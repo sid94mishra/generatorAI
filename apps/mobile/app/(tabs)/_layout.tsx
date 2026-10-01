@@ -20,7 +20,7 @@ import { Tabs } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '../../src/theme/ThemeProvider';
-import { useActivity, needsYouCount } from '../../src/api/useActivity';
+import { useActivity, needsYouCount } from '../../src/features/home/queries';
 import { useReduceMotion } from '../../src/components/ui';
 import { TabShellProvider, type TabShellValue } from '../../src/navigation/tabShell';
 import { shellContentInsets } from '../../src/navigation/tabsImplementation';

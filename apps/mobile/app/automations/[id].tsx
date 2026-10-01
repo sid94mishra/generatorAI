@@ -15,12 +15,12 @@ import React, { useMemo, useRef, useState } from 'react';
 import { Alert, Text, View } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { Lock, MoreHorizontal, Trash2 } from 'lucide-react-native';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAutomation, useAutomationExecutions, useRemoveAutomation, useToggleAutomation, useTriggerAutomation } from '../../src/features/automations/queries';
+import { useWorkflows } from '../../src/features/workflows/queries';
 import { Clock, Play, Webhook, Workflow } from 'lucide-react-native';
-import { queryKeys } from '@generatorai/client-core';
 
-import { useAdminApi } from '../../src/api/useAdminApi';
-import { useApi } from '../../src/api/useApi';
+import { useAdminApi } from '../../src/services/api/useAdminApi';
+import { useApi } from '../../src/services/api/useApi';
 import { sectionRows } from '../../src/components/common/groupByDay';
 import { relativeTime } from '../../src/components/runs/formatTime';
 import { useFeature } from '../../src/components/runs/useFeature';
@@ -30,9 +30,9 @@ import { TriggerInputSheet } from '../../src/components/work/TriggerInputSheet';
 import { ActionSheet, ConfirmSheet } from '../../src/components/ui/ActionSheet';
 import { IconButton } from '../../src/components/ui/Button';
 import {
+  type ExecutionView,
   executionCounts,
   executionIdOf,
-  executionPollInterval,
   executionStatusLabel,
   executionTime,
   executionTone,
@@ -43,9 +43,7 @@ import {
   triggerDescription,
   triggeredByLabel,
   workflowIdsOf,
-  type AutomationView,
-  type ExecutionView,
-} from '../../src/components/work/automationModel';
+} from '../../src/features/automations/model';
 import { Button } from '../../src/components/ui/Button';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
 import { Card, SectionHeader, StatusDot } from '../../src/components/ui/primitives';
@@ -61,9 +59,6 @@ const HISTORY_LIMIT = 50;
 export default function AutomationDetailScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const automationId = id ?? '';
-  const admin = useAdminApi();
-  const api = useApi();
-  const queryClient = useQueryClient();
   const navigation = useNavigation();
   const { colors } = useTheme();
   const runControl = useFeature('runControl');
@@ -74,29 +69,13 @@ export default function AutomationDetailScreen(): React.ReactElement {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const idempotencyKey = useRef<string | null>(null);
 
-  const automation = useQuery({
-    queryKey: queryKeys.automation(automationId),
-    queryFn: async () => (await admin.automations.get(automationId)) as unknown as AutomationView,
-    enabled: automationId.length > 0,
-    refetchInterval: (query) => executionPollInterval(query.state.data?.executions),
-  });
+  const automation = useAutomation(automationId);
 
   // Only when the detail payload did not carry executions (older servers).
   const embedded = Array.isArray(automation.data?.executions);
-  const executionsFallback = useQuery({
-    queryKey: queryKeys.automationExecutions(automationId),
-    queryFn: async () =>
-      (await admin.automations.executions(automationId)) as unknown as ExecutionView[],
-    enabled: automation.isSuccess && !embedded,
-    refetchInterval: (query) => executionPollInterval(query.state.data),
-  });
+  const executionsFallback = useAutomationExecutions(automationId, automation.isSuccess && !embedded);
 
-  const workflows = useQuery({
-    queryKey: queryKeys.workflows(),
-    queryFn: () => api.workflows.list(),
-    enabled: automation.isSuccess,
-    staleTime: 60_000,
-  });
+  const workflows = useWorkflows({ enabled: automation.isSuccess, staleTime: 60_000 });
 
   const workflowNames = useMemo(() => {
     const map: Record<string, string> = {};
@@ -132,12 +111,9 @@ export default function AutomationDetailScreen(): React.ReactElement {
   }, [navigation, automation.data?.name, hasData, colors.foreground]);
 
   // ── Delete ──────────────────────────────────────────────────
-  const remove = useMutation({
-    mutationFn: () => admin.automations.remove(automationId),
+  const remove = useRemoveAutomation(automationId, {
     onSuccess: () => {
       haptics.commit();
-      queryClient.removeQueries({ queryKey: queryKeys.automation(automationId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.automations() });
       if (router.canGoBack()) router.back();
       else router.replace('/(tabs)/runs?segment=automations' as never);
     },
@@ -148,47 +124,19 @@ export default function AutomationDetailScreen(): React.ReactElement {
   });
 
   // ── On / off — optimistic ───────────────────────────────────
-  const toggle = useMutation({
-    mutationFn: (next: boolean) =>
-      next ? admin.automations.enable(automationId) : admin.automations.disable(automationId),
-    onMutate: async (next) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.automation(automationId), exact: true });
-      const previous = queryClient.getQueryData<AutomationView>(queryKeys.automation(automationId));
-      if (previous) {
-        queryClient.setQueryData<AutomationView>(queryKeys.automation(automationId), {
-          ...previous,
-          enabled: next,
-        });
-      }
-      return { previous };
-    },
-    onError: (err, next, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(queryKeys.automation(automationId), context.previous);
-      }
+  const toggle = useToggleAutomation(automationId, {
+    onError: (err, next) => {
       haptics.error();
       Alert.alert(
         next ? 'Could not turn on' : 'Could not turn off',
         err instanceof Error ? err.message : String(err),
       );
     },
-    onSuccess: (updated) => {
-      // Merge rather than replace: the enable/disable response carries no
-      // executions, and replacing would blank the history until the refetch.
-      const u = updated as unknown as Partial<AutomationView>;
-      queryClient.setQueryData<AutomationView>(queryKeys.automation(automationId), (prev) =>
-        prev ? { ...prev, enabled: u.enabled ?? prev.enabled, nextRunAt: u.nextRunAt ?? null } : prev,
-      );
-    },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.automations() });
-    },
+
   });
 
   // ── Run now ─────────────────────────────────────────────────
-  const trigger = useMutation({
-    mutationFn: (key: string) =>
-      admin.automations.trigger(automationId, undefined, { idempotencyKey: key }),
+  const trigger = useTriggerAutomation(automationId, {
     onSuccess: (response) => {
       haptics.success();
       const execId = executionIdOf(response);
@@ -200,8 +148,6 @@ export default function AutomationDetailScreen(): React.ReactElement {
     },
     onSettled: () => {
       idempotencyKey.current = null;
-      // Prefix match also refreshes the executions and execution keys.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.automation(automationId) });
     },
   });
 

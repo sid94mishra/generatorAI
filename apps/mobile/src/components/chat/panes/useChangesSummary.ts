@@ -11,7 +11,7 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { queryKeys, type ChangeSummary } from '@generatorai/client-core';
 
-import { useApi } from '../../../api/useApi';
+import { useApi } from '../../../services/api/useApi';
 
 /** The base `ChangesSection` opens on. */
 export const DEFAULT_CHANGES_BASE = 'baseline';

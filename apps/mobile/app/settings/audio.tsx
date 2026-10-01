@@ -1,3 +1,5 @@
+import { useApi } from '../../src/services/api/useApi';
+import { useAdminApi } from '../../src/services/api/useAdminApi';
 // ────────────────────────────────────────────────────────────────
 // Settings ▸ Audio — the phone form of the desktop Audio section.
 //
@@ -14,11 +16,11 @@
 
 import React from 'react';
 import { ScrollView, Text, View } from 'react-native';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAudioSettings, useSaveAudio, type AudioPatch } from '../../src/features/settings/queries';
 import { AudioLines, Check, Mic, Volume2 } from 'lucide-react-native';
 
-import { useAuth } from '../../src/auth/AuthProvider';
-import { checkFeature } from '../../src/auth/featureGate';
+import { useAuth } from '../../src/services/auth/AuthProvider';
+import { checkFeature } from '../../src/services/auth/featureGate';
 import { Chip } from '../../src/components/ui/Chip';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
 import { Card, SectionHeader } from '../../src/components/ui/primitives';
@@ -34,58 +36,24 @@ import {
   SPEED_STOPS,
   engineLabel,
   formatterLabel,
-  parseAudioSettings,
   pauseLabel,
   pauseStops,
   speedLabel,
-  type AudioSettings,
-} from '../../src/settings/audioModel';
+} from '../../src/features/settings/audioModel';
 
-const AUDIO_KEY = ['system', 'audio'] as const;
 
-type AudioPatch = Partial<Pick<AudioSettings, 'sttEngine' | 'textFormatter' | 'endpointSilenceMs' | 'ttsEnabled' | 'ttsSpeed'>>;
 
 export default function AudioSettingsScreen(): React.ReactElement {
   const auth = useAuth();
   const { colors } = useTheme();
   const toast = useToast();
-  const queryClient = useQueryClient();
   const scopes = auth.state.status === 'authenticated' ? auth.state.scopes : [];
   const canManage = checkFeature('capabilityAdmin', scopes).available;
 
-  const audio = useQuery({
-    queryKey: AUDIO_KEY,
-    queryFn: async () => {
-      const res = await auth.fetch('/api/system/audio');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const parsed = parseAudioSettings(await res.json());
-      if (!parsed) throw new Error('Unexpected response');
-      return parsed;
-    },
-  });
+  const audio = useAudioSettings();
 
-  const save = useMutation({
-    mutationFn: async (patch: AudioPatch) => {
-      const res = await auth.fetch('/api/system/audio', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(patch),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return parseAudioSettings(await res.json());
-    },
-    // Optimistic: a settings row that lags its own tap feels broken.
-    onMutate: async (patch) => {
-      await queryClient.cancelQueries({ queryKey: AUDIO_KEY });
-      const previous = queryClient.getQueryData<AudioSettings>(AUDIO_KEY);
-      if (previous) queryClient.setQueryData<AudioSettings>(AUDIO_KEY, { ...previous, ...patch });
-      return { previous };
-    },
-    onSuccess: (next) => {
-      if (next) queryClient.setQueryData(AUDIO_KEY, next);
-    },
-    onError: (_err, _patch, context) => {
-      if (context?.previous) queryClient.setQueryData(AUDIO_KEY, context.previous);
+  const save = useSaveAudio({
+    onError: () => {
       haptics.error();
       toast({ message: 'That setting did not save. Try again.', variant: 'danger' });
     },

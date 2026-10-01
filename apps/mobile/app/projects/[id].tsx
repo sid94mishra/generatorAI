@@ -7,8 +7,8 @@
 // flat list that hides itself (or shows a single muted line) when empty, so
 // a small project is a short screen rather than a stack of empty cards.
 //
-// The server has no project filter on runs; `projectRuns` derives them from
-// the project's workflow ids plus runs started for it (`run.projectId`).
+// Runs are scoped and ordered by the server, including global workflows
+// that were started for this project.
 //
 // Segments: Overview (the above) · Artifacts (project skills / prompts /
 // agents / MCP servers) · Settings (name, worktree retention, limits,
@@ -20,7 +20,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useProject, useProjectChats, useProjectWorkflows, useProjectAutomations, useProjectPullRequests, useNewProjectChat, useProjectRuns, useProjectAttention } from '../../src/features/projects/queries';
 import * as Clipboard from 'expo-clipboard';
 import {
   ChevronRight,
@@ -33,15 +33,14 @@ import {
   Workflow,
   Zap,
 } from 'lucide-react-native';
-import { queryKeys, type CodebaseSummary } from '@generatorai/client-core';
+import { type CodebaseSummary } from '@generatorai/client-core';
 
-import { useApi } from '../../src/api/useApi';
+import { useApi } from '../../src/services/api/useApi';
 import { displayChatName } from '../../src/components/common/chatName';
 import { relativeTime } from '../../src/components/runs/formatTime';
 import { runTitle } from '../../src/components/runs/runModel';
 import { statusLabel } from '../../src/components/runs/statusStyle';
 import { usePullRefresh } from '../../src/components/runs/usePullRefresh';
-import { scmKeys } from '../../src/components/scm/api';
 import { useScmApi } from '../../src/components/scm/useScmApi';
 import { matchesState, prStateLabel, prStateTone } from '../../src/components/scm/prModel';
 import {
@@ -49,9 +48,7 @@ import {
   codebaseStatusTone,
   isQuietCodebaseStatus,
   mostRecent,
-  projectRuns,
   runTone,
-  runsNeedingYou,
   showsFetchState,
 } from '../../src/components/work/projectModel';
 import { Button, IconButton } from '../../src/components/ui/Button';
@@ -60,9 +57,8 @@ import { AddCodebaseSheet } from '../../src/components/projects/AddCodebaseSheet
 import { ProjectActions } from '../../src/components/projects/ProjectActions';
 import { ProjectArtifacts } from '../../src/components/projects/ProjectArtifacts';
 import { ProjectSettingsForm } from '../../src/components/projects/ProjectSettingsForm';
-import type { CodebaseWire, ProjectDetailWire } from '../../src/components/projects/api';
+import type { CodebaseWire } from '../../src/components/projects/projectEditorApi';
 import {
-  anyCloning,
   cloneEvents,
   isCloningStatus,
   statusSnapshot,
@@ -83,15 +79,11 @@ const PR_LIMIT = 3;
 type SectionKey = 'codebases' | 'chats' | 'runs';
 type DetailSegment = 'overview' | 'artifacts' | 'settings';
 
-const CLONE_POLL_MS = 3000;
 
 export default function ProjectDetailScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const projectId = String(id);
-  const api = useApi();
-  const scm = useScmApi();
   const navigation = useNavigation();
-  const queryClient = useQueryClient();
   const { colors } = useTheme();
   const toast = useToast();
   const projectEdit = useFeature('projectEdit');
@@ -99,14 +91,7 @@ export default function ProjectDetailScreen(): React.ReactElement {
   const [menuOpen, setMenuOpen] = useState(false);
   const [addingCodebase, setAddingCodebase] = useState(false);
 
-  const project = useQuery({
-    queryKey: queryKeys.project(projectId),
-    // The thin client types the row narrowly; the wire carries settings,
-    // rootPath and each codebase's lastError too.
-    queryFn: () => api.projects.get(projectId) as Promise<unknown> as Promise<ProjectDetailWire>,
-    // Follow a clone to its end without the user pulling.
-    refetchInterval: (query) => (anyCloning(query.state.data?.codebases) ? CLONE_POLL_MS : false),
-  });
+  const project = useProject(projectId, true);
 
   // Toast a clone that finishes while the screen is open.
   const lastStatuses = useRef<Record<string, string | null> | null>(null);
@@ -121,27 +106,11 @@ export default function ProjectDetailScreen(): React.ReactElement {
     }
     lastStatuses.current = statusSnapshot(codebases);
   }, [project.data?.codebases, toast]);
-  const chats = useQuery({
-    queryKey: queryKeys.projectChats(projectId),
-    queryFn: () => api.chats.list({ projectId }),
-  });
-  const workflows = useQuery({
-    queryKey: queryKeys.projectWorkflows(projectId),
-    queryFn: () => api.workflows.list(projectId),
-  });
-  const automations = useQuery({
-    queryKey: queryKeys.projectAutomations(projectId),
-    queryFn: () => api.automations.list(projectId),
-  });
-  const runs = useQuery({
-    queryKey: queryKeys.runs(),
-    queryFn: () => api.runs.list(),
-  });
-  const prs = useQuery({
-    queryKey: scmKeys.projectPullRequests(projectId, 'open'),
-    queryFn: () => scm.projectPullRequests(projectId, 'open'),
-    staleTime: 30_000,
-  });
+  const chats = useProjectChats(projectId);
+  const workflows = useProjectWorkflows(projectId);
+  const automations = useProjectAutomations(projectId);
+  const runs = useProjectRuns(projectId);
+  const prs = useProjectPullRequests(projectId, 'open');
 
   const loaded = Boolean(project.data);
   React.useLayoutEffect(() => {
@@ -174,12 +143,9 @@ export default function ProjectDetailScreen(): React.ReactElement {
     ]),
   );
 
-  const projectRunList = useMemo(
-    () => projectRuns(runs.data ?? [], (workflows.data ?? []).map((w) => w.id), projectId),
-    [runs.data, workflows.data, projectId],
-  );
-  const needsYou = useMemo(() => runsNeedingYou(projectRunList), [projectRunList]);
-  const recentRuns = useMemo(() => mostRecent(projectRunList, RECENT_LIMIT), [projectRunList]);
+  const projectRunList = useMemo(() => runs.data ?? [], [runs.data]);
+  const { needsYou } = useProjectAttention(projectId);
+  const recentRuns = useMemo(() => projectRunList.slice(0, RECENT_LIMIT), [projectRunList]);
   const recentChats = useMemo(() => mostRecent(chats.data?.items ?? [], RECENT_LIMIT), [chats.data]);
   const openPrs = useMemo(
     () => mostRecent((prs.data?.items ?? []).filter((pr) => matchesState(pr, 'open')), Number.MAX_SAFE_INTEGER),
@@ -197,11 +163,8 @@ export default function ProjectDetailScreen(): React.ReactElement {
     if (y !== undefined) scrollRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: true });
   }, []);
 
-  const newChat = useMutation({
-    mutationFn: () =>
-      api.chats.create({ name: `New chat in ${project.data?.name ?? 'project'}`, projectId }),
+  const newChat = useNewProjectChat(projectId, {
     onSuccess: (chat) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.chats() });
       router.push(`/chats/${chat.id}`);
     },
     onError: (err) =>
@@ -222,9 +185,9 @@ export default function ProjectDetailScreen(): React.ReactElement {
 
   const codebases = project.data.codebases ?? [];
   const counts: Array<{ key: string; label: string; value: number | null; onPress: () => void }> = [
-    { key: 'codebases', label: 'Codebases', value: codebases.length, onPress: () => scrollTo('codebases') },
-    { key: 'chats', label: 'Chats', value: chats.data ? chats.data.total : null, onPress: () => scrollTo('chats') },
-    { key: 'runs', label: 'Runs', value: runs.data && workflows.data ? projectRunList.length : null, onPress: () => scrollTo('runs') },
+    { key: 'codebases', label: 'Codebases', value: project.data.summary?.codebases ?? codebases.length, onPress: () => scrollTo('codebases') },
+    { key: 'chats', label: 'Chats', value: project.data.summary?.activeChats ?? chats.data?.counts.active ?? null, onPress: () => scrollTo('chats') },
+    { key: 'runs', label: 'Runs', value: project.data.summary?.runs ?? runs.total ?? null, onPress: () => scrollTo('runs') },
     {
       key: 'prs',
       label: 'Open PRs',
@@ -295,11 +258,11 @@ export default function ProjectDetailScreen(): React.ReactElement {
           <ListGroup>
             {needsYou.map((run) => (
               <ListRow
-                key={run.id}
-                title={runTitle(run.name)}
-                subtitle={`${statusLabel(run.status)} · ${relativeTime(run.updatedAt)}`}
-                icon={<StatusDot tone={runTone(run.status)} label={null} />}
-                onPress={() => router.push(`/runs/${run.id}`)}
+                key={run.key}
+                title={run.title}
+                subtitle={run.ask?.summary}
+                icon={<StatusDot tone="warning" label="Needs you" />}
+                onPress={() => router.push(run.href as never)}
               />
             ))}
           </ListGroup>
@@ -316,7 +279,7 @@ export default function ProjectDetailScreen(): React.ReactElement {
               size="sm"
               icon={<Plus size={16} color={colors.primary} />}
               loading={newChat.isPending}
-              onPress={() => newChat.mutate()}
+              onPress={() => newChat.mutate(project.data?.name ?? 'project')}
               accessibilityLabel="New chat in project"
             />
           }
@@ -346,7 +309,7 @@ export default function ProjectDetailScreen(): React.ReactElement {
         <SectionHeader title="Runs" />
         {runs.isError ? (
           <MutedLine text="Could not load runs." />
-        ) : runs.isLoading || workflows.isLoading ? (
+        ) : runs.isLoading ? (
           <SkeletonList rows={2} />
         ) : recentRuns.length === 0 ? (
           <MutedLine text="No runs yet." />
@@ -356,7 +319,7 @@ export default function ProjectDetailScreen(): React.ReactElement {
               <ListRow
                 key={run.id}
                 title={runTitle(run.name)}
-                subtitle={`${statusLabel(run.status)} · ${relativeTime(run.updatedAt)}`}
+                subtitle={`${statusLabel(run.status)} · ${relativeTime(String(run.updatedAt))}`}
                 icon={<StatusDot tone={runTone(run.status)} label={null} />}
                 onPress={() => router.push(`/runs/${run.id}`)}
               />

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildEndpointCandidates } from '../transport/endpointPlan';
+import { buildEndpointCandidates } from '../services/transport/endpointPlan';
 
 const fetchImpl = (async () => new Response('{}')) as unknown as typeof fetch;
 

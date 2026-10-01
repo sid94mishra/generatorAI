@@ -1,23 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import { ALL_SCOPES } from '@generatorai/auth';
 
-import { SCOPE_PRESETS } from '../../../auth/scopePresets';
-import { isSensitiveScope } from '../../../auth/scopeLabels';
+import { SCOPE_PRESETS } from '../../../services/auth/scopePresets';
+import { isSensitiveScope } from '../../../services/auth/scopeLabels';
 import {
   ALL_KNOWN_SCOPES,
   applyPreset,
   canGrantScope,
-  createPairingRequest,
+  createPairingBody,
   diffScopes,
   editableScopeList,
   formatCountdown,
   parsePairingInvite,
   presetWithinAuthority,
-  rotateDeviceRequest,
   sameScopes,
   secondsRemaining,
   sensitiveAdditions,
-  setDeviceScopesRequest,
   toggleScope,
 } from '../deviceAdmin';
 
@@ -73,23 +71,10 @@ describe('scope editing rules', () => {
 });
 
 describe('request shapes', () => {
-  it('PUTs the full de-duplicated scope list', () => {
-    const req = setDeviceScopesRequest('dev/1', ['a', 'a', 'b']);
-    expect(req.path).toBe('/api/auth/devices/dev%2F1/scopes');
-    expect(req.init.method).toBe('PUT');
-    expect(JSON.parse(req.init.body)).toEqual({ scopes: ['a', 'b'] });
-  });
-
-  it('POSTs rotation', () => {
-    expect(rotateDeviceRequest('d1')).toMatchObject({ path: '/api/auth/devices/d1/rotate', init: { method: 'POST' } });
-  });
-
   it('builds a pairing body the server schema accepts', () => {
-    const body = JSON.parse(createPairingRequest({ deviceName: '  ', platform: 'mobile', ttlMs: 5 }).init.body);
+    const body = createPairingBody({ deviceName: '  ', platform: 'mobile', ttlMs: 5 });
     expect(body).toEqual({ deviceName: 'New device', platform: 'mobile', ttlMs: 30_000 });
-    const big = JSON.parse(
-      createPairingRequest({ deviceName: 'x'.repeat(80), platform: 'web', scopes: ['a', 'a'], ttlMs: 1e9 }).init.body,
-    );
+    const big = createPairingBody({ deviceName: 'x'.repeat(80), platform: 'web', scopes: ['a', 'a'], ttlMs: 1e9 });
     expect(big.deviceName).toHaveLength(64);
     expect(big.scopes).toEqual(['a']);
     expect(big.ttlMs).toBe(600_000);

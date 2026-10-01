@@ -19,23 +19,23 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View } from 'react-native';
 import { LegendList } from '@legendapp/list/react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useWorkflowRuns, useWorkflows } from '../../src/features/workflows/queries';
+import { useAutomations } from '../../src/features/automations/queries';
+import { useScripts } from '../../src/features/scripts/queries';
 import { Bot, FileCode2, Plus, Workflow as WorkflowIcon } from 'lucide-react-native';
 import {
-  queryKeys,
   type AutomationSummary,
   type WorkflowRunSummary,
   type WorkflowSummary,
 } from '@generatorai/client-core';
 
-import { useApi } from '../../src/api/useApi';
-import { useAdminApi } from '../../src/api/useAdminApi';
+import { useApi } from '../../src/services/api/useApi';
+import { useAdminApi } from '../../src/services/api/useAdminApi';
 import { useFeature } from '../../src/components/runs/useFeature';
 import { ScriptRow } from '../../src/components/work/ScriptRow';
-import { parseScriptRows, type ScriptRowView } from '../../src/components/work/scriptModel';
+import { type ScriptRowView } from '../../src/features/scripts/model';
 import { TemplatePickerSheet } from '../../src/components/work/TemplatePickerSheet';
 import { IconButton } from '../../src/components/ui/Button';
-import { isActive } from '../../src/components/runs/statusStyle';
 import { AutomationCard, WorkflowCard } from '../../src/components/work/cards';
 import {
   WORK_SEGMENT_LABEL,
@@ -54,7 +54,7 @@ import { MenuButton } from '../../src/navigation/shell/MenuButton';
 import { useShellStore } from '../../src/navigation/shell/shellStore';
 import { useTabShell } from '../../src/navigation/tabShell';
 import { useScrollToTop, scrollerToTop } from '../../src/navigation/scrollToTop';
-import { prefs } from '../../src/storage/prefs';
+import { prefs } from '../../src/services/storage/prefs';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
 type Row =
@@ -64,11 +64,8 @@ type Row =
   | { kind: 'script'; item: ScriptRowView };
 
 /** Cache key for the scripts catalogue (no shared key in client-core). */
-const SCRIPTS_QUERY_KEY = ['workflow-scripts'] as const;
 
 export default function WorkScreen(): React.ReactElement {
-  const api = useApi();
-  const admin = useAdminApi();
   const workflowEdit = useFeature('workflowEdit');
   const [templates, setTemplates] = useState(false);
   const { colors } = useTheme();
@@ -109,30 +106,13 @@ export default function WorkScreen(): React.ReactElement {
     router.setParams({ segment: undefined, new: undefined });
   }, [params.segment, params.new, setSegment]);
 
-  const runs = useQuery({
-    queryKey: queryKeys.runs(),
-    queryFn: () => api.runs.list(),
-    // Only polls while something is moving; a settled list would otherwise
-    // wake the radio every fifteen seconds for nothing.
-    refetchInterval: (query) =>
-      (query.state.data ?? []).some((r: WorkflowRunSummary) => isActive(r.status)) ? 10_000 : false,
-  });
+  const runs = useWorkflowRuns();
 
-  const workflows = useQuery({
-    queryKey: queryKeys.workflows(),
-    queryFn: () => api.workflows.list(),
-  });
+  const workflows = useWorkflows();
 
-  const automations = useQuery({
-    queryKey: queryKeys.automations(),
-    queryFn: () => api.automations.list(),
-  });
+  const automations = useAutomations();
 
-  const scripts = useQuery({
-    queryKey: SCRIPTS_QUERY_KEY,
-    queryFn: async () => parseScriptRows(await admin.scripts.list()),
-    staleTime: 60_000,
-  });
+  const scripts = useScripts();
 
   const active = segment === 'workflows' ? workflows : segment === 'automations' ? automations : scripts;
 

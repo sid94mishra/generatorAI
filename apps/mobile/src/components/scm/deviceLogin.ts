@@ -12,32 +12,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import type {
-  DeviceLoginStart,
   DeviceLoginStatus,
   SourceControlProviderInfo,
 } from '@generatorai/shared';
-
-import { json, requestJson, type AuthedFetch } from '../../api/http';
-
-export interface DeviceLoginApi {
-  /** `POST /api/source-control/accounts/device/start` `{ provider: 'github', host? }`. */
-  start: (host?: string) => Promise<DeviceLoginStart>;
-  /** `GET /api/source-control/accounts/device/:loginId`. 404 once the server forgot the login. */
-  poll: (loginId: string) => Promise<DeviceLoginStatus>;
-}
-
-export function createDeviceLoginApi(fetchImpl: AuthedFetch): DeviceLoginApi {
-  return {
-    start: (host) =>
-      requestJson(
-        fetchImpl,
-        '/api/source-control/accounts/device/start',
-        json({ provider: 'github', ...(host?.trim() ? { host: host.trim() } : {}) }),
-      ),
-    poll: (loginId) =>
-      requestJson(fetchImpl, `/api/source-control/accounts/device/${encodeURIComponent(loginId)}`),
-  };
-}
 
 // ── Availability ─────────────────────────────────────────────────
 

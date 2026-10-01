@@ -33,15 +33,15 @@ import {
   type LucideIcon,
 } from 'lucide-react-native';
 
-import { useActivity, needsYouCount } from '../../api/useActivity';
-import { useAuth } from '../../auth/AuthProvider';
+import { useActivity, needsYouCount } from '../../features/home/queries';
+import { useAuth } from '../../services/auth/AuthProvider';
 import { SidePanelHost } from '../../components/ui/SidePanel';
 import { Touchable } from '../../components/ui/Touchable';
 import { IconButton } from '../../components/ui/Button';
 import { MAX_SCALE } from '../../components/ui/accessibility';
 import { BrandMark } from '../../components/brand/BrandMark';
 import { describeSessionTransport } from '../../components/chat/sessionTransport';
-import { useStreamHealth } from '../../stream/streamHealth';
+import { useStreamHealth } from '../../services/stream/streamHealth';
 import { useTheme } from '../../theme/ThemeProvider';
 import { APPROVALS_ROUTE, SEARCH_ROUTE } from '../routes';
 import { scrollActiveToTop } from '../scrollToTop';

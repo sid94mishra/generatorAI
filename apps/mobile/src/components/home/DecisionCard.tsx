@@ -14,7 +14,7 @@ import { Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { CircleHelp, ClipboardList, MessagesSquare, ShieldAlert, Workflow } from 'lucide-react-native';
 
-import type { Operation } from '../../api/activityRanking';
+import type { Operation } from '../../services/api/activityRanking';
 import { displayChatName } from '../common/chatName';
 import { runTitle } from '../runs/runModel';
 import { relativeTime } from '../runs/formatTime';
@@ -82,7 +82,7 @@ export function DecisionCard({
           ? colors.primary
           : colors.warning;
   const waiting = `since ${relativeTime(operation.updatedAt)}`;
-  const where = operation.kind === 'run' ? 'Run' : 'Chat';
+  const where = operation.kind === 'run' ? 'Run' : operation.kind === 'automation' ? 'Automation' : 'Chat';
   const name = operation.kind === 'chat' ? displayChatName(operation.name) : runTitle(operation.name);
 
   const decide = async (behavior: 'allow' | 'deny'): Promise<void> => {

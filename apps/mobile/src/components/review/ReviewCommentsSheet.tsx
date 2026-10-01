@@ -1,3 +1,4 @@
+import { domainStatusTone, domainStatusLabel } from '../../theme/status';
 // ────────────────────────────────────────────────────────────────
 // ReviewCommentsSheet — compose a comment, read the threads, send the batch.
 //
@@ -24,13 +25,13 @@ import { Sheet } from '../ui/Sheet';
 import { Button, IconButton } from '../ui/Button';
 import { Chip } from '../ui/Chip';
 import { Field } from '../ui/Form';
-import { Badge, type Tone } from '../ui/primitives';
+import { Badge } from '../ui/primitives';
 import { ConfirmSheet } from '../ui/ActionSheet';
 import { EmptyState, LoadingState, LockedState } from '../ui/States';
 import { haptics } from '../ui/haptics';
 import { splitPath } from '../changes/statusStyle';
 import type { DiffSide } from '../changes/diffModel';
-import { REVIEW_INTENTS, THREAD_STATUS_LABEL, batchSummary, countThreads, isPendingThread, type ReviewIntent } from './reviewBatch';
+import { REVIEW_INTENTS, batchSummary, countThreads, isPendingThread, type ReviewIntent } from './reviewBatch';
 import type { ReviewThreadsApi } from './useReviewThreads';
 
 export interface ReviewDraft {
@@ -61,14 +62,6 @@ export interface ReviewCommentsSheetProps {
   checkpoints: { base: string; head: string };
 }
 
-const STATUS_TONE: Record<string, Tone> = {
-  draft: 'neutral',
-  pending: 'warning',
-  submitted: 'info',
-  addressed: 'success',
-  resolved: 'success',
-  outdated: 'neutral',
-};
 
 export function ReviewCommentsSheet({
   visible,
@@ -386,7 +379,7 @@ function ThreadCard({
           {thread.path} · {thread.side === 'deletions' ? '−' : '+'}
           {range}
         </Text>
-        <Badge label={THREAD_STATUS_LABEL[thread.status] ?? thread.status} tone={STATUS_TONE[thread.status] ?? 'neutral'} />
+        <Badge label={domainStatusLabel('reviewThread', thread.status)} tone={domainStatusTone('reviewThread', thread.status)} />
       </View>
       {thread.anchorText ? (
         <View className="rounded-xl bg-canvas-bg px-2.5 py-1.5">

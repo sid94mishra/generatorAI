@@ -122,7 +122,7 @@ describe('status classification', () => {
     // "Failed" must read as failure whatever accent the user picked.
     expect(statusStyle('failed')).toEqual(['bg-danger-muted', 'text-danger']);
     expect(statusStyle('completed')).toEqual(['bg-success-muted', 'text-success']);
-    expect(statusStyle('paused')).toEqual(['bg-warning-muted', 'text-warning']);
+    expect(statusStyle('paused')).toEqual(['bg-subtle', 'text-muted-foreground']);
     for (const status of ['failed', 'completed', 'paused', 'running']) {
       expect(statusStyle(status).join(' ')).not.toContain('primary');
       expect(statusStyle(status).join(' ')).not.toContain('accent');

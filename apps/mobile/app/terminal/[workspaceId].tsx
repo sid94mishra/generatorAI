@@ -21,9 +21,9 @@
 import React from 'react';
 import { useLocalSearchParams } from 'expo-router';
 
-import { useAuth } from '../../src/auth/AuthProvider';
-import { checkFeature } from '../../src/auth/featureGate';
-import { StepUpGate } from '../../src/auth/StepUpGate';
+import { useAuth } from '../../src/services/auth/AuthProvider';
+import { checkFeature } from '../../src/services/auth/featureGate';
+import { StepUpGate } from '../../src/services/auth/StepUpGate';
 import { FeatureLocked } from '../../src/components/common/FeatureLocked';
 import { TerminalTabs } from '../../src/terminal/TerminalTabs';
 

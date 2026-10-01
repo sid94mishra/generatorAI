@@ -3,14 +3,14 @@
 //
 // `GET /sessions/:sessionId/chat?stageRunId=` returns the same ChatMessage
 // rows a chat has, so a stage transcript renders through the chat's own
-// adapter (`chatMessageToBlocks` → `deriveTimeline`) and looks identical to a
+// adapter (`chatMessageToBlocks` → `compactTimeline`) and looks identical to a
 // chat — read-only, with no composer and no per-turn actions.
 // ────────────────────────────────────────────────────────────────
 
 import type { ChatMessage } from '@generatorai/client-core';
 
-import { chatMessageToBlocks, messageWasStopped } from '../chat/timeline/chatMessageToBlocks';
-import { deriveTimeline, type TimelineRow } from '../chat/timeline/deriveTimeline';
+import { wireChatMessageToBlocks as chatMessageToBlocks, messageWasStopped } from '@generatorai/client-core';
+import { compactTimeline, type TimelineRow } from '../chat/timeline/compactTimeline';
 
 export type TranscriptItem =
   | { kind: 'user'; id: string; message: ChatMessage }
@@ -50,7 +50,7 @@ export function transcriptItems(raw: unknown, live: boolean): TranscriptItem[] {
     }
     if (message.role !== 'assistant') return;
     const isLast = index === ordered.length - 1;
-    const rows = deriveTimeline(chatMessageToBlocks(message), {
+    const rows = compactTimeline(chatMessageToBlocks(message), {
       active: live && isLast,
       idPrefix: `${message.id}:`,
       stopped: messageWasStopped(message),

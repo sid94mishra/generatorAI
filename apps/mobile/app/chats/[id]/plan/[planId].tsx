@@ -14,10 +14,8 @@
 import React, { useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
-import { queryKeys } from '@generatorai/client-core';
+import { useChatPlans, useChatPlanContent } from '../../../../src/features/chat/queries';
 
-import { useApi } from '../../../../src/api/useApi';
 import { Markdown } from '../../../../src/components/markdown/Markdown';
 import { useGateDecision } from '../../../../src/components/home/useGateDecision';
 import { RouteSheet } from '../../../../src/navigation/RouteSheet';
@@ -29,23 +27,14 @@ import { ErrorState, LoadingState } from '../../../../src/components/ui/States';
 
 export default function PlanScreen(): React.ReactElement {
   const { id: chatId, planId } = useLocalSearchParams<{ id: string; planId: string }>();
-  const api = useApi();
   const decide = useGateDecision();
   const [feedback, setFeedback] = useState('');
   const [askingChanges, setAskingChanges] = useState(false);
   const [pending, setPending] = useState<'approve' | 'changes' | null>(null);
 
-  const plans = useQuery({
-    queryKey: queryKeys.chatPlans(chatId!),
-    queryFn: () => api.chats.plans(chatId!),
-    enabled: Boolean(chatId),
-  });
+  const plans = useChatPlans(chatId!, Boolean(chatId));
 
-  const content = useQuery({
-    queryKey: [...queryKeys.chatPlans(chatId!), planId, 'content'] as const,
-    queryFn: () => api.chats.planContent(chatId!, planId!),
-    enabled: Boolean(chatId && planId),
-  });
+  const content = useChatPlanContent(chatId!, planId!);
 
   const plan = useMemo(() => plans.data?.find((p) => p.planId === planId), [plans.data, planId]);
   const awaiting = plan?.status === 'awaiting_review';

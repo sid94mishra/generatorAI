@@ -14,7 +14,7 @@
 import React, { useState } from 'react';
 import { Text, View } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useProjectPullRequests } from '../../../src/features/projects/queries';
 import { GitPullRequest, TriangleAlert } from 'lucide-react-native';
 import type { ProjectPullRequest } from '@generatorai/shared';
 
@@ -27,7 +27,7 @@ import { PlainScroll } from '../../../src/components/ui/Screen';
 import { EmptyState, ErrorState } from '../../../src/components/ui/States';
 import { SkeletonList } from '../../../src/components/ui/Skeleton';
 import { Touchable } from '../../../src/components/ui/Touchable';
-import { scmKeys, type PullRequestListState } from '../../../src/components/scm/api';
+import { scmKeys, type PullRequestListState } from '@generatorai/client-core';
 import { useScmApi } from '../../../src/components/scm/useScmApi';
 import {
   PR_STATE_SEGMENTS,
@@ -42,7 +42,6 @@ export default function ProjectPullRequestsScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const projectId = String(id);
   const navigation = useNavigation();
-  const scm = useScmApi();
   const { colors } = useTheme();
   const [state, setState] = useState<PullRequestListState>('open');
 
@@ -50,11 +49,7 @@ export default function ProjectPullRequestsScreen(): React.ReactElement {
     navigation.setOptions({ title: 'Pull requests' });
   }, [navigation]);
 
-  const prs = useQuery({
-    queryKey: scmKeys.projectPullRequests(projectId, state),
-    queryFn: () => scm.projectPullRequests(projectId, state),
-    staleTime: 30_000,
-  });
+  const prs = useProjectPullRequests(projectId, state);
 
   const { refreshing, onRefresh } = usePullRefresh(() => prs.refetch());
 

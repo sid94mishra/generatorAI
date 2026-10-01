@@ -11,11 +11,11 @@
 import React from 'react';
 import type { ApprovalOutcome, StageRunSummary } from '@generatorai/client-core';
 
-import { useStageConversation } from '../../api/useStageConversation';
+import { useStageConversation } from '../../services/api/useStageConversation';
 import { PermissionCard } from '../chat/PermissionCard';
 import { PlanCard } from '../chat/PlanCard';
 import { QuestionCard } from '../chat/QuestionCard';
-import { toPlanDecision } from '../chat/gateActions';
+import { toPlanDecision } from '../../features/chat/gateActions';
 import { ApprovalCard } from './ApprovalCard';
 import { stageGateOf } from './stageGate';
 

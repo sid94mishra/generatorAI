@@ -1,0 +1,30 @@
+appId: ${APP_ID}
+name: notifications · approval action
+tags: [characterization, full]
+env: {FRESH_CHAT: gate, PENDING_GATE: true}
+# iOS: runner performs native consent setup and injects the APNs template.
+# Android: the local notification uses real pending sandbox interaction IDs.
+---
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - runFlow: ../_subflows/launch.yaml
+      - openLink: generatorai:///notify?case=approval&chat=${CHAT_GATE_ID}&interaction=${INTERACTION_ID}
+      # sandbox-pair grants notification permission. Do not tap a generic Allow
+      # here: it can already be the notification action in a heads-up banner.
+      - extendedWaitUntil: {visible: Notification scheduled, timeout: 30000}
+      - pressKey: Home
+      - waitForAnimationToEnd
+      - swipe: {start: "50%, 0%", end: "50%, 80%", duration: 800}
+      - extendedWaitUntil: {visible: Allow, timeout: 15000}
+      - tapOn: Allow
+      - pressKey: Home
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - swipe: {start: "25%, 1%", end: "25%, 80%"}
+      - waitForAnimationToEnd
+      - extendedWaitUntil: {visible: ".*Mobile approval check.*", timeout: 15000}
+      - tapOn: {id: ListCell, text: ".*Mobile approval check.*", index: 0}
+      - extendedWaitUntil: {visible: {id: gate-card}, timeout: 30000}
+      - assertVisible: ".*Run pnpm test.*"

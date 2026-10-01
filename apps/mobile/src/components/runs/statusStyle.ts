@@ -1,3 +1,4 @@
+import { runStatus, runStatusTone } from '../../theme/status';
 // ────────────────────────────────────────────────────────────────
 // Status → colour + label mapping.
 //
@@ -15,74 +16,24 @@ export type AnyRunStatus = string;
 /** [background class, foreground class] */
 export type StatusStyle = readonly [string, string];
 
-const STYLES: Record<string, StatusStyle> = {
-  running: ['bg-info-muted', 'text-info'],
-  starting: ['bg-info-muted', 'text-info'],
-  validating: ['bg-info-muted', 'text-info'],
-  finalizing: ['bg-info-muted', 'text-info'],
-
-  ready: ['bg-subtle', 'text-muted-foreground'],
-  pending: ['bg-subtle', 'text-muted-foreground'],
-  created: ['bg-subtle', 'text-muted-foreground'],
-  cancelled: ['bg-subtle', 'text-muted-foreground'],
-  skipped: ['bg-subtle', 'text-muted-foreground'],
-
-  paused: ['bg-warning-muted', 'text-warning'],
-  waiting: ['bg-warning-muted', 'text-warning'],
-  retry_wait: ['bg-warning-muted', 'text-warning'],
-  awaiting_input: ['bg-warning-muted', 'text-warning'],
-
-  completed: ['bg-success-muted', 'text-success'],
-  failed: ['bg-danger-muted', 'text-danger'],
-};
-
-const FALLBACK: StatusStyle = ['bg-subtle', 'text-muted-foreground'];
+const TONE_STYLES = {
+  neutral: ['bg-subtle', 'text-muted-foreground'],
+  info: ['bg-info-muted', 'text-info'],
+  warning: ['bg-warning-muted', 'text-warning'],
+  success: ['bg-success-muted', 'text-success'],
+  danger: ['bg-danger-muted', 'text-danger'],
+} as const;
 
 export function statusStyle(status: AnyRunStatus): StatusStyle {
-  return STYLES[status] ?? FALLBACK;
+  return TONE_STYLES[runStatusTone(status)];
 }
-
-/** Statuses whose wire name is not what a person should read. */
-const LABELS: Record<string, string> = {
-  awaiting_input: 'Needs you',
-  retry_wait: 'Retrying',
-};
 
 export function statusLabel(status: AnyRunStatus): string {
-  const override = LABELS[status];
-  if (override) return override;
-  if (!status) return 'Unknown';
-  // `changes_requested` → `Changes requested`
-  const spaced = status.replace(/_/g, ' ');
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+  return runStatus(status)?.label ?? (status ? status.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase()) : 'Unknown');
 }
 
-/**
- * Statuses that require a human before anything else happens.
- *
- * This drives the "Needs attention" grouping — the single most valuable thing
- * a phone can surface, because a blocked run costs nothing to unblock but
- * stalls everything downstream until someone notices.
- */
-export function needsAttention(status: AnyRunStatus): boolean {
-  return status === 'paused' || status === 'awaiting_input' || status === 'failed';
-}
+export { needsAttention } from '../../services/api/runActivity';
 
-/** Statuses that are still in flight. */
-export function isActive(status: AnyRunStatus): boolean {
-  return ACTIVE.has(status);
-}
+export { isActive } from '../../services/api/runActivity';
 
-const ACTIVE: ReadonlySet<string> = new Set([
-  'ready',
-  'starting',
-  'running',
-  'validating',
-  'retry_wait',
-  'finalizing',
-]);
-
-/** Statuses that will never change again without an explicit action. */
-export function isTerminal(status: AnyRunStatus): boolean {
-  return status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'skipped';
-}
+export { isTerminal } from '../../services/api/runActivity';

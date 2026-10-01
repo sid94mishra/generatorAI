@@ -17,7 +17,7 @@ import { Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { ChevronRight } from 'lucide-react-native';
 
-import type { Operation } from '../../api/activityRanking';
+import type { Operation } from '../../services/api/activityRanking';
 import { APPROVALS_ROUTE, gateRoute, planRoute } from '../../navigation/routes';
 import { DecisionCard } from './DecisionCard';
 import { useGateDecision } from './useGateDecision';
@@ -30,7 +30,7 @@ const HOME_LIMIT = 3;
 /** Where a decision card goes when tapped: the gate sheet if there is one, else the chat/run. */
 export function decisionHref(op: Operation): string {
   if (op.kind === 'chat' && op.gate) {
-    const chatId = op.id.startsWith('chat:') ? op.id.slice('chat:'.length) : op.id;
+    const chatId = op.entityId ?? (op.id.startsWith('chat:') ? op.id.slice('chat:'.length) : op.id);
     if (op.gate.kind === 'plan_review' && op.gate.planId) return planRoute(chatId, op.gate.planId);
     return gateRoute(chatId, op.gate.interactionId);
   }
@@ -38,7 +38,7 @@ export function decisionHref(op: Operation): string {
 }
 
 export function chatIdOf(op: Operation): string | null {
-  return op.kind === 'chat' && op.id.startsWith('chat:') ? op.id.slice('chat:'.length) : null;
+  return op.kind === 'chat' ? op.entityId ?? (op.id.startsWith('chat:') ? op.id.slice('chat:'.length) : null) : null;
 }
 
 export function ApprovalsQueue({
@@ -91,7 +91,7 @@ export function ApprovalsQueue({
           key={op.id}
           operation={op}
           onOpen={() => router.push(decisionHref(op) as never)}
-          {...(op.gate?.kind === 'tool_permission'
+          {...(op.gate?.kind === 'tool_permission' && op.gate.permissionAllowed !== false
             ? { onPermission: (behavior: 'allow' | 'deny') => onPermission(op, behavior) }
             : {})}
         />

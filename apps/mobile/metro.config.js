@@ -1,5 +1,6 @@
 const { getDefaultConfig } = require('expo/metro-config');
 const { withNativeWind } = require('nativewind/metro');
+const { withStorybook } = require('@storybook/react-native/metro/withStorybook');
 const path = require('node:path');
 
 // ────────────────────────────────────────────────────────────────
@@ -56,6 +57,16 @@ const originalResolveRequest = config.resolver.resolveRequest;
 const SHARED_CLIENT_ENTRY = path.resolve(workspaceRoot, 'packages/shared/src/client.ts');
 
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  // Expo's HMR client requires pretty-format 29. Pinning every dependency
+  // to the workspace root accidentally gives it Jest 30's ESM bridge,
+  // whose CJS-default interop fails before React Native can start. Resolve
+  // this pure-JS dependency from its owner, using its CommonJS entry.
+  if (moduleName === 'pretty-format') {
+    return {
+      type: 'sourceFile',
+      filePath: require.resolve(moduleName, { paths: [context.originModulePath] }),
+    };
+  }
   if (moduleName === 'crypto') {
     return context.resolveRequest(context, 'react-native-quick-crypto', platform);
   }
@@ -101,4 +112,10 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   }
 };
 
-module.exports = withNativeWind(config, { input: './src/theme/global.css' });
+module.exports = withStorybook(withNativeWind(config, { input: './src/theme/global.css' }), {
+  enabled: process.env.EXPO_PUBLIC_STORYBOOK === '1',
+  configPath: path.resolve(__dirname, '.rnstorybook'),
+  liteMode: true,
+  websockets: 'auto',
+  experimental_mcp: true,
+});

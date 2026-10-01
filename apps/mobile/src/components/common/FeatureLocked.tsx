@@ -15,7 +15,7 @@ import React from 'react';
 import { Text, View } from 'react-native';
 import { ShieldAlert } from 'lucide-react-native';
 
-import type { FeatureAvailability } from '../../auth/featureGate';
+import type { FeatureAvailability } from '../../services/auth/featureGate';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export function FeatureLocked({

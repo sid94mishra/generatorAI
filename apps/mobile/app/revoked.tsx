@@ -14,7 +14,7 @@ import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
-import { useAuth } from '../src/auth/AuthProvider';
+import { useAuth } from '../src/services/auth/AuthProvider';
 import { Button } from '../src/components/ui/Button';
 import { LockedState } from '../src/components/ui/States';
 

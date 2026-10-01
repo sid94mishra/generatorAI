@@ -10,7 +10,7 @@
 import { createContext, useContext } from 'react';
 import type { StreamUsage } from '@generatorai/client-core';
 
-import type { ScreenshotRef } from './deriveTimeline';
+import type { ScreenshotRef } from './compactTimeline';
 
 export interface TimelineActions {
   /** The chat's workspace, when it has one. */

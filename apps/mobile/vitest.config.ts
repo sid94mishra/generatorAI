@@ -9,7 +9,9 @@ import path from 'node:path';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    // Native builds and device tests share the 8 GB development host.
+    maxWorkers: 2,
+    include: ['src/**/*.test.ts', 'e2e/**/*.test.mjs'],
   },
   resolve: {
     alias: {

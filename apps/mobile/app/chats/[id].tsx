@@ -1,3 +1,4 @@
+import { resourcePaths } from '@generatorai/client-core';
 // ────────────────────────────────────────────────────────────────
 // Chat screen — the core loop.
 //
@@ -40,7 +41,7 @@ import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useChat, useChatMessages, useChatPlans, useChatProject, useChatInteractions, useChatRefresh, usePrepareChatWorkspace, usePatchChat, useArchiveChat, useCancelChat, useDecideChatPlan, useAnswerChatQuestion, useResolveChatPermission, type ChatPatch } from '../../src/features/chat/queries';
 import { useShallow } from 'zustand/react/shallow';
 import * as Clipboard from 'expo-clipboard';
 import {
@@ -60,32 +61,29 @@ import {
 import {
   ApiError,
   isArchived,
-  queryKeys,
   type AgentMode,
   messageTime,
   type ChatMessage,
-  type ChatSummary,
   type RewindScope,
   type StreamBlock,
   type StreamUsage,
 } from '@generatorai/client-core';
 
-import { useApi } from '../../src/api/useApi';
 import {
   useCopyTranscriptMarkdown,
   useForkChat,
   useRewindChat,
-} from '../../src/api/useChatBranching';
-import { findModel, promptLimit, useModels } from '../../src/api/useModels';
-import { useChatStream } from '../../src/stream/useChatStream';
-import { restoredPromptFrom, type ChatRewoundEffect } from '../../src/stream/rewindEffects';
-import { useTwoPhaseStop } from '../../src/stream/useTwoPhaseStop';
-import { protectStream, useStreamStore } from '../../src/stream/streamStore';
-import { useTurnCatchUp } from '../../src/stream/useTurnCatchUp';
-import { useStreamHealth } from '../../src/stream/streamHealth';
-import { useAuth } from '../../src/auth/AuthProvider';
-import { checkFeature } from '../../src/auth/featureGate';
-import { useTextToSpeech } from '../../src/voice/useTextToSpeech';
+} from '../../src/services/api/useChatBranching';
+import { findModel, promptLimit, useModels } from '../../src/services/api/useModels';
+import { useChatStream } from '../../src/services/stream/useChatStream';
+import { restoredPromptFrom, type ChatRewoundEffect } from '../../src/services/stream/rewindEffects';
+import { useTwoPhaseStop } from '../../src/services/stream/useTwoPhaseStop';
+import { protectStream, useStreamStore } from '../../src/services/stream/streamStore';
+import { useTurnCatchUp } from '../../src/services/stream/useTurnCatchUp';
+import { useStreamHealth } from '../../src/services/stream/streamHealth';
+import { useAuth } from '../../src/services/auth/AuthProvider';
+import { checkFeature } from '../../src/services/auth/featureGate';
+import { useTextToSpeech } from '../../src/services/voice/useTextToSpeech';
 import { Composer, type ComposerPane } from '../../src/components/chat/Composer';
 import { READ_ALOUD_ENABLED } from '../../src/components/chat/featureFlags';
 import {
@@ -93,10 +91,10 @@ import {
   type ComposerController,
 } from '../../src/components/chat/composer/useComposerController';
 import { readAllAttachmentBytes } from '../../src/components/chat/composer/attachmentPickers';
-import { sendChatPrompt } from '../../src/api/sendChatPrompt';
+import { sendChatPrompt } from '../../src/services/api/sendChatPrompt';
 import type { ComposerSendPayload, WorkspacePrepState } from '../../src/components/chat/composer/types';
 import type { BoundAgentProps } from '../../src/components/chat/composer/ComposerBanners';
-import { bytesToBase64 } from '../../src/lib/base64';
+import { bytesToBase64 } from '../../src/services/lib/base64';
 import { PermissionCard } from '../../src/components/chat/PermissionCard';
 import { PlanCard } from '../../src/components/chat/PlanCard';
 import { QuestionCard } from '../../src/components/chat/QuestionCard';
@@ -108,7 +106,6 @@ import {
   forkedFromLabel,
   shouldRestorePrompt,
 } from '../../src/components/chat/rewindOptions';
-import { toPlanDecision } from '../../src/components/chat/gateActions';
 import { pendingGateFrom } from '../../src/components/chat/gateFromInteraction';
 import { ChatHeaderMenuButton, ChatHeaderTitle, SessionHeader } from '../../src/components/chat/ChatHeader';
 import { ChatMenuSheet, type ChatMenuSection } from '../../src/components/chat/ChatMenuSheet';
@@ -118,8 +115,8 @@ import { describeSessionTransport } from '../../src/components/chat/sessionTrans
 import { TimelineRowView } from '../../src/components/chat/timeline/TimelineRow';
 import { UserMessageRow } from '../../src/components/chat/timeline/UserMessageRow';
 import { TimelineActionsContext, type TimelineActions } from '../../src/components/chat/timeline/TimelineActions';
-import { deriveTimeline, type ScreenshotRef, type TimelineRow } from '../../src/components/chat/timeline/deriveTimeline';
-import { chatMessageToBlocks, messageWasStopped } from '../../src/components/chat/timeline/chatMessageToBlocks';
+import { compactTimeline, type ScreenshotRef, type TimelineRow } from '../../src/components/chat/timeline/compactTimeline';
+import { wireChatMessageToBlocks as chatMessageToBlocks, messageWasStopped, buildTranscriptTurns, transcriptMessageInput, messageAttachments } from '@generatorai/client-core';
 import {
   liveScmTurnIds,
   mergeScmRows,
@@ -196,7 +193,7 @@ function rowsOf(message: ChatMessage, prompt: ChatMessage | null): TimelineRow[]
   let rows = historyRows.get(message);
   if (!rows) {
     const durationMs = elapsedMs(prompt, message);
-    rows = deriveTimeline(blocksOf(message), {
+    rows = compactTimeline(blocksOf(message), {
       active: false,
       idPrefix: `${message.id}:`,
       stopped: messageWasStopped(message),
@@ -206,12 +203,6 @@ function rowsOf(message: ChatMessage, prompt: ChatMessage | null): TimelineRow[]
     historyRows.set(message, rows);
   }
   return rows;
-}
-
-/** Mirrors web's `browserArtifactUrl` — where a browser screenshot is served from. */
-function browserArtifactPath(workspaceId: string, relativePath: string): string {
-  const clean = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
-  return `/api/workspaces/${encodeURIComponent(workspaceId)}/browser/files/${clean.split('/').map(encodeURIComponent).join('/')}`;
 }
 
 /** The transcript as plain text, for the share sheet. */
@@ -232,8 +223,7 @@ function transcriptText(messages: readonly ChatMessage[], title: string): string
 
 export default function ChatScreen(): React.ReactElement {
   const { id: chatId } = useLocalSearchParams<{ id: string }>();
-  const api = useApi();
-  const queryClient = useQueryClient();
+  const refresh = useChatRefresh(chatId!);
   const navigation = useNavigation();
   const { colors } = useTheme();
   const auth = useAuth();
@@ -274,10 +264,7 @@ export default function ChatScreen(): React.ReactElement {
   const voice = checkFeature('voice', scopes);
   const tts = useTextToSpeech();
 
-  const chat = useQuery({
-    queryKey: queryKeys.chat(chatId!),
-    queryFn: () => api.chats.get(chatId!),
-  });
+  const chat = useChat(chatId!);
 
   /**
    * The composer controller, reachable from callbacks declared above it.
@@ -313,10 +300,7 @@ export default function ChatScreen(): React.ReactElement {
     [toast],
   );
 
-  const messages = useQuery({
-    queryKey: [...queryKeys.chatMessages(chatId!), limit],
-    queryFn: () => api.chats.messages(chatId!, { limit }),
-  });
+  const messages = useChatMessages(chatId!, limit);
 
   // A turn that was already running when the chat opened is replayed from
   // the event log; without it the transcript jumped from the prompt straight
@@ -337,10 +321,7 @@ export default function ChatScreen(): React.ReactElement {
     onChatRewound,
   });
 
-  const plans = useQuery({
-    queryKey: queryKeys.chatPlans(chatId!),
-    queryFn: () => api.chats.plans(chatId!),
-  });
+  const plans = useChatPlans(chatId!);
 
   // The commit / PR / conflict cards for turns that settled before this
   // screen opened. They exist only as stream events, and the mux
@@ -357,12 +338,7 @@ export default function ChatScreen(): React.ReactElement {
   const mode: AgentMode = chat.data?.defaultAgentMode ?? 'auto';
 
   const projectId = (chat.data as { projectId?: string | null } | undefined)?.projectId ?? null;
-  const project = useQuery({
-    queryKey: queryKeys.project(projectId ?? ''),
-    queryFn: () => api.projects.get(projectId!),
-    enabled: Boolean(projectId),
-    staleTime: 60_000,
-  });
+  const project = useChatProject(projectId);
   // Mount aliases ("main", "docs") name what is checked out for this chat.
   const repoAliases = useMemo(
     () => (changes.data?.repos ?? []).map((repo) => repo.alias).filter((a) => a && a !== '.'),
@@ -462,7 +438,7 @@ export default function ChatScreen(): React.ReactElement {
       try {
         const files = await readAllAttachmentBytes(payload.attachments);
         await sendChatPrompt(auth.fetch, chatId!, { message: text, mode: payload.mode ?? mode }, files);
-        void queryClient.invalidateQueries({ queryKey: queryKeys.chatMessages(chatId!) });
+        void refresh.messages();
       } catch (err) {
         applyEffects([{ op: 'errorStream', key: streamKey }]);
         const gated = err instanceof ApiError && err.status === 409;
@@ -475,21 +451,12 @@ export default function ChatScreen(): React.ReactElement {
         throw err;
       }
     },
-    [auth.fetch, chatId, mode, streamKey, applyEffects, queryClient, toast],
+    [auth.fetch, chatId, mode, streamKey, applyEffects, refresh, toast],
   );
 
   // Worktrees and branch checkouts finish after the chat exists; while they
   // do, the composer shows the prep bar and offers a retry on failure.
-  const prepareWorkspace = useMutation({
-    mutationFn: async () => {
-      const res = await auth.fetch(`/api/chats/${encodeURIComponent(chatId!)}/workspace/prepare`, {
-        method: 'POST',
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId!) });
-    },
+  const prepareWorkspace = usePrepareChatWorkspace(chatId!, {
     onError: () => {
       haptics.error();
       toast({ message: 'Could not restart workspace preparation.', tone: 'error' });
@@ -502,29 +469,12 @@ export default function ChatScreen(): React.ReactElement {
    * goes out, so every chip reflects the tap on this frame; a failure
    * restores the snapshot and says so.
    */
-  type ChatPatch = Parameters<typeof api.chats.update>[1];
-  const patchChat = useMutation({
-    mutationFn: (patch: ChatPatch) => api.chats.update(chatId!, patch),
-    onMutate: async (patch) => {
-      const key = queryKeys.chat(chatId!);
-      await queryClient.cancelQueries({ queryKey: key });
-      const previous = queryClient.getQueryData<ChatSummary>(key);
-      if (previous) {
-        queryClient.setQueryData<ChatSummary>(key, { ...previous, ...patch } as ChatSummary);
-      }
-      return { previous };
-    },
-    onError: (_error, _patch, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(queryKeys.chat(chatId!), context.previous);
-      }
+  const patchChat = usePatchChat(chatId!, {
+    onError: () => {
       haptics.error();
       toast({ message: 'That setting did not stick. Try again.', tone: 'error' });
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId!) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.chats() });
-    },
+
   });
 
   const harnessConfig = (chat.data as { harnessConfig?: Record<string, unknown> } | undefined)
@@ -543,11 +493,8 @@ export default function ChatScreen(): React.ReactElement {
   // Archiving is reversible, so this menu item toggles rather than turning
   // into a permanently disabled "Archived" row — which is what the chat list
   // has always done ("Move to active") and what the detail screen did not.
-  const archive = useMutation({
-    mutationFn: (next: 'archived' | 'active') => api.chats.update(chatId!, { status: next }),
+  const archive = useArchiveChat(chatId!, {
     onSuccess: (_result, next) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId!) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.chats() });
       toast({ message: next === 'archived' ? 'Chat archived.' : 'Chat restored.', tone: 'success' });
     },
     onError: () => {
@@ -556,10 +503,7 @@ export default function ChatScreen(): React.ReactElement {
     },
   });
 
-  const cancel = useMutation({
-    mutationFn: (options: { force: boolean; budgetSeconds: number }) =>
-      api.chats.cancel(chatId!, options),
-  });
+  const cancel = useCancelChat(chatId!);
 
   // ── History: rewind, fork, copy transcript ───────────────────
   const rewind = useRewindChat(chatId!, workspaceId);
@@ -660,25 +604,14 @@ export default function ChatScreen(): React.ReactElement {
    */
   const forkedFromChatId =
     (chat.data as { forkedFromChatId?: string | null } | undefined)?.forkedFromChatId ?? null;
-  const parentChat = useQuery({
-    queryKey: queryKeys.chat(forkedFromChatId ?? ''),
-    queryFn: () => api.chats.get(forkedFromChatId!),
-    enabled: Boolean(forkedFromChatId),
-    staleTime: 60_000,
-  });
+  const parentChat = useChat(forkedFromChatId ?? '', { enabled: Boolean(forkedFromChatId), staleTime: 60_000 });
 
-  const decidePlan = useMutation({
-    mutationFn: ({ planId, action, feedback }: { planId: string; action: string; feedback?: string }) =>
-      api.chats.decidePlan(chatId!, planId, toPlanDecision(action, feedback)),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.chatPlans(chatId!) });
-    },
+  const decidePlan = useDecideChatPlan(chatId!, {
     onError: (error) => {
       // 409: the plan was decided elsewhere, or its review ended without a
       // decision. Either way the card is stale — refresh it and say so; a
       // silent 409 left the buttons there doing nothing.
       if (error instanceof ApiError && error.status === 409) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.chatPlans(chatId!) });
         toast({ message: 'This plan is no longer waiting for review.', tone: 'info' });
         return;
       }
@@ -687,50 +620,12 @@ export default function ChatScreen(): React.ReactElement {
     },
   });
 
-  const answerQuestion = useMutation({
-    mutationFn: ({
-      interactionId,
-      answers,
-      freeformResponse,
-    }: {
-      interactionId: string;
-      answers: Record<string, string[]>;
-      freeformResponse?: string;
-    }) =>
-      api.chats.respond(chatId!, interactionId, {
-        answers,
-        ...(freeformResponse ? { freeformResponse } : {}),
-      }),
-    onSuccess: (_data, variables) => {
-      useStreamStore.getState().applyEffects([{ op: 'answerQuestion', key: streamKey, ...variables }]);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.chatInteractions(chatId!) });
-    },
-  });
+  const answerQuestion = useAnswerChatQuestion(chatId!, streamKey);
 
-  const resolvePermission = useMutation({
-    mutationFn: ({
-      interactionId,
-      behavior,
-      message,
-    }: {
-      interactionId: string;
-      behavior: 'allow' | 'deny';
-      message?: string;
-    }) =>
-      api.chats.respondPermission(chatId!, interactionId, {
-        behavior,
-        ...(message ? { message } : {}),
-      }),
-    onSuccess: (_data, variables) => {
-      // The HTTP response confirms the decision even if navigation causes
-      // this screen to miss the corresponding stream event.
-      useStreamStore.getState().applyEffects([{ op: 'resolvePermission', key: streamKey, ...variables }]);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.chatInteractions(chatId!) });
-    },
+  const resolvePermission = useResolveChatPermission(chatId!, streamKey, {
     onError: (error) => {
       // 409: another device already answered — the stream settles the card.
       if (error instanceof ApiError && error.status === 409) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.chatInteractions(chatId!) });
         return;
       }
       haptics.error();
@@ -759,25 +654,36 @@ export default function ChatScreen(): React.ReactElement {
     const liveTurnId = view.serverTurnId;
     const turnUserMessage = view.turnUserMessage?.trim();
 
-    let prompt: ChatMessage | null = null;
-    for (const message of history) {
-      if (message.role === 'user') prompt = message;
-      if (liveTurnId && message.metadata?.turnId === liveTurnId) continue;
-      if (
-        !liveTurnId &&
-        turnUserMessage &&
-        message.role === 'user' &&
-        message.content.trim() === turnUserMessage
-      ) {
-        continue;
-      }
-      if (message.role === 'user') {
-        historyOut.push({ kind: 'user', id: message.id, message });
-        continue;
-      }
-      const turnId = message.metadata?.turnId;
-      for (const row of rowsOf(message, prompt)) {
-        historyOut.push({ kind: 'row', id: row.id, row, ...(turnId ? { turnId } : {}) });
+    const turns = buildTranscriptTurns(history.map((message) => ({
+      id: message.id,
+      role: message.role,
+      ...transcriptMessageInput(message),
+      attachments: messageAttachments(message),
+      source: message,
+    })));
+    for (const turn of turns) {
+      const user = turn.entries.find((entry) => entry.kind === 'user');
+      const prompt = user?.kind === 'user' ? user.message.source : null;
+      for (const entry of turn.entries) {
+        if (entry.kind === 'live' || entry.kind === 'pending_user') continue;
+        const message = entry.message.source;
+        if (liveTurnId && message.metadata?.turnId === liveTurnId) continue;
+        if (
+          !liveTurnId &&
+          turnUserMessage &&
+          message.role === 'user' &&
+          message.content.trim() === turnUserMessage
+        ) {
+          continue;
+        }
+        if (message.role === 'user') {
+          historyOut.push({ kind: 'user', id: message.id, message });
+          continue;
+        }
+        const turnId = message.metadata?.turnId;
+        for (const row of rowsOf(message, prompt)) {
+          historyOut.push({ kind: 'row', id: row.id, row, ...(turnId ? { turnId } : {}) });
+        }
       }
     }
 
@@ -811,7 +717,7 @@ export default function ChatScreen(): React.ReactElement {
       });
     }
 
-    const liveRows = deriveTimeline(live?.blocks, {
+    const liveRows = compactTimeline(live?.blocks, {
       active: view.isLive,
       idPrefix: 'live:',
       hooks: view.hooks,
@@ -849,7 +755,7 @@ export default function ChatScreen(): React.ReactElement {
     async (image: ScreenshotRef) => {
       if (!workspaceId) return;
       try {
-        const response = await auth.fetch(browserArtifactPath(workspaceId, image.relativePath));
+        const response = await auth.fetch(resourcePaths.browserFile(workspaceId, image.relativePath));
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const buffer = await response.arrayBuffer();
         const ext = image.label.split('.').pop()?.toLowerCase() ?? 'png';
@@ -945,10 +851,7 @@ export default function ChatScreen(): React.ReactElement {
   // produced a live event here, so it is seeded from the server's
   // interaction list (invalidated by `useChatStream` on interaction events)
   // and rebuilt into the same block shape the cards expect.
-  const interactions = useQuery({
-    queryKey: queryKeys.chatInteractions(chatId!),
-    queryFn: () => api.chats.interactions(chatId!),
-  });
+  const interactions = useChatInteractions(chatId!);
   const seededGate = useMemo(() => pendingGateFrom(interactions.data), [interactions.data]);
 
   const gateBlock = view.gateBlock;
@@ -1024,8 +927,7 @@ export default function ChatScreen(): React.ReactElement {
         });
       } else {
         await cancel.mutateAsync({ force: false, budgetSeconds: 0 });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.chatPlans(chatId!) });
-        void queryClient.invalidateQueries({ queryKey: queryKeys.chatInteractions(chatId!) });
+        refresh.decisions();
       }
       await composer.send();
     } catch {
@@ -1033,14 +935,13 @@ export default function ChatScreen(): React.ReactElement {
     } finally {
       setGateBusy(false);
     }
-  }, [gateBusy, blockingPermission, resolvePermission, cancel, queryClient, chatId, composer]);
+  }, [gateBusy, blockingPermission, resolvePermission, cancel, refresh, composer]);
 
   const gate = useMemo(
     () =>
-      // The pinned gate card already says the agent is waiting. The banner's
-      // job is its "cancel and send" action, which only means something once
-      // the user has started typing a different instruction.
-      blocked && !archived && composer.draft.trim().length > 0
+      // Keep the gate present even with an empty draft: the composer uses
+      // it to allow typing. The composer reveals the banner after typing.
+      blocked && !archived
         ? {
             label: blockingPermission
               ? 'Waiting for your permission decision'
@@ -1051,7 +952,7 @@ export default function ChatScreen(): React.ReactElement {
             onCancelAndSend: () => void cancelGateAndSend(),
           }
         : null,
-    [blocked, archived, blockingPermission, blockingQuestion, gateBusy, cancelGateAndSend, composer.draft],
+    [blocked, archived, blockingPermission, blockingQuestion, gateBusy, cancelGateAndSend],
   );
 
   // The chat DTO's bound agent and mount readiness, when the server sends them.
@@ -1227,6 +1128,7 @@ export default function ChatScreen(): React.ReactElement {
         ) : (
           <View className="flex-1">
             <LegendList
+              testID="transcript-list"
               ref={listRef}
               data={listRows}
               keyExtractor={(row) => row.id}

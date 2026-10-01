@@ -5,18 +5,17 @@
 
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { queryKeys } from '@generatorai/client-core';
+import { ApiError, queryKeys } from '@generatorai/client-core';
 
-import { useApi } from '../../api/useApi';
-import { useAuth } from '../../auth/AuthProvider';
-import { checkFeature } from '../../auth/featureGate';
+import { useApi } from '../../services/api/useApi';
+import { useAdminApi } from '../../services/api/useAdminApi';
+import { checkFeature } from '../../services/auth/featureGate';
 import { useCapability } from '../review/useScopes';
-import { scmKeys } from '../scm/api';
+import { scmKeys } from '@generatorai/client-core';
 import { useScmApi } from '../scm/useScmApi';
 import { useChangesSummary } from '../chat/panes/useChangesSummary';
 import { COMPUTER_SCOPE, computerFeature } from '../chat/panes/paneModel';
 import { computerConsentKey } from '../chat/panes/ComputerPane';
-import type { PendingConsent } from '../chat/panes/computerModel';
 import type { TasksSummary } from '../chat/panes/useTasksSummary';
 import { workbenchBadge, workbenchTools, type ToolDescriptor, type WorkbenchInput } from './workbenchModel';
 
@@ -42,7 +41,7 @@ export function useWorkbench(input: UseWorkbenchInput): WorkbenchState {
   const { surface, workspaceId, chatId, scopes, live } = input;
   const api = useApi();
   const scm = useScmApi();
-  const { fetch: authFetch } = useAuth();
+  const admin = useAdminApi();
   const commitCap = useCapability('commit');
 
   const terminal = checkFeature('terminal', scopes);
@@ -62,11 +61,7 @@ export function useWorkbench(input: UseWorkbenchInput): WorkbenchState {
 
   const browserDescriptor = useQuery<{ ready?: boolean; currentUrl?: string | null }>({
     queryKey: ['workspaces', workspaceId, 'browser', 'descriptor'] as const,
-    queryFn: async () => {
-      const response = await authFetch(`/api/workspaces/${workspaceId}/browser/descriptor`);
-      if (!response.ok) throw new Error(String(response.status));
-      return (await response.json()) as { ready?: boolean; currentUrl?: string | null };
-    },
+    queryFn: () => api.resources.browserDescriptor(workspaceId!),
     enabled: Boolean(workspaceId) && browser.available && live,
     refetchInterval: live ? 5_000 : false,
     staleTime: 5_000,
@@ -74,11 +69,10 @@ export function useWorkbench(input: UseWorkbenchInput): WorkbenchState {
 
   const computerUse = useQuery({
     queryKey: ['computer-use-settings'],
-    queryFn: async () => {
-      const res = await authFetch('/api/system/computer-use');
-      if (!res.ok) return { enabled: false };
-      return (await res.json()) as { enabled: boolean };
-    },
+    queryFn: () => api.system.computerUse().catch((error: unknown) => {
+      if (error instanceof ApiError) return { enabled: false };
+      throw error;
+    }),
     enabled: Boolean(workspaceId),
     staleTime: 60_000,
   });
@@ -87,11 +81,7 @@ export function useWorkbench(input: UseWorkbenchInput): WorkbenchState {
 
   const computerConsent = useQuery({
     queryKey: computerConsentKey(workspaceId),
-    queryFn: async () => {
-      const res = await authFetch(`/api/workspaces/${workspaceId}/computer/consent`);
-      if (!res.ok) throw new Error(String(res.status));
-      return (await res.json()) as { pending?: PendingConsent[] };
-    },
+    queryFn: () => admin.computer.consent(encodeURIComponent(workspaceId!)),
     enabled: Boolean(workspaceId) && computerEnabled && holdsComputer,
     refetchInterval: live ? 5_000 : 20_000,
   });

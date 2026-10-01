@@ -1,0 +1,4 @@
+flows: ["**/*.yaml", "!_subflows/**"]
+executionOrder:
+  continueOnFailure: false
+  flowsOrder: [send-stream, send-stream-approve, two-phase-stop, keep-undo-commit, open-type, theme-switch, approval-action, pair-via-link]

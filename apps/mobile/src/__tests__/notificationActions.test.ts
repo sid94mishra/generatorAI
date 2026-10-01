@@ -5,11 +5,10 @@ import {
   APPROVAL_CATEGORY_ID,
   APPROVAL_CHANNEL_ID,
   decisionOutcome,
-  decisionRequest,
   intentFromResponse,
   submitDecision,
   type NotificationIntent,
-} from '../notifications/notificationCategories';
+} from '../services/notifications/notificationCategories';
 
 // The value Expo hands back for a plain tap (Notifications.DEFAULT_ACTION_IDENTIFIER).
 const TAP = 'expo.modules.notifications.actions.DEFAULT';
@@ -56,6 +55,14 @@ describe('approval category', () => {
 });
 
 describe('intentFromResponse — permission prompt', () => {
+  it('pins actions and fallback navigation to the notification server', () => {
+    expect(intentFromResponse('approve', { ...permissionData, serverId: 'B' }, TAP)).toMatchObject({ type: 'decide', serverId: 'B', route: '/chats/c1/gate/i1?server=B' });
+    expect(intentFromResponse('approve', { ...permissionData, route: '/chats/c1/gate/i1?server=B' }, TAP)).toMatchObject({ type: 'decide', serverId: 'B' });
+    expect(intentFromResponse(TAP, { ...permissionData, serverId: 'B' }, TAP)).toEqual({ type: 'open', route: '/chats/c1/gate/i1?server=B' });
+  });
+  it('never falls back to an active-server decision for an invalid explicit identity', () => {
+    expect(intentFromResponse('approve', { ...permissionData, serverId: '../other' }, TAP).type).not.toBe('decide');
+  });
   it('maps Allow to an allow decision without opening the UI', () => {
     expect(intentFromResponse('approve', permissionData, TAP)).toEqual({
       type: 'decide',
@@ -146,26 +153,6 @@ describe('intentFromResponse — robustness', () => {
   });
 });
 
-describe('decisionRequest', () => {
-  const decide: Extract<NotificationIntent, { type: 'decide' }> = {
-    type: 'decide',
-    chatId: 'c1',
-    interactionId: 'i1',
-    behavior: 'allow',
-    route: '/chats/c1/gate/i1',
-  };
-
-  it('targets the existing chat permission route with the server’s body shape', () => {
-    // POST /api/chats/:id/interactions/:interactionId/permission with
-    // { behavior } — the same request the in-app gate card sends.
-    const { path, init } = decisionRequest(decide);
-    expect(path).toBe('/api/chats/c1/interactions/i1/permission');
-    expect(init.method).toBe('POST');
-    expect(JSON.parse(String(init.body))).toEqual({ behavior: 'allow' });
-    expect((init.headers as Record<string, string>)['content-type']).toBe('application/json');
-  });
-});
-
 describe('decisionOutcome', () => {
   it('counts an accepted decision as settled', () => {
     expect(decisionOutcome(202)).toBe('settled');
@@ -196,7 +183,7 @@ describe('submitDecision', () => {
   };
 
   it('posts through the signed fetch and reports the outcome', async () => {
-    const fetchImpl = vi.fn(async () => new Response(null, { status: 202 }));
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 202 }));
     await expect(submitDecision(decide, fetchImpl)).resolves.toBe('settled');
     expect(fetchImpl).toHaveBeenCalledWith(
       '/api/chats/c1/interactions/i1/permission',

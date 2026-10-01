@@ -1,3 +1,6 @@
+import { createResourceMethods, type BinaryResource } from './resources.js';
+import { createPlanMethods, createReviewMethods, type TaskDigest, type ReviewSubmitTarget } from './reviewDetails.js';
+import { createScmMethods } from './scm.js';
 // ────────────────────────────────────────────────────────────────
 // Typed API client.
 //
@@ -7,6 +10,8 @@
 // ────────────────────────────────────────────────────────────────
 
 import {
+  type Agent,
+  type RepoReadiness,
   chatListSearchParams,
   runChatBulk,
   type AttentionFilter,
@@ -133,6 +138,16 @@ export async function requestText(
   }
   if (res.status === 204) return '';
   return res.text();
+}
+
+/** Binary endpoints preserve content type and the same server error contract as JSON. */
+export async function requestBinary(fetchImpl: ApiFetch, path: string, init?: RequestInit): Promise<BinaryResource> {
+  const res = await fetchImpl(path, init);
+  if (!res.ok) {
+    const body: unknown = await res.json().catch(() => undefined);
+    throw new ApiError(res.status, path, describeErrorBody(body) ?? `${res.status} ${res.statusText}`, body);
+  }
+  return { data: new Uint8Array(await res.arrayBuffer()), contentType: res.headers.get('content-type')?.split(';')[0] ?? 'application/octet-stream' };
 }
 
 export async function request<T>(fetchImpl: ApiFetch, path: string, init?: RequestInit): Promise<T> {
@@ -666,7 +681,15 @@ export interface ChangeRepoEntry {
   keptCount?: number;
 }
 
+export interface ChangeRevisionInfo {
+  kind: 'baseline' | 'checkpoint' | 'working' | 'ref';
+  id?: string;
+  label?: string;
+}
+
 export interface ChangeSummary {
+  base?: ChangeRevisionInfo;
+  head?: ChangeRevisionInfo;
   workspaceId: string;
   hasGit: boolean;
   repos: ChangeRepoEntry[];
@@ -742,6 +765,8 @@ export interface ReviewThread {
 // ── Projects ────────────────────────────────────────────────────
 
 export interface ProjectSummary {
+  rootPath?: string;
+  settings?: { worktreeRetention?: string; maxCodebases?: number; [key: string]: unknown };
   id: string;
   name: string;
   description?: string;
@@ -756,6 +781,7 @@ export interface ProjectSummary {
 }
 
 export interface CodebaseSummary {
+  lastError?: string;
   id: string;
   projectId: string;
   alias: string;
@@ -838,6 +864,13 @@ export interface WorkspaceFile {
 // ── Checkpoints ─────────────────────────────────────────────────
 
 export interface WorkspaceCheckpoint {
+  seq?: number;
+  turnId?: string;
+  phase?: 'before' | 'after';
+  promptExcerpt?: string;
+  additions?: number;
+  deletions?: number;
+  chatId?: string;
   id: string;
   workspaceId: string;
   repoAlias: string;
@@ -1030,6 +1063,9 @@ export const queryKeys = {
 
 export function createApiClient(fetchImpl: ApiFetch) {
   return {
+    resources: createResourceMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init), (path, init) => requestBinary(fetchImpl, path, init)),
+    plans: createPlanMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init)),
+    scm: createScmMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init)),
     health: () => request<HealthSnapshot>(fetchImpl, '/api/health'),
 
     /**
@@ -1157,6 +1193,10 @@ export function createApiClient(fetchImpl: ApiFetch) {
        * both the field (`attachments`) and the 10-file cap; anything past
        * that the server rejects, so callers should not silently truncate.
        */
+      /** Caller-built multipart supports native URI-backed files without a byte Blob. */
+      sendMultipart: (id: string, form: FormData) =>
+        request<{ sessionId: string }>(fetchImpl, `/api/chats/${encodeURIComponent(id)}/prompt`, { method: 'POST', body: form }),
+
       sendWithAttachments: (
         id: string,
         input: SendMessageInput,
@@ -1241,6 +1281,11 @@ export function createApiClient(fetchImpl: ApiFetch) {
         }),
 
       remove: (id: string) => request<void>(fetchImpl, `/api/chats/${id}`, { method: 'DELETE' }),
+
+      backgroundTaskDigest: (id: string, taskId: string) =>
+        request<TaskDigest>(fetchImpl, `/api/chats/${encodeURIComponent(id)}/background-tasks/${encodeURIComponent(taskId)}`),
+
+      prepareWorkspace: (id: string) => request<unknown>(fetchImpl, `/api/chats/${encodeURIComponent(id)}/workspace/prepare`, { method: 'POST' }),
 
       plans: (id: string) => request<PlanSummary[]>(fetchImpl, `/api/chats/${id}/plans`),
 
@@ -1427,6 +1472,9 @@ export function createApiClient(fetchImpl: ApiFetch) {
         ),
 
       /** {@link stageMessage} with files (multipart; the server caps at 10). */
+      stageMessageMultipart: (runId: string, instanceId: string, form: FormData) =>
+        request<StageMessageResult>(fetchImpl, `/api/workflow-runs/${encodeURIComponent(runId)}/instances/${encodeURIComponent(instanceId)}/messages`, { method: 'POST', body: form }),
+
       stageMessageWithAttachments: (
         runId: string,
         instanceId: string,
@@ -1506,6 +1554,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
     },
 
     workspaces: {
+      createCheckpoint: (id: string, label?: string) =>
+        request<{ checkpoints: WorkspaceCheckpoint[] }>(fetchImpl, `/api/workspaces/${encodeURIComponent(id)}/checkpoints`, json(label ? { label } : {})),
       list: (params?: { projectId?: string; limit?: number }) => {
         const q = new URLSearchParams();
         if (params?.projectId) q.set('projectId', params.projectId);
@@ -1643,6 +1693,7 @@ export function createApiClient(fetchImpl: ApiFetch) {
     },
 
     review: {
+      ...createReviewMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init)),
       threads: (workspaceId: string, params?: { path?: string; status?: string }) => {
         const q = new URLSearchParams();
         if (params?.path) q.set('path', params.path);
@@ -1699,7 +1750,7 @@ export function createApiClient(fetchImpl: ApiFetch) {
           },
         ),
 
-      submit: (workspaceId: string, body: { threadIds: string[]; note?: string; preview?: boolean }) =>
+      submit: (workspaceId: string, body: { threadIds: string[]; target?: ReviewSubmitTarget; note?: string; preview?: boolean }) =>
         request<{ prompt: string; threadIds: string[]; reviewRound: number; delivered: boolean }>(
           fetchImpl,
           `/api/workspaces/${workspaceId}/review/submit`,
@@ -1708,6 +1759,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
     },
 
     projects: {
+      codebaseReadiness: (id: string, cid: string) => request<RepoReadiness>(fetchImpl, `/api/projects/${encodeURIComponent(id)}/codebases/${encodeURIComponent(cid)}/readiness`),
+      availableArtifacts: (id: string, type?: 'agent' | 'prompt' | 'skill') => request<SystemArtifact[]>(fetchImpl, `/api/projects/${encodeURIComponent(id)}/available-artifacts${type ? `?type=${type}` : ''}`),
       /** `includeSummary` (G-13) adds each project's `summary` for a Projects list screen. */
       list: (params?: { includeSummary?: boolean }) =>
         request<ProjectSummary[]>(
@@ -1783,6 +1836,7 @@ export function createApiClient(fetchImpl: ApiFetch) {
      * full capability policy is visible.
      */
     agents: {
+      get: (id: string) => request<Agent>(fetchImpl, `/api/agents/${encodeURIComponent(id)}`),
       /** Picker list — project agents shadow global, global shadows system. */
       selectable: (projectId?: string) =>
         request<AgentSummary[]>(
@@ -1829,6 +1883,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
      * does, which is the part worth checking away from a desk.
      */
     system: {
+      computerUse: () => request<{ enabled: boolean; skillId?: string }>(fetchImpl, '/api/system/computer-use'),
+      audio: () => request<Record<string, unknown>>(fetchImpl, '/api/system/audio'),
       artifacts: (type?: 'agent' | 'prompt' | 'skill') =>
         request<SystemArtifact[]>(
           fetchImpl,
@@ -1899,6 +1955,10 @@ export function createApiClient(fetchImpl: ApiFetch) {
      * `createAdminApi().devices.scopeRequests`.
      */
     auth: {
+      registerPush: (body: { token: string; provider: 'expo'; platform: string }) =>
+        request<void>(fetchImpl, '/api/auth/push-token', jsonWith('PUT', body)),
+      mutePush: (mutedUntil: number | null) =>
+        request<void>(fetchImpl, '/api/auth/push-token/mute', jsonWith('PUT', { mutedUntil })),
       scopeRequests: {
         /**
          * Ask for scopes this device does not hold. 403 `SCOPE_NOT_REQUESTABLE`

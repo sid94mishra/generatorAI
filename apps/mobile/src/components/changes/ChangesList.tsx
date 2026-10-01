@@ -248,6 +248,7 @@ const FileRow = React.memo(function FileRow({
     <View className="border-b border-border-muted">
       <View className="flex-row items-center">
         <ContextMenu
+          testID="changes-file-row"
           items={menuItems}
           title={row.path}
           accessibilityLabel={`${STATUS_TITLE[row.status]} ${row.path}`}

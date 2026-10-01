@@ -248,10 +248,10 @@ describe('MCP toggles', () => {
 
   it('routes bundled and custom servers to their own endpoints', () => {
     expect(globalMcpToggle({ ...http, source: 'system' }, false)).toEqual({
-      path: '/api/system/mcp-servers/system/m1',
+      source: 'system', id: 'm1',
       body: { enabled: false },
     });
-    expect(globalMcpToggle(http, true)?.path).toBe('/api/system/mcp-servers/custom/m1');
+    expect(globalMcpToggle(http, true)).toMatchObject({ source: 'custom', id: 'm1' });
     expect(globalMcpToggle({ ...http, source: 'project' }, true)).toBeNull();
     expect(globalMcpToggle({ name: 'no-id', source: 'system' }, true)).toBeNull();
   });

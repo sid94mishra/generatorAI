@@ -1,0 +1,11 @@
+{
+  "ios": {
+    "phone": { "name": "gai-iphone", "deviceType": "iPhone 18 Pro", "runtime": "iOS 27.0" },
+    "tablet": { "name": "gai-ipad", "deviceType": "iPad Pro 13-inch (M5) (16GB)", "runtime": "iOS 27.0" }
+  },
+  "android": {
+    "phone": { "avd": "gai-phone", "device": "pixel_9", "image": "system-images;android-36;google_apis;arm64-v8a" },
+    "tablet": { "avd": "gai-tablet", "device": "pixel_tablet", "image": "system-images;android-36;google_apis;arm64-v8a" },
+    "phone37": { "avd": "gai-phone-37", "device": "pixel_9", "image": "system-images;android-37;google_apis;arm64-v8a", "optional": true }
+  }
+}

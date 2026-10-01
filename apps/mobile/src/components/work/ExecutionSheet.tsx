@@ -13,7 +13,7 @@ import { router } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@generatorai/client-core';
 
-import { useAdminApi } from '../../api/useAdminApi';
+import { useAdminApi } from '../../services/api/useAdminApi';
 import { formatDuration, relativeTime, runElapsed } from '../runs/formatTime';
 import { useFeature } from '../runs/useFeature';
 import { ConfirmSheet } from '../ui/ActionSheet';
@@ -33,7 +33,7 @@ import {
   triggeredByLabel,
   type ExecutionRunView,
   type ExecutionView,
-} from './automationModel';
+} from '../../features/automations/model';
 
 type ExecutionDetail = ExecutionView & { runs?: ExecutionRunView[] };
 

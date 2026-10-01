@@ -7,15 +7,15 @@ import {
   cacheMissHint,
   collapseWork,
   countSteps,
-  deriveTimeline,
+  compactTimeline,
   formatWorkDuration,
   rowsEqual,
   toolFamily,
   workLabel,
   workTitle,
   type TimelineRow,
-} from '../components/chat/timeline/deriveTimeline';
-import { chatMessageToBlocks, messageAttachments, messageWasStopped } from '../components/chat/timeline/chatMessageToBlocks';
+} from '../components/chat/timeline/compactTimeline';
+import { wireChatMessageToBlocks as chatMessageToBlocks, messageAttachments, messageWasStopped } from '@generatorai/client-core';
 import { activityLabelFor, selectChatView } from '../components/chat/timeline/selectChatView';
 import { DEFAULT_STREAM } from '@generatorai/client-core';
 
@@ -56,14 +56,14 @@ describe('toolFamily', () => {
   });
 });
 
-describe('deriveTimeline — grouping', () => {
+describe('compactTimeline — grouping', () => {
   it('folds consecutive reads into one "Read N files" row', () => {
     const blocks: StreamBlock[] = [
       tool('Read', { file_path: 'src/a.ts' }),
       tool('Read', { file_path: 'src/b.ts' }),
       tool('Read', { file_path: 'src/c.ts' }),
     ];
-    const rows = deriveTimeline(blocks, { active: false });
+    const rows = compactTimeline(blocks, { active: false });
     expect(kinds(rows)).toEqual(['group']);
     const row = rows[0]!;
     if (row.kind !== 'group') throw new Error('expected group');
@@ -80,7 +80,7 @@ describe('deriveTimeline — grouping', () => {
       tool('Edit', { file_path: 'b.ts' }, { fileOp: { kind: 'edit', filePath: 'b.ts', additions: 2, deletions: 3 } }),
       tool('Grep', { pattern: 'foo' }),
     ];
-    const rows = deriveTimeline(blocks, { active: false });
+    const rows = compactTimeline(blocks, { active: false });
     expect(kinds(rows)).toEqual(['group', 'tool']);
     const group = rows[0]!;
     if (group.kind !== 'group') throw new Error('expected group');
@@ -97,12 +97,12 @@ describe('deriveTimeline — grouping', () => {
       tool('mcp__browser__click_element', { url: 'https://a' }),
       tool('mcp__browser__click_element', { url: 'https://b' }, { status: 'running', result: undefined }),
     ];
-    const rows = deriveTimeline(blocks, { active: true });
+    const rows = compactTimeline(blocks, { active: true });
     const row = rows[0]!;
     if (row.kind !== 'group') throw new Error('expected group');
     expect(row.group.status).toBe('running');
     expect(row.group.label).toBe('click_element · running (2)');
-    const settled = deriveTimeline(blocks.map((b) => (b.type === 'tool_call' ? { ...b, status: 'complete' as const } : b)), { active: false });
+    const settled = compactTimeline(blocks.map((b) => (b.type === 'tool_call' ? { ...b, status: 'complete' as const } : b)), { active: false });
     if (settled[0]!.kind !== 'group') throw new Error('expected group');
     expect(settled[0]!.group.label).toBe('click_element ×2');
   });
@@ -114,11 +114,11 @@ describe('deriveTimeline — grouping', () => {
       tool('Read', { file_path: 'b.ts' }),
       tool('Read', { file_path: 'c.ts' }),
     ];
-    expect(kinds(deriveTimeline(blocks, { active: false }))).toEqual(['tool', 'text', 'group']);
+    expect(kinds(compactTimeline(blocks, { active: false }))).toEqual(['tool', 'text', 'group']);
   });
 });
 
-describe('deriveTimeline — nesting', () => {
+describe('compactTimeline — nesting', () => {
   it('nests children under the Agent call by parentCallId and counts steps', () => {
     const agent = tool('Agent', { description: 'explore auth', prompt: 'Find the auth code' }, { callId: 'agent-1', status: 'running', result: undefined });
     const blocks: StreamBlock[] = [
@@ -127,7 +127,7 @@ describe('deriveTimeline — nesting', () => {
       tool('Grep', { pattern: 'token' }, { parentCallId: 'agent-1' }),
       tool('Read', { file_path: 'other.ts' }),
     ];
-    const rows = deriveTimeline(blocks, { active: true });
+    const rows = compactTimeline(blocks, { active: true });
     expect(kinds(rows)).toEqual(['tool', 'tool']);
     const agentRow = rows[0]!;
     if (agentRow.kind !== 'tool') throw new Error('expected tool');
@@ -140,29 +140,29 @@ describe('deriveTimeline — nesting', () => {
 
   it('falls back to the top level when the parent is missing', () => {
     const blocks: StreamBlock[] = [tool('Read', { file_path: 'x.ts' }, { parentCallId: 'gone' })];
-    const rows = deriveTimeline(blocks, { active: false });
+    const rows = compactTimeline(blocks, { active: false });
     expect(kinds(rows)).toEqual(['tool']);
   });
 
   it('reuses the interned step when neither block nor children changed', () => {
     const agent = tool('Agent', { description: 'x' }, { callId: 'a' });
     const child = tool('Read', { file_path: 'a.ts' }, { parentCallId: 'a' });
-    const first = deriveTimeline([agent, child], { active: false });
-    const second = deriveTimeline([agent, child], { active: false });
+    const first = compactTimeline([agent, child], { active: false });
+    const second = compactTimeline([agent, child], { active: false });
     expect(rowsEqual(first[0]!, second[0]!)).toBe(true);
-    const grown = deriveTimeline([agent, child, tool('Read', { file_path: 'b.ts' }, { parentCallId: 'a' })], { active: false });
+    const grown = compactTimeline([agent, child, tool('Read', { file_path: 'b.ts' }, { parentCallId: 'a' })], { active: false });
     expect(rowsEqual(first[0]!, grown[0]!)).toBe(false);
   });
 });
 
-describe('deriveTimeline — status', () => {
+describe('compactTimeline — status', () => {
   it('flags the provider error and the ok:false envelope as failed, with the message', () => {
     const blocks: StreamBlock[] = [
       tool('Bash', { command: 'pnpm test' }, { error: true, result: 'Error: 3 tests failed\nmore' }),
       { type: 'text', blockId: nextId++, content: 'hm' },
       tool('mcp__browser__click', { selector: '#x' }, { result: { ok: false, error: 'element not found' } }),
     ];
-    const rows = deriveTimeline(blocks, { active: false });
+    const rows = compactTimeline(blocks, { active: false });
     const first = rows[0]!;
     if (first.kind !== 'tool') throw new Error('expected tool');
     expect(first.step.status).toBe('failed');
@@ -179,7 +179,7 @@ describe('deriveTimeline — status', () => {
       { type: 'system', blockId: nextId++, message: 'boom', category: 'error' },
       { type: 'system', blockId: nextId++, message: 'Sub-agent started: x', category: 'subagent' },
     ];
-    const rows = deriveTimeline(blocks, { active: false });
+    const rows = compactTimeline(blocks, { active: false });
     expect(rows.map((r) => (r.kind === 'system' ? r.tone : r.kind))).toEqual(['warning', 'danger', 'info']);
   });
 
@@ -199,7 +199,7 @@ describe('deriveTimeline — status', () => {
       },
     ];
     expect(awaitsUserDecision(blocks)).toBe('permission');
-    const rows = deriveTimeline(blocks, { active: true });
+    const rows = compactTimeline(blocks, { active: true });
     expect(kinds(rows)).toEqual(['tool', 'waiting']);
     const first = rows[0]!;
     if (first.kind !== 'tool') throw new Error('expected tool');
@@ -208,18 +208,18 @@ describe('deriveTimeline — status', () => {
 
   it('degrades an unresolved call to pending once the turn settled, never spinning', () => {
     const blocks: StreamBlock[] = [tool('Read', { file_path: 'a' }, { status: 'running', result: undefined })];
-    const live = deriveTimeline(blocks, { active: true });
-    const done = deriveTimeline(blocks, { active: false });
+    const live = compactTimeline(blocks, { active: true });
+    const done = compactTimeline(blocks, { active: false });
     if (live[0]!.kind !== 'tool' || done[0]!.kind !== 'tool') throw new Error('expected tool');
     expect(live[0]!.step.status).toBe('running');
     expect(done[0]!.step.status).toBe('pending');
   });
 });
 
-describe('deriveTimeline — special rows', () => {
+describe('compactTimeline — special rows', () => {
   it('builds file-op steps with +/− meta and the fileOp for the inline diff', () => {
     const fileOp = { kind: 'edit' as const, filePath: 'src/a.ts', additions: 4, deletions: 1, hunks: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 4, lines: ['-a', '+b', '+c'] }] };
-    const rows = deriveTimeline([tool('Edit', { file_path: 'src/a.ts' }, { fileOp })], { active: false });
+    const rows = compactTimeline([tool('Edit', { file_path: 'src/a.ts' }, { fileOp })], { active: false });
     const row = rows[0]!;
     if (row.kind !== 'tool') throw new Error('expected tool');
     expect(row.step.meta).toBe('+4 −1');
@@ -227,7 +227,7 @@ describe('deriveTimeline — special rows', () => {
   });
 
   it('builds shell steps with the command, exit code and output', () => {
-    const rows = deriveTimeline(
+    const rows = compactTimeline(
       [tool('Bash', { command: 'pnpm test' }, { result: { stdout: 'ok\n', exitCode: 0 } })],
       { active: false },
     );
@@ -240,7 +240,7 @@ describe('deriveTimeline — special rows', () => {
   });
 
   it('detects a screenshot result', () => {
-    const rows = deriveTimeline(
+    const rows = compactTimeline(
       [tool('mcp__browser__screenshot_page', {}, { result: { ok: true, artifactPath: 'shots/page.png', artifactType: 'browser_screenshot' } })],
       { active: false },
     );
@@ -251,7 +251,7 @@ describe('deriveTimeline — special rows', () => {
 
   it('appends stopped, hook and usage rows after the blocks, in that order', () => {
     const usage: StreamUsage = { model: 'm', inputTokens: 1, outputTokens: 2 };
-    const rows = deriveTimeline([{ type: 'text', blockId: nextId++, content: 'partial' }], {
+    const rows = compactTimeline([{ type: 'text', blockId: nextId++, content: 'partial' }], {
       active: false,
       stopped: true,
       hooks: [{ id: 'h1', hookName: 'pre-commit', phase: 'PreToolUse', status: 'ok' }],
@@ -260,10 +260,18 @@ describe('deriveTimeline — special rows', () => {
     expect(kinds(rows)).toEqual(['text', 'stopped', 'hook', 'usage']);
   });
 
+  it('does not reuse a cached step under a different transcript prefix', () => {
+    const block = tool('Read', { path: 'a' });
+    const history = compactTimeline([block], { active: false, idPrefix: 'history:' });
+    const live = compactTimeline([block], { active: false, idPrefix: 'live:' });
+    expect(history[0]?.id).toBe(`history:tool-${block.blockId}`);
+    expect(live[0]?.id).toBe(`live:tool-${block.blockId}`);
+  });
+
   it('prefixes ids so history and live rows never collide', () => {
     const block = tool('Read', { file_path: 'a' });
-    const a = deriveTimeline([block], { active: false, idPrefix: 'm1:' });
-    const b = deriveTimeline([block], { active: false, idPrefix: 'm2:' });
+    const a = compactTimeline([block], { active: false, idPrefix: 'm1:' });
+    const b = compactTimeline([block], { active: false, idPrefix: 'm2:' });
     expect(a[0]!.id).not.toBe(b[0]!.id);
   });
 
@@ -272,15 +280,24 @@ describe('deriveTimeline — special rows', () => {
       { type: 'thinking', blockId: nextId++, text: '', isComplete: false },
       { type: 'text', blockId: nextId++, content: 'Hello' },
     ];
-    const rows = deriveTimeline(blocks, { active: true });
+    const rows = compactTimeline(blocks, { active: true });
     expect(kinds(rows)).toEqual(['text']);
     expect(rows[0]!.kind === 'text' && rows[0]!.live).toBe(true);
-    const settled = deriveTimeline(blocks, { active: false });
+    const settled = compactTimeline(blocks, { active: false });
     expect(settled[0]!.kind === 'text' && settled[0]!.live).toBe(false);
   });
 });
 
 describe('blocksSignature / selectChatView', () => {
+  it('uses shared live counts without confusing nested tools with subagents', () => {
+    const view = selectChatView({ ...DEFAULT_STREAM, status: 'streaming', blocks: [
+      tool('Agent', {}, { callId: 'worker', status: 'running' }),
+      tool('Read', {}, { parentCallId: 'worker', status: 'running' }),
+    ] });
+    expect(view.runningTools).toBe(1);
+    expect(view.runningSubagents).toBe(1);
+    expect(view.pendingWorkers).toBe(0);
+  });
   it('does not change when text streams into the live block, but does when it settles', () => {
     const a: StreamBlock[] = [{ type: 'text', blockId: 1, content: 'Hel' }];
     const b: StreamBlock[] = [{ type: 'text', blockId: 1, content: 'Hello world' }];
@@ -378,7 +395,7 @@ describe('chatMessageToBlocks', () => {
   });
 });
 
-describe('deriveTimeline — settled turn collapse', () => {
+describe('compactTimeline — settled turn collapse', () => {
   const text = (content: string): StreamBlock => ({ type: 'text', blockId: nextId++, content }) as StreamBlock;
   const system = (message: string, category: 'system' | 'warning' | 'error'): StreamBlock =>
     ({ type: 'system', blockId: nextId++, message, category }) as StreamBlock;
@@ -391,7 +408,7 @@ describe('deriveTimeline — settled turn collapse', () => {
       tool('Agent', { description: 'Write alpha.txt' }),
       text('Done.'),
     ];
-    const rows = deriveTimeline(blocks, { active: false, collapseSettled: true, durationMs: 42_000 });
+    const rows = compactTimeline(blocks, { active: false, collapseSettled: true, durationMs: 42_000 });
     expect(kinds(rows)).toEqual(['text', 'work', 'text']);
     const work = rows[1]!;
     if (work.kind !== 'work') throw new Error('expected work');
@@ -402,14 +419,14 @@ describe('deriveTimeline — settled turn collapse', () => {
   });
 
   it('never collapses a live turn, and leaves a single step as a plain row', () => {
-    const live = deriveTimeline([tool('Read', { file_path: 'a' }), tool('Grep', { pattern: 'b' })], { active: true, collapseSettled: true });
+    const live = compactTimeline([tool('Read', { file_path: 'a' }), tool('Grep', { pattern: 'b' })], { active: true, collapseSettled: true });
     expect(kinds(live)).not.toContain('work');
-    const single = deriveTimeline([text('hi'), tool('Read', { file_path: 'a' }), text('bye')], { active: false, collapseSettled: true });
+    const single = compactTimeline([text('hi'), tool('Read', { file_path: 'a' }), text('bye')], { active: false, collapseSettled: true });
     expect(kinds(single)).toEqual(['text', 'tool', 'text']);
   });
 
   it('keeps warnings and errors outside the fold and splits the run around them', () => {
-    const rows = deriveTimeline(
+    const rows = compactTimeline(
       [tool('Read', { file_path: 'a' }), tool('Grep', { pattern: 'b' }), system('MCP down', 'warning'), tool('Bash', { command: 'ls' }), tool('Bash', { command: 'pwd' })],
       { active: false, collapseSettled: true, durationMs: 5_000 },
     );
@@ -421,7 +438,7 @@ describe('deriveTimeline — settled turn collapse', () => {
   it('counts failures and nested sub-agent steps', () => {
     const parent = tool('Agent', { description: 'Worker' }, { callId: 'p1' });
     const rows = collapseWork(
-      deriveTimeline([parent, tool('Read', { file_path: 'a' }, { parentCallId: 'p1' }), tool('Bash', { command: 'x' }, { error: true })], { active: false }),
+      compactTimeline([parent, tool('Read', { file_path: 'a' }, { parentCallId: 'p1' }), tool('Bash', { command: 'x' }, { error: true })], { active: false }),
       'h:',
     );
     const work = rows[0]!;
@@ -432,7 +449,7 @@ describe('deriveTimeline — settled turn collapse', () => {
   });
 
   it('names what the steps did, counting distinct files for reads and edits', () => {
-    const rows = deriveTimeline(
+    const rows = compactTimeline(
       [
         tool('Bash', { command: 'ls' }),
         tool('Read', { file_path: 'a.ts' }),
@@ -455,7 +472,7 @@ describe('deriveTimeline — settled turn collapse', () => {
   });
 
   it('lists every call of a fold at one level, with no sub-groups', () => {
-    const rows = deriveTimeline(
+    const rows = compactTimeline(
       [tool('Bash', { command: 'ls' }), tool('Bash', { command: 'pwd' }), tool('Read', { file_path: 'a' }), tool('Read', { file_path: 'b' })],
       { active: false, collapseSettled: true },
     );
@@ -466,7 +483,7 @@ describe('deriveTimeline — settled turn collapse', () => {
   });
 
   it('names the agent\'s bookkeeping tools instead of counting them as tools', () => {
-    const rows = deriveTimeline(
+    const rows = compactTimeline(
       [tool('TodoWrite', { todos: [] }), tool('Read', { file_path: 'a.ts' }), tool('ExitPlanMode', {}), tool('TodoWrite', { todos: [] })],
       { active: false, collapseSettled: true },
     );
@@ -476,17 +493,17 @@ describe('deriveTimeline — settled turn collapse', () => {
   });
 
   it('marks only the last prose row of a settled turn as final', () => {
-    const rows = deriveTimeline([text('one'), tool('Read', { file_path: 'a' }), text('two')], { active: false });
+    const rows = compactTimeline([text('one'), tool('Read', { file_path: 'a' }), text('two')], { active: false });
     const texts = rows.filter((r) => r.kind === 'text');
     expect(texts.map((r) => (r.kind === 'text' ? Boolean(r.final) : null))).toEqual([false, true]);
-    const live = deriveTimeline([text('one')], { active: true });
+    const live = compactTimeline([text('one')], { active: true });
     expect(live[0]!.kind === 'text' && live[0]!.final).toBeFalsy();
   });
 
   it('compares work rows structurally for the row memo', () => {
     const blocks: StreamBlock[] = [tool('Read', { file_path: 'a' }), tool('Grep', { pattern: 'b' })];
-    const a = deriveTimeline(blocks, { active: false, collapseSettled: true });
-    const b = deriveTimeline(blocks, { active: false, collapseSettled: true });
+    const a = compactTimeline(blocks, { active: false, collapseSettled: true });
+    const b = compactTimeline(blocks, { active: false, collapseSettled: true });
     expect(rowsEqual(a[0]!, b[0]!)).toBe(true);
   });
 

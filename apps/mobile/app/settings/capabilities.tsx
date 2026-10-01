@@ -15,12 +15,11 @@
 
 import React, { useState } from 'react';
 import { Text, View } from 'react-native';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSystemArtifacts, useSystemMcpServers, useSystemArtifactContent, useToggleSystemMcp } from '../../src/features/settings/queries';
 import { Boxes, Server, Sparkles } from 'lucide-react-native';
 import type { SystemArtifact } from '@generatorai/client-core';
 
-import { useApi } from '../../src/api/useApi';
-import { GRANT_FROM_TRUSTED_DEVICE, canRequestFeature } from '../../src/auth/featureGate';
+import { GRANT_FROM_TRUSTED_DEVICE, canRequestFeature } from '../../src/services/auth/featureGate';
 import { messageOf } from '../../src/components/projects/ProjectActions';
 import {
   globalMcpToggle,
@@ -29,7 +28,6 @@ import {
   mcpSwitchValue,
   type McpEntryLike,
 } from '../../src/components/projects/projectEditModel';
-import { useProjectsApi } from '../../src/components/projects/useProjectsApi';
 import { useFeature } from '../../src/components/runs/useFeature';
 import { Button } from '../../src/components/ui/Button';
 import { useToast } from '../../src/components/ui/Toast';
@@ -53,53 +51,23 @@ const ICON = {
 } as const;
 
 export default function CapabilitiesScreen(): React.ReactElement {
-  const api = useApi();
   const { colors } = useTheme();
   const [tab, setTab] = useState<Tab>('skill');
   const [preview, setPreview] = useState<SystemArtifact | null>(null);
-  const projectsApi = useProjectsApi();
-  const queryClient = useQueryClient();
   const toast = useToast();
   const admin = useFeature('capabilityAdmin');
   const requestable = canRequestFeature('capabilityAdmin', admin.scopes);
 
-  const artifacts = useQuery({
-    queryKey: ['system', 'artifacts'],
-    queryFn: () => api.system.artifacts(),
-    staleTime: 5 * 60_000,
-  });
+  const artifacts = useSystemArtifacts();
 
-  const mcp = useQuery({
-    queryKey: ['system', 'mcp-servers'],
-    queryFn: () => api.system.mcpServers(),
-    staleTime: 5 * 60_000,
-  });
+  const mcp = useSystemMcpServers();
 
-  const content = useQuery({
-    queryKey: ['system', 'artifacts', preview?.id ?? ''],
-    queryFn: () => api.system.artifactContent(preview!.id),
-    enabled: Boolean(preview?.id),
-  });
+  const content = useSystemArtifactContent(preview?.id ?? '');
 
-  const toggleMcp = useMutation({
-    mutationFn: async (vars: { server: McpEntryLike; enabled: boolean }) => {
-      const call = globalMcpToggle(vars.server, vars.enabled);
-      if (!call) throw new Error('This server cannot be switched from here.');
-      await projectsApi.putJson(call.path, call.body);
-    },
-    onMutate: async ({ server, enabled }) => {
-      await queryClient.cancelQueries({ queryKey: ['system', 'mcp-servers'] });
-      const before = queryClient.getQueryData<McpEntryLike[]>(['system', 'mcp-servers']);
-      queryClient.setQueryData<McpEntryLike[]>(['system', 'mcp-servers'], (list) =>
-        list?.map((s) => (s.id === server.id ? { ...s, userEnabled: enabled } : s)),
-      );
-      return { before };
-    },
-    onError: (err, _vars, context) => {
-      if (context?.before) queryClient.setQueryData(['system', 'mcp-servers'], context.before);
+  const toggleMcp = useToggleSystemMcp({
+    onError: (err) => {
       toast({ message: messageOf(err, 'Could not change the server.'), variant: 'danger' });
     },
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: ['system', 'mcp-servers'] }),
   });
 
   const byType = (type: Tab): SystemArtifact[] =>

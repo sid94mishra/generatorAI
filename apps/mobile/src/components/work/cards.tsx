@@ -1,3 +1,4 @@
+import { runStatusTone } from '../../theme/status';
 // ────────────────────────────────────────────────────────────────
 // Work rows — run, workflow, automation and agent rows.
 //
@@ -23,10 +24,7 @@ import { newestRun, runTitle } from '../runs/runModel';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export function runTone(status: string): Tone {
-  if (needsAttention(status)) return status === 'failed' ? 'danger' : 'warning';
-  if (isActive(status)) return 'info';
-  if (status === 'completed') return 'success';
-  return 'neutral';
+  return runStatusTone(status);
 }
 
 /** Shared props for every work row. */

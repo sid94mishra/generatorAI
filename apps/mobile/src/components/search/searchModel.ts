@@ -24,7 +24,7 @@ import {
   type WorkflowSummary,
 } from '@generatorai/client-core';
 
-import { fuzzyScore } from '../../lib/fuzzyMatch';
+import { fuzzyScore } from '../../services/lib/fuzzyMatch';
 
 export type SearchKind = 'chat' | 'run' | 'workflow' | 'project' | 'automation' | 'agent';
 

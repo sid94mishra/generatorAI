@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_MOBILE_SCOPES, SCOPES } from '@generatorai/auth';
 
-import { describeScope, isSensitiveScope, SENSITIVE_SCOPES } from '../auth/scopeLabels';
+import { describeScope, isSensitiveScope, SENSITIVE_SCOPES } from '../services/auth/scopeLabels';
 
 describe('scope labels', () => {
   it('has a human description for EVERY scope the server can grant', () => {

@@ -26,7 +26,7 @@ import { StaticChip } from '../../ui/Chip';
 import { ContextMenu, type ContextMenuItem } from '../../ui/ContextMenu';
 import { useToast } from '../../ui/Toast';
 import { useTheme } from '../../../theme/ThemeProvider';
-import { messageAttachments } from './chatMessageToBlocks';
+import { messageAttachments } from '@generatorai/client-core';
 import { useTimelineActions } from './TimelineActions';
 
 const MENU_TITLE = 'Your message';

@@ -114,19 +114,7 @@ const CANCELLABLE_STAGE: ReadonlySet<string> = new Set([
   'paused',
 ]);
 
-/**
- * Should the screen keep polling?
- *
- * Only a terminal run stops. `created` and `cancelling` are not terminal —
- * they are about to change on their own — so they keep a (slow) poll going.
- */
-export function pollIntervalFor(status: string | undefined, streamConnected: boolean): number | false {
-  if (!status) return 5_000;
-  if (isTerminal(status)) return false;
-  // With the run scope connected, events drive refreshes; polling is only a
-  // safety net for a dropped event.
-  return streamConnected ? 30_000 : 5_000;
-}
+export { pollIntervalFor } from '../../services/api/runActivity';
 
 /**
  * The display title of a run — one implementation, shared with the web client

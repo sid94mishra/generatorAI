@@ -95,6 +95,7 @@ export default function AppearanceScreen(): React.ReactElement {
           return (
             <ListRow
               key={option.id}
+              testID={`mode-option-${option.id}`}
               title={option.label}
               icon={<Icon size={18} color={selected ? colors.primary : colors['muted-foreground']} />}
               onPress={() => setMode(option.id)}
@@ -123,6 +124,7 @@ export default function AppearanceScreen(): React.ReactElement {
               return (
                 <ListRow
                   key={option.id}
+                  testID={`theme-option-${option.id}`}
                   title={option.label}
                   subtitle={option.description}
                   onPress={() => setThemeId(option.id)}

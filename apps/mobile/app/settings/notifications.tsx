@@ -15,8 +15,8 @@ import { Linking, Platform, Text } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { BellOff, BellRing, CircleHelp, MessageSquare, Workflow } from 'lucide-react-native';
 
-import { prefs } from '../../src/storage/prefs';
-import { describePushStatus, usePushStatusStore } from '../../src/notifications/pushStatus';
+import { prefs } from '../../src/services/storage/prefs';
+import { describePushStatus, usePushStatusStore } from '../../src/services/notifications/pushStatus';
 import { Card, SectionHeader } from '../../src/components/ui/primitives';
 import { Button } from '../../src/components/ui/Button';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';

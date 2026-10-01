@@ -15,7 +15,7 @@ import React from 'react';
 import { View } from 'react-native';
 import { Redirect } from 'expo-router';
 
-import { useAuth } from '../src/auth/AuthProvider';
+import { useAuth } from '../src/services/auth/AuthProvider';
 import { Spinner } from '../src/components/common/States';
 
 export default function Index(): React.ReactElement {

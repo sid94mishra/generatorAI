@@ -32,7 +32,7 @@ import { useToast } from '../ui/Toast';
 import { useCapability } from '../review/useScopes';
 import { ConflictSheet } from '../scm/ConflictSheet';
 import { ScmFlowSheet } from '../scm/ScmFlowSheet';
-import { scmKeys } from '../scm/api';
+import { scmKeys } from '@generatorai/client-core';
 import { useScmApi } from '../scm/useScmApi';
 import {
   actionReason,
@@ -110,7 +110,7 @@ export function CommitBar({
     const url = outcome.url;
     toast({
       message: outcome.message,
-      variant: outcome.tone,
+      variant: outcome.tone === 'neutral' ? 'info' : outcome.tone,
       ...(url ? { action: { label: 'Open PR', onPress: () => void Linking.openURL(url) } } : {}),
     });
     if (flow.status === 'ok') setFlowOpen(false);
@@ -249,6 +249,7 @@ export function CommitBar({
           <View className="flex-row items-center gap-2">
             <Button
               grow
+              testID="changes-commit"
               label={fileCount > 0 ? `Commit ${fileCount} ${fileCount === 1 ? 'file' : 'files'}` : 'Commit'}
               icon={<GitCommitHorizontal size={16} color={colors['primary-foreground']} />}
               onPress={() => setFlowOpen(true)}

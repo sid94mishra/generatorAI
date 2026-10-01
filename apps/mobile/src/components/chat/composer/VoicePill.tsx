@@ -20,7 +20,7 @@ import { IconButton } from '../../ui/Button';
 import { Spinner } from '../../ui/States';
 import { MAX_SCALE, useReduceMotion } from '../../ui/accessibility';
 import { useTheme } from '../../../theme/ThemeProvider';
-import { WAVEFORM_BARS, WAVEFORM_WEIGHTS, formatElapsed } from '../../../voice/dictationCommit';
+import { WAVEFORM_BARS, WAVEFORM_WEIGHTS, formatElapsed } from '../../../services/voice/dictationCommit';
 import type { VoiceUiState } from './types';
 import { useChatMotion } from '../chatMotion';
 

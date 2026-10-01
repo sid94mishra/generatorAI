@@ -1,3 +1,4 @@
+import { resourcePaths } from '@generatorai/client-core';
 // ────────────────────────────────────────────────────────────────
 // TerminalView — the xterm renderer plus its PTY socket.
 //
@@ -56,10 +57,10 @@ import { EmptyState, Spinner } from '../components/ui/States';
 import { useToast } from '../components/ui/Toast';
 import { haptics } from '../components/ui/haptics';
 import { MAX_SCALE } from '../components/ui/accessibility';
-import { useAuth } from '../auth/AuthProvider';
-import { useApi } from '../api/useApi';
-import { prefs } from '../storage/prefs';
-import { base64ToString, bytesToBase64 } from '../lib/base64';
+import { useAuth } from '../services/auth/AuthProvider';
+import { useApi } from '../services/api/useApi';
+import { prefs } from '../services/storage/prefs';
+import { base64ToString, bytesToBase64 } from '../services/lib/base64';
 import { useTheme } from '../theme/ThemeProvider';
 import { useComposerCapture } from '../components/chat/composer/captureContext';
 import { TERMINAL_CAPTURE_LINES } from '../components/chat/composer/captures';
@@ -175,7 +176,7 @@ export function TerminalView({
   onSessionChange,
   onExit,
 }: TerminalViewProps): React.ReactElement {
-  const { socketUrl, fetch: authedFetch } = useAuth();
+  const { socketUrl } = useAuth();
   const api = useApi();
   const { colors, terminal: terminalTheme } = useTheme();
   const toast = useToast();
@@ -277,21 +278,14 @@ export function TerminalView({
       // must not stop the live stream from attaching. `tailBytes` bounds the
       // transfer; the renderer keeps 2,000 lines regardless.
       try {
-        const res = await authedFetch(
-          `/api/workspaces/${workspaceId}/terminals/${sid}/scrollback?tailBytes=${SCROLLBACK_REPLAY_BYTES}`,
-        );
-        if (res.ok) {
-          const buffer = await res.arrayBuffer();
-          if (buffer.byteLength > 0) {
-            post({ type: 'data', b64: bytesToBase64(new Uint8Array(buffer)) });
-          }
-        }
+        const { data } = await api.resources.terminalBytes(workspaceId, sid, SCROLLBACK_REPLAY_BYTES);
+        if (data.byteLength > 0) post({ type: 'data', b64: bytesToBase64(data) });
       } catch {
         /* history is optional */
       }
 
       const url = await socketUrl(
-        `/api/workspaces/${workspaceId}/terminals/${sid}/stream`,
+        resourcePaths.terminalStream(workspaceId, sid),
         'terminal',
         sid,
       );
@@ -390,7 +384,7 @@ export function TerminalView({
 
       socketRef.current = socket;
     },
-    [authedFetch, batcher, onExit, post, send, socketUrl, workspaceId],
+    [api, batcher, onExit, post, send, socketUrl, workspaceId],
   );
 
   /**
@@ -963,6 +957,7 @@ export function TerminalView({
         <View className="flex-1" style={{ backgroundColor: colors.background }}>
           {webMounted && html ? (
             <WebView
+              testID="terminal-view"
               ref={webRef}
               // Local string only: the WebView is a renderer, not a browser.
               source={{ html }}
@@ -1016,6 +1011,7 @@ export function TerminalView({
             return (
               <Touchable
                 key={key.label}
+                testID={key.label === 'esc' ? 'terminal-key-esc' : undefined}
                 accessibilityLabel={key.a11y}
                 accessibilityState={armed ? { selected: true } : undefined}
                 haptic="select"

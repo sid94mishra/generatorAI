@@ -22,17 +22,8 @@ export const REVIEW_INTENTS: ReadonlyArray<{ value: ReviewIntent; label: string;
   { value: 'note', label: 'Note', hint: 'Context only; may need no change' },
 ];
 
-export type ReviewSubmitTarget =
-  | { kind: 'chat'; chatId: string }
-  | { kind: 'stage_followup'; runId: string; stageId: string }
-  | { kind: 'clipboard' };
-
-export interface ReviewSubmitBody {
-  threadIds: string[];
-  target: ReviewSubmitTarget;
-  note?: string;
-  preview?: boolean;
-}
+export type { ReviewSubmitBody, ReviewSubmitTarget } from '@generatorai/client-core';
+import type { ReviewSubmitBody, ReviewSubmitTarget } from '@generatorai/client-core';
 
 /** Threads still waiting to be sent. Web counts `pending` and `draft` alike. */
 export function isPendingThread(thread: Pick<ReviewThread, 'status'>): boolean {

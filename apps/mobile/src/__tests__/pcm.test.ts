@@ -10,7 +10,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect } from 'vitest';
-import { TARGET_SAMPLE_RATE, downmixToMono, rms, resampleLinear, toMono16k } from '../voice/pcm';
+import { TARGET_SAMPLE_RATE, downmixToMono, rms, resampleLinear, toMono16k } from '../services/voice/pcm';
 
 /** Build an ArrayBuffer of float32 samples, as `onBuffer` hands us. */
 function buffer(samples: number[]): ArrayBuffer {

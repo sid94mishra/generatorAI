@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ModelInfo } from '@generatorai/client-core';
 
-import { findModel, groupModels, promptLimit, reasoningEfforts } from '../api/modelCatalogue';
+import { findModel, groupModels, promptLimit, reasoningEfforts } from '../services/api/modelCatalogue';
 
 function model(partial: Partial<ModelInfo>): ModelInfo {
   return { id: 'm', name: 'M', ...partial };

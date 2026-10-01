@@ -18,16 +18,16 @@ import { ShieldAlert } from 'lucide-react-native';
 
 import { ApiError } from '@generatorai/client-core';
 
-import { useAuth } from '../src/auth/AuthProvider';
-import { useCreateScopeRequest } from '../src/api/scopeRequests';
-import { describeScope, isSensitiveScope } from '../src/auth/scopeLabels';
-import type { MobileFeature } from '../src/auth/featureGate';
+import { useAuth } from '../src/services/auth/AuthProvider';
+import { useCreateScopeRequest } from '../src/services/api/scopeRequests';
+import { describeScope, isSensitiveScope } from '../src/services/auth/scopeLabels';
+import type { MobileFeature } from '../src/services/auth/featureGate';
 import {
   UNSUPPORTED_MESSAGE,
   missingGrantableScopes,
   scopeRequestBody,
   scopeRequestOutcome,
-} from '../src/auth/scopeRequests';
+} from '../src/services/auth/scopeRequests';
 import { RouteSheet } from '../src/navigation/RouteSheet';
 import { Button } from '../src/components/ui/Button';
 import { Field } from '../src/components/ui/Form';

@@ -10,10 +10,9 @@
 import React, { useMemo } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useCodebaseFiles } from '../../../../../src/features/projects/queries';
 import { File, Folder } from 'lucide-react-native';
 
-import { projectKeys } from '../../../../../src/components/projects/api';
 import { useProjectsApi } from '../../../../../src/components/projects/useProjectsApi';
 import {
   breadcrumbs,
@@ -34,14 +33,10 @@ export default function CodebaseFilesScreen(): React.ReactElement {
   const projectId = String(params.id);
   const codebaseId = String(params.cid);
   const path = normalizeRelPath(typeof params.path === 'string' ? params.path : '');
-  const api = useProjectsApi();
   const navigation = useNavigation();
   const { colors } = useTheme();
 
-  const files = useQuery({
-    queryKey: projectKeys.files(projectId, codebaseId, path),
-    queryFn: () => api.files(projectId, codebaseId, path),
-  });
+  const files = useCodebaseFiles(projectId, codebaseId, path);
   const { refreshing, onRefresh } = usePullRefresh(() => files.refetch());
 
   const crumbs = useMemo(() => breadcrumbs(path), [path]);

@@ -19,14 +19,12 @@
 import React, { useMemo, useState } from 'react';
 import { FlatList, RefreshControl, Text, View } from 'react-native';
 import { router, useIsFocused, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useRun, useStageTranscript } from '../../../../src/features/workflows/queries';
 import { FileText, MessageSquare } from 'lucide-react-native';
-import { queryKeys, type ApprovalOutcome, type StageRunSummary } from '@generatorai/client-core';
+import { type ApprovalOutcome, type StageRunSummary } from '@generatorai/client-core';
 
-import { useApi } from '../../../../src/api/useApi';
-import { useAdminApi } from '../../../../src/api/useAdminApi';
-import { useRunMutations, type StageAction } from '../../../../src/api/useRunControl';
-import { useRunStream } from '../../../../src/stream/useRunStream';
+import { useRunMutations, type StageAction } from '../../../../src/services/api/useRunControl';
+import { useRunStream } from '../../../../src/services/stream/useRunStream';
 import { ApprovalCard } from '../../../../src/components/runs/ApprovalCard';
 import { LoopDecisionCard } from '../../../../src/components/runs/LoopDecisionCard';
 import { isParkedLoop, type RunStage } from '../../../../src/components/runs/loopModel';
@@ -38,8 +36,8 @@ import { stageSubtitle } from '../../../../src/components/runs/StageTimeline';
 import { awaitsApproval, pollIntervalFor, stageControlsFor } from '../../../../src/components/runs/runModel';
 import { isActive, isTerminal } from '../../../../src/components/runs/statusStyle';
 import { transcriptItems, withLiveRows, type TranscriptItem } from '../../../../src/components/runs/stageTranscript';
-import { deriveTimeline } from '../../../../src/components/chat/timeline/deriveTimeline';
-import { useStageLive } from '../../../../src/stream/useStageLive';
+import { compactTimeline } from '../../../../src/components/chat/timeline/compactTimeline';
+import { useStageLive } from '../../../../src/services/stream/useStageLive';
 import { useFeature } from '../../../../src/components/runs/useFeature';
 import { usePullRefresh } from '../../../../src/components/runs/usePullRefresh';
 import { TimelineActionsContext } from '../../../../src/components/chat/timeline/TimelineActions';
@@ -72,8 +70,6 @@ export default function StageScreen(): React.ReactElement {
   const params = useLocalSearchParams<{ id: string; stageRunId: string }>();
   const runId = String(params.id);
   const stageRunId = String(params.stageRunId);
-  const api = useApi();
-  const admin = useAdminApi();
   const navigation = useNavigation();
   const focused = useIsFocused();
   const { colors } = useTheme();
@@ -89,22 +85,13 @@ export default function StageScreen(): React.ReactElement {
   const { connected } = useRunStream(runId, focused);
   const { stageAction, approve } = useRunMutations(runId);
 
-  const run = useQuery({
-    queryKey: queryKeys.run(runId),
-    queryFn: () => api.runs.get(runId),
-    refetchInterval: (query) => (focused ? pollIntervalFor(query.state.data?.status, connected) : false),
-  });
+  const run = useRun(runId, focused, connected);
 
   const stage: StageRunSummary | undefined = run.data?.stageRuns?.find((s) => s.id === stageRunId);
   const sessionId = stage?.sessionId ?? null;
   const live = stage ? isActive(stage.status) : false;
 
-  const transcript = useQuery({
-    queryKey: queryKeys.stageTranscript(runId, stageRunId),
-    queryFn: () => admin.sessions.chat(sessionId!, stageRunId),
-    enabled: Boolean(sessionId) && tab === 'transcript',
-    refetchInterval: focused && live ? (connected ? 15_000 : 5_000) : false,
-  });
+  const transcript = useStageTranscript(runId, stageRunId, sessionId, tab === 'transcript', focused, live, connected);
 
   const pull = usePullRefresh(() => Promise.all([run.refetch(), transcript.refetch()]));
 
@@ -120,7 +107,7 @@ export default function StageScreen(): React.ReactElement {
   const items = useMemo(() => {
     const saved = transcriptItems(transcript.data, live);
     if (!liveState?.blocks.length) return saved;
-    return withLiveRows(saved, deriveTimeline(liveState.blocks, { active: true, idPrefix: `live-${stageRunId}:` }));
+    return withLiveRows(saved, compactTimeline(liveState.blocks, { active: true, idPrefix: `live-${stageRunId}:` }));
   }, [transcript.data, live, liveState?.blocks, stageRunId]);
   const actions = useMemo(
     () => ({ workspaceId: run.data?.workspaceId ?? null, streamKey: null, toast: (message: string) => toast({ message }) }),

@@ -28,7 +28,7 @@ import {
   WORK_SEGMENT_PREF_KEY,
   resolveWorkSegment,
 } from '../components/work/workSegment';
-import { missingGrantableScopes, scopeRequestBody, scopeRequestOutcome } from '../auth/scopeRequests';
+import { missingGrantableScopes, scopeRequestBody, scopeRequestOutcome } from '../services/auth/scopeRequests';
 
 describe('route grammar', () => {
   it('matches the paths push notifications carry', () => {

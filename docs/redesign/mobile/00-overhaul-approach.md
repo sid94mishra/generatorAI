@@ -1,6 +1,6 @@
 # GeneratorAI mobile overhaul (iOS 27 + Android 17): analysis and proposed approach
 
-Status: **proposal for owner review**. Nothing here is implemented or decided yet. After review, this becomes a phase plan in the same format as the web/desktop plan (`docs/redesign/01`–`10`).
+Status: **analysis (background)**. The plan built on it is `README.md` → `01-decisions.md` (MD-xx) → `07-phases.md`. Where this document differs from `01-decisions.md`, the decisions win. Examples: O-4 is resolved by MD-12 (the `mobile_redesign` worktree), and the O-x recommendations became MD-xx.
 
 Date 2026-09-26 · branch `desktop_redesign`. The mobile code was audited at `952be77`; the web pass has moved since (HEAD `5cc0c54`: P4-02…P4-04 landed, D-61/D-62). An independent review of this document was applied (its findings are folded in).
 
@@ -104,7 +104,7 @@ Earlier inputs, still valid unless corrected in the files above:
 | Data | 90 query/mutation hooks inside `app/` route files; **79 hand-written `/api` paths in 31 files** bypass client-core's typed client; 55 ad-hoc query keys; `deriveTimeline` duplicated with web (905 / 875 lines); no TanStack `focusManager`/`onlineManager`, no persistence | Extract before redrawing (§5.9) |
 | Platform code | 4 platform files, 36 `Platform.OS`; glass only on side panels; 7 haptic verbs; Face ID app lock + 10-min step-up; **predictive back disabled** (RN 0.86 does not forward it); no tablet layout (content centred at 720 pt) | Formalise in `ui/platform` (§5.5) |
 | Native layer | 3 config plugins (cleartext LAN, Fabric race fix, iOS 27 scene lifecycle), 1 Expo module (Secure Enclave / StrongBox DPoP key). **No widgets, Live Activities, extensions, shortcuts, tiles, share target**; no `expo-updates`, no `expo-dev-client` (EAS profile expects it) | System surfaces phase (§5.11) |
-| Quality | typecheck clean; lint 0 errors; 1,098/1,099 tests pass (1 timing-flaky); unit tests cover logic only; e2e drives the **Expo web preview** with Playwright + 1 adb script, no iOS automation; 30 testIDs; no react-hooks lint for mobile | New verification stack (§5.13) |
+| Quality | typecheck clean; lint 0 errors; 1,098/1,099 tests pass (1 timing-flaky); unit tests cover logic only; e2e drives the **Expo web preview** with Playwright + 1 adb script, no iOS automation; 34 testIDs; no react-hooks lint for mobile | New verification stack (§5.13) |
 | Shared foundations from the web pass | Done but **not consumed by mobile**: status map, nav destinations, command registry, attention feed, chat list v2, probeServer, stats, recent activity, system info, project summary/runs. Partial: tokens (generated, unused), computer consent, model picker. **Landed since the audit:** composer reducer `client-core/src/composer/composerMachine.ts` + `ui-contract/composer.ts` (D-61). Not started: iOS/Android geometry, SF/Material icon names, ui-contract types for gates/tool verbs/pane tabs (web P4-06/07), shared copy | Adopt in the extraction phase; fill the gaps listed in §5.1 |
 
 Deliberately-desktop features in code comments today ("a phone cannot host the DAG builder") conflict with the design. See decision O-5.
@@ -461,7 +461,7 @@ The legend for "impl" is:
 4. The 13+ status maps → `packages/shared/src/status`; the 4 icon maps → the concept registry.
 5. Adopt the landed read models: attention feed, chat list v2 (keyset paging, server search), `buildModelPickerCatalog`, computer consent model, stats, activity, system info, project summary and runs.
 6. Adopt the composer reducer and the ui-contract types from web P4 (P4-02 / P4-06 / P4-07) instead of mobile's `useComposerController` logic.
-7. TanStack Query `focusManager` (AppState) + `onlineManager` (NetInfo), plus an MMKV query persister for cold-start lists.
+7. TanStack Query `focusManager` (AppState) + `onlineManager` (NetInfo in this analysis; superseded by MD-89: server reachability, no NetInfo), plus an MMKV query persister for cold-start lists.
 8. Fix `IPlatformClient.downloadArtifact`'s `Buffer` type before mobile calls it.
 
 ### 5.9 Heavy surfaces
@@ -515,7 +515,7 @@ The legend for "impl" is:
 |---|---|---|---|
 | App in background | The stream is suspended within seconds; no background streaming | The stream stops when the process is cached. Only a Live Update runs a foreground service (`specialUse` type with a Play Console justification; Android 15+ time limits apply to `dataSync`, so it is not used) | Push is the only channel while backgrounded (the MAudit known defect becomes the rule, not a bug) |
 | Return to foreground | Reconnect the mux stream; catch up unfinished turns (`useTurnCatchUp`); refetch attention and lists through the TanStack `focusManager` | same | One resume routine in `services/stream`; the UI shows "Reconnecting" through `streamHealth`, never stale "Running" |
-| Offline / server unreachable | `onlineManager` (NetInfo); persisted lists render read-only with an offline banner; actions disabled with a reason | same | No optimistic writes for approvals |
+| Offline / server unreachable | `onlineManager` (server reachability, MD-89); persisted lists render read-only with an offline banner; actions disabled with a reason | same | No optimistic writes for approvals |
 | Badges | from `attention.counts` in push payloads | launcher badge where supported | one source |
 | Live progress | Live Activity updated locally while the app runs; `staleDate` when suspended; remote updates need O-15 | Live Update through the FGS while a run is active | shared live-state model (§5.10) |
 

@@ -1,0 +1,39 @@
+appId: ${APP_ID}
+name: pairing · link pre-fills and requires consent
+tags: [characterization, smoke, pairing]
+---
+- launchApp: {clearState: true, clearKeychain: true}
+- runFlow:
+    when: {true: "${BUILD == 'dev'}"}
+    commands:
+      - extendedWaitUntil: {visible: Development Build, timeout: 30000}
+      - openLink: exp+generatorai://expo-development-client/?url=${METRO_URL}&disableFab=1&disableOnboarding=1&disableAutoLaunch=1
+- extendedWaitUntil: {visible: "Scan the pairing code", timeout: 60000}
+- openLink: ${PAIR_URL}
+- extendedWaitUntil: {visible: "Pair with this server?", timeout: 30000}
+- assertVisible: {id: pairing-fingerprint}
+- assertNotVisible: {id: menu-button}
+# MD-103: the legacy Name field has no allowed M1 testID.
+- scrollUntilVisible:
+    element: {text: Name}
+    direction: DOWN
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: Name
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      # iOS exposes both the label and its field as Name; select the field.
+      - tapOn: {text: Name, index: 1}
+- eraseText
+- inputText: ${DEVICE_NAME}
+- assertVisible: ${DEVICE_NAME}
+- hideKeyboard
+- scrollUntilVisible:
+    element: {id: pairing-confirm}
+    direction: DOWN
+- tapOn: {id: pairing-confirm}
+- extendedWaitUntil: {visible: {id: menu-button}, timeout: 30000}
+- tapOn: {id: menu-button}
+- assertVisible: {id: drawer-chats}

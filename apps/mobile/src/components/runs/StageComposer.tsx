@@ -17,13 +17,13 @@ import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ApiError, type AgentMode, type ApprovalOutcome, type StageRunSummary } from '@generatorai/client-core';
 
-import { useAuth } from '../../auth/AuthProvider';
-import { useStageConversation } from '../../api/useStageConversation';
+import { useAuth } from '../../services/auth/AuthProvider';
+import { useStageConversation } from '../../services/api/useStageConversation';
 import { Composer } from '../chat/Composer';
 import { useComposerController } from '../chat/composer/useComposerController';
 import { readAllAttachmentBytes } from '../chat/composer/attachmentPickers';
 import type { ComposerSendPayload } from '../chat/composer/types';
-import { useTwoPhaseStop } from '../../stream/useTwoPhaseStop';
+import { useTwoPhaseStop } from '../../services/stream/useTwoPhaseStop';
 import { useToast } from '../ui/Toast';
 import { useKeyboardHeight } from '../ui/keyboard';
 import { StageGateCard } from './StageGateCard';

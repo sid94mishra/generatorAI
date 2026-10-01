@@ -18,7 +18,7 @@ import { Sheet } from '../ui/Sheet';
 import { Button } from '../ui/Button';
 import { Field } from '../ui/Form';
 import { useToast } from '../ui/Toast';
-import { checkFeature } from '../../auth/featureGate';
+import { checkFeature } from '../../services/auth/featureGate';
 import { useProjectsApi } from './useProjectsApi';
 import { aliasFromGitUrl, gitCodebaseBodies, validateGitUrl } from './projectEditModel';
 

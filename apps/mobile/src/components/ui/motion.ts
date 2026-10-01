@@ -25,7 +25,7 @@ import { useMemo } from 'react';
 import { Easing, ReduceMotion, type WithSpringConfig, type WithTimingConfig } from 'react-native-reanimated';
 
 import { motion } from '../../theme/tokens.generated';
-import { usePreferences, type MotionPreference } from '../../prefs/preferences';
+import { usePreferences, type MotionPreference } from '../../services/prefs/preferences';
 import { useReduceMotion } from './accessibility';
 
 /** 0 / 120 / 180 / 220 ms — the four steps the plan specifies. */

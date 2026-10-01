@@ -11,7 +11,6 @@ import {
   pageCaptureName,
   plainTextFromPty,
   terminalCaptureName,
-  terminalScrollbackPath,
   utf8ByteLength,
 } from '../captures';
 import { validateAttachment } from '../attachmentPolicy';
@@ -20,14 +19,6 @@ describe('terminal captures', () => {
   it('trims padded VT rows and blank screen below the prompt', () => {
     expect(formatTerminalLines(['', '$ ls   ', 'a  b', '', '   ', ''])).toBe('$ ls\na  b');
     expect(formatTerminalLines([])).toBe('');
-  });
-
-  it('builds the scrollback path with a clamped tail', () => {
-    expect(terminalScrollbackPath('ws 1', 'sid', 50)).toBe(
-      '/api/workspaces/ws%201/terminals/sid/scrollback?format=text&tailLines=50',
-    );
-    expect(terminalScrollbackPath('w', 's', 0)).toContain('tailLines=1');
-    expect(terminalScrollbackPath('w', 's', 1e9)).toContain('tailLines=5000');
   });
 
   it('names captures the way web does', () => {

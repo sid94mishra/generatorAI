@@ -14,7 +14,7 @@ import '../src/theme/global.css';
 // Installs `global.crypto` before anything imports the auth runtime, which is
 // written against WebCrypto. Must be the first side effect. Platform-resolved:
 // native installs the JSI/OpenSSL implementation, web asserts the built-in one.
-import { installCrypto } from '../src/crypto/installCrypto';
+import { installCrypto } from '../src/services/crypto/installCrypto';
 
 import React, { useEffect, useRef, useState } from 'react';
 import { BackHandler, Platform, Text, View } from 'react-native';
@@ -24,21 +24,23 @@ import * as SystemUI from 'expo-system-ui';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ServerScope } from '../src/services/auth/ServerScope';
+import { ServerQueryProvider } from '../src/services/api/ServerQueryProvider';
 import { ChevronLeft } from 'lucide-react-native';
 
 import { IconButton } from '../src/components/ui/Button';
 import { goBack } from '../src/components/ui/Screen';
 
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider';
-import { PreferencesProvider } from '../src/prefs/preferences';
-import { consumeLastRoute, useLastRoute } from '../src/prefs/lastRoute';
-import { AuthProvider, useAuth } from '../src/auth/AuthProvider';
-import { AppLockGate } from '../src/auth/AppLock';
-import { Spinner, ToastProvider, ContextMenuProvider, Button, ErrorState } from '../src/components/ui';
-import { usePushNotifications } from '../src/notifications/usePushNotifications';
-import { MuxStreamProvider } from '../src/stream/MuxStreamProvider';
-import { useGlobalStream } from '../src/stream/useGlobalStream';
+import { PreferencesProvider } from '../src/services/prefs/preferences';
+import { useLinkRouting } from '../src/services/navigation/useLinkRouting';
+import { consumeLastRoute, useLastRoute } from '../src/services/prefs/lastRoute';
+import { AuthProvider, useAuth } from '../src/services/auth/AuthProvider';
+import { AppLockGate } from '../src/services/auth/AppLock';
+import { Spinner, ToastProvider, useToast, ContextMenuProvider, Button, ErrorState } from '../src/components/ui';
+import { usePushNotifications } from '../src/services/notifications/usePushNotifications';
+import { MuxStreamProvider } from '../src/services/stream/MuxStreamProvider';
+import { useGlobalStream } from '../src/services/stream/useGlobalStream';
 import { ConnectionStripHost } from '../src/components/common/ConnectionStrip';
 import { StackHeader, type StackHeaderProps } from '../src/navigation/StackHeader';
 import { backFallbackFor } from '../src/navigation/backFallback';
@@ -50,18 +52,6 @@ installCrypto();
 // Held until the theme has been read, so a dark-mode user never sees the
 // white flash that an async preference read would guarantee.
 void SplashScreen.preventAutoHideAsync();
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      // A phone loses connectivity constantly; retrying forever just drains
-      // battery and hides the real state from the user.
-      retry: 2,
-      staleTime: 30_000,
-      refetchOnWindowFocus: true,
-    },
-  },
-});
 
 /** Applies the theme variables and keeps native chrome in step. */
 function ThemedShell({ children }: { children: React.ReactNode }): React.ReactElement {
@@ -118,13 +108,15 @@ function ThemedShell({ children }: { children: React.ReactNode }): React.ReactEl
 const PUBLIC_ROUTES = new Set(['/pair', '/revoked']);
 
 function AuthLifecycle({ children }: { children: React.ReactNode }): React.ReactElement {
-  const { state, initializing, storageLocked } = useAuth();
+  const { state, serverId, initializing, storageLocked } = useAuth();
   const pathname = usePathname();
 
   // Mounted once for the whole session, above every screen, so a token
   // rotation or a notification tap is handled no matter which route is open.
   // The hook no-ops until the session is authenticated.
   usePushNotifications();
+  const toast = useToast();
+  const hasIncomingLink = useLinkRouting((message) => toast({ message, tone: 'error' }));
 
   // W09-a — the `global` scope, subscribed once for the app rather than once
   // per list tab. Without it the Chats / Runs / Automations lists have no live
@@ -144,15 +136,15 @@ function AuthLifecycle({ children }: { children: React.ReactNode }): React.React
     // A locked restore has not resolved anything yet: wait for the retry.
     if (initializing || storageLocked || restoredRef.current) return;
     restoredRef.current = true;
-    const target = consumeLastRoute();
-    if (!target) return;
+    const target = consumeLastRoute(serverId);
+    if (!target || hasIncomingLink) return;
     if (state.status !== 'authenticated') return;
     if (pathname !== '/' && pathname !== '/(tabs)') return;
     // Pushed on top of the tabs, not swapped in for them: `replace` left the
     // restored screen as the only history entry, so back closed the app.
     router.replace('/(tabs)');
     setTimeout(() => router.push(target as Parameters<typeof router.push>[0]), 0);
-  }, [initializing, storageLocked, state.status, pathname]);
+  }, [initializing, storageLocked, state.status, serverId, pathname, hasIncomingLink]);
 
   return <>{children}</>;
 }
@@ -504,8 +496,9 @@ export default function RootLayout(): React.ReactElement {
         <ThemeProvider>
           <PreferencesProvider>
             <ThemedShell>
-              <QueryClientProvider client={queryClient}>
-                <AuthProvider>
+              <AuthProvider>
+                <ServerScope>
+                <ServerQueryProvider>
                   {/* Owns the app's ONE shared stream connection. Above
                       AuthGate so the connection survives a route change and
                       every screen's subscription rides the same socket. */}
@@ -542,8 +535,9 @@ export default function RootLayout(): React.ReactElement {
                       </ContextMenuProvider>
                     </ToastProvider>
                   </MuxStreamProvider>
-                </AuthProvider>
-              </QueryClientProvider>
+                </ServerQueryProvider>
+                </ServerScope>
+              </AuthProvider>
             </ThemedShell>
           </PreferencesProvider>
         </ThemeProvider>

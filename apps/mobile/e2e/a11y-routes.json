@@ -1,0 +1,5 @@
+[
+  { "name": "Home", "route": "", "ready": "home-new-chat" },
+  { "name": "Chats", "route": "chats", "ready": "chats-new" },
+  { "name": "Settings", "route": "settings", "readyLabel": "Appearance" }
+]

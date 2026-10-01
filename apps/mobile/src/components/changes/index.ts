@@ -10,6 +10,6 @@ export { CommitBar } from './CommitBar';
 export { Toolbar } from './Toolbar';
 export { useChangesSummary, type ChangeRow, type ChangesSummaryState } from './useChangesSummary';
 export { useDiffPrefs, setDiffWrap, setDiffFontSize, setDiffLayout, getDiffPrefs, type DiffPrefs, type DiffLayout } from './diffPrefs';
-export { useWorkspaceExtras, createWorkspaceExtras, requestJson, json, ApiError, type CheckpointRow, type ChangeSummaryV2 } from './api';
+export { useWorkspaceExtras, type CheckpointRow, type ChangeSummaryV2 } from './api';
 export * from './statusStyle';
 export * from './diffModel';

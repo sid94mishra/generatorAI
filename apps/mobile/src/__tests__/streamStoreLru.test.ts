@@ -9,14 +9,14 @@ import {
   MAX_BLOCKS_PER_STREAM,
   MAX_RETAINED_STREAMS,
   TRIMMED_MESSAGE,
-  _resetStreamStoreForTests,
+  resetStreamStore,
   _streamStoreInternals,
   evictLeastRecent,
   isSettledBlock,
   protectStream,
   trimStream,
   useStreamStore,
-} from '../stream/streamStore';
+} from '../services/stream/streamStore';
 
 const token = (key: string, text = 'x'): StreamEffect => ({ op: 'appendToken', key, text });
 const toolCall = (key: string, callId: string): StreamEffect => ({
@@ -38,7 +38,7 @@ function keys(): string[] {
 }
 
 describe('streamStore — LRU across chats', () => {
-  beforeEach(() => _resetStreamStoreForTests());
+  beforeEach(() => resetStreamStore());
 
   it('keeps at most MAX_RETAINED_STREAMS chats', () => {
     const store = useStreamStore.getState();
@@ -122,7 +122,7 @@ describe('streamStore — LRU across chats', () => {
 });
 
 describe('streamStore — block cap per chat', () => {
-  beforeEach(() => _resetStreamStoreForTests());
+  beforeEach(() => resetStreamStore());
 
   it('trims the oldest settled blocks behind one system note', () => {
     const store = useStreamStore.getState();

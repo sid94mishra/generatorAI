@@ -18,7 +18,7 @@
 import { useEffect, useState } from 'react';
 import { AccessibilityInfo, Platform, useWindowDimensions } from 'react-native';
 
-import { usePreferences } from '../../prefs/preferences';
+import { usePreferences } from '../../services/prefs/preferences';
 
 /**
  * Caps for text that shares a row with other text.

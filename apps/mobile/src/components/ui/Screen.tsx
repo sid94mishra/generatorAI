@@ -42,7 +42,7 @@ import { IconButton } from './Button';
 import { SearchField } from './Form';
 import { MAX_SCALE } from './accessibility';
 import { useTheme } from '../../theme/ThemeProvider';
-import { usePreferences } from '../../prefs/preferences';
+import { usePreferences } from '../../services/prefs/preferences';
 import { usePullToRefresh } from './usePullToRefresh';
 import { READABLE_MAX_WIDTH } from './windowInsets';
 

@@ -23,9 +23,7 @@ import {
   ApiError,
   queryKeys,
   type AgentSummary,
-  type McpServerEntry,
   type ModelInfo,
-  type SystemArtifact,
 } from '@generatorai/client-core';
 import type { Agent } from '@generatorai/shared';
 import { Check, MessageSquarePlus, Pencil } from 'lucide-react-native';
@@ -35,15 +33,15 @@ import { Badge } from '../ui/primitives';
 import { Button } from '../ui/Button';
 import { Field, SearchField } from '../ui/Form';
 import { useToast } from '../ui/Toast';
-import { useAdminApi } from '../../api/useAdminApi';
-import type { useModels } from '../../api/useModels';
-import { GRANT_FROM_TRUSTED_DEVICE, canRequestFeature } from '../../auth/featureGate';
+import { useAdminApi } from '../../services/api/useAdminApi';
+import type { useModels } from '../../services/api/useModels';
+import { GRANT_FROM_TRUSTED_DEVICE, canRequestFeature } from '../../services/auth/featureGate';
 import { useFeature } from '../runs/useFeature';
 import { ListGroup, ListRow } from '../ui/ListRow';
 import { Skeleton } from '../ui/Skeleton';
 import { Touchable } from '../ui/Touchable';
-import { useApi } from '../../api/useApi';
-import { useAuth } from '../../auth/AuthProvider';
+import { useApi } from '../../services/api/useApi';
+import { useAuth } from '../../services/auth/AuthProvider';
 import { useTheme } from '../../theme/ThemeProvider';
 import {
   agentDraftFrom,
@@ -86,7 +84,8 @@ export function AgentDetailSheet({
 
 function AgentDetailBody({ agent, onClose }: { agent: AgentSummary; onClose: () => void }): React.ReactElement {
   const api = useApi();
-  const { fetch: authFetch, state } = useAuth();
+  const admin = useAdminApi();
+  const { state } = useAuth();
   const queryClient = useQueryClient();
   const { colors } = useTheme();
   const scopes = state.status === 'authenticated' ? state.scopes : NO_SCOPES;
@@ -94,22 +93,16 @@ function AgentDetailBody({ agent, onClose }: { agent: AgentSummary; onClose: () 
   const edit = agentEditAvailability(agent, scopes);
   const capabilityAdmin = useFeature('capabilityAdmin');
 
-  const getJson = async <T,>(path: string): Promise<T> => {
-    const res = await authFetch(path);
-    if (!res.ok) throw new ApiError(res.status, path, `${res.status} ${res.statusText}`);
-    return (await res.json()) as T;
-  };
-
   const detailQueryOptions = {
     queryKey: queryKeys.agent(agent.id),
-    queryFn: () => getJson<Agent>(`/api/agents/${encodeURIComponent(agent.id)}`),
+    queryFn: () => api.agents.get(agent.id),
     staleTime: 30_000,
   };
   const detail = useQuery(detailQueryOptions);
 
   const usage = useQuery({
     queryKey: queryKeys.agentUsage(agent.id),
-    queryFn: () => getJson<unknown>(`/api/agents/${encodeURIComponent(agent.id)}/usage`),
+    queryFn: () => admin.agents.usage(encodeURIComponent(agent.id)),
     staleTime: 30_000,
   });
 
@@ -134,13 +127,13 @@ function AgentDetailBody({ agent, onClose }: { agent: AgentSummary; onClose: () 
   const projectSkills = useQuery({
     queryKey: ['projects', projectId ?? '', 'available-artifacts', 'skill'],
     queryFn: () =>
-      getJson<SystemArtifact[]>(`/api/projects/${encodeURIComponent(projectId!)}/available-artifacts?type=skill`),
+      api.projects.availableArtifacts(projectId!, 'skill'),
     enabled: hasSkills && projectId !== null,
     staleTime: 60_000,
   });
   const projectMcp = useQuery({
     queryKey: ['projects', projectId ?? '', 'mcp-servers'],
-    queryFn: () => getJson<McpServerEntry[]>(`/api/projects/${encodeURIComponent(projectId!)}/mcp-servers`),
+    queryFn: () => admin.projects.mcp.list(encodeURIComponent(projectId!)),
     enabled: hasMcp && projectId !== null,
     staleTime: 60_000,
   });

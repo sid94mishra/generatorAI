@@ -14,11 +14,10 @@
 import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
 import { SectionList, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { useQueries } from '@tanstack/react-query';
+import { useSearchSources } from '../src/features/search/queries';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, Clock, Search as SearchIcon, X } from 'lucide-react-native';
 import {
-  queryKeys,
   type AgentSummary,
   type AutomationSummary,
   type ChatListRow,
@@ -27,7 +26,6 @@ import {
   type WorkflowSummary,
 } from '@generatorai/client-core';
 
-import { useApi } from '../src/api/useApi';
 import { SearchResultRow } from '../src/components/search/SearchResultRow';
 import {
   RECENT_SEARCHES_KEY,
@@ -47,11 +45,9 @@ import { SkeletonList } from '../src/components/ui/Skeleton';
 import { EmptyState } from '../src/components/ui/States';
 import { Touchable } from '../src/components/ui/Touchable';
 import { chatRoute, runRoute } from '../src/navigation/routes';
-import { prefs } from '../src/storage/prefs';
+import { prefs } from '../src/services/storage/prefs';
 import { useTheme } from '../src/theme/ThemeProvider';
 
-/** Warm caches are used as-is for this long before a background refetch. */
-const STALE_MS = 30_000;
 
 function readRecents(): string[] {
   try {
@@ -88,7 +84,6 @@ function hrefFor(item: SearchItem): string | null {
 }
 
 export default function SearchScreen(): React.ReactElement {
-  const api = useApi();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
@@ -97,16 +92,7 @@ export default function SearchScreen(): React.ReactElement {
   const [agent, setAgent] = useState<AgentSummary | null>(null);
 
   // Same keys and fetchers as the tabs, so this reads their caches.
-  const [chats, runs, workflows, projects, automations, agents] = useQueries({
-    queries: [
-      { queryKey: queryKeys.chats(), queryFn: () => api.chats.list({ limit: 50 }), staleTime: STALE_MS },
-      { queryKey: queryKeys.runs(), queryFn: () => api.runs.list(), staleTime: STALE_MS },
-      { queryKey: queryKeys.workflows(), queryFn: () => api.workflows.list(), staleTime: STALE_MS },
-      { queryKey: queryKeys.projects(), queryFn: () => api.projects.list(), staleTime: STALE_MS },
-      { queryKey: queryKeys.automations(), queryFn: () => api.automations.list(), staleTime: STALE_MS },
-      { queryKey: ['agents', 'all'] as const, queryFn: () => api.agents.list(), staleTime: STALE_MS },
-    ],
-  });
+  const [chats, runs, workflows, projects, automations, agents] = useSearchSources();
   const sources = [chats, runs, workflows, projects, automations, agents];
   // `isPending`, not `isLoading`: a query that has not started fetching yet
   // (React Query waits for the network manager on a cold open) is pending but

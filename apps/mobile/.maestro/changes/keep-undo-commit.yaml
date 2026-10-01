@@ -1,0 +1,70 @@
+appId: ${APP_ID}
+name: changes · keep, undo and commit
+tags: [characterization, full]
+env: {FRESH_CHAT: edits, DEVICE_SCOPES: "write:files,write:workspaces", EXPECT_COMMIT: "Mobile characterization commit"}
+# MD-103: Close and the Push switch have no allowed M1 testID.
+# Push is explicitly off before submission. Host verifies the dummy repo commit.
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///chats/${CHAT_EDITS_ID}
+- extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- tapOn: {id: composer-input}
+- inputText: Make the edits
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
+- waitForAnimationToEnd
+- extendedWaitUntil: {visible: {id: composer-send}, timeout: 10000}
+- tapOn: {id: composer-send}
+- extendedWaitUntil: {visible: Dictate a message, timeout: 60000}
+- tapOn: {id: changes-tray-review}
+- extendedWaitUntil: {visible: {id: changes-file-row}, timeout: 15000}
+- assertVisible: ".*app.ts.*"
+- assertVisible: ".*mobile-new.ts.*"
+- assertVisible: ".*util.ts.*"
+- tapOn: {id: keep-file, index: 0}
+- extendedWaitUntil: {visible: "1 kept", timeout: 15000}
+- tapOn: "1 kept"
+- extendedWaitUntil: {visible: {id: unkeep-file}, timeout: 15000}
+- tapOn: Close
+- runFlow:
+    when: {notVisible: {id: changes-tray-undo-all}}
+    commands:
+      - tapOn: {id: changes-tray-toggle}
+- tapOn: {id: changes-tray-undo-all}
+- tapOn: Undo all
+- extendedWaitUntil: {notVisible: {id: changes-tray-review}, timeout: 15000}
+- tapOn: {id: composer-input}
+- inputText: Again
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
+- waitForAnimationToEnd
+- extendedWaitUntil: {visible: {id: composer-send}, timeout: 10000}
+- tapOn: {id: composer-send}
+- extendedWaitUntil: {visible: Dictate a message, timeout: 60000}
+- runFlow:
+    when: {notVisible: {id: changes-tray-keep-all}}
+    commands:
+      - tapOn: {id: changes-tray-toggle}
+- tapOn: {id: changes-tray-keep-all}
+- extendedWaitUntil: {visible: {id: changes-tray-keep-all, enabled: false}, timeout: 15000}
+- tapOn: {id: changes-tray-review}
+- tapOn: {id: changes-commit}
+- extendedWaitUntil: {visible: {id: commit-message}, timeout: 15000}
+- tapOn: {id: commit-message}
+- inputText: ${EXPECT_COMMIT}
+- hideKeyboard
+- runFlow:
+    when: {visible: {text: Push, checked: true}}
+    commands:
+      - tapOn: {text: Push, checked: true}
+- assertVisible: {text: Push, checked: false}
+- assertNotVisible: {text: Push, checked: true}
+- assertNotVisible: {text: Open pull request, checked: true}
+- assertVisible: {id: commit-submit, text: Commit}
+- tapOn: {id: commit-submit}
+- extendedWaitUntil: {notVisible: {id: commit-submit}, timeout: 30000}
+- assertVisible: {id: changes-commit}

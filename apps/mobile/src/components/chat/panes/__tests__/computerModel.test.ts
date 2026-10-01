@@ -4,11 +4,12 @@ import { activeConsent, activityRows, consentOptions, secondsLeft, tookScreen } 
 
 const consent = (over: Partial<Parameters<typeof consentOptions>[0] & { expiresAt: number; requestId: string }> = {}) => ({
   requestId: 'r1',
+  workspaceId: 'workspace-1',
   appIdentity: 'com.app',
   appLabel: 'App',
   action: 'click',
   summary: '',
-  path: 'uia',
+  path: 'accessibility' as const,
   expiresAt: 10_000,
   ...over,
 });
@@ -33,11 +34,11 @@ describe('computerModel', () => {
   });
 
   it('withholds "always allow" for synthetic input and never steps up a denial', () => {
-    expect(consentOptions({ path: 'uia' }).map((o) => o.decision)).toEqual(['allow_once', 'allow_run', 'always_allow', 'deny']);
+    expect(consentOptions({ path: 'accessibility' as const }).map((o) => o.decision)).toEqual(['allow_once', 'allow_run', 'always_allow', 'deny']);
     expect(consentOptions({ path: 'synthetic' }).map((o) => o.decision)).toEqual(['allow_once', 'allow_run', 'deny']);
-    const deny = consentOptions({ path: 'uia' }).find((o) => o.decision === 'deny');
+    const deny = consentOptions({ path: 'accessibility' as const }).find((o) => o.decision === 'deny');
     expect(deny).toMatchObject({ needsStepUp: false, tone: 'danger' });
-    expect(consentOptions({ path: 'uia' }).filter((o) => o.decision !== 'deny').every((o) => o.needsStepUp)).toBe(true);
+    expect(consentOptions({ path: 'accessibility' as const }).filter((o) => o.decision !== 'deny').every((o) => o.needsStepUp)).toBe(true);
   });
 
   it('lists activity newest first with readable titles and tones', () => {

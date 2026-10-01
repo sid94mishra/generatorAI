@@ -158,7 +158,9 @@ const config: ExpoConfig = {
   },
 
   plugins: [
+    ...(process.env['GAI_A11Y_AUDIT'] === '1' ? ['./plugins/withA11yAuditTarget'] : []),
     'expo-router',
+    'expo-asset',
     [
       // Splash configuration moved out of the top-level `splash` key in
       // SDK 57. Dark is the product default, so the launch background must

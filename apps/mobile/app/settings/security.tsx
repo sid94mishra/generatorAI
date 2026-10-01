@@ -14,7 +14,8 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useDevices, useSecurityPosture, useDeviceActions } from '../../src/features/devices/queries';
+import type { DeviceRecord } from '../../src/features/devices/model';
 import {
   ChevronDown,
   Clock,
@@ -42,20 +43,17 @@ import {
   useMyScopeRequests,
   usePendingScopeRequests,
   type DeviceScopeRequest,
-} from '../../src/api/scopeRequests';
-import { useAuth } from '../../src/auth/AuthProvider';
-import { revokeDeviceRequest } from '../../src/auth/deviceRequests';
-import { requireStepUp } from '../../src/auth/stepUp';
-import { describeScope, isSensitiveScope } from '../../src/auth/scopeLabels';
-import { matchScopePreset } from '../../src/auth/scopePresets';
-import { checkFeature, grantableFeatures, type MobileFeature } from '../../src/auth/featureGate';
+} from '../../src/services/api/scopeRequests';
+import { useAuth } from '../../src/services/auth/AuthProvider';
+import { requireStepUp } from '../../src/services/auth/stepUp';
+import { describeScope, isSensitiveScope } from '../../src/services/auth/scopeLabels';
+import { matchScopePreset } from '../../src/services/auth/scopePresets';
+import { checkFeature, grantableFeatures, type MobileFeature } from '../../src/services/auth/featureGate';
 import { ActionSheet, ConfirmSheet } from '../../src/components/ui/ActionSheet';
 import { EditScopesSheet } from '../../src/components/devices/EditScopesSheet';
 import { PairDeviceSheet } from '../../src/components/devices/PairDeviceSheet';
 import {
   platformLabel,
-  rotateDeviceRequest,
-  setDeviceScopesRequest,
 } from '../../src/components/devices/deviceAdmin';
 import { Button } from '../../src/components/ui/Button';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
@@ -99,32 +97,6 @@ function platformIcon(platform: string | null | undefined): typeof Smartphone {
   }
 }
 
-interface DeviceRecord {
-  deviceId: string;
-  /** Wire field is `name` (`toPublicDevice` in routes/auth.ts); `deviceName` is derived below. */
-  name?: string;
-  deviceName: string;
-  platform: string;
-  createdAt: number;
-  lastUsedAt: number | null;
-  revokedAt: number | null;
-  scopes: string[];
-}
-
-interface PostureWarning {
-  code: string;
-  severity: 'info' | 'warning' | 'critical';
-  message: string;
-}
-
-interface Posture {
-  server: { hostId: string; loopbackOnly: boolean; production: boolean };
-  authentication: { required: boolean; dpopRequired: boolean; legacyApiKeyActive: boolean };
-  secretStore: { kind: string; secure: boolean; reason?: string };
-  relay: { enabled: boolean; state: string };
-  warnings: PostureWarning[];
-}
-
 const KEY_BACKING_LABEL: Record<string, string> = {
   'secure-enclave': 'Secure Enclave',
   strongbox: 'StrongBox (hardware)',
@@ -134,9 +106,9 @@ const KEY_BACKING_LABEL: Record<string, string> = {
 };
 
 export default function SecurityScreen(): React.ReactElement {
-  const { state, transport, keyBacking, fetch: authFetch, unpair, refreshPermissions } = useAuth();
+  const { state, transport, keyBacking, unpair, refreshPermissions } = useAuth();
   const { colors } = useTheme();
-  const queryClient = useQueryClient();
+  const deviceActions = useDeviceActions();
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   /** Device awaiting the "revoke?" confirmation, or null. */
@@ -178,18 +150,7 @@ export default function SecurityScreen(): React.ReactElement {
   // withheld permission read as a broken screen. Skip the request and say so.
   const deviceAdmin = checkFeature('deviceAdmin', scopes);
 
-  const devices = useQuery({
-    queryKey: ['auth', 'devices'],
-    queryFn: async (): Promise<DeviceRecord[]> => {
-      const res = await authFetch('/api/auth/devices');
-      if (!res.ok) throw new Error(`Devices request failed (${res.status})`);
-      const list = ((await res.json()) as { devices: Array<DeviceRecord & { name?: string }> }).devices;
-      // The server publishes `name`; the screen was reading `deviceName` and
-      // rendered "Revoke undefined" (Sept 7 live run).
-      return list.map((d) => ({ ...d, deviceName: d.deviceName ?? d.name ?? 'Unnamed device' }));
-    },
-    enabled: deviceAdmin.available,
-  });
+  const devices = useDevices(deviceAdmin.available);
 
   // This device's own access requests (plan S2): the row that says "you
   // asked for X on Tuesday and nobody has answered yet", and the Cancel.
@@ -205,14 +166,7 @@ export default function SecurityScreen(): React.ReactElement {
   const approveRequest = useApproveScopeRequest();
   const denyRequest = useDenyScopeRequest();
 
-  const posture = useQuery({
-    queryKey: ['security', 'posture'],
-    queryFn: async (): Promise<Posture> => {
-      const res = await authFetch('/api/security/posture');
-      if (!res.ok) throw new Error(`Posture request failed (${res.status})`);
-      return (await res.json()) as Posture;
-    },
-  });
+  const posture = useSecurityPosture();
 
   /**
    * Revoking a device is destructive and immediate. The user first confirms
@@ -231,10 +185,7 @@ export default function SecurityScreen(): React.ReactElement {
 
       setBusy(device.deviceId);
       try {
-        const { path, init } = revokeDeviceRequest(device.deviceId);
-        const res = await authFetch(path, init);
-        if (!res.ok) throw new Error(`Revoke failed (${res.status})`);
-        await queryClient.invalidateQueries({ queryKey: ['auth', 'devices'] });
+        await deviceActions.revoke(device.deviceId);
         toast({ message: `Revoked ${device.deviceName}.`, tone: 'success' });
       } catch (err) {
         toast({
@@ -245,7 +196,7 @@ export default function SecurityScreen(): React.ReactElement {
         setBusy(null);
       }
     },
-    [authFetch, queryClient, toast],
+    [deviceActions, toast],
   );
 
   /**
@@ -317,10 +268,7 @@ export default function SecurityScreen(): React.ReactElement {
   const saveDeviceScopes = useCallback(
     async (device: { deviceId: string; deviceName: string }, next: string[]) => {
       try {
-        const { path, init } = setDeviceScopesRequest(device.deviceId, next);
-        const res = await authFetch(path, init);
-        if (!res.ok) throw new Error(await responseError(res, 'Update'));
-        await queryClient.invalidateQueries({ queryKey: ['auth', 'devices'] });
+        await deviceActions.setScopes(device.deviceId, next);
         // Editing this phone's own grant: re-mint so the app sees it now.
         if (device.deviceId === thisDeviceId) await refreshPermissions();
         toast({ message: `Updated access for ${device.deviceName}.`, tone: 'success' });
@@ -332,7 +280,7 @@ export default function SecurityScreen(): React.ReactElement {
         throw err;
       }
     },
-    [authFetch, queryClient, refreshPermissions, thisDeviceId, toast],
+    [deviceActions, refreshPermissions, thisDeviceId, toast],
   );
 
   /**
@@ -344,10 +292,7 @@ export default function SecurityScreen(): React.ReactElement {
       if (!(await requireStepUp(`Confirm signing out ${device.deviceName}`))) return;
       setBusy(device.deviceId);
       try {
-        const { path, init } = rotateDeviceRequest(device.deviceId);
-        const res = await authFetch(path, init);
-        if (!res.ok) throw new Error(await responseError(res, 'Rotate'));
-        await queryClient.invalidateQueries({ queryKey: ['auth', 'devices'] });
+        await deviceActions.rotate(device.deviceId);
         toast({ message: `Rotated credentials for ${device.deviceName}.`, tone: 'success' });
       } catch (err) {
         toast({
@@ -358,7 +303,7 @@ export default function SecurityScreen(): React.ReactElement {
         setBusy(null);
       }
     },
-    [authFetch, queryClient, toast],
+    [deviceActions, toast],
   );
 
   /**
@@ -369,7 +314,7 @@ export default function SecurityScreen(): React.ReactElement {
     setBusy('permissions');
     try {
       await refreshPermissions();
-      await queryClient.invalidateQueries({ queryKey: ['security', 'posture'] });
+      await deviceActions.refreshPosture();
       toast({ message: 'Permissions are up to date.', tone: 'success' });
     } catch (err) {
       toast({
@@ -379,7 +324,7 @@ export default function SecurityScreen(): React.ReactElement {
     } finally {
       setBusy(null);
     }
-  }, [refreshPermissions, queryClient, toast]);
+  }, [refreshPermissions, deviceActions, toast]);
 
   // Both destructive device actions on this screen confirm through the same
   // sheet as chat deletion, so one pattern covers every irreversible action.
@@ -787,7 +732,7 @@ export default function SecurityScreen(): React.ReactElement {
         visible={pairingOpen}
         callerScopes={scopes}
         onClose={() => setPairingOpen(false)}
-        onChanged={() => void queryClient.invalidateQueries({ queryKey: ['auth', 'devices'] })}
+        onChanged={() => void deviceActions.refreshDevices()}
       />
 
       <ConfirmSheet
@@ -852,17 +797,6 @@ function Field({
 }
 
 /** The server's error sentence, or a status line when the body is not JSON. */
-async function responseError(res: Response, action: string): Promise<string> {
-  try {
-    const body = (await res.json()) as { error?: { message?: string } | string };
-    if (typeof body.error === 'string') return body.error;
-    if (body.error?.message) return body.error.message;
-  } catch {
-    // Non-JSON body.
-  }
-  return `${action} failed (${res.status})`;
-}
-
 /** Same grouping the pairing screen and the server use, so they can be compared. */
 function formatFingerprint(hostId: string): string {
   return (hostId.slice(0, 16).match(/.{1,4}/g) ?? []).join('-').toUpperCase();

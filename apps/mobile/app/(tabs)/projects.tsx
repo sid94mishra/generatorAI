@@ -23,11 +23,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View } from 'react-native';
 import { LegendList } from '@legendapp/list/react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useProjects } from '../../src/features/projects/queries';
+import { useAgents } from '../../src/features/agents/queries';
 import { Archive, Bot, FolderGit2, Plus } from 'lucide-react-native';
 import { queryKeys, type AgentSummary, type ProjectSummary } from '@generatorai/client-core';
 
-import { useApi } from '../../src/api/useApi';
+import { useApi } from '../../src/services/api/useApi';
 import { duplicateNames, isDuplicateName, shortId } from '../../src/components/common/disambiguate';
 import { relativeTime } from '../../src/components/runs/formatTime';
 import { AgentCard, agentScopeLabel } from '../../src/components/work/cards';
@@ -68,7 +69,6 @@ type Row =
 const SCOPE_ORDER: AgentSummary['scope'][] = ['project', 'global', 'system'];
 
 export default function ProjectsScreen(): React.ReactElement {
-  const api = useApi();
   const { colors } = useTheme();
   const shell = useTabShell();
   // `?segment=agents` deep link (pushes, other screens) mirrors the Work tab.
@@ -101,15 +101,9 @@ export default function ProjectsScreen(): React.ReactElement {
 
   useScrollToTop('projects', scrollerToTop(listRef));
 
-  const projects = useQuery({
-    queryKey: queryKeys.projects(),
-    queryFn: () => api.projects.list(),
-  });
+  const projects = useProjects();
 
-  const agents = useQuery({
-    queryKey: ['agents', 'all'] as const,
-    queryFn: () => api.agents.list(),
-  });
+  const agents = useAgents();
 
   const active = segment === 'projects' ? projects : agents;
 

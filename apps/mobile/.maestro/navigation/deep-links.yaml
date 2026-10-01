@@ -1,0 +1,15 @@
+appId: ${APP_ID}
+name: navigation · validated deep links
+# Server identity isolation is also checked with both paired sandboxes (M2-08).
+tags: [smoke]
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///chats/${CHAT_STREAM_ID}?execute=delete
+- extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- assertVisible: Dictate a message
+- openLink: generatorai:///chats/${CHAT_STREAM_ID}?server=not-paired
+- extendedWaitUntil: {visible: {id: menu-button}, timeout: 30000}
+- assertNotVisible: {id: composer-input}
+- openLink: generatorai:///chats/%2e%2e/settings
+- extendedWaitUntil: {visible: {id: menu-button}, timeout: 30000}
+- assertNotVisible: {id: composer-input}

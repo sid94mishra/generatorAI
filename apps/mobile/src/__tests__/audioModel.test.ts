@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { engineLabel, parseAudioSettings, pauseLabel, pauseStops, speedLabel } from '../settings/audioModel';
+import { engineLabel, parseAudioSettings, pauseLabel, pauseStops, speedLabel } from '../features/settings/audioModel';
 
 describe('audio settings model', () => {
   it('names engines as desktop does and passes unknown ones through', () => {

@@ -2,3 +2,4 @@
 // framework-free store for clients without React Query (mobile, CLI).
 export * from './reducer.js';
 export * from './store.js';
+export * from './route.js';

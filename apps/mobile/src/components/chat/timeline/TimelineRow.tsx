@@ -1,5 +1,5 @@
 // ────────────────────────────────────────────────────────────────
-// TimelineRow — one transcript row, for every kind `deriveTimeline` emits.
+// TimelineRow — one transcript row, for every kind `compactTimeline` emits.
 //
 // Perf contract (plan §7.2):
 //   • `TimelineRowView` is memoised with `rowsEqual`: a settled row's props
@@ -60,7 +60,7 @@ import { ContextMenu, useContextMenu, type ContextMenuItem } from '../../ui/Cont
 import { Spinner } from '../../ui/States';
 import { useToast } from '../../ui/Toast';
 import { useTheme } from '../../../theme/ThemeProvider';
-import { useStreamStore } from '../../../stream/streamStore';
+import { useStreamStore } from '../../../services/stream/streamStore';
 import { UsageFooter } from '../UsageFooter';
 import { formatDuration, type ToolKind } from '../toolPresentation';
 import { InlineDiff } from './InlineDiff';
@@ -82,7 +82,7 @@ import {
   formatWorkDuration,
   workLabel,
   workTitle,
-} from './deriveTimeline';
+} from './compactTimeline';
 import { READ_ALOUD_ENABLED } from '../featureFlags';
 
 /** 4 KB per value — a multi-megabyte result must not lock the UI thread. */
@@ -114,9 +114,7 @@ const FAMILY_ICON: Record<ToolFamily, IconComponent> = {
   other: Wrench,
 };
 
-function toneFor(status: StepStatus): RowTone {
-  if (status === 'failed') return 'danger';
-  if (status === 'waiting') return 'primary';
+function toneFor(_status: StepStatus): RowTone {
   return 'default';
 }
 
@@ -508,7 +506,7 @@ export function ToolStepRow({ step, nested = false }: { step: ToolStep; nested?:
   const stepCount = isAgent ? countSteps(step.children) : 0;
   const Icon: IconComponent = isAgent ? Bot : step.family === 'other' ? KIND_ICON[step.kind] : FAMILY_ICON[step.family];
   // Colour means status: a sub-agent is tinted only while it runs.
-  const tone: RowTone = isAgent && step.status === 'running' && !nested ? 'info' : toneFor(step.status);
+  const tone: RowTone = toneFor(step.status);
   const color =
     isAgent && step.status === 'running'
       ? colors.info

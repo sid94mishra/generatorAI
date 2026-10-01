@@ -35,7 +35,7 @@ import { useToast } from '../ui/Toast';
 import { Badge } from '../ui/primitives';
 import { useFeature } from '../runs/useFeature';
 import { useTheme } from '../../theme/ThemeProvider';
-import { projectKeys } from './api';
+import { projectKeys } from '@generatorai/client-core';
 import { messageOf } from './ProjectActions';
 import { useProjectsApi } from './useProjectsApi';
 import {

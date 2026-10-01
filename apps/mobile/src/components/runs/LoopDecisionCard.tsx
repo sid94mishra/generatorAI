@@ -18,7 +18,7 @@ import { Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { Lock } from 'lucide-react-native';
 
-import { useLoopControl, useLoopIterations, type LoopCommand } from '../../api/useLoopControl';
+import { useLoopControl, useLoopIterations, type LoopCommand } from '../../services/api/useLoopControl';
 import { FeedbackSheet } from './FeedbackSheet';
 import {
   acceptableIterations,

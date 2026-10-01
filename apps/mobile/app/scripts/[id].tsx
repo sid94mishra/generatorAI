@@ -14,23 +14,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useScript, useScriptProfiles, useRunScript } from '../../src/features/scripts/queries';
+import { useProjects } from '../../src/features/projects/queries';
 import { FileCode2, Lock, Play } from 'lucide-react-native';
-import { queryKeys } from '@generatorai/client-core';
 
-import { useAdminApi } from '../../src/api/useAdminApi';
-import { useApi } from '../../src/api/useApi';
-import { useIdempotencyKey } from '../../src/api/useIdempotencyKey';
+import { useAdminApi } from '../../src/services/api/useAdminApi';
+import { useApi } from '../../src/services/api/useApi';
+import { useIdempotencyKey } from '../../src/services/api/useIdempotencyKey';
 import { useFeature } from '../../src/components/runs/useFeature';
 import { usePullRefresh } from '../../src/components/runs/usePullRefresh';
 import { STICKY_BAR_SPACE, StickyActionBar } from '../../src/components/work/StickyActionBar';
 import { VariableField } from '../../src/components/work/StartRunSheet';
 import {
   applyProfileDefaults,
-  parseScriptDetail,
-  parseScriptProfiles,
   profileSummary,
-} from '../../src/components/work/scriptModel';
+} from '../../src/features/scripts/model';
 import { buildVariables, initialDraft, parseVariables, type Draft } from '../../src/components/work/variableForm';
 import { Button } from '../../src/components/ui/Button';
 import { Chip } from '../../src/components/ui/Chip';
@@ -41,14 +39,10 @@ import { ErrorState } from '../../src/components/ui/States';
 import { haptics } from '../../src/components/ui/haptics';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
-const scriptKey = (id: string) => ['workflow-scripts', id] as const;
 
 export default function ScriptScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const scriptId = String(id ?? '');
-  const admin = useAdminApi();
-  const api = useApi();
-  const queryClient = useQueryClient();
   const navigation = useNavigation();
   const { colors } = useTheme();
   const scriptRun = useFeature('scriptRun');
@@ -60,23 +54,11 @@ export default function ScriptScreen(): React.ReactElement {
   const [serverError, setServerError] = useState<string | null>(null);
   const idempotencyKey = useIdempotencyKey();
 
-  const script = useQuery({
-    queryKey: scriptKey(scriptId),
-    queryFn: async () => parseScriptDetail(await admin.scripts.get(scriptId), scriptId),
-    enabled: scriptId.length > 0,
-  });
+  const script = useScript(scriptId);
 
-  const profiles = useQuery({
-    queryKey: [...scriptKey(scriptId), 'profiles'],
-    queryFn: async () => parseScriptProfiles(await admin.scripts.profiles(scriptId)),
-    enabled: scriptId.length > 0,
-  });
+  const profiles = useScriptProfiles(scriptId);
 
-  const projects = useQuery({
-    queryKey: queryKeys.projects(),
-    queryFn: () => api.projects.list(),
-    staleTime: 60_000,
-  });
+  const projects = useProjects({ staleTime: 60_000 });
 
   const pull = usePullRefresh(() => Promise.all([script.refetch(), profiles.refetch()]));
 
@@ -105,26 +87,10 @@ export default function ScriptScreen(): React.ReactElement {
     (p) => (p as { status?: string }).status !== 'archived',
   );
 
-  const run = useMutation({
-    mutationFn: async (): Promise<string> => {
-      const invocation = await admin.workflows.invoke(
-        {
-          target: { kind: 'script', scriptId },
-          variables: result.variables,
-          ...(profileName ? { profile: profileName } : {}),
-          ...(projectId ? { projectId } : {}),
-          client: 'mobile',
-        },
-        { idempotencyKey: idempotencyKey.get() },
-      );
-      return invocation.runId;
-    },
+  const run = useRunScript(scriptId, {
     onSuccess: (runId) => {
       idempotencyKey.settle();
       haptics.success();
-      void queryClient.invalidateQueries({ queryKey: queryKeys.runs() });
-      // The run materialised a new definition.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.workflows() });
       router.push(`/runs/${runId}`);
     },
     onError: (err) => {
@@ -141,7 +107,7 @@ export default function ScriptScreen(): React.ReactElement {
       haptics.warn();
       return;
     }
-    run.mutate();
+    run.mutate({ variables: result.variables, profile: profileName, projectId, idempotencyKey: idempotencyKey.get() });
   };
 
   if (script.isLoading || !scriptId) {

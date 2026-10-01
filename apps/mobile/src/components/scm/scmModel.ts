@@ -1,3 +1,4 @@
+import { domainStatusTone } from '../../theme/status';
 // ────────────────────────────────────────────────────────────────
 // The source-control flow, as data.
 //
@@ -27,7 +28,7 @@ export type ScmAction = 'commit' | 'push' | 'pullRequest';
 export const CONNECT_ON_DESKTOP = 'Connect it in Settings › Source control.';
 
 /** Toast/badge variants shared with the UI kit. */
-export type ScmTone = 'info' | 'success' | 'warning' | 'danger';
+export type ScmTone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
 
 export function shortSha(sha: string | undefined): string {
   return sha ? sha.slice(0, 7) : '';
@@ -194,16 +195,7 @@ export function plannedSteps(request: ScmFlowRequest): ScmFlowStepId[] {
 }
 
 export function stepTone(status: ScmFlowStep['status']): ScmTone {
-  switch (status) {
-    case 'done':
-      return 'success';
-    case 'failed':
-      return 'danger';
-    case 'blocked':
-      return 'warning';
-    default:
-      return 'info';
-  }
+  return domainStatusTone('scmStep', status);
 }
 
 // ── Results ──────────────────────────────────────────────────────
@@ -238,23 +230,24 @@ export interface FlowOutcome {
 }
 
 export function describeFlowResult(result: ScmFlowResult): FlowOutcome {
+  const tone = domainStatusTone('scmResult', result.status);
   if (result.status === 'conflicts') {
     const files = result.conflicts?.files.length ?? 0;
     return {
       message: `Merge conflicts in ${files} ${files === 1 ? 'file' : 'files'}`,
-      tone: 'warning',
+      tone,
       conflicts: true,
     };
   }
   if (result.status === 'blocked') {
-    return { message: mobileReason(blockedReason(result), result.readiness), tone: 'warning', conflicts: false };
+    return { message: mobileReason(blockedReason(result), result.readiness), tone, conflicts: false };
   }
   if (result.status === 'failed') {
-    return { message: mobileReason(blockedReason(result), result.readiness), tone: 'danger', conflicts: false };
+    return { message: mobileReason(blockedReason(result), result.readiness), tone, conflicts: false };
   }
   return {
     message: summarizeFlow(result),
-    tone: 'success',
+    tone,
     ...(result.pullRequest ? { url: result.pullRequest.url, prNumber: result.pullRequest.number } : {}),
     conflicts: false,
   };

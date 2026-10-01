@@ -13,14 +13,12 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { router, useIsFocused, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useRun, useRunPendingDecisions } from '../../src/features/workflows/queries';
 import { ChevronLeft, Lock, MoreHorizontal, Trash2, Workflow as WorkflowIcon } from 'lucide-react-native';
-import { queryKeys, type ApprovalOutcome, type StageRunSummary } from '@generatorai/client-core';
+import { type ApprovalOutcome, type StageRunSummary } from '@generatorai/client-core';
 
-import { useApi } from '../../src/api/useApi';
-import { useAdminApi } from '../../src/api/useAdminApi';
-import { useRunMutations, useRunPermissionMode, type RunAction } from '../../src/api/useRunControl';
-import { useRunStream } from '../../src/stream/useRunStream';
+import { useRunMutations, useRunPermissionMode, type RunAction } from '../../src/services/api/useRunControl';
+import { useRunStream } from '../../src/services/stream/useRunStream';
 import { StageGateCard } from '../../src/components/runs/StageGateCard';
 import { LoopDecisionCard } from '../../src/components/runs/LoopDecisionCard';
 import { CheckOutput } from '../../src/components/runs/CheckOutput';
@@ -40,7 +38,6 @@ import { MAX_SCALE } from '../../src/components/ui/accessibility';
 import { StatusGlyph } from '../../src/components/runs/StatusGlyph';
 import {
   awaitsApproval,
-  pollIntervalFor,
   runControlsFor,
   runTitle,
 } from '../../src/components/runs/runModel';
@@ -68,8 +65,6 @@ const ACTION_LABEL: Record<RunAction, string> = {
 export default function RunDetailScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const runId = String(id);
-  const api = useApi();
-  const admin = useAdminApi();
   const navigation = useNavigation();
   const focused = useIsFocused();
   const { colors } = useTheme();
@@ -92,11 +87,7 @@ export default function RunDetailScreen(): React.ReactElement {
   const { connected } = useRunStream(runId, focused);
   const { runAction, stageAction, approve, remove } = useRunMutations(runId);
 
-  const run = useQuery({
-    queryKey: queryKeys.run(runId),
-    queryFn: () => api.runs.get(runId),
-    refetchInterval: (query) => (focused ? pollIntervalFor(query.state.data?.status, connected) : false),
-  });
+  const run = useRun(runId, focused, connected);
 
   const runStatus = run.data?.status;
   // Only a run that can still call tools has a mode worth showing.
@@ -113,12 +104,7 @@ export default function RunDetailScreen(): React.ReactElement {
   const loopDecisions = useMemo(() => stages.filter((s) => isParkedLoop(s as RunStage)) as RunStage[], [stages]);
   // Waits (P05 §4.3) and the decisions of sub-workflow children, mirrored here (P05 §4.2).
   const hasChildren = stages.some((s) => (s as RunStage).kind === 'subworkflow' && s.status === 'running');
-  const pending = useQuery({
-    queryKey: [...queryKeys.run(runId), 'pending-decisions'],
-    queryFn: () => admin.runs.pendingDecisions(runId),
-    enabled: hasChildren,
-    refetchInterval: focused && hasChildren ? 5_000 : false,
-  });
+  const pending = useRunPendingDecisions(runId, hasChildren, focused);
   const waitDecisions = useMemo<WaitDecision[]>(() => {
     const out: WaitDecision[] = [];
     for (const s of stages as RunStage[]) {

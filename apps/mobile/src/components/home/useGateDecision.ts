@@ -12,8 +12,8 @@ import { useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ApiError, queryKeys } from '@generatorai/client-core';
 
-import { useApi } from '../../api/useApi';
-import { toPlanDecision } from '../chat/gateActions';
+import { useApi } from '../../services/api/useApi';
+import { toPlanDecision } from '../../features/chat/gateActions';
 import { haptics } from '../ui/haptics';
 import { useToast } from '../ui/Toast';
 

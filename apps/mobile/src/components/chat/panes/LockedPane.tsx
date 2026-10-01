@@ -11,7 +11,7 @@ import { View } from 'react-native';
 import { router } from 'expo-router';
 
 import { LockedState } from '../../ui/States';
-import type { FeatureAvailability } from '../../../auth/featureGate';
+import type { FeatureAvailability } from '../../../services/auth/featureGate';
 
 export function LockedPane({
   title,

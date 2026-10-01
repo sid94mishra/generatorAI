@@ -1,11 +1,8 @@
-// The project authoring client, bound to the authenticated fetch.
-
 import { useMemo } from 'react';
+import { useAdminApi } from '../../services/api/useAdminApi';
+import { createProjectActions } from './projectEditorApi';
 
-import { useAuth } from '../../auth/AuthProvider';
-import { createProjectsApi, type ProjectsApi } from './api';
-
-export function useProjectsApi(): ProjectsApi {
-  const { fetch } = useAuth();
-  return useMemo(() => createProjectsApi(fetch), [fetch]);
+export function useProjectsApi() {
+  const admin = useAdminApi();
+  return useMemo(() => createProjectActions(admin), [admin]);
 }

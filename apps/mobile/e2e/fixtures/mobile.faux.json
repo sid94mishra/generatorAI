@@ -1,0 +1,107 @@
+{
+  "Mobile — Stream": [
+    [
+      {
+        "type": "text",
+        "content": "# Mobile streaming check\n\nThis response exercises native markdown, streaming and scrolling.\n\n## Checklist\n\n- Check 1: keep the transcript readable on both platforms.\n- Check 2: keep the transcript readable on both platforms.\n- Check 3: keep the transcript readable on both platforms.\n- Check 4: keep the transcript readable on both platforms.\n- Check 5: keep the transcript readable on both platforms.\n- Check 6: keep the transcript readable on both platforms.\n- Check 7: keep the transcript readable on both platforms.\n- Check 8: keep the transcript readable on both platforms.\n- Check 9: keep the transcript readable on both platforms.\n- Check 10: keep the transcript readable on both platforms.\n- Check 11: keep the transcript readable on both platforms.\n- Check 12: keep the transcript readable on both platforms.\n- Check 13: keep the transcript readable on both platforms.\n- Check 14: keep the transcript readable on both platforms.\n- Check 15: keep the transcript readable on both platforms.\n- Check 16: keep the transcript readable on both platforms.\n- Check 17: keep the transcript readable on both platforms.\n- Check 18: keep the transcript readable on both platforms.\n- Check 19: keep the transcript readable on both platforms.\n- Check 20: keep the transcript readable on both platforms.\n\n## Example\n\n```typescript\nexport function total(values: number[]): number {\n  return values.reduce((sum, value) => sum + value, 0);\n}\n\nconst result = total([1, 2, 3]);\nconsole.log(result);\n```\n\nThe stream is complete.\n"
+      },
+      {
+        "type": "complete"
+      }
+    ]
+  ],
+  "Mobile — Gate": [
+    [
+      {
+        "type": "text",
+        "content": "I need approval before running the test command."
+      },
+      {
+        "type": "permission_request",
+        "request": {
+          "type": "shell",
+          "description": "Run pnpm test",
+          "details": {
+            "command": "pnpm test"
+          }
+        }
+      },
+      {
+        "type": "text",
+        "content": "Thanks — running it now."
+      },
+      {
+        "type": "complete"
+      }
+    ]
+  ],
+  "Mobile — Stop": [
+    [
+      {
+        "type": "text",
+        "content": "The test tool is running. Use Stop to cancel this turn."
+      },
+      {
+        "type": "tool_call",
+        "name": "Bash",
+        "input": {
+          "command": "sleep 600"
+        }
+      }
+    ]
+  ],
+  "Mobile — Edits": [
+    [
+      {
+        "type": "file_edit",
+        "path": "src/app.ts",
+        "op": "update",
+        "content": "export function main(): string {\n  return 'Mobile sandbox edit';\n}\n"
+      },
+      {
+        "type": "file_edit",
+        "path": "src/mobile-new.ts",
+        "op": "create",
+        "content": "export const MOBILE_CHECK = true;\n"
+      },
+      {
+        "type": "file_edit",
+        "path": "src/util.ts",
+        "op": "delete"
+      },
+      {
+        "type": "text",
+        "content": "Updated app.ts, added mobile-new.ts and removed util.ts in the dummy workspace."
+      },
+      {
+        "type": "complete"
+      }
+    ],
+    [
+      {
+        "type": "file_edit",
+        "path": "src/app.ts",
+        "op": "update",
+        "content": "export function main(): string {\n  return 'Mobile sandbox edit';\n}\n"
+      },
+      {
+        "type": "file_edit",
+        "path": "src/mobile-new.ts",
+        "op": "create",
+        "content": "export const MOBILE_CHECK = true;\n"
+      },
+      {
+        "type": "file_edit",
+        "path": "src/util.ts",
+        "op": "delete"
+      },
+      {
+        "type": "text",
+        "content": "Updated app.ts, added mobile-new.ts and removed util.ts in the dummy workspace."
+      },
+      {
+        "type": "complete"
+      }
+    ]
+  ]
+}

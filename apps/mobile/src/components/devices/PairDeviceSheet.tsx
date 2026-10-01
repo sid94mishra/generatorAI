@@ -18,9 +18,10 @@ import { Share, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Copy, Share2 } from 'lucide-react-native';
 
-import { useAuth } from '../../auth/AuthProvider';
-import { SCOPE_PRESETS, type ScopePresetId } from '../../auth/scopePresets';
-import { requireStepUp } from '../../auth/stepUp';
+import { useAdminApi } from '../../services/api/useAdminApi';
+import { ApiError } from '@generatorai/client-core';
+import { SCOPE_PRESETS, type ScopePresetId } from '../../services/auth/scopePresets';
+import { requireStepUp } from '../../services/auth/stepUp';
 import { Button, IconButton } from '../ui/Button';
 import { Chip } from '../ui/Chip';
 import { Field } from '../ui/Form';
@@ -29,7 +30,7 @@ import { useToast } from '../ui/Toast';
 import { useTheme } from '../../theme/ThemeProvider';
 import { QrCode } from './QrCode';
 import {
-  createPairingRequest,
+  createPairingBody,
   formatCountdown,
   parsePairingInvite,
   presetWithinAuthority,
@@ -46,17 +47,6 @@ const PLATFORMS: Array<{ value: PairingPlatform; label: string }> = [
   { value: 'mcp', label: 'MCP client' },
 ];
 
-async function errorMessage(res: Response): Promise<string> {
-  try {
-    const body = (await res.json()) as { error?: { message?: string } | string };
-    if (typeof body.error === 'string') return body.error;
-    if (body.error?.message) return body.error.message;
-  } catch {
-    // fall through
-  }
-  return `Request failed (${res.status})`;
-}
-
 export function PairDeviceSheet({
   visible,
   callerScopes,
@@ -69,7 +59,7 @@ export function PairDeviceSheet({
   /** An invite was created or cancelled — refresh the device list. */
   onChanged: () => void;
 }): React.ReactElement | null {
-  const { fetch: authFetch } = useAuth();
+  const admin = useAdminApi();
   const { colors } = useTheme();
   const toast = useToast();
   const [name, setName] = useState('');
@@ -104,14 +94,12 @@ export function PairDeviceSheet({
     if (!(await requireStepUp('Confirm creating a pairing code'))) return;
     setBusy(true);
     try {
-      const { path, init } = createPairingRequest({
+      const body = createPairingBody({
         deviceName: name,
         platform,
         ...(preset ? { scopes: preset.scopes } : {}),
       });
-      const res = await authFetch(path, init);
-      if (!res.ok) throw new Error(await errorMessage(res));
-      const parsed = parsePairingInvite(await res.json());
+      const parsed = parsePairingInvite(await admin.devices.createInvite(body));
       if (!parsed) throw new Error('The server returned an unreadable pairing code.');
       setNow(Date.now());
       setInvite(parsed);
@@ -124,14 +112,17 @@ export function PairDeviceSheet({
     } finally {
       setBusy(false);
     }
-  }, [authFetch, name, platform, presetId, toast, onChanged]);
+  }, [admin, name, platform, presetId, toast, onChanged]);
 
   const cancelInvite = useCallback(async () => {
     if (!invite) return;
     setBusy(true);
     try {
-      const res = await authFetch(`/api/auth/pair/${encodeURIComponent(invite.grantId)}`, { method: 'DELETE' });
-      if (!res.ok && res.status !== 404) throw new Error(await errorMessage(res));
+      try {
+        await admin.devices.revokeInvite(encodeURIComponent(invite.grantId));
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 404) throw error;
+      }
       setInvite(null);
       onChanged();
       toast({ message: 'Pairing code cancelled.', variant: 'success' });
@@ -140,7 +131,7 @@ export function PairDeviceSheet({
     } finally {
       setBusy(false);
     }
-  }, [authFetch, invite, onChanged, toast]);
+  }, [admin, invite, onChanged, toast]);
 
   const copy = useCallback(
     async (text: string, what: string) => {

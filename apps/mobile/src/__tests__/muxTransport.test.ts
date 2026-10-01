@@ -25,7 +25,7 @@ import {
   GLOBAL_SCOPE_ID,
   invalidateListKeys,
   listKeysForEvent,
-} from '../stream/muxTransport';
+} from '../services/stream/muxTransport';
 
 const flush = async (): Promise<void> => {
   for (let i = 0; i < 8; i += 1) await Promise.resolve();
@@ -179,7 +179,7 @@ describe('scope request events', () => {
   });
 
   it('refreshes permissions only for this device’s approvals', async () => {
-    const { isOwnScopeApproval } = await import('../stream/muxTransport');
+    const { isOwnScopeApproval } = await import('../services/stream/muxTransport');
     const approved = { kind: 'device.scope_request_resolved', data: { deviceId: 'me', status: 'approved' } };
     expect(isOwnScopeApproval(approved, 'me')).toBe(true);
     expect(isOwnScopeApproval(approved, 'other')).toBe(false);

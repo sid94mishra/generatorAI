@@ -18,7 +18,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Camera, Ellipsis, GitCompare, History, RotateCcw } from 'lucide-react-native';
 import { queryKeys, type RestoreResult } from '@generatorai/client-core';
 
-import { useApi } from '../../api/useApi';
+import { useApi } from '../../services/api/useApi';
 import { useTheme } from '../../theme/ThemeProvider';
 import { Sheet } from '../ui/Sheet';
 import { Button, IconButton } from '../ui/Button';

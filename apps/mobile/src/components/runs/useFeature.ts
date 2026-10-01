@@ -9,8 +9,8 @@
 import { useCallback } from 'react';
 import { router } from 'expo-router';
 
-import { useAuth } from '../../auth/AuthProvider';
-import { checkFeature, type FeatureAvailability, type MobileFeature } from '../../auth/featureGate';
+import { useAuth } from '../../services/auth/AuthProvider';
+import { checkFeature, type FeatureAvailability, type MobileFeature } from '../../services/auth/featureGate';
 
 export function useFeature(feature: MobileFeature): FeatureAvailability & {
   requestAccess: () => void;

@@ -8,7 +8,7 @@ import {
   decodeBase64Pure,
   encodeBase64Pure,
   stringToBase64,
-} from '../lib/base64';
+} from '../services/lib/base64';
 
 const VECTORS: ReadonlyArray<[string, string]> = [
   ['', ''],

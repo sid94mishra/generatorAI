@@ -12,7 +12,7 @@ vi.mock('expo-file-system', () => ({
     async bytes() { return this.data; }
   },
 }));
-import { sendChatPrompt } from '../api/sendChatPrompt.native';
+import { sendChatPrompt } from '../services/api/sendChatPrompt.native';
 
 afterEach(() => { disk.files.length = 0; vi.unstubAllGlobals(); });
 describe('native chat uploads', () => {

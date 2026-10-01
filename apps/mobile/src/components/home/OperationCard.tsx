@@ -23,7 +23,7 @@ import { Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { CheckCircle2, CircleDot, CircleSlash, Hand, XCircle } from 'lucide-react-native';
 
-import type { Operation } from '../../api/activityRanking';
+import type { Operation } from '../../services/api/activityRanking';
 import { parseChatName } from '../common/chatName';
 import { ENTITY_ICON } from '../common/entityIcons';
 import { runTitle } from '../runs/runModel';

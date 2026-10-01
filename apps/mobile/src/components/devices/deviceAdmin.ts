@@ -16,7 +16,7 @@
 // of letting the save fail with a 403.
 // ────────────────────────────────────────────────────────────────
 
-import { SCOPE_PRESETS, type ScopePreset } from '../../auth/scopePresets';
+import { SCOPE_PRESETS, type ScopePreset } from '../../services/auth/scopePresets';
 
 /**
  * Every scope the server knows, in the server's order. Mirrors `SCOPES` in
@@ -101,29 +101,6 @@ export function sameScopes(a: readonly string[], b: readonly string[]): boolean 
 
 // ── Request shapes ──────────────────────────────────────────────
 
-export interface JsonRequest {
-  path: string;
-  init: { method: 'PUT' | 'POST'; headers: Record<string, string>; body: string };
-}
-
-export function setDeviceScopesRequest(deviceId: string, scopes: readonly string[]): JsonRequest {
-  return {
-    path: `/api/auth/devices/${encodeURIComponent(deviceId)}/scopes`,
-    init: {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ scopes: [...new Set(scopes)] }),
-    },
-  };
-}
-
-export function rotateDeviceRequest(deviceId: string): JsonRequest {
-  return {
-    path: `/api/auth/devices/${encodeURIComponent(deviceId)}/rotate`,
-    init: { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
-  };
-}
-
 /** Mirrors `PLATFORMS` in apps/server/src/routes/auth.ts. */
 export type PairingPlatform = 'web' | 'desktop' | 'cli' | 'mobile' | 'mcp' | 'other';
 
@@ -151,22 +128,13 @@ export interface CreatePairingInput {
   ttlMs?: number;
 }
 
-export function createPairingRequest(input: CreatePairingInput): JsonRequest {
-  // The server requires 1–64 characters; an empty field must not be a 400.
-  const name = input.deviceName.trim().slice(0, 64) || 'New device';
+export function createPairingBody(input: CreatePairingInput) {
+  const deviceName = input.deviceName.trim().slice(0, 64) || 'New device';
   const ttl = input.ttlMs ?? PAIRING_TTL_MS.default;
   return {
-    path: '/api/auth/pair',
-    init: {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        deviceName: name,
-        platform: input.platform,
-        ...(input.scopes ? { scopes: [...new Set(input.scopes)] } : {}),
-        ttlMs: Math.min(PAIRING_TTL_MS.max, Math.max(PAIRING_TTL_MS.min, Math.round(ttl))),
-      }),
-    },
+    deviceName, platform: input.platform,
+    ...(input.scopes ? { scopes: [...new Set(input.scopes)] } : {}),
+    ttlMs: Math.min(PAIRING_TTL_MS.max, Math.max(PAIRING_TTL_MS.min, Math.round(ttl))),
   };
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Operation } from '../api/activityRanking';
+import type { Operation } from '../services/api/activityRanking';
 import { operationState, operationStateLabel } from '../components/home/operationStatus';
 
 const op = (over: Partial<Operation>): Operation => ({

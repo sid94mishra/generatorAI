@@ -15,7 +15,7 @@ import { ListGroup, ListRow } from '../../ui/ListRow';
 import { SectionHeader } from '../../ui/primitives';
 import { useToast } from '../../ui/Toast';
 import { useTheme } from '../../../theme/ThemeProvider';
-import { compactTokens } from '../timeline/deriveTimeline';
+import { compactTokens } from '../timeline/compactTimeline';
 import { formatDuration } from '../toolPresentation';
 
 export function InspectorSection({

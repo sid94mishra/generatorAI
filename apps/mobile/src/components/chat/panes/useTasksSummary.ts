@@ -13,7 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '@generatorai/client-core';
 import type { BackgroundTaskListItem } from '@generatorai/shared';
 
-import { useApi } from '../../../api/useApi';
+import { useApi } from '../../../services/api/useApi';
 
 /** Worker statuses that count as "running". Mirrors `TasksSection`'s ACTIVE set. */
 export const ACTIVE_TASK_STATUSES: ReadonlySet<string> = new Set(['spawned', 'running', 'reviewing', 'queued', 'needs_review']);

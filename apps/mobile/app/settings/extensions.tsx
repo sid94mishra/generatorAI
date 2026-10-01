@@ -10,13 +10,13 @@
 
 import React, { useState } from 'react';
 import { Text } from 'react-native';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useExtensions, useToggleExtension } from '../../src/features/settings/queries';
 import { Blocks } from 'lucide-react-native';
 
-import { useAdminApi } from '../../src/api/useAdminApi';
-import { useAuth } from '../../src/auth/AuthProvider';
-import { checkFeature } from '../../src/auth/featureGate';
-import { requireStepUp } from '../../src/auth/stepUp';
+import { useAdminApi } from '../../src/services/api/useAdminApi';
+import { useAuth } from '../../src/services/auth/AuthProvider';
+import { checkFeature } from '../../src/services/auth/featureGate';
+import { requireStepUp } from '../../src/services/auth/stepUp';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
 import { Badge, Card } from '../../src/components/ui/primitives';
 import { Screen } from '../../src/components/ui/Screen';
@@ -25,64 +25,19 @@ import { EmptyState, ErrorState } from '../../src/components/ui/States';
 import { useToast } from '../../src/components/ui/Toast';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
-const EXTENSIONS_KEY = ['extensions'] as const;
-
-interface ExtensionRow {
-  id: string;
-  name: string;
-  version: string | null;
-  description: string | null;
-  scope: string | null;
-  enabled: boolean;
-  /** False when the extension is enabled but failed to register. */
-  ready: boolean;
-  errors: string[];
-}
-
-/**
- * The route returns the server's `InstalledExtension` (`{ manifest, scope,
- * enabled, ready, errors }`); client-core's `ExtensionSummary` describes a
- * flat `{ id, name }`. Accept either so the screen works against both.
- */
-function toRow(raw: unknown): ExtensionRow | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const r = raw as Record<string, unknown>;
-  const manifest = (r.manifest && typeof r.manifest === 'object' ? r.manifest : r) as Record<string, unknown>;
-  const id = typeof manifest.id === 'string' ? manifest.id : null;
-  if (!id) return null;
-  const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
-  return {
-    id,
-    name: str(manifest.name) ?? id,
-    version: str(manifest.version),
-    description: str(manifest.description),
-    scope: str(r.scope),
-    enabled: r.enabled === true,
-    ready: r.ready !== false,
-    errors: Array.isArray(r.errors) ? r.errors.filter((e): e is string => typeof e === 'string') : [],
-  };
-}
+import type { ExtensionRow } from '../../src/features/settings/extensionModel';
 
 export default function ExtensionsScreen(): React.ReactElement {
-  const admin = useAdminApi();
   const { state } = useAuth();
   const { colors } = useTheme();
   const toast = useToast();
-  const queryClient = useQueryClient();
   const scopes = state.status === 'authenticated' ? state.scopes : [];
   const canManage = checkFeature('capabilityAdmin', scopes).available;
   const [pending, setPending] = useState<string | null>(null);
 
-  const extensions = useQuery({
-    queryKey: EXTENSIONS_KEY,
-    queryFn: async () =>
-      ((await admin.extensions.list()) as unknown[]).map(toRow).filter((r): r is ExtensionRow => r !== null),
-  });
+  const extensions = useExtensions();
 
-  const toggle = useMutation({
-    mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) =>
-      admin.extensions.update(encodeURIComponent(id), { enabled }),
-    onMutate: ({ id }) => setPending(id),
+  const toggle = useToggleExtension({
     onSuccess: (_data, { enabled }) => {
       toast({ message: enabled ? 'Extension turned on.' : 'Extension turned off.', variant: 'success' });
     },
@@ -93,13 +48,13 @@ export default function ExtensionsScreen(): React.ReactElement {
       }),
     onSettled: () => {
       setPending(null);
-      void queryClient.invalidateQueries({ queryKey: EXTENSIONS_KEY });
     },
   });
 
   const onToggle = async (row: ExtensionRow, enabled: boolean): Promise<void> => {
     // An extension runs code on the host; changing that is an admin action.
     if (!(await requireStepUp(`Confirm turning ${row.name} ${enabled ? 'on' : 'off'}`))) return;
+    setPending(row.id);
     toggle.mutate({ id: row.id, enabled });
   };
 

@@ -117,7 +117,7 @@ describe('gate tool labels', () => {
   });
 
   it('keeps them as plain tool rows, never sub-agent cards', async () => {
-    const { toolFamily } = await import('../components/chat/timeline/deriveTimeline');
+    const { toolFamily } = await import('../components/chat/timeline/compactTimeline');
     expect(toolFamily('ExitPlanMode')).toBe('other');
     expect(toolFamily('AskUserQuestion')).toBe('other');
     expect(toolFamily('TodoWrite')).toBe('other');

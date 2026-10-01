@@ -6,7 +6,7 @@ import {
   shouldMuteOnServer,
   shouldPresent,
   type NotifyPrefs,
-} from '../notifications/notificationFilter';
+} from '../services/notifications/notificationFilter';
 
 const ALL_ON: NotifyPrefs = { gates: true, runs: true, chats: true };
 const ALL_OFF: NotifyPrefs = { gates: false, runs: false, chats: false };

@@ -10,13 +10,12 @@
 
 import React from 'react';
 import { Text, View } from 'react-native';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useProviders, useProbeProviders, useDefaultProvider } from '../../src/features/settings/queries';
 import { Check, RefreshCw } from 'lucide-react-native';
-import { queryKeys } from '@generatorai/client-core';
 import type { HarnessProviderStatus } from '@generatorai/shared';
 
-import { useApi } from '../../src/api/useApi';
-import { requireStepUp } from '../../src/auth/stepUp';
+import { useApi } from '../../src/services/api/useApi';
+import { requireStepUp } from '../../src/services/auth/stepUp';
 import { ProviderBrandIcon } from '../../src/components/brand/VendorIcons';
 import { Badge, SectionHeader, type Tone } from '../../src/components/ui/primitives';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
@@ -34,29 +33,14 @@ function readiness(provider: HarnessProviderStatus): { label: string; tone: Tone
 }
 
 export default function ProvidersScreen(): React.ReactElement {
-  const api = useApi();
-  const queryClient = useQueryClient();
   const { colors } = useTheme();
 
-  const providers = useQuery({
-    queryKey: queryKeys.providers(),
-    queryFn: () => api.harness.providers(),
-  });
+  const providers = useProviders();
 
   // A forced re-probe spawns each provider's CLI, so it only ever runs on an
   // explicit tap — never on mount or focus.
-  const reprobe = useMutation({
-    mutationFn: () => api.harness.providers(true),
-    onSuccess: (data) => queryClient.setQueryData(queryKeys.providers(), data),
-  });
-
-  const setDefault = useMutation({
-    mutationFn: (type: string) => api.harness.setDefault(type),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.providers() });
-      void queryClient.invalidateQueries({ queryKey: ['harness', 'models'] });
-    },
-  });
+  const reprobe = useProbeProviders();
+  const setDefault = useDefaultProvider();
 
   const all = providers.data?.providers ?? [];
   // Ready first: the list exists to pick a default, and only a ready

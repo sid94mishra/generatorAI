@@ -6,7 +6,7 @@
 // for the workbench panel + sheet, and the availability rules moved with them.
 // ────────────────────────────────────────────────────────────────
 
-import { checkFeature, type FeatureAvailability } from '../../../auth/featureGate';
+import { checkFeature, type FeatureAvailability } from '../../../services/auth/featureGate';
 
 export const COMPUTER_SCOPE = 'exec:computer';
 

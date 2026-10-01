@@ -1,3 +1,4 @@
+import { canSendComposer, hasComposerContent } from '@generatorai/client-core';
 // ────────────────────────────────────────────────────────────────
 // Composer — the chat input (v2, §6.4).
 //
@@ -113,7 +114,7 @@ import type {
   VoiceUiState,
 } from './composer/types';
 import { SCOPE_REQUEST_ROUTE } from '../../navigation/routes';
-import { findModel, promptLimit } from '../../api/useModels';
+import { findModel, promptLimit } from '../../services/api/useModels';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export type { StopState } from './composer/types';
@@ -403,8 +404,12 @@ export function Composer(props: ComposerProps): React.ReactElement {
     void KeyboardController.dismiss();
   }, [fieldEditable]);
 
-  const hasContent = draft.trim().length > 0 || attachments.length > 0 || Boolean(props.activeCommand);
-  const canSend = hasContent && !disabled && !props.sending;
+  const content = { text: draft, attachmentCount: attachments.length, hasCommand: Boolean(props.activeCommand), captureCount: 0 };
+  const hasContent = hasComposerContent(content);
+  const canSend = canSendComposer({
+    ...content, disabled, sending: Boolean(props.sending), pendingInteraction: hasGate,
+    prepStatus: props.workspacePrep?.status,
+  });
   const showMic =
     props.voiceAvailable && !voiceLive && !isStreaming && !props.activeCommand && !hasContent && !props.sending;
   const turnInput = {
@@ -613,7 +618,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
 
       {props.boundAgent ? <BoundAgentChip agent={props.boundAgent} /> : null}
       {props.workspacePrep ? <WorkspacePrepBar prep={props.workspacePrep} /> : null}
-      {props.gate ? <GateBanner gate={{ ...props.gate, hasDraft: hasContent }} /> : null}
+      {props.gate && draft.trim().length > 0 ? <GateBanner gate={{ ...props.gate, hasDraft: hasContent }} /> : null}
 
       <AttachmentChips items={attachments} onRemove={onRemoveAttachment} />
 
@@ -682,6 +687,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
           >
             <TextInput
               ref={inputRef}
+              testID="composer-input"
               accessibilityLabel="Message"
               accessibilityHint={props.onOpenHistory ? 'Swipe up for recent prompts' : undefined}
               multiline
@@ -1031,6 +1037,7 @@ function SendButton({
 
   return (
     <Touchable
+      testID={streaming ? (stopState?.forceAvailable ? 'composer-force-reset' : 'composer-stop') : 'composer-send'}
       accessibilityLabel={streaming ? (stopState?.label ?? 'Stop') : sending ? 'Sending' : 'Send'}
       accessibilityHint={!streaming && onSendWithPlan ? 'Long-press to send in plan mode' : undefined}
       disabled={!active}
