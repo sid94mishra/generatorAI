@@ -33,8 +33,22 @@ export function createLinkQueue() {
 }
 export const linkQueue = createLinkQueue();
 
+/**
+ * The `(dev)` routes (Storybook, the theme switcher, the notification tester) in a development
+ * build only. They are not product routes, so the shared allowlist rejects them; walkthroughs and
+ * Maestro still need to open them by link. Release builds never match (`dev` is `__DEV__`).
+ */
+const DEV_ROUTES: ReadonlySet<string> = new Set(['storybook', 'theme', 'notify']);
+export function devRoute(path: string, dev: boolean): string | null {
+  if (!dev) return null;
+  const match = /^(?:generatorai:\/\/\/?|\/)?([a-z]+)(\?[A-Za-z0-9_=&%.-]*)?$/.exec(path);
+  return match && DEV_ROUTES.has(match[1]!) ? `/${match[1]}${match[2] ?? ''}` : null;
+}
+
 /** Native intents cannot wait on React auth: queue protected navigation for the mounted shell. */
 export function redirectLink(path: string, activeServerId?: string | null): string {
+  const dev = devRoute(path, typeof __DEV__ !== 'undefined' && __DEV__);
+  if (dev) return dev;
   const route = deepLinkToRoute(path);
   linkQueue.clear();
   if (!route) return '/';

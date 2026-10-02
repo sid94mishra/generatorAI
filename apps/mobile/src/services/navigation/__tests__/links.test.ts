@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { createLinkQueue, linkDisposition, redirectLink, linkQueue } from '../links';
+import { createLinkQueue, devRoute, linkDisposition, redirectLink, linkQueue } from '../links';
 
 it('keeps cold-start links until auth is ready; an old completion cannot erase a new link', () => {
   const queue = createLinkQueue();
@@ -29,4 +29,12 @@ it('returns same-server targets directly so Expo cannot overwrite a queued navig
   expect(redirectLink('generatorai:///chats/c?execute=delete', 'A')).toBe('/chats/c');
   expect(redirectLink('generatorai:///chats/c?server=A', 'A')).toBe('/chats/c?server=A');
   expect(linkQueue.getSnapshot()).toBeNull();
+});
+
+it('opens the (dev) routes by link only in a development build', () => {
+  expect(devRoute('generatorai:///storybook', true)).toBe('/storybook');
+  expect(devRoute('/theme?theme=github&mode=light', true)).toBe('/theme?theme=github&mode=light');
+  expect(devRoute('generatorai:///storybook', false)).toBeNull();
+  expect(devRoute('generatorai:///chats', true)).toBeNull();
+  expect(devRoute('generatorai:///theme/../settings', true)).toBeNull();
 });
