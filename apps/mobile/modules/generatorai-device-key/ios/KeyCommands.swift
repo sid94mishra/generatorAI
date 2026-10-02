@@ -1,14 +1,12 @@
 // ────────────────────────────────────────────────────────────────
 // Hardware keyboard shortcuts for iPad (mobile 06 §3.10, M5-09).
 //
-// UNCOMPILED: written without Xcode on the authoring machine. Review the
-// first `expo prebuild --platform ios && expo run:ios` carefully.
-//
 // The JS side (src/services/native/keyCommands.ts) hands over the commands
 // built from the shared COMMANDS registry (desktopMac bindings). They are
-// installed as `UIKeyCommand`s on the KEY WINDOW of the active scene — the
-// window is in every responder chain, so the shortcuts work over pushed
-// screens, form sheets and full-screen modals alike, and the iPadOS ⌘-hold
+// installed as `UIKeyCommand`s on the ROOT VIEW CONTROLLER of the active
+// scene's key window (06 §3.10; `addKeyCommand` is a UIViewController API).
+// The root controller is in the responder chain of pushed screens and — as
+// their presenter — of form sheets and full-screen modals, and the iPadOS ⌘-hold
 // overlay / menu bar list them by `discoverabilityTitle`. The action is a
 // `UIResponder` extension, so whichever responder UIKit asks first answers
 // and forwards the command id (`propertyList`) to JS as `onKeyCommand`.
@@ -39,7 +37,7 @@ internal final class KeyCommandCenter: NSObject {
 
   private var specs: [KeyCommandSpec] = []
   private var suspended = false
-  private weak var installedWindow: UIWindow?
+  private weak var installedController: UIViewController?
   private var installedCommands: [UIKeyCommand] = []
   private var observing = false
 
@@ -64,22 +62,22 @@ internal final class KeyCommandCenter: NSObject {
 
   @objc private func reinstall() {
     uninstall()
-    guard !suspended, !specs.isEmpty, let window = Self.keyWindow() else { return }
+    guard !suspended, !specs.isEmpty, let controller = Self.keyWindow()?.rootViewController else { return }
     let commands = specs.compactMap(Self.makeCommand)
     for command in commands {
-      window.addKeyCommand(command)
+      controller.addKeyCommand(command)
     }
-    installedWindow = window
+    installedController = controller
     installedCommands = commands
   }
 
   private func uninstall() {
-    if let window = installedWindow {
+    if let controller = installedController {
       for command in installedCommands {
-        window.removeKeyCommand(command)
+        controller.removeKeyCommand(command)
       }
     }
-    installedWindow = nil
+    installedController = nil
     installedCommands = []
   }
 
