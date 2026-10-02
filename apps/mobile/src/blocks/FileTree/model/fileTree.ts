@@ -103,3 +103,61 @@ export function isImagePath(path: string): boolean {
 export function isMarkdownPath(path: string): boolean {
   return /\.(md|mdx|markdown)$/i.test(path);
 }
+
+// ── The virtualised tree (MB-25) ─────────────────────────────────
+
+export interface TreeRow {
+  key: string;
+  /** Indent level (16 per level). */
+  depth: number;
+  name: string;
+  /** File: its path; folder: its prefix with the trailing slash. */
+  path: string;
+  isDir: boolean;
+  expanded: boolean;
+  /** Files under a folder. */
+  count?: number;
+  /** A file's change letter source, or a folder containing changes ("has changes"). */
+  status?: 'added' | 'modified' | 'deleted' | 'renamed';
+  dirty: boolean;
+}
+
+/**
+ * The tree flattened for a virtual list: folders first then files at each level, a folder's children right under it
+ * while it is expanded. `changed` maps a path to its change status (folders are dirty when anything under them is).
+ */
+export function flattenTree(paths: readonly string[], expanded: ReadonlySet<string>, changed: ReadonlyMap<string, TreeRow['status']>, prefix = '', depth = 0): TreeRow[] {
+  const out: TreeRow[] = [];
+  for (const entry of levelEntries(paths, prefix)) {
+    if (entry.isDir) {
+      const open = expanded.has(entry.path);
+      let dirty = false;
+      for (const p of changed.keys()) {
+        if (p.startsWith(entry.path)) {
+          dirty = true;
+          break;
+        }
+      }
+      out.push({ key: entry.path, depth, name: entry.name, path: entry.path, isDir: true, expanded: open, ...(entry.count !== undefined ? { count: entry.count } : {}), dirty });
+      if (open) out.push(...flattenTree(paths, expanded, changed, entry.path, depth + 1));
+    } else {
+      const status = changed.get(entry.path);
+      out.push({ key: entry.path, depth, name: entry.name, path: entry.path, isDir: false, expanded: false, ...(status ? { status } : {}), dirty: Boolean(status) });
+    }
+  }
+  return out;
+}
+
+/** Search results as flat file rows (the full path is the name). */
+export function searchRows(paths: readonly string[], query: string, changed: ReadonlyMap<string, TreeRow['status']>): TreeRow[] {
+  return searchEntries(paths, query).map((e) => {
+    const status = changed.get(e.path);
+    return { key: e.path, depth: 0, name: e.path, path: e.path, isDir: false, expanded: false, ...(status ? { status } : {}), dirty: Boolean(status) };
+  });
+}
+
+/** Every folder prefix above `path` (to reveal a file): `a/b/c.ts` → `a/`, `a/b/`. */
+export function ancestorPrefixes(path: string): string[] {
+  const parts = path.split('/').slice(0, -1);
+  return parts.map((_, i) => `${parts.slice(0, i + 1).join('/')}/`);
+}

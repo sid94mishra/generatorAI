@@ -43,6 +43,7 @@ import {
 import { buildSlashItems, rankMentionItems, rankSlashItems } from './model/composerCatalog';
 import { captureToAttachment, insertCaptureIntoDraft, type CaptureInput } from './model/captures';
 import type { ComposerCaptureActions } from './model/captureContext';
+import { onMentionRequest } from './model/mentionBus';
 import { useCaptures } from './useCaptures';
 import type {
   AttachmentSource,
@@ -366,6 +367,8 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
     [setDraft, setCaret, onCaptured],
   );
   const captures = useMemo<ComposerCaptureActions>(() => ({ ...fetched, mentionPath }), [fetched, mentionPath]);
+  // "Mention in chat" from a screen pushed over this chat (FilePreview, the diff).
+  useEffect(() => (chatId ? onMentionRequest(chatId, mentionPath) : undefined), [chatId, mentionPath]);
 
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));

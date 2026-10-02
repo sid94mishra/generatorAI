@@ -12,7 +12,6 @@ import React from 'react';
 
 import { EmptyState } from '../ui/States';
 import { checkFeature } from '../../services/auth/featureGate';
-import { FilesSection } from '../chat/workbench/FilesSection';
 import { TasksSection } from '../chat/workbench/TasksSection';
 import { PlanSection } from '../chat/workbench/PlanSection';
 import { TerminalSection } from '../chat/workbench/TerminalSection';
@@ -64,18 +63,6 @@ export function WorkbenchTab({
 }: WorkbenchTabProps): React.ReactElement | null {
   const noWorkspace = <EmptyState title="No workspace yet" message="A workspace is created the first time the agent runs here." />;
   switch (type) {
-    case 'files':
-      return workspaceId ? (
-        <FilesSection
-          workspaceId={workspaceId}
-          active={active}
-          focusPath={filesFocus?.path ?? null}
-          focusAlias={filesFocus?.alias ?? null}
-          {...(onOpenInChanges ? { onOpenInChanges } : {})}
-        />
-      ) : (
-        noWorkspace
-      );
     case 'terminal': {
       if (!workspaceId) return noWorkspace;
       const terminal = checkFeature('terminal', scopes);

@@ -1,6 +1,6 @@
 // File diff (MPaneDiff; `/workspaces/[workspaceId]/diff?path=&alias=&base=&chat=`; 04 §2.3): pushed over the chat
 // from the Changes tab (the pane stays docked beside it at ≥ 840). Detail header — breadcrumb "Changes › src › cart",
-// the file name, ⋯ Copy path | Keep / Unkeep | Discard changes… — over MB-24 DiffView, and the footer
+// the file name, ⋯ Copy path · Open file · Mention in chat | Keep / Unkeep | Discard changes… — over MB-24 DiffView, and the footer
 // "‹ Prev · File 1 of 2 · <next file> ›" through the same changed-file list the Changes tab shows.
 import React, { useMemo } from 'react';
 import { View } from 'react-native';
@@ -8,7 +8,9 @@ import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
 
 import { changeRows, splitPath, useChangeActions } from '../../blocks/ChangesPanel';
+import { requestMention } from '../../blocks/Composer/model/mentionBus';
 import { DiffView, fileNeighbours, useReviewThreads } from '../../blocks/DiffView';
+import { workspaceFileHref } from '../../blocks/shell/hrefs';
 import { useChangesSummary } from '../../blocks/WorkspacePane';
 import { Header } from '../../ui/native/router/Header';
 import { confirm } from '../../ui/native/AlertDialog';
@@ -57,6 +59,8 @@ export default function DiffScreen(): React.ReactElement {
 
   const menu = [
     { id: 'copy', label: 'Copy path', icon: 'copy' as const },
+    { id: 'open', label: 'Open file', icon: 'file' as const, disabled: entry?.status === 'deleted' },
+    ...(chatId ? [{ id: 'mention', label: 'Mention in chat', icon: 'mention' as const }] : []),
     ...(actions.canReview && entry ? [{ type: 'separator' as const }, entry.kept ? { id: 'unkeep', label: 'Unkeep', icon: 'undo' as const, testID: 'unkeep-file' } : { id: 'keep', label: 'Keep', icon: 'check' as const, testID: 'keep-file' }] : []),
     ...(actions.canRestore && entry ? [{ type: 'separator' as const }, { id: 'discard', label: 'Discard changes…', icon: 'undo' as const, destructive: true }] : []),
   ];
@@ -64,6 +68,10 @@ export default function DiffScreen(): React.ReactElement {
     if (item === 'copy') {
       void Clipboard.setStringAsync(path);
       haptic('success');
+    } else if (item === 'open') router.push(workspaceFileHref(workspaceId, { path, alias, chat: chatId }) as never);
+    else if (item === 'mention' && chatId) {
+      requestMention(chatId, alias !== '.' ? `${alias}/${path}` : path);
+      back();
     } else if (item === 'keep' && entry) actions.keep(entry);
     else if (item === 'unkeep' && entry) actions.unkeep(entry);
     else if (item === 'discard' && entry) {

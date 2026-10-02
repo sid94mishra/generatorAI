@@ -152,7 +152,7 @@ function InlineCommentComposer({
 }
 
 /** Pinch → font size (10–18), one `fontStep` haptic per point (MD-78). */
-function fontPinch(): ReturnType<typeof Gesture.Pinch> {
+export function fontPinch(): ReturnType<typeof Gesture.Pinch> {
   let start = getDiffPrefs().fontSize;
   return Gesture.Pinch()
     .runOnJS(true)

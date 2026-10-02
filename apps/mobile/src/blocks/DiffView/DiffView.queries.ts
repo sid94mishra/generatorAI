@@ -14,7 +14,7 @@ import { toast } from '../../ui/primitives/Toast';
 import type { DiffSide } from './model/diffModel';
 import { buildReviewBatch, groupThreadsByFile, type ReviewSubmitTarget } from './model/reviewBatch';
 
-export function useFilePatch(workspaceId: string, file: { path: string; alias?: string; oldBlob?: string; newBlob?: string }, base: string) {
+export function useFilePatch(workspaceId: string, file: { path: string; alias?: string; oldBlob?: string; newBlob?: string }, base: string, enabled = true) {
   const api = useApi();
   return useQuery({
     queryKey: [...queryKeys.changeFile(workspaceId, file.path, file.oldBlob, file.newBlob), base, file.alias ?? '.'],
@@ -27,7 +27,7 @@ export function useFilePatch(workspaceId: string, file: { path: string; alias?: 
         ...(file.oldBlob ? { oldBlob: file.oldBlob } : {}),
         ...(file.newBlob ? { newBlob: file.newBlob } : {}),
       }),
-    enabled: Boolean(workspaceId && file.path),
+    enabled: enabled && Boolean(workspaceId && file.path),
     // A diff for a specific blob pair is immutable; only the working side moves.
     staleTime: file.newBlob ? Infinity : 10_000,
   });

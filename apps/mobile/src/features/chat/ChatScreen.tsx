@@ -21,6 +21,7 @@ import {
 } from '@generatorai/client-core';
 
 import { ChangesPanel, ChangesStrip } from '../../blocks/ChangesPanel';
+import { FileTree } from '../../blocks/FileTree';
 import { chatRowView, displayChatTitle, useChatRowActions } from '../../blocks/ChatRow';
 import { Composer, type ComposerPane } from '../../blocks/Composer/Composer';
 import { readAllAttachmentBytes } from '../../blocks/Composer/model/attachmentPickers';
@@ -550,7 +551,13 @@ export default function ChatScreen({ renderLegacyTab }: ChatScreenProps = {}): R
   const renderTab = useCallback(
     (type: MobilePaneTab, ctx: { active: boolean }) => (
       <ComposerCaptureContext.Provider value={captures}>
-        {type === 'changes' ? <ChangesPanel workspaceId={workspaceId} chatId={chatId} active={ctx.active} onRewind={(turnId, prompt) => openRewind({ turnId, prompt })} /> : (renderLegacyTab?.(type, ctx, paneContext) ?? null)}
+        {type === 'changes' ? (
+          <ChangesPanel workspaceId={workspaceId} chatId={chatId} active={ctx.active} onRewind={(turnId, prompt) => openRewind({ turnId, prompt })} />
+        ) : type === 'files' ? (
+          <FileTree workspaceId={workspaceId} chatId={chatId} active={ctx.active} />
+        ) : (
+          (renderLegacyTab?.(type, ctx, paneContext) ?? null)
+        )}
       </ComposerCaptureContext.Provider>
     ),
     [captures, workspaceId, chatId, openRewind, renderLegacyTab, paneContext],
