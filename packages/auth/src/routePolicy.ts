@@ -61,6 +61,15 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
     read: ['read:status'],
     write: ['read:status'],
   },
+  // A device registering its OWN approval key (mobile MG-05): the device id
+  // comes from the DPoP principal and the body must prove possession of the
+  // new key, so it is the same carve-out as scope requests and push tokens.
+  {
+    prefix: '/auth/devices/me/approval-key',
+    read: ['read:status'],
+    write: ['read:status'],
+    riskLevel: 'high',
+  },
   { prefix: '/auth/devices', read: ['admin:devices'], write: ['admin:devices'], riskLevel: 'high' },
   // Reviewing and resolving scope requests grants authority, so it is the
   // same bar as editing a device's scopes directly.

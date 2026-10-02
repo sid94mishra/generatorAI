@@ -2821,6 +2821,16 @@ export const MIGRATIONS: readonly Migration[] = [
         `CREATE INDEX idx_chats_pin_all_activity ON chats((pinned_at IS NOT NULL), last_activity_at, id);`,
       ],
     },
+    // Mobile MG-05: the biometric-gated approval key a phone signs risky approvals with.
+    {
+      version: 65,
+      name: 'device_approval_key',
+      sql: [
+        `ALTER TABLE auth_devices ADD COLUMN approval_public_jwk TEXT;`,
+        `ALTER TABLE auth_devices ADD COLUMN approval_key_created_at INTEGER;`,
+        `ALTER TABLE auth_devices ADD COLUMN approval_key_presence TEXT;`,
+      ],
+    },
   ];
 
 

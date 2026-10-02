@@ -71,6 +71,9 @@ interface DeviceRow {
   previous_credential_grace_until: number | null;
   connection_mode: string;
   relay_binding: string | null;
+  approval_public_jwk: string | null;
+  approval_key_created_at: number | null;
+  approval_key_presence: string | null;
 }
 
 function toDevice(row: DeviceRow): DeviceRecord {
@@ -91,6 +94,9 @@ function toDevice(row: DeviceRow): DeviceRecord {
     previousCredentialGraceUntil: row.previous_credential_grace_until,
     connectionMode: row.connection_mode as DeviceConnectionMode,
     relayBinding: row.relay_binding,
+    approvalPublicJwk: row.approval_public_jwk,
+    approvalKeyCreatedAt: row.approval_key_created_at,
+    approvalKeyPresence: row.approval_key_presence as DeviceRecord['approvalKeyPresence'],
   };
 }
 
@@ -109,6 +115,9 @@ const DEVICE_COLUMN_MAP: Record<string, string> = {
   previousCredentialGraceUntil: 'previous_credential_grace_until',
   connectionMode: 'connection_mode',
   relayBinding: 'relay_binding',
+  approvalPublicJwk: 'approval_public_jwk',
+  approvalKeyCreatedAt: 'approval_key_created_at',
+  approvalKeyPresence: 'approval_key_presence',
 };
 
 export class SqliteDeviceRepository implements IDeviceRepository {
@@ -472,8 +481,8 @@ export class SqliteNonceStore implements INonceStore {
     this.sqlite = sqliteHandle(db);
   }
 
-  async issue(expiresAt: number): Promise<string> {
-    const nonce = this.randomToken();
+  async issue(expiresAt: number, prefix = ''): Promise<string> {
+    const nonce = prefix + this.randomToken();
     this.sqlite
       .prepare(`INSERT INTO auth_nonces (nonce, expires_at) VALUES (?, ?)`)
       .run(nonce, expiresAt);

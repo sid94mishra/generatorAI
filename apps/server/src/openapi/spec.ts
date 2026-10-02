@@ -1232,6 +1232,45 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
       },
     },
+    '/api/auth/approval-nonce': {
+      post: {
+        tags: ['Auth'], summary: 'Single-use approval nonce bound to this device (MG-05)',
+        description: 'Paired devices only. Valid 60 s; spent by an approval proof or an approval-key registration.',
+        responses: {
+          '200': { description: 'Nonce', content: { 'application/json': { schema: { type: 'object', properties: { nonce: { type: 'string' }, expiresAt: { type: 'number' } }, required: ['nonce', 'expiresAt'] } } } },
+          '403': { description: 'NOT_A_DEVICE' },
+        },
+      },
+    },
+    '/api/auth/devices/me/approval-key': {
+      put: {
+        tags: ['Auth'], summary: "Register this device's biometric-gated approval key (MG-05)",
+        description: 'DPoP-authenticated; the device id comes from the principal. `proof` is the new key signing the canonical JSON {"deviceId","nonce","serverId","typ":"gai-approval-key"} (ES256, raw r||s, base64url).',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  publicJwk: { type: 'object', properties: { kty: { type: 'string', enum: ['EC'] }, crv: { type: 'string', enum: ['P-256'] }, x: { type: 'string' }, y: { type: 'string' } }, required: ['kty', 'crv', 'x', 'y'] },
+                  keyProtection: { type: 'string', enum: ['secure-enclave', 'strongbox', 'tee'] },
+                  presence: { type: 'string', enum: ['biometry', 'passcode'] },
+                  nonce: { type: 'string' },
+                  proof: { type: 'string' },
+                },
+                required: ['publicJwk', 'keyProtection', 'presence', 'nonce', 'proof'],
+              },
+            },
+          },
+        },
+        responses: { '204': { description: 'Registered' }, '400': { description: 'INVALID_BODY' }, '403': { description: 'NOT_A_DEVICE or APPROVAL_PROOF_INVALID' } },
+      },
+      delete: {
+        tags: ['Auth'], summary: "Remove this device's approval key (MG-05)",
+        responses: { '204': { description: 'Removed (idempotent)' } },
+      },
+    },
     '/api/health': {
       get: {
         tags: ['System'],

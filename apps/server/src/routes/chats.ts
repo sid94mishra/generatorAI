@@ -40,6 +40,7 @@ import type {
   PlanDocument,
 } from '@generatorai/shared';
 import { chatModelSummary, type ChatListRequest } from '@generatorai/core';
+import { checkApprovalProof } from '../middleware/approvalProof.js';
 
 /**
  * Body of `POST /chats/:id/cancel`. The budget is clamped, not rejected: the
@@ -1371,14 +1372,29 @@ export function createChatApiRoutes(container: Container): Router {
     validate(ResolveToolPermissionSchema),
     async (req, res, next) => {
       try {
+        const chatId = String(req.params['id']);
+        const interactionId = String(req.params['interactionId']);
+        const { behavior, message } = req.body as { behavior: 'allow' | 'deny'; message?: string };
+        // MG-05: a risky gate answered from a phone must be signed there.
+        const interaction = await container.agentInteractionService?.findById(interactionId);
+        if (interaction && interaction.kind === 'tool_permission') {
+          const payload = interaction.payload as { risk?: unknown } | null;
+          const signed = await checkApprovalProof(container.security, req, {
+            risk: payload?.risk,
+            expect: { kind: 'tool_permission', id: interactionId, entityId: chatId, decision: behavior },
+          });
+          if (!signed.ok) {
+            res.status(signed.status).json({ error: { code: signed.code, message: signed.message } });
+            return;
+          }
+        }
         // Delegated for the same reason as the question gate: the service owns
         // the ownership check and emits the resolution event, so a reconnecting
         // client replays a settled card rather than a pending one.
-        const result = await chatManagementService.resolveToolPermission(
-          String(req.params['id']),
-          String(req.params['interactionId']),
-          req.body as { behavior: 'allow' | 'deny'; message?: string },
-        );
+        const result = await chatManagementService.resolveToolPermission(chatId, interactionId, {
+          behavior,
+          ...(message !== undefined ? { message } : {}),
+        });
         if (!result.ok) {
           const reason = result.reason ?? 'Already resolved';
           if (/not enabled/i.test(reason)) {

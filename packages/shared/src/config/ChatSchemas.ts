@@ -219,6 +219,8 @@ export const ResolveToolPermissionSchema = z.object({
   behavior: z.enum(['allow', 'deny']),
   /** Relayed to the agent as the denial reason. */
   message: z.string().max(2000).optional(),
+  /** MG-05 — signed answer from a phone; required for a risky gate answered by a mobile device. */
+  approvalProof: z.unknown().optional(),
 });
 
 /**

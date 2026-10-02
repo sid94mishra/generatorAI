@@ -19,6 +19,7 @@ import * as path from 'node:path';
 import {
   AuthService,
   DeviceService,
+  ApprovalProofVerifier,
   DpopVerifier,
   SecurityAuditService,
   TokenService,
@@ -84,6 +85,8 @@ export interface SecurityContext {
   secretStore: SecretStore;
   tokens: TokenService;
   dpop: DpopVerifier;
+  /** MG-05 — approval nonces, key registrations and signed risky approvals. */
+  approvals: ApprovalProofVerifier;
   devices: DeviceService;
   auth: AuthService;
   audit: SecurityAuditService;
@@ -411,6 +414,7 @@ export async function createSecurityContext(
     secretStore,
     tokens,
     dpop,
+    approvals: new ApprovalProofVerifier({ nonceStore, serverId: identity.hostId }),
     devices,
     auth,
     audit,

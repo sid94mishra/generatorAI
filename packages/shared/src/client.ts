@@ -35,6 +35,7 @@ export * from './status/index.js';
 export * from './review.js';
 // Mobile MG-04 — gate risk verdict
 export * from './security/gateRisk.js';
+export * from './security/approvalProof.js';
 
 // Error classes are plain `Error` subclasses.
 export * from './errors/index.js';

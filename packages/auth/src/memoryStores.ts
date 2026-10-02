@@ -51,9 +51,9 @@ export class MemoryNonceStore implements INonceStore {
 
   constructor(private readonly maxEntries = 20_000) {}
 
-  async issue(expiresAt: number): Promise<string> {
+  async issue(expiresAt: number, prefix = ''): Promise<string> {
     if (this.nonces.size >= this.maxEntries) await this.purge(Date.now());
-    const nonce = crypto.randomBytes(24).toString('base64url');
+    const nonce = prefix + crypto.randomBytes(24).toString('base64url');
     this.nonces.set(nonce, expiresAt);
     return nonce;
   }
