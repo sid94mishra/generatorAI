@@ -12,6 +12,7 @@ import { Pressable } from '../../primitives/Pressable';
 import { Text } from '../../primitives/Text';
 import { RadioGroup, RadioOption } from '../../primitives/RadioGroup';
 import { SearchInput } from '../../primitives/SearchInput';
+import { floatingLabelGeometry } from '../../primitives/Input/inputModel';
 import { AnchoredMenu, type MenuAnchor } from '../Menu/MenuJs';
 import { SheetModal } from '../Sheet/SheetJs';
 import type { SelectProps } from './Select.types';
@@ -55,6 +56,8 @@ export function SelectJs(props: SelectProps): React.ReactElement {
   const android = nativePlatform === 'android';
   const outlined = android || presentation === 'field';
   const chosen = selectedOption(options, value);
+  const [labelHeight, setLabelHeight] = useState(16);
+  const float = floatingLabelGeometry(labelHeight);
   const show = (): void => {
     if (!props.searchable) ref.current?.measureInWindow?.((x, y, width, height) => setAnchor({ x, y, width, height }));
     setOpen(true);
@@ -80,6 +83,7 @@ export function SelectJs(props: SelectProps): React.ReactElement {
         accessibilityLabel={selectAccessibilityLabel(props)}
         accessibilityHint={props.searchable ? 'Opens a list' : 'Opens a menu'}
         accessibilityState={{ expanded: open }}
+        style={android ? { paddingTop: float.padTop } : undefined}
         className={cn(
           'min-h-field flex-row items-center gap-3',
           android ? 'relative rounded-field border border-line-strong px-4' : outlined ? 'rounded-field bg-sunken ps-3 pe-2' : 'px-4',
@@ -87,7 +91,7 @@ export function SelectJs(props: SelectProps): React.ReactElement {
         )}
       >
         {android ? (
-          <View className="absolute -top-2.5 start-3 bg-surface px-1">
+          <View className="absolute start-3 bg-surface px-1" style={{ top: float.top }} onLayout={(e) => setLabelHeight(e.nativeEvent.layout.height)}>
             <Text role="caption" tone="fg-2">
               {label}
             </Text>

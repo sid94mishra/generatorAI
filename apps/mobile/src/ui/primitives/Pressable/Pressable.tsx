@@ -33,6 +33,7 @@ export function Pressable({
   large = false,
   borderless = false,
   className,
+  style,
   testID,
   children,
 }: PressableProps): React.ReactElement {
@@ -46,10 +47,12 @@ export function Pressable({
   // Reduce Motion on iOS: no scale; the highlight is an instant opacity (02 §6.2).
   const dims = kind === 'scale' && motion.reduced;
   const animated = useAnimatedStyle(
-    () => ({
-      transform: [{ scale: scales ? 1 - pressed.value * (1 - target) : 1 }],
-      opacity: dims ? 1 - pressed.value * 0.3 : 1,
-    }),
+    // Opacity is written only for the Reduce Motion highlight: an animated opacity on a Liquid Glass ancestor kills
+    // the effect (02 §8.2), and glass controls sit inside Pressables.
+    () =>
+      dims
+        ? { transform: [{ scale: 1 }], opacity: 1 - pressed.value * 0.3 }
+        : { transform: [{ scale: scales ? 1 - pressed.value * (1 - target) : 1 }] },
     [scales, dims, target],
   );
 
@@ -94,7 +97,7 @@ export function Pressable({
       onAccessibilityAction={onAccessibilityAction ? accessibilityAction : undefined}
       android_ripple={rippleFor(kind, disabled, colors.selected, borderless)}
       className={cn(frame === 'hit' && 'min-h-hit min-w-hit items-center justify-center', highlighted && 'bg-selected', className)}
-      style={animated}
+      style={style ? [animated, style] : animated}
     >
       {children}
     </AnimatedPressable>

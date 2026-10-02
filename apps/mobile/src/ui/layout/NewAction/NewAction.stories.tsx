@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View } from 'react-native';
 import type { Meta, StoryObj } from '@storybook/react-native';
 
-import { LONG_TEXT, StoryPage, StorySection, ThemeMatrix, WithFontScale } from '../../storybook/StoryKit';
+import { GlassBackdrop, LONG_TEXT, StoryPage, StorySection, ThemeMatrix, WithFontScale } from '../../storybook/StoryKit';
 import { Button } from '../../primitives/Button';
 import { NewAction } from './NewAction';
 
@@ -13,9 +13,9 @@ function Toggle(): React.ReactElement {
   return (
     <View className="gap-2">
       <Button label={collapsed ? 'Expand (scroll up)' : 'Collapse (scroll down)'} size="sm" onPress={() => setCollapsed((v) => !v)} />
-      <View className="rounded-card bg-sunken pt-4">
+      <GlassBackdrop>
         <NewAction label="New chat" icon="plus" onPress={noop} collapsed={collapsed} testID="home-new-chat" />
-      </View>
+      </GlassBackdrop>
     </View>
   );
 }
@@ -36,7 +36,9 @@ function NewActionGallery(): React.ReactElement {
       </StorySection>
       <StorySection title="Theme matrix">
         <ThemeMatrix>
-          <NewAction label="New chat" icon="plus" onPress={noop} />
+          <GlassBackdrop>
+            <NewAction label="New chat" icon="plus" onPress={noop} />
+          </GlassBackdrop>
         </ThemeMatrix>
       </StorySection>
     </StoryPage>

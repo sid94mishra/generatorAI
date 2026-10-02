@@ -1,6 +1,6 @@
 // MP-03 Pressable contract (03 MP-03).
 import type { ReactNode } from 'react';
-import type { AccessibilityRole, AccessibilityState } from 'react-native';
+import type { AccessibilityRole, AccessibilityState, StyleProp, ViewStyle } from 'react-native';
 import type { HapticConcept } from '@generatorai/design-tokens';
 
 export type PressFeedback = 'scale' | 'highlight' | 'none';
@@ -33,6 +33,8 @@ export interface PressableProps {
   /** Android ripple without bounds (icon buttons). */
   borderless?: boolean;
   className?: string;
+  /** Computed geometry only (measured offsets); literal styles are lint errors. */
+  style?: StyleProp<ViewStyle>;
   testID?: string;
   children: ReactNode;
 }

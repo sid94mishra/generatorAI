@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, screen, userEvent } from '@testing-library/react-native';
 import * as Clipboard from 'expo-clipboard';
 import { ListRow } from './ListRow';
-import { listRowLabel, listRowPress, listRowRole } from './listRowModel';
+import { listRowColumns, listRowLabel, listRowPress, listRowRole } from './listRowModel';
 import { renderThemed } from '../../__tests__/themed';
 
 describe('ListRow (ML-13)', () => {
@@ -16,6 +16,10 @@ describe('ListRow (ML-13)', () => {
     listRowPress({ kind: 'toggle', switchValue: true, onValueChange })!();
     expect(onValueChange).toHaveBeenCalledWith(false);
     expect(listRowPress({ kind: 'value', onPress: jest.fn() })).toBeUndefined();
+    // A trailing detail gets the remaining width; the title only what it needs (device review).
+    expect(listRowColumns('navigation', '1 of 2 connected')).toEqual({ title: 'max-w-3/5 shrink-0', trailing: 'flex-1 justify-end' });
+    expect(listRowColumns('navigation')).toEqual({ title: 'flex-1', trailing: '' });
+    expect(listRowColumns('toggle', 'x').title).toBe('flex-1');
   });
 
   it('toggles from the whole row, which carries the switch state', async () => {

@@ -1,8 +1,7 @@
 import React from 'react';
-import { View } from 'react-native';
 import type { Meta, StoryObj } from '@storybook/react-native';
 
-import { StoryPage, StorySection, ThemeMatrix, WithFontScale } from '../../storybook/StoryKit';
+import { GlassBackdrop, StoryPage, StorySection, ThemeMatrix, WithFontScale } from '../../storybook/StoryKit';
 import { ScrollToLatest } from './ScrollToLatest';
 
 const noop = (): void => undefined;
@@ -11,11 +10,11 @@ function ScrollToLatestGallery(): React.ReactElement {
   return (
     <StoryPage>
       <StorySection title="Latest, with new count, hidden">
-        <View className="gap-3 rounded-card bg-sunken p-4">
+        <GlassBackdrop>
           <ScrollToLatest visible onPress={noop} />
           <ScrollToLatest visible onPress={noop} newCount={3} />
           <ScrollToLatest visible={false} onPress={noop} />
-        </View>
+        </GlassBackdrop>
       </StorySection>
       <StorySection title="Font scale 2.0">
         <WithFontScale scale={2}>

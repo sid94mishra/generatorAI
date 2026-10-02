@@ -35,3 +35,13 @@ export function listRowPress(props: Pick<ListRowProps, 'kind' | 'switchValue' | 
   if (kind === 'value' || kind === 'info' || kind === 'stepper' || kind === 'segmented' || kind === 'picker') return undefined;
   return onPress;
 }
+
+/**
+ * Column widths for a row (03 ML-13): when a text detail trails the title (navigation / value / info), the title takes
+ * the width it needs up to 60 % (wrapping beyond it) and the detail takes all the remaining width, ellipsizing only
+ * when it truly runs out; otherwise the title fills the row.
+ */
+export function listRowColumns(kind: ListRowProps['kind'], value?: string): { title: string; trailing: string } {
+  const detail = Boolean(value) && (kind === 'navigation' || kind === 'value' || kind === 'info');
+  return detail ? { title: 'max-w-3/5 shrink-0', trailing: 'flex-1 justify-end' } : { title: 'flex-1', trailing: '' };
+}

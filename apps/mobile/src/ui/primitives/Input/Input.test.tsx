@@ -2,7 +2,7 @@ import React from 'react';
 import { screen, userEvent } from '@testing-library/react-native';
 import { Field } from '../Field';
 import { Input } from './Input';
-import { frameState, kindProps, labelFloats, spokenValue } from './inputModel';
+import { floatingLabelGeometry, frameState, kindProps, labelFloats, spokenValue } from './inputModel';
 import { renderThemed } from '../../__tests__/themed';
 
 describe('Input (MP-16)', () => {
@@ -18,6 +18,9 @@ describe('Input (MP-16)', () => {
     expect(labelFloats(false, 'a')).toBe(true);
     expect(spokenValue('secret', 'abc', false)).toBe('3 characters, hidden');
     expect(spokenValue('secret', 'abc', true)).toBe('abc');
+    // The floating label stays on the outline and pushes the value down only at large text (device review).
+    expect(floatingLabelGeometry(16)).toEqual({ top: -8, padTop: 0 });
+    expect(floatingLabelGeometry(32)).toEqual({ top: -16, padTop: 8 });
   });
 
   it('is named by its label, types, and takes the Field error as its hint', async () => {

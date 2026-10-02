@@ -48,3 +48,13 @@ export function spokenValue(kind: InputKind, value: string, revealed: boolean): 
   if (kind === 'secret' && !revealed) return `${value.length} characters, hidden`;
   return value;
 }
+
+/**
+ * Where an Android floating label sits for its measured height: centred on the outline, and the field's top padding
+ * grows by whatever of the label reaches into it beyond 8 dp, so a label at a large text size never covers the value
+ * (device review). At the default size the padding is 0.
+ */
+export function floatingLabelGeometry(labelHeight: number): { top: number; padTop: number } {
+  const half = Math.round(Math.max(0, labelHeight) / 2);
+  return { top: -half, padTop: Math.max(0, half - 8) };
+}

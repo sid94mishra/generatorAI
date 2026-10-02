@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View } from 'react-native';
 import type { Meta, StoryObj } from '@storybook/react-native';
 
-import { LONG_TEXT, RightToLeft, StoryPage, StorySection, ThemeMatrix, WithFontScale } from '../../storybook/StoryKit';
+import { GlassBackdrop, LONG_TEXT, RightToLeft, StoryPage, StorySection, ThemeMatrix, WithFontScale } from '../../storybook/StoryKit';
 import { Button } from '../Button';
 import { Text } from '../Text';
 import { Toast, ToastHost } from './Toast';
@@ -36,10 +36,12 @@ function ToastGallery(): React.ReactElement {
           <Live />
         </StorySection>
         <StorySection title="Kinds: undo, error + Retry, background + Open, long message">
-          <Toast options={ARCHIVED} />
-          <Toast options={FAILED} />
-          <Toast options={DONE} />
-          <Toast options={{ kind: 'error', message: LONG_TEXT }} />
+          <GlassBackdrop>
+            <Toast options={ARCHIVED} />
+            <Toast options={FAILED} />
+            <Toast options={DONE} />
+            <Toast options={{ kind: 'error', message: LONG_TEXT }} />
+          </GlassBackdrop>
         </StorySection>
         <StorySection title="Font scale 2.0, right to left">
           <WithFontScale scale={2}>

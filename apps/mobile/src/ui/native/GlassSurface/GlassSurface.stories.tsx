@@ -2,7 +2,7 @@ import React from 'react';
 import { View } from 'react-native';
 import type { Meta, StoryObj } from '@storybook/react-native';
 
-import { StoryPage, StorySection, ThemeMatrix } from '../../storybook/StoryKit';
+import { GlassBackdrop, StoryPage, StorySection, ThemeMatrix } from '../../storybook/StoryKit';
 import { Icon } from '../../primitives/Icon';
 import { Text } from '../../primitives/Text';
 import { GlassGroup, GlassSurface } from './GlassSurface';
@@ -40,13 +40,15 @@ function GlassSurfaceGallery(): React.ReactElement {
   return (
     <StoryPage>
       <StorySection title="Steps new / toast / composer / full in a merge group (iOS glass; fallback elsewhere and under Reduce Transparency)">
-        <View className="rounded-card bg-sunken p-4">
+        <GlassBackdrop>
           <Samples />
-        </View>
+        </GlassBackdrop>
       </StorySection>
       <StorySection title="Theme matrix">
         <ThemeMatrix>
-          <Samples />
+          <GlassBackdrop>
+            <Samples />
+          </GlassBackdrop>
         </ThemeMatrix>
       </StorySection>
     </StoryPage>

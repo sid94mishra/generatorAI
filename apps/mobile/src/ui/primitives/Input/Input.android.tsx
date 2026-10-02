@@ -13,7 +13,7 @@ import { Icon } from '../Icon';
 import { Pressable } from '../Pressable';
 import { Text } from '../Text';
 import type { InputProps } from './Input.types';
-import { frameState, kindProps, labelFloats, spokenValue } from './inputModel';
+import { floatingLabelGeometry, frameState, kindProps, labelFloats, spokenValue } from './inputModel';
 
 export type { InputKind, InputProps } from './Input.types';
 
@@ -54,13 +54,17 @@ export function Input({
   const k = kindProps(kind);
   const state = frameState({ focused, error, disabled });
   const floats = labelFloats(focused, value);
+  const [labelHeight, setLabelHeight] = useState(16);
+  const float = floatingLabelGeometry(labelHeight);
 
   return (
-    <View className={cn('relative min-h-field flex-row items-center gap-3 rounded-field', OUTLINE[state], disabled && 'opacity-60')}>
+    <View className={cn('relative min-h-field flex-row items-center gap-3 rounded-field', OUTLINE[state], disabled && 'opacity-60')} style={floats ? { paddingTop: float.padTop } : undefined}>
       <Animated.View
         pointerEvents="none"
+        onLayout={(e) => floats && setLabelHeight(e.nativeEvent.layout.height)}
         layout={toggle.reduced ? undefined : LinearTransition.duration(150)}
-        className={cn('absolute', floats ? '-top-2.5 start-3 bg-surface px-1' : 'inset-y-0 justify-center', !floats && (leadingIcon ? 'start-13' : 'start-4'))}
+        className={cn('absolute', floats ? 'start-3 bg-surface px-1' : 'inset-y-0 justify-center', !floats && (leadingIcon ? 'start-13' : 'start-4'))}
+        style={floats ? { top: float.top } : undefined}
       >
         <Text role={floats ? 'caption' : 'body'} tone={error ? 'err' : floats && !focused ? 'fg-2' : focused ? 'fg' : 'fg-3'} numberOfLines={1}>
           {label}

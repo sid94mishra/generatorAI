@@ -9,7 +9,7 @@ import { useThemeColors } from '../../lib/themeColors';
 import { geometry } from '../../platform/geometry';
 import { useMotion } from '../../platform/motion';
 import { controlHint, useFieldContext } from '../Field/fieldContext';
-import { labelFloats } from '../Input/inputModel';
+import { floatingLabelGeometry, labelFloats } from '../Input/inputModel';
 import { Text } from '../Text';
 import type { TextareaProps } from './Textarea.types';
 import { meterText, meterTone, rowBounds } from './textareaModel';
@@ -36,15 +36,19 @@ export function Textarea({
   const toggle = useMotion('toggle');
   const [focused, setFocused] = useState(false);
   const floats = labelFloats(focused, value);
+  const [labelHeight, setLabelHeight] = useState(16);
+  const float = floatingLabelGeometry(labelHeight);
   const step = geometry().type[mono ? 'mono' : 'transcript'];
   const bounds = rowBounds(step.lineHeight, 32, minRows, maxRows);
   const outline = disabled ? 'border border-line px-4' : error ? 'border-2 border-err px-3.75' : focused ? 'border-2 border-accent px-3.75' : 'border border-line-strong px-4';
   return (
-    <View className={cn('relative rounded-field', outline, disabled && 'opacity-60')}>
+    <View className={cn('relative rounded-field', outline, disabled && 'opacity-60')} style={floats ? { paddingTop: float.padTop } : undefined}>
       <Animated.View
         pointerEvents="none"
+        onLayout={(e) => floats && setLabelHeight(e.nativeEvent.layout.height)}
         layout={toggle.reduced ? undefined : LinearTransition.duration(150)}
-        className={cn('absolute', floats ? '-top-2.5 start-3 bg-surface px-1' : 'start-4 top-4')}
+        className={cn('absolute', floats ? 'start-3 bg-surface px-1' : 'start-4 top-4')}
+        style={floats ? { top: float.top } : undefined}
       >
         <Text role={floats ? 'caption' : 'body'} tone={error ? 'err' : focused ? 'fg' : floats ? 'fg-2' : 'fg-3'} numberOfLines={1}>
           {label}

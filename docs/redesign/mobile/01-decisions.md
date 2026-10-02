@@ -954,3 +954,12 @@ Derived during M1-02 from the installed Xcode 27 `simctl help privacy`: notifica
 - **Callout** cards use `rounded-card` (14 / 12 for 03's 16 / 12); the action is a standalone Link.
 - **QrCode** draws dark-on-light: the active theme's literals in light mode, the default theme's light literals (`loadPalette('instrument').light`) in dark mode. The encoder `qrMatrix.ts` (+ its typings and test) moved from `components/devices` into `ui/primitives/QrCode`; the legacy `devices/QrCode.tsx` imports it from there until M7 replaces that screen.
 - **Screen** `state` error / offline now render ErrorState / OfflineState (MD-133's placeholder is gone).
+
+### MD-135 Device-review fixes to the M4 kit — Final (2026-10-02)
+- **ListRow widths:** with a trailing text detail (navigation / value / info) the title takes what it needs up to 60 % (wrapping beyond) and the detail takes the rest, ellipsizing only when out of room (`listRowColumns`); without one the title fills the row.
+- **iOS Select:** the SwiftUI menu Picker gets a bounded frame — the field's inner width (`field`) or 60 % of the row (`row`) — so a long value tail-truncates inside the field.
+- **Android floating labels** (Input, Textarea, Select): the label is measured and centred on the outline; the field's top padding grows by whatever of the label reaches into it beyond 8 dp (`floatingLabelGeometry`), so at large text the label never covers the value. 0 at the default size.
+- **JS Switch on Android** draws its off track in `line-strong`: RN's Android switch draws no track when only the "on" colour is given (MD-48's "system off colours" holds for the native Compose switch).
+- **Glass:** GlassView is no longer clipped (`overflow-hidden` removed; its edge and shadow draw outside its bounds), and Pressable writes `opacity` only for the Reduce Motion highlight, so no glass control sits under an animated opacity. 02 §8.2 specifies no stroke or tint for the glass path (the board's 1 px recipe is an illustration "never re-created"), so none is added; glass over a flat dark canvas is nearly invisible by design. Glass stories now render over `GlassBackdrop` (stripes and text) in StoryKit.
+- **NewAction** labels ellipsize (the capsule is capped to the slot width; the Compose FAB text has `maxLines` 1).
+- `Pressable` gains a `style` prop for computed geometry only.

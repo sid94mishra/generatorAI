@@ -5,6 +5,7 @@ import { ScrollView, Text, View } from 'react-native';
 import { LayoutDirection } from 'uniwind';
 
 import { ThemeProvider } from '../../theme/ThemeProvider';
+import { cn } from '../lib/cn';
 import { FontScaleOverrideContext } from '../platform/fontScale';
 
 export function StoryPage({ children }: { children: React.ReactNode }): React.ReactElement {
@@ -61,3 +62,27 @@ export function RightToLeft({ children }: { children: React.ReactNode }): React.
 }
 
 export const LONG_TEXT = 'A deliberately long label that keeps going well past sixty characters to test wrapping';
+
+const STRIPES = ['bg-accent', 'bg-run', 'bg-ok', 'bg-warn', 'bg-err', 'bg-fg-2'] as const;
+
+/** Busy content behind floating chrome, so Liquid Glass (which samples what is under it) can be judged; a flat canvas
+ * shows almost nothing through glass by design. Stories only. */
+export function GlassBackdrop({ children }: { children: React.ReactNode }): React.ReactElement {
+  return (
+    <View className="relative overflow-hidden rounded-card">
+      <View className="absolute inset-0">
+        {Array.from({ length: 18 }, (_, i) => (
+          <View key={i} className={cn('h-6', STRIPES[i % STRIPES.length])} />
+        ))}
+      </View>
+      <View className="absolute inset-0 justify-around px-3">
+        {Array.from({ length: 6 }, (_, i) => (
+          <Text key={i} className="text-title font-semibold text-surface">
+            Transcript text scrolling under the glass
+          </Text>
+        ))}
+      </View>
+      <View className="gap-4 p-4">{children}</View>
+    </View>
+  );
+}

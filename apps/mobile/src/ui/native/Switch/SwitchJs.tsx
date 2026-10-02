@@ -4,6 +4,7 @@ import React from 'react';
 import { Switch as RNSwitch, View } from 'react-native';
 
 import { useThemeColors } from '../../lib/themeColors';
+import { nativePlatform } from '../../platform/geometry';
 import type { SwitchProps } from './Switch.types';
 import { toSwitchNativeProps } from './switchModel';
 
@@ -15,7 +16,7 @@ export function SwitchJs(props: SwitchProps): React.ReactElement {
         value={native.isOn}
         onValueChange={props.onValueChange}
         disabled={!native.enabled}
-        trackColor={{ true: native.onColor }}
+        trackColor={{ true: native.onColor, false: nativePlatform === 'android' ? native.offTrack : undefined }}
         thumbColor={native.isOn ? native.onThumb : undefined}
         accessibilityRole="switch"
         accessibilityLabel={props.label}

@@ -24,12 +24,12 @@ export function NewAction({ label, icon, onPress, collapsed = false, testID }: N
   const g = geometry().controls.newAction;
   return (
     <View className="items-end" style={{ paddingEnd: g.endInset, paddingBottom: insets.bottom + g.bottomAboveSafeArea }}>
-      <Pressable testID={testID} onPress={onPress} frame="none" feedback="scale" large accessibilityRole="button" accessibilityLabel={label}>
-        <Animated.View layout={reveal.reduced ? undefined : LinearTransition.duration(220)}>
-          <GlassSurface radiusStep="new" interactive className={cn('min-h-new flex-row items-center justify-center gap-2', collapsed ? 'w-13' : 'pe-5 ps-4')}>
+      <Pressable testID={testID} onPress={onPress} frame="none" feedback="scale" large accessibilityRole="button" accessibilityLabel={label} className="max-w-full">
+        <Animated.View layout={reveal.reduced ? undefined : LinearTransition.duration(220)} className="max-w-full">
+          <GlassSurface radiusStep="new" interactive className={cn('min-h-new max-w-full flex-row items-center justify-center gap-2', collapsed ? 'w-13' : 'pe-5 ps-4')}>
             <Icon concept={icon} size={g.icon as IconSize} tone="fg" />
             {collapsed ? null : (
-              <Text role="transcript" weight={600} numberOfLines={1}>
+              <Text role="transcript" weight={600} numberOfLines={1} className="shrink">
                 {label}
               </Text>
             )}

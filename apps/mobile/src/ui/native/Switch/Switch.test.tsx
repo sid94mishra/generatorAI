@@ -6,8 +6,8 @@ import { renderThemed } from '../../__tests__/themed';
 
 describe('Switch (MP-22)', () => {
   it('maps value, pending and the on colours (MD-48)', () => {
-    const colors = { accent: '#4c8dff', onAccent: '#ffffff' };
-    expect(toSwitchNativeProps({ value: true, onValueChange: jest.fn(), label: 'x' }, colors)).toEqual({ isOn: true, enabled: true, busy: false, onColor: '#4c8dff', onThumb: '#ffffff' });
+    const colors = { accent: '#4c8dff', onAccent: '#ffffff', lineStrong: '#3a3a40' };
+    expect(toSwitchNativeProps({ value: true, onValueChange: jest.fn(), label: 'x' }, colors)).toEqual({ isOn: true, enabled: true, busy: false, onColor: '#4c8dff', onThumb: '#ffffff', offTrack: '#3a3a40' });
     expect(toSwitchNativeProps({ value: false, onValueChange: jest.fn(), label: 'x', pending: true }, colors)).toMatchObject({ enabled: false, busy: true });
   });
 

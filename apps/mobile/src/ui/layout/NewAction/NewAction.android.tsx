@@ -38,7 +38,9 @@ export function NewAction({ label, icon, onPress, collapsed = false, testID }: N
                   </ui.RNHostView>
                 </ui.ExtendedFloatingActionButton.Icon>
                 <ui.ExtendedFloatingActionButton.Text>
-                  <ui.Text color={colors.onAccent}>{label}</ui.Text>
+                  <ui.Text color={colors.onAccent} maxLines={1} overflow="ellipsis">
+                    {label}
+                  </ui.Text>
                 </ui.ExtendedFloatingActionButton.Text>
               </ui.ExtendedFloatingActionButton>
             </ui.Host>
@@ -49,11 +51,11 @@ export function NewAction({ label, icon, onPress, collapsed = false, testID }: N
   }
   return (
     <View className="items-end" style={frame}>
-      <Pressable testID={testID} onPress={onPress} frame="none" feedback="scale" large accessibilityRole="button" accessibilityLabel={label}>
-        <View className={cn('min-h-new flex-row items-center justify-center gap-3 rounded-new bg-accent shadow-float', collapsed ? 'w-14' : 'pe-5 ps-4')}>
+      <Pressable testID={testID} onPress={onPress} frame="none" feedback="scale" large accessibilityRole="button" accessibilityLabel={label} className="max-w-full">
+        <View className={cn('min-h-new max-w-full flex-row items-center justify-center gap-3 rounded-new bg-accent shadow-float', collapsed ? 'w-14' : 'pe-5 ps-4')}>
           <Icon concept={icon} size={g.icon as IconSize} tone="on-accent" />
           {collapsed ? null : (
-            <Text role="subhead" weight={600} tone="on-accent" numberOfLines={1}>
+            <Text role="subhead" weight={600} tone="on-accent" numberOfLines={1} className="shrink">
               {label}
             </Text>
           )}

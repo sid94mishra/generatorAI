@@ -20,7 +20,7 @@ import { RADIO_SIDE, Radio } from '../../primitives/RadioGroup';
 import { Text } from '../../primitives/Text';
 import { IOS_GROUP_CORNERS } from '../ListSection/listSectionModel';
 import type { ListRowProps } from './ListRow.types';
-import { listRowLabel, listRowPress, listRowRole } from './listRowModel';
+import { listRowColumns, listRowLabel, listRowPress, listRowRole } from './listRowModel';
 
 export type { ListRowKind, ListRowProps } from './ListRow.types';
 
@@ -42,9 +42,10 @@ export function ListRow(props: ListRowProps): React.ReactElement {
   const press = listRowPress(props);
   const copy = copyable && value ? () => void Clipboard.setStringAsync(value) : undefined;
   const titleTone = disabled ? 'fg-3' : kind === 'destructive' ? 'err' : 'fg';
+  const columns = listRowColumns(kind, value);
 
   const text = (
-    <View className="flex-1 gap-0.5">
+    <View className={cn('gap-0.5', columns.title)}>
       <Text role="body" tone={titleTone}>
         {title}
       </Text>
@@ -61,7 +62,7 @@ export function ListRow(props: ListRowProps): React.ReactElement {
     trailing = (
       <>
         {value ? (
-          <Text role={mono ? 'mono' : 'subhead'} tone="fg-3" numberOfLines={1} selectable={copyable} className="max-w-1/2 shrink">
+          <Text role={mono ? 'mono' : 'subhead'} tone="fg-3" numberOfLines={1} selectable={copyable} className="shrink">
             {value}
           </Text>
         ) : null}
@@ -99,7 +100,7 @@ export function ListRow(props: ListRowProps): React.ReactElement {
         {provenance}
         {badge}
         <View
-          className="flex-row items-center gap-2"
+          className={cn('flex-row items-center gap-2', columns.trailing)}
           importantForAccessibility={kind === 'stepper' || kind === 'segmented' ? 'auto' : 'no-hide-descendants'}
           accessibilityElementsHidden={!(kind === 'stepper' || kind === 'segmented')}
         >

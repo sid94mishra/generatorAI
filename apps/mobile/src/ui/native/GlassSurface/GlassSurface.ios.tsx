@@ -1,6 +1,7 @@
 // MP-38 GlassSurface — iOS (02 §8.2): expo-glass-effect GlassView, `regular`, interactive for controls, no tint,
 // the app's appearance as its colour scheme, the radius from tokens. Falls back to the opaque recipe when useGlass()
-// says no (Reduce Transparency, no Liquid Glass, older iOS). Never animate opacity on it or its ancestors.
+// says no (Reduce Transparency, no Liquid Glass, older iOS). Never animate opacity on it or its ancestors, and never
+// clip it (no overflow-hidden): the material's edge and shadow draw just outside its bounds.
 import React from 'react';
 import { View } from 'react-native';
 import type * as GlassEffect from 'expo-glass-effect';
@@ -47,7 +48,7 @@ export function GlassSurface({ radiusStep, interactive = false, className, child
       glassEffectStyle="regular"
       isInteractive={interactive}
       colorScheme={appearance}
-      className={cn('overflow-hidden', className)}
+      className={className}
       style={{ borderRadius: radiusFor(radiusStep) }}
     >
       {children}
