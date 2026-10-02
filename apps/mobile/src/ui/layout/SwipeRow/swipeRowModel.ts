@@ -18,3 +18,11 @@ export function fullSwipeAction(props: Pick<SwipeRowProps, 'leading' | 'trailing
   const actions = side === 'leading' ? props.leading : props.trailing;
   return actions?.[actions.length - 1];
 }
+
+/**
+ * The leading actions drawn as a swipe on a platform (MD-52): iOS tiles; Android has trailing pills only, so its
+ * leading actions (Pin / Mark unread) live in the row menu and the accessibility actions, not under a gesture.
+ */
+export function swipeableLeading(leading: ReadonlyArray<SwipeAction> | undefined, platform: 'ios' | 'android'): ReadonlyArray<SwipeAction> {
+  return platform === 'android' ? [] : (leading ?? []);
+}

@@ -1,0 +1,27 @@
+appId: ${APP_ID}
+name: chats · list, select, archive and unarchive
+# Replaces the web-preview e2e/unarchive.mjs (08 §6.3). MChats (M6-01): segments with counts, "Select" from the
+# header only (MD-60), the row menu on long-press (MDF-57), Archive with an Undo snackbar (MD-26).
+tags: [smoke, chats]
+env: {FRESH_CHAT: stream}
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///chats
+- extendedWaitUntil: {visible: {id: chats-new}, timeout: 15000}
+- assertVisible: {id: chats-scope-all}
+- extendedWaitUntil: {visible: {id: "chat-row-${CHAT_STREAM_ID}"}, timeout: 15000}
+# Selection mode only from the header (MD-60); Cancel leaves it.
+- tapOn: {id: chats-select}
+- assertVisible: {id: chats-bulk-delete}
+- tapOn: "Cancel"
+- assertVisible: {id: chats-new}
+# Long-press opens the menu; Archive answers with Undo.
+- longPressOn: {id: "chat-row-${CHAT_STREAM_ID}"}
+- tapOn: "Archive"
+- extendedWaitUntil: {visible: "Undo", timeout: 5000}
+- tapOn: {id: chats-scope-archived}
+- extendedWaitUntil: {visible: {id: "chat-row-${CHAT_STREAM_ID}"}, timeout: 15000}
+- longPressOn: {id: "chat-row-${CHAT_STREAM_ID}"}
+- tapOn: "Unarchive"
+- tapOn: {id: chats-scope-active}
+- extendedWaitUntil: {visible: {id: "chat-row-${CHAT_STREAM_ID}"}, timeout: 15000}

@@ -4,7 +4,5 @@
 
 export { scmKeys, type ScmApi, type PullRequestListState, type ReviewChatRequest, type ReviewChatResponse } from '@generatorai/client-core';
 export { useScmApi } from './useScmApi';
-export { ScmFlowSheet } from './ScmFlowSheet';
-export { ConflictSheet } from './ConflictSheet';
-export * from './scmModel';
-export * from './prModel';
+export * from '../../blocks/CommitSheet/model/scmModel';
+export * from '../../blocks/CommitSheet/model/prModel';

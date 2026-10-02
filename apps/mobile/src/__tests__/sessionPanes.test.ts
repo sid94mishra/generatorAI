@@ -1,26 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { computerFeature } from '../components/chat/panes/paneModel';
-import { describeSessionTransport } from '../components/chat/sessionTransport';
-import { planCardActions } from '../features/chat/gateActions';
+import { checkFeature } from '../services/auth/featureGate';
+import { planCardActions } from '../blocks/GateCard/model/gateActions';
 
-describe('computerFeature', () => {
+describe('computer feature gate', () => {
   it('describes exec:computer as a grantable, lockable feature', () => {
-    expect(computerFeature(['exec:computer'])).toEqual({ available: true, missing: [], reason: null, grantable: true });
-    const locked = computerFeature(['exec:terminal']);
+    expect(checkFeature('computer', ['exec:computer'])).toEqual({ available: true, missing: [], reason: null, grantable: true });
+    const locked = checkFeature('computer', ['exec:terminal']);
     expect(locked).toMatchObject({ available: false, missing: ['exec:computer'], grantable: true });
     expect(locked.reason).toBeTruthy();
-  });
-});
-
-describe('describeSessionTransport', () => {
-  it('names direct LAN, relay as Tunnel and lets the stream override', () => {
-    expect(describeSessionTransport({ state: 'connected', kind: 'lan', endpoint: 'http://h' }, 'connected').label).toBe('LAN');
-    expect(describeSessionTransport({ state: 'connected', kind: 'relay', endpoint: 'wss://r' }, 'connected').label).toBe('Tunnel');
-    expect(describeSessionTransport({ state: 'connected', kind: 'lan', endpoint: 'http://h' }, 'reconnecting').label).toBe('Reconnecting');
-    expect(describeSessionTransport({ state: 'connected', kind: 'lan', endpoint: 'http://h' }, 'offline').tone).toBe('danger');
-    expect(describeSessionTransport({ state: 'offline', reason: 'no route' }, 'connected')).toMatchObject({ label: 'Offline', detail: 'no route' });
-    expect(describeSessionTransport({ state: 'idle' }, 'idle').label).toBe('Connecting');
   });
 });
 

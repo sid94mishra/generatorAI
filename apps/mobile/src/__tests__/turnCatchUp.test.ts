@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '@generatorai/client-core';
 
-import type { ReplayPage, ReplayRow } from '../components/scm/scmResults';
+import type { ReplayPage, ReplayRow } from '../services/stream/scmResults';
 import { stageCatchUpRows, turnCatchUpRows, unansweredTurnId } from '../services/stream/turnCatchUp';
 
 function msg(role: ChatMessage['role'], turnId?: string): ChatMessage {

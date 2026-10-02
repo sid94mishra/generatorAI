@@ -33,7 +33,16 @@ env: {FRESH_CHAT: gate}
     commands:
       - hideKeyboard
 - waitForAnimationToEnd
-- tapOn: {id: gate-allow}
+# M6-03: the fixture's shell gate is risky (MG-04), so Allow once signs with the approval key (MD-31). On a fresh
+# simulator / emulator the card first offers "Register approval key"; each step shows the system biometric prompt,
+# which the runner must match outside Maestro (iOS: `xcrun simctl` Face ID enrol + match; Android: `adb emu finger
+# touch 1`). See 08-verification and the M6 batch notes.
+- runFlow:
+    when: {visible: {id: gate-permission-register}}
+    commands:
+      - tapOn: {id: gate-permission-register}
+      - extendedWaitUntil: {visible: {id: gate-permission-allow_once}, timeout: 60000}
+- tapOn: {id: gate-permission-allow_once}
 - extendedWaitUntil: {visible: ".*Thanks — running it now.*", timeout: 30000}
 - extendedWaitUntil: {visible: "Dictate a message", timeout: 30000}
 - assertNotVisible: {id: gate-card}

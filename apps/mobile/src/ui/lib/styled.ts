@@ -6,8 +6,15 @@ import {
   KeyboardAwareScrollView as KCKeyboardAwareScrollView,
   KeyboardStickyView as KCKeyboardStickyView,
 } from 'react-native-keyboard-controller';
+import { LegendList as LegendListBase } from '@legendapp/list/react-native';
 import { withUniwind } from 'uniwind';
 
 export const KeyboardAvoidingView = withUniwind(KCKeyboardAvoidingView);
 export const KeyboardAwareScrollView = withUniwind(KCKeyboardAwareScrollView);
 export const KeyboardStickyView = withUniwind(KCKeyboardStickyView);
+
+/**
+ * Legend List with `className` / `contentContainerClassName` (Uniwind's automatic mode maps every `*Style` prop).
+ * Cast back to the generic component so `data` / `renderItem` keep their item type.
+ */
+export const LegendList = withUniwind(LegendListBase) as unknown as typeof LegendListBase;

@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { gateFromPayload, pendingGateFrom } from '../components/chat/gateFromInteraction';
+import { gateFromPayload, pendingGateFrom } from '../blocks/GateCard/model/gateFromInteraction';
 
 describe('gateFromPayload', () => {
   it('rebuilds a tool_permission row into the PermissionBlock shape', () => {

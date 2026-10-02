@@ -13,7 +13,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ApiError, queryKeys } from '@generatorai/client-core';
 
 import { useApi } from '../../services/api/useApi';
-import { toPlanDecision } from '../../features/chat/gateActions';
+import { toPlanDecision } from '../../blocks/GateCard/model/gateActions';
 import { haptics } from '../ui/haptics';
 import { useToast } from '../ui/Toast';
 

@@ -42,7 +42,7 @@ import { runTitle } from '../../../../src/components/runs/runModel';
 import { statusLabel } from '../../../../src/components/runs/statusStyle';
 import { usePullRefresh } from '../../../../src/components/runs/usePullRefresh';
 import { useScmApi } from '../../../../src/components/scm/useScmApi';
-import { matchesState, prStateLabel, prStateTone } from '../../../../src/components/scm/prModel';
+import { matchesState, prStateLabel, prStateTone } from '../../../../src/blocks/CommitSheet/model/prModel';
 import {
   codebaseLocation,
   codebaseStatusTone,

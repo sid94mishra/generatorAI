@@ -5,7 +5,7 @@ import {
   filterOperations,
   type Operation,
 } from '../services/api/activityRanking';
-import { crumbsFor, levelEntries } from '../components/chat/workbench/fileTree';
+import { crumbsFor, levelEntries } from '../blocks/FileTree/model/fileTree';
 
 function op(partial: Partial<Operation> & Pick<Operation, 'id' | 'updatedAt'>): Operation {
   return {

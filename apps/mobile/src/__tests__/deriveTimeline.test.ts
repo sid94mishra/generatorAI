@@ -16,7 +16,7 @@ import {
   type TimelineRow,
 } from '../components/chat/timeline/compactTimeline';
 import { wireChatMessageToBlocks as chatMessageToBlocks, messageAttachments, messageWasStopped } from '@generatorai/client-core';
-import { activityLabelFor, selectChatView } from '../components/chat/timeline/selectChatView';
+import { activityLabelFor, selectChatView } from '../blocks/TranscriptView/model/selectChatView';
 import { DEFAULT_STREAM } from '@generatorai/client-core';
 
 let nextId = 1;

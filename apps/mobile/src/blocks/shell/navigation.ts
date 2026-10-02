@@ -2,7 +2,7 @@
 // hardware shortcuts. Router-aware, query-free.
 import { router } from 'expo-router';
 
-import { CHATS_HREF, NEEDS_YOU_HREF, SEARCH_HREF, SERVERS_HREF, SETTINGS_HREF } from './hrefs';
+import { CHATS_HREF, NEEDS_YOU_HREF, NEW_CHAT_HREF, SEARCH_HREF, SERVERS_HREF, SETTINGS_HREF } from './hrefs';
 import { normalizePath } from './parentHref';
 
 type Href = Parameters<typeof router.replace>[0];
@@ -14,9 +14,9 @@ export function goToModule(href: string, currentPath?: string): void {
   router.replace(href as Href);
 }
 
-/** New chat. The New chat sheet (`/chats/new`) lands in M6; until then the Chats list raises its creation sheet. */
+/** New chat: the MB-06 route sheet (`/chats/new`, M6-05). */
 export function openNewChat(): void {
-  router.push({ pathname: CHATS_HREF, params: { new: '1' } } as never);
+  router.push(NEW_CHAT_HREF as never);
 }
 
 export function openSearch(params?: Record<string, string>): void {

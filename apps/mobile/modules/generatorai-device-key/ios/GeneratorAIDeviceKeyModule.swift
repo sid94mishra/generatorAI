@@ -26,7 +26,8 @@
 //
 // JS facade: apps/mobile/src/services/native/deviceKeyModule.ts; the key
 // commands of M5-09 (KeyCommands.swift) are driven from
-// apps/mobile/src/services/native/keyCommands.ts.
+// apps/mobile/src/services/native/keyCommands.ts; the approval key of M6-03
+// (ApprovalKey.swift) from apps/mobile/src/services/native/approvalKey.ts.
 // ────────────────────────────────────────────────────────────────
 
 import CryptoKit
@@ -151,6 +152,33 @@ public final class GeneratorAIDeviceKeyModule: Module {
 
     AsyncFunction("remove") { (alias: String) -> Void in
       Self.deleteKey(alias: alias)
+    }
+
+    // ── Approval key (M6-03, MG-05 / MD-31; ApprovalKey.swift) ──────
+    // A presence-bound enclave key per server that signs risky approvals. Every use prompts; nothing caches it.
+
+    AsyncFunction("generateApprovalKey") { (alias: String) -> [String: Any] in
+      return try ApprovalKey.generate(alias: alias)
+    }
+
+    AsyncFunction("approvalKeyStatus") { (alias: String) -> String in
+      return ApprovalKey.status(alias: alias)
+    }
+
+    AsyncFunction("signWithPrompt") { (alias: String, dataBase64: String, prompt: ApprovalPromptRecord) -> String in
+      guard let message = Data(base64Encoded: dataBase64, options: [.ignoreUnknownCharacters]) else {
+        throw ApprovalKeyFailedException("input is not valid base64")
+      }
+      return try ApprovalKey.sign(alias: alias, message: message, prompt: prompt).base64EncodedString()
+    }
+
+    AsyncFunction("removeApprovalKey") { (alias: String) -> Void in
+      ApprovalKey.remove(alias: alias)
+    }
+
+    // Ends a prompt that is still up (the JS timeout, MD-155); `signWithPrompt` then rejects as cancelled.
+    Function("cancelApprovalPrompt") { () -> Void in
+      ApprovalKey.cancelPrompt()
     }
   }
 

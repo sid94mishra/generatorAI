@@ -34,6 +34,13 @@ export interface HeaderProps {
   breadcrumb?: ReadonlyArray<BreadcrumbSegment>;
   /** 'detail' | 'workspace': rendered as the StatusLine under the header. */
   status?: StatusBadgeProps;
+  /**
+   * Role 'top': the module's count beside its title (MChats "Chats 48", MD-153), mono `fg-3`. Android draws it in the
+   * bar; on iOS a native large title cannot carry it, so the screen draws `LargeTitle` at the top of its scroll
+   * content and the bar shows the inline title once that scrolls under it (`scroll`). `null`: the count is still
+   * loading (the layout already reserves its place, so nothing jumps when it arrives).
+   */
+  count?: number | null;
   /** Home: "Wed, Sep 23 · ● Connected local:3100". */
   subtitle?: ReactNode;
   /** Trailing, in order; beyond the platform max they go into the ⋯ / ⋮ menu. */
@@ -54,7 +61,7 @@ export interface HeaderProps {
    * bar (the legacy screens hosted in the M5 shell, MD-141). Default false (transparent, MD-133).
    */
   opaque?: boolean;
-  /** Content offset: the Android bar turns raised when content scrolls under it. */
+  /** Content offset: the Android bar turns raised when content scrolls under it; with `count`, the iOS inline title fades in. */
   scroll?: SharedValue<number>;
   /** Sub-ids (03 §1.5): sidebar toggle `menu-button`, back (e.g. `chat-back`), pane toggle `pane-toggle`. */
   testIDs?: Partial<Record<'sidebarToggle' | 'back' | 'paneToggle', string>>;

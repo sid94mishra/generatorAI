@@ -51,17 +51,30 @@ export interface IosHeaderOptions {
  * persistent iPad sidebar (`sidebarToggleState: 'shown'`) a module root uses the inline centred title: the native
  * large title is laid out flush against the sidebar's edge there, without the content's leading inset (MD-147).
  */
-export function iosHeaderOptions({ role, title, largeTitle, onBack, opaque, sidebarToggleState }: Pick<HeaderProps, 'role' | 'title' | 'largeTitle' | 'onBack' | 'opaque' | 'sidebarToggleState'>): IosHeaderOptions {
+export function iosHeaderOptions({ role, title, largeTitle, onBack, opaque, sidebarToggleState, count }: Pick<HeaderProps, 'role' | 'title' | 'largeTitle' | 'onBack' | 'opaque' | 'sidebarToggleState' | 'count'>): IosHeaderOptions {
+  const contentTitle = iosContentLargeTitle({ role, largeTitle, count });
   return {
     headerShown: true,
     title,
-    headerLargeTitle: role === 'top' && largeTitle !== false && sidebarToggleState !== 'shown',
-    headerTransparent: role !== 'modal' && !opaque,
+    headerLargeTitle: role === 'top' && largeTitle !== false && sidebarToggleState !== 'shown' && !contentTitle,
+    // The in-content large title (MD-153) sits under an opaque bar, so its scroll offset starts at 0 for the fade.
+    headerTransparent: role !== 'modal' && !opaque && !contentTitle,
     headerShadowVisible: false,
     headerLargeTitleShadowVisible: false,
     headerBackVisible: (role === 'detail' || role === 'workspace') && !onBack,
     headerTitleAlign: 'center',
   };
+}
+
+/** A module root with a title count draws its large title in the content (`LargeTitle`), not natively (MD-153). */
+export function iosContentLargeTitle({ role, largeTitle, count }: Pick<HeaderProps, 'role' | 'largeTitle' | 'count'>): boolean {
+  return role === 'top' && largeTitle !== false && count !== undefined;
+}
+
+/** The inline title's opacity for a content offset: hidden while the large title is in view (MD-153). */
+export function inlineTitleOpacity(offset: number): number {
+  'worklet';
+  return Math.min(1, Math.max(0, (offset - 24) / 20));
 }
 
 /** The theme colours the iOS header needs (a subset of `useThemeColors()`). */
@@ -95,4 +108,73 @@ export function iosHeaderColorOptions(colors: HeaderThemeColors, transparent: bo
     headerLargeTitleStyle: { color: colors.fg },
     ...(transparent ? { headerBlurEffect: colors.appearance === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight' } : {}),
   };
+}
+
+/**
+ * The iOS bar as plain values (no callbacks): what Header.ios renders into the native toolbars and title view. Its
+ * JSON is the identity the header memoizes on, so a caller that rebuilds equal props each render (fresh arrays,
+ * inline handlers) never re-applies the navigator options — re-applying them re-renders the navigator, and a screen
+ * that re-renders with it would loop (MD-162). Presses go through `dispatchHeaderPress` with the latest props.
+ */
+export interface IosHeaderModel {
+  title: string;
+  /** The title view: breadcrumb (detail / workspace), the fading inline title (counted root), or the native title. */
+  titleView: 'breadcrumb' | 'inline' | 'native';
+  crumbs: Array<{ label: string; accessibilityLabel?: string; pressable: boolean }>;
+  left: Array<{ target: 'sidebar' | 'back' | 'cancel'; icon?: string; label: string; text?: string; selected?: boolean }>;
+  right: Array<
+    | { kind: 'button'; target: string; icon: HeaderAction['icon']; label: string; selected?: boolean }
+    | { kind: 'menu'; target: string; icon: HeaderAction['icon']; label: string; items: Array<{ target: string; label: string; icon?: HeaderAction['icon']; destructive?: boolean; disabled?: boolean; checked?: boolean }> }
+    | { kind: 'pane'; open: boolean; count: number; label: string }
+    | { kind: 'overflow'; items: Array<{ target: string; label: string; icon: HeaderAction['icon']; destructive?: boolean }> }
+    | { kind: 'primary'; label: string; disabled: boolean }
+  >;
+}
+
+export function iosHeaderModel(props: HeaderProps, fontScale: number): IosHeaderModel {
+  const { role, title, breadcrumb, actions = [], onSidebarToggle, sidebarToggleState = 'drawer', onBack, paneToggle, modal } = props;
+  const detail = role === 'detail' || role === 'workspace';
+  const { inline, overflow } = splitActions(actions, fontScale);
+  const left: IosHeaderModel['left'] = [];
+  if (role === 'top' && onSidebarToggle) left.push({ target: 'sidebar', icon: 'sidebar.left', label: sidebarToggleLabel(sidebarToggleState), selected: sidebarToggleState === 'shown' });
+  if (detail && onBack) left.push({ target: 'back', icon: 'chevron.left', label: backLabel(breadcrumb) });
+  if (role === 'modal' && modal) left.push({ target: 'cancel', label: modal.cancelLabel ?? 'Cancel', text: modal.cancelLabel ?? 'Cancel' });
+  const right: IosHeaderModel['right'] = inline.map((a) =>
+    a.menu?.length
+      ? {
+          kind: 'menu' as const,
+          target: `action:${a.id}`,
+          icon: a.icon,
+          label: a.label,
+          items: a.menu.flatMap((m) =>
+            'type' in m ? [] : [{ target: `menu:${a.id}:${m.id}`, label: m.label, ...(m.icon ? { icon: m.icon } : {}), ...(m.destructive ? { destructive: true } : {}), ...(m.disabled ? { disabled: true } : {}), ...(m.checked !== undefined ? { checked: m.checked } : {}) }],
+          ),
+        }
+      : { kind: 'button' as const, target: `action:${a.id}`, icon: a.icon, label: a.label, ...(a.selected !== undefined ? { selected: a.selected } : {}) },
+  );
+  if (role === 'workspace' && paneToggle) right.push({ kind: 'pane', open: paneToggle.open, count: paneToggle.count, label: paneToggleLabel(paneToggle.open, paneToggle.count) });
+  if (overflow.length) right.push({ kind: 'overflow', items: overflow.map((a) => ({ target: `action:${a.id}`, label: a.label, icon: a.icon, ...(a.destructive ? { destructive: true } : {}) })) });
+  if (role === 'modal' && modal?.primary) right.push({ kind: 'primary', label: modal.primary.label, disabled: Boolean(modal.primary.disabled || modal.primary.loading) });
+  return {
+    title,
+    titleView: detail ? 'breadcrumb' : iosContentLargeTitle(props) ? 'inline' : 'native',
+    crumbs: (breadcrumb ?? []).map((c) => ({ label: c.label, ...(c.accessibilityLabel ? { accessibilityLabel: c.accessibilityLabel } : {}), pressable: Boolean(c.onPress) })),
+    left,
+    right,
+  };
+}
+
+/** Run a press from the iOS bar against the latest props (`target` from `iosHeaderModel`). */
+export function dispatchHeaderPress(props: HeaderProps, target: string): void {
+  if (target === 'sidebar') return props.onSidebarToggle?.();
+  if (target === 'back') return props.onBack?.();
+  if (target === 'cancel') return props.modal?.onCancel();
+  if (target === 'pane') return props.paneToggle?.onPress();
+  if (target === 'primary') return props.modal?.primary?.onPress();
+  if (target.startsWith('crumb:')) return props.breadcrumb?.[Number(target.slice(6))]?.onPress?.();
+  const [kind, actionId, ...rest] = target.split(':');
+  const action = props.actions?.find((a) => a.id === actionId);
+  if (!action) return;
+  if (kind === 'menu') return action.onMenuSelect?.(rest.join(':'));
+  if (kind === 'action') return action.onPress?.();
 }

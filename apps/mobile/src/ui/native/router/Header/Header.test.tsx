@@ -1,4 +1,4 @@
-import { backLabel, iosHeaderColorOptions, iosHeaderOptions, paneToggleLabel, sidebarToggleLabel, splitActions } from './headerModel';
+import { backLabel, dispatchHeaderPress, inlineTitleOpacity, iosHeaderModel, iosContentLargeTitle, iosHeaderColorOptions, iosHeaderOptions, paneToggleLabel, sidebarToggleLabel, splitActions } from './headerModel';
 import type { HeaderAction } from './Header.types';
 
 const a = (id: string, destructive = false): HeaderAction => ({ id, icon: 'search', label: id, destructive });
@@ -32,6 +32,15 @@ describe('Header (ML-02)', () => {
     expect(iosHeaderOptions({ role: 'top', title: 'Chats', sidebarToggleState: 'hidden' }).headerLargeTitle).toBe(true);
   });
 
+  it('moves a counted large title into the content under an opaque bar (MD-153)', () => {
+    expect(iosContentLargeTitle({ role: 'top', count: 48 })).toBe(true);
+    expect(iosContentLargeTitle({ role: 'top', count: null })).toBe(true);
+    expect(iosContentLargeTitle({ role: 'top' })).toBe(false);
+    expect(iosContentLargeTitle({ role: 'top', count: 3, largeTitle: false })).toBe(false);
+    expect(iosHeaderOptions({ role: 'top', title: 'Chats', count: 48 })).toMatchObject({ headerLargeTitle: false, headerTransparent: false });
+    expect([0, 24, 34, 44, 200].map(inlineTitleOpacity)).toEqual([0, 0, 0.5, 1, 1]);
+  });
+
   it('paints the iOS header from the theme (bar, titles, tint, blur per appearance)', () => {
     const dark = { surface: '#111113', fg: '#ededef', appearance: 'dark' as const };
     expect(iosHeaderColorOptions(dark, false)).toMatchObject({
@@ -44,5 +53,30 @@ describe('Header (ML-02)', () => {
     expect(iosHeaderColorOptions(dark, false).headerBlurEffect).toBeUndefined();
     expect(iosHeaderColorOptions(dark, true)).toMatchObject({ headerStyle: {}, headerBlurEffect: 'systemChromeMaterialDark' });
     expect(iosHeaderColorOptions({ ...dark, appearance: 'light' }, true).headerBlurEffect).toBe('systemChromeMaterialLight');
+  });
+
+  it('models the iOS bar as values and dispatches presses to the latest props (MD-162)', () => {
+    const onMenuSelect = jest.fn();
+    const onPress = jest.fn();
+    const crumb = jest.fn();
+    const p = {
+      role: 'workspace' as const,
+      title: 'Chat',
+      breadcrumb: [{ label: 'Chats', onPress: crumb }],
+      onBack: () => undefined,
+      paneToggle: { open: true, count: 1, attention: false, onPress },
+      actions: [{ id: 'chat-menu', icon: 'more' as const, label: 'Chat actions', menu: [{ id: 'rename', label: 'Rename' }, { type: 'separator' as const }], onMenuSelect }],
+    };
+    const model = iosHeaderModel(p, 1);
+    expect(model.titleView).toBe('breadcrumb');
+    expect(model.left.map((l) => l.target)).toEqual(['back']);
+    expect(model.right.map((r) => r.kind)).toEqual(['menu', 'pane']);
+    expect(JSON.stringify(iosHeaderModel({ ...p, onBack: () => 1, actions: [{ ...p.actions[0]!, onMenuSelect: jest.fn() }] }, 1))).toBe(JSON.stringify(model));
+    dispatchHeaderPress(p, 'menu:chat-menu:rename');
+    dispatchHeaderPress(p, 'pane');
+    dispatchHeaderPress(p, 'crumb:0');
+    expect(onMenuSelect).toHaveBeenCalledWith('rename');
+    expect(onPress).toHaveBeenCalledTimes(1);
+    expect(crumb).toHaveBeenCalledTimes(1);
   });
 });

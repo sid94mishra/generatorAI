@@ -16,9 +16,13 @@ export const PROJECTS_HREF = '/projects';
 export const PAIR_HREF = '/pair';
 
 export const chatHref = (chatId: string): string => `/chats/${seg(chatId)}`;
+/** The Turn sheet (MB-02). */
+export const turnHref = (chatId: string): string => `${chatHref(chatId)}/turn`;
+/** Step detail (MB-14): a tool call of the chat by its call id. */
+export const stepHref = (chatId: string, callId: string): string => `${chatHref(chatId)}/steps/${seg(callId)}`;
 export const gateHref = (chatId: string, interactionId: string): string => `${chatHref(chatId)}/gate/${seg(interactionId)}`;
-/** Legacy plan sheet until M6 replaces it with `/chats/<id>?dock=plan` (04 §1.5). */
-export const planHref = (chatId: string, planId: string): string => `${chatHref(chatId)}/plan/${seg(planId)}`;
+/** A plan opens in the chat's pane, on the Plan tab (04 §1.5; M6-11). */
+export const planHref = (chatId: string, planId: string): string => `${chatHref(chatId)}?dock=plan&plan=${seg(planId)}`;
 export const workflowHref = (workflowId: string): string => `/workflows/${seg(workflowId)}`;
 /** A run lives under its workflow (MD-80): there is no `/runs/<id>`. */
 export const runHref = (workflowId: string, runId: string): string => `${workflowHref(workflowId)}/runs/${seg(runId)}`;
@@ -29,6 +33,17 @@ export const scriptHref = (id: string): string => `/scripts/${seg(id)}`;
 export const projectHref = (id: string): string => `/projects/${seg(id)}`;
 export const codebaseHref = (projectId: string, codebaseId: string): string => `${projectHref(projectId)}/codebases/${seg(codebaseId)}`;
 export const settingsHref = (section?: string): string => (section ? `/settings/${seg(section)}` : SETTINGS_HREF);
-/** Workspace screens (diff, file) are M6; the legacy Changes and Terminal routes stay until then. */
-export const changesHref = (workspaceId: string): string => `/changes/${seg(workspaceId)}`;
-export const terminalHref = (workspaceId: string): string => `/terminal/${seg(workspaceId)}`;
+const query = (params: Record<string, string | null | undefined>): string => {
+  const q = Object.entries(params)
+    .filter((e): e is [string, string] => typeof e[1] === 'string' && e[1].length > 0)
+    .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+    .join('&');
+  return q ? `?${q}` : '';
+};
+/** Workspace screens pushed from the pane (04 §1.2, MPaneDiff / MPaneFilePreview) and the commit sheet (MPaneCommit). */
+export const workspaceDiffHref = (workspaceId: string, p: { path: string; alias?: string; base?: string; chat?: string | null }): string =>
+  `/workspaces/${seg(workspaceId)}/diff${query({ path: p.path, alias: p.alias, base: p.base, chat: p.chat })}`;
+export const workspaceFileHref = (workspaceId: string, p: { path: string; alias?: string; chat?: string | null }): string =>
+  `/workspaces/${seg(workspaceId)}/file${query({ path: p.path, alias: p.alias, chat: p.chat })}`;
+export const workspaceCommitHref = (workspaceId: string, p: { alias?: string; chat?: string | null } = {}): string =>
+  `/workspaces/${seg(workspaceId)}/commit${query({ alias: p.alias, chat: p.chat })}`;

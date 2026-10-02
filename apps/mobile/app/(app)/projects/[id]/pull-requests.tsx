@@ -35,7 +35,7 @@ import {
   matchesState,
   prStateLabel,
   prStateTone,
-} from '../../../../src/components/scm/prModel';
+} from '../../../../src/blocks/CommitSheet/model/prModel';
 import { useTheme } from '../../../../src/theme/ThemeProvider';
 
 export default function ProjectPullRequestsScreen(): React.ReactElement {

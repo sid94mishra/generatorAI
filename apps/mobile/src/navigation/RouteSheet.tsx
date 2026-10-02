@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // RouteSheet — the scaffold for a route-addressable sheet.
 //
-// `/approvals`, `/chats/[id]/gate/[interactionId]`, `/chats/[id]/plan/[planId]`
+// `/approvals`, `/chats/[id]/gate/[interactionId]`
 // and `/scope-request` are real routes (a push notification can open them
 // cold) presented as `formSheet` on iOS and a modal on Android. The
 // navigator header is off for them; this draws the title row with a Close

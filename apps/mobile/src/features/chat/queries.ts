@@ -1,4 +1,6 @@
+import { useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useFocusEffect } from 'expo-router';
 import { queryKeys } from '@generatorai/client-core';
 import { useApi } from '../../services/api/useApi';
 
@@ -6,6 +8,24 @@ export function useChat(id: string, options: { enabled?: boolean; staleTime?: nu
   const api = useApi();
   return useQuery({ queryKey: queryKeys.chat(id), queryFn: () => api.chats.get(id), ...options });
 }
+/**
+ * MG-02 / MD-112: opening a chat sets its read mark (`PATCH {unread: false}`) each time the screen gains focus, so
+ * the list's unread dot clears; a failure is silent (the dot simply stays).
+ */
+export function useMarkChatRead(id: string): void {
+  const api = useApi();
+  const client = useQueryClient();
+  useFocusEffect(
+    useCallback(() => {
+      if (!id) return;
+      api.chats
+        .setUnread(id, false)
+        .then(() => client.invalidateQueries({ queryKey: queryKeys.chats() }))
+        .catch(() => undefined);
+    }, [api, client, id]),
+  );
+}
+
 export function useChatPlans(id: string, enabled = true) {
   const api = useApi();
   return useQuery({ queryKey: queryKeys.chatPlans(id), queryFn: () => api.chats.plans(id), enabled });
@@ -30,10 +50,11 @@ export function useChatProject(id: string | null) {
 
 import { useMemo } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ApiError, type ApiClient, type ChatSummary } from '@generatorai/client-core';
+import { ApiError, type ApiClient, type ChatSummary, type StreamBlock } from '@generatorai/client-core';
+import type { ApprovalProof } from '@generatorai/shared';
 import type { MutationCallbacks } from '../../services/api/queryCallbacks';
 import { useStreamStore } from '../../services/stream/streamStore';
-import { toPlanDecision } from './gateActions';
+import { toPlanDecision } from '../../blocks/GateCard/model/gateActions';
 
 export function useChatRefresh(id: string) {
   const client = useQueryClient();
@@ -124,14 +145,15 @@ export function useAnswerChatQuestion(id: string, streamKey: string, callbacks: 
   });
 }
 
-type PermissionInput = { interactionId: string; behavior: 'allow' | 'deny'; message?: string };
+type PermissionInput = { interactionId: string; behavior: 'allow' | 'deny'; message?: string; approvalProof?: ApprovalProof };
 type PermissionResult = Awaited<ReturnType<ApiClient['chats']['respondPermission']>>;
 export function useResolveChatPermission(id: string, streamKey: string, callbacks: MutationCallbacks<PermissionResult, PermissionInput>) {
   const api = useApi();
   const client = useQueryClient();
   const refresh = () => { void client.invalidateQueries({ queryKey: queryKeys.chatInteractions(id) }); };
   return useMutation({ ...callbacks,
-    mutationFn: ({ interactionId, behavior, message }: PermissionInput) => api.chats.respondPermission(id, interactionId, { behavior, ...(message ? { message } : {}) }),
+    mutationFn: ({ interactionId, behavior, message, approvalProof }: PermissionInput) =>
+      api.chats.respondPermission(id, interactionId, { behavior, ...(message ? { message } : {}), ...(approvalProof ? { approvalProof } : {}) }),
     onSuccess: (...args) => {
       useStreamStore.getState().applyEffects([{ op: 'resolvePermission', key: streamKey, ...args[1] }]);
       refresh();
@@ -142,4 +164,14 @@ export function useResolveChatPermission(id: string, streamKey: string, callback
       return callbacks.onError?.(...args);
     },
   });
+}
+
+/** The live turn's blocks of a chat (the stream store, keyed by session id; empty before the first turn). */
+export function useLiveChatBlocks(streamKey: string): { blocks: readonly StreamBlock[] | undefined; live: boolean } {
+  const blocks = useStreamStore((s) => s.streams[streamKey]?.blocks);
+  const live = useStreamStore((s) => {
+    const status = s.streams[streamKey]?.status;
+    return status === 'streaming' || status === 'thinking' || status === 'pending';
+  });
+  return { blocks, live };
 }

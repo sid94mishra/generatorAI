@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 const disk = vi.hoisted(() => new Map<string, string>());
 vi.mock('../../storage/prefs', () => ({ prefs: { getString: (key: string) => disk.get(key), setString: (key: string, value: string) => disk.set(key, value), delete: (key: string) => disk.delete(key) } }));
-import { createDraftStore } from '../../../components/chat/composer/draftStore';
+import { createDraftStore } from '../../../blocks/Composer/model/draftStore';
 it('keeps equal chat ids and late writes isolated across server changes', () => {
   const a = createDraftStore('a'); const b = createDraftStore('b');
   a.writeDraft('same-chat', 'A draft');

@@ -19,17 +19,15 @@ import { ApiError, type AgentMode, type ApprovalOutcome, type StageRunSummary } 
 
 import { useAuth } from '../../services/auth/AuthProvider';
 import { useStageConversation } from '../../services/api/useStageConversation';
-import { Composer } from '../chat/Composer';
-import { useComposerController } from '../chat/composer/useComposerController';
-import { readAllAttachmentBytes } from '../chat/composer/attachmentPickers';
-import type { ComposerSendPayload } from '../chat/composer/types';
+import { Composer } from '../../blocks/Composer/Composer';
+import { useComposerController } from '../../blocks/Composer/useComposerController';
+import { readAllAttachmentBytes } from '../../blocks/Composer/model/attachmentPickers';
+import type { ComposerSendPayload } from '../../blocks/Composer/model/types';
 import { useTwoPhaseStop } from '../../services/stream/useTwoPhaseStop';
 import { useToast } from '../ui/Toast';
 import { useKeyboardHeight } from '../ui/keyboard';
 import { StageGateCard } from './StageGateCard';
 import { stageGateOf } from './stageGate';
-
-const NOOP = (): void => {};
 
 /** Why the field is shut, when it is; null when a message can go. */
 function closedReason(status: string): string | null {
@@ -125,7 +123,7 @@ export function StageComposer({
     <Animated.View style={dockStyle}>
     <Composer
       {...composer.props}
-      compact
+      variant="stage"
       placeholder="Message this stage…"
       dock={
         gate && gate.kind !== 'review' ? (
@@ -137,20 +135,8 @@ export function StageComposer({
       isStreaming={streaming}
       disabled={Boolean(disabledReason)}
       disabledReason={disabledReason}
-      models={undefined}
-      modelsLoading={false}
-      selectedModelId={null}
-      onSelectModel={NOOP}
       mode={mode}
       onModeChange={setMode}
-      effort={null}
-      onEffortChange={NOOP}
-      contextTier="default"
-      onContextTierChange={NOOP}
-      permissionMode=""
-      onPermissionModeChange={NOOP}
-      contextTokens={null}
-      codebaseCount={0}
     />
     </Animated.View>
   );

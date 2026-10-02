@@ -39,7 +39,7 @@ const reportRule = {
     const story = path.endsWith('.stories.tsx');
     const platformAllowed = /^src\/ui\/platform\//.test(path) || (ui && /\.(ios|android)\.tsx$/.test(path)) || /^src\/services\/(notifications|native)\//.test(path);
     let hasJsx = false;
-    const terminal = /^src\/terminal\//.test(path);
+    const terminal = /^src\/(terminal|blocks\/TerminalView\/engine)\//.test(path);
     const report = (node, messageId) => context.report({ node, messageId });
     const checkClasses = (node, value) => {
       for (const word of value.split(/\s+/)) {
@@ -63,7 +63,7 @@ const reportRule = {
         else if (child && typeof child === 'object') strings(child, visit);
       }
     }
-    const color = (node, value) => { if (/(?:#[\da-f]{3,8}\b|\b(?:rgba?|hsla?|oklch)\()/i.test(value)) report(node, 'hexOrRgbInTs'); };
+    const color = (node, value) => { if (!terminal && /(?:#[\da-f]{3,8}\b|\b(?:rgba?|hsla?|oklch)\()/i.test(value)) report(node, 'hexOrRgbInTs'); };
     function importCheck(node, source, specifiers = []) {
       const names = specifiers.map((s) => s.imported?.name ?? s.imported?.value ?? (s.type === 'ImportNamespaceSpecifier' ? '*' : 'default'));
       if (source === 'react-native') {

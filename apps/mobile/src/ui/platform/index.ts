@@ -30,6 +30,7 @@ export {
 } from './gestures';
 export { pressFeedback, type PressFeedbackKind } from './pressFeedback';
 export { deviceKindFor, nouns, nounsFor, type DeviceKind, type PlatformNouns } from './nouns';
-export { setHardwareKeyboardAttached, useHardwareKeyboard } from './keyboard';
+export { setHardwareKeyboardAttached, useHardwareKeyboard, useKeyboardOverlap } from './keyboard';
 export { WindowInsetsProvider, useInsets, useWindowInsets } from './insets';
 export { readSystemAccentSeeds, systemAccentAvailable, type SystemAccentSeeds } from './accent';
+export { overflowIcon, overflowIconFor } from './overflow';

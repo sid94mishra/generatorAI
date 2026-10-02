@@ -51,4 +51,10 @@ export interface ChatRowModel {
   /** ISO timestamp for the Activity column. */
   lastActivityAt: string;
   tags: readonly string[];
+  /** MG-02: present (true) only for a pinned chat. */
+  pinned?: boolean;
+  /** MG-02 / MD-112: present (true) only when there is activity after the read mark. */
+  unread?: boolean;
+  /** MG-03: the model's display label, for rows with no agent (absent when the server does not know it). */
+  modelLabel?: string;
 }

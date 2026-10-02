@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { chatHref, gateHref, runHref, stageHref, workflowHref } from './hrefs';
+import { chatHref, gateHref, runHref, stageHref, workflowHref, workspaceCommitHref, workspaceDiffHref, workspaceFileHref } from './hrefs';
 import { isModuleRoot, parentHref } from './parentHref';
 import { routePath } from './routePath';
 
@@ -11,6 +11,12 @@ describe('hrefs (MD-79, MD-80)', () => {
     expect(workflowHref('w1')).toBe('/workflows/w1');
     expect(runHref('w1', 'r1')).toBe('/workflows/w1/runs/r1');
     expect(stageHref('w1', 'r1', 's1')).toBe('/workflows/w1/runs/r1/stages/s1');
+  });
+
+  it('addresses the workspace screens with their query (MPaneDiff, MPaneFilePreview, MPaneCommit)', () => {
+    expect(workspaceDiffHref('w1', { path: 'src/a b.ts', alias: 'app', base: 'turn:t1', chat: 'c1' })).toBe('/workspaces/w1/diff?path=src%2Fa%20b.ts&alias=app&base=turn%3At1&chat=c1');
+    expect(workspaceFileHref('w1', { path: 'README.md' })).toBe('/workspaces/w1/file?path=README.md');
+    expect(workspaceCommitHref('w1')).toBe('/workspaces/w1/commit');
   });
 
   it('escapes ids that would otherwise break the path', () => {

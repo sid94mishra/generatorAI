@@ -1,50 +1,41 @@
 // ────────────────────────────────────────────────────────────────
-// Diff row renderer — compatibility surface over the shared DiffLine.
-//
-// The timeline's InlineDiff draws tool-call hunks with this. It used to be
-// a second renderer with its own gutter and colours (D20); it is now a
-// thin wrapper over `changes/DiffLine`, reading the same wrap and font
-// preferences, so a hunk in the transcript looks exactly like the same
-// hunk in the Changes pane.
+// Diff row renderer for the legacy timeline's InlineDiff (kept until M8-03): the kit CodeLine with the diff
+// preferences the DiffView uses (blocks/DiffView), so a hunk in the stage transcript reads like the Changes diff.
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
+import { View } from 'react-native';
 import type { DiffHunk, DiffRow } from '@generatorai/client-core';
 
-import { DiffLine } from '../changes/DiffLine';
-import { HunkHeader } from '../changes/HunkHeader';
-import { useDiffPrefs } from '../changes/diffPrefs';
-import { gutterWidthFor, hunkLabel } from '../changes/diffModel';
+import { gutterWidthFor, hunkLabel, useDiffPrefs } from '../../blocks/DiffView';
+import { CodeLine } from '../../ui/primitives/CodeLine';
+import { Text } from '../../ui/primitives/Text';
 
 /** Gutter sized for 5 digits — beyond that the file is not phone-reviewable. */
 const GUTTER_DIGITS = 99_999;
 
 export function DiffHunkHeader({ hunk }: { hunk: DiffHunk }): React.ReactElement {
-  const { fontSize } = useDiffPrefs();
   return (
-    <HunkHeader
-      row={{ type: 'hunk', key: 'h', hunkIndex: 0, hunk, label: hunkLabel(hunk), collapsed: false, hiddenCount: 0 }}
-      fontSize={fontSize}
-    />
+    <View className="bg-sunken px-3 py-1">
+      <Text role="monoSm" tone="fg-3" numberOfLines={1}>
+        {hunkLabel(hunk)}
+      </Text>
+    </View>
   );
 }
 
-export const DiffRowView = React.memo(function DiffRowView({
-  row,
-  onPress,
-}: {
-  row: DiffRow;
-  onPress?: (row: DiffRow) => void;
-}): React.ReactElement {
+export const DiffRowView = React.memo(function DiffRowView({ row, onPress }: { row: DiffRow; onPress?: (row: DiffRow) => void }): React.ReactElement {
   const { fontSize, wrap } = useDiffPrefs();
   return (
-    <DiffLine
-      row={row}
+    <CodeLine
+      text={row.content}
+      kind={row.kind}
+      {...(row.oldNumber !== undefined ? { oldNumber: row.oldNumber } : {})}
+      {...(row.newNumber !== undefined ? { newNumber: row.newNumber } : {})}
+      gutterWidth={gutterWidthFor(GUTTER_DIGITS, fontSize)}
       fontSize={fontSize}
       wrap={wrap}
-      gutter={gutterWidthFor(GUTTER_DIGITS, fontSize)}
-      language={null}
-      {...(onPress ? { onLongPress: onPress } : {})}
+      {...(onPress ? { onLongPress: () => onPress(row) } : {})}
     />
   );
 });

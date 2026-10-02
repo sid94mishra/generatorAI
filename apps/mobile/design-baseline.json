@@ -3,10 +3,8 @@
     "app/(app)/automations/[id]/index.tsx",
     "app/(app)/changes/[workspaceId]/file.tsx",
     "app/(app)/changes/[workspaceId]/index.tsx",
-    "app/(app)/chats/[id]/gate/[interactionId].tsx",
     "app/(app)/chats/[id]/index.tsx",
     "app/(app)/chats/[id]/plan/[planId].tsx",
-    "app/(app)/chats/index.tsx",
     "app/(app)/index.tsx",
     "app/(app)/projects/[id]/codebases/[cid]/file.tsx",
     "app/(app)/projects/[id]/codebases/[cid]/files.tsx",
@@ -107,62 +105,6 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 10,
       "mobile-design/design/defaultRadius": 1
     },
-    "src/components/chat/Composer.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/legacyTokenUtility": 11,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 14,
-      "mobile-design/design/defaultTextSize": 2,
-      "mobile-design/design/literalInlineStyle": 9,
-      "mobile-design/design/defaultRadius": 1
-    },
-    "src/components/chat/GateScroll.tsx": {
-      "mobile-design/design/literalInlineStyle": 1
-    },
-    "src/components/chat/ModelSheet.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "react-hooks/set-state-in-effect/diagnostic": 1,
-      "mobile-design/design/literalInlineStyle": 3,
-      "mobile-design/design/defaultRadius": 3,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 22,
-      "mobile-design/design/legacyTokenUtility": 13,
-      "mobile-design/design/defaultTextSize": 6
-    },
-    "src/components/chat/NewChatSheet.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "react-hooks/set-state-in-effect/diagnostic": 1,
-      "mobile-design/design/defaultTextSize": 30,
-      "mobile-design/design/legacyTokenUtility": 55,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 90,
-      "mobile-design/design/defaultRadius": 5,
-      "mobile-design/design/arbitraryValue": 10
-    },
-    "src/components/chat/PermissionCard.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultRadius": 6,
-      "mobile-design/design/legacyTokenUtility": 21,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 38,
-      "mobile-design/design/defaultTextSize": 11
-    },
-    "src/components/chat/PlanCard.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultRadius": 4,
-      "mobile-design/design/legacyTokenUtility": 10,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 18,
-      "mobile-design/design/defaultTextSize": 4
-    },
-    "src/components/chat/QuestionCard.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultRadius": 5,
-      "mobile-design/design/legacyTokenUtility": 14,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 23,
-      "mobile-design/design/defaultTextSize": 4
-    },
     "src/components/chat/RenameSheet.tsx": {
       "react-hooks/set-state-in-effect/diagnostic": 1
     },
@@ -173,13 +115,6 @@
       "mobile-design/design/legacyTokenUtility": 3,
       "better-tailwindcss/no-restricted-classes/diagnostic": 6
     },
-    "src/components/chat/TurnOptionsSheet.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultTextSize": 4,
-      "mobile-design/design/legacyTokenUtility": 4,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 8
-    },
     "src/components/chat/UsageFooter.tsx": {
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
@@ -187,55 +122,6 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 12,
       "mobile-design/design/legacyTokenUtility": 7,
       "mobile-design/design/defaultTextSize": 4
-    },
-    "src/components/chat/composer/AttachmentChips.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultRadius": 2,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 13,
-      "mobile-design/design/legacyTokenUtility": 8,
-      "mobile-design/design/literalInlineStyle": 3,
-      "mobile-design/design/defaultTextSize": 3
-    },
-    "src/components/chat/composer/ComposerBanners.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultRadius": 4,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 21,
-      "mobile-design/design/legacyTokenUtility": 13,
-      "mobile-design/design/defaultTextSize": 4
-    },
-    "src/components/chat/composer/GaugeSheet.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultTextSize": 6,
-      "mobile-design/design/legacyTokenUtility": 6,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 12
-    },
-    "src/components/chat/composer/HistorySheet.tsx": {
-      "mobile-design/design/lucideDirectImport": 1
-    },
-    "src/components/chat/composer/SuggestionStrip.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultTextSize": 4,
-      "mobile-design/design/legacyTokenUtility": 5,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 10,
-      "mobile-design/design/defaultRadius": 1
-    },
-    "src/components/chat/composer/VoicePill.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/literalInlineStyle": 2,
-      "mobile-design/design/arbitraryValue": 1,
-      "mobile-design/design/defaultRadius": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 9,
-      "mobile-design/design/legacyTokenUtility": 5,
-      "mobile-design/design/defaultTextSize": 3
-    },
-    "src/components/chat/composer/useComposerController.ts": {
-      "react-hooks/refs/diagnostic": 2,
-      "react-hooks/set-state-in-effect/diagnostic": 1
     },
     "src/components/chat/panes/ChangesTray.tsx": {
       "mobile-design/design/rawTextImport": 1,
@@ -740,14 +626,6 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 11,
       "mobile-design/design/defaultRadius": 1
     },
-    "src/components/ui/SwipeableRow.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "react-hooks/immutability/diagnostic": 8,
-      "react-hooks/refs/diagnostic": 2,
-      "mobile-design/design/defaultTextSize": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 2,
-      "mobile-design/design/legacyTokenUtility": 1
-    },
     "src/components/ui/Toast.tsx": {
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
@@ -885,9 +763,6 @@
     "src/services/prefs/preferences.tsx": {
       "boundaries/dependencies/diagnostic": 1
     },
-    "src/services/stream/turnCatchUp.ts": {
-      "boundaries/dependencies/diagnostic": 1
-    },
     "src/services/stream/useChatStream.ts": {
       "react-hooks/refs/diagnostic": 2
     },
@@ -896,12 +771,6 @@
     },
     "src/services/stream/useRunStream.ts": {
       "react-hooks/set-state-in-effect/diagnostic": 1
-    },
-    "src/services/stream/useStageLive.ts": {
-      "boundaries/dependencies/diagnostic": 1
-    },
-    "src/services/stream/useTurnCatchUp.ts": {
-      "boundaries/dependencies/diagnostic": 1
     },
     "src/services/stream/useTwoPhaseStop.ts": {
       "react-hooks/refs/diagnostic": 1
@@ -968,28 +837,17 @@
       "mobile-design/design/legacyTokenUtility": 1,
       "better-tailwindcss/no-restricted-classes/diagnostic": 1
     },
-    "app/(app)/chats/[id]/gate/[interactionId].tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 8,
-      "mobile-design/design/defaultTextSize": 1,
-      "mobile-design/design/legacyTokenUtility": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 2
-    },
     "app/(app)/chats/[id]/index.tsx": {
-      "mobile-design/design/platformOs": 3,
+      "mobile-design/design/platformOs": 2,
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 43,
-      "react-hooks/refs/diagnostic": 10,
-      "react-hooks/set-state-in-effect/diagnostic": 1,
+      "boundaries/dependencies/diagnostic": 23,
+      "react-hooks/refs/diagnostic": 5,
       "react-hooks/preserve-manual-memoization/diagnostic": 4,
-      "react-hooks/purity/diagnostic": 1,
-      "react-hooks/exhaustive-deps/diagnostic": 4,
-      "mobile-design/design/legacyTokenUtility": 14,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 23,
-      "mobile-design/design/defaultTextSize": 8,
-      "mobile-design/design/literalInlineStyle": 1,
+      "mobile-design/design/legacyTokenUtility": 10,
+      "better-tailwindcss/no-restricted-classes/diagnostic": 17,
+      "mobile-design/design/defaultTextSize": 6,
+      "react-hooks/exhaustive-deps/diagnostic": 1,
       "mobile-design/design/defaultRadius": 1
     },
     "app/(app)/chats/[id]/plan/[planId].tsx": {
@@ -998,13 +856,6 @@
       "mobile-design/design/defaultTextSize": 2,
       "mobile-design/design/legacyTokenUtility": 2,
       "better-tailwindcss/no-restricted-classes/diagnostic": 4
-    },
-    "app/(app)/chats/index.tsx": {
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 18,
-      "react-hooks/set-state-in-effect/diagnostic": 1,
-      "mobile-design/design/legacyTokenUtility": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 1
     },
     "app/(app)/index.tsx": {
       "mobile-design/design/lucideDirectImport": 1,
@@ -1287,12 +1138,9 @@
     "src/services/auth/StepUpGate.tsx",
     "src/services/auth/stepUp.ts",
     "src/services/prefs/preferences.tsx",
-    "src/services/stream/turnCatchUp.ts",
     "src/services/stream/useChatStream.ts",
     "src/services/stream/useGlobalStream.ts",
     "src/services/stream/useRunStream.ts",
-    "src/services/stream/useStageLive.ts",
-    "src/services/stream/useTurnCatchUp.ts",
     "src/services/stream/useTwoPhaseStop.ts",
     "src/services/voice/useVoiceInput.ts"
   ]

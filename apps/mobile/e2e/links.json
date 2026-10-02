@@ -4,7 +4,7 @@
     { "url": "generatorai://", "expect": { "id": "home-new-chat" } },
     { "url": "generatorai:///", "expect": { "id": "home-new-chat" } },
     { "url": "generatorai://chats", "expect": { "id": "chats-new" } },
-    { "url": "generatorai://chats/new", "expect": { "text": "New chat" }, "note": "the Chats list raises its creation sheet until /chats/new lands (M6)" },
+    { "url": "generatorai://chats/new", "expect": { "text": "New chat" }, "note": "the New chat route sheet (MB-06, M6-05)" },
     { "url": "generatorai://command/chat.new", "expect": { "text": "New chat" } },
     { "url": "generatorai://chats/${CHAT_ID}", "expect": { "id": "composer-input" } },
     { "url": "generatorai://chats/${CHAT_ID}?dock=terminal", "expect": { "id": "pane-tab-terminal" }, "note": "pane opens at the tab" },

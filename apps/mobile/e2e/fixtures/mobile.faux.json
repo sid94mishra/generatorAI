@@ -19,7 +19,7 @@
       {
         "type": "permission_request",
         "request": {
-          "type": "shell",
+          "type": "shell_exec",
           "description": "Run pnpm test",
           "details": {
             "command": "pnpm test"

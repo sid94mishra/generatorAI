@@ -94,13 +94,18 @@ export function chatRowStatus(state: ChatRowState): StatusMapping | null {
  * only carries `projectId`). Pure — web (`features/chats`) and, next pass,
  * mobile call it the same way.
  */
-export function toChatRowModel(item: ChatListItem, live: ChatLiveSets | null, projectName?: string): ChatRowModel {
+export function toChatRowModel(
+  // The list API's rows (`ChatListRow`) type `status` as a plain string; `chatRowState` compares it as one.
+  item: { id: string; name: string; status: string; projectId?: string | null; pinnedAt?: string | null; tags?: readonly string[]; summary: ChatListSummary },
+  live: ChatLiveSets | null,
+  projectName?: string,
+): ChatRowModel {
   const state = chatRowState(item, live);
   const mapping = chatRowStatus(state);
   return {
     id: item.id,
     title: item.name,
-    projectId: item.projectId,
+    projectId: item.projectId ?? undefined,
     projectName,
     agentRef: item.summary.agent?.ref,
     agentName: item.summary.agent?.name,
@@ -108,7 +113,11 @@ export function toChatRowModel(item: ChatListItem, live: ChatLiveSets | null, pr
     archived: state === 'archived',
     changes: item.summary.changes,
     lastActivityAt: item.summary.lastActivityAt,
-    tags: item.tags,
+    tags: item.tags ?? [],
+    // MG-02 / MG-03 (mobile M6-01): only when the server sent them, never invented (D-36).
+    ...(item.pinnedAt ? { pinned: true } : {}),
+    ...(item.summary.unread ? { unread: true } : {}),
+    ...(!item.summary.agent && item.summary.model?.label ? { modelLabel: item.summary.model.label } : {}),
   };
 }
 

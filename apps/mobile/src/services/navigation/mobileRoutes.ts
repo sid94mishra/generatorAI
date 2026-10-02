@@ -18,9 +18,9 @@ const SETTINGS_ALIASES: Record<string, string> = {
   'app-lock': 'accessibility',
 };
 
-/** `/x/new` create links: the module's own creation UI until its route lands (New chat M6, the rest M7/M8). */
+/** `/x/new` create links: the module's own creation UI until its route lands (New chat is `/chats/new` since M6-05). */
 const CREATE: Record<string, string> = {
-  chats: '/chats?new=1',
+  chats: '/chats/new',
   workflows: '/workflows?new=1',
   projects: '/projects?new=1',
   agents: '/agents',
@@ -35,7 +35,7 @@ function withQuery(path: string, query: string): string {
 
 /**
  * Map an allowlisted route (output of `deepLinkToRoute`) to the mobile tree, or null when the app has no screen for
- * it (the legacy `runs`, `changes`, `terminal`, `approvals` roots; `share` until M9; `workspaces` until M6).
+ * it (the legacy `runs`, `changes`, `terminal`, `approvals` roots; `share` until M9).
  */
 export function mobileRoute(route: string | null): string | null {
   const mapped = mapRoute(route);
@@ -56,9 +56,14 @@ function mapRoute(route: string | null): string | null {
   if (root === 'new-chat') return CREATE.chats!;
   if (!ROOTS.has(root)) return null;
 
-  if (id === 'new' && parts.length === 2 && CREATE[root]) return CREATE[root]!;
+  // New chat keeps its entry params (`?project=&agent=`).
+  if (id === 'new' && parts.length === 2 && CREATE[root]) return root === 'chats' ? withQuery(CREATE[root]!, query) : CREATE[root]!;
 
   switch (root) {
+    case 'chats':
+      // The plan sheet became the pane's Plan tab (M6-11): open the chat there, on that plan.
+      if (id && sub === 'plan' && subId) return withQuery(`/chats/${id}`, `dock=plan&plan=${encodeURIComponent(subId)}${query ? `&${query}` : ''}`);
+      return route;
     case 'settings': {
       if (!id) return withQuery('/settings', query);
       const section = SETTINGS_ALIASES[id] ?? id;

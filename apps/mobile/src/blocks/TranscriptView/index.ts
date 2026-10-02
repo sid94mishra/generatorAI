@@ -1,0 +1,10 @@
+export { TranscriptView, type TranscriptViewProps } from './TranscriptView';
+export { useScmResults } from './TranscriptView.queries';
+export { TranscriptActionsContext, useTranscriptActions, type GateSegment, type TranscriptActions } from './transcriptContext';
+export { activityLabelFor, blocksSignature, pendingGateKind, selectChatView, type ChatStreamView } from './model/selectChatView';
+export { buildTranscriptItems, chatToolCalls, liveScmTurnIds, messageBlocksOf, type TranscriptItem } from './model/transcriptItems';
+export { errorExcerpt, stepOutcome, stepRuns, toolBlockSummary, toolBlockTitle } from './model/stepModel';
+export { UserMessage } from './parts/UserMessage';
+export { AgentTurnHeader } from './parts/AgentTurnHeader';
+export { TurnBody, TurnFooter, answerText } from './parts/TurnBody';
+export { StepGlyph, InlineError, StepRow } from './parts/StepRow';

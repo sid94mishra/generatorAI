@@ -1,0 +1,23 @@
+appId: ${APP_ID}
+name: chats · New chat sheet (task, who, create)
+# M6-05 (MB-06, MD-21, MD-62, MD-85): `chats-new` opens the `/chats/new` route sheet; Create is off until the task
+# exists ("Describe the task"); "Just a model" needs no agent; creating opens the chat with the task as its first
+# message.
+tags: [smoke, chats]
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///chats
+- extendedWaitUntil: {visible: {id: chats-new}, timeout: 15000}
+- tapOn: {id: chats-new}
+- extendedWaitUntil: {visible: {id: new-chat-sheet}, timeout: 15000}
+- assertVisible: {id: new-chat-create, enabled: false}
+- tapOn: {id: new-chat-who-model}
+- tapOn: {id: new-chat-task}
+- inputText: Say hello from the mobile New chat flow
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
+- tapOn: {id: new-chat-create}
+- extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- assertVisible: ".*Say hello from the mobile New chat flow.*"

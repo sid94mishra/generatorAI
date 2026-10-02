@@ -34,7 +34,7 @@ import { MAX_SCALE } from '../ui/accessibility';
 import { haptics } from '../ui/haptics';
 import { useToast } from '../ui/Toast';
 import { CodeBlock, withAlpha } from './CodeBlock';
-import { blockedLinkReason, classifyLink } from './linkPolicy';
+import { blockedLinkReason, classifyLink } from '../../blocks/AssistantText/model/linkPolicy';
 import { ImageLightbox, MarkdownImage, type LightboxImage } from './MarkdownImage';
 import {
   inlineText,
@@ -43,7 +43,7 @@ import {
   type ColumnAlign,
   type InlineNode,
   type ListItemNode,
-} from './markdownModel';
+} from '../../blocks/AssistantText/model/markdownModel';
 
 export interface MarkdownProps {
   content: string;

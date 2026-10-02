@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { PREVIEW_LINES, editPreview, workspaceRelative } from '../components/chat/permissionPreview';
+import { PREVIEW_LINES, editPreview, workspaceRelative } from '../blocks/GateCard/model/permissionPreview';
 
 const edit = (input: Record<string, unknown>) => JSON.stringify(input, null, 2);
 
@@ -61,7 +61,7 @@ describe('workspaceRelative', () => {
 
 describe('commandPreview', () => {
   it('reads a shell call as its command and note', async () => {
-    const { commandPreview } = await import('../components/chat/permissionPreview');
+    const { commandPreview } = await import('../blocks/GateCard/model/permissionPreview');
     expect(commandPreview('{\n "command": "npm test 2>&1 | tail -30"\n}')).toEqual({ command: 'npm test 2>&1 | tail -30', note: null });
     expect(commandPreview(JSON.stringify({ command: 'ls', description: 'List files', timeout: 5 }))).toEqual({
       command: 'ls',
@@ -70,7 +70,7 @@ describe('commandPreview', () => {
   });
 
   it('stays raw for anything else', async () => {
-    const { commandPreview } = await import('../components/chat/permissionPreview');
+    const { commandPreview } = await import('../blocks/GateCard/model/permissionPreview');
     expect(commandPreview('{"path":"a.ts"}')).toBeNull();
     expect(commandPreview('{"command":"ls","cwd":"/elsewhere"}')).toBeNull();
     expect(commandPreview('{"command":"ls", "trunc')).toBeNull();

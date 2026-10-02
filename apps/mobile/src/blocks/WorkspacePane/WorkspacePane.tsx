@@ -4,7 +4,7 @@
 // at ≥ 840, full screen as a mode (window width; the main column's width when the sidebar is docked). Visited
 // bodies stay mounted (terminal, WebView never remount); hidden ones are parked and paused. Back exits full screen
 // first, then closes the overlay pane (06 §3.2).
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams, usePathname } from 'expo-router';
 import { DOCK_LINK_PARAM, parseDockLinkTab } from '@generatorai/shared/ui-contract';
@@ -56,12 +56,13 @@ export function useClaimPaneScope(claim: PaneClaim | null): void {
 
 /** The header's pane toggle (ML-02 `paneToggle`): count = changed files; attention when a tab needs you. */
 export function usePaneToggle(): { open: boolean; count: number; attention: boolean; onPress: () => void } {
+  // Primitives only: the screen that owns the claim renders this, and a new claim object (set from its effects)
+  // must not re-render it unless what the toggle shows changed (MD-162).
   const open = usePaneStore((s) => s.open);
-  const claim = usePaneStore((s) => s.claim);
+  const count = usePaneStore((s) => s.claim?.tabs.find((t) => t.type === 'changes')?.count ?? 0);
+  const attention = usePaneStore((s) => Boolean(s.claim?.tabs.some((t) => t.attention)));
   const toggle = usePaneStore((s) => s.toggle);
-  const count = claim?.tabs.find((t) => t.type === 'changes')?.count ?? 0;
-  const attention = Boolean(claim?.tabs.some((t) => t.attention));
-  return { open, count, attention, onPress: toggle };
+  return useMemo(() => ({ open, count, attention, onPress: toggle }), [open, count, attention, toggle]);
 }
 
 /** Whether the pane is on screen (claimed, open, over its screen) and in full screen — the shell's layout inputs. */

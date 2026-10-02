@@ -12,7 +12,7 @@ import {
   TABLE_COLUMN_MIN,
   type BlockNode,
   type InlineNode,
-} from '../components/markdown/markdownModel';
+} from '../blocks/AssistantText/model/markdownModel';
 
 function only<T extends BlockNode['type']>(content: string, type: T): Extract<BlockNode, { type: T }> {
   const tree = parseMarkdown(content);

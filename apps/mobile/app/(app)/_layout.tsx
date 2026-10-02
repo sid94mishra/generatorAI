@@ -12,7 +12,7 @@ import { parentHref } from '../../src/blocks/shell/parentHref';
 import { moduleRootOptions, paletteOptions, sheetOptions, useStackScreenOptions } from '../../src/ui/platform';
 
 const MODULE_ROOTS = ['index', 'chats/index', 'projects/index', 'agents/index', 'workflows/index', 'automations/index', 'scripts/index'];
-const SHEETS = ['chats/[id]/gate/[interactionId]', 'chats/[id]/plan/[planId]', 'scope-request'];
+const SHEETS = ['chats/[id]/gate/[interactionId]', 'scope-request'];
 /** Legacy details that set their title and trailing controls through navigator options. */
 const STACK_HEADER: Record<string, string> = {
   'workflows/[id]/index': 'Workflow',
@@ -26,9 +26,6 @@ const STACK_HEADER: Record<string, string> = {
   'projects/[id]/codebases/[cid]/files': 'Files',
   'projects/[id]/codebases/[cid]/file': 'File',
   'projects/[id]/codebases/[cid]/pull-requests/[number]': 'Pull request',
-  'changes/[workspaceId]/index': 'Changes',
-  'changes/[workspaceId]/file': 'Diff',
-  'terminal/[workspaceId]': 'Terminal',
 };
 
 type Href = Parameters<typeof router.replace>[0];
@@ -65,6 +62,9 @@ export default function AppLayout(): React.ReactElement {
         ))}
         <Stack.Screen name="search" options={paletteOptions} />
         <Stack.Screen name="servers" options={sheetOptions('picker')} />
+        <Stack.Screen name="chats/[id]/turn" options={sheetOptions('large')} />
+        <Stack.Screen name="chats/new" options={sheetOptions('large')} />
+        <Stack.Screen name="workspaces/[workspaceId]/commit" options={sheetOptions('large')} />
         {Object.entries(STACK_HEADER).map(([name, title]) => (
           <Stack.Screen
             key={name}

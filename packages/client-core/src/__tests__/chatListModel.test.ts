@@ -14,6 +14,7 @@ import {
   chatRowState,
   chatRowStatus,
   mergeChatListPages,
+  toChatRowModel,
 } from '../chats/index.js';
 import { createApiClient } from '../api/client.js';
 
@@ -222,5 +223,39 @@ describe('runChatBulk (shared bulk contract)', () => {
         { id: 'c', code: 'NETWORK', message: 'offline' },
       ],
     });
+  });
+});
+
+describe('toChatRowModel MG-02 / MG-03 fields (mobile M6-01)', () => {
+  const base = {
+    id: 'c1',
+    name: 'Fix flaky test',
+    status: 'active',
+    tags: [],
+    summary: { lastActivityAt: '2026-10-02T10:00:00.000Z' },
+  } as unknown as Parameters<typeof toChatRowModel>[0];
+
+  it('omits pinned, unread and modelLabel when the server did not send them', () => {
+    const model = toChatRowModel(base, null);
+    expect('pinned' in model).toBe(false);
+    expect('unread' in model).toBe(false);
+    expect('modelLabel' in model).toBe(false);
+  });
+
+  it('marks pinned and unread rows and labels the model of agent-less rows', () => {
+    const model = toChatRowModel(
+      { ...base, pinnedAt: '2026-10-01T10:00:00.000Z', summary: { ...base.summary, unread: true, model: { id: 'sonnet', label: 'Claude Sonnet 5' } } },
+      null,
+    );
+    expect(model).toMatchObject({ pinned: true, unread: true, modelLabel: 'Claude Sonnet 5' });
+  });
+
+  it('does not label the model when an agent is bound (the agent is the meta)', () => {
+    const model = toChatRowModel(
+      { ...base, summary: { ...base.summary, agent: { ref: 'a', name: 'Bug Fixer' }, model: { id: 'sonnet', label: 'Claude Sonnet 5' } } },
+      null,
+    );
+    expect(model.agentName).toBe('Bug Fixer');
+    expect('modelLabel' in model).toBe(false);
   });
 });

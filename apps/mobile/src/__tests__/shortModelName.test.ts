@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { shortModelName } from '../components/chat/composer/turnOptions';
+import { shortModelName } from '../blocks/Composer/model/turnOptions';
 
 const m = (name: string) => ({ id: name, name }) as Parameters<typeof shortModelName>[0];
 
