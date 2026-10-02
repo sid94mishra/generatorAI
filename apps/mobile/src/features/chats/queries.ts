@@ -1,17 +1,13 @@
 // Chats data (MChats, M6-01): the server-paged list (G-02, keyset cursor, server search, counts per segment),
 // joined with the live attention sets (`chatRowState`) and the project names, as ChatRow views (MB-48).
 import { useMemo } from 'react';
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { chatListKey, chatLiveSets, mergeChatListPages, queryKeys, toChatRowModel, type ApiClient } from '@generatorai/client-core';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { chatListKey, chatLiveSets, mergeChatListPages, queryKeys, toChatRowModel } from '@generatorai/client-core';
 import type { ChatListQuery } from '@generatorai/shared';
 
 import { chatRowView, type ChatRowView, type ChatSort } from '../../blocks/ChatRow';
 import { useApi } from '../../services/api/useApi';
-import type { MutationCallbacks } from '../../services/api/queryCallbacks';
 import { useAttention } from '../../services/stream/AttentionProvider';
-
-type CreateChatBody = Parameters<ApiClient['chats']['create']>[0];
-type CreatedChat = Awaited<ReturnType<ApiClient['chats']['create']>>;
 
 export type ChatScope = 'all' | 'active' | 'archived';
 
@@ -63,17 +59,4 @@ export function useChatsList(scope: ChatScope, search: string, sort: ChatSort): 
     fetchNextPage: () => void result.fetchNextPage(),
     refetch: result.refetch,
   };
-}
-
-export function useCreateChat(callbacks: MutationCallbacks<CreatedChat, CreateChatBody>) {
-  const api = useApi();
-  const client = useQueryClient();
-  return useMutation({
-    ...callbacks,
-    mutationFn: (body: CreateChatBody) => api.chats.create(body),
-    onSuccess: (...args) => {
-      void client.invalidateQueries({ queryKey: queryKeys.chats() });
-      return callbacks.onSuccess?.(...args);
-    },
-  });
 }

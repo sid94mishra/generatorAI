@@ -12,7 +12,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { AgentMode } from '@generatorai/client-core';
-import type { ChatSourceControlOptions } from '@generatorai/shared';
+import type { AgentToolPolicy, ChatSourceControlOptions } from '@generatorai/shared';
 
 import { pickerValueToBrowserConfig, type BrowserPickerValue } from './browserConfig';
 import { draftsToSources, resolvePrimary, type DraftSource } from './sourceModel';
@@ -24,6 +24,8 @@ export interface AgentOverrides {
   addMcpServerIds?: string[];
   removeMcpServerIds?: string[];
   appendInstructions?: string;
+  /** Per-chat capability switches (MB-05); only the ones that differ from the agent's own. */
+  tools?: Partial<AgentToolPolicy>;
 }
 
 export interface NewChatFormValues {
@@ -108,7 +110,7 @@ export function sourceControlSummary(options: ChatSourceControlOptions | undefin
 export function isEmptyOverrides(o: AgentOverrides | undefined): boolean {
   if (!o) return true;
   return Object.values(o).every((v) =>
-    Array.isArray(v) ? v.length === 0 : v === undefined || v === '',
+    Array.isArray(v) ? v.length === 0 : v !== null && typeof v === 'object' ? Object.keys(v).length === 0 : v === undefined || v === '',
   );
 }
 

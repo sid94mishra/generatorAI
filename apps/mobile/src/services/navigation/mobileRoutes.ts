@@ -18,9 +18,9 @@ const SETTINGS_ALIASES: Record<string, string> = {
   'app-lock': 'accessibility',
 };
 
-/** `/x/new` create links: the module's own creation UI until its route lands (New chat M6, the rest M7/M8). */
+/** `/x/new` create links: the module's own creation UI until its route lands (New chat is `/chats/new` since M6-05). */
 const CREATE: Record<string, string> = {
-  chats: '/chats?new=1',
+  chats: '/chats/new',
   workflows: '/workflows?new=1',
   projects: '/projects?new=1',
   agents: '/agents',
@@ -56,7 +56,8 @@ function mapRoute(route: string | null): string | null {
   if (root === 'new-chat') return CREATE.chats!;
   if (!ROOTS.has(root)) return null;
 
-  if (id === 'new' && parts.length === 2 && CREATE[root]) return CREATE[root]!;
+  // New chat keeps its entry params (`?project=&agent=`).
+  if (id === 'new' && parts.length === 2 && CREATE[root]) return root === 'chats' ? withQuery(CREATE[root]!, query) : CREATE[root]!;
 
   switch (root) {
     case 'settings': {

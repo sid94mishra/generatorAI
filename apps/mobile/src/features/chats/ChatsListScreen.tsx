@@ -23,7 +23,7 @@ import {
   type ChatSort,
 } from '../../blocks/ChatRow';
 import { useSidebarToggle } from '../../blocks/shell/useSidebarToggle';
-import { chatHref } from '../../blocks/shell/hrefs';
+import { NEW_CHAT_HREF, chatHref } from '../../blocks/shell/hrefs';
 import { BulkActionBar } from '../../ui/layout/BulkActionBar';
 import { ListRow } from '../../ui/layout/ListRow';
 import { ListSection } from '../../ui/layout/ListSection';
@@ -42,14 +42,10 @@ import { Skeleton } from '../../ui/primitives/Skeleton';
 import { Spinner } from '../../ui/primitives/Spinner';
 import { useChatsList, type ChatScope } from './queries';
 
-export interface ChatsListScreenProps {
-  /** Opens New chat (the route decides how until `/chats/new` lands, M6-05). */
-  onNewChat: () => void;
-}
-
 const LIST_BOTTOM_GAP = 96;
 
-export function ChatsListScreen({ onNewChat }: ChatsListScreenProps): React.ReactElement {
+export default function ChatsListScreen(): React.ReactElement {
+  const onNewChat = useCallback(() => router.push(NEW_CHAT_HREF as never), []);
   const sidebar = useSidebarToggle();
   const insets = useInsets();
   const sheet = useSheet();

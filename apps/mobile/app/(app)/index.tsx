@@ -162,7 +162,7 @@ export default function HomeScreen(): React.ReactElement {
       {...(activity.operations.length === 0
         ? {
             message: 'Start a chat and it shows up here as it works.',
-            action: { label: 'New chat', onPress: () => router.push('/chats?new=1') },
+            action: { label: 'New chat', onPress: () => router.push('/chats/new') },
           }
         : fallbackFilter
           ? { action: { label: `Show ${fallbackFilter.label}`, onPress: () => setFilter(fallbackFilter.value) } }

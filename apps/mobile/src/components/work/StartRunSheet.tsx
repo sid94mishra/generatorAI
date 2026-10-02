@@ -48,10 +48,10 @@ import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
 import { IconButton } from '../ui/Button';
 import { Touchable } from '../ui/Touchable';
+import { ListRow } from '../../ui/layout/ListRow';
 import { useTheme } from '../../theme/ThemeProvider';
 import { pickAttachments, readAllAttachmentBytes } from '../../blocks/Composer/model/attachmentPickers';
 import type { ComposerAttachment } from '../../blocks/Composer/model/types';
-import { PickerRow } from '../chat/NewChatSheet';
 import { PermissionModeOptions } from '../runs/PermissionModeSheet';
 import { RUN_PERMISSION_MODE_LABEL, type RunPermissionMode } from '../runs/permissionMode';
 import { parseStageVariables } from './stageOverrideForm';
@@ -814,4 +814,9 @@ export function VariableField({
       {...(def.type === 'text' || def.type === 'list' || def.type === 'json' ? { style: { minHeight: 88, textAlignVertical: 'top' as const } } : {})}
     />
   );
+}
+
+/** A labelled navigation row (the legacy New chat sheet's, now the kit ListRow, M6-05; this sheet is rebuilt in M8). */
+function PickerRow({ label, value, onPress }: { icon?: React.ReactNode; label: string; value: string; onPress: () => void }): React.ReactElement {
+  return <ListRow kind="navigation" title={label} value={value} onPress={onPress} />;
 }

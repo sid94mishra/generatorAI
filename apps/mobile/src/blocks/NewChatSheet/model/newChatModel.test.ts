@@ -5,7 +5,7 @@ import {
   DEFAULT_BROWSER_PICKER_VALUE,
   browserSummary,
   pickerValueToBrowserConfig,
-} from '../browserConfig';
+} from './browserConfig';
 import {
   NO_SOURCE_CONTROL,
   addTag,
@@ -15,7 +15,7 @@ import {
   overrideIncludes,
   sourceControlSummary,
   toggleOverrideId,
-} from '../newChatModel';
+} from './newChatModel';
 import {
   defaultNewBranch,
   describeDraft,
@@ -27,7 +27,7 @@ import {
   uniqueAlias,
   validateDrafts,
   type DraftSource,
-} from '../sourceModel';
+} from './sourceModel';
 
 const draft = (over: Partial<DraftSource> = {}): DraftSource => ({
   id: 'd1',
