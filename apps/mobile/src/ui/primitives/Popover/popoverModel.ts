@@ -17,6 +17,8 @@ export function popoverOffsets(
 
 /** Max height: half the space above the keyboard (03 MP-49). */
 export function popoverMaxHeight(windowHeight: number, keyboardHeight: number): number {
+  // Runs inside Popover's useAnimatedStyle on the UI thread (keyboard height is a shared value).
+  'worklet';
   return Math.max(120, Math.round((windowHeight - Math.abs(keyboardHeight)) * 0.5));
 }
 
