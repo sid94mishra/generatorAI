@@ -5,7 +5,8 @@ import type { RemovalSource } from '../DirtyGuard/DirtyGuard.types';
 export interface FullScreenEditorProps {
   title: string;
   /** The header's text confirm ("Save", "Create", "Add"); the screen's one primary (MD-85: never filled). */
-  primary: { label: string; onPress: () => void; disabled?: boolean; loading?: boolean };
+  /** Absent on a wizard whose own sticky bar carries the action (MAutomationCreate: Cancel only, MD-85). */
+  primary?: { label: string; onPress: () => void; disabled?: boolean; loading?: boolean };
   /** Default "Cancel" (iOS text; Android ✕ named "Cancel"). */
   cancelLabel?: string;
   onCancel: () => void;

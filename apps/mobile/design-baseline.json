@@ -1,9 +1,7 @@
 {
   "legacyRoutes": [
-    "app/(app)/automations/[id]/index.tsx",
     "app/(app)/projects/[id]/codebases/[cid]/pull-requests/[number].tsx",
     "app/(app)/scope-request.tsx",
-    "app/(app)/scripts/[id]/index.tsx",
     "app/(app)/settings/about.tsx",
     "app/(app)/settings/accessibility.tsx",
     "app/(app)/settings/appearance.tsx",
@@ -378,25 +376,6 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 9,
       "mobile-design/design/defaultTextSize": 2
     },
-    "src/components/work/AgentDetailSheet.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultTextSize": 15,
-      "mobile-design/design/legacyTokenUtility": 18,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 34,
-      "mobile-design/design/arbitraryValue": 1,
-      "mobile-design/design/defaultRadius": 1,
-      "mobile-design/design/literalInlineStyle": 4
-    },
-    "src/components/work/ExecutionSheet.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/defaultTextSize": 5,
-      "mobile-design/design/legacyTokenUtility": 5,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 10
-    },
-    "src/components/work/ScriptRow.tsx": {
-      "mobile-design/design/lucideDirectImport": 1
-    },
     "src/components/work/StartRunSheet.tsx": {
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
@@ -419,14 +398,6 @@
       "mobile-design/design/defaultTextSize": 1,
       "mobile-design/design/legacyTokenUtility": 1,
       "better-tailwindcss/no-restricted-classes/diagnostic": 2
-    },
-    "src/components/work/TriggerInputSheet.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultTextSize": 6,
-      "mobile-design/design/legacyTokenUtility": 6,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 12,
-      "mobile-design/design/literalInlineStyle": 3
     },
     "src/components/work/cards.tsx": {
       "mobile-design/design/lucideDirectImport": 1
@@ -501,15 +472,6 @@
       "react-hooks/refs/diagnostic": 1,
       "react-hooks/immutability/diagnostic": 5
     },
-    "app/(app)/automations/[id]/index.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 2,
-      "boundaries/dependencies/diagnostic": 15,
-      "mobile-design/design/defaultRadius": 1,
-      "mobile-design/design/legacyTokenUtility": 8,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 16,
-      "mobile-design/design/defaultTextSize": 7
-    },
     "app/(app)/projects/[id]/codebases/[cid]/pull-requests/[number].tsx": {
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
@@ -527,16 +489,6 @@
       "mobile-design/design/legacyTokenUtility": 4,
       "better-tailwindcss/no-restricted-classes/diagnostic": 6,
       "mobile-design/design/defaultTextSize": 2
-    },
-    "app/(app)/scripts/[id]/index.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 12,
-      "react-hooks/set-state-in-effect/diagnostic": 1,
-      "mobile-design/design/legacyTokenUtility": 13,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 22,
-      "mobile-design/design/defaultRadius": 1,
-      "mobile-design/design/defaultTextSize": 8
     },
     "app/(app)/settings/about.tsx": {
       "mobile-design/design/rawTextImport": 1,
@@ -684,7 +636,7 @@
     },
     "app/(app)/workflows/index.tsx": {
       "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 12,
+      "boundaries/dependencies/diagnostic": 8,
       "mobile-design/design/legacyTokenUtility": 1,
       "better-tailwindcss/no-restricted-classes/diagnostic": 1
     },

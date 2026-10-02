@@ -1,10 +1,10 @@
-import { domainStatusTone, domainStatusLabel } from '../../theme/status';
 // ────────────────────────────────────────────────────────────────
 // Automation detail — pure view logic.
 //
 // Kept free of React Native (and of runtime imports from client-core) so
-// vitest can exercise it in node: next-run wording, trigger description,
-// execution tone / activity, and the tap-intent idempotency key.
+// vitest can exercise it in node: next-run wording, execution activity and
+// order, and the tap-intent idempotency key. The M7-04 screens' rules are in
+// model/automationsModel.ts and model/scheduleModel.ts.
 //
 // Tested in src/__tests__/automationModel.test.ts.
 // ────────────────────────────────────────────────────────────────
@@ -17,23 +17,6 @@ import type {
 
 /** What the wire actually carries for a timestamp (ISO string or epoch ms). */
 export type WireTime = string | number | null | undefined;
-
-/** The subset of `GET /api/automations/:id` the detail screen reads. */
-export interface AutomationView {
-  id: string;
-  name: string;
-  description?: string | null;
-  enabled: boolean;
-  triggerType: AutomationTriggerType | string;
-  cronExpression?: string | null;
-  timezone?: string | null;
-  nextRunAt?: WireTime;
-  lastRunAt?: WireTime;
-  workflowIds?: string[] | null;
-  dataSchema?: unknown;
-  defaultDataset?: unknown;
-  executions?: ExecutionView[];
-}
 
 export interface ExecutionView {
   id: string;
@@ -48,18 +31,6 @@ export interface ExecutionView {
   completedAt?: WireTime;
   createdAt?: WireTime;
 }
-
-export interface ExecutionRunView {
-  id?: string;
-  workflowRunId: string;
-  workflowDefinitionId: string;
-  iterationIndex?: number;
-  iterationLabel?: string | null;
-  status: AutomationRunItemStatus | string;
-  attemptCount?: number;
-}
-
-export type ExecutionTone = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
 
 export function toMs(value: WireTime): number | null {
   if (value === null || value === undefined) return null;
@@ -116,18 +87,6 @@ export function nextRunLabel(nextRunAt: WireTime, now: number = Date.now()): str
 
 // ── Trigger ────────────────────────────────────────────────────
 
-/** One line saying how this automation fires. */
-export function triggerDescription(a: Pick<AutomationView, 'triggerType' | 'cronExpression' | 'timezone'>): string {
-  if (a.triggerType === 'schedule') {
-    const cron = a.cronExpression?.trim();
-    if (!cron) return 'Schedule';
-    const tz = a.timezone?.trim();
-    return tz ? `Schedule · ${cron} (${tz})` : `Schedule · ${cron}`;
-  }
-  if (a.triggerType === 'webhook') return 'Webhook';
-  return 'Manual';
-}
-
 export function triggeredByLabel(source: string | undefined | null): string {
   if (source === 'schedule') return 'Schedule';
   if (source === 'webhook') return 'Webhook';
@@ -135,43 +94,11 @@ export function triggeredByLabel(source: string | undefined | null): string {
   return 'Unknown';
 }
 
-/**
- * The trigger route refuses a schema-driven automation that has no dataset
- * to fall back on — the phone has no way to author one, so the button says
- * so instead of failing on tap.
- */
-export function needsInputs(a: Pick<AutomationView, 'dataSchema' | 'defaultDataset'>): boolean {
-  return Boolean(a.dataSchema) && !a.defaultDataset;
-}
-
-/** Workflow ids to list. */
-export function workflowIdsOf(a: Pick<AutomationView, 'workflowIds'>): string[] {
-  return Array.isArray(a.workflowIds) ? a.workflowIds.filter((x) => typeof x === 'string' && x) : [];
-}
-
 // ── Executions ─────────────────────────────────────────────────
 
 /** Still in flight — worth polling for. `pending` counts: it is about to run. */
 export function isExecutionActive(status: string | undefined | null): boolean {
   return status === 'pending' || status === 'running';
-}
-
-export function executionTone(status: string | undefined | null): ExecutionTone {
-  return domainStatusTone('automationExecution', status);
-}
-
-export function executionStatusLabel(status: string | undefined | null): string {
-  return domainStatusLabel('automationExecution', status || null);
-}
-
-/** "3/5 done · 1 failed", or null when the server reported no counts. */
-export function executionCounts(e: Pick<ExecutionView, 'totalIterations' | 'completedIterations' | 'failedIterations'>): string | null {
-  const total = e.totalIterations ?? 0;
-  if (total <= 0) return null;
-  const done = e.completedIterations ?? 0;
-  const failed = e.failedIterations ?? 0;
-  const noun = total === 1 ? 'iteration' : 'iterations';
-  return failed > 0 ? `${done}/${total} ${noun} · ${failed} failed` : `${done}/${total} ${noun}`;
 }
 
 export function executionTime(e: Pick<ExecutionView, 'startedAt' | 'createdAt'>): number | null {

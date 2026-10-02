@@ -24,7 +24,7 @@ const CREATE: Record<string, string> = {
   workflows: '/workflows?new=1',
   projects: '/projects/new',
   agents: '/agents/new',
-  automations: '/automations',
+  automations: '/automations/new',
   scripts: '/scripts',
 };
 
@@ -76,8 +76,9 @@ function mapRoute(route: string | null): string | null {
       if (id && sub === 'runs' && subId && leaf === 'approval') return withQuery(`/workflows/${id}/runs/${subId}`, query);
       return route;
     case 'automations':
-      // Edit (M7) and an execution's sheet (M7): the automation itself, which lists its executions.
-      if (id && (sub === 'edit' || sub === 'executions')) return `/automations/${id}`;
+      // The webhook credentials are a section of the automation (MD-169); edit and executions have their routes.
+      if (id && sub === 'webhook') return `/automations/${id}`;
+      if (id && sub === 'executions' && !subId) return `/automations/${id}`;
       return route;
     case 'agents':
       // `/agents/<id>` and `/agents/<id>/edit` have screens since M7-03 (MD-83).

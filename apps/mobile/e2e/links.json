@@ -24,7 +24,7 @@
     { "url": "generatorai://workflows/${WORKFLOW_ID}/runs/${RUN_ID}", "expect": { "text": "Run actions" } },
     { "url": "generatorai://workflows/${WORKFLOW_ID}/runs/${RUN_ID}/approval/${STAGE_RUN_ID}", "expect": { "text": "Run actions" }, "note": "the run until the approval sheet lands (M8)" },
     { "url": "generatorai://automations", "expect": { "text": "Automations" } },
-    { "url": "generatorai://automations/${AUTOMATION_ID}", "expect": { "text": "Automation" } },
+    { "url": "generatorai://automations/${AUTOMATION_ID}", "expect": { "text": "Configuration" } },
     { "url": "generatorai://scripts", "expect": { "text": "Scripts" } },
     { "url": "generatorai://scripts/${SCRIPT_ID}", "expect": { "text": "Script" } },
     { "url": "generatorai://settings", "expect": { "text": "Appearance" } },

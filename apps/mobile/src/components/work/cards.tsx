@@ -12,8 +12,8 @@ import { runStatusTone } from '../../theme/status';
 
 import React from 'react';
 import { router } from 'expo-router';
-import { Clock, Play, Webhook, Workflow as WorkflowIcon } from 'lucide-react-native';
-import type { AutomationSummary, WorkflowRunSummary, WorkflowSummary } from '@generatorai/client-core';
+import { Play, Workflow as WorkflowIcon } from 'lucide-react-native';
+import type { WorkflowRunSummary, WorkflowSummary } from '@generatorai/client-core';
 
 import { relativeTime, runElapsed, formatDuration } from '../runs/formatTime';
 import { isActive, needsAttention, statusLabel } from '../runs/statusStyle';
@@ -34,12 +34,6 @@ export interface WorkRowProps {
   /** Hairline under the row. Default true. */
   separator?: boolean;
 }
-
-const TRIGGER_LABEL: Record<AutomationSummary['triggerType'], string> = {
-  manual: 'Manual',
-  schedule: 'Scheduled',
-  webhook: 'Webhook',
-};
 
 export function RunCard({ run, accessory, separator }: { run: WorkflowRunSummary } & WorkRowProps): React.ReactElement {
   const openRun = useOpenRun();
@@ -122,31 +116,4 @@ export function WorkflowCard({
   );
 }
 
-export function AutomationCard({
-  automation,
-  accessory,
-  separator,
-}: { automation: AutomationSummary } & WorkRowProps): React.ReactElement {
-  const { legacyColors: colors } = useTheme();
-  const TriggerIcon =
-    automation.triggerType === 'schedule' ? Clock : automation.triggerType === 'webhook' ? Webhook : Play;
-  const trigger = TRIGGER_LABEL[automation.triggerType] ?? automation.triggerType;
-
-  return (
-    <ListItem
-      title={automation.name}
-      subtitle={`${trigger} · ${automation.lastRunAt ? `last ran ${relativeTime(automation.lastRunAt)}` : 'never run'}`}
-      avatar={{
-        icon: <TriggerIcon size={17} color={colors['muted-foreground']} />,
-        tone: 'neutral',
-      }}
-      // "On" is the default state and says nothing; only "Off" earns a badge.
-      badge={automation.enabled ? null : { label: 'Off', tone: 'neutral' }}
-      accessory={accessory}
-      separator={separator}
-      accessibilityLabel={`${automation.name}, ${trigger}, ${automation.enabled ? 'on' : 'off'}`}
-      onPress={() => router.push(`/automations/${automation.id}`)}
-    />
-  );
-}
 
