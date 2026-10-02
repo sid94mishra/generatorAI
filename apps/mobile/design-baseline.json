@@ -1,6 +1,5 @@
 {
   "legacyRoutes": [
-    "app/(app)/_layout.tsx",
     "app/(app)/automations/[id]/index.tsx",
     "app/(app)/changes/[workspaceId]/file.tsx",
     "app/(app)/changes/[workspaceId]/index.tsx",
@@ -101,14 +100,6 @@
     "src/components/changes/Toolbar.tsx": {
       "mobile-design/design/legacyTokenUtility": 1,
       "better-tailwindcss/no-restricted-classes/diagnostic": 1
-    },
-    "src/components/chat/ChatHeader.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/legacyTokenUtility": 5,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 7,
-      "mobile-design/design/defaultTextSize": 2,
-      "mobile-design/design/arbitraryValue": 1
     },
     "src/components/chat/ChatMenuSheet.tsx": {
       "mobile-design/design/rawTextImport": 1,
@@ -711,13 +702,8 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 3
     },
     "src/components/ui/Screen.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/legacyTokenUtility": 7,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 11,
-      "mobile-design/design/literalInlineStyle": 4,
-      "mobile-design/design/boldWeight": 2,
-      "mobile-design/design/defaultTextSize": 2
+      "mobile-design/design/legacyTokenUtility": 1,
+      "better-tailwindcss/no-restricted-classes/diagnostic": 1
     },
     "src/components/ui/SegmentedControl.tsx": {
       "mobile-design/design/rawTextImport": 1,
@@ -847,15 +833,6 @@
     "src/components/work/cards.tsx": {
       "mobile-design/design/lucideDirectImport": 1
     },
-    "src/components/workbench/WorkbenchButton.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/legacyTokenUtility": 4,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 6,
-      "mobile-design/design/literalInlineStyle": 2,
-      "mobile-design/design/defaultTextSize": 1,
-      "mobile-design/design/boldWeight": 1
-    },
     "src/components/workbench/useWorkbench.ts": {
       "react-hooks/purity/diagnostic": 1
     },
@@ -874,27 +851,6 @@
       "mobile-design/design/defaultTextSize": 2,
       "mobile-design/design/boldWeight": 1,
       "mobile-design/design/literalInlineStyle": 2
-    },
-    "src/navigation/StackHeader.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/arbitraryValue": 1,
-      "mobile-design/design/legacyTokenUtility": 2,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 3,
-      "mobile-design/design/defaultTextSize": 1
-    },
-    "src/navigation/TabHeaderActions.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/legacyTokenUtility": 2,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 4,
-      "mobile-design/design/literalInlineStyle": 2,
-      "mobile-design/design/defaultTextSize": 1,
-      "mobile-design/design/boldWeight": 1
-    },
-    "src/navigation/shell/MenuButton.tsx": {
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/legacyTokenUtility": 2,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 2
     },
     "src/services/api/useLoopControl.ts": {
       "boundaries/dependencies/diagnostic": 2
@@ -997,9 +953,6 @@
     "src/terminal/terminalHtml.ts": {
       "mobile-design/design/hexOrRgbInTs": 3
     },
-    "app/(app)/_layout.tsx": {
-      "boundaries/dependencies/diagnostic": 1
-    },
     "app/(app)/automations/[id]/index.tsx": {
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 2,
@@ -1031,7 +984,7 @@
       "mobile-design/design/platformOs": 3,
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 45,
+      "boundaries/dependencies/diagnostic": 43,
       "react-hooks/refs/diagnostic": 10,
       "react-hooks/set-state-in-effect/diagnostic": 1,
       "react-hooks/preserve-manual-memoization/diagnostic": 4,
@@ -1052,14 +1005,14 @@
     },
     "app/(app)/chats/index.tsx": {
       "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 20,
+      "boundaries/dependencies/diagnostic": 18,
       "react-hooks/set-state-in-effect/diagnostic": 1,
       "mobile-design/design/legacyTokenUtility": 1,
       "better-tailwindcss/no-restricted-classes/diagnostic": 1
     },
     "app/(app)/index.tsx": {
       "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 12,
+      "boundaries/dependencies/diagnostic": 10,
       "react-hooks/set-state-in-effect/diagnostic": 1,
       "mobile-design/design/legacyTokenUtility": 1,
       "better-tailwindcss/no-restricted-classes/diagnostic": 1
@@ -1119,7 +1072,7 @@
     },
     "app/(app)/projects/index.tsx": {
       "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 19,
+      "boundaries/dependencies/diagnostic": 17,
       "mobile-design/design/legacyTokenUtility": 1,
       "better-tailwindcss/no-restricted-classes/diagnostic": 1
     },
@@ -1280,11 +1233,11 @@
     "app/(app)/workflows/[id]/runs/[runId]/index.tsx": {
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 27,
+      "boundaries/dependencies/diagnostic": 25,
       "react-hooks/exhaustive-deps/diagnostic": 3,
-      "mobile-design/design/legacyTokenUtility": 11,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 17,
-      "mobile-design/design/defaultTextSize": 5,
+      "mobile-design/design/legacyTokenUtility": 9,
+      "better-tailwindcss/no-restricted-classes/diagnostic": 14,
+      "mobile-design/design/defaultTextSize": 4,
       "mobile-design/design/defaultRadius": 1
     },
     "app/(app)/workflows/[id]/runs/[runId]/stages/[stageRunId].tsx": {
@@ -1299,7 +1252,7 @@
     },
     "app/(app)/workflows/index.tsx": {
       "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 14,
+      "boundaries/dependencies/diagnostic": 12,
       "mobile-design/design/legacyTokenUtility": 1,
       "better-tailwindcss/no-restricted-classes/diagnostic": 1
     },

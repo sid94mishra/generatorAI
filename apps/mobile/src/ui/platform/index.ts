@@ -13,6 +13,7 @@ export {
   moduleRootOptions,
   paletteOptions,
   sheetOptions,
+  useStackScreenOptions,
   type ScreenPresentationOptions,
   type SheetKind,
 } from './presentation';

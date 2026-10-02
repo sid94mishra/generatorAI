@@ -40,7 +40,7 @@ export default function SettingsScreen(): React.ReactElement {
   const readyProviders = providers.data?.providers.filter((p) => p.ready).length ?? 0;
 
   return (
-    <Screen title="Settings" back>
+    <Screen title="Settings">
       {/* Which machine this phone is talking to, and how — the first thing
           to check when anything below looks wrong. */}
       <ListGroup>

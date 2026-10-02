@@ -27,11 +27,12 @@ import { WaitDecisionCard, type WaitDecision } from '../../../../../../src/compo
 import { formatDuration, relativeTime, runElapsed } from '../../../../../../src/components/runs/formatTime';
 import { StageTimeline } from '../../../../../../src/components/runs/StageTimeline';
 import { StageTranscriptInline } from '../../../../../../src/components/runs/StageTranscriptInline';
-import { SessionHeader } from '../../../../../../src/components/chat/ChatHeader';
-import { WorkbenchButton } from '../../../../../../src/components/workbench/WorkbenchButton';
+import { Header } from '../../../../../../src/ui/native/router/Header';
+import { useBreadcrumb } from '../../../../../../src/blocks/shell/useHeaderNav';
+import { domainStatus } from '../../../../../../src/theme/status';
 import { useWorkbench } from '../../../../../../src/components/workbench/useWorkbench';
 import { useWorkbenchPane } from '../../../../../../src/components/workbench/useWorkbenchPane';
-import { usePaneStore } from '../../../../../../src/blocks/WorkspacePane';
+import { usePaneStore, usePaneToggle } from '../../../../../../src/blocks/WorkspacePane';
 import { MAX_SCALE } from '../../../../../../src/components/ui/accessibility';
 import { StatusGlyph } from '../../../../../../src/components/runs/StatusGlyph';
 import {
@@ -196,32 +197,19 @@ export default function RunDetailScreen(): React.ReactElement {
   const workflowHref = (
     workflowHrefFor(definitionId ?? String(params.id))
   ) as NonNullable<Parameters<typeof goBack>[0]>;
-  const backButton = (
-    <IconButton
-      accessibilityLabel="Back"
-      icon={<ChevronLeft size={24} color={colors.foreground} />}
-      // A run belongs to its workflow (desktop: /workflows/:id/runs/:runId), so
-      // with no history behind it Back lands on that workflow's page.
-      onPress={() => goBack(workflowHref)}
-    />
+  // A run belongs to its workflow (desktop: /workflows/:id/runs/:runId), so with no history behind it Back
+  // lands on that workflow's page. Workspace header role (MD-18): breadcrumb, status line, pane toggle.
+  const onBack = (): void => goBack(workflowHref);
+  const runCrumbs = useBreadcrumb(
+    useMemo(() => [{ label: 'Workflows', href: '/workflows' }, { label: 'Workflow', href: String(workflowHref) }], [workflowHref]),
   );
-  const headerTitle = (text: string, sub?: string): React.ReactElement => (
-    <View>
-      <Text numberOfLines={1} maxFontSizeMultiplier={MAX_SCALE.chrome} className="text-md font-semibold text-foreground">
-        {text}
-      </Text>
-      {sub ? (
-        <Text numberOfLines={1} maxFontSizeMultiplier={MAX_SCALE.chrome} className="text-xs text-muted-foreground">
-          {sub}
-        </Text>
-      ) : null}
-    </View>
-  );
+  const paneToggle = usePaneToggle();
+  const runBadge = domainStatus('workflowRun', run.data?.status);
 
   if (run.isLoading) {
     return (
       <View className="flex-1 bg-background">
-        <SessionHeader leading={backButton} title={headerTitle('Run')} trailing={null} />
+        <Header role="detail" title="Run" opaque breadcrumb={runCrumbs} onBack={onBack} />
         <View className="p-4">
           <SkeletonList rows={5} />
         </View>
@@ -231,7 +219,7 @@ export default function RunDetailScreen(): React.ReactElement {
   if (run.error || !run.data) {
     return (
       <View className="flex-1 bg-background">
-        <SessionHeader leading={backButton} title={headerTitle('Run')} trailing={null} />
+        <Header role="detail" title="Run" opaque breadcrumb={runCrumbs} onBack={onBack} />
         <ErrorState
         title={run.error ? 'Could not load this run' : 'Run not found'}
         message={run.error instanceof Error ? run.error.message : undefined}
@@ -280,21 +268,15 @@ export default function RunDetailScreen(): React.ReactElement {
 
   return (
     <View className="flex-1 bg-background">
-      <SessionHeader
-        leading={backButton}
-        title={headerTitle(runTitle(data.name, 'Run'), statusLabel(data.status))}
-        trailing={
-          <>
-            {workspaceId ? (
-              <WorkbenchButton badge={workbench.badge} selected={paneOpen} onPress={() => usePaneStore.getState().toggle()} />
-            ) : null}
-            <IconButton
-              icon={<MoreHorizontal size={20} color={colors.foreground} />}
-              accessibilityLabel="Run actions"
-              onPress={() => setMenu(true)}
-            />
-          </>
-        }
+      <Header
+        role={workspaceId ? 'workspace' : 'detail'}
+        title={runTitle(data.name, 'Run')}
+        opaque
+        breadcrumb={runCrumbs}
+        onBack={onBack}
+        {...(runBadge ? { status: { state: runBadge.state, label: runBadge.label } } : {})}
+        {...(workspaceId ? { paneToggle } : {})}
+        actions={[{ id: 'run-menu', icon: 'more', label: 'Run actions', onPress: () => setMenu(true) }]}
       />
       <PlainScroll onRefresh={pull.onRefresh} refreshing={pull.refreshing}>
         <Card className="gap-3 p-4">

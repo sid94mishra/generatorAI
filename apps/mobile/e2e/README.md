@@ -100,9 +100,9 @@ web phone viewports and an iOS bundle export are not an iOS simulator pass.
 ## September 2026 redesign
 
 There is no tab bar: top-level screens are reached through the navigation drawer
-(`menu-button`, rows `drawer-home`, `drawer-projects`, `drawer-chats`, `drawer-agents`, `drawer-workflows`, `drawer-scripts`, `drawer-automations` — the desktop sidebar, so there is no Runs row: open a workflow for its runs, `drawer-new-chat`, `drawer-settings`), or by
+(`menu-button` on Android, the "Open sidebar" toolbar item on iOS; rows `drawer-home`, `drawer-projects`, `drawer-chats`, `drawer-agents`, `drawer-workflows`, `drawer-scripts`, `drawer-automations` — the desktop sidebar, so there is no Runs row: open a workflow for its runs, `drawer-new-chat`, `drawer-settings`), or by
 URL as before. Session tools are tabs of the workspace pane (M5-03) — open it with
-`workbench-button` and pick `pane-tab-<DockTabType>` (`changes`, `files`, `terminal`, `browser`,
+`pane-toggle` (iOS: "Open workspace pane") and pick `pane-tab-<DockTabType>` (`changes`, `files`, `terminal`, `browser`,
 `computer`, `tasks`, `plan`); session info is the chat menu's "Session info". The
 composer's setup row is `composer-model`, `composer-effort`, `composer-mode` (only in plan mode) and
 `composer-options`. Design record: `docs/mobile-redesign/DESIGN.md`.

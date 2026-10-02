@@ -292,7 +292,7 @@ export default function PairScreen(): React.ReactElement {
 
     if (!permission.granted) {
       return (
-        <Screen title="Pair this phone" subtitle="Scan the code your GeneratorAI server shows.">
+        <Screen title="Pair this phone" subtitle="Scan the code your GeneratorAI server shows." sidebarToggle={false}>
           <EmptyState
             title="Camera access needed"
             message="Pairing uses the camera to read the QR code shown by your GeneratorAI server. The camera is used for nothing else."

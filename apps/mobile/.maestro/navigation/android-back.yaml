@@ -1,0 +1,39 @@
+appId: ${APP_ID}
+name: navigation · Android Back order (06 §3.2, MD-20, MD-88; batch check B12)
+# Predictive back is off (MD-20); re-run on API 36 and 37 at every SDK bump.
+# Order: sheet → pane → stack pop → module root → Home.
+tags: [android, navigation, full]
+env: {FRESH_CHAT: stream}
+---
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - runFlow: ../_subflows/launch.yaml
+      # A module root other than Home goes Home on Back (MD-88).
+      - runFlow: ../_subflows/open-sidebar.yaml
+      - tapOn: {id: drawer-chats}
+      - extendedWaitUntil: {visible: {id: chats-new}, timeout: 15000}
+      - pressKey: Back
+      - extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 15000}
+      # Push a chat, open the pane, then a sheet over it.
+      - openLink: generatorai:///chats/${CHAT_STREAM_ID}
+      - extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+      - runFlow: ../_subflows/open-pane.yaml
+      - extendedWaitUntil: {visible: {id: pane-tab-changes}, timeout: 15000}
+      - tapOn: {id: pane-close}
+      - extendedWaitUntil: {notVisible: {id: pane-tab-changes}, timeout: 10000}
+      - runFlow: ../_subflows/open-pane.yaml
+      - extendedWaitUntil: {visible: {id: pane-tab-changes}, timeout: 15000}
+      # 1. The pane closes first.
+      - pressKey: Back
+      - extendedWaitUntil: {notVisible: {id: pane-tab-changes}, timeout: 10000}
+      - assertVisible: {id: composer-input}
+      # 2. A sheet closes before the stack pops.
+      - tapOn: {id: header-chat-menu}
+      - extendedWaitUntil: {visible: "Session info", timeout: 10000}
+      - pressKey: Back
+      - extendedWaitUntil: {notVisible: "Session info", timeout: 10000}
+      - assertVisible: {id: composer-input}
+      # 3. The chat pops (or, opened by a link with no history, walks up to Chats).
+      - pressKey: Back
+      - extendedWaitUntil: {notVisible: {id: composer-input}, timeout: 10000}

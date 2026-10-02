@@ -2,6 +2,9 @@
 // Routes pass them as `options={sheetOptions('picker')}`. Plain data, typed locally so `ui/` never
 // imports the router (MD-86).
 
+import { useMemo } from 'react';
+
+import { useThemeColors } from '../lib/themeColors';
 import { nativePlatform } from './geometry';
 
 /** The subset of native-stack screen options the kit sets. */
@@ -63,4 +66,17 @@ export const moduleRootOptions: ScreenPresentationOptions = { animation: 'none' 
 
 export function sheetOptions(kind: SheetKind): ScreenPresentationOptions {
   return sheetOptionsFor(nativePlatform, kind);
+}
+
+/**
+ * The shell Stack's screen options (06 §3.1): no navigator header by default (screens draw the kit Header), the
+ * platform push transition, frozen when off screen, and the theme's surface behind every scene so a transition never
+ * shows an unpainted (white) frame.
+ */
+export function useStackScreenOptions(): ScreenPresentationOptions & { freezeOnBlur: true; contentStyle: { backgroundColor: string } } {
+  const colors = useThemeColors();
+  return useMemo(
+    () => ({ headerShown: false, ...detailOptions, freezeOnBlur: true, contentStyle: { backgroundColor: colors.surface } }),
+    [colors.surface],
+  );
 }

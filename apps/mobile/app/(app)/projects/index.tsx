@@ -45,11 +45,10 @@ import { EmptyState, ErrorState } from '../../../src/components/ui/States';
 import { SkeletonList } from '../../../src/components/ui/Skeleton';
 import { Screen } from '../../../src/components/ui/Screen';
 import { usePullToRefresh } from '../../../src/components/ui/usePullToRefresh';
-import { TabHeaderActions } from '../../../src/navigation/TabHeaderActions';
 import { Chip } from '../../../src/components/ui/Chip';
-import { MenuButton } from '../../../src/navigation/shell/MenuButton';
 import { useTheme } from '../../../src/theme/ThemeProvider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { openSearch } from '../../../src/blocks/shell/navigation';
 
 type Segment = 'projects' | 'agents';
 type RoleFilter = 'all' | 'agent' | 'orchestrator';
@@ -151,19 +150,10 @@ export default function ProjectsScreen(): React.ReactElement {
     <View className="flex-1 bg-background">
       <Screen
         title={segment === 'agents' ? 'Agents' : 'Projects'}
-        variant="compact"
-        leading={<MenuButton />}
-        trailing={
-          <TabHeaderActions>
-            {segment === 'projects' ? (
-              <IconButton
-                accessibilityLabel="New project"
-                icon={<Plus size={22} color={colors.foreground} />}
-                onPress={() => (projectEdit.available ? setCreating(true) : setLocked(true))}
-              />
-            ) : null}
-          </TabHeaderActions>
-        }
+        actions={[{ id: 'search', icon: 'search', label: 'Search', onPress: () => openSearch(), testID: 'header-search' }]}
+        {...(segment === 'projects'
+          ? { newAction: { label: 'New project', icon: 'plus' as const, onPress: () => (projectEdit.available ? setCreating(true) : setLocked(true)), testID: 'projects-new' } }
+          : {})}
         scroll={false}
       >
           <View className="flex-1">

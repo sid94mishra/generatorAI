@@ -51,7 +51,7 @@ try {
     // the tool as a sheet. Each is opened from the index and closed again.
     for (const [id, label] of [['changes', 'Changes'], ['files', 'Files'], ['terminal', 'Terminal'], ['browser', 'Browser']]) {
       await step(`workbench tool: ${label}`, async () => {
-        await tap(visible(page.getByTestId('workbench-button')));
+        await tap(visible(page.getByTestId('pane-toggle')));
         await sleep(900);
         await tap(visible(page.getByTestId(`pane-tab-${id}`)));
         await sleep(1600);

@@ -4,29 +4,29 @@ name: navigation · sidebar and route tree tour
 tags: [smoke, navigation]
 ---
 - runFlow: ../_subflows/launch.yaml
-- tapOn: {id: menu-button}
+- runFlow: ../_subflows/open-sidebar.yaml
 - extendedWaitUntil: {visible: {id: drawer-home}, timeout: 10000}
 - assertVisible: {id: drawer-search}
 - assertVisible: {id: drawer-settings}
 - assertVisible: {id: connection-status}
 - tapOn: {id: drawer-chats}
 - extendedWaitUntil: {visible: {id: chats-new}, timeout: 15000}
-- tapOn: {id: menu-button}
+- runFlow: ../_subflows/open-sidebar.yaml
 - tapOn: {id: drawer-workflows}
 - extendedWaitUntil: {visible: "Workflows", timeout: 15000}
-- tapOn: {id: menu-button}
+- runFlow: ../_subflows/open-sidebar.yaml
 - tapOn: {id: drawer-automations}
 - extendedWaitUntil: {visible: "Automations", timeout: 15000}
-- tapOn: {id: menu-button}
+- runFlow: ../_subflows/open-sidebar.yaml
 - tapOn: {id: drawer-scripts}
 - extendedWaitUntil: {visible: "Scripts", timeout: 15000}
-- tapOn: {id: menu-button}
+- runFlow: ../_subflows/open-sidebar.yaml
 - tapOn: {id: drawer-agents}
 - extendedWaitUntil: {visible: "Agents", timeout: 15000}
-- tapOn: {id: menu-button}
+- runFlow: ../_subflows/open-sidebar.yaml
 - tapOn: {id: drawer-projects}
 - extendedWaitUntil: {visible: "Projects", timeout: 15000}
-- tapOn: {id: menu-button}
+- runFlow: ../_subflows/open-sidebar.yaml
 - tapOn: {id: drawer-search}
 - extendedWaitUntil: {visible: "Search.*", timeout: 15000}
 - openLink: generatorai:///needs-you

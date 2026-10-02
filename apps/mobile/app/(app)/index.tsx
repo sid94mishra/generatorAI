@@ -43,10 +43,9 @@ import { EmptyState, ErrorState } from '../../src/components/ui/States';
 import { SkeletonList } from '../../src/components/ui/Skeleton';
 import { Screen } from '../../src/components/ui/Screen';
 import { usePullToRefresh } from '../../src/components/ui/usePullToRefresh';
-import { TabHeaderActions } from '../../src/navigation/TabHeaderActions';
-import { MenuButton } from '../../src/navigation/shell/MenuButton';
 import { useTheme } from '../../src/theme/ThemeProvider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { openNewChat, openSearch } from '../../src/blocks/shell/navigation';
 
 const FILTERS = [
   { value: 'today' as const, label: 'Today' },
@@ -175,18 +174,9 @@ export default function HomeScreen(): React.ReactElement {
     <View className="flex-1 bg-background">
       <Screen
         title="Home"
-        variant="compact"
-        leading={<MenuButton />}
-        trailing={
-          <TabHeaderActions>
-            <IconButton
-              accessibilityLabel="New chat"
-              testID="home-new-chat"
-              icon={<SquarePen size={20} color={colors.foreground} />}
-              onPress={() => router.push('/chats?new=1')}
-            />
-          </TabHeaderActions>
-        }
+        largeTitle
+        actions={[{ id: 'search', icon: 'search', label: 'Search', onPress: () => openSearch(), testID: 'header-search' }]}
+        newAction={{ label: 'New chat', icon: 'edit', onPress: openNewChat, testID: 'home-new-chat' }}
         scroll={false}
       >
         <GestureDetector gesture={swipe}>

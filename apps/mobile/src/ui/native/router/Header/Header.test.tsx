@@ -26,5 +26,6 @@ describe('Header (ML-02)', () => {
     expect(iosHeaderOptions({ role: 'detail', title: 'Run' })).toMatchObject({ headerLargeTitle: false, headerBackVisible: true });
     expect(iosHeaderOptions({ role: 'detail', title: 'Run', onBack: () => undefined }).headerBackVisible).toBe(false);
     expect(iosHeaderOptions({ role: 'modal', title: 'Edit' }).headerTransparent).toBe(false);
+    expect(iosHeaderOptions({ role: 'top', title: 'Chats', opaque: true }).headerTransparent).toBe(false);
   });
 });

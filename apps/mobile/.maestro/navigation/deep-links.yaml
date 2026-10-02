@@ -8,8 +8,8 @@ tags: [smoke]
 - extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
 - assertVisible: Dictate a message
 - openLink: generatorai:///chats/${CHAT_STREAM_ID}?server=not-paired
-- extendedWaitUntil: {visible: {id: menu-button}, timeout: 30000}
+- extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 30000}
 - assertNotVisible: {id: composer-input}
 - openLink: generatorai:///chats/%2e%2e/settings
-- extendedWaitUntil: {visible: {id: menu-button}, timeout: 30000}
+- extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 30000}
 - assertNotVisible: {id: composer-input}

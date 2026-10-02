@@ -52,14 +52,7 @@ export default function ProvidersScreen(): React.ReactElement {
     <Screen
       title="Providers"
       back
-      trailing={
-        <IconButton
-          accessibilityLabel="Re-check providers"
-          icon={<RefreshCw size={18} color={colors['muted-foreground']} />}
-          onPress={() => reprobe.mutate()}
-          disabled={reprobe.isPending}
-        />
-      }
+      actions={[{ id: 'recheck', icon: 'refresh', label: 'Re-check providers', onPress: () => { if (!reprobe.isPending) reprobe.mutate(); } }]}
       onRefresh={() => void providers.refetch()}
       refreshing={providers.isFetching}
     >

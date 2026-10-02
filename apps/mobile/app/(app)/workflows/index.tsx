@@ -43,10 +43,9 @@ import { SearchField } from '../../../src/components/ui/Form';
 import { EmptyState, ErrorState } from '../../../src/components/ui/States';
 import { SkeletonList } from '../../../src/components/ui/Skeleton';
 import { Screen } from '../../../src/components/ui/Screen';
-import { TabHeaderActions } from '../../../src/navigation/TabHeaderActions';
-import { MenuButton } from '../../../src/navigation/shell/MenuButton';
 import { useTheme } from '../../../src/theme/ThemeProvider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { openSearch } from '../../../src/blocks/shell/navigation';
 
 type Row =
   | { kind: 'header'; key: string; label: string }
@@ -155,24 +154,12 @@ export default function WorkScreen(): React.ReactElement {
     <View className="flex-1 bg-background">
       <Screen
         title={WORK_SEGMENT_LABEL[segment]}
-        variant="compact"
-        leading={<MenuButton />}
-        trailing={
-          <TabHeaderActions>
-            {/* Desktop's "Create Workflow". A phone cannot host the DAG
-                builder, so creating here means starting from a template;
-                anything built on desktop or web shows up in this list. */}
-            {segment === 'workflows' && workflowEdit.available ? (
-              <IconButton
-                testID="new-workflow"
-                accessibilityLabel="New workflow"
-                accessibilityHint="Creates a workflow from a template"
-                icon={<Plus size={22} color={colors.foreground} />}
-                onPress={() => setTemplates(true)}
-              />
-            ) : null}
-          </TabHeaderActions>
-        }
+        actions={[{ id: 'search', icon: 'search', label: 'Search', onPress: () => openSearch(), testID: 'header-search' }]}
+        // Desktop's "Create Workflow". A phone cannot host the DAG builder, so
+        // creating here means starting from a template.
+        {...(segment === 'workflows' && workflowEdit.available
+          ? { newAction: { label: 'New workflow', icon: 'plus' as const, onPress: () => setTemplates(true), testID: 'new-workflow' } }
+          : {})}
         scroll={false}
       >
           <View className="flex-1">

@@ -51,13 +51,12 @@ import { SearchField } from '../../../src/components/ui/Form';
 import { EmptyState, ErrorState } from '../../../src/components/ui/States';
 import { SkeletonList } from '../../../src/components/ui/Skeleton';
 import { Screen } from '../../../src/components/ui/Screen';
-import { TabHeaderActions } from '../../../src/navigation/TabHeaderActions';
-import { MenuButton } from '../../../src/navigation/shell/MenuButton';
 import { SwipeableRow, closeSwipedRow } from '../../../src/components/ui/SwipeableRow';
 import { ActionSheet, ConfirmSheet } from '../../../src/components/ui/ActionSheet';
 import { useToast } from '../../../src/components/ui/Toast';
 import { useTheme } from '../../../src/theme/ThemeProvider';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { openSearch } from '../../../src/blocks/shell/navigation';
 
 // Desktop's three filters, in its order. `all` is its default too.
 type Scope = 'all' | 'active' | 'archived';
@@ -249,60 +248,40 @@ export default function ChatsScreen(): React.ReactElement {
     <View className="flex-1 bg-background">
       <Screen
         title={selecting ? `${selected.size} selected` : 'Chats'}
-        variant="compact"
-        leading={
-          selecting ? (
-            <IconButton
-              accessibilityLabel="Cancel selection"
-              icon={<X size={22} color={colors.foreground} />}
-              onPress={exitSelection}
-            />
-          ) : (
-            <MenuButton />
-          )
+        actions={
+          selecting
+            ? [
+                { id: 'cancel-selection', icon: 'x', label: 'Cancel selection', onPress: exitSelection },
+                {
+                  id: 'select-all',
+                  icon: 'check',
+                  label: selected.size === selectableIds.length && selected.size > 0 ? 'Deselect all' : 'Select all',
+                  onPress: () => setSelected(selected.size === selectableIds.length ? new Set() : new Set(selectableIds)),
+                },
+                ...(selected.size > 0 && !removeMany.isPending
+                  ? [
+                      {
+                        id: 'bulk-delete',
+                        icon: 'trash' as const,
+                        label: `Delete ${selected.size} selected ${selected.size === 1 ? 'chat' : 'chats'}`,
+                        destructive: true,
+                        testID: 'chats-bulk-delete',
+                        onPress: () => {
+                          haptics.warn();
+                          setConfirmBulk(true);
+                        },
+                      },
+                    ]
+                  : []),
+              ]
+            : [
+                { id: 'search', icon: 'search', label: 'Search', onPress: () => openSearch(), testID: 'header-search' },
+                ...((chats.data?.items.length ?? 0) > 0
+                  ? [{ id: 'select', icon: 'list' as const, label: 'Select chats', onPress: () => setSelecting(true), testID: 'chats-select' }]
+                  : []),
+              ]
         }
-        trailing={
-          selecting ? (
-            <View className="flex-row items-center">
-              <Button
-                label={selected.size === selectableIds.length && selected.size > 0 ? 'Deselect all' : 'Select all'}
-                variant="ghost"
-                size="sm"
-                onPress={() =>
-                  setSelected(selected.size === selectableIds.length ? new Set() : new Set(selectableIds))
-                }
-              />
-              <IconButton
-                testID="chats-bulk-delete"
-                accessibilityLabel={`Delete ${selected.size} selected ${selected.size === 1 ? 'chat' : 'chats'}`}
-                disabled={selected.size === 0 || removeMany.isPending}
-                icon={<Trash2 size={20} color={selected.size === 0 ? colors['muted-foreground'] : colors.danger} />}
-                onPress={() => {
-                  haptics.warn();
-                  setConfirmBulk(true);
-                }}
-              />
-            </View>
-          ) : (
-            <TabHeaderActions>
-              <IconButton
-                testID="chats-new"
-                accessibilityLabel="New chat"
-                icon={<SquarePen size={20} color={colors.foreground} />}
-                onPress={() => setCreating(true)}
-              />
-              {(chats.data?.items.length ?? 0) > 0 ? (
-                <IconButton
-                  testID="chats-select"
-                  accessibilityLabel="Select chats"
-                  accessibilityHint="Select several chats to delete them together"
-                  icon={<ListChecks size={20} color={colors.foreground} />}
-                  onPress={() => setSelecting(true)}
-                />
-              ) : null}
-            </TabHeaderActions>
-          )
-        }
+        {...(selecting ? {} : { newAction: { label: 'New chat', icon: 'edit' as const, onPress: () => setCreating(true), testID: 'chats-new' } })}
         scroll={false}
       >
         <LegendList

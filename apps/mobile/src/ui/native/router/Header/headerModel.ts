@@ -47,12 +47,12 @@ export interface IosHeaderOptions {
 }
 
 /** The native-stack options for the iOS header (the title view and toolbars are added by Header.ios). */
-export function iosHeaderOptions({ role, title, largeTitle, onBack }: Pick<HeaderProps, 'role' | 'title' | 'largeTitle' | 'onBack'>): IosHeaderOptions {
+export function iosHeaderOptions({ role, title, largeTitle, onBack, opaque }: Pick<HeaderProps, 'role' | 'title' | 'largeTitle' | 'onBack' | 'opaque'>): IosHeaderOptions {
   return {
     headerShown: true,
     title,
     headerLargeTitle: role === 'top' && largeTitle !== false,
-    headerTransparent: role !== 'modal',
+    headerTransparent: role !== 'modal' && !opaque,
     headerShadowVisible: false,
     headerLargeTitleShadowVisible: false,
     headerBackVisible: (role === 'detail' || role === 'workspace') && !onBack,

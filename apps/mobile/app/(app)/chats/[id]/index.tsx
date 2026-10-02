@@ -108,7 +108,8 @@ import {
   shouldRestorePrompt,
 } from '../../../../src/components/chat/rewindOptions';
 import { pendingGateFrom } from '../../../../src/components/chat/gateFromInteraction';
-import { ChatHeaderMenuButton, ChatHeaderTitle, SessionHeader } from '../../../../src/components/chat/ChatHeader';
+import { Header } from '../../../../src/ui/native/router/Header';
+import { useBreadcrumb } from '../../../../src/blocks/shell/useHeaderNav';
 import { ChatMenuSheet, type ChatMenuSection } from '../../../../src/components/chat/ChatMenuSheet';
 import { useChatMotion } from '../../../../src/components/chat/chatMotion';
 import { displayChatName } from '../../../../src/components/common/chatName';
@@ -128,10 +129,9 @@ import { useScmResults } from '../../../../src/components/scm/useScmResults';
 import { activityLabelFor, selectChatView } from '../../../../src/components/chat/timeline/selectChatView';
 import { ComposerCaptureContext } from '../../../../src/components/chat/composer/captureContext';
 import { useTasksSummary } from '../../../../src/components/chat/panes/useTasksSummary';
-import { WorkbenchButton } from '../../../../src/components/workbench/WorkbenchButton';
 import { paneTabForTool, useWorkbenchPane, type ToolFocus } from '../../../../src/components/workbench/useWorkbenchPane';
 import { InspectorSection } from '../../../../src/components/chat/panes/InspectorSection';
-import { usePaneStore } from '../../../../src/blocks/WorkspacePane';
+import { usePaneStore, usePaneToggle } from '../../../../src/blocks/WorkspacePane';
 import { chatHref } from '../../../../src/blocks/shell/hrefs';
 import { useWorkbench } from '../../../../src/components/workbench/useWorkbench';
 import { toolForSection, type ToolId } from '../../../../src/components/workbench/workbenchModel';
@@ -420,11 +420,13 @@ export default function ChatScreen(): React.ReactElement {
     return parts.length > 0 ? parts.join(' · ') : null;
   }, [project.data?.name, repoAliases, mode]);
 
-  // The navigator's header is off for this route (see app/_layout.tsx): the
-  // screen draws its own so the workbench panel can slide over it.
-  React.useLayoutEffect(() => {
-    navigation.setOptions({ title });
-  }, [navigation, title]);
+  const paneToggle = usePaneToggle();
+  const chatCrumbs = useBreadcrumb(
+    useMemo(
+      () => [{ label: 'Chats', href: '/chats' }, ...(projectId && project.data?.name ? [{ label: project.data.name, href: `/projects/${encodeURIComponent(projectId)}` }] : [])],
+      [projectId, project.data?.name],
+    ),
+  );
 
   // ── Mutations ────────────────────────────────────────────────
   /**
@@ -1393,38 +1395,23 @@ export default function ChatScreen(): React.ReactElement {
     <TimelineActionsContext.Provider value={timelineActions}>
       <ComposerCaptureContext.Provider value={composer.captures}>
         <View className="flex-1">
-            <SessionHeader
-              // A chat is a pushed screen: Back, like every other detail
-              // screen. The menu belongs to the top-level sections only.
-              leading={
-                <IconButton
-                  testID="chat-back"
-                  accessibilityLabel="Back"
-                  icon={<ChevronLeft size={24} color={colors.foreground} />}
-                  onPress={() => goBack('/chats')}
-                />
-              }
-              title={
-                <ChatHeaderTitle
-                  title={title}
-                  subtitle={headerSubtitle}
-                  transport={transport}
-                  onPress={() => setRenameOpen(true)}
-                />
-              }
-              trailing={
-                <>
-                  <WorkbenchButton
-                    badge={workbench.badge}
-                    selected={paneOpen}
-                    onPress={() => {
-                      Keyboard.dismiss();
-                      usePaneStore.getState().toggle();
-                    }}
-                  />
-                  <ChatHeaderMenuButton onPress={() => setMenuOpen(true)} />
-                </>
-              }
+            {/* A chat is a detail screen with the pane toggle (MD-18 workspace role): Back,
+                breadcrumb, title, pane toggle with the changed-file count, ⋯ / ⋮. */}
+            <Header
+              role="workspace"
+              title={title}
+              opaque
+              breadcrumb={chatCrumbs}
+              onBack={() => goBack('/chats')}
+              testIDs={{ back: 'chat-back' }}
+              paneToggle={{
+                ...paneToggle,
+                onPress: () => {
+                  Keyboard.dismiss();
+                  paneToggle.onPress();
+                },
+              }}
+              actions={[{ id: 'chat-menu', icon: 'more', label: 'Chat actions', onPress: () => setMenuOpen(true) }]}
             />
             {renderChat()}
 
