@@ -2,7 +2,7 @@
 // DrizzleChatRepository — IChatRepository impl (v2)
 // ────────────────────────────────────────────────────────────────
 
-import { and, asc, count, desc, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull, isNotNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type {
   ChatListActivity,
   ChatListFilter,
@@ -57,6 +57,8 @@ export class DrizzleChatRepository implements IChatRepository {
 
       await this.db.insert(chats).values({
         id: chat.id,
+        pinnedAt: chat.pinnedAt ? new Date(chat.pinnedAt) : null,
+        lastReadAt: chat.lastReadAt ? new Date(chat.lastReadAt) : null,
         name: chat.name,
         description: chat.description ?? null,
         sessionId: chat.sessionId,
@@ -182,6 +184,8 @@ export class DrizzleChatRepository implements IChatRepository {
     const values: Record<string, unknown> = {};
     if (updates.name !== undefined) values['name'] = updates.name;
     if (updates.description !== undefined) values['description'] = updates.description;
+    if (updates.pinnedAt !== undefined) values['pinnedAt'] = updates.pinnedAt ? new Date(updates.pinnedAt) : null;
+    if (updates.lastReadAt !== undefined) values['lastReadAt'] = updates.lastReadAt ? new Date(updates.lastReadAt) : null;
     if (updates.model !== undefined) values['model'] = updates.model;
     if (updates.harnessConfig !== undefined) values['harnessConfig'] = updates.harnessConfig;
     if (updates.tags !== undefined) values['tags'] = updates.tags;
@@ -319,12 +323,15 @@ export class DrizzleChatRepository implements IChatRepository {
       .select({ row: chats, sortValue: key })
       .from(chats)
       .where(and(...where))
-      .orderBy(...sortOrder(sort, key))
+      // Pinned chats first. A cursor page already inside the unpinned group has one
+      // pin value, so the sort key alone keeps it a reverse index scan (SQLite adds a
+      // temp B-tree when an equality-bound expression column leads the ORDER BY).
+      .orderBy(...(after && !after.pinned ? [] : [desc(pinnedFirst())]), ...sortOrder(sort, key))
       .limit(limit + 1);
     const page = rows.slice(0, limit);
     const last = page[page.length - 1];
     const next: ChatListKeyset | null =
-      rows.length > limit && last ? { value: last.sortValue, id: last.row.id } : null;
+      rows.length > limit && last ? { value: last.sortValue, id: last.row.id, pinned: last.row.pinnedAt !== null } : null;
 
     const grouped = await this.db
       .select({ status: chats.status, n: count() })
@@ -409,6 +416,8 @@ export class DrizzleChatRepository implements IChatRepository {
         : undefined;
     return {
       id: row.id,
+      pinnedAt: row.pinnedAt?.toISOString() ?? null,
+      lastReadAt: row.lastReadAt?.toISOString() ?? null,
       name: row.name,
       description: row.description ?? undefined,
       sessionId: row.sessionId,
@@ -477,7 +486,17 @@ function sortOrder(sort: ChatListSort, key: SQL<number | string>): SQL[] {
  */
 function keysetCondition(sort: ChatListSort, key: SQL<number | string>, after: ChatListKeyset): SQL {
   const past = sort === 'name' ? sql`>` : sql`<`;
-  return sql`(${key}, ${chats.id}) ${past} (${after.value}, ${after.id})`;
+  const pastInGroup = sql`(${key}, ${chats.id}) ${past} (${after.value}, ${after.id})`;
+  // The pin group is compared through the same expression the v64 indexes hold,
+  // so a cursor page in the (usually much larger) unpinned group is a range scan.
+  return after.pinned
+    ? or(sql`${pinnedFirst()} = 0`, and(sql`${pinnedFirst()} = 1`, pastInGroup))!
+    : and(sql`${pinnedFirst()} = 0`, pastInGroup)!;
+}
+
+/** 1 for a pinned chat, 0 otherwise — the leading key of every v64 list index. */
+function pinnedFirst(): SQL<number> {
+  return sql<number>`(${chats.pinnedAt} IS NOT NULL)`;
 }
 
 /** `!` escapes LIKE's wildcards, so a search for `50%` means the text. */
@@ -487,6 +506,8 @@ function likePattern(text: string): string {
 
 function filterConditions(filter: ChatListFilter, withStatus: boolean): SQL[] {
   const where: SQL[] = [];
+  if (filter.pinned === 'only') where.push(isNotNull(chats.pinnedAt));
+  if (filter.pinned === 'exclude') where.push(isNull(chats.pinnedAt));
   if (withStatus && filter.status) where.push(eq(chats.status, filter.status));
   if (!filter.includeWorkers) where.push(isNull(chats.parentChatId));
   if (filter.projectIds?.length) where.push(inArray(chats.projectId, [...filter.projectIds]));

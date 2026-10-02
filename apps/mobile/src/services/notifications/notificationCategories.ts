@@ -19,6 +19,7 @@ import { ApiError, createApiClient } from '@generatorai/client-core';
 // ────────────────────────────────────────────────────────────────
 
 import { safeRoute } from './routeGuard';
+import { normalizePushData } from './pushData';
 
 /** Must match `APPROVAL_CATEGORY_ID` on the server. */
 export const APPROVAL_CATEGORY_ID = 'approval';
@@ -89,7 +90,7 @@ interface PushData {
 }
 
 function asRecord(data: unknown): PushData {
-  return data && typeof data === 'object' ? (data as PushData) : {};
+  return normalizePushData(data) ?? {};
 }
 
 /**

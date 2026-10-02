@@ -124,6 +124,20 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
   components: {
     schemas: {
       Error: errorResponseSchema,
+      PushDataV2: {
+        type: 'object',
+        description: 'Mobile push data. v2 clients route exclusively with href and serverId; route remains for existing consumers. Receiving a link never performs an action.',
+        required: ['v', 'serverId', 'href', 'route', 'category', 'threadId'],
+        properties: {
+          v: { type: 'integer', const: 2 }, serverId: { type: 'string' }, href: { type: 'string' },
+          route: { type: 'string' }, category: { type: 'string' }, threadId: { type: 'string' },
+          entity: { type: 'string', enum: ['chat', 'workflow_run', 'automation_execution'] },
+          entityId: { type: 'string' }, workflowDefinitionId: { type: 'string' },
+          chatId: { type: 'string' }, interactionId: { type: 'string' },
+          kind: { type: 'string', enum: ['permission', 'question', 'plan'] },
+          actions: { type: 'array', items: { type: 'string' } },
+        },
+      },
       // ── Source control (feature-source-control.md; shapes mirror
       // packages/shared/src/types/SourceControl.ts) ──
       ChatSourceControlOptions: {
@@ -964,6 +978,11 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
                 type: 'array',
                 items: { type: 'string', enum: ['allow_once', 'deny', 'approve', 'reject', 'answer', 'open'] },
               },
+              risk: {
+                type: 'string',
+                enum: ['standard', 'risky'],
+                description: 'Tool-permission gates only (MG-04): a risky gate needs a signed answer from a phone.',
+              },
             },
             required: ['kind', 'id', 'summary', 'actions'],
           },
@@ -1201,6 +1220,57 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
     },
   },
   paths: {
+    '/api/artifacts/{id}/download': {
+      get: {
+        tags: ['Artifacts'], summary: 'Download registered artifact bytes (MG-21)',
+        description: 'Requires read:files plus the owning session read:chats or read:workflows scope. Only managed artifact storage is served.',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': { description: 'Binary bytes; Content-Type and RFC 5987 Content-Disposition describe the file', content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } } },
+          '403': { description: 'Missing file/owner scope or path outside managed storage' },
+          '404': { description: 'Artifact or file not found' },
+        },
+      },
+    },
+    '/api/auth/approval-nonce': {
+      post: {
+        tags: ['Auth'], summary: 'Single-use approval nonce bound to this device (MG-05)',
+        description: 'Paired devices only. Valid 60 s; spent by an approval proof or an approval-key registration.',
+        responses: {
+          '200': { description: 'Nonce', content: { 'application/json': { schema: { type: 'object', properties: { nonce: { type: 'string' }, expiresAt: { type: 'number' } }, required: ['nonce', 'expiresAt'] } } } },
+          '403': { description: 'NOT_A_DEVICE' },
+        },
+      },
+    },
+    '/api/auth/devices/me/approval-key': {
+      put: {
+        tags: ['Auth'], summary: "Register this device's biometric-gated approval key (MG-05)",
+        description: 'DPoP-authenticated; the device id comes from the principal. `proof` is the new key signing the canonical JSON {"deviceId","nonce","serverId","typ":"gai-approval-key"} (ES256, raw r||s, base64url).',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  publicJwk: { type: 'object', properties: { kty: { type: 'string', enum: ['EC'] }, crv: { type: 'string', enum: ['P-256'] }, x: { type: 'string' }, y: { type: 'string' } }, required: ['kty', 'crv', 'x', 'y'] },
+                  keyProtection: { type: 'string', enum: ['secure-enclave', 'strongbox', 'tee'] },
+                  presence: { type: 'string', enum: ['biometry', 'passcode'] },
+                  nonce: { type: 'string' },
+                  proof: { type: 'string' },
+                },
+                required: ['publicJwk', 'keyProtection', 'presence', 'nonce', 'proof'],
+              },
+            },
+          },
+        },
+        responses: { '204': { description: 'Registered' }, '400': { description: 'INVALID_BODY' }, '403': { description: 'NOT_A_DEVICE or APPROVAL_PROOF_INVALID' } },
+      },
+      delete: {
+        tags: ['Auth'], summary: "Remove this device's approval key (MG-05)",
+        responses: { '204': { description: 'Removed (idempotent)' } },
+      },
+    },
     '/api/health': {
       get: {
         tags: ['System'],

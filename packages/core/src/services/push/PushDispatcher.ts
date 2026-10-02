@@ -20,12 +20,12 @@
 //    approval is how users disable notifications permanently.
 // ────────────────────────────────────────────────────────────────
 
-import type { ILogger } from '@generatorai/shared';
+import { pushRouting } from './pushRouting.js';
+import type { ILogger, PushData } from '@generatorai/shared';
 
 import {
   isMutable,
   planNotification,
-  type InteractionKind,
   type NotificationPlan,
 } from './notificationPolicy.js';
 
@@ -48,15 +48,7 @@ export interface PushTarget {
  * without opening the UI; `actions` is present ONLY for tool-permission
  * prompts (the one gate with a closed allow/deny answer).
  */
-export interface PushData {
-  route: string;
-  category: string;
-  threadId: string;
-  chatId?: string;
-  interactionId?: string;
-  kind?: InteractionKind;
-  actions?: readonly string[];
-}
+export type { PushData } from '@generatorai/shared';
 
 export interface PushMessage {
   target: PushTarget;
@@ -68,8 +60,9 @@ export interface PushMessage {
   interruption: 'active' | 'timeSensitive';
   /**
    * Expo/UNNotification category identifier. The app registers an
-   * `approval` category with Allow/Deny buttons at startup, so every
-   * approval notification names it — the OS then renders the buttons.
+   * `approval` category with Allow/Deny buttons at startup; a push names it
+   * only when it carries those actions (a standard permission gate), so the
+   * OS renders buttons only where a lock-screen answer is allowed (MG-04).
    */
   categoryId?: string;
 }
@@ -80,6 +73,8 @@ export interface PushProviderClient {
 }
 
 export interface PushDispatcherPorts {
+  serverId?: string;
+  workflowDefinitionId?(runId: string): Promise<string | null>;
   listTargets(): PushTarget[];
   recordSuccess(deviceId: string): void;
   recordFailure(deviceId: string, error: string): void;
@@ -114,7 +109,19 @@ export class PushDispatcher {
    * Returns the messages it decided to send, so tests can assert the decision
    * without a provider. Delivery itself is not awaited by the caller.
    */
-  handleEvent(event: EventLike): PushMessage[] {
+  /** Async metadata lookup is isolated from the event bus and the legacy synchronous API. */
+  async dispatchEvent(event: EventLike): Promise<PushMessage[]> {
+    const plan = planNotification({ kind: event.kind, data: isRecord(event.data) ? event.data : undefined });
+    if (!plan) return [];
+    let definitionId: string | null = null;
+    if (plan.threadId.startsWith('run:') && this.ports.workflowDefinitionId) {
+      try { definitionId = await this.ports.workflowDefinitionId(plan.threadId.slice(4)); }
+      catch { /* Deleted/unavailable run: open the workflow list, never an invented target. */ }
+    }
+    return this.handleEvent(event, definitionId);
+  }
+
+  handleEvent(event: EventLike, workflowDefinitionId?: string | null): PushMessage[] {
     const plan = planNotification({
       kind: event.kind,
       data: isRecord(event.data) ? event.data : undefined,
@@ -131,10 +138,12 @@ export class PushDispatcher {
         target,
         title: plan.title,
         body: plan.body,
-        data: buildData(plan),
+        data: { ...buildData(plan), ...(this.ports.serverId ? pushRouting(plan, this.ports.serverId, workflowDefinitionId) : {}) },
         threadId: plan.threadId,
         interruption: plan.interruption,
-        ...(plan.category === 'approval' ? { categoryId: APPROVAL_CATEGORY_ID } : {}),
+        // The Allow/Deny category only where the push carries those actions: a
+        // risky gate (MG-04) and a run approval (MD-31) open the app instead.
+        ...(plan.interaction?.actions?.length ? { categoryId: APPROVAL_CATEGORY_ID } : {}),
       });
       this.recentlySent.set(dedupeKey(target.deviceId, plan), now);
     }
@@ -204,6 +213,7 @@ function buildData(plan: NotificationPlan): PushData {
     data.interactionId = gate.interactionId;
     data.kind = gate.kind;
     if (gate.actions && gate.actions.length > 0) data.actions = [...gate.actions];
+    if (gate.risk) data.risk = gate.risk;
   }
   return data;
 }

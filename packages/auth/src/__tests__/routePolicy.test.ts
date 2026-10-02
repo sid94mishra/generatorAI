@@ -253,3 +253,8 @@ describe('route policy — other principals keep their authority', () => {
     expect(allowed(readOnly, '/workflow-runs/r1/commands', 'GET')).toBe(true);
   });
 });
+
+it('requires file access for registered artifact downloads', () => {
+  expect(resolveRoutePolicy('/artifacts/a/download').read).toEqual(['read:files']);
+  expect(allowed(['read:chats'], '/artifacts/a/download', 'GET')).toBe(false);
+});

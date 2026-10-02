@@ -2803,6 +2803,34 @@ export const MIGRATIONS: readonly Migration[] = [
         `ALTER TABLE chats ADD COLUMN background_task_cancelled_at INTEGER;`,
       ],
     },
+    // Mobile MG-02. New version; no changes to the frozen desktop migrations.
+    {
+      version: 64,
+      name: 'chat_pin_and_read_state',
+      sql: [
+        `ALTER TABLE chats ADD COLUMN pinned_at INTEGER;`,
+        `ALTER TABLE chats ADD COLUMN last_read_at INTEGER;`,
+        `CREATE INDEX idx_chats_pinned ON chats(pinned_at) WHERE pinned_at IS NOT NULL;`,
+        `CREATE INDEX idx_chats_pin_activity ON chats(parent_chat_id, (pinned_at IS NOT NULL), last_activity_at, id);`,
+        `CREATE INDEX idx_chats_pin_created ON chats(parent_chat_id, (pinned_at IS NOT NULL), created_at, id);`,
+        `CREATE INDEX idx_chats_pin_name ON chats(parent_chat_id, (pinned_at IS NOT NULL) DESC, lower(name), id);`,
+        // Ascending columns (as in v56): the descending list order is a reverse scan, which
+        // keeps a `(key, id) < (?, ?)` cursor a range. The status filter and the
+        // workers-included list keep their own index.
+        `CREATE INDEX idx_chats_pin_status_activity ON chats(status, parent_chat_id, (pinned_at IS NOT NULL), last_activity_at, id);`,
+        `CREATE INDEX idx_chats_pin_all_activity ON chats((pinned_at IS NOT NULL), last_activity_at, id);`,
+      ],
+    },
+    // Mobile MG-05: the biometric-gated approval key a phone signs risky approvals with.
+    {
+      version: 65,
+      name: 'device_approval_key',
+      sql: [
+        `ALTER TABLE auth_devices ADD COLUMN approval_public_jwk TEXT;`,
+        `ALTER TABLE auth_devices ADD COLUMN approval_key_created_at INTEGER;`,
+        `ALTER TABLE auth_devices ADD COLUMN approval_key_presence TEXT;`,
+      ],
+    },
   ];
 
 

@@ -37,6 +37,7 @@ export interface ChatListStateFilter {
 }
 
 export interface ChatListFilter {
+  pinned?: 'only' | 'exclude';
   status?: ChatStatus;
   projectIds?: readonly string[];
   agentRefs?: readonly string[];
@@ -51,6 +52,7 @@ export interface ChatListFilter {
 
 /** Keyset position: the sort value of the last row seen, plus its id. */
 export interface ChatListKeyset {
+  pinned?: boolean;
   value: number | string;
   id: string;
 }

@@ -219,6 +219,8 @@ export const ResolveToolPermissionSchema = z.object({
   behavior: z.enum(['allow', 'deny']),
   /** Relayed to the agent as the denial reason. */
   message: z.string().max(2000).optional(),
+  /** MG-05 — signed answer from a phone; required for a risky gate answered by a mobile device. */
+  approvalProof: z.unknown().optional(),
 });
 
 /**
@@ -230,6 +232,8 @@ export const ResolveToolPermissionSchema = z.object({
  * so older clients that PATCH fields the route ignores keep working.
  */
 export const UpdateChatSchema = z.object({
+  pinned: z.boolean().optional(),
+  unread: z.boolean().optional(),
   name: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).optional(),
   model: z.string().max(200).optional(),

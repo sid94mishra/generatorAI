@@ -209,6 +209,8 @@ export interface PermissionBlock {
   status: PermissionStatus;
   /** Optional reason the user gave when denying. */
   message?: string;
+  /** MG-04 — the server's verdict; absent on gates raised before it existed. */
+  risk?: 'standard' | 'risky';
   /** See {@link PlanBlock.openedAt}. */
   openedAt?: number;
 }

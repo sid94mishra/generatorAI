@@ -93,6 +93,8 @@ export interface BackgroundTaskListItem {
 
 /** Chat domain entity */
 export interface Chat {
+  pinnedAt?: string | null;
+  lastReadAt?: string | null;
   id: string;
   name: string;
   description?: string;

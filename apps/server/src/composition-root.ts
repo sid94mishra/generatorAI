@@ -1509,6 +1509,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
 
   if (pushTokens) {
     const dispatcher = new PushDispatcher({
+      serverId: security.identity.hostId,
+      workflowDefinitionId: async (runId) => (await workflowRunRepo.getById(runId)).workflowDefinitionId,
       // Snapshot refreshed off the device list rather than read per event:
       // `DeviceService.getDevice` is async and the dispatcher decision path
       // is deliberately synchronous so it can never stall the event bus.
@@ -1556,7 +1558,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     };
 
     eventBus.subscribeAll((event) => {
-      dispatcher.handleEvent({ kind: event.kind, data: event.data });
+      void dispatcher.dispatchEvent({ kind: event.kind, data: event.data }).catch((error: unknown) => {
+        logger.warn('[Push] Could not resolve notification target', { error: error instanceof Error ? error.message : String(error) });
+      });
     });
 
     const pushRefreshTimer = setInterval(() => void refreshPushTargets(), 30_000);
@@ -1833,6 +1837,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     logger,
   });
   const chatListService = new ChatListService({
+    modelMetadata: () => Object.values(harnessRegistry.statusSnapshot).flatMap((provider) => provider.models.map((model) => ({ ...model, provider: model.provider ?? provider.type }))),
     chats: chatEntityRepo,
     attention: attentionService,
     messages: chatMessageRepo,

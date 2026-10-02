@@ -7,6 +7,7 @@ export * from './principals.js';
 export * from './ports.js';
 export * from './jose.js';
 export * from './dpop.js';
+export * from './approvalProof.js';
 export * from './TokenService.js';
 export * from './DeviceService.js';
 export * from './SecurityAuditService.js';

@@ -35,6 +35,8 @@ export const DEFAULT_POLICY: RoutePolicy = {
 };
 
 export const ROUTE_POLICIES: RoutePolicy[] = [
+  // Registered artifact bytes; the route additionally checks its owning session's read scope.
+  { prefix: '/artifacts', read: ['read:files'], write: ['admin:settings'] },
   // Public — health probes.
   { prefix: '/health', read: [], write: [], public: true },
   // Auth bootstrap. Pairing completion is deliberately public: the caller has
@@ -58,6 +60,15 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
     prefix: '/auth/devices/me/scope-requests',
     read: ['read:status'],
     write: ['read:status'],
+  },
+  // A device registering its OWN approval key (mobile MG-05): the device id
+  // comes from the DPoP principal and the body must prove possession of the
+  // new key, so it is the same carve-out as scope requests and push tokens.
+  {
+    prefix: '/auth/devices/me/approval-key',
+    read: ['read:status'],
+    write: ['read:status'],
+    riskLevel: 'high',
   },
   { prefix: '/auth/devices', read: ['admin:devices'], write: ['admin:devices'], riskLevel: 'high' },
   // Reviewing and resolving scope requests grants authority, so it is the

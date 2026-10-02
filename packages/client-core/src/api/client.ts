@@ -1,3 +1,4 @@
+import { artifactDownloadName } from './artifactDownload.js';
 import { createResourceMethods, type BinaryResource } from './resources.js';
 import { createPlanMethods, createReviewMethods, type TaskDigest, type ReviewSubmitTarget } from './reviewDetails.js';
 import { createScmMethods } from './scm.js';
@@ -10,6 +11,8 @@ import { createScmMethods } from './scm.js';
 // ────────────────────────────────────────────────────────────────
 
 import {
+  type ApprovalKeyRegistration,
+  type ApprovalProof,
   type Agent,
   type RepoReadiness,
   chatListSearchParams,
@@ -1063,6 +1066,17 @@ export const queryKeys = {
 
 export function createApiClient(fetchImpl: ApiFetch) {
   return {
+    artifacts: {
+      async download(id: string): Promise<{ bytes: Uint8Array; mimeType: string; name: string }> {
+        let name = id;
+        const result = await requestBinary(async (path, init) => {
+          const response = await fetchImpl(path, init);
+          name = artifactDownloadName(response.headers.get('content-disposition'), id);
+          return response;
+        }, `/api/artifacts/${encodeURIComponent(id)}/download`);
+        return { bytes: result.data, mimeType: result.contentType, name };
+      },
+    },
     resources: createResourceMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init), (path, init) => requestBinary(fetchImpl, path, init)),
     plans: createPlanMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init)),
     scm: createScmMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init)),
@@ -1107,6 +1121,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
     },
 
     chats: {
+      setPinned: (id: string, pinned: boolean) => request<ChatSummary>(fetchImpl, `/api/chats/${encodeURIComponent(id)}`, { ...json({ pinned }), method: 'PATCH' }),
+      setUnread: (id: string, unread: boolean) => request<ChatSummary>(fetchImpl, `/api/chats/${encodeURIComponent(id)}`, { ...json({ unread }), method: 'PATCH' }),
       /**
        * One page of chats (chat list v2, G-02): `{ items, nextCursor, total,
        * counts }`. Unlike most list endpoints this one is paged — pass
@@ -1251,6 +1267,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
       update: (
         id: string,
         patch: {
+          pinned?: boolean;
+          unread?: boolean;
           name?: string;
           description?: string;
           model?: string;
@@ -1362,7 +1380,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
       respondPermission: (
         id: string,
         interactionId: string,
-        response: { behavior: 'allow' | 'deny'; message?: string },
+        /** `approvalProof` (MG-05) is required for a risky gate answered from a phone. */
+        response: { behavior: 'allow' | 'deny'; message?: string; approvalProof?: ApprovalProof },
       ) =>
         request<void>(
           fetchImpl,
@@ -1959,6 +1978,12 @@ export function createApiClient(fetchImpl: ApiFetch) {
         request<void>(fetchImpl, '/api/auth/push-token', jsonWith('PUT', body)),
       mutePush: (mutedUntil: number | null) =>
         request<void>(fetchImpl, '/api/auth/push-token/mute', jsonWith('PUT', { mutedUntil })),
+      /** MG-05 — a single-use nonce (60 s) bound to this device, for an approval or a key registration. */
+      approvalNonce: () => request<{ nonce: string; expiresAt: number }>(fetchImpl, '/api/auth/approval-nonce', json({})),
+      /** MG-05 — register this device's biometric-gated approval key (the body proves possession). */
+      setApprovalKey: (body: ApprovalKeyRegistration) =>
+        request<void>(fetchImpl, '/api/auth/devices/me/approval-key', jsonWith('PUT', body)),
+      removeApprovalKey: () => request<void>(fetchImpl, '/api/auth/devices/me/approval-key', { method: 'DELETE' }),
       scopeRequests: {
         /**
          * Ask for scopes this device does not hold. 403 `SCOPE_NOT_REQUESTABLE`

@@ -13,6 +13,7 @@
 // React-free wire types only; web, desktop, CLI and mobile share them.
 // ────────────────────────────────────────────────────────────────
 
+import type { GateRisk } from '../security/gateRisk.js';
 import type { StatusState } from '../status/states.js';
 
 export type AttentionEntity = 'chat' | 'workflow_run' | 'automation_execution';
@@ -54,6 +55,8 @@ export interface AttentionAsk {
    */
   detail?: string;
   actions: AttentionAction[];
+  /** MG-04 — the gate's risk verdict; a client falls back to MD-31's default when absent. */
+  risk?: GateRisk;
 }
 
 export interface AttentionProgress {

@@ -71,6 +71,7 @@ export function transcriptMessageInput(message: { content: string; metadata?: un
     type: (str(card['type']) ?? '') as PermissionCardSummary['type'], description: str(card['description']) ?? '',
     inputSummary: str(card['inputSummary']) ?? '', status: (str(card['status']) ?? 'expired') as PermissionCardSummary['status'],
     sequence: num(card['sequence']), ...(str(card['message']) ? { message: str(card['message'])! } : {}),
+    ...(card['risk'] === 'risky' || card['risk'] === 'standard' ? { risk: card['risk'] } : {}),
   }));
   return { content: message.content, metadata };
 }

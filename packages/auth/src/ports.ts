@@ -36,6 +36,10 @@ export interface DeviceRecord {
   previousCredentialGraceUntil: number | null;
   connectionMode: DeviceConnectionMode;
   relayBinding: string | null;
+  /** MG-05 — the biometric-gated approval key (canonical P-256 JWK JSON); null until registered. */
+  approvalPublicJwk?: string | null;
+  approvalKeyCreatedAt?: number | null;
+  approvalKeyPresence?: 'biometry' | 'passcode' | null;
 }
 
 export interface DeviceCredentialRecord {
@@ -161,7 +165,8 @@ export interface IReplayStore {
 }
 
 export interface INonceStore {
-  issue(expiresAt: number): Promise<string>;
+  /** `prefix` binds a nonce to a purpose/holder (approval nonces: `appr.<deviceId>.`). */
+  issue(expiresAt: number, prefix?: string): Promise<string>;
   /** Consumes a nonce. Returns false when unknown or expired. */
   verify(nonce: string, now: number): Promise<boolean>;
   purge(before: number): Promise<number>;

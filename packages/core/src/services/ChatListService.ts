@@ -18,6 +18,8 @@
 // are only valid for the sort they were issued under.
 // ────────────────────────────────────────────────────────────────
 
+import { chatModelSummary } from './chatModelSummary.js';
+import type { HarnessModel } from '../domain/ports/IAgentHarness.js';
 import {
   ValidationError,
   liveChatIds,
@@ -43,6 +45,7 @@ import type {
 
 /** A validated `GET /api/chats` query (the route parses the wire form). */
 export interface ChatListRequest {
+  pinned?: 'only' | 'exclude';
   status?: ChatStatus;
   projectIds?: readonly string[];
   agentRefs?: readonly string[];
@@ -62,6 +65,8 @@ export interface ChatListEntry {
 }
 
 export interface ChatListServiceDeps {
+  /** Cached metadata from all providers, including those not currently ready. */
+  modelMetadata?(): readonly Pick<HarnessModel, 'id' | 'name' | 'provider'>[];
   chats: Pick<IChatRepository, 'listPage'>;
   attention: { getSnapshot(): AttentionSnapshot };
   messages?: { latestBySessionIds(sessionIds: readonly string[]): Promise<Map<string, ChatMessage>> };
@@ -77,13 +82,14 @@ const TURN_STATUS_OF: Partial<Record<ChatListState, ChatTurnStatus>> = {
 };
 
 interface CursorPayload {
+  p?: boolean;
   s: ChatListSort;
   v: number | string;
   i: string;
 }
 
 export function encodeChatListCursor(sort: ChatListSort, keyset: ChatListKeyset): string {
-  const payload: CursorPayload = { s: sort, v: keyset.value, i: keyset.id };
+  const payload: CursorPayload = { s: sort, v: keyset.value, i: keyset.id, ...(keyset.pinned !== undefined ? { p: keyset.pinned } : {}) };
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
 }
 
@@ -108,7 +114,8 @@ export function decodeChatListCursor(cursor: string, sort: ChatListSort): ChatLi
   if (!valueOk) {
     throw new ValidationError('`cursor` is not a cursor this server issued');
   }
-  return { value: payload.v as number | string, id: payload.i };
+  if (payload.p !== undefined && typeof payload.p !== 'boolean') throw new ValidationError('Invalid cursor pin group');
+  return { value: payload.v as number | string, id: payload.i, ...(payload.p !== undefined ? { pinned: payload.p } : {}) };
 }
 
 function resolveStates(states: readonly ChatListState[], snapshot: AttentionSnapshot): ChatListStateFilter {
@@ -138,6 +145,7 @@ export class ChatListService {
 
     const page = await this.deps.chats.listPage({
       filter: {
+        ...(request.pinned ? { pinned: request.pinned } : {}),
         ...(request.status ? { status: request.status } : {}),
         ...(request.projectIds?.length ? { projectIds: request.projectIds } : {}),
         ...(request.agentRefs?.length ? { agentRefs: request.agentRefs } : {}),
@@ -151,6 +159,7 @@ export class ChatListService {
       limit: request.limit,
     });
 
+    const models = this.deps.modelMetadata?.() ?? [];
     const chats = page.rows.map((row) => row.chat);
     const [previews, agents] = await Promise.all([this.previews(chats), this.agents(chats)]);
 
@@ -165,7 +174,11 @@ export class ChatListService {
     return {
       items: page.rows.map(({ chat, activity }) => ({
         chat,
-        summary: summaryOf(chat, activity, previews.get(chat.sessionId), agents),
+        summary: (() => {
+          const base = summaryOf(chat, activity, previews.get(chat.sessionId), agents);
+          const model = chatModelSummary(chat, models);
+          return model ? { ...base, model } : base;
+        })(),
       })),
       nextCursor: page.next ? encodeChatListCursor(request.sort, page.next) : null,
       total: page.total,
@@ -229,6 +242,10 @@ function summaryOf(
   agents: Map<string, Agent>,
 ): ChatListSummary {
   const summary: ChatListSummary = { lastActivityAt: iso(activity.lastActivityAt) };
+  // MD-112: unread only after a read mark exists. A chat nobody has opened since
+  // pins/reads shipped is not flagged (every existing chat would be otherwise);
+  // "Mark unread" stores the epoch, so any activity reads as new.
+  if (chat.lastReadAt && new Date(activity.lastActivityAt).getTime() > new Date(chat.lastReadAt).getTime()) summary.unread = true;
   if (activity.lastTurn) {
     summary.lastTurn = {
       status: activity.lastTurn.status,

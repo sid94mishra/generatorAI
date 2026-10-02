@@ -767,3 +767,18 @@ Derived during M1-02 from the installed Xcode 27 `simctl help privacy`: notifica
 ### MD-111 Prefer IPv4 for the local Metro launcher — Final
 - Native restart exposed a Node 26 DNS-order mismatch: Expo `--localhost` bound only `[::1]:8081`, while sandbox-pair and the saved dev-client entry use `127.0.0.1:8081`. IPv4 `/status` was refused; the app reported “Could not reach” the server.
 - `pnpm --filter @generatorai/mobile start` uses a cross-platform Node launcher with `--dns-result-order=ipv4first`, preserving Expo arguments and inherited environment. No global DNS setting or network exposure is changed. Use this package script for the local dev client; direct `expo start --localhost` needs the same Node option.
+
+### MD-112 Unread means activity after a read mark — Final (2026-10-02, owner handed the mobile run to Claude Code)
+- MG-02 defines unread as `lastActivityAt > lastReadAt`. A chat with no read mark (every chat that existed before v64, and any chat nobody has opened since) is **not** unread; otherwise the first release would flag every chat on mobile and web at once.
+- Opening a chat sends `PATCH {unread: false}` (read mark = now); "Mark unread" sends `PATCH {unread: true}`, which stores the epoch, so any activity reads as new. `ChatListSummary.unread` is present only when true; `summary.model` only when the model is known (MG-03).
+- v64's list indexes lead with `(pinned_at IS NOT NULL)` and keep ascending sort columns (as v56), so the descending list order is a reverse scan; a cursor page inside the unpinned group orders by the sort key alone, so it stays an index range with no temp B-tree. Status-filtered and workers-included lists have their own pin-aware index.
+
+### MD-113 Approval-key registration carries its nonce; nonces are device-bound by prefix — Final (2026-10-02)
+- MG-05's registration body (`publicJwk, keyProtection, presence, proof`) omits the nonce the proof signs, so the server could not rebuild the signed bytes. The body gains `nonce` (the value from `POST /api/auth/approval-nonce`).
+- "Issued to this device" needs no schema change: `auth_nonces` holds approval nonces as `appr.<deviceId>.<random>` (`INonceStore.issue(expiresAt, prefix)`); the verifier checks the prefix against the DPoP principal before the single-use DELETE.
+- v65 stores the key's `presence` beside the two planned columns (`approval_key_presence`), because the `approval.signed` audit event records it (06 §6.3). `keyProtection` is audited at registration only.
+- M2-10 enforces proofs on the chat tool-permission route, the only gate MG-04 marks risky today. The question/plan/stage/consent routes accept the field when their gates gain a risk verdict (stage approvals in M8). The native `generatorai-device-key` additions (`generateApprovalKey`, `signWithPrompt`, …) land with the M6 gate UI that calls them; until then a mobile device answers risky gates with `APPROVAL_KEY_MISSING`, which the M6 gate sheet turns into the registration prompt.
+
+### MD-114 Element pick on the streamed browser uses the existing inspector and input routes — Final (2026-10-02)
+- The MG-24 spike passed against real Chromium: a remote client turns the inspector on (`POST …/browser/actions {kind:'inspector', on:true}`) and sends the tap as `POST …/browser/input {type:'mouse.click', x, y}` in page coordinates; the page's inspector captures the element, turns itself off, and every client receives `browser.selection`. No `POST …/browser/pick` route is added.
+- MPaneBrowser's comment mode (M6) maps the tap from the scaled stream frame to page coordinates and reads the selection from the event, fetching the `browser_selection` artifact for the box and HTML when it needs them.

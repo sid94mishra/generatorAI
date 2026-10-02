@@ -247,6 +247,25 @@ export interface DeviceRecord {
  * Grouped by server route module so a reader can hold one file open beside
  * one namespace and check them off.
  */
+/** `GET /api/fs/dirs?path=` (MG-22). An empty path lists `roots` (home + drives). */
+export interface FsDirListing {
+  path: string;
+  parent: string | null;
+  entries: { name: string; path: string; isGit: boolean }[];
+  roots?: string[];
+  isGit?: boolean;
+}
+
+/** `GET /api/fs/git-info?path=` (MG-22). */
+export interface FsGitInfo {
+  path: string;
+  isRepo: boolean;
+  currentBranch: string | null;
+  branches: string[];
+  dirty: boolean;
+  nestedRepos: string[];
+}
+
 export function createAdminApi(fetchImpl: ApiFetch) {
   const req = <T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init);
   const reqText = (path: string, init?: RequestInit) => requestText(fetchImpl, path, init);
@@ -993,6 +1012,13 @@ export function createAdminApi(fetchImpl: ApiFetch) {
             config: hook.config,
           }),
         ),
+    },
+
+    // ── fs.ts — server folders (MG-22). Local or administrative sessions
+    //    only: anything else is 403 FORBIDDEN, the S state (MD-30). ─────
+    fs: {
+      dirs: (path = '') => req<FsDirListing>(`/api/fs/dirs${qs({ path })}`),
+      gitInfo: (path: string) => req<FsGitInfo>(`/api/fs/git-info${qs({ path })}`),
     },
 
     // ── agents.ts (write half; reads live in client.ts) ─────────

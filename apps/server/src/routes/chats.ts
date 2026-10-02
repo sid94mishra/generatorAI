@@ -39,7 +39,8 @@ import type {
   ChatSourceControlOptions,
   PlanDocument,
 } from '@generatorai/shared';
-import type { ChatListRequest } from '@generatorai/core';
+import { chatModelSummary, type ChatListRequest } from '@generatorai/core';
+import { checkApprovalProof } from '../middleware/approvalProof.js';
 
 /**
  * Body of `POST /chats/:id/cancel`. The budget is clamped, not rejected: the
@@ -233,6 +234,9 @@ function singleParam(query: Record<string, unknown>, key: string): Parsed<string
 
 /** The wire query of `GET /chats`, validated. Exported for the route tests. */
 export function parseChatListQuery(query: Record<string, unknown>): Parsed<ChatListRequest> {
+  const pinned = singleParam(query, 'pinned');
+  if (!pinned.ok) return pinned;
+  if (pinned.value !== undefined && pinned.value !== 'only' && pinned.value !== 'exclude') return { ok: false, message: '`pinned` must be only or exclude' };
   const status = singleParam(query, 'status');
   if (!status.ok) return status;
   if (status.value !== undefined && status.value !== 'active' && status.value !== 'archived') {
@@ -298,6 +302,7 @@ export function parseChatListQuery(query: Record<string, unknown>): Parsed<ChatL
       tags: lists.tag,
       states: lists.state as ChatListState[],
       ...(text ? { q: text } : {}),
+      ...(pinned.value ? { pinned: pinned.value as 'only' | 'exclude' } : {}),
       sort: (sort.value as ChatListSort | undefined) ?? 'activity',
       ...(cursor.value ? { cursor: cursor.value } : {}),
       limit,
@@ -311,7 +316,7 @@ export function parseChatListQuery(query: Record<string, unknown>): Parsed<ChatL
  * change to any of them emits `chat.updated` (archive has its own
  * `chat.archived`).
  */
-const LIST_VISIBLE_CHAT_FIELDS = ['name', 'description', 'tags', 'status', 'projectId', 'agentRef', 'model'] as const;
+const LIST_VISIBLE_CHAT_FIELDS = ['pinnedAt', 'lastReadAt', 'name', 'description', 'tags', 'status', 'projectId', 'agentRef', 'model'] as const;
 
 /** Body of `POST /chats/archive` and `POST /chats/delete`. */
 const ChatBulkSchema = z.object({
@@ -529,7 +534,8 @@ export function createChatApiRoutes(container: Container): Router {
     try {
       const chatId = String(req.params['id']);
       const chat = await container.chatEntityRepo.getById(chatId);
-      res.json(await withWorkspacePrep(container, chat));
+      const models = Object.values(container.harnessRegistry?.statusSnapshot ?? {}).flatMap((provider) => provider.models.map((model) => ({ ...model, provider: model.provider ?? provider.type })));
+      res.json({ ...(await withWorkspacePrep(container, chat)), summary: { model: chatModelSummary(chat, models) } });
     } catch (err) {
       next(err);
     }
@@ -618,16 +624,21 @@ export function createChatApiRoutes(container: Container): Router {
         sourceControl,
       } = req.body ?? {};
 
+      const pinState: Record<string, unknown> = {};
+      if (req.body.pinned !== undefined) pinState.pinnedAt = req.body.pinned ? new Date().toISOString() : null;
+      if (req.body.unread !== undefined) pinState.lastReadAt = req.body.unread ? new Date(0).toISOString() : new Date().toISOString();
+
       // Archive via PATCH { status: 'archived' }
       if (status === 'archived') {
         await chatManagementService.archiveChat(chatId);
         logger.info(`[ChatRoutes] Archived chat ${chatId}`, { requestId: req.requestId });
-        const updated = await container.chatEntityRepo.getById(chatId);
+        const updated = Object.keys(pinState).length ? await container.chatEntityRepo.update(chatId, pinState) : await container.chatEntityRepo.getById(chatId);
+        if (Object.keys(pinState).length) await eventBus.emit(updated.sessionId, { kind: 'chat.updated', data: { chatId, pinnedAt: updated.pinnedAt, unread: req.body.unread } });
         res.json(updated);
         return;
       }
 
-      const updates: Record<string, unknown> = {};
+      const updates: Record<string, unknown> = { ...pinState };
       if (name !== undefined) updates.name = name;
       if (description !== undefined) updates.description = description;
       if (model !== undefined) updates.model = model;
@@ -708,7 +719,7 @@ export function createChatApiRoutes(container: Container): Router {
       // titles re-read on `chat.updated`; a rename, unarchive, tag, project,
       // description or agent change is otherwise invisible to them (P2-R2).
       if (LIST_VISIBLE_CHAT_FIELDS.some((field) => field in updates)) {
-        await eventBus.emit(updated.sessionId, { kind: 'chat.updated', data: { chatId } });
+        await eventBus.emit(updated.sessionId, { kind: 'chat.updated', data: { chatId, ...(req.body.pinned !== undefined ? { pinnedAt: updated.pinnedAt } : {}), ...(req.body.unread !== undefined ? { unread: req.body.unread } : {}) } });
       }
       if (agentRef !== undefined || agentOverrides !== undefined) {
         // Other clients (a second tab, a paired phone) must see the rebind.
@@ -1361,14 +1372,29 @@ export function createChatApiRoutes(container: Container): Router {
     validate(ResolveToolPermissionSchema),
     async (req, res, next) => {
       try {
+        const chatId = String(req.params['id']);
+        const interactionId = String(req.params['interactionId']);
+        const { behavior, message } = req.body as { behavior: 'allow' | 'deny'; message?: string };
+        // MG-05: a risky gate answered from a phone must be signed there.
+        const interaction = await container.agentInteractionService?.findById(interactionId);
+        if (interaction && interaction.kind === 'tool_permission') {
+          const payload = interaction.payload as { risk?: unknown } | null;
+          const signed = await checkApprovalProof(container.security, req, {
+            risk: payload?.risk,
+            expect: { kind: 'tool_permission', id: interactionId, entityId: chatId, decision: behavior },
+          });
+          if (!signed.ok) {
+            res.status(signed.status).json({ error: { code: signed.code, message: signed.message } });
+            return;
+          }
+        }
         // Delegated for the same reason as the question gate: the service owns
         // the ownership check and emits the resolution event, so a reconnecting
         // client replays a settled card rather than a pending one.
-        const result = await chatManagementService.resolveToolPermission(
-          String(req.params['id']),
-          String(req.params['interactionId']),
-          req.body as { behavior: 'allow' | 'deny'; message?: string },
-        );
+        const result = await chatManagementService.resolveToolPermission(chatId, interactionId, {
+          behavior,
+          ...(message !== undefined ? { message } : {}),
+        });
         if (!result.ok) {
           const reason = result.reason ?? 'Already resolved';
           if (/not enabled/i.test(reason)) {

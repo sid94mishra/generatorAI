@@ -17,6 +17,7 @@ import {
   isStageReviewOutcome,
 } from '@generatorai/shared';
 import {
+  buildToolPermissionPayload,
   instructionsForMode,
   resolveModeDescriptor,
   resolveTurnPermissionMode,
@@ -155,5 +156,18 @@ describe('isStageReviewOutcome', () => {
     expect(isStageReviewOutcome('approve')).toBe(false);
     expect(isStageReviewOutcome(true)).toBe(false);
     expect(isStageReviewOutcome(undefined)).toBe(false);
+  });
+});
+
+describe('buildToolPermissionPayload — gate risk (MG-04)', () => {
+  it('stamps the shared verdict on the stored payload', () => {
+    const risky = buildToolPermissionPayload(
+      { type: 'shell_exec', description: 'Run', details: { toolName: 'Bash', input: { command: 'git push origin main' } } },
+      'default',
+    );
+    expect(risky).toMatchObject({ risk: 'risky', riskReasons: ['runs a shell command', 'pushes to a git remote'] });
+    const standard = buildToolPermissionPayload({ type: 'file_write', description: 'Edit', details: { toolName: 'Edit', input: { file_path: 'src/a.ts' } } }, 'default');
+    expect(standard.risk).toBe('standard');
+    expect(standard).not.toHaveProperty('riskReasons');
   });
 });

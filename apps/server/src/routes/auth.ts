@@ -19,6 +19,7 @@ import {
   DEFAULT_DEVICE_SCOPES,
   DEFAULT_MCP_SCOPES,
   DEFAULT_MOBILE_SCOPES,
+  ApprovalProofError,
   DpopError,
   isNonceChallenge,
   HIGH_RISK_SCOPES,
@@ -85,6 +86,14 @@ const refreshSchema = z.object({
 });
 
 const renameSchema = z.object({ name: z.string().min(1).max(64) });
+/** `PUT /auth/devices/me/approval-key` (MG-05). The key is P-256; protection and presence are the device's own report. */
+const approvalKeySchema = z.object({
+  publicJwk: z.object({ kty: z.literal('EC'), crv: z.literal('P-256'), x: z.string().max(64), y: z.string().max(64) }).strict(),
+  keyProtection: z.enum(['secure-enclave', 'strongbox', 'tee']),
+  presence: z.enum(['biometry', 'passcode']),
+  nonce: z.string().min(1).max(256),
+  proof: z.string().min(1).max(256),
+});
 const scopesSchema = z.object({ scopes: z.array(z.string()).max(SCOPES.length) });
 const revokeSchema = z.object({ reason: z.string().min(1).max(200).default('revoked by operator') });
 
@@ -108,7 +117,7 @@ const muteSchema = z.object({
 
 export function createAuthRoutes(container: Container): Router {
   const router = Router();
-  const { devices, tokens, dpop, audit, posture, identity } = container.security;
+  const { devices, tokens, dpop, audit, posture, identity, approvals, deviceRepo } = container.security;
   const logger = container.logger;
 
   // ── Public bootstrap ─────────────────────────────────────────────
@@ -633,6 +642,80 @@ export function createAuthRoutes(container: Container): Router {
       }
       const principal = requirePrincipal(req);
       container.pushTokens?.setMutedUntil(principal.id, parsed.data.mutedUntil ?? null);
+      res.status(204).end();
+    })();
+  });
+
+  // ── Approval key (mobile MG-05, MD-31) ───────────────────────────
+  //
+  // A phone answers risky gates with a signature from a biometric-gated
+  // hardware key. Like push tokens, the device id always comes from the
+  // DPoP-authenticated principal: a device can only register its own key.
+
+  /** A single-use, device-bound nonce (60 s) for an approval or a key registration. */
+  router.post('/approval-nonce', (req: Request, res: Response) => {
+    void (async () => {
+      const principal = requirePrincipal(req);
+      if (principal.type !== 'paired-device') {
+        res.status(403).json({ error: { code: 'NOT_A_DEVICE', message: 'Only a paired device signs approvals' } });
+        return;
+      }
+      res.json(await approvals.issueNonce(principal.id));
+    })();
+  });
+
+  router.put('/devices/me/approval-key', (req: Request, res: Response) => {
+    void (async () => {
+      const parsed = approvalKeySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: { code: 'INVALID_BODY', message: parsed.error.message } });
+        return;
+      }
+      const principal = requirePrincipal(req);
+      if (principal.type !== 'paired-device') {
+        res.status(403).json({ error: { code: 'NOT_A_DEVICE', message: 'Only a paired device holds an approval key' } });
+        return;
+      }
+      let jwk;
+      try {
+        jwk = await approvals.verifyRegistration(principal.id, parsed.data);
+      } catch (err) {
+        if (!(err instanceof ApprovalProofError)) throw err;
+        res.status(403).json({ error: { code: err.code, message: err.message } });
+        return;
+      }
+      await deviceRepo.update(principal.id, {
+        approvalPublicJwk: JSON.stringify(jwk),
+        approvalKeyCreatedAt: Date.now(),
+        approvalKeyPresence: parsed.data.presence,
+      });
+      await audit.record({
+        action: 'approval.keyRegistered',
+        result: 'success',
+        principal,
+        resourceType: 'device',
+        resourceId: principal.id,
+        metadata: { keyProtection: parsed.data.keyProtection, presence: parsed.data.presence },
+        severity: 'info',
+      });
+      res.status(204).end();
+    })();
+  });
+
+  router.delete('/devices/me/approval-key', (req: Request, res: Response) => {
+    void (async () => {
+      const principal = requirePrincipal(req);
+      if (principal.type === 'paired-device') {
+        await deviceRepo.update(principal.id, { approvalPublicJwk: null, approvalKeyCreatedAt: null, approvalKeyPresence: null });
+        await audit.record({
+          action: 'approval.keyRemoved',
+          result: 'success',
+          principal,
+          resourceType: 'device',
+          resourceId: principal.id,
+          severity: 'info',
+        });
+      }
       res.status(204).end();
     })();
   });

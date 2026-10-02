@@ -291,6 +291,8 @@ export const chats = sqliteTable(
      * Never NULL: v56 backfilled it and its triggers reject a NULL write
      * (SQLite cannot add the constraint to an existing column).
      */
+    pinnedAt: integer('pinned_at', { mode: 'timestamp_ms' }),
+    lastReadAt: integer('last_read_at', { mode: 'timestamp_ms' }),
     lastActivityAt: integer('last_activity_at', { mode: 'timestamp_ms' }).notNull(),
     /** How the most recent turn ended; NULL until the first one does. */
     lastTurnStatus: text('last_turn_status', { enum: ['succeeded', 'failed', 'cancelled'] }),

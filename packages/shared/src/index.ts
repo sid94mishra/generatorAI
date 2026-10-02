@@ -10,6 +10,9 @@ export * from './telemetry/index.js';
 export * from './status/index.js';
 // Diff review intents + line label (React-free, also exported from ./client)
 export * from './review.js';
+// Mobile MG-04 — gate risk verdict (also exported from ./client)
+export * from './security/gateRisk.js';
+export * from './security/approvalProof.js';
 // W12 — IPC protocol for inter-process communication
 export * from './ipc/AgentHostIpc.js';
 export * from './ipc/PtyHostIpc.js';

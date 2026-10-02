@@ -232,16 +232,16 @@ describe('DrizzleChatRepository — list page', () => {
 
     for (const filter of [{}, { status: 'active' as const }, { status: 'archived' as const }]) {
       const first = await planOf(query(filter, { limit: 10 }));
-      expect(first.plan, JSON.stringify(filter)).toMatch(/USING INDEX idx_chats_list_/);
+      expect(first.plan, JSON.stringify(filter)).toMatch(/USING INDEX idx_chats_(list|pin)_/);
       expect(first.plan, JSON.stringify(filter)).not.toMatch(/TEMP B-TREE/);
       expect(first.page.next).not.toBeNull();
       const next = await planOf(query(filter, { limit: 10, after: first.page.next! }));
       expect(next.plan, JSON.stringify(filter)).toMatch(/\(last_activity_at,id\)<\(\?,\?\)/);
       expect(next.plan, JSON.stringify(filter)).not.toMatch(/TEMP B-TREE/);
     }
-    // Workers included: the plain (last_activity_at, id) index.
+    // Workers included: the pinned-first (pin, last_activity_at, id) index (v64).
     const workers = await planOf(query({ includeWorkers: true }, { limit: 10 }));
-    expect(workers.plan).toMatch(/USING INDEX idx_chats_last_activity/);
+    expect(workers.plan).toMatch(/USING INDEX idx_chats_pin_all_activity/);
     expect(workers.plan).not.toMatch(/TEMP B-TREE/);
   });
 

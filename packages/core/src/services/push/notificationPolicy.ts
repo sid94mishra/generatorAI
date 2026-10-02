@@ -18,6 +18,8 @@
 // without reading it, which destroys the value of the ones that matter.
 // ────────────────────────────────────────────────────────────────
 
+import type { GateRisk } from '@generatorai/shared';
+
 /** Minimal shape of an event, so this module needs no core imports. */
 export interface NotifiableEvent {
   kind: string;
@@ -49,6 +51,8 @@ export interface PendingInteraction {
    * opens the gate screen instead of offering buttons.
    */
   actions?: readonly string[];
+  /** MG-04 — a risky gate gets no lock-screen actions; it opens the app (MG-05 signs it). */
+  risk?: GateRisk;
 }
 
 export interface NotificationPlan {
@@ -156,6 +160,8 @@ export function planNotification(event: NotifiableEvent): NotificationPlan | nul
     const interactionId = str(data, 'interactionId');
     if (!chatId || !interactionId) return null;
     const toolName = str(data, 'toolName') ?? 'a tool';
+    const riskValue = str(data, 'risk');
+    const risk: GateRisk | undefined = riskValue === 'risky' || riskValue === 'standard' ? riskValue : undefined;
     const summary = oneLine(str(data, 'inputSummary'));
     const description = oneLine(str(data, 'description'));
     // "Allow Bash: pnpm test?" when the summary fits a title; otherwise the
@@ -173,7 +179,12 @@ export function planNotification(event: NotifiableEvent): NotificationPlan | nul
       requiredScope: 'read:chats',
       threadId: `chat:${chatId}`,
       interruption: 'timeSensitive',
-      interaction: { chatId, interactionId, kind: 'permission', actions: ['approve', 'deny'] },
+      interaction: {
+        chatId,
+        interactionId,
+        kind: 'permission',
+        ...(risk === 'risky' ? { risk } : { actions: ['approve', 'deny'], ...(risk ? { risk } : {}) }),
+      },
     };
   }
 

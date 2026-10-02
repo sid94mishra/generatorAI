@@ -222,16 +222,18 @@ export function describeToolStep(tool: unknown, args: unknown): string | undefin
 /** Summary, detail and actions for a pending chat gate. */
 export function describeInteraction(
   interaction: Pick<AgentInteraction, 'kind' | 'payload'>,
-): Pick<AttentionAsk, 'summary' | 'detail' | 'actions'> {
+): Pick<AttentionAsk, 'summary' | 'detail' | 'actions' | 'risk'> {
   const payload = record(interaction.payload) ?? {};
   switch (interaction.kind) {
     case 'tool_permission': {
       const tool = str(payload['toolName']) ?? 'a tool';
       const detail = str(payload['inputSummary']) ?? str(payload['description']);
+      const risk = payload['risk'];
       return {
         summary: clip(`Allow ${tool}?`, SUMMARY_MAX),
         ...(detail ? { detail: clip(detail, DETAIL_MAX) } : {}),
         actions: ['allow_once', 'deny', 'open'],
+        ...(risk === 'risky' || risk === 'standard' ? { risk } : {}),
       };
     }
     case 'question': {
