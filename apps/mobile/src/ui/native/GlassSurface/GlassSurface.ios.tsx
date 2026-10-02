@@ -16,13 +16,21 @@ import { GLASS_FALLBACK_CLASS, GLASS_RADIUS_CLASS } from './glassModel';
 
 export type { GlassGroupProps, GlassRadiusStep, GlassSurfaceProps } from './GlassSurface.types';
 
-/** expo-glass-effect registers its native views on import, so it is required only where it can load (not in Jest
- * or a client without the module); its views take classes through withUniwind (MD-133). */
-const glass: { View: ReturnType<typeof withUniwind<typeof GlassEffect.GlassView>>; Container: ReturnType<typeof withUniwind<typeof GlassEffect.GlassContainer>> } | null = (() => {
+/**
+ * expo-glass-effect registers its native views on import, so it is required only where it can load (not in Jest or a
+ * client without the module). Its views take classes through withUniwind (MD-133) with an explicit className → style
+ * mapping only: withUniwind's automatic mode treats every prop ending in "Style" as a style prop and passes it on as
+ * an array, which turned `glassEffectStyle="regular"` into `[undefined, 'regular']` — the native prop rejected it and
+ * no glass effect was ever installed (device review, MD-136).
+ */
+const glass: { View: React.ComponentType<GlassEffect.GlassViewProps & { className?: string }>; Container: React.ComponentType<GlassEffect.GlassContainerProps & { className?: string }> } | null = (() => {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require('expo-glass-effect') as typeof GlassEffect;
-    return { View: withUniwind(mod.GlassView), Container: withUniwind(mod.GlassContainer) };
+    return {
+      View: withUniwind(mod.GlassView, { style: { fromClassName: 'className' } }),
+      Container: withUniwind(mod.GlassContainer, { style: { fromClassName: 'className' } }),
+    };
   } catch {
     return null;
   }

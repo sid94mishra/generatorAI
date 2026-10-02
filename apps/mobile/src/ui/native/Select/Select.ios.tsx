@@ -19,8 +19,9 @@ const NONE = '';
 
 export function Select(props: SelectProps): React.ReactElement {
   const colors = useThemeColors();
-  // The width the picker may use: the field's inner box, or 60 % of the row. SwiftUI's menu label tail-truncates in a
-  // bounded frame; unbounded, a long value runs past the field (device review).
+  // The width the picker may use: the field's inner box, or 60 % of the row. The Host sizes to the picker, whose frame
+  // is capped there, so a long value wraps / truncates inside the field and a short one stays at the field's start
+  // (device review; a fixed-width Host pushed the label out past the field's start).
   const [room, setRoom] = useState(0);
   // The searchable list is a sheet (SelectJs); only the static menu is the SwiftUI Picker.
   if (!swiftUI || props.searchable) return <SelectJs {...props} />;
@@ -29,7 +30,7 @@ export function Select(props: SelectProps): React.ReactElement {
   const field = presentation === 'field';
   const bound = room > 0 ? [m.frame({ maxWidth: field ? room : Math.round(room * 0.6), alignment: field ? 'leading' : 'trailing' })] : [];
   const picker = (
-    <ui.Host matchContents={field && room > 0 ? { vertical: true } : true} style={field && room > 0 ? { width: room } : undefined}>
+    <ui.Host matchContents>
       <ui.Picker
         selection={value ?? NONE}
         onSelectionChange={(v: string) => {
@@ -55,7 +56,7 @@ export function Select(props: SelectProps): React.ReactElement {
           {label}
         </Text>
         <View className={cn('min-h-field flex-row items-center rounded-field bg-sunken px-1', disabled && 'opacity-60')}>
-          <View className="flex-1" onLayout={(e) => setRoom(Math.floor(e.nativeEvent.layout.width))}>
+          <View className="flex-1 items-start ps-2" onLayout={(e) => setRoom(Math.floor(e.nativeEvent.layout.width) - 8)}>
             {picker}
           </View>
         </View>

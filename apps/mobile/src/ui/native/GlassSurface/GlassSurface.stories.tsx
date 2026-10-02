@@ -1,6 +1,7 @@
 import React from 'react';
 import { View } from 'react-native';
 import type { Meta, StoryObj } from '@storybook/react-native';
+import { GlassContainer, GlassView } from 'expo-glass-effect';
 
 import { GlassBackdrop, StoryPage, StorySection, ThemeMatrix } from '../../storybook/StoryKit';
 import { Icon } from '../../primitives/Icon';
@@ -36,9 +37,31 @@ function Samples(): React.ReactElement {
   );
 }
 
+// Raw expo-glass-effect views (no withUniwind, no Pressable): the reference GlassSurface must match on iOS 26+.
+const RAW_CAPSULE = { width: 200, height: 56, borderRadius: 28 };
+const RAW_ROW = { flexDirection: 'row' as const, gap: 8 };
+const RAW_CIRCLE = { width: 56, height: 56, borderRadius: 28 };
+
+function RawGlass(): React.ReactElement {
+  return (
+    <View className="gap-4">
+      <GlassView glassEffectStyle="regular" style={RAW_CAPSULE} />
+      <GlassContainer spacing={8} style={RAW_ROW}>
+        <GlassView glassEffectStyle="regular" isInteractive style={RAW_CIRCLE} />
+        <GlassView glassEffectStyle="regular" isInteractive style={RAW_CIRCLE} />
+      </GlassContainer>
+    </View>
+  );
+}
+
 function GlassSurfaceGallery(): React.ReactElement {
   return (
     <StoryPage>
+      <StorySection title="Reference: raw GlassView (200 × 56, r28) and two raw GlassViews in a GlassContainer">
+        <GlassBackdrop>
+          <RawGlass />
+        </GlassBackdrop>
+      </StorySection>
       <StorySection title="Steps new / toast / composer / full in a merge group (iOS glass; fallback elsewhere and under Reduce Transparency)">
         <GlassBackdrop>
           <Samples />

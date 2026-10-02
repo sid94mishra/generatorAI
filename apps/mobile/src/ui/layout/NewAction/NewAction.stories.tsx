@@ -29,7 +29,7 @@ function NewActionGallery(): React.ReactElement {
       <StorySection title="Per module labels, long label, font scale 2.0">
         <NewAction label="New workflow" icon="workflows" onPress={noop} />
         <NewAction label="Run" icon="play" onPress={noop} />
-        <NewAction label={LONG_TEXT.slice(0, 30)} icon="plus" onPress={noop} />
+        <NewAction label={LONG_TEXT} icon="plus" onPress={noop} />
         <WithFontScale scale={2}>
           <NewAction label="New chat" icon="plus" onPress={noop} />
         </WithFontScale>

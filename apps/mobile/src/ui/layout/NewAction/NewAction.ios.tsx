@@ -29,7 +29,7 @@ export function NewAction({ label, icon, onPress, collapsed = false, testID }: N
           <GlassSurface radiusStep="new" interactive className={cn('min-h-new max-w-full flex-row items-center justify-center gap-2', collapsed ? 'w-13' : 'pe-5 ps-4')}>
             <Icon concept={icon} size={g.icon as IconSize} tone="fg" />
             {collapsed ? null : (
-              <Text role="transcript" weight={600} numberOfLines={1} className="shrink">
+              <Text role="transcript" weight={600} numberOfLines={1} ellipsizeMode="tail" className="shrink">
                 {label}
               </Text>
             )}

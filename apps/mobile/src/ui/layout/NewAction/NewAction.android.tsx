@@ -55,7 +55,7 @@ export function NewAction({ label, icon, onPress, collapsed = false, testID }: N
         <View className={cn('min-h-new max-w-full flex-row items-center justify-center gap-3 rounded-new bg-accent shadow-float', collapsed ? 'w-14' : 'pe-5 ps-4')}>
           <Icon concept={icon} size={g.icon as IconSize} tone="on-accent" />
           {collapsed ? null : (
-            <Text role="subhead" weight={600} tone="on-accent" numberOfLines={1} className="shrink">
+            <Text role="subhead" weight={600} tone="on-accent" numberOfLines={1} ellipsizeMode="tail" className="shrink">
               {label}
             </Text>
           )}
