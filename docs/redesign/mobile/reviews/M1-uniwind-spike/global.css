@@ -1,0 +1,39 @@
+@import 'tailwindcss';
+@import 'uniwind';
+/* Check 12: the package specifier, not a relative path. */
+@import '@generatorai/design-tokens/css/vocabulary.css';
+@import './themes.css';
+
+@theme inline {
+  --shadow-float: var(--gai-shadow-float);
+  --font-mono: var(--gai-font-mono);
+}
+
+@layer theme {
+  :root {
+    --gai-shadow-float: 0 8px 28px #00000047;
+    --gai-text-micro: 12px;
+    --gai-leading-micro: 16px;
+    --gai-text-title: 17px;
+    --gai-leading-title: 22px;
+    --gai-weight-title: 600;
+    --gai-text-display: 32px;
+    --gai-leading-display: 37px;
+    --gai-weight-display: 600;
+    --gai-tracking-display: -0.64px;
+    --gai-radius-card: 14px;
+    /* Check 3: platform geometry (02 §3.1). */
+    @variant ios {
+      --gai-text-body: 17px;
+      --gai-leading-body: 24px;
+      --gai-radius-card: 14px;
+      --gai-font-mono: Menlo;
+    }
+    @variant android {
+      --gai-text-body: 16px;
+      --gai-leading-body: 24px;
+      --gai-radius-card: 12px;
+      --gai-font-mono: monospace;
+    }
+  }
+}

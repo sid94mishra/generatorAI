@@ -64,3 +64,5 @@ It also records every merge of `desktop_redesign` into this branch.
 | 2026-10-02 | M2-10 / MG-22 | client-core `admin.fs.dirs/gitInfo` (+ `FsDirListing`, `FsGitInfo`), `scm.startConflicts`; every other MG-22 route already had a typed method from M2-04 (`plans.addComment/saveRevision`, `chats.backgroundTask` digest, `scm.readiness/flow/generate/*Conflicts`, `codebaseBranches`, pull requests, codebase files, `agents.get`) | additive; no server change | Tests: client-core 776. |
 
 | 2026-10-02 | M2-10 / MG-24 | `packages/core/src/infrastructure/browser/__tests__/ServerPlaywrightHost.elementPick.live.test.ts` (opt-in live spike) | test only; no server change | Spike passed (MD-114). M2-10 complete. |
+
+| 2026-10-02 | M1-08 | none outside `docs/` (spike in a scratch app; source kept in `reviews/M1-uniwind-spike/`) | — | Gate A met by uniwind 1.12.1; Gate B go (MD-115). M3-05 pins uniwind 1.12.1 exactly and relaxes `platformClassVariant` for `src/ui/**`. |
