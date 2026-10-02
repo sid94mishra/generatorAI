@@ -14,7 +14,8 @@ import { StatusLine } from '../../../layout/StatusLine';
 import { useFontScale } from '../../../platform/fontScale';
 import { sfSymbolFor, isSeparator } from '../../Menu/menuModel';
 import type { HeaderAction, HeaderProps } from './Header.types';
-import { backLabel, iosHeaderOptions, paneToggleLabel, sidebarToggleLabel, splitActions } from './headerModel';
+import { backLabel, iosHeaderColorOptions, iosHeaderOptions, paneToggleLabel, sidebarToggleLabel, splitActions } from './headerModel';
+import { useThemeColors } from '../../../lib/themeColors';
 
 export type { HeaderAction, HeaderProps, HeaderRole } from './Header.types';
 
@@ -23,10 +24,13 @@ const sf = (concept: HeaderAction['icon']): SFSymbol => (sfSymbolFor(concept) ??
 export function Header(props: HeaderProps): React.ReactElement {
   const { role, title, breadcrumb, status, subtitle, actions = [], onSidebarToggle, sidebarToggleState = 'drawer', onBack, paneToggle, modal } = props;
   const fontScale = useFontScale();
+  const colors = useThemeColors();
   const { inline, overflow } = splitActions(actions, fontScale);
   const detail = role === 'detail' || role === 'workspace';
+  const base = iosHeaderOptions(props);
   const options = {
-    ...iosHeaderOptions(props),
+    ...base,
+    ...iosHeaderColorOptions(colors, base.headerTransparent),
     headerTitle: detail ? () => <BreadcrumbTitle breadcrumb={breadcrumb} title={title} /> : undefined,
   };
   return (

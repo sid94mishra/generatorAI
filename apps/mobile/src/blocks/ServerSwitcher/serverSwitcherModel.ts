@@ -31,3 +31,14 @@ export function otherRow(probe: ProbeStatus | undefined, switching: boolean): Se
 export function shortAddress(endpoint: string): string {
   return endpoint.replace(/^[a-z]+:\/\//i, '').replace(/\/+$/, '').replace(/^(localhost|127\.0\.0\.1)(?=:)/, 'local');
 }
+
+/** A server on this computer: the host shell says so, or its address is loopback (the simulator / desktop case). */
+export function isLocalServer(server: { kind: 'local' | 'remote'; endpoint: string }): boolean {
+  if (server.kind === 'local') return true;
+  return /^[a-z]+:\/\/(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?(?:\/|$)/i.test(server.endpoint);
+}
+
+/** The trigger's second line (MB-20): "This computer" for a local server, otherwise its short address. */
+export function serverWhere(server: { kind: 'local' | 'remote'; endpoint: string }): string {
+  return isLocalServer(server) ? 'This computer' : shortAddress(server.endpoint);
+}

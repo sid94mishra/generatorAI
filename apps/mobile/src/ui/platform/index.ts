@@ -29,7 +29,7 @@ export {
   type GestureScreenRole,
 } from './gestures';
 export { pressFeedback, type PressFeedbackKind } from './pressFeedback';
-export { nouns, type PlatformNouns } from './nouns';
+export { deviceKindFor, nouns, nounsFor, type DeviceKind, type PlatformNouns } from './nouns';
 export { setHardwareKeyboardAttached, useHardwareKeyboard } from './keyboard';
 export { WindowInsetsProvider, useInsets, useWindowInsets } from './insets';
 export { readSystemAccentSeeds, systemAccentAvailable, type SystemAccentSeeds } from './accent';

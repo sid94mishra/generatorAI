@@ -18,7 +18,7 @@ import { Text } from '../../ui/primitives/Text';
 import { useConnectionHealth } from '../ConnectionStatus';
 import { usePaneStore } from '../WorkspacePane/paneStore';
 import { useShellStore } from '../shell/shellStore';
-import { activeRow, otherRow, shortAddress, type ProbeStatus, type ServerRowState } from './serverSwitcherModel';
+import { activeRow, isLocalServer, otherRow, shortAddress, type ProbeStatus, type ServerRowState } from './serverSwitcherModel';
 
 type Href = Parameters<typeof router.push>[0];
 
@@ -150,7 +150,7 @@ export function ServerSwitcherSheet(): React.ReactElement {
                 key={s.serverId}
                 name={s.label || 'Server'}
                 address={shortAddress(s.endpoint)}
-                local={s.kind === 'local'}
+                local={isLocalServer(s)}
                 current={current}
                 state={current ? activeRow(health) : otherRow(probes[s.serverId], switching === s.serverId)}
                 {...(current ? {} : { onPress: () => switchTo(s.serverId) })}

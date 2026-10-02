@@ -23,7 +23,7 @@ import { detailOptionsFor, sheetOptionsFor } from './presentation';
 import { edgeSwipeOpensDrawerOn } from './gestures';
 import { pressFeedbackFor } from './pressFeedback';
 import { maxScaleFor } from './fontScale';
-import { nouns } from './nouns';
+import { deviceKindFor, nouns, nounsFor } from './nouns';
 
 const android = Platform.OS === 'android';
 
@@ -101,5 +101,10 @@ describe(`platform layer (${Platform.OS})`, () => {
     expect(maxScaleFor('body', true)).toBe(1.4);
     expect(maxScaleFor('title', true)).toBe(1.4);
     expect(nouns().biometric).toBe(android ? 'fingerprint' : 'Face ID');
+    expect(deviceKindFor('ios', true, 820)).toBe('iPad');
+    expect(deviceKindFor('ios', false, 402)).toBe('iPhone');
+    expect(deviceKindFor('android', false, 800)).toBe('tablet');
+    expect(deviceKindFor('android', false, 412)).toBe('phone');
+    expect(nounsFor('ios', 'iPad').thisDevice).toBe('This iPad');
   });
 });

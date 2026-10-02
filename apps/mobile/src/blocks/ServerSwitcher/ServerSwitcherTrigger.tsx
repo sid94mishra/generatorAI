@@ -4,6 +4,7 @@ import React from 'react';
 import { View } from 'react-native';
 
 import { useAuth } from '../../services/auth/AuthProvider';
+import { serverWhere } from './serverSwitcherModel';
 import { BrandMark } from '../../ui/primitives/BrandMark';
 import { Icon } from '../../ui/primitives/Icon';
 import { Pressable } from '../../ui/primitives/Pressable';
@@ -12,7 +13,7 @@ import { Text } from '../../ui/primitives/Text';
 export function useActiveServer(): { name: string; where: string } {
   const { servers, serverId } = useAuth();
   const server = servers.find((s) => s.serverId === serverId);
-  return { name: server?.label || 'GeneratorAI', where: server?.kind === 'local' ? 'This computer' : 'Remote server' };
+  return { name: server?.label || 'GeneratorAI', where: server ? serverWhere(server) : '' };
 }
 
 export function ServerSwitcherTrigger({ onPress }: { onPress?: () => void }): React.ReactElement {

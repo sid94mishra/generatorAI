@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { activeRow, otherRow, shortAddress } from './serverSwitcherModel';
+import { activeRow, isLocalServer, otherRow, serverWhere, shortAddress } from './serverSwitcherModel';
 
 describe('ServerSwitcher model (MB-20)', () => {
   it('describes the active server from its connection', () => {
@@ -21,5 +21,15 @@ describe('ServerSwitcher model (MB-20)', () => {
   it('prints a short mono address', () => {
     expect(shortAddress('http://127.0.0.1:3100/')).toBe('local:3100');
     expect(shortAddress('https://10.0.4.12:3100')).toBe('10.0.4.12:3100');
+  });
+});
+
+describe('ServerSwitcher local label (MB-20)', () => {
+  it('calls a loopback server "This computer", like the footer address local:<port>', () => {
+    expect(serverWhere({ kind: 'remote', endpoint: 'http://127.0.0.1:3197' })).toBe('This computer');
+    expect(serverWhere({ kind: 'remote', endpoint: 'http://localhost:3100/' })).toBe('This computer');
+    expect(serverWhere({ kind: 'local', endpoint: 'http://10.0.4.12:3100' })).toBe('This computer');
+    expect(serverWhere({ kind: 'remote', endpoint: 'https://10.0.4.12:3100' })).toBe('10.0.4.12:3100');
+    expect(isLocalServer({ kind: 'remote', endpoint: 'http://127.0.0.10.example.com' })).toBe(false);
   });
 });

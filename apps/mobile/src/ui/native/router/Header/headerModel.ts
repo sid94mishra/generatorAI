@@ -46,16 +46,53 @@ export interface IosHeaderOptions {
   headerTitleAlign: 'center';
 }
 
-/** The native-stack options for the iOS header (the title view and toolbars are added by Header.ios). */
-export function iosHeaderOptions({ role, title, largeTitle, onBack, opaque }: Pick<HeaderProps, 'role' | 'title' | 'largeTitle' | 'onBack' | 'opaque'>): IosHeaderOptions {
+/**
+ * The native-stack options for the iOS header (the title view and toolbars are added by Header.ios). Next to a
+ * persistent iPad sidebar (`sidebarToggleState: 'shown'`) a module root uses the inline centred title: the native
+ * large title is laid out flush against the sidebar's edge there, without the content's leading inset (MD-147).
+ */
+export function iosHeaderOptions({ role, title, largeTitle, onBack, opaque, sidebarToggleState }: Pick<HeaderProps, 'role' | 'title' | 'largeTitle' | 'onBack' | 'opaque' | 'sidebarToggleState'>): IosHeaderOptions {
   return {
     headerShown: true,
     title,
-    headerLargeTitle: role === 'top' && largeTitle !== false,
+    headerLargeTitle: role === 'top' && largeTitle !== false && sidebarToggleState !== 'shown',
     headerTransparent: role !== 'modal' && !opaque,
     headerShadowVisible: false,
     headerLargeTitleShadowVisible: false,
     headerBackVisible: (role === 'detail' || role === 'workspace') && !onBack,
     headerTitleAlign: 'center',
+  };
+}
+
+/** The theme colours the iOS header needs (a subset of `useThemeColors()`). */
+export interface HeaderThemeColors {
+  surface: string;
+  fg: string;
+  appearance: 'light' | 'dark';
+}
+
+export interface IosHeaderColorOptions {
+  headerStyle: { backgroundColor?: string };
+  headerLargeStyle: { backgroundColor?: string };
+  headerTintColor: string;
+  headerTitleStyle: { color: string };
+  headerLargeTitleStyle: { color: string };
+  headerBlurEffect?: 'systemChromeMaterialDark' | 'systemChromeMaterialLight';
+}
+
+/**
+ * The header follows the active theme (02 §2.6, 03 ML-02): titles, large titles and bar items in `fg`; an opaque bar
+ * (modal, legacy bodies) painted `surface`; a transparent bar keeps its system scroll-edge material, chosen for the
+ * theme's appearance rather than the OS's, so a dark theme never gets a light bar.
+ */
+export function iosHeaderColorOptions(colors: HeaderThemeColors, transparent: boolean): IosHeaderColorOptions {
+  const background = transparent ? {} : { backgroundColor: colors.surface };
+  return {
+    headerStyle: background,
+    headerLargeStyle: background,
+    headerTintColor: colors.fg,
+    headerTitleStyle: { color: colors.fg },
+    headerLargeTitleStyle: { color: colors.fg },
+    ...(transparent ? { headerBlurEffect: colors.appearance === 'dark' ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight' } : {}),
   };
 }

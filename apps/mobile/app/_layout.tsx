@@ -30,6 +30,7 @@ import { ServerScope } from '../src/services/auth/ServerScope';
 import { ServerQueryProvider } from '../src/services/api/ServerQueryProvider';
 
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider';
+import { NavigationTheme } from '../src/theme/NavigationTheme';
 import { PreferencesProvider, usePreferences } from '../src/services/prefs/preferences';
 import { setHapticsEnabled as setKitHapticsEnabled, setMotionPreference } from '../src/ui/platform';
 import { useLinkRouting } from '../src/services/navigation/useLinkRouting';
@@ -93,7 +94,7 @@ function ThemedShell({ children }: { children: React.ReactNode }): React.ReactEl
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <StatusBar style={appearance === 'dark' ? 'light' : 'dark'} />
-      {ready ? children : null}
+      {ready ? <NavigationTheme>{children}</NavigationTheme> : null}
     </View>
   );
 }

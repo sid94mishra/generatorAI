@@ -45,6 +45,7 @@ import { Screen } from '../src/components/ui/Screen';
 import { EmptyState, Spinner } from '../src/components/ui/States';
 import { haptics } from '../src/components/ui/haptics';
 import { useTheme } from '../src/theme/ThemeProvider';
+import { nouns } from '../src/ui/platform/nouns';
 
 type Phase = 'scan' | 'manual' | 'consent' | 'enrolling';
 
@@ -55,7 +56,7 @@ export default function PairScreen(): React.ReactElement {
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<Phase>('scan');
   const [consent, setConsent] = useState<PairingConsent | null>(null);
-  const [deviceName, setDeviceName] = useState('My phone');
+  const [deviceName, setDeviceName] = useState(() => `My ${nouns().device}`);
   const [error, setError] = useState<string | null>(null);
   const [manualCode, setManualCode] = useState('');
   // Guards against the camera firing the same code dozens of times per second.
@@ -295,7 +296,7 @@ export default function PairScreen(): React.ReactElement {
     if (!permission.granted) {
       return (
         <Screen
-          title={adding ? 'Add a server' : 'Pair this phone'}
+          title={adding ? 'Add a server' : `Pair this ${nouns().device}`}
           subtitle="Scan the code your GeneratorAI server shows."
           {...(adding ? { back: true, onBack: () => router.back() } : { sidebarToggle: false })}
         >
@@ -448,7 +449,7 @@ export default function PairScreen(): React.ReactElement {
       <Text className="text-xs leading-relaxed text-muted-foreground">
         {sensitiveCount === 0
           ? 'Terminal and browser control are not included. You can grant them later, per device.'
-          : `${sensitiveCount} sensitive permission${sensitiveCount === 1 ? '' : 's'} let this phone act on the machine running GeneratorAI. You can revoke any of them later, per device.`}
+          : `${sensitiveCount} sensitive permission${sensitiveCount === 1 ? '' : 's'} let this ${nouns().device} act on the machine running GeneratorAI. You can revoke any of them later, per device.`}
       </Text>
 
       <SectionHeader title="Device name" />
@@ -457,7 +458,7 @@ export default function PairScreen(): React.ReactElement {
         hint="Shown in your server’s device list so you can revoke it later."
         value={deviceName}
         onChangeText={setDeviceName}
-        placeholder="My phone"
+        placeholder={`My ${nouns().device}`}
         autoCapitalize="words"
       />
 
