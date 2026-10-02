@@ -1,9 +1,8 @@
 // Chat (Main, MChatRunning; 04 §2.3) → features/chat/ChatScreen. M6 transition: the pane tabs whose blocks have not
-// landed yet and the legacy changes tray are rendered here (legacy code stays out of features); M6-07…M6-11 remove both.
+// landed yet render here (legacy code stays out of features); M6-08…M6-11 remove them.
 import React from 'react';
 
 import ChatScreen from '../../../../src/features/chat/ChatScreen';
-import { ChangesTray } from '../../../../src/components/chat/panes/ChangesTray';
 import { WorkbenchTab } from '../../../../src/components/workbench/WorkbenchTab';
 
 export default function ChatRoute(): React.ReactElement {
@@ -18,12 +17,10 @@ export default function ChatRoute(): React.ReactElement {
           chatId={pane.chatId}
           planId={pane.planId}
           agentBusy={pane.agentBusy}
-          changesFocus={pane.changesFocus}
           onOpenInChanges={pane.onOpenInChanges}
           onPlanDecided={pane.onPlanDecided}
         />
       )}
-      renderChangesDock={(props) => <ChangesTray {...props} />}
     />
   );
 }

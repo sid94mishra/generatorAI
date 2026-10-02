@@ -1,22 +1,7 @@
-// Review surfaces — sheets the workbench panes and route screens share.
+// Review surfaces still on the legacy layer: the plan sheet (until M6-11's PlanView). The review threads moved to
+// blocks/DiffView, the checkpoints to blocks/CheckpointScrubber (M6-07).
 
-export { ReviewCommentsSheet, type ReviewDraft, type ReviewFocus, type ReviewCommentsSheetProps } from './ReviewCommentsSheet';
-export { CheckpointsSheet, useWorkspaceCheckpoints, type CheckpointsSheetProps } from './CheckpointsSheet';
 export { PlanSheet, PlanBody, usePlanDocument, statusLabel, type PlanSheetProps, type PlanDocumentApi } from './PlanSheet';
-export { useReviewThreads, type ReviewScope, type ReviewThreadsApi, type NewThreadInput } from './useReviewThreads';
-export { useCapability, useGrantedScopes } from './useScopes';
-export { checkCapability, WORKBENCH_REQUIREMENTS, type WorkbenchCapability, type CapabilityCheck } from './scopes';
-export {
-  REVIEW_INTENTS,
-  THREAD_STATUS_LABEL,
-  batchSummary,
-  buildReviewBatch,
-  countThreads,
-  groupThreadsByFile,
-  isPendingThread,
-  type ReviewIntent,
-  type ReviewSubmitBody,
-  type ReviewSubmitTarget,
-} from './reviewBatch';
-export { groupCheckpoints, formatAliasList, describePrompt, type CheckpointGroup } from './checkpointGroups';
+export { useCapability, useGrantedScopes } from '../../services/auth/useCapability';
+export { checkCapability, WORKBENCH_REQUIREMENTS, type WorkbenchCapability, type CapabilityCheck } from '../../services/auth/capabilities';
 export { planDecisionFor, offersAutopilot, canRequestChanges, PLAN_ACTION_ID, type PlanDecisionKind } from './planDecisions';

@@ -9,7 +9,7 @@ import {
   prefixOf,
   searchEntries,
 } from '../components/chat/workbench/fileTree';
-import { describePrompt, formatAliasList, groupCheckpoints } from '../components/review/checkpointGroups';
+import { describePrompt, formatAliasList, groupCheckpoints } from '../blocks/CheckpointScrubber/model/checkpointGroups';
 
 const PATHS = ['README.md', 'src/index.ts', 'src/app/App.tsx', 'src/app/util.ts', 'src/lib/a.ts', 'test/a.test.ts', 'srcx/other.ts'];
 

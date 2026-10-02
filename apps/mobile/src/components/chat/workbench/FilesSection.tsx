@@ -49,7 +49,9 @@ import { HIGHLIGHT_MAX_BYTES, HIGHLIGHT_MAX_LINES } from '../../../ui/lib/highli
 import { setCodeWrap, useCodeWrap } from '../../markdown/codeWrapStore';
 import { useApi } from '../../../services/api/useApi';
 import { useTheme } from '../../../theme/ThemeProvider';
-import { Toolbar, formatBytes, languageForPath, splitPath } from '../../changes';
+import { Toolbar } from '../../changes/Toolbar';
+import { formatBytes, splitPath } from '../../changes/statusStyle';
+import { languageForPath } from '../../../blocks/DiffView/model/diffModel';
 import { crumbsFor, isMarkdownPath, levelEntries, parentPrefix, prefixOf, searchEntries, type TreeEntry } from './fileTree';
 import { readRecentFiles, recordRecentFile, visibleRecentFiles, type RecentFile, type StringStorage } from './recentFiles';
 import { prefs } from '../../../services/storage/prefs';

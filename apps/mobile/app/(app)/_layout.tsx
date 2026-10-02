@@ -26,8 +26,6 @@ const STACK_HEADER: Record<string, string> = {
   'projects/[id]/codebases/[cid]/files': 'Files',
   'projects/[id]/codebases/[cid]/file': 'File',
   'projects/[id]/codebases/[cid]/pull-requests/[number]': 'Pull request',
-  'changes/[workspaceId]/index': 'Changes',
-  'changes/[workspaceId]/file': 'Diff',
   'terminal/[workspaceId]': 'Terminal',
 };
 
@@ -67,6 +65,7 @@ export default function AppLayout(): React.ReactElement {
         <Stack.Screen name="servers" options={sheetOptions('picker')} />
         <Stack.Screen name="chats/[id]/turn" options={sheetOptions('large')} />
         <Stack.Screen name="chats/new" options={sheetOptions('large')} />
+        <Stack.Screen name="workspaces/[workspaceId]/commit" options={sheetOptions('large')} />
         {Object.entries(STACK_HEADER).map(([name, title]) => (
           <Stack.Screen
             key={name}

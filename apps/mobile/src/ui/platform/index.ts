@@ -33,3 +33,4 @@ export { deviceKindFor, nouns, nounsFor, type DeviceKind, type PlatformNouns } f
 export { setHardwareKeyboardAttached, useHardwareKeyboard, useKeyboardOverlap } from './keyboard';
 export { WindowInsetsProvider, useInsets, useWindowInsets } from './insets';
 export { readSystemAccentSeeds, systemAccentAvailable, type SystemAccentSeeds } from './accent';
+export { overflowIcon, overflowIconFor } from './overflow';

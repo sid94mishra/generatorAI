@@ -10,7 +10,7 @@ import { ApiError, queryKeys } from '@generatorai/client-core';
 import { useApi } from '../../services/api/useApi';
 import { useAdminApi } from '../../services/api/useAdminApi';
 import { checkFeature } from '../../services/auth/featureGate';
-import { useCapability } from '../review/useScopes';
+import { useCapability } from '../../services/auth/useCapability';
 import { scmKeys } from '@generatorai/client-core';
 import { useScmApi } from '../scm/useScmApi';
 import { useChangesSummary } from '../chat/panes/useChangesSummary';

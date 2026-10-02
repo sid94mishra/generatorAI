@@ -8,7 +8,7 @@ import type { RepoReadiness, ScmFlowResult } from '@generatorai/shared';
 
 import { blocksSignature, compactTimeline, rowsEqual } from '../compactTimeline';
 import { asScmResultBlock, type ScmResultBlock } from '../../../../services/stream/scmResultBlock';
-import { blockedReason, describeFlowResult, summarizeFlow } from '../../../scm/scmModel';
+import { blockedReason, describeFlowResult, summarizeFlow } from '../../../../blocks/CommitSheet/model/scmModel';
 
 const readiness: RepoReadiness = {
   alias: '.',

@@ -22,6 +22,8 @@ export interface ComposerCaptureActions {
   captureBrowserScreenshot(): Promise<void>;
   /** The page's accessibility tree as markdown. */
   captureBrowserPageText(): Promise<void>;
+  /** "Mention in chat" (Changes, Files): `@<path>` at the caret, then the composer comes forward. */
+  mentionPath(path: string): void;
   /**
    * Whether captures become attachments (true) or, for text, are inserted
    * into the draft (false). Lets a pane label its action honestly.

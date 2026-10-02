@@ -39,7 +39,7 @@ import {
   planDecisionFor,
   type PlanDecisionKind,
 } from './planDecisions';
-import { useCapability } from './useScopes';
+import { useCapability } from '../../services/auth/useCapability';
 
 
 export function statusLabel(status: string): string {

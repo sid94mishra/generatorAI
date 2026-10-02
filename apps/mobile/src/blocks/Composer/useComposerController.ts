@@ -342,7 +342,7 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
     [setDraft, setCaret],
   );
 
-  const captures = useCaptures({
+  const fetched = useCaptures({
     workspaceId,
     authedFetch,
     uploadAvailable: upload.available,
@@ -353,6 +353,19 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
     toast,
     onCaptured,
   });
+  const mentionPath = useCallback(
+    (path: string) => {
+      const current = draftRef.current;
+      const before = current.length === 0 || /\s$/.test(current) ? current : `${current} `;
+      const next = `${before}@${path} `;
+      setDraft(next);
+      setCaret(next.length);
+      setPendingSelection(next.length);
+      onCaptured?.();
+    },
+    [setDraft, setCaret, onCaptured],
+  );
+  const captures = useMemo<ComposerCaptureActions>(() => ({ ...fetched, mentionPath }), [fetched, mentionPath]);
 
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));

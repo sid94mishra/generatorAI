@@ -19,7 +19,7 @@ describe('pane registry (MB-42, MD-23, MD-96)', () => {
 
   it('shows over its own screen and the workspace screens pushed from it, nowhere else', () => {
     expect(paneVisibleOn('/chats/c1', '/chats/c1')).toBe(true);
-    expect(paneVisibleOn('/changes/w1/file', '/chats/c1')).toBe(true);
+    expect(paneVisibleOn('/workspaces/w1/file', '/chats/c1')).toBe(true);
     expect(paneVisibleOn('/workspaces/w1/diff', '/chats/c1')).toBe(true);
     expect(paneVisibleOn('/chats/c2', '/chats/c1')).toBe(false);
     expect(paneVisibleOn('/settings', '/chats/c1')).toBe(false);

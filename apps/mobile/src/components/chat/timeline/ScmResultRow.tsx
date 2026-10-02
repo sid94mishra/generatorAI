@@ -37,7 +37,7 @@ import {
   mobileReason,
   stepLabel,
   summarizeFlow,
-} from '../../scm/scmModel';
+} from '../../../blocks/CommitSheet/model/scmModel';
 import { RowFrame, type RowTone } from './RowFrame';
 import { useTimelineActions } from './TimelineActions';
 import type { ScmResultBlock } from '../../../services/stream/scmResultBlock';

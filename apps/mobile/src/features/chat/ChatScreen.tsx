@@ -17,10 +17,10 @@ import {
   isArchived,
   resourcePaths,
   type AgentMode,
-  type ChangeSummary,
   type RewindScope,
 } from '@generatorai/client-core';
 
+import { ChangesPanel, ChangesStrip } from '../../blocks/ChangesPanel';
 import { chatRowView, displayChatTitle, useChatRowActions } from '../../blocks/ChatRow';
 import { Composer, type ComposerPane } from '../../blocks/Composer/Composer';
 import { readAllAttachmentBytes } from '../../blocks/Composer/model/attachmentPickers';
@@ -29,7 +29,7 @@ import type { ComposerSendPayload, WorkspacePrepState } from '../../blocks/Compo
 import { useComposerController, type ComposerController } from '../../blocks/Composer/useComposerController';
 import { PermissionCard, PlanCard, QuestionCard, ResolvedGateRow, pendingGateFrom, permissionRisk } from '../../blocks/GateCard';
 import { describeFork, describeRewind, forkedFromLabel, shouldRestorePrompt, useRewindSheet } from '../../blocks/RewindSheet';
-import { chatHref, stepHref, turnHref, CHATS_HREF } from '../../blocks/shell/hrefs';
+import { chatHref, stepHref, turnHref, workspaceDiffHref, CHATS_HREF } from '../../blocks/shell/hrefs';
 import { useBreadcrumb, useHeaderBack } from '../../blocks/shell/useHeaderNav';
 import { TranscriptView, type TranscriptActions } from '../../blocks/TranscriptView';
 import { activityLabelFor, selectChatView } from '../../blocks/TranscriptView/model/selectChatView';
@@ -86,13 +86,6 @@ const PAGE_SIZE = 120;
 
 const STARTERS = ['Explain how this project is structured', 'Find and fix a failing test', 'Review my uncommitted changes'] as const;
 
-/** A request to show one file in a pane tab; `nonce` re-asks for the same file. */
-export interface PaneFocus {
-  path: string;
-  alias?: string;
-  nonce: number;
-}
-
 /** What a pane tab body gets from the chat (M6 transition: the legacy bodies take it as props). */
 export interface ChatPaneContext {
   workspaceId: string | null;
@@ -100,7 +93,6 @@ export interface ChatPaneContext {
   chatId: string;
   planId: string | null;
   agentBusy: boolean;
-  changesFocus: PaneFocus | null;
   onOpenInChanges: (path: string) => void;
   onPlanDecided: () => void;
 }
@@ -108,8 +100,6 @@ export interface ChatPaneContext {
 export interface ChatScreenProps {
   /** M6 transition (removed by M6-11): a pane tab whose block has not landed yet. */
   renderLegacyTab?: (type: MobilePaneTab, ctx: { active: boolean }, pane: ChatPaneContext) => React.ReactNode;
-  /** M6 transition (removed by M6-07): the legacy changes tray above the composer. */
-  renderChangesDock?: (props: { workspaceId: string | null; summary: ChangeSummary | undefined; onReview: () => void; onOpenFile: (path: string) => void }) => React.ReactNode;
 }
 
 function StarterPrompts({ onPick, disabled }: { onPick: (text: string) => void; disabled: boolean }): React.ReactElement {
@@ -142,7 +132,7 @@ function RenameChat({ initial, onSave }: { initial: string; onSave: (name: strin
   );
 }
 
-export default function ChatScreen({ renderLegacyTab, renderChangesDock }: ChatScreenProps = {}): React.ReactElement {
+export default function ChatScreen({ renderLegacyTab }: ChatScreenProps = {}): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const chatId = id ?? '';
   const navigation = useNavigation();
@@ -348,17 +338,16 @@ export default function ChatScreen({ renderLegacyTab, renderChangesDock }: ChatS
 
   // ── Pane ─────────────────────────────────────────────────────
   const [planId, setPlanId] = useState<string | null>(null);
-  const [changesFocus, setChangesFocus] = useState<PaneFocus | null>(null);
   const openTab = useCallback((tab: MobilePaneTab) => {
     Keyboard.dismiss();
     usePaneStore.getState().openTab(tab);
   }, []);
+  // "Open in Changes" (the legacy Files tab until M6-08): the file's diff, pushed over the chat.
   const openInChanges = useCallback(
     (path: string) => {
-      setChangesFocus((prev) => ({ path, nonce: (prev?.nonce ?? 0) + 1 }));
-      openTab('changes');
+      if (workspaceId) router.push(workspaceDiffHref(workspaceId, { path, chat: chatId }) as never);
     },
-    [openTab],
+    [workspaceId, chatId],
   );
   const openPlan = useCallback(
     (next: string) => {
@@ -553,10 +542,19 @@ export default function ChatScreen({ renderLegacyTab, renderChangesDock }: ChatS
   // ── Pane claim (MB-42) ───────────────────────────────────────
   const paneShown = usePaneStore((s) => s.open && s.claim?.scope.kind === 'chat' && s.claim.scope.id === chatId);
   const paneContext = useMemo<ChatPaneContext>(
-    () => ({ workspaceId, scopes, chatId, planId, agentBusy: isStreaming, changesFocus, onOpenInChanges: openInChanges, onPlanDecided: () => usePaneStore.getState().setOpen(false) }),
-    [workspaceId, scopes, chatId, planId, isStreaming, changesFocus, openInChanges],
+    () => ({ workspaceId, scopes, chatId, planId, agentBusy: isStreaming, onOpenInChanges: openInChanges, onPlanDecided: () => usePaneStore.getState().setOpen(false) }),
+    [workspaceId, scopes, chatId, planId, isStreaming, openInChanges],
   );
-  const renderTab = useCallback((type: MobilePaneTab, ctx: { active: boolean }) => renderLegacyTab?.(type, ctx, paneContext) ?? null, [renderLegacyTab, paneContext]);
+  const captures = composer.captures;
+  // The pane renders in the shell, outside this screen's tree: its bodies get the composer's capture actions here.
+  const renderTab = useCallback(
+    (type: MobilePaneTab, ctx: { active: boolean }) => (
+      <ComposerCaptureContext.Provider value={captures}>
+        {type === 'changes' ? <ChangesPanel workspaceId={workspaceId} chatId={chatId} active={ctx.active} onRewind={(turnId, prompt) => openRewind({ turnId, prompt })} /> : (renderLegacyTab?.(type, ctx, paneContext) ?? null)}
+      </ComposerCaptureContext.Provider>
+    ),
+    [captures, workspaceId, chatId, openRewind, renderLegacyTab, paneContext],
+  );
   useWorkspacePaneClaim({
     kind: 'chat',
     id: chatId || undefined,
@@ -740,7 +738,7 @@ export default function ChatScreen({ renderLegacyTab, renderChangesDock }: ChatS
             {...composer.props}
             dock={
               <>
-                {renderChangesDock?.({ workspaceId, summary: changes.data, onReview: () => openTab('changes'), onOpenFile: openInChanges })}
+                {isStreaming ? null : <ChangesStrip summary={changes.data} onReview={() => openTab('changes')} />}
                 {dockGate ? <View className="px-3 pt-2">{dockGate}</View> : null}
               </>
             }

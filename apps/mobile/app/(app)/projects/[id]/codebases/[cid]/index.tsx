@@ -25,7 +25,7 @@ import { useAdminApi } from '../../../../../../src/services/api/useAdminApi';
 import { relativeTime } from '../../../../../../src/components/runs/formatTime';
 import { usePullRefresh } from '../../../../../../src/components/runs/usePullRefresh';
 import { useScmApi } from '../../../../../../src/components/scm/useScmApi';
-import { matchesState, prStateLabel, prStateTone } from '../../../../../../src/components/scm/prModel';
+import { matchesState, prStateLabel, prStateTone } from '../../../../../../src/blocks/CommitSheet/model/prModel';
 import {
   codebaseLocation,
   codebaseStatusTone,
