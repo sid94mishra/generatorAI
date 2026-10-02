@@ -189,7 +189,10 @@ export type IconConcept = keyof typeof ICON_CONCEPTS;
  * added (with the names fixed in 02 §5.1) when the first mobile screen needs
  * one; the registry test applies the same rules to them.
  */
-export const MOBILE_ICON_CONCEPTS = {} as const satisfies Record<string, IconConceptDef>;
+export const MOBILE_ICON_CONCEPTS = {
+  /** CodeBlock soft-wrap toggle (MP-42). */
+  wrap: { lucide: 'text-wrap', sfSymbol: 'arrow.turn.down.left', material: 'wrap_text' },
+} as const satisfies Record<string, IconConceptDef>;
 export type MobileIconConcept = IconConcept | keyof typeof MOBILE_ICON_CONCEPTS;
 
 /** Every concept the mobile kit can draw, with its full definition. */

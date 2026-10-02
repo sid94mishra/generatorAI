@@ -42,7 +42,7 @@ import { useContextMenu, type ContextMenuItem } from '../ui/ContextMenu';
 import { EmptyState, ErrorState, LoadingState } from '../ui/States';
 import { SkeletonList } from '../ui/Skeleton';
 import { useToast } from '../ui/Toast';
-import { resolveLanguage, type Language } from '../markdown/highlight';
+import { resolveLanguage, type Language } from '../../ui/lib/highlight';
 import { DiffLine } from './DiffLine';
 import { HunkHeader } from './HunkHeader';
 import { setDiffFontSize, useDiffPrefs } from './diffPrefs';

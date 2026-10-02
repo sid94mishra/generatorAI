@@ -121,6 +121,7 @@ import LGroup from 'lucide-react-native/icons/group';
 import LUngroup from 'lucide-react-native/icons/ungroup';
 import LBraces from 'lucide-react-native/icons/braces';
 import LWand from 'lucide-react-native/icons/wand-sparkles';
+import LWrap from 'lucide-react-native/icons/text-wrap';
 
 export const LUCIDE_ALL = {
   'home': LHome,
@@ -244,4 +245,5 @@ export const LUCIDE_ALL = {
   'ungroup': LUngroup,
   'braces': LBraces,
   'wand': LWand,
+  'wrap': LWrap,
 } as const;

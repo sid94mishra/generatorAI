@@ -873,3 +873,20 @@ Derived during M1-02 from the installed Xcode 27 `simctl help privacy`: notifica
 - **Count moved forward:** Count (MP-09) landed in M4-02 because IconButton's badge needs it.
 - **Deferred:** the `PrimaryActionRegistry` dev warning lives in `Screen` (ML-01, M4-08), and the hardware-keyboard focus ring waits for the keyboard module (M5-09).
 - **Jest gains two global mocks:** an in-memory `prefs` (MMKV has no Nitro module under Jest) and a null Android ripple hook (the test renderer has no native view).
+
+### MD-128 Display primitives: values the plan left open (M4-03) — Final (2026-10-02)
+- **Link has no router (MD-86).** Internal navigation is the caller's `onPress`, and `url` covers external links (expo-web-browser). 03 MP-44's `href` would need a router import in `ui/`. Inline links are nested text, so they cannot carry a 44/48 frame (the usual inline-text exception); standalone links get the Pressable frame.
+- **ProgressSegments are hidden from screen readers (MD-67).** The bar always sits next to a text equivalent, and its trailing fraction stays readable. 03 MP-15's "one labelled element" yields to MD-67.
+- **StatusDot geometry:**
+  - The `ring` form is a 7 pt dot in an 11 pt `bg-ground` disc (2 pt ring).
+  - `hollow` is a 1 px tone border; there is no 1.5 border token.
+- **KbdHint:** uses `rounded-badge`, because there is no 4 pt radius token; on iPad it draws as a small pill. Host mapping: iPad formats as `desktopMac` (⌘ glyphs), Android as `desktopWinLinux` (Ctrl).
+- **CodeText:**
+  - The bounded highlighter moved to `src/ui/lib/highlight.ts` (03 §1.1), and the legacy importers now use it.
+  - Token kinds map onto `ThemeColors.syntax`.
+  - The soft-wrap toggle uses the first mobile-only icon concept, `wrap` (`text-wrap` / `arrow.turn.down.left` / `wrap_text`), added to `MOBILE_ICON_CONCEPTS` with this first use (02 §5.1).
+  - Copy swaps its label to "Copied" for 1.5 s (MD-58).
+- **Icon name checks extended.** The compile-time SF Symbol / Material name checks now cover `MOBILE_ICON_CONCEPTS` too.
+- **ProgressIndicator (MP-13)** loads Expo UI lazily, behind `requireOptionalNativeModule('ExpoUI')`: the package barrels register native views when imported. Without the module (Jest, an older client) it draws `ActivityIndicator`, and under Reduce Motion on Android a static loader glyph. Android sets `seedColor` only for hue accents; ink has no seed.
+- **Chip:** the attachment thumbnail uses RN `Image` (expo-image is not a dependency). The input and attachment remove controls are separate Pressables with their own 44/48 frames, laid over the chip's end.
+- **Deferred:** ChipGroup's end-fade mask and the HorizontalScrollGuard (06 §3.4) land with the SidePanel gesture work (M5). StatusBadge's elapsed timer ticks every second and does not yet pause off-screen.

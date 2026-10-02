@@ -6,7 +6,7 @@ import Animated from 'react-native-reanimated';
 import { requireOptionalNativeModule } from 'expo';
 import type { SymbolViewProps } from 'expo-symbols';
 import type { SFSymbol } from 'sf-symbols-typescript';
-import { GEOMETRY, ICON, mobileIconDef, type ICON_CONCEPTS } from '@generatorai/design-tokens';
+import { GEOMETRY, ICON, mobileIconDef, type ICON_CONCEPTS, type MOBILE_ICON_CONCEPTS } from '@generatorai/design-tokens';
 
 import type { IconProps } from './Icon.types';
 import { iconA11yProps, useIconColor, useSpinStyle } from './iconSupport';
@@ -14,9 +14,12 @@ import { LUCIDE_ALL } from './lucideAll';
 
 export type { IconProps, IconSize, IconTone } from './Icon.types';
 
+/** Every concept the kit draws: the shared registry plus the mobile-only entries. */
+type AllConcepts = typeof ICON_CONCEPTS & typeof MOBILE_ICON_CONCEPTS;
+
 // Compile-time check that every registry SF name exists in the SF Symbols catalogue (sf-symbols-typescript).
-type RegistrySf = { [K in keyof typeof ICON_CONCEPTS]: (typeof ICON_CONCEPTS)[K] extends { sfSymbol: infer S } ? S : never }[keyof typeof ICON_CONCEPTS];
-type RegistrySfFill = { [K in keyof typeof ICON_CONCEPTS]: (typeof ICON_CONCEPTS)[K] extends { sfSymbolFill: infer S } ? S : never }[keyof typeof ICON_CONCEPTS];
+type RegistrySf = { [K in keyof AllConcepts]: AllConcepts[K] extends { sfSymbol: infer S } ? S : never }[keyof AllConcepts];
+type RegistrySfFill = { [K in keyof AllConcepts]: AllConcepts[K] extends { sfSymbolFill: infer S } ? S : never }[keyof AllConcepts];
 type AssertSf<T extends SFSymbol> = T;
 export type RegistrySfNames = AssertSf<RegistrySf | RegistrySfFill>;
 

@@ -1,5 +1,5 @@
 // The OS policy layer (MD-15; 03 §1.1). Only src/ui/platform/** (and ui/**/*.ios|android.tsx) may branch on Platform.
-export { geometry, nativePlatform, type NativePlatform } from './geometry';
+export { geometry, hairline, nativePlatform, type NativePlatform } from './geometry';
 export { adjacentGapFor, hitFrame, hitFrameFor, hitSlopFor, type HitFrame } from './hit';
 export { haptic, setHapticsEnabled } from './haptics';
 export { resolveMotion, setMotionPreference, useMotion, useReduceMotion, type MotionConfig, type MotionPreference, type ResolvedMotion } from './motion';

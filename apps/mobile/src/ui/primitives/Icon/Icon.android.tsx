@@ -5,7 +5,7 @@ import React from 'react';
 import { I18nManager } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { GEOMETRY, ICON, mobileIconDef, type ICON_CONCEPTS } from '@generatorai/design-tokens';
+import { GEOMETRY, ICON, mobileIconDef, type ICON_CONCEPTS, type MOBILE_ICON_CONCEPTS } from '@generatorai/design-tokens';
 
 import type { IconProps } from './Icon.types';
 import { iconA11yProps, useIconColor, useSpinStyle } from './iconSupport';
@@ -17,8 +17,11 @@ export type { IconProps, IconSize, IconTone } from './Icon.types';
 /** expo-symbols' Material name union. */
 type AndroidSymbol = NonNullable<Exclude<SymbolViewProps['name'], string>['android']>;
 
+/** Every concept the kit draws: the shared registry plus the mobile-only entries. */
+type AllConcepts = typeof ICON_CONCEPTS & typeof MOBILE_ICON_CONCEPTS;
+
 // Compile-time check that every registry Material name is one expo-symbols can draw.
-type RegistryMaterial = { [K in keyof typeof ICON_CONCEPTS]: (typeof ICON_CONCEPTS)[K] extends { material: infer S } ? S : never }[keyof typeof ICON_CONCEPTS];
+type RegistryMaterial = { [K in keyof AllConcepts]: AllConcepts[K] extends { material: infer S } ? S : never }[keyof AllConcepts];
 type AssertMaterial<T extends AndroidSymbol> = T;
 export type RegistryMaterialNames = AssertMaterial<RegistryMaterial>;
 

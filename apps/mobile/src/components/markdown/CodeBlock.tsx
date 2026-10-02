@@ -29,7 +29,7 @@ import { MAX_SCALE } from '../ui/accessibility';
 import { Touchable } from '../ui/Touchable';
 import { usePagerInnerScroll } from '../ui/Pager';
 import { useToast } from '../ui/Toast';
-import { highlight, languageLabel, type Line, type Span } from './highlight';
+import { highlight, languageLabel, type Line, type Span } from '../../ui/lib/highlight';
 import { syntaxPalette, type SyntaxPalette } from './syntaxColors';
 import { setCodeWrap, useCodeWrap } from './codeWrapStore';
 

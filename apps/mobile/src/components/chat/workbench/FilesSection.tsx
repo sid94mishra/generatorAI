@@ -45,7 +45,7 @@ import { SkeletonList } from '../../ui/Skeleton';
 import { useToast } from '../../ui/Toast';
 import { Markdown } from '../../markdown/Markdown';
 import { CodeBlock } from '../../markdown/CodeBlock';
-import { HIGHLIGHT_MAX_BYTES, HIGHLIGHT_MAX_LINES } from '../../markdown/highlight';
+import { HIGHLIGHT_MAX_BYTES, HIGHLIGHT_MAX_LINES } from '../../../ui/lib/highlight';
 import { setCodeWrap, useCodeWrap } from '../../markdown/codeWrapStore';
 import { useApi } from '../../../services/api/useApi';
 import { useTheme } from '../../../theme/ThemeProvider';

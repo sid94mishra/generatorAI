@@ -10,7 +10,7 @@
 // Pure module so the mapping is testable without a theme provider.
 // ────────────────────────────────────────────────────────────────
 
-import type { TokenKind } from './highlight';
+import type { TokenKind } from '../../ui/lib/highlight';
 
 export type SyntaxPalette = Record<TokenKind, string | undefined>;
 
