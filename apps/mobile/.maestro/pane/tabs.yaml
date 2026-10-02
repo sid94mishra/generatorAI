@@ -1,0 +1,27 @@
+appId: ${APP_ID}
+name: pane · tabs, full screen and back order
+tags: [smoke, pane]
+env: {FRESH_CHAT: edits, DEVICE_SCOPES: "write:files,write:workspaces"}
+# Replaces the web-preview e2e/panes.mjs with changes/keep-undo-commit.yaml (08 §6.3). M6 pane tabs (MB-22 / MB-25):
+# the pinned four are always there; Changes and Files render their blocks; full screen is a mode with a back control.
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///chats/${CHAT_EDITS_ID}
+- extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- runFlow: ../_subflows/open-pane.yaml
+- extendedWaitUntil: {visible: {id: pane-tab-changes}, timeout: 15000}
+- assertVisible: {id: pane-tab-files}
+- assertVisible: {id: pane-tab-terminal}
+- assertVisible: {id: pane-tab-browser}
+- tapOn: {id: pane-tab-changes}
+- extendedWaitUntil: {visible: {id: changes-panel}, timeout: 15000}
+- tapOn: {id: pane-tab-files}
+- extendedWaitUntil: {visible: {id: file-tree}, timeout: 15000}
+- assertVisible: "Sources"
+- tapOn: {id: pane-fullscreen}
+- extendedWaitUntil: {visible: {id: pane-back}, timeout: 5000}
+- tapOn: {id: pane-back}
+- extendedWaitUntil: {notVisible: {id: pane-back}, timeout: 5000}
+- tapOn: {id: pane-close}
+- extendedWaitUntil: {notVisible: {id: pane-tab-changes}, timeout: 10000}
+- assertVisible: {id: composer-input}

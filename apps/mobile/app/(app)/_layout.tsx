@@ -12,7 +12,7 @@ import { parentHref } from '../../src/blocks/shell/parentHref';
 import { moduleRootOptions, paletteOptions, sheetOptions, useStackScreenOptions } from '../../src/ui/platform';
 
 const MODULE_ROOTS = ['index', 'chats/index', 'projects/index', 'agents/index', 'workflows/index', 'automations/index', 'scripts/index'];
-const SHEETS = ['chats/[id]/gate/[interactionId]', 'chats/[id]/plan/[planId]', 'scope-request'];
+const SHEETS = ['chats/[id]/gate/[interactionId]', 'scope-request'];
 /** Legacy details that set their title and trailing controls through navigator options. */
 const STACK_HEADER: Record<string, string> = {
   'workflows/[id]/index': 'Workflow',

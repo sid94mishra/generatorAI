@@ -21,8 +21,8 @@ export const turnHref = (chatId: string): string => `${chatHref(chatId)}/turn`;
 /** Step detail (MB-14): a tool call of the chat by its call id. */
 export const stepHref = (chatId: string, callId: string): string => `${chatHref(chatId)}/steps/${seg(callId)}`;
 export const gateHref = (chatId: string, interactionId: string): string => `${chatHref(chatId)}/gate/${seg(interactionId)}`;
-/** Legacy plan sheet until M6 replaces it with `/chats/<id>?dock=plan` (04 §1.5). */
-export const planHref = (chatId: string, planId: string): string => `${chatHref(chatId)}/plan/${seg(planId)}`;
+/** A plan opens in the chat's pane, on the Plan tab (04 §1.5; M6-11). */
+export const planHref = (chatId: string, planId: string): string => `${chatHref(chatId)}?dock=plan&plan=${seg(planId)}`;
 export const workflowHref = (workflowId: string): string => `/workflows/${seg(workflowId)}`;
 /** A run lives under its workflow (MD-80): there is no `/runs/<id>`. */
 export const runHref = (workflowId: string, runId: string): string => `${workflowHref(workflowId)}/runs/${seg(runId)}`;

@@ -16,3 +16,4 @@ export {
   type WorkspacePaneClaimInput,
 } from './WorkspacePane.queries';
 export { LockedTab, StepUpTab } from './TabGates';
+export { PaneTabBody, type PaneTabContext } from './PaneTabBody';

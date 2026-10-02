@@ -35,7 +35,7 @@ function withQuery(path: string, query: string): string {
 
 /**
  * Map an allowlisted route (output of `deepLinkToRoute`) to the mobile tree, or null when the app has no screen for
- * it (the legacy `runs`, `changes`, `terminal`, `approvals` roots; `share` until M9; `workspaces` until M6).
+ * it (the legacy `runs`, `changes`, `terminal`, `approvals` roots; `share` until M9).
  */
 export function mobileRoute(route: string | null): string | null {
   const mapped = mapRoute(route);
@@ -60,6 +60,10 @@ function mapRoute(route: string | null): string | null {
   if (id === 'new' && parts.length === 2 && CREATE[root]) return root === 'chats' ? withQuery(CREATE[root]!, query) : CREATE[root]!;
 
   switch (root) {
+    case 'chats':
+      // The plan sheet became the pane's Plan tab (M6-11): open the chat there, on that plan.
+      if (id && sub === 'plan' && subId) return withQuery(`/chats/${id}`, `dock=plan&plan=${encodeURIComponent(subId)}${query ? `&${query}` : ''}`);
+      return route;
     case 'settings': {
       if (!id) return withQuery('/settings', query);
       const section = SETTINGS_ALIASES[id] ?? id;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { toPlanDecision } from '../blocks/GateCard/model/gateActions';
-import { PLAN_ACTION_ID, canRequestChanges, offersAutopilot, planDecisionFor } from '../components/review/planDecisions';
+import { toPlanDecision } from '../../GateCard/model/gateActions';
+import { PLAN_ACTION_ID, canRequestChanges, offersAutopilot, planDecisionFor } from './planDecisions';
 
 describe('planDecisions (single encoder, D12)', () => {
   it('encodes every button through gateActions.toPlanDecision', () => {
@@ -45,12 +45,12 @@ describe('planDecisions (single encoder, D12)', () => {
 
 describe('planBodyWithoutTitle', () => {
   it('drops a first heading that repeats the title', async () => {
-    const { planBodyWithoutTitle } = await import('../components/review/planDecisions');
+    const { planBodyWithoutTitle } = await import('./planDecisions');
     expect(planBodyWithoutTitle('# Add SAVE20 coupon\n\n## Goal\nText', 'Add SAVE20 coupon')).toBe('## Goal\nText');
   });
 
   it('keeps a heading that says something else, and bodies with none', async () => {
-    const { planBodyWithoutTitle } = await import('../components/review/planDecisions');
+    const { planBodyWithoutTitle } = await import('./planDecisions');
     expect(planBodyWithoutTitle('# Overview\nText', 'Add SAVE20 coupon')).toBe('# Overview\nText');
     expect(planBodyWithoutTitle('## Goal\nText', 'Goal')).toBe('## Goal\nText');
     expect(planBodyWithoutTitle('', 'Plan')).toBe('');

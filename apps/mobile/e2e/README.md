@@ -43,7 +43,6 @@ copy rotates the resume credential and the original is logged out), `E2E_OUT` (s
 | `pair.mjs [--fresh]` | manual-code pairing → consent → tab shell |
 | `chat.mjs` | New chat sheet → send → live streaming → Stop appears |
 | `gatelive.mjs` | Turn options → Ask me → tool prompt → in-chat permission card → Allow → Changes pane → diff → Stop |
-| `panes.mjs <chat>` | Workbench: header button → tool index → Changes (with commit → push → PR, Keep / Keep all / Undo all) / Terminal / Browser / Files / Plan / Session sheets, Stop, long-press menu |
 | `stop.mjs <chat>` | Stop while a permission is pending clears the gate (two-phase stop wire) |
 | `clear.mjs` | Deny every stale gate from the Approvals sheet |
 | `companion.mjs <chat>` | a companion-scope device streams (read:activity), panes lock honestly, request-access sheet |

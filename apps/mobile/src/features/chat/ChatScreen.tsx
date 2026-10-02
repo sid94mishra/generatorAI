@@ -20,9 +20,7 @@ import {
   type RewindScope,
 } from '@generatorai/client-core';
 
-import { BrowserTab, ComputerTab } from '../../blocks/BrowserView';
-import { ChangesPanel, ChangesStrip } from '../../blocks/ChangesPanel';
-import { FileTree } from '../../blocks/FileTree';
+import { ChangesStrip } from '../../blocks/ChangesPanel';
 import { chatRowView, displayChatTitle, useChatRowActions } from '../../blocks/ChatRow';
 import { Composer, type ComposerPane } from '../../blocks/Composer/Composer';
 import { readAllAttachmentBytes } from '../../blocks/Composer/model/attachmentPickers';
@@ -30,13 +28,12 @@ import { ComposerCaptureContext } from '../../blocks/Composer/model/captureConte
 import type { ComposerSendPayload, WorkspacePrepState } from '../../blocks/Composer/model/types';
 import { useComposerController, type ComposerController } from '../../blocks/Composer/useComposerController';
 import { PermissionCard, PlanCard, QuestionCard, ResolvedGateRow, pendingGateFrom, permissionRisk } from '../../blocks/GateCard';
-import { describeFork, describeRewind, forkedFromLabel, shouldRestorePrompt, useRewindSheet } from '../../blocks/RewindSheet';
-import { chatHref, stepHref, turnHref, workspaceDiffHref, CHATS_HREF } from '../../blocks/shell/hrefs';
+import { describeFork, describeRewind, forkedFromLabel, onRewindRequest, shouldRestorePrompt, useRewindSheet } from '../../blocks/RewindSheet';
+import { chatHref, stepHref, turnHref, CHATS_HREF } from '../../blocks/shell/hrefs';
 import { useBreadcrumb, useHeaderBack } from '../../blocks/shell/useHeaderNav';
 import { TranscriptView, chatToolCalls, type TranscriptActions } from '../../blocks/TranscriptView';
-import { TerminalPanel } from '../../blocks/TerminalView';
 import { activityLabelFor, selectChatView } from '../../blocks/TranscriptView/model/selectChatView';
-import { useChangesSummary, usePaneStore, usePaneToggle, useWorkspacePaneClaim, type MobilePaneTab } from '../../blocks/WorkspacePane';
+import { PaneTabBody, useChangesSummary, usePaneStore, usePaneToggle, useWorkspacePaneClaim, type MobilePaneTab, type PaneTabContext } from '../../blocks/WorkspacePane';
 import { sendChatPrompt } from '../../services/api/sendChatPrompt';
 import { useApi } from '../../services/api/useApi';
 import { useCopyTranscriptMarkdown, useForkChat, useRewindChat } from '../../services/api/useChatBranching';
@@ -87,23 +84,9 @@ import { useAnswerPermission } from './useAnswerPermission';
 /** How many messages are fetched at a time. */
 const PAGE_SIZE = 120;
 
+const closePane = (): void => usePaneStore.getState().setOpen(false);
+
 const STARTERS = ['Explain how this project is structured', 'Find and fix a failing test', 'Review my uncommitted changes'] as const;
-
-/** What a pane tab body gets from the chat (M6 transition: the legacy bodies take it as props). */
-export interface ChatPaneContext {
-  workspaceId: string | null;
-  scopes: readonly string[];
-  chatId: string;
-  planId: string | null;
-  agentBusy: boolean;
-  onOpenInChanges: (path: string) => void;
-  onPlanDecided: () => void;
-}
-
-export interface ChatScreenProps {
-  /** M6 transition (removed by M6-11): a pane tab whose block has not landed yet. */
-  renderLegacyTab?: (type: MobilePaneTab, ctx: { active: boolean }, pane: ChatPaneContext) => React.ReactNode;
-}
 
 function StarterPrompts({ onPick, disabled }: { onPick: (text: string) => void; disabled: boolean }): React.ReactElement {
   return (
@@ -135,8 +118,8 @@ function RenameChat({ initial, onSave }: { initial: string; onSave: (name: strin
   );
 }
 
-export default function ChatScreen({ renderLegacyTab }: ChatScreenProps = {}): React.ReactElement {
-  const { id } = useLocalSearchParams<{ id: string }>();
+export default function ChatScreen(): React.ReactElement {
+  const { id, plan: planParam } = useLocalSearchParams<{ id: string; plan?: string }>();
   const chatId = id ?? '';
   const navigation = useNavigation();
   const auth = useAuth();
@@ -340,18 +323,11 @@ export default function ChatScreen({ renderLegacyTab }: ChatScreenProps = {}): R
   const answerQuestion = useAnswerChatQuestion(chatId, streamKey);
 
   // ── Pane ─────────────────────────────────────────────────────
-  const [planId, setPlanId] = useState<string | null>(null);
+  const [planId, setPlanId] = useState<string | null>(typeof planParam === 'string' ? planParam : null);
   const openTab = useCallback((tab: MobilePaneTab) => {
     Keyboard.dismiss();
     usePaneStore.getState().openTab(tab);
   }, []);
-  // "Open in Changes" (the legacy Files tab until M6-08): the file's diff, pushed over the chat.
-  const openInChanges = useCallback(
-    (path: string) => {
-      if (workspaceId) router.push(workspaceDiffHref(workspaceId, { path, chat: chatId }) as never);
-    },
-    [workspaceId, chatId],
-  );
   const openPlan = useCallback(
     (next: string) => {
       setPlanId(next);
@@ -544,10 +520,6 @@ export default function ChatScreen({ renderLegacyTab }: ChatScreenProps = {}): R
 
   // ── Pane claim (MB-42) ───────────────────────────────────────
   const paneShown = usePaneStore((s) => s.open && s.claim?.scope.kind === 'chat' && s.claim.scope.id === chatId);
-  const paneContext = useMemo<ChatPaneContext>(
-    () => ({ workspaceId, scopes, chatId, planId, agentBusy: isStreaming, onOpenInChanges: openInChanges, onPlanDecided: () => usePaneStore.getState().setOpen(false) }),
-    [workspaceId, scopes, chatId, planId, isStreaming, openInChanges],
-  );
   const captures = composer.captures;
   // The shell commands the agent ran (the Terminal tab's read-only "Agent commands").
   const messageRows = messages.data;
@@ -556,26 +528,28 @@ export default function ChatScreen({ renderLegacyTab }: ChatScreenProps = {}): R
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `view.signature` stands in for the live blocks array.
     [messageRows, streamKey, view.signature],
   );
+  // "Rewind to here" from the pane's checkpoint scrubber.
+  useEffect(() => onRewindRequest(chatId, openRewind), [chatId, openRewind]);
+  const paneContext = useMemo<PaneTabContext>(
+    () => ({
+      workspaceId,
+      chatId,
+      agentBusy: isStreaming,
+      agentName: boundAgent?.name ?? null,
+      agentCalls,
+      planId,
+      onPlanDecided: closePane,
+    }),
+    [workspaceId, chatId, isStreaming, boundAgent?.name, agentCalls, planId],
+  );
   // The pane renders in the shell, outside this screen's tree: its bodies get the composer's capture actions here.
   const renderTab = useCallback(
     (type: MobilePaneTab, ctx: { active: boolean }) => (
       <ComposerCaptureContext.Provider value={captures}>
-        {type === 'changes' ? (
-          <ChangesPanel workspaceId={workspaceId} chatId={chatId} active={ctx.active} onRewind={(turnId, prompt) => openRewind({ turnId, prompt })} />
-        ) : type === 'files' ? (
-          <FileTree workspaceId={workspaceId} chatId={chatId} active={ctx.active} />
-        ) : type === 'terminal' ? (
-          <TerminalPanel workspaceId={workspaceId} active={ctx.active} agentBusy={isStreaming} agentCalls={agentCalls} />
-        ) : type === 'browser' ? (
-          <BrowserTab workspaceId={workspaceId} active={ctx.active} agentBusy={isStreaming} agentName={boundAgent?.name ?? null} />
-        ) : type === 'computer' ? (
-          <ComputerTab workspaceId={workspaceId} active={ctx.active} />
-        ) : (
-          (renderLegacyTab?.(type, ctx, paneContext) ?? null)
-        )}
+        <PaneTabBody type={type} active={ctx.active} ctx={paneContext} />
       </ComposerCaptureContext.Provider>
     ),
-    [captures, workspaceId, chatId, openRewind, renderLegacyTab, paneContext, isStreaming, agentCalls, boundAgent?.name],
+    [captures, paneContext],
   );
   useWorkspacePaneClaim({
     kind: 'chat',

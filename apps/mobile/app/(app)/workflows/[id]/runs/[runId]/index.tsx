@@ -30,9 +30,7 @@ import { StageTranscriptInline } from '../../../../../../src/components/runs/Sta
 import { Header } from '../../../../../../src/ui/native/router/Header';
 import { useBreadcrumb } from '../../../../../../src/blocks/shell/useHeaderNav';
 import { domainStatus } from '../../../../../../src/theme/status';
-import { useWorkbench } from '../../../../../../src/components/workbench/useWorkbench';
-import { useWorkbenchPane } from '../../../../../../src/components/workbench/useWorkbenchPane';
-import { usePaneStore, usePaneToggle } from '../../../../../../src/blocks/WorkspacePane';
+import { PaneTabBody, usePaneStore, usePaneToggle, useWorkspacePaneClaim, type MobilePaneTab, type PaneTabContext } from '../../../../../../src/blocks/WorkspacePane';
 import { MAX_SCALE } from '../../../../../../src/components/ui/accessibility';
 import { StatusGlyph } from '../../../../../../src/components/runs/StatusGlyph';
 import {
@@ -157,20 +155,22 @@ export default function RunDetailScreen(): React.ReactElement {
     navigation.setOptions({ title: runTitle(run.data?.name, 'Run'), gestureEnabled: !paneOpen });
   }, [navigation, run.data?.name, paneOpen]);
 
-  const workbench = useWorkbench({
-    surface: 'run',
-    workspaceId: run.data?.workspaceId ?? null,
-    scopes: runControl.scopes,
-    live: paneOpen,
-  });
-  const paneBody = useMemo(() => ({ workspaceId: run.data?.workspaceId ?? null, scopes: runControl.scopes }), [run.data?.workspaceId, runControl.scopes]);
-  useWorkbenchPane({
+  // The run's pane (MB-42 `scope: 'run'`): the workspace tabs — Changes, Files, Terminal, Browser — through the same
+  // bodies a chat pane uses. The run-only tabs (Output, Hooks, Variables) arrive with M8 (MG-28).
+  const runWorkspaceId = run.data?.workspaceId ?? null;
+  const runBusy = run.data?.status === 'running';
+  const paneContext = useMemo<PaneTabContext>(() => ({ workspaceId: runWorkspaceId, chatId: null, agentBusy: runBusy }), [runWorkspaceId, runBusy]);
+  const renderRunTab = useCallback((type: MobilePaneTab, ctx: { active: boolean }) => <PaneTabBody type={type} active={ctx.active} ctx={paneContext} />, [paneContext]);
+  useWorkspacePaneClaim({
     kind: 'run',
-    id: run.data?.workspaceId ? runId : undefined,
+    id: runWorkspaceId ? runId : undefined,
     title: runTitle(run.data?.name, 'Run'),
     path: runHref(String(params.id), runId),
-    tools: workbench.tools,
-    body: paneBody,
+    workspaceId: runWorkspaceId,
+    chatId: null,
+    scopes: runControl.scopes,
+    live: paneOpen,
+    renderTab: renderRunTab,
   });
 
   const decide = useCallback(
