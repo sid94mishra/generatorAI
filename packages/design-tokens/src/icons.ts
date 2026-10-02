@@ -192,6 +192,8 @@ export type IconConcept = keyof typeof ICON_CONCEPTS;
 export const MOBILE_ICON_CONCEPTS = {
   /** CodeBlock soft-wrap toggle (MP-42). */
   wrap: { lucide: 'text-wrap', sfSymbol: 'arrow.turn.down.left', material: 'wrap_text' },
+  /** Input secret toggle "Hide", privacy / redaction (02 §5.1). */
+  hide: { lucide: 'eye-off', sfSymbol: 'eye.slash', material: 'visibility_off' },
 } as const satisfies Record<string, IconConceptDef>;
 export type MobileIconConcept = IconConcept | keyof typeof MOBILE_ICON_CONCEPTS;
 

@@ -86,3 +86,5 @@ It also records every merge of `desktop_redesign` into this branch.
 | 2026-10-02 | M4-01 | `pnpm-lock.yaml` (apps/mobile: `tailwind-merge` ^3.7.0, `clsx` ^2.1.1, `class-variance-authority` ^0.7.1 — the web versions) | additive | Kit `cn()` / variants (02 §9.7). |
 
 | 2026-10-02 | M4-03 | `packages/design-tokens/src/icons.ts`: first `MOBILE_ICON_CONCEPTS` entry `wrap` (lucide `text-wrap`, SF `arrow.turn.down.left`, Material `wrap_text`) | additive; not in `ICON_CONCEPTS`, web unaffected (web typecheck green) | CodeBlock wrap toggle (MD-128); registry test covers it. |
+
+| 2026-10-02 | M4-04 | `packages/design-tokens/src/icons.ts`: `MOBILE_ICON_CONCEPTS` gains `hide` (lucide `eye-off`, SF `eye.slash`, Material `visibility_off`; name fixed in mobile 02 §5.1) | additive; not in `ICON_CONCEPTS`, web unaffected (web typecheck green) | Input secret toggle (MD-129); registry test covers it. |

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cn } from './cn';
-import { formatCount, formatElapsed, spokenElapsed } from './format';
+import { formatBytes, formatCount, formatElapsed, spokenElapsed } from './format';
 import { tid } from './testIds';
 
 describe('cn (mobile 02 §9.7)', () => {
@@ -26,6 +26,10 @@ describe('format', () => {
   it('caps counts', () => {
     expect(formatCount(120, 99)).toBe('99+');
     expect(formatCount(7)).toBe('7');
+    expect(formatBytes(812)).toBe('812 B');
+    expect(formatBytes(2150)).toBe('2.1 KB');
+    expect(formatBytes(32 * 1024)).toBe('32 KB');
+    expect(formatBytes(-1)).toBe('0 B');
   });
 });
 

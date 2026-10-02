@@ -31,3 +31,18 @@ export function formatCount(value: number, max?: number): string {
   if (max !== undefined && value > max) return `${integer.format(max)}+`;
   return integer.format(value);
 }
+
+const oneDecimal = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+
+/** A byte size: "812 B", "2.1 KB", "4.2 MB", "1.3 GB" (1024 steps, like the desktop size meters). */
+export function formatBytes(bytes: number): string {
+  const n = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
+  let value = n;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${unit === 0 ? integer.format(value) : oneDecimal.format(value)} ${units[unit]}`;
+}
