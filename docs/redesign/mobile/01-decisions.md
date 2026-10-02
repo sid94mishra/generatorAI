@@ -860,3 +860,16 @@ Derived during M1-02 from the installed Xcode 27 `simctl help privacy`: notifica
 - **`useHardwareKeyboard()`** is a store that stays false until the device-key module reports a keyboard (M5-09), so KbdHint stays hidden until then.
 - **Story font scale.** `withFontScale` cannot change the OS text size per view. It sets `FontScaleOverrideContext`, and `Text` then renders its role at the simulated scale, still capped by the role's `maxScale` / `chromeScaleCap`.
 - `presentation.ts` types the native-stack options locally (`ScreenPresentationOptions`), so `ui/` never imports the router (MD-86). Android sheets set `sheetCornerRadius` 28; iOS keeps the system radius (MD-72).
+
+### MD-127 Foundation primitives: values the plan left open (M4-02) — Final (2026-10-02)
+- **Button labels:** `sm` and `md` use the `subhead` role at 600 (iOS 15, Android 14), and `lg` uses `headline` (17 / 16). 03 draws the iOS `sm` label at 14, but there is no 14 pt sans role, and adding one for a single control is not worth a token.
+- **Controls grow with text size.** Buttons and capsules use `min-h-control*` rather than fixed `h-control*`, so a label at a large text size grows the capsule instead of clipping. Their drawn height at the default size is unchanged (MD-28).
+- **Tonal buttons:** per MD-51, tonal is Android's M3 tonal button (`bg-selected`); iOS draws it as secondary. MD-51 overrides 03 MP-04's iOS tonal fill.
+- **IconButton glyph sizes:** `md` uses `controls.header.toolbarGlyph` (22 / 24). `sm` uses 18 (iOS) / 20 (Android): the 36 / 40 circle with the glyph at roughly half its size. The board draws the composer glyphs at 18.
+- **Glass before GlassSurface:** until MP-38 GlassSurface lands (M4-08), the `glass` IconButton draws GlassSurface's opaque fallback recipe on iOS (02 §8.2) and is plain on Android.
+- **Press feedback:** the iOS highlight is `bg-selected` (02 §2.1 "pressed state"). Under Reduce Motion, scale becomes an instant 0.7 opacity. On Android every feedback is the ripple, coloured `useThemeColors().selected`, borderless for icon buttons.
+- **Text alignment:** `align="start"` sets no class (natural alignment follows the layout direction). RN has no `textAlign: start`.
+- **BrandMark:** the app mark is the desktop bolt (`zap`) on an `accent` tile with radius size / 3. Vendor marks are filled with `fg`, and unknown harness providers get the neutral mark (the web resolver's rule).
+- **Count moved forward:** Count (MP-09) landed in M4-02 because IconButton's badge needs it.
+- **Deferred:** the `PrimaryActionRegistry` dev warning lives in `Screen` (ML-01, M4-08), and the hardware-keyboard focus ring waits for the keyboard module (M5-09).
+- **Jest gains two global mocks:** an in-memory `prefs` (MMKV has no Nitro module under Jest) and a null Android ripple hook (the test renderer has no native view).
