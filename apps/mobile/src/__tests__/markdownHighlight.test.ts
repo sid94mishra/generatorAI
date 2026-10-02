@@ -10,7 +10,7 @@ import {
   type Language,
   type Line,
   type TokenKind,
-} from '../components/markdown/highlight';
+} from '../ui/lib/highlight';
 import { syntaxPalette } from '../components/markdown/syntaxColors';
 
 /** `[kind, text]` pairs for one line — what the tests actually care about. */

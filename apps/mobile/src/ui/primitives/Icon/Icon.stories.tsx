@@ -40,7 +40,7 @@ function States(): React.ReactElement {
 }
 
 const meta = {
-  title: 'ui/primitives/Icon',
+  title: 'UI/Primitives/Icon',
   component: AllConcepts,
   args: { filled: false },
 } satisfies Meta<typeof AllConcepts>;

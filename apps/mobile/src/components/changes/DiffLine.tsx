@@ -20,7 +20,7 @@ import { MessageSquare } from 'lucide-react-native';
 import type { DiffRow } from '@generatorai/client-core';
 
 import { useTheme } from '../../theme/ThemeProvider';
-import { tokenize, type Language, type Span } from '../markdown/highlight';
+import { tokenize, type Language, type Span } from '../../ui/lib/highlight';
 import { syntaxPalette } from '../markdown/syntaxColors';
 import { withAlpha } from '../markdown/CodeBlock';
 import { lineHeightFor, rowHeightFor, type DiffSide } from './diffModel';

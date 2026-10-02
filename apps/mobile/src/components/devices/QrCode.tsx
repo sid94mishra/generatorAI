@@ -10,7 +10,7 @@ import React, { useMemo } from 'react';
 import { View } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 
-import { qrMatrix, qrPath } from './qrMatrix';
+import { qrMatrix, qrPath } from '../../ui/primitives/QrCode/qrMatrix';
 
 const QUIET_ZONE = 4;
 

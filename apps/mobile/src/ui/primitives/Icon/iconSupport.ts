@@ -2,15 +2,8 @@
 // accessibility props, and the spinning rotation (mobile 02 §5.3 rules 4–5).
 import { useEffect } from 'react';
 import type { ViewProps, ViewStyle } from 'react-native';
-import {
-  Easing,
-  cancelAnimation,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
+import { Easing, cancelAnimation, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import { useReduceMotion } from '../../platform/motion';
 
 import { useThemeColors, type ThemeColors } from '../../lib/themeColors';
 import type { IconTone } from './Icon.types';
@@ -43,7 +36,7 @@ export function iconA11yProps(label: string | undefined): ViewProps {
 
 /** Rotation for `spinning`; undefined (no animation) when off or under reduced motion. */
 export function useSpinStyle(spinning: boolean): ReturnType<typeof useAnimatedStyle<ViewStyle>> | undefined {
-  const reduced = useReducedMotion();
+  const reduced = useReduceMotion();
   const turn = useSharedValue(0);
   const active = spinning && !reduced;
   useEffect(() => {

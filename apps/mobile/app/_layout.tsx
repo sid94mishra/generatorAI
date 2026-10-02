@@ -34,7 +34,8 @@ import { IconButton } from '../src/components/ui/Button';
 import { goBack } from '../src/components/ui/Screen';
 
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider';
-import { PreferencesProvider } from '../src/services/prefs/preferences';
+import { PreferencesProvider, usePreferences } from '../src/services/prefs/preferences';
+import { setHapticsEnabled as setKitHapticsEnabled, setMotionPreference } from '../src/ui/platform';
 import { useLinkRouting } from '../src/services/navigation/useLinkRouting';
 import { consumeLastRoute, useLastRoute } from '../src/services/prefs/lastRoute';
 import { AuthProvider, useAuth } from '../src/services/auth/AuthProvider';
@@ -54,6 +55,19 @@ installCrypto();
 // Held until the theme has been read, so a dark-mode user never sees the
 // white flash that an async preference read would guarantee.
 void SplashScreen.preventAutoHideAsync();
+
+/**
+ * Pushes Settings › Motion and Settings › Haptics into the kit's platform layer (src/ui/platform), which
+ * cannot import services (MD-14). Layout effect: the values land before the first kit interaction.
+ */
+function KitPreferencesBridge(): null {
+  const { motion, haptics } = usePreferences();
+  React.useLayoutEffect(() => {
+    setMotionPreference(motion);
+    setKitHapticsEnabled(haptics);
+  }, [motion, haptics]);
+  return null;
+}
 
 /** Applies the theme variables and keeps native chrome in step. */
 function ThemedShell({ children }: { children: React.ReactNode }): React.ReactElement {
@@ -497,6 +511,7 @@ export default function RootLayout(): React.ReactElement {
         <KeyboardProvider>
         <ThemeProvider>
           <PreferencesProvider>
+            <KitPreferencesBridge />
             <ThemedShell>
               <AuthProvider>
                 <ServerScope>
