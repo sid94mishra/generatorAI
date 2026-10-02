@@ -6,6 +6,7 @@ import type {
   PullRequestComment,
   PullRequestDetail,
   PullRequestFile,
+  ScmConflictReport,
   ScmFlowRequest,
   ScmFlowResult,
   ScmGenerateRequest,
@@ -60,6 +61,8 @@ export interface ScmApi {
     workspaceId: string,
     body: { alias: string; chatId: string },
   ) => Promise<{ ok?: boolean }>;
+  /** `POST /api/workspaces/:id/scm/conflicts/start` — apply the base merge so markers can be edited; 409 `NO_CONFLICTS`. */
+  startConflicts: (workspaceId: string, body: { alias: string; base?: string }) => Promise<ScmConflictReport>;
   /** `POST /api/workspaces/:id/scm/conflicts/continue`. */
   continueConflicts: (workspaceId: string, body: { alias: string }) => Promise<{ ok?: boolean }>;
   /** `POST /api/workspaces/:id/scm/conflicts/abort`. */
@@ -126,6 +129,8 @@ export function createScmMethods(request: EndpointRequest): ScmApi {
         `/api/workspaces/${enc(workspaceId)}/scm/conflicts/resolve-with-agent`,
         json(body),
       ),
+    startConflicts: (workspaceId, body) =>
+      request(`/api/workspaces/${enc(workspaceId)}/scm/conflicts/start`, json(body)),
     continueConflicts: (workspaceId, body) =>
       request(`/api/workspaces/${enc(workspaceId)}/scm/conflicts/continue`, json(body)),
     abortConflicts: (workspaceId, body) =>
