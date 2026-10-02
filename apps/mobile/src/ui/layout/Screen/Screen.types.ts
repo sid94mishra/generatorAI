@@ -1,5 +1,6 @@
 // ML-01 Screen contract (03 ML-01; MD-22, MD-93).
-import type { ReactElement, ReactNode } from 'react';
+import type { ReactElement, ReactNode, RefObject } from 'react';
+import type { ScrollView } from 'react-native';
 import type { HeaderProps } from '../../native/router/Header/Header.types';
 
 export type ScreenState =
@@ -27,6 +28,8 @@ export interface ScreenProps {
   /** 'form' scrolls focused fields above the keyboard; 'chat' leaves it to the chat. Default 'none'. */
   keyboard?: 'none' | 'form' | 'chat';
   state?: ScreenState;
+  /** The body's ScrollView ('scroll' mode), for a screen that scrolls to a section (Home's count tiles). */
+  scrollRef?: RefObject<ScrollView | null>;
   children?: ReactNode;
   testID?: string;
 }
