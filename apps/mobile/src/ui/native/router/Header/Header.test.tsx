@@ -1,4 +1,4 @@
-import { backLabel, inlineTitleOpacity, iosContentLargeTitle, iosHeaderColorOptions, iosHeaderOptions, paneToggleLabel, sidebarToggleLabel, splitActions } from './headerModel';
+import { backLabel, dispatchHeaderPress, inlineTitleOpacity, iosHeaderModel, iosContentLargeTitle, iosHeaderColorOptions, iosHeaderOptions, paneToggleLabel, sidebarToggleLabel, splitActions } from './headerModel';
 import type { HeaderAction } from './Header.types';
 
 const a = (id: string, destructive = false): HeaderAction => ({ id, icon: 'search', label: id, destructive });
@@ -53,5 +53,30 @@ describe('Header (ML-02)', () => {
     expect(iosHeaderColorOptions(dark, false).headerBlurEffect).toBeUndefined();
     expect(iosHeaderColorOptions(dark, true)).toMatchObject({ headerStyle: {}, headerBlurEffect: 'systemChromeMaterialDark' });
     expect(iosHeaderColorOptions({ ...dark, appearance: 'light' }, true).headerBlurEffect).toBe('systemChromeMaterialLight');
+  });
+
+  it('models the iOS bar as values and dispatches presses to the latest props (MD-162)', () => {
+    const onMenuSelect = jest.fn();
+    const onPress = jest.fn();
+    const crumb = jest.fn();
+    const p = {
+      role: 'workspace' as const,
+      title: 'Chat',
+      breadcrumb: [{ label: 'Chats', onPress: crumb }],
+      onBack: () => undefined,
+      paneToggle: { open: true, count: 1, attention: false, onPress },
+      actions: [{ id: 'chat-menu', icon: 'more' as const, label: 'Chat actions', menu: [{ id: 'rename', label: 'Rename' }, { type: 'separator' as const }], onMenuSelect }],
+    };
+    const model = iosHeaderModel(p, 1);
+    expect(model.titleView).toBe('breadcrumb');
+    expect(model.left.map((l) => l.target)).toEqual(['back']);
+    expect(model.right.map((r) => r.kind)).toEqual(['menu', 'pane']);
+    expect(JSON.stringify(iosHeaderModel({ ...p, onBack: () => 1, actions: [{ ...p.actions[0]!, onMenuSelect: jest.fn() }] }, 1))).toBe(JSON.stringify(model));
+    dispatchHeaderPress(p, 'menu:chat-menu:rename');
+    dispatchHeaderPress(p, 'pane');
+    dispatchHeaderPress(p, 'crumb:0');
+    expect(onMenuSelect).toHaveBeenCalledWith('rename');
+    expect(onPress).toHaveBeenCalledTimes(1);
+    expect(crumb).toHaveBeenCalledTimes(1);
   });
 });

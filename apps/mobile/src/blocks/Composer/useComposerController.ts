@@ -160,6 +160,13 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
   }));
   const draft = machine.draft.text;
   const draftRef = useRef(draft);
+  // The caller's "a capture landed" callback is read when it fires, so an inline callback does not change the
+  // capture actions' identity each render (they feed the pane's claim; MD-162).
+  const onCapturedRef = useRef(onCaptured);
+  useEffect(() => {
+    onCapturedRef.current = onCaptured;
+  }, [onCaptured]);
+  const notifyCaptured = useCallback(() => onCapturedRef.current?.(), []);
   useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
@@ -352,7 +359,7 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
     insertText: insertCaptureText,
     setBusy: setAttachPending,
     toast,
-    onCaptured,
+    onCaptured: notifyCaptured,
   });
   const mentionPath = useCallback(
     (path: string) => {
@@ -362,16 +369,16 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
       setDraft(next);
       setCaret(next.length);
       setPendingSelection(next.length);
-      onCaptured?.();
+      notifyCaptured();
     },
-    [setDraft, setCaret, onCaptured],
+    [setDraft, setCaret, notifyCaptured],
   );
   const insertText = useCallback(
     (label: string, text: string) => {
       insertCaptureText(label, text);
-      onCaptured?.();
+      notifyCaptured();
     },
-    [insertCaptureText, onCaptured],
+    [insertCaptureText, notifyCaptured],
   );
   const captures = useMemo<ComposerCaptureActions>(() => ({ ...fetched, mentionPath, insertText }), [fetched, mentionPath, insertText]);
   // "Mention in chat" from a screen pushed over this chat (FilePreview, the diff).

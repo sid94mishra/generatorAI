@@ -47,7 +47,7 @@ import { protectStream, useStreamStore } from '../../services/stream/streamStore
 import { useChatStream } from '../../services/stream/useChatStream';
 import { useTurnCatchUp } from '../../services/stream/useTurnCatchUp';
 import { useTwoPhaseStop } from '../../services/stream/useTwoPhaseStop';
-import { Header } from '../../ui/native/router/Header';
+import { Header, type HeaderAction } from '../../ui/native/router/Header';
 import { useSheet } from '../../ui/native/Sheet';
 import { confirm } from '../../ui/native/AlertDialog';
 import { haptic } from '../../ui/platform/haptics';
@@ -85,6 +85,7 @@ import { useAnswerPermission } from './useAnswerPermission';
 const PAGE_SIZE = 120;
 
 const closePane = (): void => usePaneStore.getState().setOpen(false);
+const HEADER_TEST_IDS = { back: 'chat-back' } as const;
 
 const STARTERS = ['Explain how this project is structured', 'Find and fix a failing test', 'Review my uncommitted changes'] as const;
 
@@ -354,7 +355,7 @@ export default function ChatScreen(): React.ReactElement {
     onOpenPane,
     messages: messages.data,
     // "Send to chat" from the Terminal / Browser tab brings the composer forward.
-    onCaptured: () => usePaneStore.getState().setOpen(false),
+    onCaptured: closePane,
   });
   useEffect(() => {
     composerRef.current = composer;
@@ -573,17 +574,17 @@ export default function ChatScreen(): React.ReactElement {
   const messageList = messages.data;
   const lastPrompt = useMemo(() => lastUserPrompt(messageList ?? []), [messageList]);
   const lastTurn = useMemo(() => lastTurnOutcome(messageList ?? []), [messageList]);
-  const status = chatHeaderStatus({
-    archived,
-    gatePending: blocked,
-    streamStatus: view.status,
-    stopped: view.cancelRequested,
-    lastTurn,
-    detail: boundAgent?.name ?? modelLabel,
-    liveSince,
-  });
+  const streamStatus = view.status;
+  const stopped = view.cancelRequested;
+  const statusDetail = boundAgent?.name ?? modelLabel;
+  const status = useMemo(
+    () => chatHeaderStatus({ archived, gatePending: blocked, streamStatus, stopped, lastTurn, detail: statusDetail, liveSince }),
+    [archived, blocked, streamStatus, stopped, lastTurn, statusDetail, liveSince],
+  );
   const hasMessages = (messages.data?.length ?? 0) > 0;
-  const menu = chatMenu({ archived, hasMessages, streaming: isStreaming, canRewind: lastPrompt !== null, forking: fork.isPending });
+  const forking = fork.isPending;
+  const canRewind = lastPrompt !== null;
+  const menu = useMemo(() => chatMenu({ archived, hasMessages, streaming: isStreaming, canRewind, forking }), [archived, hasMessages, isStreaming, canRewind, forking]);
   const rowView = useMemo(
     () => chatRowView({ id: chatId, title: title, status: null, archived, lastActivityAt: '', tags: [] }),
     [chatId, title, archived],
@@ -647,6 +648,25 @@ export default function ChatScreen(): React.ReactElement {
     [sheet, chat.data?.name, patchChat, runCopyTranscript, messages.data, title, runFork, lastPrompt, openRewind, rowActions, rowView, archive, api, chatId],
   );
 
+  // Everything the header gets is stable across renders that change nothing it shows (MD-162).
+  const headerActions = useMemo<HeaderAction[]>(() => [{ id: 'chat-menu', icon: 'more', label: 'Chat actions', menu, onMenuSelect: onMenu }], [menu, onMenu]);
+  const paneOpen = paneToggle.open;
+  const paneCount = paneToggle.count;
+  const paneAttention = paneToggle.attention;
+  const togglePane = paneToggle.onPress;
+  const headerPaneToggle = useMemo(
+    () => ({
+      open: paneOpen,
+      count: paneCount,
+      attention: paneAttention,
+      onPress: () => {
+        Keyboard.dismiss();
+        togglePane();
+      },
+    }),
+    [paneOpen, paneCount, paneAttention, togglePane],
+  );
+
   // The page lifts with the keyboard: the larger of its overlap and the bottom inset, never their sum.
   const dockStyle = useAnimatedStyle(() => ({ paddingBottom: Math.max(keyboard.value, insets.bottom) }), [insets.bottom]);
   const hasMore = (messages.data?.length ?? 0) >= limit;
@@ -654,7 +674,7 @@ export default function ChatScreen(): React.ReactElement {
   if (messages.isError) {
     return (
       <View className="flex-1 bg-surface">
-        <Header role="workspace" title={title} breadcrumb={crumbs} onBack={onBack} testIDs={{ back: 'chat-back' }} />
+        <Header role="workspace" title={title} breadcrumb={crumbs} onBack={onBack} testIDs={HEADER_TEST_IDS} />
         <View className="flex-1 justify-center">
           <ErrorState title="Couldn't load this chat" error={messages.error} onRetry={() => void messages.refetch()} />
         </View>
@@ -671,15 +691,9 @@ export default function ChatScreen(): React.ReactElement {
           breadcrumb={crumbs}
           {...(status ? { status } : {})}
           onBack={onBack}
-          testIDs={{ back: 'chat-back' }}
-          paneToggle={{
-            ...paneToggle,
-            onPress: () => {
-              Keyboard.dismiss();
-              paneToggle.onPress();
-            },
-          }}
-          actions={[{ id: 'chat-menu', icon: 'more', label: 'Chat actions', menu: menu.map((e) => ('type' in e ? e : { ...e })), onMenuSelect: onMenu }]}
+          testIDs={HEADER_TEST_IDS}
+          paneToggle={headerPaneToggle}
+          actions={headerActions}
         />
         <Animated.View className="flex-1" style={dockStyle}>
           {forkedFromChatId ? (

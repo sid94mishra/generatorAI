@@ -61,6 +61,11 @@ interface PaneState {
   openTab(type: MobilePaneTab): void;
 }
 
+/** A re-claim with equal values (same scope, title, path, tabs, renderer) changes nothing (MD-162). */
+export function sameClaim(a: PaneClaim, b: PaneClaim): boolean {
+  return a.renderTab === b.renderTab && a.title === b.title && a.path === b.path && scopeKey(a.scope) === scopeKey(b.scope) && JSON.stringify(a.tabs) === JSON.stringify(b.tabs);
+}
+
 export const usePaneStore = create<PaneState>((set, get) => ({
   claim: null,
   open: false,
@@ -71,7 +76,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     if (!previous || scopeKey(previous.scope) !== scopeKey(claim.scope)) {
       const stored = read(tabKey(claim.scope));
       set({ claim, open: read(openKey(claim.scope)) === '1', fullscreen: false, active: isMobilePaneTab(stored) ? stored : 'changes' });
-    } else {
+    } else if (!sameClaim(previous, claim)) {
       set({ claim });
     }
     if (openAt && claim.tabs.some((t) => t.type === openAt)) get().openTab(openAt);
