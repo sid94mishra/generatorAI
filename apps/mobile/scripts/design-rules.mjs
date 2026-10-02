@@ -89,7 +89,8 @@ const reportRule = {
       },
       'Program:exit'(node) {
         if (!ui || story || !hasJsx) return;
-        const name = basename(context.filename).replace(/(?:\.(ios|android))?\.tsx$/, '');
+        // `<Name>Js.tsx` is the JS path of a native wrapper (03 §1.3 N); `<Name>.stories.tsx` covers it (MD-130).
+        const name = basename(context.filename).replace(/(?:\.(ios|android))?\.tsx$/, '').replace(/(?<=[a-z])Js$/, '');
         if (!existsSync(`${dirname(context.filename)}/${name}.stories.tsx`)) report(node, 'storiesPresent');
       },
       ImportDeclaration(node) { importCheck(node, node.source.value, node.specifiers); },
