@@ -15,7 +15,7 @@
 //   run against. As a string it is inert until the WebView parses it.
 //
 // The output is a few hundred KB. It is imported only by
-// `src/terminal/terminalHtml.ts`, which `TerminalView` loads with a dynamic
+// `src/blocks/TerminalView/engine/terminalHtml.ts`, which `TerminalView` loads with a dynamic
 // `import()` — so the string is not touched at app start, only when a
 // terminal is opened.
 //
@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(here, '..');
-const outFile = path.join(appRoot, 'src', 'terminal', 'xtermBundle.generated.ts');
+const outFile = path.join(appRoot, 'src', 'blocks', 'TerminalView', 'engine', 'xtermBundle.generated.ts');
 
 // Resolve from the app's own package.json so pnpm's strict node_modules
 // layout finds the devDependencies declared THERE, not some hoisted copy.

@@ -32,7 +32,8 @@ import { PermissionCard, PlanCard, QuestionCard, ResolvedGateRow, pendingGateFro
 import { describeFork, describeRewind, forkedFromLabel, shouldRestorePrompt, useRewindSheet } from '../../blocks/RewindSheet';
 import { chatHref, stepHref, turnHref, workspaceDiffHref, CHATS_HREF } from '../../blocks/shell/hrefs';
 import { useBreadcrumb, useHeaderBack } from '../../blocks/shell/useHeaderNav';
-import { TranscriptView, type TranscriptActions } from '../../blocks/TranscriptView';
+import { TranscriptView, chatToolCalls, type TranscriptActions } from '../../blocks/TranscriptView';
+import { TerminalPanel } from '../../blocks/TerminalView';
 import { activityLabelFor, selectChatView } from '../../blocks/TranscriptView/model/selectChatView';
 import { useChangesSummary, usePaneStore, usePaneToggle, useWorkspacePaneClaim, type MobilePaneTab } from '../../blocks/WorkspacePane';
 import { sendChatPrompt } from '../../services/api/sendChatPrompt';
@@ -547,6 +548,13 @@ export default function ChatScreen({ renderLegacyTab }: ChatScreenProps = {}): R
     [workspaceId, scopes, chatId, planId, isStreaming, openInChanges],
   );
   const captures = composer.captures;
+  // The shell commands the agent ran (the Terminal tab's read-only "Agent commands").
+  const messageRows = messages.data;
+  const agentCalls = useMemo(
+    () => chatToolCalls(messageRows ?? [], useStreamStore.getState().streams[streamKey]?.blocks),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `view.signature` stands in for the live blocks array.
+    [messageRows, streamKey, view.signature],
+  );
   // The pane renders in the shell, outside this screen's tree: its bodies get the composer's capture actions here.
   const renderTab = useCallback(
     (type: MobilePaneTab, ctx: { active: boolean }) => (
@@ -555,12 +563,14 @@ export default function ChatScreen({ renderLegacyTab }: ChatScreenProps = {}): R
           <ChangesPanel workspaceId={workspaceId} chatId={chatId} active={ctx.active} onRewind={(turnId, prompt) => openRewind({ turnId, prompt })} />
         ) : type === 'files' ? (
           <FileTree workspaceId={workspaceId} chatId={chatId} active={ctx.active} />
+        ) : type === 'terminal' ? (
+          <TerminalPanel workspaceId={workspaceId} active={ctx.active} agentBusy={isStreaming} agentCalls={agentCalls} />
         ) : (
           (renderLegacyTab?.(type, ctx, paneContext) ?? null)
         )}
       </ComposerCaptureContext.Provider>
     ),
-    [captures, workspaceId, chatId, openRewind, renderLegacyTab, paneContext],
+    [captures, workspaceId, chatId, openRewind, renderLegacyTab, paneContext, isStreaming, agentCalls],
   );
   useWorkspacePaneClaim({
     kind: 'chat',

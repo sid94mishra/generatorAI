@@ -26,7 +26,6 @@ const STACK_HEADER: Record<string, string> = {
   'projects/[id]/codebases/[cid]/files': 'Files',
   'projects/[id]/codebases/[cid]/file': 'File',
   'projects/[id]/codebases/[cid]/pull-requests/[number]': 'Pull request',
-  'terminal/[workspaceId]': 'Terminal',
 };
 
 type Href = Parameters<typeof router.replace>[0];

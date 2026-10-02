@@ -5,7 +5,7 @@ import {
   isOpenableLink,
   parseFromWebView,
   splitBatch,
-} from '../terminal/bridgeProtocol';
+} from './bridgeProtocol';
 
 describe('OutputBatcher', () => {
   it('coalesces bursts into a single bridge message', () => {

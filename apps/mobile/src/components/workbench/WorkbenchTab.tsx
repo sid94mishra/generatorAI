@@ -14,7 +14,6 @@ import { EmptyState } from '../ui/States';
 import { checkFeature } from '../../services/auth/featureGate';
 import { TasksSection } from '../chat/workbench/TasksSection';
 import { PlanSection } from '../chat/workbench/PlanSection';
-import { TerminalSection } from '../chat/workbench/TerminalSection';
 import { BrowserSection } from '../chat/workbench/BrowserSection';
 import { LockedPane } from '../chat/panes/LockedPane';
 import { ComputerPane } from '../chat/panes/ComputerPane';
@@ -22,7 +21,6 @@ import { COMPUTER_SCOPE, computerFeature } from '../chat/panes/paneModel';
 import type { MobilePaneTab } from '../../blocks/WorkspacePane';
 
 type WithActive<P> = React.ComponentType<P & { active?: boolean }>;
-const TerminalPane = TerminalSection as WithActive<React.ComponentProps<typeof TerminalSection>>;
 const BrowserPane = BrowserSection as WithActive<React.ComponentProps<typeof BrowserSection>>;
 
 /** A request to open one file in a tool. `nonce` re-asks for the same file. */
@@ -63,15 +61,6 @@ export function WorkbenchTab({
 }: WorkbenchTabProps): React.ReactElement | null {
   const noWorkspace = <EmptyState title="No workspace yet" message="A workspace is created the first time the agent runs here." />;
   switch (type) {
-    case 'terminal': {
-      if (!workspaceId) return noWorkspace;
-      const terminal = checkFeature('terminal', scopes);
-      return terminal.available ? (
-        <TerminalPane workspaceId={workspaceId} active={active} />
-      ) : (
-        <LockedPane title="Terminal is not enabled" feature={terminal} scope="exec:terminal" />
-      );
-    }
     case 'browser': {
       if (!workspaceId) return noWorkspace;
       const browser = checkFeature('browser', scopes);

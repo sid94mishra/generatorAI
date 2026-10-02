@@ -22,6 +22,7 @@ import { SegmentedControl } from '../../ui/native/SegmentedControl';
 import { Select } from '../../ui/native/Select';
 import { useSheet } from '../../ui/native/Sheet';
 import { haptic } from '../../ui/platform/haptics';
+import { useInsets } from '../../ui/platform/insets';
 import { Badge } from '../../ui/primitives/Badge';
 import { Button } from '../../ui/primitives/Button';
 import { Callout } from '../../ui/primitives/Callout';
@@ -78,6 +79,7 @@ function ConflictActions({ repo, chatId, busy, onAsk, onContinue, onAbort }: { r
 
 export function ChangesPanel({ workspaceId, chatId = null, active = true, onRewind, testID = 'changes-panel' }: ChangesPanelProps): React.ReactElement {
   const sheet = useSheet();
+  const insets = useInsets();
   const capture = useComposerCapture();
   const [base, setBase] = useState('baseline');
   const [mount, setMount] = useState<string>('all');
@@ -257,7 +259,7 @@ export function ChangesPanel({ workspaceId, chatId = null, active = true, onRewi
         </Pressable>
       ) : null}
       {repo && commit && rows.length > 0 ? (
-        <View className="min-h-footer flex-row items-center gap-3 border-t border-line-soft px-4 py-2">
+        <View className="min-h-footer flex-row items-center gap-3 border-t border-line-soft px-4 pt-2" style={{ paddingBottom: Math.max(insets.bottom, 8) }}>
           <View className="flex-1 gap-0.5">
             <Text role="subhead" weight={600}>
               {commit.title}

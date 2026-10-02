@@ -47,4 +47,3 @@ export const workspaceFileHref = (workspaceId: string, p: { path: string; alias?
   `/workspaces/${seg(workspaceId)}/file${query({ path: p.path, alias: p.alias, chat: p.chat })}`;
 export const workspaceCommitHref = (workspaceId: string, p: { alias?: string; chat?: string | null } = {}): string =>
   `/workspaces/${seg(workspaceId)}/commit${query({ alias: p.alias, chat: p.chat })}`;
-export const terminalHref = (workspaceId: string): string => `/terminal/${seg(workspaceId)}`;

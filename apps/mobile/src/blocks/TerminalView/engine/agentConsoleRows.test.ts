@@ -7,7 +7,7 @@ import {
   capTail,
   isShellTool,
   rowFromToolCall,
-} from '../terminal/agentConsoleRows';
+} from './agentConsoleRows';
 
 function call(overrides: Partial<ToolCallBlock>): ToolCallBlock {
   return {

@@ -22,6 +22,7 @@ import { LegendList } from '../../ui/lib/styled';
 import { Select } from '../../ui/native/Select';
 import { useSheet } from '../../ui/native/Sheet';
 import { haptic } from '../../ui/platform/haptics';
+import { useInsets } from '../../ui/platform/insets';
 import { EmptyState } from '../../ui/primitives/EmptyState';
 import { ErrorState } from '../../ui/primitives/ErrorState';
 import { Icon } from '../../ui/primitives/Icon';
@@ -46,6 +47,7 @@ const INDENT = 16;
 
 export function FileTree({ workspaceId, chatId = null, active = true, testID = 'file-tree' }: FileTreeProps): React.ReactElement {
   const sheet = useSheet();
+  const insets = useInsets();
   const capture = useComposerCapture();
   const tree = useWorkspaceTree(workspaceId, active);
   const mounts = useWorkspaceMounts(workspaceId);
@@ -234,7 +236,7 @@ export function FileTree({ workspaceId, chatId = null, active = true, testID = '
         keyboardShouldPersistTaps="handled"
         ListHeaderComponent={header}
         ListEmptyComponent={query.trim() ? <EmptyState copyKey="searchResults" compact action={{ label: 'Clear filter', onPress: () => setQuery('') }} /> : <EmptyState icon="files" title="No files yet" description="This source is empty." compact />}
-        contentContainerClassName="pb-8"
+        contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
         className="flex-1"
       />
     </View>

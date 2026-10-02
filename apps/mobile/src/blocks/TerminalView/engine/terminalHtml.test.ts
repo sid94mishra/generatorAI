@@ -10,10 +10,10 @@ import {
   clampFontSize,
   sanitizeTheme,
   terminalHtml,
-} from '../terminal/terminalHtml';
-import { XTERM_CSS, XTERM_JS, XTERM_VERSIONS } from '../terminal/xtermBundle.generated';
+} from './terminalHtml';
+import { XTERM_CSS, XTERM_JS, XTERM_VERSIONS } from './xtermBundle.generated';
 
-const SRC = path.resolve(__dirname, '..');
+const SRC = path.resolve(__dirname, '../../..');
 
 const THEME = {
   background: '#0d1117',
@@ -26,7 +26,7 @@ const THEME = {
 
 describe('vendored xterm bundle', () => {
   it('exists and carries the emulator', () => {
-    expect(fs.existsSync(path.join(SRC, 'terminal', 'xtermBundle.generated.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(__dirname, 'xtermBundle.generated.ts'))).toBe(true);
     // The UMD build's module epilogue; if the string were truncated or
     // mis-escaped this is the first thing to go.
     expect(XTERM_JS.length).toBeGreaterThan(100_000);
@@ -45,17 +45,17 @@ describe('vendored xterm bundle', () => {
     // startup path and every cold start pays for it.
     const importers = (needle: RegExp) =>
       walk(SRC)
-        .filter((file) => /\.(ts|tsx)$/.test(file) && !file.includes('__tests__'))
+        .filter((file) => /\.(ts|tsx)$/.test(file) && !file.includes('__tests__') && !/\.test\.tsx?$/.test(file))
         .filter((file) => needle.test(fs.readFileSync(file, 'utf8')))
         .map((file) => path.relative(SRC, file).replace(/\\/g, '/'));
 
     expect(importers(/from\s+['"][^'"]*xtermBundle\.generated['"]/)).toEqual([
-      'terminal/terminalHtml.ts',
+      'blocks/TerminalView/engine/terminalHtml.ts',
     ]);
     // Static `from './terminalHtml'` imports: none. TerminalView uses a
     // dynamic `import('./terminalHtml')` instead.
     expect(importers(/^\s*import\s[^;]*from\s+['"][^'"]*\/terminalHtml['"]/m)).toEqual([]);
-    expect(importers(/import\(['"]\.\/terminalHtml['"]\)/)).toEqual(['terminal/TerminalView.tsx']);
+    expect(importers(/import\(['"]\.\/engine\/terminalHtml['"]\)/)).toEqual(['blocks/TerminalView/TerminalView.tsx']);
   });
 });
 

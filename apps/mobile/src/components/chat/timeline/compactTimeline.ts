@@ -45,7 +45,7 @@ import {
   type WorkflowRunToolCard,
 } from '@generatorai/client-core';
 
-import { isShellTool, rowFromToolCall, type AgentConsoleRow } from '../../../terminal/agentConsoleRows';
+import { isShellTool, rowFromToolCall, type AgentConsoleRow } from '../../../blocks/TerminalView/engine/agentConsoleRows';
 import { asScmResultBlock, type ScmResultBlock } from '../../../services/stream/scmResultBlock';
 import { toolKind, toolLabel, toolSummary, type ToolKind } from '../toolPresentation';
 
