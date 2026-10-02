@@ -794,3 +794,9 @@ Derived during M1-02 from the installed Xcode 27 `simctl help privacy`: notifica
 - **`h-badge-sm` on Android is 20.** 02 §3.3 gives 20 / 20; the §3.8 value table omits the Android cell. `NativeGeometry.mobileHeights` therefore has 13 names on both platforms (02 §9.2's "12 mobile heights" predates `badge-sm`).
 - **`IconSize` name clash.** `icons.ts` already exports `IconSize` (web glyph sizes); the native icon-size union in `geometry.ts` is `NativeIconSize`.
 - **`accentVars()` lands with the emitter (M3-04)**, as 07 lists it there; `accent.ts` ships `resolveAccentFromSeed`, `accentTokens` and `toAccentVars` in M3-03. The seed test corpus uses OKLCH chroma 0.12 (02 §2.5 gives hue and lightness only).
+
+### MD-117 Uniwind emitter scope and value details (M3-04) — Final (2026-10-02)
+- **Scope split.** M3-04 emits `uniwind-themes.css` and `uniwind-themes.json` (07 row). The literal palette modules (`palettes/<id>.ts`, `palettes/index.ts`) and `splash-colors.json` of 02 §9.3 / §9.7 are generated in **M3-08**, the task that slims the mobile token module and adds `useThemeColors()`; `tokens.generated.ts` stays until then (02 §9.6 step 1).
+- **Geometry key set.** Besides the 02 §9.2 list, both platform blocks declare `--gai-ease-standard` (`cubic-bezier(0.2, 0, 0, 1)`), because `css/vocabulary.css` maps `ease-standard` to it; the emitter test proves every `var(--…)` either vocabulary reads is declared. Heights are 18 shared + 13 mobile (MD-116).
+- **Font values** are quoted family names (`'Instrument Sans'`, `'JetBrains Mono'`) in both platform blocks; M3-06 verifies them on device and changes only the `@variant android` value if Android needs the unspaced name (02 §4.4).
+- The colour blocks hold 41 keys at each theme's default accent; the active accent is always written with `Uniwind.updateCSSVariables(name, accentVars(theme, appearance, accent))` (02 §9.5).

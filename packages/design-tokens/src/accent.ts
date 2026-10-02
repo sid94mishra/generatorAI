@@ -76,3 +76,8 @@ export function accentTokens(theme: ThemeDef, appearance: Appearance, accent: Ac
 export function toAccentVars(t: AccentTokenTriple): AccentVars {
   return { '--gai-accent': t.accent, '--gai-on-accent': t.onAccent, '--gai-focus': t.focus };
 }
+
+/** Named accent → CSS variables (= toAccentVars(accentTokens(...))), for `Uniwind.updateCSSVariables`. */
+export function accentVars(theme: ThemeDef, appearance: Appearance, accent: AccentId): AccentVars {
+  return toAccentVars(accentTokens(theme, appearance, accent));
+}

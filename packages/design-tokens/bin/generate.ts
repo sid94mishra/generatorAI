@@ -17,6 +17,7 @@ import { emitCss, spliceCss } from '../src/emit/css.js';
 import { emitNative } from '../src/emit/native.js';
 import { prepaintCspHash, splicePrepaint } from '../src/emit/prepaint.js';
 import { emitStaticCss } from '../src/emit/static.js';
+import { emitUniwindThemeList, emitUniwindThemes } from '../src/emit/uniwind.js';
 import {
   emitMobileVocabularyCss,
   emitMobileVocabularyJson,
@@ -123,6 +124,18 @@ const targets: Target[] = [
     label: 'mobile vocabulary lists',
     path: resolve(repoRoot, 'packages/design-tokens/generated/vocabulary-mobile.json'),
     render: () => emitMobileVocabularyJson(),
+  },
+  {
+    label: 'mobile Uniwind themes',
+    path: resolve(repoRoot, 'apps/mobile/src/theme/uniwind-themes.css'),
+    optional: true,
+    render: () => emitUniwindThemes(),
+  },
+  {
+    label: 'mobile Uniwind theme list',
+    path: resolve(repoRoot, 'apps/mobile/src/theme/uniwind-themes.json'),
+    optional: true,
+    render: () => emitUniwindThemeList(),
   },
   {
     label: 'mobile token module',
