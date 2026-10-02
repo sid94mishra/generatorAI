@@ -418,6 +418,7 @@ Workflow run control (`admin.runs.pause/resume/retry/cancel`, `admin.ts:332-335`
 | DB | none. |
 | Web/desktop | the web client on a headless stream (no Electron inspector) gets comments the same way. |
 | When | **now — M6 (spike-gated; if the spike fails, comment mode is not rendered)** — built in M2-10 |
+| Spike result (2026-10-02, MD-114) | **Passed — no new route.** Inspector on + `input {type:'mouse.click', x, y}` selects the element under the tap once (the inspector turns itself off) and BrowserService emits `browser.selection {artifactId, cssSelector, xpath}` to every client on the workspace stream; the full selection (bounding box, outer HTML, styles) is the `browser_selection` artifact (MG-21 download). Proof: `packages/core/src/infrastructure/browser/__tests__/ServerPlaywrightHost.elementPick.live.test.ts` (`GENERATORAI_LIVE_BROWSER_TEST=1`). `POST …/browser/pick` and `admin.browser.pick` are not built. |
 
 ### MG-25 — Storage breakdown and retention dry-run
 
