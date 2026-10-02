@@ -221,7 +221,8 @@ export function TriggerInputSheet({
           autoCapitalize="none"
           autoCorrect={false}
           spellCheck={false}
-          style={{ minHeight: 160, maxHeight: 280, textAlignVertical: 'top', fontFamily: 'JetBrainsMono' }}
+          mono
+          style={{ minHeight: 160, maxHeight: 280, textAlignVertical: 'top' }}
           error={showErrors && !check.ok ? check.errors.join('\n') : null}
           {...(status ? { hint: status } : {})}
         />

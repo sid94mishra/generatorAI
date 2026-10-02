@@ -1,4 +1,6 @@
 import type { ExpoConfig } from 'expo/config';
+import { existsSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 
 // ────────────────────────────────────────────────────────────────
 // Expo config.
@@ -7,6 +9,29 @@ import type { ExpoConfig } from 'expo/config';
 // `expo prebuild` regenerates them from this file, so every native setting
 // lives here rather than in an Xcode project that drifts.
 // ────────────────────────────────────────────────────────────────
+
+// ── Embedded fonts (mobile 02 §4.4, M3-06) ─────────────────────────
+// Instrument Sans (content) and JetBrains Mono (machine text), weights
+// 400/500/600 only (MD-28), embedded at build time by the expo-font plugin,
+// so there is no runtime load and no FOUT. The family names are the CSS
+// tokens' `--gai-font-sans` / `--gai-font-mono` values (uniwind-themes.css);
+// weight is chosen by `fontWeight` within the family on both OSes. The
+// package directories are resolved, not hard-coded, because pnpm may not
+// hoist them. SDK 57 uses the static files; SDK 58 switches to the variable
+// TTFs vendored in assets/fonts (02 §4.4 "SDK 58 variable form").
+const FONT_WEIGHTS = [
+  [400, '400Regular'],
+  [500, '500Medium'],
+  [600, '600SemiBold'],
+] as const;
+function fontFiles(pkg: string, prefix: string): Array<{ path: string; weight: number }> {
+  // pnpm links every direct dependency under node_modules/; resolve only as a fallback.
+  const linked = join(__dirname, 'node_modules', pkg);
+  const dir = relative(__dirname, existsSync(linked) ? linked : dirname(require.resolve(`${pkg}/package.json`)));
+  return FONT_WEIGHTS.map(([weight, face]) => ({ path: `./${join(dir, face, `${prefix}_${face}.ttf`).split('\\').join('/')}`, weight }));
+}
+const SANS = { family: 'Instrument Sans', files: fontFiles('@expo-google-fonts/instrument-sans', 'InstrumentSans') };
+const MONO = { family: 'JetBrains Mono', files: fontFiles('@expo-google-fonts/jetbrains-mono', 'JetBrainsMono') };
 
 // ── EAS project id ─────────────────────────────────────────────────
 // `getExpoPushTokenAsync` cannot mint a token without it, so a build made
@@ -161,6 +186,18 @@ const config: ExpoConfig = {
     ...(process.env['GAI_A11Y_AUDIT'] === '1' ? ['./plugins/withA11yAuditTarget'] : []),
     'expo-router',
     'expo-asset',
+    [
+      'expo-font',
+      {
+        ios: { fonts: [...SANS.files, ...MONO.files].map((f) => f.path) },
+        android: {
+          fonts: [SANS, MONO].map(({ family, files }) => ({
+            fontFamily: family,
+            fontDefinitions: files.map(({ path, weight }) => ({ path, weight })),
+          })),
+        },
+      },
+    ],
     [
       // Splash configuration moved out of the top-level `splash` key in
       // SDK 57. Dark is the product default, so the launch background must

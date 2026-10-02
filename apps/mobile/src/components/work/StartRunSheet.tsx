@@ -626,7 +626,8 @@ export function StartRunSheet({
                             autoCapitalize="none"
                             autoCorrect={false}
                             accessibilityLabel={`Variables for ${o.stageName}`}
-                            style={{ minHeight: 72, textAlignVertical: 'top', fontFamily: 'JetBrainsMono' }}
+                            mono
+                            style={{ minHeight: 72, textAlignVertical: 'top' }}
                           />
                         </>
                       ) : null}

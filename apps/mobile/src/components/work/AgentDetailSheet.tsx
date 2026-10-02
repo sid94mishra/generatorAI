@@ -546,7 +546,8 @@ function AgentEditForm({
         multiline
         autoCapitalize="none"
         error={errors.instructions ?? null}
-        style={{ minHeight: 180, textAlignVertical: 'top', fontFamily: 'monospace' }}
+        mono
+        style={{ minHeight: 180, textAlignVertical: 'top' }}
       />
 
       <View className="gap-2">

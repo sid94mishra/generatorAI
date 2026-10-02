@@ -330,7 +330,8 @@ export function PlanBody({
               multiline
               autoFocus
               accessibilityLabel="Plan document"
-              style={{ minHeight: 260, textAlignVertical: 'top', fontFamily: 'JetBrainsMono' }}
+              mono
+              style={{ minHeight: 260, textAlignVertical: 'top' }}
             />
             <View className="flex-row justify-end gap-2">
               <Button label="Cancel" variant="ghost" size="sm" onPress={() => setEditing(false)} />
