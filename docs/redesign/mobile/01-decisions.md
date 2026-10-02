@@ -851,3 +851,12 @@ Derived during M1-02 from the installed Xcode 27 `simctl help privacy`: notifica
 
 ### MD-125 Mobile bundle budget for `packages/shared` is 400 KB of source — Final (2026-10-02)
 - `bundle:check`'s 200 KB ceiling for `workspace:shared` predates the overhaul. It counts source bytes (types and comments included), and M2 intentionally adopted shared logic (status maps, ui-contract commands/keys/copy, timeline model), which measured 336 KB at M3. The ceiling is now 400 KB; the guard against server code stays the banned-module list, which passes. Revisit at M10 with a compiled-size metric if the budget is approached.
+
+### MD-126 Kit check at M4 start; kit decisions continue from MD-126 (M4-01) — Final (2026-10-02)
+- **Numbering.** 07-phases says new kit decisions start at MD-97, but MD-97…MD-125 were taken during M1–M3, so kit decisions continue from MD-126.
+- **Kit check result.** I checked the kit plan (03 §1–2, the M4 rows) against MD-46…MD-78, MD-85, MD-86, MD-91, MD-94 and the 02 §3.9 renames. The geometry, radius and height names in 03 match 02 and `GEOMETRY.ios|android` (M3-03), including `h-badge-sm`, `min-h-row` 56 and `h-search` 44. One open point remains, below.
+- **Icon contract.** MP-02's props in 03 (`name`, `spin`, `label`, `TextTone`) predate 02 §5.3. The component built in M3-07 follows 02 §5.3 (`concept`, `spinning`, `accessibilityLabel`, `IconTone`), and 02 governs the design-system layer. Kit props that take a glyph type it as `MobileIconConcept`.
+- **Preferences reach the kit by push.** `src/ui/platform` cannot import services (MD-14), so `setHapticsEnabled` (02 §7.2) and the new `setMotionPreference` are pushed from a `KitPreferencesBridge` in `app/_layout.tsx` that reads `usePreferences()`. The legacy `components/ui` haptics and motion keep their own wiring until M10.
+- **`useHardwareKeyboard()`** is a store that stays false until the device-key module reports a keyboard (M5-09), so KbdHint stays hidden until then.
+- **Story font scale.** `withFontScale` cannot change the OS text size per view. It sets `FontScaleOverrideContext`, and `Text` then renders its role at the simulated scale, still capped by the role's `maxScale` / `chromeScaleCap`.
+- `presentation.ts` types the native-stack options locally (`ScreenPresentationOptions`), so `ui/` never imports the router (MD-86). Android sheets set `sheetCornerRadius` 28; iOS keeps the system radius (MD-72).
