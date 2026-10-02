@@ -58,4 +58,12 @@ describe('M7-09 client methods', () => {
     await systemAdmin.removeCustomMcp('c1');
     expect(fetch).toHaveBeenLastCalledWith('/api/system/mcp-servers/custom/c1', expect.objectContaining({ method: 'DELETE' }));
   });
+
+  it('force-deletes an agent with the query the route reads (?force=1)', async () => {
+    const fetch = json({ deleted: true, soft: true });
+    await createAdminApi(fetch).agents.remove('a1', true);
+    expect(fetch).toHaveBeenLastCalledWith('/api/agents/a1?force=1', expect.objectContaining({ method: 'DELETE' }));
+    await createAdminApi(fetch).agents.remove('a1');
+    expect(fetch).toHaveBeenLastCalledWith('/api/agents/a1', expect.objectContaining({ method: 'DELETE' }));
+  });
 });

@@ -37,6 +37,8 @@ It also records every merge of `desktop_redesign` into this branch.
 
 | 2026-10-03 | M7-09 / MG-01, MG-11, MG-12, MG-13, MG-17, MG-22, MG-23 | shared: new `types/Device.ts` (`SelfDeviceView`), `types/AudioSettings.ts`, `ui-contract/scopes.ts`; `SourceControl.ts` `RemoteRefs`; `Agent.ts` `AgentImportPreview`; `RecentActivity.commit.sha?`. auth: `routePolicy` `/auth/devices/me` (read `read:status`, write admin). git: `GitClient.lsRemoteBranches`, `isRemoteGitUrl`. core: `AgentService.previewImport`, `VoiceService.reconfigure({defaultLanguage})`. server: `GET /auth/devices/me`, `POST /source-control/remote-refs`, `POST /agents/import/preview`, `routes/scmOutcome.ts` (flow stamps `workspace.metadata.scmOutcome`; `/activity/recent` fills `pullRequest` / `commit`), `audio.json` `sttLanguage` + `/system/audio/model` `languages`; openapi entries. client-core: `auth.devices.me`, `sourceControl.remoteRefs`, `admin.agents.importPreview`, `admin.systemAdmin.audio/updateAudio/audioModel/downloadAudioModel/deleteAudioModel/setSystemMcp/addCustomMcp/updateCustomMcp/removeCustomMcp` | additive; no migration; web unchanged (web typecheck green) | MD-164, MD-165. Tests: auth 62, shared 445, git 64, core 1786, client-core 785, server 690, db 169; mobile 1207 vitest / 470 jest. |
 
+| 2026-10-03 | M7-03 | `packages/client-core/src/api/admin.ts` `agents.remove(id, force)` sends `?force=1` (was `force=true`, which `DELETE /agents/:id` ignores); test in `api/__tests__/m7Gaps.test.ts` | wire fix (web calls the route itself with `?force=1`; no other client-core caller) | MD-168: deleting an agent that is in use disables it instead of 409. |
+
 ## Merges of `desktop_redesign`
 
 | Date | desktop_redesign sha | Conflicts | Notes |

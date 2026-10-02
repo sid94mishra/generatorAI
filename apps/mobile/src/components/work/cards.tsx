@@ -12,8 +12,8 @@ import { runStatusTone } from '../../theme/status';
 
 import React from 'react';
 import { router } from 'expo-router';
-import { Bot, Clock, Network, Play, Webhook, Workflow as WorkflowIcon } from 'lucide-react-native';
-import type { AgentSummary, AutomationSummary, WorkflowRunSummary, WorkflowSummary } from '@generatorai/client-core';
+import { Clock, Play, Webhook, Workflow as WorkflowIcon } from 'lucide-react-native';
+import type { AutomationSummary, WorkflowRunSummary, WorkflowSummary } from '@generatorai/client-core';
 
 import { relativeTime, runElapsed, formatDuration } from '../runs/formatTime';
 import { isActive, needsAttention, statusLabel } from '../runs/statusStyle';
@@ -150,46 +150,3 @@ export function AutomationCard({
   );
 }
 
-const SCOPE_LABEL: Record<AgentSummary['scope'], string> = {
-  system: 'Built-in',
-  global: 'Global',
-  project: 'Project',
-};
-
-/** A human label for an agent's scope — also the section label when a list groups by scope. */
-export function agentScopeLabel(scope: AgentSummary['scope']): string {
-  return SCOPE_LABEL[scope] ?? scope;
-}
-
-export function AgentCard({
-  agent,
-  onPress,
-  accessory,
-  separator,
-  showScope = true,
-}: {
-  agent: AgentSummary;
-  onPress: () => void;
-  /** Omit the scope from the subtitle when the list is already grouped by it. */
-  showScope?: boolean;
-} & WorkRowProps): React.ReactElement {
-  const { legacyColors: colors } = useTheme();
-  const orchestrator = agent.role === 'orchestrator';
-  const Icon = orchestrator ? Network : Bot;
-  const facts = [showScope ? agentScopeLabel(agent.scope) : null, agent.description || null].filter(Boolean).join(' · ');
-
-  return (
-    <ListItem
-      title={agent.name}
-      subtitle={facts || agent.slug}
-      titleBadge={orchestrator ? { label: 'Orchestrator' } : null}
-      avatar={{ icon: <Icon size={17} color={colors['muted-foreground']} />, tone: 'neutral' }}
-      badge={agent.enabled ? null : { label: 'Disabled', tone: 'neutral' }}
-      accessory={accessory}
-      separator={separator}
-      accessibilityLabel={`${agent.name}, ${agent.scope} ${agent.role}${agent.enabled ? '' : ', disabled'}`}
-      {...(agent.description ? { accessibilityHint: agent.description } : {})}
-      onPress={onPress}
-    />
-  );
-}

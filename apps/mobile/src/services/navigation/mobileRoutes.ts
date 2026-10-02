@@ -23,7 +23,7 @@ const CREATE: Record<string, string> = {
   chats: '/chats/new',
   workflows: '/workflows?new=1',
   projects: '/projects/new',
-  agents: '/agents',
+  agents: '/agents/new',
   automations: '/automations',
   scripts: '/scripts',
 };
@@ -80,9 +80,9 @@ function mapRoute(route: string | null): string | null {
       if (id && (sub === 'edit' || sub === 'executions')) return `/automations/${id}`;
       return route;
     case 'agents':
-      if (id && sub === 'edit') return `/agents/${id}`;
-      // No agent detail screen before M7: agents open from their list.
-      return id ? '/agents' : route;
+      // `/agents/<id>` and `/agents/<id>/edit` have screens since M7-03 (MD-83).
+      if (id && sub && sub !== 'edit') return `/agents/${id}`;
+      return route;
     case 'scripts':
       return route;
     case 'projects':

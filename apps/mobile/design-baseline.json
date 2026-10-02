@@ -1,6 +1,5 @@
 {
   "legacyRoutes": [
-    "app/(app)/agents/index.tsx",
     "app/(app)/automations/[id]/index.tsx",
     "app/(app)/projects/[id]/codebases/[cid]/pull-requests/[number].tsx",
     "app/(app)/scope-request.tsx",
@@ -501,12 +500,6 @@
       "mobile-design/design/platformOs": 3,
       "react-hooks/refs/diagnostic": 1,
       "react-hooks/immutability/diagnostic": 5
-    },
-    "app/(app)/agents/index.tsx": {
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 7,
-      "mobile-design/design/legacyTokenUtility": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 1
     },
     "app/(app)/automations/[id]/index.tsx": {
       "mobile-design/design/rawTextImport": 1,

@@ -1048,8 +1048,9 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       create: (body: CreateAgentParams) => req<Agent>('/api/agents', json(body)),
       update: (id: string, body: UpdateAgentParams) =>
         req<Agent>(`/api/agents/${id}`, jsonWith('PUT', body)),
+      /** `force` disables an agent that is in use (soft delete); the route reads `?force=1`. */
       remove: (id: string, force?: boolean) =>
-        req<{ deleted: boolean; soft: boolean }>(`/api/agents/${id}${qs({ force })}`, {
+        req<{ deleted: boolean; soft: boolean }>(`/api/agents/${id}${qs({ force: force ? 1 : undefined })}`, {
           method: 'DELETE',
         }),
       usage: (id: string) => req<Record<string, unknown>>(`/api/agents/${id}/usage`),

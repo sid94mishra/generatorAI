@@ -14,9 +14,9 @@ import { fullScreenModalOptions, moduleRootOptions, paletteOptions, sheetOptions
 const MODULE_ROOTS = ['index', 'chats/index', 'projects/index', 'agents/index', 'workflows/index', 'automations/index', 'scripts/index'];
 const SHEETS = ['chats/[id]/gate/[interactionId]', 'scope-request'];
 /** Full-screen modal editors (MD-21). */
-const EDITORS = ['projects/new', 'projects/[id]/skills/[configId]/edit'];
+const EDITORS = ['projects/new', 'projects/[id]/skills/[configId]/edit', 'agents/create', 'agents/[id]/edit'];
 /** Route sheets at the large detent. */
-const LARGE_SHEETS = ['chats/[id]/turn', 'chats/new', 'workspaces/[workspaceId]/commit', 'projects/[id]/add-codebase'];
+const LARGE_SHEETS = ['chats/[id]/turn', 'chats/new', 'workspaces/[workspaceId]/commit', 'projects/[id]/add-codebase', 'agents/new', 'agents/import'];
 /** Legacy details that set their title and trailing controls through navigator options. */
 const STACK_HEADER: Record<string, string> = {
   'workflows/[id]/index': 'Workflow',

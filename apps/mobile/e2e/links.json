@@ -16,7 +16,7 @@
     { "url": "generatorai://projects/${PROJECT_ID}/codebases/${CODEBASE_ID}", "expect": { "text": "Worktrees" } },
     { "url": "generatorai://projects/${PROJECT_ID}/codebases/${CODEBASE_ID}/files", "expect": { "text": "Files" } },
     { "url": "generatorai://agents", "expect": { "text": "Agents" } },
-    { "url": "generatorai://agents/new", "expect": { "text": "Agents" } },
+    { "url": "generatorai://agents/new", "expect": { "text": "New agent" } },
     { "url": "generatorai://workflows", "expect": { "text": "Workflows" } },
     { "url": "generatorai://workflows/new", "expect": { "text": "Workflows" }, "note": "template picker when the device may create" },
     { "url": "generatorai://command/workflow.new", "expect": { "text": "Workflows" } },
