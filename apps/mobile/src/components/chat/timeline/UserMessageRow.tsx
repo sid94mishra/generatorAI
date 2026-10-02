@@ -127,7 +127,7 @@ function UserBubbleText({ text }: { text: string }): React.ReactElement {
   const [expanded, setExpanded] = useState(false);
   const collapsed = long && !expanded;
   return (
-    <View className="rounded-3xl bg-accent px-3.5 py-2.5">
+    <View className="rounded-3xl bg-selected px-3.5 py-2.5">
       <Text
         selectable={!collapsed}
         accessibilityLabel={text}

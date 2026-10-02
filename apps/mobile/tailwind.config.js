@@ -22,6 +22,8 @@ module.exports = {
       // skeletons, tracks). Aliases of existing theme tokens, nothing new.
       colors: {
         ...tailwindColors,
+        // MD-75: the legacy accent-tint `bg-accent` became `bg-selected` ahead of Uniwind (M3-05).
+        selected: 'var(--gai-selected)',
         control: 'var(--sidebar-accent)',
         'control-strong': 'var(--accent)',
         'control-foreground': 'var(--sidebar-accent-foreground)',

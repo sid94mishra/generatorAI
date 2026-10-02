@@ -1017,7 +1017,7 @@ export function TerminalView({
                 haptic="select"
                 onPress={() => onKey(key)}
                 className={`min-h-12 min-w-12 items-center justify-center rounded-xl px-2 ${
-                  armed ? 'border border-primary bg-accent' : 'bg-subtle'
+                  armed ? 'border border-primary bg-selected' : 'bg-subtle'
                 }`}
               >
                 <Text

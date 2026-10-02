@@ -133,7 +133,7 @@ export const DiffLine = React.memo(function DiffLine({
           hitSlop={6}
           style={{ height: rowHeight, paddingHorizontal: 6, justifyContent: 'center' }}
         >
-          <View className="flex-row items-center gap-0.5 rounded-full bg-accent px-1.5 py-0.5">
+          <View className="flex-row items-center gap-0.5 rounded-full bg-selected px-1.5 py-0.5">
             <MessageSquare size={fontSize - 1} color={colors.primary} />
             <Text className="text-primary" style={{ fontSize: fontSize - 2 }}>
               {threadCount}

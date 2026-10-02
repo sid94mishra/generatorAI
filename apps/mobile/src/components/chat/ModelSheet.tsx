@@ -241,7 +241,7 @@ export function ModelSheet({
                   setInfoId(null);
                 }}
                 className={`min-h-9 flex-row items-center gap-2 rounded-lg border px-3 ${
-                  isActive ? 'border-primary bg-accent' : 'border-border bg-raised'
+                  isActive ? 'border-primary bg-selected' : 'border-border bg-raised'
                 }`}
               >
                 <View style={p.ready ? undefined : { opacity: 0.4 }}>
@@ -311,7 +311,7 @@ function ModelRow({
   const longCtx = model.supportsLongContext ? formatTokens(longContextLimit(model)) : null;
 
   return (
-    <View className={`rounded-2xl ${selected ? 'bg-accent' : ''}`}>
+    <View className={`rounded-2xl ${selected ? 'bg-selected' : ''}`}>
       <View className="flex-row items-center">
         <Touchable
           accessibilityLabel={model.name}

@@ -20,7 +20,7 @@ export type Tone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'i
 // therefore uses a real token.
 const TONE_BADGE: Record<Tone, string> = {
   neutral: 'bg-subtle border-border-muted',
-  primary: 'bg-accent border-primary',
+  primary: 'bg-selected border-primary',
   success: 'bg-success-muted border-success',
   warning: 'bg-warning-muted border-warning',
   danger: 'bg-danger-muted border-danger',

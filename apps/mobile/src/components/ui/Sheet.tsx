@@ -590,7 +590,7 @@ export function SheetRow({
       scale="large"
       onPress={onPress}
       {...(onLongPress ? { onLongPress } : {})}
-      className={`min-h-14 flex-row items-center gap-3 px-4 py-2.5 ${selected ? 'bg-accent' : ''}`}
+      className={`min-h-14 flex-row items-center gap-3 px-4 py-2.5 ${selected ? 'bg-selected' : ''}`}
     >
       {left}
       <View className="flex-1 gap-0.5">

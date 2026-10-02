@@ -29,7 +29,7 @@ export type ChipSize = 'sm' | 'md';
 // appears once the chip is selected, which is the "quiet chrome" rule.
 const SELECTED_CONTAINER: Record<ChipTone, string> = {
   neutral: 'border-border bg-control-strong',
-  accent: 'border-primary bg-accent',
+  accent: 'border-primary bg-selected',
   // A chip used as a TAB: desktop's selected tab is solid primary.
   tab: 'border-primary-emphasis bg-primary-emphasis',
   success: 'border-success bg-success-muted',

@@ -291,7 +291,7 @@ const FileRow = React.memo(function FileRow({
             ) : null}
           </View>
           {openThreads > 0 ? (
-            <View className="rounded-full bg-accent px-1.5 py-0.5">
+            <View className="rounded-full bg-selected px-1.5 py-0.5">
               <Text className="text-xs text-primary">{openThreads}</Text>
             </View>
           ) : null}

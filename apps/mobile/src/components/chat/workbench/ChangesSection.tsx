@@ -546,7 +546,7 @@ export function ChangesSection({
       )}
 
       {counts.pending > 0 ? (
-        <View className="flex-row items-center gap-2 border-t border-border-muted bg-accent px-3 py-2">
+        <View className="flex-row items-center gap-2 border-t border-border-muted bg-selected px-3 py-2">
           <MessageSquare size={14} color={colors.primary} />
           <Text className="flex-1 text-xs font-medium text-foreground" numberOfLines={1}>
             {batchSummary(counts)}
