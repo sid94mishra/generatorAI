@@ -1,3 +1,4 @@
+import { artifactDownloadName } from './artifactDownload.js';
 import { createResourceMethods, type BinaryResource } from './resources.js';
 import { createPlanMethods, createReviewMethods, type TaskDigest, type ReviewSubmitTarget } from './reviewDetails.js';
 import { createScmMethods } from './scm.js';
@@ -1063,6 +1064,17 @@ export const queryKeys = {
 
 export function createApiClient(fetchImpl: ApiFetch) {
   return {
+    artifacts: {
+      async download(id: string): Promise<{ bytes: Uint8Array; mimeType: string; name: string }> {
+        let name = id;
+        const result = await requestBinary(async (path, init) => {
+          const response = await fetchImpl(path, init);
+          name = artifactDownloadName(response.headers.get('content-disposition'), id);
+          return response;
+        }, `/api/artifacts/${encodeURIComponent(id)}/download`);
+        return { bytes: result.data, mimeType: result.contentType, name };
+      },
+    },
     resources: createResourceMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init), (path, init) => requestBinary(fetchImpl, path, init)),
     plans: createPlanMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init)),
     scm: createScmMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init)),
@@ -1107,6 +1119,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
     },
 
     chats: {
+      setPinned: (id: string, pinned: boolean) => request<ChatSummary>(fetchImpl, `/api/chats/${encodeURIComponent(id)}`, { ...json({ pinned }), method: 'PATCH' }),
+      setUnread: (id: string, unread: boolean) => request<ChatSummary>(fetchImpl, `/api/chats/${encodeURIComponent(id)}`, { ...json({ unread }), method: 'PATCH' }),
       /**
        * One page of chats (chat list v2, G-02): `{ items, nextCursor, total,
        * counts }`. Unlike most list endpoints this one is paged — pass
@@ -1251,6 +1265,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
       update: (
         id: string,
         patch: {
+          pinned?: boolean;
+          unread?: boolean;
           name?: string;
           description?: string;
           model?: string;

@@ -272,3 +272,30 @@ describe('PushDispatcher — delivery outcomes', () => {
     expect(message!.interruption).toBe('timeSensitive');
   });
 });
+
+describe('v2 server-scoped routing', () => {
+  function scoped(resolve = async (_id: string): Promise<string | null> => 'workflow/1') {
+    return new PushDispatcher({
+      serverId: 'host-A', workflowDefinitionId: resolve,
+      listTargets: () => [target()], recordSuccess: vi.fn(), recordFailure: vi.fn(),
+      provider: { send: async () => [] }, logger,
+    });
+  }
+  it('enriches run notifications without changing the old route', async () => {
+    const resolve = vi.fn(async () => 'workflow/1');
+    const [message] = await scoped(resolve).dispatchEvent(gate);
+    expect(resolve).toHaveBeenCalledWith('r1');
+    expect(message?.data).toMatchObject({ v: 2, serverId: 'host-A', route: '/runs/r1', href: '/workflows/workflow%2F1/runs/r1', entity: 'workflow_run', entityId: 'r1' });
+  });
+  it('retains actionable chat gate targets and server identity', async () => {
+    const [message] = await scoped().dispatchEvent({ kind: 'chat.permission.requested', data: { chatId: 'c1', interactionId: 'i1' } });
+    expect(message?.data).toMatchObject({ v: 2, serverId: 'host-A', href: '/chats/c1/gate/i1', entity: 'chat', entityId: 'c1', actions: ['approve', 'deny'] });
+  });
+  it('handles deleted runs and ignores events that need no notification', async () => {
+    const resolve = vi.fn(async (): Promise<string | null> => { throw new Error('gone'); });
+    const dispatcher = scoped(resolve);
+    expect((await dispatcher.dispatchEvent(gate))[0]?.data.href).toBe('/workflows');
+    expect(await dispatcher.dispatchEvent({ kind: 'chat.token', data: {} })).toEqual([]);
+    expect(resolve).toHaveBeenCalledTimes(1);
+  });
+});

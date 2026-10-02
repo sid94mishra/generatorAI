@@ -767,3 +767,8 @@ Derived during M1-02 from the installed Xcode 27 `simctl help privacy`: notifica
 ### MD-111 Prefer IPv4 for the local Metro launcher — Final
 - Native restart exposed a Node 26 DNS-order mismatch: Expo `--localhost` bound only `[::1]:8081`, while sandbox-pair and the saved dev-client entry use `127.0.0.1:8081`. IPv4 `/status` was refused; the app reported “Could not reach” the server.
 - `pnpm --filter @generatorai/mobile start` uses a cross-platform Node launcher with `--dns-result-order=ipv4first`, preserving Expo arguments and inherited environment. No global DNS setting or network exposure is changed. Use this package script for the local dev client; direct `expo start --localhost` needs the same Node option.
+
+### MD-112 Unread means activity after a read mark — Final (2026-10-02, owner handed the mobile run to Claude Code)
+- MG-02 defines unread as `lastActivityAt > lastReadAt`. A chat with no read mark (every chat that existed before v64, and any chat nobody has opened since) is **not** unread; otherwise the first release would flag every chat on mobile and web at once.
+- Opening a chat sends `PATCH {unread: false}` (read mark = now); "Mark unread" sends `PATCH {unread: true}`, which stores the epoch, so any activity reads as new. `ChatListSummary.unread` is present only when true; `summary.model` only when the model is known (MG-03).
+- v64's list indexes lead with `(pinned_at IS NOT NULL)` and keep ascending sort columns (as v56), so the descending list order is a reverse scan; a cursor page inside the unpinned group orders by the sort key alone, so it stays an index range with no temp B-tree. Status-filtered and workers-included lists have their own pin-aware index.

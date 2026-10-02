@@ -56,6 +56,9 @@ export interface ChatListPreview {
 
 /** Everything a list row needs beyond the chat record itself. */
 export interface ChatListSummary {
+  unread?: boolean;
+  /** Display metadata remains available when the provider is signed out. */
+  model?: { id: string; label: string; provider?: string };
   /** ISO timestamp of the newest turn start or end (creation time before the first turn). */
   lastActivityAt: string;
   /** Absent until the first turn ends. */
@@ -91,6 +94,7 @@ export const CHAT_LIST_MAX_LIMIT = 200;
  * different filters must ALL match.
  */
 export interface ChatListQuery {
+  pinned?: 'only' | 'exclude';
   /** Lifecycle segment: Active or Archived. Omitted = All. */
   status?: ChatStatus;
   projectId?: string | readonly string[];
@@ -187,6 +191,8 @@ export async function runChatBulk(
 
 /** Payload of the `chat.updated` lifecycle event (list-visible fields or summary columns moved). */
 export interface ChatUpdatedEventData {
+  pinnedAt?: string | null;
+  unread?: boolean;
   chatId: string;
 }
 
@@ -207,6 +213,7 @@ export function chatListSearchParams(query: ChatListQuery = {}): string {
     parts.push(`${key}=${encodeURIComponent(value)}`);
   };
   if (query.status) add('status', query.status);
+  if (query.pinned) add('pinned', query.pinned);
   for (const id of toList(query.projectId)) add('projectId', id);
   for (const ref of toList(query.agentRef)) add('agentRef', ref);
   for (const tag of toList(query.tag)) add('tag', tag);

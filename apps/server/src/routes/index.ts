@@ -1,3 +1,4 @@
+import { createArtifactRoutes } from './artifacts.js';
 // ────────────────────────────────────────────────────────────────
 // API Router — mounts all sub-routers under /api
 // ────────────────────────────────────────────────────────────────
@@ -139,6 +140,7 @@ export function createApiRouter(container: Container): Router {
   // Attention feed (G-01) — Needs you + Running across chats, runs and
   // automation executions. Live deltas ride the `global` stream scope.
   router.use('/attention', createAttentionRoutes(container));
+  router.use('/artifacts', createArtifactRoutes(container));
 
   // Stats summary (G-10) — Home "This week", Workflows stat strip,
   // AutomationDetail stat row, WorkflowDetail rail. Read-only; no SSE.

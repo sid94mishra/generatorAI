@@ -160,6 +160,14 @@ const REVERSE_SCHEMA_ALLOWLIST: string[] = [
   'index idx_chats_forked_from on chats: not declared',
   'index idx_stream_cursors_kind_ts on stream_cursors: not declared',
   'index idx_workspace_artifacts_type on workspace_artifacts: not declared',
+  // v64 (mobile MG-02): expression / partial indexes on the pin flag, which
+  // schema.ts cannot declare (the list orders by `(pinned_at IS NOT NULL) DESC`).
+  'index idx_chats_pin_activity on chats: not declared',
+  'index idx_chats_pin_all_activity on chats: not declared',
+  'index idx_chats_pin_created on chats: not declared',
+  'index idx_chats_pin_name on chats: not declared',
+  'index idx_chats_pin_status_activity on chats: not declared',
+  'index idx_chats_pinned on chats: not declared',
   // Declared in schema.ts but never created by any migration (drizzle-kit
   // would create them; migrateDB does not).
   'index pk_idempotency_keys on idempotency_keys: declared, missing',

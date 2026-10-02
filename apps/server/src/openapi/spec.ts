@@ -124,6 +124,20 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
   components: {
     schemas: {
       Error: errorResponseSchema,
+      PushDataV2: {
+        type: 'object',
+        description: 'Mobile push data. v2 clients route exclusively with href and serverId; route remains for existing consumers. Receiving a link never performs an action.',
+        required: ['v', 'serverId', 'href', 'route', 'category', 'threadId'],
+        properties: {
+          v: { type: 'integer', const: 2 }, serverId: { type: 'string' }, href: { type: 'string' },
+          route: { type: 'string' }, category: { type: 'string' }, threadId: { type: 'string' },
+          entity: { type: 'string', enum: ['chat', 'workflow_run', 'automation_execution'] },
+          entityId: { type: 'string' }, workflowDefinitionId: { type: 'string' },
+          chatId: { type: 'string' }, interactionId: { type: 'string' },
+          kind: { type: 'string', enum: ['permission', 'question', 'plan'] },
+          actions: { type: 'array', items: { type: 'string' } },
+        },
+      },
       // ── Source control (feature-source-control.md; shapes mirror
       // packages/shared/src/types/SourceControl.ts) ──
       ChatSourceControlOptions: {
@@ -1201,6 +1215,18 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
     },
   },
   paths: {
+    '/api/artifacts/{id}/download': {
+      get: {
+        tags: ['Artifacts'], summary: 'Download registered artifact bytes (MG-21)',
+        description: 'Requires read:files plus the owning session read:chats or read:workflows scope. Only managed artifact storage is served.',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': { description: 'Binary bytes; Content-Type and RFC 5987 Content-Disposition describe the file', content: { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } } },
+          '403': { description: 'Missing file/owner scope or path outside managed storage' },
+          '404': { description: 'Artifact or file not found' },
+        },
+      },
+    },
     '/api/health': {
       get: {
         tags: ['System'],

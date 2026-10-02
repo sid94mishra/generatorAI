@@ -333,3 +333,4 @@ export { ChatListInvalidator } from './ChatListInvalidator.js';
 export type { ChatListInvalidatorDeps } from './ChatListInvalidator.js';
 export type { ChatChangeStatsDeps, ChangeStatsRepo } from './ChatChangeStatsService.js';
 export type { StreamingChangeListener } from './StreamingChatRegistry.js';
+export { chatModelSummary } from './chatModelSummary.js';

@@ -35,6 +35,8 @@ export const DEFAULT_POLICY: RoutePolicy = {
 };
 
 export const ROUTE_POLICIES: RoutePolicy[] = [
+  // Registered artifact bytes; the route additionally checks its owning session's read scope.
+  { prefix: '/artifacts', read: ['read:files'], write: ['admin:settings'] },
   // Public — health probes.
   { prefix: '/health', read: [], write: [], public: true },
   // Auth bootstrap. Pairing completion is deliberately public: the caller has

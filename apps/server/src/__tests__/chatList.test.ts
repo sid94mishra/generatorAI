@@ -412,6 +412,52 @@ describe('PATCH /api/chats/:id — live lists (P2-R2)', () => {
   });
 });
 
+describe('MG-02 — pinned and unread chats', () => {
+  const patch = (id: string, body: Record<string, unknown>) =>
+    request(app).patch(`/api/chats/${id}`).send(body).expect((r) => expect(r.status, JSON.stringify(r.body)).toBe(200));
+
+  it('pins to the top under every sort, filters by pin, and pages across the pin boundary', async () => {
+    await seed();
+    await patch('c-failed', { pinned: true });
+    await patch('c-back', { pinned: true });
+    expect(updated).toEqual(['c-failed', 'c-back']);
+
+    for (const sort of ['activity', 'name', 'created']) {
+      const all = ids(await list(`sort=${sort}`));
+      expect(all.slice(0, 2).sort(), sort).toEqual(['c-back', 'c-failed']);
+      // Keyset paging crosses from the pinned group into the rest once, in order.
+      const walked: string[] = [];
+      let cursor: string | null = null;
+      do {
+        const page: ChatListPage = await list(`sort=${sort}&limit=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+        walked.push(...ids(page));
+        cursor = page.nextCursor;
+      } while (cursor);
+      expect(walked, sort).toEqual(all);
+    }
+
+    expect(ids(await list('pinned=only')).sort()).toEqual(['c-back', 'c-failed']);
+    expect(ids(await list('pinned=exclude'))).not.toContain('c-failed');
+    expect((await list()).items.find((c) => c.id === 'c-failed')!.pinnedAt).toBeTruthy();
+
+    await patch('c-failed', { pinned: false });
+    expect(ids(await list('pinned=only'))).toEqual(['c-back']);
+    const bad = await request(app).get('/api/chats?pinned=yes');
+    expect(bad.status).toBe(400);
+  });
+
+  it('marks unread and read (MD-112: a chat never opened is not unread)', async () => {
+    await seed();
+    const unreadOf = async (id: string) => (await list()).items.find((c) => c.id === id)!.summary.unread;
+    expect((await list()).items.some((c) => c.summary.unread)).toBe(false);
+
+    await patch('c-done', { unread: true });
+    expect(await unreadOf('c-done')).toBe(true);
+    await patch('c-done', { unread: false }); // opening the chat marks it read
+    expect(await unreadOf('c-done')).toBeUndefined();
+  });
+});
+
 describe('indirect list-visible writes (P2-R33)', () => {
   it('a project delete announces every chat it unlinked, and the attention feed drops the project', async () => {
     await seed();

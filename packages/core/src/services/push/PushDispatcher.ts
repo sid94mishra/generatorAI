@@ -20,12 +20,12 @@
 //    approval is how users disable notifications permanently.
 // ────────────────────────────────────────────────────────────────
 
-import type { ILogger } from '@generatorai/shared';
+import { pushRouting } from './pushRouting.js';
+import type { ILogger, PushData } from '@generatorai/shared';
 
 import {
   isMutable,
   planNotification,
-  type InteractionKind,
   type NotificationPlan,
 } from './notificationPolicy.js';
 
@@ -48,15 +48,7 @@ export interface PushTarget {
  * without opening the UI; `actions` is present ONLY for tool-permission
  * prompts (the one gate with a closed allow/deny answer).
  */
-export interface PushData {
-  route: string;
-  category: string;
-  threadId: string;
-  chatId?: string;
-  interactionId?: string;
-  kind?: InteractionKind;
-  actions?: readonly string[];
-}
+export type { PushData } from '@generatorai/shared';
 
 export interface PushMessage {
   target: PushTarget;
@@ -80,6 +72,8 @@ export interface PushProviderClient {
 }
 
 export interface PushDispatcherPorts {
+  serverId?: string;
+  workflowDefinitionId?(runId: string): Promise<string | null>;
   listTargets(): PushTarget[];
   recordSuccess(deviceId: string): void;
   recordFailure(deviceId: string, error: string): void;
@@ -114,7 +108,19 @@ export class PushDispatcher {
    * Returns the messages it decided to send, so tests can assert the decision
    * without a provider. Delivery itself is not awaited by the caller.
    */
-  handleEvent(event: EventLike): PushMessage[] {
+  /** Async metadata lookup is isolated from the event bus and the legacy synchronous API. */
+  async dispatchEvent(event: EventLike): Promise<PushMessage[]> {
+    const plan = planNotification({ kind: event.kind, data: isRecord(event.data) ? event.data : undefined });
+    if (!plan) return [];
+    let definitionId: string | null = null;
+    if (plan.threadId.startsWith('run:') && this.ports.workflowDefinitionId) {
+      try { definitionId = await this.ports.workflowDefinitionId(plan.threadId.slice(4)); }
+      catch { /* Deleted/unavailable run: open the workflow list, never an invented target. */ }
+    }
+    return this.handleEvent(event, definitionId);
+  }
+
+  handleEvent(event: EventLike, workflowDefinitionId?: string | null): PushMessage[] {
     const plan = planNotification({
       kind: event.kind,
       data: isRecord(event.data) ? event.data : undefined,
@@ -131,7 +137,7 @@ export class PushDispatcher {
         target,
         title: plan.title,
         body: plan.body,
-        data: buildData(plan),
+        data: { ...buildData(plan), ...(this.ports.serverId ? pushRouting(plan, this.ports.serverId, workflowDefinitionId) : {}) },
         threadId: plan.threadId,
         interruption: plan.interruption,
         ...(plan.category === 'approval' ? { categoryId: APPROVAL_CATEGORY_ID } : {}),
