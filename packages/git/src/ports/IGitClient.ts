@@ -392,3 +392,8 @@ export interface IGitClient {
   /** `git --version` → e.g. `2.45.1`, or null. Cached for the client's lifetime. */
   gitVersion(): Promise<string | null>;
 }
+
+/** `GitClient.lsRemoteBranches` (mobile MG-11). Failures are values: the route maps each reason to an error code. */
+export type GitRemoteBranches =
+  | { ok: true; defaultBranch?: string; branches: string[]; truncated: boolean }
+  | { ok: false; reason: 'invalid_url' | 'auth' | 'not_found' | 'timeout' | 'failed'; message: string };

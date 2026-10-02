@@ -7,7 +7,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, expect, it } from 'vitest';
-import { requiredScopesFor, resolveRoutePolicy } from '../routePolicy.js';
+import { requiredScopesFor } from '../routePolicy.js';
 import {
   DEFAULT_MOBILE_SCOPES,
   HIGH_RISK_SCOPES,
@@ -35,7 +35,17 @@ describe('route policy — scope requests', () => {
     // A device literally named "me" is still addressed by id; its admin
     // routes do not inherit the device-side policy.
     expect(requiredScopesFor('PUT', '/auth/devices/me/scopes').scopes).toEqual(['admin:devices']);
-    expect(resolveRoutePolicy('/auth/devices/me').prefix).toBe('/auth/devices');
+    expect(requiredScopesFor('DELETE', '/auth/devices/me').scopes).toEqual(['admin:devices']);
+    expect(requiredScopesFor('POST', '/auth/devices/me/rotate').scopes).toEqual(['admin:devices']);
+  });
+
+  it('lets a device read its OWN record with read:status (MG-01)', () => {
+    const { policy, scopes } = requiredScopesFor('GET', '/auth/devices/me');
+    expect(policy.prefix).toBe('/auth/devices/me');
+    expect(scopes).toEqual(['read:status']);
+    expect(hasAllScopes(DEFAULT_MOBILE_SCOPES, scopes)).toBe(true);
+    // Other devices' records stay admin-only.
+    expect(requiredScopesFor('GET', '/auth/devices/dev-1').scopes).toEqual(['admin:devices']);
   });
 
   it('requires admin:devices to review or resolve requests', () => {

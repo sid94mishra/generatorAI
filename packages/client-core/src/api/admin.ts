@@ -27,6 +27,13 @@ import type {
 } from '@generatorai/shared';
 import type {
   Agent,
+  AgentImportPreview,
+  AgentImportPreviewRequest,
+  AudioModelStatus,
+  AudioSettingsUpdate,
+  AudioSettingsView,
+  McpServerBody,
+  SystemMcpPrefsBody,
   AgentOverrides,
   Automation,
   AutomationExecution,
@@ -1048,6 +1055,13 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       usage: (id: string) => req<Record<string, unknown>>(`/api/agents/${id}/usage`),
       export: (id: string) => req<{ markdown: string } | string>(`/api/agents/${id}/export`, json({})),
       import: (body: Record<string, unknown>) => req<Agent>('/api/agents/import', json(body)),
+      /**
+       * MG-12 — what `import` would create, without writing: parsed fields,
+       * unresolved names, the agent it would replace. 400 `PARSE_ERROR`,
+       * 413 `TOO_LARGE` (over 256 KB).
+       */
+      importPreview: (body: AgentImportPreviewRequest) =>
+        req<AgentImportPreview>('/api/agents/import/preview', json(body)),
       resolvePreview: (body: {
         agentRef?: string;
         overrides?: AgentOverrides;
@@ -1118,8 +1132,22 @@ export function createAdminApi(fetchImpl: ApiFetch) {
 
     // ── system.ts / copilot.ts ──────────────────────────────────
     systemAdmin: {
-      setAudio: (body: { sttEngine?: string; textFormatter?: string; endpointSilenceMs?: number; ttsEnabled?: boolean; ttsSpeed?: number }) =>
+      setAudio: (body: { sttEngine?: string; textFormatter?: string; endpointSilenceMs?: number; ttsEnabled?: boolean; ttsSpeed?: number } & AudioSettingsUpdate) =>
         req<Record<string, unknown>>('/api/system/audio', jsonWith('PUT', body)),
+      // MG-22 (settings rows) — typed Settings › Audio and MCP writes.
+      audio: () => req<AudioSettingsView>('/api/system/audio'),
+      updateAudio: (body: AudioSettingsUpdate) => req<AudioSettingsView>('/api/system/audio', jsonWith('PUT', body)),
+      audioModel: () => req<AudioModelStatus>('/api/system/audio/model'),
+      /** 202 while the download runs; poll `audioModel()` for progress. */
+      downloadAudioModel: () => req<AudioModelStatus>('/api/system/audio/model', json({})),
+      deleteAudioModel: () => req<AudioModelStatus>('/api/system/audio/model', { method: 'DELETE' }),
+      setSystemMcp: (id: string, body: SystemMcpPrefsBody) =>
+        req<void>(`/api/system/mcp-servers/system/${encodeURIComponent(id)}`, jsonWith('PUT', body)),
+      addCustomMcp: (body: McpServerBody) => req<McpServerEntry>('/api/system/mcp-servers/custom', json(body)),
+      updateCustomMcp: (id: string, body: McpServerBody) =>
+        req<void>(`/api/system/mcp-servers/custom/${encodeURIComponent(id)}`, jsonWith('PUT', body)),
+      removeCustomMcp: (id: string) =>
+        req<void>(`/api/system/mcp-servers/custom/${encodeURIComponent(id)}`, { method: 'DELETE' }),
       updateMcp: (source: 'system' | 'custom', id: string, body: Record<string, unknown>) =>
         req<void>(`/api/system/mcp-servers/${source}/${encodeURIComponent(id)}`, jsonWith('PUT', body)),
       computerUse: () => req<Record<string, unknown>>('/api/system/computer-use'),

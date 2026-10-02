@@ -14,7 +14,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { SCOPE_PRESETS, groupScopes, matchScopePreset } from '../../services/auth/scopePresets';
-import { describeScope, isSensitiveScope } from '../../services/auth/scopeLabels';
+import { describeScope, isSensitiveScope } from '@generatorai/shared/ui-contract';
 import { requireStepUp } from '../../services/auth/stepUp';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';

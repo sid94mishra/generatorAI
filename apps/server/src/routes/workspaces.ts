@@ -8,6 +8,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { changeFileEtag } from './changeFileEtag.js';
 import type { Container } from '../composition-root.js';
+import { recordScmOutcome, scmOutcomeFrom } from './scmOutcome.js';
 import { resolveWorktreePath, type WorkspaceTreeRepo } from '@generatorai/core';
 import {
   stripAliasPrefix,
@@ -58,6 +59,7 @@ export function createWorkspaceRoutes(container: Container): Router {
     repoReadinessService,
     chatManagementService,
     chatEntityRepo,
+    executionWorkspaceRepo,
     eventBus,
     logger,
   } = container;
@@ -387,6 +389,9 @@ export function createWorkspaceRoutes(container: Container): Router {
           ? { context: { ...(context.context ?? {}), ...(hint ? { hint } : {}) } }
           : {}),
       });
+      // MG-13: remember the commit / PR so "Recently finished" can say so.
+      const outcome = scmOutcomeFrom(result, new Date());
+      if (outcome) await recordScmOutcome(executionWorkspaceRepo, target.id, outcome);
       res.json(result);
     } catch (err) {
       next(err);

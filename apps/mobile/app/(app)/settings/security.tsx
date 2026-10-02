@@ -46,7 +46,7 @@ import {
 } from '../../../src/services/api/scopeRequests';
 import { useAuth } from '../../../src/services/auth/AuthProvider';
 import { requireStepUp } from '../../../src/services/auth/stepUp';
-import { describeScope, isSensitiveScope } from '../../../src/services/auth/scopeLabels';
+import { describeScope, isSensitiveScope } from '@generatorai/shared/ui-contract';
 import { matchScopePreset } from '../../../src/services/auth/scopePresets';
 import { checkFeature, grantableFeatures, type MobileFeature } from '../../../src/services/auth/featureGate';
 import { ActionSheet, ConfirmSheet } from '../../../src/components/ui/ActionSheet';

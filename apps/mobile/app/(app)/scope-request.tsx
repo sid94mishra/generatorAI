@@ -20,7 +20,7 @@ import { ApiError } from '@generatorai/client-core';
 
 import { useAuth } from '../../src/services/auth/AuthProvider';
 import { useCreateScopeRequest } from '../../src/services/api/scopeRequests';
-import { describeScope, isSensitiveScope } from '../../src/services/auth/scopeLabels';
+import { describeScope, isSensitiveScope } from '@generatorai/shared/ui-contract';
 import type { MobileFeature } from '../../src/services/auth/featureGate';
 import {
   UNSUPPORTED_MESSAGE,

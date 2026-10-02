@@ -1,6 +1,7 @@
 // @generatorai/git — local git operations (ports/adapters)
 
 export { GitClient } from './GitClient.js';
+export { isRemoteGitUrl } from './remoteUrl.js';
 export type {
   IGitClient,
   GitClientOptions,
@@ -19,6 +20,7 @@ export type {
   GitCommitResult,
   MergeOptions,
   GitStreamOptions,
+  GitRemoteBranches,
 } from './ports/IGitClient.js';
 export type {
   IGitProcessRunner,

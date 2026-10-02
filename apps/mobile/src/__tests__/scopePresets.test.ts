@@ -8,7 +8,7 @@ import {
   groupScopes,
   matchScopePreset,
 } from '../services/auth/scopePresets';
-import { isSensitiveScope } from '../services/auth/scopeLabels';
+import { isSensitiveScope } from '@generatorai/shared/ui-contract';
 
 describe('scope presets', () => {
   it('companion mirrors the server’s DEFAULT_MOBILE_SCOPES exactly', () => {
@@ -69,9 +69,9 @@ describe('groupScopes', () => {
     );
     expect(groups.map((g) => g.id)).toEqual(['read', 'act', 'sensitive']);
     expect(groups[0]!.scopes).toEqual(['read:chats', 'stream:events']);
-    expect(groups[1]!.scopes).toEqual(['write:chats', 'exec:agent']);
-    // `write:files` is a write scope AND withheld by default — the warning wins.
-    expect(groups[2]!.scopes).toEqual(['write:files', 'exec:terminal']);
+    expect(groups[1]!.scopes).toEqual(['write:chats', 'exec:agent', 'write:files']);
+    // Only control of the machine or the server is sensitive (MD-165) — the warning wins.
+    expect(groups[2]!.scopes).toEqual(['exec:terminal']);
   });
 
   it('omits empty groups and drops duplicates', () => {

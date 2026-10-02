@@ -35,7 +35,7 @@ import {
   shouldAutoRetryPairing,
   type PairingFailure,
 } from '../src/services/auth/pairingFailure';
-import { describeScope, isSensitiveScope } from '../src/services/auth/scopeLabels';
+import { describeScope, isSensitiveScope } from '@generatorai/shared/ui-contract';
 import { groupScopes, matchScopePreset } from '../src/services/auth/scopePresets';
 import { Button } from '../src/components/ui/Button';
 import { Field } from '../src/components/ui/Form';

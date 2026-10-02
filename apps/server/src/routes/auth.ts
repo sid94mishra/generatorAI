@@ -33,7 +33,7 @@ import {
   type Scope,
 } from '@generatorai/auth';
 import { PairingOfferSchema, encodePairingOffer, pairingOfferUrl } from '@generatorai/relay-protocol';
-import { formatPairingCode } from '@generatorai/shared';
+import { formatPairingCode, type SelfDeviceView } from '@generatorai/shared';
 import { dirname, resolve } from 'node:path';
 import type { Container } from '../composition-root.js';
 import { removeBootstrapFile } from '../composition/bootstrapPairing.js';
@@ -478,6 +478,26 @@ export function createAuthRoutes(container: Container): Router {
     })();
   });
 
+  // GET /auth/devices/me — the calling device's OWN record (mobile MG-01).
+  // `read:status` only (routePolicy carve-out); the id is the principal's,
+  // never the path's. Registered before `/devices/:deviceId` so `me` is not
+  // read as an id.
+  router.get('/devices/me', (req: Request, res: Response) => {
+    void (async () => {
+      const principal = requirePrincipal(req);
+      if (principal.type !== 'paired-device') {
+        res.status(404).json({ error: { code: 'NOT_A_DEVICE', message: 'This session is not a paired device' } });
+        return;
+      }
+      const device = await devices.getDevice(principal.id);
+      if (!device || device.revokedAt != null) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Device not found' } });
+        return;
+      }
+      res.json(toSelfDeviceView(device));
+    })();
+  });
+
   router.get('/devices/:deviceId', (req: Request, res: Response) => {
     void (async () => {
       const device = await devices.getDevice(pathParam(req, 'deviceId'));
@@ -758,6 +778,27 @@ function toPublicDevice(device: DeviceRecord): Record<string, unknown> {
     credentialVersion: device.credentialVersion,
     connectionMode: device.connectionMode,
     relayBound: device.relayBinding != null,
+  };
+}
+
+function iso(ms: number): string {
+  return new Date(ms).toISOString();
+}
+
+/** MG-01 — the self-service view: no key material, no owner, no relay binding. */
+function toSelfDeviceView(device: DeviceRecord): SelfDeviceView {
+  return {
+    deviceId: device.deviceId,
+    name: device.name,
+    platform: device.platform,
+    scopes: [...device.scopes],
+    createdAt: iso(device.createdAt),
+    ...(device.lastSeenAt != null ? { lastSeenAt: iso(device.lastSeenAt) } : {}),
+    connectionMode: device.connectionMode,
+    credentialVersion: device.credentialVersion,
+    ...(device.approvalPublicJwk && device.approvalKeyCreatedAt != null && device.approvalKeyPresence
+      ? { approvalKey: { createdAt: iso(device.approvalKeyCreatedAt), presence: device.approvalKeyPresence } }
+      : {}),
   };
 }
 

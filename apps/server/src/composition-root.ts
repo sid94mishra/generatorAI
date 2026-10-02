@@ -12,7 +12,7 @@ import * as path from 'node:path';
 import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider, resolveCodexCommand, harnessErrorOf } from '@generatorai/agent-harness-providers';
 import type { ProviderInstanceId } from '@generatorai/core';
 import { readWorkspaceRetentionPreferences } from './settings/workspaceRetention.js';
-import { readAudioPreferences } from './settings/audio.js';
+import { defaultSttLanguage, readAudioPreferences } from './settings/audio.js';
 import { AgentHostClient, HostSupervisor, resolveWorktreePath, sessionHookBridgeFactory } from '@generatorai/core';
 import { createSecurityContext, type SecurityContext } from './composition/security.js';
 import { registerHarnessInstances } from './composition/harnessInstances.js';
@@ -2163,6 +2163,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       new EnergyVad({ silenceHangoverMs: endpointSilenceMs }),
   );
   voiceService.start();
+  // MG-17 — the dictation language from Settings › Audio, applied from boot.
+  voiceService.reconfigure({ defaultLanguage: defaultSttLanguage(audioPrefs) ?? null });
 
   /**
    * Re-read Settings > Audio and rebuild the voice engines from it.
@@ -2211,6 +2213,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     );
     voiceService.reconfigure({
       sttEngine: nextStt,
+      defaultLanguage: defaultSttLanguage(prefs) ?? null,
       ...(nextTts ? { ttsEngine: nextTts } : { clearTts: true }),
       ...(nextFormatter ? { textFormatter: nextFormatter } : { clearFormatter: true }),
     });

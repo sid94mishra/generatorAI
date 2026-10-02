@@ -279,7 +279,13 @@ export class VoiceService {
     /** Pass `true` for `ttsEngine`/`textFormatter` keys that are deliberately being cleared. */
     clearTts?: boolean;
     clearFormatter?: boolean;
+    /**
+     * Settings › Audio "Language" (mobile MG-17): used when a session's
+     * client names no language. `null` clears it (auto-detect).
+     */
+    defaultLanguage?: string | null;
   }): void {
+    if (next.defaultLanguage !== undefined) this.defaultLanguage = next.defaultLanguage ?? undefined;
     if (next.sttEngine && next.sttEngine !== this.sttEngine) {
       this.retire(this.sttEngine);
       this.sttEngine = next.sttEngine;
@@ -306,6 +312,9 @@ export class VoiceService {
 
   /** Engines replaced by `reconfigure()`, awaiting the last session that uses them. */
   private retired: (ISpeechToTextEngine | ITextToSpeechEngine)[] = [];
+
+  /** The configured dictation language; `undefined` = the engine auto-detects. */
+  private defaultLanguage: string | undefined;
 
   private retire(engine: ISpeechToTextEngine | ITextToSpeechEngine): void {
     this.retired.push(engine);
@@ -386,7 +395,7 @@ export class VoiceService {
       sessionId: id,
       start: (language, options) => {
         rec.lastActivityAt = Date.now();
-        runner.start(language, options);
+        runner.start(language ?? this.defaultLanguage, options);
       },
       pushAudio: (pcm) => {
         rec.lastActivityAt = Date.now();

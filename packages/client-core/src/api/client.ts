@@ -51,6 +51,7 @@ import type {
   WorkflowRunState,
 } from '@generatorai/workflow-spec';
 import type { LoopStateView } from '@generatorai/shared';
+import type { RemoteRefs, RemoteRefsRequest, SelfDeviceView } from '@generatorai/shared';
 
 export interface ApiFetch {
   (path: string, init?: RequestInit): Promise<Response>;
@@ -1984,6 +1985,14 @@ export function createApiClient(fetchImpl: ApiFetch) {
       setApprovalKey: (body: ApprovalKeyRegistration) =>
         request<void>(fetchImpl, '/api/auth/devices/me/approval-key', jsonWith('PUT', body)),
       removeApprovalKey: () => request<void>(fetchImpl, '/api/auth/devices/me/approval-key', { method: 'DELETE' }),
+      devices: {
+        /**
+         * MG-01 — this device's own record (name, current scopes, approval
+         * key) with only `read:status`. 404 `NOT_A_DEVICE` for a session that
+         * is not a paired device (e.g. the local desktop).
+         */
+        me: () => request<SelfDeviceView>(fetchImpl, '/api/auth/devices/me'),
+      },
       scopeRequests: {
         /**
          * Ask for scopes this device does not hold. 403 `SCOPE_NOT_REQUESTABLE`
@@ -2008,6 +2017,13 @@ export function createApiClient(fetchImpl: ApiFetch) {
     sourceControl: {
       config: () => request<SourceControlConfig>(fetchImpl, '/api/source-control/config'),
       status: () => request<SourceControlStatus>(fetchImpl, '/api/source-control/status'),
+      /**
+       * MG-11 — the branches a Git remote advertises, before any codebase
+       * exists. Needs `write:projects`. Errors: 400 `INVALID_URL`,
+       * 401 `AUTH_REQUIRED`, 404 `NOT_FOUND`, 504 `TIMEOUT`.
+       */
+      remoteRefs: (body: RemoteRefsRequest) =>
+        request<RemoteRefs>(fetchImpl, '/api/source-control/remote-refs', json(body)),
     },
 
     /**

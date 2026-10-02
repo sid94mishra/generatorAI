@@ -7,6 +7,7 @@
 // this class is purely about the local git working copy.
 
 import * as path from 'node:path';
+import * as os from 'node:os';
 import * as fs from 'node:fs/promises';
 import type { ILogger } from '@generatorai/shared';
 import { GitError } from '@generatorai/shared';
@@ -23,6 +24,7 @@ import type {
   GitNumstatEntry,
   GitRawDiffEntry,
   GitRef,
+  GitRemoteBranches,
   GitStreamOptions,
   GitTreeEntry,
   IGitClient,
@@ -30,6 +32,11 @@ import type {
   ShadowRepoOptions,
   WriteTreeOptions,
 } from './ports/IGitClient.js';
+import { isRemoteGitUrl } from './remoteUrl.js';
+
+function firstLine(text: string): string {
+  return text.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
+}
 
 /**
  * Runner decorator that pins every command to a shadow git directory.
@@ -776,6 +783,65 @@ export class GitClient implements IGitClient {
       .split('\n')
       .map((b) => b.trim())
       .filter(Boolean);
+  }
+
+  /**
+   * The branches a remote advertises, read without cloning (mobile MG-11):
+   * `git ls-remote --symref <url> HEAD refs/heads/*` as an argument array —
+   * no shell, identical on Windows, macOS and Linux. Only network transports
+   * are accepted (`isRemoteGitUrl`); `ext::`, `file://` and local paths are
+   * refused before git runs, and git itself is told the same with
+   * `protocol.{ext,file}.allow=never`. Never prompts for credentials.
+   */
+  async lsRemoteBranches(url: string, opts: { timeoutMs?: number; limit?: number } = {}): Promise<GitRemoteBranches> {
+    const trimmed = url.trim();
+    if (!isRemoteGitUrl(trimmed)) {
+      return { ok: false, reason: 'invalid_url', message: 'Use an https, ssh or git URL' };
+    }
+    const timeout = opts.timeoutMs ?? 15_000;
+    const limit = opts.limit ?? 500;
+    const result = await this.runner.run(
+      'git',
+      [
+        '-c', 'protocol.ext.allow=never',
+        '-c', 'protocol.file.allow=never',
+        'ls-remote', '--symref', '--', trimmed, 'HEAD', 'refs/heads/*',
+      ],
+      { cwd: os.tmpdir(), timeout, env: { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } },
+    );
+    const timedOut = (result as { timedOut?: boolean }).timedOut === true || /timed out after/i.test(result.stderr);
+    if (timedOut) return { ok: false, reason: 'timeout', message: `The remote did not answer within ${Math.round(timeout / 1000)} s` };
+    if (result.exitCode !== 0) {
+      const stderr = result.stderr;
+      if (/authentication failed|could not read (username|password)|terminal prompts disabled|permission denied|403|401/i.test(stderr)) {
+        return { ok: false, reason: 'auth', message: 'The remote needs credentials this server does not have' };
+      }
+      if (/not found|does not exist|does not appear to be a git repository|could not resolve host|404/i.test(stderr)) {
+        return { ok: false, reason: 'not_found', message: 'Repository not found' };
+      }
+      return { ok: false, reason: 'failed', message: firstLine(stderr) || 'git ls-remote failed' };
+    }
+    let defaultBranch: string | undefined;
+    const names: string[] = [];
+    for (const line of result.stdout.split('\n')) {
+      const symref = line.match(/^ref:\s+refs\/heads\/(\S+)\s+HEAD$/);
+      if (symref) {
+        defaultBranch = symref[1];
+        continue;
+      }
+      const head = line.match(/^[0-9a-f]+\s+refs\/heads\/(\S+)$/);
+      if (head?.[1]) names.push(head[1]);
+    }
+    const unique = [...new Set(names)].sort((a, b) => a.localeCompare(b));
+    const ordered = defaultBranch && unique.includes(defaultBranch)
+      ? [defaultBranch, ...unique.filter((b) => b !== defaultBranch)]
+      : unique;
+    return {
+      ok: true,
+      ...(defaultBranch ? { defaultBranch } : {}),
+      branches: ordered.slice(0, limit),
+      truncated: ordered.length > limit,
+    };
   }
 
   /** Prune stale worktree references. */

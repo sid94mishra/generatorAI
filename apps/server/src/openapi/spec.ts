@@ -1271,6 +1271,37 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         responses: { '204': { description: 'Removed (idempotent)' } },
       },
     },
+    '/api/auth/devices/me': {
+      get: {
+        tags: ['Auth'], summary: "This device's own record (MG-01)",
+        description: 'read:status only; the device id comes from the principal. Never returns key material, the owner or the relay binding.',
+        responses: {
+          '200': {
+            description: 'SelfDeviceView',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    deviceId: { type: 'string' },
+                    name: { type: 'string' },
+                    platform: { type: 'string' },
+                    scopes: { type: 'array', items: { type: 'string' } },
+                    createdAt: { type: 'string', format: 'date-time' },
+                    lastSeenAt: { type: 'string', format: 'date-time' },
+                    connectionMode: { type: 'string' },
+                    credentialVersion: { type: 'integer' },
+                    approvalKey: { type: 'object', properties: { createdAt: { type: 'string', format: 'date-time' }, presence: { type: 'string', enum: ['biometry', 'passcode'] } } },
+                  },
+                  required: ['deviceId', 'name', 'platform', 'scopes', 'createdAt', 'connectionMode', 'credentialVersion'],
+                },
+              },
+            },
+          },
+          '404': { description: 'NOT_A_DEVICE or NOT_FOUND' },
+        },
+      },
+    },
     '/api/health': {
       get: {
         tags: ['System'],
@@ -1908,6 +1939,34 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         responses: {
           '201': { description: 'Imported agent', content: { 'application/json': { schema: { $ref: '#/components/schemas/Agent' } } } },
           '400': { description: 'Malformed document', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/agents/import/preview': {
+      post: {
+        tags: ['Agents'],
+        summary: 'Preview a .agent.md import without writing (MG-12)',
+        description: 'Parsed fields, unresolved skill / MCP / team names as warnings, and the agent an import would replace. Same scope as the import.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  markdown: { type: 'string', description: 'Max 256 KB.' },
+                  scope: { type: 'string', enum: ['global', 'project'] },
+                  projectId: { type: 'string' },
+                },
+                required: ['markdown'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'AgentImportPreview { parsed, warnings[], conflict? }' },
+          '400': { description: 'VALIDATION_ERROR or PARSE_ERROR { message }' },
+          '413': { description: 'TOO_LARGE — over 256 KB' },
         },
       },
     },
@@ -2719,6 +2778,40 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         tags: ['SourceControl'],
         summary: 'Legacy provider selection update',
         responses: { '200': { description: 'Config' }, '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } } },
+      },
+    },
+    '/api/source-control/remote-refs': {
+      post: {
+        tags: ['SourceControl'],
+        summary: 'Branches a Git remote advertises, before a clone (MG-11)',
+        description: '`git ls-remote --symref` over https / ssh / git transports only (ext:: and file:// refused), no credential prompt, 15 s timeout, at most 500 branches. Needs write:projects.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } } },
+        },
+        responses: {
+          '200': {
+            description: 'RemoteRefs',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    defaultBranch: { type: 'string' },
+                    branches: { type: 'array', items: { type: 'string' } },
+                    truncated: { type: 'boolean' },
+                  },
+                  required: ['branches', 'truncated'],
+                },
+              },
+            },
+          },
+          '400': { description: 'VALIDATION_ERROR or INVALID_URL' },
+          '401': { description: 'AUTH_REQUIRED' },
+          '404': { description: 'NOT_FOUND' },
+          '502': { description: 'REMOTE_FAILED' },
+          '504': { description: 'TIMEOUT' },
+        },
       },
     },
     '/api/source-control/status': {

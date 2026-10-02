@@ -97,6 +97,9 @@ export type {
   ResolvedAgentProjection,
   ResolvedSkillRef,
   ResolvedTeamAgent,
+  AgentImportPreviewRequest,
+  AgentImportPreview,
+  AgentImportWarning,
 } from './Agent.js';
 export {
   AGENT_TOOL_GROUPS,
@@ -421,7 +424,15 @@ export type {
   ChatSourceControlOptions,
   OpenInEditorRequest,
   OpenInEditorResult,
+  RemoteRefsRequest,
+  RemoteRefs,
 } from './SourceControl.js';
+
+// ── Own device record (mobile MG-01) ──
+export type { SelfDevicePlatform, SelfDeviceApprovalKey, SelfDeviceView } from './Device.js';
+
+// ── Audio settings wire shapes (mobile MG-17 / MG-22) ──
+export type { AudioSettingsView, AudioSettingsUpdate, AudioModelStatus } from './AudioSettings.js';
 
 // ── Attention feed (G-01) ──
 export type {

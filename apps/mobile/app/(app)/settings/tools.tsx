@@ -22,7 +22,7 @@ import {
 
 import { useAuth } from '../../../src/services/auth/AuthProvider';
 import { checkFeature, type MobileFeature } from '../../../src/services/auth/featureGate';
-import { describeScope } from '../../../src/services/auth/scopeLabels';
+import { describeScope } from '@generatorai/shared/ui-contract';
 import { Button } from '../../../src/components/ui/Button';
 import { Badge, Card, SectionHeader } from '../../../src/components/ui/primitives';
 import { SCOPE_REQUEST_HREF } from '../../../src/blocks/shell/hrefs';
