@@ -52,7 +52,7 @@ export interface UseCapturesOptions {
   onCaptured?: (() => void) | undefined;
 }
 
-export function useCaptures(opts: UseCapturesOptions): Omit<ComposerCaptureActions, 'mentionPath'> {
+export function useCaptures(opts: UseCapturesOptions): Omit<ComposerCaptureActions, 'mentionPath' | 'insertText'> {
   const { workspaceId, authedFetch, uploadAvailable, uploadReason, attach, insertText, setBusy, toast, onCaptured } = opts;
   const api = useMemo(() => createApiClient(authedFetch), [authedFetch]);
   const admin = useMemo(() => createAdminApi(authedFetch), [authedFetch]);

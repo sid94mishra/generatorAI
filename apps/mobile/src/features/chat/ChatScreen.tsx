@@ -20,6 +20,7 @@ import {
   type RewindScope,
 } from '@generatorai/client-core';
 
+import { BrowserTab, ComputerTab } from '../../blocks/BrowserView';
 import { ChangesPanel, ChangesStrip } from '../../blocks/ChangesPanel';
 import { FileTree } from '../../blocks/FileTree';
 import { chatRowView, displayChatTitle, useChatRowActions } from '../../blocks/ChatRow';
@@ -565,12 +566,16 @@ export default function ChatScreen({ renderLegacyTab }: ChatScreenProps = {}): R
           <FileTree workspaceId={workspaceId} chatId={chatId} active={ctx.active} />
         ) : type === 'terminal' ? (
           <TerminalPanel workspaceId={workspaceId} active={ctx.active} agentBusy={isStreaming} agentCalls={agentCalls} />
+        ) : type === 'browser' ? (
+          <BrowserTab workspaceId={workspaceId} active={ctx.active} agentBusy={isStreaming} agentName={boundAgent?.name ?? null} />
+        ) : type === 'computer' ? (
+          <ComputerTab workspaceId={workspaceId} active={ctx.active} />
         ) : (
           (renderLegacyTab?.(type, ctx, paneContext) ?? null)
         )}
       </ComposerCaptureContext.Provider>
     ),
-    [captures, workspaceId, chatId, openRewind, renderLegacyTab, paneContext, isStreaming, agentCalls],
+    [captures, workspaceId, chatId, openRewind, renderLegacyTab, paneContext, isStreaming, agentCalls, boundAgent?.name],
   );
   useWorkspacePaneClaim({
     kind: 'chat',

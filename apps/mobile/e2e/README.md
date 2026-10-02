@@ -49,7 +49,6 @@ copy rotates the resume credential and the original is logged out), `E2E_OUT` (s
 | `companion.mjs <chat>` | a companion-scope device streams (read:activity), panes lock honestly, request-access sheet |
 | `legacy.mjs <chat>` | a device WITHOUT read:activity gets the explanatory strip and its chat stream still connects |
 | `request.mjs` / `approveadmin.mjs` / `unlocked.mjs <chat>` | scope request → admin approve (confirm sheet + step-up) → phone unlock |
-| `flow3.mjs <chat>` | rename, slash strip, @ mentions, attach menu, agents, accessibility, chat swipe |
 | `light.mjs <chat>` | light mode + alternate theme screenshots |
 | `net2.mjs <chat>` | network timeline of a streaming turn |
 

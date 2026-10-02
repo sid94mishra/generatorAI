@@ -14,8 +14,7 @@ import { useCapability } from '../../services/auth/useCapability';
 import { scmKeys } from '@generatorai/client-core';
 import { useScmApi } from '../scm/useScmApi';
 import { useChangesSummary } from '../chat/panes/useChangesSummary';
-import { COMPUTER_SCOPE, computerFeature } from '../chat/panes/paneModel';
-import { computerConsentKey } from '../chat/panes/ComputerPane';
+import { COMPUTER_SCOPE, computerConsentKey } from '../../blocks/WorkspacePane';
 import type { TasksSummary } from '../chat/panes/useTasksSummary';
 import { workbenchBadge, workbenchTools, type ToolDescriptor, type WorkbenchInput } from './workbenchModel';
 
@@ -150,7 +149,7 @@ export function useWorkbench(input: UseWorkbenchInput): WorkbenchState {
       browserLocked: !browser.available,
       computer: {
         enabled: computerEnabled,
-        locked: !computerFeature(scopes).available,
+        locked: !checkFeature('computer', scopes).available,
         needsAnswer: computerNeedsAnswer,
       },
       session: { model: input.model ?? null, contextPercent: input.contextPercent ?? null },

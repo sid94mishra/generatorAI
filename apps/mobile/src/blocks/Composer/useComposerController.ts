@@ -366,7 +366,14 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
     },
     [setDraft, setCaret, onCaptured],
   );
-  const captures = useMemo<ComposerCaptureActions>(() => ({ ...fetched, mentionPath }), [fetched, mentionPath]);
+  const insertText = useCallback(
+    (label: string, text: string) => {
+      insertCaptureText(label, text);
+      onCaptured?.();
+    },
+    [insertCaptureText, onCaptured],
+  );
+  const captures = useMemo<ComposerCaptureActions>(() => ({ ...fetched, mentionPath, insertText }), [fetched, mentionPath, insertText]);
   // "Mention in chat" from a screen pushed over this chat (FilePreview, the diff).
   useEffect(() => (chatId ? onMentionRequest(chatId, mentionPath) : undefined), [chatId, mentionPath]);
 

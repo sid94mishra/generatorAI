@@ -83,6 +83,14 @@ import {
 } from './client.js';
 
 /** Upload categories of a run start. */
+/** `POST …/browser/input` (the server's `BrowserInputEvent`); coordinates are in page space. */
+export type BrowserInputEvent =
+  | { type: 'mouse.move'; x: number; y: number }
+  | { type: 'mouse.click'; x: number; y: number; button?: 'left' | 'right' | 'middle'; clickCount?: number }
+  | { type: 'mouse.wheel'; x?: number; y?: number; deltaX: number; deltaY: number }
+  | { type: 'key.press'; key: string; modifiers?: readonly ('Alt' | 'Control' | 'Meta' | 'Shift')[] }
+  | { type: 'key.type'; text: string };
+
 export type InvocationUploadCategory = 'skills' | 'agents' | 'prompts';
 
 /** Files a run start uploads before invoking, by category. */
@@ -733,6 +741,13 @@ export function createAdminApi(fetchImpl: ApiFetch) {
         req<void>(`/api/workspaces/${workspaceId}/browser/detach`, json({})),
       resize: (workspaceId: string, width: number, height: number) =>
         req<void>(`/api/workspaces/${workspaceId}/browser/resize`, json({ width, height })),
+      /**
+       * One pointer / keyboard event in PAGE coordinates (`POST …/browser/input`). With the inspector on
+       * (`actions {kind:'inspector', on:true}`), a `mouse.click` picks the element under it and every client
+       * receives `browser.selection` (mobile MG-24 / MD-114).
+       */
+      input: (workspaceId: string, event: BrowserInputEvent) =>
+        req<{ ok?: boolean }>(`/api/workspaces/${workspaceId}/browser/input`, json(event)),
       scroll: (workspaceId: string) =>
         req<Record<string, unknown>>(`/api/workspaces/${workspaceId}/browser/scroll`),
       /** Absolute path of the single-frame JPEG endpoint, for image rendering. */

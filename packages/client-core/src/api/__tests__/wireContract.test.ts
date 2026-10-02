@@ -584,6 +584,14 @@ describe('browser semantic inspector wire contract', () => {
     expect(calls[0]?.method).toBe('POST');
   });
 
+  it('POSTs a page-space click to the input route (MG-24 element pick)', async () => {
+    const { calls, fetchImpl } = capture();
+    await createAdminApi(fetchImpl).browser.input('ws-1', { type: 'mouse.click', x: 120, y: 340 });
+    expect(calls[0]?.path).toBe('/api/workspaces/ws-1/browser/input');
+    expect(calls[0]?.method).toBe('POST');
+    expect(calls[0]?.body).toEqual({ type: 'mouse.click', x: 120, y: 340 });
+  });
+
   it('asks the actions route for a screenshot, not the region-capture route', async () => {
     // `/browser/capture` requires a clip rectangle and answers raw
     // `image/png`; `browser screenshot` used to post to it with `fullPage`

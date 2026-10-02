@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { computerFeature } from '../components/chat/panes/paneModel';
+import { checkFeature } from '../services/auth/featureGate';
 import { planCardActions } from '../blocks/GateCard/model/gateActions';
 
-describe('computerFeature', () => {
+describe('computer feature gate', () => {
   it('describes exec:computer as a grantable, lockable feature', () => {
-    expect(computerFeature(['exec:computer'])).toEqual({ available: true, missing: [], reason: null, grantable: true });
-    const locked = computerFeature(['exec:terminal']);
+    expect(checkFeature('computer', ['exec:computer'])).toEqual({ available: true, missing: [], reason: null, grantable: true });
+    const locked = checkFeature('computer', ['exec:terminal']);
     expect(locked).toMatchObject({ available: false, missing: ['exec:computer'], grantable: true });
     expect(locked.reason).toBeTruthy();
   });

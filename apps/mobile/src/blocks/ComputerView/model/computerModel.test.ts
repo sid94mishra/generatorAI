@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { activeConsent, activityRows, consentOptions, secondsLeft, tookScreen } from '../computerModel';
+import { activeConsent, activityRows, consentOptions, secondsLeft, tookScreen } from './computerModel';
 
 const consent = (over: Partial<Parameters<typeof consentOptions>[0] & { expiresAt: number; requestId: string }> = {}) => ({
   requestId: 'r1',

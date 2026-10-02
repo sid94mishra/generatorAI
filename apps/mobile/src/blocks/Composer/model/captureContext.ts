@@ -24,6 +24,8 @@ export interface ComposerCaptureActions {
   captureBrowserPageText(): Promise<void>;
   /** "Mention in chat" (Changes, Files): `@<path>` at the caret, then the composer comes forward. */
   mentionPath(path: string): void;
+  /** A labelled text block into the draft (a browser comment's "Send to chat"), then the composer comes forward. */
+  insertText(label: string, text: string): void;
   /**
    * Whether captures become attachments (true) or, for text, are inserted
    * into the draft (false). Lets a pane label its action honestly.

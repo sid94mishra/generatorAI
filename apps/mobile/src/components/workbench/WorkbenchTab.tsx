@@ -11,17 +11,10 @@
 import React from 'react';
 
 import { EmptyState } from '../ui/States';
-import { checkFeature } from '../../services/auth/featureGate';
 import { TasksSection } from '../chat/workbench/TasksSection';
 import { PlanSection } from '../chat/workbench/PlanSection';
-import { BrowserSection } from '../chat/workbench/BrowserSection';
-import { LockedPane } from '../chat/panes/LockedPane';
-import { ComputerPane } from '../chat/panes/ComputerPane';
-import { COMPUTER_SCOPE, computerFeature } from '../chat/panes/paneModel';
 import type { MobilePaneTab } from '../../blocks/WorkspacePane';
 
-type WithActive<P> = React.ComponentType<P & { active?: boolean }>;
-const BrowserPane = BrowserSection as WithActive<React.ComponentProps<typeof BrowserSection>>;
 
 /** A request to open one file in a tool. `nonce` re-asks for the same file. */
 export interface ToolFocus {
@@ -61,24 +54,6 @@ export function WorkbenchTab({
 }: WorkbenchTabProps): React.ReactElement | null {
   const noWorkspace = <EmptyState title="No workspace yet" message="A workspace is created the first time the agent runs here." />;
   switch (type) {
-    case 'browser': {
-      if (!workspaceId) return noWorkspace;
-      const browser = checkFeature('browser', scopes);
-      return browser.available ? (
-        <BrowserPane workspaceId={workspaceId} active={active} agentBusy={agentBusy} />
-      ) : (
-        <LockedPane title="Browser is not enabled" feature={browser} scope="exec:browser" />
-      );
-    }
-    case 'computer': {
-      if (!workspaceId) return noWorkspace;
-      const computer = computerFeature(scopes);
-      return computer.available ? (
-        <ComputerPane workspaceId={workspaceId} active={active} />
-      ) : (
-        <LockedPane title="Computer use is not enabled on this device" feature={computer} scope={COMPUTER_SCOPE} />
-      );
-    }
     case 'tasks':
       return chatId ? <TasksSection chatId={chatId} active={active} /> : null;
     case 'plan':
