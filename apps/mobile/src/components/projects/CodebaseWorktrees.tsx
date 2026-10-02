@@ -27,10 +27,12 @@ import { projectKeys } from '@generatorai/client-core';
 import { messageOf } from './ProjectActions';
 import { useProjectsApi } from './useProjectsApi';
 import { canRemoveWorktree, cleanupSummary, worktreeStatusLabel, worktreeTone } from './projectEditModel';
+import { useOpenRun } from '../../features/workflows/queries';
 
 const PREVIEW = 5;
 
 export function CodebaseWorktrees({ projectId, codebaseId }: { projectId: string; codebaseId: string }): React.ReactElement {
+  const openRun = useOpenRun();
   const api = useProjectsApi();
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -114,7 +116,7 @@ export function CodebaseWorktrees({ projectId, codebaseId }: { projectId: string
                   chevron={Boolean(wt.runId && wt.runType === 'workflow')}
                   {...(tone !== 'success' ? { trailing: <Badge label={worktreeStatusLabel(wt.status)} tone={tone} /> } : {})}
                   {...(wt.runId && wt.runType === 'workflow'
-                    ? { onPress: () => router.push(`/runs/${wt.runId}`) }
+                    ? { onPress: () => void openRun(wt.runId!) }
                     : {})}
                   {...(removable ? { onLongPress: () => setRemoving(wt) } : {})}
                   accessibilityHint={removable ? 'Long-press to remove this worktree' : undefined}

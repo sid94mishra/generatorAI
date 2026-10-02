@@ -45,6 +45,7 @@ import { Screen } from '../src/components/ui/Screen';
 import { EmptyState, Spinner } from '../src/components/ui/States';
 import { haptics } from '../src/components/ui/haptics';
 import { useTheme } from '../src/theme/ThemeProvider';
+import { nouns } from '../src/ui/platform/nouns';
 
 type Phase = 'scan' | 'manual' | 'consent' | 'enrolling';
 
@@ -55,7 +56,7 @@ export default function PairScreen(): React.ReactElement {
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<Phase>('scan');
   const [consent, setConsent] = useState<PairingConsent | null>(null);
-  const [deviceName, setDeviceName] = useState('My phone');
+  const [deviceName, setDeviceName] = useState(() => `My ${nouns().device}`);
   const [error, setError] = useState<string | null>(null);
   const [manualCode, setManualCode] = useState('');
   // Guards against the camera firing the same code dozens of times per second.
@@ -95,7 +96,9 @@ export default function PairScreen(): React.ReactElement {
   // routes here with the code as a param. It goes through `acceptCode` like a
   // scan, so it still lands on the consent screen — a link is exactly as
   // attacker-controllable as a QR and gets the same fingerprint check.
-  const { code: linkedCode } = useLocalSearchParams<{ code?: string }>();
+  const { code: linkedCode, mode } = useLocalSearchParams<{ code?: string; mode?: string }>();
+  // `?mode=add`: pairing another server from the switcher (MB-20) while this one stays paired; Back returns there.
+  const adding = mode === 'add';
   const consumedLink = useRef<string | null>(null);
   useEffect(() => {
     if (typeof linkedCode !== 'string' || !linkedCode || consumedLink.current === linkedCode) return;
@@ -148,7 +151,7 @@ export default function PairScreen(): React.ReactElement {
         await completePairing(consent, deviceName.trim() || 'Mobile device');
         enrollingRef.current = false;
         haptics.success();
-        router.replace('/(tabs)');
+        router.replace('/');
       } catch (err) {
         enrollingRef.current = false;
         const next = classifyPairingFailure(err);
@@ -292,7 +295,11 @@ export default function PairScreen(): React.ReactElement {
 
     if (!permission.granted) {
       return (
-        <Screen title="Pair this phone" subtitle="Scan the code your GeneratorAI server shows.">
+        <Screen
+          title={adding ? 'Add a server' : `Pair this ${nouns().device}`}
+          subtitle="Scan the code your GeneratorAI server shows."
+          {...(adding ? { back: true, onBack: () => router.back() } : { sidebarToggle: false })}
+        >
           <EmptyState
             title="Camera access needed"
             message="Pairing uses the camera to read the QR code shown by your GeneratorAI server. The camera is used for nothing else."
@@ -349,6 +356,7 @@ export default function PairScreen(): React.ReactElement {
               setPhase('manual');
             }}
           />
+          {adding ? <Button label="Cancel" variant="ghost" full haptic="tap" onPress={() => router.back()} /> : null}
         </View>
       </View>
     );
@@ -441,7 +449,7 @@ export default function PairScreen(): React.ReactElement {
       <Text className="text-xs leading-relaxed text-muted-foreground">
         {sensitiveCount === 0
           ? 'Terminal and browser control are not included. You can grant them later, per device.'
-          : `${sensitiveCount} sensitive permission${sensitiveCount === 1 ? '' : 's'} let this phone act on the machine running GeneratorAI. You can revoke any of them later, per device.`}
+          : `${sensitiveCount} sensitive permission${sensitiveCount === 1 ? '' : 's'} let this ${nouns().device} act on the machine running GeneratorAI. You can revoke any of them later, per device.`}
       </Text>
 
       <SectionHeader title="Device name" />
@@ -450,7 +458,7 @@ export default function PairScreen(): React.ReactElement {
         hint="Shown in your server’s device list so you can revoke it later."
         value={deviceName}
         onChangeText={setDeviceName}
-        placeholder="My phone"
+        placeholder={`My ${nouns().device}`}
         autoCapitalize="words"
       />
 

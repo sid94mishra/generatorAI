@@ -7,9 +7,9 @@ env: {FRESH_CHAT: stream, DEVICE_SCOPES: "exec:terminal"}
 ---
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///chats/${CHAT_STREAM_ID}
-- extendedWaitUntil: {visible: {id: workbench-button}, timeout: 30000}
-- tapOn: {id: workbench-button}
-- tapOn: {id: workbench-tool-terminal}
+- extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- runFlow: ../_subflows/open-pane.yaml
+- tapOn: {id: pane-tab-terminal}
 - extendedWaitUntil: {visible: New terminal, timeout: 30000}
 - tapOn: New terminal
 - extendedWaitUntil: {visible: {id: terminal-view}, timeout: 30000}

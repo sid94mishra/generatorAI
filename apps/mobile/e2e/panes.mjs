@@ -10,9 +10,9 @@ const visibleButtons = async () => [...new Set(await page.locator('[role=button]
 const tool = async (id, label) => {
   const chip = page.getByRole('button', { name: new RegExp(`^${label}\\.`) }).locator('visible=true').first();
   if (await chip.count()) { await chip.click({ timeout: 8000 }); await sleep(2000); return; }
-  await page.getByTestId('workbench-button').locator('visible=true').first().click({ timeout: 8000 });
+  await page.getByTestId('pane-toggle').locator('visible=true').first().click({ timeout: 8000 });
   await sleep(900);
-  await page.getByTestId(`workbench-tool-${id}`).locator('visible=true').first().click({ timeout: 8000 });
+  await page.getByTestId(`pane-tab-${id}`).locator('visible=true').first().click({ timeout: 8000 });
   await sleep(2000);
 };
 const closeSheet = async () => { await vis(/^close$/i).click().catch(() => {}); await sleep(800); };

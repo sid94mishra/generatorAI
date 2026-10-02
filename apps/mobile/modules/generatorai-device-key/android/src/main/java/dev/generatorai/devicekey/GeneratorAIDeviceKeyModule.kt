@@ -25,11 +25,14 @@
 //     is locked, and app lock / step-up are enforced in JS instead.
 //   • `setUnlockedDeviceRequired` is deliberately NOT set for the same reason.
 //
-// JS facade: apps/mobile/src/native/deviceKeyModule.ts.
+// JS facade: apps/mobile/src/services/native/deviceKeyModule.ts; the key
+// commands of M5-09 (KeyCommands.kt) are driven from
+// apps/mobile/src/services/native/keyCommands.ts.
 // ────────────────────────────────────────────────────────────────
 
 package dev.generatorai.devicekey
 
+import android.content.res.Configuration
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
@@ -68,6 +71,35 @@ internal class DeviceKeySignatureFormatException :
 class GeneratorAIDeviceKeyModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("GeneratorAIDeviceKey")
+
+    // ── Hardware keyboard shortcuts (M5-09; KeyCommands.kt) ──────────
+    Events("onKeyCommand", "onHardwareKeyboardChange")
+
+    OnCreate {
+      KeyCommandCenter.emit = { id -> sendEvent("onKeyCommand", mapOf("id" to id)) }
+    }
+
+    Function("setKeyCommands") { commands: List<KeyCommandRecord> ->
+      KeyCommandCenter.specs = commands.mapNotNull { KeyCommandCenter.spec(it) }
+      val activity = appContext.currentActivity
+      activity?.runOnUiThread { KeyCommandCenter.install(activity) }
+    }
+
+    Function("setKeyCommandsSuspended") { suspended: Boolean ->
+      KeyCommandCenter.suspended = suspended
+    }
+
+    Function("isHardwareKeyboardAttached") {
+      hardwareKeyboardAttached()
+    }
+
+    // A new activity instance (recreated after a configuration change) gets the callback again; a keyboard plugged
+    // in or out while backgrounded is reported on return.
+    OnActivityEntersForeground {
+      val activity = appContext.currentActivity
+      activity?.runOnUiThread { KeyCommandCenter.install(activity) }
+      sendEvent("onHardwareKeyboardChange", mapOf("attached" to hardwareKeyboardAttached()))
+    }
 
     // Every supported Android version has AndroidKeyStore; whether it is
     // hardware-backed is answered per key by `backing`, not up front.
@@ -114,6 +146,13 @@ class GeneratorAIDeviceKeyModule : Module() {
     AsyncFunction("remove") { alias: String ->
       deleteKey(alias)
     }
+  }
+
+  /** A physical keyboard is attached and not hidden (Configuration.keyboard / hardKeyboardHidden). */
+  private fun hardwareKeyboardAttached(): Boolean {
+    val config = appContext.reactContext?.resources?.configuration ?: return false
+    return config.keyboard == Configuration.KEYBOARD_QWERTY &&
+      config.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
   }
 
   // ── Keystore ──────────────────────────────────────────────────

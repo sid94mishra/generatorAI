@@ -52,6 +52,9 @@ export type FromWebView =
    * arrived at the renderer — evidence of a hardware keyboard.
    */
   | { type: 'hwkey' }
+  /** The terminal gained / lost keyboard focus: it owns keys and gestures meanwhile (MD-19). */
+  | { type: 'focused' }
+  | { type: 'unfocused' }
   | { type: 'searchResult'; found: boolean };
 
 /** Largest title the bridge will carry — a shell can set anything. */
@@ -136,7 +139,9 @@ export function parseFromWebView(raw: string): FromWebView | null {
     case 'ready':
     case 'bell':
     case 'hwkey':
-      return { type: message['type'] as 'ready' | 'bell' | 'hwkey' };
+    case 'focused':
+    case 'unfocused':
+      return { type: message['type'] as 'ready' | 'bell' | 'hwkey' | 'focused' | 'unfocused' };
     case 'input':
       return typeof message['b64'] === 'string' ? { type: 'input', b64: message['b64'] } : null;
     case 'resize': {

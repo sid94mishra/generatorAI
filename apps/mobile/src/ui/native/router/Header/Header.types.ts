@@ -49,6 +49,11 @@ export interface HeaderProps {
   modal?: { cancelLabel?: string; onCancel: () => void; primary?: { label: string; onPress: () => void; disabled?: boolean; loading?: boolean } };
   /** Default true for role 'top' on iOS; Android only Home (MD-94). */
   largeTitle?: boolean;
+  /**
+   * iOS: an opaque bar the content starts below, for content that does not adjust its insets under a transparent
+   * bar (the legacy screens hosted in the M5 shell, MD-141). Default false (transparent, MD-133).
+   */
+  opaque?: boolean;
   /** Content offset: the Android bar turns raised when content scrolls under it. */
   scroll?: SharedValue<number>;
   /** Sub-ids (03 §1.5): sidebar toggle `menu-button`, back (e.g. `chat-back`), pane toggle `pane-toggle`. */

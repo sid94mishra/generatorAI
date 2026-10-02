@@ -1,0 +1,444 @@
+// ────────────────────────────────────────────────────────────────
+// Run — live stage timeline, the decisions it is waiting on, and control.
+//
+// A stage parked in `awaiting_input` blocks everything downstream and costs
+// seconds to unblock, so decisions float to the top. Failed and paused
+// stages surface too, but with the action that actually applies to them
+// (Retry / Resume) — never with approval buttons.
+//
+// Live: the `run` stream scope drives refreshes while the screen is open;
+// polling stays on as a slow safety net and stops once the run is terminal.
+// ────────────────────────────────────────────────────────────────
+
+import React, { useCallback, useMemo, useState } from 'react';
+import { Text, View } from 'react-native';
+import { router, useIsFocused, useLocalSearchParams, useNavigation } from 'expo-router';
+import { useRun, useRunPendingDecisions } from '../../../../../../src/features/workflows/queries';
+import { ChevronLeft, Lock, MoreHorizontal, Trash2, Workflow as WorkflowIcon } from 'lucide-react-native';
+import { type ApprovalOutcome, type StageRunSummary } from '@generatorai/client-core';
+
+import { useRunMutations, useRunPermissionMode, type RunAction } from '../../../../../../src/services/api/useRunControl';
+import { useRunStream } from '../../../../../../src/services/stream/useRunStream';
+import { StageGateCard } from '../../../../../../src/components/runs/StageGateCard';
+import { LoopDecisionCard } from '../../../../../../src/components/runs/LoopDecisionCard';
+import { CheckOutput } from '../../../../../../src/components/runs/CheckOutput';
+import { isCheckStage, isParkedLoop, waitOf, type RunStage } from '../../../../../../src/components/runs/loopModel';
+import { WaitDecisionCard, type WaitDecision } from '../../../../../../src/components/runs/WaitDecisionCard';
+import { formatDuration, relativeTime, runElapsed } from '../../../../../../src/components/runs/formatTime';
+import { StageTimeline } from '../../../../../../src/components/runs/StageTimeline';
+import { StageTranscriptInline } from '../../../../../../src/components/runs/StageTranscriptInline';
+import { Header } from '../../../../../../src/ui/native/router/Header';
+import { useBreadcrumb } from '../../../../../../src/blocks/shell/useHeaderNav';
+import { domainStatus } from '../../../../../../src/theme/status';
+import { useWorkbench } from '../../../../../../src/components/workbench/useWorkbench';
+import { useWorkbenchPane } from '../../../../../../src/components/workbench/useWorkbenchPane';
+import { usePaneStore, usePaneToggle } from '../../../../../../src/blocks/WorkspacePane';
+import { MAX_SCALE } from '../../../../../../src/components/ui/accessibility';
+import { StatusGlyph } from '../../../../../../src/components/runs/StatusGlyph';
+import {
+  awaitsApproval,
+  runControlsFor,
+  runTitle,
+} from '../../../../../../src/components/runs/runModel';
+import { isActive, isTerminal, statusLabel } from '../../../../../../src/components/runs/statusStyle';
+import { PermissionModeChip, PermissionModeSheet } from '../../../../../../src/components/runs/PermissionModeSheet';
+import { toneOf } from '../../../../../../src/components/runs/tone';
+import { useFeature } from '../../../../../../src/components/runs/useFeature';
+import { usePullRefresh } from '../../../../../../src/components/runs/usePullRefresh';
+import { Card, SectionHeader, TONE_TEXT } from '../../../../../../src/components/ui/primitives';
+import { ActionSheet, type MenuAction } from '../../../../../../src/components/ui/ActionSheet';
+import { Button, IconButton } from '../../../../../../src/components/ui/Button';
+import { ListGroup, ListRow } from '../../../../../../src/components/ui/ListRow';
+import { PlainScroll, goBack } from '../../../../../../src/components/ui/Screen';
+import { runHref, workflowHref as workflowHrefFor } from '../../../../../../src/blocks/shell/hrefs';
+import { EmptyState, ErrorState } from '../../../../../../src/components/ui/States';
+import { SkeletonList } from '../../../../../../src/components/ui/Skeleton';
+import { useTheme } from '../../../../../../src/theme/ThemeProvider';
+
+const ACTION_LABEL: Record<RunAction, string> = {
+  pause: 'Pause run',
+  resume: 'Resume run',
+  cancel: 'Cancel run',
+  retry: 'Retry failed',
+};
+
+export default function RunDetailScreen(): React.ReactElement {
+  const params = useLocalSearchParams<{ id: string; runId: string }>();
+  const runId = String(params.runId);
+  const navigation = useNavigation();
+  const focused = useIsFocused();
+  const { legacyColors: colors } = useTheme();
+  const runControl = useFeature('runControl');
+  // Retry forks a new run (an invocation), which needs only runStart.
+  const runStart = useFeature('runStart');
+  // The workspace pane (MB-42): the run's workspace tools, as on a chat.
+  const paneOpen = usePaneStore((s) => s.open && s.claim?.scope.kind === 'run' && s.claim.scope.id === runId);
+  // One step open at a time. `undefined` = the user has not chosen, so the
+  // running step is shown; `null` = they collapsed it and it stays shut.
+  const [expanded, setExpanded] = useState<string | null | undefined>(undefined);
+  const [busyStage, setBusyStage] = useState<string | null>(null);
+  const [menu, setMenu] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [modeSheet, setModeSheet] = useState(false);
+
+  const { connected } = useRunStream(runId, focused);
+  const { runAction, stageAction, approve, remove } = useRunMutations(runId);
+
+  const run = useRun(runId, focused, connected);
+
+  const runStatus = run.data?.status;
+  // Only a run that can still call tools has a mode worth showing.
+  const live = Boolean(runStatus) && !isTerminal(runStatus ?? '');
+  const { mode: permissionMode, setMode } = useRunPermissionMode(runId, live);
+  const pull = usePullRefresh(() => run.refetch());
+
+  const stages = run.data?.stageRuns ?? [];
+  // A parked loop is answered with the loop's own decisions, not an approval.
+  const approvals = useMemo(
+    () => stages.filter((s) => awaitsApproval(s.status) && !isParkedLoop(s as RunStage)),
+    [stages],
+  );
+  const loopDecisions = useMemo(() => stages.filter((s) => isParkedLoop(s as RunStage)) as RunStage[], [stages]);
+  // Waits (P05 §4.3) and the decisions of sub-workflow children, mirrored here (P05 §4.2).
+  const hasChildren = stages.some((s) => (s as RunStage).kind === 'subworkflow' && s.status === 'running');
+  const pending = useRunPendingDecisions(runId, hasChildren, focused);
+  const waitDecisions = useMemo<WaitDecision[]>(() => {
+    const out: WaitDecision[] = [];
+    for (const s of stages as RunStage[]) {
+      const w = waitOf(s);
+      if (!w || s.status !== 'waiting' || w.type === 'timer') continue;
+      out.push({
+        runId,
+        instanceId: s.id,
+        name: w.label ?? s.name ?? s.stageKey,
+        type: w.type,
+        prompt: w.prompt,
+        form: w.form,
+        eventKey: w.eventKey,
+        callbackUrl: s.callback?.url ?? null,
+      });
+    }
+    for (const d of pending.data ?? []) {
+      if (d.runId === runId) continue;
+      const i = (d.interruptData && typeof d.interruptData === 'object' ? d.interruptData : {}) as Record<string, unknown>;
+      const type = d.kind === 'wait' ? (d.waitType === 'event' ? 'event' : 'approval') : d.kind === 'stage_completion_review' ? 'completion_review' : null;
+      if (!type) continue;
+      out.push({
+        runId,
+        instanceId: d.instanceId,
+        name: d.name,
+        via: d.via.map((v) => v.name).join(' › '),
+        type,
+        prompt: typeof i['prompt'] === 'string' ? i['prompt'] : typeof i['reason'] === 'string' ? i['reason'] : null,
+        form: i['form'] && typeof i['form'] === 'object' ? (i['form'] as Record<string, unknown>) : null,
+        eventKey: typeof i['eventKey'] === 'string' ? i['eventKey'] : null,
+        callbackUrl: d.callback?.url ?? null,
+      });
+    }
+    return out;
+  }, [stages, pending.data, runId]);
+  const controls = runControlsFor(runStatus ?? '');
+
+  const doRunAction = useCallback(
+    (action: RunAction) => {
+      runAction.mutate(action, {
+        onSuccess: ({ newRunId }) => {
+          if (newRunId && newRunId !== runId) router.replace(runHref(run.data?.workflowDefinitionId ?? String(params.id), newRunId) as never);
+        },
+      });
+    },
+    [runAction, runId, run.data?.workflowDefinitionId, params.id],
+  );
+
+  // The navigator header is off for this route: the screen draws its own so
+  // the workbench panel can slide over it (as on a chat).
+  React.useLayoutEffect(() => {
+    navigation.setOptions({ title: runTitle(run.data?.name, 'Run'), gestureEnabled: !paneOpen });
+  }, [navigation, run.data?.name, paneOpen]);
+
+  const workbench = useWorkbench({
+    surface: 'run',
+    workspaceId: run.data?.workspaceId ?? null,
+    scopes: runControl.scopes,
+    live: paneOpen,
+  });
+  const paneBody = useMemo(() => ({ workspaceId: run.data?.workspaceId ?? null, scopes: runControl.scopes }), [run.data?.workspaceId, runControl.scopes]);
+  useWorkbenchPane({
+    kind: 'run',
+    id: run.data?.workspaceId ? runId : undefined,
+    title: runTitle(run.data?.name, 'Run'),
+    path: runHref(String(params.id), runId),
+    tools: workbench.tools,
+    body: paneBody,
+  });
+
+  const decide = useCallback(
+    (stage: StageRunSummary, outcome: ApprovalOutcome, feedback?: string) => {
+      setBusyStage(stage.id);
+      approve.mutate(
+        { stageRunId: stage.id, outcome, ...(feedback ? { feedback } : {}) },
+        { onSettled: () => setBusyStage(null) },
+      );
+    },
+    [approve],
+  );
+
+  const openStage = useCallback(
+    (stage: StageRunSummary) =>
+      router.push({
+        pathname: '/workflows/[id]/runs/[runId]/stages/[stageRunId]',
+        params: { id: run.data?.workflowDefinitionId ?? String(params.id), runId, stageRunId: stage.id },
+      } as never),
+    [runId, run.data?.workflowDefinitionId, params.id],
+  );
+
+  const definitionId = run.data?.workflowDefinitionId;
+  const workflowHref = (
+    workflowHrefFor(definitionId ?? String(params.id))
+  ) as NonNullable<Parameters<typeof goBack>[0]>;
+  // A run belongs to its workflow (desktop: /workflows/:id/runs/:runId), so with no history behind it Back
+  // lands on that workflow's page. Workspace header role (MD-18): breadcrumb, status line, pane toggle.
+  const onBack = (): void => goBack(workflowHref);
+  const runCrumbs = useBreadcrumb(
+    useMemo(() => [{ label: 'Workflows', href: '/workflows' }, { label: 'Workflow', href: String(workflowHref) }], [workflowHref]),
+  );
+  const paneToggle = usePaneToggle();
+  const runBadge = domainStatus('workflowRun', run.data?.status);
+
+  if (run.isLoading) {
+    return (
+      <View className="flex-1 bg-background">
+        <Header role="detail" title="Run" opaque breadcrumb={runCrumbs} onBack={onBack} />
+        <View className="p-4">
+          <SkeletonList rows={5} />
+        </View>
+      </View>
+    );
+  }
+  if (run.error || !run.data) {
+    return (
+      <View className="flex-1 bg-background">
+        <Header role="detail" title="Run" opaque breadcrumb={runCrumbs} onBack={onBack} />
+        <ErrorState
+        title={run.error ? 'Could not load this run' : 'Run not found'}
+        message={run.error instanceof Error ? run.error.message : undefined}
+        onRetry={() => void run.refetch()}
+        />
+      </View>
+    );
+  }
+
+  const data = run.data;
+  const runningStage = stages.find((st) => isActive(st.status));
+  const expandedStageId = expanded === undefined ? (runningStage?.id ?? null) : expanded;
+  const elapsed = runElapsed(data, isActive(data.status) ? null : data.completedAt ?? data.updatedAt);
+  const workspaceId = data.workspaceId;
+
+  const allowed = (action: RunAction): boolean => (action === 'retry' ? runStart.available : runControl.available);
+  const menuActions: MenuAction[] = [
+    ...(['pause', 'resume', 'retry', 'cancel'] as const)
+      .filter((action) => controls[action] && allowed(action))
+      .map((action) => ({
+        label: ACTION_LABEL[action],
+        destructive: action === 'cancel',
+        onPress: () => (action === 'cancel' ? setConfirmCancel(true) : doRunAction(action)),
+      })),
+    ...(runControl.available
+      ? [
+          {
+            label: 'Delete run',
+            destructive: true,
+            icon: <Trash2 size={18} color={colors.danger} />,
+            onPress: () => setConfirmDelete(true),
+          },
+        ]
+      : [
+          {
+            label: 'Request access',
+            detail: 'Pausing, cancelling and deleting runs needs workflow permission on this device.',
+            icon: <Lock size={18} color={colors['muted-foreground']} />,
+            onPress: runControl.requestAccess,
+          },
+        ]),
+  ];
+
+  // The single most relevant control, inline, so it is not hidden in a menu.
+  const primary: RunAction | null = controls.resume ? 'resume' : controls.retry ? 'retry' : null;
+
+  return (
+    <View className="flex-1 bg-background">
+      <Header
+        role={workspaceId ? 'workspace' : 'detail'}
+        title={runTitle(data.name, 'Run')}
+        opaque
+        breadcrumb={runCrumbs}
+        onBack={onBack}
+        {...(runBadge ? { status: { state: runBadge.state, label: runBadge.label } } : {})}
+        {...(workspaceId ? { paneToggle } : {})}
+        actions={[{ id: 'run-menu', icon: 'more', label: 'Run actions', onPress: () => setMenu(true) }]}
+      />
+      <PlainScroll onRefresh={pull.onRefresh} refreshing={pull.refreshing}>
+        <Card className="gap-3 p-4">
+          <View className="flex-row items-start gap-3">
+            <StatusGlyph status={data.status} />
+            <View className="flex-1 gap-0.5">
+              <Text className="text-lg font-semibold leading-snug text-foreground">{runTitle(data.name, 'Run')}</Text>
+              <Text className="text-sm text-muted-foreground">
+                <Text className={`font-medium ${TONE_TEXT[toneOf(data.status)]}`}>{statusLabel(data.status)}</Text>
+                {` · started ${relativeTime(data.startedAt ?? data.createdAt)}`}
+                {elapsed != null ? ` · ${formatDuration(elapsed)}` : ''}
+              </Text>
+            </View>
+          </View>
+          {live && permissionMode.data ? (
+            <View className="flex-row items-center gap-2">
+              <Text className="text-sm text-muted-foreground">Permissions</Text>
+              <PermissionModeChip
+                mode={permissionMode.data}
+                disabled={!runControl.available || setMode.isPending}
+                onPress={() => setModeSheet(true)}
+              />
+            </View>
+          ) : null}
+          {data.error ? (
+            <View className="rounded-2xl border border-danger bg-danger-muted p-3">
+              <Text className="text-sm text-foreground">{data.error}</Text>
+            </View>
+          ) : null}
+          {primary && allowed(primary) ? (
+            <Button
+              label={ACTION_LABEL[primary]}
+              variant={primary === 'retry' ? 'primary' : 'secondary'}
+              full
+              haptic="commit"
+              loading={runAction.isPending}
+              disabled={runAction.isPending}
+              onPress={() => doRunAction(primary)}
+            />
+          ) : null}
+        </Card>
+
+        {approvals.length + loopDecisions.length + waitDecisions.length > 0 ? (
+          <>
+            <SectionHeader title="Waiting for you" />
+            {/* A loop decision is a run-time act, like an approval (exec:agent, P05). */}
+            {loopDecisions.map((stage) => (
+              <LoopDecisionCard
+                key={stage.id}
+                runId={runId}
+                stage={stage}
+                canControl={runStart.available}
+                onRequestAccess={runStart.requestAccess}
+              />
+            ))}
+            {waitDecisions.map((d) => (
+              <WaitDecisionCard key={`${d.via ?? ''}:${d.instanceId}`} decision={d} canDecide={runStart.available} />
+            ))}
+            {/* A tool permission, question or plan inside a stage's turn is the
+                chat's card; the completion review is the approval card. */}
+            {approvals.map((stage) => (
+              <StageGateCard
+                key={stage.id}
+                runId={runId}
+                stage={stage}
+                busy={busyStage === stage.id}
+                onDecide={(outcome, feedback) => decide(stage, outcome, feedback)}
+                {...(stage.sessionId ? { onOpenStage: () => openStage(stage) } : {})}
+              />
+            ))}
+          </>
+        ) : null}
+
+        <SectionHeader title={`Stages (${stages.length})`} />
+        {stages.length === 0 ? (
+          <EmptyState title="No stages yet" message="Stages appear as the run reaches them." />
+        ) : (
+          <StageTimeline
+            stages={stages}
+            runStatus={data.status}
+            canControl={isTerminal(data.status) ? runStart.available : runControl.available}
+            busyStageId={busyStage}
+            onOpen={openStage}
+            expandedId={expandedStageId}
+            onToggle={(stage) => setExpanded(expandedStageId === stage.id ? null : stage.id)}
+            renderExpanded={(stage) =>
+              isCheckStage(stage as RunStage) ? (
+                <CheckOutput stage={stage as RunStage} />
+              ) : (
+              <StageTranscriptInline
+                runId={runId}
+                stage={stage}
+                workspaceId={workspaceId ?? null}
+                connected={connected}
+                onOpenStage={() => openStage(stage)}
+              />
+              )
+            }
+            onAction={(stage, action) => {
+              setBusyStage(stage.id);
+              stageAction.mutate(
+                { stageRunId: stage.id, action },
+                { onSettled: () => setBusyStage(null) },
+              );
+            }}
+          />
+        )}
+
+        <SectionHeader title="More" />
+        <ListGroup>
+          <ListRow
+            title="Workflow"
+            subtitle="The definition this run executes"
+            icon={<WorkflowIcon size={18} color={colors['muted-foreground']} />}
+            onPress={() => router.push(`/workflows/${data.workflowDefinitionId}`)}
+          />
+        </ListGroup>
+      </PlainScroll>
+      <ActionSheet
+        visible={menu}
+        onClose={() => setMenu(false)}
+        title={runTitle(data.name, 'Run')}
+        actions={menuActions}
+      />
+      <ActionSheet
+        visible={confirmCancel}
+        onClose={() => setConfirmCancel(false)}
+        title="Cancel this run?"
+        message="Running stages stop and nothing after them starts. You can retry it later as a new run."
+        actions={[{ label: 'Cancel run', destructive: true, onPress: () => doRunAction('cancel') }]}
+      />
+      <ActionSheet
+        visible={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        title="Delete this run?"
+        message={
+          isActive(data.status)
+            ? 'It is still running — it will be cancelled first. Its stages and history are removed for good.'
+            : 'Its stages and history are removed for good. The workflow itself is kept.'
+        }
+        actions={[
+          {
+            label: 'Delete run',
+            destructive: true,
+            onPress: () =>
+              remove.mutate(undefined, {
+                onSuccess: () => {
+                  if (router.canGoBack()) router.back();
+                  else router.replace(workflowHref);
+                },
+              }),
+          },
+        ]}
+      />
+      {permissionMode.data ? (
+        <PermissionModeSheet
+          visible={modeSheet}
+          onClose={() => setModeSheet(false)}
+          current={permissionMode.data}
+          onChange={(next) => setMode.mutate(next)}
+        />
+      ) : null}
+    </View>
+  );
+}

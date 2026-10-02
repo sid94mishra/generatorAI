@@ -41,6 +41,8 @@ export function Pressable({
   const motion = useMotion('press');
   const kind = pressFeedback(feedback);
   const [highlighted, setHighlighted] = useState(false);
+  // iPad / Android pointer hover (06 §3.11): rows and buttons tint with `hover`; a caller's own fill wins.
+  const [hovered, setHovered] = useState(false);
   const pressed = useSharedValue(0);
   const target = large ? (motion.pressScale?.large ?? 1) : (motion.pressScale?.default ?? 1);
   const scales = kind === 'scale' && !motion.reduced;
@@ -95,14 +97,19 @@ export function Pressable({
       accessibilityState={{ ...accessibilityState, disabled }}
       accessibilityActions={accessibilityActions as AccessibilityActionInfoList}
       onAccessibilityAction={onAccessibilityAction ? accessibilityAction : undefined}
+      onHoverIn={disabled ? undefined : () => setHovered(true)}
+      onHoverOut={() => setHovered(false)}
       android_ripple={rippleFor(kind, disabled, colors.selected, borderless)}
-      className={cn(frame === 'hit' && 'min-h-hit min-w-hit items-center justify-center', highlighted && 'bg-selected', className)}
-      style={style ? [animated, style] : animated}
+      className={cn(frame === 'hit' && 'min-h-hit min-w-hit items-center justify-center', hovered && !highlighted && 'bg-hover', highlighted && 'bg-selected', className)}
+      style={style ? [animated, POINTER, style] : [animated, POINTER]}
     >
       {children}
     </AnimatedPressable>
   );
 }
+
+/** The pointer cursor over anything pressable (iPadOS 17+ / Android pointers). */
+const POINTER = { cursor: 'pointer' } as const;
 
 /** The Android ripple config for a feedback kind (exported for tests). */
 export function rippleFor(

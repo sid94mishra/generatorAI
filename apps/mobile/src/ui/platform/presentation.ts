@@ -2,12 +2,15 @@
 // Routes pass them as `options={sheetOptions('picker')}`. Plain data, typed locally so `ui/` never
 // imports the router (MD-86).
 
+import { useMemo } from 'react';
+
+import { useThemeColors } from '../lib/themeColors';
 import { nativePlatform } from './geometry';
 
 /** The subset of native-stack screen options the kit sets. */
 export interface ScreenPresentationOptions {
   presentation?: 'card' | 'formSheet' | 'fullScreenModal' | 'modal';
-  animation?: 'default' | 'none' | 'fade';
+  animation?: 'default' | 'none' | 'fade' | 'slide_from_right';
   gestureEnabled?: boolean;
   fullScreenGestureEnabled?: boolean;
   headerShown?: boolean;
@@ -49,12 +52,31 @@ export const fullScreenModalOptions: ScreenPresentationOptions = { presentation:
 /** The search palette (MD-81). */
 export const paletteOptions: ScreenPresentationOptions = { presentation: 'fullScreenModal', animation: 'fade', headerShown: false };
 
-/** Detail pushes: the native interactive pop on iOS; Android uses system Back (MD-19, MD-20). */
-export const detailOptions: ScreenPresentationOptions = { gestureEnabled: true, fullScreenGestureEnabled: false };
+/**
+ * Detail pushes: the native interactive pop on iOS; Android uses system Back (MD-19, MD-20) with the platform push
+ * transition (`slide_from_right` matches the system's own back preview).
+ */
+export function detailOptionsFor(platform: 'ios' | 'android'): ScreenPresentationOptions {
+  return { gestureEnabled: true, fullScreenGestureEnabled: false, animation: platform === 'android' ? 'slide_from_right' : 'default' };
+}
+export const detailOptions: ScreenPresentationOptions = detailOptionsFor(nativePlatform);
 
 /** Module roots replaced from the sidebar switch without animation (06 §3.1, MD-87). */
 export const moduleRootOptions: ScreenPresentationOptions = { animation: 'none' };
 
 export function sheetOptions(kind: SheetKind): ScreenPresentationOptions {
   return sheetOptionsFor(nativePlatform, kind);
+}
+
+/**
+ * The shell Stack's screen options (06 §3.1): no navigator header by default (screens draw the kit Header), the
+ * platform push transition, frozen when off screen, and the theme's surface behind every scene so a transition never
+ * shows an unpainted (white) frame.
+ */
+export function useStackScreenOptions(): ScreenPresentationOptions & { freezeOnBlur: true; contentStyle: { backgroundColor: string } } {
+  const colors = useThemeColors();
+  return useMemo(
+    () => ({ headerShown: false, ...detailOptions, freezeOnBlur: true, contentStyle: { backgroundColor: colors.surface } }),
+    [colors.surface],
+  );
 }

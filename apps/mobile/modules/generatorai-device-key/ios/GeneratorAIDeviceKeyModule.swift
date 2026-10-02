@@ -24,7 +24,9 @@
 //     enforced in JS (`AppLockGate`, `requireStepUp`); binding the key to
 //     biometrics would make every background signature prompt for Face ID.
 //
-// JS facade: apps/mobile/src/native/deviceKeyModule.ts.
+// JS facade: apps/mobile/src/services/native/deviceKeyModule.ts; the key
+// commands of M5-09 (KeyCommands.swift) are driven from
+// apps/mobile/src/services/native/keyCommands.ts.
 // ────────────────────────────────────────────────────────────────
 
 import CryptoKit
@@ -56,9 +58,49 @@ internal final class DeviceKeySignatureFormatException: Exception {
   }
 }
 
+/// One hardware shortcut from JS (src/services/native/keyCommandMap.ts `NativeKeyCommand`).
+internal struct KeyCommandRecord: Record {
+  @Field var id: String = ""
+  @Field var input: String = ""
+  @Field var modifiers: [String] = []
+  @Field var title: String = ""
+}
+
 public final class GeneratorAIDeviceKeyModule: Module {
   public func definition() -> ModuleDefinition {
     Name("GeneratorAIDeviceKey")
+
+    // ── Hardware keyboard shortcuts (M5-09; KeyCommands.swift) ──────
+    Events("onKeyCommand", "onHardwareKeyboardChange")
+
+    OnCreate {
+      KeyCommandCenter.shared.emit = { [weak self] id in
+        self?.sendEvent("onKeyCommand", ["id": id])
+      }
+      KeyboardPresence.shared.onChange = { [weak self] attached in
+        self?.sendEvent("onHardwareKeyboardChange", ["attached": attached])
+      }
+      DispatchQueue.main.async {
+        KeyboardPresence.shared.start()
+      }
+    }
+
+    Function("setKeyCommands") { (commands: [KeyCommandRecord]) in
+      let specs = commands.map { KeyCommandSpec(id: $0.id, input: $0.input, modifiers: $0.modifiers, title: $0.title) }
+      DispatchQueue.main.async {
+        KeyCommandCenter.shared.install(specs)
+      }
+    }
+
+    Function("setKeyCommandsSuspended") { (suspended: Bool) in
+      DispatchQueue.main.async {
+        KeyCommandCenter.shared.setSuspended(suspended)
+      }
+    }
+
+    Function("isHardwareKeyboardAttached") { () -> Bool in
+      return KeyboardPresence.shared.attached
+    }
 
     AsyncFunction("isSupported") { () -> Bool in
       return SecureEnclave.isAvailable

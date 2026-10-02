@@ -81,7 +81,7 @@ export function StatTiles({ chats, workflows, automations, health }: StatTilesPr
         tint={colors.info ?? colors.primary!}
         label="Chats"
         value={show(chats)}
-        href="/(tabs)/chats"
+        href="/chats"
         accessibilityLabel={`${show(chats)} active chats. Open chats`}
       />
       <Tile
@@ -89,7 +89,7 @@ export function StatTiles({ chats, workflows, automations, health }: StatTilesPr
         tint={colors.primary!}
         label="Workflows"
         value={show(workflows)}
-        href="/(tabs)/runs?segment=workflows"
+        href="/workflows"
         accessibilityLabel={`${show(workflows)} workflows. Open workflows`}
       />
       <Tile
@@ -97,7 +97,7 @@ export function StatTiles({ chats, workflows, automations, health }: StatTilesPr
         tint={colors.warning!}
         label="Automations"
         value={show(automations)}
-        href="/(tabs)/runs?segment=automations"
+        href="/automations"
         accessibilityLabel={`${show(automations)} automations. Open automations`}
       />
       <Tile

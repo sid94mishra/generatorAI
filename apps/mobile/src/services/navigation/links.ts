@@ -1,4 +1,5 @@
 import { deepLinkToRoute } from '@generatorai/shared/ui-contract';
+import { mobileRoute } from './mobileRoutes';
 
 export const UNPAIRED_LINK_MESSAGE = "Link is for a server this phone isn't paired with";
 export type PendingLink = { route: string; serverId: string | null };
@@ -12,7 +13,7 @@ export function createLinkQueue() {
     getSnapshot: () => current,
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     enqueue(input: unknown, explicitServerId?: string) {
-      const parsed = deepLinkToRoute(input);
+      const parsed = mobileRoute(deepLinkToRoute(input));
       if (!parsed) return false;
       const [pathname, query] = parsed.split('?');
       const params = new URLSearchParams(query);
@@ -49,7 +50,7 @@ export function devRoute(path: string, dev: boolean): string | null {
 export function redirectLink(path: string, activeServerId?: string | null): string {
   const dev = devRoute(path, typeof __DEV__ !== 'undefined' && __DEV__);
   if (dev) return dev;
-  const route = deepLinkToRoute(path);
+  const route = mobileRoute(deepLinkToRoute(path));
   linkQueue.clear();
   if (!route) return '/';
   if (route.split('?')[0] === '/pair') return route;

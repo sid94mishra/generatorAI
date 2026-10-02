@@ -92,7 +92,7 @@ export function useRunMutations(runId: string) {
   });
 
   const stageAction = useMutation({
-    mutationFn: async ({ stageRunId, action }: { stageRunId: string; action: StageAction }): Promise<{ newRunId?: string }> => {
+    mutationFn: async ({ stageRunId, action }: { stageRunId: string; action: StageAction }): Promise<{ newRunId?: string; workflowId?: string }> => {
       const run = queryClient.getQueryData<WorkflowRunSummary & { stageRuns: StageRunSummary[] }>(
         queryKeys.run(runId),
       );
@@ -103,7 +103,7 @@ export function useRunMutations(runId: string) {
           forkRequest(runId, [stage?.instancePath ?? stage?.stageKey ?? stageRunId]),
           { idempotencyKey: newIdempotencyKey() },
         );
-        return { newRunId: fork.runId };
+        return { newRunId: fork.runId, workflowId: run.workflowDefinitionId };
       }
       await admin.runs.command(
         runId,
@@ -113,9 +113,10 @@ export function useRunMutations(runId: string) {
       );
       return {};
     },
-    onSuccess: ({ newRunId }) => {
+    onSuccess: ({ newRunId, workflowId }) => {
       haptics.commit();
-      if (newRunId && newRunId !== runId) router.push(`/runs/${newRunId}` as never);
+      // A run lives under its workflow (MD-80); the fork shares the run's workflow.
+      if (newRunId && workflowId && newRunId !== runId) router.push(`/workflows/${encodeURIComponent(workflowId)}/runs/${encodeURIComponent(newRunId)}` as never);
     },
     onError: (err) => {
       haptics.error();

@@ -19,9 +19,9 @@ import { relativeTime, runElapsed, formatDuration } from '../runs/formatTime';
 import { isActive, needsAttention, statusLabel } from '../runs/statusStyle';
 import { ListItem, TONE_COLOR_TOKEN } from '../ui/ListItem';
 import type { Tone } from '../ui/primitives';
-import { runRoute } from '../../navigation/routes';
 import { newestRun, runTitle } from '../runs/runModel';
 import { useTheme } from '../../theme/ThemeProvider';
+import { useOpenRun } from '../../features/workflows/queries';
 
 export function runTone(status: string): Tone {
   return runStatusTone(status);
@@ -42,6 +42,7 @@ const TRIGGER_LABEL: Record<AutomationSummary['triggerType'], string> = {
 };
 
 export function RunCard({ run, accessory, separator }: { run: WorkflowRunSummary } & WorkRowProps): React.ReactElement {
+  const openRun = useOpenRun();
   const { legacyColors: colors } = useTheme();
   const tone = runTone(run.status);
   const active = isActive(run.status);
@@ -73,7 +74,7 @@ export function RunCard({ run, accessory, separator }: { run: WorkflowRunSummary
       accessory={accessory}
       separator={separator}
       accessibilityLabel={`${runTitle(run.name, 'Run')}, ${status}`}
-      onPress={() => router.push(runRoute(run.id) as never)}
+      onPress={() => void openRun(run.id, run.workflowDefinitionId)}
     />
   );
 }

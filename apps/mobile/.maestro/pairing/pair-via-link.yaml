@@ -12,7 +12,7 @@ tags: [characterization, smoke, pairing]
 - openLink: ${PAIR_URL}
 - extendedWaitUntil: {visible: "Pair with this server?", timeout: 30000}
 - assertVisible: {id: pairing-fingerprint}
-- assertNotVisible: {id: menu-button}
+- assertNotVisible: {id: home-new-chat}
 # MD-103: the legacy Name field has no allowed M1 testID.
 - scrollUntilVisible:
     element: {text: Name}
@@ -34,6 +34,6 @@ tags: [characterization, smoke, pairing]
     element: {id: pairing-confirm}
     direction: DOWN
 - tapOn: {id: pairing-confirm}
-- extendedWaitUntil: {visible: {id: menu-button}, timeout: 30000}
-- tapOn: {id: menu-button}
+- extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 30000}
+- runFlow: ../_subflows/open-sidebar.yaml
 - assertVisible: {id: drawer-chats}

@@ -5,21 +5,17 @@ import { isSafeNotificationRoute, safeRoute } from '../services/notifications/ro
 describe('notification route guard — accepts real routes', () => {
   it.each([
     '/chats/abc-123',
-    '/runs/run-1',
+    '/workflows/wf-1/runs/run-1',
     '/automations/a1',
     '/projects/p1',
-    '/changes/w1',
-
     '/settings/security',
     '/workflows/wf-1',
-    '/terminal/ws-1',
-    '/approvals',
     '/scope-request',
-    '/approval',
-    '/search?kind=workflows',
+    '/needs-you',
     '/',
     '/chats/c1/gate/i1',
     '/chats/c1/plan/p1',
+    '/chats/c1?dock=plan',
   ])('allows %s', (route) => {
     expect(isSafeNotificationRoute(route)).toBe(true);
     expect(safeRoute(route)).toBe(route);
@@ -81,6 +77,12 @@ describe('notification route guard — rejects navigation escapes', () => {
     expect(isSafeNotificationRoute('/scope-requests')).toBe(false);
   });
 
+  it('rejects the pre-M5 roots (04 §1.6)', () => {
+    for (const route of ['/runs/run-1', '/changes/w1', '/terminal/ws-1', '/approvals', '/approval', '/search?kind=workflows']) {
+      expect(isSafeNotificationRoute(route), route).toBe(false);
+    }
+  });
+
   it('rejects non-strings and empties', () => {
     for (const value of [null, undefined, 42, {}, [], '', true]) {
       expect(isSafeNotificationRoute(value), String(value)).toBe(false);
@@ -89,7 +91,7 @@ describe('notification route guard — rejects navigation escapes', () => {
 
   it('drops unapproved query keys', () => {
     expect(safeRoute('/chats/c?dock=plan&execute=allow')).toBe('/chats/c?dock=plan');
-    expect(safeRoute('/changes/w1/file?path=src%2Fa.ts')).toBe('/changes/w1/file');
+    expect(safeRoute('/workflows/w1/runs/r1?path=src%2Fa.ts&run=r1')).toBe('/workflows/w1/runs/r1?run=r1');
   });
 
   it('returns null rather than throwing for bad input', () => {

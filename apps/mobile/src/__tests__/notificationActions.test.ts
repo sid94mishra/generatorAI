@@ -119,9 +119,9 @@ describe('intentFromResponse — gates that need reading', () => {
   });
 
   it('opens a workflow approval (no chat interaction) on tap', () => {
-    const run = { route: '/runs/r1', category: 'approval', threadId: 'run:r1' };
-    expect(intentFromResponse(TAP, run, TAP)).toEqual({ type: 'open', route: '/runs/r1' });
-    expect(intentFromResponse('approve', run, TAP)).toEqual({ type: 'open', route: '/runs/r1' });
+    const run = { route: '/workflows/w1/runs/r1', category: 'approval', threadId: 'run:r1' };
+    expect(intentFromResponse(TAP, run, TAP)).toEqual({ type: 'open', route: '/workflows/w1/runs/r1' });
+    expect(intentFromResponse('approve', run, TAP)).toEqual({ type: 'open', route: '/workflows/w1/runs/r1' });
   });
 });
 

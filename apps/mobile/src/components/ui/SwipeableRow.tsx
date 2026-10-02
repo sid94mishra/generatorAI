@@ -32,7 +32,7 @@ import Animated, {
 
 import { SPRING_SWIPE } from './motion';
 import { haptics } from './haptics';
-import { DRAWER_EDGE_HIT_SLOP } from './SidePanel';
+import { DRAWER_EDGE_HIT_SLOP } from '../../ui/platform/gestures';
 import { MAX_SCALE, useReduceMotion } from './accessibility';
 import { Touchable } from './Touchable';
 import type { Tone } from './primitives';

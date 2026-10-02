@@ -22,8 +22,8 @@ try {
     return t.slice(t.indexOf('Turn options'), t.indexOf('Turn options') + 220);
   });
   await safe('terminal: New terminal', async () => {
-    await tap(page.getByTestId('workbench-button').locator('visible=true').first()); await sleep(900);
-    await tap(page.getByTestId('workbench-tool-terminal').locator('visible=true').first()); await sleep(1500);
+    await tap(page.getByTestId('pane-toggle').locator('visible=true').first()); await sleep(900);
+    await tap(page.getByTestId('pane-tab-terminal').locator('visible=true').first()); await sleep(1500);
     await tap(vis(/^new terminal$/i)); await sleep(6000);
     await shot(page, 'terminal-created');
     return (await body()).slice(0, 160) + ' :: ' + (await visibleButtons()).filter((x) => /terminal|kill|restart|esc|ctrl|tab|find|paste/i.test(x)).slice(0, 12).join(', ');

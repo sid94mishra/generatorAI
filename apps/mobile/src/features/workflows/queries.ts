@@ -1,9 +1,12 @@
+import { useCallback } from 'react';
+import { router } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys, type AdminApi } from '@generatorai/client-core';
 import { useApi } from '../../services/api/useApi';
 import { useAdminApi } from '../../services/api/useAdminApi';
 import type { MutationCallbacks } from '../../services/api/queryCallbacks';
 import { isActive, pollIntervalFor } from '../../services/api/runActivity';
+import { runHref } from '../../blocks/shell/hrefs';
 
 export function useWorkflows(options: { enabled?: boolean; staleTime?: number } = {}) {
   const api = useApi();
@@ -51,4 +54,22 @@ export function useRunPendingDecisions(id: string, enabled: boolean, focused: bo
 export function useStageTranscript(runId: string, stageId: string, sessionId: string | null, enabled: boolean, focused: boolean, live: boolean, connected: boolean) {
   const admin = useAdminApi();
   return useQuery({ queryKey: queryKeys.stageTranscript(runId, stageId), queryFn: () => admin.sessions.chat(sessionId!, stageId), enabled: Boolean(sessionId) && enabled, refetchInterval: focused && live ? connected ? 15_000 : 5_000 : false });
+}
+
+// Opening a run (MD-80): a run lives at /workflows/<workflowId>/runs/<runId>. Callers that only hold the run id
+// resolve its workflow through the run screen's own query (`queryKeys.run`), which warms that screen's cache.
+export type OpenRun = (runId: string, workflowId?: string | null, mode?: 'push' | 'replace') => Promise<void>;
+
+export function useOpenRun(): OpenRun {
+  const api = useApi();
+  const client = useQueryClient();
+  return useCallback<OpenRun>(
+    async (runId, workflowId, mode = 'push') => {
+      const wid = workflowId ?? (await client.fetchQuery({ queryKey: queryKeys.run(runId), queryFn: () => api.runs.get(runId) })).workflowDefinitionId;
+      const href = runHref(wid, runId) as never;
+      if (mode === 'replace') router.replace(href);
+      else router.push(href);
+    },
+    [api, client],
+  );
 }

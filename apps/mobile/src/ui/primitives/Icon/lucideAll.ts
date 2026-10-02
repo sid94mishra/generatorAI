@@ -125,6 +125,7 @@ import LWrap from 'lucide-react-native/icons/text-wrap';
 import LHide from 'lucide-react-native/icons/eye-off';
 import LGrip from 'lucide-react-native/icons/grip-vertical';
 import LLatest from 'lucide-react-native/icons/arrow-down';
+import LMinimize from 'lucide-react-native/icons/minimize-2';
 
 export const LUCIDE_ALL = {
   'home': LHome,
@@ -252,4 +253,5 @@ export const LUCIDE_ALL = {
   'hide': LHide,
   'grip': LGrip,
   'latest': LLatest,
+  'minimize': LMinimize,
 } as const;

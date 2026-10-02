@@ -43,6 +43,7 @@ import { useAdminApi } from '../../../services/api/useAdminApi';
 import { useApi } from '../../../services/api/useApi';
 import { RowFrame, type RowTone } from './RowFrame';
 import { useTimelineActions } from './TimelineActions';
+import { useOpenRun } from '../../../features/workflows/queries';
 
 
 function statusTone(status: string): Tone {
@@ -76,6 +77,7 @@ function useChatWorkflowRuns(chatId: string | null | undefined) {
 // ── Run row ──────────────────────────────────────────────────────
 
 export function WorkflowRunRow({ run, callId }: { run: WorkflowRunToolCard; callId: string }): React.ReactElement {
+  const openRun = useOpenRun();
   const { legacyColors: colors } = useTheme();
   const { chatId } = useTimelineActions();
   const { data } = useChatWorkflowRuns(chatId);
@@ -123,7 +125,7 @@ export function WorkflowRunRow({ run, callId }: { run: WorkflowRunToolCard; call
             size="sm"
             variant="secondary"
             icon={<ExternalLink size={14} color={colors.foreground} />}
-            onPress={() => router.push(`/runs/${run.runId}` as never)}
+            onPress={() => void openRun(run.runId)}
           />
           {live?.prUrl ? (
             <Button
@@ -152,6 +154,7 @@ function ApprovalBlock({
   approval: WorkflowRunPendingApproval;
   chatId: string | null;
 }): React.ReactElement {
+  const openRun = useOpenRun();
   const { legacyColors: colors } = useTheme();
   const api = useApi();
   const queryClient = useQueryClient();
@@ -265,7 +268,7 @@ function ApprovalBlock({
           size="sm"
           variant="secondary"
           icon={<ExternalLink size={14} color={colors.foreground} />}
-          onPress={() => router.push(`/runs/${runId}` as never)}
+          onPress={() => void openRun(runId)}
         />
       )}
     </View>

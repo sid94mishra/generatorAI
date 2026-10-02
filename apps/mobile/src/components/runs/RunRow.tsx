@@ -12,6 +12,7 @@ import { runTitle } from './runModel';
 import { isActive, statusLabel } from './statusStyle';
 import { StatusGlyph } from './StatusGlyph';
 import { Touchable } from '../ui/Touchable';
+import { useOpenRun } from '../../features/workflows/queries';
 
 export function RunRow({
   run,
@@ -21,6 +22,7 @@ export function RunRow({
   /** Replaces the default "status · duration" line. */
   subtitle?: string;
 }): React.ReactElement {
+  const openRun = useOpenRun();
   const elapsed = runElapsed(run, isActive(run.status) ? null : run.completedAt ?? run.updatedAt);
   const line =
     subtitle ??
@@ -30,7 +32,7 @@ export function RunRow({
     <Touchable
       accessibilityLabel={`${runTitle(run.name)}, ${statusLabel(run.status)}`}
       haptic="tap"
-      onPress={() => router.push(`/runs/${run.id}`)}
+      onPress={() => void openRun(run.id, run.workflowDefinitionId)}
     >
       <View className="min-h-16 flex-row items-center gap-3 px-4 py-2.5">
         <StatusGlyph status={run.status} />

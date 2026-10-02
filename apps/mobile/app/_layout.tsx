@@ -19,7 +19,7 @@ import '../src/theme/prepaint';
 import { installCrypto } from '../src/services/crypto/installCrypto';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { BackHandler, Platform, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { Redirect, Stack, SplashScreen, router, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
@@ -28,12 +28,9 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { ServerScope } from '../src/services/auth/ServerScope';
 import { ServerQueryProvider } from '../src/services/api/ServerQueryProvider';
-import { ChevronLeft } from 'lucide-react-native';
-
-import { IconButton } from '../src/components/ui/Button';
-import { goBack } from '../src/components/ui/Screen';
 
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider';
+import { NavigationTheme } from '../src/theme/NavigationTheme';
 import { PreferencesProvider, usePreferences } from '../src/services/prefs/preferences';
 import { setHapticsEnabled as setKitHapticsEnabled, setMotionPreference } from '../src/ui/platform';
 import { useLinkRouting } from '../src/services/navigation/useLinkRouting';
@@ -44,11 +41,6 @@ import { Spinner, ToastProvider, useToast, ContextMenuProvider, Button, ErrorSta
 import { usePushNotifications } from '../src/services/notifications/usePushNotifications';
 import { MuxStreamProvider } from '../src/services/stream/MuxStreamProvider';
 import { useGlobalStream } from '../src/services/stream/useGlobalStream';
-import { ConnectionStripHost } from '../src/components/common/ConnectionStrip';
-import { StackHeader, type StackHeaderProps } from '../src/navigation/StackHeader';
-import { backFallbackFor } from '../src/navigation/backFallback';
-import { ErrorBoundary } from '../src/navigation/ErrorBoundary';
-import { AppDrawerHost } from '../src/navigation/shell/AppDrawer';
 
 installCrypto();
 
@@ -102,7 +94,7 @@ function ThemedShell({ children }: { children: React.ReactNode }): React.ReactEl
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <StatusBar style={appearance === 'dark' ? 'light' : 'dark'} />
-      {ready ? children : null}
+      {ready ? <NavigationTheme>{children}</NavigationTheme> : null}
     </View>
   );
 }
@@ -155,10 +147,9 @@ function AuthLifecycle({ children }: { children: React.ReactNode }): React.React
     const target = consumeLastRoute(serverId);
     if (!target || hasIncomingLink) return;
     if (state.status !== 'authenticated') return;
-    if (pathname !== '/' && pathname !== '/(tabs)') return;
-    // Pushed on top of the tabs, not swapped in for them: `replace` left the
+    if (pathname !== '/') return;
+    // Pushed on top of Home, not swapped in for it: `replace` left the
     // restored screen as the only history entry, so back closed the app.
-    router.replace('/(tabs)');
     setTimeout(() => router.push(target as Parameters<typeof router.push>[0]), 0);
   }, [initializing, storageLocked, state.status, serverId, pathname, hasIncomingLink]);
 
@@ -270,237 +261,23 @@ function ConnectionError({
 }
 
 /**
- * The navigation stack for everything outside the tab shell.
- *
- * This was a bare `<Slot />`, which renders the matched route with NO
- * navigator around it: detail screens had no header, no title and — the real
- * problem — no back button. Once you tapped into a run, a chat or Settings,
- * the only way out was the OS back gesture, with nothing on screen saying
- * where you were or that going back was possible.
- *
- * The tab group draws its own header, so it opts out of this one.
+ * The root Stack: the public screens (pairing, the revoked wall), the `(app)` shell with its one native Stack
+ * (04 §1.2, MD-18), the development routes and "Page not found". Every screen passes the auth gate.
  */
 function RootStack(): React.ReactElement {
-  const { legacyColors: colors } = useTheme();
-  const pathname = usePathname();
-  const pathnameRef = useRef(pathname);
-  pathnameRef.current = pathname;
-
-  // Hardware/gesture back on a screen with no history (notification tap, deep
-  // link) returns to its parent instead of closing the app. Registered ONCE,
-  // before any screen mounts, so screens with their own handler (the chat
-  // returning to its Chat pane) always run first. BackHandler never fires on
-  // iOS.
-  useEffect(() => {
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (router.canGoBack()) return false;
-      const fallback = backFallbackFor(pathnameRef.current);
-      if (!fallback) return false;
-      router.replace(fallback as Parameters<typeof router.replace>[0]);
-      return true;
-    });
-    return () => sub.remove();
-  }, []);
-
-  /**
-   * An explicit back button for every pushed screen.
-   *
-   * The navigator only draws one when there is history to pop, so arriving by
-   * deep link, push notification or a direct URL left detail screens with no
-   * way out. `goBack` falls back to the natural parent instead.
-   */
-  const headerBack =
-    (fallback: Parameters<typeof goBack>[0]) =>
-    () => (
-      <IconButton
-        accessibilityLabel="Back"
-        icon={<ChevronLeft size={24} color={colors.foreground} />}
-        onPress={() => goBack(fallback)}
-      />
-    );
-
   return (
     <Stack
       screenLayout={({ children, route }) => <AuthGate routeName={route.name}>{children}</AuthGate>}
-      screenOptions={{
-        // JS header: the native Android one double-pays the status-bar inset
-        // (see StackHeader). Same component on every platform.
-        header: (props) => <StackHeader {...(props as unknown as StackHeaderProps)} />,
-        headerStyle: { backgroundColor: colors.background },
-        headerTintColor: colors.foreground,
-        headerShadowVisible: false,
-        headerTitleStyle: { color: colors.foreground },
-        contentStyle: { backgroundColor: colors.background },
-        // The platform push transition, explicitly: `slide_from_right` on
-        // Android matches predictive back's own preview, and the iOS default
-        // keeps the interactive edge-swipe pop alive.
-        animation: Platform.OS === 'android' ? 'slide_from_right' : 'default',
-        gestureEnabled: true,
-        // Off-screen tab stacks stop re-rendering during a chat stream.
-        freezeOnBlur: true,
-      }}
+      screenOptions={{ headerShown: false }}
     >
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="(app)" />
       {/* Pairing and the revoked wall are full-bleed terminal states: a back
           button would imply somewhere to go back TO, and there is not. */}
-      <Stack.Screen name="pair" options={{ headerShown: false, gestureEnabled: false }} />
-      <Stack.Screen name="revoked" options={{ headerShown: false, gestureEnabled: false }} />
-      <Stack.Screen name="index" options={{ headerShown: false }} />
-
-      <Stack.Screen
-        name="chats/[id]"
-        options={{ title: 'Chat', headerShown: false }}
-      />
-      <Stack.Screen
-        name="runs/[id]"
-        options={{ title: 'Run', headerShown: false }}
-      />
-      <Stack.Screen
-        name="runs/[id]/stages/[stageRunId]"
-        options={({ route }) => {
-          const runId = (route.params as { id?: unknown } | undefined)?.id;
-          return {
-            title: 'Stage',
-            headerLeft: headerBack(
-              (typeof runId === 'string' && runId ? `/runs/${encodeURIComponent(runId)}` : '/(tabs)/runs') as Parameters<typeof goBack>[0],
-            ),
-          };
-        }}
-      />
-      <Stack.Screen
-        name="workflows/[id]"
-        options={{ title: 'Workflow', headerLeft: headerBack('/(tabs)/runs?segment=workflows' as Parameters<typeof goBack>[0]) }}
-      />
-      <Stack.Screen
-        name="scripts/[id]"
-        options={{ title: 'Script', headerLeft: headerBack('/(tabs)/runs?segment=scripts' as Parameters<typeof goBack>[0]) }}
-      />
-      <Stack.Screen
-        name="projects/[id]"
-        options={{ title: 'Project', headerLeft: headerBack('/(tabs)/projects') }}
-      />
-      <Stack.Screen
-        name="projects/[id]/pull-requests"
-        // A cold deep link here had no history, so no back button at all.
-        options={({ route }) => ({
-          title: 'Pull requests',
-          headerLeft: headerBack(projectFallback(route.params)),
-        })}
-      />
-      <Stack.Screen
-        name="projects/[id]/codebases/[cid]"
-        options={({ route }) => ({
-          title: 'Codebase',
-          headerLeft: headerBack(projectFallback(route.params)),
-        })}
-      />
-      {/* Read-only file browser under a codebase; a cold deep link backs out to the codebase. */}
-      <Stack.Screen
-        name="projects/[id]/codebases/[cid]/files"
-        options={({ route }) => ({ title: 'Files', headerLeft: headerBack(codebaseFallback(route.params)) })}
-      />
-      <Stack.Screen
-        name="projects/[id]/codebases/[cid]/file"
-        options={({ route }) => ({ title: 'File', headerLeft: headerBack(codebaseFallback(route.params)) })}
-      />
-      <Stack.Screen
-        name="projects/[id]/codebases/[cid]/pull-requests/[number]"
-        options={({ route }) => ({
-          title: 'Pull request',
-          headerLeft: headerBack(projectFallback(route.params, 'pull-requests')),
-        })}
-      />
-      <Stack.Screen
-        name="automations/[id]"
-        options={{ title: 'Automation', headerLeft: headerBack('/(tabs)/runs?segment=automations' as Parameters<typeof goBack>[0]) }}
-      />
-      <Stack.Screen
-        name="changes/[workspaceId]/index"
-        options={{ title: 'Changes', headerLeft: headerBack('/(tabs)') }}
-      />
-      <Stack.Screen
-        name="changes/[workspaceId]/file"
-        options={{ title: 'Diff', headerLeft: headerBack('/(tabs)') }}
-      />
-      <Stack.Screen
-        name="terminal/[workspaceId]"
-        options={{ title: 'Terminal', headerLeft: headerBack('/(tabs)') }}
-      />
-      {/* Settings screens draw their own collapsing large title and back
-          button through <Screen>. Leaving the navigator header on would stack
-          an empty title bar above every one of them. */}
-      <Stack.Screen name="settings/index" options={{ headerShown: false }} />
-      <Stack.Screen name="settings/appearance" options={{ headerShown: false }} />
-      <Stack.Screen name="settings/notifications" options={{ headerShown: false }} />
-      <Stack.Screen name="settings/providers" options={{ headerShown: false }} />
-      <Stack.Screen name="settings/capabilities" options={{ headerShown: false }} />
-      <Stack.Screen name="settings/source-control" options={{ headerShown: false }} />
-      <Stack.Screen name="settings/tools" options={{ headerShown: false }} />
-      <Stack.Screen name="settings/diagnostics" options={{ headerShown: false }} />
-      <Stack.Screen name="settings/about" options={{ headerShown: false }} />
-      <Stack.Screen name="settings/security" options={{ headerShown: false }} />
-      <Stack.Screen name="settings/accessibility" options={{ headerShown: false }} />
-      <Stack.Screen name="settings/extensions" options={{ headerShown: false }} />
-      <Stack.Screen name="settings/audio" options={{ headerShown: false }} />
-      {/* Global search draws its own back button beside the field. */}
-      <Stack.Screen name="search" options={{ headerShown: false }} />
-
-      {/* ── Route-addressable sheets (plan §6.2) ──────────────────────
-          These are exactly the routes push notifications carry:
-            /approvals                                the whole queue
-            /chats/[id]/gate/[interactionId]          one pending gate
-            /chats/[id]/plan/[planId]                 a plan + its decision
-            /scope-request                            ask for a permission
-          Presented as a form sheet on iOS (detents where the OS supports
-          them) and a modal on Android. Each draws its own title row and
-          Close through `RouteSheet`, which also copes with arriving cold
-          (no history to pop) by falling back to the tab shell. */}
-      <Stack.Screen name="approvals" options={sheetOptions} />
-      <Stack.Screen name="chats/[id]/gate/[interactionId]" options={sheetOptions} />
-      <Stack.Screen name="chats/[id]/plan/[planId]" options={sheetOptions} />
-      <Stack.Screen name="scope-request" options={sheetOptions} />
+      <Stack.Screen name="pair" options={{ gestureEnabled: false }} />
+      <Stack.Screen name="revoked" options={{ gestureEnabled: false }} />
     </Stack>
   );
 }
-
-/** The project (or its PR list) a PR screen falls back to when there is no history. */
-function codebaseFallback(params: unknown): Parameters<typeof goBack>[0] {
-  const { id, cid } = (params as { id?: unknown; cid?: unknown } | undefined) ?? {};
-  if (typeof id !== 'string' || !id || typeof cid !== 'string' || !cid) return projectFallback(params);
-  return `/projects/${encodeURIComponent(id)}/codebases/${encodeURIComponent(cid)}` as Parameters<typeof goBack>[0];
-}
-
-function projectFallback(params: unknown, child?: 'pull-requests'): Parameters<typeof goBack>[0] {
-  const id = (params as { id?: unknown } | undefined)?.id;
-  if (typeof id !== 'string' || id.length === 0) return '/(tabs)/projects';
-  const base = `/projects/${encodeURIComponent(id)}`;
-  return (child ? `${base}/${child}` : base) as Parameters<typeof goBack>[0];
-}
-
-/**
- * How a route sheet is presented.
- *
- * iOS: `formSheet` is the native `UISheetPresentationController`, with
- * medium/large detents and a grabber; a swipe down dismisses. Android has
- * no system sheet for a navigator route, so it is a modal that slides up.
- * Web preview: a modal too.
- */
-const sheetOptions: React.ComponentProps<typeof Stack.Screen>['options'] =
-  Platform.OS === 'ios'
-    ? {
-        headerShown: false,
-        presentation: 'formSheet',
-        sheetAllowedDetents: [0.6, 1],
-        sheetGrabberVisible: true,
-        sheetCornerRadius: 24,
-        gestureEnabled: true,
-      }
-    : {
-        headerShown: false,
-        presentation: 'modal',
-        animation: 'slide_from_bottom',
-        gestureEnabled: true,
-      };
 
 export default function RootLayout(): React.ReactElement {
   return (
@@ -530,22 +307,7 @@ export default function RootLayout(): React.ReactElement {
                             the gate can read preferences and theme. */}
                         <AppLockGate>
                           <AuthLifecycle>
-                          {/* D0/S7 — the one line that says the socket is
-                              down, retrying, or refused a scope this phone
-                              does not hold. In flow above the navigator so
-                              it never covers a back button. */}
-                          {/* The navigation drawer wraps the whole shell —
-                              status-bar strip included — so it runs the full
-                              height of the window like a system drawer. */}
-                          <AppDrawerHost>
-                          <ConnectionStripHost>
-                            {/* A render error on any screen lands here
-                                instead of blanking the app. */}
-                            <ErrorBoundary scope="root">
-                              <RootStack />
-                            </ErrorBoundary>
-                          </ConnectionStripHost>
-                          </AppDrawerHost>
+                          <RootStack />
                           </AuthLifecycle>
                         </AppLockGate>
                         {/* /app-lock-gate */}

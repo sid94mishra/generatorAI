@@ -41,7 +41,7 @@ final class A11yAuditTests: XCTestCase {
     ]
     app.activate()
     XCUIDevice.shared.system.open(try XCTUnwrap(bundle.url))
-    guard app.buttons["menu-button"].waitForExistence(timeout: 60) else {
+    guard app.buttons["Open sidebar"].waitForExistence(timeout: 60) else {
       XCTFail("Development client did not load the paired app. Check Metro on :8081 and sandbox pairing.")
       return
     }

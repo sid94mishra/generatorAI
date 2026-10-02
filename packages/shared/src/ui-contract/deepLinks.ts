@@ -7,6 +7,8 @@ export const DEEP_LINK_ROUTE_ROOTS: readonly string[] = [
   ...NAV_DESTINATIONS.map((item) => item.path.slice(1)).filter(Boolean),
   'runs', 'changes', 'settings', 'terminal', 'approvals', 'approval', 'scope-request',
   'search', 'share', 'new-chat', 'workspaces',
+  // Mobile-only screens (mobile MD-79): the attention list and the server switcher sheet.
+  'needs-you', 'servers',
 ];
 const COMMAND_ROUTES: Record<DeepLinkCommandId, string> = {
   'chat.new': '/chats/new', 'workflow.new': '/workflows/new',

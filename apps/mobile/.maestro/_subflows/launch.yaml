@@ -17,9 +17,10 @@ appId: ${APP_ID}
             - tapOn: ".*http://127.0.0.1:8081.*"
 # Expo may restore the preceding product link across a native relaunch.
 - extendedWaitUntil:
-    visible: "Menu.*|Back"
+    visible: "Open sidebar|Back.*"
     timeout: 60000
 - openLink: generatorai:///
+# Home is up when its New chat action is (the sidebar toggle has no testID on iOS, MD-133).
 - extendedWaitUntil:
-    visible: {id: menu-button}
+    visible: {id: home-new-chat}
     timeout: 60000

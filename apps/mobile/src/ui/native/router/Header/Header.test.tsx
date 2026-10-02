@@ -1,4 +1,4 @@
-import { backLabel, iosHeaderOptions, paneToggleLabel, sidebarToggleLabel, splitActions } from './headerModel';
+import { backLabel, iosHeaderColorOptions, iosHeaderOptions, paneToggleLabel, sidebarToggleLabel, splitActions } from './headerModel';
 import type { HeaderAction } from './Header.types';
 
 const a = (id: string, destructive = false): HeaderAction => ({ id, icon: 'search', label: id, destructive });
@@ -26,5 +26,23 @@ describe('Header (ML-02)', () => {
     expect(iosHeaderOptions({ role: 'detail', title: 'Run' })).toMatchObject({ headerLargeTitle: false, headerBackVisible: true });
     expect(iosHeaderOptions({ role: 'detail', title: 'Run', onBack: () => undefined }).headerBackVisible).toBe(false);
     expect(iosHeaderOptions({ role: 'modal', title: 'Edit' }).headerTransparent).toBe(false);
+    expect(iosHeaderOptions({ role: 'top', title: 'Chats', opaque: true }).headerTransparent).toBe(false);
+    // Beside a persistent iPad sidebar a module root uses the inline title (MD-147).
+    expect(iosHeaderOptions({ role: 'top', title: 'Chats', sidebarToggleState: 'shown' }).headerLargeTitle).toBe(false);
+    expect(iosHeaderOptions({ role: 'top', title: 'Chats', sidebarToggleState: 'hidden' }).headerLargeTitle).toBe(true);
+  });
+
+  it('paints the iOS header from the theme (bar, titles, tint, blur per appearance)', () => {
+    const dark = { surface: '#111113', fg: '#ededef', appearance: 'dark' as const };
+    expect(iosHeaderColorOptions(dark, false)).toMatchObject({
+      headerStyle: { backgroundColor: '#111113' },
+      headerLargeStyle: { backgroundColor: '#111113' },
+      headerTintColor: '#ededef',
+      headerTitleStyle: { color: '#ededef' },
+      headerLargeTitleStyle: { color: '#ededef' },
+    });
+    expect(iosHeaderColorOptions(dark, false).headerBlurEffect).toBeUndefined();
+    expect(iosHeaderColorOptions(dark, true)).toMatchObject({ headerStyle: {}, headerBlurEffect: 'systemChromeMaterialDark' });
+    expect(iosHeaderColorOptions({ ...dark, appearance: 'light' }, true).headerBlurEffect).toBe('systemChromeMaterialLight');
   });
 });

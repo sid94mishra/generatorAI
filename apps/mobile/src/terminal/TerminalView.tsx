@@ -78,6 +78,7 @@ import {
   clampFontSize,
   type KeyBarMode,
 } from './terminalSettings';
+import { useShellStore } from '../blocks/shell/shellStore';
 
 // NOTE: `./terminalHtml` is imported with a dynamic `import()` inside the
 // component (see `useEffect` below) and nowhere else — it pulls in the
@@ -475,6 +476,9 @@ export function TerminalView({
     haptics.warn();
   }, [api, closeSocket, onExit, send, workspaceId]);
 
+  // Leaving the screen while the terminal had focus hands keys back to the shell.
+  useEffect(() => () => useShellStore.getState().setGestureOwner('shell'), []);
+
   // ── Active / inactive ──────────────────────────────────────────
 
   // The composer's "Terminal output" capture reads the shell last on screen.
@@ -629,6 +633,13 @@ export function TerminalView({
           break;
         case 'searchResult':
           setSearchFound(message.found);
+          break;
+        case 'focused':
+          // A surface that owns keys suspends the shell's shortcuts and panel pans (MD-19 rule 4).
+          useShellStore.getState().setGestureOwner('surface');
+          break;
+        case 'unfocused':
+          useShellStore.getState().setGestureOwner('shell');
           break;
         case 'bell':
           haptics.threshold();

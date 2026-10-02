@@ -19,11 +19,11 @@ import { adjacentGapFor, hitFrame, hitFrameFor } from './hit';
 import { androidMemberFor, haptic, setHapticsEnabled } from './haptics';
 import { reduceMotionFor, resolveMotion } from './motion';
 import { sizeClassFor } from './breakpoints';
-import { sheetOptionsFor } from './presentation';
+import { detailOptionsFor, sheetOptionsFor } from './presentation';
 import { edgeSwipeOpensDrawerOn } from './gestures';
 import { pressFeedbackFor } from './pressFeedback';
 import { maxScaleFor } from './fontScale';
-import { nouns } from './nouns';
+import { deviceKindFor, nouns, nounsFor } from './nouns';
 
 const android = Platform.OS === 'android';
 
@@ -80,6 +80,8 @@ describe(`platform layer (${Platform.OS})`, () => {
   it('builds sheet options per OS (06 §3.7)', () => {
     expect(sheetOptionsFor('ios', 'picker')).toMatchObject({ presentation: 'formSheet', sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true });
     expect(sheetOptionsFor('android', 'large')).toEqual({ presentation: 'formSheet', headerShown: false, sheetAllowedDetents: [1], sheetCornerRadius: 28 });
+    expect(detailOptionsFor('android')).toMatchObject({ animation: 'slide_from_right', gestureEnabled: true });
+    expect(detailOptionsFor('ios')).toMatchObject({ animation: 'default', fullScreenGestureEnabled: false });
   });
 
   it('opens the drawer by edge only on iOS module roots in the compact class (MD-19)', () => {
@@ -99,5 +101,10 @@ describe(`platform layer (${Platform.OS})`, () => {
     expect(maxScaleFor('body', true)).toBe(1.4);
     expect(maxScaleFor('title', true)).toBe(1.4);
     expect(nouns().biometric).toBe(android ? 'fingerprint' : 'Face ID');
+    expect(deviceKindFor('ios', true, 820)).toBe('iPad');
+    expect(deviceKindFor('ios', false, 402)).toBe('iPhone');
+    expect(deviceKindFor('android', false, 800)).toBe('tablet');
+    expect(deviceKindFor('android', false, 412)).toBe('phone');
+    expect(nounsFor('ios', 'iPad').thisDevice).toBe('This iPad');
   });
 });

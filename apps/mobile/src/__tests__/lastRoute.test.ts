@@ -34,7 +34,7 @@ describe('last route — expiry', () => {
   });
 
   it('never restores the entry, pairing, revoked or settings routes', () => {
-    for (const route of ['/', '', '/pair', '/revoked', '/(tabs)', '/settings', '/settings/security']) {
+    for (const route of ['/', '', '/pair', '/revoked', '/settings', '/settings/security']) {
       expect(isRestorableRoute(route), route).toBe(false);
       expect(resolveLastRoute({ route, savedAt: NOW - 1000 }, NOW), route).toBeNull();
     }
@@ -44,8 +44,10 @@ describe('last route — expiry', () => {
 
   it('never restores a route-addressable sheet', () => {
     for (const route of [
-      '/approvals',
       '/scope-request',
+      '/servers',
+      '/search',
+      '/chats/new',
       '/scope-request?scope=exec%3Aterminal',
       '/chats/abc/gate/int-1',
       '/chats/abc/plan/plan-1',
@@ -61,7 +63,7 @@ describe('last route — expiry', () => {
   });
 
   it('restores detail routes', () => {
-    for (const route of ['/chats/abc', '/runs/r1', '/(tabs)/chats', '/terminal/ws1']) {
+    for (const route of ['/chats/abc', '/workflows/w1/runs/r1', '/chats', '/needs-you', '/terminal/ws1']) {
       expect(isRestorableRoute(route), route).toBe(true);
     }
   });

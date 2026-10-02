@@ -4,7 +4,7 @@ tags: [characterization, full]
 # Legacy rows omit accessibility selected; inspect the real provider (MD-103).
 ---
 - runFlow: ../_subflows/launch.yaml
-- tapOn: {id: menu-button}
+- runFlow: ../_subflows/open-sidebar.yaml
 - tapOn: {id: drawer-settings}
 - tapOn: {id: settings-appearance}
 - scrollUntilVisible: {element: {id: theme-option-solarized}, direction: DOWN}
@@ -19,4 +19,4 @@ tags: [characterization, full]
 - extendedWaitUntil: {visible: "Theme: solarized", timeout: 15000}
 - assertVisible: "Mode: light"
 - openLink: generatorai:///theme?theme=instrument&mode=system
-- extendedWaitUntil: {visible: {id: menu-button}, timeout: 15000}
+- extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 15000}

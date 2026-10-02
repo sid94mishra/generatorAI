@@ -60,7 +60,7 @@ export {
   type ToastRequest,
 } from './Toast';
 export { usePullToRefresh } from './usePullToRefresh';
-export { Screen, ScreenHeader, PlainScroll, goBack, type ScreenSearch } from './Screen';
+export { Screen, PlainScroll, goBack, type ScreenSearch } from './Screen';
 export { Spinner, LoadingState, EmptyState, ErrorState, LockedState } from './States';
 export { Switch, Field, SearchField } from './Form';
 export { KeyboardSticky, type KeyboardStickyProps } from './KeyboardSticky';

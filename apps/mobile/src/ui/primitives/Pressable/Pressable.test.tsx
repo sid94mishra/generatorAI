@@ -1,6 +1,6 @@
 import React from 'react';
 import { Platform, Text } from 'react-native';
-import { render, screen, userEvent } from '@testing-library/react-native';
+import { fireEvent, render, screen, userEvent } from '@testing-library/react-native';
 import { Pressable, rippleFor } from './Pressable';
 import { pressFeedback } from '../../platform/pressFeedback';
 import { renderThemed } from '../../__tests__/themed';
@@ -14,6 +14,14 @@ describe('Pressable (MP-03)', () => {
     expect(onPress).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('p').props.className).toContain('min-h-hit');
     expect(screen.getByTestId('p').props.className).toContain('min-w-hit');
+  });
+
+  it('tints on pointer hover (iPad / Android pointers, 06 §3.11) and clears on hover out', async () => {
+    await renderThemed(<Pressable accessibilityLabel="Row" onPress={jest.fn()} testID="p"><Text>Row</Text></Pressable>);
+    await fireEvent(screen.getByTestId('p'), 'hoverIn');
+    expect(screen.getByTestId('p').props.className).toContain('bg-hover');
+    await fireEvent(screen.getByTestId('p'), 'hoverOut');
+    expect(screen.getByTestId('p').props.className).not.toContain('bg-hover');
   });
 
   it('blocks presses when disabled and reads the reason', async () => {

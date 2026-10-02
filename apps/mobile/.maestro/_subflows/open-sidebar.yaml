@@ -1,0 +1,12 @@
+appId: ${APP_ID}
+# The sidebar toggle: `menu-button` on Android (JS top app bar); on iOS it is a native toolbar item,
+# which takes no testID, so it is matched by its accessibility label (MD-95, MD-133).
+---
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: {id: menu-button}
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: "Open sidebar"

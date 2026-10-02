@@ -8,8 +8,15 @@ tags: [smoke]
 - extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
 - assertVisible: Dictate a message
 - openLink: generatorai:///chats/${CHAT_STREAM_ID}?server=not-paired
-- extendedWaitUntil: {visible: {id: menu-button}, timeout: 30000}
+- extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 30000}
 - assertNotVisible: {id: composer-input}
 - openLink: generatorai:///chats/%2e%2e/settings
-- extendedWaitUntil: {visible: {id: menu-button}, timeout: 30000}
+- extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 30000}
 - assertNotVisible: {id: composer-input}
+# M5 route tree (04 §1.6, MD-145): legacy roots are rejected; mobile-only screens open.
+- openLink: generatorai:///runs/r1
+- extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 30000}
+- openLink: generatorai:///needs-you
+- extendedWaitUntil: {visible: {id: needs-you}, timeout: 30000}
+- openLink: generatorai:///chats/${CHAT_STREAM_ID}?dock=changes
+- extendedWaitUntil: {visible: {id: pane-tab-changes}, timeout: 30000}
