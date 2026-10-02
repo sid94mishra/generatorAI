@@ -12,7 +12,7 @@ const tool = async (id, label) => {
   if (await chip.count()) { await chip.click({ timeout: 8000 }); await sleep(2000); return; }
   await page.getByTestId('workbench-button').locator('visible=true').first().click({ timeout: 8000 });
   await sleep(900);
-  await page.getByTestId(`workbench-tool-${id}`).locator('visible=true').first().click({ timeout: 8000 });
+  await page.getByTestId(`pane-tab-${id}`).locator('visible=true').first().click({ timeout: 8000 });
   await sleep(2000);
 };
 const closeSheet = async () => { await vis(/^close$/i).click().catch(() => {}); await sleep(800); };

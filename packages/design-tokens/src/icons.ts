@@ -198,6 +198,8 @@ export const MOBILE_ICON_CONCEPTS = {
   grip: { lucide: 'grip-vertical', sfSymbol: 'line.3.horizontal', material: 'drag_indicator' },
   /** ScrollToLatest "↓ Latest" pill (02 §5.1). */
   latest: { lucide: 'arrow-down', sfSymbol: 'arrow.down', material: 'arrow_downward' },
+  /** Full-screen pane "Exit full screen" (MPaneOpen; 02 §5.1). */
+  minimize: { lucide: 'minimize-2', sfSymbol: 'arrow.down.right.and.arrow.up.left', material: 'close_fullscreen' },
 } as const satisfies Record<string, IconConceptDef>;
 export type MobileIconConcept = IconConcept | keyof typeof MOBILE_ICON_CONCEPTS;
 

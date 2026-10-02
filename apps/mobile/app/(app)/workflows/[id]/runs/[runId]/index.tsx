@@ -28,12 +28,10 @@ import { formatDuration, relativeTime, runElapsed } from '../../../../../../src/
 import { StageTimeline } from '../../../../../../src/components/runs/StageTimeline';
 import { StageTranscriptInline } from '../../../../../../src/components/runs/StageTranscriptInline';
 import { SessionHeader } from '../../../../../../src/components/chat/ChatHeader';
-import { SidePanelHost } from '../../../../../../src/components/ui/SidePanel';
-import { WorkbenchPanel } from '../../../../../../src/components/workbench/WorkbenchPanel';
-import { WorkbenchSheet } from '../../../../../../src/components/workbench/WorkbenchSheet';
 import { WorkbenchButton } from '../../../../../../src/components/workbench/WorkbenchButton';
 import { useWorkbench } from '../../../../../../src/components/workbench/useWorkbench';
-import type { ToolId } from '../../../../../../src/components/workbench/workbenchModel';
+import { useWorkbenchPane } from '../../../../../../src/components/workbench/useWorkbenchPane';
+import { usePaneStore } from '../../../../../../src/blocks/WorkspacePane';
 import { MAX_SCALE } from '../../../../../../src/components/ui/accessibility';
 import { StatusGlyph } from '../../../../../../src/components/runs/StatusGlyph';
 import {
@@ -72,10 +70,8 @@ export default function RunDetailScreen(): React.ReactElement {
   const runControl = useFeature('runControl');
   // Retry forks a new run (an invocation), which needs only runStart.
   const runStart = useFeature('runStart');
-  // The workbench: tools for the run's workspace, as on a chat.
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [tool, setTool] = useState<ToolId | null>(null);
-  const [toolOpen, setToolOpen] = useState(false);
+  // The workspace pane (MB-42): the run's workspace tools, as on a chat.
+  const paneOpen = usePaneStore((s) => s.open && s.claim?.scope.kind === 'run' && s.claim.scope.id === runId);
   // One step open at a time. `undefined` = the user has not chosen, so the
   // running step is shown; `null` = they collapsed it and it stays shut.
   const [expanded, setExpanded] = useState<string | null | undefined>(undefined);
@@ -157,21 +153,24 @@ export default function RunDetailScreen(): React.ReactElement {
   // The navigator header is off for this route: the screen draws its own so
   // the workbench panel can slide over it (as on a chat).
   React.useLayoutEffect(() => {
-    navigation.setOptions({ title: runTitle(run.data?.name, 'Run'), gestureEnabled: !panelOpen });
-  }, [navigation, run.data?.name, panelOpen]);
+    navigation.setOptions({ title: runTitle(run.data?.name, 'Run'), gestureEnabled: !paneOpen });
+  }, [navigation, run.data?.name, paneOpen]);
 
   const workbench = useWorkbench({
     surface: 'run',
     workspaceId: run.data?.workspaceId ?? null,
     scopes: runControl.scopes,
-    live: panelOpen || toolOpen,
+    live: paneOpen,
   });
-
-  const openTool = useCallback((next: ToolId) => {
-    setPanelOpen(false);
-    setTool(next);
-    setToolOpen(true);
-  }, []);
+  const paneBody = useMemo(() => ({ workspaceId: run.data?.workspaceId ?? null, scopes: runControl.scopes }), [run.data?.workspaceId, runControl.scopes]);
+  useWorkbenchPane({
+    kind: 'run',
+    id: run.data?.workspaceId ? runId : undefined,
+    title: runTitle(run.data?.name, 'Run'),
+    path: runHref(String(params.id), runId),
+    tools: workbench.tools,
+    body: paneBody,
+  });
 
   const decide = useCallback(
     (stage: StageRunSummary, outcome: ApprovalOutcome, feedback?: string) => {
@@ -281,29 +280,13 @@ export default function RunDetailScreen(): React.ReactElement {
 
   return (
     <View className="flex-1 bg-background">
-      <SidePanelHost
-        side="right"
-        open={panelOpen}
-        onOpenChange={setPanelOpen}
-        swipeToOpen={false}
-        accessibilityLabel="Workbench"
-        renderPanel={() => (
-          <WorkbenchPanel
-            subtitle={runTitle(data.name, 'Run')}
-            tools={workbench.tools}
-            activeTool={toolOpen ? tool : null}
-            onPick={openTool}
-            onClose={() => setPanelOpen(false)}
-          />
-        )}
-      >
       <SessionHeader
         leading={backButton}
         title={headerTitle(runTitle(data.name, 'Run'), statusLabel(data.status))}
         trailing={
           <>
             {workspaceId ? (
-              <WorkbenchButton badge={workbench.badge} selected={panelOpen} onPress={() => setPanelOpen((v) => !v)} />
+              <WorkbenchButton badge={workbench.badge} selected={paneOpen} onPress={() => usePaneStore.getState().toggle()} />
             ) : null}
             <IconButton
               icon={<MoreHorizontal size={20} color={colors.foreground} />}
@@ -430,18 +413,6 @@ export default function RunDetailScreen(): React.ReactElement {
           />
         </ListGroup>
       </PlainScroll>
-      </SidePanelHost>
-
-      <WorkbenchSheet
-        visible={toolOpen}
-        onClose={() => setToolOpen(false)}
-        tool={tool}
-        onToolChange={setTool}
-        tools={workbench.tools}
-        workspaceId={workspaceId ?? null}
-        scopes={runControl.scopes}
-      />
-
       <ActionSheet
         visible={menu}
         onClose={() => setMenu(false)}

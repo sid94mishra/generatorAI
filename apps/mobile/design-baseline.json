@@ -743,14 +743,6 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 14,
       "mobile-design/design/defaultTextSize": 3
     },
-    "src/components/ui/SidePanel.tsx": {
-      "mobile-design/design/platformOs": 5,
-      "mobile-design/design/rawTextImport": 1,
-      "react-hooks/immutability/diagnostic": 4,
-      "react-hooks/set-state-in-effect/diagnostic": 1,
-      "mobile-design/design/literalInlineStyle": 7,
-      "mobile-design/design/hexOrRgbInTs": 2
-    },
     "src/components/ui/Skeleton.tsx": {
       "mobile-design/design/legacyTokenUtility": 5,
       "better-tailwindcss/no-restricted-classes/diagnostic": 6,
@@ -863,25 +855,6 @@
       "mobile-design/design/literalInlineStyle": 2,
       "mobile-design/design/defaultTextSize": 1,
       "mobile-design/design/boldWeight": 1
-    },
-    "src/components/workbench/WorkbenchPanel.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/literalInlineStyle": 1,
-      "mobile-design/design/defaultTextSize": 7,
-      "mobile-design/design/boldWeight": 1,
-      "mobile-design/design/legacyTokenUtility": 10,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 20,
-      "mobile-design/design/defaultRadius": 2
-    },
-    "src/components/workbench/WorkbenchSheet.tsx": {
-      "mobile-design/design/lucideDirectImport": 1,
-      "react-hooks/set-state-in-effect/diagnostic": 2,
-      "mobile-design/design/legacyTokenUtility": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 1
-    },
-    "src/components/workbench/toolIcons.tsx": {
-      "mobile-design/design/lucideDirectImport": 1
     },
     "src/components/workbench/useWorkbench.ts": {
       "react-hooks/purity/diagnostic": 1
@@ -1058,7 +1031,7 @@
       "mobile-design/design/platformOs": 3,
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 46,
+      "boundaries/dependencies/diagnostic": 45,
       "react-hooks/refs/diagnostic": 10,
       "react-hooks/set-state-in-effect/diagnostic": 1,
       "react-hooks/preserve-manual-memoization/diagnostic": 4,
@@ -1086,7 +1059,7 @@
     },
     "app/(app)/index.tsx": {
       "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 13,
+      "boundaries/dependencies/diagnostic": 12,
       "react-hooks/set-state-in-effect/diagnostic": 1,
       "mobile-design/design/legacyTokenUtility": 1,
       "better-tailwindcss/no-restricted-classes/diagnostic": 1
@@ -1307,7 +1280,7 @@
     "app/(app)/workflows/[id]/runs/[runId]/index.tsx": {
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 30,
+      "boundaries/dependencies/diagnostic": 27,
       "react-hooks/exhaustive-deps/diagnostic": 3,
       "mobile-design/design/legacyTokenUtility": 11,
       "better-tailwindcss/no-restricted-classes/diagnostic": 17,

@@ -100,3 +100,5 @@ It also records every merge of `desktop_redesign` into this branch.
 | 2026-10-02 | `734dea94` | none | M5 phase-start merge not needed: `desktop_redesign` is ahead only by merges of this branch; `git diff HEAD desktop_redesign` outside `apps/mobile` and `docs/redesign/mobile` is empty. |
 
 | 2026-10-02 | M5-01 | `packages/shared/src/ui-contract/deepLinks.ts`: `DEEP_LINK_ROUTE_ROOTS` gains `needs-you`, `servers` | additive (desktop keeps its own `deep-link-route.ts`; web unaffected, web typecheck green) | Mobile-only routes of the M5 tree (MD-79, MD-138). 80 ui-contract tests green. |
+
+| 2026-10-02 | M5-03 | `packages/design-tokens/src/icons.ts`: `MOBILE_ICON_CONCEPTS` gains `minimize` (lucide `minimize-2`, SF `arrow.down.right.and.arrow.up.left`, Material `close_fullscreen`; 02 §5.1) | additive; not in `ICON_CONCEPTS`, web unaffected (web typecheck green) | Pane "Exit full screen" (MD-140). design-tokens 804 tests, `check:tokens` green. |

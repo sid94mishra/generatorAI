@@ -1,6 +1,6 @@
 // AppShell (06 §1.1, MD-18, MD-24): the one place the shell connects the kit panels to the shell store, the router
 // and the command host. Start: the sidebar in a SidePanel — a drawer over a scrim on phones, a persistent column at
-// ≥ 600 unless hidden. Main: the column that pays the status-bar and side insets once (its subtree reads 0 there;
+// ≥ 600 unless hidden. End: the workspace pane (MB-42) the focused chat or run claims. Main: the column that pays the status-bar and side insets once (its subtree reads 0 there;
 // full-window surfaces read `useWindowInsets()`), the connection banner, then the Stack. Mounts the kit hosts left by
 // M4 (ToastHost, AlertDialogHost, SheetProvider) and registers the biometric step-up for AlertDialog.
 import React, { useEffect, useMemo } from 'react';
@@ -17,6 +17,7 @@ import { edgeSwipeOpensDrawer } from '../../ui/platform/gestures';
 import { WindowInsetsProvider } from '../../ui/platform/insets';
 import { ToastHost } from '../../ui/primitives/Toast';
 import { ConnectionBanner } from '../ConnectionStatus';
+import { WorkspacePane, dockedSidebarWidth } from '../WorkspacePane';
 import { DrawerContent } from './DrawerContent';
 import { ErrorBoundary } from './ErrorBoundary';
 import { isModuleRoot } from './parentHref';
@@ -73,6 +74,7 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
               <ErrorBoundary scope="shell">{children}</ErrorBoundary>
             </SafeAreaInsetsContext.Provider>
           </View>
+          <WorkspacePane sidebarWidth={dockedSidebarWidth(persistent)} />
         </View>
         <ToastHost />
         <AlertDialogHost />

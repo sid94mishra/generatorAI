@@ -52,6 +52,7 @@ import {
   Copy,
   GitFork,
   History,
+  Info,
   Pencil,
   Share2,
   Square,
@@ -127,10 +128,11 @@ import { useScmResults } from '../../../../src/components/scm/useScmResults';
 import { activityLabelFor, selectChatView } from '../../../../src/components/chat/timeline/selectChatView';
 import { ComposerCaptureContext } from '../../../../src/components/chat/composer/captureContext';
 import { useTasksSummary } from '../../../../src/components/chat/panes/useTasksSummary';
-import { SidePanelHost } from '../../../../src/components/ui/SidePanel';
-import { WorkbenchPanel } from '../../../../src/components/workbench/WorkbenchPanel';
-import { WorkbenchSheet, type ToolFocus } from '../../../../src/components/workbench/WorkbenchSheet';
 import { WorkbenchButton } from '../../../../src/components/workbench/WorkbenchButton';
+import { paneTabForTool, useWorkbenchPane, type ToolFocus } from '../../../../src/components/workbench/useWorkbenchPane';
+import { InspectorSection } from '../../../../src/components/chat/panes/InspectorSection';
+import { usePaneStore } from '../../../../src/blocks/WorkspacePane';
+import { chatHref } from '../../../../src/blocks/shell/hrefs';
 import { useWorkbench } from '../../../../src/components/workbench/useWorkbench';
 import { toolForSection, type ToolId } from '../../../../src/components/workbench/workbenchModel';
 import { ChangesTray } from '../../../../src/components/chat/panes/ChangesTray';
@@ -234,11 +236,11 @@ export default function ChatScreen(): React.ReactElement {
   const motion = useChatMotion();
   const keyboard = useKeyboardHeight();
 
-  // The workbench: an index of session tools in a panel from the right, and
-  // the chosen tool in a sheet from the bottom. The transcript owns the screen.
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [tool, setTool] = useState<ToolId | null>(null);
-  const [toolOpen, setToolOpen] = useState(false);
+  // The workspace pane (MB-42) is shell chrome this screen claims; its tabs are
+  // the session tools. The Session tool is a sheet from the chat menu.
+  const paneOpen = usePaneStore((s) => s.open && s.claim?.scope.kind === 'chat' && s.claim.scope.id === chatId);
+  const paneTab = usePaneStore((s) => s.active);
+  const [sessionOpen, setSessionOpen] = useState(false);
   // A request to open one file in the Changes tool; the nonce re-asks for the same file.
   const [changesFocus, setChangesFocus] = useState<ToolFocus | null>(null);
   // The plan "Open plan" asked the Plan tool to show.
@@ -258,7 +260,8 @@ export default function ChatScreen(): React.ReactElement {
   const [limit, setLimit] = useState(PAGE_SIZE);
 
   const models = useModels();
-  const scopes = state.status === 'authenticated' ? state.scopes : [];
+  const authScopes = state.status === 'authenticated' ? state.scopes : null;
+  const scopes = useMemo<readonly string[]>(() => authScopes ?? [], [authScopes]);
   // Read-aloud on rows and the live turn. Dictation itself is owned by the
   // composer controller below — one `useVoiceInput` per screen, never two.
   const voice = checkFeature('voice', scopes);
@@ -780,9 +783,9 @@ export default function ChatScreen(): React.ReactElement {
   const openTool = useCallback((next: ToolId) => {
     Keyboard.dismiss();
     if (next !== 'plan') setMorePlanId(null);
-    setPanelOpen(false);
-    setTool(next);
-    setToolOpen(true);
+    const tab = paneTabForTool(next);
+    if (tab) usePaneStore.getState().openTab(tab);
+    else setSessionOpen(true);
   }, []);
 
   const openInChanges = useCallback(
@@ -793,11 +796,11 @@ export default function ChatScreen(): React.ReactElement {
     [openTool],
   );
 
-  // iOS edge swipe pops the chat only when the workbench panel is not open
-  // over it; the panel's own swipe closes that first.
+  // iOS edge swipe pops the chat only when the pane is not open over it; the
+  // pane's own drag closes that first.
   useEffect(() => {
-    navigation.setOptions({ gestureEnabled: !panelOpen });
-  }, [navigation, panelOpen]);
+    navigation.setOptions({ gestureEnabled: !paneOpen });
+  }, [navigation, paneOpen]);
 
   const timelineActions = useMemo<TimelineActions>(
     () => ({
@@ -899,7 +902,7 @@ export default function ChatScreen(): React.ReactElement {
     messages: messages.data,
     // "Send to chat" from the Terminal / Browser pane: bring the composer
     // forward so the new chip (or inserted text) is in view.
-    onCaptured: () => setToolOpen(false),
+    onCaptured: () => usePaneStore.getState().setOpen(false),
   });
   // Written during render on purpose: the stream's rewind callback is
   // declared above the controller and must see the CURRENT one, not the one
@@ -986,9 +989,7 @@ export default function ChatScreen(): React.ReactElement {
   const openPlan = useCallback((planId: string) => {
     Keyboard.dismiss();
     setMorePlanId(planId);
-    setPanelOpen(false);
-    setTool('plan');
-    setToolOpen(true);
+    usePaneStore.getState().openTab('plan');
   }, []);
 
   // A pinned card already says a decision is waiting; the transcript's own
@@ -1016,7 +1017,7 @@ export default function ChatScreen(): React.ReactElement {
   if (atBottom) seenCount.current = listRows.length;
   const unseen = atBottom ? 0 : Math.max(0, listRows.length - seenCount.current);
 
-  const tasksSummary = useTasksSummary(chatId!, { pollPaused: toolOpen && tool === 'tasks' });
+  const tasksSummary = useTasksSummary(chatId!, { pollPaused: paneOpen && paneTab === 'tasks' });
   const workbench = useWorkbench({
     surface: 'chat',
     workspaceId,
@@ -1026,8 +1027,22 @@ export default function ChatScreen(): React.ReactElement {
     tasksSummary,
     model: findModel(models.data, chat.data?.model ?? null)?.name ?? chat.data?.model ?? null,
     contextPercent: contextPercentOf(view.contextTokens, promptLimit(findModel(models.data, chat.data?.model ?? null))),
-    live: panelOpen || toolOpen,
+    live: paneOpen,
   });
+  const paneBody = useMemo(
+    () => ({
+      workspaceId,
+      scopes,
+      chatId: chatId!,
+      planId: morePlanId,
+      agentBusy: isStreaming,
+      changesFocus,
+      onOpenInChanges: openInChanges,
+      onPlanDecided: () => usePaneStore.getState().setOpen(false),
+    }),
+    [workspaceId, scopes, chatId, morePlanId, isStreaming, changesFocus, openInChanges],
+  );
+  useWorkbenchPane({ kind: 'chat', id: chatId, title, path: chatHref(chatId!), tools: workbench.tools, body: paneBody });
 
   // The newest user prompt the server has a turn id for: "Rewind" from the menu.
   const lastPrompt = useMemo(() => {
@@ -1303,6 +1318,7 @@ export default function ChatScreen(): React.ReactElement {
         title: 'Chat',
         items: [
           { label: 'Rename', icon: icon(Pencil), onPress: () => setRenameOpen(true) },
+          { label: 'Session info', detail: 'Model, usage, context and connection.', icon: icon(Info), onPress: () => setSessionOpen(true) },
           {
             label: 'Rewind…',
             detail: 'Go back to before your last message.',
@@ -1377,22 +1393,6 @@ export default function ChatScreen(): React.ReactElement {
     <TimelineActionsContext.Provider value={timelineActions}>
       <ComposerCaptureContext.Provider value={composer.captures}>
         <View className="flex-1">
-          <SidePanelHost
-            side="right"
-            open={panelOpen}
-            onOpenChange={setPanelOpen}
-            swipeToOpen={false}
-            accessibilityLabel="Workbench"
-            renderPanel={() => (
-              <WorkbenchPanel
-                subtitle={headerSubtitle}
-                tools={workbench.tools}
-                activeTool={toolOpen ? tool : null}
-                onPick={openTool}
-                onClose={() => setPanelOpen(false)}
-              />
-            )}
-          >
             <SessionHeader
               // A chat is a pushed screen: Back, like every other detail
               // screen. The menu belongs to the top-level sections only.
@@ -1416,10 +1416,10 @@ export default function ChatScreen(): React.ReactElement {
                 <>
                   <WorkbenchButton
                     badge={workbench.badge}
-                    selected={panelOpen}
+                    selected={paneOpen}
                     onPress={() => {
                       Keyboard.dismiss();
-                      setPanelOpen((v) => !v);
+                      usePaneStore.getState().toggle();
                     }}
                   />
                   <ChatHeaderMenuButton onPress={() => setMenuOpen(true)} />
@@ -1427,26 +1427,16 @@ export default function ChatScreen(): React.ReactElement {
               }
             />
             {renderChat()}
-          </SidePanelHost>
 
-          <WorkbenchSheet
-            visible={toolOpen}
-            onClose={() => setToolOpen(false)}
-            tool={tool}
-            onToolChange={setTool}
-            tools={workbench.tools}
-            workspaceId={workspaceId}
-            scopes={scopes}
-            chatId={chatId!}
-            chat={chat.data}
-            usage={view.usage}
-            contextTokens={view.contextTokens}
-            transportLabel={`${transport.label} · ${transport.detail}`}
-            streamKey={streamKey}
-            planId={morePlanId}
-            agentBusy={isStreaming}
-            changesFocus={changesFocus}
-          />
+          <Sheet visible={sessionOpen} onClose={() => setSessionOpen(false)} title="Session" detents={[0.6, 0.92]} initialDetent={0}>
+            <InspectorSection
+              chat={chat.data}
+              usage={view.usage}
+              contextTokens={view.contextTokens}
+              transportLabel={`${transport.label} · ${transport.detail}`}
+              streamKey={streamKey}
+            />
+          </Sheet>
 
           <Sheet
             visible={consoleCallId !== null}

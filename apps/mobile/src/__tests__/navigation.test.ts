@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { settleOpen, sidePanelWidth, SIDE_PANEL_MAX_WIDTH } from '../components/ui/sidePanelMath';
 import {
   DEFAULT_WORK_SEGMENT,
   WORK_SEGMENTS,
@@ -8,20 +7,6 @@ import {
   resolveWorkSegment,
 } from '../components/work/workSegment';
 import { missingGrantableScopes, scopeRequestBody, scopeRequestOutcome } from '../services/auth/scopeRequests';
-
-describe('side panel geometry', () => {
-  it('leaves a strip of content visible on a narrow phone', () => {
-    expect(sidePanelWidth(320)).toBeLessThan(320);
-    expect(sidePanelWidth(1024)).toBe(SIDE_PANEL_MAX_WIDTH);
-  });
-
-  it('lets a flick beat position when a drag is released', () => {
-    expect(settleOpen(0.1, 900)).toBe(true);
-    expect(settleOpen(0.9, -900)).toBe(false);
-    expect(settleOpen(0.6, 0)).toBe(true);
-    expect(settleOpen(0.4, 0)).toBe(false);
-  });
-});
 
 describe('resolveWorkSegment', () => {
   it('prefers the route param, then the stored value, then the default', () => {

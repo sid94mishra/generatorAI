@@ -53,7 +53,7 @@ try {
       await step(`workbench tool: ${label}`, async () => {
         await tap(visible(page.getByTestId('workbench-button')));
         await sleep(900);
-        await tap(visible(page.getByTestId(`workbench-tool-${id}`)));
+        await tap(visible(page.getByTestId(`pane-tab-${id}`)));
         await sleep(1600);
         const text = await body();
         if (/Something went wrong|Unmatched Route/.test(text)) throw new Error(text);

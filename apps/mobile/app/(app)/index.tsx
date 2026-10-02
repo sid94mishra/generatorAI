@@ -37,7 +37,7 @@ import { StatTiles } from '../../src/components/home/StatTiles';
 import { OperationCard } from '../../src/components/home/OperationCard';
 import { SectionHeader } from '../../src/components/ui/primitives';
 import { SegmentedControl, useSegmentSwipe } from '../../src/components/ui/SegmentedControl';
-import { DRAWER_EDGE_HIT_SLOP } from '../../src/components/ui/SidePanel';
+import { DRAWER_EDGE_HIT_SLOP } from '../../src/ui/platform/gestures';
 import { IconButton } from '../../src/components/ui/Button';
 import { EmptyState, ErrorState } from '../../src/components/ui/States';
 import { SkeletonList } from '../../src/components/ui/Skeleton';
