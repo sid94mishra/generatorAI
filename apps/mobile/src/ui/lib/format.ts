@@ -46,3 +46,30 @@ export function formatBytes(bytes: number): string {
   }
   return `${unit === 0 ? integer.format(value) : oneDecimal.format(value)} ${units[unit]}`;
 }
+
+const shortDate = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
+
+/** Compact relative time for rows (mono): "now", "3m", "1h", "2d", then "Sep 23". Invalid input → "". */
+export function formatRelativeShort(iso: string, now: number = Date.now()): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  const s = Math.max(0, Math.floor((now - t) / 1000));
+  if (s < 60) return 'now';
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86_400) return `${Math.floor(s / 3600)}h`;
+  if (s < 7 * 86_400) return `${Math.floor(s / 86_400)}d`;
+  return shortDate.format(t);
+}
+
+/** The same for a screen reader: "just now", "3 minutes ago", "on Sep 23". */
+export function spokenRelative(iso: string, now: number = Date.now()): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  const s = Math.max(0, Math.floor((now - t) / 1000));
+  const unit = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'} ago`;
+  if (s < 60) return 'just now';
+  if (s < 3600) return unit(Math.floor(s / 60), 'minute');
+  if (s < 86_400) return unit(Math.floor(s / 3600), 'hour');
+  if (s < 7 * 86_400) return unit(Math.floor(s / 86_400), 'day');
+  return `on ${shortDate.format(t)}`;
+}

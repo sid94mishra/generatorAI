@@ -24,3 +24,7 @@ jest.mock('./src/services/storage/prefs', () => {
 });
 // The Android ripple needs a native view (hotspotUpdate on the host ref), which the test renderer has not got.
 jest.mock('react-native/Libraries/Components/Pressable/useAndroidRippleForView', () => ({ __esModule: true, default: () => null }));
+// Native modules kit parts import at module level (Link → expo-web-browser, copy actions → expo-clipboard): kit tests
+// render screens of parts that contain them, so they are mocked once here (a test may still mock them itself).
+jest.mock('expo-web-browser', () => ({ openBrowserAsync: jest.fn(() => Promise.resolve({ type: 'opened' })) }));
+jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn(() => Promise.resolve(true)), getStringAsync: jest.fn(() => Promise.resolve('')) }));

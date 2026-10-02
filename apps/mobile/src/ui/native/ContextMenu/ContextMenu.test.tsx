@@ -17,9 +17,14 @@ const ITEMS: MenuEntry[] = [
 describe('ContextMenu (MP-28)', () => {
   it('turns enabled items into accessibility actions with the long-press hint (MD-28)', () => {
     const onSelect = jest.fn();
-    const props = contextTargetProps({ items: ITEMS, onSelect }, 'Opens the chat');
-    expect(props.accessibilityActions).toEqual([{ name: 'pin', label: 'Pin' }, { name: 'delete', label: 'Delete' }]);
+    const rowAction = jest.fn();
+    const props = contextTargetProps({ items: ITEMS, onSelect }, { accessibilityHint: 'Opens the chat', accessibilityActions: [{ name: 'archive', label: 'Archive' }], onAccessibilityAction: rowAction });
+    expect(props.accessibilityActions).toEqual([{ name: 'pin', label: 'Pin' }, { name: 'delete', label: 'Delete' }, { name: 'archive', label: 'Archive' }]);
     expect(props.accessibilityHint).toBe(`Opens the chat. ${CONTEXT_MENU_HINT}`);
+    props.onAccessibilityAction!('archive');
+    props.onAccessibilityAction!('pin');
+    expect(rowAction).toHaveBeenCalledWith('archive');
+    expect(onSelect).toHaveBeenCalledWith('pin');
     expect(contextTargetProps({ items: ITEMS, onSelect, disabled: true })).toEqual({});
   });
 

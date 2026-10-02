@@ -18,7 +18,7 @@ export function ContextMenu(props: ContextMenuProps): React.ReactElement {
   const { items, onSelect, preview, disabled = false, children, testID } = props;
   if (!swiftUI || disabled) return <ContextMenuJs {...props} />;
   const { ui } = swiftUI;
-  const target = React.cloneElement(children, contextTargetProps({ items, onSelect }, children.props.accessibilityHint));
+  const target = React.cloneElement(children, contextTargetProps({ items, onSelect }, children.props));
   return (
     <View testID={testID} onLayout={(e) => setWidth(Math.round(e.nativeEvent.layout.width))}>
       {width === 0 ? (

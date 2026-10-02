@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cn } from './cn';
-import { formatBytes, formatCount, formatElapsed, spokenElapsed } from './format';
+import { formatBytes, formatCount, formatElapsed, formatRelativeShort, spokenElapsed, spokenRelative } from './format';
 import { tid } from './testIds';
 
 describe('cn (mobile 02 §9.7)', () => {
@@ -30,6 +30,13 @@ describe('format', () => {
     expect(formatBytes(2150)).toBe('2.1 KB');
     expect(formatBytes(32 * 1024)).toBe('32 KB');
     expect(formatBytes(-1)).toBe('0 B');
+    const now = Date.parse('2026-10-02T12:00:00Z');
+    expect(formatRelativeShort('2026-10-02T11:59:30Z', now)).toBe('now');
+    expect(formatRelativeShort('2026-10-02T11:57:00Z', now)).toBe('3m');
+    expect(formatRelativeShort('2026-10-02T10:00:00Z', now)).toBe('2h');
+    expect(formatRelativeShort('2026-09-30T12:00:00Z', now)).toBe('2d');
+    expect(formatRelativeShort('nope', now)).toBe('');
+    expect(spokenRelative('2026-10-02T11:59:00Z', now)).toBe('1 minute ago');
   });
 });
 

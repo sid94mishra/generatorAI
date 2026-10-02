@@ -77,6 +77,7 @@
     "react-native-nitro-modules": "^0.36.0",
     "react-native-quick-crypto": "^1.1.6",
     "react-native-reanimated": "~4.5.1",
+    "react-native-reorderable-list": "0.18.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.2",
     "react-native-svg": "15.15.4",

@@ -194,6 +194,8 @@ export const MOBILE_ICON_CONCEPTS = {
   wrap: { lucide: 'text-wrap', sfSymbol: 'arrow.turn.down.left', material: 'wrap_text' },
   /** Input secret toggle "Hide", privacy / redaction (02 §5.1). */
   hide: { lucide: 'eye-off', sfSymbol: 'eye.slash', material: 'visibility_off' },
+  /** ReorderList handle (MBuilderList, MGestures; 02 §5.1). */
+  grip: { lucide: 'grip-vertical', sfSymbol: 'line.3.horizontal', material: 'drag_indicator' },
 } as const satisfies Record<string, IconConceptDef>;
 export type MobileIconConcept = IconConcept | keyof typeof MOBILE_ICON_CONCEPTS;
 

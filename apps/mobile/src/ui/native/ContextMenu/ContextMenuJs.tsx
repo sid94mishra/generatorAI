@@ -20,7 +20,7 @@ export function ContextMenuJs({ items, onSelect, disabled = false, children, tes
     setOpen(true);
   };
   const target = React.cloneElement(children, {
-    ...contextTargetProps({ items, onSelect, disabled }, children.props.accessibilityHint),
+    ...contextTargetProps({ items, onSelect, disabled }, children.props),
     onLongPress: disabled ? children.props.onLongPress : show,
   });
   return (
