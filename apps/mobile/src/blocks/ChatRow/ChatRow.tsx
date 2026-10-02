@@ -31,11 +31,14 @@ export interface ChatRowProps {
   position?: RowPosition;
 }
 
+/** MChats sets the project *slug* in mono; a display name ("Mobile sandbox repo") reads as prose (MD-163). */
+const isSlug = (name: string): boolean => /^[a-z0-9][a-z0-9._/-]*$/.test(name);
+
 export function ChatRow({ row, onAction, selection, swipe = true, position }: ChatRowProps): React.ReactElement {
   const meta = [
     ...(row.project
       ? [
-          <Text key="project" role="monoSm" tone="fg-3" numberOfLines={1} className="shrink">
+          <Text key="project" role={isSlug(row.project) ? 'monoSm' : 'footnote'} tone="fg-3" numberOfLines={1} className="shrink">
             {row.project}
           </Text>,
         ]
