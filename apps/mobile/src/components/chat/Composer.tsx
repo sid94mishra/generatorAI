@@ -113,7 +113,7 @@ import type {
   StopState,
   VoiceUiState,
 } from './composer/types';
-import { SCOPE_REQUEST_ROUTE } from '../../navigation/routes';
+import { SCOPE_REQUEST_HREF } from '../../blocks/shell/hrefs';
 import { findModel, promptLimit } from '../../services/api/useModels';
 import { useTheme } from '../../theme/ThemeProvider';
 
@@ -468,7 +468,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
   // ── Attach menu ────────────────────────────────────────────────
   const requestScope = useCallback(() => {
     if (props.onRequestScope) props.onRequestScope();
-    else router.push(SCOPE_REQUEST_ROUTE);
+    else router.push(SCOPE_REQUEST_HREF);
   }, [props, router]);
 
   const canCaptureTerminal = Boolean(props.captureActions && props.captureScopes?.terminal);

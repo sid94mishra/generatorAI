@@ -15,18 +15,19 @@ export const LAST_ROUTE_TTL_MS = 30 * 60 * 1000;
  * restoring `/revoked` would show a revoked wall to a re-paired device;
  * `/` and the tab root are where the user lands anyway.
  */
-const NON_RESTORABLE = new Set(['', '/', '/pair', '/revoked', '/(tabs)', '/index']);
+const NON_RESTORABLE = new Set(['', '/', '/pair', '/revoked', '/index']);
 
 /**
- * Route-addressable sheets (`/approvals`, `/scope-request`, a chat's gate or
+ * Route-addressable sheets and modals (`/scope-request`, `/servers`, the `/search` palette, a chat's gate or
  * plan sheet). Restoring one on a cold start presents a modal with nothing
  * underneath it, and a gate or plan restored half an hour later has usually
  * already been answered — so the user lands on a stale decision.
  */
 export function isSheetRoute(pathname: string): boolean {
   const path = pathname.split('?')[0] ?? '';
-  if (path === '/approvals' || path.startsWith('/approvals/')) return true;
-  if (path === '/scope-request' || path.startsWith('/scope-request/')) return true;
+  for (const root of ['/scope-request', '/servers', '/search', '/chats/new']) {
+    if (path === root || path.startsWith(`${root}/`)) return true;
+  }
   return /^\/chats\/[^/]+\/(gate|plan)\/[^/]+\/?$/.test(path);
 }
 

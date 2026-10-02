@@ -19,7 +19,7 @@ import { adjacentGapFor, hitFrame, hitFrameFor } from './hit';
 import { androidMemberFor, haptic, setHapticsEnabled } from './haptics';
 import { reduceMotionFor, resolveMotion } from './motion';
 import { sizeClassFor } from './breakpoints';
-import { sheetOptionsFor } from './presentation';
+import { detailOptionsFor, sheetOptionsFor } from './presentation';
 import { edgeSwipeOpensDrawerOn } from './gestures';
 import { pressFeedbackFor } from './pressFeedback';
 import { maxScaleFor } from './fontScale';
@@ -80,6 +80,8 @@ describe(`platform layer (${Platform.OS})`, () => {
   it('builds sheet options per OS (06 §3.7)', () => {
     expect(sheetOptionsFor('ios', 'picker')).toMatchObject({ presentation: 'formSheet', sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true });
     expect(sheetOptionsFor('android', 'large')).toEqual({ presentation: 'formSheet', headerShown: false, sheetAllowedDetents: [1], sheetCornerRadius: 28 });
+    expect(detailOptionsFor('android')).toMatchObject({ animation: 'slide_from_right', gestureEnabled: true });
+    expect(detailOptionsFor('ios')).toMatchObject({ animation: 'default', fullScreenGestureEnabled: false });
   });
 
   it('opens the drawer by edge only on iOS module roots in the compact class (MD-19)', () => {

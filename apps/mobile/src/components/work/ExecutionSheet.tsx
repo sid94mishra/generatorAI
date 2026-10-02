@@ -34,6 +34,7 @@ import {
   type ExecutionRunView,
   type ExecutionView,
 } from '../../features/automations/model';
+import { useOpenRun } from '../../features/workflows/queries';
 
 type ExecutionDetail = ExecutionView & { runs?: ExecutionRunView[] };
 
@@ -54,6 +55,7 @@ export function ExecutionSheet({
   onClose: () => void;
 }): React.ReactElement | null {
   const admin = useAdminApi();
+  const openRunRoute = useOpenRun();
   const queryClient = useQueryClient();
   const runControl = useFeature('runControl');
   const [confirming, setConfirming] = useState(false);
@@ -89,11 +91,11 @@ export function ExecutionSheet({
   const elapsed = execution ? runElapsed(execution) : null;
   const runs = detail.data?.runs ?? [];
 
-  const openRun = (runId: string) => {
+  const openRun = (runId: string, workflowId?: string) => {
     onClose();
     // Let the sheet's modal dismiss before the stack pushes, or iOS drops
     // the push while a modal is still presented.
-    setTimeout(() => router.push(`/runs/${runId}`), 250);
+    setTimeout(() => void openRunRoute(runId, workflowId), 250);
   };
 
   return (

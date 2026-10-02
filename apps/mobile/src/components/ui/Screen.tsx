@@ -63,7 +63,7 @@ const COLLAPSE_RANGE = 48;
  * A deep link, a notification tap or a cold start on a detail route all
  * produce a stack with nothing behind them.
  */
-export function goBack(fallback: Parameters<typeof router.replace>[0] = '/(tabs)'): void {
+export function goBack(fallback: Parameters<typeof router.replace>[0] = '/'): void {
   if (router.canGoBack()) router.back();
   else router.replace(fallback);
 }

@@ -51,7 +51,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
     this.setState({ error: null });
     // `replace` rather than `push`: the screen that crashed must not stay in
     // the history for the back gesture to return to.
-    router.replace('/(tabs)');
+    router.replace('/');
   };
 
   override render(): React.ReactNode {

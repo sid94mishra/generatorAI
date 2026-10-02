@@ -7,7 +7,7 @@ import { nativePlatform } from './geometry';
 /** The subset of native-stack screen options the kit sets. */
 export interface ScreenPresentationOptions {
   presentation?: 'card' | 'formSheet' | 'fullScreenModal' | 'modal';
-  animation?: 'default' | 'none' | 'fade';
+  animation?: 'default' | 'none' | 'fade' | 'slide_from_right';
   gestureEnabled?: boolean;
   fullScreenGestureEnabled?: boolean;
   headerShown?: boolean;
@@ -49,8 +49,14 @@ export const fullScreenModalOptions: ScreenPresentationOptions = { presentation:
 /** The search palette (MD-81). */
 export const paletteOptions: ScreenPresentationOptions = { presentation: 'fullScreenModal', animation: 'fade', headerShown: false };
 
-/** Detail pushes: the native interactive pop on iOS; Android uses system Back (MD-19, MD-20). */
-export const detailOptions: ScreenPresentationOptions = { gestureEnabled: true, fullScreenGestureEnabled: false };
+/**
+ * Detail pushes: the native interactive pop on iOS; Android uses system Back (MD-19, MD-20) with the platform push
+ * transition (`slide_from_right` matches the system's own back preview).
+ */
+export function detailOptionsFor(platform: 'ios' | 'android'): ScreenPresentationOptions {
+  return { gestureEnabled: true, fullScreenGestureEnabled: false, animation: platform === 'android' ? 'slide_from_right' : 'default' };
+}
+export const detailOptions: ScreenPresentationOptions = detailOptionsFor(nativePlatform);
 
 /** Module roots replaced from the sidebar switch without animation (06 §3.1, MD-87). */
 export const moduleRootOptions: ScreenPresentationOptions = { animation: 'none' };

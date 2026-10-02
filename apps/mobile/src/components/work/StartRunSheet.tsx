@@ -64,6 +64,7 @@ import {
   type Draft,
   type VariableDefinition,
 } from './variableForm';
+import { runHref } from '../../blocks/shell/hrefs';
 
 export interface StartRunWorkflow {
   id: string;
@@ -272,7 +273,7 @@ export function StartRunSheet({
       haptics.success();
       void queryClient.invalidateQueries({ queryKey: queryKeys.runs() });
       onClose();
-      router.push(`/runs/${runId}`);
+      router.push(runHref(workflow.id, runId) as never);
     },
     onError: (err) => {
       idempotencyKey.settle(err);

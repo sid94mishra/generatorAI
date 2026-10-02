@@ -59,7 +59,7 @@ export function RouteSheet({
   scroll = true,
   onRefresh,
   refreshing = false,
-  fallback = '/(tabs)',
+  fallback = '/',
 }: {
   title: string;
   subtitle?: string;

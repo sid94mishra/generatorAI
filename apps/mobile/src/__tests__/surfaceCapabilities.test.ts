@@ -31,7 +31,7 @@ const read = (rel: string): string => readFileSync(resolve(APP_ROOT, rel), 'utf8
 
 describe('W29 — mobile fileAttachment', () => {
   //   @capability-proof mobile/fileAttachment
-  const chatScreen = read('app/chats/[id].tsx');
+  const chatScreen = read('app/(app)/chats/[id]/index.tsx');
   const composer = read('src/components/chat/Composer.tsx');
 
   it('the composer only has an attach path when a handler is supplied', () => {

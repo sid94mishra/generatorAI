@@ -1,26 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  APPROVALS_ROUTE,
-  SCOPE_REQUEST_ROUTE,
-  chatRoute,
-  gateRoute,
-  needsYouLabel,
-  planRoute,
-  runRoute,
-} from '../navigation/routes';
-import {
-  FAB_MARGIN,
-  FAB_SIZE,
-  shellContentInsets,
-  withAlpha,
-} from '../navigation/tabsImplementation';
-import {
-  SHELL_SECTIONS,
-  drawerAvailable,
-  isShellRoot,
-  sectionForPath,
-} from '../navigation/shell/sections';
+import { SHELL_SECTIONS, drawerAvailable, sectionForPath } from '../navigation/shell/sections';
 import { settleOpen, sidePanelWidth, SIDE_PANEL_MAX_WIDTH } from '../components/ui/sidePanelMath';
 import {
   DEFAULT_WORK_SEGMENT,
@@ -30,94 +10,29 @@ import {
 } from '../components/work/workSegment';
 import { missingGrantableScopes, scopeRequestBody, scopeRequestOutcome } from '../services/auth/scopeRequests';
 
-describe('route grammar', () => {
-  it('matches the paths push notifications carry', () => {
-    // These strings are the contract with the server's push payload
-    // builder; the route files must exist at exactly these paths.
-    expect(gateRoute('c1', 'i9')).toBe('/chats/c1/gate/i9');
-    expect(planRoute('c1', 'p2')).toBe('/chats/c1/plan/p2');
-    expect(chatRoute('c1')).toBe('/chats/c1');
-    expect(runRoute('r3')).toBe('/runs/r3');
-    expect(APPROVALS_ROUTE).toBe('/approvals');
-    expect(SCOPE_REQUEST_ROUTE).toBe('/scope-request');
-  });
-
-  it('escapes ids that would otherwise break the path', () => {
-    expect(gateRoute('a/b', 'x y')).toBe('/chats/a%2Fb/gate/x%20y');
-  });
-});
-
-describe('needsYouLabel', () => {
-  it('is null when nothing is waiting so the strip animates out', () => {
-    expect(needsYouLabel(0)).toBeNull();
-    expect(needsYouLabel(-1)).toBeNull();
-    expect(needsYouLabel(Number.NaN)).toBeNull();
-  });
-
-  it('pluralises and caps', () => {
-    expect(needsYouLabel(1)).toBe('1 waiting for you');
-    expect(needsYouLabel(2)).toBe('2 waiting for you');
-    expect(needsYouLabel(150)).toBe('99+ waiting for you');
-  });
-});
-
-describe('shellContentInsets', () => {
-  it('reserves nothing for a bar: the drawer replaced it', () => {
-    expect(shellContentInsets(34).barOverlap).toBe(0);
-  });
-
-  it('floats the FAB a margin above the system inset', () => {
-    expect(shellContentInsets(34).fabBottom).toBe(34 + FAB_MARGIN);
-    expect(shellContentInsets(0).fabBottom).toBe(FAB_MARGIN);
-    expect(shellContentInsets(-5).fabBottom).toBe(FAB_MARGIN);
-  });
-
-  it('pads a list so its last row clears the FAB entirely', () => {
-    const insets = shellContentInsets(24);
-    expect(insets.listBottom(true)).toBeGreaterThanOrEqual(insets.fabBottom + FAB_SIZE);
-    expect(insets.listBottom(false)).toBeGreaterThan(24);
-    expect(insets.listBottom(false)).toBeLessThan(insets.listBottom(true));
-  });
-});
-
 describe('navigation drawer sections', () => {
-  const segments = { work: 'workflows', projects: 'projects' } as const;
-
-  it('lists exactly the desktop sidebar, in its order, with no Runs destination', () => {
-    expect(SHELL_SECTIONS.map((s) => s.id)).toEqual([
-      'home', 'projects', 'chats', 'agents', 'workflows', 'scripts', 'automations',
-    ]);
+  it('lists the desktop sidebar destinations as module roots', () => {
+    expect(SHELL_SECTIONS.map((s) => s.href)).toEqual(['/', '/projects', '/chats', '/agents', '/workflows', '/scripts', '/automations']);
   });
 
-  it('lights the catalogue a detail route belongs to', () => {
-    expect(sectionForPath('/', segments)).toBe('home');
-    expect(sectionForPath('/chats/abc', segments)).toBe('chats');
-    // A run belongs to its workflow, as on desktop.
-    expect(sectionForPath('/runs/r1/stages/s1', segments)).toBe('workflows');
-    expect(sectionForPath('/workflows/w1', segments)).toBe('workflows');
-    expect(sectionForPath('/automations/a1', segments)).toBe('automations');
-    expect(sectionForPath('/scripts/s1', segments)).toBe('scripts');
-    expect(sectionForPath('/projects/p1/codebases/c1', segments)).toBe('projects');
+  it('lights the module of a detail route', () => {
+    expect(sectionForPath('/')).toBe('home');
+    expect(sectionForPath('/chats/abc')).toBe('chats');
+    expect(sectionForPath('/workflows/w1/runs/r1/stages/s1')).toBe('workflows');
+    expect(sectionForPath('/automations')).toBe('automations');
+    expect(sectionForPath('/agents')).toBe('agents');
+    expect(sectionForPath('/projects/p1/codebases/c1')).toBe('projects');
+    expect(sectionForPath('/settings/appearance')).toBeNull();
+    expect(sectionForPath('/search')).toBeNull();
   });
 
-  it('defers to the reported segment on the shared roots', () => {
-    expect(sectionForPath('/runs', { work: 'automations', projects: 'projects' })).toBe('automations');
-    expect(sectionForPath('/projects', { work: 'workflows', projects: 'agents' })).toBe('agents');
-  });
-
-  it('lights nothing outside the shell', () => {
-    expect(sectionForPath('/settings/appearance', segments)).toBeNull();
-    expect(sectionForPath('/search', segments)).toBeNull();
-  });
-
-  it('offers the drawer on the roots only; a chat has Back like other pushed screens', () => {
-    for (const path of ['/', '/chats', '/runs', '/projects']) {
+  it('offers the drawer on module roots only; a chat has Back like other pushed screens', () => {
+    for (const path of ['/', '/chats', '/workflows', '/projects', '/agents', '/scripts', '/automations']) {
       expect(drawerAvailable(path)).toBe(true);
     }
-    for (const path of ['/chats/c1', '/pair', '/settings', '/chats/c1/plan/p1', '/projects/p1', '/runs/r1', '/runs/r1/stages/s1']) {
+    for (const path of ['/chats/c1', '/pair', '/settings', '/projects/p1', '/workflows/w1/runs/r1']) {
       expect(drawerAvailable(path)).toBe(false);
     }
-    expect(isShellRoot('/chats/c1')).toBe(false);
   });
 });
 
@@ -132,14 +47,6 @@ describe('side panel geometry', () => {
     expect(settleOpen(0.9, -900)).toBe(false);
     expect(settleOpen(0.6, 0)).toBe(true);
     expect(settleOpen(0.4, 0)).toBe(false);
-  });
-});
-
-describe('withAlpha', () => {
-  it('tints a hex token and leaves anything else alone', () => {
-    expect(withAlpha('#161b22', 0.94)).toBe('rgba(22, 27, 34, 0.94)');
-    expect(withAlpha('rgba(1,2,3,0.5)', 0.94)).toBe('rgba(1,2,3,0.5)');
-    expect(withAlpha('#161b22', 2)).toBe('rgba(22, 27, 34, 1)');
   });
 });
 

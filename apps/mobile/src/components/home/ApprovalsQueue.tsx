@@ -18,7 +18,7 @@ import { router } from 'expo-router';
 import { ChevronRight } from 'lucide-react-native';
 
 import type { Operation } from '../../services/api/activityRanking';
-import { APPROVALS_ROUTE, gateRoute, planRoute } from '../../navigation/routes';
+import { NEEDS_YOU_HREF, gateHref, planHref } from '../../blocks/shell/hrefs';
 import { DecisionCard } from './DecisionCard';
 import { useGateDecision } from './useGateDecision';
 import { SectionHeader } from '../ui/primitives';
@@ -31,8 +31,8 @@ const HOME_LIMIT = 3;
 export function decisionHref(op: Operation): string {
   if (op.kind === 'chat' && op.gate) {
     const chatId = op.entityId ?? (op.id.startsWith('chat:') ? op.id.slice('chat:'.length) : op.id);
-    if (op.gate.kind === 'plan_review' && op.gate.planId) return planRoute(chatId, op.gate.planId);
-    return gateRoute(chatId, op.gate.interactionId);
+    if (op.gate.kind === 'plan_review' && op.gate.planId) return planHref(chatId, op.gate.planId);
+    return gateHref(chatId, op.gate.interactionId);
   }
   return op.href;
 }
@@ -78,7 +78,7 @@ export function ApprovalsQueue({
             accessibilityLabel={`Review all, ${visible.length} waiting`}
             haptic="tap"
             ripple={false}
-            onPress={() => router.push(APPROVALS_ROUTE)}
+            onPress={() => router.push(NEEDS_YOU_HREF)}
             className="min-h-11 flex-row items-center gap-0.5 px-1"
           >
             <Text className="text-sm font-medium text-primary">Review all</Text>
@@ -100,7 +100,7 @@ export function ApprovalsQueue({
         <Touchable
           accessibilityLabel={`${rest} more waiting, review all`}
           haptic="tap"
-          onPress={() => router.push(APPROVALS_ROUTE)}
+          onPress={() => router.push(NEEDS_YOU_HREF)}
           className="min-h-11 items-center justify-center rounded-xl bg-control px-3"
         >
           <Text className="text-sm font-medium text-foreground">

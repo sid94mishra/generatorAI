@@ -7,14 +7,14 @@ import { Menu } from 'lucide-react-native';
 
 import { IconButton } from '../../components/ui/Button';
 import { useTheme } from '../../theme/ThemeProvider';
-import { useTabShell } from '../tabShell';
+import { needsYouCount, useActivity } from '../../features/home/queries';
 import { useShellStore } from './shellStore';
 
 export function MenuButton({ attention: attentionProp }: { attention?: number }): React.ReactElement {
   const { legacyColors: colors } = useTheme();
   const open = useShellStore((s) => s.openDrawer);
-  const shell = useTabShell();
-  const attention = attentionProp ?? shell?.attention ?? 0;
+  const { operations } = useActivity();
+  const attention = attentionProp ?? needsYouCount(operations);
   return (
     <View>
       <IconButton

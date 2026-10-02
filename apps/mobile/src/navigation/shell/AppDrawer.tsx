@@ -43,8 +43,7 @@ import { BrandMark } from '../../components/brand/BrandMark';
 import { describeSessionTransport } from '../../components/chat/sessionTransport';
 import { useStreamHealth } from '../../services/stream/streamHealth';
 import { useTheme } from '../../theme/ThemeProvider';
-import { APPROVALS_ROUTE, SEARCH_ROUTE } from '../routes';
-import { scrollActiveToTop } from '../scrollToTop';
+import { NEEDS_YOU_HREF, SEARCH_HREF } from '../../blocks/shell/hrefs';
 import { SHELL_SECTIONS, drawerAvailable, sectionForPath, type ShellSection } from './sections';
 import { useShellStore } from './shellStore';
 
@@ -60,22 +59,10 @@ const ICONS: Record<ShellSection, LucideIcon> = {
 
 type Href = Parameters<typeof router.navigate>[0];
 
-/**
- * Leave whatever is pushed and land on a shell destination.
- *
- * Pop first, switch tab on the next frame. The tab navigator sits in a stack
- * screen with `freezeOnBlur`; switching tabs in the same dispatch as the pop
- * rendered the new tab while that screen was still frozen, and from a pushed
- * screen on another tab (Home, Search, a chat, then Chats) the new tab never
- * appeared: the phone showed an empty screen.
- */
+/** A module switch resets the Stack (MD-87): dismiss everything, then replace with the module root. */
 function goToSection(href: string): void {
-  if (!router.canDismiss()) {
-    router.navigate(href as Href);
-    return;
-  }
-  router.dismissAll();
-  requestAnimationFrame(() => router.navigate(href as Href));
+  if (router.canDismiss()) router.dismissAll();
+  router.replace(href as Href);
 }
 
 export function AppDrawerHost({ children }: { children: React.ReactNode }): React.ReactElement {
@@ -112,8 +99,6 @@ function DrawerContent(): React.ReactElement {
   const { legacyColors: colors } = useTheme();
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
-  const work = useShellStore((s) => s.work);
-  const projects = useShellStore((s) => s.projects);
   const close = useShellStore((s) => s.closeDrawer);
   const auth = useAuth();
   const activity = useActivity();
@@ -121,7 +106,7 @@ function DrawerContent(): React.ReactElement {
   const streamConnection = useStreamHealth((s) => s.connection);
   const transport = describeSessionTransport(auth.transport, streamConnection);
 
-  const active = sectionForPath(pathname, { work, projects });
+  const active = sectionForPath(pathname);
   const toneColor =
     transport.tone === 'success'
       ? colors.success
@@ -150,7 +135,7 @@ function DrawerContent(): React.ReactElement {
           icon={<Search size={20} color={colors.foreground} />}
           onPress={() => {
             close();
-            router.push(SEARCH_ROUTE);
+            router.push(SEARCH_HREF);
           }}
         />
       </View>
@@ -178,10 +163,7 @@ function DrawerContent(): React.ReactElement {
                 scale="none"
                 onPress={() => {
                   close();
-                  // Re-choosing the section already on screen scrolls it back
-                  // to the top — what re-tapping the active tab used to do.
-                  if (selected && !router.canDismiss()) scrollActiveToTop(section.scene);
-                  else goToSection(section.href);
+                  if (!selected || router.canDismiss()) goToSection(section.href);
                 }}
                 className={`min-h-12 flex-row items-center gap-3.5 rounded-xl px-3.5 ${selected ? 'bg-sidebar-accent' : ''}`}
               >
@@ -247,7 +229,7 @@ function DrawerContent(): React.ReactElement {
             }
             onPress={() => {
               close();
-              router.push(APPROVALS_ROUTE);
+              router.push(NEEDS_YOU_HREF);
             }}
           />
         </View>

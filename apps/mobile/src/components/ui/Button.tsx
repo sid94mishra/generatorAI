@@ -18,7 +18,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Touchable, type HapticIntent } from './Touchable';
 import { MAX_SCALE, MIN_TARGET, useFontScale } from './accessibility';
 import { useTheme } from '../../theme/ThemeProvider';
-import { useTabShell } from '../../navigation/tabShell';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 export type ButtonSize = 'sm' | 'md' | 'lg';
@@ -188,10 +187,7 @@ export function Fab({
   label,
   onPress,
   accessibilityLabel,
-  /**
-   * Clearance above the safe area. Ignored inside the tab shell, where the
-   * shell knows the bar's real height (`useTabShell().fabBottom`).
-   */
+  /** Clearance above the safe area. */
   offset = 16,
 }: {
   icon: React.ReactNode;
@@ -202,8 +198,7 @@ export function Fab({
 }): React.ReactElement {
   const insets = useSafeAreaInsets();
   const fontScale = useFontScale();
-  const shell = useTabShell();
-  const bottom = shell ? shell.fabBottom : insets.bottom + offset;
+  const bottom = insets.bottom + offset;
 
   return (
     <View className="absolute right-4" style={{ bottom }} pointerEvents="box-none">

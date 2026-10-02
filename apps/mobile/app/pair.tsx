@@ -148,7 +148,7 @@ export default function PairScreen(): React.ReactElement {
         await completePairing(consent, deviceName.trim() || 'Mobile device');
         enrollingRef.current = false;
         haptics.success();
-        router.replace('/(tabs)');
+        router.replace('/');
       } catch (err) {
         enrollingRef.current = false;
         const next = classifyPairingFailure(err);
