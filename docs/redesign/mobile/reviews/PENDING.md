@@ -14,7 +14,7 @@ Owner-authorized continuation: MD-107 (2026-09-29). These items remain required 
 | MV-07 | pending | M1-06 Storybook route, native rebuilds and two-platform story walkthrough/flow. Six Jest tests and static checks pass; iOS rebuilt, installed and fingerprint recorded; Home renders after Metro fixes. Android rebuild running. Fonts/text-scale integration waits M3 foundations. | Finish native rebuilds and Storybook flow; include M3 font readiness before kit VRT. |
 
 | MV-08 | pending | M1-07 native markdown spike: 2,000-line fps and selection/copy not measured. Current renderer retained pending positive adoption evidence. | Complete with native harness, before M6-02. See M1-markdown-spike.md. |
-| MV-09 | pending | M1-08 Gate A unpublished (>1.12.0), Gate B twelve checks not run. SDK 58 stable and NativeWind 5 stable unavailable. | SDK 58 preview scratch spike before M3 engine adoption; recheck releases. See M1-uniwind-spike.md. |
+| MV-09 | partly resolved (2026-10-02) | M1-08 GO (MD-115): Gate A met by uniwind 1.12.1 (contains PR #686); Gate B 12/12 on iOS, Android 1–9 and 12 pass. Android checks 10 (Activity) and 11 (Reanimated `withUniwind`) not re-run: emulator System UI ANR (MV-18). `M1-uniwind-spike.md`. | Re-run Android 10/11 with the first M3-05 native build. |
 
 | MV-10 | pending | M1-09 service migration native smoke on both platforms; 1,111 pure tests and six Jest tests pass. | Run paired chat/approval/theme flows after MV-07 native rebuilds; then M2 regression checks. |
 

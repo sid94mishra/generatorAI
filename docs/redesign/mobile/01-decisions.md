@@ -782,3 +782,9 @@ Derived during M1-02 from the installed Xcode 27 `simctl help privacy`: notifica
 ### MD-114 Element pick on the streamed browser uses the existing inspector and input routes — Final (2026-10-02)
 - The MG-24 spike passed against real Chromium: a remote client turns the inspector on (`POST …/browser/actions {kind:'inspector', on:true}`) and sends the tap as `POST …/browser/input {type:'mouse.click', x, y}` in page coordinates; the page's inspector captures the element, turns itself off, and every client receives `browser.selection`. No `POST …/browser/pick` route is added.
 - MPaneBrowser's comment mode (M6) maps the tap from the scaled stream frame to page coordinates and reads the selection from the event, fetching the `browser_selection` artifact for the box and HTML when it needs them.
+
+### MD-115 Uniwind 1.12.1 is the styling engine; the gates ran on SDK 57 — Final (2026-10-02)
+- Gate A (MD-10): uniwind 1.12.1 (2026-10-01) contains PR #686 (GitHub compare `behind_by 0`). Pin it exactly; platform classes become allowed inside `src/ui/**` only.
+- Gate B ran on SDK 57 in Expo Go at the owner's direction (plan order: finish M2-10, then the M1-08 spike on 57), since Uniwind has no native module and SDK 58 is still `next`. All twelve checks pass on iOS; on Android 1–9 and 12 pass, and 10/11 wait for the first M3-05 native build because the emulator's System UI ANR (MV-18) blocked input. Result: **go**, no NativeWind fallback (`reviews/M1-uniwind-spike.md`).
+- So M3-03…M3-08 run on SDK 57 (07-phases "SDK fallback details"); the SDK 58 upgrade (M3-01/02) follows when 58 is `latest`, with its own mini-review.
+- Android's system `monospace` has no semibold; the kit's mono weights come from the bundled JetBrains Mono (M3-06), not the system font.
