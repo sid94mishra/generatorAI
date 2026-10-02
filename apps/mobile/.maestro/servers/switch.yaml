@@ -1,0 +1,19 @@
+appId: ${APP_ID}
+name: servers · switch between two paired sandboxes (MB-20, MD-05)
+# Needs a second paired sandbox (M2-08: A on :3197, B on :3297). Pass its label: -e SERVER_B_NAME="<label>".
+tags: [full, multi-server]
+env: {SERVER_B_NAME: "Sandbox B"}
+---
+- runFlow: ../_subflows/launch.yaml
+- runFlow: ../_subflows/open-sidebar.yaml
+- tapOn: {id: server-switcher-trigger}
+- extendedWaitUntil: {visible: {id: servers-sheet}, timeout: 15000}
+- assertVisible: {id: server-row-current}
+- assertVisible: {id: servers-add}
+- assertVisible: {id: servers-manage}
+- extendedWaitUntil: {visible: {id: "server-row-${SERVER_B_NAME}"}, timeout: 15000}
+- tapOn: {id: "server-row-${SERVER_B_NAME}"}
+# The server scope remounts and Home opens on the other server.
+- extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 60000}
+- runFlow: ../_subflows/open-sidebar.yaml
+- assertVisible: "${SERVER_B_NAME}.*"

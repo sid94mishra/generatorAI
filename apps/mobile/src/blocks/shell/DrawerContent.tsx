@@ -11,7 +11,7 @@ import { SearchInput } from '../../ui/primitives/SearchInput';
 import { AttentionList } from '../AttentionList';
 import { ConnectionFooter } from '../ConnectionStatus';
 import { ServerSwitcherTrigger } from '../ServerSwitcher';
-import { goToModule, openNewChat, openSearch, openSettings } from './navigation';
+import { goToModule, openNewChat, openSearch, openServers, openSettings } from './navigation';
 import { normalizePath } from './parentHref';
 
 const noop = (): void => undefined;
@@ -37,7 +37,7 @@ export function DrawerContent({ variant, onNavigate, active }: DrawerContentProp
       testID="drawer-content"
       header={
         <>
-          <ServerSwitcherTrigger />
+          <ServerSwitcherTrigger onPress={then(openServers)} />
           <IconButton icon="edit" label="New chat" variant="bordered" onPress={then(openNewChat)} testID="drawer-new-chat" />
         </>
       }

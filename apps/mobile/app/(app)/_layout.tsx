@@ -64,6 +64,7 @@ export default function AppLayout(): React.ReactElement {
           <Stack.Screen key={name} name={name} options={sheetOptions('approval')} />
         ))}
         <Stack.Screen name="search" options={paletteOptions} />
+        <Stack.Screen name="servers" options={sheetOptions('picker')} />
         {Object.entries(STACK_HEADER).map(([name, title]) => (
           <Stack.Screen
             key={name}

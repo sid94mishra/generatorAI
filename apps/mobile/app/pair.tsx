@@ -95,7 +95,9 @@ export default function PairScreen(): React.ReactElement {
   // routes here with the code as a param. It goes through `acceptCode` like a
   // scan, so it still lands on the consent screen — a link is exactly as
   // attacker-controllable as a QR and gets the same fingerprint check.
-  const { code: linkedCode } = useLocalSearchParams<{ code?: string }>();
+  const { code: linkedCode, mode } = useLocalSearchParams<{ code?: string; mode?: string }>();
+  // `?mode=add`: pairing another server from the switcher (MB-20) while this one stays paired; Back returns there.
+  const adding = mode === 'add';
   const consumedLink = useRef<string | null>(null);
   useEffect(() => {
     if (typeof linkedCode !== 'string' || !linkedCode || consumedLink.current === linkedCode) return;
@@ -292,7 +294,11 @@ export default function PairScreen(): React.ReactElement {
 
     if (!permission.granted) {
       return (
-        <Screen title="Pair this phone" subtitle="Scan the code your GeneratorAI server shows." sidebarToggle={false}>
+        <Screen
+          title={adding ? 'Add a server' : 'Pair this phone'}
+          subtitle="Scan the code your GeneratorAI server shows."
+          {...(adding ? { back: true, onBack: () => router.back() } : { sidebarToggle: false })}
+        >
           <EmptyState
             title="Camera access needed"
             message="Pairing uses the camera to read the QR code shown by your GeneratorAI server. The camera is used for nothing else."
@@ -349,6 +355,7 @@ export default function PairScreen(): React.ReactElement {
               setPhase('manual');
             }}
           />
+          {adding ? <Button label="Cancel" variant="ghost" full haptic="tap" onPress={() => router.back()} /> : null}
         </View>
       </View>
     );

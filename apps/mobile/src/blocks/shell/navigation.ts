@@ -2,7 +2,7 @@
 // hardware shortcuts. Router-aware, query-free.
 import { router } from 'expo-router';
 
-import { CHATS_HREF, NEEDS_YOU_HREF, SEARCH_HREF, SETTINGS_HREF } from './hrefs';
+import { CHATS_HREF, NEEDS_YOU_HREF, SEARCH_HREF, SERVERS_HREF, SETTINGS_HREF } from './hrefs';
 import { normalizePath } from './parentHref';
 
 type Href = Parameters<typeof router.replace>[0];
@@ -29,4 +29,9 @@ export function openSettings(): void {
 
 export function openNeedsYou(): void {
   router.push(NEEDS_YOU_HREF as Href);
+}
+
+/** The server switcher sheet (MB-20). */
+export function openServers(): void {
+  router.push(SERVERS_HREF as Href);
 }
