@@ -46,7 +46,7 @@ export function AgentConsole({
   onOpenInTerminal?: (row: AgentConsoleRow) => void;
 }): React.ReactElement {
   const { state } = useAuth();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
 
   const rows = useMemo(() => agentConsoleRows(blocks), [blocks]);
@@ -148,7 +148,7 @@ const ConsoleRow = React.memo(function ConsoleRow({
   onCopy: () => void;
   onOpen?: () => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const meta = [
     row.cwd ? shortenPath(row.cwd) : null,
     row.exitCode !== undefined ? `exit ${row.exitCode}` : null,

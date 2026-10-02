@@ -72,7 +72,7 @@ export default function StageScreen(): React.ReactElement {
   const stageRunId = String(params.stageRunId);
   const navigation = useNavigation();
   const focused = useIsFocused();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const runControl = useFeature('runControl');
   // Retrying a stage of a FINISHED run forks a new run, which needs only runStart.

@@ -23,7 +23,7 @@ export function Spinner({
   size?: 'small' | 'large';
   label?: string;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   return (
     <ActivityIndicator
       accessibilityLabel={label}
@@ -124,7 +124,7 @@ export function EmptyState({
   /** The dense variant for a session pane. See `Frame`. */
   compact?: boolean;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   return (
     <Frame
       icon={icon ?? <Inbox size={compact ? 16 : 24} color={colors['muted-foreground']} />}
@@ -145,7 +145,7 @@ export function ErrorState({
   message?: string;
   onRetry?: () => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   return (
     <Frame
       icon={<AlertTriangle size={24} color={colors.danger} />}
@@ -175,7 +175,7 @@ export function LockedState({
   reason: string;
   action?: { label: string; onPress: () => void };
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   return (
     <Frame
       icon={<Lock size={22} color={colors['muted-foreground']} />}

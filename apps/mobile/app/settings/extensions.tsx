@@ -29,7 +29,7 @@ import type { ExtensionRow } from '../../src/features/settings/extensionModel';
 
 export default function ExtensionsScreen(): React.ReactElement {
   const { state } = useAuth();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const scopes = state.status === 'authenticated' ? state.scopes : [];
   const canManage = checkFeature('capabilityAdmin', scopes).available;

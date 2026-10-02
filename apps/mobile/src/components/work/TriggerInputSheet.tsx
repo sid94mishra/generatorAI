@@ -52,7 +52,7 @@ export function TriggerInputSheet({
 }): React.ReactElement {
   const admin = useAdminApi();
   const queryClient = useQueryClient();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
 
   const fields = useMemo(() => schemaFieldsOf(automation.dataSchema), [automation.dataSchema]);
   const saved = useMemo(() => defaultDatasetOf(automation.defaultDataset), [automation.defaultDataset]);
@@ -221,7 +221,8 @@ export function TriggerInputSheet({
           autoCapitalize="none"
           autoCorrect={false}
           spellCheck={false}
-          style={{ minHeight: 160, maxHeight: 280, textAlignVertical: 'top', fontFamily: 'JetBrainsMono' }}
+          mono
+          style={{ minHeight: 160, maxHeight: 280, textAlignVertical: 'top' }}
           error={showErrors && !check.ok ? check.errors.join('\n') : null}
           {...(status ? { hint: status } : {})}
         />

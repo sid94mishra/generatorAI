@@ -887,12 +887,11 @@
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
       "react-hooks/set-state-in-effect/diagnostic": 1,
-      "mobile-design/design/literalInlineStyle": 5,
+      "mobile-design/design/literalInlineStyle": 4,
       "mobile-design/design/defaultTextSize": 8,
       "mobile-design/design/boldWeight": 1,
       "mobile-design/design/legacyTokenUtility": 13,
       "better-tailwindcss/no-restricted-classes/diagnostic": 23,
-      "mobile-design/design/fontFamilyLiteral": 1,
       "mobile-design/design/defaultRadius": 1
     },
     "src/components/review/ReviewCommentsSheet.tsx": {
@@ -1161,10 +1160,6 @@
     "src/components/ui/accessibility.ts": {
       "mobile-design/design/platformOs": 3
     },
-    "src/components/ui/animated.ts": {
-      "mobile-design/design/platformOs": 2,
-      "mobile-design/design/rawTextImport": 1
-    },
     "src/components/ui/haptics.ts": {
       "mobile-design/design/platformOs": 3,
       "mobile-design/design/hapticsImport": 1
@@ -1184,8 +1179,7 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 34,
       "mobile-design/design/arbitraryValue": 1,
       "mobile-design/design/defaultRadius": 1,
-      "mobile-design/design/literalInlineStyle": 5,
-      "mobile-design/design/fontFamilyLiteral": 1
+      "mobile-design/design/literalInlineStyle": 4
     },
     "src/components/work/ExecutionSheet.tsx": {
       "mobile-design/design/rawTextImport": 1,
@@ -1205,8 +1199,7 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 59,
       "mobile-design/design/defaultRadius": 2,
       "mobile-design/design/arbitraryValue": 1,
-      "mobile-design/design/literalInlineStyle": 3,
-      "mobile-design/design/fontFamilyLiteral": 1
+      "mobile-design/design/literalInlineStyle": 2
     },
     "src/components/work/StickyActionBar.tsx": {
       "mobile-design/design/legacyTokenUtility": 2,
@@ -1226,8 +1219,7 @@
       "mobile-design/design/defaultTextSize": 6,
       "mobile-design/design/legacyTokenUtility": 6,
       "better-tailwindcss/no-restricted-classes/diagnostic": 12,
-      "mobile-design/design/literalInlineStyle": 4,
-      "mobile-design/design/fontFamilyLiteral": 1
+      "mobile-design/design/literalInlineStyle": 3
     },
     "src/components/work/cards.tsx": {
       "mobile-design/design/lucideDirectImport": 1
@@ -1429,9 +1421,6 @@
     },
     "src/terminal/terminalHtml.ts": {
       "mobile-design/design/hexOrRgbInTs": 3
-    },
-    "src/theme/ThemeProvider.tsx": {
-      "react-hooks/exhaustive-deps/diagnostic": 2
     }
   },
   "migratedServices": [

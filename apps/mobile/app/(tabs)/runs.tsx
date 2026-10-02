@@ -68,7 +68,7 @@ type Row =
 export default function WorkScreen(): React.ReactElement {
   const workflowEdit = useFeature('workflowEdit');
   const [templates, setTemplates] = useState(false);
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const params = useLocalSearchParams<{ segment?: string; new?: string }>();
   const [segment, setSegmentState] = useState<WorkSegment>(() =>
     resolveWorkSegment(params.segment, prefs.getString(WORK_SEGMENT_PREF_KEY)),

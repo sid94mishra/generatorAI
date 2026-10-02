@@ -285,7 +285,7 @@ export function Screen({
   variant?: 'large' | 'compact';
 }): React.ReactElement {
   const insets = useSafeAreaInsets();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const internalScrollY = useSharedValue(0);
   const scrollY = externalScrollY ?? internalScrollY;
   const scroller = useRef<Animated.ScrollView>(null);
@@ -404,7 +404,7 @@ export function PlainScroll({
   /** Whether data is fetching; the spinner shows only for a user pull. */
   refreshing?: boolean;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const pull = usePullToRefresh(onRefresh ?? noop, refreshing);
   return (
     <ScrollView

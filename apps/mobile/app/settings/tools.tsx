@@ -45,7 +45,7 @@ const ROWS: Array<{
 
 export default function ToolsScreen(): React.ReactElement {
   const { state } = useAuth();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const scopes = state.status === 'authenticated' ? state.scopes : [];
 
   return (

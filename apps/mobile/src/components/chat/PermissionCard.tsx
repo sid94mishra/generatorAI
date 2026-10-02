@@ -37,7 +37,7 @@ export function PermissionCard({
   block: PermissionBlock;
   onDecide: (behavior: 'allow' | 'deny', message?: string) => Promise<void> | void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const entering = useCardEntering();
   const motion = useChatMotion();
   // A single in-flight flag rather than per-button, so a tap on Allow while

@@ -102,7 +102,7 @@ function TransportChip({ transport }: { transport: TransportBadge }): React.Reac
 }
 
 export function ChatHeaderMenuButton({ onPress }: { onPress: () => void }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   return (
     <IconButton
       accessibilityLabel="Chat menu"

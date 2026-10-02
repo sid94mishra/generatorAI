@@ -50,7 +50,7 @@ type Phase = 'scan' | 'manual' | 'consent' | 'enrolling';
 
 export default function PairScreen(): React.ReactElement {
   const { completePairing } = useAuth();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [phase, setPhase] = useState<Phase>('scan');

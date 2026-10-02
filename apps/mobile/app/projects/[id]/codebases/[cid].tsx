@@ -58,7 +58,7 @@ export default function CodebaseDetailScreen(): React.ReactElement {
   const codebaseId = String(params.cid);
   const navigation = useNavigation();
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [showAllBranches, setShowAllBranches] = useState(false);
   const [confirmUnlink, setConfirmUnlink] = useState(false);
   const projectEdit = useFeature('projectEdit');

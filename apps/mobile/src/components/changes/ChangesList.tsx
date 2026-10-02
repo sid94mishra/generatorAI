@@ -173,7 +173,7 @@ const FileRow = React.memo(function FileRow({
   onOpenThreads: ((row: ChangeRow, side: DiffSide, line: number) => void) | undefined;
   commentDisabledReason: string | null;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const { name, dir } = splitPath(row.path);
   const readable = !row.isBinary && !row.isTooLarge;
@@ -291,7 +291,7 @@ const FileRow = React.memo(function FileRow({
             ) : null}
           </View>
           {openThreads > 0 ? (
-            <View className="rounded-full bg-accent px-1.5 py-0.5">
+            <View className="rounded-full bg-selected px-1.5 py-0.5">
               <Text className="text-xs text-primary">{openThreads}</Text>
             </View>
           ) : null}

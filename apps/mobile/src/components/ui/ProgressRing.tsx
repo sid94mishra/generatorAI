@@ -53,7 +53,7 @@ export function ProgressRing({
   label?: string;
   accessibilityLabel?: string;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const clamped = clamp(ratio);
   const tone = usageTone(clamped);
   const color = colors[tone] ?? colors.primary;
@@ -117,7 +117,7 @@ export function ProgressBar({
   ratio: number;
   accessibilityLabel?: string;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const clamped = clamp(ratio);
   const color = colors[usageTone(clamped)] ?? colors.primary;
 

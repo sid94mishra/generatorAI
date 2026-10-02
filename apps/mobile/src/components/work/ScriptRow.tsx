@@ -19,7 +19,7 @@ export function scriptRoute(scriptId: string): string {
 }
 
 export function ScriptRow({ script }: { script: ScriptRowView }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const subtitle = scriptSubtitle(script);
   return (
     <ListItem

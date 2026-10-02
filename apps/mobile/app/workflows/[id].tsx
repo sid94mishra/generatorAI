@@ -53,7 +53,7 @@ export default function WorkflowScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const workflowId = String(id);
   const navigation = useNavigation();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const runStart = useFeature('runStart');
   const workflowEdit = useFeature('workflowEdit');
   const [sheet, setSheet] = useState(false);

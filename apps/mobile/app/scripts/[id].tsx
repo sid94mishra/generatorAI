@@ -44,7 +44,7 @@ export default function ScriptScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const scriptId = String(id ?? '');
   const navigation = useNavigation();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const scriptRun = useFeature('scriptRun');
 
   const [profileName, setProfileName] = useState<string | null>(null);

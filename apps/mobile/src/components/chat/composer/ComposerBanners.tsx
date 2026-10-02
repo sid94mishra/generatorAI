@@ -32,7 +32,7 @@ export interface BoundAgentProps {
 
 export function BoundAgentChip({ agent }: { agent: BoundAgentProps }): React.ReactElement {
   const motion = useChatMotion();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   return (
     <Animated.View entering={motion.fadeIn(120)} exiting={motion.fadeOut(120)} className="px-3 pt-2">
       <View className="flex-row">
@@ -57,7 +57,7 @@ export interface WorkspacePrepProps extends WorkspacePrepState {
 
 export function WorkspacePrepBar({ prep }: { prep: WorkspacePrepProps }): React.ReactElement | null {
   const motion = useChatMotion();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   if (prep.status === 'ready') return null;
   const failed = prep.status === 'error';
   return (
@@ -111,7 +111,7 @@ export interface GateBannerProps {
 
 export function GateBanner({ gate }: { gate: GateBannerProps }): React.ReactElement {
   const motion = useChatMotion();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   return (
     <Animated.View
       entering={motion.fadeIn(120)}

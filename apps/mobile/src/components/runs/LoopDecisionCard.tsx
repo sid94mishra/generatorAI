@@ -49,7 +49,7 @@ export function LoopDecisionCard({
   onRequestAccess?: () => void;
 }): React.ReactElement | null {
   const entering = useCardEntering();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const { command } = useLoopControl(runId);
   const [inputOpen, setInputOpen] = useState(false);
   const [pickOpen, setPickOpen] = useState(false);

@@ -10,7 +10,7 @@ import { IconButton } from './Button';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export function SettingsButton(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   return (
     <IconButton
       accessibilityLabel="Settings"

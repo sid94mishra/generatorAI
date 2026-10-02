@@ -218,7 +218,7 @@ function RowBody({ row, turnId }: { row: TimelineRow; turnId?: string | undefine
  * the steps beside a rule that hangs from this row's icon.
  */
 function WorkRow({ work, turnId }: { work: WorkSummary; turnId?: string | undefined }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [expanded, setExpanded] = useState(false);
   const title = workTitle(work);
   const right =
@@ -288,7 +288,7 @@ function LiveTextRow({ blockId }: { blockId: number }): React.ReactElement | nul
 
 function LiveThinkingRow({ blockId }: { blockId: number }): React.ReactElement | null {
   const block = useLiveBlock(blockId, 'thinking');
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [expanded, setExpanded] = useState(true);
   if (!block) return null;
   return (
@@ -308,7 +308,7 @@ function LiveThinkingRow({ blockId }: { blockId: number }): React.ReactElement |
 
 function useTextMenu(content: string, turnId?: string | undefined): ContextMenuItem[] {
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const { readAloud, onCopyTranscript, onForkFrom } = useTimelineActions();
   return useMemo(() => {
     const items: ContextMenuItem[] = [
@@ -368,7 +368,7 @@ function TextRow({
   final: boolean;
 }): React.ReactElement {
   const items = useTextMenu(content, turnId);
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const { readAloud } = useTimelineActions();
   const { open } = useContextMenu();
@@ -411,7 +411,7 @@ function TextRow({
 }
 
 function ThinkingRow({ block }: { block: Extract<StreamBlock, { type: 'thinking' }> }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [expanded, setExpanded] = useState(false);
   const menu = useTextMenu(block.text);
   return (
@@ -435,7 +435,7 @@ function ThinkingRow({ block }: { block: Extract<StreamBlock, { type: 'thinking'
 
 function useStepMenu(step: ToolStep): ContextMenuItem[] {
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const { openInChanges, openConsole } = useTimelineActions();
   return useMemo(() => {
     const items: ContextMenuItem[] = [];
@@ -497,7 +497,7 @@ function stepMarkdown(step: ToolStep): string {
 }
 
 export function ToolStepRow({ step, nested = false }: { step: ToolStep; nested?: boolean }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const { openInChanges, openConsole, openImage } = useTimelineActions();
   const [expanded, setExpanded] = useState(false);
   const menu = useStepMenu(step);
@@ -617,7 +617,7 @@ function FileOpMeta({ meta, fileOp }: { meta: string; fileOp: boolean }): React.
 }
 
 function ShellDetail({ step, onOpenConsole }: { step: ToolStep; onOpenConsole?: (() => void) | undefined }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const shell = step.shell!;
   // Six lines of the tail — where a failure explains itself — then the console.
   const preview = useMemo(() => {
@@ -676,7 +676,7 @@ function LazyValue({ label, value }: { label: string; value: unknown }): React.R
 // ── Groups ───────────────────────────────────────────────────────
 
 function GroupRow({ group }: { group: StepGroup }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const [expanded, setExpanded] = useState(false);
   const Icon = FAMILY_ICON[group.family];
@@ -743,7 +743,7 @@ function SystemRow({
   block: Extract<StreamBlock, { type: 'system' }>;
   tone: 'neutral' | 'info' | 'warning' | 'danger';
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const menu = useTextMenu(block.message);
   const icon =
     tone === 'danger' ? (
@@ -771,7 +771,7 @@ function SystemRow({
 }
 
 function WaitingRow({ gate }: { gate: 'permission' | 'question' | 'plan' }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const detail =
     gate === 'permission'
       ? 'The agent needs your permission before it can run this tool.'
@@ -790,7 +790,7 @@ function WaitingRow({ gate }: { gate: 'permission' | 'question' | 'plan' }): Rea
 }
 
 function StoppedRow(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const motion = useChatMotion();
   return (
     <Animated.View
@@ -808,7 +808,7 @@ function StoppedRow(): React.ReactElement {
 }
 
 function HookRow({ hook }: { hook: StreamHookInvocation }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const tone: RowTone = hook.status === 'failed' ? 'danger' : 'default';
   const right =
     hook.status === 'running' ? (
@@ -837,7 +837,7 @@ function HookRow({ hook }: { hook: StreamHookInvocation }): React.ReactElement {
  * interactive and is not.
  */
 function WidgetRow({ block }: { block: Extract<StreamBlock, { type: 'widget' }> }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   return (
     <RowFrame
       icon={<LayoutGrid size={14} color={colors['muted-foreground']} />}

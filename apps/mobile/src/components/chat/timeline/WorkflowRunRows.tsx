@@ -76,7 +76,7 @@ function useChatWorkflowRuns(chatId: string | null | undefined) {
 // ── Run row ──────────────────────────────────────────────────────
 
 export function WorkflowRunRow({ run, callId }: { run: WorkflowRunToolCard; callId: string }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const { chatId } = useTimelineActions();
   const { data } = useChatWorkflowRuns(chatId);
   const live = data?.runs.find((r) => r.runId === run.runId) ?? data?.runs.find((r) => r.toolCallId === callId);
@@ -152,7 +152,7 @@ function ApprovalBlock({
   approval: WorkflowRunPendingApproval;
   chatId: string | null;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const api = useApi();
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -275,7 +275,7 @@ function ApprovalBlock({
 // ── Draft row ────────────────────────────────────────────────────
 
 export function WorkflowDraftRow({ draft }: { draft: WorkflowDraftToolCard }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const admin = useAdminApi();
   const queryClient = useQueryClient();
   const toast = useToast();

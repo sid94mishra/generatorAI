@@ -194,7 +194,7 @@ export function PlanBody({
   plan: PlanDocumentApi;
   onSelectPlan: (planId: string) => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [revision, setRevision] = useState<number | null>(null);
   const [feedback, setFeedback] = useState('');
   const [editing, setEditing] = useState(false);
@@ -330,7 +330,8 @@ export function PlanBody({
               multiline
               autoFocus
               accessibilityLabel="Plan document"
-              style={{ minHeight: 260, textAlignVertical: 'top', fontFamily: 'JetBrainsMono' }}
+              mono
+              style={{ minHeight: 260, textAlignVertical: 'top' }}
             />
             <View className="flex-row justify-end gap-2">
               <Button label="Cancel" variant="ghost" size="sm" onPress={() => setEditing(false)} />
@@ -459,7 +460,7 @@ function PlanComments({
   canWrite: boolean;
   onAdd: () => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   return (
     <View className="gap-2 rounded-2xl border border-border bg-card p-3">
       <Text className="text-xs font-semibold text-foreground">Comments on r{revision}</Text>

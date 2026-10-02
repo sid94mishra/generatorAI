@@ -52,7 +52,7 @@ export const RowEnterContext = createContext(false);
 
 const TONE_CARD: Record<RowTone, string> = {
   default: 'border-border bg-card',
-  primary: 'border-primary bg-accent',
+  primary: 'border-primary bg-selected',
   info: 'border-info bg-info-muted',
   warning: 'border-warning bg-warning-muted',
   danger: 'border-danger bg-danger-muted',
@@ -119,7 +119,7 @@ export function RowFrame({
   titleLines = 1,
   children,
 }: RowFrameProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const live = useContext(RowEnterContext);
   const cardEntering = useCardEntering();
   const motion = useChatMotion();

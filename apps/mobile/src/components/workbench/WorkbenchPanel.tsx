@@ -47,7 +47,7 @@ export function WorkbenchPanel({
   onClose: () => void;
   footer?: React.ReactNode;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   // The panel sits inside `ConnectionStripHost`, which already consumed the
   // top inset; the bottom one is still live.
   const insets = useSafeAreaInsets();

@@ -8,6 +8,10 @@
 //   generated/vocabulary.json  the same name lists for Node tools that cannot
 //                              import TypeScript (check-css-emission, the
 //                              design-system ratchet, eslint.config.mjs).
+//   css/vocabulary-mobile.css  mobile-only names (MD-70; mobile 02 §9.4),
+//                              imported by apps/mobile's Uniwind global.css
+//                              after vocabulary.css; web never imports it.
+//   generated/vocabulary-mobile.json  the mobile lists for the mobile lint.
 // ────────────────────────────────────────────────────────────────
 
 import { HEIGHTS, TYPE_SCALE } from '../design.js';
@@ -25,6 +29,19 @@ import {
   TEXT_COLOR_OVERRIDES,
   VOCABULARY_NAMESPACES,
 } from '../vocabulary.js';
+import {
+  MOBILE_BANNED_SHARED_UTILITIES,
+  MOBILE_BREAKPOINTS,
+  MOBILE_CONTAINER_NAMES,
+  MOBILE_HEIGHT_NAMES,
+  MOBILE_RADIUS_STEPS,
+  MOBILE_SHADOW_NAMES,
+  MOBILE_SIZE_NAMES,
+  MOBILE_SPACING_NAMES,
+  MOBILE_TEXT_STEPS,
+  MOBILE_VOCABULARY_NAMESPACES,
+  MOBILE_WIDTH_NAMES,
+} from '../vocabulary-mobile.js';
 
 const HEADER = '/* GENERATED from packages/design-tokens (src/vocabulary.ts) — do not edit. Regenerate with `pnpm tokens:write`. */';
 
@@ -77,4 +94,62 @@ export function vocabularyJson(): VocabularyJson {
 
 export function emitVocabularyJson(): string {
   return `${JSON.stringify(vocabularyJson(), null, 2)}\n`;
+}
+
+const MOBILE_HEADER =
+  '/* GENERATED from packages/design-tokens (src/vocabulary-mobile.ts) — do not edit. Regenerate with `pnpm tokens:write`. */';
+
+/** `css/vocabulary-mobile.css` (mobile 02 §9.4): mobile names → `--gai-*`, plus the window-size breakpoints. */
+export function emitMobileVocabularyCss(): string {
+  const lines = [MOBILE_HEADER, '@theme inline {', '  /* Mobile type steps (02 §3.1): absolute line height and tracking (MD-71). */'];
+  for (const step of MOBILE_TEXT_STEPS) {
+    lines.push(`  --text-${step}: var(--gai-text-${step});`);
+    lines.push(`  --text-${step}--line-height: var(--gai-leading-${step});`);
+    lines.push(`  --text-${step}--font-weight: var(--gai-weight-${step});`);
+    lines.push(`  --text-${step}--letter-spacing: var(--gai-tracking-${step});`);
+  }
+  // vocabulary.css maps weight / tracking only where a WEB step sets them; on
+  // mobile every step has both (micro is 500, heading tracks on iOS only), so
+  // the remaining sub-variables of the shared steps are mapped here (MD-116).
+  lines.push('', '  /* Shared steps: the weight / tracking sub-variables vocabulary.css leaves out (MD-116). */');
+  for (const [step, t] of Object.entries(TYPE_SCALE)) {
+    if (t.weight === 400) lines.push(`  --text-${step}--font-weight: var(--gai-weight-${step});`);
+    if (t.tracking === 0) lines.push(`  --text-${step}--letter-spacing: var(--gai-tracking-${step});`);
+  }
+  lines.push('', '  /* Mobile radii (02 §3.2). */');
+  for (const step of MOBILE_RADIUS_STEPS) lines.push(`  --radius-${step}: var(--gai-radius-${step});`);
+  lines.push('', '  /* Mobile heights and hit sizes (02 §3.3). */');
+  for (const name of MOBILE_HEIGHT_NAMES) lines.push(`  --height-${name}: var(--gai-h-${name});`);
+  for (const name of MOBILE_SIZE_NAMES) lines.push(`  --size-${name}: var(--gai-h-${name});`);
+  for (const name of MOBILE_WIDTH_NAMES) lines.push(`  --min-width-${name}: var(--gai-h-${name});`);
+  lines.push('', '  /* Phone panels (02 §3.6). */');
+  for (const name of MOBILE_CONTAINER_NAMES) lines.push(`  --container-${name}: var(--gai-w-${name});`);
+  lines.push('', '  /* Named spacings (02 §3.5). */');
+  for (const name of MOBILE_SPACING_NAMES) lines.push(`  --spacing-${name}: var(--gai-space-${name});`);
+  lines.push('', '  /* Elevation (02 §8.4). */');
+  for (const name of MOBILE_SHADOW_NAMES) lines.push(`  --shadow-${name}: var(--gai-shadow-${name});`);
+  lines.push('', '  /* Families (02 §4.4), per OS in the Uniwind geometry blocks. */');
+  lines.push('  --font-sans: var(--gai-font-sans);', '  --font-mono: var(--gai-font-mono);');
+  lines.push('}', '@theme {', '  /* Window-size classes (MD-24): medium:, expanded:. */');
+  for (const [name, px] of Object.entries(MOBILE_BREAKPOINTS)) lines.push(`  --breakpoint-${name}: ${px}px;`);
+  lines.push('}', '');
+  return lines.join('\n');
+}
+
+export interface MobileVocabularyJson {
+  namespaces: ReadonlyArray<{ id: string; prefixes: readonly string[]; names: readonly string[] }>;
+  bannedSharedUtilities: readonly string[];
+  breakpoints: Readonly<Record<string, number>>;
+}
+
+export function mobileVocabularyJson(): MobileVocabularyJson {
+  return {
+    namespaces: MOBILE_VOCABULARY_NAMESPACES,
+    bannedSharedUtilities: MOBILE_BANNED_SHARED_UTILITIES,
+    breakpoints: MOBILE_BREAKPOINTS,
+  };
+}
+
+export function emitMobileVocabularyJson(): string {
+  return `${JSON.stringify(mobileVocabularyJson(), null, 2)}\n`;
 }

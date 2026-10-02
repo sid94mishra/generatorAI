@@ -178,7 +178,9 @@ export function TerminalView({
 }: TerminalViewProps): React.ReactElement {
   const { socketUrl } = useAuth();
   const api = useApi();
-  const { colors, terminal: terminalTheme } = useTheme();
+  const { legacyColors: colors, colors: themeColors } = useTheme();
+  // xterm ITheme as the plain record terminalHtml sanitises.
+  const terminalTheme = useMemo<Record<string, string>>(() => Object.fromEntries(Object.entries(themeColors.terminal)), [themeColors.terminal]);
   const toast = useToast();
 
   const ownsSession = sessionId === undefined;
@@ -1017,7 +1019,7 @@ export function TerminalView({
                 haptic="select"
                 onPress={() => onKey(key)}
                 className={`min-h-12 min-w-12 items-center justify-center rounded-xl px-2 ${
-                  armed ? 'border border-primary bg-accent' : 'bg-subtle'
+                  armed ? 'border border-primary bg-selected' : 'bg-subtle'
                 }`}
               >
                 <Text
@@ -1073,7 +1075,7 @@ const PILL_LABEL: Record<ConnectionState, string> = {
 };
 
 function ConnectionPill({ state }: { state: ConnectionState }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const dot =
     state === 'attached'
       ? colors.success

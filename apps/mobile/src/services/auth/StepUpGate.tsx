@@ -36,7 +36,7 @@ export function StepUpGate({
   title?: string;
   children: React.ReactNode;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [phase, setPhase] = useState<Phase>(() => (hasFreshStepUp() ? 'confirmed' : 'checking'));
   const [attempt, setAttempt] = useState(0);
 

@@ -78,7 +78,7 @@ function useDeviceCredential(): Credential {
 }
 
 export default function AccessibilityScreen(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const {
     motion,
     setMotion,

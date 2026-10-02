@@ -58,7 +58,7 @@ export function toneFor(op: Operation): Tone {
 }
 
 function StatusMark({ operation }: { operation: Operation }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const state = operationState(operation);
   const label = operationStateLabel(operation);
   const color =
@@ -109,7 +109,7 @@ export function OperationCard({
   index?: number;
   separator?: boolean;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const Icon = KIND_ICON[operation.kind];
   const name =
     operation.kind === 'chat' ? parseChatName(operation.name) : { title: runTitle(operation.name), subAgent: false };

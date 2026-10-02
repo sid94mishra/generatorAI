@@ -107,7 +107,7 @@ const KEY_BACKING_LABEL: Record<string, string> = {
 
 export default function SecurityScreen(): React.ReactElement {
   const { state, transport, keyBacking, unpair, refreshPermissions } = useAuth();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const deviceActions = useDeviceActions();
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);

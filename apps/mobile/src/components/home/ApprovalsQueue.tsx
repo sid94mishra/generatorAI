@@ -48,7 +48,7 @@ export function ApprovalsQueue({
   blocked: Operation[];
   limit?: number;
 }): React.ReactElement | null {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const decide = useGateDecision();
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
 

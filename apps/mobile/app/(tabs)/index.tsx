@@ -62,7 +62,7 @@ const EMPTY_TITLE: Record<ActivityFilter, string> = {
 };
 
 export default function HomeScreen(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const shell = useTabShell();
   const [filter, setFilter] = useState<ActivityFilter>('today');
   const activity = useActivity();

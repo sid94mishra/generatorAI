@@ -28,7 +28,7 @@ import { Screen } from '../../src/components/ui/Screen';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
 export default function SettingsScreen(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const { state, transport } = useAuth();
 
   const health = useHealth(15000);

@@ -121,7 +121,7 @@ export function FileDiff({
   commentDisabledReason,
 }: FileDiffProps): React.ReactElement {
   const api = useApi();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const menu = useContextMenu();
   const { width: viewport } = useWindowDimensions();

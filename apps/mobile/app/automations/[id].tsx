@@ -60,7 +60,7 @@ export default function AutomationDetailScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const automationId = id ?? '';
   const navigation = useNavigation();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const runControl = useFeature('runControl');
 
   const [openExecId, setOpenExecId] = useState<string | null>(null);

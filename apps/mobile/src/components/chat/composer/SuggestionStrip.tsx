@@ -63,7 +63,7 @@ export function SuggestionStrip({
   onSelect: (item: SlashItem) => void;
 }): React.ReactElement | null {
   const motion = useChatMotion();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   if (items.length === 0 && !loading && !emptyHint) return null;
 
   return (

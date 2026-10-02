@@ -93,7 +93,7 @@ export function ModelSheet({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<string | null>(null);
   const [infoId, setInfoId] = useState<string | null>(null);
@@ -241,7 +241,7 @@ export function ModelSheet({
                   setInfoId(null);
                 }}
                 className={`min-h-9 flex-row items-center gap-2 rounded-lg border px-3 ${
-                  isActive ? 'border-primary bg-accent' : 'border-border bg-raised'
+                  isActive ? 'border-primary bg-selected' : 'border-border bg-raised'
                 }`}
               >
                 <View style={p.ready ? undefined : { opacity: 0.4 }}>
@@ -305,13 +305,13 @@ function ModelRow({
   onToggleInfo: () => void;
   onSelect: () => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const tokens = formatTokens(promptLimit(model));
   const efforts = reasoningEfforts(model);
   const longCtx = model.supportsLongContext ? formatTokens(longContextLimit(model)) : null;
 
   return (
-    <View className={`rounded-2xl ${selected ? 'bg-accent' : ''}`}>
+    <View className={`rounded-2xl ${selected ? 'bg-selected' : ''}`}>
       <View className="flex-row items-center">
         <Touchable
           accessibilityLabel={model.name}

@@ -34,7 +34,7 @@ export function PermissionModeChip({
   onPress: () => void;
   disabled?: boolean;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const tone = permissionModeTone(mode);
   const Icon = tone === 'warning' ? ShieldAlert : ShieldCheck;
   return (

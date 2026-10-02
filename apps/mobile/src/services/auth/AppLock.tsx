@@ -81,7 +81,7 @@ export function AppLockGate({ children }: { children: React.ReactNode }): React.
 function NativeAppLockGate({ children }: { children: React.ReactNode }): React.ReactElement {
   const { biometricLock, lockGraceSeconds, setBiometricLock } = usePreferences();
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
 
   const [state, dispatch] = useReducer(appLockReducer, undefined, () => {
     // Read synchronously so the first frame is already covered when the

@@ -82,8 +82,21 @@ function ThemePreview({
 }
 
 export default function AppearanceScreen(): React.ReactElement {
-  const { mode, appearance, themeId, accents, accent, setMode, setThemeId, setAccent, colors } =
-    useTheme();
+  const {
+    mode,
+    appearance,
+    themeId,
+    accents,
+    accent,
+    systemAccentAvailable,
+    systemAccentSwatch,
+    setMode,
+    setThemeId,
+    setAccent,
+    legacyColors: colors,
+  } = useTheme();
+  // The System (Material You) accent previews other themes with their own default accent.
+  const previewAccent = (option: ThemeDef): AccentId => (accent === 'system' ? option.defaultAccent : accent);
 
   return (
     <Screen title="Appearance" back>
@@ -131,7 +144,7 @@ export default function AppearanceScreen(): React.ReactElement {
                   chevron={false}
                   trailing={
                     <View className="flex-row items-center gap-2">
-                      <ThemePreview theme={option} appearance={appearance} accentId={accent} />
+                      <ThemePreview theme={option} appearance={appearance} accentId={previewAccent(option)} />
                       <SelectionCheck selected={selected} color={colors.primary} />
                     </View>
                   }
@@ -171,6 +184,27 @@ export default function AppearanceScreen(): React.ReactElement {
               </Touchable>
             );
           })}
+          {/* Android 12+ with Expo UI: the wallpaper's Material You primary, contrast-clamped (MD-08). */}
+          {systemAccentAvailable ? (
+            <Touchable
+              testID="accent-option-system"
+              accessibilityLabel="System"
+              accessibilityHint="Uses your wallpaper colour"
+              accessibilityState={{ selected: accent === 'system' }}
+              haptic="select"
+              onPress={() => setAccent('system')}
+              className={`h-12 w-12 items-center justify-center rounded-full border-2 ${
+                accent === 'system' ? 'border-accent' : 'border-line'
+              }`}
+            >
+              <View
+                className="h-7 w-7 items-center justify-center rounded-full"
+                style={{ backgroundColor: systemAccentSwatch ?? colors.primary }}
+              >
+                {accent === 'system' ? <Check size={14} color={colors['primary-foreground']} /> : null}
+              </View>
+            </Touchable>
+          ) : null}
         </View>
         <Text className="text-xs leading-relaxed text-muted-foreground">
           The accent colours buttons, links, the active tab and every selection state. Status

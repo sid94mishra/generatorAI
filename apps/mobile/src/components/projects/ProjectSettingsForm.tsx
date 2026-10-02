@@ -45,7 +45,7 @@ export function ProjectSettingsForm({
   const api = useProjectsApi();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const feature = useFeature('projectEdit');
   const editable = feature.available;
 

@@ -84,7 +84,7 @@ function hrefFor(item: SearchItem): string | null {
 }
 
 export default function SearchScreen(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   const deferred = useDeferredValue(query);

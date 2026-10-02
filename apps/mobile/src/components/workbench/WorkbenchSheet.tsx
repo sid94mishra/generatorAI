@@ -99,7 +99,7 @@ export function WorkbenchSheet({
   agentBusy = false,
   changesFocus = null,
 }: WorkbenchSheetProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   // A file opened inside Changes / Files turns the sheet into a two-level
   // stack: the title becomes the file name and Back returns to the list.
   const [detail, setDetail] = useState<{ tool: 'changes' | 'files'; file: FileDetail } | null>(null);

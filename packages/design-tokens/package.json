@@ -19,7 +19,9 @@
       "types": "./src/emit/index.ts"
     },
     "./css/vocabulary.css": "./css/vocabulary.css",
-    "./vocabulary.json": "./generated/vocabulary.json"
+    "./css/vocabulary-mobile.css": "./css/vocabulary-mobile.css",
+    "./vocabulary.json": "./generated/vocabulary.json",
+    "./vocabulary-mobile.json": "./generated/vocabulary-mobile.json"
   },
   "files": [
     "dist",
@@ -44,7 +46,9 @@
         "import": "./dist/emit/index.js"
       },
       "./css/vocabulary.css": "./css/vocabulary.css",
-      "./vocabulary.json": "./generated/vocabulary.json"
+      "./css/vocabulary-mobile.css": "./css/vocabulary-mobile.css",
+      "./vocabulary.json": "./generated/vocabulary.json",
+      "./vocabulary-mobile.json": "./generated/vocabulary-mobile.json"
     }
   },
   "scripts": {

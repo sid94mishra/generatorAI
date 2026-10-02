@@ -46,7 +46,7 @@ export function ProjectActions({
   const api = useProjectsApi();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const feature = useFeature('projectEdit');
   const [renaming, setRenaming] = useState<ProjectActionTarget | null>(null);
   const [deleting, setDeleting] = useState<ProjectActionTarget | null>(null);

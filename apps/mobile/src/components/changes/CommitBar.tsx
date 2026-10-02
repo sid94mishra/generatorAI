@@ -66,7 +66,7 @@ export function CommitBar({
   const scm = useScmApi();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const commitCap = useCapability('commit');
 
   const [alias, setAlias] = useState<string | null>(null);
@@ -331,7 +331,7 @@ function MountLine({
   multi: boolean;
   onPress: () => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const pr = readiness.openPullRequest;
   const line = readinessLine(readiness);
 
@@ -341,7 +341,7 @@ function MountLine({
       haptic="select"
       scale="none"
       onPress={onPress}
-      className={`flex-row items-center gap-2 rounded-2xl px-1 py-0.5 ${selected ? 'bg-accent' : ''}`}
+      className={`flex-row items-center gap-2 rounded-2xl px-1 py-0.5 ${selected ? 'bg-selected' : ''}`}
     >
       <GitBranch size={13} color={colors['muted-foreground']} />
       <Text numberOfLines={1} className="flex-1 text-xs text-muted-foreground">
@@ -349,7 +349,7 @@ function MountLine({
         {line}
       </Text>
       {pr ? (
-        <View className="rounded-full border border-primary bg-accent px-2 py-0.5">
+        <View className="rounded-full border border-primary bg-selected px-2 py-0.5">
           <Text className="text-xs font-medium text-primary">
             PR #{pr.number}
             {pr.draft ? ' · draft' : ''}

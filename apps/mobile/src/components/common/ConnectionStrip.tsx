@@ -56,7 +56,7 @@ export function ConnectionStrip(): React.ReactElement | null {
   const clearRejected = useStreamHealth((s) => s.clearRejected);
   const stream = useMuxStream();
   const { refreshPermissions } = useAuth();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const reduceMotion = useReduceMotion();
   const [busy, setBusy] = useState(false);
 

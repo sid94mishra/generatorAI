@@ -70,7 +70,7 @@ export function ComputerPane({
 function ComputerPanel({ workspaceId, active }: { workspaceId: string; active: boolean }): React.ReactElement {
   const api = useApi();
   const admin = useAdminApi();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const queryClient = useQueryClient();
   const interval = active ? POLL_MS : false;

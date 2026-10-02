@@ -51,7 +51,7 @@ const ICON = {
 } as const;
 
 export default function CapabilitiesScreen(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [tab, setTab] = useState<Tab>('skill');
   const [preview, setPreview] = useState<SystemArtifact | null>(null);
   const toast = useToast();

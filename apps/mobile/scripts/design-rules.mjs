@@ -46,6 +46,8 @@ const reportRule = {
         const base = word.split(':').at(-1).replace(/^!/, '');
         for (const [id, pattern] of Object.entries(classRules)) {
           if (id === 'varInClassString' && path.startsWith('src/ui/lib/')) continue;
+          // Gate A (MD-115): uniwind 1.12.1 fixes the ios:/android: leak, so the kit may use platform classes.
+          if (id === 'platformClassVariant' && ui) continue;
           if (id === 'arbitraryValue' && path.startsWith('src/ui/lib/') && context.sourceCode.getAllComments().some((c) => /geometry|vocabulary|token/i.test(c.value))) continue;
           if (pattern.test(['defaultBreakpoint', 'platformClassVariant', 'darkVariant', 'arbitraryValue', 'varInClassString'].includes(id) ? word : base)) report(node, id);
         }

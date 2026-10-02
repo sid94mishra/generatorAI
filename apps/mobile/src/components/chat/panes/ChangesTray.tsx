@@ -88,7 +88,7 @@ export function ChangesTray({
   onReview: () => void;
   onOpenFile: (path: string) => void;
 }): React.ReactElement | null {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const motion = useChatMotion();
   const api = useApi();
   const toast = useToast();

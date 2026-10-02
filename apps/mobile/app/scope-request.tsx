@@ -57,7 +57,7 @@ const FEATURE_LABELS: Record<MobileFeature, string> = {
 
 export default function ScopeRequestScreen(): React.ReactElement {
   const { state, refreshPermissions } = useAuth();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const create = useCreateScopeRequest();
   const params = useLocalSearchParams<{ scope?: string | string[] }>();

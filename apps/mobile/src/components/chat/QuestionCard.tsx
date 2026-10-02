@@ -32,7 +32,7 @@ export function QuestionCard({
   block: QuestionBlock;
   onSubmit: (answers: Record<string, string[]>, freeform: string | undefined) => Promise<void> | void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const entering = useCardEntering();
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [freeform, setFreeform] = useState('');
@@ -96,7 +96,7 @@ export function QuestionCard({
                       scale="large"
                       onPress={() => toggle(question.id, option.label, question.multiSelect)}
                       className={`min-h-11 flex-row items-center gap-2.5 rounded-2xl border px-3 py-2.5 ${
-                        selected ? 'border-primary bg-accent' : 'border-border bg-raised'
+                        selected ? 'border-primary bg-selected' : 'border-border bg-raised'
                       }`}
                     >
                       <View

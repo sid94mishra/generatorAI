@@ -17,7 +17,9 @@
 import React, { useState } from 'react';
 import { Text, View } from 'react-native';
 import { useSourceControlSettings, useDefaultScmAccount, useDisconnectScmAccount } from '../../src/features/settings/queries';
-import { Github, GitBranch, Info, Plus, Sparkles, Star, Trash2 } from 'lucide-react-native';
+import { GitBranch, Info, Plus, Sparkles, Star, Trash2 } from 'lucide-react-native';
+// lucide 1.x dropped brand icons; the GitHub mark is the vendor SVG (as on web).
+import { GitHubCopilotMark as GitHubMark } from '../../src/components/brand/VendorIcons';
 import type { SourceControlAccount } from '@generatorai/shared';
 
 import { Badge, SectionHeader } from '../../src/components/ui/primitives';
@@ -36,7 +38,7 @@ import { useTheme } from '../../src/theme/ThemeProvider';
 
 export default function SourceControlScreen(): React.ReactElement {
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [menuFor, setMenuFor] = useState<SourceControlAccount | null>(null);
   const [confirmFor, setConfirmFor] = useState<SourceControlAccount | null>(null);
   const [connecting, setConnecting] = useState(false);
@@ -101,7 +103,7 @@ export default function SourceControlScreen(): React.ReactElement {
             <EmptyState
               title="No account connected"
               message="Pull requests and pushes need a GitHub account."
-              icon={<Github size={24} color={colors['muted-foreground']} />}
+              icon={<GitHubMark size={24} color={colors['muted-foreground']} />}
               {...(connect.kind === 'available'
                 ? { action: { label: 'Connect GitHub', onPress: () => setConnecting(true) } }
                 : {})}
@@ -113,7 +115,7 @@ export default function SourceControlScreen(): React.ReactElement {
                   key={account.id}
                   title={account.login ?? account.label}
                   subtitle={subtitleFor(account)}
-                  icon={<Github size={18} color={colors.foreground} />}
+                  icon={<GitHubMark size={18} color={colors.foreground} />}
                   onPress={() => setMenuFor(account)}
                   chevron={false}
                   {...(account.id === data?.defaultAccountId

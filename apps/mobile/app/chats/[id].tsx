@@ -225,7 +225,7 @@ export default function ChatScreen(): React.ReactElement {
   const { id: chatId } = useLocalSearchParams<{ id: string }>();
   const refresh = useChatRefresh(chatId!);
   const navigation = useNavigation();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const auth = useAuth();
   const { state } = auth;
   const toast = useToast();
@@ -1515,7 +1515,7 @@ function ActivityRow({
   speaking: boolean;
   onSpeakLive?: (() => void) | undefined;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const motion = useChatMotion();
   return (
     <Animated.View

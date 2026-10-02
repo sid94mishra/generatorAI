@@ -11,7 +11,7 @@ import { useTabShell } from '../tabShell';
 import { useShellStore } from './shellStore';
 
 export function MenuButton({ attention: attentionProp }: { attention?: number }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const open = useShellStore((s) => s.openDrawer);
   const shell = useTabShell();
   const attention = attentionProp ?? shell?.attention ?? 0;

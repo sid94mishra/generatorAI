@@ -30,7 +30,7 @@ export default function CodebaseFileScreen(): React.ReactElement {
   const path = normalizeRelPath(typeof params.path === 'string' ? params.path : '');
   const navigation = useNavigation();
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
 
   const file = useCodebaseFile(projectId, codebaseId, path);
   const { refreshing, onRefresh } = usePullRefresh(() => file.refetch());

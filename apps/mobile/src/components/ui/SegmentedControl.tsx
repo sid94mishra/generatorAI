@@ -84,7 +84,7 @@ export function SegmentedControl<T extends string>({
   const reduceMotion = useReduceMotion();
   const fontScale = useFontScale();
   const presets = useReducedMotionPreset();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   // Desktop's FilterTabs: a hairline-bordered track and a solid
   // `primary-emphasis` pill with `primary-foreground` text. Token-driven, so
   // every theme and appearance gets its own accent rather than a grey pill.

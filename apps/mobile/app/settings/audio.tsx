@@ -45,7 +45,7 @@ import {
 
 export default function AudioSettingsScreen(): React.ReactElement {
   const auth = useAuth();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const scopes = auth.state.status === 'authenticated' ? auth.state.scopes : [];
   const canManage = checkFeature('capabilityAdmin', scopes).available;

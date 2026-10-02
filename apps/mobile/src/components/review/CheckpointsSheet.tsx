@@ -74,7 +74,7 @@ export function CheckpointsSheet({
   const extras = useWorkspaceExtras();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const restoreCap = useCapability('restoreCheckpoints');
   const [confirm, setConfirm] = useState<CheckpointGroup | null>(null);
   const [menuFor, setMenuFor] = useState<CheckpointGroup | null>(null);

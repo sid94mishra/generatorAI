@@ -1,12 +1,7 @@
 // Barrel for the design system. Screens import from here so a component can
 // move between files without touching every call site.
-//
-// The `animated` import must come first: it registers the NativeWind interop
-// for Reanimated components, and anything imported before it would render
-// with its className silently dropped.
-import './animated';
 
-export { AnimatedPressable } from './animated';
+export { AnimatedPressable } from '../../ui/lib/animated';
 export { haptics, setHapticsEnabled } from './haptics';
 export {
   MAX_SCALE,

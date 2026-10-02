@@ -54,7 +54,7 @@ export function ListRow({
   accessibilityHint?: string;
   testID?: string;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const showChevron = chevron ?? (Boolean(onPress) && !toggle);
 
   const body = (
@@ -124,7 +124,7 @@ export function ListRow({
   );
 
   if (!onPress && !toggle && !onLongPress) {
-    return <View testID={testID} className={selected ? 'bg-accent' : undefined}>{body}</View>;
+    return <View testID={testID} className={selected ? 'bg-selected' : undefined}>{body}</View>;
   }
 
   return (
@@ -143,7 +143,7 @@ export function ListRow({
       scale="large"
       onPress={toggle ? () => toggle.onValueChange(!toggle.value) : onPress}
       {...(onLongPress ? { onLongPress } : {})}
-      className={selected ? 'bg-accent' : undefined}
+      className={selected ? 'bg-selected' : undefined}
     >
       {body}
     </Touchable>

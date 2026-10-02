@@ -34,7 +34,7 @@ export function TemplatePickerSheet({
 }): React.ReactElement {
   const admin = useAdminApi();
   const queryClient = useQueryClient();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
 

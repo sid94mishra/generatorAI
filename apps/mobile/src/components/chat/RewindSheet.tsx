@@ -41,7 +41,7 @@ export function RewindSheet({
   busy?: boolean;
   preview?: string | null;
 }): React.ReactElement | null {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   if (!visible) return null;
 
   const options = rewindOptions(availability);

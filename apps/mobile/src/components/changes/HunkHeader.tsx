@@ -23,7 +23,7 @@ export const HunkHeader = React.memo(function HunkHeader({
   fontSize: number;
   onToggle?: (hunkIndex: number) => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const height = headerHeightFor(fontSize);
   const Icon = row.collapsed ? ChevronRight : ChevronDown;
 
