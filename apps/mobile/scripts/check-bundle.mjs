@@ -53,7 +53,11 @@ const FORBIDDEN = [
 /** Per-package source-size ceilings (bytes of source). */
 const CEILINGS = {
   'lucide-react-native': 200_000,
-  'workspace:shared': 200_000,
+  // Source bytes, type declarations and comments included (types/AgentEvent.ts alone is 44 KB,
+  // mostly erased at build). M2 deliberately moved status maps, the ui-contract (commands, keys,
+  // copy) and the timeline model into shared, so the 200 KB pre-overhaul budget no longer fits;
+  // server-only shared modules stay banned by FORBIDDEN above (MD-125). Measured 336 KB at M3.
+  'workspace:shared': 400_000,
 };
 
 function packageKey(source) {
