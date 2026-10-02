@@ -51,7 +51,6 @@ copy rotates the resume credential and the original is logged out), `E2E_OUT` (s
 | `request.mjs` / `approveadmin.mjs` / `unlocked.mjs <chat>` | scope request → admin approve (confirm sheet + step-up) → phone unlock |
 | `flow3.mjs <chat>` | rename, slash strip, @ mentions, attach menu, agents, accessibility, chat swipe |
 | `modelterm.mjs <chat>` | model pick, turn options, terminal tab create, browser start |
-| `unarchive.mjs` | Archived tab → row menu → Move to active |
 | `light.mjs <chat>` | light mode + alternate theme screenshots |
 | `net2.mjs <chat>` | network timeline of a streaming turn |
 

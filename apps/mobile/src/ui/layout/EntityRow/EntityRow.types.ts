@@ -19,6 +19,8 @@ export interface EntityRowProps {
   leading: EntityLeading;
   /** Joined with " · " (strings are footnote fg-3; elements render as given, e.g. AgentGlyph, mono project). */
   meta?: ReadonlyArray<ReactElement | string>;
+  /** Spoken words for element meta (a mono project, an AgentGlyph), which the label cannot read from the element. */
+  metaLabel?: string;
   /** ISO time → relative mono ("3m", "now", "1h"). */
   time?: string;
   pinned?: boolean;

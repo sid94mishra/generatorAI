@@ -50,7 +50,6 @@ export {
 } from './ContextMenu';
 export { Pager, PagerIndicator, type PagerProps, type PagerHandle } from './Pager';
 export { EDGE_GUTTER, clampIndex, pageOffset, pageProgress, settlePage, type SettleInput } from './pagerMath';
-export { SwipeableRow, closeSwipedRow, type SwipeAction } from './SwipeableRow';
 export {
   ToastProvider,
   useToast,

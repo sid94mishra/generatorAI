@@ -740,14 +740,6 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 11,
       "mobile-design/design/defaultRadius": 1
     },
-    "src/components/ui/SwipeableRow.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "react-hooks/immutability/diagnostic": 8,
-      "react-hooks/refs/diagnostic": 2,
-      "mobile-design/design/defaultTextSize": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 2,
-      "mobile-design/design/legacyTokenUtility": 1
-    },
     "src/components/ui/Toast.tsx": {
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
@@ -1000,11 +992,8 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 4
     },
     "app/(app)/chats/index.tsx": {
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 18,
-      "react-hooks/set-state-in-effect/diagnostic": 1,
-      "mobile-design/design/legacyTokenUtility": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 1
+      "boundaries/dependencies/diagnostic": 1,
+      "react-hooks/set-state-in-effect/diagnostic": 1
     },
     "app/(app)/index.tsx": {
       "mobile-design/design/lucideDirectImport": 1,

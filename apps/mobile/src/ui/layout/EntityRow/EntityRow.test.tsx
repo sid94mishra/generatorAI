@@ -11,6 +11,9 @@ describe('EntityRow (ML-14)', () => {
     expect(entityRowLabel({ leading: { status: 'needs_you' }, title: 'Fix flaky test', meta: ['payments-service'], time: '2026-10-02T11:57:00Z', pinned: true, unread: true }, NOW)).toBe(
       'Needs you, Fix flaky test, pinned, unread, payments-service, 3 minutes ago',
     );
+    expect(entityRowLabel({ leading: { status: 'running' }, title: 'Upgrade', meta: [], metaLabel: 'agent Orchestrator', time: '2026-10-02T11:57:00Z' }, NOW)).toBe(
+      'Running, Upgrade, agent Orchestrator, 3 minutes ago',
+    );
   });
 
   it('is a checkbox in selection mode (MD-60)', async () => {

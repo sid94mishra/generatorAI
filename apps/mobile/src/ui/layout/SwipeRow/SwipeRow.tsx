@@ -1,7 +1,8 @@
 // ML-15 SwipeRow (03 ML-15; MD-52): RNGH's ReanimatedSwipeable around an EntityRow. iOS: full-height tiles (leading
 // 64, trailing 74 each); Android: 74-wide pills, radius 16, inset 4. A full swipe performs the side's last action
 // with the `threshold` haptic as it arms. One row open at a time (closeOpenSwipeRow() for scroll / drawer). Every
-// action is also an accessibility action on the row (MD-28); callers also list them in the row menu.
+// action is also an accessibility action on the row (MD-28); callers also list them in the row menu. Android draws
+// trailing actions only (MD-52): its leading actions are accessibility actions and menu items, not a gesture.
 import React, { useRef, useState } from 'react';
 import { View } from 'react-native';
 import ReanimatedSwipeable, { type SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
@@ -14,7 +15,7 @@ import { Icon } from '../../primitives/Icon';
 import { Pressable } from '../../primitives/Pressable';
 import { Text } from '../../primitives/Text';
 import type { SwipeAction, SwipeRowProps } from './SwipeRow.types';
-import { fullSwipeAction, fullSwipeDistance, revealWidth } from './swipeRowModel';
+import { fullSwipeAction, fullSwipeDistance, revealWidth, swipeableLeading } from './swipeRowModel';
 
 export type { SwipeAction, SwipeRowProps } from './SwipeRow.types';
 
@@ -81,6 +82,8 @@ export function SwipeRow(props: SwipeRowProps): React.ReactElement {
         )
       : undefined;
 
+  // Android draws no leading swipe (MD-52); those actions stay accessibility actions (below) and menu items.
+  const drawnLeading = swipeableLeading(leading, nativePlatform);
   const row = React.cloneElement(children, { swipeActions: [...(children.props.swipeActions ?? []), ...[...leading, ...trailing].map((a) => ({ id: a.id, label: a.label, onPress: a.onPress }))] });
   return (
     <View testID={testID} onLayout={(e) => setRowWidth(e.nativeEvent.layout.width)}>
@@ -88,9 +91,9 @@ export function SwipeRow(props: SwipeRowProps): React.ReactElement {
         ref={ref}
         friction={1}
         overshootFriction={4}
-        leftThreshold={revealWidth(leading.length, controls.leading) / 2}
+        leftThreshold={revealWidth(drawnLeading.length, controls.leading) / 2}
         rightThreshold={revealWidth(trailing.length, controls.trailing) / 2}
-        renderLeftActions={side('leading', leading, controls.leading)}
+        renderLeftActions={side('leading', drawnLeading, controls.leading)}
         renderRightActions={side('trailing', trailing, controls.trailing)}
         onSwipeableWillOpen={() => {
           if (openRow && openRow !== ref.current) openRow.close();

@@ -41,7 +41,7 @@ import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useChat, useChatMessages, useChatPlans, useChatProject, useChatInteractions, useChatRefresh, usePrepareChatWorkspace, usePatchChat, useArchiveChat, useCancelChat, useDecideChatPlan, useAnswerChatQuestion, useResolveChatPermission, type ChatPatch } from '../../../../src/features/chat/queries';
+import { useChat, useMarkChatRead, useChatMessages, useChatPlans, useChatProject, useChatInteractions, useChatRefresh, usePrepareChatWorkspace, usePatchChat, useArchiveChat, useCancelChat, useDecideChatPlan, useAnswerChatQuestion, useResolveChatPermission, type ChatPatch } from '../../../../src/features/chat/queries';
 import { useShallow } from 'zustand/react/shallow';
 import * as Clipboard from 'expo-clipboard';
 import {
@@ -268,6 +268,7 @@ export default function ChatScreen(): React.ReactElement {
   const tts = useTextToSpeech();
 
   const chat = useChat(chatId!);
+  useMarkChatRead(chatId!);
 
   /**
    * The composer controller, reachable from callbacks declared above it.

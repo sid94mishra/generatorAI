@@ -1,4 +1,6 @@
+import { useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useFocusEffect } from 'expo-router';
 import { queryKeys } from '@generatorai/client-core';
 import { useApi } from '../../services/api/useApi';
 
@@ -6,6 +8,24 @@ export function useChat(id: string, options: { enabled?: boolean; staleTime?: nu
   const api = useApi();
   return useQuery({ queryKey: queryKeys.chat(id), queryFn: () => api.chats.get(id), ...options });
 }
+/**
+ * MG-02 / MD-112: opening a chat sets its read mark (`PATCH {unread: false}`) each time the screen gains focus, so
+ * the list's unread dot clears; a failure is silent (the dot simply stays).
+ */
+export function useMarkChatRead(id: string): void {
+  const api = useApi();
+  const client = useQueryClient();
+  useFocusEffect(
+    useCallback(() => {
+      if (!id) return;
+      api.chats
+        .setUnread(id, false)
+        .then(() => client.invalidateQueries({ queryKey: queryKeys.chats() }))
+        .catch(() => undefined);
+    }, [api, client, id]),
+  );
+}
+
 export function useChatPlans(id: string, enabled = true) {
   const api = useApi();
   return useQuery({ queryKey: queryKeys.chatPlans(id), queryFn: () => api.chats.plans(id), enabled });

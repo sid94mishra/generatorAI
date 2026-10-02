@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, screen } from '@testing-library/react-native';
 import { EntityRow } from '../EntityRow';
 import { SwipeRow } from './SwipeRow';
-import { fullSwipeAction, fullSwipeDistance, revealWidth } from './swipeRowModel';
+import { fullSwipeAction, fullSwipeDistance, revealWidth, swipeableLeading } from './swipeRowModel';
 import { renderThemed } from '../../__tests__/themed';
 
 const more = { id: 'more', label: 'More', icon: 'more' as const, tone: 'neutral' as const, onPress: jest.fn() };
@@ -16,6 +16,12 @@ describe('SwipeRow (ML-15)', () => {
     expect(fullSwipeAction({ trailing: [more, archive] }, 'trailing')).toBe(archive);
     expect(fullSwipeAction({ trailing: [more, archive], fullSwipe: false }, 'trailing')).toBeUndefined();
     expect(fullSwipeAction({ leading: [more], trailing: [archive] }, 'leading')).toBeUndefined();
+  });
+
+  it('draws leading actions on iOS only; Android keeps them as accessibility actions (MD-52)', () => {
+    expect(swipeableLeading([more], 'ios')).toEqual([more]);
+    expect(swipeableLeading([more], 'android')).toEqual([]);
+    expect(swipeableLeading(undefined, 'ios')).toEqual([]);
   });
 
   it('exposes every swipe action as an accessibility action on the row (MD-28)', async () => {
