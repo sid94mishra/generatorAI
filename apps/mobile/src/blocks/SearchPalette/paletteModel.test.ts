@@ -5,6 +5,7 @@ import { buildPalette, flatRows, highlightRange, matchRank, parseRecents, rememb
 import { nextThemeMode, themeToggleHint } from '../shell/themeCycle';
 
 const base = { offline: false, themeHint: 'Dark → System', actions: ['chat.new', 'theme.toggle', 'app.settings'] as const };
+
 const hit = (type: SearchResult['type'], id: string, title: string): SearchResult => ({ type, id, title, href: `/${type}s/${id}` });
 
 describe('search palette model (MB-21)', () => {

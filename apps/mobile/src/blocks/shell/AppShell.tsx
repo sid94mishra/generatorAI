@@ -21,6 +21,7 @@ import { ConnectionBanner } from '../ConnectionStatus';
 import { WorkspacePane, usePaneShown } from '../WorkspacePane';
 import { DrawerContent } from './DrawerContent';
 import { ErrorBoundary } from './ErrorBoundary';
+import { KeyCommandHost } from './KeyCommandHost';
 import { isModuleRoot } from './parentHref';
 import { useShellStore } from './shellStore';
 
@@ -84,6 +85,7 @@ export function AppShell({ children }: { children: React.ReactNode }): React.Rea
         </AdaptiveLayout>
         <ToastHost />
         <AlertDialogHost />
+        <KeyCommandHost />
       </SheetProvider>
     </WindowInsetsProvider>
   );

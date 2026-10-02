@@ -10,24 +10,11 @@ import { usePaneStore } from '../WorkspacePane/paneStore';
 import { emitScopedCommand } from './commandBus';
 import { goToModule, openNewChat, openSearch, openSettings } from './navigation';
 import { useShellStore } from './shellStore';
+export { MOBILE_KEY_COMMANDS, MOBILE_PALETTE_ACTIONS, activeKeyCommandIds } from './commandSets';
 import { useSidebarToggle } from './useSidebarToggle';
 import { nextThemeMode, type ThemeModeName } from './themeCycle';
 
 type Href = Parameters<typeof router.replace>[0];
-
-/** Palette "Actions" available on mobile now (board order). */
-export const MOBILE_PALETTE_ACTIONS = ['chat.new', 'theme.toggle', 'app.settings'] as const satisfies readonly CommandId[];
-
-/** Global commands the hardware keyboard drives on mobile (06 §3.10). */
-export const MOBILE_KEY_COMMANDS = [
-  'palette.toggle',
-  'chat.new',
-  ...NAV_DESTINATIONS.map((d) => d.command),
-  'app.settings',
-  'nav.back',
-  'sidebar.toggle',
-  'dock.toggle',
-] as const satisfies readonly CommandId[];
 
 export function commandLabel(id: CommandId): string {
   return COMMANDS[id].label;
@@ -53,6 +40,14 @@ export function useCommandRunner(): (id: CommandId) => boolean {
           return true;
         case 'chat.new':
           openNewChat();
+          return true;
+        case 'workflow.new':
+          // The Workflows template picker until the builder's New workflow lands (M8).
+          router.push({ pathname: '/workflows', params: { new: '1' } } as never);
+          return true;
+        case 'project.new':
+          // The Projects create sheet until the full-screen New project lands (M7).
+          router.push({ pathname: '/projects', params: { new: '1' } } as never);
           return true;
         case 'app.settings':
           openSettings();

@@ -72,7 +72,7 @@ export const ENTITY_GROUPS: Record<SearchEntityType, { label: string; icon: Mobi
   script: { label: 'Scripts', icon: 'scripts' },
 };
 
-const ACTION_ICONS: Partial<Record<CommandId, MobileIconConcept>> = { 'chat.new': 'edit', 'app.settings': 'settings', 'theme.toggle': 'mode-dark' };
+const ACTION_ICONS: Partial<Record<CommandId, MobileIconConcept>> = { 'chat.new': 'edit', 'workflow.new': 'plus', 'project.new': 'plus', 'app.settings': 'settings', 'theme.toggle': 'mode-dark' };
 const KEYWORDS: Partial<Record<CommandId, readonly string[]>> = {
   'nav.home': ['dashboard'],
   'app.settings': ['settings', 'preferences'],

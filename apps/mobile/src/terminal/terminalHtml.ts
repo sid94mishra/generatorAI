@@ -193,6 +193,11 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
   term.onResize(function (size) { post({ type: 'resize', cols: size.cols, rows: size.rows }); });
   term.onTitleChange(function (title) { post({ type: 'title', title: String(title).slice(0, 256) }); });
   term.onBell(function () { post({ type: 'bell' }); });
+  // Keyboard focus: while the terminal has it, the app's hardware shortcuts and panel gestures stand down (MD-19).
+  if (term.textarea) {
+    term.textarea.addEventListener('focus', function () { post({ type: 'focused' }); });
+    term.textarea.addEventListener('blur', function () { post({ type: 'unfocused' }); });
+  }
   term.onSelectionChange(function () {
     if (term.hasSelection()) post({ type: 'selection', text: term.getSelection() });
   });
