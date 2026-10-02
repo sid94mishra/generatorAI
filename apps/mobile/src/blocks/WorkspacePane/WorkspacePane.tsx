@@ -5,16 +5,15 @@
 // bodies stay mounted (terminal, WebView never remount); hidden ones are parked and paused. Back exits full screen
 // first, then closes the overlay pane (06 §3.2).
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, useWindowDimensions } from 'react-native';
+import { View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams, usePathname } from 'expo-router';
 import { DOCK_LINK_PARAM, parseDockLinkTab } from '@generatorai/shared/ui-contract';
 
+import type { PanelSlot } from '../../ui/layout/AdaptiveLayout';
 import { PaneShell } from '../../ui/layout/PaneShell';
 import { PaneTabStrip } from '../../ui/layout/PaneTabStrip';
 import { SidePanel } from '../../ui/layout/SidePanel';
 import { useBackHandler } from '../../ui/platform/back';
-import { useSizeClass } from '../../ui/platform/breakpoints';
-import { geometry } from '../../ui/platform/geometry';
 import { useShellStore } from '../shell/shellStore';
 import { isMobilePaneTab, type MobilePaneTab } from './paneRegistry';
 import { scopeKey, usePaneStore, type PaneClaim, type PaneScope } from './paneStore';
@@ -65,20 +64,24 @@ export function usePaneToggle(): { open: boolean; count: number; attention: bool
   return { open, count, attention, onPress: toggle };
 }
 
-export function WorkspacePane({ sidebarWidth }: { sidebarWidth: number }): React.ReactElement {
+/** Whether the pane is on screen (claimed, open, over its screen) and in full screen — the shell's layout inputs. */
+export function usePaneShown(): { shown: boolean; fullscreen: boolean } {
   const pathname = usePathname();
-  const window = useWindowDimensions();
-  const { sizeClass } = useSizeClass();
   const claim = usePaneStore((s) => s.claim);
   const open = usePaneStore((s) => s.open);
+  const fullscreen = usePaneStore((s) => s.fullscreen);
+  const shown = Boolean(claim && open && paneVisibleOn(pathname, claim.path));
+  return { shown, fullscreen: shown && fullscreen };
+}
+
+/** The pane in the presentation AdaptiveLayout gives it (overlay < 840, docked ≥ 840, full screen as a mode). */
+export function WorkspacePane({ presentation, width }: PanelSlot): React.ReactElement {
+  const { shown } = usePaneShown();
+  const claim = usePaneStore((s) => s.claim);
   const fullscreen = usePaneStore((s) => s.fullscreen);
   const active = usePaneStore((s) => s.active);
   const { setOpen, setFullscreen, select } = usePaneStore.getState();
   const surfaceOwnsGestures = useShellStore((s) => s.gestureOwner === 'surface');
-
-  const shown = Boolean(claim && open && paneVisibleOn(pathname, claim.path));
-  const presentation = !shown ? 'overlay' : fullscreen ? 'fullscreen' : sizeClass === 'expanded' ? 'persistent' : 'overlay';
-  const width = presentation === 'fullscreen' ? Math.max(0, window.width - sidebarWidth) : undefined;
   const tabs = claim?.tabs ?? [];
   const current: MobilePaneTab = tabs.some((t) => t.type === active) ? active : (tabs[0]?.type ?? 'changes');
 
@@ -136,7 +139,3 @@ export function WorkspacePane({ sidebarWidth }: { sidebarWidth: number }): React
   );
 }
 
-/** Sidebar column width when the sidebar is docked (the full-screen pane covers only the main column then). */
-export function dockedSidebarWidth(persistent: boolean): number {
-  return persistent ? geometry().shell.sidebar : 0;
-}
