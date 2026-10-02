@@ -33,7 +33,10 @@ import {
   MOBILE_SPACING_NAMES,
   MOBILE_TEXT_STEPS,
 } from '../vocabulary-mobile.js';
+import { UNIWIND_THEMES, uniwindThemeName } from '../uniwind-names.js';
 import { resolveTokenSet } from './native.js';
+
+export { UNIWIND_THEMES, uniwindThemeName };
 
 export type NativePlatform = 'ios' | 'android';
 
@@ -41,14 +44,6 @@ const APPEARANCES: readonly Appearance[] = ['dark', 'light'];
 
 /** The default theme that Uniwind's adaptive `dark` / `light` variants carry. */
 const BASE_THEME_ID = 'instrument';
-
-/** `${theme.id}-${appearance}`: the Uniwind theme name of one theme × appearance. */
-export function uniwindThemeName(themeId: string, appearance: Appearance): string {
-  return `${themeId}-${appearance}`;
-}
-
-/** `${theme.id}-${appearance}` for every theme in THEMES order, dark then light (36 names). */
-export const UNIWIND_THEMES: readonly string[] = THEMES.flatMap((t) => APPEARANCES.map((a) => uniwindThemeName(t.id, a)));
 
 /** Chart ramp and canvas: the shared (unprefixed) variables mobile uses (02 §2.1 #33–34). */
 const SHARED_VARS = ['--chart-1', '--chart-2', '--chart-3', '--chart-4', '--chart-5', '--chart-6', '--canvas-bg', '--canvas-dot'];

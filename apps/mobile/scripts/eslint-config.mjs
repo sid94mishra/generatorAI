@@ -17,23 +17,30 @@ const hookRules = Object.fromEntries(Object.keys(reactHooks.configs.recommended.
 const toTypes = (...types) => ({ to: { element: { type: types } } });
 const namespaces = JSON.parse(readFileSync(new URL('../../../packages/design-tokens/generated/vocabulary.json', import.meta.url), 'utf8')).namespaces;
 const vocabulary = namespaces.flatMap((ns) => ns.prefixes.flatMap((p) => ns.names.map((n) => `${p}-${n}`)));
+/** Class restrictions for better-tailwindcss; `skip` lifts rules per scope. */
+const restrictions = (skip = []) => Object.entries(classRules)
+  .filter(([id]) => !['arbitraryValue', 'varInClassString', ...skip].includes(id))
+  .map(([id, pattern]) => ({ pattern: pattern.source.replace(/^\^/, '^(?:.*:)?'), message: `${id}: use the mobile vocabulary.` }));
 export default [
   {
     files: all, ignores: tests,
     plugins: { 'mobile-design': design, 'react-hooks': reactHooks, 'better-tailwindcss': betterTailwind },
-    settings: { 'better-tailwindcss': { entryPoint: `${mobile}tailwind.config.js`, cwd: mobile } },
+    settings: { 'better-tailwindcss': { entryPoint: `${mobile}src/theme/global.css`, cwd: mobile } },
     rules: {
       ...hookRules,
       'mobile-design/design': 'warn',
-      'better-tailwindcss/no-restricted-classes': ['warn', { restrict: Object.entries(classRules)
-        .filter(([id]) => !['arbitraryValue', 'varInClassString'].includes(id))
-        .map(([id, pattern]) => ({ pattern: pattern.source.replace(/^\^/, '^(?:.*:)?'), message: `${id}: use the mobile vocabulary.` })) }],
+      'better-tailwindcss/no-restricted-classes': ['warn', { restrict: restrictions() }],
       'better-tailwindcss/no-unknown-classes': ['warn', { ignore: ['^group(/.+)?$', '^peer(/.+)?$', `^(?:${vocabulary.join('|')})$`] }],
     },
   },
   {
     files: newFiles, ignores: [...tests, ...legacyRouteGlobs],
     rules: { ...Object.fromEntries(Object.keys(hookRules).map((key) => [key, 'error'])), 'mobile-design/design': 'error', 'better-tailwindcss/no-unknown-classes': 'error', 'better-tailwindcss/no-restricted-classes': 'error' },
+  },
+  {
+    // Gate A (MD-115): platform classes (ios:/android:/native:/web:/tv:) are allowed inside the kit only.
+    files: ['apps/mobile/src/ui/**/*.{ts,tsx}'], ignores: tests,
+    rules: { 'better-tailwindcss/no-restricted-classes': ['error', { restrict: restrictions(['platformClassVariant']) }] },
   },
   {
     files: all, ignores: tests,

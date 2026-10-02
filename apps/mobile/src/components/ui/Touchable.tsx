@@ -24,7 +24,7 @@ import React, { useCallback } from 'react';
 import { Platform, type PressableProps, type ViewStyle } from 'react-native';
 import { useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 
-import { AnimatedPressable } from './animated';
+import { AnimatedPressable } from '../../ui/lib/animated';
 import { PRESS_SCALE, PRESS_SCALE_LARGE, SPRING_PRESS, TIMING_FAST } from './motion';
 import { haptics } from './haptics';
 import { MIN_TARGET, useReduceMotion } from './accessibility';

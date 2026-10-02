@@ -1161,10 +1161,6 @@
     "src/components/ui/accessibility.ts": {
       "mobile-design/design/platformOs": 3
     },
-    "src/components/ui/animated.ts": {
-      "mobile-design/design/platformOs": 2,
-      "mobile-design/design/rawTextImport": 1
-    },
     "src/components/ui/haptics.ts": {
       "mobile-design/design/platformOs": 3,
       "mobile-design/design/hapticsImport": 1
@@ -1429,9 +1425,6 @@
     },
     "src/terminal/terminalHtml.ts": {
       "mobile-design/design/hexOrRgbInTs": 3
-    },
-    "src/theme/ThemeProvider.tsx": {
-      "react-hooks/exhaustive-deps/diagnostic": 2
     }
   },
   "migratedServices": [

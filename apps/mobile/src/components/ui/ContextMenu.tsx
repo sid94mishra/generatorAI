@@ -24,7 +24,7 @@ import type { PressableProps, ViewStyle } from 'react-native';
 import { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
 import { ActionSheet, type MenuAction } from './ActionSheet';
-import { AnimatedPressable } from './animated';
+import { AnimatedPressable } from '../../ui/lib/animated';
 import { PRESS_SCALE, SPRING_PRESS, useReducedMotionPreset } from './motion';
 import { haptics } from './haptics';
 import { useReduceMotion } from './accessibility';

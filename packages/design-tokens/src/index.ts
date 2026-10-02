@@ -16,3 +16,4 @@ export * from './accent.js';
 export * from './motion.js';
 export * from './haptics.js';
 export * from './glass.js';
+export * from './uniwind-names.js';

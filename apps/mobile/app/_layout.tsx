@@ -11,6 +11,8 @@
 // ────────────────────────────────────────────────────────────────
 
 import '../src/theme/global.css';
+// Applies the stored theme before the first render; must follow global.css, whose module registers the Uniwind themes.
+import '../src/theme/prepaint';
 // Installs `global.crypto` before anything imports the auth runtime, which is
 // written against WebCrypto. Must be the first side effect. Platform-resolved:
 // native installs the JSI/OpenSSL implementation, web asserts the built-in one.
@@ -55,7 +57,7 @@ void SplashScreen.preventAutoHideAsync();
 
 /** Applies the theme variables and keeps native chrome in step. */
 function ThemedShell({ children }: { children: React.ReactNode }): React.ReactElement {
-  const { style, appearance, colors } = useTheme();
+  const { appearance, colors } = useTheme();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -84,7 +86,7 @@ function ThemedShell({ children }: { children: React.ReactNode }): React.ReactEl
   }, [ready]);
 
   return (
-    <View style={[style, { flex: 1, backgroundColor: colors.background }]}>
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
       <StatusBar style={appearance === 'dark' ? 'light' : 'dark'} />
       {ready ? children : null}
     </View>

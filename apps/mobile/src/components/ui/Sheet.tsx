@@ -14,11 +14,8 @@
 //     to the composer's box.
 //
 // `Modal` is the one primitive that reliably escapes the layout tree on both
-// platforms. Its cost is that it renders in a SEPARATE host subtree, so the
-// NativeWind `vars()` bag applied at the app root does not reach inside and
-// every themed class resolves to nothing — the surface paints fully
-// transparent, in both light and dark. Re-applying `useTheme().style` on the
-// modal's root view is therefore load-bearing, not decoration.
+// platforms. It renders in a separate host subtree; Uniwind's theme variables
+// are global (Uniwind.setTheme), so themed classes resolve inside it too.
 //
 // v2 — what changed and why:
 //   • Drag ANYWHERE. The header drags as before; the body drags too, the way
@@ -160,7 +157,7 @@ export function Sheet({
   children,
   footer,
 }: SheetProps): React.ReactElement | null {
-  const { colors, style: themeVars } = useTheme();
+  const { colors } = useTheme();
   const { height: screenHeight } = useWindowDimensions();
   // The Modal spans the whole window, outside `ConnectionStripHost`, so it
   // needs the REAL insets rather than the consumed ones the tree carries.
@@ -410,14 +407,10 @@ export function Sheet({
           scrim. iOS presents inside the same root and was unaffected, which is
           how this went unnoticed. */}
       <GestureHandlerRootView style={styles.gestureRoot}>
-      {/* `themeVars` is re-applied here because the modal host is a separate
-          subtree: without it every themed class inside resolves to nothing
-          and the whole sheet paints transparent. `zIndex` is explicit because
-          react-native-web lands the modal host at z-index 0. */}
+      {/* `zIndex` is explicit because react-native-web lands the modal host at z-index 0. */}
       <Animated.View
         style={[
           StyleSheet.absoluteFill,
-          themeVars,
           liftStyle,
           // Landscape: keep the card clear of the notch / Dynamic Island. The
           // scrim is absolutely positioned, so it still covers the edges.
