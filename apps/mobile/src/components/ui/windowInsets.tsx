@@ -16,31 +16,8 @@
 // landscape and pushed the sheet down).
 // ────────────────────────────────────────────────────────────────
 
-import React, { createContext, useContext } from 'react';
-import { useSafeAreaInsets, type EdgeInsets } from 'react-native-safe-area-context';
-
-const WindowInsetsContext = createContext<EdgeInsets | null>(null);
-
-export function WindowInsetsProvider({
-  insets,
-  children,
-}: {
-  insets: EdgeInsets;
-  children: React.ReactNode;
-}): React.ReactElement {
-  return <WindowInsetsContext.Provider value={insets}>{children}</WindowInsetsContext.Provider>;
-}
-
-/**
- * The window's real insets. Outside a `WindowInsetsProvider` (a screen
- * rendered above the host, a test harness) the nearest safe-area context is
- * already the real one, so it is returned as-is.
- */
-export function useWindowInsets(): EdgeInsets {
-  const provided = useContext(WindowInsetsContext);
-  const local = useSafeAreaInsets();
-  return provided ?? local;
-}
+// The context now lives in the kit (`ui/platform/insets`); the shell's main column provides it.
+export { WindowInsetsProvider, useWindowInsets } from '../../ui/platform/insets';
 
 /**
  * Widest a column of reading content gets. On iPad (and a landscape phone)

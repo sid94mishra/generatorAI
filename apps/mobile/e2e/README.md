@@ -41,7 +41,6 @@ copy rotates the resume credential and the original is logged out), `E2E_OUT` (s
 | Script | What it proves |
 |---|---|
 | `pair.mjs [--fresh]` | manual-code pairing → consent → tab shell |
-| `tour2.mjs` | every top-level route renders with no console errors (screenshots) |
 | `chat.mjs` | New chat sheet → send → live streaming → Stop appears |
 | `gatelive.mjs` | Turn options → Ask me → tool prompt → in-chat permission card → Allow → Changes pane → diff → Stop |
 | `panes.mjs <chat>` | Workbench: header button → tool index → Changes (with commit → push → PR, Keep / Keep all / Undo all) / Terminal / Browser / Files / Plan / Session sheets, Stop, long-press menu |

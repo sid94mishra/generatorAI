@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { SHELL_SECTIONS, drawerAvailable, sectionForPath } from '../navigation/shell/sections';
 import { settleOpen, sidePanelWidth, SIDE_PANEL_MAX_WIDTH } from '../components/ui/sidePanelMath';
 import {
   DEFAULT_WORK_SEGMENT,
@@ -9,32 +8,6 @@ import {
   resolveWorkSegment,
 } from '../components/work/workSegment';
 import { missingGrantableScopes, scopeRequestBody, scopeRequestOutcome } from '../services/auth/scopeRequests';
-
-describe('navigation drawer sections', () => {
-  it('lists the desktop sidebar destinations as module roots', () => {
-    expect(SHELL_SECTIONS.map((s) => s.href)).toEqual(['/', '/projects', '/chats', '/agents', '/workflows', '/scripts', '/automations']);
-  });
-
-  it('lights the module of a detail route', () => {
-    expect(sectionForPath('/')).toBe('home');
-    expect(sectionForPath('/chats/abc')).toBe('chats');
-    expect(sectionForPath('/workflows/w1/runs/r1/stages/s1')).toBe('workflows');
-    expect(sectionForPath('/automations')).toBe('automations');
-    expect(sectionForPath('/agents')).toBe('agents');
-    expect(sectionForPath('/projects/p1/codebases/c1')).toBe('projects');
-    expect(sectionForPath('/settings/appearance')).toBeNull();
-    expect(sectionForPath('/search')).toBeNull();
-  });
-
-  it('offers the drawer on module roots only; a chat has Back like other pushed screens', () => {
-    for (const path of ['/', '/chats', '/workflows', '/projects', '/agents', '/scripts', '/automations']) {
-      expect(drawerAvailable(path)).toBe(true);
-    }
-    for (const path of ['/chats/c1', '/pair', '/settings', '/projects/p1', '/workflows/w1/runs/r1']) {
-      expect(drawerAvailable(path)).toBe(false);
-    }
-  });
-});
 
 describe('side panel geometry', () => {
   it('leaves a strip of content visible on a narrow phone', () => {

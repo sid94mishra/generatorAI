@@ -30,5 +30,5 @@ export {
 export { pressFeedback, type PressFeedbackKind } from './pressFeedback';
 export { nouns, type PlatformNouns } from './nouns';
 export { setHardwareKeyboardAttached, useHardwareKeyboard } from './keyboard';
-export { useInsets } from './insets';
+export { WindowInsetsProvider, useInsets, useWindowInsets } from './insets';
 export { readSystemAccentSeeds, systemAccentAvailable, type SystemAccentSeeds } from './accent';

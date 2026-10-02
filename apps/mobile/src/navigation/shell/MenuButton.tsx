@@ -8,11 +8,11 @@ import { Menu } from 'lucide-react-native';
 import { IconButton } from '../../components/ui/Button';
 import { useTheme } from '../../theme/ThemeProvider';
 import { needsYouCount, useActivity } from '../../features/home/queries';
-import { useShellStore } from './shellStore';
+import { useSidebarToggle } from '../../blocks/shell/useSidebarToggle';
 
 export function MenuButton({ attention: attentionProp }: { attention?: number }): React.ReactElement {
   const { legacyColors: colors } = useTheme();
-  const open = useShellStore((s) => s.openDrawer);
+  const { onSidebarToggle: open } = useSidebarToggle();
   const { operations } = useActivity();
   const attention = attentionProp ?? needsYouCount(operations);
   return (

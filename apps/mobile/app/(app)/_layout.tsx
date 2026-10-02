@@ -1,13 +1,11 @@
-// The (app) shell (04 §1.2, MD-18): one native Stack carries every screen. Presentation options for every route
-// live here (04 §1.1 rule 2), from `ui/platform/presentation` (MD-21). Until M5-02 / M5-04 replace them, the shell
-// still hosts the legacy drawer, connection strip and JS stack header (MD-138).
+// The (app) shell (04 §1.2, MD-18): AppShell (sidebar, main column, connection banner) around one native Stack that
+// carries every screen. Presentation options for every route live here (04 §1.1 rule 2), from
+// `ui/platform/presentation` (MD-21). Until M5-04 replaces it, legacy details keep the JS stack header (MD-138).
 import React, { useEffect, useRef } from 'react';
 import { BackHandler } from 'react-native';
 import { Stack, router, usePathname } from 'expo-router';
 
-import { ConnectionStripHost } from '../../src/components/common/ConnectionStrip';
-import { ErrorBoundary } from '../../src/navigation/ErrorBoundary';
-import { AppDrawerHost } from '../../src/navigation/shell/AppDrawer';
+import { AppShell } from '../../src/blocks/shell/AppShell';
 import { StackHeader, type StackHeaderProps } from '../../src/navigation/StackHeader';
 import { parentHref } from '../../src/blocks/shell/parentHref';
 import { routePath } from '../../src/blocks/shell/routePath';
@@ -17,10 +15,11 @@ import { useTheme } from '../../src/theme/ThemeProvider';
 
 const MODULE_ROOTS = ['index', 'chats/index', 'projects/index', 'agents/index', 'workflows/index', 'automations/index', 'scripts/index'];
 const SHEETS = ['chats/[id]/gate/[interactionId]', 'chats/[id]/plan/[planId]', 'scope-request'];
+/** Screens built on the kit Header (native on iOS, the JS bar on Android): no legacy JS stack header. */
+const KIT_HEADER = ['needs-you'];
 /** Legacy screens that draw their own header (settings, chat, run, the attention list). */
 const OWN_HEADER = [
-  'needs-you',
-  'chats/[id]/index',
+    'chats/[id]/index',
   'workflows/[id]/runs/[runId]/index',
   'settings/index', 'settings/about', 'settings/accessibility', 'settings/appearance', 'settings/audio', 'settings/capabilities',
   'settings/diagnostics', 'settings/extensions', 'settings/notifications', 'settings/providers', 'settings/security',
@@ -81,9 +80,7 @@ export default function AppLayout(): React.ReactElement {
   }, []);
 
   return (
-    <AppDrawerHost>
-      <ConnectionStripHost>
-        <ErrorBoundary scope="root">
+    <AppShell>
           <Stack
             screenOptions={{
               header: (props) => <StackHeader {...(props as unknown as StackHeaderProps)} />,
@@ -100,6 +97,9 @@ export default function AppLayout(): React.ReactElement {
               <Stack.Screen key={name} name={name} options={sheetOptions('approval')} />
             ))}
             <Stack.Screen name="search" options={paletteOptions} />
+            {KIT_HEADER.map((name) => (
+              <Stack.Screen key={name} name={name} options={{ header: undefined }} />
+            ))}
             {OWN_HEADER.map((name) => (
               <Stack.Screen key={name} name={name} options={{ headerShown: false }} />
             ))}
@@ -111,8 +111,6 @@ export default function AppLayout(): React.ReactElement {
               />
             ))}
           </Stack>
-        </ErrorBoundary>
-      </ConnectionStripHost>
-    </AppDrawerHost>
+    </AppShell>
   );
 }

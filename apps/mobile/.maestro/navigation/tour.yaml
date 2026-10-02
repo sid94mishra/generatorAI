@@ -1,0 +1,37 @@
+appId: ${APP_ID}
+name: navigation · sidebar and route tree tour
+# Replaces the web-preview e2e/tour2.mjs (08 §6.3). Module switches reset the Stack (MD-87).
+tags: [smoke, navigation]
+---
+- runFlow: ../_subflows/launch.yaml
+- tapOn: {id: menu-button}
+- extendedWaitUntil: {visible: {id: drawer-home}, timeout: 10000}
+- assertVisible: {id: drawer-search}
+- assertVisible: {id: drawer-settings}
+- assertVisible: {id: connection-status}
+- tapOn: {id: drawer-chats}
+- extendedWaitUntil: {visible: {id: chats-new}, timeout: 15000}
+- tapOn: {id: menu-button}
+- tapOn: {id: drawer-workflows}
+- extendedWaitUntil: {visible: "Workflows", timeout: 15000}
+- tapOn: {id: menu-button}
+- tapOn: {id: drawer-automations}
+- extendedWaitUntil: {visible: "Automations", timeout: 15000}
+- tapOn: {id: menu-button}
+- tapOn: {id: drawer-scripts}
+- extendedWaitUntil: {visible: "Scripts", timeout: 15000}
+- tapOn: {id: menu-button}
+- tapOn: {id: drawer-agents}
+- extendedWaitUntil: {visible: "Agents", timeout: 15000}
+- tapOn: {id: menu-button}
+- tapOn: {id: drawer-projects}
+- extendedWaitUntil: {visible: "Projects", timeout: 15000}
+- tapOn: {id: menu-button}
+- tapOn: {id: drawer-search}
+- extendedWaitUntil: {visible: "Search.*", timeout: 15000}
+- openLink: generatorai:///needs-you
+- extendedWaitUntil: {visible: {id: needs-you}, timeout: 15000}
+- openLink: generatorai:///settings
+- extendedWaitUntil: {visible: "Appearance", timeout: 15000}
+- openLink: generatorai:///
+- extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 15000}
