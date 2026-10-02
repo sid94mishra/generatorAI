@@ -41,6 +41,9 @@ const FORBIDDEN = [
   { pattern: /node_modules\/(express|better-sqlite3|ws|node-pty|playwright)\b/, why: 'server runtime' },
   { pattern: /node_modules\/@gorhom\//, why: 'removed sheet library' },
   { pattern: /node_modules\/@shopify\/react-native-skia\//, why: 'removed (native 10 MB, unused)' },
+  // 02 §5.2: per-icon imports only (babel-plugin-lucide-icons, Icon/lucide.ts); the 1.x barrel bundles every icon.
+  { pattern: /lucide-react-native\/dist\/esm\/lucide-react-native\.mjs$/, why: 'lucide barrel (use lucide-react-native/icons/<name>)' },
+  { pattern: /lucide-react-native\/dist\/esm\/icons\/index\.mjs$/, why: 'lucide icons barrel' },
 ];
 
 // Note: `semver` still appears via react-native-reanimated's own

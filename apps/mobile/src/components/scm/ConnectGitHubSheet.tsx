@@ -18,7 +18,9 @@ import { Text, View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import * as WebBrowser from 'expo-web-browser';
-import { CheckCircle2, Copy, ExternalLink, Github, XCircle } from 'lucide-react-native';
+import { CheckCircle2, Copy, ExternalLink, XCircle } from 'lucide-react-native';
+// lucide 1.x dropped brand icons; the GitHub mark is the vendor SVG (as on web).
+import { GitHubCopilotMark as GitHubMark } from '../brand/VendorIcons';
 import type { DeviceLoginStart } from '@generatorai/shared';
 
 import { ApiError } from '@generatorai/client-core';
@@ -236,7 +238,7 @@ function Outcome({
   return (
     <View className="gap-3 px-4 pb-6 pt-4">
       <View className="items-center gap-2">
-        {icon ?? <Github size={32} />}
+        {icon ?? <GitHubMark size={32} />}
         <Text accessibilityRole="header" className="text-center text-lg font-semibold text-foreground">
           {title}
         </Text>
