@@ -17,7 +17,6 @@
     "app/(app)/projects/index.tsx",
     "app/(app)/scope-request.tsx",
     "app/(app)/scripts/[id]/index.tsx",
-    "app/(app)/search.tsx",
     "app/(app)/settings/about.tsx",
     "app/(app)/settings/accessibility.tsx",
     "app/(app)/settings/appearance.tsx",
@@ -629,9 +628,6 @@
       "mobile-design/design/literalInlineStyle": 4,
       "mobile-design/design/defaultRadius": 3
     },
-    "src/components/search/SearchResultRow.tsx": {
-      "mobile-design/design/lucideDirectImport": 1
-    },
     "src/components/ui/ActionSheet.tsx": {
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/legacyTokenUtility": 10,
@@ -1094,14 +1090,6 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 22,
       "mobile-design/design/defaultRadius": 1,
       "mobile-design/design/defaultTextSize": 8
-    },
-    "app/(app)/search.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 10,
-      "mobile-design/design/legacyTokenUtility": 3,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 4,
-      "mobile-design/design/defaultTextSize": 1
     },
     "app/(app)/settings/about.tsx": {
       "mobile-design/design/rawTextImport": 1,
