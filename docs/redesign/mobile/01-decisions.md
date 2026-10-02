@@ -969,3 +969,8 @@ Derived during M1-02 from the installed Xcode 27 `simctl help privacy`: notifica
 - The GlassSurface story has a reference section with raw `GlassView` / `GlassContainer` (no wrappers) for side-by-side comparison.
 - **iOS Select field:** the Host sizes to the picker (no fixed width) inside a start-aligned slot; the picker's frame is capped at the slot, so a short value sits at the field's start and a long one wraps or truncates inside it.
 - **NewAction:** the long-label story now passes the whole long label (the old story sliced it to exactly 30 characters, so it ended at "that" without needing an ellipsis); the label sets `ellipsizeMode="tail"` explicitly.
+
+### MD-137 iOS Select field grows with a wrapped value (M4) — Final (2026-10-02)
+- A SwiftUI Host with `matchContents` measures its content at the *ideal* (unconstrained) width, so a value the capped frame then wraps to several lines was measured one line tall and spilled out of the field. In `field` presentation the Host now gets the field's inner width explicitly with `matchContents={{ vertical: true }}`, so SwiftUI measures the wrapped height at that width and the field (min-h-field, never a fixed height) grows with it; SwiftUI centres the ⌃⌄ glyph in the label.
+- `matchContents` can be set only once on mount, so the field's Host mounts only after the slot is measured. MD-136's left shift came from mounting it unmeasured with a different `matchContents` and then changing it.
+- `row` presentation stays one line (`lineLimit(1)`, tail-truncated, capped at 60 % of the row), like a settings value.

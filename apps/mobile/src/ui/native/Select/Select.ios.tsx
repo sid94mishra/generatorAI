@@ -19,9 +19,9 @@ const NONE = '';
 
 export function Select(props: SelectProps): React.ReactElement {
   const colors = useThemeColors();
-  // The width the picker may use: the field's inner box, or 60 % of the row. The Host sizes to the picker, whose frame
-  // is capped there, so a long value wraps / truncates inside the field and a short one stays at the field's start
-  // (device review; a fixed-width Host pushed the label out past the field's start).
+  // The width the picker may use (device review, MD-137): `field` — the field's inner width, given to the Host as an
+  // explicit width so SwiftUI measures the wrapped height at that width and the field grows with it (the Host mounts
+  // only once measured: `matchContents` is fixed at mount); `row` — 60 % of the row, one line, tail-truncated.
   const [room, setRoom] = useState(0);
   // The searchable list is a sheet (SelectJs); only the static menu is the SwiftUI Picker.
   if (!swiftUI || props.searchable) return <SelectJs {...props} />;
@@ -29,8 +29,9 @@ export function Select(props: SelectProps): React.ReactElement {
   const { label, value, options, onValueChange, placeholder, presentation = 'row', disabled = false, testID } = props;
   const field = presentation === 'field';
   const bound = room > 0 ? [m.frame({ maxWidth: field ? room : Math.round(room * 0.6), alignment: field ? 'leading' : 'trailing' })] : [];
+  const oneLine = field ? [] : [m.lineLimit(1)];
   const picker = (
-    <ui.Host matchContents>
+    <ui.Host matchContents={field ? { vertical: true } : true} style={field ? { width: room } : undefined}>
       <ui.Picker
         selection={value ?? NONE}
         onSelectionChange={(v: string) => {
@@ -38,7 +39,7 @@ export function Select(props: SelectProps): React.ReactElement {
           haptic('selection');
           onValueChange(v);
         }}
-        modifiers={[...bound, m.pickerStyle('menu'), m.labelsHidden(), m.tint(colors.fg3), m.disabled(disabled), m.accessibilityLabel(selectAccessibilityLabel(props)), m.accessibilityHint('Opens a menu')]}
+        modifiers={[...bound, ...oneLine, m.pickerStyle('menu'), m.labelsHidden(), m.tint(colors.fg3), m.disabled(disabled), m.accessibilityLabel(selectAccessibilityLabel(props)), m.accessibilityHint('Opens a menu')]}
       >
         {value === null ? <ui.Text modifiers={[m.tag(NONE)]}>{placeholder ?? 'None'}</ui.Text> : null}
         {options.map((o) => (
@@ -55,9 +56,9 @@ export function Select(props: SelectProps): React.ReactElement {
         <Text role="subhead" tone="fg-2" className="px-1">
           {label}
         </Text>
-        <View className={cn('min-h-field flex-row items-center rounded-field bg-sunken px-1', disabled && 'opacity-60')}>
+        <View className={cn('min-h-field flex-row items-center rounded-field bg-sunken px-1 py-1', disabled && 'opacity-60')}>
           <View className="flex-1 items-start ps-2" onLayout={(e) => setRoom(Math.floor(e.nativeEvent.layout.width) - 8)}>
-            {picker}
+            {room > 0 ? picker : null}
           </View>
         </View>
       </View>
