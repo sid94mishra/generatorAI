@@ -17,7 +17,12 @@ import { emitCss, spliceCss } from '../src/emit/css.js';
 import { emitNative } from '../src/emit/native.js';
 import { prepaintCspHash, splicePrepaint } from '../src/emit/prepaint.js';
 import { emitStaticCss } from '../src/emit/static.js';
-import { emitVocabularyCss, emitVocabularyJson } from '../src/emit/vocabulary.js';
+import {
+  emitMobileVocabularyCss,
+  emitMobileVocabularyJson,
+  emitVocabularyCss,
+  emitVocabularyJson,
+} from '../src/emit/vocabulary.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../../..');
@@ -108,6 +113,16 @@ const targets: Target[] = [
     label: 'vocabulary lists for Node tools',
     path: resolve(repoRoot, 'packages/design-tokens/generated/vocabulary.json'),
     render: () => emitVocabularyJson(),
+  },
+  {
+    label: 'mobile class vocabulary',
+    path: resolve(repoRoot, 'packages/design-tokens/css/vocabulary-mobile.css'),
+    render: () => emitMobileVocabularyCss(),
+  },
+  {
+    label: 'mobile vocabulary lists',
+    path: resolve(repoRoot, 'packages/design-tokens/generated/vocabulary-mobile.json'),
+    render: () => emitMobileVocabularyJson(),
   },
   {
     label: 'mobile token module',

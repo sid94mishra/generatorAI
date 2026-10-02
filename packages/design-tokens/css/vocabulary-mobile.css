@@ -1,0 +1,85 @@
+/* GENERATED from packages/design-tokens (src/vocabulary-mobile.ts) — do not edit. Regenerate with `pnpm tokens:write`. */
+@theme inline {
+  /* Mobile type steps (02 §3.1): absolute line height and tracking (MD-71). */
+  --text-detail-title: var(--gai-text-detail-title);
+  --text-detail-title--line-height: var(--gai-leading-detail-title);
+  --text-detail-title--font-weight: var(--gai-weight-detail-title);
+  --text-detail-title--letter-spacing: var(--gai-tracking-detail-title);
+  --text-transcript: var(--gai-text-transcript);
+  --text-transcript--line-height: var(--gai-leading-transcript);
+  --text-transcript--font-weight: var(--gai-weight-transcript);
+  --text-transcript--letter-spacing: var(--gai-tracking-transcript);
+  --text-mono-lg: var(--gai-text-mono-lg);
+  --text-mono-lg--line-height: var(--gai-leading-mono-lg);
+  --text-mono-lg--font-weight: var(--gai-weight-mono-lg);
+  --text-mono-lg--letter-spacing: var(--gai-tracking-mono-lg);
+  --text-mono: var(--gai-text-mono);
+  --text-mono--line-height: var(--gai-leading-mono);
+  --text-mono--font-weight: var(--gai-weight-mono);
+  --text-mono--letter-spacing: var(--gai-tracking-mono);
+  --text-mono-sm: var(--gai-text-mono-sm);
+  --text-mono-sm--line-height: var(--gai-leading-mono-sm);
+  --text-mono-sm--font-weight: var(--gai-weight-mono-sm);
+  --text-mono-sm--letter-spacing: var(--gai-tracking-mono-sm);
+
+  /* Shared steps: the weight / tracking sub-variables vocabulary.css leaves out (MD-116). */
+  --text-micro--font-weight: var(--gai-weight-micro);
+  --text-micro--letter-spacing: var(--gai-tracking-micro);
+  --text-small--font-weight: var(--gai-weight-small);
+  --text-small--letter-spacing: var(--gai-tracking-small);
+  --text-ui--font-weight: var(--gai-weight-ui);
+  --text-ui--letter-spacing: var(--gai-tracking-ui);
+  --text-body--font-weight: var(--gai-weight-body);
+  --text-body--letter-spacing: var(--gai-tracking-body);
+  --text-title--letter-spacing: var(--gai-tracking-title);
+
+  /* Mobile radii (02 §3.2). */
+  --radius-seg-item: var(--gai-radius-seg-item);
+  --radius-card-lg: var(--gai-radius-card-lg);
+  --radius-group: var(--gai-radius-group);
+  --radius-nav: var(--gai-radius-nav);
+  --radius-field: var(--gai-radius-field);
+  --radius-code: var(--gai-radius-code);
+  --radius-composer: var(--gai-radius-composer);
+  --radius-new: var(--gai-radius-new);
+  --radius-toast: var(--gai-radius-toast);
+
+  /* Mobile heights and hit sizes (02 §3.3). */
+  --height-chip: var(--gai-h-chip);
+  --height-seg: var(--gai-h-seg);
+  --height-field: var(--gai-h-field);
+  --height-search: var(--gai-h-search);
+  --height-search-sm: var(--gai-h-search-sm);
+  --height-row-2: var(--gai-h-row-2);
+  --height-bar-lg: var(--gai-h-bar-lg);
+  --height-hit: var(--gai-h-hit);
+  --height-icon-button: var(--gai-h-icon-button);
+  --height-icon-button-sm: var(--gai-h-icon-button-sm);
+  --height-new: var(--gai-h-new);
+  --height-toast: var(--gai-h-toast);
+  --height-badge-sm: var(--gai-h-badge-sm);
+  --size-hit: var(--gai-h-hit);
+  --size-icon-button: var(--gai-h-icon-button);
+  --size-icon-button-sm: var(--gai-h-icon-button-sm);
+  --min-width-hit: var(--gai-h-hit);
+
+  /* Phone panels (02 §3.6). */
+  --container-drawer: var(--gai-w-drawer);
+  --container-pane: var(--gai-w-pane);
+
+  /* Named spacings (02 §3.5). */
+  --spacing-gutter: var(--gai-space-gutter);
+  --spacing-gutter-title: var(--gai-space-gutter-title);
+
+  /* Elevation (02 §8.4). */
+  --shadow-float: var(--gai-shadow-float);
+
+  /* Families (02 §4.4), per OS in the Uniwind geometry blocks. */
+  --font-sans: var(--gai-font-sans);
+  --font-mono: var(--gai-font-mono);
+}
+@theme {
+  /* Window-size classes (MD-24): medium:, expanded:. */
+  --breakpoint-medium: 600px;
+  --breakpoint-expanded: 840px;
+}

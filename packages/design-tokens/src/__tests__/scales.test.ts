@@ -19,6 +19,13 @@ import { GEOMETRY, PLATFORMS } from '../geometry.js';
 import { FONT_SIZES } from '../registry.js';
 import { THEMES } from '../themes/index.js';
 import { CONTAINER_NAMES, HEIGHT_NAMES, RADIUS_STEPS, TEXT_STEPS, Z_NAMES } from '../vocabulary.js';
+import {
+  MOBILE_CONTAINER_NAMES,
+  MOBILE_HEIGHT_NAMES,
+  MOBILE_RADIUS_STEPS,
+  MOBILE_SPACING_NAMES,
+  MOBILE_TEXT_STEPS,
+} from '../vocabulary-mobile.js';
 
 describe('radius scale (D-14)', () => {
   it.each([
@@ -102,7 +109,7 @@ describe('z-index (D-41)', () => {
 });
 
 describe('per-platform geometry (M-04)', () => {
-  it('fills web from the emitted scales and leaves iOS and Android as typed empty slots', () => {
+  it('fills web from the emitted scales', () => {
     expect(Object.keys(GEOMETRY)).toEqual([...PLATFORMS]);
     expect(GEOMETRY.web).toEqual({
       type: TYPE_SCALE,
@@ -112,8 +119,66 @@ describe('per-platform geometry (M-04)', () => {
       zIndex: Z_INDEX,
       shell: CONTAINER_WIDTHS,
     });
-    expect(GEOMETRY.ios).toBeUndefined();
-    expect(GEOMETRY.android).toBeUndefined();
+  });
+
+  const sorted = (xs: readonly string[]): string[] => [...xs].sort();
+  const native = [
+    ['ios', GEOMETRY.ios, 44, 11],
+    ['android', GEOMETRY.android, 48, 12],
+  ] as const;
+
+  describe.each(native)('NativeGeometry %s (mobile 02 §3.8)', (_platform, g, target, minText) => {
+    it('has exactly the keys of every name list', () => {
+      expect(sorted(Object.keys(g.type))).toEqual(sorted([...TEXT_STEPS, ...MOBILE_TEXT_STEPS]));
+      expect(sorted(Object.keys(g.radii))).toEqual(sorted([...RADIUS_STEPS, ...MOBILE_RADIUS_STEPS]));
+      expect(sorted(Object.keys(g.heights.comfortable))).toEqual(sorted(HEIGHT_NAMES));
+      expect(sorted(Object.keys(g.mobileHeights))).toEqual(sorted(MOBILE_HEIGHT_NAMES));
+      expect(sorted(Object.keys(g.shell))).toEqual(sorted(CONTAINER_NAMES));
+      expect(sorted(Object.keys(g.mobileShell))).toEqual(sorted(MOBILE_CONTAINER_NAMES));
+      expect(sorted(Object.keys(g.panelMaxFraction))).toEqual(sorted(MOBILE_CONTAINER_NAMES));
+      expect(sorted(Object.keys(g.spacing))).toEqual(sorted(MOBILE_SPACING_NAMES));
+      expect(Object.keys(g.zIndex)).toEqual([...Z_NAMES]);
+    });
+
+    it('meets the MD-28 floors', () => {
+      expect(g.minHitTarget).toBe(target);
+      for (const [step, t] of Object.entries(g.type)) {
+        expect(t.size, step).toBeGreaterThanOrEqual(minText);
+        if (t.mono) expect(t.size, step).toBeGreaterThanOrEqual(12);
+        expect([400, 500, 600], step).toContain(t.weight);
+        expect(t.lineHeight, step).toBeGreaterThan(t.size);
+      }
+      for (const name of ['row', 'item', 'nav', 'step'] as const) {
+        expect(g.heights.comfortable[name], name).toBeGreaterThanOrEqual(g.minHitTarget);
+      }
+      expect(g.heights.comfortable.th).toBeLessThan(g.minHitTarget); // a label, not interactive
+      expect(g.mobileHeights.hit).toBe(g.minHitTarget);
+      expect(g.mobileHeights['icon-button']).toBe(g.minHitTarget);
+    });
+
+    it('has one density (MD-69)', () => {
+      expect(g.heights.comfortable).toEqual(g.heights.compact);
+    });
+
+    it('caps phone panels inside the window, drawer narrower than pane', () => {
+      for (const f of Object.values(g.panelMaxFraction)) expect(f).toBeLessThanOrEqual(1);
+      expect(g.mobileShell.drawer).toBeLessThan(g.mobileShell.pane);
+      expect(g.breakpoints).toEqual({ medium: 600, expanded: 840 });
+    });
+
+    it('draws h-badge-sm at 20 for dense rows (MD-64)', () => {
+      expect(g.mobileHeights['badge-sm']).toBe(20);
+    });
+  });
+
+  it('pins the per-platform values of 02 §3.1–3.3', () => {
+    expect(GEOMETRY.ios.type.body).toMatchObject({ size: 17, lineHeight: 24, ramp: 'body' });
+    expect(GEOMETRY.android.type.body).toMatchObject({ size: 16, lineHeight: 24, m3: 'bodyLarge' });
+    expect(GEOMETRY.ios.type.display).toMatchObject({ size: 32, lineHeight: 37, tracking: -0.64 });
+    expect(GEOMETRY.android.type['detail-title']).toMatchObject({ size: 18, m3: null });
+    expect([GEOMETRY.ios.radii.card, GEOMETRY.android.radii.card]).toEqual([14, 12]);
+    expect([GEOMETRY.ios.heights.comfortable.control, GEOMETRY.android.heights.comfortable.control]).toEqual([44, 40]);
+    expect([GEOMETRY.ios.heights.comfortable.row, GEOMETRY.android.heights.comfortable.row]).toEqual([52, 56]);
   });
 
   it('covers every shell width name', () => {
