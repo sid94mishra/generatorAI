@@ -14,7 +14,52 @@
 
 import { DEFAULT_STREAM, computeLiveCounters, type StreamBlock, type StreamState } from '@generatorai/client-core';
 
-import { awaitsUserDecision, blocksSignature } from './compactTimeline';
+/** The pending gate a turn is parked on, most urgent first (a permission stops the agent mid-call). */
+export function pendingGateKind(blocks: readonly StreamBlock[] | undefined): 'permission' | 'question' | 'plan' | null {
+  if (!blocks) return null;
+  if (blocks.some((b) => b.type === 'permission' && b.status === 'pending')) return 'permission';
+  if (blocks.some((b) => b.type === 'question' && b.status === 'pending')) return 'question';
+  if (blocks.some((b) => b.type === 'plan' && b.status === 'awaiting_review')) return 'plan';
+  return null;
+}
+
+/**
+ * A string that changes when a block is added, settles or fails — not when text streams into a live block — so the
+ * screen re-derives its items on structure and a token re-renders only the live turn (which subscribes itself).
+ */
+export function blocksSignature(blocks: readonly StreamBlock[] | undefined): string {
+  if (!blocks || blocks.length === 0) return '';
+  let out = '';
+  for (const b of blocks) {
+    switch (b.type) {
+      case 'thinking':
+        out += `t${b.blockId}${b.isComplete ? 'c' : 'l'}${b.text ? '' : 'e'}|`;
+        break;
+      case 'text':
+        out += `x${b.blockId}${b.content ? '' : 'e'}|`;
+        break;
+      case 'tool_call':
+        out += `c${b.blockId}${b.status === 'complete' ? (b.error ? 'f' : 'd') : 'r'}${b.fileOp ? 'o' : ''}${b.result === undefined ? '' : 'R'}|`;
+        break;
+      case 'scm_result':
+        out += `g${b.blockId}${b.result.status}|`;
+        break;
+      case 'widget':
+        out += `w${b.blockId}${b.status}|`;
+        break;
+      case 'plan':
+        out += `p${b.blockId}${b.status}|`;
+        break;
+      case 'question':
+      case 'permission':
+        out += `q${b.blockId}${b.status}|`;
+        break;
+      default:
+        out += `s${b.blockId}|`;
+    }
+  }
+  return out;
+}
 
 export type LastBlockKind = 'none' | 'thinking-live' | 'tool-running' | 'text' | 'other';
 
@@ -60,7 +105,7 @@ export function selectChatView(stream: StreamState | undefined): ChatStreamView 
   // Completed/failed turns cannot keep the composer blocked by an old card;
   // genuinely pending server interactions are independently seeded by REST.
   const isLive = s.status === 'streaming' || s.status === 'thinking' || s.status === 'pending';
-  const gate = isLive ? awaitsUserDecision(blocks) : null;
+  const gate = isLive ? pendingGateKind(blocks) : null;
   let gateBlock: ChatStreamView['gateBlock'] = null;
   if (gate === 'permission' || gate === 'question') {
     for (const b of blocks) {

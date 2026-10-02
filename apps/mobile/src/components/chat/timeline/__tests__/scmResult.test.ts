@@ -7,7 +7,7 @@ import type { StreamBlock } from '@generatorai/client-core';
 import type { RepoReadiness, ScmFlowResult } from '@generatorai/shared';
 
 import { blocksSignature, compactTimeline, rowsEqual } from '../compactTimeline';
-import { asScmResultBlock, type ScmResultBlock } from '../scmResultBlock';
+import { asScmResultBlock, type ScmResultBlock } from '../../../../services/stream/scmResultBlock';
 import { blockedReason, describeFlowResult, summarizeFlow } from '../../../scm/scmModel';
 
 const readiness: RepoReadiness = {

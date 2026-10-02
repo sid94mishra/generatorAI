@@ -40,7 +40,7 @@ import {
 } from '../../scm/scmModel';
 import { RowFrame, type RowTone } from './RowFrame';
 import { useTimelineActions } from './TimelineActions';
-import type { ScmResultBlock } from './scmResultBlock';
+import type { ScmResultBlock } from '../../../services/stream/scmResultBlock';
 
 export function ScmResultRow({ block }: { block: ScmResultBlock }): React.ReactElement {
   const { legacyColors: colors } = useTheme();

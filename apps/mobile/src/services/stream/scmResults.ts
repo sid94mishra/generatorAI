@@ -20,7 +20,7 @@
 
 import type { ScmFlowResult } from '@generatorai/shared';
 
-import { asScmResultBlock } from '../chat/timeline/scmResultBlock';
+import { asScmResultBlock } from './scmResultBlock';
 
 /** The event kind that carries a flow result. */
 export const SCM_RESULT_KIND = 'chat.scm.result';

@@ -16,6 +16,8 @@ export const PROJECTS_HREF = '/projects';
 export const PAIR_HREF = '/pair';
 
 export const chatHref = (chatId: string): string => `/chats/${seg(chatId)}`;
+/** Step detail (MB-14): a tool call of the chat by its call id. */
+export const stepHref = (chatId: string, callId: string): string => `${chatHref(chatId)}/steps/${seg(callId)}`;
 export const gateHref = (chatId: string, interactionId: string): string => `${chatHref(chatId)}/gate/${seg(interactionId)}`;
 /** Legacy plan sheet until M6 replaces it with `/chats/<id>?dock=plan` (04 §1.5). */
 export const planHref = (chatId: string, planId: string): string => `${chatHref(chatId)}/plan/${seg(planId)}`;

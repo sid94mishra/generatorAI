@@ -6,7 +6,7 @@ import { useState } from 'react';
 import type { ChatMessage } from '@generatorai/client-core';
 
 import { useApi } from '../api/useApi';
-import type { ReplayPage } from '../../components/scm/scmResults';
+import type { ReplayPage } from './scmResults';
 import { CATCH_UP_PAGE_SIZE, turnCatchUpRows, unansweredTurnId } from './turnCatchUp';
 
 export interface TurnCatchUp {

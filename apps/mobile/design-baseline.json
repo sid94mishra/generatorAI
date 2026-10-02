@@ -877,9 +877,6 @@
     "src/services/prefs/preferences.tsx": {
       "boundaries/dependencies/diagnostic": 1
     },
-    "src/services/stream/turnCatchUp.ts": {
-      "boundaries/dependencies/diagnostic": 1
-    },
     "src/services/stream/useChatStream.ts": {
       "react-hooks/refs/diagnostic": 2
     },
@@ -888,12 +885,6 @@
     },
     "src/services/stream/useRunStream.ts": {
       "react-hooks/set-state-in-effect/diagnostic": 1
-    },
-    "src/services/stream/useStageLive.ts": {
-      "boundaries/dependencies/diagnostic": 1
-    },
-    "src/services/stream/useTurnCatchUp.ts": {
-      "boundaries/dependencies/diagnostic": 1
     },
     "src/services/stream/useTwoPhaseStop.ts": {
       "react-hooks/refs/diagnostic": 1
@@ -969,19 +960,16 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 2
     },
     "app/(app)/chats/[id]/index.tsx": {
-      "mobile-design/design/platformOs": 3,
+      "mobile-design/design/platformOs": 2,
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 43,
-      "react-hooks/refs/diagnostic": 10,
-      "react-hooks/set-state-in-effect/diagnostic": 1,
+      "boundaries/dependencies/diagnostic": 33,
+      "react-hooks/refs/diagnostic": 5,
       "react-hooks/preserve-manual-memoization/diagnostic": 4,
-      "react-hooks/purity/diagnostic": 1,
-      "react-hooks/exhaustive-deps/diagnostic": 4,
-      "mobile-design/design/legacyTokenUtility": 14,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 23,
-      "mobile-design/design/defaultTextSize": 8,
-      "mobile-design/design/literalInlineStyle": 1,
+      "mobile-design/design/legacyTokenUtility": 10,
+      "better-tailwindcss/no-restricted-classes/diagnostic": 17,
+      "mobile-design/design/defaultTextSize": 6,
+      "react-hooks/exhaustive-deps/diagnostic": 1,
       "mobile-design/design/defaultRadius": 1
     },
     "app/(app)/chats/[id]/plan/[planId].tsx": {
@@ -1276,12 +1264,9 @@
     "src/services/auth/StepUpGate.tsx",
     "src/services/auth/stepUp.ts",
     "src/services/prefs/preferences.tsx",
-    "src/services/stream/turnCatchUp.ts",
     "src/services/stream/useChatStream.ts",
     "src/services/stream/useGlobalStream.ts",
     "src/services/stream/useRunStream.ts",
-    "src/services/stream/useStageLive.ts",
-    "src/services/stream/useTurnCatchUp.ts",
     "src/services/stream/useTwoPhaseStop.ts",
     "src/services/voice/useVoiceInput.ts"
   ]

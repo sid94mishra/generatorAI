@@ -36,8 +36,8 @@ import { resourcePaths } from '@generatorai/client-core';
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Keyboard, Platform, Share, Text, View } from 'react-native';
-import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
+import { Keyboard, Linking, Platform, Share, Text, View } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
@@ -47,26 +47,20 @@ import * as Clipboard from 'expo-clipboard';
 import {
   Archive,
   ArchiveRestore,
-  ArrowDown,
-  ChevronLeft,
   Copy,
   GitFork,
   History,
   Info,
   Pencil,
   Share2,
-  Square,
-  Volume2,
   WifiOff,
 } from 'lucide-react-native';
 import {
   ApiError,
   isArchived,
   type AgentMode,
-  messageTime,
   type ChatMessage,
   type RewindScope,
-  type StreamBlock,
   type StreamUsage,
 } from '@generatorai/client-core';
 
@@ -114,98 +108,32 @@ import { ChatMenuSheet, type ChatMenuSection } from '../../../../src/components/
 import { useChatMotion } from '../../../../src/components/chat/chatMotion';
 import { displayChatName } from '../../../../src/components/common/chatName';
 import { describeSessionTransport } from '../../../../src/components/chat/sessionTransport';
-import { TimelineRowView } from '../../../../src/components/chat/timeline/TimelineRow';
-import { UserMessageRow } from '../../../../src/components/chat/timeline/UserMessageRow';
-import { TimelineActionsContext, type TimelineActions } from '../../../../src/components/chat/timeline/TimelineActions';
-import { compactTimeline, type ScreenshotRef, type TimelineRow } from '../../../../src/components/chat/timeline/compactTimeline';
-import { wireChatMessageToBlocks as chatMessageToBlocks, messageWasStopped, buildTranscriptTurns, transcriptMessageInput, messageAttachments } from '@generatorai/client-core';
-import {
-  liveScmTurnIds,
-  mergeScmRows,
-  replayedScmBlock,
-  replayedScmRowId,
-} from '../../../../src/components/chat/timeline/mergeScmRows';
-import { useScmResults } from '../../../../src/components/scm/useScmResults';
-import { activityLabelFor, selectChatView } from '../../../../src/components/chat/timeline/selectChatView';
+import { TranscriptView, type TranscriptActions } from '../../../../src/blocks/TranscriptView';
+import { mobileRoute } from '../../../../src/services/navigation/mobileRoutes';
+import { selectChatView } from '../../../../src/blocks/TranscriptView/model/selectChatView';
 import { ComposerCaptureContext } from '../../../../src/components/chat/composer/captureContext';
 import { useTasksSummary } from '../../../../src/components/chat/panes/useTasksSummary';
 import { paneTabForTool, useWorkbenchPane, type ToolFocus } from '../../../../src/components/workbench/useWorkbenchPane';
 import { InspectorSection } from '../../../../src/components/chat/panes/InspectorSection';
 import { usePaneStore, usePaneToggle } from '../../../../src/blocks/WorkspacePane';
-import { chatHref } from '../../../../src/blocks/shell/hrefs';
+import { chatHref, stepHref } from '../../../../src/blocks/shell/hrefs';
 import { useWorkbench } from '../../../../src/components/workbench/useWorkbench';
 import { toolForSection, type ToolId } from '../../../../src/components/workbench/workbenchModel';
 import { ChangesTray } from '../../../../src/components/chat/panes/ChangesTray';
 import { useChangesSummary } from '../../../../src/components/chat/panes/useChangesSummary';
-import { AgentConsole } from '../../../../src/terminal';
 import { ImageLightbox, type LightboxImage } from '../../../../src/components/markdown/MarkdownImage';
-import { Button, IconButton } from '../../../../src/components/ui/Button';
 import { goBack } from '../../../../src/components/ui/Screen';
 import { Sheet } from '../../../../src/components/ui/Sheet';
-import { Skeleton } from '../../../../src/components/ui/Skeleton';
+import { Skeleton } from '../../../../src/ui/primitives/Skeleton';
 import { useKeyboardHeight } from '../../../../src/components/ui/keyboard';
 import { useToast } from '../../../../src/components/ui/Toast';
-import { ErrorState, Spinner } from '../../../../src/components/ui/States';
+import { ErrorState } from '../../../../src/components/ui/States';
 import { Touchable } from '../../../../src/components/ui/Touchable';
 import { haptics } from '../../../../src/components/ui/haptics';
 import { useTheme } from '../../../../src/theme/ThemeProvider';
 
-/** A transcript row: a user bubble, a derived timeline row, or the working indicator. */
-type Row =
-  | { kind: 'user'; id: string; message: ChatMessage }
-  // `turnId` is what "Fork from here" anchors to. Only history rows have
-  // one: the live turn has no server turn id until it settles.
-  | { kind: 'row'; id: string; row: TimelineRow; turnId?: string }
-  | { kind: 'activity'; id: string; label: string };
-
 /** How many messages are fetched at a time. */
 const PAGE_SIZE = 120;
-
-// History turns never change once fetched, so their rows are derived once
-// per message object and reused across every live-turn update. WeakMaps so
-// a refetched page frees the old entries.
-const historyRows = new WeakMap<ChatMessage, TimelineRow[]>();
-const historyBlocks = new WeakMap<ChatMessage, StreamBlock[]>();
-
-function blocksOf(message: ChatMessage): StreamBlock[] {
-  let blocks = historyBlocks.get(message);
-  if (!blocks) {
-    blocks = chatMessageToBlocks(message);
-    historyBlocks.set(message, blocks);
-  }
-  return blocks;
-}
-
-/** Milliseconds between two message timestamps, when both parse. */
-function elapsedMs(from: ChatMessage | null, to: ChatMessage): number | undefined {
-  if (!from) return undefined;
-  const a = messageTime(from);
-  const b = messageTime(to);
-  if (a == null || b == null) return undefined;
-  const ms = new Date(b).getTime() - new Date(a).getTime();
-  return Number.isFinite(ms) && ms > 0 ? ms : undefined;
-}
-
-/**
- * A history message's rows. Settled, so its activity folds into one "Worked ·
- * N steps · duration" row; the duration runs from the prompt that started the
- * turn (stable for a given message, so the per-message cache still holds).
- */
-function rowsOf(message: ChatMessage, prompt: ChatMessage | null): TimelineRow[] {
-  let rows = historyRows.get(message);
-  if (!rows) {
-    const durationMs = elapsedMs(prompt, message);
-    rows = compactTimeline(blocksOf(message), {
-      active: false,
-      idPrefix: `${message.id}:`,
-      stopped: messageWasStopped(message),
-      collapseSettled: true,
-      ...(durationMs !== undefined ? { durationMs } : {}),
-    });
-    historyRows.set(message, rows);
-  }
-  return rows;
-}
 
 /** The transcript as plain text, for the share sheet. */
 /** Share of the model's prompt window in use, or null when either side is unknown. */
@@ -232,7 +160,6 @@ export default function ChatScreen(): React.ReactElement {
   const { state } = auth;
   const toast = useToast();
   const insets = useSafeAreaInsets();
-  const listRef = useRef<LegendListRef | null>(null);
   const motion = useChatMotion();
   const keyboard = useKeyboardHeight();
 
@@ -250,13 +177,7 @@ export default function ChatScreen(): React.ReactElement {
   // The user message a rewind is anchored on: its turn id, and its text so
   // the sheet can show what it is about to go back to.
   const [rewindTarget, setRewindTarget] = useState<{ turnId: string; prompt: string } | null>(null);
-  const [consoleCallId, setConsoleCallId] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<LightboxImage | null>(null);
-  const [atBottom, setAtBottom] = useState(true);
-  // True until the reader first touches the transcript. While it holds, the
-  // list keeps following the end as rows measure in: `initialScrollAtEnd`
-  // lands on ESTIMATED sizes, and the real ones arrive after it.
-  const [settling, setSettling] = useState(true);
   const [limit, setLimit] = useState(PAGE_SIZE);
 
   const models = useModels();
@@ -327,13 +248,6 @@ export default function ChatScreen(): React.ReactElement {
 
   const plans = useChatPlans(chatId!);
 
-  // The commit / PR / conflict cards for turns that settled before this
-  // screen opened. They exist only as stream events, and the mux
-  // subscription starts at the live cursor, so without this replay a
-  // reopened chat showed its answers with no record of what was committed
-  // for them.
-  const scmResults = useScmResults(chatId);
-
   const workspaceId = chat.data?.workspaceId ?? null;
   const archived = chat.data ? isArchived(chat.data) : false;
   const changes = useChangesSummary(workspaceId);
@@ -375,35 +289,12 @@ export default function ChatScreen(): React.ReactElement {
     usageRef.current = { previous: usageRef.current.current, current: view.usage };
   }
 
-  const [liveSpeaking, setLiveSpeaking] = useState(false);
-  useEffect(() => {
-    if (tts.status === 'idle' || tts.status === 'error') setLiveSpeaking(false);
-  }, [tts.status]);
-
-  const onSpeakLive = useCallback(() => {
-    if (liveSpeaking) {
-      tts.stop();
-      setLiveSpeaking(false);
-      return;
-    }
-    haptics.tap();
-    setLiveSpeaking(true);
-    void tts.speakStream(streamKey).then((err) => {
-      if (err) {
-        setLiveSpeaking(false);
-        toast({ message: err, tone: 'error' });
-      }
-    });
-  }, [liveSpeaking, tts, streamKey, toast]);
-
   // W30-b — two-phase Stop on the shared machine web uses; the BACKEND
   // decides whether a second press is offered (`isLive` is stream-derived).
   const stop = useTwoPhaseStop({
     isLive: isStreaming,
     onCancel: (options) => cancel.mutate(options),
   });
-
-  const activityLabel = activityLabelFor(view);
 
   // ── Header ───────────────────────────────────────────────────
   const streamConnection = useStreamHealth((s) => s.connection);
@@ -639,126 +530,9 @@ export default function ChatScreen(): React.ReactElement {
     },
   });
 
-  // ── Rows ─────────────────────────────────────────────────────
-  /**
-   * History + live rows, one model.
-   *
-   * De-duplication is by SERVER TURN ID: the live turn is fully represented
-   * as blocks, so once its messages land in history they would render twice.
-   *
-   * The live blocks are read from the store INSIDE the memo, keyed on the
-   * blocks signature rather than the array: a token appending to the live
-   * block changes neither, so this does not re-run per chunk.
-   */
-  const rows = useMemo<Row[]>(() => {
-    const out: Row[] = [];
-    // History rows are collected apart from the live ones: the replayed
-    // source-control cards are merged into THEM (by turn), and the live
-    // turn carries its own `scm_result` block already.
-    const historyOut: Row[] = [];
-    const history = messages.data ?? [];
-    const liveTurnId = view.serverTurnId;
-    const turnUserMessage = view.turnUserMessage?.trim();
-
-    const turns = buildTranscriptTurns(history.map((message) => ({
-      id: message.id,
-      role: message.role,
-      ...transcriptMessageInput(message),
-      attachments: messageAttachments(message),
-      source: message,
-    })));
-    for (const turn of turns) {
-      const user = turn.entries.find((entry) => entry.kind === 'user');
-      const prompt = user?.kind === 'user' ? user.message.source : null;
-      for (const entry of turn.entries) {
-        if (entry.kind === 'live' || entry.kind === 'pending_user') continue;
-        const message = entry.message.source;
-        if (liveTurnId && message.metadata?.turnId === liveTurnId) continue;
-        if (
-          !liveTurnId &&
-          turnUserMessage &&
-          message.role === 'user' &&
-          message.content.trim() === turnUserMessage
-        ) {
-          continue;
-        }
-        if (message.role === 'user') {
-          historyOut.push({ kind: 'user', id: message.id, message });
-          continue;
-        }
-        const turnId = message.metadata?.turnId;
-        for (const row of rowsOf(message, prompt)) {
-          historyOut.push({ kind: 'row', id: row.id, row, ...(turnId ? { turnId } : {}) });
-        }
-      }
-    }
-
-    const live = useStreamStore.getState().streams[streamKey];
-    // A turn that settled while the screen was open is already a block in
-    // the live stream; the replayed copy of it would be a duplicate card.
-    for (const row of mergeScmRows(
-      historyOut,
-      (row) => (row.kind === 'row' ? row.turnId : undefined),
-      scmResults.data,
-      (turnId, result): Row => {
-        const id = replayedScmRowId(turnId);
-        return {
-          kind: 'row',
-          id,
-          row: { kind: 'scm_result', id, block: replayedScmBlock(turnId, result, chatId!) },
-          turnId,
-        };
-      },
-      liveScmTurnIds(live?.blocks),
-    )) {
-      out.push(row);
-    }
-
-    if (view.pendingUserMessage) {
-      const id = `pending-${view.turnId}`;
-      out.push({
-        kind: 'user',
-        id,
-        message: { id, chatId: chatId!, role: 'user', content: view.pendingUserMessage, timestamp: Date.now() },
-      });
-    }
-
-    const liveRows = compactTimeline(live?.blocks, {
-      active: view.isLive,
-      idPrefix: 'live:',
-      hooks: view.hooks,
-      usage: view.usage,
-      stopped: view.cancelRequested && !view.isLive,
-    });
-    for (const row of liveRows) out.push({ kind: 'row', id: row.id, row });
-
-    // A turn spends its first seconds with nothing to render; without a row
-    // here the transcript looked frozen and people sent again.
-    if (activityLabel) {
-      out.push({ kind: 'activity', id: `a-${view.turnId}`, label: activityLabel });
-    }
-    return out;
-    // `view.signature` is the dependency that stands in for the blocks array.
-  }, [
-    messages.data,
-    scmResults.data,
-    chatId,
-    streamKey,
-    activityLabel,
-    view.signature,
-    view.isLive,
-    view.hooks,
-    view.usage,
-    view.cancelRequested,
-    view.pendingUserMessage,
-    view.turnId,
-    view.serverTurnId,
-    view.turnUserMessage,
-  ]);
-
   // ── Row actions ──────────────────────────────────────────────
   const openImage = useCallback(
-    async (image: ScreenshotRef) => {
+    async (image: { relativePath: string; label: string }) => {
       if (!workspaceId) return;
       try {
         const response = await auth.fetch(resourcePaths.browserFile(workspaceId, image.relativePath));
@@ -804,50 +578,6 @@ export default function ChatScreen(): React.ReactElement {
   useEffect(() => {
     navigation.setOptions({ gestureEnabled: !paneOpen });
   }, [navigation, paneOpen]);
-
-  const timelineActions = useMemo<TimelineActions>(
-    () => ({
-      workspaceId,
-      chatId,
-      streamKey,
-      previousUsage: usageRef.current.previous,
-      openInChanges: workspaceId ? openInChanges : undefined,
-      openConsole: (callId) => setConsoleCallId(callId),
-      openImage: workspaceId ? (image) => void openImage(image) : undefined,
-      readAloud: READ_ALOUD_ENABLED && voice.available ? readAloud : undefined,
-      toast: (message) => toast({ message, tone: 'info' }),
-      // A row only names the turn that was tapped; the screen owns the
-      // sheet, the mutation and the composer.
-      onRewind: (turnId, prompt) => setRewindTarget({ turnId, prompt }),
-      onForkFrom: (turnId) => void runFork(turnId),
-      onCopyTranscript: () => void runCopyTranscript(),
-    }),
-    // `usageRef.current.previous` only moves when `view.usage` does.
-    [
-      workspaceId,
-      chatId,
-      streamKey,
-      view.usage,
-      openInChanges,
-      openImage,
-      readAloud,
-      voice.available,
-      toast,
-      runFork,
-      runCopyTranscript,
-    ],
-  );
-
-  // Every block in the chat — for the Agent Console, built only while open.
-  const consoleBlocks = useMemo<StreamBlock[]>(() => {
-    if (consoleCallId === null) return [];
-    const out: StreamBlock[] = [];
-    for (const message of messages.data ?? []) {
-      if (message.role === 'assistant') out.push(...blocksOf(message));
-    }
-    out.push(...(useStreamStore.getState().streams[streamKey]?.blocks ?? []));
-    return out;
-  }, [consoleCallId, messages.data, streamKey, view.signature]);
 
   // ── Gates ────────────────────────────────────────────────────
   //
@@ -987,6 +717,36 @@ export default function ChatScreen(): React.ReactElement {
     [chatExtras?.workspacePrep, prepareWorkspace],
   );
 
+  // The transcript's actions (MB-07): rows only say what was tapped; the screen owns navigation, sheets and
+  // mutations. The model label prefers the server's display label (MG-03).
+  const modelLabel =
+    (chat.data as { summary?: { model?: { label?: string } } } | undefined)?.summary?.model?.label ??
+    findModel(models.data, chat.data?.model ?? null)?.name ??
+    (chat.data?.model && chat.data.model !== 'default' ? chat.data.model : null);
+  const transcriptActions = useMemo<TranscriptActions>(
+    () => ({
+      agent: boundAgent ? { name: boundAgent.name, ...(boundAgent.role ? { role: boundAgent.role } : {}) } : null,
+      model: modelLabel,
+      onOpenStep: (callId) => router.push(stepHref(chatId!, callId) as never),
+      onOpenChat: (id) => router.push(chatHref(id) as never),
+      onOpenTasks: () => usePaneStore.getState().openTab('tasks'),
+      onOpenHref: (href) => {
+        const path = mobileRoute(href);
+        if (path) router.push(path as never);
+      },
+      onOpenLink: (href) => {
+        if (/^generatorai:/i.test(href)) void Linking.openURL(href).catch(() => undefined);
+        else void WebBrowser.openBrowserAsync(href).catch(() => undefined);
+      },
+      ...(workspaceId ? { onOpenImage: (image: { relativePath: string; label: string }) => void openImage(image) } : {}),
+      onRewind: (turnId, prompt) => setRewindTarget({ turnId, prompt }),
+      onForkFrom: (turnId) => void runFork(turnId),
+      onCopyTranscript: () => void runCopyTranscript(),
+      ...(READ_ALOUD_ENABLED && voice.available ? { onReadAloud: readAloud } : {}),
+    }),
+    [boundAgent, modelLabel, chatId, workspaceId, openImage, runFork, runCopyTranscript, voice.available, readAloud],
+  );
+
   // "Open plan" lands on the Workbench's Plan section — the full document
   // with revisions, edits and comments — not the read-only route.
   const openPlan = useCallback((planId: string) => {
@@ -994,31 +754,6 @@ export default function ChatScreen(): React.ReactElement {
     setMorePlanId(planId);
     usePaneStore.getState().openTab('plan');
   }, []);
-
-  // A pinned card already says a decision is waiting; the transcript's own
-  // "Waiting for you" row would be the same message a second time.
-  const listRows = useMemo(
-    () => (blocked ? rows.filter((r) => !(r.kind === 'row' && r.row.kind === 'waiting')) : rows),
-    [rows, blocked],
-  );
-
-  // "N new" on the jump pill: rows that arrived since the reader scrolled up.
-  // A gate card (permission, question, plan) grows the dock by a third of the
-  // screen, and the list above it shrinks by as much. If the reader was at the
-  // end of the transcript, keep them there: otherwise the prompt they just
-  // sent, and the tool call the card is asking about, slide out of view
-  // behind the card that refers to them.
-  const atBottomRef = useRef(true);
-  atBottomRef.current = atBottom;
-  useEffect(() => {
-    if (!blocked || !atBottomRef.current) return undefined;
-    const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: !motion.reduce }), 120);
-    return () => clearTimeout(t);
-  }, [blocked, motion.reduce]);
-
-  const seenCount = useRef(0);
-  if (atBottom) seenCount.current = listRows.length;
-  const unseen = atBottom ? 0 : Math.max(0, listRows.length - seenCount.current);
 
   const tasksSummary = useTasksSummary(chatId!, { pollPaused: paneOpen && paneTab === 'tasks' });
   const workbench = useWorkbench({
@@ -1070,21 +805,6 @@ export default function ChatScreen(): React.ReactElement {
     [insets.bottom],
   );
 
-  const renderRow = useCallback(
-    ({ item }: { item: Row }) => {
-      if (item.kind === 'user') return <UserMessageRow message={item.message} />;
-      if (item.kind === 'row') return <TimelineRowView row={item.row} turnId={item.turnId} />;
-      return (
-        <ActivityRow
-          label={item.label}
-          speaking={liveSpeaking}
-          {...(READ_ALOUD_ENABLED && voice.available ? { onSpeakLive: onSpeakLive } : {})}
-        />
-      );
-    },
-    [liveSpeaking, onSpeakLive, voice.available],
-  );
-
   const hasMore = (messages.data?.length ?? 0) >= limit;
 
   // ── The chat page ────────────────────────────────────────────
@@ -1134,91 +854,29 @@ export default function ChatScreen(): React.ReactElement {
         ) : null}
 
         {messages.isLoading ? (
-          <TranscriptSkeleton />
-        ) : listRows.length === 0 ? (
-          <StarterPrompts
-            disabled={archived}
-            onPick={(text) => {
-              haptics.tap();
-              composer.props.onDraftChange(text);
-            }}
-          />
-        ) : (
-          <View className="flex-1">
-            <LegendList
-              testID="transcript-list"
-              ref={listRef}
-              data={listRows}
-              keyExtractor={(row) => row.id}
-              renderItem={renderRow}
-              // Chat semantics without inverting the list.
-              alignItemsAtEnd
-              initialScrollAtEnd
-              // Pinned to the end when rows arrive, while a live turn's rows
-              // grow, and while the transcript first measures (`settling`).
-              // NOT when a settled row is expanded or collapsed:
-              // following the end then scrolled the tapped row's header off
-              // the top and left a blank band above the transcript when it
-              // closed. The tapped row stays put instead.
-              maintainScrollAtEnd={{
-                on: { dataChange: true, layout: true, footerLayout: true, itemLayout: view.isLive || settling },
-              }}
-              onTouchStart={settling ? () => setSettling(false) : undefined}
-              // Anchor on DATA changes only ("Load earlier messages" prepends
-              // above the reader). Size anchoring held a row BELOW the one
-              // being expanded in place, so a row near the top grew upward
-              // and scrolled its own header out of view.
-              maintainVisibleContentPosition={{ data: true, size: false }}
-              recycleItems={false}
-              {...(Platform.OS === 'web'
-                ? {}
-                : {
-                    keyboardDismissMode: 'interactive' as const,
-                    keyboardShouldPersistTaps: 'handled' as const,
-                  })}
-              onScroll={(event) => {
-                const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-                const distance = contentSize.height - contentOffset.y - layoutMeasurement.height;
-                const next = distance < 120;
-                setAtBottom((prev) => (prev === next ? prev : next));
-              }}
-              scrollEventThrottle={32}
-              ListHeaderComponent={
-                hasMore ? (
-                  <View className="items-center pb-3">
-                    <Button
-                      label={messages.isFetching ? 'Loading…' : 'Load earlier messages'}
-                      variant="secondary"
-                      size="sm"
-                      loading={messages.isFetching}
-                      onPress={() => setLimit((n) => n + PAGE_SIZE)}
-                    />
-                  </View>
-                ) : null
-              }
-              style={{ flex: 1 }}
-              contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12, gap: 10 }}
-            />
-
-            {!atBottom ? (
-              <Animated.View entering={motion.fadeIn(140)} exiting={motion.fadeOut(120)} className="absolute bottom-3 self-center">
-                <Touchable
-                  accessibilityLabel={unseen > 0 ? `Jump to latest, ${unseen} new` : 'Jump to latest'}
-                  haptic="tap"
-                  onPress={() => {
-                    listRef.current?.scrollToEnd({ animated: !motion.reduce });
-                    setAtBottom(true);
-                  }}
-                  className="min-h-11 flex-row items-center gap-1.5 rounded-full border border-border bg-overlay px-4 py-2"
-                >
-                  <ArrowDown size={14} color={unseen > 0 ? colors.primary : colors.foreground} />
-                  <Text className={`text-sm font-medium ${unseen > 0 ? 'text-primary' : 'text-foreground'}`}>
-                    {unseen > 0 ? `${unseen} new` : 'Latest'}
-                  </Text>
-                </Touchable>
-              </Animated.View>
-            ) : null}
+          <View accessibilityLabel="Loading conversation" className="flex-1 justify-end px-4 pb-4">
+            <Skeleton preset="transcript" />
           </View>
+        ) : (
+          <TranscriptView
+            chatId={chatId!}
+            streamKey={streamKey}
+            messages={messages.data}
+            hasMore={hasMore}
+            loadingMore={messages.isFetching}
+            onLoadMore={() => setLimit((n) => n + PAGE_SIZE)}
+            actions={transcriptActions}
+            blocked={blocked}
+            empty={
+              <StarterPrompts
+                disabled={archived}
+                onPick={(text) => {
+                  haptics.tap();
+                  composer.props.onDraftChange(text);
+                }}
+              />
+            }
+          />
         )}
 
         <Composer
@@ -1304,7 +962,7 @@ export default function ChatScreen(): React.ReactElement {
     // a fresh object per controller render, which is the intent: the field
     // must re-render on every keystroke.
     [
-      archived, listRows, renderRow, hasMore, messages.isFetching, messages.isLoading, atBottom, unseen, dockStyle,
+      archived, hasMore, messages.isFetching, messages.isLoading, messages.data, transcriptActions, chatId, streamKey, dockStyle,
       forkedFromChatId, parentChat.data?.name, streamTrouble, streamConnection, motion,
       changes.data, openInChanges, blockingPermission, blockingQuestion, blockingPlan, decidePlan.isPending,
       openPlan, composer.props, gate, boundAgent, workspacePrep, stop,
@@ -1393,7 +1051,6 @@ export default function ChatScreen(): React.ReactElement {
   }
 
   return (
-    <TimelineActionsContext.Provider value={timelineActions}>
       <ComposerCaptureContext.Provider value={composer.captures}>
         <View className="flex-1">
             {/* A chat is a detail screen with the pane toggle (MD-18 workspace role): Back,
@@ -1426,25 +1083,6 @@ export default function ChatScreen(): React.ReactElement {
             />
           </Sheet>
 
-          <Sheet
-            visible={consoleCallId !== null}
-            onClose={() => setConsoleCallId(null)}
-            title="Agent console"
-            detents={[0.6, 0.92]}
-            initialDetent={1}
-            scrollable={false}
-          >
-            <View className="flex-1">
-              {consoleCallId !== null ? (
-                <AgentConsole
-                  blocks={consoleBlocks}
-                  selectedId={consoleCallId}
-                  {...(workspaceId ? { workspaceId } : {})}
-                />
-              ) : null}
-            </View>
-          </Sheet>
-
           <ImageLightbox image={lightbox} onClose={() => setLightbox(null)} />
 
           <RewindSheet
@@ -1475,72 +1113,6 @@ export default function ChatScreen(): React.ReactElement {
           <ChatMenuSheet visible={menuOpen} onClose={() => setMenuOpen(false)} title={title} sections={menuSections} />
         </View>
       </ComposerCaptureContext.Provider>
-    </TimelineActionsContext.Provider>
-  );
-}
-
-/**
- * The live-turn row: "the agent is doing something" between the prompt and
- * the first token, plus the per-turn "speak this reply as it is written"
- * control — the one row that exists exactly for the duration of a turn.
- */
-function ActivityRow({
-  label,
-  speaking,
-  onSpeakLive,
-}: {
-  label: string;
-  speaking: boolean;
-  onSpeakLive?: (() => void) | undefined;
-}): React.ReactElement {
-  const { legacyColors: colors } = useTheme();
-  const motion = useChatMotion();
-  return (
-    <Animated.View
-      entering={motion.fadeIn(160)}
-      exiting={motion.fadeOut(120)}
-      accessibilityLiveRegion="polite"
-      accessibilityLabel={label}
-      className="flex-row items-center gap-2.5 py-0.5"
-    >
-      <Spinner />
-      <Text className="text-sm text-muted-foreground">{label}</Text>
-      {onSpeakLive ? (
-        <IconButton
-          accessibilityLabel={speaking ? 'Stop speaking' : 'Speak this reply aloud as it is written'}
-          variant="ghost"
-          selected={speaking}
-          icon={
-            speaking ? (
-              <Square size={14} color={colors.destructive} />
-            ) : (
-              <Volume2 size={16} color={colors['muted-foreground']} />
-            )
-          }
-          onPress={onSpeakLive}
-        />
-      ) : null}
-    </Animated.View>
-  );
-}
-
-/** Shaped like a transcript — a prompt bubble, a reply, two step lines — while it loads. */
-function TranscriptSkeleton(): React.ReactElement {
-  return (
-    <View accessibilityLabel="Loading conversation" className="flex-1 justify-end gap-4 px-4 pb-4">
-      <View className="items-end">
-        <Skeleton width="62%" height={44} radius={20} />
-      </View>
-      <View className="gap-2">
-        <Skeleton width="40%" height={14} />
-        <Skeleton width="48%" height={14} />
-      </View>
-      <View className="gap-2">
-        <Skeleton width="92%" height={13} />
-        <Skeleton width="85%" height={13} />
-        <Skeleton width="60%" height={13} />
-      </View>
-    </View>
   );
 }
 

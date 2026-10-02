@@ -50,7 +50,7 @@ export function useChatProject(id: string | null) {
 
 import { useMemo } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ApiError, type ApiClient, type ChatSummary } from '@generatorai/client-core';
+import { ApiError, type ApiClient, type ChatSummary, type StreamBlock } from '@generatorai/client-core';
 import type { MutationCallbacks } from '../../services/api/queryCallbacks';
 import { useStreamStore } from '../../services/stream/streamStore';
 import { toPlanDecision } from './gateActions';
@@ -162,4 +162,14 @@ export function useResolveChatPermission(id: string, streamKey: string, callback
       return callbacks.onError?.(...args);
     },
   });
+}
+
+/** The live turn's blocks of a chat (the stream store, keyed by session id; empty before the first turn). */
+export function useLiveChatBlocks(streamKey: string): { blocks: readonly StreamBlock[] | undefined; live: boolean } {
+  const blocks = useStreamStore((s) => s.streams[streamKey]?.blocks);
+  const live = useStreamStore((s) => {
+    const status = s.streams[streamKey]?.status;
+    return status === 'streaming' || status === 'thinking' || status === 'pending';
+  });
+  return { blocks, live };
 }

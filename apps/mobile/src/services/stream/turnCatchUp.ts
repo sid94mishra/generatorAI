@@ -23,7 +23,7 @@
 
 import type { ChatMessage } from '@generatorai/client-core';
 
-import type { ReplayFn, ReplayRow } from '../../components/scm/scmResults';
+import type { ReplayFn, ReplayRow } from './scmResults';
 
 /** The server's page ceiling; the turn start sits near the end of the log. */
 export const CATCH_UP_PAGE_SIZE = 500;
