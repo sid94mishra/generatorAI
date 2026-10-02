@@ -3,7 +3,6 @@
     "app/(app)/automations/[id]/index.tsx",
     "app/(app)/changes/[workspaceId]/file.tsx",
     "app/(app)/changes/[workspaceId]/index.tsx",
-    "app/(app)/chats/[id]/gate/[interactionId].tsx",
     "app/(app)/chats/[id]/index.tsx",
     "app/(app)/chats/[id]/plan/[planId].tsx",
     "app/(app)/chats/index.tsx",
@@ -116,9 +115,6 @@
       "mobile-design/design/literalInlineStyle": 9,
       "mobile-design/design/defaultRadius": 1
     },
-    "src/components/chat/GateScroll.tsx": {
-      "mobile-design/design/literalInlineStyle": 1
-    },
     "src/components/chat/ModelSheet.tsx": {
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
@@ -138,30 +134,6 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 90,
       "mobile-design/design/defaultRadius": 5,
       "mobile-design/design/arbitraryValue": 10
-    },
-    "src/components/chat/PermissionCard.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultRadius": 6,
-      "mobile-design/design/legacyTokenUtility": 21,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 38,
-      "mobile-design/design/defaultTextSize": 11
-    },
-    "src/components/chat/PlanCard.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultRadius": 4,
-      "mobile-design/design/legacyTokenUtility": 10,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 18,
-      "mobile-design/design/defaultTextSize": 4
-    },
-    "src/components/chat/QuestionCard.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultRadius": 5,
-      "mobile-design/design/legacyTokenUtility": 14,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 23,
-      "mobile-design/design/defaultTextSize": 4
     },
     "src/components/chat/RenameSheet.tsx": {
       "react-hooks/set-state-in-effect/diagnostic": 1
@@ -951,19 +923,11 @@
       "mobile-design/design/legacyTokenUtility": 1,
       "better-tailwindcss/no-restricted-classes/diagnostic": 1
     },
-    "app/(app)/chats/[id]/gate/[interactionId].tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 8,
-      "mobile-design/design/defaultTextSize": 1,
-      "mobile-design/design/legacyTokenUtility": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 2
-    },
     "app/(app)/chats/[id]/index.tsx": {
       "mobile-design/design/platformOs": 2,
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 33,
+      "boundaries/dependencies/diagnostic": 29,
       "react-hooks/refs/diagnostic": 5,
       "react-hooks/preserve-manual-memoization/diagnostic": 4,
       "mobile-design/design/legacyTokenUtility": 10,

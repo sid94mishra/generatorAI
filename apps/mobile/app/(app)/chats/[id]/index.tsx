@@ -41,7 +41,7 @@ import * as WebBrowser from 'expo-web-browser';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useChat, useMarkChatRead, useChatMessages, useChatPlans, useChatProject, useChatInteractions, useChatRefresh, usePrepareChatWorkspace, usePatchChat, useArchiveChat, useCancelChat, useDecideChatPlan, useAnswerChatQuestion, useResolveChatPermission, type ChatPatch } from '../../../../src/features/chat/queries';
+import { useChat, useMarkChatRead, useChatMessages, useChatPlans, useChatProject, useChatInteractions, useChatRefresh, usePrepareChatWorkspace, usePatchChat, useArchiveChat, useCancelChat, useDecideChatPlan, useAnswerChatQuestion, type ChatPatch } from '../../../../src/features/chat/queries';
 import { useShallow } from 'zustand/react/shallow';
 import * as Clipboard from 'expo-clipboard';
 import {
@@ -90,9 +90,9 @@ import { sendChatPrompt } from '../../../../src/services/api/sendChatPrompt';
 import type { ComposerSendPayload, WorkspacePrepState } from '../../../../src/components/chat/composer/types';
 import type { BoundAgentProps } from '../../../../src/components/chat/composer/ComposerBanners';
 import { bytesToBase64 } from '../../../../src/services/lib/base64';
-import { PermissionCard } from '../../../../src/components/chat/PermissionCard';
-import { PlanCard } from '../../../../src/components/chat/PlanCard';
-import { QuestionCard } from '../../../../src/components/chat/QuestionCard';
+import { PermissionCard, PlanCard, QuestionCard, ResolvedGateRow, permissionRisk } from '../../../../src/blocks/GateCard';
+import { useAnswerPermission } from '../../../../src/features/chat/useAnswerPermission';
+import { haptic } from '../../../../src/ui/platform/haptics';
 import { RenameSheet } from '../../../../src/components/chat/RenameSheet';
 import { RewindSheet } from '../../../../src/components/chat/RewindSheet';
 import {
@@ -101,7 +101,7 @@ import {
   forkedFromLabel,
   shouldRestorePrompt,
 } from '../../../../src/components/chat/rewindOptions';
-import { pendingGateFrom } from '../../../../src/components/chat/gateFromInteraction';
+import { pendingGateFrom } from '../../../../src/blocks/GateCard';
 import { Header } from '../../../../src/ui/native/router/Header';
 import { useBreadcrumb } from '../../../../src/blocks/shell/useHeaderNav';
 import { ChatMenuSheet, type ChatMenuSection } from '../../../../src/components/chat/ChatMenuSheet';
@@ -519,16 +519,6 @@ export default function ChatScreen(): React.ReactElement {
 
   const answerQuestion = useAnswerChatQuestion(chatId!, streamKey);
 
-  const resolvePermission = useResolveChatPermission(chatId!, streamKey, {
-    onError: (error) => {
-      // 409: another device already answered — the stream settles the card.
-      if (error instanceof ApiError && error.status === 409) {
-        return;
-      }
-      haptics.error();
-      toast({ message: 'Could not send that decision. Try again.', tone: 'error' });
-    },
-  });
 
   // ── Row actions ──────────────────────────────────────────────
   const openImage = useCallback(
@@ -610,6 +600,9 @@ export default function ChatScreen(): React.ReactElement {
     (plans.data === undefined && seededGate?.kind === 'plan' ? seededGate.plan : undefined);
   const blocked = Boolean(blockingPermission || blockingPlan || blockingQuestion);
 
+  // MG-05 / MD-31: risky permissions are answered with a signature (features/chat/useAnswerPermission).
+  const { answer: answerPermission, signer } = useAnswerPermission(chatId!, streamKey);
+
   // ── Composer ─────────────────────────────────────────────────
   // `/browser`, `/terminal`, `/changes` switch the pane; `/files`, `/plan`,
   // `/tasks` open the More sheet. Same table the v1 slash menu used.
@@ -656,11 +649,7 @@ export default function ChatScreen(): React.ReactElement {
     setGateBusy(true);
     try {
       if (blockingPermission) {
-        await resolvePermission.mutateAsync({
-          interactionId: blockingPermission.interactionId,
-          behavior: 'deny',
-          message: 'Cancelled by the user to send a new message.',
-        });
+        await answerPermission(blockingPermission, 'deny', 'Cancelled by the user to send a new message.');
       } else {
         await cancel.mutateAsync({ force: false, budgetSeconds: 0 });
         refresh.decisions();
@@ -671,7 +660,7 @@ export default function ChatScreen(): React.ReactElement {
     } finally {
       setGateBusy(false);
     }
-  }, [gateBusy, blockingPermission, resolvePermission, cancel, refresh, composer]);
+  }, [gateBusy, blockingPermission, answerPermission, cancel, refresh, composer]);
 
   const gate = useMemo(
     () =>
@@ -717,6 +706,87 @@ export default function ChatScreen(): React.ReactElement {
     [chatExtras?.workspacePrep, prepareWorkspace],
   );
 
+  // "Open plan" lands on the Workbench's Plan section — the full document
+  // with revisions, edits and comments — not the read-only route.
+  const openPlan = useCallback((planId: string) => {
+    Keyboard.dismiss();
+    setMorePlanId(planId);
+    usePaneStore.getState().openTab('plan');
+  }, []);
+
+  // MB-15: the pending gate draws inline where the agent raised it; a gate seeded from the interaction list (no
+  // stream block on this screen yet) draws above the composer instead. Settled gates collapse to one line.
+  const planInStream = useMemo(
+    () => Boolean(blockingPlan && useStreamStore.getState().streams[streamKey]?.blocks.some((b) => b.type === 'plan' && b.planId === blockingPlan.planId)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `view.signature` stands in for the live blocks array.
+    [blockingPlan, streamKey, view.signature],
+  );
+  const gateApproval = useCallback(
+    (block: NonNullable<typeof blockingPermission>) =>
+      permissionRisk(block) === 'risky'
+        ? { risky: true, readiness: signer.readiness, noun: signer.noun, onRegister: signer.register, registering: signer.registering }
+        : undefined,
+    [signer],
+  );
+  const renderPermission = useCallback(
+    (block: NonNullable<typeof blockingPermission>) => {
+      const approval = gateApproval(block);
+      return <PermissionCard block={block} onDecide={(behavior, message) => answerPermission(block, behavior, message)} {...(approval ? { approval } : {})} />;
+    },
+    [gateApproval, answerPermission],
+  );
+  const renderQuestion = useCallback(
+    (block: NonNullable<typeof blockingQuestion>) => (
+      <QuestionCard
+        block={block}
+        onSubmit={async (answers, freeform) => {
+          await answerQuestion.mutateAsync({ interactionId: block.interactionId, answers, ...(freeform ? { freeformResponse: freeform } : {}) });
+          haptic('success');
+        }}
+      />
+    ),
+    [answerQuestion],
+  );
+  const renderPlan = useCallback(
+    (plan: NonNullable<typeof blockingPlan>) => (
+      <PlanCard
+        plan={{ ...plan, actions: plan.actions ?? [] }}
+        onOpenPlan={() => openPlan(plan.planId)}
+        onDecide={async (action, feedback) => {
+          await decidePlan.mutateAsync({ planId: plan.planId, action, ...(feedback ? { feedback } : {}) });
+          haptic('success');
+        }}
+      />
+    ),
+    [openPlan, decidePlan],
+  );
+  const renderGate = useCallback(
+    (segment: Parameters<NonNullable<TranscriptActions['renderGate']>>[0]): React.ReactElement | null => {
+      if (segment.type === 'permission') {
+        return segment.permission.status === 'pending' && blockingPermission?.interactionId === segment.permission.interactionId
+          ? renderPermission(segment.permission)
+          : <ResolvedGateRow block={segment.permission} />;
+      }
+      if (segment.type === 'question') {
+        return segment.question.status === 'pending' && blockingQuestion?.interactionId === segment.question.interactionId
+          ? renderQuestion(segment.question)
+          : <ResolvedGateRow block={segment.question} />;
+      }
+      return segment.plan.status === 'awaiting_review' && blockingPlan?.planId === segment.plan.planId
+        ? renderPlan(blockingPlan)
+        : <ResolvedGateRow block={segment.plan} />;
+    },
+    [blockingPermission, blockingQuestion, blockingPlan, renderPermission, renderQuestion, renderPlan],
+  );
+  // The pending gate the transcript does not hold (seeded from the server's interaction list).
+  const dockGate = !view.gateBlock && blockingPermission
+    ? renderPermission(blockingPermission)
+    : !view.gateBlock && blockingQuestion
+      ? renderQuestion(blockingQuestion)
+      : blockingPlan && !planInStream
+        ? renderPlan(blockingPlan)
+        : null;
+
   // The transcript's actions (MB-07): rows only say what was tapped; the screen owns navigation, sheets and
   // mutations. The model label prefers the server's display label (MG-03).
   const modelLabel =
@@ -743,17 +813,10 @@ export default function ChatScreen(): React.ReactElement {
       onForkFrom: (turnId) => void runFork(turnId),
       onCopyTranscript: () => void runCopyTranscript(),
       ...(READ_ALOUD_ENABLED && voice.available ? { onReadAloud: readAloud } : {}),
+      renderGate,
     }),
-    [boundAgent, modelLabel, chatId, workspaceId, openImage, runFork, runCopyTranscript, voice.available, readAloud],
+    [boundAgent, modelLabel, chatId, workspaceId, openImage, runFork, runCopyTranscript, voice.available, readAloud, renderGate],
   );
-
-  // "Open plan" lands on the Workbench's Plan section — the full document
-  // with revisions, edits and comments — not the read-only route.
-  const openPlan = useCallback((planId: string) => {
-    Keyboard.dismiss();
-    setMorePlanId(planId);
-    usePaneStore.getState().openTab('plan');
-  }, []);
 
   const tasksSummary = useTasksSummary(chatId!, { pollPaused: paneOpen && paneTab === 'tasks' });
   const workbench = useWorkbench({
@@ -889,42 +952,7 @@ export default function ChatScreen(): React.ReactElement {
                 onReview={() => openTool('changes')}
                 onOpenFile={openInChanges}
               />
-              {blockingPermission ? (
-                <PermissionCard
-                  block={blockingPermission}
-                  onDecide={async (behavior, message) => {
-                    await resolvePermission.mutateAsync({
-                      interactionId: blockingPermission.interactionId,
-                      behavior,
-                      ...(message ? { message } : {}),
-                    });
-                  }}
-                />
-              ) : blockingQuestion ? (
-                <QuestionCard
-                  block={blockingQuestion}
-                  onSubmit={async (answers, freeform) => {
-                    await answerQuestion.mutateAsync({
-                      interactionId: blockingQuestion.interactionId,
-                      answers,
-                      ...(freeform ? { freeformResponse: freeform } : {}),
-                    });
-                  }}
-                />
-              ) : blockingPlan ? (
-                <PlanCard
-                  plan={blockingPlan}
-                  busy={decidePlan.isPending}
-                  onOpenPlan={() => openPlan(blockingPlan.planId)}
-                  onDecide={async (action, feedback) => {
-                    await decidePlan.mutateAsync({
-                      planId: blockingPlan.planId,
-                      action,
-                      ...(feedback ? { feedback } : {}),
-                    });
-                  }}
-                />
-              ) : null}
+              {dockGate ? <View className="px-3 pt-2">{dockGate}</View> : null}
             </>
           }
           onStop={stop.press}
@@ -964,7 +992,7 @@ export default function ChatScreen(): React.ReactElement {
     [
       archived, hasMore, messages.isFetching, messages.isLoading, messages.data, transcriptActions, chatId, streamKey, dockStyle,
       forkedFromChatId, parentChat.data?.name, streamTrouble, streamConnection, motion,
-      changes.data, openInChanges, blockingPermission, blockingQuestion, blockingPlan, decidePlan.isPending,
+      changes.data, openInChanges, dockGate,
       openPlan, composer.props, gate, boundAgent, workspacePrep, stop,
       isStreaming, blocked, models.data, models.isLoading, chat.data, mode, effort, contextTier,
       view.contextTokens, codebaseCount, colors,

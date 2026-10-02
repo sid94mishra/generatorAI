@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { toPlanDecision } from '../features/chat/gateActions';
+import { toPlanDecision } from '../blocks/GateCard/model/gateActions';
 import { PLAN_ACTION_ID, canRequestChanges, offersAutopilot, planDecisionFor } from '../components/review/planDecisions';
 
 describe('planDecisions (single encoder, D12)', () => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { computerFeature } from '../components/chat/panes/paneModel';
 import { describeSessionTransport } from '../components/chat/sessionTransport';
-import { planCardActions } from '../features/chat/gateActions';
+import { planCardActions } from '../blocks/GateCard/model/gateActions';
 
 describe('computerFeature', () => {
   it('describes exec:computer as a grantable, lockable feature', () => {

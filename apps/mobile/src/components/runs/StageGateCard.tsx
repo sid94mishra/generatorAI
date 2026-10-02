@@ -2,7 +2,7 @@
 // StageGateCard — a stage parked on a human decision, as the chat shows it.
 //
 // A tool permission, a question and a plan review inside a stage's turn are
-// the chat's gates (P03b): the same PermissionCard / QuestionCard / PlanCard,
+// the chat's gates (P03b): the same GateCard family (blocks/GateCard, MB-15),
 // answered through the stage conversation API. Deny and "request changes"
 // let the turn carry on with the refusal; they never fail the stage. The
 // completion review keeps the ApprovalCard (the `approve` command).
@@ -12,10 +12,8 @@ import React from 'react';
 import type { ApprovalOutcome, StageRunSummary } from '@generatorai/client-core';
 
 import { useStageConversation } from '../../services/api/useStageConversation';
-import { PermissionCard } from '../chat/PermissionCard';
-import { PlanCard } from '../chat/PlanCard';
-import { QuestionCard } from '../chat/QuestionCard';
-import { toPlanDecision } from '../../features/chat/gateActions';
+import { PermissionCard, PlanCard, QuestionCard } from '../../blocks/GateCard';
+import { toPlanDecision } from '../../blocks/GateCard/model/gateActions';
 import { ApprovalCard } from './ApprovalCard';
 import { stageGateOf } from './stageGate';
 
@@ -69,8 +67,7 @@ export function StageGateCard({
     case 'plan':
       return (
         <PlanCard
-          plan={gate.plan}
-          busy={conversation.plan.isPending}
+          plan={{ ...gate.plan, actions: gate.plan.actions ?? [] }}
           onOpenPlan={() => onOpenStage?.()}
           onDecide={async (action, feedback) => {
             await conversation.plan.mutateAsync({ interactionId: gate.interactionId, ...toPlanDecision(action, feedback) });

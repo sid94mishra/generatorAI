@@ -27,7 +27,8 @@
 //
 // JS facade: apps/mobile/src/services/native/deviceKeyModule.ts; the key
 // commands of M5-09 (KeyCommands.kt) are driven from
-// apps/mobile/src/services/native/keyCommands.ts.
+// apps/mobile/src/services/native/keyCommands.ts; the approval key of M6-03
+// (ApprovalKey.kt) from apps/mobile/src/services/native/approvalKey.ts.
 // ────────────────────────────────────────────────────────────────
 
 package dev.generatorai.devicekey
@@ -39,6 +40,8 @@ import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
 import android.security.keystore.StrongBoxUnavailableException
 import android.util.Base64
+import androidx.fragment.app.FragmentActivity
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -145,6 +148,34 @@ class GeneratorAIDeviceKeyModule : Module() {
 
     AsyncFunction("remove") { alias: String ->
       deleteKey(alias)
+    }
+
+    // ── Approval key (M6-03, MG-05 / MD-31; ApprovalKey.kt) ──────────
+    // A presence-bound key per server that signs risky approvals; every use shows the BiometricPrompt.
+
+    AsyncFunction("generateApprovalKey") { alias: String ->
+      val context = appContext.reactContext ?: throw ApprovalKeyFailedException("no React context")
+      val presence = ApprovalKeys.generate(context, alias)
+      handleFor(alias) + mapOf("presence" to presence)
+    }
+
+    AsyncFunction("approvalKeyStatus") { alias: String ->
+      val context = appContext.reactContext ?: return@AsyncFunction "unsupported"
+      ApprovalKeys.status(context, alias)
+    }
+
+    AsyncFunction("signWithPrompt") { alias: String, dataBase64: String, prompt: ApprovalPromptRecord, promise: Promise ->
+      val activity = appContext.currentActivity as? FragmentActivity
+      if (activity == null) {
+        promise.reject(ApprovalKeyFailedException("no foreground activity to show the prompt"))
+      } else {
+        ApprovalKeys.signWithPrompt(activity, alias, dataBase64, prompt, { der -> derToRaw(der) }, promise)
+      }
+    }
+
+    AsyncFunction("removeApprovalKey") { alias: String ->
+      val context = appContext.reactContext ?: return@AsyncFunction Unit
+      ApprovalKeys.remove(context, alias)
     }
   }
 

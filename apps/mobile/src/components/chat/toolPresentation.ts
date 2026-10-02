@@ -11,7 +11,7 @@
 // with the renderer.
 // ────────────────────────────────────────────────────────────────
 
-import { workspaceRelative } from './permissionPreview';
+import { workspaceRelative } from '../../blocks/GateCard/model/permissionPreview';
 
 export type ToolKind =
   | 'read'

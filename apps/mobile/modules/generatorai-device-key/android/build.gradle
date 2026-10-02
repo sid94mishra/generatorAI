@@ -13,3 +13,9 @@ android {
     versionName '0.1.0'
   }
 }
+
+dependencies {
+  // BiometricPrompt + CryptoObject for the approval key (ApprovalKey.kt). The same artifact and version
+  // expo-local-authentication already puts in the app, so no new library reaches the APK.
+  implementation "androidx.biometric:biometric:1.2.0-alpha04"
+}

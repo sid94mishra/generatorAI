@@ -51,9 +51,10 @@ export function useChatProject(id: string | null) {
 import { useMemo } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiError, type ApiClient, type ChatSummary, type StreamBlock } from '@generatorai/client-core';
+import type { ApprovalProof } from '@generatorai/shared';
 import type { MutationCallbacks } from '../../services/api/queryCallbacks';
 import { useStreamStore } from '../../services/stream/streamStore';
-import { toPlanDecision } from './gateActions';
+import { toPlanDecision } from '../../blocks/GateCard/model/gateActions';
 
 export function useChatRefresh(id: string) {
   const client = useQueryClient();
@@ -144,14 +145,15 @@ export function useAnswerChatQuestion(id: string, streamKey: string, callbacks: 
   });
 }
 
-type PermissionInput = { interactionId: string; behavior: 'allow' | 'deny'; message?: string };
+type PermissionInput = { interactionId: string; behavior: 'allow' | 'deny'; message?: string; approvalProof?: ApprovalProof };
 type PermissionResult = Awaited<ReturnType<ApiClient['chats']['respondPermission']>>;
 export function useResolveChatPermission(id: string, streamKey: string, callbacks: MutationCallbacks<PermissionResult, PermissionInput>) {
   const api = useApi();
   const client = useQueryClient();
   const refresh = () => { void client.invalidateQueries({ queryKey: queryKeys.chatInteractions(id) }); };
   return useMutation({ ...callbacks,
-    mutationFn: ({ interactionId, behavior, message }: PermissionInput) => api.chats.respondPermission(id, interactionId, { behavior, ...(message ? { message } : {}) }),
+    mutationFn: ({ interactionId, behavior, message, approvalProof }: PermissionInput) =>
+      api.chats.respondPermission(id, interactionId, { behavior, ...(message ? { message } : {}), ...(approvalProof ? { approvalProof } : {}) }),
     onSuccess: (...args) => {
       useStreamStore.getState().applyEffects([{ op: 'resolvePermission', key: streamKey, ...args[1] }]);
       refresh();

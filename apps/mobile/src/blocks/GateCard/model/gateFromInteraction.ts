@@ -47,6 +47,8 @@ export function gateFromPayload(
         inputSummary: str(payload['inputSummary']),
         permissionMode: str(payload['permissionMode']),
         status: 'pending',
+        // MG-04: the server's verdict travels with the gate (absent on gates raised before it existed).
+        ...(payload['risk'] === 'risky' || payload['risk'] === 'standard' ? { risk: payload['risk'] } : {}),
       },
     };
   }
