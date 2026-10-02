@@ -138,7 +138,7 @@ function Composer({
   onCancel: () => void;
   onSubmit: (body: string, intent: ReviewIntent, sendNow: boolean) => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [intent, setIntent] = useState<ReviewIntent>('fix');
   const [body, setBody] = useState('');
   const trimmed = body.trim();
@@ -219,7 +219,7 @@ function ThreadList({
   review: ReviewThreadsApi;
   focus: ReviewFocus | null;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [note, setNote] = useState('');
   const [showNote, setShowNote] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
@@ -365,7 +365,7 @@ function ThreadCard({
   review: ReviewThreadsApi;
   onAskDelete: () => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [reply, setReply] = useState('');
   const [editing, setEditing] = useState<{ id: string; body: string } | null>(null);
   const range = thread.startLine === thread.endLine ? `L${thread.startLine}` : `L${thread.startLine}–${thread.endLine}`;

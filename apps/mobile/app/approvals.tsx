@@ -24,7 +24,7 @@ import { SkeletonList } from '../src/components/ui/Skeleton';
 import { useTheme } from '../src/theme/ThemeProvider';
 
 export default function ApprovalsScreen(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const activity = useActivity();
   const decide = useGateDecision();
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());

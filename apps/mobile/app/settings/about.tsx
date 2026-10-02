@@ -57,7 +57,7 @@ const CAPABILITIES: Array<{ title: string; support: Support; note: string }> = [
 ];
 
 export default function AboutScreen(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
 
   const icon = (support: Support): React.ReactElement =>
     support === 'full' ? (

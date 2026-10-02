@@ -60,7 +60,7 @@ export default function PullRequestDetailScreen(): React.ReactElement {
   const number = Number(params.number);
   const navigation = useNavigation();
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [reviewOpen, setReviewOpen] = useState(false);
   const [instructions, setInstructions] = useState('');
 
@@ -214,7 +214,7 @@ export default function PullRequestDetailScreen(): React.ReactElement {
 }
 
 function FileCard({ file }: { file: PullRequestFile }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [open, setOpen] = useState(false);
   const rows = open ? parsePatchRows(file.patch) : [];
 
@@ -276,7 +276,7 @@ const PATCH_CLASS: Record<ReturnType<typeof parsePatchRows>[number]['kind'], str
 };
 
 function CommentCard({ comment }: { comment: PullRequestComment }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   return (
     <Card className="gap-1.5 p-3.5">
       <View className="flex-row items-center gap-2">

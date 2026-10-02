@@ -32,7 +32,7 @@ export function QuestionCard({
   block: QuestionBlock;
   onSubmit: (answers: Record<string, string[]>, freeform: string | undefined) => Promise<void> | void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const entering = useCardEntering();
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [freeform, setFreeform] = useState('');

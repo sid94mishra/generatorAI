@@ -97,7 +97,7 @@ export function Chip({
   accessibilityHint,
   maxWidth,
 }: ChipProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const isSelected = selected ?? active;
 
   const container = isSelected ? SELECTED_CONTAINER[tone] : 'border-border bg-transparent';

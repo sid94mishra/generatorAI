@@ -10,8 +10,12 @@ import { GEOMETRY } from '../../geometry.js';
 import { SHADOW_FLOAT } from '../../glass.js';
 import { THEMES } from '../../themes/index.js';
 import { ACCENT_IDS, resolveChartRamp, type Appearance } from '../../themes/types.js';
+import { buildNativePalette } from '../../native-palette.js';
 import {
   UNIWIND_THEMES,
+  emitNativePalette,
+  emitNativePaletteIndex,
+  emitSplashColors,
   emitUniwindThemeList,
   emitUniwindThemes,
   uniwindColorVars,
@@ -145,5 +149,33 @@ describe('accentVars (Uniwind.updateCSSVariables input)', () => {
         for (const [k, v] of Object.entries(def)) expect(block[k]).toBe(v);
       }
     }
+  });
+});
+
+describe('native palettes (02 §9.3)', () => {
+  it('carry each theme at its default accent plus the seven accent triples, equal to accentVars', () => {
+    for (const theme of THEMES) {
+      const p = buildNativePalette(theme);
+      expect(p.id).toBe(theme.id);
+      for (const appearance of APPEARANCES) {
+        expect(p[appearance].tokens).toEqual(resolveDesignTokens(theme, appearance, theme.defaultAccent));
+        expect(p[appearance].chart).toEqual(resolveChartRamp(theme, appearance));
+        for (const id of ACCENT_IDS) {
+          expect(toAccentVars(p.accents[appearance][id])).toEqual(accentVars(theme, appearance, id));
+        }
+      }
+    }
+  });
+
+  it('emit one module per theme, a require-switch index and the splash colours', () => {
+    expect(emitNativePalette('nord')).toContain('id: "nord"');
+    const index = emitNativePaletteIndex();
+    for (const theme of THEMES) expect(index).toContain(`require('./${theme.id}')`);
+    expect(JSON.parse(emitSplashColors())).toEqual({ light: { background: '#ffffff' }, dark: { background: '#111113' } });
+  });
+
+  it('stay small: accent deltas only, never a bag per accent', () => {
+    const total = THEMES.reduce((n, t) => n + emitNativePalette(t.id).length, 0);
+    expect(total).toBeLessThan(90_000);
   });
 });

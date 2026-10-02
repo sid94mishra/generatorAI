@@ -6,7 +6,7 @@ import { isKnownMode, isKnownTheme } from '@generatorai/design-tokens';
 
 function ThemeCanvas({ children }: { children: React.ReactNode }): React.ReactElement {
   const theme = useTheme();
-  return <View style={{ flex: 1, backgroundColor: theme.colors.background }}>{children}</View>;
+  return <View style={{ flex: 1, backgroundColor: theme.colors.surface }}>{children}</View>;
 }
 const preview: Preview = {
   initialGlobals: { theme: 'instrument', mode: 'dark', accent: 'ink' },

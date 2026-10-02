@@ -87,7 +87,7 @@ export function SidePanelHost({
   children,
   progress: externalProgress,
 }: SidePanelHostProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const { width: windowWidth } = useWindowDimensions();
   const reduceMotion = useReduceMotion();
   const width = sidePanelWidth(windowWidth);

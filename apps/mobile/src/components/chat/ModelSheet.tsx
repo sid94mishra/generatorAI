@@ -93,7 +93,7 @@ export function ModelSheet({
   selectedId: string | null;
   onSelect: (id: string) => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<string | null>(null);
   const [infoId, setInfoId] = useState<string | null>(null);
@@ -305,7 +305,7 @@ function ModelRow({
   onToggleInfo: () => void;
   onSelect: () => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const tokens = formatTokens(promptLimit(model));
   const efforts = reasoningEfforts(model);
   const longCtx = model.supportsLongContext ? formatTokens(longContextLimit(model)) : null;

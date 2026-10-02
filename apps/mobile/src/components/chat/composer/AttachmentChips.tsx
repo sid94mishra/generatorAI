@@ -31,7 +31,7 @@ export function AttachmentChips({
   onRemove: (id: string) => void;
 }): React.ReactElement | null {
   const motion = useChatMotion();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   if (items.length === 0) return null;
 
   return (

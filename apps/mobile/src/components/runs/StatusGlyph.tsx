@@ -31,7 +31,7 @@ export function StatusGlyph({
   status: string;
   size?: 28 | 36;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const tone = toneOf(status);
   const color = (colors as Record<string, string | undefined>)[TONE_COLOR[tone]] ?? colors.foreground;
   const icon = size === 36 ? 16 : 14;

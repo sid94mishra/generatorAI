@@ -17,7 +17,7 @@
 //
 // ── Theming ──────────────────────────────────────────────────────
 // A WebView gets no CSS variables from the host, so the palette is baked in
-// at construction as an xterm `ITheme` (from `useTheme().terminal`, which is
+// at construction as an xterm `ITheme` (from `useTheme().colors.terminal`, which is
 // generated from the same design tokens the web app uses) and swapped live
 // with a `theme` message afterwards. Every colour is validated before it is
 // interpolated — the theme record is trusted data, but a `<style>` block is

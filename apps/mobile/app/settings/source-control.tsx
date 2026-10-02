@@ -38,7 +38,7 @@ import { useTheme } from '../../src/theme/ThemeProvider';
 
 export default function SourceControlScreen(): React.ReactElement {
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [menuFor, setMenuFor] = useState<SourceControlAccount | null>(null);
   const [confirmFor, setConfirmFor] = useState<SourceControlAccount | null>(null);
   const [connecting, setConnecting] = useState(false);

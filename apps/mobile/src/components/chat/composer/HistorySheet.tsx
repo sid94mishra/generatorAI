@@ -38,7 +38,7 @@ export function HistorySheet({
   entries: readonly PromptHistoryEntry[];
   onPick: (entry: PromptHistoryEntry) => void;
 }): React.ReactElement | null {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   if (!visible) return null;
 
   return (

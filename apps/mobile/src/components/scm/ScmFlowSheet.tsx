@@ -60,7 +60,7 @@ export function ScmFlowSheet({
   result: ScmFlowResult | null;
   onRun: (form: ScmFlowForm) => void;
 }): React.ReactElement | null {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const scm = useScmApi();
   const [form, setForm] = useState<ScmFlowForm>(() => initialForm(readiness));
@@ -249,7 +249,7 @@ function errorText(err: unknown, fallback: string): string {
 }
 
 function Reason({ text }: { text: string }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   return (
     <View className="flex-row gap-2 rounded-xl border border-border bg-control p-3">
       <TriangleAlert size={14} color={colors.warning} />
@@ -299,7 +299,7 @@ function StepList({
   busy: boolean;
   result: ScmFlowResult | null;
 }): React.ReactElement | null {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   if (!busy && !result) return null;
   const byId = new Map((result?.steps ?? []).map((s) => [s.id as string, s]));
 

@@ -52,7 +52,7 @@ export function TriggerInputSheet({
 }): React.ReactElement {
   const admin = useAdminApi();
   const queryClient = useQueryClient();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
 
   const fields = useMemo(() => schemaFieldsOf(automation.dataSchema), [automation.dataSchema]);
   const saved = useMemo(() => defaultDatasetOf(automation.defaultDataset), [automation.defaultDataset]);

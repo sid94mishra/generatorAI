@@ -30,7 +30,7 @@ export function Switch({
   disabled?: boolean;
   accessibilityLabel?: string;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   return (
     <RNSwitch
       accessibilityLabel={accessibilityLabel ?? ''}
@@ -63,7 +63,7 @@ export function Field({
   /** Machine text (JSON, key=value, plans): the embedded JetBrains Mono (`font-mono`, M3-06). */
   mono?: boolean;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const labelId = useId();
 
   return (
@@ -128,7 +128,7 @@ export function SearchField({
   onCancel?: () => void;
   accessibilityLabel?: string;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const input = useRef<TextInput>(null);
   const [focused, setFocused] = useState(false);
 

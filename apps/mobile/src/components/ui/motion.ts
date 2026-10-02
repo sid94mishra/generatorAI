@@ -24,7 +24,7 @@
 import { useMemo } from 'react';
 import { Easing, ReduceMotion, type WithSpringConfig, type WithTimingConfig } from 'react-native-reanimated';
 
-import { motion } from '../../theme/tokens.generated';
+import { MOTION as motion } from '@generatorai/design-tokens';
 import { usePreferences, type MotionPreference } from '../../services/prefs/preferences';
 import { useReduceMotion } from './accessibility';
 

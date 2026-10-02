@@ -69,7 +69,7 @@ export function DecisionCard({
   onPermission,
   animate = true,
 }: DecisionCardProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const entering = useCardEntering();
   const [pending, setPending] = useState<'allow' | 'deny' | null>(null);
   const { title, badge, tone, Icon } = describe(operation);

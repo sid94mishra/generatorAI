@@ -87,7 +87,7 @@ function AgentDetailBody({ agent, onClose }: { agent: AgentSummary; onClose: () 
   const admin = useAdminApi();
   const { state } = useAuth();
   const queryClient = useQueryClient();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const scopes = state.status === 'authenticated' ? state.scopes : NO_SCOPES;
   const [editing, setEditing] = useState(false);
   const edit = agentEditAvailability(agent, scopes);
@@ -491,7 +491,7 @@ function AgentEditForm({
 }): React.ReactElement {
   const admin = useAdminApi();
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [draft, setDraft] = useState<AgentDraft>(() => agentDraftFrom(agent));
   const [pickingModel, setPickingModel] = useState(false);
   const [modelQuery, setModelQuery] = useState('');

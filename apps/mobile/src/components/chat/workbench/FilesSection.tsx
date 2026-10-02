@@ -82,7 +82,7 @@ export function FilesSection({
   onOpenFile,
 }: FilesSectionProps): React.ReactElement {
   const api = useApi();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [prefix, setPrefix] = useState('');
   const [query, setQuery] = useState('');
   const [aliasFilter, setAliasFilter] = useState<string | null>(null);
@@ -334,7 +334,7 @@ function FileView({
   onOpenInChanges?: ((path: string, alias?: string) => void) | undefined;
 }): React.ReactElement {
   const api = useApi();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const wrap = useCodeWrap();
   const [rendered, setRendered] = useState(true);

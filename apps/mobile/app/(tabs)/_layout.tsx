@@ -28,7 +28,7 @@ import { shellContentInsets } from '../../src/navigation/tabsImplementation';
 const NO_BAR = (): null => null;
 
 export default function TabsLayout(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { operations } = useActivity();
   const attention = needsYouCount(operations);

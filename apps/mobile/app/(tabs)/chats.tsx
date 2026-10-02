@@ -64,7 +64,7 @@ import { useTheme } from '../../src/theme/ThemeProvider';
 type Scope = 'all' | 'active' | 'archived';
 
 export default function ChatsScreen(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const params = useLocalSearchParams<{ new?: string }>();
   const listRef = useRef<never>(null);
@@ -468,7 +468,7 @@ function ChatRow({
   onDelete: () => void;
   onMenu: () => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
 
   const actions = useMemo(
     () =>

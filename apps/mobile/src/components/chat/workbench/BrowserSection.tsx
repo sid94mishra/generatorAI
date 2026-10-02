@@ -100,7 +100,7 @@ function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBu
   const insets = useSafeAreaInsets();
   const api = useApi();
   const admin = useAdminApi();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const queryClient = useQueryClient();
   const toast = useToast();
   const [frame, setFrame] = useState<string | null>(null);

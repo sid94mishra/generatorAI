@@ -54,7 +54,7 @@ export function ListRow({
   accessibilityHint?: string;
   testID?: string;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const showChevron = chevron ?? (Boolean(onPress) && !toggle);
 
   const body = (

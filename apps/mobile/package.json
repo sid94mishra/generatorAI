@@ -29,6 +29,7 @@
     "@expo-google-fonts/instrument-sans": "0.4.2",
     "@expo-google-fonts/jetbrains-mono": "0.4.1",
     "@expo/metro-runtime": "~57.0.16",
+    "@expo/ui": "~57.0.20",
     "@generatorai/client-core": "workspace:*",
     "@generatorai/client-runtime": "workspace:*",
     "@generatorai/client-transport": "workspace:*",

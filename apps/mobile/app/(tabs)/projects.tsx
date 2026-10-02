@@ -69,7 +69,7 @@ type Row =
 const SCOPE_ORDER: AgentSummary['scope'][] = ['project', 'global', 'system'];
 
 export default function ProjectsScreen(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const shell = useTabShell();
   // `?segment=agents` deep link (pushes, other screens) mirrors the Work tab.
   const params = useLocalSearchParams<{ segment?: string }>();
@@ -260,7 +260,7 @@ function ProjectRow({
   duplicate: boolean;
   onMenu: () => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const created = `Created ${relativeTime(project.createdAt)}`;
   // The list payload has no codebase count, so a same-named project is told
   // apart by what does differ: creation time and a short id.

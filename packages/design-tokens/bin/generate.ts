@@ -10,14 +10,20 @@
 // ────────────────────────────────────────────────────────────────
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { emitCss, spliceCss } from '../src/emit/css.js';
-import { emitNative } from '../src/emit/native.js';
 import { prepaintCspHash, splicePrepaint } from '../src/emit/prepaint.js';
 import { emitStaticCss } from '../src/emit/static.js';
-import { emitUniwindThemeList, emitUniwindThemes } from '../src/emit/uniwind.js';
+import {
+  emitNativePalette,
+  emitNativePaletteIndex,
+  emitSplashColors,
+  emitUniwindThemeList,
+  emitUniwindThemes,
+} from '../src/emit/uniwind.js';
+import { THEMES } from '../src/themes/index.js';
 import {
   emitMobileVocabularyCss,
   emitMobileVocabularyJson,
@@ -137,11 +143,24 @@ const targets: Target[] = [
     optional: true,
     render: () => emitUniwindThemeList(),
   },
-  {
-    label: 'mobile token module',
-    path: resolve(repoRoot, 'apps/mobile/src/theme/tokens.generated.ts'),
+  // Literal palettes for native hosts, one module per theme (02 §9.3).
+  ...THEMES.map((theme) => ({
+    label: `mobile palette ${theme.id}`,
+    path: resolve(repoRoot, `apps/mobile/src/theme/palettes/${theme.id}.ts`),
     optional: true,
-    render: () => emitNative(),
+    render: () => emitNativePalette(theme.id),
+  })),
+  {
+    label: 'mobile palette index',
+    path: resolve(repoRoot, 'apps/mobile/src/theme/palettes/index.ts'),
+    optional: true,
+    render: () => emitNativePaletteIndex(),
+  },
+  {
+    label: 'mobile splash colours',
+    path: resolve(repoRoot, 'apps/mobile/src/theme/splash-colors.json'),
+    optional: true,
+    render: () => emitSplashColors(),
   },
 ];
 
@@ -184,8 +203,10 @@ for (const target of targets) {
   const exists = existsSync(target.path);
 
   if (!exists && target.optional) {
-    // The host app is not scaffolded yet — nothing to keep in sync.
-    if (!existsSync(dirname(target.path))) {
+    // The host app is not scaffolded yet — nothing to keep in sync. A missing
+    // folder INSIDE a present app (e.g. a first palettes/ write) is created.
+    const appRoot = resolve(repoRoot, relative(repoRoot, target.path).split(/[\\/]/).slice(0, 2).join('/'));
+    if (!existsSync(appRoot)) {
       console.log(`  skip   ${target.label} (host app not present)`);
       continue;
     }

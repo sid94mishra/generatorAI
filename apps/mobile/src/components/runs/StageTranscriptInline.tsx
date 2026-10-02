@@ -52,7 +52,7 @@ export function StageTranscriptInline({
   onOpenStage: () => void;
 }): React.ReactElement {
   const admin = useAdminApi();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const sessionId = stage.sessionId ?? null;
   const live = isActive(stage.status);

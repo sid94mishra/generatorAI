@@ -25,7 +25,7 @@ export function FeatureLocked({
   feature: string;
   check: FeatureAvailability;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
 
   return (
     <View className="flex-1 items-center justify-center gap-4 px-8">

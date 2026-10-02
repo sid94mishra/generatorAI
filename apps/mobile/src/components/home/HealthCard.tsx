@@ -17,7 +17,7 @@ import { Skeleton } from '../ui/Skeleton';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export function HealthCard({ health }: { health: HealthSnapshot | undefined }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
 
   if (!health) {
     return <Skeleton height={72} radius={16} />;

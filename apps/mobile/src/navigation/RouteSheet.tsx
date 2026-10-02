@@ -78,7 +78,7 @@ export function RouteSheet({
   /** Where Close goes when there is nothing to pop. */
   fallback?: Parameters<typeof goBack>[0];
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { top, left, right } = useSheetInsets();
   const pull = usePullToRefresh(onRefresh ?? (() => undefined), refreshing);

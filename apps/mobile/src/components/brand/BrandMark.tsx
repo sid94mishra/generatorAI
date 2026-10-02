@@ -15,7 +15,7 @@ import { Zap } from 'lucide-react-native';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export function BrandMark({ size = 24 }: { size?: number }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   return (
     <View
       accessible={false}

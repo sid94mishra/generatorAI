@@ -109,7 +109,7 @@ export function AppDrawerHost({ children }: { children: React.ReactNode }): Reac
 }
 
 function DrawerContent(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
   const work = useShellStore((s) => s.work);

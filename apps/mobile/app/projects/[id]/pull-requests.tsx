@@ -42,7 +42,7 @@ export default function ProjectPullRequestsScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const projectId = String(id);
   const navigation = useNavigation();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [state, setState] = useState<PullRequestListState>('open');
 
   React.useLayoutEffect(() => {
@@ -124,7 +124,7 @@ function PullRequestCard({
   pr: ProjectPullRequest;
   projectId: string;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
 
   return (
     <Touchable

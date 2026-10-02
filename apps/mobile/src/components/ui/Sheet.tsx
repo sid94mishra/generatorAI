@@ -157,7 +157,7 @@ export function Sheet({
   children,
   footer,
 }: SheetProps): React.ReactElement | null {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const { height: screenHeight } = useWindowDimensions();
   // The Modal spans the whole window, outside `ConnectionStripHost`, so it
   // needs the REAL insets rather than the consumed ones the tree carries.
@@ -570,7 +570,7 @@ export function SheetRow({
   /** For E2E: the rows of a decision sheet have to be addressable by name. */
   testID?: string;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
 
   return (
     <Touchable

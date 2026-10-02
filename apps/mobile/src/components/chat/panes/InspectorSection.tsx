@@ -32,7 +32,7 @@ export function InspectorSection({
   streamKey: string;
 }): React.ReactElement {
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const copy = (value: string) => {
     void Clipboard.setStringAsync(value).then(() => toast({ message: 'Copied.', tone: 'success' }));
   };

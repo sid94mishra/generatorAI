@@ -164,7 +164,7 @@ export function NewChatSheet({
   /** Granted scopes. Omit to treat every option as available (v1 callers). */
   scopes?: readonly string[] | undefined;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const api = useApi();
   const admin = useAdminApi();
   const [page, setPage] = useState<Page>('main');
@@ -794,7 +794,7 @@ function SourcesPage({
   onRemove: (id: string) => void;
   error: string | null;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
 
   if (!allowed) {
     return (
@@ -922,7 +922,7 @@ function SourceEditPage({
   onRemove: () => void;
   onDone: () => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const branches = useQuery({
     queryKey: ['projects', projectId ?? '', 'codebases', draft.codebaseId ?? '', 'branches'],
     queryFn: () => fetchBranches(draft.codebaseId!),
@@ -1066,7 +1066,7 @@ function CapabilitiesPage({
   projection: Projection | undefined;
   previewBusy: boolean;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const baseSkills = new Set(agent?.skillIds ?? []);
   const baseMcp = new Set(agent?.mcpServerIds ?? []);
 
@@ -1193,7 +1193,7 @@ function SourceControlPage({
   value: ChatSourceControlOptions;
   onChange: (next: ChatSourceControlOptions) => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
 
   return (
     <>
@@ -1286,7 +1286,7 @@ export function PickerRow({
   value: string;
   onPress: () => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   return (
     <Touchable
       accessibilityLabel={`${label}: ${value}`}

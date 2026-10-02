@@ -130,7 +130,7 @@ export function StageTimeline({
   onToggle?: (stage: StageRunSummary) => void;
   renderExpanded?: (stage: StageRunSummary) => React.ReactNode;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   // Per loop: the iteration picked (absent = the latest) and whether its body is folded.
   const [selectedIteration, setSelectedIteration] = useState<Record<string, number>>({});
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());

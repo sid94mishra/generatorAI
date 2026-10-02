@@ -40,7 +40,7 @@ export function PlanCard({
   onOpenPlan: () => void;
   busy?: boolean;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const entering = useCardEntering();
   const motion = useChatMotion();
   const [pending, setPending] = useState<string | null>(null);

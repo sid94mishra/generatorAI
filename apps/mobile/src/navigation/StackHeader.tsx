@@ -42,7 +42,7 @@ export function stackHeaderTitle(options: StackHeaderProps['options'], routeName
 }
 
 export function StackHeader({ options, route, back }: StackHeaderProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const title = stackHeaderTitle(options, route.name);
   const slotProps = { canGoBack: Boolean(back), tintColor: colors.foreground };
   const left = options.headerLeft?.(slotProps);

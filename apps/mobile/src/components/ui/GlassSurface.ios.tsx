@@ -5,7 +5,7 @@ import { useTheme } from '../../theme/ThemeProvider';
 
 /** Native glass belongs to controls, never the code or transcript beneath them. */
 export function GlassSurface({ style, ...props }: ViewProps): React.ReactElement {
-  const { colors, appearance } = useTheme();
+  const { legacyColors: colors, appearance } = useTheme();
   // Start opaque: never flash transparency before the accessibility query resolves.
   const [reduceTransparency, setReduceTransparency] = useState(true);
   useEffect(() => {

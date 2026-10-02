@@ -55,7 +55,7 @@ export const CodeBlock = memo(function CodeBlock({
   meta,
   streaming = false,
 }: CodeBlockProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const wrap = useCodeWrap();
   const [copied, setCopied] = useState(false);

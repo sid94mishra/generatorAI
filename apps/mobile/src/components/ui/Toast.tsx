@@ -120,7 +120,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }): Reac
 
 function ToastView({ toast, onDismiss }: { toast: ToastState; onDismiss: () => void }): React.ReactElement {
   const insets = useSafeAreaInsets();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const reduceMotion = useReduceMotion();
   const translateY = useSharedValue(0);
 

@@ -19,7 +19,6 @@ import { describe, expect, it } from 'vitest';
 
 import { DESIGN_ACCENT_KEYS, DESIGN_COLOR_VARS } from '../design.js';
 import { DESIGN_LAYER_HEADER, emitCss, spliceCss, TOKENS_END_MARKER, TOKENS_START_MARKER } from '../emit/css.js';
-import { emitNative } from '../emit/native.js';
 import { emitVocabularyCss, emitVocabularyJson, vocabularyJson } from '../emit/vocabulary.js';
 import { ACCENT_IDS, DEFAULT_THEME, THEMES } from '../themes/index.js';
 import {
@@ -310,36 +309,5 @@ describe('splice', () => {
   it('refuses to guess when the markers are missing', () => {
     // Silently appending would corrupt the hand-written base styles below.
     expect(() => spliceCss('no markers here', 'new')).toThrow(/markers/);
-  });
-});
-
-describe('native emitter', () => {
-  const native = emitNative();
-
-  it('exports one variable bag per theme × appearance × accent', () => {
-    for (const theme of THEMES) {
-      expect(native, `${theme.id} missing from mobile bundle`).toContain(`"${theme.id}"`);
-    }
-    // Mobile resolves `var()` at style time but needs literals for Skia and
-    // the status bar, so the values must be concrete.
-    expect(native).toContain('"--background"');
-    expect(native).toContain('"--chart-1"');
-    // The design layer ships as literals too (M-01), but gets no NativeWind
-    // utilities in P1.
-    expect(native).toContain('"--gai-ground"');
-    const tailwind = native.slice(native.indexOf('export const tailwindColors'), native.indexOf('/** Design-layer colour names'));
-    expect(tailwind).not.toContain('gai-');
-    expect(native).toContain('export const gaiColors');
-    expect(native).toContain('export const accentIds');
-  });
-
-  it('ships terminal palettes and picker metadata', () => {
-    expect(native).toContain('terminalThemes');
-    expect(native).toContain('themeMeta');
-    expect(native).toContain('brightMagenta');
-  });
-
-  it('is marked generated so an edit is caught rather than absorbed', () => {
-    expect(native).toContain('GENERATED FILE — do not edit');
   });
 });

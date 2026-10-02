@@ -12,13 +12,26 @@ import {
   withTiming,
 } from 'react-native-reanimated';
 
-import { useTheme } from '../../../theme/ThemeProvider';
+import { useThemeColors, type ThemeColors } from '../../lib/themeColors';
 import type { IconTone } from './Icon.types';
+
+/** Icon tone → design token (02 §5.3 IconTone). */
+const TONE_TOKEN = {
+  fg: 'fg',
+  'fg-2': 'fg2',
+  'fg-3': 'fg3',
+  accent: 'accent',
+  'on-accent': 'onAccent',
+  run: 'run',
+  ok: 'ok',
+  warn: 'warn',
+  err: 'err',
+  surface: 'surface',
+} as const satisfies Record<IconTone, keyof ThemeColors>;
 
 /** Literal colour of a tone for native glyph hosts (SF tint, Material font, SVG fill). */
 export function useIconColor(tone: IconTone): string {
-  const { colors } = useTheme();
-  return colors[`gai-${tone}`] ?? colors['gai-fg-2'] ?? '';
+  return useThemeColors()[TONE_TOKEN[tone]];
 }
 
 /** Decorative unless labelled (mobile 02 §5.3). */

@@ -58,7 +58,7 @@ export function GaugeSheet({
   limit: number | null;
   modelName?: string | undefined;
 }): React.ReactElement | null {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   if (!visible) return null;
 
   const current = usage?.currentTokens ?? contextTokens ?? 0;

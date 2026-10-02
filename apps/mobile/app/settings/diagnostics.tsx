@@ -35,7 +35,7 @@ import { Screen } from '../../src/components/ui/Screen';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
 export default function DiagnosticsScreen(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const { transport, keyBacking, state, reconnect } = useAuth();
 
   const connection = describeTransport(transport);

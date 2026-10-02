@@ -17,3 +17,4 @@ export * from './motion.js';
 export * from './haptics.js';
 export * from './glass.js';
 export * from './uniwind-names.js';
+export * from './native-palette.js';

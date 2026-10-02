@@ -36,7 +36,7 @@ export function FileDiffPane({
   onShowComments,
   ...diff
 }: FileDiffPaneProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const { width } = useWindowDimensions();
   const { wrap, layout } = useDiffPrefs();

@@ -70,7 +70,7 @@ export function TurnOptionsSheet({
   /** Hands off to the model picker; the composer owns that sheet. */
   onOpenModel?: () => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
 
   const efforts = effortOptionsFor(model);
   const limit =

@@ -119,7 +119,7 @@ export function RowFrame({
   titleLines = 1,
   children,
 }: RowFrameProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const live = useContext(RowEnterContext);
   const cardEntering = useCardEntering();
   const motion = useChatMotion();

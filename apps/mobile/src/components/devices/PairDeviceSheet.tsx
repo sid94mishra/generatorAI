@@ -60,7 +60,7 @@ export function PairDeviceSheet({
   onChanged: () => void;
 }): React.ReactElement | null {
   const admin = useAdminApi();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const [name, setName] = useState('');
   const [platform, setPlatform] = useState<PairingPlatform>('mobile');

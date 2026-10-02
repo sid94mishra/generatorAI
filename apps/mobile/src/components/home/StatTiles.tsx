@@ -70,7 +70,7 @@ function Tile({
 }
 
 export function StatTiles({ chats, workflows, automations, health }: StatTilesProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const show = (n: number | null): string => (n == null ? '—' : String(n));
   const healthy = health === 'ok';
   const healthValue = health == null ? '—' : healthy ? 'OK' : 'Check';

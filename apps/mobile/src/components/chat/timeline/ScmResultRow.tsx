@@ -43,7 +43,7 @@ import { useTimelineActions } from './TimelineActions';
 import type { ScmResultBlock } from './scmResultBlock';
 
 export function ScmResultRow({ block }: { block: ScmResultBlock }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   // Conflicts open expanded: they are a question addressed to the user, and
   // a collapsed row would hide the only three answers.
   const [expanded, setExpanded] = useState(block.result.status === 'conflicts');

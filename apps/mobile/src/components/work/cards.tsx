@@ -42,7 +42,7 @@ const TRIGGER_LABEL: Record<AutomationSummary['triggerType'], string> = {
 };
 
 export function RunCard({ run, accessory, separator }: { run: WorkflowRunSummary } & WorkRowProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const tone = runTone(run.status);
   const active = isActive(run.status);
   const blocked = needsAttention(run.status) && run.status !== 'failed';
@@ -87,7 +87,7 @@ export function WorkflowCard({
   workflow: WorkflowSummary;
   runs: WorkflowRunSummary[];
 } & WorkRowProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const mine = runs.filter((r) => r.workflowDefinitionId === workflow.id);
   const latest = newestRun(mine);
   const latestTone = latest ? runTone(latest.status) : 'neutral';
@@ -126,7 +126,7 @@ export function AutomationCard({
   accessory,
   separator,
 }: { automation: AutomationSummary } & WorkRowProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const TriggerIcon =
     automation.triggerType === 'schedule' ? Clock : automation.triggerType === 'webhook' ? Webhook : Play;
   const trigger = TRIGGER_LABEL[automation.triggerType] ?? automation.triggerType;
@@ -172,7 +172,7 @@ export function AgentCard({
   /** Omit the scope from the subtitle when the list is already grouped by it. */
   showScope?: boolean;
 } & WorkRowProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const orchestrator = agent.role === 'orchestrator';
   const Icon = orchestrator ? Network : Bot;
   const facts = [showScope ? agentScopeLabel(agent.scope) : null, agent.description || null].filter(Boolean).join(' · ');

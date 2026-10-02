@@ -45,7 +45,7 @@ export function ConflictSheet({
   onContinue: () => void;
   onAbort: () => void;
 }): React.ReactElement | null {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   if (!visible) return null;
 
   return (

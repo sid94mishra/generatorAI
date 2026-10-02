@@ -28,7 +28,7 @@ export function SearchResultRow({
   onPress: (item: SearchItem) => void;
   separator?: boolean;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const muted = colors['muted-foreground'];
   const press = (): void => onPress(item);
 

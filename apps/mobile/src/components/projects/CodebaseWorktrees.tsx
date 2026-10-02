@@ -34,7 +34,7 @@ export function CodebaseWorktrees({ projectId, codebaseId }: { projectId: string
   const api = useProjectsApi();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const feature = useFeature('projectEdit');
   const [showAll, setShowAll] = useState(false);
   const [removing, setRemoving] = useState<WorktreeInfo | null>(null);

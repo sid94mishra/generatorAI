@@ -55,7 +55,7 @@ function ConnectBody({ onClose }: { onClose: () => void }): React.ReactElement {
   const api = useApi().scm.deviceLogin;
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [grant, setGrant] = useState<(DeviceLoginStart & { startedAt: number }) | null>(null);
   const [now, setNow] = useState(() => Date.now());
 

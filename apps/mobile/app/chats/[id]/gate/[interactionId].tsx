@@ -35,7 +35,7 @@ import { useTheme } from '../../../../src/theme/ThemeProvider';
 
 export default function GateScreen(): React.ReactElement {
   const { id: chatId, interactionId } = useLocalSearchParams<{ id: string; interactionId: string }>();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const decide = useGateDecision();
 
   const chat = useChat(chatId!, { enabled: Boolean(chatId) });

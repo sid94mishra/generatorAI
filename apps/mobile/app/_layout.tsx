@@ -57,7 +57,7 @@ void SplashScreen.preventAutoHideAsync();
 
 /** Applies the theme variables and keeps native chrome in step. */
 function ThemedShell({ children }: { children: React.ReactNode }): React.ReactElement {
-  const { appearance, colors } = useTheme();
+  const { appearance, legacyColors: colors } = useTheme();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -267,7 +267,7 @@ function ConnectionError({
  * The tab group draws its own header, so it opts out of this one.
  */
 function RootStack(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const pathname = usePathname();
   const pathnameRef = useRef(pathname);
   pathnameRef.current = pathname;

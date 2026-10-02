@@ -54,7 +54,7 @@ export function TerminalTabs({
   const api = useApi();
   const insets = useSafeAreaInsets();
   const admin = useAdminApi();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
 
   const [tabs, setTabs] = useState<Tab[] | null>(null);

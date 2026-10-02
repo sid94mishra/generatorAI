@@ -66,7 +66,7 @@ export function CommitBar({
   const scm = useScmApi();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const commitCap = useCapability('commit');
 
   const [alias, setAlias] = useState<string | null>(null);
@@ -331,7 +331,7 @@ function MountLine({
   multi: boolean;
   onPress: () => void;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const pr = readiness.openPullRequest;
   const line = readinessLine(readiness);
 

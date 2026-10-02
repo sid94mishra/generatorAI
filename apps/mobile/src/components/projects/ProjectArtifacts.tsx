@@ -54,7 +54,7 @@ export function ProjectArtifacts({ projectId }: { projectId: string }): React.Re
   const api = useProjectsApi();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const feature = useFeature('projectEdit');
   const [kind, setKind] = useState<ArtifactKind>('skill');
   const [preview, setPreview] = useState<ProjectConfig | null>(null);
@@ -223,7 +223,7 @@ function ConfigPreviewSheet({
   onRemove: (config: ProjectConfig) => void;
 }): React.ReactElement {
   const api = useProjectsApi();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const content = useQuery({
     queryKey: projectKeys.configContent(projectId, config?.id ?? ''),
     queryFn: () => api.configContent(projectId, config!.id),

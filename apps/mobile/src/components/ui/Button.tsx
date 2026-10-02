@@ -84,7 +84,7 @@ export function Button({
   accessibilityHint?: string;
   testID?: string;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const spinnerColor =
     variant === 'primary'
       ? colors['primary-foreground']

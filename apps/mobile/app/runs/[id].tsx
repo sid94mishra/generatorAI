@@ -67,7 +67,7 @@ export default function RunDetailScreen(): React.ReactElement {
   const runId = String(id);
   const navigation = useNavigation();
   const focused = useIsFocused();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const runControl = useFeature('runControl');
   // Retry forks a new run (an invocation), which needs only runStart.
   const runStart = useFeature('runStart');

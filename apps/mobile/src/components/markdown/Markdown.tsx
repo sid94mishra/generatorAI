@@ -244,7 +244,7 @@ function List({
   depth: number;
   streaming: boolean;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const lastNumber = node.start + node.items.length - 1;
   // Marker column width: wide enough for the largest number in the list so
   // "9." and "10." align their text, not their dots.
@@ -322,7 +322,7 @@ function alignStyle(align: ColumnAlign): TextStyle | undefined {
 }
 
 function Table({ node }: { node: Extract<BlockNode, { type: 'table' }> }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   // Zebra at half the `subtle` tone: a full-strength band reads as a header.
   const zebra = useMemo(() => withAlpha(colors.subtle, 0.5), [colors.subtle]);
 

@@ -53,7 +53,7 @@ export const DiffLine = React.memo(function DiffLine({
   onLongPress,
   onPressThreads,
 }: DiffLineProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const lineHeight = lineHeightFor(fontSize);
   const rowHeight = rowHeightFor(fontSize);
   const palette = useMemo(() => syntaxPalette(colors), [colors]);

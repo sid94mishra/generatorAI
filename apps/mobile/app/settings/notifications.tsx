@@ -53,7 +53,7 @@ function read(key: string, fallback: boolean): boolean {
 }
 
 export default function NotificationsScreen(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [permission, setPermission] = useState<Notifications.PermissionStatus | null>(null);
   const [values, setValues] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(CATEGORIES.map((c) => [c.key, read(c.key, c.defaultOn)])),

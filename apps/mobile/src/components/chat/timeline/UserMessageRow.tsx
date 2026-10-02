@@ -33,7 +33,7 @@ const MENU_TITLE = 'Your message';
 
 export const UserMessageRow = memo(function UserMessageRow({ message }: { message: ChatMessage }): React.ReactElement {
   const toast = useToast();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const { onRewind } = useTimelineActions();
   const attachments = useMemo(() => messageAttachments(message), [message]);
 

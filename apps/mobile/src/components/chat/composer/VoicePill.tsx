@@ -77,7 +77,7 @@ export function VoicePill({
   onAccept: () => void;
 }): React.ReactElement {
   const motion = useChatMotion();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const reduceMotion = useReduceMotion();
   const [now, setNow] = useState(() => Date.now());
 

@@ -20,7 +20,7 @@ export function WorkbenchButton({
   onPress: () => void;
   selected?: boolean;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const label =
     badge?.kind === 'count'
       ? `Workbench, ${badge.count} changed ${badge.count === 1 ? 'file' : 'files'}`

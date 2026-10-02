@@ -30,7 +30,7 @@ export function UsageFooter({
   previous?: StreamUsage | null;
 }): React.ReactElement {
   const motion = useChatMotion();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [expanded, setExpanded] = useState(false);
 
   const duration = formatDuration(usage.durationMs);

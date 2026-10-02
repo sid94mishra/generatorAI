@@ -141,7 +141,7 @@ export function StartRunSheet({
   /** Files already staged for the current selection, reused by a retry so its body matches. */
   const staged = useRef<StagedUpload[] | null>(null);
   const opened = useRef(false);
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
 
   // Re-seed each time the sheet opens, so a cancelled draft does not leak
   // into the next run.

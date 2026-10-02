@@ -112,7 +112,7 @@ export function ChangesSection({
 }: ChangesSectionProps): React.ReactElement {
   const api = useApi();
   const queryClient = useQueryClient();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const { wrap } = useDiffPrefs();
   const restoreCap = useCapability('restoreCheckpoints');

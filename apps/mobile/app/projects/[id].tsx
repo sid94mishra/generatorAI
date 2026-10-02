@@ -84,7 +84,7 @@ export default function ProjectDetailScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const projectId = String(id);
   const navigation = useNavigation();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const projectEdit = useFeature('projectEdit');
   const [segment, setSegment] = useState<DetailSegment>('overview');
@@ -456,7 +456,7 @@ function MutedLine({ text }: { text: string }): React.ReactElement {
 }
 
 function CodebaseRow({ codebase, projectId }: { codebase: CodebaseSummary & Pick<CodebaseWire, 'lastError'>; projectId: string }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const toast = useToast();
   const location = codebaseLocation(codebase);
   const remote = codebase.type === 'git-remote';

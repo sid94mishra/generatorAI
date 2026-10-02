@@ -282,7 +282,7 @@ const LINE_HEIGHT = 24;
 const MAX_LINES = 6;
 
 export function Composer(props: ComposerProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const router = useRouter();
   const fontScale = useFontScale();
   const [sheet, setSheet] = useState<
@@ -975,7 +975,7 @@ function MicButton({
   onStart: (() => void) | undefined;
   onAccept: (() => void) | undefined;
 }): React.ReactElement | null {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   if (!visible || !onStart) return null;
   const busy = state === 'transcribing';
 
@@ -1026,7 +1026,7 @@ function SendButton({
   onStop: () => void;
   stopState?: StopState;
 }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const motion = useChatMotion();
   // W30-b — during the 400 ms arming window the control is genuinely
   // unpressable, not merely dimmed: a disabled-looking button that still fires

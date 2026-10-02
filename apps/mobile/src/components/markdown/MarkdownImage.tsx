@@ -111,7 +111,7 @@ export interface MarkdownImageProps {
 }
 
 export function MarkdownImage({ src, alt, allowed, streaming = false, onOpen }: MarkdownImageProps): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const [containerWidth, setContainerWidth] = useState(0);
   const [failed, setFailed] = useState(false);
   const size = useImageSize(src, allowed && !streaming);

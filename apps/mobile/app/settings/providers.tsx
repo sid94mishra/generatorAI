@@ -33,7 +33,7 @@ function readiness(provider: HarnessProviderStatus): { label: string; tone: Tone
 }
 
 export default function ProvidersScreen(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
 
   const providers = useProviders();
 

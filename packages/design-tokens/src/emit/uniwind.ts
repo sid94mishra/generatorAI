@@ -12,6 +12,10 @@
 //     } }
 //   apps/mobile/src/theme/uniwind-themes.json   UNIWIND_THEMES for Metro's
 //                                               `extraThemes` (plain CommonJS)
+//   apps/mobile/src/theme/palettes/<id>.ts      literal colours, one theme per
+//                                               module (02 §9.3) + index.ts
+//   apps/mobile/src/theme/splash-colors.json    Instrument surface for the
+//                                               splash / root (app.config.ts)
 //
 // Every colour block declares the same 41 variables at the theme's DEFAULT
 // accent (Uniwind requires an identical key set per theme); the active accent
@@ -23,7 +27,8 @@
 import { DESIGN_COLOR_VARS, MOTION_CSS } from '../design.js';
 import { GEOMETRY } from '../geometry.js';
 import { SHADOW_FLOAT } from '../glass.js';
-import { THEMES, getThemeDef } from '../themes/index.js';
+import { DEFAULT_THEME, THEMES, getThemeDef } from '../themes/index.js';
+import { buildNativePalette } from '../native-palette.js';
 import type { Appearance, ThemeDef } from '../themes/types.js';
 import { CONTAINER_NAMES, EASE_NAMES, HEIGHT_NAMES, RADIUS_STEPS, TEXT_STEPS, Z_NAMES } from '../vocabulary.js';
 import {
@@ -135,4 +140,61 @@ export function emitUniwindThemes(): string {
 /** JSON array of UNIWIND_THEMES (metro.config.js `extraThemes`). */
 export function emitUniwindThemeList(): string {
   return `${JSON.stringify(UNIWIND_THEMES, null, 2)}\n`;
+}
+
+const GENERATED_TS = '// GENERATED from packages/design-tokens (emit/uniwind.ts) — do not edit. Regenerate with `pnpm tokens:write`.';
+
+/** One theme's literal palette module (02 §9.3): one compact JSON line per leaf object. */
+export function emitNativePalette(themeId: string): string {
+  const p = buildNativePalette(getThemeDef(themeId));
+  const appearance = (a: 'dark' | 'light'): string[] => [
+    `  ${a}: {`,
+    ...(['tokens', 'chart', 'canvasBg', 'canvasDot', 'terminal', 'syntax'] as const).map((k) => `    ${k}: ${JSON.stringify(p[a][k])},`),
+    '  },',
+  ];
+  return [
+    GENERATED_TS,
+    "import type { NativeThemePalette } from '@generatorai/design-tokens';",
+    '',
+    'const palette: NativeThemePalette = {',
+    `  id: ${JSON.stringify(p.id)},`,
+    ...appearance('dark'),
+    ...appearance('light'),
+    '  accents: {',
+    `    dark: ${JSON.stringify(p.accents.dark)},`,
+    `    light: ${JSON.stringify(p.accents.light)},`,
+    '  },',
+    '};',
+    'export default palette;',
+    '',
+  ].join('\n');
+}
+
+/** `loadPalette(id)`: a switch of `require`s, so Metro's inline requires evaluate only the active theme. */
+export function emitNativePaletteIndex(): string {
+  return [
+    GENERATED_TS,
+    '/* eslint-disable @typescript-eslint/no-require-imports */',
+    "import type { NativeThemePalette } from '@generatorai/design-tokens';",
+    '',
+    '/** The active theme\'s literal palette; an unknown id falls back to the default theme. */',
+    'export function loadPalette(id: string): NativeThemePalette {',
+    '  switch (id) {',
+    ...THEMES.filter((t) => t.id !== DEFAULT_THEME).flatMap((t) => [
+      `    case ${JSON.stringify(t.id)}:`,
+      `      return (require('./${t.id}') as { default: NativeThemePalette }).default;`,
+    ]),
+    '    default:',
+    `      return (require('./${DEFAULT_THEME}') as { default: NativeThemePalette }).default;`,
+    '  }',
+    '}',
+    '',
+  ].join('\n');
+}
+
+/** Build-time splash and root colours (02 §9.3): the default theme's surface per appearance. */
+export function emitSplashColors(): string {
+  const theme = getThemeDef(DEFAULT_THEME);
+  const surface = (a: 'dark' | 'light'): string => buildNativePalette(theme)[a].tokens.surface;
+  return `${JSON.stringify({ light: { background: surface('light') }, dark: { background: surface('dark') } }, null, 2)}\n`;
 }

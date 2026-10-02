@@ -6,23 +6,23 @@
 // data attributes on <html>; here the generated Uniwind themes
 // (uniwind-themes.css) are switched with `Uniwind.setTheme` and the accent is
 // written with `Uniwind.updateCSSVariables` (applyTheme.ts, MD-10). Views read
-// CSS variables, so a theme change re-renders only `useTheme()` consumers.
+// CSS variables, so a theme change re-renders only `useTheme()` /
+// `useThemeColors()` consumers.
 //
 // Three axes, same as web:
 //   mode    'system' | 'light' | 'dark'
 //   theme   palette id  (github, graphite, catppuccin, …)
-//   accent  accent id
+//   accent  accent id, or 'system' — the Android Material You accent (MD-08)
 //
 // Preference is applied BEFORE the first paint by prepaint.ts (module
 // evaluation, synchronous MMKV), the mobile equivalent of the web's
-// pre-hydration script — otherwise a dark-mode user gets a white flash on
-// every cold start. A provider with `persist={false}` is a preview (Storybook,
-// tests): it never touches the app theme and scopes its subtree instead
-// (ScopedTheme + ScopedVariables).
+// pre-hydration script. A provider with `persist={false}` is a preview
+// (Storybook, tests): it never touches the app theme and scopes its subtree
+// instead (ScopedTheme + ScopedVariables + its own ThemeColors).
 // ────────────────────────────────────────────────────────────────
 
-import React, { createContext, useCallback, useContext, useLayoutEffect, useMemo, useState } from 'react';
-import { useColorScheme } from 'react-native';
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { AppState, useColorScheme } from 'react-native';
 import { ScopedTheme, ScopedVariables, type ThemeName } from 'uniwind';
 import {
   ACCENT_STORAGE_KEY,
@@ -32,24 +32,31 @@ import {
   MODE_STORAGE_KEY,
   THEMES,
   THEME_STORAGE_KEY,
-  accentVars,
   getThemeDef,
   isKnownMode,
   isKnownTheme,
-  resolveAccentId,
-  resolveTerminalPalette,
   themeAccents,
+  toAccentVars,
   uniwindThemeName,
   type AccentDef,
-  type AccentId,
   type Appearance,
   type ThemeDef,
   type ThemeMode,
 } from '@generatorai/design-tokens';
 
 import { prefs } from '../services/storage/prefs';
+import { ThemeColorsContext, type ThemeColors } from '../ui/lib/themeColors';
+import { readSystemAccentSeeds, systemAccentAvailable, type SystemAccentSeeds } from '../ui/platform/accent';
 import { applyTheme } from './applyTheme';
-import { legacyColors } from './legacyColors';
+import { legacyColorsFrom } from './legacyColorNames';
+import {
+  readCachedSeeds,
+  readStoredAccentChoice,
+  resolveAccentChoice,
+  resolveTheme,
+  writeCachedSeeds,
+  type AccentChoice,
+} from './themeState';
 
 interface ThemeContextValue {
   mode: ThemeMode;
@@ -61,14 +68,18 @@ interface ThemeContextValue {
   theme: ThemeDef;
   /** Accents this theme exposes, already resolved to its own hues. */
   accents: AccentDef[];
-  accent: AccentId;
+  accent: AccentChoice;
+  /** Whether the Android System (Material You) accent can be offered (02 §2.5). */
+  systemAccentAvailable: boolean;
+  /** The System accent as it would paint now (for its swatch); null when unavailable. */
+  systemAccentSwatch: string | null;
   setMode(mode: ThemeMode): void;
   setThemeId(id: string): void;
   setAccent(accent: string): void;
-  /** Legacy literal colours for consumers that cannot read a CSS variable (useThemeColors() replaces it in M3-08). */
-  colors: Record<string, string>;
-  /** xterm ITheme for the terminal WebView. */
-  terminal: Record<string, string>;
+  /** Literal colours for native hosts (§2.6); useThemeColors() reads the same object. */
+  colors: ThemeColors;
+  /** Legacy literal names (`legacyColors['muted-foreground']`) for the legacy screens; deleted in M10 (MD-123). */
+  legacyColors: Record<string, string>;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -91,6 +102,9 @@ function readStoredThemeId(): string {
   return isKnownTheme(stored) ? (stored as string) : DEFAULT_THEME;
 }
 
+const sameSeeds = (a: SystemAccentSeeds | null, b: SystemAccentSeeds | null): boolean =>
+  a?.dark === b?.dark && a?.light === b?.light;
+
 export function ThemeProvider({ children, initialTheme, initialMode, initialAccent, persist = true }: {
   children: React.ReactNode;
   initialTheme?: string;
@@ -104,9 +118,11 @@ export function ThemeProvider({ children, initialTheme, initialMode, initialAcce
   const [themeId, setThemeIdState] = useState<string>(() => initialTheme && isKnownTheme(initialTheme) ? initialTheme : readStoredThemeId());
 
   const theme = useMemo(() => getThemeDef(themeId), [themeId]);
-  const [accent, setAccentState] = useState<AccentId>(() =>
-    resolveAccentId(getThemeDef(themeId), initialAccent ?? prefs.getString(ACCENT_STORAGE_KEY)),
+  const [accent, setAccentState] = useState<AccentChoice>(() =>
+    initialAccent !== undefined ? resolveAccentChoice(themeId, initialAccent) : readStoredAccentChoice(themeId),
   );
+  // Material You seeds: the MMKV cache paints the first frame; a fresh read follows (02 §2.5).
+  const [seeds, setSeeds] = useState<SystemAccentSeeds | null>(() => readCachedSeeds());
 
   const appearance: Appearance = useMemo(() => {
     if (mode === 'system') return systemScheme === 'light' ? 'light' : 'dark';
@@ -126,24 +142,47 @@ export function ThemeProvider({ children, initialTheme, initialMode, initialAcce
 
   const setAccent = useCallback(
     (next: string) => {
-      const valid = resolveAccentId(theme, next);
+      const valid = resolveAccentChoice(theme.id, next);
       setAccentState(valid);
       if (persist) prefs.setString(ACCENT_STORAGE_KEY, valid);
     },
     [theme, persist],
   );
 
-  // The app provider owns the global Uniwind theme and the native colour
-  // scheme (applyTheme.ts); a layout effect so the switch lands before paint.
-  useLayoutEffect(() => {
-    if (persist) applyTheme({ themeId, mode, appearance, accent });
-  }, [persist, themeId, mode, appearance, accent]);
+  // Refresh the System accent seeds on mount, on return to the foreground and on an
+  // appearance change (wallpaper / configuration changes land there); cache when they differ.
+  useEffect(() => {
+    if (!persist || accent !== 'system') return undefined;
+    const refresh = (): void => {
+      const fresh = readSystemAccentSeeds();
+      if (!fresh) return;
+      setSeeds((prev) => {
+        if (sameSeeds(prev, fresh)) return prev;
+        writeCachedSeeds(fresh);
+        return fresh;
+      });
+    };
+    refresh();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refresh();
+    });
+    return () => sub.remove();
+  }, [persist, accent, appearance]);
 
-  const colors = useMemo(() => legacyColors(themeId, appearance, accent), [themeId, appearance, accent]);
-  const terminal = useMemo(
-    () => resolveTerminalPalette(theme, appearance) as unknown as Record<string, string>,
-    [theme, appearance],
-  );
+  const resolved = useMemo(() => resolveTheme(themeId, appearance, accent, seeds), [themeId, appearance, accent, seeds]);
+
+  // The app provider owns the global Uniwind theme, the native colour scheme and the
+  // published colours (applyTheme.ts); a layout effect so the switch lands before paint.
+  useLayoutEffect(() => {
+    if (persist) applyTheme({ themeId, mode, appearance, resolved });
+  }, [persist, themeId, mode, appearance, resolved]);
+
+  const legacyColors = useMemo(() => legacyColorsFrom(resolved.colors), [resolved]);
+  const systemAccentSwatch = useMemo(() => {
+    if (!systemAccentAvailable) return null;
+    const source = seeds ?? readSystemAccentSeeds();
+    return source ? resolveTheme(themeId, appearance, 'system', source).triple.accent : null;
+  }, [themeId, appearance, seeds]);
 
   const value = useMemo<ThemeContextValue>(
     () => ({
@@ -153,23 +192,27 @@ export function ThemeProvider({ children, initialTheme, initialMode, initialAcce
       theme,
       accents: themeAccents(theme),
       accent,
+      systemAccentAvailable,
+      systemAccentSwatch,
       setMode,
       setThemeId,
       setAccent,
-      colors,
-      terminal,
+      colors: resolved.colors,
+      legacyColors,
     }),
-    [mode, appearance, themeId, theme, accent, setMode, setThemeId, setAccent, colors, terminal],
+    [mode, appearance, themeId, theme, accent, systemAccentSwatch, setMode, setThemeId, setAccent, resolved, legacyColors],
   );
 
-  const scopedAccent = useMemo(() => ({ ...accentVars(theme, appearance, accent) }), [theme, appearance, accent]);
+  const scopedAccent = useMemo(() => ({ ...toAccentVars(resolved.triple) }), [resolved]);
 
   if (persist) return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
   return (
     <ThemeContext.Provider value={value}>
-      <ScopedTheme theme={uniwindThemeName(themeId, appearance) as ThemeName}>
-        <ScopedVariables variables={scopedAccent}>{children}</ScopedVariables>
-      </ScopedTheme>
+      <ThemeColorsContext.Provider value={resolved.colors}>
+        <ScopedTheme theme={uniwindThemeName(themeId, appearance) as ThemeName}>
+          <ScopedVariables variables={scopedAccent}>{children}</ScopedVariables>
+        </ScopedTheme>
+      </ThemeColorsContext.Provider>
     </ThemeContext.Provider>
   );
 }

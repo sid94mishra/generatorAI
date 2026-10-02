@@ -34,7 +34,7 @@ export default function CodebaseFilesScreen(): React.ReactElement {
   const codebaseId = String(params.cid);
   const path = normalizeRelPath(typeof params.path === 'string' ? params.path : '');
   const navigation = useNavigation();
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
 
   const files = useCodebaseFiles(projectId, codebaseId, path);
   const { refreshing, onRefresh } = usePullRefresh(() => files.refetch());

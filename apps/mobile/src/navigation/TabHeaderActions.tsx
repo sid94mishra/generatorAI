@@ -26,7 +26,7 @@ import { APPROVALS_ROUTE, SEARCH_ROUTE, needsYouLabel } from './routes';
 import { useTabShell } from './tabShell';
 
 export function InboxButton({ count: countProp }: { count?: number }): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   const shell = useTabShell();
   const count = countProp ?? shell?.attention ?? 0;
   const label = needsYouLabel(count);
@@ -69,7 +69,7 @@ export function InboxButton({ count: countProp }: { count?: number }): React.Rea
 }
 
 export function SearchButton(): React.ReactElement {
-  const { colors } = useTheme();
+  const { legacyColors: colors } = useTheme();
   return (
     <IconButton
       accessibilityLabel="Search"
