@@ -336,7 +336,8 @@ export default function ChatScreen(): React.ReactElement {
         await sendChatPrompt(auth.fetch, chatId!, { message: text, mode: payload.mode ?? mode }, files);
         void refresh.messages();
       } catch (err) {
-        applyEffects([{ op: 'errorStream', key: streamKey }]);
+        // Never accepted: the optimistic bubble goes (the controller has put the text back in the composer).
+        useStreamStore.getState().clear(streamKey);
         const gated = err instanceof ApiError && err.status === 409;
         toast({
           message: gated
@@ -723,7 +724,7 @@ export default function ChatScreen(): React.ReactElement {
   const gateApproval = useCallback(
     (block: NonNullable<typeof blockingPermission>) =>
       permissionRisk(block) === 'risky'
-        ? { risky: true, readiness: signer.readiness, noun: signer.noun, onRegister: signer.register, registering: signer.registering }
+        ? { risky: true, readiness: signer.readiness, noun: signer.noun, onRegister: signer.register, registering: signer.registering, error: signer.error }
         : undefined,
     [signer],
   );

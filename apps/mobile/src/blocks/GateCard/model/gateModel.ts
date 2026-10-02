@@ -91,3 +91,25 @@ export function riskyActionState(readiness: ApprovalReadiness, noun: string): { 
       return { canAnswer: false, needsRegistration: false, note: 'Checking this device…' };
   }
 }
+
+export type ApprovalFailureCode = 'cancelled' | 'timeout' | 'unsupported' | 'missing' | 'invalidated' | 'failed';
+
+/**
+ * What the card says after the approval key's prompt did not produce a signature (M6 device review): every native
+ * outcome has visible words, and the card is back to its pending state (the caller re-reads the key's status).
+ */
+export function approvalFailureNote(code: ApprovalFailureCode, action: 'register' | 'sign', noun: string): string {
+  switch (code) {
+    case 'timeout':
+      return 'Couldn’t complete — try again.';
+    case 'cancelled':
+      return action === 'register' ? 'Registration cancelled. Nothing was changed.' : 'Cancelled. The request is still waiting for your answer.';
+    case 'unsupported':
+      return `This device can’t hold an approval key. Set a passcode${noun ? ` or ${noun}` : ''} first.`;
+    case 'missing':
+    case 'invalidated':
+      return 'The approval key on this device is gone. Register it again.';
+    default:
+      return action === 'register' ? 'Couldn’t register the approval key. Try again.' : 'Couldn’t sign that answer on this device. Try again.';
+  }
+}

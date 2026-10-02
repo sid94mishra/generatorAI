@@ -62,7 +62,7 @@ function Actions({ actions, side, translation, armAt, onArm, onRun }: { actions:
 }
 
 export function SwipeRow(props: SwipeRowProps): React.ReactElement {
-  const { leading = [], trailing = [], children, testID } = props;
+  const { leading = [], trailing = [], children, grouped = false, testID } = props;
   const ref = useRef<SwipeableMethods>(null);
   const armed = useRef<'leading' | 'trailing' | null>(null);
   const [rowWidth, setRowWidth] = useState(0);
@@ -107,7 +107,7 @@ export function SwipeRow(props: SwipeRowProps): React.ReactElement {
         }}
       >
         {/* Opaque, so the action track never shows through the row at rest. */}
-        <View className="bg-surface">{row}</View>
+        <View className={cn('bg-surface', grouped && 'ios:bg-raised')}>{row}</View>
       </ReanimatedSwipeable>
     </View>
   );

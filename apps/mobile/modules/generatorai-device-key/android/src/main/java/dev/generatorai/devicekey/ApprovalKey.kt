@@ -76,6 +76,17 @@ class ApprovalPromptRecord : Record {
 }
 
 internal object ApprovalKeys {
+  /** The prompt being shown, so `cancelPrompt()` can end it (the JS timeout, MD-155). Main thread only. */
+  private var inFlight: BiometricPrompt? = null
+
+  /** Ends the prompt in flight, if any: its callback reports ERROR_CANCELED and `signWithPrompt` rejects as cancelled. */
+  fun cancelPrompt() {
+    Handler(Looper.getMainLooper()).post {
+      inFlight?.cancelAuthentication()
+      inFlight = null
+    }
+  }
+
   private fun keyStore(): KeyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
 
   private fun prefs(context: Context) = context.getSharedPreferences(APPROVAL_PREFS, Context.MODE_PRIVATE)
@@ -198,6 +209,7 @@ internal object ApprovalKeys {
     val executor = Executor { runnable -> main.post(runnable) }
     val callback = object : BiometricPrompt.AuthenticationCallback() {
       override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+        inFlight = null
         try {
           val authorised = result.cryptoObject?.signature ?: throw ApprovalKeyFailedException("the prompt returned no signature")
           authorised.update(message)
@@ -210,10 +222,17 @@ internal object ApprovalKeys {
       }
 
       override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+        inFlight = null
+        // Every outcome reaches JS as one of the coded errors (M6 device review).
         when (errorCode) {
           BiometricPrompt.ERROR_USER_CANCELED,
           BiometricPrompt.ERROR_NEGATIVE_BUTTON,
-          BiometricPrompt.ERROR_CANCELED -> promise.reject(ApprovalKeyCancelledException())
+          BiometricPrompt.ERROR_CANCELED,
+          BiometricPrompt.ERROR_TIMEOUT -> promise.reject(ApprovalKeyCancelledException())
+          BiometricPrompt.ERROR_NO_BIOMETRICS,
+          BiometricPrompt.ERROR_HW_NOT_PRESENT,
+          BiometricPrompt.ERROR_HW_UNAVAILABLE,
+          BiometricPrompt.ERROR_NO_DEVICE_CREDENTIAL -> promise.reject(ApprovalKeyUnsupportedException())
           else -> promise.reject(ApprovalKeyFailedException(errString.toString()))
         }
       }
@@ -232,8 +251,12 @@ internal object ApprovalKeys {
 
     activity.runOnUiThread {
       try {
-        BiometricPrompt(activity, executor, callback).authenticate(info.build(), BiometricPrompt.CryptoObject(signature))
+        val biometric = BiometricPrompt(activity, executor, callback)
+        inFlight?.cancelAuthentication()
+        inFlight = biometric
+        biometric.authenticate(info.build(), BiometricPrompt.CryptoObject(signature))
       } catch (err: Exception) {
+        inFlight = null
         promise.reject(ApprovalKeyFailedException(err.message ?: err.javaClass.simpleName, err))
       }
     }

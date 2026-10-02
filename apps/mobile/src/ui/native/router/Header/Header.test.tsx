@@ -1,4 +1,4 @@
-import { backLabel, iosHeaderColorOptions, iosHeaderOptions, paneToggleLabel, sidebarToggleLabel, splitActions } from './headerModel';
+import { backLabel, inlineTitleOpacity, iosContentLargeTitle, iosHeaderColorOptions, iosHeaderOptions, paneToggleLabel, sidebarToggleLabel, splitActions } from './headerModel';
 import type { HeaderAction } from './Header.types';
 
 const a = (id: string, destructive = false): HeaderAction => ({ id, icon: 'search', label: id, destructive });
@@ -30,6 +30,15 @@ describe('Header (ML-02)', () => {
     // Beside a persistent iPad sidebar a module root uses the inline title (MD-147).
     expect(iosHeaderOptions({ role: 'top', title: 'Chats', sidebarToggleState: 'shown' }).headerLargeTitle).toBe(false);
     expect(iosHeaderOptions({ role: 'top', title: 'Chats', sidebarToggleState: 'hidden' }).headerLargeTitle).toBe(true);
+  });
+
+  it('moves a counted large title into the content under an opaque bar (MD-153)', () => {
+    expect(iosContentLargeTitle({ role: 'top', count: 48 })).toBe(true);
+    expect(iosContentLargeTitle({ role: 'top', count: null })).toBe(true);
+    expect(iosContentLargeTitle({ role: 'top' })).toBe(false);
+    expect(iosContentLargeTitle({ role: 'top', count: 3, largeTitle: false })).toBe(false);
+    expect(iosHeaderOptions({ role: 'top', title: 'Chats', count: 48 })).toMatchObject({ headerLargeTitle: false, headerTransparent: false });
+    expect([0, 24, 34, 44, 200].map(inlineTitleOpacity)).toEqual([0, 0, 0.5, 1, 1]);
   });
 
   it('paints the iOS header from the theme (bar, titles, tint, blur per appearance)', () => {

@@ -6,6 +6,7 @@
 import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { LegendList } from '@legendapp/list/react-native';
+import { useSharedValue } from 'react-native-reanimated';
 import { router } from 'expo-router';
 
 import {
@@ -25,6 +26,7 @@ import {
 import { useSidebarToggle } from '../../blocks/shell/useSidebarToggle';
 import { NEW_CHAT_HREF, chatHref } from '../../blocks/shell/hrefs';
 import { BulkActionBar } from '../../ui/layout/BulkActionBar';
+import { LargeTitle } from '../../ui/layout/LargeTitle';
 import { ListRow } from '../../ui/layout/ListRow';
 import { ListSection } from '../../ui/layout/ListSection';
 import { NewAction } from '../../ui/layout/NewAction';
@@ -56,6 +58,9 @@ export default function ChatsListScreen(): React.ReactElement {
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const query = useDeferredValue(search);
   const list = useChatsList(scope, query, sort);
+  const scrollY = useSharedValue(0);
+  // "Chats 48" (MChats, MD-153): the All count, once the server has sent it.
+  const titleCount = list.counts?.all ?? null;
   const bulk = useChatBulkActions();
 
   const open = useCallback((row: ChatRowView) => router.push(chatHref(row.id) as never), []);
@@ -106,6 +111,8 @@ export default function ChatsListScreen(): React.ReactElement {
     <Header
       role="top"
       title="Chats"
+      count={titleCount}
+      scroll={scrollY}
       onSidebarToggle={sidebar.onSidebarToggle}
       sidebarToggleState={sidebar.sidebarToggleState}
       actions={[
@@ -123,23 +130,26 @@ export default function ChatsListScreen(): React.ReactElement {
   );
 
   const listHeader = (
-    <View className="gap-3 px-4 pb-2">
-      <SearchInput value={search} onChangeText={setSearch} placeholder="Search chats" loading={list.isLoading && search.length > 0} testID="chats-search" />
-      <SegmentedControl<ChatScope>
-        accessibilityLabel="Filter chats"
-        value={scope}
-        onValueChange={(next) => {
-          closeOpenSwipeRow();
-          setScope(next);
-        }}
-        segments={[
-          { value: 'all', label: 'All', count: list.counts?.all },
-          { value: 'active', label: 'Active', count: list.counts?.active },
-          { value: 'archived', label: 'Archived', count: list.counts?.archived },
-        ]}
-        fullWidth
-        testID="chats-scope"
-      />
+    <View className="gap-3 pb-2">
+      {!selecting ? <LargeTitle title="Chats" count={titleCount} /> : null}
+      <View className="gap-3 px-4">
+        <SearchInput value={search} onChangeText={setSearch} placeholder="Search chats" loading={list.isLoading && search.length > 0} testID="chats-search" />
+        <SegmentedControl<ChatScope>
+          accessibilityLabel="Filter chats"
+          value={scope}
+          onValueChange={(next) => {
+            closeOpenSwipeRow();
+            setScope(next);
+          }}
+          segments={[
+            { value: 'all', label: 'All', count: list.counts?.all },
+            { value: 'active', label: 'Active', count: list.counts?.active },
+            { value: 'archived', label: 'Archived', count: list.counts?.archived },
+          ]}
+          fullWidth
+          testID="chats-scope"
+        />
+      </View>
     </View>
   );
 
@@ -159,10 +169,11 @@ export default function ChatsListScreen(): React.ReactElement {
 
   const renderItem = ({ item }: { item: ChatListEntry }): React.ReactElement =>
     item.type === 'header' ? (
-      <SectionHeader title={item.title} {...(item.count !== undefined ? { count: item.count } : {})} />
+      <SectionHeader title={item.title} {...(item.title === 'Pinned' ? { icon: 'pin' as const } : {})} {...(item.count !== undefined ? { count: item.count } : {})} />
     ) : (
       <ChatRow
         row={item.row}
+        {...(item.position ? { position: item.position } : {})}
         onAction={run}
         {...(selecting
           ? {
@@ -225,6 +236,8 @@ export default function ChatsListScreen(): React.ReactElement {
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         onScrollBeginDrag={closeOpenSwipeRow}
+        onScroll={(e) => scrollY.set(e.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={32}
         contentContainerStyle={{ paddingBottom: insets.bottom + LIST_BOTTOM_GAP }}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={empty}

@@ -25,6 +25,8 @@ export interface GateApproval {
   noun: string;
   onRegister: () => void;
   registering: boolean;
+  /** The last prompt's outcome when it produced no signature; shown in place of the usual note. */
+  error?: string | null;
 }
 
 export interface PermissionCardProps {
@@ -118,7 +120,7 @@ export function PermissionCard({ block, onDecide, approval }: PermissionCardProp
             />
           ) : null}
           <View>
-            <ActionRow actions={actions} {...(riskState ? { note: riskState.note } : {})} />
+            <ActionRow actions={actions} {...(riskState ? { note: approval?.error ?? riskState.note } : {})} />
           </View>
         </>
       )}

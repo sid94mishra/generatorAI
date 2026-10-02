@@ -20,5 +20,7 @@ export interface SwipeRowProps {
   /** Which side's last action a full swipe performs (only reversible ones). Default 'trailing' when trailing exists. */
   fullSwipe?: 'leading' | 'trailing' | false;
   children: ReactElement<EntityRowProps>;
+  /** Inside an iOS inset group (the caller draws the group): the opaque row layer is `raised`, not `surface`. */
+  grouped?: boolean;
   testID?: string;
 }

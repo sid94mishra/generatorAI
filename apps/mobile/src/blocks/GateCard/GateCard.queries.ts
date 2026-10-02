@@ -1,7 +1,7 @@
 // MB-15 / MB-50 data: the signed-approval state of this device for the active server (MG-05, MD-31). Readiness is
 // the native key's status (ok / missing / invalidated / unsupported, or `unavailable` on an app built before
 // M6-03); `register` creates and registers the key (one prompt); `sign` signs one answer (one prompt, no cache).
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ApprovalProof } from '@generatorai/shared';
 
@@ -12,13 +12,15 @@ import { approvalErrorCode, type ApprovalPrompt } from '../../services/native/ap
 import { nouns } from '../../ui/platform/nouns';
 import { haptic } from '../../ui/platform/haptics';
 import { toast } from '../../ui/primitives/Toast';
-import type { ApprovalReadiness } from './model/gateModel';
+import { approvalFailureNote, type ApprovalReadiness } from './model/gateModel';
 
 export interface ApprovalSigner {
   readiness: ApprovalReadiness;
   noun: string;
   register: () => void;
   registering: boolean;
+  /** The last prompt's outcome when it produced no signature (timeout, cancel, unsupported …); cleared on retry. */
+  error: string | null;
   /** Signs one answer; rejects with `{ cancelled: true }` when the person cancelled the prompt. */
   sign: (target: ApprovalTarget, prompt: ApprovalPrompt) => Promise<ApprovalProof>;
   /** Re-read the key (after a 403 `APPROVAL_KEY_MISSING`). */
@@ -36,35 +38,45 @@ export function useApprovalSigner(): ApprovalSigner {
   const status = useQuery({ queryKey: key, queryFn: () => approvalReadiness({ serverId: serverId! }), enabled: Boolean(serverId), staleTime: 30_000 });
   const ctx = useMemo<ApprovalContext | null>(() => (serverId && deviceId ? { api: api as unknown as ApprovalApi, serverId, deviceId } : null), [api, serverId, deviceId]);
   const refresh = useCallback(() => void client.invalidateQueries({ queryKey: key }), [client, key]);
+  const noun = nouns().biometric;
+  const [error, setError] = useState<string | null>(null);
   const register = useMutation({
     mutationFn: async () => {
       if (!ctx) throw new Error('Not paired');
       await registerApprovalKey(ctx, REGISTER_PROMPT);
     },
+    onMutate: () => setError(null),
     onSuccess: () => {
       haptic('success');
       refresh();
     },
-    onError: (error) => {
-      if (approvalErrorCode(error) === 'cancelled') return;
-      haptic('error');
-      toast({ kind: 'error', message: approvalErrorCode(error) === 'unsupported' ? 'This device cannot hold an approval key.' : "Couldn't register the approval key." });
+    // Every outcome is visible (M6 device review): the card returns to "Register approval key" with the reason.
+    onError: (failure) => {
+      const code = approvalErrorCode(failure);
+      const note = approvalFailureNote(code, 'register', noun);
+      setError(note);
+      if (code !== 'cancelled') {
+        haptic('error');
+        toast({ kind: 'error', message: note });
+      }
       refresh();
     },
   });
   const sign = useCallback(
     async (target: ApprovalTarget, prompt: ApprovalPrompt) => {
       if (!ctx) throw new Error('Not paired');
+      setError(null);
       try {
         return await signApproval(ctx, target, prompt);
-      } catch (error) {
-        const code = approvalErrorCode(error);
-        if (code === 'missing' || code === 'invalidated') refresh();
-        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { cancelled: code === 'cancelled' });
+      } catch (failure) {
+        const code = approvalErrorCode(failure);
+        if (code !== 'failed') refresh();
+        setError(approvalFailureNote(code, 'sign', noun));
+        throw Object.assign(failure instanceof Error ? failure : new Error(String(failure)), { cancelled: code === 'cancelled', approvalCode: code });
       }
     },
-    [ctx, refresh],
+    [ctx, refresh, noun],
   );
   const readiness: ApprovalReadiness = !serverId || status.isLoading ? 'checking' : (status.data ?? 'checking');
-  return { readiness, noun: nouns().biometric, register: () => register.mutate(), registering: register.isPending, sign, refresh };
+  return { readiness, noun, register: () => register.mutate(), registering: register.isPending, error, sign, refresh };
 }

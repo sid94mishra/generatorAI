@@ -51,17 +51,30 @@ export interface IosHeaderOptions {
  * persistent iPad sidebar (`sidebarToggleState: 'shown'`) a module root uses the inline centred title: the native
  * large title is laid out flush against the sidebar's edge there, without the content's leading inset (MD-147).
  */
-export function iosHeaderOptions({ role, title, largeTitle, onBack, opaque, sidebarToggleState }: Pick<HeaderProps, 'role' | 'title' | 'largeTitle' | 'onBack' | 'opaque' | 'sidebarToggleState'>): IosHeaderOptions {
+export function iosHeaderOptions({ role, title, largeTitle, onBack, opaque, sidebarToggleState, count }: Pick<HeaderProps, 'role' | 'title' | 'largeTitle' | 'onBack' | 'opaque' | 'sidebarToggleState' | 'count'>): IosHeaderOptions {
+  const contentTitle = iosContentLargeTitle({ role, largeTitle, count });
   return {
     headerShown: true,
     title,
-    headerLargeTitle: role === 'top' && largeTitle !== false && sidebarToggleState !== 'shown',
-    headerTransparent: role !== 'modal' && !opaque,
+    headerLargeTitle: role === 'top' && largeTitle !== false && sidebarToggleState !== 'shown' && !contentTitle,
+    // The in-content large title (MD-153) sits under an opaque bar, so its scroll offset starts at 0 for the fade.
+    headerTransparent: role !== 'modal' && !opaque && !contentTitle,
     headerShadowVisible: false,
     headerLargeTitleShadowVisible: false,
     headerBackVisible: (role === 'detail' || role === 'workspace') && !onBack,
     headerTitleAlign: 'center',
   };
+}
+
+/** A module root with a title count draws its large title in the content (`LargeTitle`), not natively (MD-153). */
+export function iosContentLargeTitle({ role, largeTitle, count }: Pick<HeaderProps, 'role' | 'largeTitle' | 'count'>): boolean {
+  return role === 'top' && largeTitle !== false && count !== undefined;
+}
+
+/** The inline title's opacity for a content offset: hidden while the large title is in view (MD-153). */
+export function inlineTitleOpacity(offset: number): number {
+  'worklet';
+  return Math.min(1, Math.max(0, (offset - 24) / 20));
 }
 
 /** The theme colours the iOS header needs (a subset of `useThemeColors()`). */

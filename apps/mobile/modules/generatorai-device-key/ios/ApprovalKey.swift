@@ -13,14 +13,21 @@
 //   • neither           → rejected: the device cannot approve risky gates
 //
 // Accessibility is `WhenPasscodeSetThisDeviceOnly`: removing the passcode
-// deletes the key. A marker in UserDefaults remembers that a key was made
-// for the alias, so a key that vanished reads as "invalidated" (re-register)
-// rather than "missing" (never registered).
+// deletes the key. A passcode is therefore REQUIRED (MD-155): biometry
+// without a passcode (only possible on the Simulator; iOS will not enrol
+// Face ID / Touch ID without one) reads as "unsupported", never as a key
+// with a weaker accessibility class. A marker in UserDefaults remembers that
+// a key was made for the alias, so a key that vanished reads as
+// "invalidated" (re-register) rather than "missing" (never registered).
 //
 // Signing passes an LAContext (`localizedReason`, `localizedCancelTitle`)
 // through `kSecUseAuthenticationContext`; `SecKeyCreateSignature` shows the
-// prompt. The DER signature becomes raw r‖s (64 bytes) through the module's
-// `derToRaw`, exactly as for DPoP proofs.
+// prompt. The context is kept alive (`withExtendedLifetime`) until the
+// signature returns and is registered as the in-flight prompt, so JS can
+// cancel it (`cancelApprovalPrompt`, used by the 60 s client timeout):
+// `invalidate()` makes the pending `SecKeyCreateSignature` fail as
+// cancelled. The DER signature becomes raw r‖s (64 bytes) through the
+// module's `derToRaw`, exactly as for DPoP proofs.
 // ────────────────────────────────────────────────────────────────
 
 import CryptoKit
@@ -68,6 +75,43 @@ internal struct ApprovalPromptRecord: Record {
 
 internal enum ApprovalKey {
   private static let markerPrefix = "gai.approval.marker."
+  private static let passcodeProbeService = "gai.approval.passcode-probe"
+
+  /// The context of the prompt being shown, so `cancelPrompt()` can end it.
+  private static var inFlight: LAContext?
+  private static let inFlightLock = NSLock()
+
+  private static func setInFlight(_ context: LAContext?) {
+    inFlightLock.lock()
+    inFlight = context
+    inFlightLock.unlock()
+  }
+
+  /// Ends the prompt in flight (if any): its `SecKeyCreateSignature` fails and `sign` throws cancelled.
+  static func cancelPrompt() {
+    inFlightLock.lock()
+    let context = inFlight
+    inFlight = nil
+    inFlightLock.unlock()
+    context?.invalidate()
+  }
+
+  /// Whether a device passcode is set: an item with `WhenPasscodeSetThisDeviceOnly` can only be added then.
+  /// (`.deviceOwnerAuthentication` cannot tell, because enrolled biometry alone satisfies it on the Simulator.)
+  static func passcodeSet() -> Bool {
+    let query: [String: Any] = [
+      kSecClass as String: kSecClassGenericPassword,
+      kSecAttrService as String: passcodeProbeService,
+      kSecAttrAccount as String: "probe",
+    ]
+    SecItemDelete(query as CFDictionary)
+    var add = query
+    add[kSecValueData as String] = Data([1])
+    add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly
+    let status = SecItemAdd(add as CFDictionary, nil)
+    SecItemDelete(query as CFDictionary)
+    return status == errSecSuccess
+  }
 
   private static func tag(_ alias: String) -> Data {
     return Data(alias.utf8)
@@ -82,8 +126,9 @@ internal enum ApprovalKey {
   }
 
   /// "biometry" when Face ID / Touch ID is enrolled (a temporary lockout still counts), "passcode" when only a
-  /// passcode is set, nil when the device can authenticate neither way.
+  /// passcode is set, nil without a passcode (MD-155: the key's accessibility class needs one).
   static func presence() -> String? {
+    guard passcodeSet() else { return nil }
     let context = LAContext()
     var error: NSError?
     if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &error) {
@@ -180,28 +225,40 @@ internal enum ApprovalKey {
     let context = LAContext()
     context.localizedReason = prompt.subtitle.map { "\(prompt.title)\n\($0)" } ?? prompt.title
     context.localizedCancelTitle = prompt.cancel
-    guard let privateKey = find(alias: alias, context: context) else {
-      if UserDefaults.standard.bool(forKey: markerPrefix + alias) {
-        throw ApprovalKeyInvalidatedException(alias)
-      }
-      throw ApprovalKeyMissingException(alias)
-    }
-    var error: Unmanaged<CFError>?
-    guard
-      let der = SecKeyCreateSignature(privateKey, .ecdsaSignatureMessageX962SHA256, message as CFData, &error) as Data?
-    else {
-      if let cfError = error?.takeRetainedValue() {
-        let code = CFErrorGetCode(cfError)
-        if code == Int(errSecUserCanceled) || code == LAError.userCancel.rawValue || code == LAError.appCancel.rawValue
-          || code == LAError.systemCancel.rawValue
-        {
-          throw ApprovalKeyCancelledException()
+    // The key reference is bound to `context` (kSecUseAuthenticationContext); ARC may release a local after its
+    // last use, so the context is held for the whole signature, and published as the prompt in flight.
+    return try withExtendedLifetime(context) { () throws -> Data in
+      guard let privateKey = find(alias: alias, context: context) else {
+        if UserDefaults.standard.bool(forKey: markerPrefix + alias) {
+          throw ApprovalKeyInvalidatedException(alias)
         }
-        throw ApprovalKeyFailedException(CFErrorCopyDescription(cfError) as String? ?? "code \(code)")
+        throw ApprovalKeyMissingException(alias)
       }
-      throw ApprovalKeyFailedException("unknown Security.framework error")
+      setInFlight(context)
+      defer { setInFlight(nil) }
+      var error: Unmanaged<CFError>?
+      guard
+        let der = SecKeyCreateSignature(privateKey, .ecdsaSignatureMessageX962SHA256, message as CFData, &error) as Data?
+      else {
+        throw signingError(error?.takeRetainedValue(), alias: alias)
+      }
+      return try GeneratorAIDeviceKeyModule.derToRaw(der)
     }
-    return try GeneratorAIDeviceKeyModule.derToRaw(der)
+  }
+
+  /// Maps a Security / LocalAuthentication failure onto the module's coded exceptions (every one reaches JS).
+  private static func signingError(_ cfError: CFError?, alias: String) -> Exception {
+    guard let cfError = cfError else { return ApprovalKeyFailedException("unknown Security.framework error") }
+    let code = CFErrorGetCode(cfError)
+    let cancelled: [Int] = [
+      Int(errSecUserCanceled), LAError.userCancel.rawValue, LAError.appCancel.rawValue, LAError.systemCancel.rawValue,
+      LAError.invalidContext.rawValue, LAError.userFallback.rawValue,
+    ]
+    if cancelled.contains(code) { return ApprovalKeyCancelledException() }
+    let unsupported: [Int] = [LAError.passcodeNotSet.rawValue, LAError.biometryNotAvailable.rawValue]
+    if unsupported.contains(code) { return ApprovalKeyUnsupportedException() }
+    if code == Int(errSecItemNotFound) { return ApprovalKeyInvalidatedException(alias) }
+    return ApprovalKeyFailedException(CFErrorCopyDescription(cfError) as String? ?? "code \(code)")
   }
 
   static func remove(alias: String) {

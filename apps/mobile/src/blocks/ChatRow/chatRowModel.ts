@@ -4,6 +4,7 @@
 import type { MobileIconConcept } from '@generatorai/design-tokens';
 import type { StatusState } from '@generatorai/shared';
 import type { ChatRowModel } from '@generatorai/shared/ui-contract';
+import type { RowPosition } from '../../ui/layout/ListSection/ListSection.types';
 
 export type ChatRowActionId = 'open' | 'pin' | 'unpin' | 'mark-unread' | 'mark-read' | 'stop' | 'archive' | 'unarchive' | 'delete' | 'more';
 
@@ -94,22 +95,34 @@ export function chatRowSwipe(row: ChatRowView): { leading: ChatRowSwipe[]; trail
   return { leading, trailing };
 }
 
-export type ChatListEntry = { type: 'header'; key: string; title: 'Pinned' | 'Recent'; count?: number } | { type: 'row'; key: string; row: ChatRowView };
+export type ChatListEntry =
+  | { type: 'header'; key: string; title: 'Pinned' | 'Recent'; count?: number }
+  /** `position` places the row in its section's iOS inset group (MChats); absent in flat lists. */
+  | { type: 'row'; key: string; row: ChatRowView; position?: RowPosition };
+
+function positioned(rows: readonly ChatRowView[]): ChatListEntry[] {
+  return rows.map((row, i) => ({
+    type: 'row',
+    key: row.id,
+    row,
+    position: rows.length === 1 ? 'only' : i === 0 ? 'first' : i === rows.length - 1 ? 'last' : 'middle',
+  }));
+}
 
 /**
- * The list body: a "Pinned" section (only when a row is pinned, MG-02) then "Recent". The server returns pinned
- * rows first on the first page, so the split is stable while pages append. Archived and search results stay flat.
+ * The list body: a "Pinned" section (only when a row is pinned, MG-02) then "Recent" (MChats: on iOS each section is
+ * an inset rounded group, so rows carry their position; Android stays flat). The server returns pinned rows first on
+ * the first page, so the split is stable while pages append. Archived and search results stay flat.
  */
 export function chatListEntries(rows: readonly ChatRowView[], options: { flat: boolean }): ChatListEntry[] {
-  const toEntry = (row: ChatRowView): ChatListEntry => ({ type: 'row', key: row.id, row });
-  if (options.flat) return rows.map(toEntry);
+  if (options.flat) return rows.map((row) => ({ type: 'row', key: row.id, row }));
   const pinned = rows.filter((r) => r.pinned);
-  if (pinned.length === 0) return rows.map(toEntry);
+  if (pinned.length === 0) return positioned(rows);
   const rest = rows.filter((r) => !r.pinned);
   return [
-    { type: 'header', key: 'h-pinned', title: 'Pinned', count: pinned.length },
-    ...pinned.map(toEntry),
-    ...(rest.length ? [{ type: 'header' as const, key: 'h-recent', title: 'Recent' as const }, ...rest.map(toEntry)] : []),
+    { type: 'header', key: 'h-pinned', title: 'Pinned' },
+    ...positioned(pinned),
+    ...(rest.length ? [{ type: 'header' as const, key: 'h-recent', title: 'Recent' as const }, ...positioned(rest)] : []),
   ];
 }
 

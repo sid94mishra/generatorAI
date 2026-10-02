@@ -177,6 +177,11 @@ class GeneratorAIDeviceKeyModule : Module() {
       val context = appContext.reactContext ?: return@AsyncFunction Unit
       ApprovalKeys.remove(context, alias)
     }
+
+    // Ends a prompt that is still up (the JS timeout, MD-155); `signWithPrompt` then rejects as cancelled.
+    Function("cancelApprovalPrompt") {
+      ApprovalKeys.cancelPrompt()
+    }
   }
 
   /** A physical keyboard is attached and not hidden (Configuration.keyboard / hardKeyboardHidden). */

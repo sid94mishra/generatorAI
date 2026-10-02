@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { approvalPrompt, permissionCategory, permissionRisk, permissionView, resolvedWords, riskyActionState } from './gateModel';
+import { approvalFailureNote, approvalPrompt, permissionCategory, permissionRisk, permissionView, resolvedWords, riskyActionState } from './gateModel';
 
 const perm = (over: Record<string, unknown> = {}) =>
   ({ type: 'permission', blockId: 1, interactionId: 'i1', toolName: 'Bash', permissionType: 'shell_exec', description: 'Publishes the branch', inputSummary: JSON.stringify({ command: 'git push -u origin fix' }), permissionMode: 'default', status: 'pending', ...over }) as never;
@@ -29,5 +29,14 @@ describe('gate model (MB-15)', () => {
     expect(riskyActionState('unsupported', 'Face ID').note).toBe('Needs Face ID or a passcode on this device');
     expect(riskyActionState('unavailable', 'Face ID').needsRegistration).toBe(false);
     expect(approvalPrompt('allow', 'git push').title).toBe('Approve "git push"?');
+  });
+
+  it('says something visible for every way the approval prompt can end without a signature', () => {
+    expect(approvalFailureNote('timeout', 'register', 'Face ID')).toBe('Couldn’t complete — try again.');
+    for (const code of ['cancelled', 'timeout', 'unsupported', 'missing', 'invalidated', 'failed'] as const) {
+      expect(approvalFailureNote(code, 'register', 'Face ID').length).toBeGreaterThan(0);
+      expect(approvalFailureNote(code, 'sign', 'Face ID').length).toBeGreaterThan(0);
+    }
+    expect(approvalFailureNote('cancelled', 'sign', 'Face ID')).toMatch(/still waiting/);
   });
 });

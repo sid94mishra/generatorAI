@@ -6,6 +6,7 @@
 // at the top of the content.
 import React from 'react';
 import { View } from 'react-native';
+import Animated, { useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
 import { Stack } from 'expo-router';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
@@ -14,15 +15,28 @@ import { StatusLine } from '../../../layout/StatusLine';
 import { useFontScale } from '../../../platform/fontScale';
 import { sfSymbolFor, isSeparator } from '../../Menu/menuModel';
 import type { HeaderAction, HeaderProps } from './Header.types';
-import { backLabel, iosHeaderColorOptions, iosHeaderOptions, paneToggleLabel, sidebarToggleLabel, splitActions } from './headerModel';
+import { backLabel, inlineTitleOpacity, iosContentLargeTitle, iosHeaderColorOptions, iosHeaderOptions, paneToggleLabel, sidebarToggleLabel, splitActions } from './headerModel';
+import { Text } from '../../../primitives/Text';
 import { useThemeColors } from '../../../lib/themeColors';
 
 export type { HeaderAction, HeaderProps, HeaderRole } from './Header.types';
 
 const sf = (concept: HeaderAction['icon']): SFSymbol => (sfSymbolFor(concept) ?? 'circle') as SFSymbol;
 
+/** The centred headline that takes over once the in-content large title scrolls under the bar (MD-153). */
+function InlineTitle({ title, scroll }: { title: string; scroll?: SharedValue<number> }): React.ReactElement {
+  const style = useAnimatedStyle(() => ({ opacity: scroll ? inlineTitleOpacity(scroll.value) : 1 }), [scroll]);
+  return (
+    <Animated.View style={style}>
+      <Text role="headline" numberOfLines={1} accessibilityRole="header">
+        {title}
+      </Text>
+    </Animated.View>
+  );
+}
+
 export function Header(props: HeaderProps): React.ReactElement {
-  const { role, title, breadcrumb, status, subtitle, actions = [], onSidebarToggle, sidebarToggleState = 'drawer', onBack, paneToggle, modal } = props;
+  const { role, title, breadcrumb, status, subtitle, actions = [], onSidebarToggle, sidebarToggleState = 'drawer', onBack, paneToggle, modal, scroll } = props;
   const fontScale = useFontScale();
   const colors = useThemeColors();
   const { inline, overflow } = splitActions(actions, fontScale);
@@ -31,7 +45,11 @@ export function Header(props: HeaderProps): React.ReactElement {
   const options = {
     ...base,
     ...iosHeaderColorOptions(colors, base.headerTransparent),
-    headerTitle: detail ? () => <BreadcrumbTitle breadcrumb={breadcrumb} title={title} /> : undefined,
+    headerTitle: detail
+      ? () => <BreadcrumbTitle breadcrumb={breadcrumb} title={title} />
+      : iosContentLargeTitle(props)
+        ? () => <InlineTitle title={title} scroll={scroll} />
+        : undefined,
   };
   return (
     <>

@@ -37,11 +37,13 @@ export type TranscriptItem =
   | { kind: 'activity'; key: string; label: string };
 
 export interface TranscriptLiveInput {
+  /** The live stream's status ('pending' until the server's first event for the turn). */
+  status?: 'idle' | 'pending' | 'thinking' | 'streaming' | 'complete' | 'error';
   /** The server turn id of the live stream, once known. */
   serverTurnId: string | null;
   /** The optimistic bubble of the turn being sent. */
   pendingUserMessage: string | null;
-  /** The prompt of the live turn, to drop its persisted twin before the turn id is known. */
+  /** The prompt of the live turn, to find its persisted twin before the turn id is known. */
   turnUserMessage: string | null;
   /** Local turn counter (keys the pending bubble). */
   turnId: number;
@@ -81,30 +83,59 @@ export function replayedScmBlock(turnId: string, result: ScmFlowResult): StreamB
   return { type: 'scm_result', blockId: 1_000_000, turnId, result };
 }
 
+/**
+ * The persisted user message that opened the live turn: the one carrying the server turn id, or — before the id is
+ * known — the last user message when it is the newest row and has the live prompt's text (an identical older prompt
+ * is never taken for it, desktop WEB-02).
+ */
+function liveAnchor(messages: readonly ChatMessage[], live: TranscriptLiveInput): string | null {
+  if (live.serverTurnId) {
+    const hit = messages.find((m) => m.role === 'user' && m.metadata?.turnId === live.serverTurnId);
+    return hit?.id ?? null;
+  }
+  const prompt = live.turnUserMessage?.trim();
+  if (!prompt) return null;
+  const last = messages[messages.length - 1];
+  return last?.role === 'user' && last.content.trim() === prompt ? last.id : null;
+}
+
+/**
+ * The transcript rows. The live turn renders right after the user message that started it (M6 device review): its
+ * persisted user message is drawn in place (sent, with its time and turn id), the persisted agent messages of that
+ * turn are skipped (the live blocks represent them), and every later message — prompts sent while the turn ran —
+ * follows its output. Until the server has persisted the prompt, the optimistic bubble stands in at the end; it is
+ * "sending" (clock glyph) only until the server acknowledges the turn (its turn id, or any status past `pending`).
+ */
 export function buildTranscriptItems(
   messages: readonly ChatMessage[],
   live: TranscriptLiveInput,
   scm?: { results: ReadonlyMap<string, ScmFlowResult> | undefined; liveTurnIds: ReadonlySet<string> },
 ): TranscriptItem[] {
   const out: TranscriptItem[] = [];
-  const turnPrompt = live.turnUserMessage?.trim();
+  const anchor = liveAnchor(messages, live);
+  const liveRows = (): void => {
+    if (live.hasLive) out.push({ kind: 'live', key: 'live-turn' });
+    if (live.activityLabel) out.push({ kind: 'activity', key: `activity-${live.turnId}`, label: live.activityLabel });
+  };
   const turns = buildTranscriptTurns(
     messages.map((message) => ({ id: message.id, role: message.role, ...transcriptMessageInput(message), attachments: messageAttachments(message), source: message })),
   );
   for (const turn of turns) {
     const user = turn.entries.find((e) => e.kind === 'user');
     const prompt = user?.kind === 'user' ? user.message.source : null;
+    const anchored = prompt !== null && prompt.id === anchor;
     const agents: Array<Extract<TranscriptItem, { kind: 'agent' }>> = [];
     for (const entry of turn.entries) {
       if (entry.kind === 'live' || entry.kind === 'pending_user') continue;
       const message = entry.message.source;
       const turnId = message.metadata?.turnId;
-      if (live.serverTurnId && turnId === live.serverTurnId) continue;
-      if (!live.serverTurnId && turnPrompt && message.role === 'user' && message.content.trim() === turnPrompt) continue;
       if (entry.kind === 'user') {
         out.push({ kind: 'user', key: message.id, text: message.content, attachments: entry.message.attachments ?? [], time: iso(message), ...(turnId ? { turnId } : {}) });
+        if (anchored) liveRows();
         continue;
       }
+      // The live turn's own persisted output: its blocks are already on screen.
+      if (anchored || (live.serverTurnId && turnId === live.serverTurnId)) continue;
       if (entry.kind === 'system') {
         out.push({ kind: 'system', key: message.id, text: message.content });
         continue;
@@ -133,11 +164,13 @@ export function buildTranscriptItems(
       }
     }
   }
-  if (live.pendingUserMessage) {
-    out.push({ kind: 'user', key: `pending-${live.turnId}`, text: live.pendingUserMessage, attachments: [], time: null, pending: true });
+  if (anchor === null) {
+    if (live.pendingUserMessage) {
+      const sending = live.serverTurnId === null && (live.status === undefined || live.status === 'pending');
+      out.push({ kind: 'user', key: `pending-${live.turnId}`, text: live.pendingUserMessage, attachments: [], time: null, pending: sending });
+    }
+    liveRows();
   }
-  if (live.hasLive) out.push({ kind: 'live', key: 'live-turn' });
-  if (live.activityLabel) out.push({ kind: 'activity', key: `activity-${live.turnId}`, label: live.activityLabel });
   return out;
 }
 

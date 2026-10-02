@@ -175,6 +175,11 @@ public final class GeneratorAIDeviceKeyModule: Module {
     AsyncFunction("removeApprovalKey") { (alias: String) -> Void in
       ApprovalKey.remove(alias: alias)
     }
+
+    // Ends a prompt that is still up (the JS timeout, MD-155); `signWithPrompt` then rejects as cancelled.
+    Function("cancelApprovalPrompt") { () -> Void in
+      ApprovalKey.cancelPrompt()
+    }
   }
 
   // MARK: - Keychain

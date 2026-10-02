@@ -16,6 +16,7 @@ import type { HeaderAction, HeaderProps } from '../../native/router/Header/Heade
 import { actionTestID, backLabel, paneToggleLabel, sidebarToggleLabel, splitActions } from '../../native/router/Header/headerModel';
 import { useFontScale, useFontScaleOverride } from '../../platform/fontScale';
 import { useInsets } from '../../platform/insets';
+import { Count } from '../../primitives/Count';
 import { IconButton } from '../../primitives/IconButton';
 import { Pressable } from '../../primitives/Pressable';
 import { Spinner } from '../../primitives/Spinner';
@@ -45,7 +46,7 @@ function Overflow({ actions }: { actions: HeaderAction[] }): React.ReactElement 
 }
 
 export function TopAppBar(props: HeaderProps): React.ReactElement {
-  const { role, title, breadcrumb, status, subtitle, actions = [], onSidebarToggle, sidebarToggleState = 'drawer', onBack, paneToggle, modal, largeTitle = false, scroll, testIDs, testID } = props;
+  const { role, title, count, breadcrumb, status, subtitle, actions = [], onSidebarToggle, sidebarToggleState = 'drawer', onBack, paneToggle, modal, largeTitle = false, scroll, testIDs, testID } = props;
   const colors = useThemeColors();
   const insets = useInsets();
   const osScale = useFontScale();
@@ -74,9 +75,13 @@ export function TopAppBar(props: HeaderProps): React.ReactElement {
         <View className={cn('flex-1 justify-center', leading && 'ps-1')}>
           {detail && breadcrumb?.length ? <Breadcrumb segments={breadcrumb} /> : null}
           {home ? null : (
-            <Text role={detail ? 'detailTitle' : 'title'} numberOfLines={1} accessibilityRole="header">
-              {title}
-            </Text>
+            <View className="flex-row items-baseline gap-2">
+              <Text role={detail ? 'detailTitle' : 'title'} numberOfLines={1} accessibilityRole="header" className="shrink">
+                {title}
+              </Text>
+              {/* MChats "Chats 48" (MD-153). */}
+              {role === 'top' && count != null ? <Count value={count} /> : null}
+            </View>
           )}
         </View>
         {inline.map((a) => (

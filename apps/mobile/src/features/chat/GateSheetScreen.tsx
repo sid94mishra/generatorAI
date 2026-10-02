@@ -75,7 +75,7 @@ export default function GateSheetScreen(): React.ReactElement {
           close();
         }}
         {...(permissionRisk(block) === 'risky'
-          ? { approval: { risky: true, readiness: signer.readiness, noun: signer.noun, onRegister: signer.register, registering: signer.registering } }
+          ? { approval: { risky: true, readiness: signer.readiness, noun: signer.noun, onRegister: signer.register, registering: signer.registering, error: signer.error } }
           : {})}
       />
     );

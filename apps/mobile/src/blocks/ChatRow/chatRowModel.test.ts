@@ -48,6 +48,10 @@ describe('ChatRow model (MB-48)', () => {
     expect(chatListEntries(rows, { flat: false }).map((e) => e.key)).toEqual(['h-pinned', 'a', 'h-recent', 'b', 'c']);
     expect(chatListEntries(rows, { flat: true }).map((e) => e.key)).toEqual(['a', 'b', 'c']);
     expect(chatListEntries(rows.slice(1), { flat: false }).map((e) => e.key)).toEqual(['b', 'c']);
+    // iOS inset groups (MChats): each section's rows carry their place in the group; flat lists carry none.
+    const position = (e: ReturnType<typeof chatListEntries>[number]) => (e.type === 'row' ? (e.position ?? '-') : 'h');
+    expect(chatListEntries(rows, { flat: false }).map(position)).toEqual(['h', 'only', 'h', 'first', 'last']);
+    expect(chatListEntries(rows, { flat: true }).map(position)).toEqual(['-', '-', '-']);
   });
 
   it('select all toggles; after a bulk call only the failures stay selected (MD-60)', () => {

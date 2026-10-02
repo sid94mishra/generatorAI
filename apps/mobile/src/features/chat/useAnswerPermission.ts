@@ -5,7 +5,7 @@
 import { useCallback } from 'react';
 import { ApiError, type StreamBlock } from '@generatorai/client-core';
 
-import { approvalPrompt, permissionRisk, permissionView, useApprovalSigner, type ApprovalSigner } from '../../blocks/GateCard';
+import { approvalFailureNote, approvalPrompt, permissionRisk, permissionView, useApprovalSigner, type ApprovalFailureCode, type ApprovalSigner } from '../../blocks/GateCard';
 import { approvalRejection } from '../../services/auth/approvalSigning';
 import { haptic } from '../../ui/platform/haptics';
 import { toast } from '../../ui/primitives/Toast';
@@ -30,7 +30,14 @@ export function useAnswerPermission(
         // Success haptics fire on the server's confirmation (MD-78).
         haptic(behavior === 'allow' ? 'success' : 'warning');
       } catch (error) {
+        // A prompt that ended without a signature: the signer already holds the visible note (the card shows it).
         if ((error as { cancelled?: boolean }).cancelled) throw error;
+        const code = (error as { approvalCode?: string }).approvalCode;
+        if (code && code !== 'failed') {
+          haptic('error');
+          toast({ kind: 'error', message: approvalFailureNote(code as ApprovalFailureCode, 'sign', signer.noun) });
+          throw error;
+        }
         // 409: another device answered first; the stream settles the card.
         if (error instanceof ApiError && error.status === 409) return;
         const rejection = approvalRejection(error);

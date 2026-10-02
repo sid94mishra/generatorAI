@@ -112,6 +112,7 @@ export function TranscriptView({ chatId, streamKey, messages, hasMore, loadingMo
       buildTranscriptItems(
         messages ?? [],
         {
+          status: view.status,
           serverTurnId: view.serverTurnId,
           pendingUserMessage: view.pendingUserMessage,
           turnUserMessage: view.turnUserMessage,
@@ -123,7 +124,7 @@ export function TranscriptView({ chatId, streamKey, messages, hasMore, loadingMo
         { results: scm.data, liveTurnIds: liveScmTurnIds(useStreamStore.getState().streams[streamKey]?.blocks) },
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `view.signature` stands in for the live blocks array.
-    [messages, scm.data, streamKey, view.serverTurnId, view.pendingUserMessage, view.turnUserMessage, view.turnId, view.blockCount, view.signature, activityLabel],
+    [messages, scm.data, streamKey, view.status, view.serverTurnId, view.pendingUserMessage, view.turnUserMessage, view.turnId, view.blockCount, view.signature, activityLabel],
   );
 
   // A gate card grows the bottom of the screen; a reader at the end stays at the end.
