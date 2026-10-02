@@ -17,7 +17,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { LegendList } from '@legendapp/list/react-native';
-import { router, usePathname } from 'expo-router';
+import { router, useLocalSearchParams, usePathname } from 'expo-router';
 import { useWorkflowRuns, useWorkflows } from '../../../src/features/workflows/queries';
 import { useAutomations } from '../../../src/features/automations/queries';
 import { useScripts } from '../../../src/features/scripts/queries';
@@ -65,6 +65,13 @@ export default function WorkScreen(): React.ReactElement {
   const [query, setQuery] = useState('');
   const listRef = useRef<never>(null);
   const listBottom = useSafeAreaInsets().bottom + 24;
+  // `/workflows/new` links (command/workflow.new) arrive as `?new=1`: the template picker (MD-145).
+  const { new: createParam } = useLocalSearchParams<{ new?: string }>();
+  const [handledCreate, setHandledCreate] = useState<string | undefined>(undefined);
+  if (createParam === '1' && handledCreate !== createParam) {
+    setHandledCreate(createParam);
+    if (segment === 'workflows' && workflowEdit.available) setTemplates(true);
+  }
 
   const runs = useWorkflowRuns();
 

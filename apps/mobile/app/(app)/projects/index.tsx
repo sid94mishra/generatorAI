@@ -22,7 +22,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { LegendList } from '@legendapp/list/react-native';
-import { router, usePathname } from 'expo-router';
+import { router, useLocalSearchParams, usePathname } from 'expo-router';
 import { useProjects } from '../../../src/features/projects/queries';
 import { useAgents } from '../../../src/features/agents/queries';
 import { Archive, Bot, FolderGit2, Plus } from 'lucide-react-native';
@@ -77,6 +77,14 @@ export default function ProjectsScreen(): React.ReactElement {
   const [locked, setLocked] = useState(false);
   const [menuFor, setMenuFor] = useState<ProjectActionTarget | null>(null);
   const projectEdit = useFeature('projectEdit');
+  // `/projects/new` links arrive as `?new=1`: the create sheet, or the reason it is locked (MD-145).
+  const { new: createParam } = useLocalSearchParams<{ new?: string }>();
+  const [handledCreate, setHandledCreate] = useState<string | undefined>(undefined);
+  if (createParam === '1' && handledCreate !== createParam && segment === 'projects') {
+    setHandledCreate(createParam);
+    if (projectEdit.available) setCreating(true);
+    else setLocked(true);
+  }
   const listRef = useRef<never>(null);
 
   const projects = useProjects();

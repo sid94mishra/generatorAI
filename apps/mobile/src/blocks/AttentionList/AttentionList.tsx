@@ -9,6 +9,7 @@ import { attentionItemRoute, selectNeedsYou, selectRunning } from '@generatorai/
 import type { AttentionItem } from '@generatorai/shared';
 
 import { useAuth } from '../../services/auth/AuthProvider';
+import { mobileRoute } from '../../services/navigation/mobileRoutes';
 import { useAttention } from '../../services/stream/AttentionProvider';
 import { DrawerLiveRow, DrawerSection } from '../../ui/layout/Drawer';
 import { EntityRow } from '../../ui/layout/EntityRow';
@@ -45,8 +46,10 @@ export function useOpenAttentionItem(onNavigate?: () => void): (item: AttentionI
   const { serverId } = useAuth();
   return (item) => {
     const route = serverId ? attentionItemRoute(item, serverId) : null;
+    // The server's web-shaped href, mapped onto the mobile tree (screens that land later open their nearest parent).
+    const pathname = route ? mobileRoute(route.pathname) : null;
     onNavigate?.();
-    if (route) router.push({ pathname: route.pathname as never, params: route.params });
+    if (route && pathname) router.push({ pathname: pathname as never, params: route.params });
   };
 }
 
