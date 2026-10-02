@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { cn } from './cn';
-import { formatBytes, formatCount, formatElapsed, formatRelativeShort, spokenElapsed, spokenRelative } from './format';
+import { errorText, formatBytes, formatCount, formatElapsed, formatRelativeShort, spokenElapsed, spokenRelative } from './format';
 import { tid } from './testIds';
 
 describe('cn (mobile 02 §9.7)', () => {
@@ -37,6 +37,10 @@ describe('format', () => {
     expect(formatRelativeShort('2026-09-30T12:00:00Z', now)).toBe('2d');
     expect(formatRelativeShort('nope', now)).toBe('');
     expect(spokenRelative('2026-10-02T11:59:00Z', now)).toBe('1 minute ago');
+    expect(errorText(new Error('Network request failed\n    at fetch (x.js:1)'))).toBe('Network request failed');
+    expect(errorText({ message: 'Forbidden', status: 403 })).toBe('Forbidden (403)');
+    expect(errorText({ code: 'ECONNREFUSED' })).toBe('Something went wrong. (ECONNREFUSED)');
+    expect(errorText(undefined)).toBe('Something went wrong.');
   });
 });
 

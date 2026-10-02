@@ -15,8 +15,8 @@ import { useThemeColors } from '../../lib/themeColors';
 import { ProgressIndicator } from '../../native/ProgressIndicator';
 import { useSizeClass } from '../../platform/breakpoints';
 import { nativePlatform } from '../../platform/geometry';
-import { Button } from '../../primitives/Button';
-import { Text } from '../../primitives/Text';
+import { ErrorState } from '../../primitives/ErrorState';
+import { OfflineState } from '../../primitives/OfflineState';
 import type { ScreenProps } from './Screen.types';
 import { READING_WIDTH, screenBody, stateAnnouncement } from './screenModel';
 
@@ -33,19 +33,15 @@ function StateBody({ state }: { state: NonNullable<ScreenProps['state']> }): Rea
     case 'empty':
       return state.empty;
     case 'error':
-      // M4-09 replaces this with ErrorState.
       return (
-        <View accessibilityRole="alert" className="flex-1 items-center justify-center gap-3 p-8">
-          <Text role="headline" align="center">
-            {state.title ?? "Couldn't load"}
-          </Text>
-          <Button label="Retry" variant="ghost" icon="retry" onPress={state.onRetry} />
+        <View className="flex-1 justify-center">
+          <ErrorState title={state.title ?? "Couldn't load"} error={state.error} onRetry={state.onRetry} />
         </View>
       );
     case 'offline':
       return (
-        <View className="flex-1 items-center justify-center p-8">
-          <Text role="headline">Offline</Text>
+        <View className="flex-1 justify-center">
+          <OfflineState form="screen" state="unreachable" />
         </View>
       );
     default:

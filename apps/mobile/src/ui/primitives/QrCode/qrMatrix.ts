@@ -5,7 +5,7 @@
 // well-tested library the web app renders its pairing QR with. Only the
 // core is imported: it is pure JS with no canvas, DOM or Node dependency, so
 // it runs unchanged on Hermes and the web preview. Drawing is left to
-// `QrCode.tsx` (react-native-svg).
+// `QrCode.tsx` (react-native-svg; MP-50).
 // ────────────────────────────────────────────────────────────────
 
 import { create } from 'qrcode/lib/core/qrcode';

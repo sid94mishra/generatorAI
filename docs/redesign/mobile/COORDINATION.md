@@ -92,3 +92,5 @@ It also records every merge of `desktop_redesign` into this branch.
 | 2026-10-02 | M4-07 | `packages/design-tokens/src/icons.ts`: `MOBILE_ICON_CONCEPTS` gains `grip` (lucide `grip-vertical`, SF `line.3.horizontal`, Material `drag_indicator`; 02 §5.1); `pnpm-lock.yaml` (apps/mobile: `react-native-reorderable-list` 0.18.1, JS only) | additive; web unaffected (web typecheck green) | ReorderList (MD-132). |
 
 | 2026-10-02 | M4-08 | `packages/design-tokens/src/icons.ts`: `MOBILE_ICON_CONCEPTS` gains `latest` (lucide `arrow-down`, SF `arrow.down`, Material `arrow_downward`; 02 §5.1) | additive; web unaffected (web typecheck green) | ScrollToLatest (MD-133). |
+
+| 2026-10-02 | M4-09 | `packages/shared/src/ui-contract/copy.ts`: `EMPTY_STATE_COPY` gains 14 keys (`archivedChats`, `changes`, `backgroundTasks`, `plan`, `worktrees`, `executions`, `skills`, `prompts`, `mcpServers`, `templates`, `extensions`, `accessRequests`, `versions`, `builderEmpty`; copy from mobile 10-design-feedback MDF-136) | additive; `EmptyStateKey` widens; no web consumer reads the new keys (web typecheck green) | Mobile EmptyState (MD-134). shared typecheck + 445 tests green. |

@@ -180,6 +180,21 @@ export const EMPTY_STATE_COPY = {
   running: { icon: 'status-running', title: 'Nothing running', description: 'Started chats and runs appear here.' },
   recentlyFinished: { icon: 'status-succeeded', title: 'Nothing finished yet', description: 'Completed chats and runs appear here.' },
   searchResults: { icon: 'search', title: 'No results', description: 'Try a different search.' },
+  // Mobile states (mobile 10-design-feedback MDF-136, added additively in M4-09).
+  archivedChats: { icon: 'archive', title: 'No archived chats', description: 'Chats you archive appear here.' },
+  changes: { icon: 'changes', title: 'No changes', description: 'Files the agent changes appear here.' },
+  backgroundTasks: { icon: 'tasks', title: 'No background tasks', description: 'Work the orchestrator delegates appears here.' },
+  plan: { icon: 'plan', title: 'No plan yet', description: 'Plans the agent writes appear here.' },
+  worktrees: { icon: 'branch', title: 'No worktrees', description: 'Worktrees appear when a chat or run starts here.' },
+  executions: { icon: 'activity', title: 'No executions yet', description: 'Each run of this automation appears here.' },
+  skills: { icon: 'skills', title: 'No skills', description: 'Upload a skill to teach agents a task.' },
+  prompts: { icon: 'message', title: 'No prompts', description: 'Saved prompts appear here.' },
+  mcpServers: { icon: 'mcp', title: 'No MCP servers', description: 'Add a server to give agents more tools.' },
+  templates: { icon: 'layout', title: 'No templates', description: 'Templates appear here.' },
+  extensions: { icon: 'layers', title: 'No extensions', description: 'Installed extensions appear here.' },
+  accessRequests: { icon: 'key', title: 'No access requests', description: 'Requests from other devices appear here.' },
+  versions: { icon: 'history', title: 'No earlier versions', description: 'Published versions appear here.' },
+  builderEmpty: { icon: 'workflows', title: 'No stages yet', description: 'Add the first stage to start.' },
 } as const satisfies Record<string, EmptyStateCopy>;
 
 export type EmptyStateKey = keyof typeof EMPTY_STATE_COPY;

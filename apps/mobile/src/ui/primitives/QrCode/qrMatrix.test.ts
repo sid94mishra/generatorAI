@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { qrMatrix, qrPath } from '../qrMatrix';
+import { qrMatrix, qrPath } from './qrMatrix';
 
 /** A 7×7 finder pattern: dark ring, light ring, dark 3×3 core. */
 function hasFinder(m: ReturnType<typeof qrMatrix>, top: number, left: number): boolean {

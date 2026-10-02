@@ -73,3 +73,18 @@ export function spokenRelative(iso: string, now: number = Date.now()): string {
   if (s < 7 * 86_400) return unit(Math.floor(s / 86_400), 'day');
   return `on ${shortDate.format(t)}`;
 }
+
+/** A human line for an error (03 MP-33): the message's first line, never a stack; a status code is appended in parentheses. */
+export function errorText(error: unknown): string {
+  const fallback = 'Something went wrong.';
+  if (typeof error === 'string') return error.split('\n')[0]?.trim() || fallback;
+  if (error && typeof error === 'object') {
+    const e = error as { message?: unknown; status?: unknown; code?: unknown };
+    const message = typeof e.message === 'string' ? e.message.split('\n')[0]!.trim() : '';
+    const code = typeof e.status === 'number' ? String(e.status) : typeof e.code === 'string' ? e.code : '';
+    if (message && code && !message.includes(code)) return `${message} (${code})`;
+    if (message) return message;
+    if (code) return `${fallback} (${code})`;
+  }
+  return fallback;
+}
