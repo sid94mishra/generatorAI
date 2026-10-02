@@ -1,0 +1,26 @@
+appId: ${APP_ID}
+name: chat · composer "+" menu, slash and mention popovers
+# Part of the web-preview e2e/flow3.mjs (08 §6.3; flow3 goes with pane/browser.yaml in M6-10). M6-04 (MB-01, MD-63).
+tags: [smoke, chat]
+env: {FRESH_CHAT: stream}
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///chats/${CHAT_STREAM_ID}
+- extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- assertVisible: {id: composer-send, enabled: false}
+- tapOn: {id: composer-input}
+- inputText: /
+- extendedWaitUntil: {visible: {id: composer-suggestions}, timeout: 15000}
+- assertVisible: "Commands & skills"
+- eraseText
+- inputText: "@"
+- extendedWaitUntil: {visible: {id: composer-suggestions}, timeout: 15000}
+- eraseText
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
+- tapOn: {id: composer-options}
+- assertVisible: "Attach file"
+- assertVisible: "Commands & skills"
+- assertVisible: "Mention file"

@@ -22,29 +22,27 @@ import type { SharedValue } from 'react-native-reanimated';
 import { ApiError, composerReducer, createComposerState, selectCanSend, type AgentMode, type ChatMessage } from '@generatorai/client-core';
 import { COMPUTER_USE_SKILL_ID } from '@generatorai/shared';
 
-import { useApi } from '../../../services/api/useApi';
-import { useAuth } from '../../../services/auth/AuthProvider';
-import { checkFeature } from '../../../services/auth/featureGate';
-import { PREF_KEYS, prefs } from '../../../services/storage/prefs';
-import { useToast } from '../../ui/Toast';
-import { haptics } from '../../ui/haptics';
-import { announce } from '../../ui/accessibility';
-import { useVoiceInput } from '../../../services/voice/useVoiceInput';
-import { commitDictation, type CommittedRange } from '../../../services/voice/dictationCommit';
-import { readPushToTalk } from '../../../services/voice/pushToTalk';
-import { applyMenuSelection, detectMenu } from '../composerMenu';
-import { pickAttachments } from './attachmentPickers';
-import { attachmentKindFor, validateAttachment } from './attachmentPolicy';
-import { createDraftStore } from './draftStore';
+import { useApi } from '../../services/api/useApi';
+import { useAuth } from '../../services/auth/AuthProvider';
+import { checkFeature } from '../../services/auth/featureGate';
+import { PREF_KEYS, prefs } from '../../services/storage/prefs';
+import { announce, haptics, notify } from './notify';
+import { useVoiceInput } from '../../services/voice/useVoiceInput';
+import { commitDictation, type CommittedRange } from '../../services/voice/dictationCommit';
+import { readPushToTalk } from '../../services/voice/pushToTalk';
+import { applyMenuSelection, detectMenu } from './model/composerMenu';
+import { pickAttachments } from './model/attachmentPickers';
+import { attachmentKindFor, validateAttachment } from './model/attachmentPolicy';
+import { createDraftStore } from './model/draftStore';
 import {
   caretLine,
   historyForSheet,
   mergePromptHistory,
   stepHistory,
-} from './promptHistory';
-import { buildSlashItems, rankMentionItems, rankSlashItems } from './composerCatalog';
-import { captureToAttachment, insertCaptureIntoDraft, type CaptureInput } from './captures';
-import type { ComposerCaptureActions } from './captureContext';
+} from './model/promptHistory';
+import { buildSlashItems, rankMentionItems, rankSlashItems } from './model/composerCatalog';
+import { captureToAttachment, insertCaptureIntoDraft, type CaptureInput } from './model/captures';
+import type { ComposerCaptureActions } from './model/captureContext';
 import { useCaptures } from './useCaptures';
 import type {
   AttachmentSource,
@@ -53,8 +51,8 @@ import type {
   PromptHistoryEntry,
   SlashItem,
   VoiceUiState,
-} from './types';
-import type { ComposerControlledProps } from '../Composer';
+} from './model/types';
+import type { ComposerControlledProps } from './Composer.types';
 
 export type ComposerPane = NonNullable<SlashItem['pane']>;
 
@@ -147,7 +145,7 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
   const api = useApi();
   const { fetch: authedFetch, serverId } = useAuth();
   const { clearDraft, readDraft, readLocalHistory, recordSentPrompt, writeDraft } = useMemo(() => createDraftStore(serverId), [serverId]);
-  const toast = useToast();
+  const toast = notify;
 
   const upload = checkFeature('fileUpload', scopes);
   const voiceFeature = checkFeature('voice', scopes);
@@ -161,7 +159,9 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
   }));
   const draft = machine.draft.text;
   const draftRef = useRef(draft);
-  draftRef.current = draft;
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
   const [caret, setCaretState] = useState(0);
   const caretRef = useRef(0);
   const [pendingSelection, setPendingSelection] = useState<number | null>(null);
@@ -274,7 +274,9 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
   // ── Attachments ────────────────────────────────────────────────
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const attachmentsRef = useRef(attachments);
-  attachmentsRef.current = attachments;
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
   const [attachPending, setAttachPending] = useState(false);
 
   const addAttachment = useCallback(
@@ -361,10 +363,9 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
   const menu = useMemo(() => detectMenu(draft, caret), [draft, caret]);
   const [slashWanted, setSlashWanted] = useState(false);
   const [mentionsWanted, setMentionsWanted] = useState(false);
-  useEffect(() => {
-    if (menu?.kind === 'slash' && !slashWanted) setSlashWanted(true);
-    if (menu?.kind === 'mention' && !mentionsWanted) setMentionsWanted(true);
-  }, [menu, slashWanted, mentionsWanted]);
+  // The sources load the first time a trigger is typed (state adjusted during render, not in an effect).
+  if (menu?.kind === 'slash' && !slashWanted) setSlashWanted(true);
+  if (menu?.kind === 'mention' && !mentionsWanted) setMentionsWanted(true);
 
   const skills = useQuery({
     queryKey: ['system', 'artifacts', 'skill'],

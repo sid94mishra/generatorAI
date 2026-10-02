@@ -8,7 +8,7 @@ import {
   noteActiveTerminal,
   noteTerminalSelection,
   pickCaptureSession,
-} from '../terminalFocus';
+} from './terminalFocus';
 
 describe('terminalFocus', () => {
   beforeEach(() => _resetTerminalFocusForTests());

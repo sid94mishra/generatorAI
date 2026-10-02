@@ -19,9 +19,9 @@
 import { useCallback, useMemo } from 'react';
 import { ApiError, createApiClient, createAdminApi } from '@generatorai/client-core';
 
-import { shortError } from '../../../services/lib/shortError';
-import { bytesToBase64, utf8Decode } from '../../../services/lib/base64';
-import { currentTerminalSelection, pickCaptureSession } from '../../../terminal/terminalFocus';
+import { shortError } from '../../services/lib/shortError';
+import { bytesToBase64, utf8Decode } from '../../services/lib/base64';
+import { currentTerminalSelection, pickCaptureSession } from '../../services/terminal/terminalFocus';
 import {
   captureDestination,
   formatPageText,
@@ -32,8 +32,8 @@ import {
   terminalCaptureName,
   type CaptureInput,
   type TerminalCaptureLines,
-} from './captures';
-import type { ComposerCaptureActions } from './captureContext';
+} from './model/captures';
+import type { ComposerCaptureActions } from './model/captureContext';
 
 type Toast = (request: { message: string; variant?: 'info' | 'success' | 'warning' | 'danger'; duration?: number }) => void;
 

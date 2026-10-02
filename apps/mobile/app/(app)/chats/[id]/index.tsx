@@ -79,16 +79,15 @@ import { useStreamHealth } from '../../../../src/services/stream/streamHealth';
 import { useAuth } from '../../../../src/services/auth/AuthProvider';
 import { checkFeature } from '../../../../src/services/auth/featureGate';
 import { useTextToSpeech } from '../../../../src/services/voice/useTextToSpeech';
-import { Composer, type ComposerPane } from '../../../../src/components/chat/Composer';
+import { Composer, type ComposerPane } from '../../../../src/blocks/Composer/Composer';
 import { READ_ALOUD_ENABLED } from '../../../../src/components/chat/featureFlags';
 import {
   useComposerController,
   type ComposerController,
-} from '../../../../src/components/chat/composer/useComposerController';
-import { readAllAttachmentBytes } from '../../../../src/components/chat/composer/attachmentPickers';
+} from '../../../../src/blocks/Composer/useComposerController';
+import { readAllAttachmentBytes } from '../../../../src/blocks/Composer/model/attachmentPickers';
 import { sendChatPrompt } from '../../../../src/services/api/sendChatPrompt';
-import type { ComposerSendPayload, WorkspacePrepState } from '../../../../src/components/chat/composer/types';
-import type { BoundAgentProps } from '../../../../src/components/chat/composer/ComposerBanners';
+import type { ComposerSendPayload, WorkspacePrepState } from '../../../../src/blocks/Composer/model/types';
 import { bytesToBase64 } from '../../../../src/services/lib/base64';
 import { PermissionCard, PlanCard, QuestionCard, ResolvedGateRow, permissionRisk } from '../../../../src/blocks/GateCard';
 import { useAnswerPermission } from '../../../../src/features/chat/useAnswerPermission';
@@ -110,13 +109,13 @@ import { displayChatName } from '../../../../src/components/common/chatName';
 import { describeSessionTransport } from '../../../../src/components/chat/sessionTransport';
 import { TranscriptView, type TranscriptActions } from '../../../../src/blocks/TranscriptView';
 import { mobileRoute } from '../../../../src/services/navigation/mobileRoutes';
-import { selectChatView } from '../../../../src/blocks/TranscriptView/model/selectChatView';
-import { ComposerCaptureContext } from '../../../../src/components/chat/composer/captureContext';
+import { activityLabelFor, selectChatView } from '../../../../src/blocks/TranscriptView/model/selectChatView';
+import { ComposerCaptureContext } from '../../../../src/blocks/Composer/model/captureContext';
 import { useTasksSummary } from '../../../../src/components/chat/panes/useTasksSummary';
 import { paneTabForTool, useWorkbenchPane, type ToolFocus } from '../../../../src/components/workbench/useWorkbenchPane';
 import { InspectorSection } from '../../../../src/components/chat/panes/InspectorSection';
 import { usePaneStore, usePaneToggle } from '../../../../src/blocks/WorkspacePane';
-import { chatHref, stepHref } from '../../../../src/blocks/shell/hrefs';
+import { chatHref, stepHref, turnHref } from '../../../../src/blocks/shell/hrefs';
 import { useWorkbench } from '../../../../src/components/workbench/useWorkbench';
 import { toolForSection, type ToolId } from '../../../../src/components/workbench/workbenchModel';
 import { ChangesTray } from '../../../../src/components/chat/panes/ChangesTray';
@@ -688,7 +687,7 @@ export default function ChatScreen(): React.ReactElement {
         workspacePrep?: WorkspacePrepState;
       }
     | undefined;
-  const boundAgent = useMemo<BoundAgentProps | null>(() => {
+  const boundAgent = useMemo<{ name: string; ref: string; role?: 'agent' | 'orchestrator' } | null>(() => {
     const driving = chatExtras?.agentSnapshot?.driving;
     if (driving) return { name: driving.name, ref: driving.ref, ...(driving.role ? { role: driving.role } : {}) };
     if (chatExtras?.agentRef) return { name: chatExtras.agentRef.split(':').pop() ?? chatExtras.agentRef, ref: chatExtras.agentRef };
@@ -958,29 +957,20 @@ export default function ChatScreen(): React.ReactElement {
           onStop={stop.press}
           stopState={stop}
           isStreaming={isStreaming}
-          // The server rejects a prompt with 409 while a gate is open, and
-          // an archived chat does not accept turns at all. With `gate` set
-          // the field stays editable so "Cancel and send" has a draft.
+          // The server rejects a prompt with 409 while a gate is open, and an archived chat does not accept turns
+          // at all. With `gate` set the field stays editable so "Cancel and send" has a draft (D-29).
           disabled={blocked || archived}
-          disabledReason={archived ? 'This chat is archived.' : blocked ? 'Answer above to continue.' : undefined}
+          disabledReason={archived ? 'This chat is archived.' : undefined}
           gate={gate}
-          boundAgent={boundAgent}
+          agent={boundAgent ? { name: boundAgent.name, ...(boundAgent.role ? { role: boundAgent.role } : {}) } : null}
+          modelLabel={modelLabel}
+          onModelPress={() => {
+            Keyboard.dismiss();
+            router.push(turnHref(chatId!) as never);
+          }}
+          working={isStreaming ? { label: activityLabelFor(view) } : null}
           workspacePrep={workspacePrep}
-          models={models.data}
-          modelsLoading={models.isLoading}
-          onRefreshModels={() => void models.refetch()}
-          selectedModelId={chat.data?.model ?? null}
-          onSelectModel={(id) => patchChat.mutate({ model: id })}
-          mode={mode}
-          onModeChange={(next) => patchChat.mutate({ defaultAgentMode: next })}
-          effort={effort}
-          onEffortChange={(next) => patchHarness({ reasoningEffort: next })}
-          contextTier={contextTier}
-          onContextTierChange={(next) => patchHarness({ contextTier: next })}
-          permissionMode={chat.data?.permissionMode ?? 'default'}
-          onPermissionModeChange={(next) => patchChat.mutate({ permissionMode: next })}
-          contextTokens={view.contextTokens}
-          codebaseCount={codebaseCount}
+          onRequestScope={() => router.push('/scope-request' as never)}
         />
       </Animated.View>
     ),
@@ -995,7 +985,7 @@ export default function ChatScreen(): React.ReactElement {
       changes.data, openInChanges, dockGate,
       openPlan, composer.props, gate, boundAgent, workspacePrep, stop,
       isStreaming, blocked, models.data, models.isLoading, chat.data, mode, effort, contextTier,
-      view.contextTokens, codebaseCount, colors,
+      view.contextTokens, colors, modelLabel, chatId,
     ],
   );
 

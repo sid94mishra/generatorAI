@@ -28,7 +28,7 @@ import { useApi } from '../services/api/useApi';
 import { useTheme } from '../theme/ThemeProvider';
 import { KeyboardSticky } from '../components/ui/KeyboardSticky';
 import { TerminalView } from './TerminalView';
-import { forgetTerminal } from './terminalFocus';
+import { forgetTerminal } from '../services/terminal/terminalFocus';
 
 /** Same cap as the web's RightPane. */
 export const MAX_TERMINAL_TABS = 4;

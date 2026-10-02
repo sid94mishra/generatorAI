@@ -25,7 +25,7 @@ import {
   skillToCommand, computerUseSkillToCommand, promptToCommand,
   fuzzyMatch, type SlashCommand,
 } from '@generatorai/client-core';
-import { filterPaths } from '../composerMenu';
+import { filterPaths } from './composerMenu';
 import type { SlashItem } from './types';
 
 export interface ArtifactLike {

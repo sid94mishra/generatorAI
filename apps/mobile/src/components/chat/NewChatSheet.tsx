@@ -55,7 +55,7 @@ import { useAdminApi } from '../../services/api/useAdminApi';
 import { checkFeature } from '../../services/auth/featureGate';
 import { useModelGroups } from '../../services/api/useModels';
 import { useTheme } from '../../theme/ThemeProvider';
-import { PERMISSION_MODES } from './composer/turnOptions';
+import { PERMISSION_MODES } from '../../blocks/Composer/model/turnOptions';
 import {
   BROWSER_VISIBILITY_OPTIONS,
   DEFAULT_BROWSER_PICKER_VALUE,

@@ -18,7 +18,7 @@ import { FileUp, History, Play } from 'lucide-react-native';
 import { queryKeys } from '@generatorai/client-core';
 
 import { useAdminApi } from '../../services/api/useAdminApi';
-import { pickAttachments, readAttachmentBytes } from '../chat/composer/attachmentPickers';
+import { pickAttachments, readAttachmentBytes } from '../../blocks/Composer/model/attachmentPickers';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
 import { Field, Switch } from '../ui/Form';

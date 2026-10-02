@@ -62,9 +62,9 @@ import { useApi } from '../services/api/useApi';
 import { prefs } from '../services/storage/prefs';
 import { base64ToString, bytesToBase64 } from '../services/lib/base64';
 import { useTheme } from '../theme/ThemeProvider';
-import { useComposerCapture } from '../components/chat/composer/captureContext';
-import { TERMINAL_CAPTURE_LINES } from '../components/chat/composer/captures';
-import { noteActiveTerminal, noteTerminalSelection } from './terminalFocus';
+import { useComposerCapture } from '../blocks/Composer/model/captureContext';
+import { TERMINAL_CAPTURE_LINES } from '../blocks/Composer/model/captures';
+import { noteActiveTerminal, noteTerminalSelection } from '../services/terminal/terminalFocus';
 import {
   OutputBatcher,
   isOpenableLink,

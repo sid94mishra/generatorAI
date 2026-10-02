@@ -50,7 +50,7 @@ import {
 import { IconButton } from '../../ui/Button';
 import { ActionSheet, type MenuAction } from '../../ui/ActionSheet';
 import { Chip } from '../../ui/Chip';
-import { useComposerCapture } from '../composer/captureContext';
+import { useComposerCapture } from '../../../blocks/Composer/model/captureContext';
 import { EmptyState, ErrorState, LoadingState, Spinner } from '../../ui/States';
 import { Field } from '../../ui/Form';
 import { useToast } from '../../ui/Toast';

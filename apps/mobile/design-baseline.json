@@ -106,25 +106,6 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 10,
       "mobile-design/design/defaultRadius": 1
     },
-    "src/components/chat/Composer.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/legacyTokenUtility": 11,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 14,
-      "mobile-design/design/defaultTextSize": 2,
-      "mobile-design/design/literalInlineStyle": 9,
-      "mobile-design/design/defaultRadius": 1
-    },
-    "src/components/chat/ModelSheet.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "react-hooks/set-state-in-effect/diagnostic": 1,
-      "mobile-design/design/literalInlineStyle": 3,
-      "mobile-design/design/defaultRadius": 3,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 22,
-      "mobile-design/design/legacyTokenUtility": 13,
-      "mobile-design/design/defaultTextSize": 6
-    },
     "src/components/chat/NewChatSheet.tsx": {
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
@@ -145,13 +126,6 @@
       "mobile-design/design/legacyTokenUtility": 3,
       "better-tailwindcss/no-restricted-classes/diagnostic": 6
     },
-    "src/components/chat/TurnOptionsSheet.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultTextSize": 4,
-      "mobile-design/design/legacyTokenUtility": 4,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 8
-    },
     "src/components/chat/UsageFooter.tsx": {
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
@@ -159,55 +133,6 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 12,
       "mobile-design/design/legacyTokenUtility": 7,
       "mobile-design/design/defaultTextSize": 4
-    },
-    "src/components/chat/composer/AttachmentChips.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultRadius": 2,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 13,
-      "mobile-design/design/legacyTokenUtility": 8,
-      "mobile-design/design/literalInlineStyle": 3,
-      "mobile-design/design/defaultTextSize": 3
-    },
-    "src/components/chat/composer/ComposerBanners.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultRadius": 4,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 21,
-      "mobile-design/design/legacyTokenUtility": 13,
-      "mobile-design/design/defaultTextSize": 4
-    },
-    "src/components/chat/composer/GaugeSheet.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultTextSize": 6,
-      "mobile-design/design/legacyTokenUtility": 6,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 12
-    },
-    "src/components/chat/composer/HistorySheet.tsx": {
-      "mobile-design/design/lucideDirectImport": 1
-    },
-    "src/components/chat/composer/SuggestionStrip.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/defaultTextSize": 4,
-      "mobile-design/design/legacyTokenUtility": 5,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 10,
-      "mobile-design/design/defaultRadius": 1
-    },
-    "src/components/chat/composer/VoicePill.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "mobile-design/design/literalInlineStyle": 2,
-      "mobile-design/design/arbitraryValue": 1,
-      "mobile-design/design/defaultRadius": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 9,
-      "mobile-design/design/legacyTokenUtility": 5,
-      "mobile-design/design/defaultTextSize": 3
-    },
-    "src/components/chat/composer/useComposerController.ts": {
-      "react-hooks/refs/diagnostic": 2,
-      "react-hooks/set-state-in-effect/diagnostic": 1
     },
     "src/components/chat/panes/ChangesTray.tsx": {
       "mobile-design/design/rawTextImport": 1,
@@ -927,7 +852,7 @@
       "mobile-design/design/platformOs": 2,
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 29,
+      "boundaries/dependencies/diagnostic": 23,
       "react-hooks/refs/diagnostic": 5,
       "react-hooks/preserve-manual-memoization/diagnostic": 4,
       "mobile-design/design/legacyTokenUtility": 10,

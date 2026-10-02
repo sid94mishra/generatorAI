@@ -16,6 +16,8 @@ export const PROJECTS_HREF = '/projects';
 export const PAIR_HREF = '/pair';
 
 export const chatHref = (chatId: string): string => `/chats/${seg(chatId)}`;
+/** The Turn sheet (MB-02). */
+export const turnHref = (chatId: string): string => `${chatHref(chatId)}/turn`;
 /** Step detail (MB-14): a tool call of the chat by its call id. */
 export const stepHref = (chatId: string, callId: string): string => `${chatHref(chatId)}/steps/${seg(callId)}`;
 export const gateHref = (chatId: string, interactionId: string): string => `${chatHref(chatId)}/gate/${seg(interactionId)}`;
