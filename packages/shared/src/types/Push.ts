@@ -1,3 +1,4 @@
+import type { GateRisk } from '../security/gateRisk.js';
 import type { AttentionEntity } from './Attention.js';
 
 /** Push envelope. v2 routes pin the server and use the same paths as attention. */
@@ -15,4 +16,6 @@ export interface PushData {
   entity?: AttentionEntity;
   entityId?: string;
   workflowDefinitionId?: string;
+  /** MG-04 — a risky gate opens the app instead of offering lock-screen answers. */
+  risk?: GateRisk;
 }

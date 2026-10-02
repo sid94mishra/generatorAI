@@ -66,6 +66,20 @@ describe('planNotification — what earns an interruption', () => {
     });
   });
 
+  it('gives a risky permission gate no lock-screen actions (MG-04): it opens the app to sign', () => {
+    const base = { chatId: 'c1', interactionId: 'i1', toolName: 'Bash', inputSummary: 'git push' };
+    expect(planNotification(event('chat.permission.requested', { ...base, risk: 'risky' }))!.interaction).toEqual({
+      chatId: 'c1',
+      interactionId: 'i1',
+      kind: 'permission',
+      risk: 'risky',
+    });
+    expect(planNotification(event('chat.permission.requested', { ...base, risk: 'standard' }))!.interaction).toMatchObject({
+      actions: ['approve', 'deny'],
+      risk: 'standard',
+    });
+  });
+
   it('moves a long tool input into the body instead of truncating the title', () => {
     const inputSummary = `cat ${'src/very/deep/path/component.tsx '.repeat(4)}| grep TODO`;
     const plan = planNotification(

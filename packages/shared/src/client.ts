@@ -33,6 +33,8 @@ export * from './status/index.js';
 
 // Diff review intents, their words and the line-range label.
 export * from './review.js';
+// Mobile MG-04 — gate risk verdict
+export * from './security/gateRisk.js';
 
 // Error classes are plain `Error` subclasses.
 export * from './errors/index.js';

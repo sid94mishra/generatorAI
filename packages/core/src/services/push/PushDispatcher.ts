@@ -60,8 +60,9 @@ export interface PushMessage {
   interruption: 'active' | 'timeSensitive';
   /**
    * Expo/UNNotification category identifier. The app registers an
-   * `approval` category with Allow/Deny buttons at startup, so every
-   * approval notification names it — the OS then renders the buttons.
+   * `approval` category with Allow/Deny buttons at startup; a push names it
+   * only when it carries those actions (a standard permission gate), so the
+   * OS renders buttons only where a lock-screen answer is allowed (MG-04).
    */
   categoryId?: string;
 }
@@ -140,7 +141,9 @@ export class PushDispatcher {
         data: { ...buildData(plan), ...(this.ports.serverId ? pushRouting(plan, this.ports.serverId, workflowDefinitionId) : {}) },
         threadId: plan.threadId,
         interruption: plan.interruption,
-        ...(plan.category === 'approval' ? { categoryId: APPROVAL_CATEGORY_ID } : {}),
+        // The Allow/Deny category only where the push carries those actions: a
+        // risky gate (MG-04) and a run approval (MD-31) open the app instead.
+        ...(plan.interaction?.actions?.length ? { categoryId: APPROVAL_CATEGORY_ID } : {}),
       });
       this.recentlySent.set(dedupeKey(target.deviceId, plan), now);
     }
@@ -210,6 +213,7 @@ function buildData(plan: NotificationPlan): PushData {
     data.interactionId = gate.interactionId;
     data.kind = gate.kind;
     if (gate.actions && gate.actions.length > 0) data.actions = [...gate.actions];
+    if (gate.risk) data.risk = gate.risk;
   }
   return data;
 }

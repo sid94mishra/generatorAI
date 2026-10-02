@@ -239,11 +239,24 @@ describe('PushDispatcher — delivery outcomes', () => {
     });
   });
 
-  it('names the approval category for every approval, but never for other categories', () => {
+  it('names the Allow/Deny category only for a push that carries those actions (MG-04)', () => {
     const { dispatcher } = makeDispatcher([target()]);
+    const permission = (interactionId: string, risk: string) => ({
+      kind: 'chat.permission.requested',
+      data: { chatId: 'c1', interactionId, toolName: 'Bash', risk },
+    });
+    const [standard] = dispatcher.handleEvent(permission('i1', 'standard'));
+    expect(standard!.categoryId).toBe('approval');
+    expect(standard!.data).toMatchObject({ actions: ['approve', 'deny'], risk: 'standard' });
+
+    const [risky] = makeDispatcher([target()]).dispatcher.handleEvent(permission('i2', 'risky'));
+    expect(risky!.categoryId).toBeUndefined();
+    expect(risky!.data.actions).toBeUndefined();
+    expect(risky!.data.risk).toBe('risky');
+
+    // A workflow approval opens the run (MD-31), with no per-gate fields.
     const [approval] = dispatcher.handleEvent(gate);
-    expect(approval!.categoryId).toBe('approval');
-    // A workflow gate has no chat interaction, so no per-gate fields leak in.
+    expect(approval!.categoryId).toBeUndefined();
     expect(approval!.data).toEqual({ route: '/runs/r1', category: 'approval', threadId: 'run:r1' });
 
     const [done] = dispatcher.handleEvent({

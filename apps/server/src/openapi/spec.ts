@@ -978,6 +978,11 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
                 type: 'array',
                 items: { type: 'string', enum: ['allow_once', 'deny', 'approve', 'reject', 'answer', 'open'] },
               },
+              risk: {
+                type: 'string',
+                enum: ['standard', 'risky'],
+                description: 'Tool-permission gates only (MG-04): a risky gate needs a signed answer from a phone.',
+              },
             },
             required: ['kind', 'id', 'summary', 'actions'],
           },

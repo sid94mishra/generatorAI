@@ -1073,6 +1073,7 @@ export class StreamEventRouter {
             inputSummary: str(data['inputSummary']),
             permissionMode: str(data['permissionMode']),
             status: 'pending',
+            ...(data['risk'] === 'risky' || data['risk'] === 'standard' ? { risk: data['risk'] } : {}),
           },
         });
         out.push({ op: 'invalidate', resource: 'interactions', ...chatId() });

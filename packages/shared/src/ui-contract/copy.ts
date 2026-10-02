@@ -14,6 +14,8 @@ export const PERMISSION_GATE_COPY = {
   titleAllowed: 'Tool call allowed',
   titleDenied: 'Tool call denied',
   titleExpired: 'Permission request expired',
+  /** MG-04 — the server marked the gate risky (a phone must sign the answer). */
+  risky: 'Risky',
   actions: {
     deny: 'Deny',
     allow_once: 'Allow once',

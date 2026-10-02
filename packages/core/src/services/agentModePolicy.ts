@@ -18,7 +18,7 @@ import type {
   HarnessPermissionMode,
   PermissionRequest,
 } from '../domain/ports/IAgentHarness.js';
-import type { ToolPermissionRequestPayload } from '@generatorai/shared';
+import { classifyPermissionRisk, type ToolPermissionRequestPayload } from '@generatorai/shared';
 
 /** The behavioural contract for a mode. Re-exported so callers need one import. */
 export function resolveModeDescriptor(mode: AgentMode | undefined): AgentModeDescriptor {
@@ -181,12 +181,18 @@ export function buildToolPermissionPayload(
     for (const [k, v] of Object.entries(details)) if (!DETAIL_META_KEYS.has(k)) rest[k] = v;
     input = Object.keys(rest).length > 0 ? rest : undefined;
   }
+  const inputSummary = summariseToolInput(input);
+  // MG-04: stamped once, here, so the stored gate, its event, the attention
+  // ask and the push all carry the same verdict.
+  const { risk, reasons } = classifyPermissionRisk({ type: request.type, toolName, inputSummary });
   return {
     toolName,
     type: request.type,
     description: request.description,
-    inputSummary: summariseToolInput(input),
+    inputSummary,
     permissionMode: permissionMode as ToolPermissionRequestPayload['permissionMode'],
+    risk,
+    ...(reasons.length > 0 ? { riskReasons: reasons } : {}),
   };
 }
 

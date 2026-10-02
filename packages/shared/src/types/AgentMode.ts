@@ -21,6 +21,8 @@
  * See docs/PLAN_MODE_RESEARCH_AND_ARCHITECTURE.md
  */
 
+import type { GateRisk } from '../security/gateRisk.js';
+
 // ────────────────────────────────────────────────────────────────
 // Agent mode
 // ────────────────────────────────────────────────────────────────
@@ -368,6 +370,9 @@ export interface ToolPermissionRequestPayload {
   inputSummary: string;
   /** Effective permission mode of the turn that raised the prompt. */
   permissionMode: AgentPermissionMode;
+  /** Server verdict (MG-04): a risky gate needs a signed approval from a phone (MG-05). */
+  risk?: GateRisk;
+  riskReasons?: string[];
 }
 
 /** What the user posts back to `POST /chats/:id/interactions/:interactionId/permission`. */
@@ -388,6 +393,9 @@ export interface PermissionCardSummary {
   message?: string;
   /** See {@link PlanCardSummary.sequence}. */
   sequence?: number;
+  /** MG-04 — copied from the gate's payload. */
+  risk?: GateRisk;
+  riskReasons?: string[];
 }
 
 /** Resolution the UI posts back for a plan review gate. */

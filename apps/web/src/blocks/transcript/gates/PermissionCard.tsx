@@ -11,6 +11,9 @@
 // The board's "Always in this chat" needs a server-side standing grant the
 // permission API does not have (it answers allow | deny per request); it is
 // not rendered (D-36).
+//
+// A gate the server marked risky (mobile MG-04) carries a neutral "Risky"
+// badge; on web and desktop the answer stays a click (signing is phone-only).
 // ────────────────────────────────────────────────────────────────
 
 import { useState } from 'react';
@@ -19,6 +22,7 @@ import { PERMISSION_GATE_COPY as COPY } from '@generatorai/shared/ui-contract';
 import { GateCardFrame, type GateAction, type GateTone } from '@/ui/patterns/GateCardFrame/GateCardFrame.js';
 import { CodeBlock } from '@/ui/patterns/CodeBlock/CodeBlock.js';
 import { Icon } from '@/ui/icons/Icon.js';
+import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { InlineCode } from '@/ui/primitives/InlineCode/InlineCode.js';
 import { Input } from '@/ui/primitives/Input/Input.js';
 import { gateKeyChips, gateKeyDown } from './gateKeys.js';
@@ -109,6 +113,7 @@ export function PermissionCard({ permission, onAnswer, busy = false }: Permissio
       <div className="flex min-w-0 items-center gap-2 text-ui text-fg-2">
         <InlineCode>{toolName}</InlineCode>
         {permission.description ? <span className="min-w-0 text-fg">{permission.description}</span> : null}
+        {permission.risk === 'risky' ? <Badge className="ml-auto shrink-0">{COPY.risky}</Badge> : null}
       </div>
       {permission.inputSummary ? (
         <CodeBlock wrap className="max-h-40 overflow-auto">
