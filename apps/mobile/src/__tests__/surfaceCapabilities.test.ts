@@ -31,7 +31,7 @@ const read = (rel: string): string => readFileSync(resolve(APP_ROOT, rel), 'utf8
 
 describe('W29 — mobile fileAttachment', () => {
   //   @capability-proof mobile/fileAttachment
-  const chatScreen = read('app/(app)/chats/[id]/index.tsx');
+  const chatScreen = read('src/features/chat/ChatScreen.tsx');
   const composer = read('src/blocks/Composer/Composer.tsx');
   const composerTypes = read('src/blocks/Composer/Composer.types.ts');
   const plusMenu = read('src/blocks/Composer/model/composerView.ts');
@@ -61,9 +61,9 @@ describe('W29 — mobile fileAttachment', () => {
     expect(
       MOBILE_CAPABILITIES.fileAttachment.supported,
       wired
-        ? 'app/chats/[id].tsx now passes onAttach, so mobile can attach — set ' +
+        ? 'features/chat/ChatScreen.tsx now passes onAttach, so mobile can attach — set ' +
           'MOBILE_CAPABILITIES.fileAttachment to supported.'
-        : 'app/chats/[id].tsx passes no onAttach, so the attach button is inert — ' +
+        : 'features/chat/ChatScreen.tsx passes no onAttach, so the attach button is inert — ' +
           'MOBILE_CAPABILITIES.fileAttachment must not claim the capability.',
     ).toBe(wired);
   });

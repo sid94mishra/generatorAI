@@ -28,11 +28,11 @@ env: {FRESH_CHAT: stream}
       - pressKey: Back
       - extendedWaitUntil: {notVisible: {id: pane-tab-changes}, timeout: 10000}
       - assertVisible: {id: composer-input}
-      # 2. A sheet closes before the stack pops.
+      # 2. A menu closes before the stack pops (the chat menu, MDF-57).
       - tapOn: {id: header-chat-menu}
-      - extendedWaitUntil: {visible: "Session info", timeout: 10000}
+      - extendedWaitUntil: {visible: "Rename", timeout: 10000}
       - pressKey: Back
-      - extendedWaitUntil: {notVisible: "Session info", timeout: 10000}
+      - extendedWaitUntil: {notVisible: "Rename", timeout: 10000}
       - assertVisible: {id: composer-input}
       # 3. The chat pops (or, opened by a link with no history, walks up to Chats).
       - pressKey: Back

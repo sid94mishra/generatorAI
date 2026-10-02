@@ -15,7 +15,7 @@ import {
   rewindBlockedReason,
   rewindOptions,
   shouldRestorePrompt,
-} from '../components/chat/rewindOptions';
+} from './rewindOptions';
 
 function response(over: Partial<RewindChatResponse> = {}): RewindChatResponse {
   return {
