@@ -4,7 +4,7 @@
 // SheetFooter: the action sheet's one primary, sticky above the keyboard. Dismissal is guarded while dirty.
 import React, { useEffect } from 'react';
 import { ScrollView, View } from 'react-native';
-import { KeyboardStickyView } from 'react-native-keyboard-controller';
+import { KeyboardStickyView } from '../../lib/styled';
 
 import { cn } from '../../lib/cn';
 import { useDirtyGuard } from '../../layout/DirtyGuard/useDirtyGuard';

@@ -90,3 +90,5 @@ It also records every merge of `desktop_redesign` into this branch.
 | 2026-10-02 | M4-04 | `packages/design-tokens/src/icons.ts`: `MOBILE_ICON_CONCEPTS` gains `hide` (lucide `eye-off`, SF `eye.slash`, Material `visibility_off`; name fixed in mobile 02 §5.1) | additive; not in `ICON_CONCEPTS`, web unaffected (web typecheck green) | Input secret toggle (MD-129); registry test covers it. |
 
 | 2026-10-02 | M4-07 | `packages/design-tokens/src/icons.ts`: `MOBILE_ICON_CONCEPTS` gains `grip` (lucide `grip-vertical`, SF `line.3.horizontal`, Material `drag_indicator`; 02 §5.1); `pnpm-lock.yaml` (apps/mobile: `react-native-reorderable-list` 0.18.1, JS only) | additive; web unaffected (web typecheck green) | ReorderList (MD-132). |
+
+| 2026-10-02 | M4-08 | `packages/design-tokens/src/icons.ts`: `MOBILE_ICON_CONCEPTS` gains `latest` (lucide `arrow-down`, SF `arrow.down`, Material `arrow_downward`; 02 §5.1) | additive; web unaffected (web typecheck green) | ScrollToLatest (MD-133). |

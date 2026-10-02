@@ -7,6 +7,7 @@ import { cn } from '../../lib/cn';
 import { Icon } from '../Icon';
 import { Pressable } from '../Pressable';
 import { Text } from '../Text';
+import { useRegisterPrimary } from '../../lib/primaryAction';
 import type { ButtonProps } from './Button.types';
 import { ICON_SIZE, LABEL_ROLE, LABEL_TONE, buttonSurface } from './buttonStyles';
 
@@ -27,6 +28,7 @@ export function Button({
   accessibilityLabel,
   testID,
 }: ButtonProps): React.ReactElement {
+  useRegisterPrimary(variant === 'primary', label);
   const tone = LABEL_TONE[variant];
   const iconSize = ICON_SIZE[size];
   const inactive = disabled || loading;

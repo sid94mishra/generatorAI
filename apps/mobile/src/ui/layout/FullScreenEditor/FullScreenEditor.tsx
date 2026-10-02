@@ -5,7 +5,7 @@
 // "Discard changes?". Keyboard-aware scrolling body; optional stepper and sticky wizard bar.
 import React from 'react';
 import { View } from 'react-native';
-import { KeyboardAwareScrollView, KeyboardStickyView } from 'react-native-keyboard-controller';
+import { KeyboardAwareScrollView, KeyboardStickyView } from '../../lib/styled';
 
 import { useDirtyGuard } from '../DirtyGuard/useDirtyGuard';
 import { nativePlatform } from '../../platform/geometry';

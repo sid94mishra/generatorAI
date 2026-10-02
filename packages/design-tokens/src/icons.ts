@@ -196,6 +196,8 @@ export const MOBILE_ICON_CONCEPTS = {
   hide: { lucide: 'eye-off', sfSymbol: 'eye.slash', material: 'visibility_off' },
   /** ReorderList handle (MBuilderList, MGestures; 02 §5.1). */
   grip: { lucide: 'grip-vertical', sfSymbol: 'line.3.horizontal', material: 'drag_indicator' },
+  /** ScrollToLatest "↓ Latest" pill (02 §5.1). */
+  latest: { lucide: 'arrow-down', sfSymbol: 'arrow.down', material: 'arrow_downward' },
 } as const satisfies Record<string, IconConceptDef>;
 export type MobileIconConcept = IconConcept | keyof typeof MOBILE_ICON_CONCEPTS;
 

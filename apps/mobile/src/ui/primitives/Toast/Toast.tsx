@@ -1,14 +1,15 @@
-// MP-30 Toast (03 MP-30; MD-26, MD-58): iOS a floating capsule (h48, rounded-toast 24, glass via GlassSurface's
-// fallback recipe until M4-08) with a 600 action; Android the M3 inverse snackbar (bg-fg / text-surface, radius 8).
+// MP-30 Toast (03 MP-30; MD-26, MD-58): iOS a Liquid Glass capsule (GlassSurface `toast`: h48, radius 24) with a 600
+// action — it slides (never fades: opacity kills glass, 02 §8.2); Android the M3 inverse snackbar (bg-fg / text-surface, radius 8).
 // ToastHost shows the store's one toast bottom-centred 16 above the safe area (+ bottomOffset), times it out (never
 // while a screen reader is on), announces it, and dismisses on swipe (iOS down, Android sideways) or the "Dismiss"
 // accessibility action.
 import React, { useEffect, useState } from 'react';
 import { AccessibilityInfo, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown, SlideInDown, SlideOutDown } from 'react-native-reanimated';
 
 import { cn } from '../../lib/cn';
+import { GlassSurface } from '../../native/GlassSurface';
 import { nativePlatform } from '../../platform/geometry';
 import { useInsets } from '../../platform/insets';
 import { useReduceMotion } from '../../platform/motion';
@@ -25,13 +26,8 @@ export function Toast({ options, onAction }: { options: ToastOptions; onAction?:
   const android = nativePlatform === 'android';
   const action = toastActionLabel(options);
   const icon = options.icon ?? (options.kind === 'error' ? 'status-failed' : undefined);
-  return (
-    <View
-      className={cn(
-        'min-h-toast flex-row items-center gap-2.5 rounded-toast',
-        android ? 'bg-fg ps-4 pe-1 shadow-float' : 'border border-line bg-overlay ps-4.5 pe-1.5 shadow-float',
-      )}
-    >
+  const content = (
+    <>
       {icon ? <Icon concept={icon} size={18} tone={android ? 'surface' : options.kind === 'error' ? 'err' : 'fg-2'} /> : null}
       <Text role="subhead" tone={android ? 'surface' : 'fg'} numberOfLines={2} className="shrink py-3">
         {options.message}
@@ -43,8 +39,16 @@ export function Toast({ options, onAction }: { options: ToastOptions; onAction?:
           </Text>
         </Pressable>
       ) : null}
-    </View>
+    </>
   );
+  if (!android) {
+    return (
+      <GlassSurface radiusStep="toast" className="min-h-toast flex-row items-center gap-2.5 pe-1.5 ps-4.5">
+        {content}
+      </GlassSurface>
+    );
+  }
+  return <View className="min-h-toast flex-row items-center gap-2.5 rounded-toast bg-fg pe-1 ps-4 shadow-float">{content}</View>;
 }
 
 export function ToastHost({ bottomOffset = 0 }: ToastHostProps): React.ReactElement | null {
@@ -82,8 +86,8 @@ export function ToastHost({ bottomOffset = 0 }: ToastHostProps): React.ReactElem
         <Animated.View
           key={entry.id}
           testID={entry.options.testID}
-          entering={reduced ? FadeIn.duration(120) : FadeInDown.duration(220)}
-          exiting={reduced ? FadeOut.duration(120) : FadeOutDown.duration(180)}
+          entering={android ? (reduced ? FadeIn.duration(120) : FadeInDown.duration(220)) : reduced ? undefined : SlideInDown.duration(220)}
+          exiting={android ? (reduced ? FadeOut.duration(120) : FadeOutDown.duration(180)) : reduced ? undefined : SlideOutDown.duration(180)}
           accessibilityLiveRegion="polite"
           accessibilityRole="alert"
           accessibilityActions={[{ name: 'dismiss', label: 'Dismiss' }, ...(action ? [{ name: 'activate', label: action }] : [])]}

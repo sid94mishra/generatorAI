@@ -1,12 +1,12 @@
-// IconButton surfaces (03 MP-05). Glass is drawn by GlassSurface (MP-38, M4-08); until it lands, `glass` uses
-// GlassSurface's opaque fallback recipe on iOS (bg-overlay + border-line + shadow-float, 02 §8.2) and plain on Android.
+// IconButton surfaces (03 MP-05). The iOS `glass` circle is drawn by GlassSurface (MP-38, with its own opaque
+// fallback); Android draws `glass` plain.
 import { cva } from 'class-variance-authority';
 
 export const iconButtonSurface = cva('items-center justify-center rounded-full', {
   variants: {
     variant: {
       plain: '',
-      glass: 'ios:border ios:border-line ios:bg-overlay ios:shadow-float',
+      glass: '',
       bordered: 'border ios:border-line android:border-line-strong',
       filled: 'bg-accent android:rounded-card-lg',
       tonal: 'bg-selected',

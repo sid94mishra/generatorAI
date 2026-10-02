@@ -4,6 +4,7 @@ import React from 'react';
 import { View } from 'react-native';
 
 import { cn } from '../../lib/cn';
+import { GlassSurface } from '../../native/GlassSurface';
 import { geometry, nativePlatform } from '../../platform/geometry';
 import { Count } from '../Count';
 import { Icon } from '../Icon';
@@ -18,6 +19,18 @@ export type { IconButtonProps, IconButtonVariant } from './IconButton.types';
 export function iconButtonGlyph(size: 'sm' | 'md'): IconSize {
   if (size === 'md') return geometry().controls.header.toolbarGlyph as IconSize;
   return nativePlatform === 'android' ? 20 : 18;
+}
+
+/** The drawn circle: Liquid Glass on iOS for `glass` (GlassSurface, interactive), a plain view otherwise. */
+function Surface({ glass, className, children }: { glass: boolean; className: string; children: React.ReactNode }): React.ReactElement {
+  if (glass && nativePlatform === 'ios') {
+    return (
+      <GlassSurface radiusStep="full" interactive className={className}>
+        {children}
+      </GlassSurface>
+    );
+  }
+  return <View className={className}>{children}</View>;
 }
 
 export function IconButton({
@@ -47,7 +60,7 @@ export function IconButton({
       accessibilityLabel={label}
       accessibilityState={{ selected }}
     >
-      <View className={cn(iconButtonSurface({ variant, size, selected }))}>
+      <Surface glass={variant === 'glass'} className={cn(iconButtonSurface({ variant, size, selected }))}>
         <View className={disabled ? 'opacity-40' : undefined}>
           <Icon concept={icon} size={iconButtonGlyph(size)} tone={variant === 'filled' ? 'on-accent' : 'fg'} filled={filled} />
         </View>
@@ -60,7 +73,7 @@ export function IconButton({
             )}
           </View>
         ) : null}
-      </View>
+      </Surface>
     </Pressable>
   );
 }

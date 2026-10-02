@@ -6,7 +6,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 import { Modal, Pressable as RNPressable, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
+import { KeyboardAvoidingView } from '../../lib/styled';
 import Animated, { FadeIn, SlideInDown, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { cn } from '../../lib/cn';

@@ -3,7 +3,7 @@ import { screen, userEvent } from '@testing-library/react-native';
 import { Text } from '../Text';
 import { Popover } from './Popover';
 import { popoverAnnouncement, popoverMaxHeight, popoverOffsets } from './popoverModel';
-import { renderThemed } from '../../__tests__/themed';
+import { renderThemed, themed } from '../../__tests__/themed';
 
 describe('Popover (MP-49)', () => {
   it('places against the anchor, caps its height and announces the count', () => {
@@ -24,9 +24,11 @@ describe('Popover (MP-49)', () => {
     );
     expect(screen.queryByText('/review')).toBeNull();
     await rerender(
-      <Popover open onOpenChange={onOpenChange} anchor="composer" accessibilityLabel="Suggestions" resultCount={3} testID="pop">
-        <Text>/review</Text>
-      </Popover>,
+      themed(
+        <Popover open onOpenChange={onOpenChange} anchor="composer" accessibilityLabel="Suggestions" resultCount={3} testID="pop">
+          <Text>/review</Text>
+        </Popover>,
+      ),
     );
     expect(screen.getByTestId('pop').props.accessibilityLabel).toBe('Suggestions, 3 results');
     expect(screen.getByTestId('pop').props.accessibilityViewIsModal).toBe(false);
