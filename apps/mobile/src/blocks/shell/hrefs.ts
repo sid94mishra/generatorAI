@@ -32,6 +32,20 @@ export const automationHref = (id: string): string => `/automations/${seg(id)}`;
 export const scriptHref = (id: string): string => `/scripts/${seg(id)}`;
 export const projectHref = (id: string): string => `/projects/${seg(id)}`;
 export const codebaseHref = (projectId: string, codebaseId: string): string => `${projectHref(projectId)}/codebases/${seg(codebaseId)}`;
+export const NEW_PROJECT_HREF = '/projects/new';
+/** Project tabs are path segments (R-3); `codebases` is the project screen itself. */
+export const projectTabHref = (id: string, tab: string, query?: string): string => (tab === 'codebases' ? projectHref(id) : `${projectHref(id)}/${seg(tab)}${query ? `?${query}` : ''}`);
+export const addCodebaseHref = (projectId: string): string => `${projectHref(projectId)}/add-codebase`;
+export const codebaseFilesHref = (projectId: string, codebaseId: string): string => `${codebaseHref(projectId, codebaseId)}/files`;
+export const codebaseLogsHref = (projectId: string, codebaseId: string): string => `${codebaseHref(projectId, codebaseId)}/logs`;
+export const codebaseFileHref = (projectId: string, codebaseId: string, path: string): string => `${codebaseHref(projectId, codebaseId)}/file?path=${encodeURIComponent(path)}`;
+export const pullRequestHref = (projectId: string, codebaseId: string, number: number): string => `${codebaseHref(projectId, codebaseId)}/pull-requests/${number}`;
+export const skillHref = (projectId: string, configId: string): string => `${projectHref(projectId)}/skills/${seg(configId)}`;
+export const skillEditHref = (projectId: string, configId: string): string => `${skillHref(projectId, configId)}/edit`;
+export const AGENTS_HREF = '/agents';
+export const agentHref = (id: string): string => `/agents/${seg(id)}`;
+export const AUTOMATIONS_HREF = '/automations';
+export const SCRIPTS_HREF = '/scripts';
 export const settingsHref = (section?: string): string => (section ? `/settings/${seg(section)}` : SETTINGS_HREF);
 const query = (params: Record<string, string | null | undefined>): string => {
   const q = Object.entries(params)

@@ -9,22 +9,20 @@ import { Stack, router, usePathname } from 'expo-router';
 import { AppShell } from '../../src/blocks/shell/AppShell';
 import { LegacyStackHeader, type LegacyStackHeaderProps } from '../../src/blocks/shell/LegacyStackHeader';
 import { parentHref } from '../../src/blocks/shell/parentHref';
-import { moduleRootOptions, paletteOptions, sheetOptions, useStackScreenOptions } from '../../src/ui/platform';
+import { fullScreenModalOptions, moduleRootOptions, paletteOptions, sheetOptions, useStackScreenOptions } from '../../src/ui/platform';
 
 const MODULE_ROOTS = ['index', 'chats/index', 'projects/index', 'agents/index', 'workflows/index', 'automations/index', 'scripts/index'];
 const SHEETS = ['chats/[id]/gate/[interactionId]', 'scope-request'];
+/** Full-screen modal editors (MD-21). */
+const EDITORS = ['projects/new', 'projects/[id]/skills/[configId]/edit'];
+/** Route sheets at the large detent. */
+const LARGE_SHEETS = ['chats/[id]/turn', 'chats/new', 'workspaces/[workspaceId]/commit', 'projects/[id]/add-codebase'];
 /** Legacy details that set their title and trailing controls through navigator options. */
 const STACK_HEADER: Record<string, string> = {
   'workflows/[id]/index': 'Workflow',
   'workflows/[id]/runs/[runId]/stages/[stageRunId]': 'Stage',
   'scripts/[id]/index': 'Script',
   'automations/[id]/index': 'Automation',
-  'projects/[id]/index': 'Project',
-  'projects/[id]/[tab]': 'Project',
-  'projects/[id]/pull-requests': 'Pull requests',
-  'projects/[id]/codebases/[cid]/index': 'Codebase',
-  'projects/[id]/codebases/[cid]/files': 'Files',
-  'projects/[id]/codebases/[cid]/file': 'File',
   'projects/[id]/codebases/[cid]/pull-requests/[number]': 'Pull request',
 };
 
@@ -62,9 +60,12 @@ export default function AppLayout(): React.ReactElement {
         ))}
         <Stack.Screen name="search" options={paletteOptions} />
         <Stack.Screen name="servers" options={sheetOptions('picker')} />
-        <Stack.Screen name="chats/[id]/turn" options={sheetOptions('large')} />
-        <Stack.Screen name="chats/new" options={sheetOptions('large')} />
-        <Stack.Screen name="workspaces/[workspaceId]/commit" options={sheetOptions('large')} />
+        {LARGE_SHEETS.map((name) => (
+          <Stack.Screen key={name} name={name} options={sheetOptions('large')} />
+        ))}
+        {EDITORS.map((name) => (
+          <Stack.Screen key={name} name={name} options={fullScreenModalOptions} />
+        ))}
         {Object.entries(STACK_HEADER).map(([name, title]) => (
           <Stack.Screen
             key={name}

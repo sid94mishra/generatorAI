@@ -17,7 +17,7 @@ describe('deep links → the mobile route tree (04 §1.6, MD-145)', () => {
     ['generatorai://chats/c1/gate/i1', '/chats/c1/gate/i1'],
     ['generatorai://chats/c1/plan/p1', '/chats/c1?dock=plan&plan=p1'],
     ['generatorai://projects', '/projects'],
-    ['generatorai://projects/new', '/projects?new=1'],
+    ['generatorai://projects/new', '/projects/new'],
     ['generatorai://projects/p1/customization?kind=skills', '/projects/p1/customization?kind=skills'],
     ['generatorai://projects/p1/codebases/c1', '/projects/p1/codebases/c1'],
     ['generatorai://projects/p1/codebases/c1/worktrees', '/projects/p1/codebases/c1'],

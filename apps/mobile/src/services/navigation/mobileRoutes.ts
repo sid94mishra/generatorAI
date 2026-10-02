@@ -22,7 +22,7 @@ const SETTINGS_ALIASES: Record<string, string> = {
 const CREATE: Record<string, string> = {
   chats: '/chats/new',
   workflows: '/workflows?new=1',
-  projects: '/projects?new=1',
+  projects: '/projects/new',
   agents: '/agents',
   automations: '/automations',
   scripts: '/scripts',

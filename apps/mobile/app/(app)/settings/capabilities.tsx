@@ -20,14 +20,13 @@ import { Boxes, Server, Sparkles } from 'lucide-react-native';
 import type { SystemArtifact } from '@generatorai/client-core';
 
 import { GRANT_FROM_TRUSTED_DEVICE, canRequestFeature } from '../../../src/services/auth/featureGate';
-import { messageOf } from '../../../src/components/projects/ProjectActions';
 import {
   globalMcpToggle,
   mcpNeedsConfiguration,
   mcpSubtitle,
   mcpSwitchValue,
   type McpEntryLike,
-} from '../../../src/components/projects/projectEditModel';
+} from '../../../src/features/settings/mcpModel';
 import { useFeature } from '../../../src/components/runs/useFeature';
 import { Button } from '../../../src/components/ui/Button';
 import { useToast } from '../../../src/components/ui/Toast';
@@ -66,7 +65,7 @@ export default function CapabilitiesScreen(): React.ReactElement {
 
   const toggleMcp = useToggleSystemMcp({
     onError: (err) => {
-      toast({ message: messageOf(err, 'Could not change the server.'), variant: 'danger' });
+      toast({ message: err instanceof Error && err.message ? err.message : 'Could not change the server.', variant: 'danger' });
     },
   });
 

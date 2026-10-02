@@ -16,6 +16,12 @@ describe('EntityRow (ML-14)', () => {
     );
   });
 
+  it('speaks the description and renders the footer line', async () => {
+    expect(entityRowLabel({ leading: { icon: 'projects' }, title: 'payments', description: 'Checkout API', meta: ['2 codebases'] }, NOW)).toBe('payments, Checkout API, 2 codebases');
+    await renderThemed(<EntityRow title="payments" description="Checkout API" leading={{ icon: 'projects' }} footer={<></>} onPress={jest.fn()} />);
+    expect(screen.getByText('Checkout API')).toBeTruthy();
+  });
+
   it('is a checkbox in selection mode (MD-60)', async () => {
     await renderThemed(<EntityRow title="Draft" leading={{ checkbox: true }} onPress={jest.fn()} />);
     expect(screen.getByRole('checkbox', { name: 'Draft' }).props.accessibilityState).toMatchObject({ checked: true });

@@ -47,6 +47,19 @@ function EntityRowGallery(): React.ReactElement {
         <EntityRow title="payments-service" leading={{ icon: 'projects' }} meta={['3 codebases']} selected onPress={noop} />
         <Selecting />
       </StorySection>
+      <StorySection title="Project row: description, footer; mono title (worktree)">
+        <EntityRow
+          title="payments-service"
+          leading={{ icon: 'folder-open' }}
+          description="Checkout, coupons and payment capture"
+          meta={['2 codebases', '3 chats']}
+          time={minutesAgo(30)}
+          footer={<StatusBadge state="needs_you" size="sm" />}
+          metaLabel="Needs you"
+          onPress={noop}
+        />
+        <EntityRow title="fix/checkout-flake" titleMono leading={{ icon: 'branch' }} meta={['Fix flaky checkout test', '214 MB']} onPress={noop} />
+      </StorySection>
       <StorySection title="Long text, font scale 2.0, right to left">
         <EntityRow title={LONG_TEXT} leading={{ status: 'failed' }} meta={[LONG_TEXT]} time={minutesAgo(5)} onPress={noop} />
         <WithFontScale scale={2}>

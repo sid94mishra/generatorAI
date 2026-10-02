@@ -15,6 +15,12 @@ export interface EntityRowAction {
 
 export interface EntityRowProps {
   title: string;
+  /** Mono title: branch names, codebase aliases, config names (MD-64). */
+  titleMono?: boolean;
+  /** One fg-2 line under the title (MProjects: the project's description). */
+  description?: string;
+  /** A third line under the meta (MProjects: last run StatusBadge + run name; spoken via `metaLabel`). */
+  footer?: ReactElement;
   /** Status glyph (StatusBadge's glyph only), an icon, or the selection-mode checkbox (MD-60). */
   leading: EntityLeading;
   /** Joined with " · " (strings are footnote fg-3; elements render as given, e.g. AgentGlyph, mono project). */
