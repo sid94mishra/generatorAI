@@ -33,6 +33,9 @@ function SelectGallery(): React.ReactElement {
       <StorySection title="Field presentation">
         <Live label="Base branch" presentation="field" options={BRANCHES} initial="develop" />
       </StorySection>
+      <StorySection title="Searchable (a sheet with search + radio list)">
+        <Live label="Timezone" searchable options={['UTC', 'Europe/London', 'Europe/Berlin', 'Asia/Kolkata', 'Asia/Tokyo', 'America/New_York', 'America/Los_Angeles'].map((z) => ({ value: z, label: z }))} initial="Asia/Kolkata" />
+      </StorySection>
       <StorySection title="JS path (Jest, web, clients without Expo UI)">
         <Live js label="Base branch" options={BRANCHES} initial="main" />
       </StorySection>

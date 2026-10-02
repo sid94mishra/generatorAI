@@ -10,7 +10,7 @@ export interface SelectProps {
   /** Visible label (row start / field label) and the accessible name. */
   label: string;
   value: string | null;
-  /** ≤ 30 static options; longer or searchable lists use `searchable` (a sheet with search, M4-06). */
+  /** ≤ 30 static options in a menu; longer lists set `searchable` (a sheet with search + radio list). */
   options: ReadonlyArray<SelectOption>;
   onValueChange: (v: string) => void;
   placeholder?: string;

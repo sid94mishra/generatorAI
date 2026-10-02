@@ -1,7 +1,7 @@
 import React from 'react';
 import { screen, userEvent } from '@testing-library/react-native';
 import { Select } from './Select';
-import { selectAccessibilityLabel, selectMenuItems, selectValueText } from './selectModel';
+import { filterSelectOptions, selectAccessibilityLabel, selectMenuItems, selectValueText } from './selectModel';
 import { renderThemed } from '../../__tests__/themed';
 
 const OPTIONS = [
@@ -24,6 +24,18 @@ describe('Select (MP-24)', () => {
     expect(trigger.props.accessibilityHint).toBe('Opens a menu');
     await user.press(trigger);
     await user.press(screen.getByRole('menuitem', { name: 'develop' }));
+    expect(onValueChange).toHaveBeenCalledWith('dev');
+  });
+
+  it('searches a long list in a sheet and applies the pick', async () => {
+    expect(filterSelectOptions(OPTIONS, 'DEV').map((o) => o.value)).toEqual(['dev']);
+    const onValueChange = jest.fn();
+    const user = userEvent.setup();
+    await renderThemed(<Select label="Branch" options={OPTIONS} value="main" onValueChange={onValueChange} searchable />);
+    await user.press(screen.getByRole('button', { name: 'Branch, main' }));
+    await user.type(screen.getByLabelText('Search branch'), 'dev');
+    expect(screen.queryByRole('radio', { name: 'main' })).toBeNull();
+    await user.press(screen.getByRole('radio', { name: 'develop' }));
     expect(onValueChange).toHaveBeenCalledWith('dev');
   });
 

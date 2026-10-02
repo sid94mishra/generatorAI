@@ -1,0 +1,60 @@
+import React, { useState } from 'react';
+import { View } from 'react-native';
+import type { Meta, StoryObj } from '@storybook/react-native';
+
+import { LONG_TEXT, ThemeMatrix } from '../../storybook/StoryKit';
+import { Button } from '../../primitives/Button';
+import { Field } from '../../primitives/Field';
+import { Input } from '../../primitives/Input';
+import { Textarea } from '../../primitives/Textarea';
+import { FullScreenEditor } from './FullScreenEditor';
+
+const noop = (): void => undefined;
+
+function AgentEditor({ long = false }: { long?: boolean }): React.ReactElement {
+  const [name, setName] = useState('Bug Fixer');
+  const [instructions, setInstructions] = useState('Reproduce, fix, verify.');
+  const [saving, setSaving] = useState(false);
+  const changes = Number(name !== 'Bug Fixer') + Number(instructions !== 'Reproduce, fix, verify.');
+  return (
+    <FullScreenEditor
+      title={long ? LONG_TEXT : 'Edit agent'}
+      primary={{ label: 'Save', onPress: () => setSaving(true), disabled: changes === 0, loading: saving }}
+      onCancel={noop}
+      dirty={changes > 0}
+      dirtyCount={changes}
+      stickyBar={
+        <View className="flex-row gap-3 px-4 py-3">
+          <Button label="Back" onPress={noop} />
+          <Button label="Continue" variant="primary" onPress={noop} />
+        </View>
+      }
+    >
+      <Field help="Shown in pickers and chat headers.">
+        <Input label="Name" presentation="standalone" value={name} onChangeText={setName} />
+      </Field>
+      <Textarea label="Instructions" value={instructions} onChangeText={setInstructions} />
+    </FullScreenEditor>
+  );
+}
+
+function FullScreenEditorGallery(): React.ReactElement {
+  return (
+    <View className="flex-1 bg-surface">
+      <View className="flex-1">
+        <AgentEditor />
+      </View>
+      <View className="h-80">
+        <ThemeMatrix>
+          <View className="h-40">
+            <AgentEditor long />
+          </View>
+        </ThemeMatrix>
+      </View>
+    </View>
+  );
+}
+
+const meta = { title: 'UI/Layout/FullScreenEditor', component: FullScreenEditorGallery } satisfies Meta<typeof FullScreenEditorGallery>;
+export default meta;
+export const AgentEditorFrame: StoryObj<typeof meta> = {};

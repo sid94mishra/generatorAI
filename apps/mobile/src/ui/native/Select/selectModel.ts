@@ -18,3 +18,10 @@ export function selectAccessibilityLabel(props: Pick<SelectProps, 'label' | 'opt
 export function selectMenuItems(options: ReadonlyArray<SelectOption>, value: string | null): MenuEntry[] {
   return options.map((o) => ({ id: o.value, label: o.label, subtitle: o.description, disabled: o.disabled, checked: o.value === value }));
 }
+
+/** Case-insensitive match on label and description (the searchable sheet). */
+export function filterSelectOptions(options: ReadonlyArray<SelectOption>, query: string): ReadonlyArray<SelectOption> {
+  const q = query.trim().toLowerCase();
+  if (!q) return options;
+  return options.filter((o) => o.label.toLowerCase().includes(q) || o.description?.toLowerCase().includes(q));
+}

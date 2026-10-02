@@ -19,7 +19,8 @@ const NONE = '';
 
 export function Select(props: SelectProps): React.ReactElement {
   const colors = useThemeColors();
-  if (!swiftUI) return <SelectJs {...props} />;
+  // The searchable list is a sheet (SelectJs); only the static menu is the SwiftUI Picker.
+  if (!swiftUI || props.searchable) return <SelectJs {...props} />;
   const { ui, modifiers: m } = swiftUI;
   const { label, value, options, onValueChange, placeholder, presentation = 'row', disabled = false, testID } = props;
   const picker = (
