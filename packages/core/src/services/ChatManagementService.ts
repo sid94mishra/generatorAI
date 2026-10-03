@@ -14,9 +14,12 @@ import type {
   AgentQuestion,
   AgentQuestionResponse,
   PlanAction,
+  AgentInteraction,
+  PermissionCardSummary,
   PlanCardSummary,
   PlanDecision,
   QuestionCardSummary,
+  ToolPermissionRequestPayload,
 } from '@generatorai/shared';
 import { generateId, DEFAULT_AGENT_MODE, ValidationError } from '@generatorai/shared';
 import * as path from 'node:path';
@@ -865,13 +868,14 @@ export class ChatManagementService {
   /** Snapshot of the plan/question cards surfaced during the current turn. */
   private async collectTurnCards(
     conversationId: string,
-  ): Promise<{ planCards: PlanCardSummary[]; questionCards: QuestionCardSummary[] }> {
+  ): Promise<{ planCards: PlanCardSummary[]; questionCards: QuestionCardSummary[]; permissionCards: PermissionCardSummary[] }> {
     const ctx = this.turns.get(conversationId);
     const planService = this.extensions.planService;
     const interactions = this.extensions.agentInteractionService;
     const planCards: PlanCardSummary[] = [];
     const questionCards: QuestionCardSummary[] = [];
-    if (!ctx) return { planCards, questionCards };
+    const permissionCards: PermissionCardSummary[] = [];
+    if (!ctx) return { planCards, questionCards, permissionCards };
 
     if (planService) {
       for (const planId of ctx.planIds) {
@@ -894,6 +898,13 @@ export class ChatManagementService {
     if (interactions) {
       for (const interactionId of ctx.interactionIds) {
         const record = await interactions.findById(interactionId).catch(() => null);
+        if (record?.kind === 'tool_permission') {
+          // The decision stays in the transcript: a completed chat skips event
+          // replay, so without this the "Tool call allowed/denied" card vanished
+          // once the turn settled (the client reads `permissionCards` already).
+          permissionCards.push(permissionCardOf(record, ctx.cardSequence.get(record.id)));
+          continue;
+        }
         if (!record || record.kind !== 'question') continue;
         const payload = (record.payload ?? {}) as { questions?: AgentQuestion[] };
         const sequence = ctx.cardSequence.get(record.id);
@@ -914,7 +925,7 @@ export class ChatManagementService {
       }
     }
 
-    return { planCards, questionCards };
+    return { planCards, questionCards, permissionCards };
   }
 
   /**
@@ -2094,6 +2105,7 @@ export class ChatManagementService {
       const cards = await this.collectTurnCards(session.conversationId!);
       if (cards.planCards.length > 0) metadata.planCards = cards.planCards;
       if (cards.questionCards.length > 0) metadata.questionCards = cards.questionCards;
+      if (cards.permissionCards.length > 0) metadata.permissionCards = cards.permissionCards;
 
       await this.messageRepo.create({
         id: generateId(),
@@ -3105,4 +3117,24 @@ function firstAlias(sources: ChatSourceSpec[]): string | undefined {
 function chatOf(turn: TurnContext): string {
   if (turn.owner.kind !== 'chat') throw new Error('A chat gate was called for a stage turn');
   return turn.owner.chatId;
+}
+
+/** A settled (or still open) tool-permission interaction as its transcript card. */
+export function permissionCardOf(record: AgentInteraction, sequence: number | undefined): PermissionCardSummary {
+  const payload = (record.payload ?? {}) as Partial<ToolPermissionRequestPayload>;
+  const response = (record.resolution ?? undefined) as { granted?: boolean; reason?: string } | undefined;
+  const status: PermissionCardSummary['status'] =
+    record.status === 'answered' ? (response?.granted ? 'allowed' : 'denied') : record.status === 'pending' ? 'pending' : 'expired';
+  return {
+    interactionId: record.id,
+    toolName: payload.toolName ?? 'tool',
+    type: payload.type ?? 'other',
+    description: payload.description ?? '',
+    inputSummary: payload.inputSummary ?? '',
+    status,
+    ...(response?.reason ? { message: response.reason } : {}),
+    ...(sequence === undefined ? {} : { sequence }),
+    ...(payload.risk ? { risk: payload.risk } : {}),
+    ...(payload.riskReasons?.length ? { riskReasons: payload.riskReasons } : {}),
+  };
 }
