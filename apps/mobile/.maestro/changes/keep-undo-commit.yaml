@@ -65,12 +65,13 @@ env: {FRESH_CHAT: edits, DEVICE_SCOPES: "write:files,write:workspaces", EXPECT_C
     when: {platform: Android}
     commands:
       - hideKeyboard
+# The switch rows read "<title>, <subtitle>".
 - runFlow:
-    when: {visible: {text: Push, checked: true}}
+    when: {visible: {text: "Push.*", checked: true}}
     commands:
-      - tapOn: {text: Push, checked: true}
-- assertVisible: {text: Push, checked: false}
-- assertNotVisible: {text: Open pull request, checked: true}
+      - tapOn: {text: "Push.*", checked: true}
+- assertVisible: {text: "Push.*", checked: false}
+- assertNotVisible: {text: "Open pull request.*", checked: true}
 - assertVisible: {id: commit-submit, text: Commit}
 - tapOn: {id: commit-submit}
 - extendedWaitUntil: {visible: {id: commit-done}, timeout: 30000}

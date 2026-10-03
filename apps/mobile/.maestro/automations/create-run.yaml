@@ -14,6 +14,11 @@ env: {DEVICE_SCOPES: "write:workflows"}
 - tapOn: {id: automation-wizard-name}
 - inputText: Maestro automation
 - tapOn: {id: automation-wizard-next}
+# iOS: with the keyboard up the first tap may only end editing.
+- runFlow:
+    when: {notVisible: {id: automation-wizard-trigger-manual}}
+    commands:
+      - tapOn: {id: automation-wizard-next}
 - tapOn: {id: automation-wizard-trigger-manual}
 - tapOn: {id: automation-wizard-next}
 - tapOn: {id: automation-wizard-add-workflow}

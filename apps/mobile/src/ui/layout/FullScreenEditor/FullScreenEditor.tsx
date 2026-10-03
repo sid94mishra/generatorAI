@@ -12,6 +12,7 @@ import { KeyboardAwareScrollView } from '../../lib/styled';
 
 import { useDirtyGuard } from '../DirtyGuard/useDirtyGuard';
 import { SheetOutlet } from '../../native/Sheet/SheetJs';
+import { ToastHost } from '../../primitives/Toast';
 import { nativePlatform } from '../../platform/geometry';
 import { useModalInsets } from '../../platform/insets';
 import { IconButton } from '../../primitives/IconButton';
@@ -87,6 +88,7 @@ export function FullScreenEditor({ title, primary, cancelLabel = 'Cancel', onCan
       {stickyBar ?? null}
       {/* A full-screen editor is a native modal screen: sheets presented from it render here (iOS presents only from the top screen). */}
       <SheetOutlet />
+      <ToastHost />
     </View>
   );
 }

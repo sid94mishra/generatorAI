@@ -10,8 +10,16 @@ env: {DEVICE_SCOPES: "write:workflows"}
 - openLink: generatorai:///workflows
 - extendedWaitUntil: {visible: {id: "workflow-row-.*"}, timeout: 20000}
 - tapOn: {id: "workflow-row-.*", index: 0}
-- extendedWaitUntil: {visible: {id: workflow-more}, timeout: 15000}
-- tapOn: {id: workflow-more}
+- extendedWaitUntil: {visible: {id: workflow-detail}, timeout: 15000}
+# A header action: by testID on Android, by its label on iOS (native toolbar items take no testID, MD-133).
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: {id: workflow-more}
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: "Workflow actions"
 - tapOn: "Edit in builder"
 - extendedWaitUntil: {visible: {id: builder-list}, timeout: 15000}
 - tapOn: {id: builder-more}
@@ -32,4 +40,4 @@ env: {DEVICE_SCOPES: "write:workflows"}
 - assertVisible: "● Unsaved changes"
 - tapOn: "Cancel"
 - tapOn: "Discard"
-- extendedWaitUntil: {visible: {id: workflow-more}, timeout: 10000}
+- extendedWaitUntil: {visible: {id: workflow-detail}, timeout: 10000}

@@ -7,7 +7,7 @@
 import React, { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { View } from 'react-native';
 import Animated, { useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
-import { Stack } from 'expo-router';
+import { Stack, useFocusEffect, useNavigation } from 'expo-router';
 import type { SFSymbol } from 'sf-symbols-typescript';
 
 import { BreadcrumbTitle } from '../../../layout/Breadcrumb';
@@ -68,6 +68,15 @@ export function Header(props: HeaderProps): React.ReactElement {
             : undefined,
     };
   }, [modelKey, optionsKey, press, scroll]);
+  // A link that resets the stack onto an already-mounted screen (a module root reached by `generatorai:///settings`)
+  // gives the route fresh options while <Stack.Screen> keeps its memoized ones, so the bar fell back to the route
+  // name ("settings/index", "index"). Re-apply on focus; it is the same value, so nothing re-renders in a loop.
+  const navigation = useNavigation();
+  useFocusEffect(
+    useCallback(() => {
+      navigation.setOptions(options);
+    }, [navigation, options]),
+  );
   const left = useMemo(() => {
     const model = JSON.parse(modelKey) as IosHeaderModel;
     return model.left.map((item) =>

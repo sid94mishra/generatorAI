@@ -3,6 +3,7 @@ name: workflows · list, detail, runs, graph, new draft
 # M8-01 (MWorkflows, MWorkflowDetail(+More), MWorkflowNew(+Basics)). Replaces the "workflow" phase of the
 # web-preview e2e/audit-scenarios.mjs (08 §6.3). The sandbox seeds "Sandbox Workflow.*"; the draft needs write:workflows.
 tags: [workflows]
+env: {DEVICE_SCOPES: "write:workflows"}
 ---
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///workflows
@@ -26,7 +27,15 @@ tags: [workflows]
 - tapOn: "Create"
 - extendedWaitUntil: {visible: {id: workflow-detail}, timeout: 20000}
 - assertVisible: "Draft"
-- tapOn: {id: workflow-more}
+# A header action: by testID on Android, by its label on iOS (native toolbar items take no testID, MD-133).
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: {id: workflow-more}
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: "Workflow actions"
 - tapOn: "Delete workflow"
 - tapOn: {text: "Delete workflow", index: 1}
 - extendedWaitUntil: {visible: {id: workflows}, timeout: 15000}

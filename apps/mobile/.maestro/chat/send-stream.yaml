@@ -21,7 +21,13 @@ env: {FRESH_CHAT: stream}
 # The transcript follows the stream to its end; a code block reads as one element ("Code, TypeScript, 6 lines").
 - assertVisible: {id: transcript-list}
 - assertVisible: "Code, TypeScript, 6 lines"
-- scrollUntilVisible: {element: ".*Mobile streaming check.*", direction: UP, timeout: 60000, visibilityPercentage: 50}
+# Scroll the transcript itself (the keyboard and composer cover the screen's centre, where scrollUntilVisible swipes).
+- repeat:
+    while: {notVisible: ".*Mobile streaming check.*"}
+    times: 10
+    commands:
+      - swipe: {from: {id: transcript-list}, direction: DOWN, duration: 400}
+- assertVisible: ".*Mobile streaming check.*"
 - assertNotVisible: {id: composer-stop}
 - assertNotVisible: {id: composer-force-reset}
 - assertVisible: Dictate a message

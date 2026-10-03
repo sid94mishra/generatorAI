@@ -15,6 +15,7 @@ import { nativePlatform } from '../../platform/geometry';
 import { useInsets } from '../../platform/insets';
 import { useReduceMotion } from '../../platform/motion';
 import { Pressable } from '../../primitives/Pressable';
+import { ToastHost } from '../../primitives/Toast';
 import { Sheet } from './Sheet';
 import type { PresentOptions, RouteSheetProps, SheetController, SheetProps } from './Sheet.types';
 import { DEFAULT_DETENTS, detentHeight, dragOutcome } from './sheetModel';
@@ -165,6 +166,7 @@ export function RouteSheet(props: RouteSheetProps): React.ReactElement {
     <>
       <Sheet {...props} />
       <SheetOutlet />
+      <ToastHost />
     </>
   );
 }

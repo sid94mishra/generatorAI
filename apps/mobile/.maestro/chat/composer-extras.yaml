@@ -9,6 +9,22 @@ env: {FRESH_CHAT: stream}
 - extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
 - runFlow: ../_subflows/pane-closed.yaml
 - assertVisible: {id: composer-send, enabled: false}
+# The "+" menu first, before the keyboard is up: with it up the native menu has no room and scrolls its items.
+# A menu item that needs a scope the device lacks carries the reason in its label ("Attach file, Uploading files needs…").
+- tapOn: {id: composer-options}
+- extendedWaitUntil: {visible: "Attach file.*", timeout: 10000}
+- assertVisible: "Commands & skills.*"
+- assertVisible: "Mention file.*"
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - back
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      # A tap outside a UIMenu closes it.
+      - tapOn: {point: "50%, 20%"}
+- waitForAnimationToEnd
 - tapOn: {id: composer-input}
 - inputText: /
 - extendedWaitUntil: {visible: {id: composer-suggestions}, timeout: 15000}
@@ -17,12 +33,3 @@ env: {FRESH_CHAT: stream}
 - inputText: "@"
 - extendedWaitUntil: {visible: {id: composer-suggestions}, timeout: 15000}
 - eraseText
-- runFlow:
-    when: {platform: Android}
-    commands:
-      - hideKeyboard
-- tapOn: {id: composer-options}
-# A menu item that needs a scope the device lacks carries the reason in its label ("Attach file, Uploading files needs…").
-- assertVisible: "Attach file.*"
-- assertVisible: "Commands & skills.*"
-- assertVisible: "Mention file.*"

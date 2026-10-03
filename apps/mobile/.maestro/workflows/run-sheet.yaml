@@ -18,7 +18,7 @@ tags: [workflows]
 - tapOn: {id: run-stage-done}
 - assertVisible: "Stages 1 of 2"
 - tapOn: {id: run-permission-acceptEdits}
-- tapOn: {id: run-sheet-review}
+- tapOn: {id: run-sheet-review, retryTapIfNoChange: false}
 - extendedWaitUntil: {visible: "Plan preview", timeout: 15000}
 - assertVisible: "L1"
 - tapOn: {id: run-sheet-options}

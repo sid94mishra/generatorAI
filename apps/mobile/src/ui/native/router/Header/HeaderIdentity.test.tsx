@@ -26,6 +26,8 @@ jest.mock('expo-router', () => {
       },
       Toolbar,
     },
+    useNavigation: () => ({ setOptions: () => undefined }),
+    useFocusEffect: () => undefined,
   };
 });
 

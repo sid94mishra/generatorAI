@@ -22,5 +22,12 @@ tags: [workflows]
 - extendedWaitUntil: {visible: {id: stage-chat}, timeout: 15000}
 - runFlow: ../_subflows/back.yaml
 - extendedWaitUntil: {visible: {id: run-screen}, timeout: 10000}
-- tapOn: {id: run-menu}
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: {id: run-menu}
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: "Run actions"
 - assertVisible: "Copy run ID"
