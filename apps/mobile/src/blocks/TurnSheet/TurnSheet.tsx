@@ -2,7 +2,7 @@
 // "isn't signed in" and the way to fix it), Model (MB-03), Mode (Auto / Plan, `composer-mode`) with its help line,
 // Effort (the model's own levels), Context (Standard / Long when the model has both), Approvals, and the context
 // usage row (MB-41). A selection sheet: "Done" in the header applies (MD-85); ✕ with changes asks first.
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { findPickerModel, type AgentMode, type ModelPickerCatalog } from '@generatorai/client-core';
 
@@ -56,10 +56,19 @@ function Section({ title, children, help }: { title: string; children: React.Rea
 function TurnBody({ chatId, initial, catalog, harness, streamKey, onClose, navigation }: { chatId: string; initial: TurnState; catalog: ModelPickerCatalog; harness: Record<string, unknown>; streamKey: string; onClose: () => void; navigation?: RemovalSource }): React.ReactElement {
   const [state, setState] = useState<TurnState>(initial);
   const apply = useApplyTurn(chatId);
+  // Applied: close only after the sheet re-rendered clean. Closing inside onSuccess ran the dirty guard's
+  // beforeRemove with the stale `dirty`, so Done asked "Discard changes?" for changes it had just saved.
+  const [applied, setApplied] = useState(false);
+  const closed = useRef(false);
+  useEffect(() => {
+    if (!applied || closed.current) return;
+    closed.current = true;
+    onClose();
+  }, [applied, onClose]);
   const usage = useLiveContextUsage(streamKey);
   const model = findPickerModel(catalog, state.model, state.provider);
   const provider = catalog.providers.find((p) => p.type === state.provider) ?? null;
-  const dirty = JSON.stringify(state) !== JSON.stringify(initial);
+  const dirty = !applied && JSON.stringify(state) !== JSON.stringify(initial);
   const usageView = contextUsageView(usage, state.tier === 'long_context' ? (model?.longContextTokens ?? model?.contextTokens) : model?.contextTokens);
   const efforts = model?.reasoningEfforts ?? [];
 
@@ -76,7 +85,7 @@ function TurnBody({ chatId, initial, catalog, harness, streamKey, onClose, navig
       {
         onSuccess: () => {
           haptic('success');
-          onClose();
+          setApplied(true);
         },
         onError: () => toast({ kind: 'error', message: "Couldn't change the next turn. Try again." }),
       },
