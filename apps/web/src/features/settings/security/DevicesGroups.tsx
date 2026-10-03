@@ -3,10 +3,11 @@
 // A request is a paired device asking for more scopes than it holds: untick
 // what you do not want to grant and approve the rest. A device's
 // capabilities can be granted or withdrawn after pairing (the Capabilities
-// menu); terminal and device-admin grants are confirmed first — the server
-// audits them as critical.
+// menu); a sensitive grant (shared vocabulary, MG-23: every `exec:*` but
+// `exec:agent`, every `admin:*`) is confirmed first.
 
 import { useState } from 'react';
+import { isSensitiveScope, scopeLabel } from '@generatorai/shared/ui-contract';
 import {
   useApproveScopeRequest,
   useDenyScopeRequest,
@@ -32,9 +33,7 @@ import {
   PLATFORM_LABEL,
   accessLevel,
   ago,
-  isSensitiveScope,
   relativeTime,
-  scopeLabel,
   sensitiveGrantText,
 } from './securityModel.js';
 
@@ -86,7 +85,7 @@ function RequestRow({ request, onError }: { request: ScopeRequestSummary; onErro
               label={
                 <span className="inline-flex items-center gap-1">
                   {scopeLabel(scope)}
-                  {scope.startsWith('exec:') || scope.startsWith('admin:') ? (
+                  {isSensitiveScope(scope) ? (
                     <Icon concept="warning" size={12} className="text-warn" />
                   ) : null}
                 </span>
