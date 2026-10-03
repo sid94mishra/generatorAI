@@ -55,11 +55,24 @@ export function needsYouActions(item: Pick<AttentionItem, 'entity' | 'ask'>): Ne
   }
 }
 
+/**
+ * A gate's detail as one readable line. The feed carries the tool input as a
+ * clipped JSON summary (`{ "path": "src/config.ts" }`, often cut mid-object);
+ * the row shows the command or path it names (board Home: "Allow git push?").
+ */
+export function askDetailLine(detail: string | undefined): string | undefined {
+  if (!detail) return undefined;
+  const text = detail.trim();
+  if (!text.startsWith('{')) return text;
+  const field = /"(command|file_path|path|url|query)"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(text);
+  return field?.[2] ? field[2].replace(/\\"/g, '"') : text;
+}
+
 /** The second line of a Needs you row: the ask's detail, else its summary. */
 export function needsYouDetail(item: Pick<AttentionItem, 'ask' | 'parent'>): string | undefined {
   const ask = item.ask;
   const via = item.parent ? `in ${item.parent.title}` : undefined;
-  const parts = [ask?.summary, ask?.detail, via].filter((p): p is string => !!p);
+  const parts = [ask?.summary, askDetailLine(ask?.detail), via].filter((p): p is string => !!p);
   return parts.length > 0 ? parts.join(' · ') : undefined;
 }
 
