@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AgentStageSchema, type WorkflowGraph } from '@generatorai/workflow-spec';
 
-import { capabilityRows, formatDuration, insertRef, parseDuration, platformTools, regexProblem, renameStageKey, retryGroupsOn, retryOnFor, retrySentence, setPlatformTool, toggleAdded, undeclaredVariables } from '../stageEditor/stageEditorModel';
+import { capabilityRows, formatDuration, insertRef, newRule, parseDuration, platformTools, regexProblem, renameStageKey, ruleProblem, retryGroupsOn, retryOnFor, retrySentence, setPlatformTool, toggleAdded, undeclaredVariables } from '../stageEditor/stageEditorModel';
 
 const agent = (key: string, extra: Record<string, unknown> = {}) => AgentStageSchema.parse({ kind: 'agent', key, name: key, ...extra });
 
@@ -50,5 +50,17 @@ describe('stage editor model (MD-04 simple fields)', () => {
     expect(r.stages.map((s) => s.key)).toEqual(['scan', 'b']);
     expect(r.edges[0]).toMatchObject({ from: 'scan', to: 'b' });
     expect((r.stages[1] as { context: { from: string[] } }).context.from).toEqual(['scan']);
+  });
+});
+
+describe('new output rules (final review F-1)', () => {
+  it('starts text rules empty and asks for the text instead of saving a placeholder', () => {
+    expect(newRule('contains')).toEqual({ type: 'contains', value: '' });
+    expect(newRule('not_contains')).toEqual({ type: 'not_contains', value: '' });
+    expect(ruleProblem(newRule('contains'))).toBe('Enter the text the output must contain.');
+    expect(ruleProblem(newRule('not_contains'))).toBe('Enter the text the output must not contain.');
+    expect(ruleProblem({ type: 'contains', value: 'DONE' })).toBeNull();
+    expect(ruleProblem({ type: 'contains', value: 'x'.repeat(10_001) })).toBe('Keep it under 10,000 characters.');
+    expect(ruleProblem(newRule('min_length'))).toBeNull();
   });
 });

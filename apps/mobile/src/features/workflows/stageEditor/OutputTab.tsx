@@ -13,12 +13,17 @@ import { IconButton } from '../../../ui/primitives/IconButton';
 import { Input } from '../../../ui/primitives/Input';
 import { Text } from '../../../ui/primitives/Text';
 import { DesktopOnlyRow, type TabProps } from './fields';
-import { RULE_LABEL, SIMPLE_RULES, newRule, regexProblem, ruleDetail, schemaFieldCount } from './stageEditorModel';
+import { RULE_LABEL, SIMPLE_RULES, newRule, regexProblem, ruleDetail, ruleProblem, schemaFieldCount } from './stageEditorModel';
 
 function RuleEditor({ rule, onChange, onRemove, index }: { rule: ResultValidationRule; onChange: (r: ResultValidationRule) => void; onRemove: () => void; index: number }): React.ReactElement {
   let body: React.ReactNode;
   if (rule.type === 'contains' || rule.type === 'not_contains') {
-    body = <Input label="Text" value={rule.value} onChangeText={(value) => onChange({ ...rule, value })} presentation="standalone" testID={`stage-rule-${index}-value`} />;
+    const problem = ruleProblem(rule);
+    body = (
+      <Field {...(problem ? { error: problem } : {})}>
+        <Input label="Text" value={rule.value} onChangeText={(value) => onChange({ ...rule, value })} presentation="standalone" {...(problem ? { error: problem } : {})} testID={`stage-rule-${index}-value`} />
+      </Field>
+    );
   } else if (rule.type === 'min_length' || rule.type === 'max_length') {
     body = <Input label="Characters" value={String(rule.value)} onChangeText={(t) => onChange({ ...rule, value: Math.max(0, Math.floor(Number(t) || 0)) })} kind="number" presentation="standalone" />;
   } else if (rule.type === 'regex') {
