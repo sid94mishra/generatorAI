@@ -894,6 +894,12 @@ export class OrchestratorService {
   async checkBackgroundAgent(taskId: string, opts: { wait?: boolean } = {}): Promise<TaskResultDigest & { taskId: string; taskName: string }> {
     const record = this.tasks.get(taskId);
     if (!record) {
+      // No live record (the server restarted since): the digest is still in the worker chat's messages.
+      const chat = await this.chatRepo.getById(taskId).catch(() => null);
+      if (chat?.backgroundTask) {
+        const persisted = { taskId, status: chat.backgroundTask.status, lastAssistantText: '' } as TaskRecord;
+        return { ...(await this.buildDigest(persisted)), taskId, taskName: chat.backgroundTask.taskName };
+      }
       return { taskId, taskName: taskId, status: 'failed', summary: `Unknown task ${taskId}`, keyFindings: [], artifacts: [], risks: [], openQuestions: [] };
     }
     if (opts.wait && record.status === 'running') {

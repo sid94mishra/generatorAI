@@ -108,3 +108,15 @@ describe('getBackgroundTaskDetail (D-89)', () => {
     });
   });
 });
+
+describe('checkBackgroundAgent after a restart', () => {
+  it('reads the digest from the worker chat when there is no live task record', async () => {
+    const orchestrator = await setup([
+      message('m1', 'user', BRIEF, 1),
+      message('m2', 'assistant', 'All done.\n<TASK_RESULT>{"status":"completed","summary":"Wrote src/slugify.ts","keyFindings":[],"artifacts":[],"risks":[],"openQuestions":[]}</TASK_RESULT>', 2),
+    ]);
+    const digest = await orchestrator.checkBackgroundAgent('worker-1');
+    expect(digest).toMatchObject({ taskId: 'worker-1', taskName: 'slug-guide' });
+    expect(digest.summary).not.toMatch(/Unknown task/);
+  });
+});
