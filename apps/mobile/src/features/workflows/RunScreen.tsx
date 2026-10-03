@@ -50,6 +50,7 @@ import { lifecycleView, needsYou, postProcessingResults, pullRequestOf, runName,
 import { versionLabels } from './model/workflowsModel';
 import { useRunPane, type RunPaneInput } from './useRunPane';
 import { useDefinitionVersions, useRun, useRunCommands, useRunGraph, useRunPendingDecisions, useRunPermissionMode, useWorkflow } from './queries';
+import { useFollowLive } from '../../services/live/useFollowLive';
 
 type Href = Parameters<typeof router.push>[0];
 type RunMenuId = 'pause-drain' | 'pause-interrupt' | 'resume' | 'retry' | 'copy-id' | 'cancel' | 'delete';
@@ -96,6 +97,7 @@ function NeedsYouCard({ item, runId, workflowId, canDecide }: { item: NeedsYouIt
 
 export default function RunScreen(): React.ReactElement {
   const { id = '', runId = '' } = useLocalSearchParams<{ id: string; runId: string }>();
+  useFollowLive('workflow_run', runId);
   const focused = useIsFocused();
   const onBack = useHeaderBack();
   const sheet = useSheet();

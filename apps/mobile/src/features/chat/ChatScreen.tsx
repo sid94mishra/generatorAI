@@ -82,6 +82,7 @@ import {
   type ChatPatch,
 } from './queries';
 import { useAnswerPermission } from './useAnswerPermission';
+import { useFollowLive } from '../../services/live/useFollowLive';
 
 /** How many messages are fetched at a time. */
 const PAGE_SIZE = 120;
@@ -123,6 +124,7 @@ function RenameChat({ initial, onSave }: { initial: string; onSave: (name: strin
 
 export default function ChatScreen(): React.ReactElement {
   const { id, plan: planParam } = useLocalSearchParams<{ id: string; plan?: string }>();
+  useFollowLive('chat', id);
   const chatId = id ?? '';
   const navigation = useNavigation();
   const auth = useAuth();

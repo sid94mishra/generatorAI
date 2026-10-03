@@ -54,6 +54,7 @@ import { buildEndpointCandidates } from '../transport/endpointPlan';
 import { assertServerWriteAllowed } from '../api/offlinePolicy';
 import { clearServerQueryCache } from '../api/queryPersister';
 import { PREF_KEYS, prefs } from '../storage/prefs';
+import { liveStore } from '../live/liveStore';
 
 export interface AuthContextValue {
   state: AuthState;
@@ -382,6 +383,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     await new MobileSessionStore(id).clear();
     await clearServerQueryCache(id);
     prefs.deletePrefix(`srv.${id}.`);
+    liveStore.dispatch({ type: 'forgetServer', serverId: id });
     registerAuthenticatedFetch(id, null);
     runtimes.current.delete(id);
     serverRegistry.remove(id);

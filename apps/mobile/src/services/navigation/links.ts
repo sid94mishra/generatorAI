@@ -39,7 +39,7 @@ export const linkQueue = createLinkQueue();
  * build only. They are not product routes, so the shared allowlist rejects them; walkthroughs and
  * Maestro still need to open them by link. Release builds never match (`dev` is `__DEV__`).
  */
-const DEV_ROUTES: ReadonlySet<string> = new Set(['storybook', 'theme', 'notify']);
+const DEV_ROUTES: ReadonlySet<string> = new Set(['storybook', 'theme', 'notify', 'live']);
 export function devRoute(path: string, dev: boolean): string | null {
   if (!dev) return null;
   const match = /^(?:generatorai:\/\/\/?|\/)?([a-z]+)(\?[A-Za-z0-9_=&%.-]*)?$/.exec(path);
