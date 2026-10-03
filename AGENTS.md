@@ -1,19 +1,19 @@
-# GeneratorAI — agent instructions (branch `mobile_redesign`)
+# GeneratorAI — agent instructions
 
-This worktree hosts the **mobile design overhaul** (iOS 27 + Android 17, Expo / React Native in `apps/mobile`).
+Two redesign tracks share this repository. Pick the one your task belongs to:
 
-**Read `apps/mobile/AGENTS.md` before any work.** It holds the binding rules. The plan is in `docs/redesign/mobile/`: start at `docs/redesign/mobile/README.md`.
+- **Mobile overhaul** (iOS 27 + Android 17, Expo / React Native in `apps/mobile`) — built on branch `mobile_redesign` in its own worktree. **Read `apps/mobile/AGENTS.md` before any mobile work.** The plan is in `docs/redesign/mobile/` (start at `docs/redesign/mobile/README.md`). Since 2026-10-02 the mobile run is owned by Claude Code (it was Codex before).
+- **Web + desktop redesign** (`apps/web`, `apps/desktop`) — built on branch `desktop_redesign`. Its binding rules are `.claude/CLAUDE.md`; the plan is `docs/redesign/*.md` (start at `docs/redesign/README.md`).
+
+`mobile_redesign` is merged into `desktop_redesign` at mobile phase ends, so this file appears on both branches — the rules below apply to both.
 
 **Repository map.** For the monorepo layout, see `.github/AGENTS.md`: `apps/server`, `apps/web`, `apps/desktop`, `apps/mobile`, and `packages/*` (shared, client-core, client-runtime, client-transport, design-tokens, core, db). Tooling is pnpm + turbo on Node.
 
-**Ownership rules for this branch:**
-- Mobile work only. Never edit `apps/web/**`, `apps/desktop/**`, or the web/desktop plan docs (`docs/redesign/*.md` outside `docs/redesign/mobile/`).
-- The web/desktop redesign runs in parallel on `desktop_redesign`. It is merged into this branch regularly (`docs/redesign/mobile/09-codex-playbook.md` §5).
-- Shared packages (`packages/shared`, `client-core`, `client-runtime`, `client-transport`, `design-tokens`) change **additively only**. Log every change in `docs/redesign/mobile/COORDINATION.md`.
-- Server changes are API-first and additive (`docs/redesign/mobile/05-gap-matrix.md`).
-- Never commit to `desktop_redesign`, never push, never open PRs, unless the owner asks.
-
-**Other agent files.** `.claude/CLAUDE.md` is the rulebook of the Claude session that builds the web/desktop redesign. Its branch rule does not apply here, and its layer and style rules apply to `apps/web` only.
+**Ownership rules:**
+- Mobile work edits `apps/mobile/**` and `docs/redesign/mobile/**`; web/desktop work edits `apps/web/**`, `apps/desktop/**` and the web/desktop plan docs. Neither track edits the other's app or plan.
+- Shared packages (`packages/shared`, `client-core`, `client-runtime`, `client-transport`, `design-tokens`) change **additively only**; mobile logs every change in `docs/redesign/mobile/COORDINATION.md`.
+- Server changes are API-first and additive (`docs/redesign/mobile/05-gap-matrix.md` for mobile gaps).
+- Commit only to the branch of your track; never push and never open PRs unless the owner asks.
 
 **Standing rules for the whole repo:**
 - **Cross-platform.** Windows, Linux and macOS are first-class, and so are iOS and Android. Never fix a bug for one OS only; find the platform-independent cause.
