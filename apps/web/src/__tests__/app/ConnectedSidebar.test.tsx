@@ -38,9 +38,12 @@ function conn(over: {
   return { lastEventTime: Date.now(), eventsReceived: 0, unrecoverableEvents: 0, lastGapAt: null, ...over };
 }
 
+/** The attention feed's clock: the elapsed time below is read against it, never the wall clock. */
+const NOW = Date.parse('2026-09-03T10:42:00.000Z');
+
 const SNAPSHOT: AttentionSnapshot = {
   seq: 1,
-  generatedAt: new Date().toISOString(),
+  generatedAt: new Date(NOW).toISOString(),
   needsYou: [
     {
       key: 'chat:c1:i1',
@@ -49,7 +52,7 @@ const SNAPSHOT: AttentionSnapshot = {
       title: 'Fix flaky checkout test',
       href: '/chats/c1',
       state: 'needs_you',
-      since: new Date().toISOString(),
+      since: new Date(NOW).toISOString(),
       ask: { kind: 'tool_permission', id: 'i1', summary: 'Allow git push?', actions: ['allow_once', 'deny'] },
       stoppable: true,
     },
@@ -62,7 +65,7 @@ const SNAPSHOT: AttentionSnapshot = {
       title: 'Memory leak in worker',
       href: '/chats/c2',
       state: 'running',
-      since: new Date(Date.now() - 38_000).toISOString(),
+      since: new Date(NOW - 38_000).toISOString(),
       stoppable: true,
     },
   ],
@@ -139,13 +142,20 @@ describe('ConnectedSidebar', () => {
   });
 
   it('lists Needs you and Running items with their asks and elapsed time', () => {
-    attention.data = SNAPSHOT;
-    renderWithProviders(<ConnectedSidebar layout="native" />);
-    const needs = screen.getByTestId('sidebar-needs-you');
-    expect(within(needs).getByRole('link', { name: /Fix flaky checkout test/ }).getAttribute('href')).toBe('/chats/c1');
-    expect(needs.textContent).toContain('Allow git push?');
-    const running = screen.getByTestId('sidebar-running');
-    expect(within(running).getByTestId('sidebar-running-row').textContent).toMatch(/Memory leak in worker0:3[89]/);
+    // Only Date is faked: the elapsed time is exact however long a loaded
+    // machine takes between building the snapshot and rendering it.
+    vi.useFakeTimers({ toFake: ['Date'], now: NOW });
+    try {
+      attention.data = SNAPSHOT;
+      renderWithProviders(<ConnectedSidebar layout="native" />);
+      const needs = screen.getByTestId('sidebar-needs-you');
+      expect(within(needs).getByRole('link', { name: /Fix flaky checkout test/ }).getAttribute('href')).toBe('/chats/c1');
+      expect(needs.textContent).toContain('Allow git push?');
+      const running = screen.getByTestId('sidebar-running');
+      expect(within(running).getByTestId('sidebar-running-row').textContent).toMatch(/Memory leak in worker0:38/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('the strip layout drops search and the switcher (the title strip holds them)', () => {

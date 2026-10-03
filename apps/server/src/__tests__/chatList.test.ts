@@ -382,7 +382,10 @@ describe('GET /api/chats — chat list v2', () => {
     await bus.emit('sess-c-dummy', { kind: 'workspace.changed', data: { workspaceId: 'ws-dummy' } } as never);
     await changeStats.settled();
     expect(updated).toEqual(['c-dummy', 'c-dummy']);
-  });
+    // Real git (three recomputes, each several subprocesses; ≈0.2 s alone).
+    // Every step awaits `changeStats.settled()` — nothing is timed — so the
+    // budget only has to cover a CPU-starved parallel run.
+  }, 30_000);
 });
 
 describe('PATCH /api/chats/:id — live lists (P2-R2)', () => {

@@ -28,6 +28,13 @@ const dirname = fileURLToPath(new URL('.', import.meta.url));
 export const unitProject = {
   name: 'unit',
   globals: true,
+  // A hang detector, not a speed check: every unit test waits on state
+  // (findBy / waitFor / act), none on the clock. The page-level
+  // characterization tests render whole screens in happy-dom (0.2–0.7 s
+  // alone); when the whole repo's suites run at once on a laptop they run
+  // 20–30× slower and the 5 s default failed a different handful each run,
+  // always "timed out", never an assertion (final-review-2 addendum).
+  testTimeout: 20_000,
   environment: 'happy-dom',
   setupFiles: [`${dirname}vitest.setup.ts`],
   include: ['src/**/*.test.{ts,tsx}'],

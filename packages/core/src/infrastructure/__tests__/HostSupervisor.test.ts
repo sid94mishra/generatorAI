@@ -243,9 +243,18 @@ describe('HostSupervisor', () => {
     await rig.supervisor.start();
     const first = rig.children[0]!;
 
-    await rig.supervisor.restart();
-    await new Promise((r) => setTimeout(r, 80));
-    expect(first.killSignals).toEqual(['SIGTERM', 'SIGKILL']);
+    // The grace window runs on a fake clock (the boot handshake's setImmediate
+    // stays real), so it is measured, not raced against a loaded machine.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await rig.supervisor.restart();
+      vi.advanceTimersByTime(19);
+      expect(first.killSignals).toEqual(['SIGTERM']);
+      vi.advanceTimersByTime(1);
+      expect(first.killSignals).toEqual(['SIGTERM', 'SIGKILL']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not SIGKILL a host that exited on SIGTERM', async () => {
@@ -253,10 +262,18 @@ describe('HostSupervisor', () => {
     await rig.supervisor.start();
     const first = rig.children[0]!;
 
-    await rig.supervisor.restart();
-    first.crash(0);
-    await new Promise((r) => setTimeout(r, 80));
-    expect(first.killSignals).toEqual(['SIGTERM']);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      // SIGTERM is sent synchronously; the host exits inside the grace window
+      // whatever the machine's load (no wall-clock time passes on this clock).
+      const restarting = rig.supervisor.restart();
+      first.crash(0);
+      await restarting;
+      vi.advanceTimersByTime(1_000);
+      expect(first.killSignals).toEqual(['SIGTERM']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('correlates responses by reqId', async () => {

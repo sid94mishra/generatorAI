@@ -66,10 +66,15 @@ describe('AgentStageInspector', () => {
     store.selectNode(second);
   });
 
-  it('renders every tab and edits the stage', async () => {
+  // One test per tab: each renders the inspector once and opens one tab, so a
+  // slow (loaded) machine pays for one tab at a time and a failure names it.
+  const openTab = (name: RegExp) => {
     wrap(<Harness stageKey={second} />);
+    fireEvent.click(screen.getByRole('tab', { name }));
+  };
 
-    // Prompt tab (default)
+  it('Prompt (default tab): adds a prompt, inserts a variable and a context source', async () => {
+    wrap(<Harness stageKey={second} />);
     fireEvent.click(screen.getByRole('button', { name: 'Add prompt' }));
     expect(stageOf(second).prompts).toHaveLength(1);
     expect(await screen.findByLabelText('Prompt 1 text')).toBeTruthy();
@@ -80,45 +85,48 @@ describe('AgentStageInspector', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add context source' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /Scan/ }));
     await waitFor(() => expect(stageOf(second).context.from).toEqual([first]));
+  });
 
-    // Session
-    fireEvent.click(screen.getByRole('tab', { name: /^Session/ }));
+  it('Session: the session spec editor, and the session group reaches the stage', async () => {
+    openTab(/^Session/);
     expect(await screen.findByTestId('session-spec-editor-stage')).toBeTruthy();
     expect(screen.getByRole('combobox', { name: 'stage provider' })).toBeTruthy();
     expect(screen.getByRole('radiogroup', { name: 'stage agent mode' })).toBeTruthy();
     expect(screen.getByTestId('stage-customize-capabilities')).toBeTruthy();
     fireEvent.change(screen.getByRole('textbox', { name: 'Session group' }), { target: { value: 'audit' } });
     expect(stageOf(second).sessionGroup).toBe('audit');
+  });
 
-    // Tools
-    fireEvent.click(screen.getByRole('tab', { name: /^Tools/ }));
-    const browser = await screen.findByRole('switch', { name: 'Integrated browser' });
-    fireEvent.click(browser);
+  it('Tools: the integrated browser switch', async () => {
+    openTab(/^Tools/);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Integrated browser' }));
     await waitFor(() => expect(stageOf(second).session?.browser?.enabled).toBe(false));
+  });
 
-    // Output
-    fireEvent.click(screen.getByRole('tab', { name: /^Output/ }));
+  it('Output: adds a rule; format and schema fields', async () => {
+    openTab(/^Output/);
     fireEvent.click(await screen.findByRole('button', { name: 'Add rule' }));
     expect(stageOf(second).output.rules).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Remove rule 1' })).toBeTruthy();
     expect(screen.getByRole('radiogroup', { name: 'Output format' })).toBeTruthy();
     expect(screen.getByRole('textbox', { name: 'Output JSON Schema' })).toBeTruthy();
+  });
 
-    // Policy
-    fireEvent.click(screen.getByRole('tab', { name: /^Policy/ }));
+  it('Policy: retry on failure, jitter, exhaustion and the guard', async () => {
+    openTab(/^Policy/);
     fireEvent.click(await screen.findByRole('switch', { name: 'Retry on failure' }));
     await waitFor(() => expect(stageOf(second).retry?.maxAttempts).toBe(2));
     expect(screen.getByRole('combobox', { name: 'Retry jitter' })).toBeTruthy();
     expect(screen.getByRole('combobox', { name: 'When retries are exhausted' })).toBeTruthy();
     expect(await screen.findByLabelText('Guard expression')).toBeTruthy();
+  });
 
-    // Hooks
-    fireEvent.click(screen.getByRole('tab', { name: /^Hooks/ }));
+  it('Hooks: adds a hook and counts it on the tab', async () => {
+    openTab(/^Hooks/);
     fireEvent.click(await screen.findByRole('button', { name: 'Add hook' }));
     expect(stageOf(second).hooks).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Remove Hook 1' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Edit workflow hooks' })).toBeTruthy();
-    // Tab counts
     expect(within(screen.getByRole('tab', { name: /^Hooks/ })).getByText('1')).toBeTruthy();
   });
 

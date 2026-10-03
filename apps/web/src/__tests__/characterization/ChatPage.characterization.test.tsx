@@ -147,11 +147,12 @@ describe('paging (09 §5.4 Paging; 236-244, 1398-1408)', () => {
     expect(loadEarlier()).not.toBeInTheDocument();
   });
 
-  it('keys on count === limit: exactly 100 still offers the button (one wasted round-trip), 99 does not', () => {
-    const first = mount(H.makeChat(), H.makeConversation(100));
+  it('keys on count === limit: exactly 100 still offers the button (one wasted round-trip)', () => {
+    mount(H.makeChat(), H.makeConversation(100));
     expect(loadEarlier()).toBeInTheDocument();
-    first.unmount();
+  });
 
+  it('keys on count === limit: 99 does not offer the button', () => {
     mount(H.makeChat(), H.makeConversation(99));
     expect(loadEarlier()).not.toBeInTheDocument();
   });
