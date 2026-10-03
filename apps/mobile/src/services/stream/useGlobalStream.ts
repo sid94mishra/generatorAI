@@ -40,6 +40,7 @@ import {
   requiredScopeFromReason,
   useStreamHealth,
 } from './streamHealth';
+import { useLatestRef } from '../lib/useLatestRef';
 
 /**
  * One invalidation batch per frame.
@@ -55,10 +56,8 @@ export function useGlobalStream(): void {
   const stream = useMuxStream();
   const pendingRef = useRef(new Set<string>());
   const { state, refreshPermissions } = useAuth();
-  const deviceIdRef = useRef<string | null>(null);
-  deviceIdRef.current = state.status === 'authenticated' ? state.deviceId : null;
-  const refreshRef = useRef(refreshPermissions);
-  refreshRef.current = refreshPermissions;
+  const deviceIdRef = useLatestRef<string | null>(state.status === 'authenticated' ? state.deviceId : null);
+  const refreshRef = useLatestRef(refreshPermissions);
   // D0/S7 — a phone paired before `read:activity` existed does not hold it,
   // and the server now rejects THIS scope alone rather than the whole
   // connection. The client drops the scope after the rejection, so the only
@@ -122,5 +121,5 @@ export function useGlobalStream(): void {
       flush();
     };
     // `retryGeneration` is a deliberate dependency: it is the re-subscribe signal.
-  }, [stream, queryClient, retryGeneration]);
+  }, [stream, queryClient, retryGeneration, deviceIdRef, refreshRef]);
 }

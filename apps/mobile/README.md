@@ -93,13 +93,13 @@ Two mechanisms keep it out, both enforced:
   `metro.config.js`): the server's app-config schema, child-process env, host IPC, OpenTelemetry
   and the pino logger never enter the bundle. `src/__tests__/sharedClientEntry.test.ts` fails if a
   client package imports a value the entry does not export.
-- `plugins/babel-plugin-lucide-icons.js` rewrites icon imports to per-icon modules (the barrel is
-  1.29 MB of source for ~60 icons).
+- Icons import lucide per icon (`lucide-react-native/icons/*` in `src/ui/primitives/Icon/lucide.ts`); the barrel
+  (1.29 MB of source for ~60 icons) fails `bundle:check`.
 
 ```powershell
 pnpm --filter @generatorai/mobile bundle:analyze   # expo export + size table + forbidden-module gate
 pnpm --filter @generatorai/mobile bundle:check     # gate only (needs a previous export)
-pnpm --filter @generatorai/mobile terminal:bundle  # regenerate src/terminal/xtermBundle.generated.ts
+pnpm --filter @generatorai/mobile terminal:bundle  # regenerate src/blocks/TerminalView/engine/xtermBundle.generated.ts
 ```
 
 ## End-to-end harness

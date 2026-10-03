@@ -1,17 +1,14 @@
 import boundaries from 'eslint-plugin-boundaries';
 import reactHooks from 'eslint-plugin-react-hooks';
 import betterTailwind from 'eslint-plugin-better-tailwindcss';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import design, { classRules } from './design-rules.mjs';
 const root = fileURLToPath(new URL('../../..', import.meta.url));
 const mobile = `${root}apps/mobile/`;
-const baselineURL = new URL('../design-baseline.json', import.meta.url);
-const baseline = existsSync(baselineURL) ? JSON.parse(readFileSync(baselineURL, 'utf8')) : {};
-const legacyRoutes = [...(baseline.legacyRoutes ?? []), ...(baseline.migratedServices ?? [])];
 const tests = ['**/__tests__/**', '**/*.test.{ts,tsx}', '**/*.generated.ts', 'apps/mobile/src/theme/palettes/**', 'apps/mobile/src/theme/uniwind-*', 'apps/mobile/src/ui/primitives/Icon/material-filled/**'];
-const newFiles = ['apps/mobile/src/{ui,blocks,features,services}/**/*.{ts,tsx}', 'apps/mobile/app/**/*.{ts,tsx}'];
-const legacyRouteGlobs = legacyRoutes.map((p) => `apps/mobile/${p.replaceAll('[', '[[]')}`);
+// Hard zero everywhere since M10-01 deleted the legacy layer (02 §9.8): every rule is an error in src/ and app/.
+const strictFiles = ['apps/mobile/{src,app}/**/*.{ts,tsx}'];
 const all = ['apps/mobile/{src,app}/**/*.{ts,tsx}'];
 const hookRules = Object.fromEntries(Object.keys(reactHooks.configs.recommended.rules).map((key) => [key, 'warn']));
 const toTypes = (...types) => ({ to: { element: { type: types } } });
@@ -34,7 +31,7 @@ export default [
     },
   },
   {
-    files: newFiles, ignores: [...tests, ...legacyRouteGlobs],
+    files: strictFiles, ignores: tests,
     rules: { ...Object.fromEntries(Object.keys(hookRules).map((key) => [key, 'error'])), 'mobile-design/design': 'error', 'better-tailwindcss/no-unknown-classes': 'error', 'better-tailwindcss/no-restricted-classes': 'error' },
   },
   {
@@ -58,8 +55,8 @@ export default [
         { type: 'service', pattern: 'apps/mobile/src/services', partialMatch: false },
         { type: 'theme', pattern: 'apps/mobile/src/theme', partialMatch: false },
         { type: 'route', pattern: 'apps/mobile/app', partialMatch: false },
-        { type: 'legacy', pattern: 'apps/mobile/src/*', partialMatch: false },
-        { type: 'legacy', pattern: 'apps/mobile/src/*.{ts,tsx}', mode: 'file' },
+        // Ambient declarations (`src/assets.d.ts`) only; there is no legacy layer any more.
+        { type: 'ambient', pattern: 'apps/mobile/src/*.d.ts', mode: 'file' },
       ],
     },
     rules: {
@@ -71,14 +68,13 @@ export default [
         { from: { element: { type: 'service' } }, allow: toTypes('service', 'theme') },
         { from: { element: { type: 'theme' } }, allow: toTypes('theme', 'service', 'ui') },
         { from: { element: { type: 'route' } }, allow: toTypes('route', 'feature', 'blocks', 'ui', 'service', 'theme') },
-        { from: { element: { type: 'legacy' } }, allow: toTypes('legacy', 'ui', 'blocks', 'feature', 'service', 'theme') },
       ] }],
       'boundaries/no-unknown-files': 'warn',
       'boundaries/no-unknown-dependencies': 'warn',
     },
   },
   {
-    files: newFiles, ignores: [...tests, ...legacyRouteGlobs],
+    files: strictFiles, ignores: tests,
     rules: { 'boundaries/dependencies': 'error', 'boundaries/no-unknown-files': 'error', 'boundaries/no-unknown-dependencies': 'error' },
   },
 ];

@@ -39,7 +39,7 @@ const reportRule = {
     const story = path.endsWith('.stories.tsx');
     const platformAllowed = /^src\/ui\/platform\//.test(path) || (ui && /\.(ios|android)\.tsx$/.test(path)) || /^src\/services\/(notifications|native)\//.test(path);
     let hasJsx = false;
-    const terminal = /^src\/(terminal|blocks\/TerminalView\/engine)\//.test(path);
+    const terminal = /^src\/blocks\/TerminalView\/engine\//.test(path);
     const report = (node, messageId) => context.report({ node, messageId });
     const checkClasses = (node, value) => {
       for (const word of value.split(/\s+/)) {

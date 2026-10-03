@@ -31,7 +31,7 @@
 | `src/services/**` | the stable data layer (auth, transport, stream, notifications, native, storage, voice); don't rewrite it, extend it |
 | `src/theme/**` | Uniwind CSS, generated theme CSS, ThemeProvider |
 
-- `src/components/**` is legacy: delete it per screen as its replacement lands. Never import legacy code into `ui/`, `blocks/` or `features/`.
+- There is no legacy layer: `src/components/**`, `src/navigation`, `src/dev`, `legacy.css` and `legacyColors` were deleted in M10-01. Every file in `src/` and `app/` is lint hard zero (`check:design`, no baseline).
 - `Platform` / `Platform.OS` / `Platform.select` are allowed **only** in `src/ui/platform/**`, `src/ui/**/*.ios.tsx|*.android.tsx`, `src/services/notifications/**` and `src/services/native/**` (MD-15). Everywhere else, differences come from tokens or a `ui/` component.
 - Shared concepts (status, nav destinations, commands, icons, tool verbs, gate kinds, composer states, pane tabs, copy) come from `@generatorai/shared` / `@generatorai/client-core`. Never re-declare them locally.
 - Packages `packages/client-*` are never rewritten: add new files and exports only.
@@ -129,7 +129,7 @@ Section numbers inside the block (§2, §4.2, §6.3) refer to `08-verification.m
 ## Standing rules
 - **Cross-platform.** iOS and Android are both first-class, and so are Windows, Linux and macOS for tooling. No fix for one OS only. Scripts are Node `.mjs` with `path` / `os.tmpdir()`.
 - **Isolated servers only** (sandbox :3197, bare `DB_PATH`… + `GENERATORAI_BIND_HOST=127.0.0.1`). Git features are tested against `node scripts/redesign/make-dummy-repo.mjs`.
-- **No backward compatibility.** Replace and delete in the same task. The only temporary scaffolding is the legacy class aliases (M3-05) and the legacy `src/components` tree, both deleted by M10.
+- **No backward compatibility.** Replace and delete in the same task. The temporary scaffolding (the legacy class aliases of M3-05 and the legacy `src/components` tree) was deleted in M10-01.
 - **Undecided questions:**
   - When the plan is silent but the answer can be derived from the plan or the code: decide, add an MD-xx to `01-decisions.md`, continue.
   - When it can't be derived: stop and ask the owner (playbook §8).

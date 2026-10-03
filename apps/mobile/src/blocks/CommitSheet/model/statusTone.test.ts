@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { domainStatus, domainStatusTone, runStatusTone, healthTone, changeTone, stepStatus } from '../theme/status';
+import { changeTone, domainStatus, domainStatusTone } from './statusTone';
 
-describe('shared status adoption', () => {
-  it('distinguishes a timer wait from a human gate', () => {
-    expect(runStatusTone('waiting')).toBe('neutral');
-    expect(runStatusTone('awaiting_input')).toBe('warning');
-    expect(stepStatus('waiting').state).toBe('needs_you');
-  });
+describe('SCM / PR status tones from the shared status table', () => {
   it('keeps cancellation neutral and partial failure visible', () => {
     expect(domainStatusTone('permission', 'denied')).toBe('neutral');
     expect(domainStatusTone('automationExecution', 'partial')).toBe('danger');
@@ -16,8 +11,7 @@ describe('shared status adoption', () => {
     expect(domainStatus('workflowRun', 'constructor')).toBeNull();
     expect(domainStatusTone('workflowRun', 'future-status')).toBe('neutral');
   });
-  it('uses shared health/change colors', () => {
-    expect(healthTone('codebase', 'cloning')).toBe('info');
+  it('uses the shared change colours', () => {
     expect(changeTone('modified')).toBe('warning');
     expect(changeTone('removed')).toBe('danger');
   });

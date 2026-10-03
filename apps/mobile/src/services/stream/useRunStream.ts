@@ -31,10 +31,8 @@ export function useRunStream(runId: string | undefined, enabled = true): { conne
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!stream || !runId || !enabled) {
-      setConnected(false);
-      return;
-    }
+    // Nothing to subscribe; the previous subscription's cleanup already reported "not connected".
+    if (!stream || !runId || !enabled) return;
 
     const flush = (): void => {
       timer.current = null;
@@ -68,5 +66,5 @@ export function useRunStream(runId: string | undefined, enabled = true): { conne
     };
   }, [stream, runId, enabled, queryClient]);
 
-  return { connected };
+  return { connected: connected && Boolean(stream && runId && enabled) };
 }

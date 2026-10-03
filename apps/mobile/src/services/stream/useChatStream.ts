@@ -53,6 +53,7 @@ import { useStreamStore } from './streamStore';
 import { useMuxStream } from './MuxStreamProvider';
 import { connectionFromDisconnect, useStreamHealth } from './streamHealth';
 import { partitionRewound, rewoundMatchesChat, type ChatRewoundEffect } from './rewindEffects';
+import { useLatestRef } from '../lib/useLatestRef';
 
 const FLUSH_INTERVAL_MS = 16;
 
@@ -123,10 +124,8 @@ export function useChatStream({
   // Read at flush time, never a dependency: a screen-owned callback closes
   // over the composer and is rebuilt on every keystroke, and re-subscribing
   // the mux scope per keystroke would drop the resume cursor each time.
-  const rewoundRef = useRef(onChatRewound);
-  rewoundRef.current = onChatRewound;
-  const catchUpRef = useRef({ events: catchUpEvents, afterSequence });
-  catchUpRef.current = { events: catchUpEvents, afterSequence };
+  const rewoundRef = useLatestRef(onChatRewound);
+  const catchUpRef = useLatestRef({ events: catchUpEvents, afterSequence });
 
   // Refs, not state: these must not trigger a re-render, and the effect must
   // not re-run when a callback identity changes mid-stream.
@@ -324,5 +323,5 @@ export function useChatStream({
       flush(true);
       router.reset();
     };
-  }, [chatId, streamKey, enabled, stream, queryClient, applyEffects, onStatusChange]);
+  }, [chatId, streamKey, enabled, stream, queryClient, applyEffects, onStatusChange, rewoundRef, catchUpRef]);
 }

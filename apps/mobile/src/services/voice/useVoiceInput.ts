@@ -41,11 +41,12 @@ import { resourcePaths } from '@generatorai/client-core';
 // ────────────────────────────────────────────────────────────────
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform } from 'react-native';
 import { AudioModule, setAudioModeAsync, useAudioStream } from 'expo-audio';
 import { useSharedValue, type SharedValue } from 'react-native-reanimated';
 
 import { useAuth } from '../auth/AuthProvider';
+import { useLatestRef } from '../lib/useLatestRef';
+import { IS_NATIVE_RUNTIME } from '../native/runtimeOs';
 import { TARGET_SAMPLE_RATE, rms, toMono16k } from './pcm';
 import { PLAYBACK_AUDIO_MODE, RECORDING_AUDIO_MODE } from './audioSession';
 import { WAVEFORM_BARS } from './dictationCommit';
@@ -104,8 +105,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
 
   // Callbacks are read through a ref so a caller that passes inline closures
   // (every caller) doesn't re-create the audio stream on every render.
-  const cbRef = useRef(options);
-  cbRef.current = options;
+  const cbRef = useLatestRef(options);
 
   const socketRef = useRef<WebSocket | null>(null);
   // A socket that never answers must not leave the composer on a spinner.
@@ -125,11 +125,11 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
   /** True while this hook holds the audio session in record mode. */
   const recordModeRef = useRef(false);
 
-  const supported = Platform.OS === 'ios' || Platform.OS === 'android';
+  const supported = IS_NATIVE_RUNTIME;
 
   const resetLevels = useCallback(() => {
-    amplitude.value = 0;
-    waveform.value = EMPTY_WAVEFORM;
+    amplitude.set(0);
+    waveform.set(EMPTY_WAVEFORM);
   }, [amplitude, waveform]);
 
   /**
@@ -151,9 +151,9 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
       // 0.05–0.3, so it is lifted onto a 0..1 display range here once,
       // rather than in every worklet that reads it.
       const level = Math.min(1, rms(pcm) * 4);
-      amplitude.value = level;
-      const prev = waveform.value;
-      waveform.value = [...prev.slice(1), level];
+      amplitude.set(level);
+      const prev = waveform.get();
+      waveform.set([...prev.slice(1), level]);
       try {
         socket.send(pcm.buffer as ArrayBuffer);
       } catch {
@@ -197,7 +197,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
       setError(message);
       cbRef.current.onError?.(message);
     },
-    [teardown],
+    [teardown, cbRef],
   );
 
   const start = useCallback(async () => {
@@ -294,14 +294,14 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
     } catch (err) {
       fail((err as Error).message);
     }
-  }, [supported, fail, socketUrl, stream, teardown, clearWatchdog]);
+  }, [supported, fail, socketUrl, stream, teardown, clearWatchdog, cbRef]);
 
   const pause = useCallback(() => {
     if (status !== 'listening') return;
     // Stop sending immediately rather than waiting for the ack: the point of
     // pausing is that words spoken while the user is editing must not land.
     sendingRef.current = false;
-    amplitude.value = 0;
+    amplitude.set(0);
     const socket = socketRef.current;
     if (socket?.readyState === 1) socket.send(JSON.stringify({ t: 'pause' }));
   }, [status, amplitude]);

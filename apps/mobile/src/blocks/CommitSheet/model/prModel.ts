@@ -1,4 +1,4 @@
-import { changeKind, changeTone, domainStatusTone } from '../../../theme/status';
+import { changeKind, changeTone, domainStatusTone } from './statusTone';
 // ────────────────────────────────────────────────────────────────
 // Pull-request presentation, as data.
 //

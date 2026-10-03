@@ -14,17 +14,14 @@
 //
 // Every value here has a UI (Settings → Accessibility) and a consumer:
 //
-//   motion              ui/motion.ts `useReducedMotionPreset`, ui/accessibility.ts `useReduceMotion`
-//   haptics             ui/haptics.ts `setHapticsEnabled` (pushed from here)
-//   biometricLock       src/auth/AppLock.tsx `AppLockGate`
-//   lockGraceSeconds    src/auth/AppLock.tsx `AppLockGate`
-//   largeTitleCollapse  ui/Screen.tsx (see the note on `largeTitleCollapse` below)
+//   motion, transparency, haptics   pushed into the kit's platform layer by app/_layout.tsx `KitPreferencesBridge`
+//   biometricLock, lockGraceSeconds blocks/shell/AppLockGate.tsx
+//   largeTitleCollapse              the kit Header (see the note on `largeTitleCollapse` below)
 // ────────────────────────────────────────────────────────────────
 
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
 import { prefs, PREF_KEYS } from '../storage/prefs';
-import { setHapticsEnabled } from '../../components/ui/haptics';
 
 /** `system` follows Reduce Motion; the other two override it either way. */
 export type MotionPreference = 'system' | 'reduced' | 'full';
@@ -125,13 +122,7 @@ export function PreferencesProvider({
 }): React.ReactElement {
   const [motion, setMotionState] = useState<MotionPreference>(readMotion);
   const [transparency, setTransparencyState] = useState<MotionPreference>(readTransparency);
-  const [haptics, setHapticsState] = useState<boolean>(() => {
-    const enabled = prefs.getBoolean(PREF_KEYS.haptics, true);
-    // The haptics module is a plain singleton so call sites stay a one-liner;
-    // it therefore has to be told the stored value before the first tap.
-    setHapticsEnabled(enabled);
-    return enabled;
-  });
+  const [haptics, setHapticsState] = useState<boolean>(() => prefs.getBoolean(PREF_KEYS.haptics, true));
   const [biometricLock, setBiometricLockState] = useState<boolean>(
     () => readLockPreferences().biometricLock,
   );
@@ -158,7 +149,6 @@ export function PreferencesProvider({
 
   const setHaptics = useCallback((next: boolean) => {
     setHapticsState(next);
-    setHapticsEnabled(next);
     prefs.setBoolean(PREF_KEYS.haptics, next);
   }, []);
 
