@@ -5,9 +5,9 @@
 import { useCallback, useMemo, useState } from 'react';
 import { router } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { queryKeys, type AdminApi } from '@generatorai/client-core';
-import type { StatsByDefinitionRow } from '@generatorai/shared';
-import type { InvocationRequest, WorkflowDefinitionRecord, WorkflowDefinitionSummary, WorkflowGraphInput, WorkflowTemplate } from '@generatorai/workflow-spec';
+import { queryKeys, type AdminApi, type AgentMode } from '@generatorai/client-core';
+import type { ApprovalProof, StatsByDefinitionRow } from '@generatorai/shared';
+import type { RunCommand, InvocationRequest, WorkflowDefinitionRecord, WorkflowDefinitionSummary, WorkflowGraphInput, WorkflowTemplate } from '@generatorai/workflow-spec';
 
 import { runHref } from '../../blocks/shell/hrefs';
 import { useStatsSummary } from '../../blocks/StatsCards';
@@ -15,6 +15,9 @@ import type { MutationCallbacks } from '../../services/api/queryCallbacks';
 import { isActive, pollIntervalFor } from '../../services/api/runActivity';
 import { useAdminApi } from '../../services/api/useAdminApi';
 import { useApi } from '../../services/api/useApi';
+import { sendStageMessage } from '../../services/api/sendStageMessage';
+import type { ChatUpload } from '../../services/api/sendChatPrompt';
+import { useAuth } from '../../services/auth/AuthProvider';
 
 export const workflowKey = (id: string) => [...queryKeys.workflows(), 'detail', id] as const;
 const versionsKey = (id: string) => [...workflowKey(id), 'versions'] as const;
@@ -163,6 +166,114 @@ export function useRunPendingDecisions(id: string, enabled: boolean, focused: bo
 export function useStageTranscript(runId: string, stageId: string, sessionId: string | null, enabled: boolean, focused: boolean, live: boolean, connected: boolean) {
   const admin = useAdminApi();
   return useQuery({ queryKey: queryKeys.stageTranscript(runId, stageId), queryFn: () => admin.sessions.chat(sessionId!, stageId), enabled: Boolean(sessionId) && enabled, refetchInterval: focused && live ? (connected ? 15_000 : 5_000) : false });
+}
+
+/** The run's pinned definition version (stage specs for the rows, edges for the graph, review rounds). */
+export function useRunGraph(workflowId: string, versionId: string | null | undefined) {
+  const admin = useAdminApi();
+  return useQuery({
+    queryKey: [...workflowKey(workflowId), 'version', versionId ?? ''],
+    queryFn: () => admin.definitions.version(workflowId, versionId!),
+    enabled: Boolean(workflowId && versionId),
+    staleTime: Infinity,
+  });
+}
+
+const refreshRun = (client: ReturnType<typeof useQueryClient>, runId: string) =>
+  Promise.all([client.invalidateQueries({ queryKey: queryKeys.run(runId) }), client.invalidateQueries({ queryKey: queryKeys.runs() })]);
+
+/**
+ * Run and stage commands (`POST /workflow-runs/:id/commands`, P03): pause (drain / interrupt), resume, cancel; a
+ * stage's pause, resume, retry (resume / restart), skip (as completed), cancel. A finished run is never mutated:
+ * "Retry failed" and "Re-run from here" fork a NEW run (`POST /workflow-invocations`, target fork). The run refetches
+ * on settle — the server decides where it landed (a 409 means another device got there first).
+ */
+export function useRunCommands(runId: string) {
+  const admin = useAdminApi();
+  const client = useQueryClient();
+  const command = useMutation({
+    mutationFn: (body: RunCommand) => admin.runs.command(runId, body),
+    onSettled: () => refreshRun(client, runId),
+  });
+  const fork = useMutation({
+    mutationFn: ({ rerunFrom, idempotencyKey }: { rerunFrom?: string[]; idempotencyKey: string }) =>
+      admin.workflows.invoke({ target: { kind: 'fork', sourceRunId: runId, definition: 'pinned', workspace: 'fresh', ...(rerunFrom ? { rerunFrom } : {}) }, variables: {}, client: 'mobile' }, { idempotencyKey }),
+    onSettled: () => refreshRun(client, runId),
+  });
+  const remove = useMutation({
+    mutationFn: () => admin.runs.remove(runId),
+    onSuccess: () => {
+      client.removeQueries({ queryKey: queryKeys.run(runId) });
+      void client.invalidateQueries({ queryKey: queryKeys.runs() });
+    },
+  });
+  return { command, fork, remove };
+}
+
+/** The run's live permission mode (`GET / PATCH /workflow-runs/:id/permission-mode`). */
+export function useRunPermissionMode(runId: string, enabled: boolean) {
+  const admin = useAdminApi();
+  const client = useQueryClient();
+  const key = [...queryKeys.run(runId), 'permission-mode'] as const;
+  const mode = useQuery({ queryKey: key, queryFn: async () => (await admin.runs.permissionMode.get(runId)).mode, enabled, staleTime: 30_000 });
+  const setMode = useMutation({
+    mutationFn: async (next: string) => (await admin.runs.permissionMode.set(runId, next)).mode,
+    onMutate: async (next) => {
+      await client.cancelQueries({ queryKey: key });
+      const previous = client.getQueryData<string>(key);
+      client.setQueryData(key, next);
+      return { previous };
+    },
+    onSuccess: (confirmed) => client.setQueryData(key, confirmed),
+    onError: (_e, _next, context) => {
+      if (context?.previous) client.setQueryData(key, context.previous);
+    },
+  });
+  return { mode, setMode };
+}
+
+/** A stage's gate answered with the `approve` command (signed from a phone, MG-05); the run refetches. */
+export function useApproveStage(runId: string) {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Parameters<typeof api.runs.approveStage>[1]) => api.runs.approveStage(runId, input),
+    onSettled: () => refreshRun(client, runId),
+  });
+}
+
+/**
+ * A stage is a compact chat (P03b): send a message (queued between turns, an amendment of a completed stage, a
+ * retry of a paused one; 409 STAGE_BUSY mid-turn), stop the turn in flight, answer an in-turn gate in the chat's
+ * shapes (a risky permission signed, MG-05). Every mutation refetches the run and the transcript.
+ */
+export function useStageConversation(runId: string, stageRunId: string) {
+  const api = useApi();
+  const { fetch } = useAuth();
+  const client = useQueryClient();
+  const refresh = () => Promise.all([refreshRun(client, runId), client.invalidateQueries({ queryKey: queryKeys.stageTranscript(runId, stageRunId) })]);
+  const send = useMutation({
+    mutationFn: (input: { message: string; mode?: AgentMode | undefined; files: ChatUpload[] }) =>
+      sendStageMessage(fetch, runId, stageRunId, { message: input.message, ...(input.mode ? { mode: input.mode } : {}) }, input.files),
+    onSettled: refresh,
+  });
+  const stop = useMutation({ mutationFn: (options: { force?: boolean }) => api.runs.cancelStageTurn(runId, stageRunId, options), onSettled: refresh });
+  const permission = useMutation({
+    mutationFn: (input: { interactionId: string; behavior: 'allow' | 'deny'; message?: string; approvalProof?: ApprovalProof }) =>
+      api.runs.stagePermission(runId, stageRunId, input.interactionId, { behavior: input.behavior, ...(input.message ? { message: input.message } : {}), ...(input.approvalProof ? { approvalProof: input.approvalProof } : {}) }),
+    onSettled: refresh,
+  });
+  const answer = useMutation({
+    mutationFn: (input: { interactionId: string; answers: Record<string, string[]>; freeformResponse?: string }) =>
+      api.runs.stageAnswer(runId, stageRunId, input.interactionId, { answers: input.answers, ...(input.freeformResponse ? { freeformResponse: input.freeformResponse } : {}) }),
+    onSettled: refresh,
+  });
+  const plan = useMutation({
+    mutationFn: (input: { interactionId: string; approved: boolean; action?: 'exit_only' | 'implement_interactive' | 'implement_autopilot'; feedback?: string }) =>
+      api.runs.stagePlan(runId, stageRunId, input.interactionId, { approved: input.approved, ...(input.action ? { action: input.action } : {}), ...(input.feedback ? { feedback: input.feedback } : {}) }),
+    onSettled: refresh,
+  });
+  return { send, stop, permission, answer, plan };
 }
 
 // Opening a run (MD-80): a run lives at /workflows/<workflowId>/runs/<runId>. Callers that only hold the run id

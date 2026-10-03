@@ -62,6 +62,7 @@ import { Pressable } from '../../ui/primitives/Pressable';
 import { Skeleton } from '../../ui/primitives/Skeleton';
 import { Text } from '../../ui/primitives/Text';
 import { toast } from '../../ui/primitives/Toast';
+import { errorText } from '../../ui/lib/format';
 import { chatHeaderStatus, chatMenu, lastTurnOutcome, lastUserPrompt, transcriptText, type ChatMenuId } from './model/chatHeader';
 import {
   useAnswerChatQuestion,
@@ -77,6 +78,7 @@ import {
   useMarkChatRead,
   usePatchChat,
   usePrepareChatWorkspace,
+  usePublishWorkflowDraft,
   type ChatPatch,
 } from './queries';
 import { useAnswerPermission } from './useAnswerPermission';
@@ -495,6 +497,8 @@ export default function ChatScreen(): React.ReactElement {
     },
     [auth, workspaceId, sheet],
   );
+  const publishDraft = usePublishWorkflowDraft().mutateAsync;
+  const canPublishDrafts = scopes.includes('write:workflows');
   const transcriptActions = useMemo<TranscriptActions>(
     () => ({
       agent: boundAgent,
@@ -514,9 +518,22 @@ export default function ChatScreen(): React.ReactElement {
       onRewind: (turnId, prompt) => openRewind({ turnId, prompt }),
       onForkFrom: (turnId) => void runFork(turnId),
       onCopyTranscript: () => void runCopyTranscript(),
+      ...(canPublishDrafts
+        ? {
+            onPublishDraft: async (workflowId: string) => {
+              try {
+                await publishDraft(workflowId);
+                haptic('success');
+              } catch (e) {
+                toast({ kind: 'error', message: errorText(e) });
+                throw e;
+              }
+            },
+          }
+        : {}),
       renderGate,
     }),
-    [boundAgent, modelLabel, chatId, workspaceId, openImage, openRewind, runFork, runCopyTranscript, renderGate, openTab],
+    [boundAgent, modelLabel, chatId, workspaceId, openImage, openRewind, runFork, runCopyTranscript, renderGate, openTab, canPublishDrafts, publishDraft],
   );
 
   // ── Pane claim (MB-42) ───────────────────────────────────────

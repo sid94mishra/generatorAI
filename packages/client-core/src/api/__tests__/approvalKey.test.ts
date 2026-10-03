@@ -39,4 +39,16 @@ describe('approval key API (MG-05)', () => {
     await createApiClient(fetchImpl).chats.respondPermission('c1', 'i1', { behavior: 'allow', approvalProof });
     expect(calls).toEqual([{ path: '/api/chats/c1/interactions/i1/permission', method: 'POST', body: { behavior: 'allow', approvalProof } }]);
   });
+
+  it('signs a stage approval beside the approve command, and a risky stage permission', async () => {
+    const { calls, fetchImpl } = recorder(202, { runId: 'r1', command: 'approve' });
+    const approvalProof = { v: 1, payload: { nonce: 'n' }, signature: 's' } as unknown as ApprovalProof;
+    const api = createApiClient(fetchImpl);
+    await api.runs.approveStage('r1', { instanceId: 's1', outcome: 'changes_requested', feedback: 'tighten it', approvalProof });
+    await api.runs.stagePermission('r1', 's1', 'i1', { behavior: 'deny', approvalProof });
+    expect(calls).toEqual([
+      { path: '/api/workflow-runs/r1/commands', method: 'POST', body: { command: 'approve', instanceId: 's1', outcome: 'changes_requested', feedback: 'tighten it', approvalProof } },
+      { path: '/api/workflow-runs/r1/instances/s1/interactions/i1/permission', method: 'POST', body: { behavior: 'deny', approvalProof } },
+    ]);
+  });
 });

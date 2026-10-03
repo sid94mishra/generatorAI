@@ -1,26 +1,21 @@
 // The (app) shell (04 §1.2, MD-18): AppShell (sidebar, workspace pane, connection banner) around one native Stack
 // that carries every screen. Presentation options for every route live here (04 §1.1 rule 2), from
-// `ui/platform/presentation` (MD-21). Screens draw the kit Header themselves (native on iOS, the M3 bar on Android);
-// legacy details that still set navigator options get the kit-built LegacyStackHeader until M7/M8 (MD-141).
+// `ui/platform/presentation` (MD-21). Every screen draws the kit Header itself (native on iOS, the M3 bar on
+// Android); the last legacy navigator headers (MD-141) went with the M8 run screens.
 import React, { useEffect, useRef } from 'react';
 import { BackHandler } from 'react-native';
 import { Stack, router, usePathname } from 'expo-router';
 
 import { AppShell } from '../../src/blocks/shell/AppShell';
-import { LegacyStackHeader, type LegacyStackHeaderProps } from '../../src/blocks/shell/LegacyStackHeader';
 import { parentHref } from '../../src/blocks/shell/parentHref';
 import { fullScreenModalOptions, moduleRootOptions, paletteOptions, sheetOptions, useStackScreenOptions } from '../../src/ui/platform';
 
 const MODULE_ROOTS = ['index', 'chats/index', 'projects/index', 'agents/index', 'workflows/index', 'automations/index', 'scripts/index', 'settings/index'];
-const SHEETS = ['chats/[id]/gate/[interactionId]', 'scope-request'];
+const SHEETS = ['chats/[id]/gate/[interactionId]', 'workflows/[id]/runs/[runId]/approval/[stageRunId]', 'scope-request'];
 /** Full-screen modal editors (MD-21). */
 const EDITORS = ['workflows/new', 'projects/new', 'projects/[id]/skills/[configId]/edit', 'agents/create', 'agents/[id]/edit', 'automations/new', 'automations/[id]/edit', 'settings/mcp/add'];
 /** Route sheets at the large detent. */
 const LARGE_SHEETS = ['workflows/[id]/run', 'chats/[id]/turn', 'chats/new', 'workspaces/[workspaceId]/commit', 'projects/[id]/add-codebase', 'agents/new', 'agents/import', 'automations/[id]/executions/[executionId]', 'scripts/[id]/run', 'pickers/model'];
-/** Legacy details that set their title and trailing controls through navigator options. */
-const STACK_HEADER: Record<string, string> = {
-  'workflows/[id]/runs/[runId]/stages/[stageRunId]': 'Stage',
-};
 
 type Href = Parameters<typeof router.replace>[0];
 
@@ -61,13 +56,6 @@ export default function AppLayout(): React.ReactElement {
         ))}
         {EDITORS.map((name) => (
           <Stack.Screen key={name} name={name} options={fullScreenModalOptions} />
-        ))}
-        {Object.entries(STACK_HEADER).map(([name, title]) => (
-          <Stack.Screen
-            key={name}
-            name={name}
-            options={{ title, headerShown: true, header: (props) => <LegacyStackHeader {...(props as unknown as LegacyStackHeaderProps)} /> }}
-          />
         ))}
       </Stack>
     </AppShell>

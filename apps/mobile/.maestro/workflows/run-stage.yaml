@@ -1,0 +1,26 @@
+appId: ${APP_ID}
+name: workflows · run screen, stage chat, run menu
+# M8-03 (MWorkflowRun, MWorkflowRunMenu, MRunStageChat). Starts a run of the sandbox's "Sandbox Workflow" (Faux
+# harness), follows it on the run screen, opens a stage's compact chat and the run menu. A stage approval (MRunApproval)
+# needs a workflow with an approval gate and a registered approval key (checked on device, 08 §2).
+tags: [workflows]
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///workflows
+- extendedWaitUntil: {visible: "Sandbox Workflow", timeout: 20000}
+- tapOn: "Sandbox Workflow"
+- extendedWaitUntil: {visible: {id: workflow-run}, timeout: 15000}
+- tapOn: {id: workflow-run}
+- extendedWaitUntil: {visible: {id: run-sheet-run}, timeout: 10000}
+- tapOn: {id: run-sheet-run}
+- extendedWaitUntil: {visible: {id: run-screen}, timeout: 30000}
+- assertVisible: {id: run-lifecycle}
+- extendedWaitUntil: {visible: {id: run-timeline}, timeout: 30000}
+- tapOn: {id: "run-stage-plan"}
+- extendedWaitUntil: {visible: {id: run-stage-plan-chat}, timeout: 30000}
+- tapOn: {id: run-stage-plan-chat}
+- extendedWaitUntil: {visible: {id: stage-chat}, timeout: 15000}
+- back
+- extendedWaitUntil: {visible: {id: run-screen}, timeout: 10000}
+- tapOn: {id: run-menu}
+- assertVisible: "Copy run ID"

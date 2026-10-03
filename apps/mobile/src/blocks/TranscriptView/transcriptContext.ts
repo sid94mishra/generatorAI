@@ -28,6 +28,8 @@ export interface TranscriptActions {
   onCopyTranscript?: () => void;
   /** Absent when text to speech is unavailable. */
   onReadAloud?: (text: string) => void;
+  /** MB-18 DraftCard "Publish" (people with `write:workflows` only); resolves once published, rejects otherwise. */
+  onPublishDraft?: (workflowId: string) => Promise<void>;
   /** Gate segments (MB-15): the screen renders the card; without it a settled gate shows its one-line outcome. */
   renderGate?: (segment: GateSegment) => ReactElement | null;
 }

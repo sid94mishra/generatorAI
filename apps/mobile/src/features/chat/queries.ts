@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useFocusEffect } from 'expo-router';
 import { queryKeys } from '@generatorai/client-core';
+import { useAdminApi } from '../../services/api/useAdminApi';
 import { useApi } from '../../services/api/useApi';
 
 export function useChat(id: string, options: { enabled?: boolean; staleTime?: number } = {}) {
@@ -174,4 +175,14 @@ export function useLiveChatBlocks(streamKey: string): { blocks: readonly StreamB
     return status === 'streaming' || status === 'thinking' || status === 'pending';
   });
   return { blocks, live };
+}
+
+/** MB-18 DraftCard "Publish": an agent's draft becomes the published version (people only, PD-14). */
+export function usePublishWorkflowDraft() {
+  const admin = useAdminApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (workflowId: string) => admin.definitions.publish(workflowId),
+    onSettled: () => void client.invalidateQueries({ queryKey: queryKeys.workflows() }),
+  });
 }

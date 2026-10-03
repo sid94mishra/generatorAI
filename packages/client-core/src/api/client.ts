@@ -1475,6 +1475,17 @@ export function createApiClient(fetchImpl: ApiFetch) {
           json(body),
         ),
 
+      /**
+       * Answer a stage's gate with the `approve` command (a completion review, an approval wait, an in-turn gate).
+       * A phone sends `approvalProof` beside the command (mobile MG-05): its approval key signs
+       * `{kind: 'stage_approval', id: instanceId, entityId: runId}` and `STAGE_APPROVAL_DECISION[outcome]`.
+       */
+      approveStage: (
+        runId: string,
+        input: { instanceId: string; outcome: ApprovalOutcome; feedback?: string; data?: Record<string, unknown>; expectedVersion?: number; approvalProof?: ApprovalProof },
+      ) =>
+        request<{ runId: string; command: string }>(fetchImpl, `/api/workflow-runs/${runId}/commands`, json({ command: 'approve', ...input })),
+
       // ── A stage is a compact chat (P03b) ──────────────────────────
 
       /**
@@ -1521,8 +1532,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
           json(options ?? {}),
         ),
 
-      /** Answer a stage's tool-permission gate (the chat's body shape). */
-      stagePermission: (runId: string, instanceId: string, interactionId: string, response: { behavior: 'allow' | 'deny'; message?: string }) =>
+      /** Answer a stage's tool-permission gate (the chat's body shape; `approvalProof` for a risky gate from a phone, MG-05). */
+      stagePermission: (runId: string, instanceId: string, interactionId: string, response: { behavior: 'allow' | 'deny'; message?: string; approvalProof?: ApprovalProof }) =>
         request<void>(
           fetchImpl,
           `/api/workflow-runs/${runId}/instances/${instanceId}/interactions/${interactionId}/permission`,

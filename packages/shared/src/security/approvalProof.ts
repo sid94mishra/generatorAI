@@ -17,7 +17,14 @@ export type ApprovalGateKind =
   | 'computer_consent'
   | 'scope_grant';
 
-export type ApprovalDecision = 'allow' | 'deny' | 'approve' | 'reject' | 'answer';
+export type ApprovalDecision = 'allow' | 'deny' | 'approve' | 'reject' | 'answer' | 'request_changes';
+
+/** A workflow approval's outcome (the `approve` run command) as the decision its proof signs (M8, MD-177). */
+export const STAGE_APPROVAL_DECISION = {
+  approved: 'approve',
+  rejected: 'reject',
+  changes_requested: 'request_changes',
+} as const satisfies Record<'approved' | 'rejected' | 'changes_requested', ApprovalDecision>;
 
 export interface ApprovalPayload {
   v: 1;

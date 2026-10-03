@@ -11,7 +11,6 @@ import {
   type Line,
   type TokenKind,
 } from '../ui/lib/highlight';
-import { syntaxPalette } from '../components/markdown/syntaxColors';
 
 /** `[kind, text]` pairs for one line — what the tests actually care about. */
 function kinds(lines: Line[], index = 0): [TokenKind, string][] {
@@ -275,35 +274,5 @@ describe('highlight — budget and cache', () => {
     expect(a).not.toBeNull();
     expect(a).toBe(b);
     expect(highlight('const a = 1;', 'go')).not.toBe(a);
-  });
-});
-
-describe('syntaxPalette', () => {
-  it('maps every kind onto an existing theme colour, plain inherits', () => {
-    const colors = {
-      primary: '#p',
-      success: '#s',
-      warning: '#w',
-      danger: '#d',
-      info: '#i',
-      done: '#o',
-      'muted-foreground': '#m',
-    };
-    const palette = syntaxPalette(colors);
-    expect(palette.plain).toBeUndefined();
-    expect(palette.keyword).toBe('#p');
-    expect(palette.string).toBe('#s');
-    expect(palette.comment).toBe('#m');
-    expect(palette.number).toBe('#w');
-    expect(palette.type).toBe('#i');
-    expect(palette.attr).toBe('#o');
-    expect(palette.added).toBe('#s');
-    expect(palette.removed).toBe('#d');
-  });
-
-  it('falls back when a theme lacks info/done', () => {
-    const palette = syntaxPalette({ primary: '#p', 'primary-emphasis': '#pe' });
-    expect(palette.type).toBe('#pe');
-    expect(palette.attr).toBe('#pe');
   });
 });

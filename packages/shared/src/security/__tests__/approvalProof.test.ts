@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalApprovalPayload, canonicalJson } from '../approvalProof.js';
+import { STAGE_APPROVAL_DECISION, canonicalApprovalPayload, canonicalJson } from '../approvalProof.js';
 
 describe('canonicalJson (MG-05)', () => {
   it('sorts keys at every depth, drops undefined and keeps no whitespace', () => {
@@ -21,5 +21,11 @@ describe('canonicalJson (MG-05)', () => {
     ).toBe(
       '{"decision":"allow","deviceId":"dev_1","gate":{"entityId":"c","id":"i","kind":"tool_permission"},"iat":1790412600,"nonce":"n","serverId":"s","typ":"gai-approval","v":1}',
     );
+  });
+});
+
+describe('STAGE_APPROVAL_DECISION (M8)', () => {
+  it('names the signed decision of each workflow approval outcome', () => {
+    expect(STAGE_APPROVAL_DECISION).toEqual({ approved: 'approve', rejected: 'reject', changes_requested: 'request_changes' });
   });
 });
