@@ -437,7 +437,7 @@ export default function AutomationWizardScreen(): React.ReactElement {
       title={editing ? 'Edit automation' : 'New automation'}
       {...(editing ? { primary: { label: 'Save', onPress: finish, loading: saving, disabled: !dirty || saving } } : {})}
       onCancel={close}
-      dirty={dirty && !saving}
+      dirty={dirty && !saving && !create.isSuccess}
       navigation={navigation as never}
       stepper={<Stepper steps={WIZARD_STEPS.map((s) => ({ id: s.id, label: s.label }))} current={page} done={WIZARD_STEPS.map((_, i) => i).filter((i) => i < page)} />}
       stickyBar={

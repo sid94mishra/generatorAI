@@ -139,10 +139,10 @@ export default function AgentEditorScreen(): React.ReactElement {
     (editing ? writes.update(params.id!, updateBody(draft)) : writes.create(createBody(draft)))
       .then((agent) => {
         haptic('success');
-        if (editing) {
-          setDraft(null);
-          close();
-        } else router.replace(agentHref(agent.id) as Href);
+        // Clean before leaving: `saving` turns false again in `finally`, and a dirty editor would ask to discard.
+        setDraft(null);
+        if (editing) close();
+        else router.replace(agentHref(agent.id) as Href);
       })
       .catch((e: unknown) => toast({ kind: 'error', message: e instanceof ApiError && e.status === 409 ? 'Another agent in this scope uses this slug.' : errorText(e) }))
       .finally(() => setSaving(false));

@@ -32,6 +32,6 @@ tags: [smoke, navigation]
 - openLink: generatorai:///needs-you
 - extendedWaitUntil: {visible: {id: needs-you}, timeout: 15000}
 - openLink: generatorai:///settings
-- extendedWaitUntil: {visible: "Appearance", timeout: 15000}
+- extendedWaitUntil: {visible: "Appearance.*", timeout: 15000}
 - openLink: generatorai:///
 - extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 15000}

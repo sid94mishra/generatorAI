@@ -57,6 +57,7 @@ describe('last route — expiry', () => {
       '/workflows/w1/run',
       '/workflows/w1/runs/r1/approval/s1',
       '/workflows/new',
+      '/workflows/w1/edit/stages/plan',
       '/agents/a1/edit',
       '/workspaces/ws1/commit',
       '/settings/mcp/add',
