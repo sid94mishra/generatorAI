@@ -211,7 +211,7 @@ test.describe('Settings', () => {
 
     await gotoApp('/settings');
     await openSection(page, 'Model providers');
-    await expect(page.getByRole('heading', { name: 'Model Providers', exact: true, level: 2 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Model providers', exact: true, level: 2 })).toBeVisible();
 
     const main = settingsDialog(page);
     for (const p of reg.data.providers) {

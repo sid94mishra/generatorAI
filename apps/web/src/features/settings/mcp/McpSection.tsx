@@ -118,7 +118,7 @@ export function McpSection() {
 
   return (
     <SettingsSection
-      title="MCP Servers"
+      title="MCP servers"
       description="Model Context Protocol servers extend agents with external tools. Disabled servers are hidden from the per-stage MCP selector when building workflows."
     >
       <SectionHeader

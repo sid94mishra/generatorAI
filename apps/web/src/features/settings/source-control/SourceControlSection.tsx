@@ -147,7 +147,7 @@ export function SourceControlSection() {
 
   return (
     <SettingsSection
-      title="Source Control"
+      title="Source control"
       description="Connect the accounts GeneratorAI uses to push branches and open pull requests. Tokens are stored on the server and never returned to the browser."
       data-testid="settings-source-control"
     >

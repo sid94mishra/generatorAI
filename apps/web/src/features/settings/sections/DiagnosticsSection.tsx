@@ -58,15 +58,8 @@ function SystemHealthGroup() {
 
   return (
     <section className="flex flex-col gap-2">
-      <SectionHeader
-        title="System health"
-        level={3}
-        action={
-          <Button size="sm" icon="refresh" loading={info.isFetching} onClick={() => void info.refetch()}>
-            Refresh
-          </Button>
-        }
-      />
+      {/* One Refresh for the whole section (the status row above); a second one here duplicated it. */}
+      <SectionHeader title="System health" level={3} />
       {!data ? (
         <div className="flex items-center gap-2 text-small text-fg-3">
           <Spinner size={14} /> Loading…
@@ -95,6 +88,7 @@ function SystemHealthGroup() {
 
 export function DiagnosticsSection() {
   const { data: health, isError, isFetching, refetch } = useHealth();
+  const info = useSystemInfo();
   const { data: healthConfig, isLoading: sandboxLoading } = useHealthConfig();
 
   return (
@@ -105,7 +99,15 @@ export function DiagnosticsSection() {
             <StatusDot tone={isError ? 'err' : 'ok'} size="sm" />
             {isFetching ? 'Refreshing…' : isError ? 'Disconnected' : 'Auto-refreshing'}
           </span>
-          <Button size="sm" icon="refresh" loading={isFetching} onClick={() => void refetch()}>
+          <Button
+            size="sm"
+            icon="refresh"
+            loading={isFetching || info.isFetching}
+            onClick={() => {
+              void refetch();
+              void info.refetch();
+            }}
+          >
             Refresh
           </Button>
         </div>

@@ -52,7 +52,8 @@ export function SectionHeader({
   const form = variant === 'form';
   return (
     <div className={cn('flex min-w-0 items-baseline gap-2', form ? 'min-h-6' : 'min-h-6 items-center', className)} {...rest}>
-      <Heading className={cn('truncate text-fg', form ? 'text-title' : 'text-ui font-semibold')}>{title}</Heading>
+      {/* The hint gives way first: a long hint truncates, the title never does ("Acco…"). */}
+      <Heading className={cn('truncate text-fg', hint != null && 'shrink-0', form ? 'text-title' : 'text-ui font-semibold')}>{title}</Heading>
       {count != null ? <Count tone={countTone}>{count}</Count> : null}
       {hint != null ? <span className="min-w-0 truncate text-small text-fg-3">{hint}</span> : null}
       {action != null ? <div className="ml-auto flex shrink-0 items-center">{action}</div> : null}

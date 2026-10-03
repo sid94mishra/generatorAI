@@ -129,7 +129,7 @@ export function ProvidersSection() {
 
   return (
     <SettingsSection
-      title="Model Providers"
+      title="Model providers"
       description="All connected providers are available at once — a chat or workflow stage can use any model from any of them. The default provider only handles requests that don't pick one."
     >
       <div className="flex items-center justify-between">
@@ -192,7 +192,9 @@ export function ProvidersSection() {
 function ConnectionBadge({ provider, checking }: { provider: HarnessProviderStatus; checking: boolean }) {
   if (checking) return <Badge tone="neutral">Checking…</Badge>;
   if (provider.ready) return <Badge tone="ok">Connected</Badge>;
-  return <Badge tone="err">{provider.installed ? 'Not signed in' : 'Not installed'}</Badge>;
+  // Not an error: an optional provider that is absent is neutral (the model picker
+  // dims it the same way); an installed one waiting for sign-in asks for action.
+  return provider.installed ? <Badge tone="warn">Not signed in</Badge> : <Badge tone="neutral">Not installed</Badge>;
 }
 
 function ProviderDetails({
