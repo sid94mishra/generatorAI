@@ -185,3 +185,21 @@ export function overrideIncludes(
   if (overrides[removeKey]?.includes(id)) return false;
   return inBase;
 }
+
+/**
+ * Skills switched off on this device (Settings › Skills, MD-30) leave an agent chat at create time: removed when the
+ * agent brings them, dropped when the person added them. Derived per create; the draft keeps its own choices.
+ */
+export function withDeviceSkillsOff(overrides: AgentOverrides, agentSkillIds: readonly string[], disabled: readonly string[]): AgentOverrides {
+  if (!disabled.length) return overrides;
+  const off = new Set(disabled);
+  const add = (overrides.addSkillIds ?? []).filter((id) => !off.has(id));
+  const remove = new Set(overrides.removeSkillIds ?? []);
+  for (const id of agentSkillIds) if (off.has(id)) remove.add(id);
+  const next: AgentOverrides = { ...overrides };
+  if (add.length) next.addSkillIds = add;
+  else delete next.addSkillIds;
+  if (remove.size) next.removeSkillIds = [...remove];
+  else delete next.removeSkillIds;
+  return next;
+}

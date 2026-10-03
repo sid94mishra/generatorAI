@@ -52,6 +52,8 @@ export const PREF_KEYS = {
   /** Epoch ms of the `lastRoute` write — the TTL is measured from here. */
   lastRouteAt: 'generatorai.last-route-at',
   motion: 'generatorai.motion',
+  /** Reduce transparency (iOS glass): 'system' | 'reduced' | 'full'. */
+  transparency: 'generatorai.transparency',
   haptics: 'generatorai.haptics',
   /** Whether `<Screen>`'s large title collapses on scroll. */
   largeTitleCollapse: 'generatorai.large-title-collapse',

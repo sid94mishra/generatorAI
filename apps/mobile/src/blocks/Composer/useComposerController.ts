@@ -25,7 +25,7 @@ import { COMPUTER_USE_SKILL_ID } from '@generatorai/shared';
 import { useApi } from '../../services/api/useApi';
 import { useAuth } from '../../services/auth/AuthProvider';
 import { checkFeature } from '../../services/auth/featureGate';
-import { PREF_KEYS, prefs } from '../../services/storage/prefs';
+import { readDisabledSkills } from '../../services/prefs/skillPrefs';
 import { announce, haptics, notify } from './notify';
 import { useVoiceInput } from '../../services/voice/useVoiceInput';
 import { commitDictation, type CommittedRange } from '../../services/voice/dictationCommit';
@@ -116,16 +116,6 @@ export interface ComposerController {
   /** The draft, for screens that need to seed or inspect it. */
   draft: string;
   setDraft(text: string): void;
-}
-
-function readDisabledSkills(): string[] {
-  try {
-    const raw = prefs.getString(PREF_KEYS.disabledSkills);
-    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
-  } catch {
-    return [];
-  }
 }
 
 function serverHistoryFrom(messages: readonly ChatMessage[] | undefined): PromptHistoryEntry[] {

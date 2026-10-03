@@ -47,6 +47,9 @@ export const agentHref = (id: string): string => `/agents/${seg(id)}`;
 export const AUTOMATIONS_HREF = '/automations';
 export const SCRIPTS_HREF = '/scripts';
 export const settingsHref = (section?: string): string => (section ? `/settings/${seg(section)}` : SETTINGS_HREF);
+/** The scope request sheet (MScopeRequest, MD-30) pre-filled with the scopes a control needs. */
+export const scopeRequestHref = (scopes: ReadonlyArray<string>, reason?: string): string =>
+  `${SCOPE_REQUEST_HREF}?scopes=${scopes.map(seg).join(',')}${reason ? `&reason=${seg(reason)}` : ''}`;
 const query = (params: Record<string, string | null | undefined>): string => {
   const q = Object.entries(params)
     .filter((e): e is [string, string] => typeof e[1] === 'string' && e[1].length > 0)

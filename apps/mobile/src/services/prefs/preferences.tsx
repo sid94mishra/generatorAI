@@ -52,6 +52,9 @@ export const DEFAULT_LOCK_GRACE_SECONDS: LockGraceSeconds = 60;
 export interface PreferencesValue {
   motion: MotionPreference;
   setMotion(next: MotionPreference): void;
+  /** iOS glass: 'system' follows Reduce Transparency; the other two override it. */
+  transparency: MotionPreference;
+  setTransparency(next: MotionPreference): void;
   haptics: boolean;
   setHaptics(next: boolean): void;
   /** Require biometrics / device passcode on cold start and after the grace. */
@@ -71,6 +74,11 @@ export interface PreferencesValue {
 }
 
 const PreferencesContext = createContext<PreferencesValue | null>(null);
+
+function readTransparency(): MotionPreference {
+  const stored = prefs.getString(PREF_KEYS.transparency);
+  return MOTION_VALUES.includes(stored as MotionPreference) ? (stored as MotionPreference) : 'system';
+}
 
 function readMotion(): MotionPreference {
   const stored = prefs.getString(PREF_KEYS.motion);
@@ -110,6 +118,7 @@ export function PreferencesProvider({
   children: React.ReactNode;
 }): React.ReactElement {
   const [motion, setMotionState] = useState<MotionPreference>(readMotion);
+  const [transparency, setTransparencyState] = useState<MotionPreference>(readTransparency);
   const [haptics, setHapticsState] = useState<boolean>(() => {
     const enabled = prefs.getBoolean(PREF_KEYS.haptics, true);
     // The haptics module is a plain singleton so call sites stay a one-liner;
@@ -130,6 +139,11 @@ export function PreferencesProvider({
   const setMotion = useCallback((next: MotionPreference) => {
     setMotionState(next);
     prefs.setString(PREF_KEYS.motion, next);
+  }, []);
+
+  const setTransparency = useCallback((next: MotionPreference) => {
+    setTransparencyState(next);
+    prefs.setString(PREF_KEYS.transparency, next);
   }, []);
 
   const setHaptics = useCallback((next: boolean) => {
@@ -158,6 +172,8 @@ export function PreferencesProvider({
     () => ({
       motion,
       setMotion,
+      transparency,
+      setTransparency,
       haptics,
       setHaptics,
       biometricLock,
@@ -170,6 +186,8 @@ export function PreferencesProvider({
     [
       motion,
       setMotion,
+      transparency,
+      setTransparency,
       haptics,
       setHaptics,
       biometricLock,
@@ -187,6 +205,8 @@ export function PreferencesProvider({
 const OUTSIDE_PROVIDER: PreferencesValue = {
   motion: 'system',
   setMotion: () => {},
+  transparency: 'system',
+  setTransparency: () => {},
   haptics: true,
   setHaptics: () => {},
   biometricLock: false,

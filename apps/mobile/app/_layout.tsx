@@ -32,7 +32,7 @@ import { ServerQueryProvider } from '../src/services/api/ServerQueryProvider';
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider';
 import { NavigationTheme } from '../src/theme/NavigationTheme';
 import { PreferencesProvider, usePreferences } from '../src/services/prefs/preferences';
-import { setHapticsEnabled as setKitHapticsEnabled, setMotionPreference } from '../src/ui/platform';
+import { setHapticsEnabled as setKitHapticsEnabled, setMotionPreference, setTransparencyPreference } from '../src/ui/platform';
 import { useLinkRouting } from '../src/services/navigation/useLinkRouting';
 import { consumeLastRoute, useLastRoute } from '../src/services/prefs/lastRoute';
 import { AuthProvider, useAuth } from '../src/services/auth/AuthProvider';
@@ -53,11 +53,12 @@ void SplashScreen.preventAutoHideAsync();
  * cannot import services (MD-14). Layout effect: the values land before the first kit interaction.
  */
 function KitPreferencesBridge(): null {
-  const { motion, haptics } = usePreferences();
+  const { motion, transparency, haptics } = usePreferences();
   React.useLayoutEffect(() => {
     setMotionPreference(motion);
+    setTransparencyPreference(transparency);
     setKitHapticsEnabled(haptics);
-  }, [motion, haptics]);
+  }, [motion, transparency, haptics]);
   return null;
 }
 

@@ -42,6 +42,8 @@ describe('deep links → the mobile route tree (04 §1.6, MD-145)', () => {
     ['generatorai://scripts/s1', '/scripts/s1'],
     ['generatorai://settings', '/settings'],
     ['generatorai://settings/appearance', '/settings/appearance'],
+    ['generatorai://settings/mcp', '/settings/mcp'],
+    ['generatorai://settings/general', '/settings/general'],
     ['generatorai://settings/browser-terminal', '/settings/tools'],
     ['generatorai://settings/nope', '/settings'],
     ['generatorai://search?kind=workflows', '/search?kind=workflows'],

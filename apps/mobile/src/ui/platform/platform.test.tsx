@@ -18,6 +18,7 @@ import { geometry } from './geometry';
 import { adjacentGapFor, hitFrame, hitFrameFor } from './hit';
 import { androidMemberFor, haptic, setHapticsEnabled } from './haptics';
 import { reduceMotionFor, resolveMotion } from './motion';
+import { reduceTransparencyFor } from './transparency';
 import { sizeClassFor } from './breakpoints';
 import { detailOptionsFor, sheetOptionsFor } from './presentation';
 import { edgeSwipeOpensDrawerOn } from './gestures';
@@ -64,6 +65,9 @@ describe(`platform layer (${Platform.OS})`, () => {
     expect(reduceMotionFor('system', true)).toBe(true);
     expect(reduceMotionFor('full', true)).toBe(false);
     expect(reduceMotionFor('reduced', false)).toBe(true);
+    expect(reduceTransparencyFor('system', true)).toBe(true);
+    expect(reduceTransparencyFor('full', true)).toBe(false);
+    expect(reduceTransparencyFor('reduced', false)).toBe(true);
     const panel = resolveMotion('panel', 'ios', false);
     expect(panel.spatial).toMatchObject({ type: 'spring', config: { stiffness: 157.91, damping: 25.13 } });
     expect(resolveMotion('panel', 'android', false).spatial).toMatchObject({ type: 'spring', config: { stiffness: 700 } });

@@ -7,14 +7,11 @@ const ROOTS = new Set(['', 'chats', 'projects', 'agents', 'workflows', 'automati
 
 /** Settings sections with a screen today; web section ids that live inside one of them; anything else → /settings. */
 const SETTINGS_SECTIONS = new Set([
-  'appearance', 'audio', 'capabilities', 'diagnostics', 'extensions', 'notifications', 'providers', 'security', 'source-control', 'tools', 'accessibility', 'about',
+  'general', 'appearance', 'providers', 'agents', 'skills', 'mcp', 'templates',
+  'audio', 'diagnostics', 'extensions', 'notifications', 'security', 'source-control', 'tools', 'accessibility',
 ]);
 const SETTINGS_ALIASES: Record<string, string> = {
   'browser-terminal': 'tools',
-  agents: 'capabilities',
-  skills: 'capabilities',
-  mcp: 'capabilities',
-  templates: 'capabilities',
   'app-lock': 'accessibility',
 };
 
