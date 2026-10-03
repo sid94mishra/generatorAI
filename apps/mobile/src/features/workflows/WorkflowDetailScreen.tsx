@@ -6,8 +6,8 @@
 // (succeeded, median run, runs — each only when the server has it); Recent runs (MB-49 RunRow, "View all");
 // Setup (project, codebases, worktree per run, default session, post-processing, workflow hooks, automations);
 // Variables (type, required, default). NewAction "Run" / "Test run" (a draft runs its working graph) opens the
-// run sheet; a device without `runStart` gets the scope request card instead.
-import React, { useMemo } from 'react';
+// run sheet (`?run` presents it, R-5); a device without `runStart` gets the scope request card instead.
+import React, { useEffect, useMemo } from 'react';
 import { Share, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { toEpochMs } from '@generatorai/client-core';
@@ -44,7 +44,7 @@ const RECENT_RUNS = 5;
 const dateOf = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
 
 export default function WorkflowDetailScreen(): React.ReactElement {
-  const { id = '' } = useLocalSearchParams<{ id: string }>();
+  const { id = '', run: runParam } = useLocalSearchParams<{ id: string; run?: string }>();
   const onBack = useHeaderBack();
   const scopes = useGrantedScopes();
   const canEdit = scopes.includes('write:workflows');
@@ -63,6 +63,12 @@ export default function WorkflowDetailScreen(): React.ReactElement {
   const breadcrumb = useBreadcrumb(useMemo(() => [{ label: 'Workflows', href: WORKFLOWS_HREF }], []));
   const labels = useMemo(() => versionLabels(versions.data), [versions.data]);
   const isDraft = record?.status === 'draft';
+  // `/workflows/<id>?run` (R-5, the list's and links' "Run…") presents the run sheet once, then the param is dropped.
+  useEffect(() => {
+    if (!runParam || !record) return;
+    router.setParams({ run: undefined });
+    if (runStart.available) router.push(runSheetHref(record.id) as Href);
+  }, [runParam, record, runStart.available]);
 
   const act = (mid: MenuId): void => {
     if (!record || !graph) return;

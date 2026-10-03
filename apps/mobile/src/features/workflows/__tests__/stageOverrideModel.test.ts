@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatStageVariables, parseStageVariables } from '../components/work/stageOverrideForm';
+import { formatStageVariables, parseStageVariables } from '../model/stageOverrideModel';
 
 describe('parseStageVariables', () => {
   it('parses key=value lines with typed scalars', () => {

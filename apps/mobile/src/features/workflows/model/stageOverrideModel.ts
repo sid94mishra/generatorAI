@@ -1,5 +1,5 @@
 // ────────────────────────────────────────────────────────────────
-// Per-stage variables for the Advanced section of StartRunSheet.
+// Per-stage variables for a stage's overrides page in the run sheet (M8-02, MD-62).
 //
 // A stage override's `variables` are free-form (the invocation's
 // `stageOverrides[].variables`) — there is no per-stage declaration to build
@@ -8,7 +8,7 @@
 // everything else is a string. `activeStageOverrides` (client-core) turns
 // the drafts into the request's `stageOverrides`.
 //
-// Tested in src/__tests__/stageOverrideForm.test.ts.
+// Tested in features/workflows/__tests__/stageOverrideModel.test.ts.
 // ────────────────────────────────────────────────────────────────
 
 export interface StageVariablesParse {

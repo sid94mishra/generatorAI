@@ -132,6 +132,18 @@ export function useInvokeWorkflow(workflowId: string) {
   });
 }
 
+/** What a run of this request would do (`POST /workflow-invocations/plan`); nothing is written. */
+export function usePlanInvocation() {
+  const admin = useAdminApi();
+  return useMutation({ mutationFn: (body: InvocationRequest) => admin.workflows.plan(body) });
+}
+
+/** A codebase's branches (the run sheet's base ref). */
+export function useCodebaseBranches(projectId: string | null, codebaseId: string | null) {
+  const admin = useAdminApi();
+  return useQuery({ queryKey: [...queryKeys.projects(), projectId ?? '', 'codebases', codebaseId ?? '', 'branches'], queryFn: () => admin.projects.codebases.branches(projectId!, codebaseId!), enabled: Boolean(projectId && codebaseId), staleTime: 60_000 });
+}
+
 // ── Runs (the run screens) ────────────────────────────────────────
 
 type RemoveResult = Awaited<ReturnType<AdminApi['definitions']['remove']>>;
