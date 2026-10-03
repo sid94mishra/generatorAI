@@ -146,3 +146,5 @@ It also records every merge of `desktop_redesign` into this branch.
 | 2026-10-03 | M9 phase-end build check | none beyond the M9 commits | — | Freed ~9.7 GB (unused gai_pixel AVD + Android 35 image, Codex's leftover simulator, caches). iOS prebuild needed the apple-targets patch (MD-191, 9dae1a0e); iOS simulator build embeds all four extensions; Android arm64 build compiles generatorai-live, the recents privacy Kotlin and the tile. Functional checks parked as MV-33 (pairing automation broken on the new pairing screen). |
 
 | 2026-10-03 | M10 (MV-33) | `scripts/mobile/lib/sandbox-devices.mjs` (pairing drives the M7-08 screen by testID; no name typing; `/paired` Continue; Home detection on phone + tablet), `scripts/mobile/lib/sandbox-data.mjs` `findNewPairing` + its Node test | mobile-only tooling fix | `sandbox-pair.mjs pair` failed at `agent-device fill` (MD-192). Node tooling tests pass; the device run is the owner's. |
+
+| 2026-10-03 | M10-02 | `scripts/mobile/lib/sandbox-maestro.mjs`: flows also receive `PROJECT_ID` and `CODEBASE_ID` | additive (mobile-only tooling) | The new `projects/codebase` Maestro flow. |

@@ -899,6 +899,9 @@ it pins, cited in the flow's header comment. Weakening an assertion to make a re
 - Each script is **deleted in the same commit** as the Maestro flow that replaces it lands. `native-audit.mjs` is
   deleted in M1-03 (agent-device does its job). `lib.mjs`, the web-preview parts of `e2e/README.md` and the
   `playwright-core` devDependency go with the last script.
+- **Done in M10-02 (2026-10-03):** the last scripts (`net2.mjs`, `lib.mjs`) are deleted; `e2e/README.md` now lists only
+  the native helpers (fixtures, push payloads, links, the a11y checker and audit target). No mobile package depended on
+  Playwright. Route coverage by Maestro: `reviews/M10-notes.md` §1.
 
 | Legacy script | Replaced by | When |
 |---|---|---|

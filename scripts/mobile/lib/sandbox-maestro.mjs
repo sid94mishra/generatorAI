@@ -185,6 +185,7 @@ export async function runMaestro(session, target, args, { verify } = {}) {
       await seedSandbox(session, [...fresh]);
       const env = { APP_ID, PLATFORM: target.platform, BUILD: build, METRO_URL: encodeURIComponent(`http://${host}:8081`),
         SERVER_URL: `http://${host}:${session.port}`, DEVICE_NAME: target.name, DUMMY_REPO: assertDummyRepo(session.state.dummyRepo),
+        PROJECT_ID: session.state.projectId, CODEBASE_ID: session.state.fixtures.edits.codebaseId,
         ...Object.fromEntries(Object.entries(session.state.chats).map(([key, id]) => [`CHAT_${key.toUpperCase()}_ID`, id])) };
       const pairing = metadata.tags.includes('pairing');
       const devicesBefore = pairing ? new Set((await session.api('/auth/devices')).devices.map(device => device.deviceId)) : null;
