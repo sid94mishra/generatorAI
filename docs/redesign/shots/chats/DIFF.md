@@ -1,4 +1,32 @@
-# ChatsList — board vs app (P3-07)
+# Chats list + New chat dialog — boards ChatsList, NewChat (ChatsList re-verified)
+
+App: isolated seeded sandbox (`sandbox.mjs --port=3497 --web-port=5497`, temp DB under a private `TMPDIR`, Faux
+harness with a validation fixture adding scripted chats: file edits, a risky shell gate, a question, a provider
+error, an orchestrator with two workers, a long answer), project "DV Project" with a throwaway dummy repo
+(`make-dummy-repo.mjs`) added through the UI. Headed Chrome via playwright-cli; shots `<w>x<h>-<theme>-<mode>[-state].png`
+at 1440x900 and 1100x760 in Instrument dark, Instrument light and Solarized light (PNGs gitignored);
+`compare-*.png` from `side-by-side.mjs`. Design validation pass, 2026-10-03 (`../../reviews/design-validation.md`).
+
+Walked: sidebar → Chats; N opens New chat (web binding, D-24); project pick (DV Project) → Include repo; agent
+picker; ⌘↵ starts the chat; row menu; search; scope seg.
+
+## Matches
+- ChatsList as in `../review-2/DIFF.md` (header, count, search, seg with counts, chips, sort chip, columns, dash
+  cells, footnote under the table, pin glyph / unread dot per D-83).
+- New chat dialog: 640 dialog, Task box, Name row, Where (project + codebase checkboxes, Add local folder), Who
+  (Agent / Model / Effort columns), capability summary, Options collapsible, Esc hint, Cancel / Start chat.
+
+## Intentional deviations
+- Capability editing is a static summary (D-77). Per-source branch controls live on `/chats/new` (DF-15, R-1).
+
+## Defects (fixed)
+- "New chat ⌃N" in a browser tab advertised a chord Chrome reserves → the registry binding for the host (web "N",
+  ⌘N / Ctrl N on desktop); submit hints said "Ctrl ↵" on macOS; the dialog's ⌘/Ctrl ↵ had no handler (`9a2cd42c`).
+- New chat dialog lacked the board's Agent / Model / Effort column labels; name hint moved into the placeholder (`9a2cd42c`).
+
+---
+
+## P3-07 Chats list (earlier pass)
 
 Board: `docs/redesign/boards/web/ChatsList.dc.html` rendered by
 `scripts/redesign/render-boards.mjs`. App: `features/chats/ChatsListPage.tsx`

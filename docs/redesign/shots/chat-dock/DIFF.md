@@ -1,4 +1,45 @@
-# Chat dock — board vs app (P4-06)
+# Chat workspace + dock — boards Main, ChatLight, ChatNarrow, ChatFiles, ChatTerminal, ChatBrowser, ChatTasks, DockChanges, DockFiles, DockTerminal, DockBrowser, DockTasks
+
+App: isolated seeded sandbox (`sandbox.mjs --port=3497 --web-port=5497`, temp DB under a private `TMPDIR`, Faux
+harness with a validation fixture adding scripted chats: file edits, a risky shell gate, a question, a provider
+error, an orchestrator with two workers, a long answer), project "DV Project" with a throwaway dummy repo
+(`make-dummy-repo.mjs`) added through the UI. Headed Chrome via playwright-cli; shots `<w>x<h>-<theme>-<mode>[-state].png`
+at 1440x900 and 1100x760 in Instrument dark, Instrument light and Solarized light (PNGs gitignored);
+`compare-*.png` from `side-by-side.mjs`. Design validation pass, 2026-10-03 (`../../reviews/design-validation.md`).
+
+Walked: DV Changes (3 Faux file edits in a dummy-repo worktree) → Review changes → Changes dock (This turn / This
+chat / Branch vs HEAD, Keep all, Undo all, commit message, Commit & push — pushed `10e1882` to the dummy origin);
+Files dock (status letters, file preview); Terminal (shell, `echo`); Browser; DV Gate (risky shell gate → Allow once
+→ reload: the decision stays); DV Question (answer); DV Orchestrator (`?dock=tasks`, two workers); DV Error (failed
+turn); view seg Normal / Verbose / Summary; 1100 window (rail + dock sheet); Instrument light.
+Dock frame details from P4-06 below still hold.
+
+## Matches
+- T-04 workspace: breadcrumb + branch chip header, view seg, user bubble, agent turn header, "Edited 3 files" step
+  row, markdown (code block, table), changes tray, composer, key-hint row; dock 480 with pinned tabs, Maximize.
+- ChatNarrow: rail, 380 sheet, icon-only inactive tabs, no branch chip. ChatLight: light theme tokens.
+- Changes dock: compare seg, base select, Keep all / Undo all, per-file diffs with A/M letters, commit form, checks list.
+- Permission gate card, question card, delegation cards in the Tasks dock.
+
+## Intentional deviations
+- Tasks tab only in orchestrator chats (D-27). Keep / Undo stay (D-28). No queue (D-29). "Always in this chat" has no
+  API (D-67). Plan dock (ChatPlan) and Computer dock (ChatComputer) are not reachable on the sandbox: the Faux harness
+  cannot raise plan reviews and computer use is off — covered by stories and earlier reviews (blocked here).
+
+## Defects (fixed)
+- Files tree had no git-status letters (board ChatFiles/DockFiles) (`eb649466`).
+- Commit bar PR reason "Remote host var is not connected" for a path remote → "The remote is a local path …" (`99aa27ce`).
+- Shell gate showed its JSON wrapper instead of the command; Allow's name lacked its visible label (WCAG 2.5.3);
+  the allowed/denied card vanished once the turn settled — now persisted (`e13eddaa`).
+- The server's "[system] Every background agent … finished" re-prompt rendered as the user's bubble → system note (`55e02511`).
+- A failed turn vanished from the transcript (no text, no error) → persisted with its InlineError (`49f27026`).
+- Composer placeholder "What feature are you dreaming up?" → "Message <model>…" / "Reply to <agent>…"; gauge
+  popover bar never filled; tray truncated "3 file…" beside the dock (`44a26675`, `6c95ec7e`).
+- Dock tab overflow left half a tab visible (`15093589`).
+
+---
+
+## P4-06 dock frame (unchanged; earlier pass)
 
 Boards: `Main` (1440, dock as a panel) and `ChatNarrow` (1100, dock as a sheet), rendered by
 `scripts/redesign/render-boards.mjs`; DockChanges / DockFiles / DockTerminal / DockBrowser / DockTasks were

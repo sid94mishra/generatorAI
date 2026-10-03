@@ -521,6 +521,22 @@ Chats and runs work in mounts (`workspace_mounts`); the `worktrees` table, which
 - A person cannot remove an **active** worktree (409; web and mobile hide Remove for it). The retention clock runs from when the worktree stopped being live (`cleanedUpAt` is now set on `orphaned` too, cleared on `active`), and a restored chat's orphaned worktree returns to `active`.
 - Pre-existing chats are not back-filled (no backward compatibility).
 
+### D-85 Design validation as built (2026-10-03) — Final
+- **Key hints follow the host.** A hard-coded chord is never drawn: global commands show `shortcutFor(id)` (D-24
+  bindings), page-local Mod chords show `modChord(key)` (`lib/shortcuts.ts`: ⌘ on macOS, Ctrl elsewhere), and every
+  advertised chord has a handler.
+- **Worker chats are internal.** Every count that sits beside a chat list (project Chats tab, Home This week) counts
+  top-level chats only, as the lists do; the server's orchestrator re-prompt (`[system] …`) renders as a system note.
+- **A failed turn is part of the transcript.** The server records a turn with a provider error (streamed text +
+  `systemMessages`), and replay renders persisted "Error: …" notes as the live error block.
+- **Gate inputs are shown as what they name** (the command / path), never the JSON wrapper, on the gate card and on
+  Home; tool-permission decisions are persisted as `permissionCards`.
+- **Builder Save is disabled while validation has errors**, matching the problems panel (D-82's "Save validates first"
+  now shows up front instead of after a click).
+- **Disabled workflow scripts are explained**, not shown as "none found": `GET /api/workflow-scripts/status`.
+- **Shared layout hooks** used by several features live in `lib/` (`useNarrow`); `DataTable` gains `alwaysShowActions`
+  for short tables whose row actions are the point (ProjectDetail codebases).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
