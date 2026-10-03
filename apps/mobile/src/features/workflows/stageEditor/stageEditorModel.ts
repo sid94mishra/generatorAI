@@ -109,10 +109,20 @@ export const RULE_LABEL: Record<ResultValidationRule['type'], string> = {
 export const SIMPLE_RULES = ['contains', 'not_contains', 'min_length', 'max_length', 'regex'] as const;
 export type SimpleRuleType = (typeof SIMPLE_RULES)[number];
 
+/** A new rule. Text rules start empty — the editor asks for the text (`ruleProblem`); a placeholder would be saved. */
 export function newRule(type: SimpleRuleType): ResultValidationRule {
   if (type === 'min_length' || type === 'max_length') return { type, value: type === 'min_length' ? 1 : 10_000 };
   if (type === 'regex') return { type, pattern: '.+' };
-  return { type, value: 'TODO' };
+  return { type, value: '' };
+}
+
+/** What blocks saving a simple rule (the spec needs 1…10,000 characters of text), or null. */
+export function ruleProblem(rule: ResultValidationRule): string | null {
+  if (rule.type === 'contains' || rule.type === 'not_contains') {
+    if (!rule.value.trim()) return rule.type === 'contains' ? 'Enter the text the output must contain.' : 'Enter the text the output must not contain.';
+    if (rule.value.length > 10_000) return 'Keep it under 10,000 characters.';
+  }
+  return null;
 }
 
 export function ruleDetail(rule: ResultValidationRule): string {

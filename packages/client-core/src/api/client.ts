@@ -2015,6 +2015,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
         request<void>(fetchImpl, '/api/auth/push-token', jsonWith('PUT', body)),
       mutePush: (mutedUntil: number | null) =>
         request<void>(fetchImpl, '/api/auth/push-token/mute', jsonWith('PUT', { mutedUntil })),
+      /** Forget this device's push token on the server (mobile "Unpair this device"). */
+      unregisterPush: () => request<void>(fetchImpl, '/api/auth/push-token', { method: 'DELETE' }),
       /** MG-05 — a single-use nonce (60 s) bound to this device, for an approval or a key registration. */
       approvalNonce: () => request<{ nonce: string; expiresAt: number }>(fetchImpl, '/api/auth/approval-nonce', json({})),
       /** MG-05 — register this device's biometric-gated approval key (the body proves possession). */

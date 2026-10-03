@@ -152,3 +152,11 @@ It also records every merge of `desktop_redesign` into this branch.
 | 2026-10-03 | M10-03 | `scripts/mobile/vrt.mjs`, `scripts/mobile/perf.mjs`, `scripts/mobile/lib/{vrt-plan,perf-budgets}.mjs` + Node tests (new); `pnpm-lock.yaml` (`odiff-bin` 4.5.0 devDependency of `@generatorai/mobile`) | new mobile-only tooling | VRT and perf budgets (MD-194). No web / server effect. |
 
 | 2026-10-03 | M10-04 | `scripts/mobile/a11y-audit.mjs`, `scripts/mobile/lib/a11y-report.mjs` + Node test (new) | new mobile-only tooling | Route accessibility audit on both platforms + Dynamic Type sweep (MD-195). |
+
+| 2026-10-03 | M10-05 | none outside apps/mobile | — | Store readiness (MD-196): `app.config.ts` icons / splash / privacy manifest, `targets/*/PrivacyInfo.xcprivacy`, generated icon PNGs, `reviews/M10-store.md`. Needs a prebuild + rebuild (app config and target folders changed). |
+
+| 2026-10-03 | M10-06 | `pnpm-lock.yaml` (`@sentry/react-native` ~7.11.0 and its dependencies for `@generatorai/mobile`) | additive dependency (mobile only) | Opt-in crash reporting (MD-197). Installed through the registry mirror while registry.npmjs.org timed out; the lockfile keeps no tarball URLs (frozen offline install verified). |
+
+| 2026-10-03 | M10 plan sweep (M2-04 acceptance) | `packages/client-core/src/api/client.ts`: `auth.unregisterPush()` (`DELETE /api/auth/push-token`, the route exists) + wire test in `api/__tests__/deviceActions.test.ts` | additive | The last hand-written `/api` path in mobile features ("Unpair this device") goes through client-core. client-core tests, mobile + web typecheck green. |
+
+| 2026-10-03 | root package.json `pnpm.packageExtensions` | react-native-worklets 0.10.1 gains `@babel/generator`, `@babel/traverse`, `@babel/types` dependencies | lockfile | After Vite 8 (plugin-react 6 drops Babel) two @babel/traverse versions remain and pnpm hoists neither, so the worklets Babel plugin's undeclared requires failed: Jest suites could not load and Metro's transform worker died (`Cannot read properties of undefined (reading 'transformFile')`). Declaring them fixes both; drop it when worklets declares its own deps. |

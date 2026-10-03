@@ -5,6 +5,7 @@ import React from 'react';
 import { View } from 'react-native';
 import { router } from 'expo-router';
 
+import { reportCaughtError } from '../../services/native/crashReporting';
 import { Button } from '../../ui/primitives/Button';
 import { ErrorState } from '../../ui/primitives/ErrorState';
 
@@ -26,6 +27,8 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   override componentDidCatch(error: Error, info: React.ErrorInfo): void {
+    // Opt-in crash reporting (MD-42): a no-op unless the user turned it on.
+    reportCaughtError(error);
     if (__DEV__) {
       // eslint-disable-next-line no-console
       console.error(`[ErrorBoundary${this.props.scope ? `:${this.props.scope}` : ''}]`, error, info.componentStack);

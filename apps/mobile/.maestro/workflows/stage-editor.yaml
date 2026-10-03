@@ -22,6 +22,11 @@ tags: [workflows]
 - tapOn: {id: stage-tab-output}
 - tapOn: {id: stage-add-rule-contains}
 - assertVisible: {id: stage-rule-0}
+# A new text rule starts empty and asks for its text (final review F-1: it used to save the literal "TODO").
+- assertVisible: "Enter the text the output must contain."
+- tapOn: {id: stage-rule-0-value}
+- inputText: DONE
+- assertNotVisible: "Enter the text the output must contain."
 - tapOn: {id: stage-tab-policy}
 - tapOn: {id: stage-retry}
 - assertVisible: {id: stage-retry-sentence}

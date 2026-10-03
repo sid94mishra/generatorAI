@@ -111,6 +111,14 @@ const FACE_ID_USAGE =
 // on the App ID (with Time Sensitive Notifications) before a device build;
 // @bacons/apple-targets signs the extensions with `APPLE_TEAM_ID`.
 const APP_GROUP = 'group.dev.generatorai.app';
+
+// ── Crash-report symbols (MD-42, 06 §8.6, MD-197) ───────────────────
+// The reporter itself is opt-in at runtime (Settings › Diagnostics). Release symbols — the iOS dSYMs and JS source
+// maps (Xcode build phases) and the Android R8 mapping + native symbols (Sentry Android Gradle plugin) — upload only
+// when all four variables are set in the build environment (EAS secrets); otherwise the plugin is not applied and
+// builds never call sentry-cli.
+const SENTRY_ENV = ['SENTRY_AUTH_TOKEN', 'SENTRY_ORG', 'SENTRY_PROJECT', 'SENTRY_URL'] as const;
+const sentryUpload = SENTRY_ENV.every((key) => Boolean(process.env[key]?.trim()));
 const appleTeamId = process.env['APPLE_TEAM_ID']?.trim() || undefined;
 
 const config: ExpoConfig = {
@@ -141,11 +149,41 @@ const config: ExpoConfig = {
       // Approvals break through Focus (06 §7.2); `critical` is never used.
       'com.apple.developer.usernotifications.time-sensitive': true,
     },
-    // Opaque 1024×1024 (no alpha): App Store Connect rejects an iOS icon
-    // with transparency, and iOS paints transparent pixels black anyway.
-    // It is icon.png flattened onto the splash colour (#0d1117); regenerate
-    // it the same way if the mark changes (README "iOS").
-    icon: './assets/icon-ios.png',
+    // Per appearance (M10-05, MD-196). Light: opaque 1024×1024 (no alpha; App Store Connect rejects a
+    // transparent light icon) — icon.png flattened onto the splash colour (#0d1117). Dark and tinted: the
+    // ring mark on a transparent canvas (scripts/gen-app-icons.mjs); iOS draws their backdrop and derives
+    // the clear look. An Icon Composer `.icon` would replace all three (06 §8.8; designer follow-up).
+    icon: {
+      light: './assets/icon-ios.png',
+      dark: './assets/icon-ios-dark.png',
+      tinted: './assets/icon-ios-tinted.png',
+    },
+    // PrivacyInfo.xcprivacy (06 §8.8, MD-196). Required-reason APIs the app's own code and its Expo modules use;
+    // every pod also ships its own manifest (Xcode › Product › Archive › Generate Privacy Report to verify).
+    // Nothing is collected by the developer: the app talks only to the user's own server. Crash data appears only
+    // because opt-in crash reporting exists (MD-42, off by default, sent to the DSN the user enters).
+    privacyManifests: {
+      NSPrivacyTracking: false,
+      NSPrivacyTrackingDomains: [],
+      NSPrivacyAccessedAPITypes: [
+        // Preferences (expo modules, MMKV-adjacent settings) and the App Group suite shared with the extensions.
+        { NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryUserDefaults', NSPrivacyAccessedAPITypeReasons: ['CA92.1', '1C8F.1'] },
+        // expo-file-system / expo-image-picker read file dates of files the app itself created or the user picked.
+        { NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryFileTimestamp', NSPrivacyAccessedAPITypeReasons: ['C617.1', '3B52.1'] },
+        // React Native and timers measure elapsed time from boot (no fingerprinting).
+        { NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategorySystemBootTime', NSPrivacyAccessedAPITypeReasons: ['35F9.1'] },
+        // expo-file-system's free / total disk space (Settings › Storage shows device space only when asked).
+        { NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryDiskSpace', NSPrivacyAccessedAPITypeReasons: ['E174.1'] },
+      ],
+      NSPrivacyCollectedDataTypes: [
+        {
+          NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeCrashData',
+          NSPrivacyCollectedDataTypeLinked: false,
+          NSPrivacyCollectedDataTypeTracking: false,
+          NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAppFunctionality'],
+        },
+      ],
+    },
     infoPlist: {
       // The relay + E2EE stack is real cryptography, so this is NOT exempt.
       // Claiming exemption to skip the App Store prompt would be a false
@@ -153,9 +191,9 @@ const config: ExpoConfig = {
       ITSAppUsesNonExemptEncryption: true,
       NSCameraUsageDescription: CAMERA_USAGE,
       NSMicrophoneUsageDescription: MICROPHONE_USAGE,
-      // Both uses are real (D8): `AppLockGate` (src/auth/AppLock.tsx) locks the
+      // Both uses are real (D8): `AppLockGate` (src/blocks/shell/AppLockGate.tsx) locks the
       // app on cold start and after the configured grace, and `requireStepUp`
-      // (src/auth/stepUp.ts) confirms terminal/browser/computer and admin
+      // (src/services/auth/stepUp.ts) confirms terminal/browser/computer and admin
       // actions and device revocation. Keep this string in step with the
       // `faceIDPermission` plugin value below — Apple reviews the one that
       // ends up in Info.plist, and the plugin writes the same key.
@@ -183,7 +221,8 @@ const config: ExpoConfig = {
 
   android: {
     package: 'dev.generatorai.app',
-    adaptiveIcon: { foregroundImage: './assets/icon.png', backgroundColor: '#0d1117' },
+    // Themed icons (Android 13+): the launcher recolours the monochrome layer (scripts/gen-app-icons.mjs, MD-196).
+    adaptiveIcon: { foregroundImage: './assets/icon.png', monochromeImage: './assets/icon-android-monochrome.png', backgroundColor: '#0d1117' },
     // Predictive back stays OFF. With it on, the manifest gets
     // `enableOnBackInvokedCallback="true"` and Android 13+ dispatches back
     // through OnBackInvokedDispatcher, which React Native 0.86 does not
@@ -212,6 +251,27 @@ const config: ExpoConfig = {
   plugins: [
     // First on purpose: its entitlements mod runs after every other plugin's (see the file).
     './plugins/withUniqueAppGroups',
+    ...(sentryUpload
+      ? [
+          [
+            '@sentry/react-native',
+            {
+              url: process.env['SENTRY_URL'],
+              organization: process.env['SENTRY_ORG'],
+              project: process.env['SENTRY_PROJECT'],
+              experimental_android: {
+                enableAndroidGradlePlugin: true,
+                includeProguardMapping: true,
+                autoUploadProguardMapping: true,
+                uploadNativeSymbols: true,
+                autoUploadNativeSymbols: true,
+                includeNativeSources: false,
+                includeSourceContext: false,
+              },
+            },
+          ] as [string, Record<string, unknown>],
+        ]
+      : []),
     ...(process.env['GAI_A11Y_AUDIT'] === '1' ? ['./plugins/withA11yAuditTarget'] : []),
     'expo-router',
     'expo-asset',
@@ -244,6 +304,8 @@ const config: ExpoConfig = {
         image: './assets/splash-mark.png',
         imageWidth: 72,
         resizeMode: 'contain',
+        // Per appearance, both dark (MD-124): written out so the launch screen has an explicit dark variant.
+        dark: { backgroundColor: SPLASH.dark.background, image: './assets/splash-mark.png' },
       },
     ],
     [

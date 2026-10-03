@@ -106,3 +106,20 @@ npx expo prebuild -p ios --clean
 By hand: Android Accessibility Scanner on `gai-phone` over Home, a chat, the pane, Settings (findings →
 `reviews/F/a11y-android-scanner.md`); VoiceOver / TalkBack order on the chat screen (header → transcript → composer);
 Reduce Motion (Settings › Accessibility) and iOS Reduce Transparency (glass becomes opaque).
+
+## 4. M10-06 — Crash reporting (owner check against a test DSN)
+
+New native dependency: `@sentry/react-native` ~7.11.0 (prebuild + rebuild needed). Off by default (MD-197).
+
+```sh
+# 1. a test project: sentry.io free tier, or GlitchTip locally (docker run … glitchtip), copy its DSN
+# 2. rebuild the dev client (new native module), open Settings › Diagnostics › Crash reports:
+#    enter the DSN → "Send crash reports" on (the row says "To <host>")
+# 3. JS error: dev route that throws, or from the Metro console: global.ErrorUtils.getGlobalHandler()(new Error('test'), true)
+# 4. native crash (release build): a debug-only "Crash" is not shipped; use `Sentry.nativeCrash()` from the Metro
+#    console in a dev build
+# 5. in the project: the event has type + stack + device; message "[redacted]"; no user, no URL query, no paths
+# 6. turn it off → trigger again → nothing arrives
+# symbols (release, EAS): set SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT, SENTRY_URL as EAS secrets, build the
+# production profile, check the dSYM / source map / R8 mapping uploads in the build log
+```

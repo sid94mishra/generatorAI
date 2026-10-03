@@ -45,10 +45,13 @@ import { toast } from '../src/ui/primitives/Toast';
 import { usePushNotifications } from '../src/services/notifications/usePushNotifications';
 import { useQuickActionLinks } from '../src/services/native/quickActions';
 import { useShareIntake } from '../src/services/native/shareIntent';
+import { startCrashReporting } from '../src/services/native/crashSettings';
 import { MuxStreamProvider } from '../src/services/stream/MuxStreamProvider';
 import { useGlobalStream } from '../src/services/stream/useGlobalStream';
 
 installCrypto();
+// Opt-in crash reporting (MD-42): starts only when the user enabled it with a DSN in Settings › Diagnostics.
+startCrashReporting();
 
 // Held until the theme has been read, so a dark-mode user never sees the
 // white flash that an async preference read would guarantee.

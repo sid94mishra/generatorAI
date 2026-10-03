@@ -1217,6 +1217,8 @@ for a change whose fingerprint differs from the store build.
 
 ### 8.6 Crash reporting (MD-42, M10)
 
+**Built in M10-06 (MD-197)** as below; the owner verifies against a test DSN (`reviews/M10-notes.md` §4).
+
 - `@sentry/react-native` (Sentry-compatible: works with self-hosted Sentry or GlitchTip). **Off by default.**
   Settings › Diagnostics has a DSN field and an "Send crash reports" switch; `Sentry.init` runs only when both are set,
   with `sendDefaultPii: false`, a `beforeSend` that strips URLs' query strings, message text, paths and breadcrumbs'

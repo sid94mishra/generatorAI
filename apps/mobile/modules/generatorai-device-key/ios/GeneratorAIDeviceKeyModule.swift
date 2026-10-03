@@ -15,7 +15,7 @@
 //     itself). Security.framework returns DER; `derToRaw` converts it to the
 //     raw `r || s` (64 bytes) JOSE form that `createDpopProof` base64url-encodes.
 //   • Usable after first unlock. Lock-screen Allow/Deny actions
-//     (src/auth/backgroundFetch.ts) sign a request while the phone is locked,
+//     (src/services/auth/backgroundFetch.ts) sign a request while the phone is locked,
 //     so the access control is `AfterFirstUnlockThisDeviceOnly`, NOT
 //     `WhenUnlocked`. `ThisDeviceOnly` also keeps the reference out of
 //     iCloud Keychain / restores, matching an enclave key that cannot leave

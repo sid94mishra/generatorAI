@@ -6,7 +6,7 @@
 // the white flash we are trying to avoid.
 //
 // NOTHING sensitive goes here. Tokens, resume secrets and key material live
-// in SecureStore — see src/auth/stores.ts.
+// in SecureStore — see src/services/auth/.
 // ────────────────────────────────────────────────────────────────
 
 import { createMMKV } from 'react-native-mmkv';
@@ -66,4 +66,7 @@ export const PREF_KEYS = {
   liveChats: 'generatorai.live.chats',
   /** Locally disabled skills — mirrors the web's `catalogPrefsStore`. */
   disabledSkills: 'generatorai.disabled-skills',
+  /** Opt-in crash reporting (MD-42): off by default; the Sentry-compatible DSN the user entered (this device only). */
+  crashReports: 'generatorai.crash-reports.enabled',
+  crashDsn: 'generatorai.crash-reports.dsn',
 } as const;

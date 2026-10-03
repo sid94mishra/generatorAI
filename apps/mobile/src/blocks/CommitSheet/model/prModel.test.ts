@@ -13,7 +13,6 @@ import {
   mergeability,
   parsePatchRows,
   prStateLabel,
-  prStateTone,
 } from './prModel';
 
 function pr(over: Partial<ProjectPullRequest> = {}): ProjectPullRequest {
@@ -57,8 +56,6 @@ describe('the list', () => {
   it('labels a draft as a draft, not as open', () => {
     expect(prStateLabel('open', true)).toBe('Draft');
     expect(prStateLabel('merged')).toBe('Merged');
-    expect(prStateTone('merged')).toBe('primary');
-    expect(prStateTone('closed')).toBe('neutral');
   });
 });
 

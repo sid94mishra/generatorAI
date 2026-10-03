@@ -300,7 +300,7 @@ Legacy deletions follow `04-screen-map.md` §4.2 (M9 row).
 | M10-04 | Accessibility audit (XCUITest audit, Android accessibility checks), Dynamic Type sweep (AX5 / font scale 2.0), focus trapping, custom actions | 0 open Major a11y findings |
 | M10-05 | Store readiness: iOS icons (light/dark/tinted/clear), Android monochrome icon, splash per appearance, `PrivacyInfo.xcprivacy`, entitlements (App Groups, time-sensitive, Live Activities), Play Data Safety notes, FGS declaration text, App Review notes + demo server instructions | Checklist in `reviews/M10-store.md` |
 | M10-06 | Crash reporting (MD-42, opt-in, off by default; DSN in Settings › Diagnostics; R8 mapping + dSYM upload) | Works against a test DSN; off by default |
-| M10-07 | Final review (fresh Codex session) + merge-readiness report for the owner (what changed in shared packages and server, conflicts expected with `desktop_redesign`) | `reviews/F-review.md`, `reviews/merge-readiness.md` |
+| M10-07 | Final review (fresh Codex session) + merge-readiness report for the owner (what changed in shared packages and server, conflicts expected with `desktop_redesign`) | `reviews/final-review.md` (named by the owner; this row said `F-review.md`), `reviews/merge-readiness.md` |
 
 ---
 

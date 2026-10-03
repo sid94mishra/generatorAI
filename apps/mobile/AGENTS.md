@@ -5,7 +5,7 @@
 | What | Where |
 |---|---|
 | Plan entry point, progress table, resume point | `docs/redesign/mobile/README.md` |
-| Decisions MD-01…MD-96 (they override the boards) | `docs/redesign/mobile/01-decisions.md` |
+| Decisions MD-01…MD-197 (they override the boards) | `docs/redesign/mobile/01-decisions.md` |
 | Phases and task IDs | `docs/redesign/mobile/07-phases.md` |
 | Session protocol | `docs/redesign/mobile/09-codex-playbook.md` |
 | Design snapshot | `docs/redesign/boards/mobile/project/*.dc.html`, 131 boards; each screen board shows the iOS 27 phone on the left and the Android 17 phone on the right |
