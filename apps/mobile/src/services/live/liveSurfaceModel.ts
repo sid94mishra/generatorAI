@@ -3,8 +3,9 @@
 //   • `planLiveSurfaces` — given the surfaces now on screen and the live map: which items to show (start or update),
 //     which ending items to leave as they are while their outcome is resolved, which to end with their final state
 //     (dismissed after the MD-90 window) and which to drop at once (forgotten, unfollowed, switched off, displaced).
-//   • `toLiveActivityProps` — one item as the props of the expo-widgets Live Activity layout. Always the lock-screen
-//     form (`redactForLockScreen`): the Lock Screen and the Dynamic Island are visible while the phone is locked.
+//   • `toLiveActivityProps` — one item as the props of the expo-widgets Live Activity layout; `toAndroidLiveUpdate`
+//     — as the generatorai-live notification record. Always the lock-screen form (`redactForLockScreen`): the Lock
+//     Screen, the Dynamic Island and the status-bar chip are visible while the phone is locked.
 import {
   isLiveTerminal,
   liveDismissal,
@@ -146,4 +147,102 @@ export function toLiveActivityProps(state: LiveState, palette: WidgetPalette): L
   if (s.next && !isLiveTerminal(s.phase)) props.next = `Next: ${s.next}`;
   if (s.ask) props.reviewUrl = s.deepLink;
   return props;
+}
+
+// ── Android Live Update (modules/generatorai-live) ──────────────
+
+/** Mirrors `LiveUpdateRecord` in GeneratorAILiveModule (Kotlin). Colours are ARGB ints. */
+export interface AndroidLiveUpdate {
+  key: string;
+  /** Stable notification id per live key. */
+  id: number;
+  /** The gate, step or status (the notification title). */
+  title: string;
+  /** "Nightly audit · Needs you · Apply upgrades". */
+  text: string;
+  /** "Run #248" when the API gives a number. */
+  subText?: string;
+  /** Status-bar chip (Android 16 promoted notifications): "Needs you 3/6". */
+  chip?: string;
+  segments: { length: number; color: number }[];
+  /** Tracker position on the segments' scale (each segment is SEGMENT_LENGTH long). */
+  progress: number;
+  /** No stages: an indeterminate bar while it is live. */
+  indeterminate: boolean;
+  tracker: 'needs_you' | 'running' | 'failed' | 'done' | 'cancelled';
+  /** Chronometer base: the start. */
+  whenMs: number;
+  /** False for the final state (dismissible, timed out after the MD-90 window). */
+  ongoing: boolean;
+  deepLink: string;
+  reviewUrl?: string;
+  reviewLabel: string;
+}
+
+export const SEGMENT_LENGTH = 100;
+
+/** `#rgb`, `#rrggbb` or CSS `#rrggbbaa` → a signed 32-bit ARGB int (Android `@ColorInt`); 0 when unreadable. */
+export function hexToArgb(hex: string): number {
+  const m = /^#([\da-f]{3}|[\da-f]{6}|[\da-f]{8})$/i.exec(hex.trim());
+  if (!m) return 0;
+  let h = m[1]!;
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const rgb = parseInt(h.slice(0, 6), 16);
+  const alpha = h.length === 8 ? parseInt(h.slice(6, 8), 16) : 0xff;
+  return ((alpha << 24) | rgb) | 0;
+}
+
+/** A stable positive notification id for a live key (FNV-1a), clear of the low ids other notifications use. */
+export function liveNotificationId(key: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < key.length; i++) {
+    hash ^= key.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return 0x10000000 + ((hash >>> 0) % 0x0fffffff);
+}
+
+/** The stages to draw: the run's own segments, or ones derived from "step n of N". */
+function stagesOf(s: LiveState): LiveSegment[] {
+  if (s.segments?.length) return [...s.segments];
+  const index = s.step?.index;
+  const count = s.step?.count;
+  if (!index || !count || count > 12) return [];
+  const current: LiveSegment = s.phase === 'needs_you' ? 'needs_you' : s.phase === 'failed' ? 'failed' : isLiveTerminal(s.phase) ? 'done' : 'current';
+  return Array.from({ length: count }, (_, i) => (i < index - 1 ? 'done' : i === index - 1 ? current : 'pending'));
+}
+
+function trackerOf(phase: LivePhase): AndroidLiveUpdate['tracker'] {
+  if (phase === 'needs_you') return 'needs_you';
+  if (phase === 'failed') return 'failed';
+  if (phase === 'succeeded') return 'done';
+  if (phase === 'cancelled') return 'cancelled';
+  return 'running';
+}
+
+export function toAndroidLiveUpdate(state: LiveState, palette: WidgetPalette): AndroidLiveUpdate {
+  const s = redactForLockScreen(state);
+  const lines = liveLines(s);
+  const ended = isLiveTerminal(s.phase);
+  const stages = stagesOf(s);
+  const at = stages.findIndex((x) => x === 'current' || x === 'needs_you' || x === 'failed');
+  const progress = stages.length === 0 ? 0 : at < 0 ? stages.length * SEGMENT_LENGTH : at * SEGMENT_LENGTH + SEGMENT_LENGTH / 2;
+  const update: AndroidLiveUpdate = {
+    key: s.key,
+    id: liveNotificationId(s.key),
+    title: lines.headline,
+    text: [s.title, lines.detail].filter(Boolean).join(' · '),
+    segments: stages.map((x) => ({ length: SEGMENT_LENGTH, color: hexToArgb(palette[SEGMENT_KEY[x]]) })),
+    progress,
+    indeterminate: stages.length === 0 && !ended,
+    tracker: trackerOf(s.phase),
+    whenMs: Date.parse(s.startedAt),
+    ongoing: !ended,
+    deepLink: s.deepLink,
+    reviewLabel: 'Review',
+  };
+  if (s.runNumber !== undefined) update.subText = `Run #${s.runNumber}`;
+  if (!ended) update.chip = [s.statusWord, progressText(s)].filter(Boolean).join(' ');
+  if (s.ask) update.reviewUrl = s.deepLink;
+  return update;
 }

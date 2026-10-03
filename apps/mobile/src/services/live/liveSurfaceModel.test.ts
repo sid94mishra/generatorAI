@@ -3,13 +3,16 @@ import { liveReducer, type LiveMap } from '@generatorai/client-core';
 import type { AttentionItem } from '@generatorai/shared';
 
 import type { WidgetPalette } from '../native/widgetPalette';
-import { liveLines, planLiveSurfaces, toLiveActivityProps } from './liveSurfaceModel';
+import { hexToArgb, liveLines, liveNotificationId, planLiveSurfaces, toAndroidLiveUpdate, toLiveActivityProps } from './liveSurfaceModel';
 
 const now = new Date('2026-10-03T10:00:00Z');
 const server = { id: 's', name: 'S' };
 const palette: WidgetPalette = {
   appearance: 'dark', ground: 'g', surface: 'su', raised: 'ra', line: 'li', fg: 'f1', fg2: 'f2', fg3: 'f3',
   accent: 'ac', onAccent: 'oa', run: 'RUN', ok: 'OK', warn: 'WARN', err: 'ERR',
+};
+const hexPalette: WidgetPalette = {
+  ...palette, line: '#2d3644', run: '#59c2ff', ok: '#7fd962', warn: '#ffb454cc', err: '#f26d78',
 };
 const run: AttentionItem = {
   key: 'workflow_run:r1', entity: 'workflow_run', entityId: 'r1', title: 'Nightly audit', href: '/workflows/w/runs/r1',
@@ -74,5 +77,41 @@ describe('toLiveActivityProps', () => {
 
   it('keeps the status word next to a step label', () => {
     expect(liveLines(mapOf([run])['s:workflow_run:r1']!)).toEqual({ headline: 'Apply upgrades', detail: 'Running' });
+  });
+});
+
+describe('toAndroidLiveUpdate', () => {
+  it('draws a gate as a promoted ongoing notification with derived stages and the tracker on the current one', () => {
+    const u = toAndroidLiveUpdate(mapOf([run, ask])['s:workflow_run:r1']!, hexPalette);
+    expect(u).toMatchObject({
+      key: 's:workflow_run:r1', title: 'Allow Bash?', text: 'Nightly audit · Needs you · Apply upgrades', chip: 'Needs you 3/6',
+      tracker: 'needs_you', ongoing: true, indeterminate: false, progress: 250, whenMs: now.getTime(),
+      reviewUrl: 'generatorai:///workflows/w/runs/r1/stages/s3/approval?server=s', reviewLabel: 'Review',
+    });
+    expect(u.segments.map((x) => x.color)).toEqual([
+      hexToArgb('#7fd962'), hexToArgb('#7fd962'), hexToArgb('#ffb454cc'), hexToArgb('#2d3644'), hexToArgb('#2d3644'), hexToArgb('#2d3644'),
+    ]);
+    expect(u.subText).toBeUndefined();
+  });
+
+  it('is indeterminate without stages and dismissible once it ended', () => {
+    const live = toAndroidLiveUpdate(mapOf([chat])['s:chat:c1']!, hexPalette);
+    expect(live).toMatchObject({ indeterminate: true, segments: [], chip: 'Running', title: 'Running' });
+    const map = liveReducer(mapOf([run]), { type: 'ended', key: 's:workflow_run:r1', outcome: 'succeeded', now });
+    const done = toAndroidLiveUpdate(map['s:workflow_run:r1']!, hexPalette);
+    expect(done).toMatchObject({ ongoing: false, tracker: 'done', indeterminate: false, progress: 600 });
+    expect(done.chip).toBeUndefined();
+  });
+
+  it('converts CSS hex to signed ARGB and keeps notification ids stable and positive', () => {
+    expect(hexToArgb('#ffffff')).toBe(-1);
+    expect(hexToArgb('#000')).toBe(-16777216);
+    expect(hexToArgb('#11223380')).toBe(((0x80 << 24) | 0x112233) | 0);
+    expect(hexToArgb('oklch(1 0 0)')).toBe(0);
+    const id = liveNotificationId('s:chat:c1');
+    expect(id).toBe(liveNotificationId('s:chat:c1'));
+    expect(id).toBeGreaterThanOrEqual(0x10000000);
+    expect(id).toBeLessThan(0x20000000);
+    expect(liveNotificationId('s:chat:c2')).not.toBe(id);
   });
 });

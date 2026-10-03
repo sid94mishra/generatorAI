@@ -21,12 +21,18 @@ const timers: LiveTimers = {
 
 const ignore = (): void => undefined;
 
+/** Surfaces found at launch wait this long for their server's first snapshot before an orphan is ended. */
+const RESTORE_GRACE_MS = 30_000;
+
 export function LiveSurfacesSync(): null {
   useEffect(() => {
     const driver = liveSurfaceDriver();
     if (!driver) return;
     let palette: WidgetPalette | null = currentWidgetPalette();
-    const active = new Set(driver.activeKeys());
+    const active = new Set<string>();
+    /** Found at launch, not yet confirmed: adopted by a candidate, or ended once their server reported (or later). */
+    const restored = new Set<string>();
+    let restoreUntil = 0;
 
     const show = (key: string): void => {
       const state = liveStore.getState()[key];
@@ -39,8 +45,16 @@ export function LiveSurfacesSync(): null {
       palette ??= currentWidgetPalette();
       if (!palette) return;
       const map = liveStore.getState();
+      for (const key of restored) {
+        const serverId = key.split(':')[0];
+        if (Date.now() >= restoreUntil || Object.values(map).some((s) => s.serverId === serverId)) {
+          restored.delete(key);
+          active.add(key);
+        }
+      }
       const plan = planLiveSurfaces(active, map, surfaceCandidates(map, readFollowedIn(map), readLiveSurfacePrefs()));
       for (const state of plan.show) {
+        restored.delete(state.key);
         active.add(state.key);
         coalescer.push(state.key);
       }
@@ -66,8 +80,25 @@ export function LiveSurfacesSync(): null {
       for (const key of active) show(key);
       driver.background?.();
     });
+    // Surfaces left from before a relaunch or reload: kept (and updated) when their item is still a candidate,
+    // ended otherwise — but only once the live store has heard from their server, so a cold start does not end and
+    // restart every surface before the first snapshot arrives.
+    let mounted = true;
+    let restoreTimer: ReturnType<typeof setTimeout> | null = null;
+    void Promise.resolve(driver.activeKeys()).then(
+      (keys) => {
+        if (!mounted) return;
+        for (const key of keys) if (!active.has(key)) restored.add(key);
+        restoreUntil = Date.now() + RESTORE_GRACE_MS;
+        restoreTimer = setTimeout(evaluate, RESTORE_GRACE_MS);
+        evaluate();
+      },
+      ignore,
+    );
     evaluate();
     return () => {
+      mounted = false;
+      if (restoreTimer) clearTimeout(restoreTimer);
       unsubscribe();
       stopPalette();
       appState.remove();

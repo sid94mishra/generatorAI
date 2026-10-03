@@ -5,8 +5,8 @@ import type { LiveState } from '@generatorai/client-core';
 import type { WidgetPalette } from '../widgetPalette';
 
 export interface LiveSurfaceDriver {
-  /** Keys with a surface on screen, reconciled with the OS after a relaunch (MMKV key → platform id). */
-  activeKeys(): string[];
+  /** Keys with a surface on screen, reconciled with the OS after a relaunch or a JS reload. */
+  activeKeys(): string[] | Promise<string[]>;
   /** Start, or update when the content changed. */
   show(state: LiveState, palette: WidgetPalette): Promise<void>;
   /** End with the final state; the OS removes it at `at` (MD-90). */
