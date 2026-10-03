@@ -1,5 +1,50 @@
 # Open implementation and verification items
 
+## Sweep at M10 (2026-10-03) — current status of every item
+
+Owner = the person who must act; **device** = a simulator / emulator / phone run the agent cannot do; **external** =
+waits for a release outside this repo. The original evidence rows are kept below as history.
+
+| ID | Status now | Owner | Exactly what remains |
+|---|---|---|---|
+| MV-01 | open — device | owner | The legacy terminal host is gone; M6-09's TerminalView (xterm WebView in the pane) replaces it. Re-run `terminal/open-type` on Android and check the viewport renders and typed text reaches the shell. |
+| MV-02 | superseded → device | owner | The iOS workbench sheet no longer exists (pane since M5-03, terminal tab M6-09). Verify the Terminal tab opens full height on iOS phone + iPad during the walkthrough; close MV-02 then. |
+| MV-03 | open — device | owner | Notifications v2 (M9-02) replaced the routing; `e2e/net2.mjs` was a web-preview script and is deleted (M10-02). Re-run `notifications/approval-action` on iOS: tap the banner from Notification Center → the chat opens. |
+| MV-04 | open — fixture + device | owner | The force-reset branch of the two-phase stop needs a Faux step that never acknowledges a cancel; the Faux harness has none today. Add one to `e2e/fixtures/mobile.faux.json` when the harness supports it, then run `chat/two-phase-stop`. |
+| MV-05 | open — device | owner | The full Maestro suite on both OSes (`merge-readiness.md` §4 step 4). The M1 baseline (Android 7/8, iOS 6/8) predates the redesign; the flows were rewritten for the kit since. |
+| MV-06 | open — external | — | `expo` `latest` = 57.0.26 (58.0.2 is `next`) on 2026-10-03; Android API 37 image availability unchecked (registry offline here). Recheck `npm view expo dist-tags`. |
+| MV-07 | open — device | owner | On-device Storybook walkthrough of the kit on both OSes (`EXPO_PUBLIC_STORYBOOK=1`); the VRT baseline run (MV-26) doubles as it. |
+| MV-08 | decided; numbers open — device | owner | M1-07: the renderer decision is taken (MD-40 fallback, `marked` model on kit Text — MD-149). Remaining: 2,000-line fps (`node scripts/mobile/perf.mjs --platform=android --only=streaming` on `gai-phone`) and selection / copy by hand; write both into `M1-markdown-spike.md`. |
+| MV-09 | open — device | owner | Uniwind Gate B checks 10 (Activity) and 11 (Reanimated `withUniwind`) on Android. |
+| MV-10 | open — device | owner | M1-09 service move smoke: covered by the full Maestro suite (MV-05). Close with it. |
+| MV-11 | open — device | owner | Transcript / turn regression: `chat/send-stream`, `chat/send-stream-approve`, `chat/two-phase-stop` on both OSes. |
+| MV-12 | closed (2026-10-02) | — | — |
+| MV-13 | closed (static) → device glance | owner | Source scan at M10: the legacy cards and their tints are deleted (M10-01); the PR lifecycle tone map had no caller and is deleted; Agent commands use the shared status (6d350c71). Remaining: a glance at status glyph + word on device during the walkthrough. |
+| MV-14 | open — device | owner | Composer send / gate / stop on both OSes (with MV-11). |
+| MV-15 | open — device | owner | iOS Maestro launcher detection: `_subflows/launch.yaml` now waits for `home-new-chat`; re-run any flow on iOS. |
+| MV-16 | open — device | owner | M2-04 typed API walkthrough: SCM / review / project / uploads / devices / terminal screens — covered by the walkthrough + suite. |
+| MV-17 | open — device | owner | M2-05 query extraction: covered by the suite. |
+| MV-18 | open — device | owner | Attention, keyset paging, search, model / consent, project read models: the walkthrough (Home, Chats, Projects, Search). |
+| MV-19 | open — device | owner | Lifecycle: background → foreground resumes a running turn; offline banner; cache per server. |
+| MV-20 | open — device | owner | Android composer input (M6-04 rewrote the composer): `chat/send-stream` on Android. |
+| MV-21 | open — device | owner | Multi-server: `servers/switch` with a second sandbox (`--port=3297`), cold restore, notification for server B while A is open. |
+| MV-22 | open — device | owner | iOS link flow, cold cross-server launch, unknown-server toast: `navigation/deep-links` + `e2e/links.json` smoke. |
+| MV-23 | open — device | owner | Android Icon story (outlined / filled / RTL), RTL layout, Reduce Motion, terminal palette on theme switch. |
+| MV-24 | open — device | owner | Release builds on both OSes (`expo run:ios --configuration Release`, Android `assembleRelease`), then the smoke suite. |
+| MV-25 | open — external | — | M3-01 / M3-02 wait for SDK 58 `latest` (see MV-06). |
+| MV-26 | tooling done (M10-03) → device | owner | `node scripts/mobile/vrt.mjs … --update` per platform (commands in `M10-notes.md` §2). |
+| MV-27 | open — device | owner | iOS Select field with a long value at font scale 2.0 (SwiftUI Host height). Needs a device iteration (measure the hosted view or move the label to RN). |
+| MV-28 | open — device | owner | M5 checks: hardware shortcuts (iPad, Android tablet), docked pane at ≥ 840, Android Back order, server switcher, rotation keeps the terminal. |
+| MV-29 | open — real phone | owner | Biometric-signed risky approval end to end on a real iPhone + Android phone (simulators cannot draw the Face ID sheet). |
+| MV-30 | open — device | owner | M7 batch A screens beyond the lists (project / agent / automation / script detail and editors, Android, tablets). |
+| MV-31 | open — device | owner | M7 batch B screens (Theme row clipping was fixed before M8); General, providers, MCP, step-up, source control, pair a device, notifications, app lock, scope request, pairing, PR detail; Android, tablets. |
+| MV-32 | open — device | owner | M8 run sheet, run screen, stage chat, run pane, builder, stage editor, settings; Android, tablets. |
+| MV-33 | automation fixed → device | owner | Re-pair with `sandbox-pair.mjs pair` (MD-192), then the M9 surface checklist (`merge-readiness.md` §4 step 3). |
+| MV-34 | new — device / consoles | owner | M10 device work: perf (`perf.mjs`), accessibility (`a11y-audit.mjs` + XCUITest + Accessibility Scanner), crash reporting against a test DSN, store console entries (`M10-store.md`), App IDs / capabilities for the extensions. |
+
+## History (evidence as recorded)
+
+
 Owner-authorized continuation: MD-107 (2026-09-29). These items remain required for end-to-end acceptance. A task proceeding does not resolve them.
 
 | ID | Status | Evidence / issue | Next repair or retest |

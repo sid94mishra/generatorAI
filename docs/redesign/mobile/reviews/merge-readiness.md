@@ -9,8 +9,8 @@ State on 2026-10-03, branch `mobile_redesign` after the M10 commits and the fina
   (review-2 test hardening and close-out, P8-01 Vite 8, P8-02 React Compiler for web, sandbox `--clean` fix); none
   touches `apps/mobile`.
 - Not yet in `desktop_redesign`: M10-05 (store readiness), M10-06 (crash reporting), the final-review fixes and the plan
-  sweep. Outside `apps/mobile/**` and `docs/redesign/mobile/**` they touch **only `pnpm-lock.yaml`** (+209 lines:
-  `@sentry/react-native` 7.11.0 and its dependencies). A trial merge (`git merge-tree`) shows `pnpm-lock.yaml` changed
+  sweep. Outside `apps/mobile/**` and `docs/redesign/mobile/**` they touch `pnpm-lock.yaml` (+209 lines:
+  `@sentry/react-native` 7.11.0 and its dependencies) and `packages/client-core` (`auth.unregisterPush` + its test). A trial merge (`git merge-tree`) shows `pnpm-lock.yaml` changed
   on both sides **without conflicting hunks**; after the merge run `pnpm install --frozen-lockfile` to confirm.
 
 ## 2. What the mobile branch changed outside the app (all logged in `COORDINATION.md`)
@@ -20,7 +20,7 @@ State on 2026-10-03, branch `mobile_redesign` after the M10 commits and the fina
 | `packages/db` | **v64** `chat_pin_and_read_state` (MG-02: `chats.pinned_at`, `last_read_at` + list indexes), **v65** `device_approval_key` (MG-05: `auth_devices.approval_public_jwk`, `approval_key_created_at`, `approval_key_presence`). There is **no v66**. `migrations.lock.json` holds both hashes. | additive columns / indexes; already in `desktop_redesign` |
 | `apps/server` | MG-02 pin / unread, MG-03 model label, MG-04 risk flag, MG-05 approval-key routes + proof verification (chat gates; stage approvals and risky stage permissions from mobile devices, MD-177), MG-06 push payload v2 (+ `'time-sensitive'` bug fix), MG-21 artifact download, MG-22 wrappers, M7-09 gaps (own device, remote refs, import preview, SCM outcomes, dictation language, scope vocabulary), MG-09 `POST /chats/ingest`; openapi appended; route tests | additive; the proof rule binds mobile principals only; push v2 is a contract change whose only consumer is mobile |
 | `packages/shared` | `ui-contract/` (deep links, copy keys, chats row fields, pane run tabs, notifications vocabulary), `security/gateRisk.ts`, `security/approvalProof.ts`, `types/Push.ts` part B, `types/ChatIngest.ts` | additive exports |
-| `packages/client-core` | transcript inputs, step status, SCM API, attention route, chats list fields, `admin.browser.input`, `terminals.create` shell, `runs.approveStage`, `chats.ingest`, `live/` model; `agents.remove` sends `?force=1` (bug fix) | additive (+ one fix) |
+| `packages/client-core` | `auth.unregisterPush` (plan sweep, not yet in desktop), transcript inputs, step status, SCM API, attention route, chats list fields, `admin.browser.input`, `terminals.create` shell, `runs.approveStage`, `chats.ingest`, `live/` model; `agents.remove` sends `?force=1` (bug fix) | additive (+ one fix) |
 | `packages/auth`, `packages/core` | approval-proof verifier; push dispatcher / Expo provider v2 | additive / mobile-only consumers |
 | `packages/design-tokens` | mobile vocabulary, `GEOMETRY.ios/android`, motion, haptics, glass, accent-from-seed, Uniwind emitter, native palettes, mobile icon concepts | additive; web untouched (`check:tokens` green) |
 | scripts | `scripts/mobile/**` (new), `scripts/redesign/sandbox.mjs` port / Faux options (additive) | mobile tooling |

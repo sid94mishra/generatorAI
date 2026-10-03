@@ -12,7 +12,7 @@ The overhaul is **code-complete and statically green** on both platforms: every 
 layer is gone (M10-01) and the design gate is hard zero in `src/` and `app/`. It is **not verified on devices**: the
 batch reviews A–E never ran in fresh sessions, and the device walkthroughs, Maestro suite, VRT baselines, perf and
 accessibility device audits of M1–M10 are all outstanding (PENDING MV-xx, §5). Two defects were found and fixed
-(F-1, F-2); no Critical finding is open.
+(F-1, F-2), plus three Minor ones (F-3, F-11, F-12); no Critical finding is open.
 
 ## 2. Evidence (static, at `5fdfa870` + this review's fixes)
 
@@ -41,6 +41,8 @@ accessibility device audits of M1–M10 are all outstanding (PENDING MV-xx, §5)
 | F-8 | Minor | M10-06 | The Sentry SDK adds 1.1 MB of bytecode for an opt-in feature. | **Accepted** (MD-197): evaluated only when switched on. |
 | F-9 | Minor | M10-03 | VRT captures the first screen of each story; gallery stories taller than the screen are cropped. | **Accepted** (MD-194); split a gallery into stories if a regression hides below the fold. |
 | F-10 | Minor | M10-02 | Screens no flow reaches (step detail, agent import, share sheet, revoked, skills / logs / PR detail) — listed with reasons in `M10-notes.md` §1. | **Accepted**; device walkthrough covers them. |
+| F-11 | Minor | M2-04 acceptance (plan sweep) | One hand-written `/api` path remained in a feature: "Unpair this device" called `DELETE /api/auth/push-token` with the raw fetch. | **Fixed** `53d6a9db`: client-core `auth.unregisterPush()` (additive, wire test). |
+| F-12 | Minor | M2-02 / MV-13 (plan sweep) | Agent commands drew a local running / failed glyph without a word; `prStateTone` was an unused local PR tone map. | **Fixed** `6d350c71`: shared step status through StatusBadge; the dead map deleted. |
 
 ## 4. Phase-by-phase check against 07
 
