@@ -7,6 +7,7 @@ import { useLifecycle } from './lifecycle';
 import { useApi } from '../api/useApi';
 import { LiveModelSync } from '../live/LiveModelSync';
 import { BadgeSync } from '../notifications/BadgeSync';
+import { QuickActionItemsSync } from '../native/quickActions';
 
 const Context = createContext<AttentionStore | null>(null);
 const initial = initialAttentionState();
@@ -29,6 +30,7 @@ export function AttentionProvider({ client, children }: { client: LifecycleStrea
       {children}
       <LiveModelSync />
       <BadgeSync />
+      <QuickActionItemsSync />
     </Context.Provider>
   );
 }

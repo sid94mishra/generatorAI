@@ -307,6 +307,20 @@ const config: ExpoConfig = {
     './plugins/withSceneLifecycle',
     // Extension targets from ./targets (06 §7.9): the notification service extension (MD-92).
     '@bacons/apple-targets',
+    [
+      // Home-screen quick actions / app shortcuts (06 §7.6, M9-07). iOS draws SF Symbols (no files); Android gets an
+      // adaptive mipmap per shortcut (src/services/native/quickActionItems.ts ANDROID_SHORTCUT_ICONS), from
+      // assets/shortcuts (scripts/gen-shortcut-icons.mjs) on the Material shortcut-icon grey.
+      'expo-quick-actions',
+      {
+        androidIcons: Object.fromEntries(
+          (['new-chat', 'home', 'workflows', 'search'] as const).map((id) => [
+            `shortcut_${id.replace('-', '_')}`,
+            { foregroundImage: `./assets/shortcuts/${id}.png`, backgroundColor: '#F1F3F4' },
+          ]),
+        ),
+      },
+    ],
   ],
 
   experiments: {

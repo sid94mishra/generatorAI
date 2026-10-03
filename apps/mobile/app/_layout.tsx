@@ -39,6 +39,7 @@ import { AuthProvider, useAuth } from '../src/services/auth/AuthProvider';
 import { AppLockGate } from '../src/services/auth/AppLock';
 import { Spinner, ToastProvider, useToast, ContextMenuProvider, Button, ErrorState } from '../src/components/ui';
 import { usePushNotifications } from '../src/services/notifications/usePushNotifications';
+import { useQuickActionLinks } from '../src/services/native/quickActions';
 import { MuxStreamProvider } from '../src/services/stream/MuxStreamProvider';
 import { useGlobalStream } from '../src/services/stream/useGlobalStream';
 
@@ -124,6 +125,8 @@ function AuthLifecycle({ children }: { children: React.ReactNode }): React.React
   // rotation or a notification tap is handled no matter which route is open.
   // The hook no-ops until the session is authenticated.
   usePushNotifications();
+  // Home-screen quick actions / app shortcuts become queued links (M9-07), like a notification tap.
+  useQuickActionLinks();
   const toast = useToast();
   const hasIncomingLink = useLinkRouting((message) => toast({ message, tone: 'error' }));
 

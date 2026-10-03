@@ -86,6 +86,14 @@ describe('UIScene life cycle adoption', () => {
     expect(src).toContain('continue userActivity');
   });
 
+  it('delivers home-screen quick actions on a cold start and while running (M9-07)', () => {
+    const src = sceneDelegateSource();
+    expect(src).toContain('if let shortcutItem = connectionOptions.shortcutItem');
+    expect(src).toContain('"ExpoQuickActionsAppDelegate"');
+    expect(src).toMatch(/func windowScene\(\s*_ windowScene: UIWindowScene,\s*performActionFor shortcutItem: UIApplicationShortcutItem/);
+    expect(src).toContain('ExpoAppDelegateSubscriberManager.application(UIApplication.shared, performActionFor: shortcutItem, completionHandler: completionHandler)');
+  });
+
   it('keeps Expo modules informed of foreground and background', () => {
     const src = sceneDelegateSource();
     for (const event of ['applicationDidBecomeActive', 'applicationWillResignActive', 'applicationDidEnterBackground', 'applicationWillEnterForeground']) {
