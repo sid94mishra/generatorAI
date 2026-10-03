@@ -150,9 +150,16 @@ const OUTCOME_STATE: Record<RecentActivityItem['outcome'], StatusState> = {
   cancelled: 'skipped',
 };
 
+/** What the item's work produced (MG-13): "PR #12 opened", "committed to <branch>", else a run's worktree branch. */
+function scmOutcome(item: RecentActivityItem): string | undefined {
+  if (item.pullRequest) return `PR #${item.pullRequest.number} opened`;
+  if (item.commit?.sha) return `committed to ${item.commit.branch}`;
+  return item.commit ? `on ${item.commit.branch}` : undefined;
+}
+
 function finishedDetail(item: RecentActivityItem): ReactNode {
   const text = item.outcome === 'failed' ? `Failed · ${item.summary}` : item.summary;
-  const tail = [text, item.commit ? `on ${item.commit.branch}` : undefined].filter(Boolean).join(' · ');
+  const tail = [scmOutcome(item), text].filter(Boolean).join(' · ');
   if (!item.changes) return tail;
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
