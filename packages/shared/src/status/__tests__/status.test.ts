@@ -70,7 +70,7 @@ const TABLE: Record<StatusDomain, string> = {
   stageRun: 'pending → queued; ready → queued "Ready"; starting → running "Starting"; running → running; validating → running "Validating"; awaiting_input → needs_you; waiting → waiting; retry_wait → waiting "Retrying"; paused → paused; completed → succeeded; failed → failed; skipped → skipped; cancelled → skipped "Cancelled"',
   automationExecution: 'pending → queued; running → running; completed → succeeded; partial → failed "Partly failed"; failed → failed; cancelled → skipped "Cancelled"',
   automationRunItem: 'pending → queued; running → running; completed → succeeded; failed → failed; cancelled → skipped "Cancelled"',
-  backgroundTask: 'spawned → queued "Starting"; running → running; needs_review → needs_you "Needs review"; completed → succeeded "Done"; failed → failed; cancelled → skipped "Cancelled"',
+  backgroundTask: 'spawned → queued "Starting"; running → running; needs_review → waiting "In review"; completed → succeeded "Done"; failed → failed; cancelled → skipped "Cancelled"',
   chat: 'active → null; archived → null',
   chatTurn: 'succeeded → succeeded; failed → failed; cancelled → skipped "Cancelled"',
   stream: 'idle → null; pending → running "Starting"; streaming → running; thinking → running "Thinking"; complete → succeeded "Done"; error → failed',

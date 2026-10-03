@@ -94,7 +94,8 @@ export const STATUS_MAPS = {
   backgroundTask: {
     spawned: m('queued', 'Starting'),
     running: m('running'),
-    needs_review: m('needs_you', 'Needs review'),
+    // The worker finished; its ORCHESTRATOR is reading the result (board DockTasks "In review") — not the person.
+    needs_review: m('waiting', 'In review'),
     completed: m('succeeded', 'Done'),
     failed: m('failed'),
     cancelled: m('skipped', 'Cancelled'),

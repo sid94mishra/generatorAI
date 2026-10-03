@@ -553,6 +553,9 @@ Chats and runs work in mounts (`workspace_mounts`); the `worktrees` table, which
 - **One count:** the Home headline, the Running list, the System card's "Agents · N running" and Settings ›
   Diagnostics all read the feed's `counts.running`. `SystemInfo.agents` keeps only `max`; `/health`'s
   `activeChats` stays a technical in-flight count for diagnostics.
+- **A worker in `needs_review` is "In review"** (status `waiting`, board DockTasks): it finished and its orchestrator
+  is reading the result. It was mapped to `needs_you` "Needs review" (the hand glyph), which told the person to act
+  when nothing waited on them.
 
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)

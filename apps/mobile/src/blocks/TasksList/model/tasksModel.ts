@@ -1,5 +1,5 @@
 // MB-30 TasksList model (MPaneTasks, MPaneTaskDetail; MD-25), pure: a worker's status words through the shared
-// status map (Starting, Running, Needs review, Done, Failed, Cancelled), the All / Active / Done filter, the summary
+// status map (Starting, Running, In review, Done, Failed, Cancelled), the All / Active / Done filter, the summary
 // card's segments and legend, and the row's note. The wave and the worker limit are not shown (MG-36).
 import { STATUS_MAPS, type StatusMapping, type StatusState } from '@generatorai/shared';
 import type { BackgroundTaskListItem } from '@generatorai/shared';
@@ -45,7 +45,7 @@ export function taskSummary(tasks: readonly Pick<BackgroundTaskListItem, 'status
   return { total: tasks.length, active, done: tasks.length - active, segments, legend: [...legend.values()] };
 }
 
-const STATE_WORD: Partial<Record<StatusState, string>> = { running: 'Running', succeeded: 'Done', failed: 'Failed', needs_you: 'Needs review', queued: 'Starting', skipped: 'Cancelled' };
+const STATE_WORD: Partial<Record<StatusState, string>> = { running: 'Running', succeeded: 'Done', failed: 'Failed', waiting: 'In review', queued: 'Starting', skipped: 'Cancelled' };
 
 /** The row's second line: review rounds, or how it was cancelled. */
 export function taskNote(task: Pick<BackgroundTaskListItem, 'status' | 'reviewRounds' | 'cancelledBy'>): string | null {

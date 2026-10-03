@@ -9,7 +9,7 @@ describe('tasks (MB-30, MD-25)', () => {
   it('words statuses through the shared map', () => {
     expect(taskStatus('spawned')).toMatchObject({ state: 'queued', label: 'Starting' });
     expect(taskStatus('completed')).toMatchObject({ state: 'succeeded', label: 'Done' });
-    expect(taskStatus('needs_review')).toMatchObject({ state: 'needs_you' });
+    expect(taskStatus('needs_review')).toMatchObject({ state: 'waiting' });
   });
 
   it('filters and summarises', () => {
@@ -18,7 +18,7 @@ describe('tasks (MB-30, MD-25)', () => {
     expect(filterTasks(list, 'done').map((t) => t.taskName)).toEqual(['c']);
     const summary = taskSummary(list);
     expect([summary.total, summary.active, summary.done]).toEqual([4, 3, 1]);
-    expect(summary.legend.map((l) => `${l.count} ${l.label}`)).toEqual(['1 Running', '1 Needs review', '1 Done', '1 Starting']);
+    expect(summary.legend.map((l) => `${l.count} ${l.label}`)).toEqual(['1 Running', '1 In review', '1 Done', '1 Starting']);
     expect(summary.segments).toHaveLength(4);
   });
 
