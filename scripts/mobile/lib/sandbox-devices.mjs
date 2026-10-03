@@ -120,8 +120,12 @@ async function pressExpoControl(target, nodes, label) {
   if (!control?.ref) throw new Error(`Expo ${label} control is missing from the native snapshot`);
   await agent(target, ['press', `@${control.ref}`, '--settle']);
 }
+// A fresh install's first Metro bundle plus a cold XCTest runner can take a few minutes on a loaded machine.
+const APP_READY_MS = 300000;
+// One iOS snapshot can take 5–17 s while the XCTest runner is busy; a 30 s step wait then sees only one or two.
+const STEP_WAIT_MS = 90000;
 async function waitForApp(target) {
-  const deadline = Date.now() + 120000;
+  const deadline = Date.now() + APP_READY_MS;
   while (Date.now() < deadline) {
     let snapshot;
     try {
@@ -153,7 +157,7 @@ async function waitForApp(target) {
     await confirmAppLink(target, snapshot);
     await delay(500);
   }
-  throw new Error('The app did not reach its pairing screen or shell within 120 seconds; check Metro and native logs');
+  throw new Error(`The app did not reach its pairing screen or shell within ${APP_READY_MS / 1000} seconds; check Metro and native logs`);
 }
 async function snapshotIdentifiers(target) {
   // The full tree (not -i on Android): callouts such as `pairing-error` are not interactive.
@@ -261,20 +265,20 @@ export async function pairTarget(session, target, { repair = false, noConfirm = 
   await confirmAppLink(target, linked.data?.snapshot ?? linked.data);
   // M7-08 (MD-34): the link only pre-fills the 12-character code and the server address ("Server found" callout);
   // Connect opens the consent step. Every control is reached by its testID — no snapshot refs, no typing.
-  await agent(target, ['wait', 'id="pairing-scanned"', '30000']);
+  await agent(target, ['wait', 'id="pairing-scanned"', String(STEP_WAIT_MS)]);
   await scrollAndPress(target, 'pairing-connect', ['pairing-fingerprint']);
   if (noConfirm) { console.log(`Consent is waiting on ${target.name}; pairing has not completed.`); return; }
-  await agent(target, ['wait', 'id="pairing-fingerprint"', '30000']);
+  await agent(target, ['wait', 'id="pairing-fingerprint"', String(STEP_WAIT_MS)]);
   // The device name keeps its default ("My iPhone", "My phone", …): the Name field auto-capitalises and
   // auto-corrects, so typed text never verifies on iOS (agent-device fill → COMMAND_FAILED), and the new device is
   // identified by its id instead (findNewPairing). No keyboard opens, so nothing covers "Pair".
   await scrollAndPress(target, 'pairing-confirm', ['paired-continue', 'pairing-error']);
   // The success step (`/paired`): Continue skips the optional approval-key setup (Settings › Security later).
-  await waitForIdentifier(target, ['paired-continue', 'pairing-error'], 30000);
+  await waitForIdentifier(target, ['paired-continue', 'pairing-error'], STEP_WAIT_MS);
   if (await hasIdentifier(target, 'pairing-error')) throw new Error(`Pairing ${target.name} failed on the consent step; see the app's error callout`);
   await scrollAndPress(target, 'paired-continue', ['home-new-chat', 'menu-button']);
   // Home on a phone (sidebar toggle `menu-button`) or a tablet (persistent sidebar; `home-new-chat` either way).
-  await waitForIdentifier(target, ['home-new-chat', 'menu-button'], 30000);
+  await waitForIdentifier(target, ['home-new-chat', 'menu-button'], STEP_WAIT_MS);
   await recordPairing(session, target, before, started);
 }
 
