@@ -8,5 +8,5 @@ appId: ${APP_ID}
 - runFlow:
     when: {platform: iOS}
     commands:
-      - tapOn: {text: "Back|Close", index: 0}
+      - tapOn: {text: "Back.*|Close", index: 0}
       - waitForAnimationToEnd

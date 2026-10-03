@@ -8,8 +8,8 @@ env: {DEVICE_SCOPES: "write:workflows"}
 ---
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///workflows
-- extendedWaitUntil: {visible: "Sandbox Workflow", timeout: 20000}
-- tapOn: "Sandbox Workflow"
+- extendedWaitUntil: {visible: {id: "workflow-row-.*"}, timeout: 20000}
+- tapOn: {id: "workflow-row-.*", index: 0}
 - extendedWaitUntil: {visible: {id: workflow-more}, timeout: 15000}
 - tapOn: {id: workflow-more}
 - tapOn: "Edit in builder"

@@ -22,7 +22,7 @@ tags: [settings]
 - tapOn: {id: security-scopes}
 - extendedWaitUntil: {visible: ".*read:status", timeout: 10000}
 - runFlow: ../_subflows/back.yaml
-- assertVisible: {id: security-unpair}
+- scrollUntilVisible: {element: {id: security-unpair}, direction: DOWN}
 - runFlow:
     when: {visible: {id: security-pair-device}}
     commands:

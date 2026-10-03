@@ -153,7 +153,7 @@ async function waitForApp(target) {
       await pressExpoControl(target, nodes, 'Close');
       continue;
     }
-    if (nodes.some(node => node.identifier === 'menu-button' || node.identifier === 'pairing-connect' || node.identifier === 'pairing-confirm' || node.label === 'Connect to a GeneratorAI server')) return;
+    if (nodes.some(node => ['menu-button', 'home-new-chat', 'pairing-connect', 'pairing-confirm', 'paired-continue'].includes(node.identifier) || node.label === 'Connect to a GeneratorAI server')) return;
     if (nodes.some(node => node.label === 'Unlock to continue')) throw new Error('The installed app is locked; unlock it before native verification');
     await confirmAppLink(target, snapshot);
     await delay(500);

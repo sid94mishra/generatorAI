@@ -1,14 +1,14 @@
 appId: ${APP_ID}
 name: workflows · list, detail, runs, graph, new draft
 # M8-01 (MWorkflows, MWorkflowDetail(+More), MWorkflowNew(+Basics)). Replaces the "workflow" phase of the
-# web-preview e2e/audit-scenarios.mjs (08 §6.3). The sandbox seeds "Sandbox Workflow"; the draft needs write:workflows.
+# web-preview e2e/audit-scenarios.mjs (08 §6.3). The sandbox seeds "Sandbox Workflow.*"; the draft needs write:workflows.
 tags: [workflows]
 ---
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///workflows
 - extendedWaitUntil: {visible: {id: workflows}, timeout: 20000}
-- extendedWaitUntil: {visible: "Sandbox Workflow", timeout: 15000}
-- tapOn: "Sandbox Workflow"
+- extendedWaitUntil: {visible: {id: "workflow-row-.*"}, timeout: 15000}
+- tapOn: {id: "workflow-row-.*", index: 0}
 - extendedWaitUntil: {visible: {id: workflow-detail}, timeout: 15000}
 - assertVisible: {id: workflow-version}
 - assertVisible: "Recent runs"

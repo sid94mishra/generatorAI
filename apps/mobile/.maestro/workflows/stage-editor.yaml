@@ -1,15 +1,15 @@
 appId: ${APP_ID}
 name: workflows · stage editor (tabs, simple fields, save into the builder draft)
 # M8-06 (MStagePrompt, MStageModel, MStageTools, MStageOutput, MStagePolicy, MStageHooks). Edits the sandbox's
-# "Sandbox Workflow" plan stage, saves into the builder draft, then cancels the builder — nothing is saved.
+# "Sandbox Workflow.*" plan stage, saves into the builder draft, then cancels the builder — nothing is saved.
 tags: [workflows]
 # The paired device has the default scopes; this flow edits, so it adds the route-policy scope for its run.
 env: {DEVICE_SCOPES: "write:workflows"}
 ---
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///workflows
-- extendedWaitUntil: {visible: "Sandbox Workflow", timeout: 20000}
-- tapOn: "Sandbox Workflow"
+- extendedWaitUntil: {visible: {id: "workflow-row-.*"}, timeout: 20000}
+- tapOn: {id: "workflow-row-.*", index: 0}
 - extendedWaitUntil: {visible: {id: workflow-more}, timeout: 15000}
 - tapOn: {id: workflow-more}
 - tapOn: "Edit in builder"
