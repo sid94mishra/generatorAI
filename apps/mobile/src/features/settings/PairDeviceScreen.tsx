@@ -3,14 +3,15 @@
 // its own grant is disabled, no admin preset, MD-30) — and shown as 1 the address to open (Copy), 2 the 12-character
 // code in 3 × 4 cells (Copy) with its QR, "Expires in m:ss · n scopes · single use" and Cancel. Changing the preset
 // cancels the code and issues a new one. States: generating, active, expired ("New code"), consumed ("<device>
-// joined"). No Share (MD-35) and no Device row (the joining device names itself). Screen-capture blocking and
-// keep-awake need native modules this pass does not add (M9-09); the screen says not to screenshot the code.
+// joined"). No Share (MD-35) and no Device row (the joining device names itself). While a code is live the screen
+// blocks screenshots and recordings and keeps the device awake (M9-09, `useSecretReveal`).
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { SCOPE_PRESETS, type ScopePresetId } from '@generatorai/shared/ui-contract';
 
 import { useGrantedScopes } from '../../services/auth/useCapability';
+import { useSecretReveal } from '../../services/native/privacy';
 import { ListRow } from '../../ui/layout/ListRow';
 import { ListSection } from '../../ui/layout/ListSection';
 import { errorText } from '../../ui/lib/format';
@@ -63,6 +64,7 @@ export default function PairDeviceScreen(): React.ReactElement {
   const consumed = Boolean(issued && remaining > 0 && pending.data && !pending.isFetching && !pending.data.includes(issued.grantId));
   const expired = Boolean(issued && remaining === 0);
   const live = issued && !consumed && !expired ? issued : null;
+  useSecretReveal(live !== null);
   const devices = useDevices(consumed);
   const current = useRef<PairingInvite | null>(null);
 

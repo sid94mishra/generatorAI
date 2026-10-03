@@ -25,7 +25,8 @@
 //     is locked, and app lock / step-up are enforced in JS instead.
 //   • `setUnlockedDeviceRequired` is deliberately NOT set for the same reason.
 //
-// JS facade: apps/mobile/src/services/native/deviceKeyModule.ts; the key
+// JS facade: apps/mobile/src/services/native/deviceKeyModule.ts; Recents
+// privacy (M9-09) from apps/mobile/src/services/native/privacy.ts; the key
 // commands of M5-09 (KeyCommands.kt) are driven from
 // apps/mobile/src/services/native/keyCommands.ts; the approval key of M6-03
 // (ApprovalKey.kt) from apps/mobile/src/services/native/approvalKey.ts.
@@ -33,6 +34,7 @@
 
 package dev.generatorai.devicekey
 
+import android.app.Activity
 import android.content.res.Configuration
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
@@ -61,6 +63,16 @@ private const val SIGNATURE_ALGORITHM = "SHA256withECDSA"
 private const val BACKING_STRONGBOX = "strongbox"
 private const val BACKING_KEYSTORE = "keystore"
 private const val BACKING_SOFTWARE = "software"
+
+/** The Recents privacy choice, re-applied to every new activity instance (API 33+). */
+internal object RecentsPrivacy {
+  @Volatile var hidden = false
+
+  fun apply(activity: Activity?) {
+    if (activity == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+    activity.setRecentsScreenshotEnabled(!hidden)
+  }
+}
 
 internal class DeviceKeyNotFoundException(alias: String) :
   CodedException("No device key exists under alias \"$alias\"")
@@ -97,11 +109,27 @@ class GeneratorAIDeviceKeyModule : Module() {
     }
 
     // A new activity instance (recreated after a configuration change) gets the callback again; a keyboard plugged
-    // in or out while backgrounded is reported on return.
+    // in or out while backgrounded is reported on return. The Recents privacy flag is per activity instance, so it
+    // is applied again too.
     OnActivityEntersForeground {
       val activity = appContext.currentActivity
-      activity?.runOnUiThread { KeyCommandCenter.install(activity) }
+      activity?.runOnUiThread {
+        KeyCommandCenter.install(activity)
+        RecentsPrivacy.apply(activity)
+      }
       sendEvent("onHardwareKeyboardChange", mapOf("attached" to hardwareKeyboardAttached()))
+    }
+
+    // ── Recents privacy (M9-09, MX-10, mobile 06 §6.2) ───────────────
+    // `Activity.setRecentsScreenshotEnabled(false)` (API 33+): Recents shows a blank card instead of the last frame,
+    // and screenshots stay possible (unlike FLAG_SECURE). Returns false below API 33, where the JS side falls back to
+    // FLAG_SECURE through expo-screen-capture.
+    Function("setRecentsScreenshotEnabled") { enabled: Boolean ->
+      RecentsPrivacy.hidden = !enabled
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return@Function false
+      val activity = appContext.currentActivity
+      activity?.runOnUiThread { RecentsPrivacy.apply(activity) }
+      true
     }
 
     // Every supported Android version has AndroidKeyStore; whether it is

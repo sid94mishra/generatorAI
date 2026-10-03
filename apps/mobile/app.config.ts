@@ -198,6 +198,9 @@ const config: ExpoConfig = {
     softwareKeyboardLayoutMode: 'resize',
     // Cleartext (`http://`) is enabled by `./plugins/withCleartextTraffic`
     // below — see that file and README "Android cleartext".
+    // expo-screen-capture (M9-09) declares screenshot-detection permissions the app never uses (it only blocks
+    // capture and hides Recents); READ_MEDIA_IMAGES in particular is a Play-policy permission.
+    blockedPermissions: ['android.permission.READ_MEDIA_IMAGES', 'android.permission.DETECT_SCREEN_CAPTURE'],
     permissions: [
       'android.permission.CAMERA',
       'android.permission.RECORD_AUDIO',

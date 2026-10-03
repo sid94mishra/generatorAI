@@ -32,7 +32,9 @@ import { BrandMark } from '../../components/brand/BrandMark';
 import { Button } from '../../components/ui/Button';
 import { useToast } from '../../components/ui/Toast';
 import { useTheme } from '../../theme/ThemeProvider';
-import { setNotificationPreviewRedaction } from '../native/privacy';
+import { setAppSwitcherPrivacy, setNotificationPreviewRedaction } from '../native/privacy';
+import { resetStepUp } from './stepUp';
+import { stepUpExpiredByAbsence } from './stepUpRules';
 import { readLockPreferences, usePreferences } from '../prefs/preferences';
 import {
   appLockReducer,
@@ -101,6 +103,25 @@ function NativeAppLockGate({ children }: { children: React.ReactNode }): React.R
   useEffect(() => {
     setNotificationPreviewRedaction(redactPreviews);
   }, [redactPreviews]);
+
+  // App switcher / Recents (MX-10, 06 §6.2): native protection under the JS overlay below, with the lock always.
+  const hideSwitcher = biometricLock || hideInSwitcher;
+  useEffect(() => {
+    setAppSwitcherPrivacy(hideSwitcher);
+  }, [hideSwitcher]);
+
+  // Step-up cache (06 §6.4): an absence longer than the lock grace forgets the 10-minute step-up.
+  const leftAt = useRef<number | null>(null);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (next === 'background') leftAt.current ??= Date.now();
+      else if (next === 'active') {
+        if (stepUpExpiredByAbsence(leftAt.current, Date.now(), readLockPreferences().lockGraceSeconds)) resetStepUp();
+        leftAt.current = null;
+      }
+    });
+    return () => subscription.remove();
+  }, []);
 
   // Preference changes flow into the machine; the machine never writes the
   // preference back except in the "nothing to lock with" case below.

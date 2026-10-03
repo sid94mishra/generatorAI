@@ -52,7 +52,7 @@ export default function AppLockScreen(): React.ReactElement {
           kind="toggle"
           icon="hide"
           title={ios ? 'Hide content in app switcher' : 'Hide content in Recents'}
-          subtitle={biometricLock ? 'Always on while App lock is on' : 'Shows the app mark instead'}
+          subtitle={biometricLock ? 'Always on while App lock is on' : ios ? 'Blurs it and shows the app mark' : 'Recents shows a blank card'}
           switchValue={biometricLock || hideInSwitcher}
           onValueChange={setHideInSwitcher}
           disabled={biometricLock}
