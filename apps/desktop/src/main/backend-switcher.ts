@@ -55,7 +55,8 @@ function persist(next: ServerConnectionState): ServerConnectionState {
 
 /** Label for the embedded server, independent of whether it is active. */
 function embeddedLabel(): string {
-  return `This computer (${app.getName()})`;
+  // Board DesktopMac: "This computer" (the app name is already the switcher title).
+  return 'This computer';
 }
 
 /**

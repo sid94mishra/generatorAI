@@ -60,7 +60,7 @@ beforeEach(() => {
 describe('listServers', () => {
   it('always includes the embedded entry, active when no remote is selected', () => {
     expect(listServers()).toEqual([
-      { id: 'embedded', label: 'This computer (GeneratorAI)', url: 'http://127.0.0.1:3100', kind: 'embedded', active: true },
+      { id: 'embedded', label: 'This computer', url: 'http://127.0.0.1:3100', kind: 'embedded', active: true },
     ]);
   });
 
@@ -70,7 +70,7 @@ describe('listServers', () => {
     expect(connectionState().serverMode).toBe('embedded');
     await switchToRemote(connection.id);
     expect(listServers()).toEqual([
-      { id: 'embedded', label: 'This computer (GeneratorAI)', url: 'http://127.0.0.1:3100', kind: 'embedded', active: false },
+      { id: 'embedded', label: 'This computer', url: 'http://127.0.0.1:3100', kind: 'embedded', active: false },
       { id: connection.id, label: 'Studio', url: 'https://studio.example:3100', kind: 'remote', active: true },
     ]);
   });
@@ -129,7 +129,7 @@ describe('onServersChanged', () => {
 
 describe('currentBackendLabel', () => {
   it('reuses the embedded label helper', () => {
-    expect(currentBackendLabel()).toBe('This computer (GeneratorAI)');
+    expect(currentBackendLabel()).toBe('This computer');
   });
 
   it('is the remote label once switched', async () => {
