@@ -856,7 +856,7 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch(`${this.baseUrl}/api/chats/${chatId}/workflow-runs`);
   }
 
-  async updateChat(chatId: string, updates: { name?: string; model?: string; gitRepositories?: unknown; codebaseIds?: string[]; harnessConfig?: Record<string, unknown>; defaultAgentMode?: AgentMode; permissionMode?: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan' }): Promise<Chat> {
+  async updateChat(chatId: string, updates: { pinned?: boolean; unread?: boolean; name?: string; model?: string; gitRepositories?: unknown; codebaseIds?: string[]; harnessConfig?: Record<string, unknown>; defaultAgentMode?: AgentMode; permissionMode?: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan' }): Promise<Chat> {
     return apiFetch<Chat>(`${this.baseUrl}/api/chats/${chatId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },

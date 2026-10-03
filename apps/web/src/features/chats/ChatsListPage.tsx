@@ -5,6 +5,7 @@
 // PageHeader + PageTitle "Chats · N" + FilterBar (search, All/Active/Archived
 // seg with server counts, Project/Agent/Status/Tags chips, sort) + a
 // virtualized DataTable with infinite paging + a floating BulkActionBar.
+// Rows show and change the pin / read state shared with mobile (D-83).
 // "New chat" opens the NewChatDialog (features/chats/create) via
 // useNewChatStore — the dialog itself is mounted once by app/ShellRoute.
 // ────────────────────────────────────────────────────────────────
@@ -15,7 +16,14 @@ import { chatLiveSets, toChatRowModel } from '@generatorai/client-core';
 import type { ChatBulkResult, ChatListSort, ChatListState } from '@generatorai/shared';
 import type { ChatRowModel, CreateChatDraft } from '@generatorai/shared/ui-contract';
 import { useNewChatStore } from '@/stores/newChatStore.js';
-import { useBulkArchiveChats, useBulkDeleteChats, ChatBulkError, useChatPages } from '@/hooks/chatListQueries.js';
+import {
+  useBulkArchiveChats,
+  useBulkDeleteChats,
+  ChatBulkError,
+  useChatPages,
+  useSetChatPinned,
+  useSetChatUnread,
+} from '@/hooks/chatListQueries.js';
 import { useArchiveChat, useDeleteChat, useUnarchiveChat } from '@/hooks/queries.js';
 import { useAttention } from '@/hooks/attentionQueries.js';
 import { useProjects } from '@/hooks/projectQueries.js';
@@ -132,6 +140,8 @@ export function ChatsListPage() {
   const archiveChat = useArchiveChat();
   const unarchiveChat = useUnarchiveChat();
   const deleteChat = useDeleteChat();
+  const setPinned = useSetChatPinned();
+  const setUnread = useSetChatUnread();
 
   const clearSelection = () => setSelectedIds(new Set());
   const selectAllLoaded = () => setSelectedIds(new Set(rows.map((r) => r.id)));
@@ -174,6 +184,18 @@ export function ChatsListPage() {
     unarchiveChat.mutate(row.id, {
       onError: (err) => toast.error(`Couldn't unarchive "${row.title}"`, { description: String(err) }),
     });
+  };
+  const onRowPin = (row: ChatRowModel, pinned: boolean) => {
+    setPinned.mutate(
+      { chatId: row.id, pinned },
+      { onError: (err) => toast.error(`Couldn't ${pinned ? 'pin' : 'unpin'} "${row.title}"`, { description: String(err) }) },
+    );
+  };
+  const onRowMarkUnread = (row: ChatRowModel, unread: boolean) => {
+    setUnread.mutate(
+      { chatId: row.id, unread },
+      { onError: (err) => toast.error(`Couldn't change "${row.title}"`, { description: String(err) }) },
+    );
   };
   const onRowDelete = async (row: ChatRowModel) => {
     const ok = await confirmer.confirm({
@@ -267,6 +289,8 @@ export function ChatsListPage() {
                 onArchive: onRowArchive,
                 onUnarchive: onRowUnarchive,
                 onDelete: (r) => void onRowDelete(r),
+                onPin: onRowPin,
+                onMarkUnread: onRowMarkUnread,
               })
             }
             actionsWidth={56}

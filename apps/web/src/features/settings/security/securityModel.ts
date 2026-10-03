@@ -1,9 +1,13 @@
 // ────────────────────────────────────────────────────────────────
 // Security & devices — pure helpers and the static tables the section
 // renders (moved from the legacy components/settings/sections/Security.tsx).
+// Scope words, sensitivity and the server-constant presets come from the
+// shared vocabulary (`@generatorai/shared/ui-contract` scopes, MG-23), so web,
+// desktop and mobile name and guard a grant the same way.
 // ────────────────────────────────────────────────────────────────
 
 import type { IconConcept } from '@generatorai/design-tokens';
+import { describeScope, isSensitiveScope, SCOPE_PRESETS as SHARED_SCOPE_PRESETS } from '@generatorai/shared/ui-contract';
 import type { BadgeTone } from '@/ui/primitives/Badge/Badge.js';
 import type { NetworkEndpoint } from '@/hooks/securityQueries.js';
 
@@ -43,6 +47,11 @@ export interface ScopePreset {
   scopes: string[] | null;
 }
 
+/** A server-constant preset's scopes (`DEFAULT_MOBILE_SCOPES`, `STANDALONE_MOBILE_SCOPES`), from the shared vocabulary. */
+function sharedPresetScopes(id: 'companion' | 'standalone'): string[] {
+  return [...(SHARED_SCOPE_PRESETS.find((preset) => preset.id === id)?.scopes ?? [])];
+}
+
 const READ = ['read:status', 'read:projects', 'read:workspaces', 'read:chats', 'read:workflows', 'read:files', 'read:reviews', 'read:activity'];
 
 /** Permission presets offered when generating a pairing code. */
@@ -58,26 +67,13 @@ export const SCOPE_PRESETS: readonly ScopePreset[] = [
     id: 'companion',
     label: 'Mobile companion',
     hint: 'Read, chat, approve and review. No terminal, browser or admin access.',
-    scopes: [...READ, 'write:chats', 'write:reviews', 'stream:events', 'exec:agent'],
+    scopes: sharedPresetScopes('companion'),
   },
-  // Mirrors STANDALONE_MOBILE_SCOPES in packages/auth/src/scopes.ts.
   {
     id: 'standalone',
     label: 'Mobile standalone',
     hint: 'Full client on a phone you hold: workspaces, files, workflows, terminal and browser control; no admin.',
-    scopes: [
-      ...READ,
-      'write:chats',
-      'write:reviews',
-      'stream:events',
-      'exec:agent',
-      'write:workspaces',
-      'write:files',
-      'write:workflows',
-      'write:projects',
-      'exec:terminal',
-      'exec:browser',
-    ],
+    scopes: sharedPresetScopes('standalone'),
   },
   {
     id: 'workstation',
@@ -113,21 +109,14 @@ export const GRANTABLE_CAPABILITIES: readonly { scope: string; label: string; hi
   { scope: 'admin:devices', label: 'Manage devices', hint: 'Pair and revoke other devices from this one.' },
 ];
 
-/** Short label for a scope; the raw id otherwise. */
-export function scopeLabel(scope: string): string {
-  return GRANTABLE_CAPABILITIES.find((cap) => cap.scope === scope)?.label ?? scope;
-}
-
-/** A scope whose grant is confirmed explicitly (the server audits it as critical). */
-export function isSensitiveScope(scope: string): boolean {
-  return scope === 'exec:terminal' || scope === 'admin:devices';
-}
-
-/** What granting `scopes` lets a device do, for the confirmation title. */
+/** What granting the sensitive ones of `scopes` lets a device do, for the confirmation title ("run terminal commands on your machine"). */
 export function sensitiveGrantText(scopes: readonly string[]): string {
   return scopes
     .filter(isSensitiveScope)
-    .map((s) => (s === 'exec:terminal' ? 'run shell commands on this machine' : 'pair and revoke other devices'))
+    .map((s) => {
+      const text = describeScope(s);
+      return text.charAt(0).toLowerCase() + text.slice(1);
+    })
     .join(' and ');
 }
 

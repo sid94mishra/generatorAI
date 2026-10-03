@@ -131,4 +131,4 @@ When both non-approval categories are off, the client requests a server mute for
 
 ## Sources
 
-`packages/shared/src/types/Project.ts`, `apps/server/src/routes/{projects,system,sourceControl,auth}.ts`, `apps/server/src/settings/{audio,computerUse,workspaceRetention}.ts`, `apps/desktop/src/main/{config,settings-schema}.ts`, `apps/mobile/src/prefs/preferences.tsx`, `apps/mobile/src/notifications/notificationFilter.ts`, `apps/web/src/lib/appPreferences.ts`, `apps/web/src/components/settings/sections/`.
+`packages/shared/src/types/Project.ts`, `apps/server/src/routes/{projects,system,sourceControl,auth}.ts`, `apps/server/src/settings/{audio,computerUse,workspaceRetention}.ts`, `apps/desktop/src/main/{config,settings-schema}.ts`, `apps/mobile/src/prefs/preferences.tsx`, `apps/mobile/src/notifications/notificationFilter.ts`, `apps/web/src/lib/appPreferences.ts`, `apps/web/src/features/settings/sections/`.

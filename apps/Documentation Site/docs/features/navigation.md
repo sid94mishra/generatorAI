@@ -31,7 +31,7 @@ Navigation state, appearance preferences, and some panel preferences are local t
 
 ## Source evidence
 
-`apps/web/src/features/home`, `apps/web/src/features/palette`, `apps/web/src/components/layout/AppLayout.tsx`, `apps/web/src/components/layout/CommandPalette.tsx`, `apps/web/src/components/layout/FindBar.tsx`, `apps/web/src/pages/ChatsListPage.tsx`, and `apps/web/src/components/layout/RightPane.tsx`.
+`apps/web/src/features/home`, `apps/web/src/features/palette`, `apps/web/src/app/shell/ShellRoute.tsx`, `apps/web/src/features/palette/CommandPalette.tsx`, `apps/web/src/app/shell/FindBar.tsx`, `apps/web/src/features/chats/ChatsListPage.tsx`, and `apps/web/src/blocks/dock/Dock.tsx`.
 
 ## Configuration and worked examples
 

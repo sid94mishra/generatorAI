@@ -159,3 +159,39 @@ describe('WorktreeCleanupService — per-project scoping (DATA-2)', () => {
     expect(removeWorktree).not.toHaveBeenCalled();
   });
 });
+
+describe('WorktreeCleanupService — chat worktree retention clock (#21b)', () => {
+  function setup(rows: ReturnType<typeof wt>[], chatStatus: 'active' | 'archived') {
+    const updateStatus = vi.fn(async () => {});
+    const removeWorktree = vi.fn(async () => {});
+    const svc = new WorktreeCleanupService(
+      { removeWorktree } as unknown as WorktreeService,
+      { getByProjectId: vi.fn(async () => rows), updateStatus } as unknown as IWorktreeRepository,
+      { getById: vi.fn(async () => ({ id: 'p1', settings: { worktreeRetention: 'hours-24' } })) } as unknown as IProjectRepository,
+      { getById: vi.fn() } as unknown as IWorkflowRunRepository,
+      noopLogger,
+      { getById: vi.fn(async () => ({ status: chatStatus })) } as unknown as IChatRepository,
+    );
+    return { svc, updateStatus, removeWorktree };
+  }
+
+  it('an archived chat\'s worktree created long ago is kept for the retention window from the archive, not from creation', async () => {
+    const longAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+    const { svc, updateStatus, removeWorktree } = setup([wt({ id: 'wt-c', runId: 'chat-1', runType: 'manual', createdAt: longAgo })], 'archived');
+    const result = await svc.runCleanupForProject('p1');
+    expect(updateStatus).toHaveBeenCalledWith('wt-c', 'orphaned');
+    expect(result).toEqual({ cleaned: 0, orphaned: 1 });
+    expect(removeWorktree).not.toHaveBeenCalled();
+  });
+
+  it('a restored chat\'s orphaned worktree becomes active again and is not swept', async () => {
+    const longAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+    const { svc, updateStatus, removeWorktree } = setup(
+      [wt({ id: 'wt-c', runId: 'chat-1', runType: 'manual', status: 'orphaned', createdAt: longAgo, cleanedUpAt: longAgo })],
+      'active',
+    );
+    await svc.runCleanupForProject('p1');
+    expect(updateStatus).toHaveBeenCalledWith('wt-c', 'active');
+    expect(removeWorktree).not.toHaveBeenCalled();
+  });
+});

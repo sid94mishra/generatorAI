@@ -71,7 +71,7 @@ For a brownfield change, use stages for source analysis, implementation, indepen
 
 ## Source evidence
 
-`apps/web/src/pages/WorkflowDefinitionPage.tsx`, `apps/web/src/pages/WorkflowRunPage.tsx`, `apps/web/src/components/workflow/RuntimeDAGCanvas.tsx`, `apps/web/src/components/workflow/redesign/RunHeaderBar.tsx`, `apps/web/src/components/workflow/redesign/RightInspector.tsx`, `apps/web/src/components/workflow/redesign/InlineHitlControls.tsx`, `apps/web/src/components/artifacts/ArtifactBrowser.tsx`, and `packages/workflow-spec/src/state/workflowRun.ts`.
+`apps/web/src/features/workflows/detail/WorkflowDetailPage.tsx`, `apps/web/src/features/workflows/run/WorkflowRunPage.tsx`, `apps/web/src/features/workflows/run/graph`, `apps/web/src/features/workflows/run/header/RunHeader.tsx`, `apps/web/src/features/workflows/run/inspector/StageInspector.tsx`, `apps/web/src/features/workflows/run/stages/StageRow.tsx`, `apps/web/src/features/projects/detail/customization/CustomizationTab.tsx`, and `packages/workflow-spec/src/state/workflowRun.ts`.
 
 ## Configuration and worked examples
 

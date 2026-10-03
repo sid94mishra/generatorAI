@@ -51,7 +51,7 @@ The Chats list searches names and tags, filters active or archived records, and 
 
 ## Source evidence
 
-`apps/web/src/pages/ChatPage.tsx`, `apps/web/src/pages/ChatsListPage.tsx`, `apps/web/src/components/chat/CreateChatDialog.tsx`, `apps/web/src/components/chat/ChatInput.tsx`, `apps/web/src/components/chat/MessageActions.tsx`, `apps/web/src/components/chat/composer`, `apps/web/src/components/chat/sources`, and `apps/web/src/hooks/useTwoPhaseStop.ts`.
+`apps/web/src/features/chat/ChatPage.tsx`, `apps/web/src/features/chats/ChatsListPage.tsx`, `apps/web/src/features/chats/create/NewChatDialog.tsx`, `apps/web/src/blocks/composer/Composer.tsx`, `apps/web/src/features/chat/components/MessageActions.tsx`, `apps/web/src/blocks/composer`, `apps/web/src/blocks/sources`, and `apps/web/src/hooks/useTwoPhaseStop.ts`.
 
 ## Configuration and worked examples
 

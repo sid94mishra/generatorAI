@@ -2,7 +2,10 @@
 // ChatsTable column bindings (B-26 EntityTable bindings; 03-component-
 // inventory-domain.md §2.5): checkbox · Title flex · Project 140 ·
 // Agent 150 (Avatar 20 + name) · Status 96 · Changes 88 (± mono) ·
-// Activity 72 · actions 56. Row menu: Archive/Unarchive, Delete.
+// Activity 72 · actions 56. Row menu: Pin/Unpin and Mark as read/unread
+// (D-83, when the page passes them), Archive/Unarchive, Delete.
+// The title carries the pin glyph and the unread dot (MG-02 data; the server
+// lists pinned chats first, so the glyph explains the order).
 // A block since P5-04: ChatsList and the ProjectDetail Chats tab share it.
 // ────────────────────────────────────────────────────────────────
 
@@ -10,10 +13,13 @@ import { Link as RouterLink } from 'react-router';
 import type { ChatRowModel } from '@generatorai/shared/ui-contract';
 import type { DataTableColumn } from '@/ui/patterns/DataTable/DataTable.js';
 import { MenuButton, type MenuButtonItem } from '@/ui/patterns/MenuButton/MenuButton.js';
+import { Icon } from '@/ui/icons/Icon.js';
+import { cn } from '@/ui/lib/cn.js';
 import { Avatar } from '@/ui/primitives/Avatar/Avatar.js';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Link } from '@/ui/primitives/Link/Link.js';
 import { StatusBadge } from '@/ui/primitives/StatusBadge/StatusBadge.js';
+import { StatusDot } from '@/ui/primitives/StatusDot/StatusDot.js';
 import { formatRelativeTime } from '@/utils/formatRelativeTime.js';
 
 /** The Status column: a StatusBadge, a neutral "Archived" chip, or a dash (never ran). */
@@ -42,9 +48,13 @@ export const CHATS_COLUMNS: readonly DataTableColumn<ChatRowModel>[] = [
     header: 'Title',
     width: 'minmax(240px,1fr)',
     cell: (row) => (
-      <Link render={<RouterLink to={`/chats/${row.id}`} />} className="truncate">
-        {row.title}
-      </Link>
+      <span className="flex min-w-0 items-center gap-1.5">
+        <Link render={<RouterLink to={`/chats/${row.id}`} />} className={cn('truncate', row.unread && 'font-semibold')}>
+          {row.title}
+        </Link>
+        {row.pinned ? <Icon concept="pin" size={12} label="Pinned" className="shrink-0 text-fg-3" /> : null}
+        {row.unread ? <StatusDot tone="accent" size="sm" label="Unread" /> : null}
+      </span>
     ),
   },
   {
@@ -91,13 +101,38 @@ export interface ChatRowActionsCallbacks {
   onArchive: (row: ChatRowModel) => void;
   onUnarchive: (row: ChatRowModel) => void;
   onDelete: (row: ChatRowModel) => void;
+  /** Pin (true) or unpin (false) — MG-02, shared with mobile. */
+  onPin?: (row: ChatRowModel, pinned: boolean) => void;
+  /** Mark unread (true) or read (false) — MG-02 / MD-112. */
+  onMarkUnread?: (row: ChatRowModel, unread: boolean) => void;
 }
 
-/** The row menu: Archive/Unarchive (lifecycle), Delete (danger, confirmed by the caller). */
-export function chatRowActions(row: ChatRowModel, { onArchive, onUnarchive, onDelete }: ChatRowActionsCallbacks) {
-  const items: MenuButtonItem[] = row.archived
-    ? [{ id: 'unarchive', label: 'Unarchive', icon: 'undo', onSelect: () => onUnarchive(row) }]
-    : [{ id: 'archive', label: 'Archive', icon: 'archive', onSelect: () => onArchive(row) }];
+/** The row menu: Pin/Unpin and Mark as read/unread, Archive/Unarchive (lifecycle), Delete (danger, confirmed by the caller). */
+export function chatRowActions(
+  row: ChatRowModel,
+  { onArchive, onUnarchive, onDelete, onPin, onMarkUnread }: ChatRowActionsCallbacks,
+) {
+  const items: MenuButtonItem[] = [];
+  if (onPin) {
+    items.push(
+      row.pinned
+        ? { id: 'unpin', label: 'Unpin', icon: 'pin', onSelect: () => onPin(row, false) }
+        : { id: 'pin', label: 'Pin', icon: 'pin', onSelect: () => onPin(row, true) },
+    );
+  }
+  if (onMarkUnread) {
+    items.push(
+      row.unread
+        ? { id: 'mark-read', label: 'Mark as read', icon: 'chats', onSelect: () => onMarkUnread(row, false) }
+        : { id: 'mark-unread', label: 'Mark as unread', icon: 'chats', onSelect: () => onMarkUnread(row, true) },
+    );
+  }
+  if (items.length > 0) items.push({ type: 'separator' });
+  items.push(
+    row.archived
+      ? { id: 'unarchive', label: 'Unarchive', icon: 'undo', onSelect: () => onUnarchive(row) }
+      : { id: 'archive', label: 'Archive', icon: 'archive', onSelect: () => onArchive(row) },
+  );
   items.push(
     { type: 'separator' },
     { id: 'delete', label: 'Delete', icon: 'trash', danger: true, onSelect: () => onDelete(row) },

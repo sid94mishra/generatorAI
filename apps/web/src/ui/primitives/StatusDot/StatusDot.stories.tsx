@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { STATUS_STATES } from '@generatorai/shared';
 import { StatusDot, type DotTone } from './StatusDot.js';
 
-const TONES: DotTone[] = ['neutral', 'muted', 'run', 'ok', 'warn', 'err'];
+const TONES: DotTone[] = ['neutral', 'muted', 'run', 'ok', 'warn', 'err', 'accent'];
 
 const meta = {
   component: StatusDot,

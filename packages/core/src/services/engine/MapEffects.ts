@@ -55,7 +55,7 @@ import { mapItemScope, mapStateOf, StateIndex } from '../../domain/scheduler/sco
 import type { InstanceState, MapItemState, MapState, RunState } from '../../domain/scheduler/types.js';
 import { compile, type CompiledNode } from '../../domain/workflow-graph/compile.js';
 import type { RunDefinitionReader } from '../definitions/RunDefinitionReader.js';
-import type { MountService } from '../MountService.js';
+import { MAP_ITEM_OWNER_SEP, type MountService } from '../MountService.js';
 import { runWorkspace } from '../session/workspaceExposure.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
 import { runCheck } from './CheckRunner.js';
@@ -263,7 +263,7 @@ export class MapEffects {
     const svc = this.mounts;
     if (!item || !state.snapshot || !svc) return { ok: false, code: 'mount_fork_failed', error: 'The map has no snapshot to cut item mounts from' };
     const base = await this.baseOf(run, this.deps.stores.runStore.loadRunState(runId), inst);
-    const ownerId = `${run.id}~${inst.id.slice(0, 8)}-${index}`;
+    const ownerId = `${run.id}${MAP_ITEM_OWNER_SEP}${inst.id.slice(0, 8)}-${index}`;
     let where: Omit<Extract<PrepareItemResult, { ok: true }>, 'ok'>;
     try {
       const existing = item.workspaceId ? await this.deps.workspaceManager.getExecutionWorkspace(item.workspaceId) : null;

@@ -732,6 +732,8 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
           inputSummary: String(data['inputSummary'] ?? ''),
           permissionMode: String(data['permissionMode'] ?? ''),
           status: 'pending',
+          // MG-04 — the Risky badge survives a reload (same rule as the live router).
+          ...(data['risk'] === 'risky' || data['risk'] === 'standard' ? { risk: data['risk'] } : {}),
         });
         break;
       case 'chat.permission.resolved':

@@ -51,7 +51,7 @@ For hot-loaded executable packages and interactive components, see [Extensions a
 
 ## Source evidence
 
-`apps/web/src/components/settings/sections/Catalogs.tsx`, `apps/web/src/pages/ProjectDetailPage.tsx`, `apps/web/src/components/chat/composer/builtins.ts`, `apps/web/src/components/workflow/SkillSelector.tsx`, `apps/web/src/components/workflow/McpServerSelector.tsx`, `packages/shared/src/types/Project.ts`, and `packages/shared/src/config/McpSchemas.ts`.
+`apps/web/src/features/settings/skills/SkillsSection.tsx`, `apps/web/src/features/projects/ProjectDetailPage.tsx`, `apps/web/src/blocks/composer/hooks/useComposerSend.ts`, `apps/web/src/features/workflows/builder/inspector/agent/session/ToolSections.tsx`, `packages/shared/src/types/Project.ts`, and `packages/shared/src/config/McpSchemas.ts`.
 
 ## Configuration and worked examples
 

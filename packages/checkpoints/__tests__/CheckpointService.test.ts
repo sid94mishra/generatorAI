@@ -174,6 +174,22 @@ describe('CheckpointService (real git)', () => {
     expect(second).toBeNull();
   });
 
+  it('records a turn boundary even when a live snapshot already holds its tree', async () => {
+    await fs.writeFile(path.join(repoDir, 'a.txt'), 'hello\n');
+    const base = await service.create({ workspaceId: WORKSPACE_ID, repoDir, kind: 'baseline' });
+    await fs.writeFile(path.join(repoDir, 'a.txt'), 'hello\nworld\n');
+    // A tool call scheduled a live snapshot of the edited tree mid-turn.
+    const live = await service.create({ workspaceId: WORKSPACE_ID, repoDir, kind: 'live', turnId: 'turn_1' });
+    const after = await service.create({ workspaceId: WORKSPACE_ID, repoDir, kind: 'turn', turnId: 'turn_1', phase: 'after' });
+
+    expect(live).not.toBeNull();
+    expect(after).not.toBeNull();
+    expect(after!.parentId).toBe(base!.id);
+    expect(after!.additions).toBe(1);
+    // Nothing changed since that durable boundary: the next one is skipped.
+    expect(await service.create({ workspaceId: WORKSPACE_ID, repoDir, kind: 'turn', turnId: 'turn_2' })).toBeNull();
+  });
+
   it('captures a new checkpoint after an edit and links the parent', async () => {
     await fs.writeFile(path.join(repoDir, 'a.txt'), 'hello\n');
     const base = await service.create({ workspaceId: WORKSPACE_ID, repoDir, kind: 'baseline' });

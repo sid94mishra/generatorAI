@@ -2,14 +2,15 @@
 // Recently finished activity hook (G-11) — Home "Recently finished".
 //
 // Merges chats' finished turns, terminal workflow runs and terminal
-// automation executions into one feed, newest first. Pull-request- and
-// commit-derived items are not built in this pass (see
+// automation executions into one feed, newest first. An item carries the
+// commit / pull request its workspace made through the SCM flow (MG-13, see
 // `packages/shared/src/types/RecentActivity.ts`). No SSE: Home refetches it
 // when the attention feed (G-01) loses an item (something just finished).
 // ────────────────────────────────────────────────────────────────
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { RecentActivityItem } from '@generatorai/shared';
+import type { ChatMessage, RecentActivityItem } from '@generatorai/shared';
+import { attachmentUrl } from '@/lib/attachmentUrl.js';
 import { usePlatform } from '../providers/PlatformProvider.js';
 
 export interface RecentActivityQuery {
@@ -57,9 +58,12 @@ export function useRetryActivity() {
       }
       if (item.retry === 'chat_prompt') {
         const messages = await platform.getChatMessages(item.entityId, RETRY_HISTORY);
-        const last = [...messages].reverse().find((m) => m.role === 'user' && m.content.trim());
+        const last = [...messages].reverse().find((m) => m.role === 'user' && (m.content.trim() || m.attachments?.length));
         if (!last) throw new Error('This chat has no prompt to send again.');
-        await platform.sendChatPrompt(item.entityId, last.content);
+        // The prompt goes again WITH its files (final-review #21): each is fetched back from the chat.
+        const files = await Promise.all((last.attachments ?? []).map((att) => refetchAttachment(att, item.entityId)));
+        if (files.length > 0) await platform.sendChatPromptWithFiles(item.entityId, last.content, files);
+        else await platform.sendChatPrompt(item.entityId, last.content);
         return {};
       }
       throw new Error('This item cannot be retried.');
@@ -69,4 +73,14 @@ export function useRetryActivity() {
       void queryClient.invalidateQueries({ queryKey: activityKeys.all });
     },
   });
+}
+
+/** A persisted message attachment as a `File` to send again; fails when it can no longer be fetched. */
+async function refetchAttachment(att: NonNullable<ChatMessage['attachments']>[number], chatId: string): Promise<File> {
+  const url = attachmentUrl(att, chatId);
+  if (!url) throw new Error(`"${att.name}" can no longer be attached. Open the chat to send it again.`);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Could not fetch "${att.name}" (${res.status}).`);
+  const blob = await res.blob();
+  return new File([blob], att.name, { type: att.mimeType || blob.type });
 }

@@ -114,4 +114,4 @@ The current scripts supersede older README advice describing server dependency s
 - **Native computer actions fail:** review Computer Use status and the OS permissions reported by the desktop driver. Browser permission alone does not grant desktop automation.
 - **Preference disappears across launches:** inspect origin/port changes and native settings persistence before deleting data.
 
-Sources: `apps/desktop/package.json`, `apps/desktop/src/main/{index,server-manager,backend-switcher,menu,window-manager,settings-schema}.ts`, `apps/desktop/src/preload/index.ts`, `apps/desktop/scripts/`, `apps/web/src/components/layout/RightPane.tsx`, `apps/web/src/pages/ChatPage.tsx`.
+Sources: `apps/desktop/package.json`, `apps/desktop/src/main/{index,server-manager,backend-switcher,menu,window-manager,settings-schema}.ts`, `apps/desktop/src/preload/index.ts`, `apps/desktop/scripts/`, `apps/web/src/blocks/dock/Dock.tsx`, `apps/web/src/features/chat/ChatPage.tsx`.

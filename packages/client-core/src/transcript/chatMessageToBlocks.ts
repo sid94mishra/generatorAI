@@ -157,6 +157,7 @@ export function chatMessageToBlocks(message: TranscriptMessageInput): StreamBloc
         permissionMode: '',
         status: card.status === 'pending' ? 'expired' : card.status,
         ...(card.message ? { message: card.message } : {}),
+        ...(card.risk ? { risk: card.risk } : {}),
       }),
     });
   }

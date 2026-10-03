@@ -231,3 +231,49 @@ export function useBulkDeleteChats() {
   const platform = usePlatform();
   return useBulkChatAction((ids) => platform.deleteChats(ids), 'delete');
 }
+
+// ── Pin and read state (MG-02 / MD-112, D-83) ──
+//
+// The server lists pinned chats first and flags a chat unread when it has
+// activity after its read mark — the same state the phone shows, so the web
+// both shows it and keeps it true.
+
+/** Pin or unpin a chat (`PATCH /chats/:id {pinned}`). */
+export function useSetChatPinned() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ chatId, pinned }: { chatId: string; pinned: boolean }) => platform.updateChat(chatId, { pinned }),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: chatListKeys.all }),
+  });
+}
+
+/** Mark a chat unread (true) or read (false) (`PATCH /chats/:id {unread}`). */
+export function useSetChatUnread() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ chatId, unread }: { chatId: string; unread: boolean }) => platform.updateChat(chatId, { unread }),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: chatListKeys.all }),
+  });
+}
+
+/**
+ * An open chat sets its read mark — when it opens and again when it is left,
+ * so what streamed in while it was on screen does not read as unread on
+ * another device. Silent on failure (a device without `write:chats`): the
+ * mark simply stays. The server's `chat.updated` refreshes every list.
+ */
+export function useMarkChatRead(chatId: string | undefined): void {
+  const platform = usePlatform();
+  useEffect(() => {
+    if (!chatId) return;
+    const mark = () => {
+      void Promise.resolve()
+        .then(() => platform.updateChat(chatId, { unread: false }))
+        .catch(() => undefined);
+    };
+    mark();
+    return mark;
+  }, [platform, chatId]);
+}

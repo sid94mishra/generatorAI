@@ -70,7 +70,7 @@ The detail page presents execution history, iteration labels/variables, linked w
 
 ## Source evidence
 
-`apps/web/src/pages/CreateAutomationPage.tsx`, `apps/web/src/pages/AutomationDetailPage.tsx`, `apps/web/src/components/automation/TriggerAutomationModal.tsx`, `apps/web/src/components/automation/WebhookCredentialsDialog.tsx`, `packages/shared/src/types/Automation.ts`, `packages/shared/src/types/DataSchema.ts`, and `apps/server/src/routes/automations.ts`.
+`apps/web/src/features/automations/CreateAutomationPage.tsx`, `apps/web/src/features/automations/AutomationDetailPage.tsx`, `apps/web/src/features/automations/TriggerAutomationDialog.tsx`, `apps/web/src/features/automations/WebhookCredentialsDialog.tsx`, `packages/shared/src/types/Automation.ts`, `packages/shared/src/types/DataSchema.ts`, and `apps/server/src/routes/automations.ts`.
 
 ## Configuration and worked examples
 

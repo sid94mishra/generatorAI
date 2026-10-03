@@ -33,6 +33,8 @@ import type {
   ProjectCodebase,
   WorkspaceExposure,
   WorkspaceMount,
+  WorktreeInfo,
+  WorktreeRunType,
 } from '@generatorai/shared';
 import { ConflictError, NotFoundError, ValidationError } from '@generatorai/shared';
 import type { IGitClient } from '@generatorai/git';
@@ -40,6 +42,7 @@ import { shadowGitDirFor } from '@generatorai/changes';
 import type { IWorkspaceMountRepository } from '../domain/ports/IWorkspaceMountRepository.js';
 import type { IExecutionWorkspaceRepository } from '../domain/ports/IExecutionWorkspaceRepository.js';
 import type { IProjectCodebaseRepository } from '../domain/ports/IProjectCodebaseRepository.js';
+import type { IWorktreeRepository } from '../domain/ports/IWorktreeRepository.js';
 import type { EventBus } from '../events/EventBus.js';
 import { buildWorkspaceHint } from './chatSystemHints.js';
 
@@ -94,6 +97,28 @@ export interface MountServiceDeps {
   workspacesDir: string;
   codebaseRepo?: IProjectCodebaseRepository;
   eventBus?: EventBus;
+  /**
+   * The project `worktrees` table. Every worktree mount of a project codebase
+   * gets a row there (same id as the mount), so a codebase's worktree list,
+   * the project counts and the retention sweep see chat and run worktrees.
+   */
+  worktreeRepo?: IWorktreeRepository;
+}
+
+/**
+ * A map item workspace is owned by `<runId>~<instance>-<index>` (MapEffects);
+ * its worktrees belong to the run.
+ */
+export const MAP_ITEM_OWNER_SEP = '~';
+
+/** Who a workspace's worktrees belong to, as the `worktrees` table records it. */
+export function worktreeOwnerOf(workspace: Pick<ExecutionWorkspace, 'ownerType' | 'ownerId'>): {
+  runId: string;
+  runType: WorktreeRunType;
+} {
+  if (workspace.ownerType === 'chat') return { runId: workspace.ownerId, runType: 'manual' };
+  const sep = workspace.ownerId.indexOf(MAP_ITEM_OWNER_SEP);
+  return { runId: sep > 0 ? workspace.ownerId.slice(0, sep) : workspace.ownerId, runType: 'workflow' };
 }
 
 /** Default alias for a workspace that has no source at all. */
@@ -491,6 +516,7 @@ export class MountService {
         try {
           const git = await this.prepareMount(workspace, mount);
           await this.deps.mountRepo.update(mount.id, { status: 'ready', error: null, git });
+          await this.recordWorktree(workspace, mount, git);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           failures.push(`${mount.alias}: ${message}`);
@@ -615,6 +641,45 @@ export class MountService {
       ...(intent.newBranch ? { createdBranch: true } : {}),
       ...(nested.length ? { nested } : {}),
     };
+  }
+
+  /**
+   * Record a ready worktree mount of a project codebase in the `worktrees`
+   * table (row id = mount id). Idempotent; a failure is logged, never fatal —
+   * the mount itself is what the agent works in.
+   */
+  private async recordWorktree(workspace: ExecutionWorkspace, mount: WorkspaceMount, git: MountGitState): Promise<void> {
+    const repo = this.deps.worktreeRepo;
+    if (!repo || mount.mode !== 'worktree' || !mount.codebaseId || !mount.projectId) return;
+    try {
+      const existing = await repo.getById(mount.id).catch(() => null);
+      if (existing) {
+        if (existing.status !== 'active') await repo.updateStatus(mount.id, 'active');
+        return;
+      }
+      const row: WorktreeInfo = {
+        id: mount.id,
+        projectId: mount.projectId,
+        codebaseId: mount.codebaseId,
+        ...worktreeOwnerOf(workspace),
+        worktreePath: path.resolve(mount.path),
+        branchName: git.branch ?? '',
+        status: 'active',
+        createdAt: new Date(),
+      };
+      await repo.create(row);
+    } catch (err) {
+      this.deps.logger.warn(`[Mounts] Could not record worktree ${mount.alias} of workspace ${workspace.id}: ${err}`);
+    }
+  }
+
+  /** Drop the `worktrees` row of a mount whose directory is gone. */
+  private async forgetWorktree(mountId: string): Promise<void> {
+    try {
+      await this.deps.worktreeRepo?.delete(mountId);
+    } catch (err) {
+      this.deps.logger.warn(`[Mounts] Could not delete the worktree row of mount ${mountId}: ${err}`);
+    }
   }
 
   /**
@@ -948,6 +1013,7 @@ export class MountService {
           .catch(() => undefined);
       }
     }
+    if (mount.mode === 'worktree') await this.forgetWorktree(mountId);
     await this.deps.mountRepo.delete(mountId);
   }
 
@@ -970,19 +1036,49 @@ export class MountService {
     const mounts = await this.deps.mountRepo.findByWorkspace(workspaceId);
     let released = 0;
     for (const m of mounts) {
-      if (m.mode !== 'worktree' || m.status === 'removed' || !m.originPath) continue;
-      if (!(await pathExists(m.path))) continue;
-      try {
-        await this.deps.git.removeWorktree(m.originPath, m.path);
-        await this.deps.git.pruneWorktrees(m.originPath);
-        await rmWithRetry(m.path);
-        await this.deps.mountRepo.update(m.id, { status: 'removed' });
-        released++;
-      } catch (err) {
-        this.deps.logger.warn(`[Mounts] release failed for ${m.path}: ${err}`);
-      }
+      if (await this.releaseOne(m)) released++;
     }
     return released;
+  }
+
+  /**
+   * Release ONE worktree mount by id (the `worktrees` row of a mount shares
+   * its id): the directory goes, the branch and the mount row (`removed`)
+   * stay. Returns false when `mountId` is not a worktree mount, so a caller
+   * holding a plain `worktrees` row id falls back to its own removal.
+   */
+  async releaseWorktree(mountId: string): Promise<boolean> {
+    const mount = await this.deps.mountRepo.findById(mountId);
+    if (!mount || mount.mode !== 'worktree') return false;
+    if (mount.status !== 'removed') {
+      if (!(await pathExists(mount.path))) {
+        await this.deps.mountRepo.update(mount.id, { status: 'removed' });
+      } else if (!(await this.releaseOne(mount))) {
+        throw new Error(`The worktree directory ${mount.path} could not be removed`);
+      }
+    }
+    await this.forgetWorktree(mountId);
+    return true;
+  }
+
+  private async releaseOne(m: WorkspaceMount): Promise<boolean> {
+    if (m.mode !== 'worktree' || m.status === 'removed' || !m.originPath) return false;
+    if (!(await pathExists(m.path))) {
+      // Nothing on disk to reclaim, and nothing for a worktree list to show.
+      await this.forgetWorktree(m.id);
+      return false;
+    }
+    try {
+      await this.deps.git.removeWorktree(m.originPath, m.path);
+      await this.deps.git.pruneWorktrees(m.originPath);
+      await rmWithRetry(m.path);
+      await this.deps.mountRepo.update(m.id, { status: 'removed' });
+      await this.forgetWorktree(m.id);
+      return true;
+    } catch (err) {
+      this.deps.logger.warn(`[Mounts] release failed for ${m.path}: ${err}`);
+      return false;
+    }
   }
 
   /** Recompute `hasUncommittedChanges` for every git mount (after a turn). */

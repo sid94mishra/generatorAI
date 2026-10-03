@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import type {
   CheckpointDiffFile,
   CheckpointFilters,
+  CheckpointKind,
   CheckpointRecord,
   CheckpointRetentionPolicy,
   CreateCheckpointParams,
@@ -63,7 +64,7 @@ export class CheckpointService {
     // Nothing to capture, decided outside the per-repo lock (P07 WP-7.1,
     // F O-1): parallel stages that write nothing no longer queue behind each
     // other's `git add -A` + `write-tree`.
-    if ((params.skipIfUnchanged ?? true) && (await this.cleanAtPrevious(params.workspaceId, repoAlias, params.repoDir))) return null;
+    if ((params.skipIfUnchanged ?? true) && (await this.cleanAtPrevious(params.workspaceId, repoAlias, params.repoDir, params.kind))) return null;
     return this.withLock(key, () => this.createUnlocked(params, repoAlias));
   }
 
@@ -73,10 +74,10 @@ export class CheckpointService {
    * cannot tell (a shadow store, no previous snapshot, a git error): the
    * full capture then decides.
    */
-  private async cleanAtPrevious(workspaceId: string, repoAlias: string, repoDir: string): Promise<boolean> {
+  private async cleanAtPrevious(workspaceId: string, repoAlias: string, repoDir: string, kind: CheckpointKind): Promise<boolean> {
     if (this.store.shadowGitDir(repoDir)) return false;
     try {
-      const previous = await this.repository.findLatest(workspaceId, repoAlias);
+      const previous = await this.previousFor(workspaceId, repoAlias, kind);
       if (!previous) return false;
       const git = this.store.gitFor(repoDir);
       if (!(await git.isClean(repoDir))) return false;
@@ -84,6 +85,21 @@ export class CheckpointService {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * The snapshot a new one is compared with (skip-if-unchanged, stats,
+   * parent). A durable snapshot compares with the latest DURABLE one: the
+   * rolling `live` snapshots a turn's tool calls schedule usually already
+   * hold the turn's final tree, and comparing with them made the turn's
+   * `after` boundary look unchanged and get skipped — with a real provider
+   * (which reports tool calls) a turn never recorded its `after` (review-2).
+   * A `live` snapshot compares with the latest of any kind.
+   */
+  private async previousFor(workspaceId: string, repoAlias: string, kind: CheckpointKind): Promise<CheckpointRecord | null> {
+    if (kind === 'live') return this.repository.findLatest(workspaceId, repoAlias);
+    const [latestDurable] = await this.repository.list({ workspaceId, repoAlias, limit: 1 });
+    return latestDurable ?? null;
   }
 
   private async createUnlocked(
@@ -99,7 +115,7 @@ export class CheckpointService {
         return null;
       }
 
-      const previous = await this.repository.findLatest(workspaceId, repoAlias);
+      const previous = await this.previousFor(workspaceId, repoAlias, kind);
       const seq = (await this.repository.maxSeq(workspaceId, repoAlias)) + 1;
       const refName = checkpointRefName(workspaceId, repoAlias, seq);
       const message = `generatorai:${kind}${label ? ` ${label}` : ''}`;
