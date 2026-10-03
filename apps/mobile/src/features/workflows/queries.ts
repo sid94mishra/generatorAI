@@ -147,6 +147,48 @@ export function useCodebaseBranches(projectId: string | null, codebaseId: string
   return useQuery({ queryKey: [...queryKeys.projects(), projectId ?? '', 'codebases', codebaseId ?? '', 'branches'], queryFn: () => admin.projects.codebases.branches(projectId!, codebaseId!), enabled: Boolean(projectId && codebaseId), staleTime: 60_000 });
 }
 
+// ── The builder (M8-05) ───────────────────────────────────────────
+
+/** The record a 409 REVISION_CONFLICT carries (`error.current`: what the save lost to). */
+export function conflictRecord(error: unknown): WorkflowDefinitionRecord | null {
+  const e = error as { status?: number; body?: { error?: { current?: WorkflowDefinitionRecord } } } | null;
+  return e?.status === 409 ? (e.body?.error?.current ?? null) : null;
+}
+
+/** Save the whole graph against the revision it was edited from; publish; stateless validation. */
+export function useBuilderWrites(id: string) {
+  const admin = useAdminApi();
+  const client = useQueryClient();
+  const refresh = (record?: WorkflowDefinitionRecord): void => {
+    if (record) client.setQueryData(workflowKey(id), record);
+    void client.invalidateQueries({ queryKey: queryKeys.workflows() });
+    void client.invalidateQueries({ queryKey: versionsKey(id) });
+  };
+  return {
+    save: async (graph: WorkflowGraphInput, expectedRevision: number): Promise<WorkflowDefinitionRecord> => {
+      const record = await admin.definitions.saveGraph(id, graph, expectedRevision);
+      refresh(record);
+      return record;
+    },
+    publish: async (): Promise<WorkflowDefinitionRecord> => {
+      const record = await admin.definitions.publish(id);
+      refresh(record);
+      return record;
+    },
+    validate: (graph: unknown) => admin.definitions.validate(graph),
+    discard: () => admin.definitions.remove(id).finally(() => {
+      client.removeQueries({ queryKey: workflowKey(id) });
+      void client.invalidateQueries({ queryKey: queryKeys.workflows() });
+    }),
+  };
+}
+
+/** One version's graph (the history sheet's diff and restore). */
+export function useDefinitionVersion(id: string, versionId: string | null) {
+  const admin = useAdminApi();
+  return useQuery({ queryKey: [...versionsKey(id), versionId ?? ''], queryFn: () => admin.definitions.version(id, versionId!), enabled: Boolean(id && versionId), staleTime: Infinity });
+}
+
 // ── Runs (the run screens) ────────────────────────────────────────
 
 type RemoveResult = Awaited<ReturnType<AdminApi['definitions']['remove']>>;

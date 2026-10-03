@@ -31,6 +31,8 @@ export function parentHref(pathname: string): string | null {
     case 'workflows':
       if (!id || id === 'new') return '/workflows';
       if (sub === 'runs' && subId) return leaf ? `/workflows/${id}/runs/${subId}` : `/workflows/${id}`;
+      // The builder's sheets, stage editor and settings close onto the builder.
+      if (sub === 'edit' && subId) return `/workflows/${id}/edit`;
       return sub ? `/workflows/${id}` : '/workflows';
     case 'projects':
       if (!id || id === 'new') return '/projects';

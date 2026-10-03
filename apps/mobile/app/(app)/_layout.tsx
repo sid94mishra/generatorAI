@@ -13,7 +13,7 @@ import { fullScreenModalOptions, moduleRootOptions, paletteOptions, sheetOptions
 const MODULE_ROOTS = ['index', 'chats/index', 'projects/index', 'agents/index', 'workflows/index', 'automations/index', 'scripts/index', 'settings/index'];
 const SHEETS = ['chats/[id]/gate/[interactionId]', 'workflows/[id]/runs/[runId]/approval/[stageRunId]', 'scope-request'];
 /** Full-screen modal editors (MD-21). */
-const EDITORS = ['workflows/new', 'projects/new', 'projects/[id]/skills/[configId]/edit', 'agents/create', 'agents/[id]/edit', 'automations/new', 'automations/[id]/edit', 'settings/mcp/add'];
+const EDITORS = ['workflows/new', 'workflows/[id]/edit', 'projects/new', 'projects/[id]/skills/[configId]/edit', 'agents/create', 'agents/[id]/edit', 'automations/new', 'automations/[id]/edit', 'settings/mcp/add'];
 /** Route sheets at the large detent. */
 const LARGE_SHEETS = ['workflows/[id]/run', 'chats/[id]/turn', 'chats/new', 'workspaces/[workspaceId]/commit', 'projects/[id]/add-codebase', 'agents/new', 'agents/import', 'automations/[id]/executions/[executionId]', 'scripts/[id]/run', 'pickers/model'];
 

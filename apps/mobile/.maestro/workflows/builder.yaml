@@ -1,0 +1,40 @@
+appId: ${APP_ID}
+name: workflows · builder (reorder, add stage, validate, versions, cancel)
+# M8-05 (MBuilderList, MBuilderGraph, MWorkflowValidate, MWorkflowAgentDraft). Edits the sandbox's "Sandbox
+# Workflow" in the builder and cancels — nothing is saved. Needs admin:workflows.
+tags: [workflows]
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///workflows
+- extendedWaitUntil: {visible: "Sandbox Workflow", timeout: 20000}
+- tapOn: "Sandbox Workflow"
+- extendedWaitUntil: {visible: {id: workflow-more}, timeout: 15000}
+- tapOn: {id: workflow-more}
+- tapOn: "Edit in builder"
+- extendedWaitUntil: {visible: {id: builder-list}, timeout: 15000}
+- assertVisible: {id: builder-stage-plan}
+- assertVisible: {id: builder-stage-apply}
+- longPressOn: {id: builder-stage-plan}
+- tapOn: "Move down"
+- assertVisible: "● Unsaved changes"
+- tapOn: {id: builder-undo}
+- assertVisible: "Saved"
+- tapOn: {id: builder-stage-plan}
+- tapOn: {id: builder-add-stage}
+- extendedWaitUntil: {visible: {id: add-stage-sheet}, timeout: 5000}
+- tapOn: {id: add-stage-agent}
+- extendedWaitUntil: {visible: {id: builder-stage-stage_3}, timeout: 5000}
+- tapOn: {id: builder-validate}
+- extendedWaitUntil: {visible: {id: validate-sheet}, timeout: 5000}
+- extendedWaitUntil: {visible: {id: validation-recheck}, timeout: 15000}
+- swipe: {direction: DOWN}
+- tapOn: {id: builder-view}
+- tapOn: "Graph"
+- extendedWaitUntil: {visible: {id: graph-fit}, timeout: 5000}
+- tapOn: {id: graph-list}
+- tapOn: {id: builder-versions}
+- extendedWaitUntil: {visible: {id: versions-sheet}, timeout: 5000}
+- swipe: {direction: DOWN}
+- tapOn: "Cancel"
+- tapOn: "Discard"
+- extendedWaitUntil: {visible: {id: workflow-more}, timeout: 10000}

@@ -30,7 +30,7 @@ describe('deep links → the mobile route tree (04 §1.6, MD-145)', () => {
     ['generatorai://workflows/new', '/workflows/new'],
     ['generatorai://command/workflow.new', '/workflows/new'],
     ['generatorai://workflows/w1?run=1', '/workflows/w1?run=1'],
-    ['generatorai://workflows/w1/edit', '/workflows/w1'],
+    ['generatorai://workflows/w1/edit', '/workflows/w1/edit'],
     ['generatorai://workflows/w1/runs/r1?dock=terminal', '/workflows/w1/runs/r1?dock=terminal'],
     ['generatorai://workflows/w1/runs/r1/approval/s1', '/workflows/w1/runs/r1/approval/s1'],
     ['generatorai://automations', '/automations'],

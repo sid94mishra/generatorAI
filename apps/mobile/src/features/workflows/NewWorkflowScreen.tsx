@@ -10,7 +10,7 @@ import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { PERMISSION_MODES, REASONING_EFFORTS } from '@generatorai/workflow-spec';
 
-import { WORKFLOWS_HREF, workflowHref } from '../../blocks/shell/hrefs';
+import { WORKFLOWS_HREF, builderHref, workflowHref } from '../../blocks/shell/hrefs';
 import { useModelPickerCatalog } from '../../blocks/TurnSheet';
 import { FullScreenEditor } from '../../ui/layout/FullScreenEditor';
 import { ListRow } from '../../ui/layout/ListRow';
@@ -104,7 +104,9 @@ export default function NewWorkflowScreen(): React.ReactElement {
     (start === 'import' ? writes.importDocument(graph) : writes.create(graph))
       .then((record) => {
         haptic('success');
+        // The new workflow's page, with the builder over it (M8-05): closing the builder lands on the workflow.
         router.replace(workflowHref(record.id) as Href);
+        router.push(builderHref(record.id) as Href);
       })
       .catch((e: unknown) => {
         setCreating(false);

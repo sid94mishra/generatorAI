@@ -34,6 +34,8 @@ function Builder(): React.ReactElement {
           itemLabel={(s) => s.name}
           editing={editing}
           canMove={(from, to) => !stages[from]?.locked && !stages[to]?.locked}
+          header={<Text role="footnote" tone="fg-3" className="px-4 py-2">Header scrolls with the rows</Text>}
+          footer={<Text role="footnote" tone="fg-3" className="px-4 py-2">Footer: a settings row</Text>}
           onMove={(key, to) =>
             setStages((list) => {
               const from = list.findIndex((s) => s.id === key);

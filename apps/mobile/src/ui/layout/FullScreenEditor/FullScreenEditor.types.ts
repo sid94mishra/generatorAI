@@ -17,6 +17,8 @@ export interface FullScreenEditorProps {
   stepper?: ReactElement;
   /** A wizard's Back · Continue bar (ML-23), riding above the keyboard. */
   stickyBar?: ReactElement;
+  /** `fixed`: the body does not scroll — a list (ReorderList, a canvas) owns scrolling and its own gutters. */
+  body?: 'scroll' | 'fixed';
   /** Pass the screen's navigation so router removal is guarded too. */
   navigation?: RemovalSource;
   children: ReactNode;

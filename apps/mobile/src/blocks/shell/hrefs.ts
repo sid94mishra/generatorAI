@@ -40,7 +40,11 @@ export const approvalHref = (workflowId: string, runId: string, stageRunId: stri
 /** The builder (MBuilderList), a full-screen modal group. */
 export const builderHref = (workflowId: string): string => `${workflowHref(workflowId)}/edit`;
 export const stageEditorHref = (workflowId: string, stageKey: string, tab?: string): string => `${builderHref(workflowId)}/stages/${seg(stageKey)}${tab ? `?tab=${seg(tab)}` : ''}`;
-export const workflowVersionsHref = (workflowId: string): string => `${workflowHref(workflowId)}/versions`;
+export const workflowVersionsHref = (workflowId: string): string => `${builderHref(workflowId)}/versions`;
+export const builderValidateHref = (workflowId: string): string => `${builderHref(workflowId)}/validate`;
+export const addStageHref = (workflowId: string, after?: string | null): string => `${builderHref(workflowId)}/add-stage${after ? `?after=${seg(after)}` : ''}`;
+export const loopSettingsHref = (workflowId: string, stageKey: string): string => `${builderHref(workflowId)}/loop/${seg(stageKey)}`;
+export const workflowSettingsHref = (workflowId: string, tab?: string): string => `${builderHref(workflowId)}/settings${tab ? `?tab=${seg(tab)}` : ''}`;
 export const automationHref = (id: string): string => `/automations/${seg(id)}`;
 export const scriptHref = (id: string): string => `/scripts/${seg(id)}`;
 export const projectHref = (id: string): string => `/projects/${seg(id)}`;

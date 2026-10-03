@@ -63,9 +63,7 @@ function mapRoute(route: string | null): string | null {
       return SETTINGS_SECTIONS.has(id) ? `/settings/${id}` : '/settings';
     }
     case 'workflows':
-      // The builder lands in M8-05; until then an edit link opens the workflow. Runs, their stages and the stage
-      // approval sheet (MB-50) have routes (M8-03).
-      if (id && sub === 'edit') return `/workflows/${id}`;
+      // The builder (`/workflows/<id>/edit`, M8-05), runs, their stages and the stage approval sheet (MB-50) have routes.
       return route;
     case 'automations':
       // The webhook credentials are a section of the automation (MD-169); edit and executions have their routes.

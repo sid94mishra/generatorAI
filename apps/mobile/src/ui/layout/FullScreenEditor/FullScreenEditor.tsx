@@ -38,7 +38,7 @@ function Confirm({ label, onPress, disabled = false, loading = false }: NonNulla
   );
 }
 
-export function FullScreenEditor({ title, primary, cancelLabel = 'Cancel', onCancel, dirty, dirtyCount, stepper, stickyBar, navigation, children, testID }: FullScreenEditorProps): React.ReactElement {
+export function FullScreenEditor({ title, primary, cancelLabel = 'Cancel', onCancel, dirty, dirtyCount, stepper, stickyBar, body = 'scroll', navigation, children, testID }: FullScreenEditorProps): React.ReactElement {
   const insets = useInsets();
   const { guard } = useDirtyGuard(dirty, { onDiscard: onCancel, navigation });
   const cancel = (): void => void guard(onCancel);
@@ -71,9 +71,13 @@ export function FullScreenEditor({ title, primary, cancelLabel = 'Cancel', onCan
         {primary ? <Confirm {...primary} /> : null}
       </View>
       {stepper ? <View className="px-gutter pb-2">{stepper}</View> : null}
-      <KeyboardAwareScrollView className="flex-1" contentContainerClassName="gap-6 px-gutter pb-8 pt-2" keyboardShouldPersistTaps="handled" bottomOffset={16}>
-        {children}
-      </KeyboardAwareScrollView>
+      {body === 'fixed' ? (
+        <View className="flex-1 pt-2">{children}</View>
+      ) : (
+        <KeyboardAwareScrollView className="flex-1" contentContainerClassName="gap-6 px-gutter pb-8 pt-2" keyboardShouldPersistTaps="handled" bottomOffset={16}>
+          {children}
+        </KeyboardAwareScrollView>
+      )}
       {stickyBar ? (
         <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
           <View style={{ paddingBottom: insets.bottom }}>{stickyBar}</View>

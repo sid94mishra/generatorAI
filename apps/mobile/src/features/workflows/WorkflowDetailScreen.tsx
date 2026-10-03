@@ -15,7 +15,7 @@ import { toEpochMs } from '@generatorai/client-core';
 import { RunGraph } from '../../blocks/RunGraph';
 import { RunRow } from '../../blocks/RunRow';
 import { ScopeRequestCard } from '../../blocks/ScopeRequestCard';
-import { WORKFLOWS_HREF, automationHref, runSheetHref, workflowGraphHref, workflowHref, workflowRunsHref } from '../../blocks/shell/hrefs';
+import { WORKFLOWS_HREF, automationHref, builderHref, runSheetHref, workflowGraphHref, workflowHref, workflowRunsHref, workflowVersionsHref } from '../../blocks/shell/hrefs';
 import { useBreadcrumb, useHeaderBack } from '../../blocks/shell/useHeaderNav';
 import { formatDurationShort, formatRate } from '../../blocks/StatsCards';
 import { FEATURE_REQUIREMENTS, checkFeature } from '../../services/auth/featureGate';
@@ -39,7 +39,7 @@ import { definitionFacts, duplicateGraph, hooksLine, postProcessingLine, session
 import { useDefinitionVersions, useLinkedAutomations, useProjectsList, useWorkflow, useWorkflowRuns, useWorkflowStats, useWorkflowWrites } from './queries';
 
 type Href = Parameters<typeof router.push>[0];
-type MenuId = 'duplicate' | 'export' | 'delete';
+type MenuId = 'edit' | 'versions' | 'duplicate' | 'export' | 'delete';
 const RECENT_RUNS = 5;
 const dateOf = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
 
@@ -73,6 +73,12 @@ export default function WorkflowDetailScreen(): React.ReactElement {
   const act = (mid: MenuId): void => {
     if (!record || !graph) return;
     switch (mid) {
+      case 'edit':
+        router.push(builderHref(record.id) as Href);
+        return;
+      case 'versions':
+        router.push(workflowVersionsHref(record.id) as Href);
+        return;
       case 'duplicate':
         writes
           .create(duplicateGraph(graph))
@@ -107,6 +113,7 @@ export default function WorkflowDetailScreen(): React.ReactElement {
     }
   };
   const menu: MenuEntry[] = [
+    ...(canEdit ? [{ id: 'edit', label: 'Edit in builder', icon: 'edit' as const }, { id: 'versions', label: 'Version history', icon: 'history' as const }, { type: 'separator' as const }] : []),
     ...(canEdit ? [{ id: 'duplicate', label: 'Duplicate as draft', icon: 'copy' as const }] : []),
     { id: 'export', label: 'Export JSON', icon: 'download' },
     ...(canEdit ? [{ type: 'separator' as const }, { id: 'delete', label: 'Delete workflow', icon: 'trash' as const, destructive: true }] : []),
