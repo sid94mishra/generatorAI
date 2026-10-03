@@ -18,6 +18,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { awaitsUserDecision, type ScmResultBlock, type WidgetBlock } from '@generatorai/client-core';
 import { harnessProviderLabel } from '@generatorai/shared/ui-contract';
+import { useMarkChatRead } from '@/hooks/chatListQueries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useEditSourcesStore } from '@/stores/editSourcesStore.js';
 import { parseWidgetTabId } from '@/lib/widgetTabId.js';
@@ -81,6 +82,8 @@ export function ChatPage() {
   // whether it is open (collapsed, never unmounted, when closed).
   const [dockOpen, setDockOpen, toggleDock] = useDockOpen(CHAT_DOCK_KEYS.open, false);
   const view = useChatView({ chatId, dockOpen, setDockOpen, toggleDock });
+  // MG-02 / MD-112: the chat is read while it is open (D-83).
+  useMarkChatRead(chatId);
   const { chat, sessionId, workspace, stream, transcript, gates, stopRewind, dock } = view;
   const { isWorking } = stream;
   const { messages, promptHistory } = transcript;

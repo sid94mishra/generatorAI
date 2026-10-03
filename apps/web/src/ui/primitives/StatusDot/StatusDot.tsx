@@ -11,7 +11,8 @@ import type { ComponentProps } from 'react';
 import type { StatusState } from '@generatorai/shared';
 import { cn } from '../../lib/cn.js';
 
-export type DotTone = 'neutral' | 'muted' | 'run' | 'ok' | 'warn' | 'err';
+/** `accent` marks something new rather than a status (an unread chat). */
+export type DotTone = 'neutral' | 'muted' | 'run' | 'ok' | 'warn' | 'err' | 'accent';
 
 const TONE_BG: Record<DotTone, string> = {
   neutral: 'bg-fg-2',
@@ -20,6 +21,7 @@ const TONE_BG: Record<DotTone, string> = {
   ok: 'bg-ok',
   warn: 'bg-warn',
   err: 'bg-err',
+  accent: 'bg-accent',
 };
 
 /** Dot colour per state (02 §7.1 last column). */
