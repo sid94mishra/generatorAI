@@ -132,6 +132,8 @@ export const TRANSCRIPT_COPY = {
   openInTerminal: 'Open this command in the terminal view',
   openScreenshot: (label: string): string => `Open screenshot ${label}`,
   steps: (n: number): string => `${n} step${n === 1 ? '' : 's'}`,
+  /** Summary mode's line under a live turn: "Working · 7 steps". */
+  workingSteps: (n: number): string => (n > 0 ? `Working · ${n} step${n === 1 ? '' : 's'}` : 'Working'),
   inBackground: 'in background',
   viewMode: 'Transcript view',
   viewModes: { normal: 'Normal', verbose: 'Verbose', summary: 'Summary' },

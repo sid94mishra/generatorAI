@@ -168,6 +168,13 @@ function countSteps(steps: readonly TimelineStep[], acc: { steps: number; failed
   }
 }
 
+/** Tool-call and worker steps in a timeline (nested ones included), as the digest counts them. */
+export function countTimelineSteps(steps: readonly TimelineStep[]): { steps: number; failed: number } {
+  const acc = { steps: 0, failed: 0 };
+  countSteps(steps, acc);
+  return acc;
+}
+
 /** Digest of one response's blocks (Summary mode; the collapsed-turn header). */
 export function digestBlocks(blocks: readonly StreamBlock[] | undefined, durationMs?: number): TurnDigest {
   const list = blocks ? [...blocks] : [];

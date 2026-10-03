@@ -70,7 +70,10 @@ function AgentResponse({
   avatar,
   defaultCollapsed,
   renderActions,
+  startedAt,
 }: {
+  /** When the turn's user message was sent: the digest's duration runs from it to this response. */
+  startedAt?: ChatMessage['timestamp'] | undefined;
   message: ChatMessage;
   agentName: string;
   avatar: 'initials' | 'bot';
@@ -90,7 +93,11 @@ function AgentResponse({
   const partial = message.metadata?.partial === true;
   const folded = collapsed && !summary;
   // The digest walks the blocks again; only a folded or summarised response shows it.
-  const digest = useMemo(() => (folded || summary ? digestBlocks(blocks) : null), [folded, summary, blocks]);
+  const durationMs = turnDurationMs(startedAt, message.timestamp);
+  const digest = useMemo(
+    () => (folded || summary ? digestBlocks(blocks, durationMs) : null),
+    [folded, summary, blocks, durationMs],
+  );
   const digestLine = digest ? formatDigest(digest, formatStepDuration) : undefined;
 
   return (
@@ -146,7 +153,17 @@ function SystemNote({ text }: { text: string }) {
 /** The server prompts an orchestrator itself ("[system] Every background agent…"); that is not the user talking. */
 const SYSTEM_PROMPT_PREFIX = '[system] ';
 
-function renderEntry(entry: TranscriptEntry, props: TranscriptTurnProps): ReactNode {
+/** Wall-clock time from the user's message to the response, when both times are known. */
+function turnDurationMs(
+  startedAt: ChatMessage['timestamp'] | undefined,
+  endedAt: ChatMessage['timestamp'] | undefined,
+): number | undefined {
+  if (startedAt == null || endedAt == null) return undefined;
+  const ms = new Date(endedAt).getTime() - new Date(startedAt).getTime();
+  return Number.isFinite(ms) && ms > 0 ? ms : undefined;
+}
+
+function renderEntry(entry: TranscriptEntry, props: TranscriptTurnProps, startedAt?: ChatMessage['timestamp']): ReactNode {
   switch (entry.kind) {
     case 'user':
       if (entry.message.content.startsWith(SYSTEM_PROMPT_PREFIX)) {
@@ -173,6 +190,7 @@ function renderEntry(entry: TranscriptEntry, props: TranscriptTurnProps): ReactN
           avatar={props.avatar ?? 'initials'}
           defaultCollapsed={props.defaultCollapsed ?? false}
           renderActions={props.renderResponseActions}
+          startedAt={startedAt}
         />
       );
     case 'system':
@@ -182,10 +200,16 @@ function renderEntry(entry: TranscriptEntry, props: TranscriptTurnProps): ReactN
   }
 }
 
+/** The turn's user message time — where its responses' durations start. */
+function turnStart(entries: readonly TranscriptEntry[]): ChatMessage['timestamp'] | undefined {
+  for (const entry of entries) if (entry.kind === 'user') return entry.message.timestamp;
+  return undefined;
+}
+
 function TranscriptTurnImpl(props: TranscriptTurnProps) {
   return (
     <section className={cn('flex min-w-0 flex-col gap-4')} data-gai-turn={props.turn.key} aria-label="Turn">
-      {props.turn.entries.map((entry) => renderEntry(entry, props))}
+      {props.turn.entries.map((entry) => renderEntry(entry, props, turnStart(props.turn.entries)))}
     </section>
   );
 }

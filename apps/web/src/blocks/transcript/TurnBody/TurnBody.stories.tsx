@@ -104,3 +104,68 @@ export const Streaming: Story = {
     answerStreaming: true,
   },
 };
+
+const actionsFor = (viewMode: 'verbose' | 'summary') => ({
+  onOpenChanges: fn(),
+  onOpenShell: fn(),
+  onOpenPlan: fn(),
+  onApprovePlan: fn(),
+  onRequestPlanChanges: fn(),
+  onAnswerQuestion: fn(),
+  onAnswerPermission: fn(),
+  viewMode,
+});
+
+/** Verbose (G-06): every step ungrouped and open, its input and output shown. */
+export const Verbose: Story = {
+  args: { segments: deriveSegments(BLOCKS.slice(0, 7), { active: false }) },
+  decorators: [(Story) => <TranscriptProvider value={actionsFor('verbose')}>{Story()}</TranscriptProvider>],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // The Read, Grep, Bash, navigate and Edit steps are all open — none folded into a group.
+    await expect(canvas.queryByTestId('step-group')).toBeNull();
+    const toggles = canvasElement.querySelectorAll('[data-testid="step-row"] [aria-expanded]');
+    for (const toggle of toggles) await expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    // Read, Grep, Bash, navigate and Edit: five open panels.
+    await expect(canvas.getAllByTestId('step-detail-panel')).toHaveLength(5);
+  },
+};
+
+/** Summary (G-06) while a gate waits: the gate stays, then the latest answer — no step rows. */
+export const SummaryLive: Story = {
+  args: {
+    segments: deriveSegments(
+      [...BLOCKS.slice(0, 9), { type: 'text', blockId: 21, content: 'While the build runs: v12 renames the pack' }],
+      { active: true },
+    ),
+    active: true,
+    answerStreaming: true,
+  },
+  decorators: [(Story) => <TranscriptProvider value={actionsFor('summary')}>{Story()}</TranscriptProvider>],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvasElement.querySelector('[data-gai-block="steps"]')).toBeNull();
+    await expect(canvas.getByText('Risky')).toBeInTheDocument();
+    await expect(canvas.getByText(/While the build runs/)).toBeInTheDocument();
+    await expect(canvas.queryByText(/The race is between/)).toBeNull();
+  },
+};
+
+/** Summary (G-06) while streaming: the latest answer and "Working · N steps" in place of the step rows. */
+export const SummaryWorking: Story = {
+  args: {
+    segments: deriveSegments(
+      [...BLOCKS.slice(0, 7), { type: 'text', blockId: 21, content: 'While the build runs: v12 renames the pack' }],
+      { active: true },
+    ),
+    active: true,
+    answerStreaming: true,
+  },
+  decorators: [(Story) => <TranscriptProvider value={actionsFor('summary')}>{Story()}</TranscriptProvider>],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvasElement.querySelector('[data-gai-block="steps"]')).toBeNull();
+    await expect(canvas.getByText('Working · 5 steps')).toBeInTheDocument();
+    await expect(canvas.getByText(/While the build runs/)).toBeInTheDocument();
+  },
+};

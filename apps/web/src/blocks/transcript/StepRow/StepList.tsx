@@ -14,7 +14,7 @@
 // streamed token (which only grows the answer) re-renders none of this.
 // ────────────────────────────────────────────────────────────────
 
-import { memo, useMemo, useState, type ReactNode } from 'react';
+import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
 import { Link as RouterLink } from 'react-router';
 import {
   formatStepDuration,
@@ -282,6 +282,18 @@ function sameSteps(a: readonly TimelineStep[], b: readonly TimelineStep[]): bool
 
 function StepListImpl({ steps, mode = 'normal', live = false, label = 'Steps', className }: StepListProps) {
   const actions = useTranscriptActions();
+  // Verbose (G-06) opens every step — including ones that arrive while the turn
+  // streams and every step already on screen when the mode is switched — so the
+  // rails are controlled: open unless the reader closed that one.
+  const [closed, setClosed] = useState<ReadonlySet<string>>(() => new Set());
+  const onVerboseToggle = useCallback((id: string, open: boolean) => {
+    setClosed((prev) => {
+      const next = new Set(prev);
+      if (open) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
   const entries = useMemo<Entry[]>(() => {
     if (mode === 'verbose') return steps.map((step) => ({ type: 'step' as const, step }));
     return foldDelegations(groupSteps(steps));
@@ -296,10 +308,16 @@ function StepListImpl({ steps, mode = 'normal', live = false, label = 'Steps', c
     items = [];
     blocks.push(
       <StepRail
-        key={key}
+        // Keyed by mode: a rail's own (Normal) open rows do not leak into the other mode.
+        key={`${key}-${mode}`}
         label={label}
         items={run}
-        {...(mode === 'verbose' ? { defaultExpandedIds: run.filter((i) => i.expandable).map((i) => i.id) } : {})}
+        {...(mode === 'verbose'
+          ? {
+              expandedIds: run.filter((i) => i.expandable && !closed.has(i.id)).map((i) => i.id),
+              onExpandedChange: onVerboseToggle,
+            }
+          : {})}
       />,
     );
   };

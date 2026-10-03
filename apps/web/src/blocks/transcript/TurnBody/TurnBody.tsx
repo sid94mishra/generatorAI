@@ -9,8 +9,8 @@
 // throughs, gate handlers and host slots through the transcript context.
 // ────────────────────────────────────────────────────────────────
 
-import { memo } from 'react';
-import type { StreamSegment, TimelineStep, UsageInfo } from '@generatorai/client-core';
+import { memo, useMemo } from 'react';
+import { countTimelineSteps, type StreamSegment, type TimelineStep, type UsageInfo } from '@generatorai/client-core';
 import { TRANSCRIPT_COPY } from '@generatorai/shared/ui-contract';
 import { cn } from '@/ui/lib/cn.js';
 import { Skeleton } from '@/ui/primitives/Skeleton/Skeleton.js';
@@ -57,6 +57,25 @@ function fromSplit(steps: readonly TimelineStep[] | undefined, answer: string | 
   return out;
 }
 
+/** What Summary mode keeps of a turn: gates still waiting on the person, then the latest answer. */
+function summarySegments(list: readonly StreamSegment[]): StreamSegment[] {
+  let last: StreamSegment | undefined;
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    if (list[i]!.type === 'answer') {
+      last = list[i];
+      break;
+    }
+  }
+  const out = list.filter(
+    (s) =>
+      (s.type === 'plan' && s.plan.status === 'awaiting_review') ||
+      (s.type === 'question' && s.question.status === 'pending') ||
+      (s.type === 'permission' && s.permission.status === 'pending'),
+  );
+  if (last) out.push(last);
+  return out;
+}
+
 function TurnBodyImpl({
   segments,
   steps,
@@ -73,8 +92,17 @@ function TurnBodyImpl({
 }: TurnBodyProps) {
   const ctx = useTranscriptActions();
   const mode = ctx.viewMode === 'verbose' ? 'verbose' : 'normal';
-  const list = segments && segments.length > 0 ? segments : fromSplit(steps, answer);
+  const summary = ctx.viewMode === 'summary';
+  const all = segments && segments.length > 0 ? segments : fromSplit(steps, answer);
   const streaming = answerStreaming ?? active;
+  // Summary (G-06) condenses a live turn as it does a settled one: the latest
+  // answer and one "Working · N steps" line — but a gate waiting on the person
+  // is never hidden.
+  const stepCount = useMemo(
+    () => (summary ? countTimelineSteps(all.flatMap((s) => (s.type === 'steps' ? s.steps : []))).steps : 0),
+    [summary, all],
+  );
+  const list = useMemo(() => (summary ? summarySegments(all) : all), [summary, all]);
 
   let lastAnswer = -1;
   for (let i = list.length - 1; i >= 0; i -= 1) {
@@ -172,8 +200,9 @@ function TurnBodyImpl({
       ) : null}
 
       {active && !awaitingUser ? (
-        <div role="status" aria-label={TRANSCRIPT_COPY.generating} className="flex h-step items-center pl-0.5">
+        <div role="status" aria-label={TRANSCRIPT_COPY.generating} className="flex h-step items-center gap-2 pl-0.5">
           <Spinner size={14} className="text-fg-3" />
+          {summary ? <span className="text-small text-fg-3">{TRANSCRIPT_COPY.workingSteps(stepCount)}</span> : null}
         </div>
       ) : null}
 
