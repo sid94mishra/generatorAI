@@ -51,6 +51,15 @@ describe('last route — expiry', () => {
       '/scope-request?scope=exec%3Aterminal',
       '/chats/abc/gate/int-1',
       '/chats/abc/plan/plan-1',
+      // Every presented route of the stack: a Turn sheet left open used to come back on every cold start.
+      '/chats/abc/turn',
+      '/pickers/model',
+      '/workflows/w1/run',
+      '/workflows/w1/runs/r1/approval/s1',
+      '/workflows/new',
+      '/agents/a1/edit',
+      '/workspaces/ws1/commit',
+      '/settings/mcp/add',
     ]) {
       expect(isSheetRoute(route), route).toBe(true);
       expect(isRestorableRoute(route), route).toBe(false);

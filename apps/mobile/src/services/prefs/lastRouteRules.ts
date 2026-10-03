@@ -5,6 +5,8 @@
 // imports expo-router and MMKV, neither of which loads outside a device.
 // ────────────────────────────────────────────────────────────────
 
+import { isPresentedRoute } from '../navigation/presentedRoutes';
+
 /** Restore only if the app was killed less than this long ago. */
 export const LAST_ROUTE_TTL_MS = 30 * 60 * 1000;
 
@@ -18,17 +20,16 @@ export const LAST_ROUTE_TTL_MS = 30 * 60 * 1000;
 const NON_RESTORABLE = new Set(['', '/', '/pair', '/paired', '/revoked', '/index']);
 
 /**
- * Route-addressable sheets and modals (`/scope-request`, `/servers`, the `/search` palette, a chat's gate or
- * plan sheet). Restoring one on a cold start presents a modal with nothing
- * underneath it, and a gate or plan restored half an hour later has usually
- * already been answered — so the user lands on a stale decision.
+ * Route-addressable sheets, palettes and full-screen editors (every presented route of the (app) stack, plus a
+ * chat's plan sheet). Restoring one on a cold start presents a modal with nothing underneath it — a Turn sheet left
+ * open kept every relaunch on it — and a gate, plan or editor restored half an hour later is stale.
  */
 export function isSheetRoute(pathname: string): boolean {
   const path = pathname.split('?')[0] ?? '';
   for (const root of ['/scope-request', '/servers', '/search', '/chats/new']) {
     if (path === root || path.startsWith(`${root}/`)) return true;
   }
-  return /^\/chats\/[^/]+\/(gate|plan)\/[^/]+\/?$/.test(path);
+  return isPresentedRoute(path) || /^\/chats\/[^/]+\/plan\/[^/]+\/?$/.test(path);
 }
 
 export function isRestorableRoute(pathname: string | null | undefined): pathname is string {
