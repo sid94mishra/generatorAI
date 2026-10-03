@@ -157,6 +157,23 @@ describe('persisted history — the spawn tool call alone', () => {
     expect(steps[0]?.children?.[0]?.target).toBe('React 19 notes written');
   });
 
+  it('treats MCP-namespaced spawn and check calls as the same tools', () => {
+    const steps = deriveTimeline(
+      [
+        tool('mcp__generatorai-tools__spawn_background_agent', 'call-1', {
+          args: { taskName: 'research-react' },
+          result: { ok: true, taskId: 'chat-w1', taskName: 'research-react' },
+        }),
+        tool('mcp__generatorai-tools__check_background_agents', 'call-2', {
+          result: { count: 1, digests: [{ taskId: 'chat-w1', status: 'completed', summary: 'notes written' }] },
+        }),
+      ],
+      { active: false },
+    );
+    expect(steps[0]).toMatchObject({ kind: 'delegate', verb: 'Delegated', target: 'research-react', workerChatId: 'chat-w1' });
+    expect(steps[0]?.children?.[0]?.target).toBe('notes written');
+  });
+
   it('reads digests out of a single-worker check too, and out of a JSON string result', () => {
     const map = backgroundDigests([
       tool('check_background_agent', 'c', {

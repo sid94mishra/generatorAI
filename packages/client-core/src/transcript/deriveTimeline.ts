@@ -16,7 +16,14 @@
 //  - text blocks are the "answer" and do NOT become steps
 // ────────────────────────────────────────────────────────────────
 
-import { SPAWN_WORKER_TOOL, humanizeToolName, isShellTool, toolStepKind, toolStepVerb } from '@generatorai/shared/ui-contract';
+import {
+  humanizeToolName,
+  isCheckWorkersTool,
+  isShellTool,
+  isSpawnWorkerTool,
+  toolStepKind,
+  toolStepVerb,
+} from '@generatorai/shared/ui-contract';
 import type { StreamBlock } from '../stream/types.js';
 import type { TimelineStep, StepStatus } from './types.js';
 import { resolveInlineHunks } from './inlineHunks.js';
@@ -266,11 +273,8 @@ function subagentTarget(messages: string[]): string {
 // (`taskId` / `taskName`). That is enough to rebuild a settled worker row from
 // history alone, which is why no extra persistence was needed for §3.
 
-/** The orchestrator tool that creates a worker. */
-const SPAWN_TOOL = SPAWN_WORKER_TOOL;
-
-/** The orchestrator tools whose results carry worker digests. */
-const CHECK_TOOLS = new Set(['check_background_agents', 'check_background_agent']);
+// The spawn and check tools are matched bare or MCP-namespaced (`isSpawnWorkerTool`,
+// `isCheckWorkersTool`): the Claude provider calls them through an MCP server.
 
 /** `{ taskId, taskName }` a spawn tool call reported, from its result or args. */
 export function spawnWorkerRef(
@@ -300,7 +304,7 @@ export function backgroundDigests(blocks: StreamBlock[]): Map<string, string> {
     if (typeof d['taskName'] === 'string') out.set(d['taskName'], summary);
   };
   for (const b of blocks) {
-    if (b.type !== 'tool_call' || !CHECK_TOOLS.has(b.tool)) continue;
+    if (b.type !== 'tool_call' || !isCheckWorkersTool(b.tool)) continue;
     const res = resultObject(b.result);
     if (!res) continue;
     // `check_background_agents` answers `{ count, digests: [...] }`;
@@ -437,7 +441,7 @@ export function deriveTimeline(
         // A spawn call IS a worker: name it one, link to its chat, and show
         // the digest it eventually produced. This is what makes a replayed
         // orchestrator turn render worker rows with no extra persistence.
-        const worker = b.tool === SPAWN_TOOL ? spawnWorkerRef(b) : undefined;
+        const worker = isSpawnWorkerTool(b.tool) ? spawnWorkerRef(b) : undefined;
         const workerSummary = worker
           ? digests.get(worker.taskId ?? '') ?? digests.get(worker.taskName ?? '')
           : undefined;

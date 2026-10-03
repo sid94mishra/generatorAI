@@ -22,6 +22,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ScmFlowResult, TransportCapabilitySet } from '@generatorai/shared';
+import { isSpawnWorkerTool } from '@generatorai/shared/ui-contract';
 import type { WorkflowRunCardEvent } from './workflowRuns.js';
 
 import type {
@@ -389,9 +390,6 @@ export interface StreamEventRouterOptions {
 /** How many spawn tool calls one stream key remembers for worker nesting. */
 const SPAWN_CALL_MEMORY = 64;
 
-/** The orchestrator tool whose call a background worker nests under. */
-const SPAWN_TOOL = 'spawn_background_agent';
-
 /** Minimum gap between two sub-agent progress notes on one stream key. */
 const SUBAGENT_PROGRESS_THROTTLE_MS = 1500;
 
@@ -758,7 +756,7 @@ export class StreamEventRouter {
         const tool = str(data['tool'], 'tool');
         const callId = optStr(data['callId']);
         // The spawn call is the anchor a background worker's step nests under.
-        if (tool === SPAWN_TOOL && callId) {
+        if (isSpawnWorkerTool(tool) && callId) {
           this.rememberSpawnCall(key, spawnTaskNameOf(data['args']), callId);
         }
         out.push({
@@ -778,7 +776,7 @@ export class StreamEventRouter {
         this.flushKey(key, out);
         if (internal) break;
         const id = optStr(data['callId']) ?? optStr(data['tool']);
-        if (str(data['tool']) === SPAWN_TOOL && optStr(data['callId'])) {
+        if (isSpawnWorkerTool(str(data['tool'])) && optStr(data['callId'])) {
           // The result names the worker chat; index the call by that id too so
           // later progress events nest even if their taskName drifted.
           const result = data['result'];

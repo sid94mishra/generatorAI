@@ -115,6 +115,21 @@ export function humanizeToolName(tool: string): string {
   return tool;
 }
 
+/**
+ * The orchestrator's spawn tool, bare or MCP-namespaced: the Claude provider
+ * reaches the platform tools through an MCP server, so its calls arrive as
+ * `mcp__generatorai-tools__spawn_background_agent`.
+ */
+export function isSpawnWorkerTool(tool: string): boolean {
+  return humanizeToolName(tool) === SPAWN_WORKER_TOOL;
+}
+
+/** The orchestrator tools whose results carry worker digests (bare or MCP-namespaced). */
+export function isCheckWorkersTool(tool: string): boolean {
+  const name = humanizeToolName(tool);
+  return name === 'check_background_agents' || name === 'check_background_agent';
+}
+
 /** The harness's built-in shell tools — their output is a real command console. */
 export function isShellTool(tool: string): boolean {
   return /^(bash|powershell|shell)$/i.test(tool);

@@ -91,6 +91,29 @@ describe('chat.background_task.* → background_task blocks', () => {
     expect(tasksOf(streams)[0]?.parentCallId).toBe('call-9');
   });
 
+  it('nests under an MCP-namespaced spawn call (the Claude provider calls the platform tools over MCP)', () => {
+    const router = new StreamEventRouter();
+    const tool = 'mcp__generatorai-tools__spawn_background_agent';
+    let streams = applyStreamEffects({}, route(router, 'harness.tool_start', {
+      tool,
+      args: { taskName: 'docs', objective: 'write docs' },
+      callId: 'toolu_1',
+    }));
+    streams = applyStreamEffects(streams, route(router, 'chat.background_task.spawned', { taskId: 'chat-d', taskName: 'docs' }));
+    expect(tasksOf(streams)[0]?.parentCallId).toBe('toolu_1');
+    // Learned from the result too, by taskId.
+    streams = applyStreamEffects(streams, route(router, 'harness.tool_complete', {
+      tool,
+      callId: 'toolu_1',
+      result: { ok: true, taskId: 'chat-d', taskName: 'docs-renamed' },
+      success: true,
+    }));
+    streams = applyStreamEffects(streams, route(router, 'chat.background_task.progress', {
+      taskId: 'chat-d', taskName: 'docs-renamed', status: 'running',
+    }));
+    expect(tasksOf(streams)[0]?.parentCallId).toBe('toolu_1');
+  });
+
   it('falls back to a top-level step when the spawn call is outside the window', () => {
     const router = new StreamEventRouter();
     const streams = applyStreamEffects({}, route(router, 'chat.background_task.spawned', {
