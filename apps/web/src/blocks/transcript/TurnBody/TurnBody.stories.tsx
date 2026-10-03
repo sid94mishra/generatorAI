@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { MemoryRouter } from 'react-router';
-import { fn } from 'storybook/test';
+import { expect, fn, within } from 'storybook/test';
 import { deriveSegments, type StreamBlock } from '@generatorai/client-core';
 import { TranscriptProvider } from '../transcriptContext.js';
 import { TurnBody } from './TurnBody.js';
@@ -41,6 +41,8 @@ const BLOCKS: StreamBlock[] = [
     inputSummary: 'git push -u origin fix/checkout-flake',
     permissionMode: 'default',
     status: 'pending',
+    // MG-04: a push is risky — the card carries the neutral "Risky" badge.
+    risk: 'risky',
   },
   {
     type: 'question',
@@ -83,7 +85,13 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 /** Settled: thinking, prose with code, grouped steps, a failed call with its error, a diff, a warning and the three gates. */
-export const EveryBlockKind: Story = { args: { segments: deriveSegments(BLOCKS, { active: false }) } };
+export const EveryBlockKind: Story = {
+  args: { segments: deriveSegments(BLOCKS, { active: false }) },
+  play: async ({ canvasElement }) => {
+    // The risky permission gate shows the server's verdict; answering stays a click.
+    await expect(within(canvasElement).getByText('Risky')).toBeInTheDocument();
+  },
+};
 
 /** Streaming: live steps, the caret on the last answer. */
 export const Streaming: Story = {
