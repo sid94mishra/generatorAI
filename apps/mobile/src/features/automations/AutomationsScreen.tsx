@@ -18,6 +18,7 @@ import { LargeTitle } from '../../ui/layout/LargeTitle';
 import { NewAction } from '../../ui/layout/NewAction';
 import { Screen } from '../../ui/layout/Screen';
 import { errorText, formatRelativeShort } from '../../ui/lib/format';
+import { projectLabelRole } from '../../ui/lib/projectLabel';
 import { LegendList } from '../../ui/lib/styled';
 import type { MenuEntry } from '../../ui/native/Menu/Menu.types';
 import { Header } from '../../ui/native/router/Header';
@@ -50,10 +51,12 @@ function AutomationRow({ a, projectName, workflowNames, canEdit, canRun }: { a: 
       title={a.name}
       leading={{ icon: TRIGGER_ICON[a.triggerType] }}
       meta={[
-        projectName,
+        <Text key="p" role={projectLabelRole(projectName)} tone="fg-3" numberOfLines={1} className="shrink">
+          {projectName}
+        </Text>,
         ...(a.enabled ? [] : [<Badge key="d" label="Disabled" size="sm" />]),
       ]}
-      metaLabel={a.enabled ? '' : 'disabled'}
+      metaLabel={a.enabled ? projectName : `${projectName}, disabled`}
       description={[triggerLine(a), workflowNames].filter(Boolean).join(' · ')}
       footer={
         <>

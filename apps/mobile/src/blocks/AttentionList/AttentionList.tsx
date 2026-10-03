@@ -15,6 +15,8 @@ import { DrawerLiveRow, DrawerSection } from '../../ui/layout/Drawer';
 import { EntityRow } from '../../ui/layout/EntityRow';
 import { ListSection } from '../../ui/layout/ListSection';
 import { formatElapsed } from '../../ui/lib/format';
+import { projectLabelRole } from '../../ui/lib/projectLabel';
+import { Text } from '../../ui/primitives/Text';
 import { NEEDS_YOU_HREF } from '../shell/hrefs';
 import { askHint, attentionLabel, sectionRows } from './attentionModel';
 
@@ -68,7 +70,17 @@ export function AttentionList({ variant, onNavigate, active = true }: AttentionL
             key={item.key}
             title={item.title}
             leading={{ status: 'needs_you' }}
-            meta={[item.ask?.summary ?? askHint(item) ?? '', ...(item.project ? [item.project.name] : [])].filter(Boolean)}
+            meta={[
+              ...[item.ask?.summary ?? askHint(item) ?? ''].filter(Boolean),
+              ...(item.project
+                ? [
+                    <Text key="p" role={projectLabelRole(item.project.name)} tone="fg-3" numberOfLines={1} className="shrink">
+                      {item.project.name}
+                    </Text>,
+                  ]
+                : []),
+            ]}
+            metaLabel={item.project?.name ?? ''}
             time={item.since}
             onPress={() => open(item)}
             testID={`needs-you-${item.key}`}

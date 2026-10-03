@@ -26,6 +26,7 @@ import { Screen } from '../../ui/layout/Screen';
 import { SectionHeader } from '../../ui/layout/SectionHeader';
 import { StatStrip } from '../../ui/layout/StatStrip';
 import { formatCount, formatElapsed } from '../../ui/lib/format';
+import { projectLabelRole } from '../../ui/lib/projectLabel';
 import { Header } from '../../ui/native/router/Header';
 import { Button } from '../../ui/primitives/Button';
 import { EmptyState } from '../../ui/primitives/EmptyState';
@@ -115,7 +116,7 @@ function RunningRow({ item, now, position }: { item: AttentionItem; now: number;
       meta={[
         ...(meta.project
           ? [
-              <Text key="p" role="monoSm" tone="fg-3" numberOfLines={1}>
+              <Text key="p" role={projectLabelRole(meta.project)} tone="fg-3" numberOfLines={1} className="shrink">
                 {meta.project}
               </Text>,
             ]
@@ -144,7 +145,7 @@ function RecentRow({ item, position, onOpen }: { item: RecentActivityItem; posit
       meta={[
         ...(view.project
           ? [
-              <Text key="p" role="monoSm" tone="fg-3" numberOfLines={1}>
+              <Text key="p" role={projectLabelRole(view.project)} tone="fg-3" numberOfLines={1} className="shrink">
                 {view.project}
               </Text>,
             ]
@@ -155,7 +156,7 @@ function RecentRow({ item, position, onOpen }: { item: RecentActivityItem; posit
       ]}
       metaLabel={[view.project, view.outcome].filter(Boolean).join(', ')}
       trailing={
-        <Text role="monoSm" tone="fg-3" tabular>
+        <Text role="footnote" tone="fg-3" tabular>
           {finishTime(view.endedAt)}
         </Text>
       }

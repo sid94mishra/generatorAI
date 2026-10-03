@@ -18,6 +18,7 @@ import { useStreamHealth } from '../../services/stream/streamHealth';
 import { useTheme } from '../../theme/ThemeProvider';
 import { ListSection } from '../../ui/layout/ListSection';
 import { SearchHeader } from '../../ui/layout/SearchHeader';
+import { projectLabelRole } from '../../ui/lib/projectLabel';
 import { useWindowInsets } from '../../ui/platform/insets';
 import { EmptyState } from '../../ui/primitives/EmptyState';
 import { ErrorState } from '../../ui/primitives/ErrorState';
@@ -82,7 +83,7 @@ function PaletteRowView({ row, query, selected, onPress }: { row: PaletteRow; qu
           <Highlighted text={row.title} query={query} />
         </Text>
         {row.subtitle ? (
-          <Text role="monoSm" tone="fg-3" numberOfLines={1}>
+          <Text role={projectLabelRole(row.subtitle)} tone="fg-3" numberOfLines={1}>
             {row.subtitle}
           </Text>
         ) : null}
