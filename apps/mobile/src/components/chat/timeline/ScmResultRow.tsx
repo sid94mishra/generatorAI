@@ -30,7 +30,7 @@ import { Button } from '../../ui/Button';
 import { useToast } from '../../ui/Toast';
 import { useTheme } from '../../../theme/ThemeProvider';
 import { scmKeys } from '@generatorai/client-core';
-import { useScmApi } from '../../scm/useScmApi';
+import { useApi } from '../../../services/api/useApi';
 import {
   blockedReason,
   describeFlowResult,
@@ -49,7 +49,7 @@ export function ScmResultRow({ block }: { block: ScmResultBlock }): React.ReactE
   const [expanded, setExpanded] = useState(block.result.status === 'conflicts');
   const { workspaceId, chatId: chatFromScreen } = useTimelineActions();
   const toast = useToast();
-  const scm = useScmApi();
+  const scm = useApi().scm;
   const queryClient = useQueryClient();
 
   const result = block.result;

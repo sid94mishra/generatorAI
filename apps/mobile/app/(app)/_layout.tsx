@@ -21,7 +21,6 @@ const LARGE_SHEETS = ['chats/[id]/turn', 'chats/new', 'workspaces/[workspaceId]/
 const STACK_HEADER: Record<string, string> = {
   'workflows/[id]/index': 'Workflow',
   'workflows/[id]/runs/[runId]/stages/[stageRunId]': 'Stage',
-  'projects/[id]/codebases/[cid]/pull-requests/[number]': 'Pull request',
 };
 
 type Href = Parameters<typeof router.replace>[0];
