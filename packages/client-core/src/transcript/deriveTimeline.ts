@@ -21,6 +21,8 @@ import {
   isCheckWorkersTool,
   isShellTool,
   isSpawnWorkerTool,
+  isToolSearchTool,
+  toolSearchTarget,
   toolStepKind,
   toolStepVerb,
 } from '@generatorai/shared/ui-contract';
@@ -402,7 +404,10 @@ export function deriveTimeline(
       }
 
       case 'tool_call': {
-        const { target, meta } = summarizeArgs(b.tool, b.args);
+        const summary = summarizeArgs(b.tool, b.args);
+        const toolSearch = isToolSearchTool(b.tool) ? toolSearchTarget(b.args) : undefined;
+        const target = toolSearch ?? summary.target;
+        const meta = toolSearch ? undefined : summary.meta;
         const kind = toolStepKind(b.tool);
         // A tool call may only spin while the turn is genuinely live. Several
         // legitimate paths drop the matching `tool_complete` (harness.error,
@@ -465,7 +470,7 @@ export function deriveTimeline(
           ...(result != null ? { result } : {}),
           ...(errorText ? { errorText } : {}),
           target: worker ? worker.taskName ?? target : target,
-          mono: !worker,
+          mono: !worker && toolSearch === undefined,
           status,
           ...(worker?.taskId ? { workerChatId: worker.taskId } : {}),
           ...(workerChildren ? { children: workerChildren } : {}),

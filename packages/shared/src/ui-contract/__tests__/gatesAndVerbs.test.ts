@@ -7,7 +7,7 @@ import {
 } from '../copy.js';
 import { GATE_ACTIONS, GATE_KEY_BINDINGS, GATE_KINDS, gateLifecycle, type GateKey } from '../gates.js';
 import { formatBinding } from '../keys.js';
-import { STEP_KINDS, STEP_VERBS, humanizeToolName, toolStepKind, toolStepVerb } from '../toolVerbs.js';
+import { STEP_KINDS, STEP_VERBS, humanizeToolName, isToolSearchTool, toolDisplayName, toolSearchTarget, toolStepKind, toolStepVerb } from '../toolVerbs.js';
 
 describe('gate contract', () => {
   it('every gate kind has actions, and every action has copy', () => {
@@ -72,7 +72,9 @@ describe('tool verbs', () => {
     ['TodoWrite', 'plan', 'Revised plan'],
     ['Task', 'subagent', 'Task'],
     ['render_widget', 'widget', 'Rendered widget'],
-    ['mcp__github__list_issues', 'tool', 'list_issues'],
+    ['mcp__github__list_issues', 'tool', 'List issues'],
+    ['mcp__generatorai-tools__check_background_agents', 'tool', 'Check tasks'],
+    ['ToolSearch', 'tool', 'Loaded tools'],
   ])('%s → %s / %s', (tool, kind, verb) => {
     expect(toolStepKind(tool)).toBe(kind);
     expect(toolStepVerb(tool, false)).toBe(verb);
@@ -81,6 +83,27 @@ describe('tool verbs', () => {
   it('has live verbs', () => {
     expect(toolStepVerb('Bash', true)).toBe('Running');
     expect(toolStepVerb('Read', true)).toBe('Reading');
+  });
+
+  it('names tools the way a person reads them', () => {
+    expect(toolDisplayName('mcp__generatorai-tools__spawn_background_agent')).toBe('Delegate');
+    expect(toolDisplayName('mcp__generatorai-tools__list_models')).toBe('List models');
+    expect(toolDisplayName('mcp__github__createPullRequest')).toBe('Create pull request');
+    expect(toolDisplayName('Bash')).toBe('Bash');
+  });
+
+  it('turns a ToolSearch select query into the tools it loaded', () => {
+    expect(isToolSearchTool('ToolSearch')).toBe(true);
+    expect(isToolSearchTool('mcp__x__ToolSearch')).toBe(true);
+    expect(isToolSearchTool('Grep')).toBe(false);
+    expect(
+      toolSearchTarget({
+        query: 'select:mcp__generatorai-tools__list_models,mcp__generatorai-tools__spawn_background_agent,mcp__generatorai-tools__check_background_agents',
+        max_results: 10,
+      }),
+    ).toBe('List models, Delegate, Check tasks');
+    expect(toolSearchTarget({ query: 'github issues' })).toBe('“github issues”');
+    expect(toolSearchTarget({})).toBeUndefined();
   });
 
   it('humanizes MCP names', () => {

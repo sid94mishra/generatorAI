@@ -97,7 +97,74 @@ export const TOOL_VERB_OVERRIDES: Readonly<Record<string, { done: string; live: 
   update_plan: { done: 'Revised plan', live: 'Revising plan' },
   todowrite: { done: 'Revised plan', live: 'Revising plan' },
   spawn_background_agent: { done: 'Delegated', live: 'Delegating' },
+  // Claude Code's deferred-tool loader: "Loaded tools: Delegate, Check tasks".
+  toolsearch: { done: 'Loaded tools', live: 'Loading tools' },
 };
+
+/**
+ * Display names for platform tools whose own names are API-shaped. Keys are
+ * lower-cased tool names with any `mcp__server__` prefix removed; every other
+ * tool name is humanized (`list_models` → "List models").
+ */
+const TOOL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  spawn_background_agent: 'Delegate',
+  check_background_agents: 'Check tasks',
+  check_background_agent: 'Check task',
+  send_to_background_agent: 'Message task',
+  list_background_agents: 'List tasks',
+  cancel_background_agent: 'Cancel task',
+  list_available_agents: 'List agents',
+  list_models: 'List models',
+  toolsearch: 'Load tools',
+};
+
+/** The orchestrator's own bookkeeping tools (spawning is `delegate`): plain tool calls, not sub-agents. */
+const ORCHESTRATOR_TOOLS: ReadonlySet<string> = new Set([
+  'check_background_agents',
+  'check_background_agent',
+  'send_to_background_agent',
+  'list_background_agents',
+  'cancel_background_agent',
+  'list_available_agents',
+  'list_models',
+]);
+
+/** A tool's name as a person reads it: MCP prefix gone, `snake_case` / `camelCase` as words, first letter capital. */
+export function toolDisplayName(tool: string): string {
+  const raw = humanizeToolName(tool);
+  const known = TOOL_DISPLAY_NAMES[raw.toLowerCase()];
+  if (known) return known;
+  if (!/[_\-]|[a-z][A-Z]/.test(raw)) return raw;
+  const words = raw
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[_\-\s]+/)
+    .filter(Boolean)
+    .map((w) => w.toLowerCase());
+  const text = words.join(' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** Claude Code's ToolSearch, which loads deferred tools by name or keyword. */
+export function isToolSearchTool(tool: string): boolean {
+  return humanizeToolName(tool).toLowerCase() === 'toolsearch';
+}
+
+/**
+ * The target of a ToolSearch row: `select:a,b` names the tools it loaded
+ * ("Delegate, Check tasks"); a keyword query reads as the query itself.
+ */
+export function toolSearchTarget(args: unknown): string | undefined {
+  const query = args && typeof args === 'object' ? (args as Record<string, unknown>)['query'] : undefined;
+  if (typeof query !== 'string' || !query.trim()) return undefined;
+  const select = /^select:(.*)$/is.exec(query.trim());
+  if (!select) return `“${query.trim()}”`;
+  const names = select[1]!
+    .split(',')
+    .map((n) => n.trim())
+    .filter(Boolean)
+    .map(toolDisplayName);
+  return [...new Set(names)].join(', ');
+}
 
 /** The orchestrator tool that creates a background worker. */
 export const SPAWN_WORKER_TOOL = 'spawn_background_agent';
@@ -156,6 +223,7 @@ export function toolStepKind(toolName: string): StepKind {
   // Exact SDK tool names first.
   if (n === 'task' || n === 'agent') return 'subagent';
   if (n === SPAWN_WORKER_TOOL) return 'delegate';
+  if (n === 'toolsearch' || ORCHESTRATOR_TOOLS.has(n)) return 'tool';
   if (n === 'todowrite' || n === 'update_plan' || n === 'exit_plan_mode') return 'plan';
   if (isShellTool(n)) return 'run';
   if (n.startsWith('computer_')) return 'computer';
@@ -181,7 +249,7 @@ export function toolStepVerb(toolName: string, live: boolean): string {
   const override = TOOL_VERB_OVERRIDES[raw.toLowerCase()];
   if (override) return live ? override.live : override.done;
   const kind = toolStepKind(toolName);
-  if (kind === 'tool' || kind === 'subagent') return raw;
+  if (kind === 'tool' || kind === 'subagent') return toolDisplayName(raw);
   const def = STEP_VERBS[kind];
   return live ? def.live : def.done;
 }
