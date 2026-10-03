@@ -18,6 +18,7 @@ import { useConfirm } from '@/ui/primitives/AlertDialog/AlertDialog.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Card } from '@/ui/primitives/Card/Card.js';
 import { EmptyState } from '@/ui/primitives/EmptyState/EmptyState.js';
+import { Icon } from '@/ui/icons/Icon.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { Link } from '@/ui/primitives/Link/Link.js';
 import { toast } from '@/ui/primitives/Toast/Toast.js';
@@ -129,12 +130,15 @@ export function CodebasesTab({ projectId, codebases, isLoading, error }: Codebas
       header: 'Codebase',
       width: 'minmax(220px,1fr)',
       cell: (cb) => (
-        <span className="flex min-w-0 flex-col">
-          <Link render={<RouterLink to={`/projects/${projectId}/codebases/${cb.id}`} />} className="truncate font-medium">
-            {cb.alias}
-          </Link>
-          <span className="truncate font-mono text-micro text-fg-3">
-            {codebaseLocation(cb)} · {CODEBASE_TYPE_LABEL[cb.type].toLowerCase()}
+        <span className="flex min-w-0 items-center gap-2.5">
+          <Icon concept={cb.type === 'local-dir' ? 'projects' : 'branch'} size={16} className="shrink-0 text-fg-3" />
+          <span className="flex min-w-0 flex-col">
+            <Link render={<RouterLink to={`/projects/${projectId}/codebases/${cb.id}`} />} className="truncate font-medium">
+              {cb.alias}
+            </Link>
+            <span className="truncate font-mono text-micro text-fg-3">
+              {codebaseLocation(cb)} · {CODEBASE_TYPE_LABEL[cb.type].toLowerCase()}
+            </span>
           </span>
         </span>
       ),
@@ -193,6 +197,7 @@ export function CodebasesTab({ projectId, codebases, isLoading, error }: Codebas
         getRowId={(cb) => cb.id}
         onRowClick={(cb) => navigate(`/projects/${projectId}/codebases/${cb.id}`)}
         actionsWidth={172}
+        alwaysShowActions
         rowActions={(cb) => (
           <span className="flex items-center gap-1">
             {cb.type !== 'local-dir' ? (

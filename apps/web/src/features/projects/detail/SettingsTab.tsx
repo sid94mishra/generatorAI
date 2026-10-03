@@ -9,9 +9,11 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import type { Project, WorktreeRetentionPolicy } from '@generatorai/shared';
 import { useDeleteProject, useUpdateProject } from '@/hooks/projectQueries.js';
+import { copyTextToClipboard } from '@/utils/copyToClipboard.js';
 import { SettingRow, SettingsSection } from '@/ui/patterns/SettingsSection/SettingsSection.js';
 import { useConfirm } from '@/ui/primitives/AlertDialog/AlertDialog.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
+import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { NumberField } from '@/ui/primitives/NumberField/NumberField.js';
 import { Select } from '@/ui/primitives/Select/Select.js';
 import { toast } from '@/ui/primitives/Toast/Toast.js';
@@ -131,7 +133,22 @@ export function SettingsTab({ project }: { project: Project }) {
 
       <SettingsSection title="Location">
         <div>
-          <SettingRow label="Root path" control={<span className="font-mono text-small text-fg-2">{project.rootPath}</span>} />
+          <SettingRow
+            label="Root path"
+            control={
+              <IconButton
+                icon="copy"
+                size="sm"
+                label="Copy root path"
+                onClick={() =>
+                  copyTextToClipboard(project.rootPath).catch((err: unknown) =>
+                    toast.error("Couldn't copy the root path", { description: String(err) }),
+                  )
+                }
+              />
+            }
+            stacked={<span className="font-mono text-small break-all text-fg-2">{project.rootPath}</span>}
+          />
           <SettingRow label="Created" control={<span className="text-small text-fg-2">{new Date(project.createdAt).toLocaleString()}</span>} />
         </div>
       </SettingsSection>

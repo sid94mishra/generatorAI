@@ -172,8 +172,11 @@ export interface TableCellProps extends ComponentProps<'div'> {
   align?: 'start' | 'end';
   /** Mono micro fg-3 (paths, times, numbers). */
   mono?: boolean;
-  /** Trailing row-actions cell: visible on row hover, focus-within or selection. */
-  actions?: boolean;
+  /**
+   * Trailing row-actions cell: visible on row hover, focus-within or selection;
+   * `'always'` keeps it visible (a short table whose actions are the point, e.g. Fetch / Logs).
+   */
+  actions?: boolean | 'always';
   children?: ReactNode;
 }
 
@@ -186,8 +189,9 @@ export function TableCell({ align = 'start', mono = false, actions = false, clas
         'flex min-w-0 items-center',
         align === 'end' && 'justify-end text-right',
         mono && 'font-mono text-micro text-fg-3',
-        actions &&
-          'justify-end gap-1 opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 group-aria-selected/row:opacity-100',
+        actions && 'justify-end gap-1',
+        actions === true &&
+          'opacity-0 group-hover/row:opacity-100 group-focus-within/row:opacity-100 group-aria-selected/row:opacity-100',
         className,
       )}
       {...rest}
