@@ -502,10 +502,11 @@ export function useHealthConfig() {
  * token is unregistered (`DELETE /auth/push-token`) and this server's approval key is removed from the keystore.
  */
 export function useForgetThisDevice() {
-  const { fetch, serverId } = useAuth();
+  const { serverId } = useAuth();
+  const api = useApi();
   return async (): Promise<void> => {
     try {
-      await fetch('/api/auth/push-token', { method: 'DELETE' });
+      await api.auth.unregisterPush();
     } catch {
       // The server may already be unreachable; forgetting locally still matters.
     }

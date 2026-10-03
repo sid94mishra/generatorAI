@@ -31,6 +31,8 @@ describe('device and notification contracts', () => {
     expect(fetch).toHaveBeenLastCalledWith('/api/auth/push-token', expect.objectContaining({ method: 'PUT', body: JSON.stringify(registration) }));
     await auth.mutePush(null);
     expect(fetch).toHaveBeenLastCalledWith('/api/auth/push-token/mute', expect.objectContaining({ method: 'PUT', body: '{"mutedUntil":null}' }));
+    await auth.unregisterPush();
+    expect(fetch).toHaveBeenLastCalledWith('/api/auth/push-token', expect.objectContaining({ method: 'DELETE' }));
   });
   it('reads config content without pretending the response is a config row', async () => {
     const fetch = vi.fn(async () => new Response('{"content":"# Instructions"}'));
