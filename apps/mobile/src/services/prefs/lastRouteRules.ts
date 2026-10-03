@@ -15,7 +15,7 @@ export const LAST_ROUTE_TTL_MS = 30 * 60 * 1000;
  * restoring `/revoked` would show a revoked wall to a re-paired device;
  * `/` and the tab root are where the user lands anyway.
  */
-const NON_RESTORABLE = new Set(['', '/', '/pair', '/revoked', '/index']);
+const NON_RESTORABLE = new Set(['', '/', '/pair', '/paired', '/revoked', '/index']);
 
 /**
  * Route-addressable sheets and modals (`/scope-request`, `/servers`, the `/search` palette, a chat's gate or

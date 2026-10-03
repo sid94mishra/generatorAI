@@ -148,7 +148,7 @@ async function waitForApp(target) {
       await pressExpoControl(target, nodes, 'Close');
       continue;
     }
-    if (nodes.some(node => node.identifier === 'menu-button' || node.label === 'Pair this phone' || node.label === 'Scan the pairing code' || node.label === 'Fingerprint' || node.label === 'Pair this device')) return;
+    if (nodes.some(node => node.identifier === 'menu-button' || node.identifier === 'pairing-connect' || node.identifier === 'pairing-confirm' || node.label === 'Connect to a GeneratorAI server')) return;
     if (nodes.some(node => node.label === 'Unlock to continue')) throw new Error('The installed app is locked; unlock it before native verification');
     await confirmAppLink(target, snapshot);
     await delay(500);
@@ -210,8 +210,12 @@ export async function pairTarget(session, target, { repair = false, noConfirm = 
   else await run(ADB, ['-s', id, 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', url, APP_ID]);
   const linked = await readSnapshot(target);
   await confirmAppLink(target, linked.data?.snapshot ?? linked.data);
+  // M7-08: the link only pre-fills the code and address (MD-34); Connect opens the consent step.
+  await agent(target, ['wait', 'id="pairing-scanned"', '30000']);
+  await agent(target, ['scroll', 'down', '--until', 'id="pairing-connect"', '--settle']);
+  await agent(target, ['press', 'id="pairing-connect"', '--settle']);
   if (noConfirm) { console.log(`Consent is waiting on ${target.name}; pairing has not completed.`); return; }
-  await agent(target, ['wait', 'text', 'Fingerprint', '30000']);
+  await agent(target, ['wait', 'id="pairing-fingerprint"', '30000']);
   await agent(target, ['scroll', 'down', '--until', 'label="Name"', '--settle']);
   const fields = await readSnapshot(target);
   const name = (fields.data?.snapshot?.nodes ?? fields.data?.nodes ?? []).find(node =>
@@ -223,12 +227,15 @@ export async function pairTarget(session, target, { repair = false, noConfirm = 
   // A software keyboard can otherwise cover the consent button on iOS.
   if (target.platform === 'ios') await agent(target, ['keyboard', 'enter']);
   else await agent(target, ['keyboard', 'dismiss']);
-  await agent(target, ['scroll', 'down', '--until', 'label="Pair this device"', '--settle']);
+  await agent(target, ['scroll', 'down', '--until', 'id="pairing-confirm"', '--settle']);
   const consent = await readSnapshot(target);
   const confirm = (consent.data?.snapshot?.nodes ?? consent.data?.nodes ?? []).find(node =>
-    node.identifier === 'pairing-confirm' || (node.type === 'Button' && node.label === 'Pair this device'));
+    node.identifier === 'pairing-confirm' || (node.type === 'Button' && node.label === 'Pair'));
   if (!confirm?.ref) throw new Error('The pairing confirmation button is not accessible');
   await agent(target, ['press', `@${confirm.ref}`, '--settle']);
+  // The success step (`/paired`) first, then the shell.
+  await agent(target, ['wait', 'id="paired-continue"', '30000']);
+  await agent(target, ['press', 'id="paired-continue"', '--settle']);
   await agent(target, ['wait', 'id="menu-button"', '30000']);
   await recordPairing(session, target, before, started);
 }

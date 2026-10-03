@@ -1,6 +1,8 @@
 appId: ${APP_ID}
-name: pairing · link pre-fills and requires consent
+name: pairing · link pre-fills, Connect shows consent, Pair, success
 tags: [characterization, smoke, pairing]
+# M7-08 (MPairing, MD-34): a `pair` link pre-fills the code and address and never submits; Connect shows the consent
+# step (fingerprint, scopes, name); Pair opens the success step.
 ---
 - launchApp: {clearState: true, clearKeychain: true}
 - runFlow:
@@ -8,32 +10,29 @@ tags: [characterization, smoke, pairing]
     commands:
       - extendedWaitUntil: {visible: Development Build, timeout: 30000}
       - openLink: exp+generatorai://expo-development-client/?url=${METRO_URL}&disableFab=1&disableOnboarding=1&disableAutoLaunch=1
-- extendedWaitUntil: {visible: "Scan the pairing code", timeout: 60000}
+- extendedWaitUntil: {visible: {id: pairing-connect}, timeout: 60000}
 - openLink: ${PAIR_URL}
-- extendedWaitUntil: {visible: "Pair with this server?", timeout: 30000}
-- assertVisible: {id: pairing-fingerprint}
-- assertNotVisible: {id: home-new-chat}
-# MD-103: the legacy Name field has no allowed M1 testID.
+- extendedWaitUntil: {visible: {id: pairing-scanned}, timeout: 30000}
+- assertNotVisible: {id: pairing-consent}
 - scrollUntilVisible:
-    element: {text: Name}
+    element: {id: pairing-connect}
     direction: DOWN
-- runFlow:
-    when: {platform: Android}
-    commands:
-      - tapOn: Name
-- runFlow:
-    when: {platform: iOS}
-    commands:
-      # iOS exposes both the label and its field as Name; select the field.
-      - tapOn: {text: Name, index: 1}
+- tapOn: {id: pairing-connect}
+- extendedWaitUntil: {visible: {id: pairing-fingerprint}, timeout: 30000}
+- assertNotVisible: {id: home-new-chat}
+- scrollUntilVisible:
+    element: {id: pairing-name}
+    direction: DOWN
+- tapOn: {id: pairing-name}
 - eraseText
 - inputText: ${DEVICE_NAME}
-- assertVisible: ${DEVICE_NAME}
 - hideKeyboard
 - scrollUntilVisible:
     element: {id: pairing-confirm}
     direction: DOWN
 - tapOn: {id: pairing-confirm}
+- extendedWaitUntil: {visible: {id: paired-continue}, timeout: 30000}
+- tapOn: {id: paired-continue}
 - extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 30000}
 - runFlow: ../_subflows/open-sidebar.yaml
 - assertVisible: {id: drawer-chats}
