@@ -660,6 +660,13 @@ relaunch → `home-new-chat` through the driver (relative). The perf flows are e
 | Reduce Transparency (iOS) | batch | `xcrun simctl spawn <udid> defaults write com.apple.Accessibility ReduceTransparencyEnabled -bool true` then relaunch (if the flag does not take effect on the runtime, verify with `GlassSurface` stories' forced-opaque variant); glass becomes opaque |
 | Screen reader order | batch, chat screen | snapshot order: header → transcript → composer; drawer and pane reachable from header buttons |
 
+**Route audit on both platforms (M10-04, MD-195).** `node scripts/mobile/a11y-audit.mjs --platform=<p> [--text-size=ax]
+--batch=<batch>` opens every route of `e2e/a11y-routes.json` (17 since M10-04), snapshots it and runs `a11y-check.mjs`;
+`--text-size=ax` is the Dynamic Type sweep (iOS AX5 / Android font scale 2.0). Report:
+`reviews/<batch>/a11y-<platform>[-ax].md`. Statically, Jest renders every kit / block story on both platform projects
+and checks accessible names, exposure and font scaling (`src/ui/__tests__/a11ySweep.test.tsx`); Vitest checks every
+palette's contrast (`src/theme/contrast.test.ts`).
+
 **XCUITest audit (iOS, built in M1-03).** `plugins/withA11yAuditTarget.js` (added to plugins only when `GAI_A11Y_AUDIT=1`) adds a UI
 test target `GeneratorAIUITests` with `A11yAuditTests.swift`: for each route in `apps/mobile/e2e/a11y-routes.json` it
 opens `generatorai:///<route>`, waits for `vrt-ready` or the route's main testID, then

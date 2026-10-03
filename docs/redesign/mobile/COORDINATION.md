@@ -150,3 +150,5 @@ It also records every merge of `desktop_redesign` into this branch.
 | 2026-10-03 | M10-02 | `scripts/mobile/lib/sandbox-maestro.mjs`: flows also receive `PROJECT_ID` and `CODEBASE_ID` | additive (mobile-only tooling) | The new `projects/codebase` Maestro flow. |
 
 | 2026-10-03 | M10-03 | `scripts/mobile/vrt.mjs`, `scripts/mobile/perf.mjs`, `scripts/mobile/lib/{vrt-plan,perf-budgets}.mjs` + Node tests (new); `pnpm-lock.yaml` (`odiff-bin` 4.5.0 devDependency of `@generatorai/mobile`) | new mobile-only tooling | VRT and perf budgets (MD-194). No web / server effect. |
+
+| 2026-10-03 | M10-04 | `scripts/mobile/a11y-audit.mjs`, `scripts/mobile/lib/a11y-report.mjs` + Node test (new) | new mobile-only tooling | Route accessibility audit on both platforms + Dynamic Type sweep (MD-195). |

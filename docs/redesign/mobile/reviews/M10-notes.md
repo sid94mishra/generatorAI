@@ -80,3 +80,29 @@ node scripts/mobile/perf.mjs --platform=android --batch=F
 
 Results: `docs/redesign/mobile/reviews/F/perf.json`. Real-phone absolute numbers: the same scenarios by hand on the
 owner's phones (08 §4.7).
+
+## 3. M10-04 — Accessibility audit
+
+Static results (MD-195): the Jest story sweep (99 stories × iOS + Android) and the palette contrast test (18 themes ×
+2 modes × 7 accents) report **no findings**. Existing tests already pin the MD-28 floors, Dynamic Type caps, hit
+frames, custom actions and focus trapping. No `hitSlop` is used, so `e2e/a11y-allow.json` stays empty.
+
+**Owner run** (each platform; app paired, Metro or a release build running):
+
+```sh
+# routes at the default text size, then the Dynamic Type sweep (AX5 / font scale 2.0)
+node scripts/mobile/a11y-audit.mjs --platform=ios --batch=F
+node scripts/mobile/a11y-audit.mjs --platform=ios --batch=F --text-size=ax
+node scripts/mobile/a11y-audit.mjs --platform=android --batch=F
+node scripts/mobile/a11y-audit.mjs --platform=android --batch=F --text-size=ax
+# iOS XCUITest audit (contrast, element detection, hit region, descriptions, Dynamic Type, clipping, traits)
+cd apps/mobile && GAI_A11Y_AUDIT=1 npx expo prebuild -p ios --clean
+xcodebuild test -workspace ios/GeneratorAI.xcworkspace -scheme GeneratorAIUITests \
+  -destination 'platform=iOS Simulator,name=gai-iphone' -resultBundlePath "$TMPDIR/a11y.xcresult"
+xcrun xcresulttool get test-results tests --path "$TMPDIR/a11y.xcresult" > "$TMPDIR/a11y.json"
+npx expo prebuild -p ios --clean
+```
+
+By hand: Android Accessibility Scanner on `gai-phone` over Home, a chat, the pane, Settings (findings →
+`reviews/F/a11y-android-scanner.md`); VoiceOver / TalkBack order on the chat screen (header → transcript → composer);
+Reduce Motion (Settings › Accessibility) and iOS Reduce Transparency (glass becomes opaque).
