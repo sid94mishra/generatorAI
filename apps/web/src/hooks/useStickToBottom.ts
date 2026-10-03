@@ -66,7 +66,10 @@ export function useStickToBottom(dep: unknown): StickToBottom {
       if (!pinnedRef.current || frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
-        if (pinnedRef.current) el.scrollTop = el.scrollHeight;
+        if (pinnedRef.current) {
+          el.scrollTop = el.scrollHeight;
+          lastTop = el.scrollTop;
+        }
       });
     };
     const onScroll = () => {
@@ -94,7 +97,10 @@ export function useStickToBottom(dep: unknown): StickToBottom {
     // followed — the question card's Submit button (and a plan's Approve bar)
     // sat clipped below the fold of a list that believed it was at the bottom.
     ro.observe(el);
-    if (pinnedRef.current) el.scrollTop = el.scrollHeight; // initial pin, synchronous
+    if (pinnedRef.current) {
+      el.scrollTop = el.scrollHeight; // initial pin, synchronous
+      lastTop = el.scrollTop;
+    }
 
     return () => {
       el.removeEventListener('scroll', onScroll);
