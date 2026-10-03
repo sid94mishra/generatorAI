@@ -4958,6 +4958,19 @@ label:has(> input[type="radio"]) {
   transition-duration: 0.01ms !important;
 }
 
+/* Streaming reveal (D-91): the newest words settle in over ~180 ms through
+   three Custom Highlights set by blocks/transcript useRevealFade — colour
+   only, no element and no layout change. Not drawn under reduced motion. */
+::highlight(gai-reveal-1) {
+  color: color-mix(in oklab, var(--gai-fg) 25%, transparent);
+}
+::highlight(gai-reveal-2) {
+  color: color-mix(in oklab, var(--gai-fg) 55%, transparent);
+}
+::highlight(gai-reveal-3) {
+  color: color-mix(in oklab, var(--gai-fg) 80%, transparent);
+}
+
 /* Prose for the transcript and Streamdown output (02 §5.3). */
 .gai-prose {
   font-size: var(--gai-text-body);

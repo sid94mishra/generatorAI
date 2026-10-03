@@ -566,10 +566,10 @@ Profiled in the production build (Electron, CDP CPU profiles + Long Animation Fr
   keep a document whole. After a stream ends the blocks stay (no second whole-document parse).
 - **Highlighting off the main thread.** Shiki runs in a module worker (`highlight.worker.ts`, in-thread fallback), with
   a result cache so a remounted code block paints at once.
-- **Deferred, interruptible renders:** the streaming markdown source, the transcript's turns at boundaries (the live
+- **Deferred, interruptible renders:** the transcript's turns at boundaries (the live
   turn stays on screen until its persisted message has rendered) and the view mode use `useDeferredValue`; Summary
   renders through the same `TurnBody`, so a mode switch re-renders the answer instead of remounting it; the digest is
-  counted from the derived segments.
+  counted from the derived segments. (A deferred streaming-markdown source was dropped in D-91.)
 - **Fences:** `agent-tests/perf/transcript-stream.spec.ts` (reporting, generous limits) and the `markdownBlocks` unit test.
 
 ### D-90 Provider-neutral composer and empty chat (owner, 2026-10-03) — Final
@@ -578,6 +578,27 @@ read as if the chat were that product). `composerPromptPlaceholder` (ui-contract
 for a bound agent, "Reply to the orchestrator…" in orchestrate mode, else "Ask anything — @ for files, / for skills"
 (or "Ask anything — / for skills" without a workspace). The empty chat reads "Type a message below to start." Mobile's
 composer accessible name drops the model ("Message", or "Message <agent>"); web keeps its textbox name and testids.
+
+### D-91 Paced streaming and spring follow-scroll (owner, 2026-10-04) — Final
+Measured before/after in the desktop app (real Sonnet 5.5 and GPT-5.6-Sol answers, a worker chat, a workflow stage)
+and web, at 1440×900 and 1100×760 (`reviews/desktop-orchestrator-test.md`, addendum). Approach after StackBlitz's
+`use-stick-to-bottom` (velocity spring + ResizeObserver, user-intent detection) and the AI SDK's `smoothStream`
+(word-granular smoothing):
+- **Paced reveal** — `client-core` `advancePacer` (web `blocks/transcript` `usePacedText`, mobile `AssistantText`):
+  text that arrived is revealed per animation frame at `max(90 chars/s, rate held per burst, backlog / 0.9 s)`, ending
+  on a word; it never holds text back: everything shows at once when the page is hidden, the reader scrolled away
+  (`pacing: false`) or the view mode changes; after the turn ends the rest catches up within 250 ms; reduced motion
+  reveals bursts in 250 ms steps. It lives in `AssistantText`, so every panel that streams an answer (chat, worker
+  chats, workflow stages, task detail) uses it.
+- **Reveal fade** — the newest words settle in over ~180 ms through three CSS Custom Highlights (`useRevealFade`,
+  `::highlight(gai-reveal-*)`): colour only, no element, no layout; off under reduced motion.
+- **Spring follow** — `useStickToBottom` follows with `v = (0.7·v + 0.05·gap) / 1.25` per 60 Hz frame from a
+  ResizeObserver, one layout read per frame; only a scroll UP by the reader unpins (a clamp from shrinking content
+  does not); a reader at the end when content grows starts following; "Jump to latest" rides the same spring. The
+  workflow run page follows its stage output the same way once the reader is at the end.
+- **Steady tail** — no spinner row under an answer that is itself streaming (its caret shows the activity); the
+  streaming markdown is not rendered from a deferred value (that skipped frames and committed bursts — D-88's other
+  deferrals stay).
 
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)

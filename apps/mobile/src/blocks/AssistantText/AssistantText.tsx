@@ -15,6 +15,7 @@ import type { TextRole } from '../../ui/primitives/Text/Text.types';
 import { toast } from '../../ui/primitives/Toast';
 import { blockedLinkReason, classifyLink } from './model/linkPolicy';
 import { inlineText, parseMarkdown, type BlockNode, type InlineNode, type ListItemNode } from './model/markdownModel';
+import { usePacedText } from './usePacedText';
 
 export interface AssistantTextProps {
   text: string;
@@ -200,7 +201,9 @@ function Block({ node, env, streaming }: { node: BlockNode; env: Env; streaming:
 }
 
 export const AssistantText = memo(function AssistantText({ text, streaming = false, onLinkPress, testID }: AssistantTextProps): React.ReactElement {
-  const tree = useMemo(() => parseMarkdown(text, { streaming }), [text, streaming]);
+  // Streaming text is revealed at a steady pace (D-91, the web cadence); the full text once the turn ends.
+  const shown = usePacedText(text, streaming);
+  const tree = useMemo(() => parseMarkdown(shown, { streaming }), [shown, streaming]);
   const env = useMemo<Env>(() => ({ openLink: openLinkWith(onLinkPress) }), [onLinkPress]);
   const last = tree.length - 1;
   return (

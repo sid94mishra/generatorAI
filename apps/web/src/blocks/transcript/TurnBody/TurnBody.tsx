@@ -199,7 +199,9 @@ function TurnBodyImpl({
         </div>
       ) : null}
 
-      {active && !awaitingUser ? (
+      {/* While the answer itself is streaming its caret shows the activity; a spinner row under
+          moving text only travelled down with every line (D-91). */}
+      {active && !awaitingUser && (summary || !(streaming && lastAnswer === list.length - 1)) ? (
         <div role="status" aria-label={TRANSCRIPT_COPY.generating} className="flex h-step items-center gap-2 pl-0.5">
           <Spinner size={14} className="text-fg-3" />
           {summary ? <span className="text-small text-fg-3">{TRANSCRIPT_COPY.workingSteps(stepCount)}</span> : null}

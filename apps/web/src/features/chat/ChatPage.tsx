@@ -53,7 +53,6 @@ import {
 } from './dock/chatDockPanels.js';
 import { CHAT_DOCK_KEYS, CHAT_DOCK_TAB_CAPS } from './hooks/useChatDockRouting.js';
 import { useChatView } from './hooks/useChatView.js';
-import { useModelLabel } from '@/blocks/model-picker/index.js';
 
 /** Placeholder turns while the chat record or its messages load (decorative; the region says "Loading"). */
 function ChatSkeleton() {
@@ -90,7 +89,6 @@ export function ChatPage() {
   const { messages, promptHistory } = transcript;
   const { stop, canRewind, restoredDraft } = stopRewind;
   const activeHarnessLabel = workspace.harnessProvider ? harnessProviderLabel(workspace.harnessProvider) : null;
-  const modelLabel = useModelLabel(workspace.effectiveModel);
 
   // The turn is parked on a gate: the agent is idle and the ball is with the user.
   const awaitingUserDecision = useStreamStore((state) =>

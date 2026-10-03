@@ -412,38 +412,50 @@ describe('scroll (09 §5.4 Scroll; 1039-1048, 1489-1496)', () => {
     return el;
   }
 
-  it('re-pins on message-count / block-count / status changes, never on streamed text alone', () => {
+  /** Let the follow loop run its animation frames. */
+  const frames = (ms = 120) => act(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  /** Content grew below the view: nothing fires a scroll event. */
+  const contentGrew = (el: Element, top: number) => {
+    (el as HTMLElement).scrollTop = top;
+  };
+
+  // D-91: following is an eased, rAF-driven scroll — a re-bind (message-count /
+  // block-count / status change) moves toward the bottom over the next frames
+  // instead of writing scrollTop synchronously; streamed text alone never re-binds.
+  it('follows to the bottom after message-count / block-count / status changes, never on streamed text alone', async () => {
     mount(H.makeChat(), H.makeConversation(2));
     const el = scroller();
-    const pins = () => metrics.writesTo(el);
-    const before = pins();
+    const top = () => (el as HTMLElement).scrollTop;
 
     act(() => store().startPending(H.SESSION_ID, 'go')); // status → pending
-    expect(pins()).toBe(before + 1);
-
     act(() => store().appendToken(H.SESSION_ID, 'a')); // status → streaming, +1 block
-    const afterFirstToken = pins();
-    expect(afterFirstToken).toBe(before + 2);
+    await frames();
 
+    contentGrew(el, 1000); // max = 2000 - 500 = 1500
     for (let i = 0; i < 5; i++) act(() => store().appendToken(H.SESSION_ID, ' more'));
-    expect(pins()).toBe(afterFirstToken); // text grew, signature did not
+    await frames();
+    expect(top()).toBe(1000); // text grew, the signature did not: no re-bind, no follow
 
-    act(() => store().addToolCall(H.SESSION_ID, 'bash', { cmd: 'ls' }, 'call-1')); // +1 block
-    expect(pins()).toBe(afterFirstToken + 1);
+    act(() => store().addToolCall(H.SESSION_ID, 'bash', { cmd: 'ls' }, 'call-1')); // +1 block: re-bind
+    await frames(400);
+    expect(top()).toBeGreaterThan(1000);
+    expect(top()).toBeLessThanOrEqual(1500);
   });
 
-  it('"Jump to latest" appears once the user scrolls up, and clicking it re-pins and hides it', async () => {
+  it('"Jump to latest" appears once the user scrolls up, and clicking it eases back to the bottom and hides it', async () => {
     mount(H.makeChat(), H.makeConversation(2));
     const el = scroller();
     expect(screen.queryByRole('button', { name: /Jump to latest/ })).not.toBeInTheDocument();
 
     metrics.userScrollTo(el, 0); // 2000 - 0 - 500 ≥ 80 px from the bottom
     const jump = screen.getByRole('button', { name: /Jump to latest/ });
-    const scrollTo = vi.fn();
-    (el as HTMLElement).scrollTo = scrollTo as unknown as HTMLElement['scrollTo'];
+    const writesBefore = metrics.writesTo(el);
     await userEvent.click(jump);
-    expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ top: 2000 }));
     expect(screen.queryByRole('button', { name: /Jump to latest/ })).not.toBeInTheDocument();
+    await frames(1500);
+    // Eased over several frames to the bottom (max = 1500), not one jump.
+    expect(metrics.writesTo(el) - writesBefore).toBeGreaterThan(3);
+    expect((el as HTMLElement).scrollTop).toBeGreaterThan(1499);
 
     metrics.userScrollTo(el, 1450); // within 80 px of the bottom → pinned, no pill
     expect(screen.queryByRole('button', { name: /Jump to latest/ })).not.toBeInTheDocument();

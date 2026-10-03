@@ -24,6 +24,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
+import { useStickToBottom } from '@/hooks/useStickToBottom.js';
 import { useShallow } from 'zustand/react/shallow';
 import type { WorkflowRunPermissionMode } from '@generatorai/shared';
 import { dockStorageKeys, DOCK_TAB_CAPS, type DockLinkTab } from '@generatorai/shared/ui-contract';
@@ -260,6 +261,9 @@ export function WorkflowRunPage() {
       cache: viewCache.current,
     });
   }, [storeRun, pinnedGraph, streams, permissionMode, admission]);
+  // A reader at the end of a streaming stage stays with its output (D-91). Bound once the
+  // run view exists, i.e. once the scroll host below is mounted (the page renders a skeleton until then).
+  useStickToBottom(runLoading || !runData || !runView ? null : runId, { ref: scrollHostRef, initiallyPinned: false });
 
   // A run named exactly like its workflow is identified by its start time.
   const runCrumb = useMemo(() => {

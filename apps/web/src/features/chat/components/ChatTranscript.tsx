@@ -234,6 +234,8 @@ export function ChatTranscript({
       ...(renderWidget && sessionId ? { renderWidget: (block: WidgetBlock) => renderWidget(block, sessionId) } : {}),
       ...(renderScmResult ? { renderScmResult } : {}),
       viewMode: renderedViewMode,
+      // Not following the latest text (scrolled away): show it as it arrives, nothing to animate (D-91).
+      pacing: !showJumpToLatest,
     }),
     [
       openChangesTab,
@@ -251,6 +253,7 @@ export function ChatTranscript({
       renderScmResult,
       sessionId,
       renderedViewMode,
+      showJumpToLatest,
     ],
   );
 

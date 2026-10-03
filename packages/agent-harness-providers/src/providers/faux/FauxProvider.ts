@@ -74,6 +74,11 @@ export interface FauxTextEntry {
    * every token is emitted at once.
    */
   delayMs?: number;
+  /**
+   * Emit this many words per token event (default 1), pausing `delayMs` per
+   * word between events — the bursty delivery real providers have.
+   */
+  chunkWords?: number;
 }
 
 /** Emit a tool_start event and wait for provideToolResult(). */
@@ -577,12 +582,16 @@ export class FauxProvider implements IAgentHarness {
             // Emit word-by-word for realism
             const words = entry.content.split(' ');
             const delayMs = entry.delayMs ?? 0;
-            for (let i = 0; i < words.length; i += 1) {
+            const chunk = Math.max(1, entry.chunkWords ?? 1);
+            for (let i = 0; i < words.length; i += chunk) {
               if (delayMs > 0 && i > 0) {
-                await new Promise((resolve) => setTimeout(resolve, delayMs));
+                await new Promise((resolve) => setTimeout(resolve, delayMs * chunk));
                 if (signal?.aborted) break;
               }
-              const token = i === 0 ? words[i]! : ` ${words[i]}`;
+              const token = words
+                .slice(i, i + chunk)
+                .map((word, k) => (i + k === 0 ? word : ` ${word}`))
+                .join('');
               this.broadcast(conversationId, { kind: 'harness.token', data: { text: token } });
               assistantText += token;
             }

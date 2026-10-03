@@ -33,7 +33,6 @@ import {
   isValidElement,
   useCallback,
   useContext,
-  useDeferredValue,
   useMemo,
   useRef,
   type ReactNode,
@@ -68,11 +67,11 @@ type MarkdownSize = NonNullable<MarkdownProps['size']>;
 
 /** Renders markdown source as styled, sanitised prose; see the file header. */
 export function Markdown({ children, streaming = false, size = 'prose', className }: MarkdownProps) {
-  // While tokens arrive, the markdown is re-rendered in a deferred, interruptible
-  // render (D-88): when a frame is busy React skips intermediate sources and the
-  // tail block's re-parse never blocks input or paint. Settled text is not deferred.
-  const deferred = useDeferredValue(children);
-  const source = streaming ? deferred : children;
+  // Rendered on every revealed frame: with blocks split correctly only the tail
+  // re-parses (D-88), and the paced reveal (D-91) sets the cadence. A deferred
+  // source was tried and dropped — under load it skipped frames and then
+  // committed thousands of characters at once, the very burst pacing removes.
+  const source = children;
   // Streamdown splits the (repaired) source into blocks with this function; the
   // count it last produced tells `TailBlock` which block is the tail.
   const blockCount = useRef(0);

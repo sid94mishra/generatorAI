@@ -43,6 +43,12 @@ export interface TranscriptActions {
   renderWidget?: (block: WidgetBlock) => ReactNode;
   renderScmResult?: (block: ScmResultBlock) => ReactNode;
   /** G-06 view mode (client-only). */
+  /**
+   * Streaming text is revealed at a steady pace (D-91) unless this is false —
+   * the reader is not following the latest text (scrolled away), so there is
+   * nothing to animate and everything that arrived is shown at once.
+   */
+  pacing?: boolean;
   viewMode?: TranscriptViewMode;
 }
 

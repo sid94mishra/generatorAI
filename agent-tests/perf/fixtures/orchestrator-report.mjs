@@ -86,7 +86,7 @@ export function reportMarkdown() {
 }
 
 /** The scripted turn: steps, a short note, then the report streamed word by word. */
-export function perfScript(delayMs = 8) {
+export function perfScript(delayMs = 8, chunkWords = 1) {
   const steps = [];
   for (const [i, name] of FILES.entries()) {
     steps.push({ type: 'file_edit', path: `src/${name}.ts`, content: `export const ${name} = ${i};\n`.repeat(6), toolName: i % 2 ? 'Edit' : 'Write' });
@@ -100,7 +100,7 @@ export function perfScript(delayMs = 8) {
       [
         { type: 'text', content: 'Both waves are done; checking their output before the report.' },
         ...steps,
-        { type: 'text', content: reportMarkdown(), delayMs },
+        { type: 'text', content: reportMarkdown(), delayMs, ...(chunkWords > 1 ? { chunkWords } : {}) },
         { type: 'complete', usage: { inputTokens: 48211, outputTokens: 5120 } },
       ],
     ],
@@ -109,8 +109,10 @@ export function perfScript(delayMs = 8) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const delay = Number(process.argv.find((a) => a.startsWith('--delay='))?.slice(8) ?? 8);
+  // --chunk=30: 30 words per event (a provider's bursts) instead of one.
+  const chunk = Number(process.argv.find((a) => a.startsWith('--chunk='))?.slice(8) ?? 1);
   const out = path.join(path.dirname(fileURLToPath(import.meta.url)), 'orchestrator-report.faux.json');
-  fs.writeFileSync(out, JSON.stringify(perfScript(delay), null, 2));
+  fs.writeFileSync(out, JSON.stringify(perfScript(delay, chunk), null, 2));
   const words = reportMarkdown().split(/\s+/).length;
   console.log(`wrote ${out} (${words} words)`);
 }
