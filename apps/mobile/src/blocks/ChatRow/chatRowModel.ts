@@ -3,7 +3,7 @@
 // glyph, the meta parts, the menu and the swipe actions — so the list, Home and the palette render one shape.
 import type { MobileIconConcept } from '@generatorai/design-tokens';
 import type { StatusState } from '@generatorai/shared';
-import type { ChatRowModel } from '@generatorai/shared/ui-contract';
+import { displayChatTitle, type ChatRowModel } from '@generatorai/shared/ui-contract';
 import type { RowPosition } from '../../ui/layout/ListSection/ListSection.types';
 
 export type ChatRowActionId = 'open' | 'pin' | 'unpin' | 'mark-unread' | 'mark-read' | 'stop' | 'archive' | 'unarchive' | 'delete' | 'more';
@@ -39,11 +39,8 @@ export interface ChatRowView {
   stoppable: boolean;
 }
 
-/** Orchestrator workers carry the server's "⚙ " marker in their names; it is not part of the title. */
-export function displayChatTitle(name: string | null | undefined): string {
-  const title = (name ?? '').replace(/^⚙\s*/, '').trim();
-  return title || 'Untitled chat';
-}
+/** Orchestrator workers carry the server's "⚙ " marker in their names; shared with web (ui-contract). */
+export { displayChatTitle };
 
 export function chatRowView(model: ChatRowModel): ChatRowView {
   const status = model.status?.state ?? null;

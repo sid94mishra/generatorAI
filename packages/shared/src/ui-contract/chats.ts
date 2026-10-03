@@ -58,3 +58,12 @@ export interface ChatRowModel {
   /** MG-03: the model's display label, for rows with no agent (absent when the server does not know it). */
   modelLabel?: string;
 }
+
+/**
+ * The server names an orchestrator's worker chats `⚙ <taskName>`
+ * (`OrchestratorService`); the marker is bookkeeping, not part of the title.
+ */
+export function displayChatTitle(name: string | null | undefined): string {
+  const title = (name ?? '').replace(/^⚙\s*/, '').trim();
+  return title || 'Untitled chat';
+}

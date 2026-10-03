@@ -19,6 +19,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router';
 import { chatActivity, resolveMapping, type Chat, type StreamStatus } from '@generatorai/shared';
+import { displayChatTitle } from '@generatorai/shared/ui-contract';
 import { useArchiveChat, useChat, useRenameChat } from '@/hooks/queries.js';
 import { useProject } from '@/hooks/projectQueries.js';
 import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
@@ -131,14 +132,26 @@ export function ChatHeader({ chat, streamStatus, awaitingUser, dockOpen, onToggl
     .sort((a, b) => a.position - b.position)[0];
   const branch = primaryMount?.git?.branch;
 
+  // A worker chat (orchestrator task) is reached from its orchestrator's Tasks
+  // dock and leads back there; its name drops the server's "⚙ " marker.
+  const { data: orchestrator } = useChat(chat.parentChatId ?? undefined);
+  const title = displayChatTitle(chat.name);
   const crumbs: BreadcrumbItem[] = [
     project
       ? { label: project.name, render: <RouterLink to={`/projects/${project.id}`} /> }
       : { label: 'Chats', render: <RouterLink to="/chats" /> },
+    ...(chat.parentChatId
+      ? [
+          {
+            label: displayChatTitle(orchestrator?.name),
+            render: <RouterLink to={`/chats/${chat.parentChatId}?dock=tasks`} data-testid="worker-orchestrator-link" />,
+          },
+        ]
+      : []),
     {
       label: (
-        <h1 className="inline truncate text-ui font-semibold" title={chat.name}>
-          {chat.name}
+        <h1 className="inline truncate text-ui font-semibold" title={title}>
+          {title}
         </h1>
       ),
     },
