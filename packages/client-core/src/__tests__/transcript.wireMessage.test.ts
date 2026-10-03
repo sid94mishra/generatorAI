@@ -32,6 +32,10 @@ describe('wire transcript input', () => {
     expect(blocks.map(b=>b.type)).toEqual(['tool_call','plan','question','permission']);
     for(const block of blocks.slice(1)) expect(block).toMatchObject({status:'expired'});
   });
+  it('keeps a settled permission card\'s risk verdict (MG-04)', () => {
+    const [block] = wireChatMessageToBlocks({content:'',metadata:{permissionCards:[{interactionId:'g',status:'allowed',risk:'risky'}]}});
+    expect(block).toMatchObject({type:'permission',status:'allowed',risk:'risky'});
+  });
   it('preserves optional attachment metadata and stopped turns', () => {
     expect(messageAttachments({attachments:[{}, {name:'image',path:'a.png',artifactId:'a'}]})).toEqual([{name:'image',path:'a.png',artifactId:'a'}]);
     expect(messageWasStopped({metadata:{partial:true}})).toBe(true);

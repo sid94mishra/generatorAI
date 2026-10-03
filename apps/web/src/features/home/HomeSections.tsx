@@ -1,6 +1,6 @@
 // ────────────────────────────────────────────────────────────────
 // Home activity sections (F-home-04…06): Needs you (inline Allow once /
-// Approve + Review), Running (Stop / Cancel) — both from the attention feed
+// Approve + Review; a risky gate carries the "Risky" badge), Running (Stop / Cancel) — both from the attention feed
 // (G-01) — and Recently finished (G-11, Retry). C-12 SectionHeader over a
 // card of C-08 ActivityRows. A section with no items renders nothing (D-36);
 // while loading it shows skeleton rows, on error an inline Retry.
@@ -9,12 +9,14 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router';
 import type { AttentionItem, RecentActivityItem, StatusState } from '@generatorai/shared';
+import { PERMISSION_GATE_COPY } from '@generatorai/shared/ui-contract';
 import { useAttentionAction } from '@/hooks/attentionQueries.js';
 import { useRecentActivity, useRetryActivity } from '@/hooks/activityQueries.js';
 import { formatElapsed, useNow } from '@/lib/elapsed.js';
 import { ActivityRow } from '@/ui/patterns/ActivityRow/ActivityRow.js';
 import { DiffStat } from '@/ui/patterns/DiffStat/DiffStat.js';
 import { SectionHeader } from '@/ui/patterns/SectionHeader/SectionHeader.js';
+import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Callout } from '@/ui/primitives/Callout/Callout.js';
 import { Card } from '@/ui/primitives/Card/Card.js';
@@ -70,6 +72,8 @@ export function NeedsYouSection({ items }: { items: readonly AttentionItem[] }) 
             data-testid="home-needs-you-row"
             actions={
               <>
+                {/* MG-04: the server's verdict, as on the gate card; the answer stays a click here. */}
+                {item.ask?.risk === 'risky' ? <Badge>{PERMISSION_GATE_COPY.risky}</Badge> : null}
                 <Button size="sm" onClick={() => navigate(item.href)} aria-label={`${openLabel} ${item.title}`}>
                   {openLabel}
                 </Button>
