@@ -90,7 +90,7 @@ describe('ExpoPushProvider — approval payload', () => {
       categoryId: 'approval',
       priority: 'high',
       threadId: 'chat:c1',
-      interruptionLevel: 'timeSensitive',
+      interruptionLevel: 'time-sensitive',
       ttl: 3600,
     });
   });

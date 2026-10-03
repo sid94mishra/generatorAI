@@ -36,6 +36,17 @@ function androidChannel(message: PushMessage): string {
   return message.data.category === 'approval' ? 'approvals' : message.data.category;
 }
 
+/**
+ * The Expo Push API's spelling of the iOS interruption level (`'time-sensitive'`,
+ * hyphenated, as APNs' `interruption-level`). The app-side
+ * `expo-notifications` type spells it `'timeSensitive'`; sending that to the
+ * push service is not a value it knows, so approvals lost their Time
+ * Sensitive delivery.
+ */
+export function expoInterruptionLevel(level: PushMessage['interruption']): string {
+  return level === 'timeSensitive' ? 'time-sensitive' : level;
+}
+
 interface ExpoTicket {
   status: 'ok' | 'error';
   id?: string;
@@ -77,7 +88,7 @@ export class ExpoPushProvider implements PushProviderClient {
       ...(message.categoryId ? { categoryId: message.categoryId, priority: 'high' as const } : {}),
       // Groups related notifications into one stack on both platforms.
       ...(message.target.platform === 'ios'
-        ? { threadId: message.threadId, interruptionLevel: message.interruption }
+        ? { threadId: message.threadId, interruptionLevel: expoInterruptionLevel(message.interruption) }
         : { channelId: androidChannel(message) }),
       // Approvals expire: an hour-old gate has usually been handled at a
       // desk, and delivering it then is pure noise.
