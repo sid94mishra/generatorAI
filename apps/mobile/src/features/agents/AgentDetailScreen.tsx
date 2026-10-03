@@ -43,7 +43,8 @@ export default function AgentDetailScreen(): React.ReactElement {
   const a = agent.data;
   const builtIn = a?.scope === 'system';
   const usage = useAgentUsage(id, Boolean(a));
-  const preview = useResolvePreview(a ? { agentRef: a.ref, scope: a.scope === 'project' ? 'project' : 'global', ...(a.projectId ? { projectId: a.projectId } : {}), ...(a.runtime.harnessType ? { harnessType: a.runtime.harnessType } : {}) } : null);
+  // The resolve preview is an `admin:settings` route: a device without it would only get a 403 error card.
+  const preview = useResolvePreview(a && canEdit ? { agentRef: a.ref, scope: a.scope === 'project' ? 'project' : 'global', ...(a.projectId ? { projectId: a.projectId } : {}), ...(a.runtime.harnessType ? { harnessType: a.runtime.harnessType } : {}) } : null);
   const all = useAgents();
   const attention = useAttention();
   const live = useMemo(() => chatLiveSets(attention.snapshot), [attention.snapshot]);
@@ -143,7 +144,7 @@ export default function AgentDetailScreen(): React.ReactElement {
             </>
           ) : null}
 
-          <CapabilitySummary projection={preview.data} loading={preview.isLoading} error={preview.error} onRetry={() => void preview.refetch()} />
+          {canEdit ? <CapabilitySummary projection={preview.data} loading={preview.isLoading} error={preview.error} onRetry={() => void preview.refetch()} /> : null}
 
           {usage.data ? (
             <ListSection
