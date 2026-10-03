@@ -277,8 +277,9 @@ export function AgentsListPage() {
               return (
                 <EntityCard
                   key={agent.id}
-                  role="button"
-                  tabIndex={0}
+                  // Not role="button": the card holds its own buttons (nested-interactive,
+                  // and the card's name swallowed theirs). Keyboard users open it with the
+                  // View/Edit button; a pointer click anywhere on the card still opens it.
                   data-testid={`agent-card-${agent.slug}`}
                   // Opacity would also wash out the "Disabled" badge's and
                   // the description's text below the 4.5:1 contrast floor
@@ -286,11 +287,6 @@ export function AgentsListPage() {
                   // Badge alone signals the state.
                   className="cursor-pointer"
                   onClick={() => navigate(`/agents/${agent.id}`)}
-                  onKeyDown={(e) => {
-                    if (e.key !== 'Enter' && e.key !== ' ') return;
-                    e.preventDefault();
-                    navigate(`/agents/${agent.id}`);
-                  }}
                   leading={
                     <span className="flex size-8 shrink-0 items-center justify-center rounded-card bg-selected">
                       <AgentGlyph size={16} />

@@ -129,9 +129,14 @@ function EffectiveCapabilitiesBody({
         <div className="text-small text-fg-3">Capabilities</div>
         <div className="grid grid-cols-2 gap-x-3 gap-y-1">
           {AGENT_TOOL_GROUPS.map((group) => (
-            <div key={group} className={cn('flex items-center gap-1.5 truncate text-small', groups[group] ? 'text-fg' : 'text-fg-3')}>
+            <div
+              key={group}
+              title={TOOL_GROUP_LABELS[group]}
+              className={cn('flex min-w-0 items-center gap-1.5 text-small', groups[group] ? 'text-fg' : 'text-fg-3')}
+            >
               <Icon concept={groups[group] ? 'check' : 'x'} size={12} className="shrink-0" />
-              {TOOL_GROUP_LABELS[group]}
+              {/* The ellipsis needs a block box: "Orchestration (spawn…" was clipped mid-word. */}
+              <span className="min-w-0 truncate">{TOOL_GROUP_LABELS[group]}</span>
             </div>
           ))}
         </div>
