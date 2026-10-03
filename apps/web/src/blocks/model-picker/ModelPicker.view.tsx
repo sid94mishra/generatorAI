@@ -8,7 +8,8 @@
 // otherwise one list; rows name + mono id + context "200K · 1M" + check)
 // · detail pane (title, tier, description, Provider / Context (prompt) /
 // Long context / Long context (prompt) / Max output / Reasoning / Vision,
-// footnote) · 32h footer "↑↓ Navigate · ↵ Select · Esc Close".
+// footnote) · 32h footer "↑↓ Navigate · ↵ Select · Esc Close" under the model list
+// (board: the provider column and the detail pane keep the full height).
 //
 // Keyboard: focus lands in the search field; typing filters, ↑/↓ move the
 // highlight through the visible models (aria-activedescendant), Enter picks,
@@ -333,11 +334,11 @@ function ModelPickerPanel({ value, catalog, loading, refreshing, onRefresh, onOp
               </div>
             )}
           </div>
+          <KbdHintRow hints={HINTS} end={status} className="min-h-8 shrink-0 border-t border-line-soft px-3" />
         </div>
 
         <ModelDetail model={provider?.availability === 'ready' ? highlighted : undefined} provider={provider} />
       </div>
-      <KbdHintRow hints={HINTS} end={status} className="min-h-8 shrink-0 border-t border-line-soft px-3" />
     </>
   );
 }

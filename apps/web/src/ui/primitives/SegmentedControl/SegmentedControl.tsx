@@ -12,7 +12,7 @@
 //   tabs  — scopes a list (All / Active / Archived): Base UI Tabs (tablist).
 // ────────────────────────────────────────────────────────────────
 
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { cva } from 'class-variance-authority';
 import { Radio } from '@base-ui/react/radio';
 import { RadioGroup } from '@base-ui/react/radio-group';
@@ -77,14 +77,26 @@ export interface SegmentedControlProps<V extends string = string> {
   'data-testid'?: string;
 }
 
-function ItemContent({ item }: { item: SegmentedItem }) {
+function ItemContent({ item, labelId }: { item: SegmentedItem; labelId?: string }) {
   return (
     <>
       {item.icon ? <Icon concept={item.icon} size={14} /> : null}
-      {item.label ? <span className="truncate">{item.label}</span> : null}
-      {item.count != null ? <span className="font-mono text-micro text-fg-3">{item.count}</span> : null}
+      {item.label ? (
+        <span id={labelId ? `${labelId}-l` : undefined} className="truncate">
+          {item.label}
+        </span>
+      ) : null}
+      {item.count != null ? (
+        <span id={labelId ? `${labelId}-c` : undefined} className="font-mono text-micro text-fg-3">
+          {item.count}
+        </span>
+      ) : null}
     </>
   );
+}
+
+function optionLabelledBy(id: string, item: SegmentedItem): string {
+  return item.count != null ? `${id}-l ${id}-c` : `${id}-l`;
 }
 
 /** A small set of mutually exclusive options drawn as one pill track. */
@@ -99,6 +111,7 @@ export function SegmentedControl<V extends string = string>({
   className,
   'data-testid': testId,
 }: SegmentedControlProps<V>) {
+  const uid = useId();
   const track = cn(trackVariants({ size, fullWidth }), className);
   const withReason = (item: SegmentedItem<V>, node: ReactNode) =>
     item.disabled && item.reason ? (
@@ -142,7 +155,7 @@ export function SegmentedControl<V extends string = string>({
       className={track}
       data-testid={testId}
     >
-      {items.map((item) =>
+      {items.map((item, index) =>
         withReason(
           item,
           <Radio.Root
@@ -150,9 +163,12 @@ export function SegmentedControl<V extends string = string>({
             value={item.value}
             disabled={item.disabled}
             aria-label={item.label ? undefined : item.ariaLabel}
+            // Inside a kit Field, Base UI labels every radio with the Field's label;
+            // each option names itself from its own text instead.
+            aria-labelledby={item.label ? optionLabelledBy(`${uid}-${index}`, item) : undefined}
             className={itemClass(item)}
           >
-            <ItemContent item={item} />
+            <ItemContent item={item} labelId={`${uid}-${index}`} />
           </Radio.Root>,
         ),
       )}

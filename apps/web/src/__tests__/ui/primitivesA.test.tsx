@@ -11,6 +11,8 @@ describe('initialsOf (P-10)', () => {
     ['Bug Fixer', 'BF'],
     ['orchestrator', 'OR'],
     ['test-writer', 'TW'],
+    ['Faux (test)', 'FT'],
+    ['(beta)', 'BE'],
     ['  ', '?'],
   ])('%s → %s', (name, initials) => {
     expect(initialsOf(name)).toBe(initials);

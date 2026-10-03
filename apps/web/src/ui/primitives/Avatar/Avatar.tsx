@@ -14,9 +14,9 @@ import { Avatar as BaseAvatar } from '@base-ui/react/avatar';
 import { cn } from '../../lib/cn.js';
 import { AVATAR_SIZE_CLASSES, type AvatarSize } from '../../lib/avatar.js';
 
-/** "Bug Fixer" → "BF", "orchestrator" → "OR", "" → "?". */
+/** "Bug Fixer" → "BF", "orchestrator" → "OR", "Faux (test)" → "FT", "" → "?". Punctuation never shows. */
 export function initialsOf(name: string): string {
-  const words = name.trim().split(/[\s._-]+/).filter(Boolean);
+  const words = name.trim().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
   if (words.length === 0) return '?';
   const [first = '', second] = words;
   const letters = second ? `${first[0] ?? ''}${second[0] ?? ''}` : first.slice(0, 2);
