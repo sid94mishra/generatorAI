@@ -1,10 +1,10 @@
 // The builder group (04 §1.1: nested Stack; `(app)/_layout` presents the group as a full-screen modal, MD-21). The
-// builder list is the group's root; its sheets (validate, versions, add stage, loop settings) present over it, so a
+// builder list is the group's root; the stage editor is a full-screen modal over it (M8-06); its sheets (validate, versions, add stage, loop settings) present over it, so a
 // link to a sheet still opens with the builder beneath (initialRouteName). Presentation from ui/platform (MD-21).
 import React from 'react';
 import { Stack } from 'expo-router';
 
-import { sheetOptions, useStackScreenOptions } from '../../../../../src/ui/platform';
+import { fullScreenModalOptions, sheetOptions, useStackScreenOptions } from '../../../../../src/ui/platform';
 
 export const unstable_settings = { initialRouteName: 'index' };
 
@@ -22,6 +22,7 @@ export default function BuilderLayout(): React.ReactElement {
       {LARGE_SHEETS.map((name) => (
         <Stack.Screen key={name} name={name} options={sheetOptions('large')} />
       ))}
+      <Stack.Screen name="stages/[stageKey]" options={fullScreenModalOptions} />
     </Stack>
   );
 }

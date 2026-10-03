@@ -183,6 +183,16 @@ export function useBuilderWrites(id: string) {
   };
 }
 
+/** Skills and MCP servers a stage can add over its agent (MStageTools); the same cache as the agent editor's. */
+export function useCapabilityCatalog() {
+  const api = useApi();
+  const skills = useQuery({ queryKey: ['system', 'artifacts', 'skill'] as const, queryFn: () => api.system.artifacts('skill'), staleTime: 5 * 60_000 });
+  const mcp = useQuery({ queryKey: ['system', 'mcp-servers'] as const, queryFn: () => api.system.mcpServers(), staleTime: 5 * 60_000 });
+  const skillList = useMemo(() => (skills.data ?? []).map((x) => ({ id: x.id, name: x.name, description: (x as { description?: string }).description })), [skills.data]);
+  const mcpList = useMemo(() => (mcp.data ?? []).map((m) => ({ id: m.id ?? m.name, name: m.name, description: (m as { description?: string }).description })), [mcp.data]);
+  return { skills: skillList, mcp: mcpList, loading: skills.isLoading || mcp.isLoading };
+}
+
 /** One version's graph (the history sheet's diff and restore). */
 export function useDefinitionVersion(id: string, versionId: string | null) {
   const admin = useAdminApi();

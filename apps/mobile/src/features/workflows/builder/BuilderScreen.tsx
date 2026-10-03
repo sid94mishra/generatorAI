@@ -5,8 +5,8 @@
 // banner (who drafted it, what it replaces, risk chips — neutral, MD-25 —, what changed, View diff · Discard ·
 // Publish, the filled one while it shows). List: the top-level stages as cards — reorder only inside a linear chain
 // (MD-04; the drag handle, or Move up / Move down in the menu and as accessibility actions), a loop card with its
-// body and its loop settings, the edges a phone does not edit as read-only callouts. Graph: MB-35 read-only; a node
-// selects its stage. Bottom toolbar: Add stage (after the selected one), Validate (MB-37 in a sheet), Publish vN,
+// body, the edges a phone does not edit as read-only callouts; a card opens its stage editor (M8-06). Graph: MB-35
+// read-only; a node opens its stage editor. Bottom toolbar: Add stage (after the selected one), Validate (MB-37 in a sheet), Publish vN,
 // and Run / Test run (the filled one, MD-22 — secondary while the agent-draft banner shows). Save is a whole-graph
 // save against the revision the draft started from; a 409 says someone else saved and offers theirs or yours.
 import React, { useEffect, useMemo, useState } from 'react';
@@ -15,7 +15,7 @@ import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { riskFlags, type RiskFlag, type StageSpec } from '@generatorai/workflow-spec';
 
 import { RunGraph } from '../../../blocks/RunGraph';
-import { WORKFLOWS_HREF, addStageHref, builderValidateHref, loopSettingsHref, runSheetHref, workflowHref, workflowVersionsHref } from '../../../blocks/shell/hrefs';
+import { WORKFLOWS_HREF, addStageHref, builderValidateHref, loopSettingsHref, runSheetHref, stageEditorHref, workflowHref, workflowVersionsHref } from '../../../blocks/shell/hrefs';
 import { errorsByStage } from '../../../blocks/ValidationList';
 import { BottomToolbar } from '../../../ui/layout/BottomToolbar';
 import { FullScreenEditor } from '../../../ui/layout/FullScreenEditor';
@@ -45,7 +45,7 @@ import { changeCount, freshErrors, isDirty, useBuilderStore } from './builderSto
 import { useBuilderDraft, useValidateDraft } from './useBuilderDraft';
 
 type Href = Parameters<typeof router.replace>[0];
-type StageMenuId = 'up' | 'down' | 'duplicate' | 'delete' | 'loop';
+type StageMenuId = 'up' | 'down' | 'edit' | 'duplicate' | 'delete' | 'loop';
 
 export const RISK_WORD: Record<RiskFlag, string> = {
   writes_files: 'Writes files',
@@ -281,11 +281,18 @@ export default function BuilderScreen(): React.ReactElement {
         })
         .catch((e: unknown) => toast({ kind: 'error', message: errorText(e) }));
     });
+  /** A card or a node opens its stage editor (M8-06) and becomes the selection Add stage inserts after. */
+  const openStage = (key: string): void => {
+    store().select(id, key);
+    router.push(stageEditorHref(id, key) as Href);
+  };
   const addStage = (): void => router.push(addStageHref(id, store().drafts[id]?.selected) as Href);
   const stageMenu = (stage: StageSpec, index: number): MenuEntry[] => [
     ...(canMove(order, chains, index, index - 1) ? [{ id: 'up', label: 'Move up', icon: 'chevron-up' as const }] : []),
     ...(canMove(order, chains, index, index + 1) ? [{ id: 'down', label: 'Move down', icon: 'chevron-down' as const }] : []),
-    ...(stage.kind === 'loop' ? [{ type: 'separator' as const }, { id: 'loop', label: 'Loop settings', icon: 'repeat' as const }] : []),
+    { type: 'separator' },
+    { id: 'edit', label: 'Edit stage', icon: 'edit' },
+    ...(stage.kind === 'loop' ? [{ id: 'loop', label: 'Loop settings', icon: 'repeat' as const }] : []),
     { type: 'separator' },
     { id: 'duplicate', label: 'Duplicate', icon: 'copy' },
     { type: 'separator' },
@@ -296,6 +303,9 @@ export default function BuilderScreen(): React.ReactElement {
       case 'up':
       case 'down':
         edit((g) => nudge(g, stage.key, mid === 'up' ? -1 : 1));
+        return;
+      case 'edit':
+        openStage(stage.key);
         return;
       case 'loop':
         router.push(loopSettingsHref(id, stage.key) as Href);
@@ -400,10 +410,7 @@ export default function BuilderScreen(): React.ReactElement {
             <RunGraph
               variant="canvas"
               graph={graph}
-              onNodePress={(key) => {
-                store().select(id, key);
-                store().setView(id, 'list');
-              }}
+              onNodePress={openStage}
               onList={() => store().setView(id, 'list')}
               testID="builder-graph"
             />
@@ -436,7 +443,7 @@ export default function BuilderScreen(): React.ReactElement {
                 errors={errors.get(stage.key) ?? 0}
                 menu={stageMenu(stage, index)}
                 onMenu={(mid) => onStageMenu(stage, mid as StageMenuId)}
-                onPress={() => (stage.kind === 'loop' ? onStageMenu(stage, 'loop') : store().select(id, draft.selected === stage.key ? null : stage.key))}
+                onPress={() => openStage(stage.key)}
                 handle={chains.get(stage.key) !== null ? handle : null}
                 callouts={edgeCallouts(graph, stage.key)}
                 body={graph.stages.filter((s) => s.parentKey === stage.key)}
