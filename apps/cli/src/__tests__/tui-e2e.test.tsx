@@ -457,10 +457,12 @@ describe('TUI · navigation', () => {
     }
   }, 60000);
 
-  it('resets the cursor when a pane is replaced with a different list', async () => {
+  it('resets the cursor when a pane is replaced with a different list', async (ctx) => {
     // The shell owns one cursor and wrote it out per pane without ever
     // reading it back, so `g w` then `g c` left the Chats cursor on whatever
-    // row Workflows had been on.
+    // row Workflows had been on. Needs rows in both lists: a live server
+    // (GENERATORAI_TEST_SERVER, e.g. the redesign sandbox), skipped without one.
+    if (!liveServerReachable) return ctx.skip();
     active = await mount();
     const { screen } = active;
     await screen.waitFor('GeneratorAI');

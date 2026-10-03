@@ -346,34 +346,36 @@ describe('PtyHostAdapter — availability', () => {
     }
   }, 20_000);
 
+  // The two cases below are about the adapter's start-promise bookkeeping, so
+  // the client's boot is stubbed to fail: forking a node process that loads
+  // tsx only to die on a missing entry made them take 30 s on a loaded machine
+  // while proving nothing more.
+  const failingAdapter = () => {
+    const adapter = new PtyHostAdapter({ logger: mockLogger(), hostEntryPath: CRASHABLE_HOST_ENTRY });
+    const client = (adapter as unknown as { client: PtyHostClient }).client;
+    const start = vi.spyOn(client, 'start').mockRejectedValue(new Error('pty-host failed to boot'));
+    return { adapter, start };
+  };
+
   it('a failed start is retried rather than cached forever', async () => {
     // The rejected promise used to be stored permanently, so one unlucky boot
     // disabled the out-of-process host for the life of the process.
-    const missing = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'does-not-exist.mjs');
-    const adapter = new PtyHostAdapter({ logger: mockLogger(), hostEntryPath: missing });
-    try {
-      await expect(adapter.start()).rejects.toThrow();
-      const first = (adapter as unknown as { startPromise: Promise<void> | null }).startPromise;
-      expect(first).toBeNull();
+    const { adapter, start } = failingAdapter();
+    await expect(adapter.start()).rejects.toThrow('pty-host failed to boot');
+    expect((adapter as unknown as { startPromise: Promise<void> | null }).startPromise).toBeNull();
 
-      // Second call actually attempts again (and fails again, for the same
-      // reason) rather than re-awaiting the cached rejection.
-      await expect(adapter.start()).rejects.toThrow();
-    } finally {
-      await adapter.stop().catch(() => undefined);
-    }
-  }, 30_000);
+    // Second call actually attempts again (and fails again, for the same
+    // reason) rather than re-awaiting the cached rejection.
+    await expect(adapter.start()).rejects.toThrow('pty-host failed to boot');
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(adapter.isAvailable()).toBe(false);
+  });
 
   it('whenReady() resolves rather than rejecting when the start failed', async () => {
-    const missing = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'does-not-exist.mjs');
-    const adapter = new PtyHostAdapter({ logger: mockLogger(), hostEntryPath: missing });
-    try {
-      const started = adapter.start().catch(() => undefined);
-      await expect(adapter.whenReady()).resolves.toBeUndefined();
-      await started;
-      expect(adapter.isAvailable()).toBe(false);
-    } finally {
-      await adapter.stop().catch(() => undefined);
-    }
-  }, 30_000);
+    const { adapter } = failingAdapter();
+    const started = adapter.start().catch(() => undefined);
+    await expect(adapter.whenReady()).resolves.toBeUndefined();
+    await started;
+    expect(adapter.isAvailable()).toBe(false);
+  });
 });

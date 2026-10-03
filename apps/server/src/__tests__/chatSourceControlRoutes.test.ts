@@ -9,15 +9,19 @@
 // response projection that strips the server-internal `conversationSeed`.
 // ────────────────────────────────────────────────────────────────
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
 import { createChatApiRoutes } from '../routes/chats.js';
 
-const createChat = vi.fn();
-const update = vi.fn();
-const getById = vi.fn();
+// Fresh mocks per test (assigned in beforeEach, read by makeApp at call
+// time): a request a timed-out test left in flight lands on ITS mocks, never
+// on the next test's — on a loaded machine that late call used to become the
+// next test's `createdWith()`.
+let createChat: Mock;
+let update: Mock;
+let getById: Mock;
 
 function makeApp() {
   const container = {
@@ -42,9 +46,9 @@ function createdWith(): Record<string, unknown> {
 }
 
 beforeEach(() => {
-  createChat.mockReset();
-  update.mockReset();
-  getById.mockReset();
+  createChat = vi.fn();
+  update = vi.fn();
+  getById = vi.fn();
   createChat.mockImplementation(async (params: Record<string, unknown>) => ({
     id: 'c1',
     name: params['name'],

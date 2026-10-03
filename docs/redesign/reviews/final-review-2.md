@@ -104,3 +104,30 @@ role or accessible name changed; new accessible names only (`img "Pinned"`, `img
 | Docs-site source paths (#22) | **Resolved** (#10). `reference:generate` already reads `ui-contract/settings.ts` |
 | Home retry without attachments (#21a) | **Resolved** (#9); #21b (worktrees rows for chat mounts) open |
 | P8 deferred platform | Not started. **P8-01 (Vite 8) is now unblocked**: Vite 8.3.2, `@tailwindcss/vite` 4.3.3, Storybook 10.6.1 and Vitest 4.1.11 all accept `vite ^8` (`@vitejs/plugin-react` 6.x requires it). P8-02 (React Compiler) has no external blocker. P8-03 (TypeScript 7) stays blocked: 7.0.2 is out, 7.1 is not, and typescript-eslint 8.71 supports `typescript <6.1` |
+
+## Addendum — open items closed and P8 (2026-10-03)
+
+| Item | Commit | Result |
+|---|---|---|
+| #16 / #21b chat-workspace mounts write no `worktrees` rows | `098fd2f1` | `MountService` records every ready worktree mount of a project codebase in `worktrees` under the mount's id (chat → `manual`/chat id, run → `workflow`/run id, map items → their run); removing/releasing the mount or deleting the workspace drops the row, and removing the row (Remove, Clean up orphans, the retention sweep) releases the mount (branch kept). Manual removal of an active worktree is refused (409) and hidden on web as on mobile; the retention clock starts when the worktree is orphaned, a restored chat's worktree returns to active. No migration (shared key). **D-84.** Real-git test (6 cases) + cleanup tests; sandbox check: a chat with a worktree source lists under its codebase with `link.entity: 'chat'`, size 701 KB, no Remove; `DELETE` → 409 |
+| #17 + parked load-sensitive tests | `4716a535` | Reproduced by running the web, core and server suites concurrently (load 50–70 on 8 cores, swap in use). Fixed at the cause: faked clock for the sidebar elapsed time, caret wait in the restored-draft test, act-drained sends instead of 102 polls, fake timers for the HostSupervisor SIGTERM grace, stubbed pty-host boot for the adapter retry tests, fresh mocks per test in `chatSourceControlRoutes` (a timed-out test's late request had become the next test's assertion), a never-settling probe instead of a 500 ms stopwatch in `harnessProvidersNonBlocking`, one test per tab/mount in `AgentStageInspector`/ChatPage paging, cli `tui-e2e` cursor test skipped without a live server, `projects.spec` create waits on the `POST /api/projects` response. Budgets only where the work is CPU-bound and nothing is timed: web unit hang budget 20 s, real-git `chatList` 30 s, the 51-send cap 60 s. Evidence: affected files 5× alone and 3× next to a concurrently running suite all green; the create spec 4× under 8 busy threads. What remains is starvation, not nondeterminism: with three suites at once and the machine swapping, a different handful of heavy characterization tests still exceed their budget (always "timed out", never an assertion); the real-process `PtyHostAdapter` tests depend on node+tsx boot time; `VoiceWorkerPool` "recycles the worker" needs the network (Hugging Face 404s) |
+| Sandbox `--clean` | `a92ed835` | Found while cleaning up: `--clean` deleted every sandbox temp dir, including other sessions' running sandboxes. Each sandbox now writes its pid; a live one is kept |
+| P8-01 Vite 8 | `0a39b523` | Vite 8.3.2 (Rolldown) for web, Storybook builder and every package's Vitest (root override); `@vitejs/plugin-react` 6.1.1, Storybook 10.6.1; Vitest 4.1.11 and `@tailwindcss/vite` 4.3.3 kept (both accept `^8`). `rolldownOptions` + a `codeSplitting` group (same chunk function), `import.meta.dirname`. Budgets green without changes: initial gzip 427.8 → 458.7 KB (Rolldown keeps 54 shared chunks as modulepreloads instead of folding them into the entry), fonts 94.6 KB, initial CSS 28.0 → 28.2 KB. Lightning CSS warns about `::highlight()` (rules emitted unchanged). Hoisting shift recorded in COORDINATION.md (metro/hermes-parser/jest-worker/source-map; zod/esbuild unchanged). Mobile Vitest 1112/1112 on Vite 8 (read-only run) |
+| P8-02 React Compiler | `78ec9dcd` | Compiler 1.0 (Babel) in dev, production, Storybook and the web unit project; `'use no memo'` in TranscriptView and DataTable (useVirtualizer); 144 functions skipped by the compiler, none excluded by config. **D-85.** xyflow canvases (production build, 24 stages, component renders, 3 stable runs): builder pan 3,982 → 199, node drag 5,211 → 1,066, zoom 3,069 → 536, select 5 nodes 1,576 → 1,085; run graph open 1,074 → 758, pan 900 → 409; script time pan 63–70 → 20 ms, drag ~103 → ~64 ms. Cost: build ~3 → ~21 s, initial gzip +39.6 KB (498.3 KB of 800) |
+| P8-03 TypeScript 7 | — | Still blocked: `typescript` latest 7.0.2 (no 7.1), `typescript-eslint` 8.71 peer `>=4.8.4 <6.1.0` |
+
+### Verification after all four (macOS)
+
+| Gate | Result |
+|---|---|
+| typecheck (web, core, db, server, sdk, cli) | pass |
+| lint (web) | 0 errors (75 pre-existing warnings) |
+| `check:design`, `check:tokens` | OK |
+| web unit (compiled components) | 126 files, **1564/1564** |
+| core / server / db / client-core / shared / desktop / design-tokens / sdk / cli | 1794 / 696 / 169 / 788 / 447 / 445 / 804 / 8 / 323 (9 skipped) |
+| web build, `check:bundle`, `check:css` | pass (initial gzip 498.3 KB, fonts 94.6 KB) |
+| Storybook story tests, 3 appearances + axe, cold optimizer cache | **1731/1731** (no "Failed to import" on the first run after the dependency change) |
+| `build-storybook` | pass |
+| e2e (`agent-tests/e2e`, fresh isolated sandbox :3397/:5397, Vite 8 dev + compiler, `--workers=1`) | **84 passed, 4 skipped, 0 flaky** |
+| desktop smokes (macOS, one at a time, isolated profiles) | chrome 59/59 · right-pane 9/9 · terminal 8/8 · browser 11/11 · dock-browser 23/23 · diff-review 10/10 (real provider; diff viewer workers OK in the Rolldown bundle) |
+| VRT | not run: no Docker (D-53) |

@@ -88,6 +88,10 @@ export function TranscriptView({
   collapseBeyond = 0,
   className,
 }: TranscriptViewProps) {
+  // TanStack Virtual's useVirtualizer returns a mutable instance whose methods
+  // the React Compiler cannot track, so memoised children would go stale
+  // (P8-02, D-85).
+  'use no memo';
   // Virtualize only when the scroller has real layout (a jsdom test has none).
   const [measurable, setMeasurable] = useState(false);
   useLayoutEffect(() => {

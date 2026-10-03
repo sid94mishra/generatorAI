@@ -54,3 +54,10 @@ mobile `lib/sandbox-options.mjs` port handling over the P7 `portArg`), `pnpm-loc
 manifests; web keeps no Radix, server/sdk keep zod 3.25). Gates: typecheck 51/51 once the gitignored
 `apps/mobile/.rnstorybook/storybook.requires.ts` is generated, lint 0 errors, check:design, check:tokens, tokens 533,
 mobile Vitest 1116 + Jest 6, web unit 1558, shared 440, client-core 770. Status report: `reviews/mobile-status-2026-10-01.md`.
+
+**P8-01 Vite 8 (2026-10-03, note for the mobile session).** Root `pnpm.overrides.vite` is now `^8.3.2` (Rolldown), so
+`apps/mobile`'s Vitest runs on Vite 8 after the next merge (its 1112 tests pass here on Vite 8, run read-only). The
+re-resolve also changed which versions `shamefully-hoist` puts at the root — no lockfile version changed for these, only
+the hoisted pick: `metro`/`metro-*` 0.84.5 → 0.84.6, `hermes-parser` 0.25.1 → 0.36.1, `jest-worker` 27 → 29,
+`source-map` 0.7.6 → 0.5.7. Nothing in the workspace imports them, but Expo resolves `metro` from the root, so run the
+Metro/Expo smoke once after merging. `zod`, `esbuild`, `rollup` keep their hoisted versions.

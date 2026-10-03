@@ -37,13 +37,24 @@ test.describe('Create project', () => {
     await expect(create).toBeDisabled();
 
     const name = `W4 Created ${Date.now()}`;
-    await page.getByRole('textbox', { name: 'Name' }).fill(name);
+    const field = page.getByRole('textbox', { name: 'Name' });
+    await field.fill(name);
+    await expect(field).toHaveValue(name);
     await expect(create).toBeEnabled();
-    await create.click();
 
-    await expect(page).toHaveURL(/\/projects\/[0-9a-f-]{36}/, { timeout: 15_000 });
-    const id = page.url().split('/projects/')[1]?.split(/[/?#]/)[0];
-    if (id) tracker.track('project', id);
+    // Wait on the create request itself, not on a guessed navigation budget:
+    // the id comes from the server's answer (tracked for cleanup even if the
+    // page then fails), and the URL must be exactly that project's.
+    const created = page.waitForResponse(
+      (r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/projects',
+    );
+    await create.click();
+    const response = await created;
+    expect(response.status(), await response.text()).toBe(201);
+    const { id } = (await response.json()) as { id: string };
+    tracker.track('project', id);
+    await expect(page).toHaveURL(new RegExp(`/projects/${id}(?:[/?#]|$)`));
+    await expect(page.getByRole('heading', { name, level: 1 })).toBeVisible();
   });
 });
 

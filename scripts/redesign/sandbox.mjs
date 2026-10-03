@@ -121,15 +121,41 @@ if (process.argv.includes('--help') || process.argv.includes('--dry-run')) {
 // immediate, on-demand counterpart for someone who only knows `--clean`.
 const DESKTOP_PROFILE_PATTERN = /^gai-(desktop-smoke|security-smoke|chrome-smoke|packaged-smoke|pairing-diag)-/;
 
+/** The sandbox that owns a temp dir writes its pid there; `--clean` leaves a live one alone. */
+const PID_FILE = 'sandbox.pid';
+
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM: the process exists but belongs to someone else — still alive.
+    return err?.code === 'EPERM';
+  }
+}
+
 function clean() {
   const tmp = os.tmpdir();
   let removed = 0;
+  let kept = 0;
   for (const name of fs.readdirSync(tmp)) {
     if (!name.startsWith(PREFIX) && !DESKTOP_PROFILE_PATTERN.test(name)) continue;
+    // Several sandboxes run side by side (parallel sessions, other worktrees):
+    // deleting a running one's DB and workspaces out from under it breaks it.
+    let pid = 0;
+    try {
+      pid = Number.parseInt(fs.readFileSync(path.join(tmp, name, PID_FILE), 'utf8'), 10) || 0;
+    } catch {
+      /* no pid file: a desktop profile or a sandbox from before this guard */
+    }
+    if (pid > 0 && pid !== process.pid && isAlive(pid)) {
+      kept += 1;
+      continue;
+    }
     fs.rmSync(path.join(tmp, name), { recursive: true, force: true });
     removed += 1;
   }
-  log(`removed ${removed} sandbox/desktop-smoke temp dir(s) from ${tmp}`);
+  log(`removed ${removed} sandbox/desktop-smoke temp dir(s) from ${tmp}${kept ? `; kept ${kept} in use` : ''}`);
 }
 
 if (process.argv.includes('--clean')) {
@@ -166,6 +192,7 @@ if (!fs.existsSync(BUNDLE_ENTRY)) {
 // ── 2. Temp DB / artifacts / workspaces / extensions dirs ──────
 
 const sandboxDir = fs.mkdtempSync(path.join(os.tmpdir(), PREFIX));
+fs.writeFileSync(path.join(sandboxDir, PID_FILE), String(process.pid));
 const dbPath = path.join(sandboxDir, 'sandbox.db');
 const artifactsDir = path.join(sandboxDir, 'artifacts');
 const workspacesDir = path.join(sandboxDir, 'workspaces');

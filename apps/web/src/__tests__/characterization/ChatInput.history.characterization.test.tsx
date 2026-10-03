@@ -263,14 +263,20 @@ describe('ChatInput — local history (09 §5.1)', () => {
     renderComposer({ customSendFn, promptHistory: [] });
     for (let i = 0; i < 51; i += 1) {
       fireEvent.change(textbox(), { target: { value: `p${i}` } });
-      fireEvent.keyDown(textbox(), { key: 'Enter' });
-      await waitFor(() => expect(customSendFn).toHaveBeenCalledTimes(i + 1));
-      await waitFor(() => expect(textbox()).toHaveValue(''));
+      // `act` drains the send (an awaited promise) and its state updates, so
+      // each round is checked once instead of polled twice.
+      await act(async () => {
+        fireEvent.keyDown(textbox(), { key: 'Enter' });
+      });
+      expect(customSendFn).toHaveBeenCalledTimes(i + 1);
+      expect(textbox()).toHaveValue('');
     }
     for (let i = 0; i < 50; i += 1) expect(press('ArrowUp')).toBe(true);
     expect(textbox()).toHaveValue('p1');
     expect(press('ArrowUp')).toBe(false);
-  });
+    // 51 full send cycles through the real Composer (≈0.25 s alone) — the cap
+    // is the behaviour; every cycle is checked, nothing is timed.
+  }, 60_000);
 });
 
 describe('ChatInput — restored draft (09 §5.1; 03 §6.1 #14)', () => {
@@ -279,9 +285,14 @@ describe('ChatInput — restored draft (09 §5.1; 03 §6.1 #14)', () => {
     const customSendFn = vi.fn(async () => undefined);
     const r = renderComposer({ customSendFn, restoredDraft: { text: 'rewound prompt', at: 1 } });
     expect(textbox()).toHaveValue('rewound prompt');
-    await waitFor(() => expect(textbox()).toHaveFocus());
-    expect(textbox().selectionStart).toBe('rewound prompt'.length);
-    expect(textbox().selectionEnd).toBe('rewound prompt'.length);
+    // Focus and caret land together in the restore's animation frame; the box
+    // may already hold focus (autofocus) before that frame runs, so wait for
+    // the caret, not just the focus.
+    await waitFor(() => {
+      expect(textbox()).toHaveFocus();
+      expect(textbox().selectionStart).toBe('rewound prompt'.length);
+      expect(textbox().selectionEnd).toBe('rewound prompt'.length);
+    });
 
     await user.type(textbox(), ' edited');
     // Same token again (a re-render with a fresh object): ignored.
