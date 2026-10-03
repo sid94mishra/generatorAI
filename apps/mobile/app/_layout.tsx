@@ -18,7 +18,7 @@ import '../src/theme/prepaint';
 // native installs the JSI/OpenSSL implementation, web asserts the built-in one.
 import { installCrypto } from '../src/services/crypto/installCrypto';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import { Redirect, Stack, SplashScreen, router, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -40,6 +40,7 @@ import { AppLockGate } from '../src/services/auth/AppLock';
 import { Spinner, ToastProvider, useToast, ContextMenuProvider, Button, ErrorState } from '../src/components/ui';
 import { usePushNotifications } from '../src/services/notifications/usePushNotifications';
 import { useQuickActionLinks } from '../src/services/native/quickActions';
+import { useShareIntake } from '../src/services/native/shareIntent';
 import { MuxStreamProvider } from '../src/services/stream/MuxStreamProvider';
 import { useGlobalStream } from '../src/services/stream/useGlobalStream';
 
@@ -127,6 +128,15 @@ function AuthLifecycle({ children }: { children: React.ReactNode }): React.React
   usePushNotifications();
   // Home-screen quick actions / app shortcuts become queued links (M9-07), like a notification tap.
   useQuickActionLinks();
+  // Content shared from another app opens the Send to agent sheet (M9-08); on iOS the hand-off link already did.
+  const pathRef = useRef(pathname);
+  useEffect(() => {
+    pathRef.current = pathname;
+  }, [pathname]);
+  const openShareSheet = useCallback(() => {
+    if (pathRef.current !== '/share') router.push('/share');
+  }, []);
+  useShareIntake(openShareSheet);
   const toast = useToast();
   const hasIncomingLink = useLinkRouting((message) => toast({ message, tone: 'error' }));
 

@@ -210,6 +210,8 @@ const config: ExpoConfig = {
   },
 
   plugins: [
+    // First on purpose: its entitlements mod runs after every other plugin's (see the file).
+    './plugins/withUniqueAppGroups',
     ...(process.env['GAI_A11Y_AUDIT'] === '1' ? ['./plugins/withA11yAuditTarget'] : []),
     'expo-router',
     'expo-asset',
@@ -326,6 +328,24 @@ const config: ExpoConfig = {
           { name: 'Running', displayName: 'Running', description: 'Chats and runs in progress, with their elapsed time.', supportedFamilies: ['systemMedium', 'systemLarge'], contentMarginsDisabled: false },
           { name: 'Summary', displayName: 'Summary', description: 'How many items need you and how many are running.', supportedFamilies: ['systemSmall'], contentMarginsDisabled: false },
         ],
+      },
+    ],
+    [
+      // Share to agent (06 §7.7, MX-09, M9-08; MD-190): an iOS share extension and Android ACTION_SEND /
+      // ACTION_SEND_MULTIPLE filters that only hand the payload to the app (App Group on iOS) and open it on the
+      // `/share` sheet — the extension holds no credentials. 8.0.1 is the SDK 57 release (`expo: ^57`).
+      'expo-share-intent',
+      {
+        iosActivationRules: {
+          NSExtensionActivationSupportsText: true,
+          NSExtensionActivationSupportsWebURLWithMaxCount: 1,
+          NSExtensionActivationSupportsImageWithMaxCount: 5,
+          NSExtensionActivationSupportsFileWithMaxCount: 5,
+        },
+        iosAppGroupIdentifier: APP_GROUP,
+        iosShareExtensionBundleIdentifier: 'dev.generatorai.app.share-extension',
+        androidIntentFilters: ['text/*', 'image/*', 'application/*'],
+        androidMultiIntentFilters: ['image/*', 'application/*'],
       },
     ],
     [

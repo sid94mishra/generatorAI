@@ -264,3 +264,23 @@ export const SendChatPromptSchema = z.object({
    */
   mode: AgentModeSchema.optional(),
 });
+
+// ────────────────────────────────────────────────────────────────
+// Chat ingest (mobile MG-09): the `target` part of POST /api/chats/ingest
+// ────────────────────────────────────────────────────────────────
+
+export const ChatIngestTargetSchema = z.union([
+  z.object({ chatId: z.string().min(1).max(200) }).strict(),
+  z
+    .object({
+      newChat: z
+        .object({
+          name: z.string().trim().min(1).max(200).optional(),
+          projectId: z.string().uuid().optional(),
+          agentRef: z.string().max(128).optional(),
+          model: z.string().max(200).optional(),
+        })
+        .strict(),
+    })
+    .strict(),
+]);

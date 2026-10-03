@@ -486,6 +486,16 @@ export type {
   BrowserAnnotatePollResult,
 } from './DesktopShell.js';
 
+// ── Chat ingest (mobile MG-09) ──
+export type { ChatIngestTarget, ChatIngestResult, ChatIngestInput } from './ChatIngest.js';
+export {
+  CHAT_INGEST_MAX_FILES,
+  CHAT_INGEST_MAX_FILE_BYTES,
+  CHAT_INGEST_MAX_TEXT,
+  chatIngestPrompt,
+  chatIngestName,
+} from './ChatIngest.js';
+
 // ── Chat list v2 (G-02) ──
 export type {
   ChatTurnStatus,

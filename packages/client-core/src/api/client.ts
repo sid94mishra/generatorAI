@@ -22,6 +22,8 @@ import {
   type BackgroundTaskListItem,
   type AttentionSnapshot,
   type ChatBulkResult,
+  type ChatIngestInput,
+  type ChatIngestResult,
   type ChatListPage,
   type ChatListQuery,
   type ChatListSummary,
@@ -1240,6 +1242,28 @@ export function createApiClient(fetchImpl: ApiFetch) {
         // hand here would omit the boundary and the server could not parse it.
         return request<{ sessionId: string }>(fetchImpl, `/api/chats/${id}/prompt`, {
           method: 'POST',
+          body: form,
+        });
+      },
+
+      /**
+       * "Send to agent" from the OS share sheet (mobile MG-09): an existing chat or a new one, the note / text / URL
+       * and up to five files in ONE multipart request, so a share is sent once. `idempotencyKey` is required: a
+       * retry with the same key answers the first chat (`created: false`) without sending again.
+       */
+      ingest: (input: ChatIngestInput, options: { idempotencyKey: string }) => {
+        const form = new FormData();
+        form.set('target', JSON.stringify(input.target));
+        if (input.note) form.set('note', input.note);
+        if (input.text) form.set('text', input.text);
+        if (input.url) form.set('url', input.url);
+        for (const file of input.attachments ?? []) {
+          form.append('attachments', new Blob([file.data as unknown as ArrayBuffer], { type: file.mimeType || 'application/octet-stream' }), file.name);
+        }
+        // No content-type: fetch writes the multipart boundary itself.
+        return request<ChatIngestResult>(fetchImpl, '/api/chats/ingest', {
+          method: 'POST',
+          headers: { 'idempotency-key': options.idempotencyKey },
           body: form,
         });
       },

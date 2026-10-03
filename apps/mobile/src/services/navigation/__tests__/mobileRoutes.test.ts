@@ -61,12 +61,17 @@ describe('deep links → the mobile route tree (04 §1.6, MD-145)', () => {
     expect(resolve('generatorai://settings/nope?server=B')).toBe('/settings?server=B');
   });
 
+  it('opens the share sheet for /share and for the share extension hand-off (M9-08)', () => {
+    expect(resolve('generatorai://share')).toBe('/share');
+    expect(redirectLink('generatorai://dataUrl=generatoraiShareKey?nonce=1#text', 'A')).toBe('/share');
+    expect(redirectLink('generatorai:///dataUrl=generatoraiShareKey#file', 'A')).toBe('/share');
+  });
+
   it.each([
     'generatorai://runs/r1',
     'generatorai://changes/w1',
     'generatorai://terminal/w1',
     'generatorai://approvals',
-    'generatorai://share',
     'generatorai://workspaces/w1/commit',
     'generatorai://command/project.new',
     'generatorai://admin',

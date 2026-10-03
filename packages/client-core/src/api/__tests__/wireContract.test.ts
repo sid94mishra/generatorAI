@@ -189,6 +189,25 @@ describe('chat attachment wire contract', () => {
   });
 });
 
+describe('chat ingest wire contract (MG-09)', () => {
+  it('sends `target` as JSON, the text parts and `attachments`, with the Idempotency-Key header', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).chats.ingest(
+      { target: { newChat: { agentRef: 'user:bug-fixer' } }, note: 'look', url: 'https://x.dev', attachments: [{ name: 'a.log', data: new Uint8Array([1]) }] },
+      { idempotencyKey: 'k-1' },
+    );
+    expect(calls[0]?.path).toBe('/api/chats/ingest');
+    expect(calls[0]?.method).toBe('POST');
+    expect(calls[0]?.headers).toEqual({ 'idempotency-key': 'k-1' });
+    const form = calls[0]?.body as unknown as FormData;
+    expect(JSON.parse(String(form.get('target')))).toEqual({ newChat: { agentRef: 'user:bug-fixer' } });
+    expect(form.get('note')).toBe('look');
+    expect(form.get('url')).toBe('https://x.dev');
+    expect(form.get('text')).toBeNull();
+    expect((form.get('attachments') as File).name).toBe('a.log');
+  });
+});
+
 describe('automation wire contract (create/update)', () => {
   it('sends workflowIds/cronExpression/onError, not the CLI-flag-shaped names', async () => {
     const { calls, fetchImpl } = capture();
