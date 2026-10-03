@@ -164,7 +164,7 @@ export function ContextUsageDetails({
             <span className={cn('font-mono tabular-nums', tone ? TONE_TEXT[tone] : 'text-fg')}>{pctLabel}%</span>
           </div>
 
-          <div className="relative flex h-1.5 w-full overflow-hidden rounded-badge bg-line">
+          <div className="relative flex min-h-1.5 w-full overflow-hidden rounded-badge bg-line">
             {hasBreakdown && limit ? (
               BAR_SEGMENTS.map((seg) => {
                 const v = breakdown?.[seg.key];
@@ -172,7 +172,8 @@ export function ContextUsageDetails({
                 return (
                   <span
                     key={seg.key}
-                    className={cn('h-full', seg.swatch)}
+                    // No h-full: in a min-height track it resolves to 0; flex stretch fills it.
+                    className={seg.swatch}
                     // Computed geometry: the segment's share of the window.
                     style={{ width: `${Math.min(100, (v / limit) * 100)}%` }}
                     title={`${seg.label}: ${v.toLocaleString()}`}
@@ -181,7 +182,7 @@ export function ContextUsageDetails({
               })
             ) : (
               <span
-                className={cn('h-full', tone === 'err' ? 'bg-err' : tone === 'warn' ? 'bg-warn' : 'bg-fg-2')}
+                className={tone === 'err' ? 'bg-err' : tone === 'warn' ? 'bg-warn' : 'bg-fg-2'}
                 style={{ width: `${(pct ?? 0) * 100}%` }}
               />
             )}
