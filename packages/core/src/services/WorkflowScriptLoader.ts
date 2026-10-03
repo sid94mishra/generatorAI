@@ -129,6 +129,8 @@ export class WorkflowScriptLoader {
   private readonly IMPORT_TIMEOUT_MS = 30_000;
   private hookUnregisters = new Map<string, () => void>();
   private readonly enabled: boolean;
+  /** `.workflow.mjs` files seen by the last discovery (loaded or not). */
+  private lastFound = 0;
 
   constructor(
     private readonly logger: ILogger,
@@ -142,6 +144,14 @@ export class WorkflowScriptLoader {
   /** Whether scripts may be loaded at all (operator opt-in). */
   isEnabled(): boolean {
     return this.enabled;
+  }
+
+  /**
+   * What a client needs to explain an empty list: scripts switched off with
+   * files present ("3 found, not loaded") reads differently from no files.
+   */
+  status(): { enabled: boolean; found: number; loaded: number } {
+    return { enabled: this.enabled, found: this.lastFound, loaded: this.loadedScripts.size };
   }
 
   /**
@@ -173,6 +183,7 @@ export class WorkflowScriptLoader {
           found += (await readdir(resolved)).filter((f) => f.endsWith('.workflow.mjs')).length;
         } catch { /* unreadable dir — nothing to count */ }
       }
+      this.lastFound = found;
       if (found > 0) {
         this.logger.warn(
           `[ScriptLoader] ${found} workflow script(s) found but NOT loaded — ${WORKFLOW_SCRIPTS_DISABLED_MESSAGE}`,
@@ -182,6 +193,7 @@ export class WorkflowScriptLoader {
       }
       return metadata;
     }
+    let found = 0;
     for (const dir of this.scriptDirs) {
       const resolved = resolve(dir);
       if (!existsSync(resolved)) {
@@ -191,6 +203,7 @@ export class WorkflowScriptLoader {
       const files = await readdir(resolved);
       for (const file of files) {
         if (!file.endsWith('.workflow.mjs')) continue;
+        found += 1;
         try {
           const loaded = await this.loadScript(join(resolved, file));
           metadata.push(loaded.metadata);
@@ -199,6 +212,7 @@ export class WorkflowScriptLoader {
         }
       }
     }
+    this.lastFound = found;
     this.logger.info(`[ScriptLoader] Discovered ${metadata.length} workflow script(s)`);
     return metadata;
   }
