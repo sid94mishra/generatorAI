@@ -80,14 +80,17 @@ export function Stepper({ steps, current, onSelect, footer, className, 'data-tes
               isCurrent && 'bg-selected hover:not-disabled:bg-selected',
             )}
           >
-            <StepMarker index={index} state={step.state} />
-            <span className="flex min-w-0 flex-col">
-              <span className={cn('truncate text-ui font-medium', step.state === 'future' ? 'text-fg-2' : 'text-fg')}>
-                {step.title}
+            {/* Button wraps its children in one span: lay marker + text out as a row (spec: gap 10). */}
+            <span className="flex min-w-0 items-start gap-2.5">
+              <StepMarker index={index} state={step.state} />
+              <span className="flex min-w-0 flex-col">
+                <span className={cn('truncate text-ui font-medium', step.state === 'future' ? 'text-fg-2' : 'text-fg')}>
+                  {step.title}
+                </span>
+                {step.subtitle != null ? (
+                  <span className={cn('truncate text-small', step.error ? 'text-err' : 'text-fg-3')}>{step.subtitle}</span>
+                ) : null}
               </span>
-              {step.subtitle != null ? (
-                <span className={cn('truncate text-small', step.error ? 'text-err' : 'text-fg-3')}>{step.subtitle}</span>
-              ) : null}
             </span>
           </Button>
         );
