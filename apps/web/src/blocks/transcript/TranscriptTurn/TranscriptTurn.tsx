@@ -135,17 +135,23 @@ function AgentResponse({
   );
 }
 
-function SystemNote({ message }: { message: ChatMessage }) {
+function SystemNote({ text }: { text: string }) {
   return (
     <Callout tone="neutral" data-chat-row data-gai-block="system">
-      <span className="text-ui text-fg-2 whitespace-pre-wrap">{message.content}</span>
+      <span className="text-ui text-fg-2 whitespace-pre-wrap">{text}</span>
     </Callout>
   );
 }
 
+/** The server prompts an orchestrator itself ("[system] Every background agent…"); that is not the user talking. */
+const SYSTEM_PROMPT_PREFIX = '[system] ';
+
 function renderEntry(entry: TranscriptEntry, props: TranscriptTurnProps): ReactNode {
   switch (entry.kind) {
     case 'user':
+      if (entry.message.content.startsWith(SYSTEM_PROMPT_PREFIX)) {
+        return <SystemNote key={entry.key} text={entry.message.content.slice(SYSTEM_PROMPT_PREFIX.length)} />;
+      }
       return (
         <UserMessage
           key={entry.key}
@@ -170,7 +176,7 @@ function renderEntry(entry: TranscriptEntry, props: TranscriptTurnProps): ReactN
         />
       );
     case 'system':
-      return <SystemNote key={entry.key} message={entry.message} />;
+      return <SystemNote key={entry.key} text={entry.message.content} />;
     case 'live':
       return <div key={entry.key}>{props.renderLive?.()}</div>;
   }

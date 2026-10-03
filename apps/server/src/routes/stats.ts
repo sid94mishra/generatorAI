@@ -87,7 +87,10 @@ export function createStatsRoutes(container: Container): Router {
 
       // ── chats.created ──
       const chats = projectId ? await chatEntityRepo.getByProjectId(projectId) : await chatEntityRepo.getAll();
+      // Worker chats are an orchestrator's internals and hidden from every chat
+      // list; Home's "Chats" figure links to that list, so it counts the same set.
       const created = chats.filter((c) => {
+        if (c.parentChatId) return false;
         const t = c.createdAt.getTime();
         return t >= fromMs && t <= toMs;
       }).length;

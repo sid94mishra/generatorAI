@@ -151,7 +151,8 @@ describe('GET /api/projects?include=summary', () => {
   it('reports codebases, active chats, worktree buckets and the latest run', async () => {
     const app = makeApp({
       codebases: [{}, {}],
-      chats: [chat({ id: 'c1', status: 'active' }), chat({ id: 'c2', status: 'archived' })],
+      // c3 is an orchestrator's worker: hidden from chat lists, so not counted.
+      chats: [chat({ id: 'c1', status: 'active' }), chat({ id: 'c2', status: 'archived' }), chat({ id: 'c3', status: 'active', parentChatId: 'c1' })],
       worktrees: [
         worktree({ id: 'wt-active', status: 'active' }),
         worktree({ id: 'wt-orphaned', status: 'orphaned' }),

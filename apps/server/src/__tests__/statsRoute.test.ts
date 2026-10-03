@@ -151,6 +151,8 @@ describe('GET /api/stats/summary', () => {
       chats: [
         chat({ id: 'in-range', createdAt: new Date('2026-01-03T00:00:00Z') }),
         chat({ id: 'before', createdAt: new Date('2025-12-01T00:00:00Z') }),
+        // An orchestrator's worker: hidden from the chat list, so not counted.
+        chat({ id: 'worker', createdAt: new Date('2026-01-03T00:00:00Z'), parentChatId: 'in-range' }),
       ],
     });
     const res = await request(app).get(`/api/stats/summary${RANGE}`);
