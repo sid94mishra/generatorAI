@@ -38,7 +38,7 @@ Both PNG folders are gitignored; `shots/**/DIFF.md` is tracked.
 | File | What it holds | Use it when |
 |---|---|---|
 | `00-context-and-analysis.md` | How the web and desktop clients work today, the diagnosis with numbers, the design summary, what the independent review changed, the relationship to the Workflow Overhaul Plan, non-negotiable constraints | Understanding *why* |
-| `01-decisions.md` | D-01…D-82: every decision with options, evidence and consequences; sources | Always |
+| `01-decisions.md` | D-01…D-83: every decision with options, evidence and consequences; sources | Always |
 | `02-design-system-spec.md` | Token architecture; every colour token (derivation, Instrument values); collisions and codemods; Instrument theme and ink accent; type, radius, heights and density, z-index, focus, motion; the status map with the full server→state mapping; `CHROME`; icon concepts; emitters file by file; pre-paint; WCAG suite; the P1 token checklist | Tokens and foundations (P1), any styling question |
 | `03-component-inventory-kit.md` | The presentational kit: 48 primitives, 35 patterns, 13 shell parts, 5 templates, 5 layouts — anatomy, exact sizes, props, Base UI part, board usage counts, what each replaces, phase. **Rosetta table** (board markup → component). Usage matrix, delete list, build order | Building or using any `ui/` component; translating a board |
 | `03-component-inventory-domain.md` | Query-aware parts: 27 blocks, ~90 feature composites, 20 workflow kit pieces, 4 extension registries; the composer state map; decomposition plans and characterization behaviours for the giant files | Building blocks and features; splitting giant files (P4) |
@@ -153,10 +153,18 @@ Update in every PR (task ID, PR link, date).
 | P6 Settings | done | P6-01 ✓ settings kit (NumberField, SettingsSection, ListPane, SettingsModalFrame, MasterDetail) · P6-02 ✓ modal route · P6-03 ✓ Appearance · P6-04 ✓ Security & devices · P6-05…P6-11 ✓ all 15 sections on the recipe; legacy settings deleted |
 | PW Workflow surfaces | done (D-81 merge, D-82 screens on the kit) | |
 | P7 Lockdown | done (macOS); Windows/Linux runs and VRT pending | P7-01 ✓ legacy `components/**`, `pages/`, LegacyHeader + `legacyHeader` handle, legacy overlay selector, unused PageHeaderSlot deleted · P7-02 ✓ legacy token layer removed (shared + `--gai-*` only; initial CSS gzip 42.7 → 27.9 KB), Tailwind colour/text/radius/shadow namespaces reset (`styles/theme-reset.css`), `@radix-ui/*` + `cmdk` removed, `zod` declared in server/sdk (the removal re-hoisted it) · P7-03 ✓ every design lint rule an error, ratchet locked at 0, `DESIGN_SYSTEM.md` rewritten with a generated kit index (`docs:design-index --check` in CI), `.github/AGENTS.md` updated · P7-04 ✓ on macOS: e2e 84/84 (4 skipped), web unit 1558/1558, stories 1731/1731 across 3 appearances with axe, design-tokens 533/533, every package's tests green when run one at a time (`turbo test --concurrency=1`; the parallel run times out on a laptop) except the cli `tui-e2e` cursor test that needs a :3100 server, desktop smokes chrome/right-pane/browser/terminal/dock-browser green (four smokes moved onto isolated profiles); diff-review 9/10 (see Resume point); Windows/Linux smokes run in CI; VRT = P1-R7 |
-| P8 Deferred platform | not started | |
+| Final review 2 (after the mobile merges M0–M8) | done 2026-10-03 (`reviews/final-review-2.md`) | 17 findings (2 M, 5 S, 5 L, 3 D, 2 O); fixed: real-provider turns lost their `after` checkpoint (diff-review smoke 10/10), pin/read state on web (D-83), Risky badge on reload and Home, shared scope vocabulary, SCM outcome text, desktop deep-link hardening, retry with attachments, docs-site paths. Verification: unit 1558, e2e 83 + 1 load flake, macOS desktop smokes all green |
+| P8 Deferred platform | not started (P8-01 Vite 8 unblocked 2026-10-03; P8-03 TS 7 still blocked) | |
 | Mobile pass (M0–M4, D-80) | planned | after the Workflow Overhaul merge; decisions MD-1…MD-8 settled |
 
-## Resume point (2026-10-01)
+## Resume point (2026-10-03)
+
+- `desktop_redesign` (not pushed): redesign P0–P7, the Workflow Overhaul merge (D-81/D-82) and nine `mobile_redesign` merges (M0–M8).
+- Second final review, its fix pass and the end-to-end verification are done (`reviews/final-review-2.md`). The earlier diff-review gap (#19) is fixed in core (durable checkpoints compare with durable snapshots).
+- Open: P1-R7 VRT baselines (owner; no Docker here); Windows/Linux desktop smokes (CI after a push); load-sensitive tests; chat-workspace mounts write no `worktrees` rows; root `AGENTS.md` describes the mobile branch (owner/mobile); P8 (P8-01 now unblocked); mobile pass continues on `mobile_redesign`.
+
+## Resume point (2026-10-01, superseded)
+
 
 - `desktop_redesign` (not pushed): redesign P0–P7 + the Workflow Overhaul merge (D-81) and its screens on the kit (D-82).
 - P7 done on macOS. Regression fixes found by the full runs: composer menu secondary text contrast, SplitPane collapsed pane hidden from AT, page h1s (Breadcrumb `currentIsHeading`, ListPane `headingLevel`), syntax colours clamped to text contrast on code surfaces, builder canvas theme, server CSP without an IPv6 literal, zod declared in server/sdk; stale specs/stories/smokes aligned with the ported UI and the Overhaul API.
