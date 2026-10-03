@@ -1,29 +1,10 @@
 {
   "legacyRoutes": [
-    "app/(app)/projects/[id]/codebases/[cid]/pull-requests/[number].tsx",
-    "app/(app)/scope-request.tsx",
-    "app/(app)/settings/about.tsx",
-    "app/(app)/settings/accessibility.tsx",
-    "app/(app)/settings/appearance.tsx",
-    "app/(app)/settings/audio.tsx",
-    "app/(app)/settings/capabilities.tsx",
-    "app/(app)/settings/diagnostics.tsx",
-    "app/(app)/settings/extensions.tsx",
-    "app/(app)/settings/index.tsx",
-    "app/(app)/settings/notifications.tsx",
-    "app/(app)/settings/providers.tsx",
-    "app/(app)/settings/security.tsx",
-    "app/(app)/settings/source-control.tsx",
-    "app/(app)/settings/tools.tsx",
-    "app/(app)/workflows/[id]/index.tsx",
     "app/(app)/workflows/[id]/runs/[runId]/index.tsx",
     "app/(app)/workflows/[id]/runs/[runId]/stages/[stageRunId].tsx",
-    "app/(app)/workflows/index.tsx",
     "app/(dev)/notify.tsx",
     "app/(dev)/theme.tsx",
-    "app/_layout.tsx",
-    "app/pair.tsx",
-    "app/revoked.tsx"
+    "app/_layout.tsx"
   ],
   "files": {
     "src/components/brand/BrandMark.tsx": {
@@ -101,28 +82,6 @@
     "src/components/common/entityIcons.ts": {
       "mobile-design/design/lucideDirectImport": 1
     },
-    "src/components/devices/EditScopesSheet.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "react-hooks/set-state-in-effect/diagnostic": 1,
-      "mobile-design/design/defaultTextSize": 8,
-      "mobile-design/design/legacyTokenUtility": 12,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 21,
-      "mobile-design/design/defaultRadius": 1
-    },
-    "src/components/devices/PairDeviceSheet.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "react-hooks/set-state-in-effect/diagnostic": 1,
-      "mobile-design/design/defaultTextSize": 10,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 23,
-      "mobile-design/design/legacyTokenUtility": 11,
-      "mobile-design/design/defaultRadius": 2
-    },
-    "src/components/devices/QrCode.tsx": {
-      "mobile-design/design/defaultRadius": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 1,
-      "mobile-design/design/hexOrRgbInTs": 2
-    },
     "src/components/markdown/CodeBlock.tsx": {
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
@@ -189,13 +148,6 @@
       "mobile-design/design/legacyTokenUtility": 1,
       "better-tailwindcss/no-restricted-classes/diagnostic": 2
     },
-    "src/components/runs/RunRow.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/legacyTokenUtility": 5,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 7,
-      "mobile-design/design/defaultTextSize": 2,
-      "mobile-design/design/literalInlineStyle": 1
-    },
     "src/components/runs/StageTimeline.tsx": {
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
@@ -225,16 +177,6 @@
     },
     "src/components/runs/usePullRefresh.ts": {
       "react-hooks/refs/diagnostic": 1
-    },
-    "src/components/scm/ConnectGitHubSheet.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "react-hooks/exhaustive-deps/diagnostic": 2,
-      "mobile-design/design/defaultTextSize": 7,
-      "mobile-design/design/legacyTokenUtility": 9,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 18,
-      "mobile-design/design/defaultRadius": 1,
-      "mobile-design/design/boldWeight": 1
     },
     "src/components/ui/ActionSheet.tsx": {
       "mobile-design/design/rawTextImport": 1,
@@ -376,32 +318,6 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 9,
       "mobile-design/design/defaultTextSize": 2
     },
-    "src/components/work/StartRunSheet.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "react-hooks/set-state-in-effect/diagnostic": 1,
-      "mobile-design/design/defaultTextSize": 23,
-      "mobile-design/design/legacyTokenUtility": 34,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 59,
-      "mobile-design/design/defaultRadius": 2,
-      "mobile-design/design/arbitraryValue": 1,
-      "mobile-design/design/literalInlineStyle": 2
-    },
-    "src/components/work/StickyActionBar.tsx": {
-      "mobile-design/design/legacyTokenUtility": 2,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 2
-    },
-    "src/components/work/TemplatePickerSheet.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "react-hooks/set-state-in-effect/diagnostic": 1,
-      "mobile-design/design/defaultTextSize": 1,
-      "mobile-design/design/legacyTokenUtility": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 2
-    },
-    "src/components/work/cards.tsx": {
-      "mobile-design/design/lucideDirectImport": 1
-    },
     "src/dev/NotifyRoute.tsx": {
       "react-hooks/exhaustive-deps/diagnostic": 1
     },
@@ -472,148 +388,6 @@
       "react-hooks/refs/diagnostic": 1,
       "react-hooks/immutability/diagnostic": 5
     },
-    "app/(app)/projects/[id]/codebases/[cid]/pull-requests/[number].tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 12,
-      "mobile-design/design/defaultTextSize": 13,
-      "mobile-design/design/legacyTokenUtility": 14,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 27,
-      "mobile-design/design/literalInlineStyle": 2
-    },
-    "app/(app)/scope-request.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 8,
-      "react-hooks/exhaustive-deps/diagnostic": 1,
-      "mobile-design/design/legacyTokenUtility": 4,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 6,
-      "mobile-design/design/defaultTextSize": 2
-    },
-    "app/(app)/settings/about.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 2,
-      "mobile-design/design/defaultTextSize": 5,
-      "mobile-design/design/legacyTokenUtility": 5,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 10
-    },
-    "app/(app)/settings/accessibility.tsx": {
-      "mobile-design/design/platformOs": 5,
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 5,
-      "react-hooks/set-state-in-effect/diagnostic": 1,
-      "mobile-design/design/legacyTokenUtility": 9,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 15,
-      "mobile-design/design/defaultTextSize": 6
-    },
-    "app/(app)/settings/appearance.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 4,
-      "mobile-design/design/defaultRadius": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 9,
-      "mobile-design/design/legacyTokenUtility": 5,
-      "mobile-design/design/defaultTextSize": 3,
-      "mobile-design/design/arbitraryValue": 1
-    },
-    "app/(app)/settings/audio.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 8,
-      "mobile-design/design/defaultTextSize": 5,
-      "mobile-design/design/legacyTokenUtility": 5,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 10,
-      "mobile-design/design/arbitraryValue": 1
-    },
-    "app/(app)/settings/capabilities.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 11,
-      "mobile-design/design/defaultTextSize": 2,
-      "mobile-design/design/legacyTokenUtility": 2,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 4
-    },
-    "app/(app)/settings/diagnostics.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 6,
-      "mobile-design/design/defaultTextSize": 1,
-      "mobile-design/design/legacyTokenUtility": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 2
-    },
-    "app/(app)/settings/extensions.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 6,
-      "mobile-design/design/defaultTextSize": 2,
-      "mobile-design/design/legacyTokenUtility": 2,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 4
-    },
-    "app/(app)/settings/index.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 4,
-      "mobile-design/design/defaultTextSize": 1,
-      "mobile-design/design/legacyTokenUtility": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 2
-    },
-    "app/(app)/settings/notifications.tsx": {
-      "mobile-design/design/platformOs": 2,
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 4,
-      "react-hooks/set-state-in-effect/diagnostic": 1,
-      "mobile-design/design/legacyTokenUtility": 7,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 10,
-      "mobile-design/design/defaultTextSize": 3
-    },
-    "app/(app)/settings/providers.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 7,
-      "mobile-design/design/arbitraryValue": 2,
-      "mobile-design/design/defaultTextSize": 2,
-      "mobile-design/design/legacyTokenUtility": 2,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 4
-    },
-    "app/(app)/settings/security.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 11,
-      "react-hooks/exhaustive-deps/diagnostic": 3,
-      "mobile-design/design/defaultTextSize": 16,
-      "mobile-design/design/legacyTokenUtility": 23,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 40,
-      "mobile-design/design/defaultRadius": 1
-    },
-    "app/(app)/settings/source-control.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 13,
-      "mobile-design/design/defaultRadius": 2,
-      "mobile-design/design/legacyTokenUtility": 6,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 10,
-      "mobile-design/design/defaultTextSize": 2
-    },
-    "app/(app)/settings/tools.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 3,
-      "mobile-design/design/defaultTextSize": 3,
-      "mobile-design/design/legacyTokenUtility": 4,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 7
-    },
-    "app/(app)/workflows/[id]/index.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 20,
-      "mobile-design/design/legacyTokenUtility": 25,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 41,
-      "mobile-design/design/defaultRadius": 2,
-      "mobile-design/design/defaultTextSize": 14
-    },
     "app/(app)/workflows/[id]/runs/[runId]/index.tsx": {
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
@@ -634,12 +408,6 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 15,
       "mobile-design/design/defaultRadius": 1
     },
-    "app/(app)/workflows/index.tsx": {
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 8,
-      "mobile-design/design/legacyTokenUtility": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 1
-    },
     "app/(dev)/notify.tsx": {
       "boundaries/dependencies/diagnostic": 1
     },
@@ -654,24 +422,6 @@
       "mobile-design/design/defaultTextSize": 2,
       "mobile-design/design/legacyTokenUtility": 2,
       "better-tailwindcss/no-restricted-classes/diagnostic": 4
-    },
-    "app/pair.tsx": {
-      "mobile-design/design/rawTextImport": 1,
-      "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 7,
-      "react-hooks/set-state-in-effect/diagnostic": 1,
-      "react-hooks/immutability/diagnostic": 1,
-      "react-hooks/refs/diagnostic": 1,
-      "mobile-design/design/defaultTextSize": 11,
-      "mobile-design/design/legacyTokenUtility": 20,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 32,
-      "mobile-design/design/literalInlineStyle": 2,
-      "mobile-design/design/defaultRadius": 1
-    },
-    "app/revoked.tsx": {
-      "boundaries/dependencies/diagnostic": 2,
-      "mobile-design/design/legacyTokenUtility": 1,
-      "better-tailwindcss/no-restricted-classes/diagnostic": 1
     }
   },
   "migratedServices": [

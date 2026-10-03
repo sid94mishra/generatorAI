@@ -1,6 +1,7 @@
 // What a command does on mobile (06 §3.9, §3.10; D-24): one runner for the search palette, the hardware-key host
 // and `command/<id>` links, so a command behaves the same from every entry point. Only commands with a working
 // mobile surface are offered (MD-27); the rest arrive with their screens (M7/M8).
+import { NEW_WORKFLOW_HREF } from './hrefs';
 import { useCallback } from 'react';
 import { router, usePathname } from 'expo-router';
 import { COMMANDS, NAV_DESTINATIONS, type CommandId } from '@generatorai/shared/ui-contract';
@@ -42,8 +43,8 @@ export function useCommandRunner(): (id: CommandId) => boolean {
           openNewChat();
           return true;
         case 'workflow.new':
-          // The Workflows template picker until the builder's New workflow lands (M8).
-          router.push({ pathname: '/workflows', params: { new: '1' } } as never);
+          // New workflow (MWorkflowNew, M8-01): the full-screen modal.
+          router.push(NEW_WORKFLOW_HREF as never);
           return true;
         case 'project.new':
           // The Projects create sheet until the full-screen New project lands (M7).

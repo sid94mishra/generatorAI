@@ -1,5 +1,5 @@
 // ────────────────────────────────────────────────────────────────
-// variableForm — the pure half of the Start-run sheet.
+// MB-36 VariableForm model — the pure half of the form (run sheet, script run).
 //
 // A workflow declares typed inputs (`graph.workflow.variables`,
 // `VariableDefinitionSchema` of @generatorai/workflow-spec): string, text,
@@ -140,4 +140,26 @@ export function buildVariables(defs: readonly VariableDefinition[], draft: Draft
   }
 
   return { variables, errors, valid: Object.keys(errors).length === 0 };
+}
+
+const TYPE_WORD: Record<VariableType, string> = { string: 'String', number: 'Number', boolean: 'Boolean', choice: 'Choice', text: 'Text', list: 'List', json: 'JSON' };
+
+/** The row's second line: "String · Required", "Number · default 3", "Choice · pnpm, npm, yarn", "Text · optional". */
+export function variableDetail(def: VariableDefinition): string {
+  const parts = [TYPE_WORD[def.type]];
+  if (def.required) parts.push('Required');
+  else if (def.defaultValue !== undefined && def.defaultValue !== null && def.defaultValue !== '') parts.push(`default ${typeof def.defaultValue === 'string' ? def.defaultValue : JSON.stringify(def.defaultValue)}`);
+  else if (def.type === 'choice' && def.options?.length) parts.push(def.options.join(', '));
+  else parts.push('optional');
+  return parts.join(' · ');
+}
+
+/** The first missing required input's label, or null (the run sheet's "Run disabled + reason"). */
+export function firstMissing(defs: readonly VariableDefinition[], draft: Draft): string | null {
+  for (const def of defs) {
+    if (!def.required || def.type === 'boolean') continue;
+    const v = draft[def.name];
+    if (typeof v !== 'string' || !v.trim()) return def.label;
+  }
+  return null;
 }

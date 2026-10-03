@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildVariables, initialDraft, parseVariables } from '../components/work/variableForm';
+import { buildVariables, initialDraft, parseVariables } from './variableFormModel';
 
 const RAW = [
   { name: 'repo', type: 'string', label: 'Repository', required: true },

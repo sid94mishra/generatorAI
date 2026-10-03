@@ -74,10 +74,6 @@ it bypasses the connection catalog.
 `E2E_CHROME` is optional; set it to an installed Chrome executable or install Playwright's browser.
 Run only one script at a time against a persistent profile. Cold Metro navigation has a 90-second budget.
 
-- `audit-scenarios.mjs workflow|panes|automation` uses `AUDIT_FIXTURES`, a JSON file containing
-  `workflow.id`, `automation.id`, and `chatId` from an isolated server. It inspects dependencies/prompts,
-  starts a workflow, visits chat tools, or triggers a manual automation and checks the response/history.
-  Workflow definitions and any associated test project must be created separately.
 - Native interaction now uses the root-pinned `agent-device` CLI on both platforms. Pair with
   `node scripts/mobile/sandbox-pair.mjs --platform=ios|android` before a walkthrough.
   Capture `snapshot --raw --json` on iOS (MD-100), or `snapshot -i --json` on Android, then run

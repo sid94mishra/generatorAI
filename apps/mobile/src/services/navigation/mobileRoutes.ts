@@ -15,7 +15,7 @@ const SETTINGS_SECTIONS = new Set([
 /** `/x/new` create links: the module's own creation UI until its route lands (New chat is `/chats/new` since M6-05). */
 const CREATE: Record<string, string> = {
   chats: '/chats/new',
-  workflows: '/workflows?new=1',
+  workflows: '/workflows/new',
   projects: '/projects/new',
   agents: '/agents/new',
   automations: '/automations/new',
