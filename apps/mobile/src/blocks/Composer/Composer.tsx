@@ -272,8 +272,8 @@ export function Composer(props: ComposerProps): React.ReactElement {
             props.onComposerInteraction?.();
             onDraftChange(text);
           }}
-          placeholder={composerPlaceholder({ disabled, gated, argHint: props.activeCommand?.argHint, placeholder: props.placeholder, agent: agentName, model: modelName })}
-          accessibilityLabel={composerLabel(agentName, modelName)}
+          placeholder={composerPlaceholder({ disabled, gated, argHint: props.activeCommand?.argHint, placeholder: props.placeholder, agent: agentName, orchestrator: props.orchestrator === true, files: props.files === true })}
+          accessibilityLabel={composerLabel(agentName)}
           editable={!disabled || gated}
           selection={pendingSelection ?? null}
           onCaretChange={props.onCaretChange}

@@ -114,7 +114,7 @@ describe('routing (09 §5.4 Routing)', () => {
   it('an empty loaded chat shows the "Start the conversation" empty state', () => {
     mount();
     expect(screen.getByText('Start the conversation')).toBeInTheDocument();
-    expect(screen.getByText('Type a message below to start chatting')).toBeInTheDocument();
+    expect(screen.getByText('Type a message below to start.')).toBeInTheDocument();
   });
 
   it('opens the chat SSE session for (chatId, sessionId) (712-718)', () => {

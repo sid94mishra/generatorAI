@@ -17,7 +17,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { awaitsUserDecision, type ScmResultBlock, type WidgetBlock } from '@generatorai/client-core';
-import { harnessProviderLabel } from '@generatorai/shared/ui-contract';
+import { composerPromptPlaceholder, harnessProviderLabel } from '@generatorai/shared/ui-contract';
 import { useMarkChatRead } from '@/hooks/chatListQueries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useEditSourcesStore } from '@/stores/editSourcesStore.js';
@@ -352,15 +352,13 @@ export function ChatPage() {
     );
   }
 
-  // Board ComposerStates: the box names who answers — the bound agent, the
-  // orchestrator, or the model itself.
-  const composerPlaceholder = agentName
-    ? `Reply to ${agentName}…`
-    : chat.orchestratorMode
-      ? 'Reply to the orchestrator…'
-      : modelLabel && workspace.effectiveModel !== 'default'
-        ? `Message ${modelLabel}…`
-        : `Message ${activeHarnessLabel ?? 'the agent'}…`;
+  // The box names who answers only for an agent or the orchestrator; a plain model
+  // chat reads provider-neutral (D-90, shared with mobile).
+  const composerPlaceholder = composerPromptPlaceholder({
+    agent: agentName,
+    orchestrator: !!chat.orchestratorMode,
+    files: !!chat.workspaceId,
+  });
 
   const composer =
     view.chatActive && sessionId ? (

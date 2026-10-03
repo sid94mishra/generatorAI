@@ -779,6 +779,8 @@ export default function ChatScreen(): React.ReactElement {
             disabledReason={archived ? 'This chat is archived.' : undefined}
             gate={gate}
             agent={boundAgent}
+            orchestrator={chat.data?.orchestratorMode === true}
+            files={workspaceId !== null}
             modelLabel={modelLabel}
             onModelPress={() => {
               Keyboard.dismiss();

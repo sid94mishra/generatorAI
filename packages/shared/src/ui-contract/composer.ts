@@ -116,3 +116,16 @@ export interface ComposerToolToggle<TChat> {
   read: (chat: TChat) => boolean;
   write: (chatId: string, on: boolean) => Promise<void>;
 }
+
+/**
+ * The composer's placeholder (D-90). It names who answers only when that is a
+ * person-made agent or the orchestrator; a chat with a plain model gets a
+ * provider-neutral line — never the provider or harness name ("Message
+ * Copilot…" read as if the chat were bound to that product). `files` says
+ * whether `@` mentions files here (a chat with a workspace). Web and mobile.
+ */
+export function composerPromptPlaceholder(who: { agent?: string | null; orchestrator?: boolean; files?: boolean }): string {
+  if (who.agent) return `Reply to ${who.agent}…`;
+  if (who.orchestrator) return 'Reply to the orchestrator…';
+  return who.files ? 'Ask anything — @ for files, / for skills' : 'Ask anything — / for skills';
+}

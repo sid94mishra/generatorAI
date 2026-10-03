@@ -74,6 +74,10 @@ export interface ComposerTurnProps {
   disabledReason?: string | undefined;
   /** The bound agent: a locked chip (MD-03); hidden for model-only chats. */
   agent?: { name: string; role?: 'agent' | 'orchestrator' } | null;
+  /** An orchestrator chat without a bound agent: the placeholder reads "Reply to the orchestrator…" (D-90). */
+  orchestrator?: boolean;
+  /** The chat has a workspace, so `@` mentions files (the placeholder says so). */
+  files?: boolean;
   /** The next turn's model label; the chip opens the Turn sheet (`composer-model`). */
   modelLabel?: string | null;
   onModelPress?: () => void;

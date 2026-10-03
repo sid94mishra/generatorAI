@@ -11,10 +11,14 @@ describe('Composer view model (MB-01)', () => {
 
   it('placeholder never says Queue (D-29)', () => {
     expect(composerPlaceholder({ disabled: false, gated: false, agent: 'Bug Fixer' })).toBe('Reply to Bug Fixer…');
-    expect(composerPlaceholder({ disabled: false, gated: false, model: 'Claude Sonnet 5' })).toBe('Message Claude Sonnet 5…');
+    // Provider-neutral for a plain model chat (D-90).
+    expect(composerPlaceholder({ disabled: false, gated: false })).toBe('Ask anything — / for skills');
+    expect(composerPlaceholder({ disabled: false, gated: false, files: true })).toBe('Ask anything — @ for files, / for skills');
+    expect(composerPlaceholder({ disabled: false, gated: false, orchestrator: true })).toBe('Reply to the orchestrator…');
     expect(composerPlaceholder({ disabled: true, gated: true, agent: 'Bug Fixer' })).toBe('Reply to Bug Fixer…');
     expect(composerPlaceholder({ disabled: true, gated: false, agent: 'Bug Fixer' })).toBe('Waiting…');
-    expect(composerLabel(null, 'Opus')).toBe('Message Opus');
+    expect(composerLabel(null)).toBe('Message');
+    expect(composerLabel('Bug Fixer')).toBe('Message Bug Fixer');
   });
 
   it('"+" menu: captures only where they exist, disabled uploads with the reason (MD-63)', () => {

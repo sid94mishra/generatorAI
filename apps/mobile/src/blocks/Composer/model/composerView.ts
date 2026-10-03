@@ -2,6 +2,7 @@
 // menu and the suggestion groups. Kept apart from the component so the rules are unit-tested.
 import type { MobileIconConcept } from '@generatorai/design-tokens';
 
+import { composerPromptPlaceholder } from '@generatorai/shared/ui-contract';
 import { TERMINAL_CAPTURE_LINES } from './captures';
 import type { SlashItem, StopState } from './types';
 
@@ -15,26 +16,25 @@ export function composerPrimary(isStreaming: boolean, stop: StopState | undefine
   return 'stop';
 }
 
-/** "Reply to <agent>…" / "Message <model>…" — the same while running, never "Queue…" (MD-03, D-29). */
+/** "Reply to <agent>…", or the provider-neutral line (D-90) — the same while running, never "Queue…" (MD-03, D-29). */
 export function composerPlaceholder(input: {
   disabled: boolean;
   gated: boolean;
   argHint?: string | undefined;
   placeholder?: string | undefined;
   agent?: string | null | undefined;
-  model?: string | null | undefined;
+  orchestrator?: boolean | undefined;
+  files?: boolean | undefined;
 }): string {
   if (input.disabled && !input.gated) return 'Waiting…';
   if (input.argHint) return input.argHint;
   if (input.placeholder) return input.placeholder;
-  if (input.agent) return `Reply to ${input.agent}…`;
-  if (input.model) return `Message ${input.model}…`;
-  return 'Message…';
+  return composerPromptPlaceholder({ agent: input.agent, orchestrator: input.orchestrator, files: input.files });
 }
 
-/** The field's spoken name ("Message Bug Fixer"). */
-export function composerLabel(agent?: string | null, model?: string | null): string {
-  return agent ? `Message ${agent}` : model ? `Message ${model}` : 'Message';
+/** The field's spoken name ("Message Bug Fixer", else "Message" — never a model or provider name, D-90). */
+export function composerLabel(agent?: string | null): string {
+  return agent ? `Message ${agent}` : 'Message';
 }
 
 export type PlusItem =

@@ -41,7 +41,7 @@ export interface ChatTranscriptProps {
   view: ChatView;
   /** Name the agent's responses are signed with. */
   agentName: string;
-  /** The harness label for the empty state ("chat with Claude"); null when unknown. */
+  /** The harness label for the "… is thinking" placeholder; null when unknown. */
   harnessLabel: string | null;
   canRewind: boolean;
   /** Skeleton while the message page loads. */
@@ -272,7 +272,7 @@ export function ChatTranscript({
             <EmptyState
               icon="agents"
               title={TRANSCRIPT_COPY.emptyTitle}
-              description={TRANSCRIPT_COPY.emptyBody(harnessLabel)}
+              description={TRANSCRIPT_COPY.emptyBody}
               className="mt-24"
             />
           ) : null

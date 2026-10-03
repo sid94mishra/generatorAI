@@ -572,6 +572,13 @@ Profiled in the production build (Electron, CDP CPU profiles + Long Animation Fr
   counted from the derived segments.
 - **Fences:** `agent-tests/perf/transcript-stream.spec.ts` (reporting, generous limits) and the `markdownBlocks` unit test.
 
+### D-90 Provider-neutral composer and empty chat (owner, 2026-10-03) — Final
+Overrides the ComposerStates/Main boards' "Message Claude Sonnet 5…" (owner: the box said "Message Copilot…", which
+read as if the chat were that product). `composerPromptPlaceholder` (ui-contract, web + mobile): "Reply to <agent>…"
+for a bound agent, "Reply to the orchestrator…" in orchestrate mode, else "Ask anything — @ for files, / for skills"
+(or "Ask anything — / for skills" without a workspace). The empty chat reads "Type a message below to start." Mobile's
+composer accessible name drops the model ("Message", or "Message <agent>"); web keeps its textbox name and testids.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

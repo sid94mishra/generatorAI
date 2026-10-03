@@ -119,8 +119,8 @@ export const TRANSCRIPT_COPY = {
   jumpToLatest: 'Jump to latest',
   loadEarlier: 'Load earlier messages',
   emptyTitle: 'Start the conversation',
-  emptyBody: (agent: string | null): string =>
-    agent ? `Type a message below to chat with ${agent}` : 'Type a message below to start chatting',
+  /** Provider-neutral (D-90): the empty chat never names the harness. */
+  emptyBody: 'Type a message below to start.',
   agentThinking: (agent: string): string => `${agent} is thinking`,
   waitingForYou: 'Waiting for you',
   failed: 'Failed',
