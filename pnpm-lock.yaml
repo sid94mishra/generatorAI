@@ -13,6 +13,8 @@ overrides:
   protobufjs@8: ^8.8.0
   '@protobufjs/utf8': ^1.1.1
 
+packageExtensionsChecksum: sha256-ItqEaXFy51QcN2+qn4+10YUU6gxUunZOXG34XTXIMis=
+
 patchedDependencies:
   '@bacons/apple-targets@5.0.0':
     hash: fecd98b9492917337f19d96cdd36fa81fc0ec61a0ec577705c37683141e4b227
@@ -30858,6 +30860,7 @@ snapshots:
   react-native-worklets@0.10.1(@babel/core@7.29.0)(@react-native/metro-config@0.86.2(@babel/core@7.29.0))(react-native@0.86.3(@babel/core@7.29.0)(@react-native/jest-preset@0.86.3(@babel/core@7.29.0)(react@19.2.3))(@react-native/metro-config@0.86.2(@babel/core@7.29.0))(@types/react@19.3.0)(react@19.2.3))(react@19.2.3):
     dependencies:
       '@babel/core': 7.29.0
+      '@babel/generator': 7.29.8
       '@babel/plugin-transform-arrow-functions': 7.29.7(@babel/core@7.29.0)
       '@babel/plugin-transform-class-properties': 7.29.7(@babel/core@7.29.0)
       '@babel/plugin-transform-classes': 7.29.7(@babel/core@7.29.0)
@@ -30867,6 +30870,7 @@ snapshots:
       '@babel/plugin-transform-template-literals': 7.29.7(@babel/core@7.29.0)
       '@babel/plugin-transform-unicode-regex': 7.29.7(@babel/core@7.29.0)
       '@babel/preset-typescript': 7.29.7(@babel/core@7.29.0)
+      '@babel/traverse': 7.29.8
       '@babel/types': 7.29.8
       '@react-native/metro-config': 0.86.2(@babel/core@7.29.0)
       convert-source-map: 2.0.0
