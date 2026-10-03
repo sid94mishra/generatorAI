@@ -13,6 +13,20 @@ export function isLiveScriptId(value: unknown): value is LiveScriptId {
   return typeof value === 'string' && (LIVE_SCRIPT_IDS as readonly string[]).includes(value);
 }
 
+export interface LiveRun {
+  script?: string;
+  step?: string;
+  n: number;
+}
+
+/** `generatorai:///live?script=…&step=…` → the run it asks for; null for any other link. */
+export function parseLiveLink(url: string): Omit<LiveRun, 'n'> | null {
+  const match = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*\/live(?:\?([^#]*))?(?:#.*)?$/i.exec(url);
+  if (!match) return null;
+  const query = new URLSearchParams(match[1] ?? '');
+  return { script: query.get('script') ?? undefined, step: query.get('step') ?? undefined };
+}
+
 export interface LiveScriptStep {
   label: string;
   event: (now: Date) => LiveEvent;
