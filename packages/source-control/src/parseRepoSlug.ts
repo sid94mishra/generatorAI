@@ -13,7 +13,9 @@ export interface RepoSlug {
  * Parse a git remote URL into an owner/repo/host slug.
  * Handles HTTPS (`https://github.com/o/r.git`), SSH
  * (`git@github.com:o/r.git`), and `ssh://` forms. Returns null when the URL
- * isn't a recognizable repo URL.
+ * isn't a recognizable repo URL. A local-path remote still parses (its first
+ * path segment reads as the "host"); callers that talk to a host check
+ * `isLocalRemote` first.
  */
 export function parseRepoSlug(remoteUrl: string): RepoSlug | null {
   if (!remoteUrl) return null;
@@ -41,4 +43,10 @@ export function parseRepoSlug(remoteUrl: string): RepoSlug | null {
   } catch {
     return null;
   }
+}
+
+/** A remote that is a path on this machine (POSIX, Windows, UNC, `file://`, relative), not a hosted repo. */
+export function isLocalRemote(remoteUrl: string): boolean {
+  const url = remoteUrl.trim();
+  return /^(?:file:|\/|\.{1,2}[\\/]|~[\\/]|[A-Za-z]:[\\/]|\\\\)/.test(url);
 }

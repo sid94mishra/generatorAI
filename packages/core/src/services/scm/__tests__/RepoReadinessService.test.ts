@@ -123,6 +123,16 @@ describe('RepoReadinessService', () => {
     expect(r.accountId).toBeUndefined();
   });
 
+  it('says a local-path remote cannot host a PR (no bogus host name), on every OS form', async () => {
+    for (const remote of ['/var/tmp/origin.git', 'C:\\repos\\origin.git', 'file:///srv/origin.git']) {
+      const svc = service(fakeGit({ getRemoteUrl: async () => remote }), fakeRegistry({ connected: false }));
+      const r = await svc.readiness({ repoDir: '/repo', alias: '.' });
+      expect(r.hasRemote).toBe(true);
+      expect(r.can.pullRequest).toBe(false);
+      expect(r.reasons.pullRequest).toBe('The remote is a local path — pull requests need a hosted remote');
+    }
+  });
+
   it('blocks the PR on a detached HEAD', async () => {
     const svc = service(fakeGit({ isDetached: async () => true }), fakeRegistry());
     const r = await svc.readiness({ repoDir: '/repo', alias: '.' });
