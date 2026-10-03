@@ -1693,7 +1693,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
      * the session id is the thing the socket URL is built from.
      */
     terminals: {
-      create: (workspaceId: string, body: { cols: number; rows: number }) =>
+      /** `shell` (optional): the executable to spawn instead of the server's default (the route accepts it). */
+      create: (workspaceId: string, body: { cols: number; rows: number; shell?: string }) =>
         request<TerminalDescriptor>(
           fetchImpl,
           `/api/workspaces/${workspaceId}/terminals`,

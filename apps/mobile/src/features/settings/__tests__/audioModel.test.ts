@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { engineLabel, parseAudioSettings, pauseLabel, pauseStops, speedLabel } from '../features/settings/audioModel';
+import { engineLabel, languageLabel, megabytes, parseAudioSettings, pauseLabel, pauseStops, speedLabel } from '../audioModel';
 
 describe('audio settings model', () => {
   it('names engines as desktop does and passes unknown ones through', () => {
@@ -34,7 +34,15 @@ describe('audio settings model', () => {
     });
     expect(full).toMatchObject({ sttEngine: 'nemotron', ttsEnabled: false, engineLockedByEnv: 'whisper' });
     const thin = parseAudioSettings({});
-    expect(thin).toMatchObject({ sttEngine: 'auto', engines: ['auto'], ttsEnabled: true, engineLockedByEnv: null });
+    expect(thin).toMatchObject({ sttEngine: 'auto', engines: ['auto'], ttsEnabled: true, engineLockedByEnv: null, sttLanguage: 'auto' });
+    expect(parseAudioSettings({ sttLanguage: 'de-DE' })?.sttLanguage).toBe('de-DE');
     expect(parseAudioSettings(null)).toBeNull();
+  });
+
+  it('names dictation languages (MG-17) and sizes', () => {
+    expect(languageLabel('auto')).toBe('Auto-detect');
+    expect(languageLabel('')).toBe('Auto-detect');
+    expect(languageLabel('xx-not-a-tag-%')).toBe('xx-not-a-tag-%');
+    expect(megabytes(790 * 1024 * 1024)).toBe('790 MB');
   });
 });

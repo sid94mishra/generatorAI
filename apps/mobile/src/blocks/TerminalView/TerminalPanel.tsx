@@ -14,8 +14,10 @@ import { LockedTab, StepUpTab } from '../WorkspacePane/TabGates';
 import { usePaneStore } from '../WorkspacePane/paneStore';
 import { useAdminApi } from '../../services/api/useAdminApi';
 import { useApi } from '../../services/api/useApi';
+import { useAuth } from '../../services/auth/AuthProvider';
 import { checkFeature } from '../../services/auth/featureGate';
 import { useGrantedScopes } from '../../services/auth/useCapability';
+import { readTerminalShell } from '../../services/prefs/terminalPrefs';
 import { forgetTerminal } from '../../services/terminal/terminalFocus';
 import { PaneTabStrip } from '../../ui/layout/PaneTabStrip';
 import { haptic } from '../../ui/platform/haptics';
@@ -66,6 +68,7 @@ export function TerminalPanel(props: TerminalPanelProps): React.ReactElement {
 
 function Shells({ workspaceId, active, agentBusy = false, agentCalls = [] }: TerminalPanelProps & { workspaceId: string }): React.ReactElement {
   const api = useApi();
+  const { serverId } = useAuth();
   const admin = useAdminApi();
   const insets = useInsets();
   const keyboard = useKeyboardOverlap();
@@ -83,7 +86,9 @@ function Shells({ workspaceId, active, agentBusy = false, agentCalls = [] }: Ter
       setCreating(true);
       try {
         // 80×24 is a placeholder: the renderer resizes to its real geometry at once.
-        const created = await api.terminals.create(workspaceId, { cols: 80, rows: 24 });
+        // The device's shell for this server (Settings › Browser & terminal); empty = the server default.
+        const shellPath = readTerminalShell(serverId);
+        const created = await api.terminals.create(workspaceId, { cols: 80, rows: 24, ...(shellPath ? { shell: shellPath } : {}) });
         seq.current += 1;
         const shell: Shell = { key: `shell-${seq.current}`, sessionId: created.id, ...(initialInput ? { initialInput } : {}) };
         setShells((prev) => [...(prev ?? []), shell]);
@@ -97,7 +102,7 @@ function Shells({ workspaceId, active, agentBusy = false, agentCalls = [] }: Ter
         setCreating(false);
       }
     },
-    [api, workspaceId],
+    [api, workspaceId, serverId],
   );
 
   // Seed from the server: shells opened elsewhere (the desktop, another phone) are the same sessions.

@@ -7,7 +7,7 @@ import {
   interpretDeviceStatus,
   isNotConfiguredError,
   pollDelayMs,
-} from '../components/scm/deviceLogin';
+} from '../model/deviceLogin';
 
 const github = (loginMethods: Array<'token' | 'device' | 'gh-cli'>) => [
   { id: 'github' as const, name: 'GitHub', loginMethods },

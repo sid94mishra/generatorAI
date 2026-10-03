@@ -4,6 +4,8 @@ export interface ExtensionRow {
   version: string | null;
   description: string | null;
   scope: string | null;
+  /** Where it is installed on the server. */
+  rootPath: string | null;
   enabled: boolean;
   /** False when the extension is enabled but failed to register. */
   ready: boolean;
@@ -28,9 +30,21 @@ export function toRow(raw: unknown): ExtensionRow | null {
     version: str(manifest.version),
     description: str(manifest.description),
     scope: str(r.scope),
+    rootPath: str(r.rootPath),
     enabled: r.enabled === true,
     ready: r.ready !== false,
     errors: Array.isArray(r.errors) ? r.errors.filter((e): e is string => typeof e === 'string') : [],
   };
 }
 
+
+/** Built-in (system scope) extensions cannot be switched off or uninstalled (MDF-119: a lock, not a disabled switch). */
+export const isBuiltIn = (row: ExtensionRow): boolean => row.scope === 'system';
+
+/** "Ready" / "Error" / "Disabled" — the state word the row and the sheet show. */
+export function extensionState(row: ExtensionRow): { label: string; health: 'ok' | 'err' | 'idle' } {
+  if (!row.enabled) return { label: 'Disabled', health: 'idle' };
+  return row.ready ? { label: 'Ready', health: 'ok' } : { label: 'Error', health: 'err' };
+}
+
+export const SCOPE_LABEL: Record<string, string> = { system: 'Built in', user: 'User', workspace: 'Workspace' };
