@@ -14,7 +14,7 @@
 import { memo, useMemo, useState, type ReactNode } from 'react';
 import {
   deriveSegments,
-  digestBlocks,
+  digestSegments,
   formatDigest,
   formatStepDuration,
   messageBlocks,
@@ -28,7 +28,6 @@ import { Callout } from '@/ui/primitives/Callout/Callout.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { Icon } from '@/ui/icons/Icon.js';
 import { AgentTurnHeader } from '../AgentTurnHeader/AgentTurnHeader.js';
-import { AssistantText } from '../AssistantText/AssistantText.js';
 import { TurnBody } from '../TurnBody/TurnBody.js';
 import { AttachmentList } from '../UserMessage/AttachmentList.js';
 import { UserMessage } from '../UserMessage/UserMessage.js';
@@ -92,13 +91,10 @@ function AgentResponse({
   const isTool = message.role === 'tool';
   const partial = message.metadata?.partial === true;
   const folded = collapsed && !summary;
-  // The digest walks the blocks again; only a folded or summarised response shows it.
+  // Counted from the segments already derived for rendering, so a mode switch never re-derives it.
   const durationMs = turnDurationMs(startedAt, message.timestamp);
-  const digest = useMemo(
-    () => (folded || summary ? digestBlocks(blocks, durationMs) : null),
-    [folded, summary, blocks, durationMs],
-  );
-  const digestLine = digest ? formatDigest(digest, formatStepDuration) : undefined;
+  const digest = useMemo(() => digestSegments(segments, blocks, durationMs), [segments, blocks, durationMs]);
+  const digestLine = folded || summary ? formatDigest(digest, formatStepDuration) : undefined;
 
   return (
     <div
@@ -128,11 +124,9 @@ function AgentResponse({
           }
         />
       )}
-      {summary ? (
-        digest?.finalText ? <AssistantText text={digest.finalText} /> : null
-      ) : folded ? null : (
-        <TurnBody segments={segments} streamKey={message.sessionId} />
-      )}
+      {/* One TurnBody in every mode (Summary keeps only the final answer, TurnBody filters):
+          a mode switch re-renders the answer's AssistantText instead of remounting and re-parsing it. */}
+      {folded ? null : <TurnBody segments={segments} streamKey={message.sessionId} />}
       {partial ? <StoppedNote partial={segments.length > 0} testId="message-stopped-note" /> : null}
       {!folded && message.attachments && message.attachments.length > 0 ? (
         <AttachmentList attachments={message.attachments} chatId={message.chatId} download />

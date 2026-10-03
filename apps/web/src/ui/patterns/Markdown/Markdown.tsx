@@ -5,9 +5,12 @@
 // its defaults are kept) and, while `streaming`, repairs incomplete markdown
 // (remend: an unterminated ``` fence, `**bold`, a half-typed link) and splits
 // the source into blocks that are each memoised — a new token re-renders only
-// the tail block. When the stream ends the document is rendered once more as
-// a single parse (`mode="static"`), so constructs that span blocks (link
-// reference definitions, footnotes) come out right in the final render.
+// the tail block. When the stream ends the blocks stay: every settled block
+// keeps its memoised render and only the tail re-renders without the caret
+// (D-88 — re-parsing a 4,000-word answer as one document was a 100+ ms long
+// task at the end of every large response, and again on every remount). Only
+// a document that needs a single parse — constructs that span blocks: link
+// reference definitions, footnotes — is rendered with `mode="static"`.
 //
 // Every element is rendered by an override below, styled with design
 // utilities only; nothing relies on Streamdown's own class names (they are
@@ -30,6 +33,7 @@ import {
   isValidElement,
   useCallback,
   useContext,
+  useDeferredValue,
   useMemo,
   useRef,
   type ReactNode,
@@ -38,7 +42,6 @@ import {
 import {
   Block,
   Streamdown,
-  parseMarkdownIntoBlocks,
   useIsCodeFenceIncomplete,
   type BlockProps,
   type Components,
@@ -49,6 +52,7 @@ import { cn } from '../../lib/cn.js';
 import { Checkbox } from '../../primitives/Checkbox/Checkbox.js';
 import { InlineCode } from '../../primitives/InlineCode/InlineCode.js';
 import { CodeBlock } from '../CodeBlock/CodeBlock.js';
+import { needsWholeDocument, splitMarkdownBlocks } from './markdownBlocks.js';
 
 export interface MarkdownProps {
   /** Markdown source. */
@@ -64,11 +68,16 @@ type MarkdownSize = NonNullable<MarkdownProps['size']>;
 
 /** Renders markdown source as styled, sanitised prose; see the file header. */
 export function Markdown({ children, streaming = false, size = 'prose', className }: MarkdownProps) {
+  // While tokens arrive, the markdown is re-rendered in a deferred, interruptible
+  // render (D-88): when a frame is busy React skips intermediate sources and the
+  // tail block's re-parse never blocks input or paint. Settled text is not deferred.
+  const deferred = useDeferredValue(children);
+  const source = streaming ? deferred : children;
   // Streamdown splits the (repaired) source into blocks with this function; the
   // count it last produced tells `TailBlock` which block is the tail.
   const blockCount = useRef(0);
   const parseBlocks = useCallback((markdown: string) => {
-    const blocks = parseMarkdownIntoBlocks(markdown);
+    const blocks = splitMarkdownBlocks(markdown);
     blockCount.current = blocks.length;
     return blocks;
   }, []);
@@ -78,7 +87,7 @@ export function Markdown({ children, streaming = false, size = 'prose', classNam
     <div className={cn('min-w-0 break-words text-fg', size === 'prose' ? 'text-body' : 'text-small', className)}>
       <TailContext.Provider value={tail}>
         <Streamdown
-          mode={streaming ? 'streaming' : 'static'}
+          mode={streaming || !needsWholeDocument(source) ? 'streaming' : 'static'}
           isAnimating={streaming}
           parseIncompleteMarkdown={streaming}
           parseMarkdownIntoBlocksFn={parseBlocks}
@@ -89,10 +98,10 @@ export function Markdown({ children, streaming = false, size = 'prose', classNam
           lineNumbers={false}
           className={ROOT_SPACING[size]}
         >
-          {children}
+          {source}
         </Streamdown>
       </TailContext.Provider>
-      {streaming && children.trim() === '' ? <StreamingCaret /> : null}
+      {streaming && source.trim() === '' ? <StreamingCaret /> : null}
     </div>
   );
 }

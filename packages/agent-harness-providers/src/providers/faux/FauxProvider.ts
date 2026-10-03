@@ -68,6 +68,12 @@ export const FAUX_MODELS: HarnessModel[] = [
 export interface FauxTextEntry {
   type: 'text';
   content: string;
+  /**
+   * Pause between tokens, in ms — a long answer then streams over seconds the
+   * way a real provider's does (transcript performance checks). Default 0:
+   * every token is emitted at once.
+   */
+  delayMs?: number;
 }
 
 /** Emit a tool_start event and wait for provideToolResult(). */
@@ -570,8 +576,13 @@ export class FauxProvider implements IAgentHarness {
           case 'text': {
             // Emit word-by-word for realism
             const words = entry.content.split(' ');
-            for (const word of words) {
-              const token = words.indexOf(word) === 0 ? word : ` ${word}`;
+            const delayMs = entry.delayMs ?? 0;
+            for (let i = 0; i < words.length; i += 1) {
+              if (delayMs > 0 && i > 0) {
+                await new Promise((resolve) => setTimeout(resolve, delayMs));
+                if (signal?.aborted) break;
+              }
+              const token = i === 0 ? words[i]! : ` ${words[i]}`;
               this.broadcast(conversationId, { kind: 'harness.token', data: { text: token } });
               assistantText += token;
             }

@@ -18,7 +18,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../../lib/cn.js';
 import { IconButton } from '../../primitives/IconButton/IconButton.js';
-import { highlightCode, resolveLang, withPreChrome } from './highlighter.js';
+import { highlightCode, peekHighlightedCode, resolveLang, withPreChrome } from './highlighter.js';
 
 export interface CodeBlockProps {
   /** Raw source text. */
@@ -48,15 +48,17 @@ export function CodeBlock({
   lineNumbers = false,
   className,
 }: CodeBlockProps) {
-  const [html, setHtml] = useState<string | null>(null);
-  const generation = useRef(0);
   const highlightLang = resolveLang(lang);
+  // A block highlighted before (a remount after a view-mode switch, the live turn becoming the persisted one) paints at once.
+  const [html, setHtml] = useState<string | null>(() => (highlightLang ? (peekHighlightedCode(children, highlightLang) ?? null) : null));
+  const generation = useRef(0);
 
   useEffect(() => {
     generation.current += 1;
     const myGeneration = generation.current;
-    setHtml(null);
-    if (!highlightLang) return;
+    const cached = highlightLang ? peekHighlightedCode(children, highlightLang) : undefined;
+    setHtml(cached ?? null);
+    if (!highlightLang || cached !== undefined) return;
     highlightCode(children, highlightLang).then((result) => {
       if (generation.current === myGeneration) setHtml(result);
     });

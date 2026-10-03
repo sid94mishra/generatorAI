@@ -150,7 +150,24 @@ function useOverflowIds(listRef: RefObject<HTMLDivElement | null>, layoutKey: st
     };
     measure();
     list.addEventListener('scroll', measure, { passive: true });
-    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    // Re-measure only when a width actually changed: the observer also reports
+    // every element once on observe, and reading tab offsets forces a layout of
+    // the whole page — costly in the middle of a long streaming answer.
+    const widths = new WeakMap<Element, number>();
+    const ro =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver((entries) => {
+            let changed = false;
+            for (const entry of entries) {
+              const width = entry.contentRect.width;
+              if (widths.get(entry.target) !== width) {
+                widths.set(entry.target, width);
+                changed = true;
+              }
+            }
+            if (changed) measure();
+          });
     if (ro) {
       ro.observe(list);
       for (const el of Array.from(list.children)) ro.observe(el);

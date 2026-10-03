@@ -15,7 +15,7 @@ import type { ChatMessage } from '@generatorai/shared';
 import type { TranscriptTurnMessage } from './messageInput.js';
 import type { StreamBlock } from '../stream/types.js';
 import { chatMessageToBlocks } from './chatMessageToBlocks.js';
-import { deriveSegments, deriveTimeline } from './deriveTimeline.js';
+import { deriveSegments, deriveTimeline, type StreamSegment } from './deriveTimeline.js';
 import type { TimelineStep } from './types.js';
 
 /** A persisted row of the transcript, or the live turn's parts. */
@@ -173,6 +173,32 @@ export function countTimelineSteps(steps: readonly TimelineStep[]): { steps: num
   const acc = { steps: 0, failed: 0 };
   countSteps(steps, acc);
   return acc;
+}
+
+/**
+ * The same digest from segments already derived for rendering (`deriveSegments(blocks, { active: false })`):
+ * no second timeline walk, so a response can keep its digest current for every view mode at no cost.
+ */
+export function digestSegments(
+  segments: readonly StreamSegment[],
+  blocks: readonly StreamBlock[] | undefined,
+  durationMs?: number,
+): TurnDigest {
+  const acc = { steps: 0, failed: 0 };
+  let finalText = '';
+  for (const seg of segments) {
+    if (seg.type === 'steps') countSteps(seg.steps, acc);
+    else if (seg.type === 'answer') finalText = seg.text;
+  }
+  let additions = 0;
+  let deletions = 0;
+  for (const b of blocks ?? []) {
+    if (b.type === 'tool_call' && b.fileOp) {
+      additions += b.fileOp.additions;
+      deletions += b.fileOp.deletions;
+    }
+  }
+  return { steps: acc.steps, additions, deletions, failed: acc.failed, finalText, ...(durationMs != null ? { durationMs } : {}) };
 }
 
 /** Digest of one response's blocks (Summary mode; the collapsed-turn header). */

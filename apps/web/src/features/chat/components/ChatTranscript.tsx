@@ -10,7 +10,7 @@
 // `useChatStreamState` handed down by the page.
 // ────────────────────────────────────────────────────────────────
 
-import { memo, useCallback, useMemo, type ReactNode } from 'react';
+import { memo, useCallback, useDeferredValue, useMemo, useRef, type ReactNode } from 'react';
 import {
   buildTranscriptTurns,
   deriveSegments,
@@ -71,7 +71,16 @@ interface LiveTurnProps {
  * re-renders this leaf only.
  */
 const LiveTurn = memo(function LiveTurn({ sessionId, agentName, harnessLabel, prevUsage, prevCompletedAt, thinking }: LiveTurnProps) {
-  const stream = useStreamStore((state) => state.streams[sessionId]);
+  const current = useStreamStore((state) => state.streams[sessionId]);
+  // The transcript swaps a finished live turn for its persisted message in a
+  // deferred render (D-88). The stream is cleared as soon as history holds the
+  // turn, which can be a few frames before that render commits: keep showing
+  // the finished turn meanwhile instead of an empty gap.
+  const lastFinished = useRef<typeof current>(undefined);
+  if (current?.status === 'complete' && (current.blocks?.length ?? 0) > 0) lastFinished.current = current;
+  else if (current && current.status !== 'idle') lastFinished.current = undefined;
+  const cleared = !current || (current.status === 'idle' && (current.blocks?.length ?? 0) === 0);
+  const stream = cleared && lastFinished.current ? lastFinished.current : current;
   const status = stream?.status;
   const active = status === 'streaming' || status === 'thinking';
   const blocks = stream?.blocks;
@@ -137,6 +146,9 @@ export function ChatTranscript({
   const { displayMessages, messagesLoading, hasMoreMessages, loadEarlier, showOptimisticUserMessage, scrollRef, showJumpToLatest, jumpToLatest } =
     transcript;
   const viewMode = useTranscriptViewMode(chatId);
+  // The segmented control answers the click at once; the transcript re-renders for the new mode in a
+  // deferred, interruptible render (D-88), so a long transcript never blocks the frame after the click.
+  const renderedViewMode = useDeferredValue(viewMode);
   const setViewMode = useTranscriptPrefsStore((s) => s.setViewMode);
 
   const thinking = stream.isPending && !stream.hasNewTurnContent;
@@ -149,6 +161,11 @@ export function ChatTranscript({
       }),
     [displayMessages, showOptimisticUserMessage, stream.turnUserMessage, live, sessionId],
   );
+
+  // A boundary (a new user message, the live turn becoming its persisted message)
+  // re-renders the transcript in a deferred, interruptible render (D-88): the
+  // persisted answer is parsed in time slices while the live one stays on screen.
+  const shownTurns = useDeferredValue(turns);
 
   const prevUsage = stream.prevUsageRef.current;
   const renderLive = useCallback(
@@ -216,7 +233,7 @@ export function ChatTranscript({
       ...(chatId ? { chatId } : {}),
       ...(renderWidget && sessionId ? { renderWidget: (block: WidgetBlock) => renderWidget(block, sessionId) } : {}),
       ...(renderScmResult ? { renderScmResult } : {}),
-      viewMode,
+      viewMode: renderedViewMode,
     }),
     [
       openChangesTab,
@@ -233,7 +250,7 @@ export function ChatTranscript({
       renderWidget,
       renderScmResult,
       sessionId,
-      viewMode,
+      renderedViewMode,
     ],
   );
 
@@ -243,7 +260,7 @@ export function ChatTranscript({
   return (
     <TranscriptProvider value={actions}>
       <TranscriptView
-        turns={turns}
+        turns={shownTurns}
         scrollRef={scrollRef}
         agentName={agentName}
         loading={messagesLoading}

@@ -557,6 +557,21 @@ Chats and runs work in mounts (`workspace_mounts`); the `worktrees` table, which
   is reading the result. It was mapped to `needs_you` "Needs review" (the hand glyph), which told the person to act
   when nothing waited on them.
 
+### D-88 Transcript rendering budget (desktop orchestrator test, 2026-10-03) — Final
+Profiled in the production build (Electron, CDP CPU profiles + Long Animation Frames) on a scripted ~4,000-word,
+12-step answer (`agent-tests/perf/fixtures/orchestrator-report.mjs`, Faux `text.delayMs`):
+- **Blocks, not the whole answer.** Streamdown keeps a whole document as one block when it sees `[^label]` — and it
+  looked inside code, so any regex class like `[^a-z0-9]` re-parsed the full answer every frame. `ui/patterns/Markdown/
+  markdownBlocks.ts` masks fenced and inline code before splitting; only real footnotes / link reference definitions
+  keep a document whole. After a stream ends the blocks stay (no second whole-document parse).
+- **Highlighting off the main thread.** Shiki runs in a module worker (`highlight.worker.ts`, in-thread fallback), with
+  a result cache so a remounted code block paints at once.
+- **Deferred, interruptible renders:** the streaming markdown source, the transcript's turns at boundaries (the live
+  turn stays on screen until its persisted message has rendered) and the view mode use `useDeferredValue`; Summary
+  renders through the same `TurnBody`, so a mode switch re-renders the answer instead of remounting it; the digest is
+  counted from the derived segments.
+- **Fences:** `agent-tests/perf/transcript-stream.spec.ts` (reporting, generous limits) and the `markdownBlocks` unit test.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

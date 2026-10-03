@@ -1,187 +1,109 @@
 // ────────────────────────────────────────────────────────────────
 // Lazy Shiki 4 highlighting for C-23 CodeBlock (D-33, D-38; 09 §8.1 "Shiki
-// grammars lazy, out of the initial bundle").
+// grammars lazy, out of the initial bundle"), off the main thread (D-88).
 //
-// Nothing here is imported eagerly by CodeBlock.tsx: `getHighlighter()` and
-// `highlightCode()` are only called from inside a `useEffect`, so `shiki/core`,
-// the JS regex engine (no WASM download — `shiki/engine/javascript` trades a
-// little grammar accuracy for a much smaller, dependency-free chunk than
-// `shiki/engine/oniguruma` + its .wasm) and each language grammar land in
-// their own on-demand chunks. `LANG_LOADERS` lists static import specifiers
-// (one `import('shiki/langs/<x>.mjs')` per entry) rather than a templated
-// `import(\`shiki/langs/${lang}.mjs\`)`, so the bundler can see every chunk at
-// build time instead of needing dynamic-import-vars globbing into
-// node_modules — safer and it keeps the supported-language surface explicit.
+// Nothing here is imported eagerly by CodeBlock.tsx: `highlightCode()` and
+// `highlightTokens()` are only called from inside a `useEffect`, and the
+// engine (`./shikiEngine.ts`: `shiki/core`, the JS regex engine, one lazy
+// chunk per language grammar, the `var(--syntax-*)` theme) is loaded inside
+// a dedicated module worker (`./highlight.worker.ts`). Compiling a grammar
+// and tokenizing a block used to run on the main thread — 0.3–0.4 s for the
+// first TypeScript fence, a long task in the middle of a streaming answer.
+// Where there is no Worker (unit tests) the engine runs in-thread.
 //
-// The theme is generated once, mapping standard TextMate scopes to this
-// theme's `--syntax-*` custom properties (globals.css) — not fixed hex
-// values — so highlighted HTML repaints for free across themes/light-dark
-// without re-highlighting (replaces the old `.hljs-*` rules, D-33).
+// Results are cached by (kind, language, code): a code block that remounts
+// (a transcript view-mode switch, the live turn becoming the persisted
+// message) shows its colours at once (`peekHighlightedCode`) and costs nothing.
 // ────────────────────────────────────────────────────────────────
 
-import type { HighlighterCore, ThemedToken, ThemeRegistrationRaw } from 'shiki/core';
+import type { ThemedToken } from 'shiki/core';
+import { engineHighlightCode, engineHighlightTokens, resolveLang } from './shikiEngine.js';
 
-export const SYNTAX_THEME_NAME = 'gai-syntax';
+export {
+  LANG_LOADERS,
+  SYNTAX_THEME,
+  SYNTAX_THEME_NAME,
+  isSupportedLang,
+  resolveLang,
+  type SupportedLang,
+} from './shikiEngine.js';
 
-/** Shiki theme whose token colours are `var(--syntax-*)` (globals.css, per-theme values). */
-export const SYNTAX_THEME: ThemeRegistrationRaw = {
-  name: SYNTAX_THEME_NAME,
-  type: 'dark',
-  fg: 'var(--syntax-variable)',
-  bg: 'transparent',
-  settings: [
-    { scope: ['comment', 'punctuation.definition.comment'], settings: { foreground: 'var(--syntax-comment)' } },
-    {
-      scope: ['string', 'string.quoted', 'punctuation.definition.string', 'string.template'],
-      settings: { foreground: 'var(--syntax-string)' },
-    },
-    { scope: ['constant.numeric'], settings: { foreground: 'var(--syntax-number)' } },
-    {
-      scope: ['keyword', 'storage.type', 'storage.modifier', 'keyword.control', 'keyword.other'],
-      settings: { foreground: 'var(--syntax-keyword)' },
-    },
-    {
-      scope: ['entity.name.function', 'support.function', 'meta.function-call', 'variable.function'],
-      settings: { foreground: 'var(--syntax-function)' },
-    },
-    {
-      scope: ['entity.name.type', 'support.type', 'entity.name.class', 'support.class', 'entity.other.inherited-class'],
-      settings: { foreground: 'var(--syntax-type)' },
-    },
-    { scope: ['variable', 'variable.other', 'variable.parameter'], settings: { foreground: 'var(--syntax-variable)' } },
-    {
-      scope: ['constant', 'constant.language', 'support.constant', 'constant.character'],
-      settings: { foreground: 'var(--syntax-constant)' },
-    },
-    { scope: ['keyword.operator'], settings: { foreground: 'var(--syntax-operator)' } },
-    { scope: ['punctuation', 'meta.brace', 'punctuation.separator'], settings: { foreground: 'var(--syntax-punctuation)' } },
-    { scope: ['entity.name.tag'], settings: { foreground: 'var(--syntax-tag)' } },
-    { scope: ['entity.other.attribute-name'], settings: { foreground: 'var(--syntax-attribute)' } },
-    { scope: ['markup.deleted', 'diff.deleted'], settings: { foreground: 'var(--syntax-deleted)' } },
-    { scope: ['markup.inserted', 'diff.inserted'], settings: { foreground: 'var(--syntax-inserted)' } },
-  ],
-};
+// ── Result cache ─────────────────────────────────────────────────
 
-/**
- * Supported languages, each its own lazy chunk. Extend by adding one static
- * `import('shiki/langs/<name>.mjs')` entry — never a templated dynamic import
- * (breaks bundler chunk analysis for a node_modules path).
- */
-export const LANG_LOADERS = {
-  typescript: () => import('shiki/langs/typescript.mjs'),
-  tsx: () => import('shiki/langs/tsx.mjs'),
-  javascript: () => import('shiki/langs/javascript.mjs'),
-  jsx: () => import('shiki/langs/jsx.mjs'),
-  json: () => import('shiki/langs/json.mjs'),
-  jsonc: () => import('shiki/langs/jsonc.mjs'),
-  bash: () => import('shiki/langs/bash.mjs'),
-  shellscript: () => import('shiki/langs/shellscript.mjs'),
-  python: () => import('shiki/langs/python.mjs'),
-  yaml: () => import('shiki/langs/yaml.mjs'),
-  markdown: () => import('shiki/langs/markdown.mjs'),
-  css: () => import('shiki/langs/css.mjs'),
-  html: () => import('shiki/langs/html.mjs'),
-  sql: () => import('shiki/langs/sql.mjs'),
-  go: () => import('shiki/langs/go.mjs'),
-  rust: () => import('shiki/langs/rust.mjs'),
-  java: () => import('shiki/langs/java.mjs'),
-  diff: () => import('shiki/langs/diff.mjs'),
-  toml: () => import('shiki/langs/toml.mjs'),
-  dockerfile: () => import('shiki/langs/dockerfile.mjs'),
-  c: () => import('shiki/langs/c.mjs'),
-  cpp: () => import('shiki/langs/cpp.mjs'),
-  csharp: () => import('shiki/langs/csharp.mjs'),
-  ini: () => import('shiki/langs/ini.mjs'),
-  kotlin: () => import('shiki/langs/kotlin.mjs'),
-  php: () => import('shiki/langs/php.mjs'),
-  ruby: () => import('shiki/langs/ruby.mjs'),
-  scss: () => import('shiki/langs/scss.mjs'),
-  swift: () => import('shiki/langs/swift.mjs'),
-  xml: () => import('shiki/langs/xml.mjs'),
-} as const;
+const CACHE_LIMIT = 400;
+const cache = new Map<string, string | ThemedToken[][] | null>();
 
-export type SupportedLang = keyof typeof LANG_LOADERS;
-
-export function isSupportedLang(lang: string | undefined): lang is SupportedLang {
-  return !!lang && Object.hasOwn(LANG_LOADERS, lang);
+function cacheKey(kind: 'html' | 'tokens', code: string, lang: string): string {
+  return `${kind}\u0000${lang}\u0000${code}`;
 }
 
-/**
- * Common short names (fence info strings like ```ts / ```sh, file-extension
- * style names) → the `LANG_LOADERS` key that highlights them.
- */
-const LANG_ALIASES: Readonly<Record<string, SupportedLang>> = {
-  ts: 'typescript',
-  mts: 'typescript',
-  cts: 'typescript',
-  js: 'javascript',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  node: 'javascript',
-  json5: 'jsonc',
-  sh: 'bash',
-  zsh: 'bash',
-  shell: 'bash',
-  console: 'bash',
-  py: 'python',
-  python3: 'python',
-  yml: 'yaml',
-  md: 'markdown',
-  htm: 'html',
-  svg: 'xml',
-  rs: 'rust',
-  rb: 'ruby',
-  golang: 'go',
-  patch: 'diff',
-  docker: 'dockerfile',
-  cs: 'csharp',
-  'c#': 'csharp',
-  'c++': 'cpp',
-  cc: 'cpp',
-  hpp: 'cpp',
-  h: 'c',
-  kt: 'kotlin',
-  kts: 'kotlin',
-  cfg: 'ini',
-  conf: 'ini',
-};
-
-/** Resolves a language name or alias (case-insensitive) to a highlightable language, else `undefined`. */
-export function resolveLang(lang: string | undefined): SupportedLang | undefined {
-  if (!lang) return undefined;
-  const key = lang.trim().toLowerCase();
-  if (isSupportedLang(key)) return key;
-  return Object.hasOwn(LANG_ALIASES, key) ? LANG_ALIASES[key] : undefined;
+function remember<T extends string | ThemedToken[][] | null>(key: string, value: T): T {
+  cache.delete(key);
+  cache.set(key, value);
+  if (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!);
+  return value;
 }
 
-/** Languages Shiki tokenizes without a grammar (no lazy chunk needed). */
-const PLAIN_LANGS = new Set(['text', 'plain', 'plaintext', 'txt']);
+/** The highlighted HTML of `code` if it was already produced, so a remounting block paints it without waiting. */
+export function peekHighlightedCode(code: string, lang: string | undefined): string | undefined {
+  const value = cache.get(cacheKey('html', code, resolveLang(lang) ?? lang ?? 'text'));
+  return typeof value === 'string' ? value : undefined;
+}
 
-let highlighterPromise: Promise<HighlighterCore> | null = null;
-const loadedLangs = new Set<string>();
+// ── Worker dispatch ──────────────────────────────────────────────
 
-async function getHighlighter(): Promise<HighlighterCore> {
-  if (!highlighterPromise) {
-    highlighterPromise = (async () => {
-      const [{ createHighlighterCore }, { createJavaScriptRegexEngine }] = await Promise.all([
-        import('shiki/core'),
-        import('shiki/engine/javascript'),
-      ]);
-      return createHighlighterCore({
-        themes: [SYNTAX_THEME],
-        langs: [],
-        engine: createJavaScriptRegexEngine(),
-      });
-    })();
+export type HighlightRequest = { id: number; kind: 'html' | 'tokens'; code: string; lang: string | undefined };
+export type HighlightResponse = { id: number; ok: true; value: string | ThemedToken[][] | null } | { id: number; ok: false; error: string };
+
+let workerPromise: Promise<Worker | null> | null = null;
+let nextId = 1;
+const pending = new Map<number, { resolve: (value: string | ThemedToken[][] | null) => void; reject: (err: Error) => void }>();
+
+function getWorker(): Promise<Worker | null> {
+  if (!workerPromise) {
+    workerPromise =
+      typeof Worker === 'undefined'
+        ? Promise.resolve(null)
+        : import('./highlight.worker.ts?worker')
+            .then(({ default: HighlightWorker }) => {
+              const worker = new HighlightWorker();
+              worker.onmessage = (event: MessageEvent<HighlightResponse>) => {
+                const reply = event.data;
+                const waiter = pending.get(reply.id);
+                if (!waiter) return;
+                pending.delete(reply.id);
+                if (reply.ok) waiter.resolve(reply.value);
+                else waiter.reject(new Error(reply.error));
+              };
+              worker.onerror = () => {
+                // A worker that cannot start (CSP, a host without module workers): highlight in-thread from now on.
+                workerPromise = Promise.resolve(null);
+                for (const [id, waiter] of pending) {
+                  pending.delete(id);
+                  waiter.reject(new Error('highlight worker failed'));
+                }
+              };
+              return worker;
+            })
+            .catch(() => null);
   }
-  return highlighterPromise;
+  return workerPromise;
 }
 
-async function ensureLanguage(highlighter: HighlighterCore, lang: SupportedLang): Promise<void> {
-  if (loadedLangs.has(lang)) return;
-  const mod = await LANG_LOADERS[lang]();
-  await highlighter.loadLanguage(mod.default);
-  loadedLangs.add(lang);
+async function run(kind: 'html' | 'tokens', code: string, lang: string | undefined): Promise<string | ThemedToken[][] | null> {
+  const worker = await getWorker();
+  if (worker) {
+    try {
+      return await new Promise((resolve, reject) => {
+        const id = nextId++;
+        pending.set(id, { resolve, reject });
+        worker.postMessage({ id, kind, code, lang } satisfies HighlightRequest);
+      });
+    } catch {
+      // Fall through to the in-thread engine.
+    }
+  }
+  return kind === 'html' ? engineHighlightCode(code, lang) : engineHighlightTokens(code, lang);
 }
 
 /**
@@ -190,25 +112,24 @@ async function ensureLanguage(highlighter: HighlighterCore, lang: SupportedLang)
  * a code block should never fail to render because a grammar is missing.
  */
 export async function highlightCode(code: string, lang: string | undefined): Promise<string> {
-  const supported = resolveLang(lang);
-  const resolvedLang = supported ?? (lang && PLAIN_LANGS.has(lang) ? lang : 'text');
-  const highlighter = await getHighlighter();
-  if (supported) await ensureLanguage(highlighter, supported);
-  return highlighter.codeToHtml(code, { lang: resolvedLang, theme: SYNTAX_THEME_NAME });
+  const key = cacheKey('html', code, resolveLang(lang) ?? lang ?? 'text');
+  const hit = cache.get(key);
+  if (typeof hit === 'string') return hit;
+  return remember(key, (await run('html', code, lang)) as string);
 }
 
 /**
  * Highlights `code` as one token array per source line (for line-oriented
  * views such as diff rows, which lay out each line themselves). Each token's
- * `color` is a `var(--syntax-*)` reference from `SYNTAX_THEME`. Resolves
- * `null` for an unsupported/omitted language — callers render plain text.
+ * `color` is a `var(--syntax-*)` reference. Resolves `null` for an
+ * unsupported/omitted language — callers render plain text.
  */
 export async function highlightTokens(code: string, lang: string | undefined): Promise<ThemedToken[][] | null> {
   const supported = resolveLang(lang);
   if (!supported) return null;
-  const highlighter = await getHighlighter();
-  await ensureLanguage(highlighter, supported);
-  return highlighter.codeToTokens(code, { lang: supported, theme: SYNTAX_THEME_NAME }).tokens;
+  const key = cacheKey('tokens', code, supported);
+  if (cache.has(key)) return cache.get(key) as ThemedToken[][] | null;
+  return remember(key, (await run('tokens', code, supported)) as ThemedToken[][] | null);
 }
 
 /**
