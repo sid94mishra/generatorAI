@@ -31,6 +31,8 @@ describe('parentHref (06 §3.2, MD-88)', () => {
     expect(parentHref('/chats/new')).toBe('/chats');
     expect(parentHref('/workflows/w1')).toBe('/workflows');
     expect(parentHref('/workflows/w1/runs/r1')).toBe('/workflows/w1');
+    expect(parentHref('/workflows/w1/edit')).toBe('/workflows/w1');
+    expect(parentHref('/workflows/w1/edit/loop/fix')).toBe('/workflows/w1/edit');
     expect(parentHref('/workflows/w1/runs/r1/stages/s1')).toBe('/workflows/w1/runs/r1');
     expect(parentHref('/projects/p1/pull-requests')).toBe('/projects/p1');
     expect(parentHref('/projects/p1/codebases/c1')).toBe('/projects/p1');

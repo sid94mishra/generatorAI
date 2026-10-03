@@ -1,0 +1,34 @@
+appId: ${APP_ID}
+name: workflows · stage editor (tabs, simple fields, save into the builder draft)
+# M8-06 (MStagePrompt, MStageModel, MStageTools, MStageOutput, MStagePolicy, MStageHooks). Edits the sandbox's
+# "Sandbox Workflow" plan stage, saves into the builder draft, then cancels the builder — nothing is saved.
+tags: [workflows]
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///workflows
+- extendedWaitUntil: {visible: "Sandbox Workflow", timeout: 20000}
+- tapOn: "Sandbox Workflow"
+- extendedWaitUntil: {visible: {id: workflow-more}, timeout: 15000}
+- tapOn: {id: workflow-more}
+- tapOn: "Edit in builder"
+- extendedWaitUntil: {visible: {id: builder-stage-plan}, timeout: 15000}
+- tapOn: {id: builder-stage-plan}
+- extendedWaitUntil: {visible: {id: stage-editor}, timeout: 5000}
+- assertVisible: {id: stage-name}
+- tapOn: {id: stage-tab-session}
+- assertVisible: {id: stage-model}
+- tapOn: {id: stage-tab-tools}
+- assertVisible: {id: stage-tool-browser}
+- tapOn: {id: stage-tab-output}
+- tapOn: {id: stage-add-rule-contains}
+- assertVisible: {id: stage-rule-0}
+- tapOn: {id: stage-tab-policy}
+- tapOn: {id: stage-retry}
+- assertVisible: {id: stage-retry-sentence}
+- tapOn: {id: stage-tab-hooks}
+- assertVisible: "Stage hooks"
+- tapOn: "Save"
+- extendedWaitUntil: {visible: "● Unsaved changes", timeout: 5000}
+- tapOn: "Cancel"
+- tapOn: "Discard"
+- extendedWaitUntil: {visible: {id: workflow-more}, timeout: 10000}

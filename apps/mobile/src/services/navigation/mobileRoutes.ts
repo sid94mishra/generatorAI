@@ -15,7 +15,7 @@ const SETTINGS_SECTIONS = new Set([
 /** `/x/new` create links: the module's own creation UI until its route lands (New chat is `/chats/new` since M6-05). */
 const CREATE: Record<string, string> = {
   chats: '/chats/new',
-  workflows: '/workflows?new=1',
+  workflows: '/workflows/new',
   projects: '/projects/new',
   agents: '/agents/new',
   automations: '/automations/new',
@@ -63,10 +63,7 @@ function mapRoute(route: string | null): string | null {
       return SETTINGS_SECTIONS.has(id) ? `/settings/${id}` : '/settings';
     }
     case 'workflows':
-      // The builder (M8) and the stage approval sheet (M8) are not built: open the workflow / the run, whose stage
-      // card answers the approval.
-      if (id && sub === 'edit') return `/workflows/${id}`;
-      if (id && sub === 'runs' && subId && leaf === 'approval') return withQuery(`/workflows/${id}/runs/${subId}`, query);
+      // The builder (`/workflows/<id>/edit`, M8-05), runs, their stages and the stage approval sheet (MB-50) have routes.
       return route;
     case 'automations':
       // The webhook credentials are a section of the automation (MD-169); edit and executions have their routes.

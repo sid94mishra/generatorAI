@@ -9,7 +9,7 @@ import type { BackgroundTaskListItem } from '@generatorai/shared';
 import { useAdminApi } from '../../services/api/useAdminApi';
 import { useApi } from '../../services/api/useApi';
 import { useAuth } from '../../services/auth/AuthProvider';
-import { ACTIVE_TASK_STATUSES, paneTabs, type PaneTabEntry } from './paneFacts';
+import { ACTIVE_TASK_STATUSES, paneTabs, type PaneTabEntry, type PaneTabInputs } from './paneFacts';
 import type { MobilePaneTab } from './paneRegistry';
 import { usePaneStore, type PaneClaim } from './paneStore';
 import { useClaimPaneScope } from './WorkspacePane';
@@ -57,11 +57,13 @@ export interface PaneTabsInput {
   orchestrator?: boolean;
   /** The pane is on screen: poll the live bits. */
   live: boolean;
+  /** Run panes: the run tabs' counts (MG-28). */
+  run?: PaneTabInputs['run'];
 }
 
 /** The tabs for a scope, with counts and needs-you dots. */
 export function usePaneTabs(input: PaneTabsInput): PaneTabEntry[] {
-  const { kind, workspaceId, chatId = null, scopes, orchestrator = false, live } = input;
+  const { kind, workspaceId, chatId = null, scopes, orchestrator = false, live, run } = input;
   const api = useApi();
   const admin = useAdminApi();
   const changes = useChangesSummary(workspaceId);
@@ -98,8 +100,9 @@ export function usePaneTabs(input: PaneTabsInput): PaneTabEntry[] {
         },
         planStatus: latestPlan?.status ?? null,
         computer: { enabled: computerEnabled, needsAnswer },
+        ...(run ? { run } : {}),
       }),
-    [kind, changedFiles, orchestrator, list, latestPlan?.status, computerEnabled, needsAnswer],
+    [kind, changedFiles, orchestrator, list, latestPlan?.status, computerEnabled, needsAnswer, run?.files, run?.hooks, run?.variables, run?.needsYou], // eslint-disable-line react-hooks/exhaustive-deps
   );
 }
 

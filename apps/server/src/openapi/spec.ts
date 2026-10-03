@@ -2402,7 +2402,10 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           'the loop decisions grant_iterations {n}, raise_budget, continue_with_input {text}, accept, accept_iteration {k}, and deliver_event ' +
           '{eventKey, idempotencyKey, data?} (P05). `instanceId` targets one instance; `expectedVersion` makes the command conditional. ' +
           '`approve` also resolves an approval wait (its form is validated) and a decision of a sub-workflow child sent to the parent run. ' +
-          'The decisions (approve, the loop decisions, deliver_event) need exec:agent; every other command also needs write:workflows.',
+          'The decisions (approve, the loop decisions, deliver_event) need exec:agent; every other command also needs write:workflows. ' +
+          'A mobile device sends `approve` with `approvalProof` beside the command (mobile MG-05): the device approval key signs gate ' +
+          '{kind: stage_approval, id: instanceId, entityId: runId} and the decision approve / reject / request_changes for approved / rejected / ' +
+          'changes_requested; until workflow approvals carry a server risk verdict every one counts as risky.',
         parameters: [runIdParam],
         requestBody: {
           required: true,
@@ -2412,7 +2415,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           '200': { description: 'deliver_event: the same key and data were delivered before (`replayed: true`)' },
           '202': { description: 'Accepted by the engine' },
           '400': { description: 'Invalid command, or approval data that does not match the form schema of the wait' },
-          '403': { description: 'A run-control command without write:workflows' },
+          '403': { description: 'A run-control command without write:workflows; APPROVAL_KEY_MISSING, APPROVAL_PROOF_REQUIRED or APPROVAL_PROOF_INVALID for an approval from a mobile device' },
           '404': { description: 'Unknown run or instance' },
           '409': { description: 'invalid_state, version_conflict or conflict' },
           '503': { description: 'No workflow engine in this process' },
@@ -2484,8 +2487,13 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       post: {
         tags: ['Runs', 'HITL'],
         summary: "Answer a stage's tool-permission gate ({behavior: allow|deny, message?})",
+        description: 'A risky gate (the MG-04 verdict on the parked interaction) answered by a mobile device carries `approvalProof` (gate {kind: tool_permission, id: interactionId, entityId: runId}, decision = behavior).',
         parameters: [runIdParam, instanceIdParam, interactionIdParam],
-        responses: { '202': { description: 'Answered' }, '409': { description: 'INTERACTION_STALE' } },
+        responses: {
+          '202': { description: 'Answered' },
+          '403': { description: 'APPROVAL_KEY_MISSING, APPROVAL_PROOF_REQUIRED or APPROVAL_PROOF_INVALID (a risky gate answered by a mobile device)' },
+          '409': { description: 'INTERACTION_STALE' },
+        },
       },
     },
     '/api/workflow-runs/{runId}/instances/{instanceId}/interactions/{interactionId}/answer': {

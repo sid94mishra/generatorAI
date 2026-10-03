@@ -153,7 +153,7 @@ const GATE_KINDS: ReadonlySet<string> = new Set<ApprovalGateKind>([
   'computer_consent',
   'scope_grant',
 ]);
-const DECISIONS: ReadonlySet<string> = new Set<ApprovalDecision>(['allow', 'deny', 'approve', 'reject', 'answer']);
+const DECISIONS: ReadonlySet<string> = new Set<ApprovalDecision>(['allow', 'deny', 'approve', 'reject', 'answer', 'request_changes']);
 
 /** Validates the wire shape; every member the signature covers must be the right type. */
 function parseProof(value: unknown): { payload: ApprovalPayload; signature: string } {

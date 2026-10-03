@@ -79,3 +79,25 @@ export function dockStorageKeys(scope: DockScope): {
   const base = `generatorai:dock:${scope}`;
   return { open: `${base}:open`, layout: `${base}:layout`, tabs: (entityId) => `${base}:${entityId}` };
 }
+
+// ── Run pane (mobile MG-28) ──────────────────────────────────────────────
+//
+// The run page's pane on mobile: the run's own Output (the focused stage's
+// output and files), Hooks and Variables, then the workspace tabs every
+// pane shows. Additive; web's run dock keeps its Inspector / Usage panels.
+
+/** Run-only tab types (mobile MG-28). */
+export const RUN_PANE_TABS = ['output', 'hooks', 'variables'] as const;
+export type RunPaneTab = (typeof RUN_PANE_TABS)[number];
+
+/** The run pane's tabs, in order (MWorkflowRunPane). */
+export const RUN_DOCK_TABS = ['output', 'files', 'hooks', 'variables', 'changes', 'terminal', 'browser'] as const satisfies readonly (
+  | RunPaneTab
+  | DockTabType
+)[];
+export type RunDockTab = (typeof RUN_DOCK_TABS)[number];
+
+/** Parses a run's `?dock=` value (any run pane tab); anything else is ignored (null). */
+export function parseRunDockLinkTab(value: string | null | undefined): RunDockTab | null {
+  return (RUN_DOCK_TABS as readonly string[]).includes(value ?? '') ? (value as RunDockTab) : null;
+}

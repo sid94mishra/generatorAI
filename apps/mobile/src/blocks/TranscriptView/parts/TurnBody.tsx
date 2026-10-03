@@ -5,7 +5,6 @@
 import React, { memo, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { deriveSegments, digestBlocks, formatDigest, formatStepDuration, type StreamBlock, type StreamSegment } from '@generatorai/client-core';
-import { STATUS_MAPS, type RunStatus } from '@generatorai/shared';
 import { TRANSCRIPT_COPY } from '@generatorai/shared/ui-contract';
 
 import { AssistantText } from '../../AssistantText/AssistantText';
@@ -20,6 +19,7 @@ import { useTranscriptActions, type GateSegment } from '../transcriptContext';
 import { DelegationGroup } from './DelegationGroup';
 import { StepGroupCard } from './StepGroupCard';
 import { UserMessage } from './UserMessage';
+import { WorkflowDraftCard, WorkflowRunCard } from './WorkflowCards';
 
 function ThoughtPill({ text, live }: { text: string; live: boolean }): React.ReactElement {
   const [open, setOpen] = useState(false);
@@ -97,46 +97,6 @@ function ScmResultCard({ block }: { block: Extract<StreamBlock, { type: 'scm_res
         </Text>
       ))}
       {r.pullRequest?.url ? <Button label="Open pull request" size="sm" icon="external-link" onPress={() => onOpenLink?.(r.pullRequest!.url)} /> : null}
-    </View>
-  );
-}
-
-function WorkflowRunCard({ segment }: { segment: Extract<StreamSegment, { type: 'workflow_run' }> }): React.ReactElement {
-  const { onOpenHref } = useTranscriptActions();
-  const mapping = segment.run.status ? (STATUS_MAPS.workflowRun as Record<string, { state: Parameters<typeof StatusBadge>[0]['state']; label?: string } | null>)[segment.run.status as RunStatus] : null;
-  return (
-    <View testID="workflow-run-card" className="gap-2 rounded-card border border-line-soft p-3">
-      <View className="flex-row items-center gap-2">
-        <Icon concept="workflows" size={18} tone="fg-2" />
-        <Text role="subhead" weight={600} numberOfLines={1} className="flex-1">
-          {segment.run.workflowName ?? 'Workflow run'}
-        </Text>
-        {mapping ? <StatusBadge state={mapping.state} {...(mapping.label ? { label: mapping.label } : {})} size="sm" /> : null}
-      </View>
-      {segment.run.link && onOpenHref ? <Button label="Open run" size="sm" icon="external-link" onPress={() => onOpenHref(segment.run.link!)} /> : null}
-    </View>
-  );
-}
-
-function WorkflowDraftCard({ segment }: { segment: Extract<StreamSegment, { type: 'workflow_draft' }> }): React.ReactElement {
-  return (
-    <View testID="workflow-draft-card" className="gap-2 rounded-card border border-line-soft p-3">
-      <View className="flex-row items-center gap-2">
-        <Icon concept="workflows" size={18} tone="fg-2" />
-        <Text role="subhead" weight={600} numberOfLines={1} className="flex-1">
-          {segment.draft.name}
-        </Text>
-        <Badge label="Agent draft" icon="wand" size="sm" />
-      </View>
-      {segment.draft.warnings.length ? (
-        <Text role="footnote" tone="fg-3">
-          {`${segment.draft.warnings.length} warning${segment.draft.warnings.length === 1 ? '' : 's'} · Not published`}
-        </Text>
-      ) : (
-        <Text role="footnote" tone="fg-3">
-          Not published
-        </Text>
-      )}
     </View>
   );
 }

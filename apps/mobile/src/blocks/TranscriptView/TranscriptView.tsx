@@ -24,7 +24,8 @@ import { AgentTurnHeader } from './parts/AgentTurnHeader';
 import { TurnBody, TurnFooter, answerText } from './parts/TurnBody';
 import { UserMessage } from './parts/UserMessage';
 import { TranscriptActionsContext, type TranscriptActions } from './transcriptContext';
-import { useScmResults } from './TranscriptView.queries';
+import { useChatWorkflowRuns, useScmResults } from './TranscriptView.queries';
+import { WorkflowRunCardsContext } from './parts/WorkflowCards';
 
 export interface TranscriptViewProps {
   chatId: string;
@@ -99,6 +100,8 @@ const Item = memo(function Item({ item, streamKey }: { item: TranscriptItem; str
 export function TranscriptView({ chatId, streamKey, messages, hasMore, loadingMore, onLoadMore, actions, blocked = false, empty, testID = 'transcript-list' }: TranscriptViewProps): React.ReactElement {
   const view = useStreamStore(useShallow((s) => selectChatView(s.streams[streamKey])));
   const scm = useScmResults(chatId);
+  const runCards = useChatWorkflowRuns(chatId || null);
+  const runCardMap = useMemo(() => new Map((runCards.data ?? []).map((c) => [c.runId, c])), [runCards.data]);
   const reduceMotion = useReduceMotion();
   const listRef = useRef<LegendListRef | null>(null);
   const [atBottom, setAtBottom] = useState(true);
@@ -140,6 +143,7 @@ export function TranscriptView({ chatId, streamKey, messages, hasMore, loadingMo
 
   return (
     <TranscriptActionsContext.Provider value={actions}>
+      <WorkflowRunCardsContext.Provider value={runCardMap}>
       <View className="flex-1">
         <LegendList
           testID={testID}
@@ -184,6 +188,7 @@ export function TranscriptView({ chatId, streamKey, messages, hasMore, loadingMo
           />
         </View>
       </View>
+      </WorkflowRunCardsContext.Provider>
     </TranscriptActionsContext.Provider>
   );
 }

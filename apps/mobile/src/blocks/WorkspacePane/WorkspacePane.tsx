@@ -7,7 +7,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams, usePathname } from 'expo-router';
-import { DOCK_LINK_PARAM, parseDockLinkTab } from '@generatorai/shared/ui-contract';
+import { DOCK_LINK_PARAM, parseDockLinkTab, parseRunDockLinkTab } from '@generatorai/shared/ui-contract';
 
 import type { PanelSlot } from '../../ui/layout/AdaptiveLayout';
 import { PaneShell } from '../../ui/layout/PaneShell';
@@ -23,7 +23,8 @@ import { paneVisibleOn } from './paneVisibility';
 export function useClaimPaneScope(claim: PaneClaim | null): void {
   const params = useLocalSearchParams();
   const raw = params[DOCK_LINK_PARAM];
-  const dock = parseDockLinkTab(typeof raw === 'string' ? raw : undefined);
+  const value = typeof raw === 'string' ? raw : undefined;
+  const dock = claim?.scope.kind === 'run' ? parseRunDockLinkTab(value) : parseDockLinkTab(value);
   const pending = useRef<MobilePaneTab | null>(null);
   useEffect(() => {
     if (!dock) return;

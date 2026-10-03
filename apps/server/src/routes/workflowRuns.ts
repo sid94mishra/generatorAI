@@ -1,6 +1,9 @@
 // ────────────────────────────────────────────────────────────────
 // WorkflowRun Routes — runs, their instances and the commands API.
 //
+// A stage approval sent by a phone (and a risky in-turn tool permission) carries the device's approval-key
+// signature (mobile MG-05, MD-31); see `takeApprovalProof` and `checkApprovalProof`.
+//
 // A run starts through ONE route, `POST /workflow-invocations` (P04), and
 // so does a re-run of a terminal run (`target: {kind: 'fork'}`, G5 §3.8).
 // Every operator action on a run or one of its instances is ONE route,
@@ -33,14 +36,15 @@
 
 import { orderStageRuns } from './workflowRunOrder.js';
 import { canBypassPermissions } from './permissionScope.js';
-import { Router } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import type { Container } from '../composition-root.js';
 import { z } from 'zod';
 import { RunCommandSchema, WORKFLOW_RUN_STATES, type RunCommand } from '@generatorai/workflow-spec';
 import { RunCommandRefusedError, type StageGateAnswer } from '@generatorai/core';
-import { AgentModeSchema, AnswerQuestionSchema, PlanDecisionSchema, ResolveToolPermissionSchema, type WorkflowRunStatus } from '@generatorai/shared';
+import { AgentModeSchema, AnswerQuestionSchema, PlanDecisionSchema, ResolveToolPermissionSchema, STAGE_APPROVAL_DECISION, type WorkflowRunStatus } from '@generatorai/shared';
 import type { WorkflowRunSearch } from '@generatorai/db';
 import multer from 'multer';
+import { checkApprovalProof } from '../middleware/approvalProof.js';
 import { validate } from '../middleware/validate.js';
 
 /** An operator message to a stage (the multipart fields, as strings). */
@@ -76,6 +80,26 @@ const DECISION_COMMANDS: ReadonlySet<RunCommand['command']> = new Set([
   'accept_iteration',
   'deliver_event',
 ]);
+
+/**
+ * Mobile MG-05 / MD-31: no server verdict on workflow approvals exists yet (MG-34), so every stage approval a
+ * phone sends is risky and must be signed by its approval key. Desktop, web and CLI keep click approvals.
+ */
+const WORKFLOW_APPROVAL_RISK = 'risky';
+
+/**
+ * The commands body is a strict union; a phone's `approvalProof` rides beside the command, so it is taken off the
+ * body (into `res.locals`) before the schema sees it.
+ */
+function takeApprovalProof(req: Request, res: Response, next: NextFunction): void {
+  const body = req.body as Record<string, unknown> | undefined;
+  if (body && typeof body === 'object' && 'approvalProof' in body) {
+    const { approvalProof, ...rest } = body;
+    res.locals['approvalProof'] = approvalProof;
+    req.body = rest;
+  }
+  next();
+}
 
 const RUN_LIST_MAX = 1000;
 const STAGE_HISTORY_DEFAULT = 20;
@@ -235,10 +259,25 @@ export function createWorkflowRunRoutes(container: Container): Router {
   // POST /workflow-runs/:id/commands — every operator action (RunCommand).
   // 202 when the engine accepted it; 404 unknown run or instance; 409 a state
   // or version conflict; 400 an invalid command; 503 no engine in this process.
-  router.post('/:id/commands', validate(RunCommandSchema), async (req, res, next) => {
+  router.post('/:id/commands', takeApprovalProof, validate(RunCommandSchema), async (req, res, next) => {
     try {
       const runId = String(req.params['id']);
       const command = req.body as RunCommand;
+      // MG-05: a stage approval from a phone carries its approval-key signature over this exact decision.
+      if (command.command === 'approve') {
+        const signed = await checkApprovalProof(
+          container.security,
+          { principal: req.principal, body: { approvalProof: res.locals['approvalProof'] } },
+          {
+            risk: WORKFLOW_APPROVAL_RISK,
+            expect: { kind: 'stage_approval', id: command.instanceId ?? runId, entityId: runId, decision: STAGE_APPROVAL_DECISION[command.outcome] },
+          },
+        );
+        if (!signed.ok) {
+          res.status(signed.status).json({ error: { code: signed.code, message: signed.message } });
+          return;
+        }
+      }
       // A run-level budget raise (no instance) widens the whole run: run control (LOOP-R10).
       const decision = DECISION_COMMANDS.has(command.command) && !(command.command === 'raise_budget' && !command.instanceId);
       if (!decision && !mayControlRuns(req)) {
@@ -411,12 +450,28 @@ export function createWorkflowRunRoutes(container: Container): Router {
   // — answer the stage's in-turn gate, in the chat's body shapes. The route
   // policy admits these on `exec:agent` (answering the agent), like `approve`.
   const gateRoute = <S extends z.ZodTypeAny>(verb: string, schema: S, toAnswer: (body: z.infer<S>) => StageGateAnswer) =>
-    router.post(`/:id/instances/:instanceId/interactions/:interactionId/${verb}`, validate(schema), async (req, res, next) => {
+    router.post(`/:id/instances/:instanceId/interactions/:interactionId/${verb}`, takeApprovalProof, validate(schema), async (req, res, next) => {
       try {
         const runId = String(req.params['id']);
         const instanceId = String(req.params['instanceId']);
         const interactionId = String(req.params['interactionId']);
-        await stageConversationService.resolveInteraction(runId, instanceId, interactionId, toAnswer(req.body as z.infer<S>));
+        const answer = toAnswer(req.body as z.infer<S>);
+        // MG-05: a risky in-turn tool permission (the MG-04 verdict on the parked gate) answered from a phone is
+        // signed, exactly as on a chat; questions and plan reviews stay unsigned, as on a chat.
+        if (answer.kind === 'permission') {
+          const parked = await stageRunRepo.getById(instanceId).catch(() => null);
+          const gate = (parked?.interruptData && typeof parked.interruptData === 'object' ? parked.interruptData : {}) as { interactionId?: string; risk?: unknown };
+          const signed = await checkApprovalProof(
+            container.security,
+            { principal: req.principal, body: { approvalProof: res.locals['approvalProof'] } },
+            { risk: gate.interactionId === interactionId ? gate.risk : undefined, expect: { kind: 'tool_permission', id: interactionId, entityId: runId, decision: answer.behavior } },
+          );
+          if (!signed.ok) {
+            res.status(signed.status).json({ error: { code: signed.code, message: signed.message } });
+            return;
+          }
+        }
+        await stageConversationService.resolveInteraction(runId, instanceId, interactionId, answer);
         logger.info(`[WorkflowRunRoutes] ${verb} answered on ${runId} / ${instanceId}`, { requestId: req.requestId });
         res.status(202).json({ runId, instanceId, interactionId });
       } catch (err) {

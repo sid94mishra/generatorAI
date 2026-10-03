@@ -13,5 +13,8 @@ export interface ReorderListProps<T> {
   editing: boolean;
   /** Accessible name of each row's handle: "Reorder <label>". */
   itemLabel?: (item: T) => string;
+  /** Scrolls with the rows, above them (a banner) and below them (a settings row, the toolbar's space). */
+  header?: ReactElement | null;
+  footer?: ReactElement | null;
   testID?: string;
 }

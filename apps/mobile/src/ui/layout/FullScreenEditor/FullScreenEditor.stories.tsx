@@ -6,6 +6,7 @@ import { LONG_TEXT, ThemeMatrix } from '../../storybook/StoryKit';
 import { Button } from '../../primitives/Button';
 import { Field } from '../../primitives/Field';
 import { Input } from '../../primitives/Input';
+import { Text } from '../../primitives/Text';
 import { Textarea } from '../../primitives/Textarea';
 import { FullScreenEditor } from './FullScreenEditor';
 
@@ -69,3 +70,12 @@ export default meta;
 export const AgentEditorFrame: StoryObj<typeof meta> = {};
 
 export const Wizard: StoryObj<typeof meta> = { render: () => <WizardFrame /> };
+export const FixedBody: StoryObj<typeof meta> = {
+  render: () => (
+    <FullScreenEditor title="Edit workflow" primary={{ label: 'Save', onPress: noop }} onCancel={noop} dirty={false} body="fixed">
+      <View className="flex-1 gap-2 px-gutter">
+        <Text role="body">A list owns scrolling here (the builder's ReorderList).</Text>
+      </View>
+    </FullScreenEditor>
+  ),
+};

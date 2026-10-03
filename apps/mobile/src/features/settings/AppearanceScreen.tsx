@@ -39,6 +39,24 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
   return rows;
 }
 
+// A section label with its trailing value. The label column takes the free width (SectionHeader's own spacer would
+// otherwise claim the whole row and push the value past the screen edge); the value keeps its natural width and
+// ellipsizes inside the row's padding when it cannot fit.
+function LabelRow({ title, value, testID }: { title: string; value?: string; testID?: string }): React.ReactElement {
+  return (
+    <View className="flex-row items-center gap-2">
+      <View className="flex-1">
+        <SectionHeader title={title} variant="label" />
+      </View>
+      {value ? (
+        <Text role="footnote" tone="fg-3" numberOfLines={1} className="shrink" testID={testID}>
+          {value}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 export default function AppearanceScreen(): React.ReactElement {
   const { mode, appearance, themeId, theme, accents, accent, systemAccentAvailable, setMode, setThemeId, setAccent } = useTheme();
   const { motion, setMotion, transparency, setTransparency } = usePreferences();
@@ -53,24 +71,12 @@ export default function AppearanceScreen(): React.ReactElement {
   return (
     <SettingsPage title="Appearance" testID="settings-appearance-screen">
       <View className="gap-2 px-4">
-        <View className="flex-row items-center justify-between">
-          <SectionHeader title="Mode" variant="label" />
-          {mode === 'system' ? (
-            <Text role="footnote" tone="fg-3">
-              System is {appearance} now
-            </Text>
-          ) : null}
-        </View>
+        <LabelRow title="Mode" value={mode === 'system' ? `System is ${appearance} now` : undefined} />
         <SegmentedControl<ThemeMode> accessibilityLabel="Mode" value={mode} onValueChange={setMode} segments={MODE_SEGMENTS} fullWidth testID="appearance-mode" />
       </View>
 
       <View className="gap-2 px-4">
-        <View className="flex-row items-center justify-between">
-          <SectionHeader title="Theme" variant="label" />
-          <Text role="footnote" tone="fg-3">
-            {theme.label} + {total - 1}
-          </Text>
-        </View>
+        <LabelRow title="Theme" value={`${theme.label} + ${total - 1}`} testID="appearance-theme-value" />
         <SegmentedControl accessibilityLabel="Theme group" value={group.id} onValueChange={(id) => setGroupId(id as typeof groupId)} segments={groups.map((g) => ({ value: g.id, label: g.label, count: g.themes.length }))} fullWidth testID="appearance-theme-group" />
         <View className="gap-2" accessibilityRole="radiogroup" accessibilityLabel={`${group.label} themes`}>
           {chunk(group.themes, 3).map((row, i) => (

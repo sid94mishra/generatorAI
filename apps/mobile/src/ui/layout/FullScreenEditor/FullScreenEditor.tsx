@@ -2,14 +2,17 @@
 // fullScreenModalOptions — no swipe dismiss). A JS modal header (h-dialog-bar 56 / 64): iOS "Cancel" text at the
 // start, the centred title, the text confirm at the end; Android ✕ + Title L at the start, the 14/600 text confirm
 // at the end. While dirty the header shows the change count, and Cancel / Android Back / router removal ask
-// "Discard changes?". Keyboard-aware scrolling body; optional stepper and sticky wizard bar.
+// "Discard changes?". Keyboard-aware scrolling body; optional stepper and sticky wizard bar. The bar clears the
+// status bar with `useModalInsets()`: an iOS full-screen modal is presented over the whole window, outside the shell
+// column that pays the top inset (the consumed context inset reads 0 there, and a nested native SafeAreaView finds
+// no provider inside a native modal), so it pays the window's top inset; an Android modal stays inside the column.
 import React from 'react';
 import { View } from 'react-native';
 import { KeyboardAwareScrollView, KeyboardStickyView } from '../../lib/styled';
 
 import { useDirtyGuard } from '../DirtyGuard/useDirtyGuard';
 import { nativePlatform } from '../../platform/geometry';
-import { useInsets } from '../../platform/insets';
+import { useModalInsets } from '../../platform/insets';
 import { IconButton } from '../../primitives/IconButton';
 import { Pressable } from '../../primitives/Pressable';
 import { Spinner } from '../../primitives/Spinner';
@@ -38,8 +41,8 @@ function Confirm({ label, onPress, disabled = false, loading = false }: NonNulla
   );
 }
 
-export function FullScreenEditor({ title, primary, cancelLabel = 'Cancel', onCancel, dirty, dirtyCount, stepper, stickyBar, navigation, children, testID }: FullScreenEditorProps): React.ReactElement {
-  const insets = useInsets();
+export function FullScreenEditor({ title, primary, cancelLabel = 'Cancel', onCancel, dirty, dirtyCount, stepper, stickyBar, body = 'scroll', navigation, children, testID }: FullScreenEditorProps): React.ReactElement {
+  const insets = useModalInsets();
   const { guard } = useDirtyGuard(dirty, { onDiscard: onCancel, navigation });
   const cancel = (): void => void guard(onCancel);
   const changes = changeCountText(dirty, dirtyCount);
@@ -58,7 +61,7 @@ export function FullScreenEditor({ title, primary, cancelLabel = 'Cancel', onCan
   );
   return (
     <View testID={testID} accessibilityViewIsModal onAccessibilityEscape={cancel} className="flex-1 bg-surface" style={{ paddingTop: insets.top }}>
-      <View className="min-h-dialog-bar flex-row items-center gap-1 px-2">
+      <View className="min-h-dialog-bar flex-row items-center gap-1 px-2" testID={testID ? `${testID}-bar` : 'full-screen-editor-bar'}>
         {android ? (
           <IconButton icon="x" label={cancelLabel} onPress={cancel} />
         ) : (
@@ -71,9 +74,13 @@ export function FullScreenEditor({ title, primary, cancelLabel = 'Cancel', onCan
         {primary ? <Confirm {...primary} /> : null}
       </View>
       {stepper ? <View className="px-gutter pb-2">{stepper}</View> : null}
-      <KeyboardAwareScrollView className="flex-1" contentContainerClassName="gap-6 px-gutter pb-8 pt-2" keyboardShouldPersistTaps="handled" bottomOffset={16}>
-        {children}
-      </KeyboardAwareScrollView>
+      {body === 'fixed' ? (
+        <View className="flex-1 pt-2">{children}</View>
+      ) : (
+        <KeyboardAwareScrollView className="flex-1" contentContainerClassName="gap-6 px-gutter pb-8 pt-2" keyboardShouldPersistTaps="handled" bottomOffset={16}>
+          {children}
+        </KeyboardAwareScrollView>
+      )}
       {stickyBar ? (
         <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
           <View style={{ paddingBottom: insets.bottom }}>{stickyBar}</View>
