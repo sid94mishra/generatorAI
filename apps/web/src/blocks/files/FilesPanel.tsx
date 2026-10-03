@@ -14,7 +14,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useWorkspaceTree, useWorkspaceTreeFile } from '@/hooks/queries.js';
+import { useWorkspaceChangeSummary, useWorkspaceTree, useWorkspaceTreeFile } from '@/hooks/queries.js';
 import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Callout } from '@/ui/primitives/Callout/Callout.js';
@@ -22,6 +22,7 @@ import { EmptyState } from '@/ui/primitives/EmptyState/EmptyState.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { MenuPopup, MenuRadioGroup, MenuRadioItem, MenuRoot, MenuTrigger } from '@/ui/primitives/Menu/Menu.js';
 import { KbdHintRow } from '@/ui/patterns/KbdHintRow/KbdHintRow.js';
+import type { FileTreeStatusEntry } from './FileTree.js';
 import { MountFileTree, type MountTreeSection } from './MountFileTree.js';
 import { FileViewer } from './FileViewer.js';
 import type { FileTabRef } from './fileTabId.js';
@@ -57,6 +58,20 @@ export function FilesPanel({ workspaceId, initialFile, onOpenFile, onSelectionCh
     return map;
   }, [workspaceInfo.data]);
 
+  // Git-status letters in the tree (boards ChatFiles / DockFiles): the same
+  // since-session-start summary the Changes tab opens on (shared query cache).
+  const changes = useWorkspaceChangeSummary(workspaceId, { base: 'baseline', head: 'working' });
+  const statusesByAlias = useMemo(() => {
+    const map = new Map<string, FileTreeStatusEntry[]>();
+    for (const repo of changes.data?.repos ?? []) {
+      map.set(
+        repo.alias,
+        repo.files.map((file) => ({ path: file.path, status: file.status })),
+      );
+    }
+    return map;
+  }, [changes.data]);
+
   const sections = useMemo<MountTreeSection[]>(
     () =>
       repos
@@ -71,9 +86,10 @@ export function FilesPanel({ workspaceId, initialFile, onOpenFile, onSelectionCh
             title: repo.alias === '.' ? 'workspace root' : repo.alias,
             ...(subtitle ? { subtitle } : {}),
             paths: [...repo.paths].sort(),
+            statuses: statusesByAlias.get(repo.alias) ?? [],
           };
         }),
-    [repos, source, mounts],
+    [repos, source, mounts, statusesByAlias],
   );
 
   // Follow the host's file when a tab is re-pointed or restored.
