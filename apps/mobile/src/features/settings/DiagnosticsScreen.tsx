@@ -94,6 +94,7 @@ export default function DiagnosticsScreen(): React.ReactElement {
       title="Diagnostics"
       actions={[{ id: 'refresh', icon: 'refresh', label: 'Refresh', onPress: () => void Promise.all([health.refetch(), info.refetch(), config.refetch()]), testID: 'diagnostics-refresh' }]}
       onRefresh={async () => void (await Promise.all([health.refetch(), info.refetch(), config.refetch()]))}
+      keyboard="form"
       testID="settings-diagnostics-screen"
     >
       <View className="flex-row items-center gap-1.5 px-4" accessible accessibilityLabel={`${health.isError ? 'Disconnected' : 'Auto-refreshing every 5 seconds'}${updated ? `, updated ${updated}` : ''}`}>
