@@ -164,7 +164,7 @@ export function ContextUsageDetails({
             <span className={cn('font-mono tabular-nums', tone ? TONE_TEXT[tone] : 'text-fg')}>{pctLabel}%</span>
           </div>
 
-          <div className="relative flex min-h-1.5 w-full overflow-hidden rounded-badge bg-line">
+          <div className="relative flex h-1.5 w-full overflow-hidden rounded-badge bg-line">
             {hasBreakdown && limit ? (
               BAR_SEGMENTS.map((seg) => {
                 const v = breakdown?.[seg.key];

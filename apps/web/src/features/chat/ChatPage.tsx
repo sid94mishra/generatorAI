@@ -53,6 +53,7 @@ import {
 } from './dock/chatDockPanels.js';
 import { CHAT_DOCK_KEYS, CHAT_DOCK_TAB_CAPS } from './hooks/useChatDockRouting.js';
 import { useChatView } from './hooks/useChatView.js';
+import { useModelLabel } from '@/blocks/model-picker/index.js';
 
 /** Placeholder turns while the chat record or its messages load (decorative; the region says "Loading"). */
 function ChatSkeleton() {
@@ -89,6 +90,7 @@ export function ChatPage() {
   const { messages, promptHistory } = transcript;
   const { stop, canRewind, restoredDraft } = stopRewind;
   const activeHarnessLabel = workspace.harnessProvider ? harnessProviderLabel(workspace.harnessProvider) : null;
+  const modelLabel = useModelLabel(workspace.effectiveModel);
 
   // The turn is parked on a gate: the agent is idle and the ball is with the user.
   const awaitingUserDecision = useStreamStore((state) =>
@@ -350,6 +352,16 @@ export function ChatPage() {
     );
   }
 
+  // Board ComposerStates: the box names who answers — the bound agent, the
+  // orchestrator, or the model itself.
+  const composerPlaceholder = agentName
+    ? `Reply to ${agentName}…`
+    : chat.orchestratorMode
+      ? 'Reply to the orchestrator…'
+      : modelLabel && workspace.effectiveModel !== 'default'
+        ? `Message ${modelLabel}…`
+        : `Message ${activeHarnessLabel ?? 'the agent'}…`;
+
   const composer =
     view.chatActive && sessionId ? (
       <Composer
@@ -358,7 +370,7 @@ export function ChatPage() {
         onOpenTasks={() => focusDockTab('tasks')}
         // D-29: typing is never blocked — while a turn runs, Send is Stop and the draft waits (no queue).
         disabled={false}
-        placeholder="What feature are you dreaming up?"
+        placeholder={composerPlaceholder}
         selectedModel={workspace.effectiveModel}
         onModelChange={workspace.changeModel}
         reasoningEffort={workspace.reasoningEffort}
