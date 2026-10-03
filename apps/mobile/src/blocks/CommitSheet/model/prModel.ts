@@ -27,12 +27,6 @@ export const PR_STATE_SEGMENTS: ReadonlyArray<{ value: PullRequestListState; lab
   { value: 'all', label: 'All' },
 ];
 
-export function prStateTone(state: PullRequestState): PrTone {
-  if (state === 'open') return 'success';
-  if (state === 'merged') return 'primary';
-  return 'neutral';
-}
-
 export function prStateLabel(state: PullRequestState, draft?: boolean): string {
   if (state === 'open' && draft) return 'Draft';
   return state.charAt(0).toUpperCase() + state.slice(1);
