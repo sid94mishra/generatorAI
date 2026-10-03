@@ -33,6 +33,13 @@ export default function WidgetsScreen(): React.ReactElement {
         <ListRow kind="toggle" icon="workflows" title="Runs I start" subtitle="Stages as progress, gates as milestones" switchValue={runs} onValueChange={set('runs', setRuns)} testID="widgets-live-runs" />
         <ListRow kind="toggle" icon="chats" title="Chats waiting on me" subtitle="Only while a permission is pending" switchValue={chats} onValueChange={set('chats', setChats)} testID="widgets-live-chats" />
       </ListSection>
+      {ios ? (
+        <ListSection title="Widgets" footer={`Add or remove widgets from the Home Screen. They show this ${n.device}'s last sync with the active server.`}>
+          <ListRow kind="info" icon="widgets" title="Needs you" subtitle="Medium" testID="widgets-needs-you" />
+          <ListRow kind="info" icon="widgets" title="Running" subtitle="Medium · Large" testID="widgets-running" />
+          <ListRow kind="info" icon="widgets" title="Summary" subtitle="Small" testID="widgets-summary" />
+        </ListSection>
+      ) : null}
       <ListSection title="Approving from the Lock Screen" footer={`Lock Screen surfaces show titles and statuses only, never code or message text.`}>
         <ListRow kind="value" icon="hand" title="Ordinary approvals" value="Needs unlock" />
         <ListRow kind="value" icon="shield" title="Risky approvals" value="Open the app" />
