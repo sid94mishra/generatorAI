@@ -1,4 +1,4 @@
-// Keeps the home-screen widgets current (06 §7.4): the active server's live items (the live store, folded and
+// Keeps the home-screen widgets (iOS) and the Quick Settings tile (Android) current (06 §7.4, §7.5): the active server's live items (the live store, folded and
 // redacted) with the attention feed's counts. A change of the Needs-you rows or count is written at once; any other
 // change waits WIDGET_DEBOUNCE_MS (WidgetKit's reload budget); going to the background and coming back write the
 // latest at once. A cached snapshot is not written as fresh data. With no server paired the widgets say so.
@@ -11,16 +11,9 @@ import { useAuth } from '../../auth/AuthProvider';
 import { useLiveMap } from '../../live/liveStore';
 import { buildWidgetSnapshot, isUrgentWidgetChange, snapshotFingerprint, WIDGET_DEBOUNCE_MS, type WidgetSnapshot } from '../../live/widgetSnapshot';
 import { useAttention } from '../../stream/AttentionProvider';
+import { setTileFromSnapshot, tileAvailable } from '../quickSettingsTile';
 import { currentWidgetPalette, startWidgetPaletteSync, type WidgetPalette } from '../widgetPalette';
 import { homeWidgetsAvailable, writeWidgetSnapshot } from './homeWidgets';
-
-/** Called with every snapshot actually written (the Android tile reads its count from here, M9-06). */
-type SnapshotListener = (snapshot: WidgetSnapshot) => void;
-const listeners = new Set<SnapshotListener>();
-export function onWidgetSnapshot(listener: SnapshotListener): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
 
 interface Writer {
   /** Take the latest snapshot: written at once when urgent (Needs you, palette), else after the debounce. */
@@ -40,8 +33,9 @@ function createWriter(): Writer {
     const next = latest;
     if (!next || (written && snapshotFingerprint(written) === snapshotFingerprint(next))) return;
     writeWidgetSnapshot(next);
+    // The Android Quick Settings tile takes its state from the same snapshot (06 §7.5).
+    setTileFromSnapshot(next);
     written = next;
-    for (const listener of listeners) listener(next);
   };
   return {
     push(next) {
@@ -71,7 +65,7 @@ export function HomeWidgetsSync(): null {
   const fresh = !attention.stale;
 
   useEffect(() => {
-    if (!palette || (!homeWidgetsAvailable() && listeners.size === 0)) return;
+    if (!palette || (!homeWidgetsAvailable() && !tileAvailable())) return;
     let server: { id: string; name: string } | null = serverId ? { id: serverId, name: label } : null;
     let useCounts = counts;
     if (__DEV__) {

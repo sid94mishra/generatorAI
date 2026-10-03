@@ -11,9 +11,13 @@
 
 package dev.generatorai.live
 
+import android.app.StatusBarManager
+import android.content.ComponentName
 import android.content.Context
+import android.graphics.drawable.Icon
 import android.os.Build
 import androidx.core.app.NotificationManagerCompat
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -53,6 +57,48 @@ class GeneratorAILiveModule : Module() {
     AsyncFunction("endAll") {
       val ctx = context ?: return@AsyncFunction Unit
       LiveUpdates.endAll(ctx)
+    }.runOnQueue(Queues.MAIN)
+
+    /** The Quick Settings tile's state (06 §7.5): unavailable when nothing is paired; subtitle "N need you". */
+    Function("setTileState") { paired: Boolean, subtitle: String? ->
+      context?.let { NewChatTileService.update(it, paired, subtitle) }
+      Unit
+    }
+
+    /** API 33+ can ask the user to add the tile from inside the app (MX-06 "Add tile"). */
+    Function("canRequestAddTile") { Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU }
+
+    /** added | already | dismissed | unsupported | failed */
+    AsyncFunction("requestAddTile") { promise: Promise ->
+      val ctx = context
+      if (ctx == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+        promise.resolve("unsupported")
+        return@AsyncFunction
+      }
+      val manager = ctx.getSystemService(StatusBarManager::class.java)
+      if (manager == null) {
+        promise.resolve("unsupported")
+        return@AsyncFunction
+      }
+      try {
+        manager.requestAddTileService(
+          ComponentName(ctx, NewChatTileService::class.java),
+          "New chat",
+          Icon.createWithResource(ctx, R.drawable.generatorai_tile_new_chat),
+          ctx.mainExecutor,
+        ) { result ->
+          promise.resolve(
+            when (result) {
+              StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED -> "added"
+              StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED -> "already"
+              StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_NOT_ADDED -> "dismissed"
+              else -> "failed"
+            },
+          )
+        }
+      } catch (_: Exception) {
+        promise.resolve("failed")
+      }
     }.runOnQueue(Queues.MAIN)
 
     /** The theme's 14 literal colours as JSON (02 §2.6), for the widgets and the tile. */

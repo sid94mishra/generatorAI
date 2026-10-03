@@ -21,5 +21,17 @@
           android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
           android:value="Shows live progress of an agent run the user started" />
     </service>
+
+    <!-- Quick Settings tile "New chat" (MX-06). Exported for the system UI, guarded by its bind permission. -->
+    <service
+        android:name="dev.generatorai.live.NewChatTileService"
+        android:exported="true"
+        android:icon="@drawable/generatorai_tile_new_chat"
+        android:label="New chat"
+        android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+      <intent-filter>
+        <action android:name="android.service.quicksettings.action.QS_TILE" />
+      </intent-filter>
+    </service>
   </application>
 </manifest>
