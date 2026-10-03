@@ -81,7 +81,7 @@ Relevant checks are `pnpm check:tokens`, web `check:design`, web `check:bundle`,
 
 This page documents the current design implementation and intended interaction contract. It is not a new accessibility conformance certificate or a claim that all native OS permutations were tested while building this documentation site. Product screenshots and earlier audit reports should retain their date/runtime context. When a design behavior changes, update this page together with the relevant client guide and evidence.
 
-Sources: `packages/design-tokens/src/{tokens,registry}.ts`, `packages/design-tokens/src/themes/`, `packages/design-tokens/src/emit/`, `apps/web/src/components/ui/`, `apps/web/src/components/layout/RightPane.tsx`, `apps/mobile/src/components/ui/`, `apps/mobile/src/theme/`, `apps/mobile/src/navigation/`, `apps/mobile/app/(tabs)/_layout.tsx`, `packages/cli-core/src/keymap/Keymap.ts`.
+Sources: `packages/design-tokens/src/{tokens,registry}.ts`, `packages/design-tokens/src/themes/`, `packages/design-tokens/src/emit/`, `apps/web/src/ui/`, `apps/web/src/blocks/dock/Dock.tsx`, `apps/mobile/src/components/ui/`, `apps/mobile/src/theme/`, `apps/mobile/src/navigation/`, `apps/mobile/app/(tabs)/_layout.tsx`, `packages/cli-core/src/keymap/Keymap.ts`.
 
 ## Documentation-site parity
 

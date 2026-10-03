@@ -78,4 +78,4 @@ If a setting appears different in another browser, first check whether it is a l
 - **Two scrollbars or clipped panels:** check viewport size, collapsed navigation and page-specific panel state; the intended shell constrains each pane's scroll owner.
 - **Build passes but native behavior differs:** desktop bridge operations and mobile native APIs need their own runtime validation.
 
-Sources: `apps/web/package.json`, `apps/web/vite.config.ts`, `apps/web/src/{App,router}.tsx`, `apps/web/src/components/AuthGate.tsx`, `apps/web/src/components/layout/`, `apps/web/src/components/settings/sections/BrowserTerminal.tsx`, `apps/web/src/providers/`.
+Sources: `apps/web/package.json`, `apps/web/vite.config.ts`, `apps/web/src/{App,router}.tsx`, `apps/web/src/app/shell/AuthGate.tsx`, `apps/web/src/app/shell/`, `apps/web/src/features/settings/sections/BrowserTerminalSection.tsx`, `apps/web/src/providers/`.
