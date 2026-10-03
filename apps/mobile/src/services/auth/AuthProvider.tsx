@@ -145,7 +145,9 @@ interface AuthSnapshot {
   endpoint: string | null;
 }
 const INITIAL_AUTH_SNAPSHOT: AuthSnapshot = { state: { status: 'unpaired' }, endpoint: null };
-const replaceAuthSnapshot = (_previous: AuthSnapshot, next: AuthSnapshot): AuthSnapshot => next;
+/** A full snapshot replaces; `{ endpoint }` alone refreshes the endpoint (a transport change), keeping the state. */
+const replaceAuthSnapshot = (previous: AuthSnapshot, next: AuthSnapshot | { endpoint: string | null }): AuthSnapshot =>
+  'state' in next ? next : next.endpoint === previous.endpoint ? previous : { ...previous, endpoint: next.endpoint };
 const authSnapshot = (state: AuthState, runtime: AuthenticatedClientRuntime | null): AuthSnapshot => ({ state, endpoint: runtime?.endpoint ?? null });
 
 export function AuthProvider({ children }: { children: React.ReactNode }): React.ReactElement {
@@ -198,7 +200,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
           localOnly: prefs.getBoolean(PREF_KEYS.localOnly),
         }),
         verifyHost: verifyHostIdentity,
-        onStatusChange: (next) => { if (activeServerRef.current === pinnedServerId) setTransport(next); },
+        onStatusChange: (next) => {
+          if (activeServerRef.current !== pinnedServerId) return;
+          setTransport(next);
+          // The context's endpoint followed every transport change before M10-01 (it was read in the memo).
+          dispatchAuth({ endpoint: runtimeRef.current?.endpoint ?? null });
+        },
       });
       return supervisor;
     },
