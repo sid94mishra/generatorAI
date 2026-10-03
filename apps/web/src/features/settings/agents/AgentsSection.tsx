@@ -69,20 +69,24 @@ export function AgentsSection() {
               fullWidth
               onClick={() => navigate(`/agents/${a.id}`)}
               data-testid={`settings-agent-${a.slug}`}
-              className="h-auto justify-start gap-3 rounded-card px-3 py-2.5 text-left font-normal"
+              className="h-auto justify-start gap-3 rounded-card px-3 py-2.5 text-left font-normal *:flex-1"
             >
-              <Icon concept={a.role === 'orchestrator' ? 'workflows' : 'agents'} size={16} className="shrink-0 text-fg-2" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-ui font-medium text-fg">{a.name}</div>
-                <div className="truncate text-small text-fg-3">{a.description}</div>
-              </div>
-              <Badge tone={LEGACY_TONE[scopeTone(a.scope)]} className="shrink-0">
-                {SCOPE_LABELS[a.scope]}
-              </Badge>
-              <Badge tone={a.role === 'orchestrator' ? 'ok' : 'neutral'} className="shrink-0">
-                {ROLE_LABELS[a.role]}
-              </Badge>
-              {!a.enabled ? <Badge tone="warn" className="shrink-0">Disabled</Badge> : null}
+              {/* Button wraps its children in one inline span: lay the row out in a flex span
+                  (spans, not divs — a button holds phrasing content only). */}
+              <span className="flex min-w-0 items-center gap-3">
+                <Icon concept={a.role === 'orchestrator' ? 'workflows' : 'agents'} size={16} className="shrink-0 text-fg-2" />
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-ui font-medium text-fg">{a.name}</span>
+                  <span className="truncate text-small text-fg-3">{a.description}</span>
+                </span>
+                <Badge tone={LEGACY_TONE[scopeTone(a.scope)]} className="shrink-0">
+                  {SCOPE_LABELS[a.scope]}
+                </Badge>
+                <Badge tone={a.role === 'orchestrator' ? 'ok' : 'neutral'} className="shrink-0">
+                  {ROLE_LABELS[a.role]}
+                </Badge>
+                {!a.enabled ? <Badge tone="warn" className="shrink-0">Disabled</Badge> : null}
+              </span>
             </Button>
           ))}
         </div>
