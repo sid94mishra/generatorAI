@@ -32,7 +32,8 @@ tags: [workflows]
 - tapOn: "Graph"
 - extendedWaitUntil: {visible: {id: graph-fit}, timeout: 5000}
 - tapOn: {id: graph-list}
-- tapOn: {id: builder-versions}
+- tapOn: {id: builder-more}
+- tapOn: "Version history"
 - extendedWaitUntil: {visible: {id: versions-sheet}, timeout: 5000}
 - swipe: {direction: DOWN}
 - tapOn: "Cancel"

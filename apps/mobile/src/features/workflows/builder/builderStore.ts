@@ -14,6 +14,8 @@ export interface BuilderDraft {
   future: WorkflowGraph[];
   selected: string | null;
   view: 'list' | 'graph';
+  /** The last edit's merge key: consecutive edits with the same key (typing in one field) are one undo step. */
+  lastMerge?: string | null;
   /** The last validation of this draft (the cards' error counts, the Validate sheet). */
   validation: { issues: ValidationIssue[]; at: number; graph: WorkflowGraph } | null;
 }
@@ -24,7 +26,7 @@ interface BuilderState {
   open: (record: WorkflowDefinitionRecord) => void;
   /** Replace the base after a save / conflict reload, keeping (or dropping) the edits. */
   rebase: (record: WorkflowDefinitionRecord, keepEdits: boolean) => void;
-  edit: (id: string, change: (graph: WorkflowGraph) => WorkflowGraph) => void;
+  edit: (id: string, change: (graph: WorkflowGraph) => WorkflowGraph, mergeKey?: string) => void;
   undo: (id: string) => void;
   redo: (id: string) => void;
   select: (id: string, key: string | null) => void;
@@ -46,27 +48,28 @@ export const useBuilderStore = create<BuilderState>((set, get) => ({
       const graph = keepEdits && d ? d.graph : record.graph;
       return { drafts: { ...s.drafts, [record.id]: { base: record, graph, past: keepEdits && d ? d.past : [], future: [], selected: d?.selected ?? null, view: d?.view ?? 'list', validation: d?.validation ?? null } } };
     }),
-  edit: (id, change) =>
+  edit: (id, change, mergeKey) =>
     set((s) => {
       const d = s.drafts[id];
       if (!d) return s;
       const graph = change(d.graph);
       if (graph === d.graph) return s;
-      return { drafts: { ...s.drafts, [id]: { ...d, graph, past: [...d.past, d.graph].slice(-HISTORY), future: [] } } };
+      const merge = Boolean(mergeKey) && d.lastMerge === mergeKey && d.past.length > 0;
+      return { drafts: { ...s.drafts, [id]: { ...d, graph, past: merge ? d.past : [...d.past, d.graph].slice(-HISTORY), future: [], lastMerge: mergeKey ?? null } } };
     }),
   undo: (id) =>
     set((s) => {
       const d = s.drafts[id];
       const prev = d?.past[d.past.length - 1];
       if (!d || !prev) return s;
-      return { drafts: { ...s.drafts, [id]: { ...d, graph: prev, past: d.past.slice(0, -1), future: [d.graph, ...d.future] } } };
+      return { drafts: { ...s.drafts, [id]: { ...d, graph: prev, past: d.past.slice(0, -1), future: [d.graph, ...d.future], lastMerge: null } } };
     }),
   redo: (id) =>
     set((s) => {
       const d = s.drafts[id];
       const next = d?.future[0];
       if (!d || !next) return s;
-      return { drafts: { ...s.drafts, [id]: { ...d, graph: next, past: [...d.past, d.graph], future: d.future.slice(1) } } };
+      return { drafts: { ...s.drafts, [id]: { ...d, graph: next, past: [...d.past, d.graph], future: d.future.slice(1), lastMerge: null } } };
     }),
   select: (id, key) => set((s) => (s.drafts[id] ? { drafts: { ...s.drafts, [id]: { ...s.drafts[id]!, selected: key } } } : s)),
   setView: (id, view) => set((s) => (s.drafts[id] ? { drafts: { ...s.drafts, [id]: { ...s.drafts[id]!, view } } } : s)),

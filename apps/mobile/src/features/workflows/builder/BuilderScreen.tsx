@@ -1,7 +1,7 @@
 // The list builder (MBuilderList, MBuilderGraph, MBuilderLoop, MWorkflowValidate, MWorkflowAgentDraft;
 // `/workflows/[id]/edit`, a full-screen modal; MD-04, MD-85; M8-05). Header: Cancel / "Edit workflow" / Save (text,
 // MD-85; the dirty guard asks before Cancel throws edits away). Under it: List / Graph, the neutral version chip
-// (and "Agent draft"), "Unsaved changes" / "Saved", undo, redo, version history. An agent's draft opens with its
+// (and "Agent draft"), "Unsaved changes" / "Saved", undo, redo, and More: Workflow settings (M8-07), Version history. An agent's draft opens with its
 // banner (who drafted it, what it replaces, risk chips — neutral, MD-25 —, what changed, View diff · Discard ·
 // Publish, the filled one while it shows). List: the top-level stages as cards — reorder only inside a linear chain
 // (MD-04; the drag handle, or Move up / Move down in the menu and as accessibility actions), a loop card with its
@@ -15,7 +15,7 @@ import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { riskFlags, type RiskFlag, type StageSpec } from '@generatorai/workflow-spec';
 
 import { RunGraph } from '../../../blocks/RunGraph';
-import { WORKFLOWS_HREF, addStageHref, builderValidateHref, loopSettingsHref, runSheetHref, stageEditorHref, workflowHref, workflowVersionsHref } from '../../../blocks/shell/hrefs';
+import { WORKFLOWS_HREF, addStageHref, builderValidateHref, loopSettingsHref, runSheetHref, stageEditorHref, workflowHref, workflowSettingsHref, workflowVersionsHref } from '../../../blocks/shell/hrefs';
 import { errorsByStage } from '../../../blocks/ValidationList';
 import { BottomToolbar } from '../../../ui/layout/BottomToolbar';
 import { FullScreenEditor } from '../../../ui/layout/FullScreenEditor';
@@ -23,9 +23,11 @@ import { ReorderList } from '../../../ui/layout/ReorderList';
 import { errorText } from '../../../ui/lib/format';
 import { confirm } from '../../../ui/native/AlertDialog';
 import { ContextMenu } from '../../../ui/native/ContextMenu';
+import { Menu } from '../../../ui/native/Menu';
 import type { MenuEntry } from '../../../ui/native/Menu/Menu.types';
 import { SegmentedControl } from '../../../ui/native/SegmentedControl';
 import { haptic } from '../../../ui/platform/haptics';
+import { overflowIcon } from '../../../ui/platform/overflow';
 import { Badge } from '../../../ui/primitives/Badge';
 import { Button } from '../../../ui/primitives/Button';
 import { Callout } from '../../../ui/primitives/Callout';
@@ -365,7 +367,15 @@ export default function BuilderScreen(): React.ReactElement {
       </Text>
       <IconButton icon="undo" label="Undo" size="sm" disabled={!draft.past.length} onPress={() => store().undo(id)} testID="builder-undo" />
       <IconButton icon="redo" label="Redo" size="sm" disabled={!draft.future.length} onPress={() => store().redo(id)} testID="builder-redo" />
-      <IconButton icon="history" label="Version history" size="sm" onPress={() => router.push(workflowVersionsHref(id) as Href)} testID="builder-versions" />
+      <Menu
+        accessibilityLabel="More builder actions"
+        items={[
+          { id: 'settings', label: 'Workflow settings', icon: 'settings', testID: 'builder-settings' },
+          { id: 'versions', label: 'Version history', icon: 'history', testID: 'builder-versions' },
+        ]}
+        onSelect={(mid) => router.push((mid === 'settings' ? workflowSettingsHref(id) : workflowVersionsHref(id)) as Href)}
+        trigger={<IconButton icon={overflowIcon} label="More builder actions" size="sm" onPress={() => undefined} testID="builder-more" />}
+      />
     </View>
   );
 

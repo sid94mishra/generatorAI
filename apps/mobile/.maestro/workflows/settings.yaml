@@ -1,0 +1,33 @@
+appId: ${APP_ID}
+name: workflows · workflow settings (sections, variable editor, reserved name)
+# M8-07 (MWorkflowSettings; MDF-89). Adds a variable to the sandbox's "Sandbox Workflow" in the builder draft,
+# then cancels the builder — nothing is saved.
+tags: [workflows]
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///workflows
+- extendedWaitUntil: {visible: "Sandbox Workflow", timeout: 20000}
+- tapOn: "Sandbox Workflow"
+- extendedWaitUntil: {visible: {id: workflow-more}, timeout: 15000}
+- tapOn: {id: workflow-more}
+- tapOn: "Edit in builder"
+- extendedWaitUntil: {visible: {id: builder-list}, timeout: 15000}
+- tapOn: {id: builder-more}
+- tapOn: "Workflow settings"
+- extendedWaitUntil: {visible: {id: workflow-settings-variables}, timeout: 5000}
+- assertVisible: "Saved with the workflow draft"
+- tapOn: {id: workflow-settings-variables}
+- tapOn: "Add variable"
+- tapOn: {id: variable-name}
+- inputText: "run"
+- assertVisible: "run is reserved. Pick another name."
+- eraseText: 3
+- inputText: "risk_level"
+- tapOn: {id: variable-editor-done}
+- assertVisible: {id: workflow-variable-risk_level}
+- back
+- back
+- assertVisible: "● Unsaved changes"
+- tapOn: "Cancel"
+- tapOn: "Discard"
+- extendedWaitUntil: {visible: {id: workflow-more}, timeout: 10000}

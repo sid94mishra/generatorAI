@@ -28,6 +28,10 @@ describe('builder draft store (MD-85)', () => {
     s.edit('w1', () => graph('C'));
     expect(freshErrors(useBuilderStore.getState().drafts.w1)).toBe(false);
 
+    s.edit('w1', () => graph('Ca'), 'name');
+    s.edit('w1', () => graph('Cab'), 'name');
+    expect(useBuilderStore.getState().drafts.w1!.past.at(-1)!.workflow.name).toBe('C');
+
     s.rebase(record(2, graph('C')), false);
     d = useBuilderStore.getState().drafts.w1!;
     expect([d.base.revision, isDirty(d), d.past.length]).toEqual([2, false, 0]);
