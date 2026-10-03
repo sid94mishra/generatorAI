@@ -31,8 +31,9 @@ env: {DEVICE_SCOPES: "write:workflows"}
 - assertVisible: "Saved"
 # A stage row opens the stage editor (the stage-editor flow covers it); Add stage appends.
 - tapOn: {id: builder-add-stage}
-- extendedWaitUntil: {visible: {id: add-stage-sheet}, timeout: 5000}
-- tapOn: {id: add-stage-agent}
+# The imperative sheet is an RN Modal; on iOS its content is matched by text.
+- extendedWaitUntil: {visible: "Search stage kinds", timeout: 5000}
+- tapOn: "Agent.*An agent turn.*"
 - extendedWaitUntil: {visible: {id: builder-stage-stage_3}, timeout: 5000}
 - tapOn: {id: builder-validate}
 - extendedWaitUntil: {visible: {id: validate-sheet}, timeout: 5000}

@@ -26,8 +26,11 @@ env: {DEVICE_SCOPES: "write:workflows"}
 - tapOn: {id: workflow-new-name}
 - inputText: Maestro draft
 - tapOn: "Create"
+# Create opens the new workflow with the builder over it (M8-05): leave the builder first.
+- extendedWaitUntil: {visible: {id: builder}, timeout: 20000}
+- tapOn: "Cancel"
 - extendedWaitUntil: {visible: {id: workflow-detail}, timeout: 20000}
-- assertVisible: "Draft"
+- assertVisible: "Draft.*"
 # A header action: by testID on Android, by its label on iOS (native toolbar items take no testID, MD-133).
 - runFlow:
     when: {platform: Android}
