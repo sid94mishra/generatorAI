@@ -45,6 +45,7 @@ import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { DecisionCard } from './DecisionCard.js';
 import { loopDecisionOf } from '../model/loopView.js';
 import type { LoopView, StageView, WaitView } from '../model/types.js';
+import { formatWhen } from '@/lib/formatWhen.js';
 
 // ── Context: the run's pending decisions and a command to any run of its tree ──
 
@@ -361,7 +362,7 @@ export function WaitCard({ stage, runId, onCommand }: { stage: StageView; runId:
         <p>
           Outcome <span className="font-semibold text-fg">{wait.outcome.outcome}</span>
           {wait.outcome.by && <span className="text-fg-3"> · by {wait.outcome.by}</span>}
-          {wait.outcome.at > 0 && <span className="text-fg-3"> · {new Date(wait.outcome.at).toLocaleString()}</span>}
+          {wait.outcome.at > 0 && <span className="text-fg-3"> · {formatWhen(wait.outcome.at)}</span>}
         </p>
         {wait.outcome.data !== null && wait.outcome.data !== undefined && (
           <pre className="max-h-40 overflow-auto font-mono text-micro break-all whitespace-pre-wrap text-fg-2">{pretty(wait.outcome.data)}</pre>

@@ -28,6 +28,7 @@ import { MenuButton, type MenuButtonItem } from '@/ui/patterns/MenuButton/MenuBu
 import { formatStageDuration } from '../model/format.js';
 import type { StageView } from '../model/types.js';
 import { ReviewCard } from './ReviewCard.js';
+import { formatWhen } from '@/lib/formatWhen.js';
 
 /** An answer to one of a stage's in-turn gates, in the chat's shapes (the stage conversation API). */
 export type StageGateResolution =
@@ -259,7 +260,7 @@ export const StageRow = memo(function StageRow({
             <Badge
               tone="run"
               icon="edit"
-              title={`Output amended ${new Date(stage.amendedAt).toLocaleString()}. Later stages kept the output they already used; re-run from here to update them.`}
+              title={`Output amended ${formatWhen(stage.amendedAt)}. Later stages kept the output they already used; re-run from here to update them.`}
             >
               Amended
             </Badge>

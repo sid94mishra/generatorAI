@@ -83,6 +83,7 @@ import { createStageViewCache, deriveRunView, pickStageStreams } from './model/d
 import type { RenderStage } from './model/renderStage.js';
 import type { StageView } from './model/types.js';
 import { useStageFiles } from './useStageFiles.js';
+import { formatWhen } from '@/lib/formatWhen.js';
 
 /** The run dock's persistence keys (D-27): open + layout global to runs, the tab list per run. */
 export const RUN_DOCK_KEYS = dockStorageKeys('run');
@@ -265,7 +266,7 @@ export function WorkflowRunPage() {
     const title = runTitle(runView?.name);
     if (definitionName && title === definitionName) {
       const started = runView?.startedAt;
-      return started ? `Run · ${new Date(started).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}` : 'Run';
+      return started ? `Run · ${formatWhen(started)}` : 'Run';
     }
     return title;
   }, [runView?.name, runView?.startedAt, definitionName]);

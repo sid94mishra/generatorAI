@@ -244,7 +244,13 @@ export function DockTabStrip({
                     closeTab(tab);
                   }
                 }}
-                className={cn(tabClass, iconOnly && 'relative size-control justify-center px-0', showX && 'pr-6')}
+                className={cn(
+                  tabClass,
+                  iconOnly && 'relative size-control justify-center px-0',
+                  showX && 'pr-6',
+                  // A tab the row cannot fit lives in the "+" menu; do not leave half of it showing.
+                  overflowIds.includes(tab.id) && 'invisible',
+                )}
               >
                 <Icon concept={tab.icon} size={14} />
                 {iconOnly ? (

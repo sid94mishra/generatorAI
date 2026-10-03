@@ -40,6 +40,7 @@ import { BuilderInspector } from './inspector/BuilderInspector.js';
 import { BuilderInspectorContext, type BuilderInspectorApi, type SettingsTab } from './inspector/InspectorShell.js';
 import { BuilderProblems } from './problems/BuilderProblems.js';
 import { useBuilderDocument, RUN_LABELS } from './useBuilderDocument.js';
+import { formatWhen } from '@/lib/formatWhen.js';
 
 export function WorkflowBuilderPage() {
   // New workflow creates the draft on the server first, so the builder always edits a saved definition.
@@ -311,7 +312,7 @@ export function WorkflowBuilderPage() {
         <DialogBody>
           <p className="text-ui text-fg-2">
             {doc.conflict
-              ? `It was saved again (revision ${doc.conflict.revision}, ${new Date(doc.conflict.updatedAt).toLocaleString()}) after you opened it. `
+              ? `It was saved again (revision ${doc.conflict.revision}, ${formatWhen(doc.conflict.updatedAt)}) after you opened it. `
               : null}
             <strong className="text-fg">Reload theirs</strong> discards your unsaved edits and loads the saved version.{' '}
             <strong className="text-fg">Overwrite</strong> replaces it with what you see here.

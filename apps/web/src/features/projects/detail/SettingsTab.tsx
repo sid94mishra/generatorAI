@@ -25,6 +25,7 @@ import {
   plural,
   retentionHint,
 } from '../projectFormat.js';
+import { formatWhen } from '@/lib/formatWhen.js';
 
 export function SettingsTab({ project }: { project: Project }) {
   const navigate = useNavigate();
@@ -149,7 +150,7 @@ export function SettingsTab({ project }: { project: Project }) {
             }
             stacked={<span className="font-mono text-small break-all text-fg-2">{project.rootPath}</span>}
           />
-          <SettingRow label="Created" control={<span className="text-small text-fg-2">{new Date(project.createdAt).toLocaleString()}</span>} />
+          <SettingRow label="Created" control={<span className="text-small text-fg-2">{formatWhen(project.createdAt)}</span>} />
         </div>
       </SettingsSection>
 
