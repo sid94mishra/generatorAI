@@ -1266,7 +1266,11 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     workspacesDir: config.workspacesDir,
     codebaseRepo: projectCodebaseRepo,
     eventBus,
+    worktreeRepo,
   });
+  // A codebase worktree mount's `worktrees` row shares the mount's id: removing
+  // it (Remove, Clean up orphans, the retention sweep) releases the mount.
+  worktreeService.setMountReleaser((id) => mountService.releaseWorktree(id));
 
   // ── Workspace retention (nightly) ──
   //

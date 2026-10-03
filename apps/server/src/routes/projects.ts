@@ -778,7 +778,7 @@ export function createProjectRoutes(container: Container): Router {
   // DELETE /projects/:id/codebases/:cid/worktrees/:wid — Remove worktree
   router.delete('/:id/codebases/:cid/worktrees/:wid', async (req, res, next) => {
     try {
-      await worktreeService.removeWorktree(String(req.params['wid']));
+      await worktreeService.removeWorktree(String(req.params['wid']), { refuseActive: true });
       res.status(204).send();
     } catch (err) {
       next(err);
@@ -924,7 +924,7 @@ export function createProjectRoutes(container: Container): Router {
   // DELETE /projects/:id/worktrees/:wid — Remove specific worktree
   router.delete('/:id/worktrees/:wid', async (req, res, next) => {
     try {
-      await worktreeService.removeWorktree(String(req.params['wid']));
+      await worktreeService.removeWorktree(String(req.params['wid']), { refuseActive: true });
       res.status(204).send();
     } catch (err) {
       next(err);

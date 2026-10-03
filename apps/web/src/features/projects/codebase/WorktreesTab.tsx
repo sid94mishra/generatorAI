@@ -3,7 +3,7 @@
 // G-17). Seg All / Active / Orphaned / Completed (counts), "1.27 GB on disk ·
 // frees 385 MB" (only once the server has measured something — never a fake
 // 0), Clean up orphans; the B-26 WorktreesTable: Branch (+ path) · Linked to ·
-// Status (+ "removes in 26h") · Created · Size · Remove.
+// Status (+ "removes in 26h") · Created · Size · Remove (not while active).
 // ────────────────────────────────────────────────────────────────
 
 import { useMemo, useState } from 'react';
@@ -30,6 +30,11 @@ const STATUS: Record<WorktreeStatus, { tone: BadgeTone; label: string }> = {
   completed: { tone: 'neutral', label: 'Completed' },
   'cleanup-pending': { tone: 'neutral', label: 'Cleaning up' },
 };
+
+/** A worktree a live chat or run is working in is not offered for removal (the server refuses it too). */
+function removable(status: WorktreeStatus): boolean {
+  return status !== 'active' && status !== 'cleanup-pending';
+}
 
 function LinkedCell({ wt }: { wt: WorktreeListItem }) {
   if (!wt.link) return <span className="text-small text-fg-3">{wt.runType ? `${wt.runType} run` : '—'}</span>;
@@ -71,7 +76,7 @@ export function WorktreesTab({ projectId, codebaseId }: { projectId: string; cod
   const onRemove = async (wt: WorktreeListItem) => {
     const ok = await confirmer.confirm({
       title: `Remove ${wt.branchName}?`,
-      description: 'This deletes the worktree directory and its branch. It can’t be undone.',
+      description: 'This deletes the worktree directory. Its branch stays in the repository.',
       confirmLabel: 'Remove worktree',
     });
     if (!ok) return;
@@ -176,7 +181,11 @@ export function WorktreesTab({ projectId, codebaseId }: { projectId: string; cod
         rows={rows}
         getRowId={(wt) => wt.id}
         actionsWidth={40}
-        rowActions={(wt) => <IconButton size="sm" icon="trash" label={`Remove worktree ${wt.branchName}`} onClick={() => void onRemove(wt)} />}
+        rowActions={(wt) =>
+          removable(wt.status) ? (
+            <IconButton size="sm" icon="trash" label={`Remove worktree ${wt.branchName}`} onClick={() => void onRemove(wt)} />
+          ) : null
+        }
         loading={isLoading}
         error={isError ? <EmptyState framed tone="error" icon="warning" title="Couldn't load worktrees" description={String(error)} /> : undefined}
         empty={

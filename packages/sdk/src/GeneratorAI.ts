@@ -535,7 +535,9 @@ export class GeneratorAI {
       workspacesDir,
       codebaseRepo: repos.projectCodebaseRepo,
       eventBus: services.eventBus,
+      worktreeRepo: repos.worktreeRepo,
     });
+    worktreeService.setMountReleaser((id) => mountService.releaseWorktree(id));
     services.engine.setLifecyclePlatform({ mounts: mountService, projectConfigs: projectConfigService, sandbox });
 
     // ── Stream Broker ──

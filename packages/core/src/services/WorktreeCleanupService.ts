@@ -170,9 +170,16 @@ export class WorktreeCleanupService {
         const isOrphaned = await this.isWorktreeOrphaned(wt);
         if (isOrphaned) {
           await this.worktreeRepo.updateStatus(wt.id, 'orphaned');
+          // Retention runs from now — the moment it stopped being live.
+          wt.cleanedUpAt = new Date();
           orphaned++;
           eligible = true;
         }
+      } else if (wt.status === 'orphaned' && wt.runType === 'manual' && !(await this.isWorktreeOrphaned(wt))) {
+        // A chat that was archived and then restored is live again: its
+        // worktree must not be swept on the archived clock.
+        await this.worktreeRepo.updateStatus(wt.id, 'active');
+        continue;
       }
 
       if (!eligible) continue;

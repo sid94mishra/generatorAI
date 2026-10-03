@@ -125,8 +125,8 @@ export class WorkspaceManager {
     /** Optional git client — when provided, commits go through it. */
     private readonly gitClient?: IGitClient,
     /**
-     * The legacy `worktrees` table, keyed by runId. Still written by
-     * `WorktreeService` for workflow runs, and read here to (a) back-fill
+     * The `worktrees` table, keyed by runId. Written by `MountService` for
+     * every codebase worktree mount (chats and runs), and read here to (a) back-fill
      * mounts for workspaces created before mounts existed and (b) unregister
      * those worktrees on delete. Optional for embedders without worktrees.
      */
@@ -617,6 +617,8 @@ export class WorkspaceManager {
    *    workspace root in the old project worktrees dir.
    *  - `mountRepo` — worktree mounts (`mode === 'worktree'`). In-place mounts
    *    are the user's own directories and are never candidates for removal.
+   *    `MountService` records a codebase worktree mount in the same table
+   *    under the mount's id.
    */
   private async collectWorktreeTargets(
     workspace: ExecutionWorkspace,
@@ -651,7 +653,11 @@ export class WorkspaceManager {
         this.logger.warn(`[WorkspaceManager] Skipping worktree mount ${mount.id}: ${mount.path} is outside workspace ${workspace.id}`);
         continue;
       }
-      if (!byPath.has(resolved)) byPath.set(resolved, { worktreePath: resolved });
+      // A codebase worktree mount's `worktrees` row shares the mount's id; a
+      // map item's row is keyed by the run, not this workspace's owner.
+      if (!byPath.has(resolved)) {
+        byPath.set(resolved, { worktreePath: resolved, ...(mount.codebaseId ? { runWorktreeId: mount.id } : {}) });
+      }
     }
 
     return [...byPath.values()];
