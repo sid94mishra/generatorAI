@@ -148,3 +148,5 @@ It also records every merge of `desktop_redesign` into this branch.
 | 2026-10-03 | M10 (MV-33) | `scripts/mobile/lib/sandbox-devices.mjs` (pairing drives the M7-08 screen by testID; no name typing; `/paired` Continue; Home detection on phone + tablet), `scripts/mobile/lib/sandbox-data.mjs` `findNewPairing` + its Node test | mobile-only tooling fix | `sandbox-pair.mjs pair` failed at `agent-device fill` (MD-192). Node tooling tests pass; the device run is the owner's. |
 
 | 2026-10-03 | M10-02 | `scripts/mobile/lib/sandbox-maestro.mjs`: flows also receive `PROJECT_ID` and `CODEBASE_ID` | additive (mobile-only tooling) | The new `projects/codebase` Maestro flow. |
+
+| 2026-10-03 | M10-03 | `scripts/mobile/vrt.mjs`, `scripts/mobile/perf.mjs`, `scripts/mobile/lib/{vrt-plan,perf-budgets}.mjs` + Node tests (new); `pnpm-lock.yaml` (`odiff-bin` 4.5.0 devDependency of `@generatorai/mobile`) | new mobile-only tooling | VRT and perf budgets (MD-194). No web / server effect. |

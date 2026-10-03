@@ -594,6 +594,9 @@ importers:
       jest-expo:
         specifier: ~57.0.5
         version: 57.0.5(@babel/core@7.29.0)(@react-native/jest-preset@0.86.3(@babel/core@7.29.0)(react@19.2.3))(expo@57.0.25)(jest@30.5.2(@types/node@22.20.0)(esbuild-register@3.6.0(esbuild@0.27.3)))(react-native@0.86.3(@babel/core@7.29.0)(@react-native/jest-preset@0.86.3(@babel/core@7.29.0)(react@19.2.3))(@react-native/metro-config@0.86.2(@babel/core@7.29.0))(@types/react@19.3.0)(react@19.2.3))(react@19.2.3)
+      odiff-bin:
+        specifier: 4.5.0
+        version: 4.5.0
       sf-symbols-typescript:
         specifier: ^2.2.0
         version: 2.2.0
@@ -4767,6 +4770,41 @@ packages:
 
   '@nozbe/microfuzz@1.0.0':
     resolution: {integrity: sha512-XKIg/guk+s1tkPTkHch9hfGOWgsKojT7BqSQddXTppOfVr3SWQhhTCqbgQaPTbppf9gc2kFeG0gpBZZ612UXHA==}
+
+  '@odiff/darwin-arm64@4.5.0':
+    resolution: {integrity: sha512-fztpr/73BNwJqua2xSjGaxkZr9xMVDqYFIKFnZS/MAW1MzHg6lN9r0kno2aY9FSIbCyE6c6/0MqbHs/+AkDhXw==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@odiff/darwin-x64@4.5.0':
+    resolution: {integrity: sha512-UXm/Ak+arL5tP8fwUNKR8vuuUGtm9aYOPS2oLzhkoV5/GfK5vY09nusW6Z5c5ka9VYQQyDHRKOUieXTIZKNdxg==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@odiff/linux-arm64@4.5.0':
+    resolution: {integrity: sha512-tAuSZSW4H6D6rscqpTtZ68dzK+FxbeSSzJHfJqcAmn9k7WWzXIseNRH6XLgFQE8t3bY1u6DqtOxQbE7nQV3ciw==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@odiff/linux-riscv64@4.5.0':
+    resolution: {integrity: sha512-LZ42duK8HpPWNTJplqPufQWD9d5ce26imO1DOHWJoq6sGrYaNaihHJNXOX6EV363lmSEeEZNXZr+xOMgOGJoVg==}
+    cpu: [riscv64]
+    os: [linux]
+
+  '@odiff/linux-x64@4.5.0':
+    resolution: {integrity: sha512-9Png/tO5M70Btcsv68wvIGk2GXIbc2CAw71rbeSOyUm7acFK/rOOCt5m4aJR4ZPC+bqEpB5RBp0kccNv9/Ji3A==}
+    cpu: [x64]
+    os: [linux]
+
+  '@odiff/win32-arm64@4.5.0':
+    resolution: {integrity: sha512-Icz19TRoJXU6hEHppbEd8p4bGhDkE/aeECC/lnQuMMrUE14Meqmj+8Dwr+9/KWifIqDhgebwtH8wnNwH98x5/A==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@odiff/win32-x64@4.5.0':
+    resolution: {integrity: sha512-KSwUwFSmIbLxM+aJPrQggqLhMD+AUJMtsxX531Oiskp1n3z3o2V/6meIBdY6w7ZXb6ZvU/M1WjojPViCqiQFLw==}
+    cpu: [x64]
+    os: [win32]
 
   '@openai/codex@0.154.0':
     resolution: {integrity: sha512-FV/x1OHXYv/ifjf3mXj9ThTTAWcUZN6cGIRQRhRxkKNOPuImu1WW0c8ev1vUkE9XGH90dEnYG1tBjIkxRikg0w==}
@@ -12158,6 +12196,10 @@ packages:
   obug@2.2.1:
     resolution: {integrity: sha512-XrsrhT5sybtKI6wakr2SPOlGZWWYbUXZ7a0jT8/QOeAPau+1X/bSegNe5YR75oJmEZQbKningirmGOEJCIk61Q==}
     engines: {node: '>=12.20.0'}
+
+  odiff-bin@4.5.0:
+    resolution: {integrity: sha512-FaXidbI0XDLCjLAet5n5OvRDfr6Fwt/C5SyWPfwgSUvYhCej1rjZjDXb/xdk+N6yTOCeAFaJ5mwTmU4ZthvPaA==}
+    hasBin: true
 
   on-exit-leak-free@2.1.2:
     resolution: {integrity: sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA==}
@@ -20205,6 +20247,27 @@ snapshots:
       fastq: 1.20.1
 
   '@nozbe/microfuzz@1.0.0': {}
+
+  '@odiff/darwin-arm64@4.5.0':
+    optional: true
+
+  '@odiff/darwin-x64@4.5.0':
+    optional: true
+
+  '@odiff/linux-arm64@4.5.0':
+    optional: true
+
+  '@odiff/linux-riscv64@4.5.0':
+    optional: true
+
+  '@odiff/linux-x64@4.5.0':
+    optional: true
+
+  '@odiff/win32-arm64@4.5.0':
+    optional: true
+
+  '@odiff/win32-x64@4.5.0':
+    optional: true
 
   '@openai/codex@0.154.0':
     optionalDependencies:
@@ -29056,6 +29119,16 @@ snapshots:
   obuf@1.1.2: {}
 
   obug@2.2.1: {}
+
+  odiff-bin@4.5.0:
+    optionalDependencies:
+      '@odiff/darwin-arm64': 4.5.0
+      '@odiff/darwin-x64': 4.5.0
+      '@odiff/linux-arm64': 4.5.0
+      '@odiff/linux-riscv64': 4.5.0
+      '@odiff/linux-x64': 4.5.0
+      '@odiff/win32-arm64': 4.5.0
+      '@odiff/win32-x64': 4.5.0
 
   on-exit-leak-free@2.1.2: {}
 

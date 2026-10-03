@@ -28,7 +28,8 @@
     "*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts",
-    ".rnstorybook/**/*.tsx"
+    ".rnstorybook/**/*.tsx",
+    ".rnstorybook/vrtMode.ts"
   ],
   "exclude": [
     "node_modules",

@@ -1,0 +1,21 @@
+appId: ${APP_ID}
+name: perf · fling the long transcript
+# 08 §4.7 (M10-03, MD-194): the 2,000-line reply left by perf/streaming is the scroll subject (the sandbox has no
+# 300-message chat). Three rounds of fast flings toward the top and back down. Driven by scripts/mobile/perf.mjs
+# after streaming.yaml.
+tags: [perf]
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///chats/${CHAT_LONG_ID}
+- extendedWaitUntil: {visible: {id: transcript-list}, timeout: 30000}
+- repeat:
+    times: 3
+    commands:
+      - repeat:
+          times: 12
+          commands:
+            - swipe: {direction: DOWN, duration: 150}
+      - repeat:
+          times: 12
+          commands:
+            - swipe: {direction: UP, duration: 150}

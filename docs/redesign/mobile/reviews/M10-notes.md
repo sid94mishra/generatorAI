@@ -44,3 +44,39 @@ New env for flows: `PROJECT_ID`, `CODEBASE_ID` (the seeded project and the Edits
 node scripts/mobile/sandbox-pair.mjs maestro --platform=ios --udid=<udid> -- test apps/mobile/.maestro
 node scripts/mobile/sandbox-pair.mjs maestro --platform=android --serial=<serial> -- test apps/mobile/.maestro
 ```
+
+## 2. M10-03 — VRT and performance budgets
+
+Built (MD-194): `scripts/mobile/vrt.mjs` (+ `lib/vrt-plan.mjs`, Node tests), `.rnstorybook/vrtMode.ts`,
+`scripts/mobile/perf.mjs` (+ `lib/perf-budgets.mjs`, Node tests), `apps/mobile/perf/budgets.json`,
+`apps/mobile/.maestro/perf/{streaming,transcript-scroll}.yaml`. `vrt --list`: 99 stories, 485 captures per device
+(two verification stories skipped). Nothing was captured or measured here: both need simulators.
+
+**Owner run — VRT baselines (MV-26).** Per platform, phone first (tablet optional):
+
+```sh
+# 1. Metro in VRT mode (leave it running)
+cd apps/mobile && EXPO_PUBLIC_STORYBOOK=1 EXPO_PUBLIC_VRT=1 pnpm start
+# 2. the booted gai-iphone / gai-phone paired with the sandbox
+node scripts/mobile/sandbox-pair.mjs pair --platform=ios
+node scripts/mobile/sandbox-pair.mjs pair --platform=android
+# 3. record (writes apps/mobile/vrt/baselines/<platform>/phone/*.png + META.json), then check it is stable
+node scripts/mobile/vrt.mjs --platform=ios --device=phone --update
+node scripts/mobile/vrt.mjs --platform=ios --device=phone          # expect 0 diffs; flaky stories → parameters.vrt.skip
+node scripts/mobile/vrt.mjs --platform=android --device=phone --update
+node scripts/mobile/vrt.mjs --platform=android --device=phone
+# 4. commit the baselines: mobile(M10-03): VRT baselines (<platform> phone)
+```
+
+Disk: roughly 485 PNGs per device (iOS 1x, Android 0.4 scale); check the size before committing a tablet set.
+
+**Owner run — perf** (release builds; `npx expo run:ios --configuration Release`, `npx expo run:android --variant release`):
+
+```sh
+node scripts/mobile/perf.mjs --platform=ios --batch=F
+node scripts/mobile/perf.mjs --platform=android --batch=F
+# later batches: --previous=F to judge the ≤ 10 % regression
+```
+
+Results: `docs/redesign/mobile/reviews/F/perf.json`. Real-phone absolute numbers: the same scenarios by hand on the
+owner's phones (08 §4.7).

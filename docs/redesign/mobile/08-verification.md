@@ -574,6 +574,13 @@ sandbox seed and the Faux fixture (§2.4). Nothing else creates data.
 
 ### 4.6 VRT — `scripts/mobile/vrt.mjs` (M4-10)
 
+**Built in M10-03 (MD-194).** Prerequisites: the target booted and sandbox-paired (the dev routes sit behind the auth
+gate), Metro started with `EXPO_PUBLIC_STORYBOOK=1 EXPO_PUBLIC_VRT=1` (`.rnstorybook/vrtMode.ts` freezes the clock at
+2026-10-01 09:41 UTC, seeds `Math.random`, forces Reduce Motion). A capture is the first screen of the story (galleries
+taller than the screen are cropped to `vrt-root`'s visible frame). Android screenshots are scaled 0.4 (≈ 1 px per dp,
+like the iOS simulator's 1x). The device check compares `deviceType` + `runtime` (iOS) / `image` = `android-<sdk>;<abi>`
+(Android) with `META.json`. `pnpm --filter @generatorai/mobile vrt -- --list` prints the plan without a device.
+
 `node scripts/mobile/vrt.mjs [--platform=ios|android|both] [--device=phone|tablet] [--grep=<regex>] [--variants=<list>]
 [--update] [--list]`
 
@@ -607,6 +614,14 @@ Instrument dark. Token correctness for all 18 themes × 2 modes × 7 accents is 
 plus one `ThemeMatrix` story, not screenshots (SE §5).
 
 ### 4.7 Performance
+
+**Built in M10-03 (MD-194):** `node scripts/mobile/perf.mjs --platform=<p> [--udid|--serial] --batch=<batch>
+[--previous=<batch>]` runs cold start, `perf/streaming.yaml` (frames + memory) and `perf/transcript-scroll.yaml` (frames;
+flings over the 2,000-line reply, as the sandbox has no 300-message chat) and judges them with
+`scripts/mobile/lib/perf-budgets.mjs` against `apps/mobile/perf/budgets.json`. A metric agent-device does not report
+(p95 frame time on some runtimes) is *unmeasured*, never a pass. Cold start: Android `am start -W` TotalTime; iOS
+relaunch → `home-new-chat` through the driver (relative). The perf flows are excluded from the functional suite
+(`config.yaml` `!perf/**`).
 
 - **Where:** release builds only (§3.2 B2), both platforms, pinned devices. Emulator and simulator numbers are
   **relative** (batch-to-batch); absolute device budgets are checked on the owner's phones at M10.
