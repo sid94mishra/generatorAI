@@ -10,7 +10,9 @@ tags: [smoke, chats]
 - extendedWaitUntil: {visible: {id: chats-new}, timeout: 15000}
 - tapOn: {id: chats-new}
 - extendedWaitUntil: {visible: {id: new-chat-sheet}, timeout: 15000}
-- assertVisible: {id: new-chat-create, enabled: false}
+# The sheet keeps an unsent draft (MD-152): clear it first.
+- tapOn: {id: new-chat-task}
+- eraseText: 80
 # The "Who works on this" control is native on iOS (segments carry no testID): by label on both platforms.
 - tapOn: "Just a model"
 - tapOn: {id: new-chat-task}

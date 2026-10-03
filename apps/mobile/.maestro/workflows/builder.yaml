@@ -29,7 +29,7 @@ env: {DEVICE_SCOPES: "write:workflows"}
 - assertVisible: "● Unsaved changes"
 - tapOn: {id: builder-undo}
 - assertVisible: "Saved"
-- tapOn: {id: builder-stage-plan}
+# A stage row opens the stage editor (the stage-editor flow covers it); Add stage appends.
 - tapOn: {id: builder-add-stage}
 - extendedWaitUntil: {visible: {id: add-stage-sheet}, timeout: 5000}
 - tapOn: {id: add-stage-agent}
@@ -42,7 +42,8 @@ env: {DEVICE_SCOPES: "write:workflows"}
 - tapOn: "Graph"
 - extendedWaitUntil: {visible: {id: graph-fit}, timeout: 5000}
 - tapOn: {id: graph-list}
-- tapOn: {id: builder-more}
+# A native menu's trigger is matched by its label (the menu, not the hosted button, is the element on iOS).
+- tapOn: "More builder actions"
 - tapOn: "Version history"
 - extendedWaitUntil: {visible: {id: versions-sheet}, timeout: 5000}
 - swipe: {direction: DOWN}

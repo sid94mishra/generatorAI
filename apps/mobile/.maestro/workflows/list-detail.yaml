@@ -13,7 +13,7 @@ env: {DEVICE_SCOPES: "write:workflows"}
 - extendedWaitUntil: {visible: {id: workflow-detail}, timeout: 15000}
 - assertVisible: {id: workflow-version}
 - assertVisible: "Recent runs"
-- assertVisible: "Setup"
+- scrollUntilVisible: {element: "Setup", direction: DOWN}
 - tapOn: {id: workflow-mini-graph}
 - extendedWaitUntil: {visible: {id: workflow-graph-canvas}, timeout: 10000}
 - tapOn: {id: graph-fit}

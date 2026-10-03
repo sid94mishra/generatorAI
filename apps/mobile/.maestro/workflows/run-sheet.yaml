@@ -17,6 +17,8 @@ tags: [workflows]
 - tapOn: {id: run-stage-run}
 - tapOn: {id: run-stage-done}
 - assertVisible: "Stages 1 of 2"
+# The row sits under the sticky footer until scrolled up; a tap on its centre would press Run.
+- scrollUntilVisible: {element: {id: run-permission-acceptEdits}, direction: DOWN, centerElement: true}
 - tapOn: {id: run-permission-acceptEdits}
 - tapOn: {id: run-sheet-review, retryTapIfNoChange: false}
 - extendedWaitUntil: {visible: "Plan preview", timeout: 15000}

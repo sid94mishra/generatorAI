@@ -22,7 +22,8 @@ env: {DEVICE_SCOPES: "write:workflows"}
       - tapOn: "Workflow actions"
 - tapOn: "Edit in builder"
 - extendedWaitUntil: {visible: {id: builder-list}, timeout: 15000}
-- tapOn: {id: builder-more}
+# A native menu's trigger is matched by its label (the menu, not the hosted button, is the element on iOS).
+- tapOn: "More builder actions"
 - tapOn: "Workflow settings"
 - extendedWaitUntil: {visible: {id: workflow-settings-variables}, timeout: 5000}
 - assertVisible: "Saved with the workflow draft"
