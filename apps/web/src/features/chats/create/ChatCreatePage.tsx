@@ -176,10 +176,10 @@ export function ChatCreatePage() {
   const asideCollapsed = useMediaQuery(ASIDE_COLLAPSE_QUERY);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  const [defaults] = useState(() =>
-    initialDraft((location.state as { draft?: Partial<CreateChatDraft> } | null)?.draft),
-  );
-  const [sourceDrafts, setSourceDrafts] = useState<DraftSource[]>([]);
+  const handoff = location.state as { draft?: Partial<CreateChatDraft>; sourceDrafts?: DraftSource[] } | null;
+  const [defaults] = useState(() => initialDraft(handoff?.draft));
+  // The New chat dialog's "More options" hands over the sources it had picked.
+  const [sourceDrafts, setSourceDrafts] = useState<DraftSource[]>(() => handoff?.sourceDrafts ?? []);
   const [tagInput, setTagInput] = useState('');
 
   const form = useForm({

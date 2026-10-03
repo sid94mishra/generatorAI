@@ -153,7 +153,8 @@ export function NewChatDialog() {
   function openFullPage() {
     const draft: Partial<CreateChatDraft> = currentDraft();
     close();
-    navigate('/chats/new', { state: { draft } });
+    // The picked sources travel too: "More options" continues this form, it does not restart it.
+    navigate('/chats/new', { state: { draft, sourceDrafts } });
     reset();
   }
 
