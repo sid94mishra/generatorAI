@@ -49,6 +49,7 @@ import {
   TagsFilterChip,
 } from './ChatsFilterControls.js';
 import { CHATS_COLUMNS, chatRowActions } from '@/blocks/chats-table/chatsColumns.js';
+import { shortcutFor } from '@/lib/shortcuts.js';
 
 type Scope = 'all' | 'active' | 'archived';
 const SCOPE_ITEMS: readonly Omit<SegmentedItem<Scope>, 'count'>[] = [
@@ -232,7 +233,7 @@ export function ChatsListPage() {
             title="Chats"
             count={chatList ? chatList.total : undefined}
             actions={
-              <Button variant="primary" icon="plus" shortcut={['Ctrl', 'N']} onClick={() => openNewChat()}>
+              <Button variant="primary" icon="plus" shortcut={shortcutFor('chat.new')} onClick={() => openNewChat()}>
                 New chat
               </Button>
             }

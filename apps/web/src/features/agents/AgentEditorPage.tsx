@@ -72,6 +72,7 @@ import {
   type AgentFormValues,
 } from './agentFormSchema.js';
 import { ROLE_LABEL } from './agentListCopy.js';
+import { modChord } from '@/lib/shortcuts.js';
 
 const AGENT_INSTRUCTIONS_WARN_BYTES = 8 * 1024;
 const AGENT_INSTRUCTIONS_MAX_BYTES = 32 * 1024;
@@ -797,7 +798,7 @@ export function AgentEditorPage() {
           primary={
             <Button
               variant="primary"
-              shortcut={['Ctrl', '↵']}
+              shortcut={modChord('S')}
               disabled={!canSave || isSubmitting}
               loading={isSubmitting}
               onClick={handleSave}

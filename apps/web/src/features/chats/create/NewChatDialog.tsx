@@ -9,7 +9,7 @@
 // defaults to the task when left blank (ChatCreateModel board).
 // ────────────────────────────────────────────────────────────────
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import type { Agent, HarnessCatalogModel } from '@generatorai/shared';
 import { EMPTY_CREATE_CHAT_DRAFT, type CreateChatDraft } from '@generatorai/shared/ui-contract';
@@ -35,6 +35,7 @@ import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { BrowserVisibilityField, DEFAULT_BROWSER_SETTINGS } from './BrowserVisibilityField.js';
 import { defaultReasoningEffortFor, reasoningLevelsFor } from './modelControls.js';
 import { buildCreateChatParams, chatCreateBlockingReason, chatCreateDisplayName } from './mapDraftToParams.js';
+import { modChord } from '@/lib/shortcuts.js';
 
 const EFFORT_LABEL: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High' };
 
@@ -135,6 +136,20 @@ export function NewChatDialog() {
     }
   }
 
+  // The footer advertises Ctrl/⌘ ↵ (modChord): wire the real key while the dialog is open.
+  const submitRef = useRef(handleSubmit);
+  submitRef.current = handleSubmit;
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      void submitRef.current();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isOpen]);
+
   function openFullPage() {
     const draft: Partial<CreateChatDraft> = currentDraft();
     close();
@@ -194,8 +209,12 @@ export function NewChatDialog() {
             onChange={(e) => setTask(e.target.value)}
             autosize={{ minRows: 4, maxRows: 8 }}
           />
-          <Field label="Name" hint="Named from the task if left empty" orientation="horizontal" labelWidth={64}>
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={chatCreateDisplayName({ name: '', prompt: task }) || 'Untitled chat'} />
+          <Field label="Name" orientation="horizontal" labelWidth={64}>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={chatCreateDisplayName({ name: '', prompt: task }) || 'Named from the task if left empty'}
+            />
           </Field>
         </div>
 
@@ -224,7 +243,11 @@ export function NewChatDialog() {
             <h3 className="text-ui font-semibold text-fg">Who</h3>
             <span className="text-small text-fg-3">The agent brings its own instructions, skills and MCP servers.</span>
           </div>
-          <div className="grid grid-cols-3 items-end gap-3">
+          <div className="grid grid-cols-3 items-end gap-x-3 gap-y-1.5">
+            {/* Column labels (board NewChat); each control keeps its own accessible name. */}
+            <span className="text-small text-fg-2">Agent</span>
+            <span className="text-small text-fg-2">Model</span>
+            <span className="text-small text-fg-2">{reasoningLevels.length > 0 ? 'Effort' : null}</span>
             <AgentPicker
               value={agentRef}
               onChange={(ref, agent) => {
@@ -309,7 +332,7 @@ export function NewChatDialog() {
         <DialogClose render={<Button variant="secondary" />}>Cancel</DialogClose>
         <Button
           variant="primary"
-          shortcut={['Ctrl', '↵']}
+          shortcut={modChord('Enter')}
           disabled={!!blockingReason || submitting}
           loading={submitting}
           onClick={() => void handleSubmit()}

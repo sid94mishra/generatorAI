@@ -25,6 +25,7 @@ import { TerminalFrame } from '@/ui/patterns/TerminalFrame/TerminalFrame.js';
 import { shortenPath } from './shortenPath.js';
 import { useTerminalSession } from './useTerminalSession.js';
 import { useXtermInstance } from './useXtermInstance.js';
+import { modChord } from '@/lib/shortcuts.js';
 
 export interface TerminalWorktreeOption {
   /** Alias shown in the menu (e.g. `backend`). */
@@ -161,7 +162,7 @@ export function TerminalPanel({ workspaceId, tabId, label = 'Terminal', onCaptur
       >
         Attach selection
       </Button>
-      <Button variant="secondary" size="sm" icon="search" shortcut={['Ctrl', 'F']} pressed={xterm.find.open} onClick={xterm.openFind}>
+      <Button variant="secondary" size="sm" icon="search" shortcut={modChord('F')} pressed={xterm.find.open} onClick={xterm.openFind}>
         Find
       </Button>
     </>

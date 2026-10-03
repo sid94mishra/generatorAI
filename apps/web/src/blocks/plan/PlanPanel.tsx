@@ -35,6 +35,7 @@ import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { SectionHeader } from '@/ui/patterns/SectionHeader/SectionHeader.js';
 import { cn } from '@/ui/lib/cn.js';
 import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
+import { modChord } from '@/lib/shortcuts.js';
 
 export interface PlanPanelProps {
   chatId: string;
@@ -392,7 +393,7 @@ export function PlanPanel({ chatId, planId }: PlanPanelProps) {
               <Button
                 size="sm"
                 variant="primary"
-                shortcut={['Ctrl', '↵']}
+                shortcut={modChord('Enter')}
                 loading={decide.isPending}
                 onClick={() => void handleDecision(true, 'implement_interactive')}
               >

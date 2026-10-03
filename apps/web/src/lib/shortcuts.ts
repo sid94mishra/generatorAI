@@ -11,3 +11,11 @@ export function shortcutFor(id: RendererCommandId): readonly string[] | undefine
   const chords = formatBinding(binding, commandHost, { mac: isMacOS });
   return chords.length === 1 ? chords[0] : undefined;
 }
+
+/**
+ * Key chips for a page-local `Mod+<key>` chord whose handler accepts Ctrl or ⌘
+ * (submit forms, the terminal's Find): `⌘ ↵` on macOS, `Ctrl ↵` elsewhere.
+ */
+export function modChord(key: string): readonly string[] {
+  return formatBinding(`Mod+${key}`, commandHost, { mac: isMacOS })[0] ?? ['Ctrl', key];
+}

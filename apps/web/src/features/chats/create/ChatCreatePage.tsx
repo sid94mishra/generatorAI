@@ -60,6 +60,7 @@ import { cn } from '@/ui/lib/cn.js';
 import { BrowserVisibilityField, DEFAULT_BROWSER_SETTINGS } from './BrowserVisibilityField.js';
 import { buildCreateChatParams, chatCreateBlockingReason, chatCreateDisplayName } from './mapDraftToParams.js';
 import { contextTiersFor, defaultReasoningEffortFor, reasoningLevelsFor, type ContextTier } from './modelControls.js';
+import { modChord } from '@/lib/shortcuts.js';
 
 // ── Constants ───────────────────────────────────────────────────
 
@@ -680,7 +681,7 @@ export function ChatCreatePage() {
             primary={
               <Button
                 variant="primary"
-                shortcut={['Ctrl', '↵']}
+                shortcut={modChord('Enter')}
                 disabled={blockingReason != null}
                 loading={isSubmitting}
                 onClick={() => void form.handleSubmit()}
