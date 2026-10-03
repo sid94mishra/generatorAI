@@ -99,10 +99,11 @@ export async function mintPair(session, target) {
 // toolbar as an overlay. Raw XCTest preserves the native hittability/refs;
 // fill/press still enforce keyboard and target checks. No coordinate fallback.
 async function readSnapshot(target, interactive = true) {
-  const deadline = Date.now() + 15000;
+  // A raw iOS tree of Home takes 5-10 s while the runner is busy; a 5 s cap cancelled every read.
+  const deadline = Date.now() + 45000;
   let lastError;
   do {
-    try { return JSON.parse(await agent(target, ['snapshot', ...(target.platform === 'ios' ? ['--raw'] : interactive ? ['-i'] : []), '--timeout', '5000'])); }
+    try { return JSON.parse(await agent(target, ['snapshot', ...(target.platform === 'ios' ? ['--raw'] : interactive ? ['-i'] : []), '--timeout', '20000'])); }
     catch (error) { lastError = error; await delay(500); }
   } while (Date.now() < deadline);
   throw lastError;
