@@ -204,9 +204,14 @@ export class TurnRecorder {
   take(opts: { partial?: boolean; fallbackContent?: string } = {}): RecordedTurn | undefined {
     if (this.written) return undefined;
     const partial = opts.partial === true;
-    let content = partial && this.streamed.trim().length > this.text.trim().length ? this.streamed : this.text;
+    // A turn that failed keeps what it streamed and its error even with no final
+    // message (a provider error ends a turn without `message_complete`); it is not
+    // "stopped", so it is not marked partial.
+    const failed = !partial && this.system.some((m) => m.startsWith('Error: '));
+    let content =
+      (partial || failed) && this.streamed.trim().length > this.text.trim().length ? this.streamed : this.text;
     if (content.trim().length === 0 && opts.fallbackContent) content = opts.fallbackContent;
-    if (!partial && content.trim().length === 0) return undefined;
+    if (!partial && !failed && content.trim().length === 0) return undefined;
     this.written = true;
 
     // A stopped turn cannot have a call still in flight.
