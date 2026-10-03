@@ -132,6 +132,10 @@ export function DataTable<Row>({
   className,
   'data-testid': testId,
 }: DataTableProps<Row>) {
+  // TanStack Virtual's useVirtualizer returns a mutable instance whose methods
+  // the React Compiler cannot track, so memoised children would go stale
+  // (P8-02, D-85).
+  'use no memo';
   const [containerRef, width] = useWidth<HTMLDivElement>();
   const viewportRef = useRef<HTMLDivElement | null>(null);
   // The sticky header's height (density changes it) offsets the virtual rows.

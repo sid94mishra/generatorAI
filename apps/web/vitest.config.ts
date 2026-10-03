@@ -3,6 +3,8 @@ import { defineConfig, type TestProjectInlineConfiguration } from 'vitest/config
 import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
 import { playwright } from '@vitest/browser-playwright';
 import tailwindcss from '@tailwindcss/vite';
+import babel from '@rolldown/plugin-babel';
+import { reactCompilerPreset } from '@vitejs/plugin-react';
 
 /**
  * The single Vitest config for the web app (docs/redesign/09-verification.md
@@ -25,6 +27,13 @@ const dirname = fileURLToPath(new URL('.', import.meta.url));
  * does not expand a `projects` list nested inside a referenced config.
  * Paths are absolute so they hold from either root.
  */
+/**
+ * The React Compiler exactly as the app build applies it (vite.config.ts,
+ * P8-02): unit tests render the compiled components the user runs, so a
+ * component that breaks under auto-memoisation fails here too.
+ */
+const reactCompiler = () => babel({ presets: [reactCompilerPreset()] });
+
 export const unitProject = {
   name: 'unit',
   globals: true,
@@ -91,7 +100,7 @@ export default defineConfig({
   resolve: { alias: { '@': `${dirname}src` } },
   test: {
     projects: [
-      { extends: true, test: unitProject },
+      { extends: true, plugins: [reactCompiler()], test: unitProject },
       storybookProject('storybook'),
       storybookProject('storybook-instrument-light', {
         initialGlobals: { mode: 'light', theme: 'instrument' },

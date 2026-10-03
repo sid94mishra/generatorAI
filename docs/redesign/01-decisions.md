@@ -521,6 +521,13 @@ Chats and runs work in mounts (`workspace_mounts`); the `worktrees` table, which
 - A person cannot remove an **active** worktree (409; web and mobile hide Remove for it). The retention clock runs from when the worktree stopped being live (`cleanedUpAt` is now set on `orphaned` too, cleared on `active`), and a restored chat's orphaned worktree returns to `active`.
 - Pre-existing chats are not back-filled (no backward compatibility).
 
+### D-85 React Compiler 1.0 on web and desktop (P8-02, 2026-10-03) — Final
+- **How:** the stable Babel compiler (`babel-plugin-react-compiler` 1.0 through `@rolldown/plugin-babel` and `@vitejs/plugin-react`'s `reactCompilerPreset`), not plugin-react 6's experimental native `compiler` option. It runs wherever the client is built: `vite.config.ts` (dev, production, Storybook) and the web `unit` Vitest project, so unit tests render the compiled components. Desktop renders the web build, so it is covered too. Default `compilationMode: 'infer'`, target React 19.
+- **Opt-outs:** `'use no memo'` in the two `useVirtualizer` components (`blocks/transcript/TranscriptView`, `ui/patterns/DataTable`) — TanStack Virtual returns a mutable instance the compiler cannot track (the compiler already skipped DataTable as an incompatible library; the directive makes both explicit). No module is excluded from the compiler.
+- **What it skips:** at enablement it left 144 functions as written (refs read during render, `try … finally`, value blocks inside `try`, hooks with a disabled `react-hooks` lint rule, update expressions on captured variables, existing memoisation it could not preserve). Skipping is the safe failure mode; these are candidates for later clean-up, not defects.
+- **Measured** (production build, 24-stage workflow, render counts from a commit hook, 3 runs each, stable): builder pan 3,982 → 199 component renders, node drag (40 steps) 5,211 → 1,066, zoom 3,069 → 536, selecting 5 nodes 1,576 → 1,085; run graph open 1,074 → 758, run graph pan 900 → 409. Script time for pan 63–70 → 20 ms, drag ~103 → ~64 ms.
+- **Cost:** web build ~3 s → ~21 s (Babel pass), initial-load gzip 458.7 → 498.3 KB (budget 800).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

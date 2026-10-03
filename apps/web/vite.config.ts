@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
+import react, { reactCompilerPreset } from '@vitejs/plugin-react';
+import babel from '@rolldown/plugin-babel';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 import tailwindcss from '@tailwindcss/vite';
 import { visualizer } from 'rollup-plugin-visualizer';
@@ -52,6 +53,14 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    // React Compiler 1.0 (P8-02, D-85): auto-memoises components and hooks in
+    // the client build (dev, production, Storybook). A component the compiler
+    // cannot prove safe is left as written; `'use no memo'` opts one out.
+    babel({
+      presets: [
+        reactCompilerPreset(),
+      ],
+    }),
     tailwindcss(),
     ...(devHttps ? [basicSsl()] : []),
     visualizer({
