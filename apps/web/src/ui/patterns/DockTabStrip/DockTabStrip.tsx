@@ -115,13 +115,27 @@ const tabClass = cn(
 // On IconButton sm (which keeps the 24px hitSlop): a 16px box inside the tab's right padding.
 const closeXClass = 'absolute top-1/2 right-1 size-4 -translate-y-1/2 rounded-badge text-fg-3';
 
-/** Ids of the tabs not fully inside the scrolled tab row (re-measured on resize and scroll). */
-function useOverflowIds(listRef: RefObject<HTMLDivElement | null>, layoutKey: string): string[] {
+/**
+ * Ids of the tabs not fully inside the scrolled tab row (re-measured on resize
+ * and scroll). The active tab is scrolled into the row first, on every measure:
+ * a tab that grows (a count appears in its label) or a dock that narrows must
+ * not push the selected tab into the "+" menu.
+ */
+function useOverflowIds(listRef: RefObject<HTMLDivElement | null>, layoutKey: string, activeId: string): string[] {
   const [ids, setIds] = useState<string[]>([]);
   useLayoutEffect(() => {
     const list = listRef.current;
     if (!list) return;
+    const keepActiveVisible = () => {
+      const el = Array.from(list.querySelectorAll<HTMLElement>('[data-dock-tab]')).find((node) => node.dataset.dockTab === activeId);
+      if (!el) return;
+      const left = el.offsetLeft;
+      const right = left + el.offsetWidth;
+      if (left < list.scrollLeft) list.scrollLeft = left;
+      else if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth;
+    };
     const measure = () => {
+      keepActiveVisible();
       // Layout offsets inside the (positioned) row, so transforms and zoom do not skew it.
       const left = list.scrollLeft;
       const right = left + list.clientWidth;
@@ -146,7 +160,7 @@ function useOverflowIds(listRef: RefObject<HTMLDivElement | null>, layoutKey: st
       ro?.disconnect();
     };
     // `layoutKey` changes with the tab set, the active tab and `compact`: re-measure then.
-  }, [listRef, layoutKey]);
+  }, [listRef, layoutKey, activeId]);
   return ids;
 }
 
@@ -170,23 +184,11 @@ export function DockTabStrip({
 }: DockTabStripProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const tabKey = tabs.map((t) => t.id).join('\u0000');
-  const overflowIds = useOverflowIds(listRef, `${tabKey}|${compact}|${value}`);
+  const overflowIds = useOverflowIds(listRef, `${tabKey}|${compact}`, value);
   const overflowTabs = tabs.filter((t) => overflowIds.includes(t.id));
 
   const addLabel = labels?.add ?? 'Add tab';
   const closeTabLabel = labels?.closeTab ?? ((label: string) => `Close ${label} tab`);
-
-  // Keep the active tab visible in the scrolled row.
-  useLayoutEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-    const el = Array.from(list.querySelectorAll<HTMLElement>('[data-dock-tab]')).find((node) => node.dataset.dockTab === value);
-    if (!el) return;
-    const left = el.offsetLeft;
-    const right = left + el.offsetWidth;
-    if (left < list.scrollLeft) list.scrollLeft = left;
-    else if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth;
-  }, [value, tabKey, compact]);
 
   const closeTab = useCallback(
     (tab: DockTab) => {
