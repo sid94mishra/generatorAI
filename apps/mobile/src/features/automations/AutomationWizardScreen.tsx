@@ -25,6 +25,7 @@ import { DatePicker } from '../../ui/native/DatePicker';
 import { SegmentedControl } from '../../ui/native/SegmentedControl';
 import { Select } from '../../ui/native/Select';
 import { useSheet } from '../../ui/native/Sheet';
+import { useSizeClass } from '../../ui/platform/breakpoints';
 import { haptic } from '../../ui/platform/haptics';
 import { Button } from '../../ui/primitives/Button';
 import { Callout } from '../../ui/primitives/Callout';
@@ -74,6 +75,7 @@ export default function AutomationWizardScreen(): React.ReactElement {
   const params = useLocalSearchParams<{ id?: string; from?: string; page?: string }>();
   const navigation = useNavigation();
   const sheet = useSheet();
+  const { sizeClass } = useSizeClass();
   const editing = Boolean(params.id);
   const sourceId = params.id ?? params.from ?? '';
   const source = useAutomation(sourceId);
@@ -220,9 +222,11 @@ export default function AutomationWizardScreen(): React.ReactElement {
       content = (
         <View className="gap-4">
           <PageTitle title="Trigger" hint="Schedules run while the server is up." />
-          <View className="flex-row gap-2">
+          {/* ChoiceCards stack on a phone and sit side by side from `medium` (MP-48): three in a phone row wrapped the
+              titles a few letters per line. */}
+          <View className={sizeClass === 'compact' ? 'gap-2' : 'flex-row gap-2'}>
             {(['manual', 'schedule', 'webhook'] as AutomationTriggerType[]).map((t) => (
-              <View key={t} className="flex-1">
+              <View key={t} className={sizeClass === 'compact' ? undefined : 'flex-1'}>
                 <ChoiceCard value={t} selected={draft.triggerType === t} title={{ manual: 'Manual', schedule: 'Schedule', webhook: 'Webhook' }[t]} icon={({ manual: 'hand', schedule: 'clock', webhook: 'webhook' } as const)[t]} onPress={() => set({ triggerType: t })} testID={`automation-wizard-trigger-${t}`} />
               </View>
             ))}
