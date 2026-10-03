@@ -348,34 +348,43 @@ export default function BuilderScreen(): React.ReactElement {
     );
   }
 
+  // Two rows (phone width): the view switch at its own width with undo / redo / More, then the version chip and the
+  // save state, which truncates rather than squeezing the switch.
   const toolbar = (
-    <View className="flex-row items-center gap-2 px-gutter pb-2">
-      <SegmentedControl<'list' | 'graph'>
-        accessibilityLabel="Builder view"
-        value={draft.view}
-        onValueChange={(v) => store().setView(id, v)}
-        segments={[
-          { value: 'list', label: 'List', icon: 'list' },
-          { value: 'graph', label: 'Graph', icon: 'workflows' },
-        ]}
-        testID="builder-view"
-      />
-      {chip ? <Badge label={chip.label} {...(chip.suffix && record?.status === 'published' ? { suffix: chip.suffix } : {})} size="sm" /> : null}
-      {agentDraft ? <Badge label="Agent draft" icon="wand" size="sm" /> : null}
-      <Text role="footnote" tone="fg-3" numberOfLines={1} className="flex-1">
-        {dirty ? '● Unsaved changes' : 'Saved'}
-      </Text>
-      <IconButton icon="undo" label="Undo" size="sm" disabled={!draft.past.length} onPress={() => store().undo(id)} testID="builder-undo" />
-      <IconButton icon="redo" label="Redo" size="sm" disabled={!draft.future.length} onPress={() => store().redo(id)} testID="builder-redo" />
-      <Menu
-        accessibilityLabel="More builder actions"
-        items={[
-          { id: 'settings', label: 'Workflow settings', icon: 'settings', testID: 'builder-settings' },
-          { id: 'versions', label: 'Version history', icon: 'history', testID: 'builder-versions' },
-        ]}
-        onSelect={(mid) => router.push((mid === 'settings' ? workflowSettingsHref(id) : workflowVersionsHref(id)) as Href)}
-        trigger={<IconButton icon={overflowIcon} label="More builder actions" size="sm" onPress={() => undefined} testID="builder-more" />}
-      />
+    <View className="gap-1 px-gutter pb-2">
+      <View className="flex-row items-center gap-1">
+        <View className="shrink-0">
+          <SegmentedControl<'list' | 'graph'>
+            accessibilityLabel="Builder view"
+            value={draft.view}
+            onValueChange={(v) => store().setView(id, v)}
+            segments={[
+              { value: 'list', label: 'List' },
+              { value: 'graph', label: 'Graph' },
+            ]}
+            testID="builder-view"
+          />
+        </View>
+        <View className="flex-1" />
+        <IconButton icon="undo" label="Undo" size="sm" disabled={!draft.past.length} onPress={() => store().undo(id)} testID="builder-undo" />
+        <IconButton icon="redo" label="Redo" size="sm" disabled={!draft.future.length} onPress={() => store().redo(id)} testID="builder-redo" />
+        <Menu
+          accessibilityLabel="More builder actions"
+          items={[
+            { id: 'settings', label: 'Workflow settings', icon: 'settings', testID: 'builder-settings' },
+            { id: 'versions', label: 'Version history', icon: 'history', testID: 'builder-versions' },
+          ]}
+          onSelect={(mid) => router.push((mid === 'settings' ? workflowSettingsHref(id) : workflowVersionsHref(id)) as Href)}
+          trigger={<IconButton icon={overflowIcon} label="More builder actions" size="sm" onPress={() => undefined} testID="builder-more" />}
+        />
+      </View>
+      <View className="flex-row items-center gap-2">
+        {chip ? <Badge label={chip.label} {...(chip.suffix && record?.status === 'published' ? { suffix: chip.suffix } : {})} size="sm" /> : null}
+        {agentDraft ? <Badge label="Agent draft" icon="wand" size="sm" /> : null}
+        <Text role="footnote" tone="fg-3" numberOfLines={1} className="flex-1" testID="builder-save-state">
+          {dirty ? '● Unsaved changes' : 'Saved'}
+        </Text>
+      </View>
     </View>
   );
 
@@ -390,7 +399,10 @@ export default function BuilderScreen(): React.ReactElement {
     </View>
   );
 
-  // The agent draft's banner carries the filled Publish; Run steps back to secondary there (MD-22: one filled action).
+  // Bottom toolbar at phone width: Add stage and Validate are the icon capsule (named for assistive tech), Publish a
+  // text button, Run / Test run the filled primary. The agent draft's banner carries the filled Publish; Run steps
+  // back to secondary there (MD-22: one filled action). It pays its own bottom inset, so it is the fixed body's last
+  // child rather than the editor's sticky bar (which would pay it again).
   const runAction = { label: record?.status === 'draft' ? 'Test run' : 'Run', icon: 'play' as const, onPress: runIt, loading: busy === 'run', disabled: busy !== null || blocked, testID: 'builder-run' };
   return (
     <FullScreenEditor
@@ -400,16 +412,6 @@ export default function BuilderScreen(): React.ReactElement {
       dirty={dirty}
       dirtyCount={changeCount(draft)}
       navigation={navigation as never}
-      stickyBar={
-        <BottomToolbar
-          actions={[
-            { label: 'Add stage', icon: 'plus', onPress: addStage, testID: 'builder-add-stage' },
-            { label: 'Validate', icon: 'check', onPress: showValidation, testID: 'builder-validate' },
-            ...(agentDraft ? [runAction] : [{ label: record?.status === 'draft' && !record.currentVersionId ? 'Publish' : `Publish v${nextVersion}`, onPress: publish, loading: busy === 'publish', disabled: busy !== null || blocked || (!dirty && !record?.hasUnpublishedChanges && record?.status === 'published'), testID: 'builder-publish' }]),
-          ]}
-          {...(agentDraft ? {} : { primary: runAction })}
-        />
-      }
       body="fixed"
       testID="builder"
     >
@@ -434,35 +436,46 @@ export default function BuilderScreen(): React.ReactElement {
           <EmptyState copyKey="builderEmpty" action={{ label: 'Add stage', icon: 'plus', onPress: addStage }} />
         </View>
       ) : (
-        <ReorderList
-          data={order}
-          keyExtractor={(s) => s.key}
-          itemLabel={(s) => s.name}
-          editing
-          canMove={(from, to) => canMove(order, chains, from, to)}
-          onMove={(key, to) => edit((g) => moveStage(g, key, to))}
-          header={notices}
-          footer={<View className="h-6" />}
-          renderItem={(stage, handle) => {
-            const index = order.indexOf(stage);
-            return (
-              <StageCard
-                stage={stage}
-                index={index}
-                selected={draft.selected === stage.key}
-                errors={errors.get(stage.key) ?? 0}
-                menu={stageMenu(stage, index)}
-                onMenu={(mid) => onStageMenu(stage, mid as StageMenuId)}
-                onPress={() => openStage(stage.key)}
-                handle={chains.get(stage.key) !== null ? handle : null}
-                callouts={edgeCallouts(graph, stage.key)}
-                body={graph.stages.filter((s) => s.parentKey === stage.key)}
-              />
-            );
-          }}
-          testID="builder-list"
-        />
+        <View className="flex-1">
+          <ReorderList
+            data={order}
+            keyExtractor={(s) => s.key}
+            itemLabel={(s) => s.name}
+            editing
+            canMove={(from, to) => canMove(order, chains, from, to)}
+            onMove={(key, to) => edit((g) => moveStage(g, key, to))}
+            header={notices}
+            footer={<View className="h-6" />}
+            renderItem={(stage, handle) => {
+              const index = order.indexOf(stage);
+              return (
+                <StageCard
+                  stage={stage}
+                  index={index}
+                  selected={draft.selected === stage.key}
+                  errors={errors.get(stage.key) ?? 0}
+                  menu={stageMenu(stage, index)}
+                  onMenu={(mid) => onStageMenu(stage, mid as StageMenuId)}
+                  onPress={() => openStage(stage.key)}
+                  handle={chains.get(stage.key) !== null ? handle : null}
+                  callouts={edgeCallouts(graph, stage.key)}
+                  body={graph.stages.filter((s) => s.parentKey === stage.key)}
+                />
+              );
+            }}
+            testID="builder-list"
+          />
+        </View>
       )}
+      <BottomToolbar
+        nav={[
+          { icon: 'plus', label: 'Add stage', onPress: addStage, testID: 'builder-add-stage' },
+          { icon: 'check', label: 'Validate', onPress: showValidation, testID: 'builder-validate' },
+        ]}
+        actions={agentDraft ? [runAction] : [{ label: record?.status === 'draft' && !record.currentVersionId ? 'Publish' : `Publish v${nextVersion}`, onPress: publish, loading: busy === 'publish', disabled: busy !== null || blocked || (!dirty && !record?.hasUnpublishedChanges && record?.status === 'published'), testID: 'builder-publish' }]}
+        {...(agentDraft ? {} : { primary: runAction })}
+        testID="builder-toolbar"
+      />
     </FullScreenEditor>
   );
 }
