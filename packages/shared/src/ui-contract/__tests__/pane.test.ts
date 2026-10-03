@@ -40,3 +40,13 @@ describe('dock contract (M-11, D-27, R-4)', () => {
     expect(dockStorageKeys('run').tabs('r1')).toBe('generatorai:dock:run:r1');
   });
 });
+
+describe('run pane tabs (mobile MG-28)', () => {
+  it('orders the run tabs and parses run dock links', async () => {
+    const { RUN_DOCK_TABS, parseRunDockLinkTab } = await import('../pane.js');
+    expect(RUN_DOCK_TABS).toEqual(['output', 'files', 'hooks', 'variables', 'changes', 'terminal', 'browser']);
+    expect(parseRunDockLinkTab('output')).toBe('output');
+    expect(parseRunDockLinkTab('tasks')).toBeNull();
+    expect(parseRunDockLinkTab(undefined)).toBeNull();
+  });
+});

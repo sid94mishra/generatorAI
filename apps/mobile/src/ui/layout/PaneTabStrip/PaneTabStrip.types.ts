@@ -1,10 +1,11 @@
 // ML-08 PaneTabStrip contract (03 ML-08; MD-23, MD-02).
 import type { MobileIconConcept } from '@generatorai/design-tokens';
-import type { DockTabType } from '@generatorai/shared/ui-contract';
+import type { DockTabType, RunPaneTab } from '@generatorai/shared/ui-contract';
 
 export interface PaneTab {
   id: string;
-  type: DockTabType;
+  /** A dock tab type, or a run pane tab (MG-28). */
+  type: DockTabType | RunPaneTab;
   label: string;
   icon: MobileIconConcept;
   /** Inline mono count (changed files, running tasks). */

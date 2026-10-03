@@ -11,7 +11,7 @@ import { resolveStatus, STATUS_STATE_DEFS, type StatusState } from '@generatorai
 import type { MobileIconConcept } from '@generatorai/design-tokens';
 import type { StageSpec } from '@generatorai/workflow-spec';
 
-import { usageLine } from '../../../blocks/DecisionCard';
+import { usageLine, useLoopIterations } from '../../../blocks/DecisionCard';
 import { ListSection } from '../../../ui/layout/ListSection';
 import { cn } from '../../../ui/lib/cn';
 import { Menu } from '../../../ui/native/Menu';
@@ -27,9 +27,10 @@ import { effectiveStageStatus, stageControlsFor } from '../model/runModel';
 import { checkLabel, checkResultOf, isLoopStage, itemLabel, loopBadge, loopExitLabel, mapBadge, stageTree, type RunStage, type StageNode } from '../model/runStages';
 import { stageRowView } from '../model/runView';
 
-export type StageMenuId = 'pause' | 'resume' | 'retry-resume' | 'retry-restart' | 'skip' | 'rerun' | 'copy-output' | 'open-chat' | 'cancel';
+export type StageMenuId = 'pause' | 'resume' | 'retry-resume' | 'retry-restart' | 'skip' | 'rerun' | 'copy-output' | 'open-chat' | 'open-pane' | 'cancel';
 
 export interface RunTimelineProps {
+  runId: string;
   stages: readonly RunStage[];
   runStatus: string;
   /** The pinned graph's stages by key (agent / model, attempts, reuse). */
@@ -56,6 +57,7 @@ export function stageMenu(stage: RunStage, runStatus: string, can: { control: bo
   const info: MenuEntry[] = [
     ...(stage.outputText || stage.summary ? [{ id: 'copy-output', label: 'Copy output', icon: 'copy' as const }] : []),
     ...(stage.sessionId ? [{ id: 'open-chat', label: 'Open chat', icon: 'message' as const }] : []),
+    { id: 'open-pane', label: 'Open in run pane', icon: 'dock' },
   ];
   const destructive: MenuEntry[] = c.cancel && can.control ? [{ id: 'cancel', label: 'Cancel stage…', icon: 'status-failed', destructive: true }] : [];
   return [control, info, destructive].filter((g) => g.length).flatMap((g, i) => (i === 0 ? g : [{ type: 'separator' as const }, ...g]));
@@ -168,6 +170,62 @@ function StageRow({ node, depth, props }: { node: StageNode; depth: number; prop
   );
 }
 
+/**
+ * MRunLoop: a loop's rules, read-only (MD-04 — rule editors are desktop): "Loop · max 5 · <phase>", each exit rule
+ * (when · action, its streak "1/2" in a row), the carried values of the last iteration, the loop budget against what
+ * it spent.
+ */
+function LoopRules({ stage, spec, runId }: { stage: RunStage; spec: StageSpec | undefined; runId: string }): React.ReactElement | null {
+  const iterations = useLoopIterations(runId, stage.id, spec?.kind === 'loop');
+  if (spec?.kind !== 'loop') return null;
+  const ls = stage.loopState;
+  const last = iterations.data?.[iterations.data.length - 1];
+  const carry = Object.entries(last?.carry ?? {});
+  const budget = spec.budget ?? {};
+  const usage = (last?.usage ?? {}) as Record<string, unknown>;
+  const spent = [budget.maxTurns ? `${typeof usage['turns'] === 'number' ? usage['turns'] : 0}/${budget.maxTurns} turns` : null, budget.maxCostUsd ? `$${typeof usage['costUsd'] === 'number' ? (usage['costUsd'] as number).toFixed(2) : '0.00'}/$${budget.maxCostUsd}` : null].filter(Boolean);
+  return (
+    <View className="gap-1.5 ps-12 pe-4" testID={`run-loop-rules-${stage.stageKey}`}>
+      <Text role="footnote" tone="fg-3">
+        {[`Loop · max ${ls?.effectiveMax ?? spec.loop.maxIterations}`, ls?.phase ? ls.phase.replace(/_/g, ' ') : null].filter(Boolean).join(' · ')}
+      </Text>
+      {spec.loop.exits.map((rule, i) => (
+        <View key={`${rule.reason}-${i}`} className="flex-row items-baseline gap-2">
+          <Text role="footnote" tone="fg-2" className="w-20" numberOfLines={1}>
+            {rule.action === 'complete' ? 'Until' : rule.action === 'fail' ? 'Fail when' : rule.action === 'pause' ? 'Pause when' : 'Stop when'}
+          </Text>
+          <Text role="monoSm" numberOfLines={2} className="flex-1">
+            {rule.reason || rule.when}
+          </Text>
+          {(rule.consecutive ?? 1) > 1 ? (
+            <Text role="monoSm" tone="fg-3">{`${ls?.streaks?.[i] ?? 0}/${rule.consecutive}`}</Text>
+          ) : null}
+        </View>
+      ))}
+      {carry.length ? (
+        <View className="flex-row flex-wrap items-baseline gap-x-2">
+          <Text role="footnote" tone="fg-2" className="w-20">
+            Carry
+          </Text>
+          {carry.slice(0, 4).map(([k, v]) => (
+            <Text key={k} role="monoSm" tone="fg-2">{`${k} ${typeof v === 'string' ? v : JSON.stringify(v)}`}</Text>
+          ))}
+        </View>
+      ) : null}
+      {spent.length ? (
+        <View className="flex-row items-baseline gap-2">
+          <Text role="footnote" tone="fg-2" className="w-20">
+            Budget
+          </Text>
+          <Text role="monoSm" tone="fg-2">
+            {spent.join(' · ')}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function LoopBody({ node, depth, props }: { node: StageNode; depth: number; props: RunTimelineProps }): React.ReactElement | null {
   const loop = node.loop!;
   const isLoop = isLoopStage(node.stage);
@@ -196,6 +254,7 @@ function LoopBody({ node, depth, props }: { node: StageNode; depth: number; prop
           {exit}
         </Text>
       ) : null}
+      {isLoop ? <LoopRules stage={node.stage} spec={props.specs.get(node.stage.stageKey)} runId={props.runId} /> : null}
       {nodes.map((n) => (
         <StageRow key={n.stage.id} node={n} depth={depth + 1} props={props} />
       ))}

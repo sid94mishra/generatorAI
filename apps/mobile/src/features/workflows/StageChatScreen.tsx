@@ -24,7 +24,7 @@ import { DecisionCard, ReviewCard, reviewView } from '../../blocks/DecisionCard'
 import { WORKFLOWS_HREF, runHref, workflowHref } from '../../blocks/shell/hrefs';
 import { useBreadcrumb, useHeaderBack } from '../../blocks/shell/useHeaderNav';
 import { TranscriptView, type TranscriptActions } from '../../blocks/TranscriptView';
-import { PaneTabBody, usePaneToggle, useWorkspacePaneClaim, type MobilePaneTab, type PaneTabContext } from '../../blocks/WorkspacePane';
+import { usePaneStore } from '../../blocks/WorkspacePane';
 import { isActive } from '../../services/api/runActivity';
 import { checkFeature } from '../../services/auth/featureGate';
 import { useGrantedScopes } from '../../services/auth/useCapability';
@@ -49,6 +49,7 @@ import { waitOf, type RunStage } from './model/runStages';
 import { runName } from './model/runView';
 import { stageGateOf } from './model/stageGate';
 import { useRun, useRunCommands, useRunGraph, useStageConversation, useStageTranscript, useWorkflow } from './queries';
+import { useRunPane, type RunPaneInput } from './useRunPane';
 import { useStageDecision } from './useStageDecision';
 
 type Href = Parameters<typeof router.push>[0];
@@ -124,12 +125,28 @@ export default function StageChatScreen(): React.ReactElement {
   const runTitle = data ? runName(data) : 'Run';
   const breadcrumb = useBreadcrumb(useMemo(() => [{ label: 'Workflows', href: WORKFLOWS_HREF }, { label: workflowName, href: workflowHref(workflowId) }, { label: runTitle, href: runHref(workflowId, runId) }], [workflowName, workflowId, runTitle, runId]));
 
-  // The run's pane, claimed here too: the stage works in the run's workspace.
+  // The run's pane, claimed here too, focused on this stage (the stage works in the run's workspace).
   const workspaceId = data?.workspaceId ?? null;
-  const paneContext = useMemo<PaneTabContext>(() => ({ workspaceId, chatId: null, agentBusy: streaming, agentName: agent }), [workspaceId, streaming, agent]);
-  const renderTab = useCallback((type: MobilePaneTab, ctx: { active: boolean }) => <PaneTabBody type={type} active={ctx.active} ctx={paneContext} />, [paneContext]);
-  useWorkspacePaneClaim({ kind: 'run', id: workspaceId ? runId : undefined, title: runTitle, path: runHref(workflowId, runId), workspaceId, chatId: null, scopes, live: focused, renderTab });
-  const paneToggle = usePaneToggle();
+  const stages = useMemo(() => (data?.stageRuns ?? []) as RunStage[], [data?.stageRuns]);
+  const extra = data as { variables?: Record<string, unknown>; runOverrides?: RunPaneInput['runOverrides']; stageOverrides?: RunPaneInput['stageOverrides'] } | undefined;
+  const [focusedId, setFocusedId] = useState<string | null>(stageRunId);
+  const paneToggle = useRunPane({
+    runId,
+    workflowId,
+    title: runTitle,
+    workspaceId,
+    stages,
+    graph: graph.data?.graph,
+    variables: extra?.variables,
+    runOverrides: extra?.runOverrides ?? null,
+    stageOverrides: extra?.stageOverrides ?? null,
+    focusedId,
+    onFocus: setFocusedId,
+    agentBusy: streaming,
+    agentName: agent,
+    scopes,
+    live: focused,
+  });
 
   const gate = stage?.status === 'awaiting_input' ? stageGateOf(stage.interruptData) : null;
   const wait = stage?.status === 'waiting' ? waitOf(stage) : null;
@@ -190,6 +207,10 @@ export default function StageChatScreen(): React.ReactElement {
       case 'open-run':
         router.push(runHref(workflowId, runId) as Href);
         return;
+      case 'open-pane':
+        setFocusedId(stage.id);
+        usePaneStore.getState().openTab('output');
+        return;
       case 'cancel':
         void confirm({ title: `Cancel ${name}?`, message: 'The agent stops. Stages after it will not start.', confirmLabel: 'Cancel stage', icon: 'status-failed' }).then((ok) => {
           if (ok) send({ command: 'cancel', instanceId: stage.id });
@@ -201,12 +222,12 @@ export default function StageChatScreen(): React.ReactElement {
   const actions = useMemo<TranscriptActions>(() => ({ agent: agent ? { name: agent } : null, model: agentSpec?.session?.model ?? null }), [agent, agentSpec?.session?.model]);
   const header = (
     <Header
-      role={workspaceId ? 'workspace' : 'detail'}
+      role="workspace"
       title={stage?.name ?? 'Stage'}
       breadcrumb={breadcrumb}
       onBack={onBack}
       {...(status ? { status: { state: status.state, label: status.label, ...(agent ? { detail: agent } : {}) } } : {})}
-      {...(workspaceId ? { paneToggle } : {})}
+      paneToggle={paneToggle}
       actions={menu.length ? [{ id: 'stage-menu', icon: 'more', label: 'Stage actions', menu, onMenuSelect: onMenu, testID: 'stage-menu' }] : []}
     />
   );

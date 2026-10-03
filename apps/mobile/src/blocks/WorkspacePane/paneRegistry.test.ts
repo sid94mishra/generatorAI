@@ -31,8 +31,11 @@ describe('pane registry (MB-42, MD-23, MD-96)', () => {
     expect(tabs.find((t) => t.type === 'changes')?.count).toBe(3);
     expect(tabs.find((t) => t.type === 'tasks')?.count).toBe(1);
     expect(tabs.filter((t) => t.attention).map((t) => t.type)).toEqual(['computer', 'plan']);
-    // A run pane has no chat-only tabs; a plain chat shows the pinned four.
-    expect(paneTabs({ kind: 'run', planStatus: 'approved', tasks: { orchestrator: true, total: 1, running: 1 } }).map((t) => t.type)).toEqual(['changes', 'files', 'terminal', 'browser']);
+    // A run pane shows the MG-28 run tabs and no chat-only ones; a plain chat shows the pinned four.
+    const run = paneTabs({ kind: 'run', planStatus: 'approved', tasks: { orchestrator: true, total: 1, running: 1 }, run: { files: 3, hooks: 1, variables: 5, needsYou: true } });
+    expect(run.map((t) => t.type)).toEqual(['output', 'files', 'hooks', 'variables', 'changes', 'terminal', 'browser']);
+    expect(run.find((t) => t.type === 'output')).toMatchObject({ count: 3, attention: true });
+    expect(run.find((t) => t.type === 'hooks')?.count).toBe(1);
     expect(paneTabs({ kind: 'chat', changedFiles: 0, tasks: { orchestrator: false, total: 0, running: 0 } }).every((t) => t.count === undefined)).toBe(true);
   });
 });

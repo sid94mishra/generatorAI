@@ -7,7 +7,7 @@
 // card with the hand glyph — reviews, in-turn gates and approval waits open the approval sheet MB-50; a parked loop
 // is the decision card MB-34 in place; an event wait says what it waits for), the stage timeline (MB-33), and what
 // post-processing did once the run finalized. Live through the `run` stream scope; polling is the safety net.
-import React, { useCallback, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as WebBrowser from 'expo-web-browser';
@@ -19,9 +19,9 @@ import type { RunCommand, StageSpec } from '@generatorai/workflow-spec';
 import { DecisionCard } from '../../blocks/DecisionCard';
 import { PERMISSION_MODE_LABEL, PermissionModePicker, isLoosening, isRunPermissionMode, type RunPermissionMode } from '../../blocks/PermissionModePicker';
 import { triggerLabel } from '../../blocks/RunRow';
-import { WORKFLOWS_HREF, approvalHref, runHref, stageHref, workflowHref } from '../../blocks/shell/hrefs';
+import { WORKFLOWS_HREF, approvalHref, runGraphHref, runHref, stageHref, workflowHref } from '../../blocks/shell/hrefs';
 import { useBreadcrumb, useHeaderBack } from '../../blocks/shell/useHeaderNav';
-import { PaneTabBody, usePaneToggle, useWorkspacePaneClaim, type MobilePaneTab, type PaneTabContext } from '../../blocks/WorkspacePane';
+import { usePaneStore } from '../../blocks/WorkspacePane';
 import { isActive, isTerminal } from '../../services/api/runActivity';
 import { checkFeature } from '../../services/auth/featureGate';
 import { useGrantedScopes } from '../../services/auth/useCapability';
@@ -48,6 +48,7 @@ import { runControlsFor } from './model/runModel';
 import type { RunStage } from './model/runStages';
 import { lifecycleView, needsYou, postProcessingResults, pullRequestOf, runName, usageView, type NeedsYouItem, type PhaseState } from './model/runView';
 import { versionLabels } from './model/workflowsModel';
+import { useRunPane, type RunPaneInput } from './useRunPane';
 import { useDefinitionVersions, useRun, useRunCommands, useRunGraph, useRunPendingDecisions, useRunPermissionMode, useWorkflow } from './queries';
 
 type Href = Parameters<typeof router.push>[0];
@@ -119,12 +120,30 @@ export default function RunScreen(): React.ReactElement {
   const specs = useMemo(() => new Map<string, StageSpec>((graph.data?.graph.stages ?? []).map((s) => [s.key, s])), [graph.data]);
   const title = data ? runName(data) : 'Run';
 
-  // The run's pane (MB-42 `scope: 'run'`): the workspace tabs through the bodies a chat pane uses.
+  // The run's pane (MB-42 `scope: 'run'`, MG-28): Output / Hooks / Variables of the focused stage + the workspace tabs.
   const workspaceId = data?.workspaceId ?? null;
-  const paneContext = useMemo<PaneTabContext>(() => ({ workspaceId, chatId: null, agentBusy: data?.status === 'running' }), [workspaceId, data?.status]);
-  const renderTab = useCallback((type: MobilePaneTab, ctx: { active: boolean }) => <PaneTabBody type={type} active={ctx.active} ctx={paneContext} />, [paneContext]);
-  useWorkspacePaneClaim({ kind: 'run', id: workspaceId ? runId : undefined, title, path: runHref(workflowId, runId), workspaceId, chatId: null, scopes, live: focused, renderTab });
-  const paneToggle = usePaneToggle();
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const extra = data as { runOverrides?: RunPaneInput['runOverrides']; stageOverrides?: RunPaneInput['stageOverrides'] } | undefined;
+  const paneToggle = useRunPane({
+    runId,
+    workflowId,
+    title,
+    workspaceId,
+    stages,
+    graph: graph.data?.graph,
+    variables: data?.variables,
+    runOverrides: extra?.runOverrides ?? null,
+    stageOverrides: extra?.stageOverrides ?? null,
+    focusedId,
+    onFocus: setFocusedId,
+    agentBusy: data?.status === 'running',
+    scopes,
+    live: focused,
+  });
+  const openInPane = (stageId: string): void => {
+    setFocusedId(stageId);
+    usePaneStore.getState().openTab('output');
+  };
 
   const fail = (e: unknown): void => {
     haptic('error');
@@ -213,6 +232,9 @@ export default function RunScreen(): React.ReactElement {
       case 'open-chat':
         router.push(stageHref(workflowId, runId, stage.id) as Href);
         return;
+      case 'open-pane':
+        openInPane(stage.id);
+        return;
       case 'cancel':
         void confirm({ title: `Cancel ${name}?`, message: 'The agent stops. Stages after it will not start.', confirmLabel: 'Cancel stage', icon: 'status-failed' }).then((ok) => {
           if (ok) send({ command: 'cancel', instanceId: stage.id });
@@ -248,12 +270,12 @@ export default function RunScreen(): React.ReactElement {
   const status = data ? resolveStatus('workflowRun', data.status) : null;
   const header = (
     <Header
-      role={workspaceId ? 'workspace' : 'detail'}
+      role="workspace"
       title={title}
       breadcrumb={breadcrumb}
       onBack={onBack}
       {...(status ? { status: { state: status.state, label: status.label, ...(isActive(data?.status ?? '') && data?.startedAt ? { elapsedSince: String(data.startedAt) } : {}) } } : {})}
-      {...(workspaceId ? { paneToggle } : {})}
+      paneToggle={paneToggle}
       actions={data ? [{ id: 'run-menu', icon: 'more', label: 'Run actions', menu: runMenu, onMenuSelect: (mid: string) => onRunMenu(mid as RunMenuId), testID: 'run-menu' }] : []}
     />
   );
@@ -312,6 +334,8 @@ export default function RunScreen(): React.ReactElement {
           {stages.length ? (
             <RunTimeline
               title={`Stages ${lifecycle.done} of ${lifecycle.total} done`}
+              action={{ label: 'Graph', onPress: () => router.push(runGraphHref(workflowId, runId) as Href) }}
+              runId={runId}
               stages={stages}
               runStatus={data.status}
               specs={specs}

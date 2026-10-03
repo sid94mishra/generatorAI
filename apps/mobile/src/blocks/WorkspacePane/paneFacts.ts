@@ -16,6 +16,8 @@ export interface PaneTabInputs {
   planStatus?: string | null;
   /** Computer use is on on the server; a consent ask is waiting. */
   computer?: { enabled: boolean; needsAnswer: boolean };
+  /** Run panes (MG-28): the focused stage's files, the configured hooks, the run's variables, a stage that needs you. */
+  run?: { files?: number; hooks?: number; variables?: number; needsYou?: boolean };
 }
 
 export type PaneTabEntry = PaneTab & { type: MobilePaneTab };
@@ -25,10 +27,11 @@ export function paneTabs(input: PaneTabInputs): PaneTabEntry[] {
   const tasks = chat && Boolean(input.tasks && (input.tasks.orchestrator || input.tasks.total > 0));
   const plan = chat && Boolean(input.planStatus);
   const computer = Boolean(input.computer?.enabled);
-  return paneTabTypes({ tasks, plan, computer }).map((type) => {
+  const run = input.run ?? {};
+  return paneTabTypes({ tasks, plan, computer }, input.kind).map((type) => {
     const count =
-      type === 'changes' ? input.changedFiles : type === 'tasks' ? input.tasks?.running : undefined;
-    const attention = (type === 'plan' && input.planStatus === 'awaiting_review') || (type === 'computer' && input.computer?.needsAnswer === true);
+      type === 'changes' ? input.changedFiles : type === 'tasks' ? input.tasks?.running : type === 'output' ? run.files : type === 'hooks' ? run.hooks : type === 'variables' ? run.variables : undefined;
+    const attention = (type === 'plan' && input.planStatus === 'awaiting_review') || (type === 'computer' && input.computer?.needsAnswer === true) || (type === 'output' && run.needsYou === true);
     return {
       id: type,
       type,
