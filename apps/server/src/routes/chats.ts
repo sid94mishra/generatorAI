@@ -10,6 +10,10 @@ import { z } from 'zod';
 import type { Container } from '../composition-root.js';
 import { validate } from '../middleware/validate.js';
 import {
+  ChatIngestTargetSchema,
+  CHAT_INGEST_MAX_FILES,
+  chatIngestName,
+  chatIngestPrompt,
   CreateChatSchema,
   SendChatPromptSchema,
   UpdatePlanContentSchema,
@@ -31,6 +35,7 @@ import {
   NotFoundError,
 } from '@generatorai/shared';
 import type {
+  ChatIngestResult,
   ChatBulkFailure,
   ChatBulkResult,
   ChatListSort,
@@ -361,6 +366,60 @@ async function withWorkspacePrep<T extends { workspaceId?: string; conversationS
   }
 }
 
+/** A retried share within a day answers the first chat (the invocations' window). */
+const CHAT_INGEST_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+/** A claim left pending this long by a crashed request is freed. */
+const CHAT_INGEST_STALE_CLAIM_MS = 5 * 60 * 1000;
+
+type CreateParams = Record<string, unknown> & { harnessConfig?: Record<string, unknown>; permissionMode?: string; sourceControl?: unknown };
+type PrepareResult =
+  | { ok: true; params: CreateParams }
+  | { ok: false; status: number; error: { code: string; message: string } };
+
+/**
+ * The defaults and permission gates of chat creation, shared by POST /chats and POST /chats/ingest: all tools,
+ * streaming, normalised source control; a provider needs admin:settings; approvals-off needs admin:settings both
+ * when asked for and as the default (without the scope a chat starts in the gated `default` mode).
+ */
+function prepareCreateParams(req: Parameters<typeof canBypassPermissions>[0] & Parameters<typeof canSetSessionProvider>[0], input: Record<string, unknown>): PrepareResult {
+  const params: CreateParams = { ...input };
+  const harness: Record<string, unknown> = { ...((params.harnessConfig as Record<string, unknown> | undefined) ?? {}) };
+  // Ensure all tools available and session stays open indefinitely
+  if (!harness['availableTools']) harness['availableTools'] = ['*'];
+  if (harness['streaming'] === undefined) harness['streaming'] = true;
+  params.harnessConfig = harness;
+
+  if (params.sourceControl !== undefined) {
+    const sc = normaliseSourceControl(params.sourceControl);
+    if (!sc.ok) return { ok: false, status: 400, error: { code: 'VALIDATION_ERROR', message: sc.message } };
+    params.sourceControl = sc.value;
+  }
+
+  // R1 — a BYOK provider sends a stored key to a caller-chosen endpoint.
+  if (harness['provider'] && !canSetSessionProvider(req)) {
+    return { ok: false, status: 403, error: { code: 'FORBIDDEN', message: 'Setting a chat provider requires the admin:settings scope.' } };
+  }
+
+  // Creation is the front door, and it takes `permissionMode` directly.
+  // Gating only the two update routes left a caller free to ask for
+  // approvals-off on the way in, which is the same escalation by another
+  // name. Same rule: raising needs the admin scope, lowering is free.
+  if (params.permissionMode === 'bypassPermissions' && !canBypassPermissions(req)) {
+    return {
+      ok: false,
+      status: 403,
+      error: { code: 'FORBIDDEN', message: 'Creating a chat with tool approvals off requires the admin:settings scope.' },
+    };
+  }
+  // No mode asked for: choose the gated default rather than inheriting
+  // the service's historical `bypassPermissions`. A caller that wants
+  // unattended execution has to say so, and hold the scope to say it.
+  if (params.permissionMode === undefined && !canBypassPermissions(req)) {
+    params.permissionMode = 'default';
+  }
+  return { ok: true, params };
+}
+
 export function createChatApiRoutes(container: Container): Router {
   const router = Router();
   const {
@@ -394,61 +453,121 @@ export function createChatApiRoutes(container: Container): Router {
   // POST /chats — Create a new chat
   router.post('/', validate(CreateChatSchema), async (req, res, next) => {
     try {
-      // Apply default harness config: all tools enabled, no session timeout
-      const params = { ...req.body };
-      if (!params.harnessConfig) {
-        params.harnessConfig = {};
-      }
-      // Ensure all tools available and session stays open indefinitely
-      if (!params.harnessConfig.availableTools) {
-        params.harnessConfig.availableTools = ['*'];
-      }
-      if (params.harnessConfig.streaming === undefined) {
-        params.harnessConfig.streaming = true;
-      }
-
-      if (params.sourceControl !== undefined) {
-        const sc = normaliseSourceControl(params.sourceControl);
-        if (!sc.ok) {
-          res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: sc.message } });
-          return;
-        }
-        params.sourceControl = sc.value;
-      }
-
-      // R1 — a BYOK provider sends a stored key to a caller-chosen endpoint.
-      if (params.harnessConfig?.provider && !canSetSessionProvider(req)) {
-        res.status(403).json({
-          error: { code: 'FORBIDDEN', message: 'Setting a chat provider requires the admin:settings scope.' },
-        });
+      const prepared = prepareCreateParams(req, req.body);
+      if (!prepared.ok) {
+        res.status(prepared.status).json({ error: prepared.error });
         return;
       }
-
-      // Creation is the front door, and it takes `permissionMode` directly.
-      // Gating only the two update routes left a caller free to ask for
-      // approvals-off on the way in, which is the same escalation by another
-      // name. Same rule: raising needs the admin scope, lowering is free.
-      if (params.permissionMode === 'bypassPermissions' && !canBypassPermissions(req)) {
-        res.status(403).json({
-          error: {
-            code: 'FORBIDDEN',
-            message:
-              'Creating a chat with tool approvals off requires the admin:settings scope.',
-          },
-        });
-        return;
-      }
-      // No mode asked for: choose the gated default rather than inheriting
-      // the service's historical `bypassPermissions`. A caller that wants
-      // unattended execution has to say so, and hold the scope to say it.
-      if (params.permissionMode === undefined && !canBypassPermissions(req)) {
-        params.permissionMode = 'default';
-      }
-
-      const chat = await chatManagementService.createChat({ ...params, createdByPrincipal: chatPrincipalOf(req) });
+      const chat = await chatManagementService.createChat({ ...prepared.params, createdByPrincipal: chatPrincipalOf(req) } as Parameters<typeof chatManagementService.createChat>[0]);
       logger.info(`[ChatRoutes] Created chat ${chat.id}`, { requestId: req.requestId });
       res.status(201).json(await withWorkspacePrep(container, chat));
     } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /chats/ingest — "Send to agent" from the OS share sheet (mobile MG-09, M9-08).
+  //
+  // multipart: `target` (JSON: { chatId } | { newChat: { name?, projectId?, agentRef?, model? } }), `note?`, `text?`,
+  // `url?`, `attachments[]` (≤ 5 × 10 MB, the prompt route's limits); header `Idempotency-Key` required.
+  // → 201 { chatId, created }. One request so a share is sent exactly once: a new chat is created (with the same
+  // defaults and permission gates as POST /chats) and the prompt dispatched like POST /chats/:id/prompt; a retry with
+  // the same key answers the first chat without sending again. The URL is prompt text — never fetched.
+  router.post('/ingest', upload.array('attachments', CHAT_INGEST_MAX_FILES), async (req, res, next) => {
+    try {
+      const key = String(req.header('idempotency-key') ?? '').trim();
+      if (!key) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'An Idempotency-Key header is required' } });
+        return;
+      }
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      let rawTarget: unknown;
+      try {
+        rawTarget = typeof body['target'] === 'string' ? JSON.parse(body['target']) : body['target'];
+      } catch {
+        rawTarget = undefined;
+      }
+      const target = ChatIngestTargetSchema.safeParse(rawTarget);
+      if (!target.success) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '`target` must be {"chatId"} or {"newChat"}', fields: target.error.flatten().fieldErrors } });
+        return;
+      }
+      const field = (name: string): string | undefined => (typeof body[name] === 'string' ? (body[name] as string) : undefined);
+      const files = (req.files ?? []) as Express.Multer.File[];
+      const prompt = chatIngestPrompt({ note: field('note'), text: field('text'), url: field('url'), fileNames: files.map((f) => f.originalname) });
+      const validation = SendChatPromptSchema.safeParse({ prompt });
+      if (!validation.success) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: prompt ? 'The shared content is too long' : 'Nothing to send: add a note, text, a link or a file' } });
+        return;
+      }
+
+      const existingId = 'chatId' in target.data ? target.data.chatId : undefined;
+      let prepared: ReturnType<typeof prepareCreateParams> | null = null;
+      if (!existingId) {
+        const spec = 'newChat' in target.data ? target.data.newChat : {};
+        prepared = prepareCreateParams(req, {
+          name: spec.name ?? chatIngestName(prompt),
+          tags: [],
+          ...(spec.projectId ? { projectId: spec.projectId } : {}),
+          ...(spec.agentRef ? { agentRef: spec.agentRef } : {}),
+          ...(spec.model ? { model: spec.model } : {}),
+        });
+        if (!prepared.ok) {
+          res.status(prepared.status).json({ error: prepared.error });
+          return;
+        }
+      } else {
+        // Same refusals as POST /chats/:id/prompt, before anything is stored.
+        const pendingGates = agentInteractionService ? await agentInteractionService.listPendingByChat(existingId) : [];
+        if (pendingGates[0]) {
+          res.status(409).json({ error: { code: 'INTERACTION_PENDING', message: 'This chat is waiting on your response. Resolve it before sending more.', details: { interactionId: pendingGates[0].id, kind: pendingGates[0].kind } } });
+          return;
+        }
+        if (chatManagementService.isTurnActive(existingId)) {
+          res.status(409).json({ error: { code: 'CHAT_BUSY', message: 'This chat is still generating a response. Wait for it to finish, or stop it first.' } });
+          return;
+        }
+      }
+
+      const send = async (): Promise<{ executionId: string; value: ChatIngestResult }> => {
+        let chatId = existingId;
+        let sessionId: string;
+        if (!chatId) {
+          const params = (prepared as { ok: true; params: CreateParams }).params;
+          const chat = await chatManagementService.createChat({ ...params, createdByPrincipal: chatPrincipalOf(req) } as Parameters<typeof chatManagementService.createChat>[0]);
+          chatId = chat.id;
+          sessionId = chat.sessionId;
+        } else {
+          sessionId = (await container.chatEntityRepo.getById(chatId)).sessionId;
+        }
+        const attachmentRefs: Array<{ type: 'file'; path: string; displayName?: string; artifactId?: string; mimeType?: string }> = [];
+        for (const file of files) {
+          const artifact = await artifactService.createArtifact({ sessionId, name: file.originalname, mimeType: file.mimetype, content: file.buffer });
+          attachmentRefs.push({ type: 'file', path: artifact.path, displayName: file.originalname, artifactId: artifact.id, mimeType: file.mimetype });
+        }
+        const id = chatId;
+        chatManagementService.sendPrompt(id, prompt, attachmentRefs).catch((err) => {
+          logger.error(`[ChatRoutes] Ingest prompt failed for chat ${id}`, { error: err instanceof Error ? err.message : String(err) });
+          eventBus.emitGlobal({ kind: 'chat.prompt_failed', data: { chatId: id, error: err instanceof Error ? err.message : String(err) } });
+        });
+        return { executionId: id, value: { chatId: id, created: !existingId } };
+      };
+
+      const result = container.idempotencyService
+        ? await container.idempotencyService.run(
+            { key, scope: `chat-ingest:${chatPrincipalOf(req).id}`, ttlMs: CHAT_INGEST_IDEMPOTENCY_TTL_MS, staleAfterMs: CHAT_INGEST_STALE_CLAIM_MS },
+            send,
+          )
+        : { replayed: false, ...(await send()) };
+      if (result.replayed) {
+        res.setHeader('X-Idempotent-Replay', 'true');
+        res.status(200).json({ chatId: result.executionId, created: false } satisfies ChatIngestResult);
+        return;
+      }
+      logger.info(`[ChatRoutes] Ingested a share into chat ${result.executionId}`, { requestId: req.requestId });
+      res.status(201).json(result.value ?? { chatId: result.executionId, created: !existingId });
+    } catch (err) {
+      if (sendCodedError(res, err)) return;
       next(err);
     }
   });

@@ -1,4 +1,4 @@
-import { domainStatusTone } from '../../../theme/status';
+import { domainStatusTone } from './statusTone';
 // ────────────────────────────────────────────────────────────────
 // The source-control flow, as data.
 //

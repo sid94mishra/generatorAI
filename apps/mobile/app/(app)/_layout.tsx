@@ -15,7 +15,7 @@ const SHEETS = ['chats/[id]/gate/[interactionId]', 'workflows/[id]/runs/[runId]/
 /** Full-screen modal editors (MD-21). */
 const EDITORS = ['workflows/new', 'workflows/[id]/edit', 'projects/new', 'projects/[id]/skills/[configId]/edit', 'agents/create', 'agents/[id]/edit', 'automations/new', 'automations/[id]/edit', 'settings/mcp/add'];
 /** Route sheets at the large detent. */
-const LARGE_SHEETS = ['workflows/[id]/run', 'chats/[id]/turn', 'chats/new', 'workspaces/[workspaceId]/commit', 'projects/[id]/add-codebase', 'agents/new', 'agents/import', 'automations/[id]/executions/[executionId]', 'scripts/[id]/run', 'pickers/model'];
+const LARGE_SHEETS = ['workflows/[id]/run', 'chats/[id]/turn', 'chats/new', 'workspaces/[workspaceId]/commit', 'projects/[id]/add-codebase', 'agents/new', 'agents/import', 'automations/[id]/executions/[executionId]', 'scripts/[id]/run', 'pickers/model', 'share'];
 
 type Href = Parameters<typeof router.replace>[0];
 

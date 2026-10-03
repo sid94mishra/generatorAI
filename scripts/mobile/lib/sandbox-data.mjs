@@ -67,3 +67,17 @@ export function mergedFixture(web, mobile) {
     ]],
   };
 }
+
+/**
+ * The device a pairing just created: not in the `before` set, not revoked, created after the pairing started (one
+ * minute of clock skew allowed). The name only breaks ties, case-insensitively — the app's Name field
+ * auto-capitalises typed text and the automation keeps the default name ("My iPhone"). Null while none, or while more
+ * than one candidate remains and the name does not single one out.
+ */
+export function findNewPairing(devices, { before, started, name }) {
+  const candidates = devices.filter(device => !before.has(device.deviceId) && !device.revokedAt
+    && new Date(device.createdAt).getTime() >= started - 60000);
+  if (candidates.length === 1) return candidates[0];
+  const named = candidates.filter(device => typeof name === 'string' && device.name?.toLowerCase() === name.toLowerCase());
+  return named.length === 1 ? named[0] : null;
+}

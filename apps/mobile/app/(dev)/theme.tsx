@@ -1,1 +1,1 @@
-export { default } from '../../src/dev/ThemeRoute';
+export { default } from '../../src/features/development/ThemeScreen';

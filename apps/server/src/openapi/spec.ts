@@ -136,6 +136,31 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           chatId: { type: 'string' }, interactionId: { type: 'string' },
           kind: { type: 'string', enum: ['permission', 'question', 'plan'] },
           actions: { type: 'array', items: { type: 'string' } },
+          // MG-06 part B (mobile M9-02): `category` is a shared NotificationCategoryId
+          // (approval, approval.risky, question, plan, run.approval, done, failed, scope_request).
+          risk: { type: 'string', enum: ['standard', 'risky'] },
+          runId: { type: 'string' }, stageRunId: { type: 'string' },
+          question: {
+            type: 'object',
+            description: 'A chat question: the first question and up to four option labels, so a lock-screen reply can be matched to an option.',
+            required: ['id', 'options', 'multiSelect', 'freeText', 'count'],
+            properties: {
+              id: { type: 'string' }, options: { type: 'array', items: { type: 'string' }, maxItems: 4 },
+              multiSelect: { type: 'boolean' }, freeText: { type: 'boolean' }, count: { type: 'integer' },
+            },
+          },
+          redacted: {
+            type: 'object',
+            description: 'Lock-screen-safe title and body (no command, path or message text); shown by the iOS service extension while App lock hides previews.',
+            required: ['title', 'body'],
+            properties: { title: { type: 'string' }, body: { type: 'string' } },
+          },
+          counts: {
+            type: 'object',
+            description: "The sending server's attention counts at send time (app badge).",
+            required: ['needsYou', 'running'],
+            properties: { needsYou: { type: 'integer' }, running: { type: 'integer' } },
+          },
         },
       },
       // ── Source control (feature-source-control.md; shapes mirror
@@ -1655,6 +1680,49 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           },
         },
         responses: { '202': { description: 'Accepted — stream via /api/stream' } },
+      },
+    },
+    '/api/chats/ingest': {
+      post: {
+        tags: ['Chats'],
+        summary: 'Send shared content to an existing or a new chat in one request (mobile share sheet, MG-09)',
+        description:
+          'multipart: `target` (JSON `{"chatId"}` or `{"newChat":{"name"?,"projectId"?,"agentRef"?,"model"?}}`), `note`, `text`, `url` ' +
+          '(sent as prompt text, never fetched), `attachments[]` (≤ 5 × 10 MB). Header `Idempotency-Key` required: a retry within 24 h answers ' +
+          'the first chat (200, `X-Idempotent-Replay: true`) without sending again. A new chat gets the defaults and permission gates of ' +
+          '`POST /api/chats`. Needs write:chats. 409 CHAT_BUSY / INTERACTION_PENDING as for the prompt route.',
+        parameters: [{ in: 'header', name: 'Idempotency-Key', required: true, schema: { type: 'string', maxLength: 200 } }],
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                properties: {
+                  target: { type: 'string', description: 'JSON target' },
+                  note: { type: 'string' },
+                  text: { type: 'string' },
+                  url: { type: 'string' },
+                  attachments: { type: 'array', items: { type: 'string', format: 'binary' } },
+                },
+                required: ['target'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Sent',
+            content: {
+              'application/json': {
+                schema: { type: 'object', properties: { chatId: { type: 'string' }, created: { type: 'boolean' } }, required: ['chatId', 'created'] },
+              },
+            },
+          },
+          '200': { description: 'Replayed (same Idempotency-Key)' },
+          '400': { description: 'No key, a malformed target, or nothing to send' },
+          '409': { description: 'CHAT_BUSY or INTERACTION_PENDING' },
+        },
       },
     },
     '/api/chats/{id}/transcript': {

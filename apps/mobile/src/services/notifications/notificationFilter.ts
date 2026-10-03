@@ -17,11 +17,10 @@
 //      `MUTABLE_CATEGORIES` in @generatorai/core), so a switched-off
 //      "Approvals" only affects foreground presentation.
 //
-// The server's payload puts `{ route, category, threadId }` in `data`
-// (PushDispatcher.ts), plus `{ chatId, interactionId, kind, actions? }` for
-// chat gates (see notificationCategories.ts). `category` is one of
-// 'approval' | 'completed' | 'failed'; `route` starts with `/runs/…` or
-// `/chats/…` (`/chats/<id>/gate/<interactionId>` for a gate).
+// The payload's `category` is a shared NotificationCategoryId (06 §7.2): everything that needs you
+// (approval, approval.risky, question, plan, run.approval, scope_request) is "gates"; `done` and
+// `failed` are run or chat outcomes, placed by their route (`/chats/…` vs `/workflows/…`,
+// `/automations/…`).
 // ────────────────────────────────────────────────────────────────
 
 export const NOTIFY_PREF_KEYS = {
@@ -51,12 +50,14 @@ export function readNotifyPrefs(get: (key: string) => string | null | undefined)
   };
 }
 
+const GATE_CATEGORIES: ReadonlySet<string> = new Set(['approval', 'approval.risky', 'question', 'plan', 'run.approval', 'scope_request']);
+
 /** Which switch governs a push payload, or null when it is not one of ours. */
 export function categoryOf(data: unknown): keyof NotifyPrefs | null {
   if (!data || typeof data !== 'object') return null;
   const { category, route } = data as { category?: unknown; route?: unknown };
-  if (category === 'approval') return 'gates';
-  if (category !== 'completed' && category !== 'failed') return null;
+  if (typeof category === 'string' && GATE_CATEGORIES.has(category)) return 'gates';
+  if (category !== 'done' && category !== 'failed') return null;
   if (typeof route === 'string') {
     if (route.startsWith('/chats')) return 'chats';
     if (route.startsWith('/runs') || route.startsWith('/workflows') || route.startsWith('/automations')) {
@@ -80,7 +81,7 @@ export function shouldPresent(data: unknown, prefs: NotifyPrefs): boolean {
 }
 
 /**
- * Whether the server-side mute (which covers 'completed' + 'failed' only)
+ * Whether the server-side mute (which covers outcomes — done + failed — only)
  * should be engaged for these preferences.
  */
 export function shouldMuteOnServer(prefs: NotifyPrefs): boolean {

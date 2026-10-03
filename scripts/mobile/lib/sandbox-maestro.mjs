@@ -185,6 +185,7 @@ export async function runMaestro(session, target, args, { verify } = {}) {
       await seedSandbox(session, [...fresh]);
       const env = { APP_ID, PLATFORM: target.platform, BUILD: build, METRO_URL: encodeURIComponent(`http://${host}:8081`),
         SERVER_URL: `http://${host}:${session.port}`, DEVICE_NAME: target.name, DUMMY_REPO: assertDummyRepo(session.state.dummyRepo),
+        PROJECT_ID: session.state.projectId, CODEBASE_ID: session.state.fixtures.edits.codebaseId,
         ...Object.fromEntries(Object.entries(session.state.chats).map(([key, id]) => [`CHAT_${key.toUpperCase()}_ID`, id])) };
       const pairing = metadata.tags.includes('pairing');
       const devicesBefore = pairing ? new Set((await session.api('/auth/devices')).devices.map(device => device.deviceId)) : null;
@@ -224,7 +225,9 @@ export async function runMaestro(session, target, args, { verify } = {}) {
         const setup = path.join(ROOT, 'apps/mobile/.maestro/_subflows/notification-setup.yaml');
         if (await invoke(['test', setup, '--config', runtimeConfig]) !== 0) throw new Error('Native notification consent setup failed');
         const template = await fs.readFile(path.join(ROOT, 'apps/mobile/e2e/push/approval.json'), 'utf8');
-        const payload = template.replaceAll('${CHAT_GATE_ID}', env.CHAT_GATE_ID).replaceAll('${INTERACTION_ID}', env.INTERACTION_ID);
+        // v2 fixture (apps/mobile/src/features/development/pushFixtures.ts): the gate chat and the sandbox's server id.
+        const payload = template.replaceAll('${CHAT_ID}', env.CHAT_GATE_ID).replaceAll('${INTERACTION_ID}', env.INTERACTION_ID)
+          .replaceAll('${SERVER_ID}', session.state.server.serverId);
         JSON.parse(payload);
         const payloadFile = path.join(runtimeDir, 'approval.json');
         await fs.writeFile(payloadFile, payload, { mode: 0o600 });

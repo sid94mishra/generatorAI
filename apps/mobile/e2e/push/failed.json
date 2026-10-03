@@ -1,0 +1,34 @@
+{
+  "aps": {
+    "alert": {
+      "title": "Workflow run failed",
+      "body": "typecheck failed in payments-service"
+    },
+    "sound": "default",
+    "category": "failed",
+    "thread-id": "run:${RUN_ID}",
+    "interruption-level": "active",
+    "mutable-content": 1,
+    "badge": 1
+  },
+  "body": {
+    "v": 2,
+    "serverId": "${SERVER_ID}",
+    "counts": {
+      "needsYou": 1,
+      "running": 1
+    },
+    "route": "/workflows/${WORKFLOW_ID}/runs/${RUN_ID}",
+    "href": "/workflows/${WORKFLOW_ID}/runs/${RUN_ID}",
+    "category": "failed",
+    "threadId": "run:${RUN_ID}",
+    "redacted": {
+      "title": "Something failed",
+      "body": "Open GeneratorAI to see it."
+    },
+    "entity": "workflow_run",
+    "entityId": "${RUN_ID}",
+    "runId": "${RUN_ID}",
+    "workflowDefinitionId": "${WORKFLOW_ID}"
+  }
+}

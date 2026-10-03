@@ -45,9 +45,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useCallback, useMemo } from 'react';
-import { Platform } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 
+import { RUNTIME_OS } from '../native/runtimeOs';
 import { isStepUpFresh } from './stepUpRules';
 
 export { STEP_UP_WINDOW_MS, isStepUpFresh } from './stepUpRules';
@@ -60,7 +60,7 @@ interface StepUpSession {
 const session: StepUpSession = { lastSuccessAt: null, inFlight: null };
 
 /** The web preview has no sensor. */
-const WEB = Platform.OS === 'web';
+const WEB = RUNTIME_OS === 'web';
 
 /** Whether the cached step-up is still valid right now. */
 export function hasFreshStepUp(now: number = Date.now()): boolean {

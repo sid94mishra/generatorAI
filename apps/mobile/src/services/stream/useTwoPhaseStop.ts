@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { composerReducer, createComposerState, selectStopPhase, stopViewForPhase, type StopView } from '@generatorai/client-core';
+import { useLatestRef } from '../lib/useLatestRef';
 
 export interface UseTwoPhaseStopOptions {
   /** Whether the BACKEND still considers the turn live. */
@@ -44,8 +45,7 @@ export function useTwoPhaseStop({
     setView(previous => next.phase === previous.phase ? previous : next);
   }, [machine]);
 
-  const cancelRef = useRef(onCancel);
-  cancelRef.current = onCancel;
+  const cancelRef = useLatestRef(onCancel);
 
   useEffect(() => {
     machine.current = createComposerState(budgetSeconds !== undefined ? { budgetSeconds } : {});
@@ -71,7 +71,7 @@ export function useTwoPhaseStop({
     publish();
     if (!action || action.kind === 'noop') return;
     cancelRef.current({ budgetSeconds: action.budgetSeconds, force: action.kind === 'force' });
-  }, [machine, isLive, publish]);
+  }, [machine, isLive, publish, cancelRef]);
 
   return { ...view, press };
 }

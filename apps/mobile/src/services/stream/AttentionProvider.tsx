@@ -5,6 +5,11 @@ import type { AttentionSnapshot } from '@generatorai/shared';
 import type { LifecycleStream } from './lifecycleStream';
 import { useLifecycle } from './lifecycle';
 import { useApi } from '../api/useApi';
+import { LiveModelSync } from '../live/LiveModelSync';
+import { LiveSurfacesSync } from '../native/live/LiveSurfacesSync';
+import { HomeWidgetsSync } from '../native/widgets/HomeWidgetsSync';
+import { BadgeSync } from '../notifications/BadgeSync';
+import { QuickActionItemsSync } from '../native/quickActions';
 
 const Context = createContext<AttentionStore | null>(null);
 const initial = initialAttentionState();
@@ -22,7 +27,16 @@ export function AttentionProvider({ client, children }: { client: LifecycleStrea
     const state = store.getState();
     if (state.snapshot && !state.needsResync) queries.setQueryData(['attention'], state.snapshot);
   }), [store, queries]);
-  return <Context.Provider value={store}>{children}</Context.Provider>;
+  return (
+    <Context.Provider value={store}>
+      {children}
+      <LiveModelSync />
+      <LiveSurfacesSync />
+      <HomeWidgetsSync />
+      <BadgeSync />
+      <QuickActionItemsSync />
+    </Context.Provider>
+  );
 }
 
 export function useAttention() {

@@ -8,6 +8,7 @@ import * as Clipboard from 'expo-clipboard';
 import type { DataFieldDef } from '@generatorai/shared';
 
 import { useAuth } from '../../../services/auth/AuthProvider';
+import { useSecretReveal } from '../../../services/native/privacy';
 import { errorText } from '../../../ui/lib/format';
 import { confirm } from '../../../ui/native/AlertDialog';
 import { useSheet } from '../../../ui/native/Sheet';
@@ -23,8 +24,9 @@ import { toast } from '../../../ui/primitives/Toast';
 import { curlSample, webhookUrl } from '../model/automationsModel';
 import { useAutomationWrites } from '../queries';
 
-/** The one-time reveal: token and secret with copy; gone once the sheet closes. */
+/** The one-time reveal: token and secret with copy; gone once the sheet closes. No screenshots, no auto-lock (M9-09). */
 export function RevealCredentials({ token, secret, onDone }: { token: string; secret?: string | undefined; onDone: () => void }): React.ReactElement {
+  useSecretReveal(true);
   const copy = (value: string): void => {
     void Clipboard.setStringAsync(value).then(() => haptic('success'));
   };

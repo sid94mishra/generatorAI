@@ -6,7 +6,6 @@
 @import '@generatorai/design-tokens/css/vocabulary.css';
 @import '@generatorai/design-tokens/css/vocabulary-mobile.css';
 @import './uniwind-themes.css';
-@import './legacy.css'; /* M3-05 → deleted in M10 */
 
 @source '../../app';
 @source '../';

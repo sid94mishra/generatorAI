@@ -48,7 +48,6 @@ import { prefs } from '../services/storage/prefs';
 import { ThemeColorsContext, type ThemeColors } from '../ui/lib/themeColors';
 import { readSystemAccentSeeds, systemAccentAvailable, type SystemAccentSeeds } from '../ui/platform/accent';
 import { applyTheme } from './applyTheme';
-import { legacyColorsFrom } from './legacyColorNames';
 import {
   readCachedSeeds,
   readStoredAccentChoice,
@@ -78,8 +77,6 @@ interface ThemeContextValue {
   setAccent(accent: string): void;
   /** Literal colours for native hosts (§2.6); useThemeColors() reads the same object. */
   colors: ThemeColors;
-  /** Legacy literal names (`legacyColors['muted-foreground']`) for the legacy screens; deleted in M10 (MD-123). */
-  legacyColors: Record<string, string>;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -177,7 +174,6 @@ export function ThemeProvider({ children, initialTheme, initialMode, initialAcce
     if (persist) applyTheme({ themeId, mode, appearance, resolved });
   }, [persist, themeId, mode, appearance, resolved]);
 
-  const legacyColors = useMemo(() => legacyColorsFrom(resolved.colors), [resolved]);
   const systemAccentSwatch = useMemo(() => {
     if (!systemAccentAvailable) return null;
     const source = seeds ?? readSystemAccentSeeds();
@@ -198,9 +194,8 @@ export function ThemeProvider({ children, initialTheme, initialMode, initialAcce
       setThemeId,
       setAccent,
       colors: resolved.colors,
-      legacyColors,
     }),
-    [mode, appearance, themeId, theme, accent, systemAccentSwatch, setMode, setThemeId, setAccent, resolved, legacyColors],
+    [mode, appearance, themeId, theme, accent, systemAccentSwatch, setMode, setThemeId, setAccent, resolved],
   );
 
   const scopedAccent = useMemo(() => ({ ...toAccentVars(resolved.triple) }), [resolved]);

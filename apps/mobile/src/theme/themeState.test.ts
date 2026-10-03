@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { THEMES, accentVars, getThemeDef, resolveAccentFromSeed, toAccentVars } from '@generatorai/design-tokens';
 
@@ -15,7 +14,6 @@ vi.mock('./palettes', async () => {
 });
 
 const { resolveTheme, resolveAccentChoice, readCachedSeeds, writeCachedSeeds } = await import('./themeState');
-const { LEGACY_COLOR_TOKEN, legacyColorsFrom } = await import('./legacyColorNames');
 
 describe('theme resolution (M3-08)', () => {
   it('uses the generated palette with the named accent overlaid, for every theme', () => {
@@ -49,15 +47,5 @@ describe('theme resolution (M3-08)', () => {
     writeCachedSeeds({ dark: '#111111', light: '#222222' });
     expect(readCachedSeeds()).toEqual({ dark: '#111111', light: '#222222' });
     expect(JSON.parse(store.get('generatorai-system-accent-seed')!)).toHaveProperty('at');
-  });
-
-  it('maps legacy literal names exactly as legacy.css maps the legacy classes', () => {
-    const css = readFileSync(new URL('./legacy.css', import.meta.url), 'utf8');
-    const camel = (s: string): string => s.replace(/-([a-z0-9])/g, (_, c: string) => c.toUpperCase());
-    const fromCss = Object.fromEntries([...css.matchAll(/--color-([a-z-]+): var\(--gai-([a-z0-9-]+)\);/g)].map((m) => [m[1], camel(m[2]!)]));
-    for (const [name, token] of Object.entries(fromCss)) expect(LEGACY_COLOR_TOKEN[name as keyof typeof LEGACY_COLOR_TOKEN], name).toBe(token);
-    const legacy = legacyColorsFrom(resolveTheme('instrument', 'dark', 'ink', null).colors);
-    expect(legacy['muted-foreground']).toBe(resolveTheme('instrument', 'dark', 'ink', null).colors.fg2);
-    expect(legacy['file-icon-blue']).toMatch(/^#/);
   });
 });

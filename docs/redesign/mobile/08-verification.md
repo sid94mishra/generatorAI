@@ -222,11 +222,15 @@ secrets).
    - Open the link: iOS `xcrun simctl openurl <udid> <url>`; Android
      `adb -s <serial> shell am start -a android.intent.action.VIEW -d <url> dev.generatorai.app` — spawned with an
      argument array (`execFile`), never through a shell string, so the URL is not re-parsed.
-   - The app pre-fills the code and shows the consent screen; it never submits by itself (MD-34). Unless `--no-confirm`,
-     confirm with agent-device: `agent-device snapshot -i --json --platform <p>`, then
-     `agent-device press 'id="pairing-confirm"' --settle` (M1-04 adds this testID to today's "Pair this device" button;
-     fallback selector `label="Pair this device"`), then `agent-device wait 'id="menu-button"' 30000`.
-   - Verify: `GET /api/auth/devices` lists a device named like the target, paired in the last minute. Record
+   - The app pre-fills the 12-character code and the address and shows "Server found" (`pairing-scanned`); it never
+     submits by itself (MD-34). The automation (M7-08 screen, fixed in M10 for MV-33) drives it by testID only:
+     `agent-device wait 'id="pairing-scanned"'` → `scroll down --until 'id="pairing-connect"'` → `press` it (consent
+     step, unless `--no-confirm`) → `wait 'id="pairing-fingerprint"'` → `scroll`/`press 'id="pairing-confirm"'` (Pair)
+     → `/paired` → `press 'id="paired-continue"'` (skips the optional approval-key setup) → Home (`home-new-chat` or
+     `menu-button`). The device keeps its default name ("My iPhone", "My phone"): the Name field auto-capitalises, so a
+     typed name never verifies on iOS (`fill` → `COMMAND_FAILED`, MD-192).
+   - Verify: `GET /api/auth/devices` lists exactly one device that was not there before, not revoked, created in the
+     last minute (`findNewPairing`; the target name only breaks ties, case-insensitively). Record
      `{ platform, udid|serial, deviceId, host }`.
 5. Print `sandbox-pair: ready` and a summary (server, dbPath, dummy repo path, chat ids per key, paired targets).
 
@@ -570,6 +574,13 @@ sandbox seed and the Faux fixture (§2.4). Nothing else creates data.
 
 ### 4.6 VRT — `scripts/mobile/vrt.mjs` (M4-10)
 
+**Built in M10-03 (MD-194).** Prerequisites: the target booted and sandbox-paired (the dev routes sit behind the auth
+gate), Metro started with `EXPO_PUBLIC_STORYBOOK=1 EXPO_PUBLIC_VRT=1` (`.rnstorybook/vrtMode.ts` freezes the clock at
+2026-10-01 09:41 UTC, seeds `Math.random`, forces Reduce Motion). A capture is the first screen of the story (galleries
+taller than the screen are cropped to `vrt-root`'s visible frame). Android screenshots are scaled 0.4 (≈ 1 px per dp,
+like the iOS simulator's 1x). The device check compares `deviceType` + `runtime` (iOS) / `image` = `android-<sdk>;<abi>`
+(Android) with `META.json`. `pnpm --filter @generatorai/mobile vrt -- --list` prints the plan without a device.
+
 `node scripts/mobile/vrt.mjs [--platform=ios|android|both] [--device=phone|tablet] [--grep=<regex>] [--variants=<list>]
 [--update] [--list]`
 
@@ -603,6 +614,14 @@ Instrument dark. Token correctness for all 18 themes × 2 modes × 7 accents is 
 plus one `ThemeMatrix` story, not screenshots (SE §5).
 
 ### 4.7 Performance
+
+**Built in M10-03 (MD-194):** `node scripts/mobile/perf.mjs --platform=<p> [--udid|--serial] --batch=<batch>
+[--previous=<batch>]` runs cold start, `perf/streaming.yaml` (frames + memory) and `perf/transcript-scroll.yaml` (frames;
+flings over the 2,000-line reply, as the sandbox has no 300-message chat) and judges them with
+`scripts/mobile/lib/perf-budgets.mjs` against `apps/mobile/perf/budgets.json`. A metric agent-device does not report
+(p95 frame time on some runtimes) is *unmeasured*, never a pass. Cold start: Android `am start -W` TotalTime; iOS
+relaunch → `home-new-chat` through the driver (relative). The perf flows are excluded from the functional suite
+(`config.yaml` `!perf/**`).
 
 - **Where:** release builds only (§3.2 B2), both platforms, pinned devices. Emulator and simulator numbers are
   **relative** (batch-to-batch); absolute device budgets are checked on the owner's phones at M10.
@@ -640,6 +659,13 @@ plus one `ThemeMatrix` story, not screenshots (SE §5).
 | Reduce Motion | batch | app preference Settings › Accessibility › Reduce motion (plus iOS system setting where scriptable); panels jump, spinners freeze |
 | Reduce Transparency (iOS) | batch | `xcrun simctl spawn <udid> defaults write com.apple.Accessibility ReduceTransparencyEnabled -bool true` then relaunch (if the flag does not take effect on the runtime, verify with `GlassSurface` stories' forced-opaque variant); glass becomes opaque |
 | Screen reader order | batch, chat screen | snapshot order: header → transcript → composer; drawer and pane reachable from header buttons |
+
+**Route audit on both platforms (M10-04, MD-195).** `node scripts/mobile/a11y-audit.mjs --platform=<p> [--text-size=ax]
+--batch=<batch>` opens every route of `e2e/a11y-routes.json` (17 since M10-04), snapshots it and runs `a11y-check.mjs`;
+`--text-size=ax` is the Dynamic Type sweep (iOS AX5 / Android font scale 2.0). Report:
+`reviews/<batch>/a11y-<platform>[-ax].md`. Statically, Jest renders every kit / block story on both platform projects
+and checks accessible names, exposure and font scaling (`src/ui/__tests__/a11ySweep.test.tsx`); Vitest checks every
+palette's contrast (`src/theme/contrast.test.ts`).
 
 **XCUITest audit (iOS, built in M1-03).** `plugins/withA11yAuditTarget.js` (added to plugins only when `GAI_A11Y_AUDIT=1`) adds a UI
 test target `GeneratorAIUITests` with `A11yAuditTests.swift`: for each route in `apps/mobile/e2e/a11y-routes.json` it
@@ -895,6 +921,9 @@ it pins, cited in the flow's header comment. Weakening an assertion to make a re
 - Each script is **deleted in the same commit** as the Maestro flow that replaces it lands. `native-audit.mjs` is
   deleted in M1-03 (agent-device does its job). `lib.mjs`, the web-preview parts of `e2e/README.md` and the
   `playwright-core` devDependency go with the last script.
+- **Done in M10-02 (2026-10-03):** the last scripts (`net2.mjs`, `lib.mjs`) are deleted; `e2e/README.md` now lists only
+  the native helpers (fixtures, push payloads, links, the a11y checker and audit target). No mobile package depended on
+  Playwright. Route coverage by Maestro: `reviews/M10-notes.md` §1.
 
 | Legacy script | Replaced by | When |
 |---|---|---|

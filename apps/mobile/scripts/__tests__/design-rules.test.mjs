@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ESLint } from 'eslint';
 import { fileURLToPath } from 'node:url';
-import { compareCounts } from '../check-design.mjs';
+import { hardZeroFailures } from '../check-design.mjs';
 const root = fileURLToPath(new URL('../../../..', import.meta.url));
 const eslint = new ESLint({ cwd: root });
 async function messages(source, file = 'src/ui/primitives/LintProbe.tsx') {
@@ -24,8 +24,8 @@ test('shared vocabulary is accepted before M3 native emission', async () => {
   assert.ok(!has(result, 'better-tailwindcss/no-unknown-classes'));
   assert.equal(result.filter((m) => m.ruleId === 'mobile-design/design' && m.messageId !== 'storiesPresent').length, 0);
 });
-test('ui cannot reach legacy data or router hooks; platform imports are confined', async () => {
-  const result = await messages(`import {Button as useAuth} from '../../components/ui/Button'; import {useRouter} from 'expo-router'; import {Platform as Device} from 'react-native'; export const value = [useAuth,useRouter,Device];`);
+test('ui cannot reach blocks or router hooks; platform imports are confined', async () => {
+  const result = await messages(`import {GateCard as useAuth} from '../../blocks/GateCard'; import {useRouter} from 'expo-router'; import {Platform as Device} from 'react-native'; export const value = [useAuth,useRouter,Device];`);
   for (const id of ['boundaries/dependencies', 'routerPresentation', 'platformOs']) assert.ok(has(result, id), id);
 });
 test('router adapter admits presentational imports only', async () => {
@@ -43,20 +43,23 @@ test('features use queries and kit controls; stories only relax raw elements', a
   assert.ok(!has(story, 'rawTextImport'));
   assert.ok(has(story, 'defaultTextSize'));
 });
-test('new routes are hard zero even with legacy routes grandfathered', async () => {
+test('routes, services and theme are hard zero (no legacy layer since M10-01)', async () => {
   const result = await messages(`import {Platform} from 'react-native'; export const value = Platform.OS;`, 'app/lint-probe.tsx');
   assert.ok(result.some((m) => m.messageId === 'platformOs' && m.severity === 2));
+  for (const file of ['src/services/lint-probe/probe.ts', 'src/theme/lintProbe.ts']) {
+    const other = await messages(`import {Platform} from 'react-native'; export const value = Platform.OS;`, file);
+    assert.ok(other.some((m) => m.messageId === 'platformOs' && m.severity === 2), file);
+  }
 });
 test('compiler diagnostics are errors in new layers', async () => {
   const result = await messages(`import {useState} from 'react'; export function useProbe(flag:boolean) { if(flag) return useState(0); return null; }`, 'src/ui/lib/useProbe.ts');
   assert.ok(result.some((m) => m.ruleId === 'react-hooks/rules-of-hooks' && m.severity === 2));
 });
-test('per-file allowance cannot move, grow or be silently reset', () => {
-  const baseline = {'src/legacy.ts': {palette: 2}};
-  assert.deepEqual(compareCounts({'src/legacy.ts': {palette: 1}}, baseline), []);
-  assert.equal(compareCounts({'src/legacy.ts': {palette: 3}}, baseline).length, 1);
-  assert.equal(compareCounts({'src/new.ts': {palette: 1}}, baseline).length, 1);
-  assert.equal(compareCounts({}, baseline, true).length, 1);
+test('the gate fails on any error or guarded warning and ignores unguarded warnings', () => {
+  const at = (ruleId, severity) => ({ filePath: `${root}apps/mobile/src/x.ts`, messages: [{ ruleId, severity, line: 3, message: 'm' }] });
+  assert.deepEqual(hardZeroFailures([at('mobile-design/design', 1)], `${root}apps/mobile`), ['src/x.ts:3: mobile-design/design m']);
+  assert.equal(hardZeroFailures([at('no-console', 2)], `${root}apps/mobile`).length, 1);
+  assert.equal(hardZeroFailures([at('no-console', 1)], `${root}apps/mobile`).length, 0);
 });
 
 test('Tailwind class extraction follows a named class string', async () => {

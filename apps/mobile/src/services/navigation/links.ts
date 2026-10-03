@@ -1,4 +1,5 @@
 import { deepLinkToRoute } from '@generatorai/shared/ui-contract';
+import { isShareHandoff } from '../native/sharePayload';
 import { mobileRoute } from './mobileRoutes';
 
 export const UNPAIRED_LINK_MESSAGE = "Link is for a server this phone isn't paired with";
@@ -39,7 +40,7 @@ export const linkQueue = createLinkQueue();
  * build only. They are not product routes, so the shared allowlist rejects them; walkthroughs and
  * Maestro still need to open them by link. Release builds never match (`dev` is `__DEV__`).
  */
-const DEV_ROUTES: ReadonlySet<string> = new Set(['storybook', 'theme', 'notify']);
+const DEV_ROUTES: ReadonlySet<string> = new Set(['storybook', 'theme', 'notify', 'live']);
 export function devRoute(path: string, dev: boolean): string | null {
   if (!dev) return null;
   const match = /^(?:generatorai:\/\/\/?|\/)?([a-z]+)(\?[A-Za-z0-9_=&%.-]*)?$/.exec(path);
@@ -50,6 +51,9 @@ export function devRoute(path: string, dev: boolean): string | null {
 export function redirectLink(path: string, activeServerId?: string | null): string {
   const dev = devRoute(path, typeof __DEV__ !== 'undefined' && __DEV__);
   if (dev) return dev;
+  // The share extension's hand-off (M9-08): the payload is read from the App Group by the share intake, never from
+  // the link, which only opens the sheet.
+  if (isShareHandoff(path)) return '/share';
   const route = mobileRoute(deepLinkToRoute(path));
   linkQueue.clear();
   if (!route) return '/';

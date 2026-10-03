@@ -48,6 +48,8 @@ export const PREF_KEYS = {
   lockGraceSeconds: 'generatorai.lock-grace-seconds',
   /** Privacy overlay in the app switcher with the lock off. */
   hideInSwitcher: 'generatorai.hide-in-switcher',
+  /** iOS: the notification service extension shows only the lock-screen-safe copy (App Group `privacy.redact`). */
+  hideNotificationPreviews: 'generatorai.hide-notification-previews',
   localOnly: 'generatorai.local-only',
   /** Last visited route, restored on a cold start within `LAST_ROUTE_TTL_MS`. */
   lastRoute: 'generatorai.last-route',

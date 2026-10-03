@@ -41,7 +41,8 @@ final class A11yAuditTests: XCTestCase {
     ]
     app.activate()
     XCUIDevice.shared.system.open(try XCTUnwrap(bundle.url))
-    guard app.buttons["Open sidebar"].waitForExistence(timeout: 60) else {
+    // Home's New chat action exists on phones and tablets alike (the sidebar toggle's label differs by size class).
+    guard app.descendants(matching: .any).matching(identifier: "home-new-chat").firstMatch.waitForExistence(timeout: 60) else {
       XCTFail("Development client did not load the paired app. Check Metro on :8081 and sandbox pairing.")
       return
     }

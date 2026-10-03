@@ -1,0 +1,17 @@
+{
+  "about": "Mobile performance budgets (08 §4.7, M10-03, MD-194). Release builds on the pinned simulator / emulator; those numbers are relative (batch to batch), absolute budgets are checked on the owner's phones. `node scripts/mobile/perf.mjs` runs the scenarios and compares. A metric the driver does not report is listed as unmeasured, never as a pass.",
+  "regressionPercent": 10,
+  "scenarios": {
+    "transcript-scroll": {
+      "flow": "apps/mobile/.maestro/perf/transcript-scroll.yaml",
+      "budgets": { "jankPercent": 5, "p95FrameMs": 20 }
+    },
+    "streaming": {
+      "flow": "apps/mobile/.maestro/perf/streaming.yaml",
+      "budgets": { "jankPercent": 8, "longestFrameMs": 100, "memoryMb": 400 }
+    },
+    "cold-start": {
+      "budgets": { "coldStartMs": 3000 }
+    }
+  }
+}

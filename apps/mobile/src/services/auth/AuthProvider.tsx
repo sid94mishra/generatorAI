@@ -22,6 +22,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
 } from 'react';
@@ -54,6 +55,7 @@ import { buildEndpointCandidates } from '../transport/endpointPlan';
 import { assertServerWriteAllowed } from '../api/offlinePolicy';
 import { clearServerQueryCache } from '../api/queryPersister';
 import { PREF_KEYS, prefs } from '../storage/prefs';
+import { liveStore } from '../live/liveStore';
 
 export interface AuthContextValue {
   state: AuthState;
@@ -138,12 +140,22 @@ async function verifyHostIdentity(endpoint: string, signal?: AbortSignal): Promi
   return body.serverId;
 }
 
+interface AuthSnapshot {
+  state: AuthState;
+  endpoint: string | null;
+}
+const INITIAL_AUTH_SNAPSHOT: AuthSnapshot = { state: { status: 'unpaired' }, endpoint: null };
+const replaceAuthSnapshot = (_previous: AuthSnapshot, next: AuthSnapshot): AuthSnapshot => next;
+const authSnapshot = (state: AuthState, runtime: AuthenticatedClientRuntime | null): AuthSnapshot => ({ state, endpoint: runtime?.endpoint ?? null });
+
 export function AuthProvider({ children }: { children: React.ReactNode }): React.ReactElement {
   const [serverId, setServerId] = useState<string | null>(() => serverRegistry.read().activeServerId);
   const activeServerRef = useRef(serverId);
   const pairingRef = useRef(false);
   const [servers, setServers] = useState(() => serverRegistry.read().connections);
-  const [state, setState] = useState<AuthState>({ status: 'unpaired' });
+  // The auth state and the active runtime's endpoint change together (the runtime is built or replaced only with a
+  // state change — pairing, restore, unpair, revoke), so one reducer holds both and render never reads the ref.
+  const [{ state, endpoint }, dispatchAuth] = useReducer(replaceAuthSnapshot, INITIAL_AUTH_SNAPSHOT);
   // Starts `restoring`; `initializing` and `storageLocked` are views of it.
   // See `AuthContextValue.initializing` and `restoreState.ts`.
   const [restorePhase, setRestorePhase] = useState<RestorePhase>('restoring');
@@ -208,7 +220,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       },
       onStateChange: (next) => {
         latest = next;
-        if (activeServerRef.current === id && runtimes.current.get(id)?.runtime === runtime) setState(next);
+        if (activeServerRef.current === id && runtimes.current.get(id)?.runtime === runtime) dispatchAuth(authSnapshot(next, runtimeRef.current));
       },
     });
     const entry = { runtime, supervisor, keyStore: keys, get state() { return latest; } };
@@ -230,7 +242,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
           await clearLegacyCredentials();
           prefs.setBoolean('auth.multi-server-reset', true);
         }
-        if (!sessionStore || !keyStore || !serverId) { setState({ status: 'unpaired' }); return; }
+        if (!sessionStore || !keyStore || !serverId) { dispatchAuth(authSnapshot({ status: 'unpaired' }, runtimeRef.current)); return; }
         let session: Awaited<ReturnType<MobileSessionStore['load']>>;
         try {
           session = await sessionStore.load();
@@ -245,7 +257,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
         if (cancelled) return;
 
         if (!session) {
-          setState({ status: 'unpaired' });
+          dispatchAuth(authSnapshot({ status: 'unpaired' }, runtimeRef.current));
           return;
         }
 
@@ -267,7 +279,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
             if (!cancelled) next = await runtime.retryInitialize();
           }
           if (!cancelled) {
-            setState(next);
+            dispatchAuth(authSnapshot(next, runtimeRef.current));
             setKeyBacking(entry.keyStore.backing);
           }
         } catch (err) {
@@ -284,15 +296,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
           if (err instanceof HostIdentityMismatchError) {
             // Surfaced as a blocking screen: this is a security event, not a
             // transient network error, and it must not be retried silently.
-            setState({ status: 'error', message: err.message });
+            dispatchAuth(authSnapshot({ status: 'error', message: err.message }, runtimeRef.current));
             return;
           }
-          setState({ status: 'error', message: err instanceof Error ? err.message : String(err) });
+          dispatchAuth(authSnapshot({ status: 'error', message: err instanceof Error ? err.message : String(err) }, runtimeRef.current));
         }
       } catch (error) {
         if (!cancelled) {
           if (isStorageUnavailableError(error)) outcome = { type: 'storage-unavailable' };
-          else setState({ status: 'error', message: error instanceof Error ? error.message : String(error) });
+          else dispatchAuth(authSnapshot({ status: 'error', message: error instanceof Error ? error.message : String(error) }, runtimeRef.current));
         }
       } finally {
         // Must run on every path, including the early `!session` return and
@@ -329,7 +341,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     setBackgroundActiveServer(id);
     runtimeRef.current = null;
     supervisorRef.current = null;
-    setState({ status: 'unpaired' });
+    dispatchAuth(authSnapshot({ status: 'unpaired' }, runtimeRef.current));
     setTransport({ state: 'idle' });
     dispatchRestore({ type: 'server-switch' });
     setServerId(id);
@@ -343,12 +355,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     const previousId = activeServerRef.current;
     pairingRef.current = true;
     activeServerRef.current = consent.serverId;
-    setState({ status: 'pairing' });
     setServerId(consent.serverId);
     const endpoints = consent.endpoints.map((endpoint) => endpoint.origin);
     const entry = getRuntime(consent.serverId, consent.endpoint, endpoints);
     runtimeRef.current = entry.runtime;
     supervisorRef.current = entry.supervisor;
+    dispatchAuth(authSnapshot({ status: 'pairing' }, runtimeRef.current));
     try {
       await entry.runtime.completePairing({ pairingToken: consent.pairingGrant, deviceName, platform: 'mobile', serverId: consent.serverId, endpoint: consent.endpoint, endpoints });
       serverRegistry.add({ serverId: consent.serverId, label: consent.serverName, endpoint: consent.endpoint, endpoints, kind: 'remote', managed: false, lastConnectedAt: Date.now() });
@@ -362,7 +374,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       const previous = previousId ? runtimes.current.get(previousId) : undefined;
       runtimeRef.current = previous?.runtime ?? null;
       supervisorRef.current = previous?.supervisor ?? null;
-      setState(previous?.state ?? { status: 'unpaired' });
+      dispatchAuth(authSnapshot(previous?.state ?? { status: 'unpaired' }, runtimeRef.current));
       setBackgroundActiveServer(previousId);
       throw error;
     } finally {
@@ -382,6 +394,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     await new MobileSessionStore(id).clear();
     await clearServerQueryCache(id);
     prefs.deletePrefix(`srv.${id}.`);
+    liveStore.dispatch({ type: 'forgetServer', serverId: id });
     registerAuthenticatedFetch(id, null);
     runtimes.current.delete(id);
     serverRegistry.remove(id);
@@ -394,7 +407,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     supervisorRef.current = null;
     activeServerRef.current = catalog.activeServerId;
     setBackgroundActiveServer(catalog.activeServerId);
-    setState({ status: 'unpaired' });
+    dispatchAuth(authSnapshot({ status: 'unpaired' }, runtimeRef.current));
     setTransport({ state: 'idle' });
     setServerId(catalog.activeServerId);
   }, [dispatchRestore]);
@@ -415,12 +428,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     // A launch that failed left auth in `error`; reconnecting the transport
     // alone never leaves that screen, so re-run initialisation too.
     const runtime = runtimeRef.current;
-    if (runtime) setState(await runtime.retryInitialize());
+    if (runtime) dispatchAuth(authSnapshot(await runtime.retryInitialize(), runtimeRef.current));
   }, []);
 
   const refreshPermissions = useCallback(async () => {
     const next = await runtimeRef.current?.refreshSession();
-    if (next) setState(next);
+    if (next) dispatchAuth(authSnapshot(next, runtimeRef.current));
   }, []);
 
   // These operations read the current runtime through a ref. Keep their
@@ -456,9 +469,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       transport,
       keyBacking,
       fetch: authenticatedFetch,
-      // Recomputed whenever `state` changes, which is the only time the
-      // runtime is built or replaced — pairing, restore, unpair, revoke.
-      endpoint: runtimeRef.current?.endpoint ?? null,
+      endpoint,
       streamUrl,
       socketUrl,
       completePairing,
@@ -468,6 +479,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     }),
     [
       state,
+      endpoint,
       serverId,
       servers,
       switchServer,

@@ -1825,7 +1825,9 @@ Test (`apps/mobile`, Vitest): `cn('text-fg-2', 'text-title') === 'text-fg-2 text
 
 Two mechanisms, as on web: ESLint (fast, per file, `eslint-plugin-better-tailwindcss` with `entryPoint:
 apps/mobile/src/theme/global.css`, plus `no-restricted-imports` / `no-restricted-syntax`) and the ratchet script
-`apps/mobile/scripts/check-design.mjs` → `pnpm --filter @generatorai/mobile check:design` (`--strict` in CI). Scopes:
+`apps/mobile/scripts/check-design.mjs` → `pnpm --filter @generatorai/mobile check:design` (`--strict` in CI). **Since M10-01
+(MD-193) every file in `src/` and `app/` is hard zero and the baseline file is gone**; the scopes below describe M1–M9:
+Scopes:
 **hard zero** in `app/**`, `src/ui/**`, `src/blocks/**`, `src/features/**`; **ratchet** (count may only fall) in
 legacy `src/components/**`, `src/navigation/**`, `src/settings/**` and other legacy folders; **exempt**:
 `src/theme/palettes/**`, `src/theme/*.json`, `src/theme/uniwind-*.{css,json,d.ts}`, `src/ui/primitives/Icon/material-filled/**`,

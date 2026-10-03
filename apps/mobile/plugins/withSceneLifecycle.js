@@ -20,6 +20,8 @@
 //     notification's route) arrives in the scene's connection options, not
 //     in launch options, so it is folded back into the launch options React
 //     Native reads for `Linking.getInitialURL()`;
+//   • a home-screen quick action (cold start: the connection options; warm:
+//     `windowScene(_:performActionFor:)`) reaches expo-quick-actions;
 //   • later links and the foreground/background transitions are forwarded to
 //     the AppDelegate / Expo subscriber paths that Expo modules (linking,
 //     notifications, local authentication…) already listen to, since UIKit
@@ -129,6 +131,15 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         "UIApplicationLaunchOptionsUserActivityKey": activity,
       ]
     }
+    // A cold-start home-screen quick action also arrives here. expo-quick-actions records the launch action from
+    // \`application(_:didFinishLaunchingWithOptions:)\`, which ran before the scene connected, so hand it the item.
+    if let shortcutItem = connectionOptions.shortcutItem {
+      launchOptions[.shortcutItem] = shortcutItem
+      for subscriber in ExpoAppDelegateSubscriberRepository.subscribers
+      where String(describing: type(of: subscriber)) == "ExpoQuickActionsAppDelegate" {
+        _ = subscriber.application?(UIApplication.shared, didFinishLaunchingWithOptions: [.shortcutItem: shortcutItem])
+      }
+    }
 
     let window = UIWindow(windowScene: windowScene)
     self.window = window
@@ -147,6 +158,15 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
   func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
     _ = appDelegate?.application(UIApplication.shared, continue: userActivity, restorationHandler: { _ in })
+  }
+
+  // A quick action while the app runs: UIKit calls the scene, not the app delegate, once scenes are adopted.
+  func windowScene(
+    _ windowScene: UIWindowScene,
+    performActionFor shortcutItem: UIApplicationShortcutItem,
+    completionHandler: @escaping (Bool) -> Void
+  ) {
+    ExpoAppDelegateSubscriberManager.application(UIApplication.shared, performActionFor: shortcutItem, completionHandler: completionHandler)
   }
 
   // UIKit stops calling the app-delegate versions of these once scenes are

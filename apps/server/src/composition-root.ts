@@ -1515,6 +1515,13 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     const dispatcher = new PushDispatcher({
       serverId: security.identity.hostId,
       workflowDefinitionId: async (runId) => (await workflowRunRepo.getById(runId)).workflowDefinitionId,
+      // MG-06 part B: the badge and quick-action counts. The feed is declared below and started in
+      // `initialize()`; until it is available the push carries no counts.
+      attentionCounts: () => {
+        if (!attentionService.isAvailable()) return null;
+        const { counts } = attentionService.getSnapshot();
+        return { needsYou: counts.needsYou, running: counts.running };
+      },
       // Snapshot refreshed off the device list rather than read per event:
       // `DeviceService.getDevice` is async and the dispatcher decision path
       // is deliberately synchronous so it can never stall the event bus.

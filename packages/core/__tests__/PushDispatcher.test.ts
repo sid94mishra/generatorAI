@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   PushDispatcher,
+  type PushDispatcherPorts,
   type PushMessage,
   type PushTarget,
 } from '../src/services/push/PushDispatcher.js';
@@ -27,7 +28,7 @@ function target(overrides: Partial<PushTarget> = {}): PushTarget {
   };
 }
 
-function makeDispatcher(targets: PushTarget[], now = { value: 1_000 }) {
+function makeDispatcher(targets: PushTarget[], now = { value: 1_000 }, extra: Partial<PushDispatcherPorts> = {}) {
   const sent: PushMessage[][] = [];
   const recordSuccess = vi.fn();
   const recordFailure = vi.fn();
@@ -44,6 +45,7 @@ function makeDispatcher(targets: PushTarget[], now = { value: 1_000 }) {
     },
     logger,
     clock: () => now.value,
+    ...extra,
   });
 
   return { dispatcher, sent, recordSuccess, recordFailure, now };
@@ -232,6 +234,7 @@ describe('PushDispatcher — delivery outcomes', () => {
       route: '/chats/c1/gate/i1',
       category: 'approval',
       threadId: 'chat:c1',
+      redacted: { title: 'Permission needed', body: 'Open GeneratorAI to see it.' },
       chatId: 'c1',
       interactionId: 'i1',
       kind: 'permission',
@@ -239,7 +242,7 @@ describe('PushDispatcher — delivery outcomes', () => {
     });
   });
 
-  it('names the Allow/Deny category only for a push that carries those actions (MG-04)', () => {
+  it('names a v2 category for every push; only `approval` carries Allow/Deny (MG-04)', () => {
     const { dispatcher } = makeDispatcher([target()]);
     const permission = (interactionId: string, risk: string) => ({
       kind: 'chat.permission.requested',
@@ -250,20 +253,48 @@ describe('PushDispatcher — delivery outcomes', () => {
     expect(standard!.data).toMatchObject({ actions: ['approve', 'deny'], risk: 'standard' });
 
     const [risky] = makeDispatcher([target()]).dispatcher.handleEvent(permission('i2', 'risky'));
-    expect(risky!.categoryId).toBeUndefined();
+    expect(risky!.categoryId).toBe('approval.risky');
     expect(risky!.data.actions).toBeUndefined();
     expect(risky!.data.risk).toBe('risky');
 
     // A workflow approval opens the run (MD-31), with no per-gate fields.
     const [approval] = dispatcher.handleEvent(gate);
-    expect(approval!.categoryId).toBeUndefined();
-    expect(approval!.data).toEqual({ route: '/runs/r1', category: 'approval', threadId: 'run:r1' });
+    expect(approval!.categoryId).toBe('run.approval');
+    expect(approval!.data).toMatchObject({ route: '/runs/r1', category: 'run.approval', threadId: 'run:r1', runId: 'r1' });
+    expect(approval!.data.actions).toBeUndefined();
 
     const [done] = dispatcher.handleEvent({
       kind: 'workflow_run.completed',
       data: { workflowRunId: 'r2' },
     });
-    expect(done!.categoryId).toBeUndefined();
+    expect(done!.categoryId).toBe('done');
+    expect(done!.interruption).toBe('passive');
+    expect(done!.data.redacted).toEqual({ title: 'Finished', body: 'Open GeneratorAI to see it.' });
+  });
+
+  it('carries a question with its options, and the attention counts at send time (MG-06 part B)', () => {
+    const counts = vi.fn(() => ({ needsYou: 3, running: 1 }));
+    const { dispatcher } = makeDispatcher([target()], undefined, { attentionCounts: counts });
+    const [message] = dispatcher.handleEvent({
+      kind: 'chat.question.asked',
+      data: {
+        chatId: 'c1',
+        interactionId: 'q1',
+        questions: [{ id: 'k', header: 'Edges', question: 'Migrate now?', multiSelect: false, allowFreeform: true, options: [{ label: 'Migrate them now' }, { label: 'Keep a v11 shim' }] }],
+      },
+    });
+    expect(message!.categoryId).toBe('question');
+    expect(message!.data).toMatchObject({
+      category: 'question',
+      question: { id: 'k', options: ['Migrate them now', 'Keep a v11 shim'], multiSelect: false, freeText: true, count: 1 },
+      counts: { needsYou: 3, running: 1 },
+    });
+  });
+
+  it('sends without counts when the attention feed cannot answer', () => {
+    const { dispatcher } = makeDispatcher([target()], undefined, { attentionCounts: () => { throw new Error('down'); } });
+    const [message] = dispatcher.handleEvent(gate);
+    expect(message!.data.counts).toBeUndefined();
   });
 
   it('dedupes a permission prompt per chat, so a replayed gate does not buzz twice', () => {
@@ -303,6 +334,10 @@ describe('v2 server-scoped routing', () => {
   it('retains actionable chat gate targets and server identity', async () => {
     const [message] = await scoped().dispatchEvent({ kind: 'chat.permission.requested', data: { chatId: 'c1', interactionId: 'i1' } });
     expect(message?.data).toMatchObject({ v: 2, serverId: 'host-A', href: '/chats/c1/gate/i1', entity: 'chat', entityId: 'c1', actions: ['approve', 'deny'] });
+  });
+  it('opens a stage approval on its approval sheet (MB-50)', async () => {
+    const [message] = await scoped().dispatchEvent({ kind: 'stage_run.awaiting_input', data: { workflowRunId: 'r1', stageRunId: 's1', name: 'Deploy' } });
+    expect(message?.data).toMatchObject({ category: 'run.approval', runId: 'r1', stageRunId: 's1', href: '/workflows/workflow%2F1/runs/r1/approval/s1' });
   });
   it('handles deleted runs and ignores events that need no notification', async () => {
     const resolve = vi.fn(async (): Promise<string | null> => { throw new Error('gone'); });

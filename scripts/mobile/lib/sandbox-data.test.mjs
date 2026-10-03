@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { assertSandboxDbPath, assertDummyRepo, rewritePairUrl, mergedFixture } from './sandbox-data.mjs';
+import { assertSandboxDbPath, assertDummyRepo, findNewPairing, rewritePairUrl, mergedFixture } from './sandbox-data.mjs';
 
 test('pair links change only routing hints and preserve consent/security fields', () => {
   const offer = { v: 2, serverId: 'test-server', serverPublicKey: 'test-public-key', pairingGrant: 'test-only-grant',
@@ -47,4 +47,22 @@ test('mobile fixture merges preserve web scripts and generate the long stream lo
   assert.equal(merged['Mobile — Long stream'][0][0].content.split('\n').length, 2000);
   assert.equal(Object.keys(web).length, 1);
   assert.throws(() => mergedFixture(web, { 'Sandbox — Active Chat': [] }));
+});
+
+test('a new pairing is found by id, with the name only as a case-insensitive tie-breaker', () => {
+  const started = Date.parse('2026-10-03T10:00:00Z');
+  const at = (offset) => new Date(started + offset).toISOString();
+  const old = { deviceId: 'old', name: 'gai-iphone', createdAt: at(-3600000) };
+  const fresh = { deviceId: 'new', name: 'My iPhone', createdAt: at(2000) };
+  const before = new Set(['old']);
+  assert.equal(findNewPairing([old, fresh], { before, started, name: 'gai-iphone' }), fresh);
+  assert.equal(findNewPairing([old], { before, started, name: 'gai-iphone' }), null);
+  assert.equal(findNewPairing([old, { ...fresh, revokedAt: at(3000) }], { before, started, name: 'gai-iphone' }), null);
+  // Created before this attempt (beyond the skew allowance) is not this pairing.
+  assert.equal(findNewPairing([{ ...fresh, createdAt: at(-120000) }], { before: new Set(), started, name: 'x' }), null);
+  // Two candidates: the (auto-capitalised) typed name decides; otherwise ambiguous.
+  const other = { deviceId: 'other', name: 'My phone', createdAt: at(1000) };
+  const typed = { deviceId: 'typed', name: 'Gai-iphone', createdAt: at(1500) };
+  assert.equal(findNewPairing([other, typed], { before, started, name: 'gai-iphone' }), typed);
+  assert.equal(findNewPairing([other, fresh], { before, started, name: 'gai-iphone' }), null);
 });

@@ -3,7 +3,7 @@
 // paths (MD-79) but builds some screens later. Roots the app has no screen for are rejected (null → Home). Pure.
 
 /** First path segments with a screen in the (app) tree. */
-const ROOTS = new Set(['', 'chats', 'projects', 'agents', 'workflows', 'automations', 'scripts', 'settings', 'needs-you', 'search', 'servers', 'scope-request']);
+const ROOTS = new Set(['', 'chats', 'projects', 'agents', 'workflows', 'automations', 'scripts', 'settings', 'needs-you', 'search', 'servers', 'scope-request', 'share']);
 
 /** Settings sections (web SETTINGS_NAV ids + the device rows); anything else → /settings. */
 const SETTINGS_SECTIONS = new Set([
@@ -29,7 +29,7 @@ function withQuery(path: string, query: string): string {
 
 /**
  * Map an allowlisted route (output of `deepLinkToRoute`) to the mobile tree, or null when the app has no screen for
- * it (the legacy `runs`, `changes`, `terminal`, `approvals` roots; `share` until M9).
+ * it (the legacy `runs`, `changes`, `terminal`, `approvals` roots).
  */
 export function mobileRoute(route: string | null): string | null {
   const mapped = mapRoute(route);

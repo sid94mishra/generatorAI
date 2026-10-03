@@ -5,9 +5,6 @@ module.exports = function (api) {
     // transformer and the components Metro substitutes for react-native's.
     presets: ['babel-preset-expo'],
     plugins: [
-      // Per-icon imports for lucide: without this Metro bundles all ~1,500
-      // icons (1.29 MB of source) for the ~60 the app draws. See the plugin.
-      './plugins/babel-plugin-lucide-icons',
       // Reanimated's plugin MUST be last — it rewrites worklets and expects
       // every other transform to have already run.
       'react-native-reanimated/plugin',

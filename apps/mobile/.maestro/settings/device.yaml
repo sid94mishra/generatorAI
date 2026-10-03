@@ -10,6 +10,7 @@ tags: [settings]
 - openLink: generatorai:///settings/app-lock
 - extendedWaitUntil: {visible: {id: app-lock-require}, timeout: 15000}
 - assertVisible: {id: app-lock-hide-switcher}
+- assertVisible: {id: app-lock-hide-previews}
 - openLink: generatorai:///settings/widgets
 - extendedWaitUntil: {visible: {id: widgets-live-runs}, timeout: 15000}
 - tapOn: {id: widgets-live-chats}

@@ -1,0 +1,9 @@
+{
+  "name": "generatorai-live",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local Expo module (Android): the Live Update (ProgressStyle, promoted ongoing, specialUse foreground service), the widget palette in SharedPreferences and the New chat Quick Settings tile. Autolinked from apps/mobile/modules by expo prebuild.",
+  "license": "UNLICENSED",
+  "author": "GeneratorAI",
+  "homepage": "https://github.com/generatorai"
+}

@@ -1,0 +1,23 @@
+appId: ${APP_ID}
+name: perf · stream the 2,000-line reply
+# 08 §4.7 (M10-03): the Faux "Mobile — Long stream" fixture streams 2,000 lines into a fresh chat. Driven by
+# scripts/mobile/perf.mjs, which samples frames and memory right after; not part of the functional suite (config.yaml).
+tags: [perf]
+env: {FRESH_CHAT: long}
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///chats/${CHAT_LONG_ID}
+- extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- tapOn: {id: composer-input}
+- inputText: Stream the long fixture
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
+- waitForAnimationToEnd
+- extendedWaitUntil: {visible: {id: composer-send}, timeout: 10000}
+- tapOn: {id: composer-send}
+# Streaming has started when Stop shows; it is over when Stop goes (the composer returns to Dictate).
+- extendedWaitUntil: {visible: {id: composer-stop}, timeout: 30000}
+- extendedWaitUntil: {notVisible: {id: composer-stop}, timeout: 240000}
+- assertVisible: Dictate a message

@@ -3,8 +3,9 @@
 // the lock is unavailable) and Lock after leaving. "Asks for <noun>" lists the fixed policy as locked rows, not
 // switches (06 §6.4: risky approvals sign every time, admin writes and device changes step up every time, terminal /
 // browser / computer use once per 10 minutes) — a phone cannot turn them off. Privacy: "Hide content in app switcher"
-// (always with the lock; a choice without it). Not rendered: "Hide notification previews" (needs the iOS
-// notification-service extension, M9). The footer says where the signing key lives.
+// (always with the lock; a choice without it) and "Hide notification previews" (iOS: the notification service
+// extension swaps in the lock-screen-safe copy, always with the lock — MD-92; Android: PRIVATE channels, the system's
+// lock-screen setting decides). The footer says where the signing key lives.
 import React from 'react';
 
 import { useAuth } from '../../services/auth/AuthProvider';
@@ -19,7 +20,7 @@ import { keyProtection } from './model/deviceView';
 import { unlockMethod } from './model/appLockModel';
 
 export default function AppLockScreen(): React.ReactElement {
-  const { biometricLock, setBiometricLock, lockGraceSeconds, setLockGraceSeconds, hideInSwitcher, setHideInSwitcher } = usePreferences();
+  const { biometricLock, setBiometricLock, lockGraceSeconds, setLockGraceSeconds, hideInSwitcher, setHideInSwitcher, hideNotificationPreviews, setHideNotificationPreviews } = usePreferences();
   const info = useBiometricInfo();
   const { keyBacking } = useAuth();
   const method = unlockMethod(info, nativePlatform);
@@ -51,12 +52,26 @@ export default function AppLockScreen(): React.ReactElement {
           kind="toggle"
           icon="hide"
           title={ios ? 'Hide content in app switcher' : 'Hide content in Recents'}
-          subtitle={biometricLock ? 'Always on while App lock is on' : 'Shows the app mark instead'}
+          subtitle={biometricLock ? 'Always on while App lock is on' : ios ? 'Blurs it and shows the app mark' : 'Recents shows a blank card'}
           switchValue={biometricLock || hideInSwitcher}
           onValueChange={setHideInSwitcher}
           disabled={biometricLock}
           testID="app-lock-hide-switcher"
         />
+        {ios ? (
+          <ListRow
+            kind="toggle"
+            icon="bell"
+            title="Hide notification previews"
+            subtitle={biometricLock ? 'Always on while App lock is on' : 'Shows what needs you, never the command or message'}
+            switchValue={biometricLock || hideNotificationPreviews}
+            onValueChange={setHideNotificationPreviews}
+            disabled={biometricLock}
+            testID="app-lock-hide-previews"
+          />
+        ) : (
+          <ListRow kind="value" icon="bell" title="Hide notification previews" subtitle="Android hides them on a secure lock screen" value="System setting" testID="app-lock-hide-previews" />
+        )}
       </ListSection>
     </SettingsPage>
   );

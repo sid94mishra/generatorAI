@@ -1,3 +1,5 @@
+// Must stay the first import: freezes the clock and motion before any story module evaluates (VRT, 08 §4.6).
+import './vrtMode';
 import React, { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { Redirect, useLocalSearchParams } from 'expo-router';
@@ -12,7 +14,7 @@ function DevelopmentStories(): React.ReactElement {
   const story = params.story?.includes('--') ? params.story as `${string}--${string}` : undefined;
   const Canvas = useMemo(() => view.getStorybookUI({
     CustomUIComponent: LiteUI,
-    initialSelection: story ?? 'ui-verification-nativebutton--enabled',
+    initialSelection: story ?? 'ui-primitives-button--all-variants',
     shouldPersistSelection: false,
     onDeviceUI: !story,
   }), [story]);

@@ -18,12 +18,11 @@ import '../src/theme/prepaint';
 // native installs the JSI/OpenSSL implementation, web asserts the built-in one.
 import { installCrypto } from '../src/services/crypto/installCrypto';
 
-import React, { useEffect, useRef, useState } from 'react';
-import { Text, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { View } from 'react-native';
 import { Redirect, Stack, SplashScreen, router, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { ServerScope } from '../src/services/auth/ServerScope';
@@ -36,9 +35,16 @@ import { setHapticsEnabled as setKitHapticsEnabled, setMotionPreference, setTran
 import { useLinkRouting } from '../src/services/navigation/useLinkRouting';
 import { consumeLastRoute, useLastRoute } from '../src/services/prefs/lastRoute';
 import { AuthProvider, useAuth } from '../src/services/auth/AuthProvider';
-import { AppLockGate } from '../src/services/auth/AppLock';
-import { Spinner, ToastProvider, useToast, ContextMenuProvider, Button, ErrorState } from '../src/components/ui';
+import { AppLockGate } from '../src/blocks/shell/AppLockGate';
+import { GestureHandlerRootView } from '../src/ui/lib/styled';
+import { Button } from '../src/ui/primitives/Button';
+import { ErrorState } from '../src/ui/primitives/ErrorState';
+import { Spinner } from '../src/ui/primitives/Spinner';
+import { Text } from '../src/ui/primitives/Text';
+import { toast } from '../src/ui/primitives/Toast';
 import { usePushNotifications } from '../src/services/notifications/usePushNotifications';
+import { useQuickActionLinks } from '../src/services/native/quickActions';
+import { useShareIntake } from '../src/services/native/shareIntent';
 import { MuxStreamProvider } from '../src/services/stream/MuxStreamProvider';
 import { useGlobalStream } from '../src/services/stream/useGlobalStream';
 
@@ -64,18 +70,19 @@ function KitPreferencesBridge(): null {
 
 /** Applies the theme variables and keeps native chrome in step. */
 function ThemedShell({ children }: { children: React.ReactNode }): React.ReactElement {
-  const { appearance, legacyColors: colors } = useTheme();
+  const { appearance, colors } = useTheme();
   const [ready, setReady] = useState(false);
 
+  // The navigator mounts right after the first commit (a microtask, not in the effect body: no cascading render).
   useEffect(() => {
-    setReady(true);
+    queueMicrotask(() => setReady(true));
   }, []);
 
   // The native root behind React matches the theme, so nothing unpainted —
   // a transition, the strip behind the keyboard — shows the system white.
   useEffect(() => {
-    if (colors.background) void SystemUI.setBackgroundColorAsync(colors.background).catch(() => undefined);
-  }, [colors.background]);
+    void SystemUI.setBackgroundColorAsync(colors.surface).catch(() => undefined);
+  }, [colors.surface]);
 
   // The splash comes down once the first screen has had frames to paint, not
   // in the same tick that first allows it to render: hiding it there exposed
@@ -93,7 +100,7 @@ function ThemedShell({ children }: { children: React.ReactNode }): React.ReactEl
   }, [ready]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <View className="flex-1 bg-surface">
       <StatusBar style={appearance === 'dark' ? 'light' : 'dark'} />
       {ready ? <NavigationTheme>{children}</NavigationTheme> : null}
     </View>
@@ -124,8 +131,18 @@ function AuthLifecycle({ children }: { children: React.ReactNode }): React.React
   // rotation or a notification tap is handled no matter which route is open.
   // The hook no-ops until the session is authenticated.
   usePushNotifications();
-  const toast = useToast();
-  const hasIncomingLink = useLinkRouting((message) => toast({ message, tone: 'error' }));
+  // Home-screen quick actions / app shortcuts become queued links (M9-07), like a notification tap.
+  useQuickActionLinks();
+  // Content shared from another app opens the Send to agent sheet (M9-08); on iOS the hand-off link already did.
+  const pathRef = useRef(pathname);
+  useEffect(() => {
+    pathRef.current = pathname;
+  }, [pathname]);
+  const openShareSheet = useCallback(() => {
+    if (pathRef.current !== '/share') router.push('/share');
+  }, []);
+  useShareIntake(openShareSheet);
+  const hasIncomingLink = useLinkRouting((message) => void toast({ kind: 'error', message }));
 
   // W09-a — the `global` scope, subscribed once for the app rather than once
   // per list tab. Without it the Chats / Runs / Automations lists have no live
@@ -169,8 +186,8 @@ function AuthGate({ children, routeName }: { children: React.ReactNode; routeNam
   // indistinguishable from "checked, and there is no session".
   if (initializing) {
     return (
-      <View className="flex-1 items-center justify-center">
-        <Spinner />
+      <View className="flex-1 items-center justify-center bg-surface">
+        <Spinner label="Loading" />
       </View>
     );
   }
@@ -204,14 +221,13 @@ function AuthGate({ children, routeName }: { children: React.ReactNode; routeNam
 function StorageLocked(): React.ReactElement {
   const { retryRestore } = useAuth();
   return (
-    <View className="flex-1 items-center justify-center gap-4 px-8">
+    <View className="flex-1 items-center justify-center gap-4 bg-surface px-8" testID="storage-locked">
       <Spinner />
-      <Text accessibilityRole="header" className="text-center text-lg font-semibold text-foreground">
+      <Text role="title" weight={600} align="center" accessibilityRole="header">
         Unlock to continue
       </Text>
-      <Text className="text-center text-sm leading-relaxed text-muted-foreground">
-        GeneratorAI keeps its sign-in in this device’s secure storage, which opens once the device is
-        unlocked.
+      <Text role="subhead" tone="fg-2" align="center">
+        GeneratorAI keeps its sign-in in this device’s secure storage, which opens once the device is unlocked.
       </Text>
       <Button label="Try again" variant="ghost" size="sm" onPress={retryRestore} />
     </View>
@@ -234,17 +250,13 @@ function ConnectionError({
 }): React.ReactElement {
   const { reconnect } = useAuth();
   return (
-    <View className="flex-1 items-center justify-center gap-4 px-8">
+    <View className="flex-1 items-center justify-center gap-4 bg-surface px-8" testID="connection-error">
       <ErrorState
         // A rejected saved session is not an unreachable host, and calling it
         // one sends people to check their Wi-Fi. It is also not a revocation:
         // the pairing is intact and a retry is the right first move.
         title={kind === 'credential' ? 'Sign-in needs refreshing' : 'Can’t reach your server'}
-        message={
-          kind === 'credential'
-            ? `${message} Try again — if it keeps failing, pair this phone from the host again.`
-            : message
-        }
+        error={kind === 'credential' ? `${message} Try again — if it keeps failing, pair this device from the host again.` : message}
         onRetry={() => {
           void reconnect();
         }}
@@ -282,10 +294,10 @@ function RootStack(): React.ReactElement {
 
 export default function RootLayout(): React.ReactElement {
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView className="flex-1">
       <SafeAreaProvider>
         {/* One keyboard source for the whole app: frame-accurate IME insets on
-            both platforms (see src/components/ui/keyboard.ts). */}
+            both platforms. */}
         <KeyboardProvider>
         <ThemeProvider>
           <PreferencesProvider>
@@ -298,22 +310,15 @@ export default function RootLayout(): React.ReactElement {
                       AuthGate so the connection survives a route change and
                       every screen's subscription rides the same socket. */}
                   <MuxStreamProvider>
-                    <ToastProvider>
-                      {/* Hosts the single shared long-press menu sheet;
-                          `ContextMenu`/`useContextMenu` no-op without it. */}
-                      <ContextMenuProvider>
-                        {/* app-lock-gate: the biometric <AppLockGate> wraps
-                            <AuthLifecycle> here — outside the auth gate so a locked
-                            app never renders a screen, inside the providers so
-                            the gate can read preferences and theme. */}
-                        <AppLockGate>
-                          <AuthLifecycle>
-                          <RootStack />
-                          </AuthLifecycle>
-                        </AppLockGate>
-                        {/* /app-lock-gate */}
-                      </ContextMenuProvider>
-                    </ToastProvider>
+                    {/* app-lock-gate: the biometric <AppLockGate> wraps <AuthLifecycle> here — outside the auth
+                        gate so a locked app never renders a screen, inside the providers so the gate can read
+                        preferences and theme. Toasts, dialogs and sheets are hosted by the (app) shell. */}
+                    <AppLockGate>
+                      <AuthLifecycle>
+                        <RootStack />
+                      </AuthLifecycle>
+                    </AppLockGate>
+                    {/* /app-lock-gate */}
                   </MuxStreamProvider>
                 </ServerQueryProvider>
                 </ServerScope>
