@@ -70,8 +70,9 @@ async function prepare(target) {
     await demo('battery', '-e', 'level', '100', '-e', 'plugged', 'false');
     await demo('network', '-e', 'wifi', 'show', '-e', 'level', '4');
     await demo('notifications', '-e', 'visible', 'false');
+    await agent(target, ['settings', 'animations', 'off']);
   }
-  await agent(target, ['settings', 'animations', 'off']);
+  // iOS: agent-device has no animation setting for the simulator; VRT mode forces Reduce Motion in the app.
 }
 
 async function restore(target) {

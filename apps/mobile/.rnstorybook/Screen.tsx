@@ -32,11 +32,14 @@ function DevelopmentStories(): React.ReactElement {
     };
     channel.on('storyRendered', rendered);
     channel.emit('updateGlobals', { globals: { theme: params.theme ?? 'instrument', mode: params.mode ?? 'dark', accent: params.accent ?? 'ink' } });
+    // Globals equal to the current ones re-render nothing, so no storyRendered follows: settle after a short wait.
+    const settle = setTimeout(rendered, 1500);
     return () => {
+      clearTimeout(settle);
       channel.off('storyRendered', rendered);
       cancelAnimationFrame(first);
       cancelAnimationFrame(second);
     };
   }, [params.theme, params.mode, params.accent, story, captureKey]);
-  return <View className="flex-1" testID="vrt-root"><Canvas />{readyKey === captureKey ? <View testID="vrt-ready" /> : null}</View>;
+  return <View className="flex-1" testID="vrt-root"><Canvas />{/* A sized, uncollapsed marker: an empty leaf view is pruned from the iOS accessibility tree, so the driver never saw it; a labelled element stays. */}{readyKey === captureKey ? <View collapsable={false} accessible accessibilityLabel="Story ready" className="absolute bottom-0 start-0" style={{ width: 4, height: 4 }} testID="vrt-ready" /> : null}</View>;
 }
