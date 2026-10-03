@@ -2,7 +2,7 @@
 // useNarrow — the container-query flag T-02 `railStacked` / T-03
 // `asideCollapsed` expect from their caller (the templates never watch their
 // own width). Measures the element the ref lands on, so it follows the main
-// card rather than the window.
+// card rather than the window. Shared by every T-02/T-03 page (projects, workflows, automations).
 // ────────────────────────────────────────────────────────────────
 
 import { useCallback, useRef, useState } from 'react';

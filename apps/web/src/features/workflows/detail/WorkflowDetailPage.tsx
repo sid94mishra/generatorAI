@@ -39,7 +39,7 @@ import { EmptyState } from '@/ui/primitives/EmptyState/EmptyState.js';
 import { SkeletonRows } from '@/ui/primitives/Skeleton/Skeleton.js';
 import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { DetailPage } from '@/ui/templates/DetailPage/DetailPage.js';
-import { useNarrow } from '../useNarrow.js';
+import { useNarrow } from '@/lib/useNarrow.js';
 import { formatShortDate, plural } from '../workflowFormat.js';
 import { SetupCard, StagesCard, VariablesCard } from './DefinitionCards.js';
 import { RunsRail } from './RunsRail.js';

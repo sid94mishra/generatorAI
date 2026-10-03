@@ -44,7 +44,7 @@ import { Textarea } from '@/ui/primitives/Textarea/Textarea.js';
 import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { DetailPage } from '@/ui/templates/DetailPage/DetailPage.js';
 import { PR_STATE_TONE } from './detail/PullRequestsTab.js';
-import { useNarrow } from './useNarrow.js';
+import { useNarrow } from '@/lib/useNarrow.js';
 import { formatWhen } from '@/lib/formatWhen.js';
 
 const FILE_STATUS_TONE: Record<PullRequestFile['status'], string> = {
