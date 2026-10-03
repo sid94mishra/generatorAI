@@ -3,17 +3,16 @@
 // start, the centred title, the text confirm at the end; Android ✕ + Title L at the start, the 14/600 text confirm
 // at the end. While dirty the header shows the change count, and Cancel / Android Back / router removal ask
 // "Discard changes?". Keyboard-aware scrolling body; optional stepper and sticky wizard bar. The bar clears the
-// status bar with a position-aware safe area (the native SafeAreaView measures where the modal actually sits): an
-// iOS full-screen modal is presented over the whole window — outside the shell column that pays the top inset — so
-// the context's (consumed) top inset reads 0 there, while an Android modal stays inside the column.
+// status bar with `useModalInsets()`: an iOS full-screen modal is presented over the whole window, outside the shell
+// column that pays the top inset (the consumed context inset reads 0 there, and a nested native SafeAreaView finds
+// no provider inside a native modal), so it pays the window's top inset; an Android modal stays inside the column.
 import React from 'react';
 import { View } from 'react-native';
-import { SafeAreaView, type Edge } from 'react-native-safe-area-context';
 import { KeyboardAwareScrollView, KeyboardStickyView } from '../../lib/styled';
 
 import { useDirtyGuard } from '../DirtyGuard/useDirtyGuard';
 import { nativePlatform } from '../../platform/geometry';
-import { useInsets } from '../../platform/insets';
+import { useModalInsets } from '../../platform/insets';
 import { IconButton } from '../../primitives/IconButton';
 import { Pressable } from '../../primitives/Pressable';
 import { Spinner } from '../../primitives/Spinner';
@@ -21,8 +20,6 @@ import { Text } from '../../primitives/Text';
 import type { FullScreenEditorProps } from './FullScreenEditor.types';
 
 export type { FullScreenEditorProps } from './FullScreenEditor.types';
-
-const TOP_EDGE: Edge[] = ['top'];
 
 /** "3 changes" / "1 change" (exported for tests). */
 export function changeCountText(dirty: boolean, count?: number): string | undefined {
@@ -45,7 +42,7 @@ function Confirm({ label, onPress, disabled = false, loading = false }: NonNulla
 }
 
 export function FullScreenEditor({ title, primary, cancelLabel = 'Cancel', onCancel, dirty, dirtyCount, stepper, stickyBar, body = 'scroll', navigation, children, testID }: FullScreenEditorProps): React.ReactElement {
-  const insets = useInsets();
+  const insets = useModalInsets();
   const { guard } = useDirtyGuard(dirty, { onDiscard: onCancel, navigation });
   const cancel = (): void => void guard(onCancel);
   const changes = changeCountText(dirty, dirtyCount);
@@ -63,21 +60,19 @@ export function FullScreenEditor({ title, primary, cancelLabel = 'Cancel', onCan
     </View>
   );
   return (
-    <View testID={testID} accessibilityViewIsModal onAccessibilityEscape={cancel} className="flex-1 bg-surface">
-      <SafeAreaView edges={TOP_EDGE} mode="padding">
-        <View className="min-h-dialog-bar flex-row items-center gap-1 px-2">
-          {android ? (
-            <IconButton icon="x" label={cancelLabel} onPress={cancel} />
-          ) : (
-            <Pressable onPress={cancel} feedback="none" accessibilityRole="button" accessibilityLabel={cancelLabel} className="z-10 px-2">
-              <Text role="body">{cancelLabel}</Text>
-            </Pressable>
-          )}
-          {heading}
-          {android ? null : <View className="flex-1" />}
-          {primary ? <Confirm {...primary} /> : null}
-        </View>
-      </SafeAreaView>
+    <View testID={testID} accessibilityViewIsModal onAccessibilityEscape={cancel} className="flex-1 bg-surface" style={{ paddingTop: insets.top }}>
+      <View className="min-h-dialog-bar flex-row items-center gap-1 px-2" testID={testID ? `${testID}-bar` : 'full-screen-editor-bar'}>
+        {android ? (
+          <IconButton icon="x" label={cancelLabel} onPress={cancel} />
+        ) : (
+          <Pressable onPress={cancel} feedback="none" accessibilityRole="button" accessibilityLabel={cancelLabel} className="z-10 px-2">
+            <Text role="body">{cancelLabel}</Text>
+          </Pressable>
+        )}
+        {heading}
+        {android ? null : <View className="flex-1" />}
+        {primary ? <Confirm {...primary} /> : null}
+      </View>
       {stepper ? <View className="px-gutter pb-2">{stepper}</View> : null}
       {body === 'fixed' ? (
         <View className="flex-1 pt-2">{children}</View>

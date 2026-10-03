@@ -25,7 +25,8 @@ import { confirm } from '../../../ui/native/AlertDialog';
 import { ContextMenu } from '../../../ui/native/ContextMenu';
 import { Menu } from '../../../ui/native/Menu';
 import type { MenuEntry } from '../../../ui/native/Menu/Menu.types';
-import { SegmentedControl } from '../../../ui/native/SegmentedControl';
+import { SegmentedControl, estimateSegmentsWidth } from '../../../ui/native/SegmentedControl';
+import { useFontScale } from '../../../ui/platform/fontScale';
 import { haptic } from '../../../ui/platform/haptics';
 import { overflowIcon } from '../../../ui/platform/overflow';
 import { Badge } from '../../../ui/primitives/Badge';
@@ -47,6 +48,11 @@ import { changeCount, freshErrors, isDirty, useBuilderStore } from './builderSto
 import { useBuilderDraft, useValidateDraft } from './useBuilderDraft';
 
 type Href = Parameters<typeof router.replace>[0];
+const VIEW_SEGMENTS = [
+  { value: 'list' as const, label: 'List' },
+  { value: 'graph' as const, label: 'Graph' },
+];
+
 type StageMenuId = 'up' | 'down' | 'edit' | 'duplicate' | 'delete' | 'loop';
 
 export const RISK_WORD: Record<RiskFlag, string> = {
@@ -197,6 +203,8 @@ export default function BuilderScreen(): React.ReactElement {
   const writes = useBuilderWrites(id);
   const { validate } = useValidateDraft(id);
   const store = useBuilderStore.getState;
+  const fontScale = useFontScale();
+  const viewSwitchWidth = Math.max(160, estimateSegmentsWidth(VIEW_SEGMENTS, fontScale) + 32);
   const [busy, setBusy] = useState<'save' | 'publish' | 'run' | null>(null);
 
   const graph = draft?.graph;
@@ -353,17 +361,9 @@ export default function BuilderScreen(): React.ReactElement {
   const toolbar = (
     <View className="gap-1 px-gutter pb-2">
       <View className="flex-row items-center gap-1">
-        <View className="shrink-0">
-          <SegmentedControl<'list' | 'graph'>
-            accessibilityLabel="Builder view"
-            value={draft.view}
-            onValueChange={(v) => store().setView(id, v)}
-            segments={[
-              { value: 'list', label: 'List' },
-              { value: 'graph', label: 'Graph' },
-            ]}
-            testID="builder-view"
-          />
+        {/* An explicit width (from the labels, at the font scale): in a row the native control has none of its own. */}
+        <View className="shrink-0" style={{ width: viewSwitchWidth }}>
+          <SegmentedControl<'list' | 'graph'> accessibilityLabel="Builder view" value={draft.view} onValueChange={(v) => store().setView(id, v)} segments={VIEW_SEGMENTS} fullWidth testID="builder-view" />
         </View>
         <View className="flex-1" />
         <IconButton icon="undo" label="Undo" size="sm" disabled={!draft.past.length} onPress={() => store().undo(id)} testID="builder-undo" />

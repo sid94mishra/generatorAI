@@ -7,6 +7,8 @@
 import React, { createContext, useContext } from 'react';
 import { SafeAreaInsetsContext, type EdgeInsets } from 'react-native-safe-area-context';
 
+import { nativePlatform } from './geometry';
+
 const ZERO: EdgeInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 const WindowInsetsContext = createContext<EdgeInsets | null>(null);
 
@@ -22,4 +24,16 @@ export function useWindowInsets(): EdgeInsets {
   const window = useContext(WindowInsetsContext);
   const local = useInsets();
   return window ?? local;
+}
+
+/**
+ * Insets for the body of a full-screen modal route. iOS presents it natively over the whole window — outside the
+ * shell column that pays the top inset, and outside any native safe-area provider (a nested native SafeAreaView
+ * finds none there) — so it takes the window's insets from the shell. An Android modal is a screen inside the
+ * column, which already paid them: it takes the local ones.
+ */
+export function useModalInsets(platform: 'ios' | 'android' = nativePlatform): EdgeInsets {
+  const window = useWindowInsets();
+  const local = useInsets();
+  return platform === 'ios' ? window : local;
 }
