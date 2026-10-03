@@ -282,19 +282,28 @@ export function ChatCreatePage() {
     cancel,
   };
   useEffect(() => {
-    function onKeyDown(e: globalThis.KeyboardEvent) {
+    const inPage = (e: globalThis.KeyboardEvent) => {
       const root = rootRef.current;
       const target = e.target as Node | null;
-      if (!root || e.defaultPrevented || !(target === document.body || (target && root.contains(target)))) return;
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        shortcuts.current.submit();
-      } else if (e.key === 'Escape' && !popupOpen(e.target)) {
-        shortcuts.current.cancel();
-      }
+      return !!root && (target === document.body || (!!target && root.contains(target)));
+    };
+    // Capture phase for ⌘/Ctrl ↵: a focused switch or radio must not take the Enter first.
+    function onSubmitChord(e: globalThis.KeyboardEvent) {
+      if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || !inPage(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      shortcuts.current.submit();
     }
+    function onKeyDown(e: globalThis.KeyboardEvent) {
+      if (e.defaultPrevented || !inPage(e)) return;
+      if (e.key === 'Escape' && !popupOpen(e.target)) shortcuts.current.cancel();
+    }
+    document.addEventListener('keydown', onSubmitChord, true);
     document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onSubmitChord, true);
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, []);
 
   // ── Derived display ───────────────────────────────────────────

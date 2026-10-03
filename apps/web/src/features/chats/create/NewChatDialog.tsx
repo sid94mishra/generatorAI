@@ -141,13 +141,16 @@ export function NewChatDialog() {
   submitRef.current = handleSubmit;
   useEffect(() => {
     if (!isOpen) return;
+    // Capture phase: ⌘/Ctrl ↵ submits from any field — a focused switch or radio
+    // (Orchestrate mode) used to take the Enter, flip itself and swallow the chord.
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
+      if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
+      e.stopPropagation();
       void submitRef.current();
     };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
   }, [isOpen]);
 
   function openFullPage() {
