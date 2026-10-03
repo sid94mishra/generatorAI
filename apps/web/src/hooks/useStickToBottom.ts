@@ -16,11 +16,30 @@
 // CSS smooth-scroll (which lags and fights the next flush), is what makes
 // following feel smooth. The explicit "jump to latest" is the one place a
 // smooth scroll is right, because the user asked for the travel.
+//
+// Only the READER unpins. A scroll event arrives a frame after the write that
+// caused it, and a large response grows by more than the threshold between
+// the two (a table, a code block, a burst of streamed markdown). Reading that
+// event as "the reader left the bottom" stopped following in the middle of
+// every long answer. So a scroll event unpins only when the view moved UP;
+// one that lands lower (our own follow, the reader scrolling down) keeps the
+// current state, and reaching the bottom always pins.
 // ────────────────────────────────────────────────────────────────
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const PIN_THRESHOLD_PX = 80;
+
+/**
+ * Whether the view keeps following after a scroll event: reaching the bottom
+ * pins, moving up away from it unpins, anything else (our own follow write
+ * landing short of content that grew meanwhile, scrolling down) keeps the state.
+ */
+export function nextPinned(pinned: boolean, scroll: { near: boolean; movedUp: boolean }): boolean {
+  if (scroll.near) return true;
+  if (scroll.movedUp) return false;
+  return pinned;
+}
 
 export interface StickToBottom {
   ref: React.RefObject<HTMLDivElement | null>;
@@ -42,18 +61,7 @@ export function useStickToBottom(dep: unknown): StickToBottom {
     if (!el) return;
     let frame = 0;
     let lastShow: boolean | null = null;
-    const onScroll = () => {
-      const near = el.scrollHeight - el.scrollTop - el.clientHeight < PIN_THRESHOLD_PX;
-      pinnedRef.current = near;
-      // Only touch React state on a transition — this handler runs on every
-      // scroll event, including the ones our own follow writes cause.
-      if (lastShow !== !near) {
-        lastShow = !near;
-        setShowJumpToLatest(!near);
-      }
-    };
-    el.addEventListener('scroll', onScroll, { passive: true });
-
+    let lastTop = el.scrollTop;
     const follow = () => {
       if (!pinnedRef.current || frame) return;
       frame = requestAnimationFrame(() => {
@@ -61,6 +69,22 @@ export function useStickToBottom(dep: unknown): StickToBottom {
         if (pinnedRef.current) el.scrollTop = el.scrollHeight;
       });
     };
+    const onScroll = () => {
+      const top = el.scrollTop;
+      const near = el.scrollHeight - top - el.clientHeight < PIN_THRESHOLD_PX;
+      pinnedRef.current = nextPinned(pinnedRef.current, { near, movedUp: top < lastTop - 1 });
+      lastTop = top;
+      const show = !pinnedRef.current;
+      // Only touch React state on a transition — this handler runs on every
+      // scroll event, including the ones our own follow writes cause.
+      if (lastShow !== show) {
+        lastShow = show;
+        setShowJumpToLatest(show);
+      }
+      if (pinnedRef.current && !near) follow();
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+
     const ro = new ResizeObserver(follow);
     if (el.firstElementChild) ro.observe(el.firstElementChild);
     // The VIEWPORT changes height too, and that hides the latest content just
