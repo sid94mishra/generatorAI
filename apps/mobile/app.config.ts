@@ -111,6 +111,14 @@ const FACE_ID_USAGE =
 // on the App ID (with Time Sensitive Notifications) before a device build;
 // @bacons/apple-targets signs the extensions with `APPLE_TEAM_ID`.
 const APP_GROUP = 'group.dev.generatorai.app';
+
+// ── Crash-report symbols (MD-42, 06 §8.6, MD-197) ───────────────────
+// The reporter itself is opt-in at runtime (Settings › Diagnostics). Release symbols — the iOS dSYMs and JS source
+// maps (Xcode build phases) and the Android R8 mapping + native symbols (Sentry Android Gradle plugin) — upload only
+// when all four variables are set in the build environment (EAS secrets); otherwise the plugin is not applied and
+// builds never call sentry-cli.
+const SENTRY_ENV = ['SENTRY_AUTH_TOKEN', 'SENTRY_ORG', 'SENTRY_PROJECT', 'SENTRY_URL'] as const;
+const sentryUpload = SENTRY_ENV.every((key) => Boolean(process.env[key]?.trim()));
 const appleTeamId = process.env['APPLE_TEAM_ID']?.trim() || undefined;
 
 const config: ExpoConfig = {
@@ -243,6 +251,27 @@ const config: ExpoConfig = {
   plugins: [
     // First on purpose: its entitlements mod runs after every other plugin's (see the file).
     './plugins/withUniqueAppGroups',
+    ...(sentryUpload
+      ? [
+          [
+            '@sentry/react-native',
+            {
+              url: process.env['SENTRY_URL'],
+              organization: process.env['SENTRY_ORG'],
+              project: process.env['SENTRY_PROJECT'],
+              experimental_android: {
+                enableAndroidGradlePlugin: true,
+                includeProguardMapping: true,
+                autoUploadProguardMapping: true,
+                uploadNativeSymbols: true,
+                autoUploadNativeSymbols: true,
+                includeNativeSources: false,
+                includeSourceContext: false,
+              },
+            },
+          ] as [string, Record<string, unknown>],
+        ]
+      : []),
     ...(process.env['GAI_A11Y_AUDIT'] === '1' ? ['./plugins/withA11yAuditTarget'] : []),
     'expo-router',
     'expo-asset',

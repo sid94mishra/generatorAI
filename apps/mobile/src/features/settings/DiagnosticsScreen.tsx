@@ -1,9 +1,10 @@
 // Settings › Diagnostics (MSetDiagnostics, MDF-119; `/settings/diagnostics`, header Refresh): "Auto-refreshing every
 // 5 s · updated hh:mm:ss"; Server — status (`HEALTH.server` dot + word; uptime, chats and runs in flight), agent
 // provider, database, version; This <device> — connection (`HEALTH.connection` + direct / relay), key protection, app
-// version; Runtime — telemetry and sandbox. Not rendered: the server log / export (MG-18), "up to date" (MG-26) and
-// the crash-report opt-in (M10-06).
-import React from 'react';
+// version; Runtime — telemetry and sandbox; Crash reports — the opt-in reporter (MD-42, M10-06, MD-197): a DSN field and
+// "Send crash reports", off by default and disabled until the DSN is valid. Not rendered: the server log / export (MG-18)
+// and "up to date" (MG-26).
+import React, { useState } from 'react';
 import { View } from 'react-native';
 import Constants from 'expo-constants';
 import { HEALTH, type HealthTone } from '@generatorai/shared';
@@ -12,9 +13,13 @@ import { useConnectionHealth } from '../../blocks/ConnectionStatus';
 import { useSystemInfo } from '../../blocks/StatsCards';
 import { useAuth } from '../../services/auth/AuthProvider';
 import { describeTransport } from '../../services/auth/describeTransport';
+import { dsnHost, isValidDsn } from '../../services/native/crashScrub';
+import { setCrashSettings, useCrashSettings } from '../../services/native/crashSettings';
 import { ListRow } from '../../ui/layout/ListRow';
 import { ListSection } from '../../ui/layout/ListSection';
 import { formatBytes } from '../../ui/lib/format';
+import { Field } from '../../ui/primitives/Field';
+import { Input } from '../../ui/primitives/Input';
 import { nouns } from '../../ui/platform/nouns';
 import { StatusDot } from '../../ui/primitives/StatusDot';
 import { Text } from '../../ui/primitives/Text';
@@ -23,6 +28,41 @@ import { keyProtection, uptimeLabel } from './model/deviceView';
 import { useHealth, useHealthConfig } from './queries';
 
 const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+/** Crash reports (MD-42): opt-in, per device, to a Sentry-compatible server the user runs or chooses. */
+function CrashReports(): React.ReactElement {
+  const settings = useCrashSettings();
+  const [draft, setDraft] = useState(settings.dsn);
+  const valid = isValidDsn(draft);
+  const host = dsnHost(settings.dsn);
+  const commit = (): void => {
+    const dsn = draft.trim();
+    if (dsn === settings.dsn) return;
+    // A cleared or invalid DSN also turns sending off.
+    setCrashSettings({ dsn, ...(isValidDsn(dsn) ? {} : { enabled: false }) });
+  };
+  return (
+    <ListSection
+      title="Crash reports"
+      footer="Off by default. A report holds the error type, its stack and the device model — never messages, prompts, file paths or server addresses — and goes only to the Sentry-compatible server you enter (self-hosted Sentry or GlitchTip)."
+    >
+      <Field {...(draft.trim() && !valid ? { error: 'Enter a DSN like https://key@sentry.example.com/1' } : {})}>
+        <Input label="DSN" kind="url" value={draft} onChangeText={setDraft} onBlur={commit} onSubmitEditing={commit} returnKeyType="done" placeholder="https://key@sentry.example.com/1" testID="diagnostics-crash-dsn" />
+      </Field>
+      <ListRow
+        kind="toggle"
+        icon="warning"
+        title="Send crash reports"
+        subtitle={settings.enabled && host ? `To ${host}` : 'Off'}
+        switchValue={settings.enabled && valid}
+        onValueChange={(enabled) => setCrashSettings({ dsn: draft.trim(), enabled })}
+        disabled={!valid}
+        {...(!valid ? { disabledReason: 'Enter a DSN first.' } : {})}
+        testID="diagnostics-crash-reports"
+      />
+    </ListSection>
+  );
+}
 
 function Mark({ health, label }: { health: HealthTone; label: string }): React.ReactElement {
   return (
@@ -90,6 +130,8 @@ export default function DiagnosticsScreen(): React.ReactElement {
           <ListRow kind="value" icon="layers" title="Streaming" value="SSE (durable)" />
         )}
       </ListSection>
+
+      <CrashReports />
     </SettingsPage>
   );
 }

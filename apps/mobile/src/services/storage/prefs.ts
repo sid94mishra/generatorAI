@@ -66,4 +66,7 @@ export const PREF_KEYS = {
   liveChats: 'generatorai.live.chats',
   /** Locally disabled skills — mirrors the web's `catalogPrefsStore`. */
   disabledSkills: 'generatorai.disabled-skills',
+  /** Opt-in crash reporting (MD-42): off by default; the Sentry-compatible DSN the user entered (this device only). */
+  crashReports: 'generatorai.crash-reports.enabled',
+  crashDsn: 'generatorai.crash-reports.dsn',
 } as const;
