@@ -78,6 +78,9 @@
       "protobufjs@7": "^7.6.6",
       "protobufjs@8": "^8.8.0",
       "@protobufjs/utf8": "^1.1.1"
+    },
+    "patchedDependencies": {
+      "@bacons/apple-targets@5.0.0": "patches/@bacons__apple-targets@5.0.0.patch"
     }
   },
   "devDependencies": {

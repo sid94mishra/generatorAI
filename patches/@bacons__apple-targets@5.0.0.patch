@@ -1,0 +1,16 @@
+diff --git a/build/with-xcode-changes.js b/build/with-xcode-changes.js
+index 96ded68c694a0eaae6e4068f09a55c50b119bc0c..0fda2822f6c4ec99778f4bbf128a818a7a867241 100644
+--- a/build/with-xcode-changes.js
++++ b/build/with-xcode-changes.js
+@@ -62,7 +62,10 @@ async function applyXcodeChanges(config, project, props) {
+     }
+     const targets = getExtensionTargets();
+     const productName = props.productName;
+-    let targetToUpdate = (_a = targets.find((target) => target.props.productName === productName)) !== null && _a !== void 0 ? _a : targets[0];
++    // GeneratorAI patch (mobile MD-191): match an existing target by product name only. Upstream falls back to the
++    // first extension of the same type, which hijacks targets other plugins own (expo-widgets' ExpoWidgetsTarget is a
++    // WidgetKit extension like targets/controls) and crashes rebuilding their configuration list.
++    let targetToUpdate = (_a = targets.find((target) => target.props.productName === productName)) !== null && _a !== void 0 ? _a : undefined;
+     if (targetToUpdate) {
+         (0, util_1.warnOnce)(`Target "${targetToUpdate.props.productName}" already exists, updating instead of creating a new one`);
+     }
