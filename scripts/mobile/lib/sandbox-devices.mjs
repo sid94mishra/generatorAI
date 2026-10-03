@@ -173,6 +173,37 @@ async function waitForIdentifier(target, ids, timeout) {
   }
   throw new Error(`None of ${ids.join(', ')} appeared on ${target.name} within ${timeout / 1000} s`);
 }
+/**
+ * Scroll a control into view and press it. A press that lands while a screen is still animating in (the
+ * consent → /paired transition) fails with COMMAND_FAILED, so it retries after the transition settles.
+ */
+/** Screen-point centre of the element with this testID, from the native tree. */
+async function centreOf(target, id) {
+  const snapshot = await readSnapshot(target, false);
+  const node = (snapshot.data?.snapshot?.nodes ?? snapshot.data?.nodes ?? []).find(item => item.identifier === id);
+  const rect = node?.rect ?? node?.frame ?? node?.bounds;
+  if (!rect) throw new Error(`${id} is not in the native tree on ${target.name}`);
+  return [String(Math.round(rect.x + rect.width / 2)), String(Math.round(rect.y + rect.height / 2))];
+}
+async function scrollAndPress(target, id, next = []) {
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      // A press reported as failed may still have landed: stop once the next screen is showing.
+      if (attempt > 0 && next.length && [...(await snapshotIdentifiers(target))].some(found => next.includes(found))) return;
+      await agent(target, ['scroll', 'down', '--until', `id="${id}"`, '--settle']);
+      try {
+        await agent(target, ['press', `id="${id}"`, '--settle']);
+      } catch {
+        // agent-device refuses a selector press when a full-screen pass-through container (the native toolbar
+        // host, the overlay window) overlaps the control, although a real tap reaches it. Tap its centre as a user would.
+        await agent(target, ['press', ...(await centreOf(target, id)), '--settle']);
+      }
+      return;
+    } catch (error) { lastError = error; await delay(1500); }
+  }
+  throw lastError;
+}
 export async function pairTarget(session, target, { repair = false, noConfirm = false } = {}) {
   const id = targetId(target);
   const installed = target.platform === 'ios'
@@ -231,20 +262,17 @@ export async function pairTarget(session, target, { repair = false, noConfirm = 
   // M7-08 (MD-34): the link only pre-fills the 12-character code and the server address ("Server found" callout);
   // Connect opens the consent step. Every control is reached by its testID — no snapshot refs, no typing.
   await agent(target, ['wait', 'id="pairing-scanned"', '30000']);
-  await agent(target, ['scroll', 'down', '--until', 'id="pairing-connect"', '--settle']);
-  await agent(target, ['press', 'id="pairing-connect"', '--settle']);
+  await scrollAndPress(target, 'pairing-connect', ['pairing-fingerprint']);
   if (noConfirm) { console.log(`Consent is waiting on ${target.name}; pairing has not completed.`); return; }
   await agent(target, ['wait', 'id="pairing-fingerprint"', '30000']);
   // The device name keeps its default ("My iPhone", "My phone", …): the Name field auto-capitalises and
   // auto-corrects, so typed text never verifies on iOS (agent-device fill → COMMAND_FAILED), and the new device is
   // identified by its id instead (findNewPairing). No keyboard opens, so nothing covers "Pair".
-  await agent(target, ['scroll', 'down', '--until', 'id="pairing-confirm"', '--settle']);
-  await agent(target, ['press', 'id="pairing-confirm"', '--settle']);
+  await scrollAndPress(target, 'pairing-confirm', ['paired-continue', 'pairing-error']);
   // The success step (`/paired`): Continue skips the optional approval-key setup (Settings › Security later).
   await waitForIdentifier(target, ['paired-continue', 'pairing-error'], 30000);
   if (await hasIdentifier(target, 'pairing-error')) throw new Error(`Pairing ${target.name} failed on the consent step; see the app's error callout`);
-  await agent(target, ['scroll', 'down', '--until', 'id="paired-continue"', '--settle']);
-  await agent(target, ['press', 'id="paired-continue"', '--settle']);
+  await scrollAndPress(target, 'paired-continue', ['home-new-chat', 'menu-button']);
   // Home on a phone (sidebar toggle `menu-button`) or a tablet (persistent sidebar; `home-new-chat` either way).
   await waitForIdentifier(target, ['home-new-chat', 'menu-button'], 30000);
   await recordPairing(session, target, before, started);
