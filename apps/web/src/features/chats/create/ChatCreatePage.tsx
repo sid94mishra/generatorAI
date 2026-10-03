@@ -366,8 +366,8 @@ export function ChatCreatePage() {
     </FormSection>
   );
 
+  // Whoever orchestrates — a model in orchestrate mode or an orchestrator agent — runs on this model.
   const showPowerfulNudge =
-    values.who === 'model' &&
     draft.orchestratorMode &&
     activeModel?.category != null &&
     activeModel.category !== 'powerful';
