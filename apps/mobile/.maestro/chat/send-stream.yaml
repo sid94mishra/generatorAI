@@ -7,6 +7,7 @@ env: {FRESH_CHAT: stream}
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///chats/${CHAT_STREAM_ID}
 - extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- runFlow: ../_subflows/pane-closed.yaml
 - tapOn: {id: composer-input}
 - inputText: Show the mobile markdown streaming fixture
 - runFlow:
@@ -17,9 +18,10 @@ env: {FRESH_CHAT: stream}
 - extendedWaitUntil: {visible: {id: composer-send}, timeout: 10000}
 - tapOn: {id: composer-send}
 - extendedWaitUntil: {visible: ".*The stream is complete.*", timeout: 60000}
-- assertVisible: ".*Mobile streaming check.*"
-- assertVisible: ".*export function total.*"
+# The transcript follows the stream to its end; a code block reads as one element ("Code, TypeScript, 6 lines").
 - assertVisible: {id: transcript-list}
+- assertVisible: "Code, TypeScript, 6 lines"
+- scrollUntilVisible: {element: ".*Mobile streaming check.*", direction: UP, timeout: 60000, visibilityPercentage: 50}
 - assertNotVisible: {id: composer-stop}
 - assertNotVisible: {id: composer-force-reset}
 - assertVisible: Dictate a message

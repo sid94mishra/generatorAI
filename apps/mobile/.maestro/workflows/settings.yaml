@@ -3,6 +3,8 @@ name: workflows · workflow settings (sections, variable editor, reserved name)
 # M8-07 (MWorkflowSettings; MDF-89). Adds a variable to the sandbox's "Sandbox Workflow" in the builder draft,
 # then cancels the builder — nothing is saved.
 tags: [workflows]
+# The paired device has the default scopes; this flow edits, so it adds the route-policy scope for its run.
+env: {DEVICE_SCOPES: "write:workflows"}
 ---
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///workflows
@@ -25,8 +27,8 @@ tags: [workflows]
 - inputText: "risk_level"
 - tapOn: {id: variable-editor-done}
 - assertVisible: {id: workflow-variable-risk_level}
-- back
-- back
+- runFlow: ../_subflows/back.yaml
+- runFlow: ../_subflows/back.yaml
 - assertVisible: "● Unsaved changes"
 - tapOn: "Cancel"
 - tapOn: "Discard"

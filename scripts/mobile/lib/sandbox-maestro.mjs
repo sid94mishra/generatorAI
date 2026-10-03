@@ -20,6 +20,9 @@ async function flowFiles(input) {
     .map(entry => flowFiles(path.join(input, entry.name))))).flat().sort();
 }
 
+/** Scopes a flow may add for its run (DEVICE_SCOPES), beyond the pairing's defaults; restored afterwards. */
+const FLOW_SCOPES = ['write:files', 'write:workspaces', 'exec:terminal', 'exec:browser', 'write:projects', 'write:workflows', 'admin:settings'];
+
 export async function flowMetadata(file) {
   const docs = parseAllDocuments(await fs.readFile(file, 'utf8'));
   if (docs.some(doc => doc.errors.length)) throw new Error(`Invalid Maestro YAML: ${file}`);
@@ -28,7 +31,7 @@ export async function flowMetadata(file) {
   const fresh = config.env?.FRESH_CHAT == null ? [] : String(config.env.FRESH_CHAT).split(',').map(key => key.trim());
   for (const key of fresh) if (!(key in CHAT_NAMES)) throw new Error(`Unknown FRESH_CHAT '${key}' in ${file}`);
   const scopes = config.env?.DEVICE_SCOPES == null ? [] : String(config.env.DEVICE_SCOPES).split(',').map(scope => scope.trim());
-  for (const scope of scopes) if (!['write:files', 'write:workspaces', 'exec:terminal'].includes(scope)) {
+  for (const scope of scopes) if (!FLOW_SCOPES.includes(scope)) {
     throw new Error(`Unsupported characterization scope '${scope}' in ${file}`);
   }
   return { fresh, scopes, pending: config.env?.PENDING_GATE === true || config.env?.PENDING_GATE === 'true', tags: config.tags ?? [], name: config.name ?? path.basename(file).replace(/\.ya?ml$/, ''),
@@ -218,7 +221,7 @@ export async function runMaestro(session, target, args, { verify } = {}) {
         const argv = ['--device', id, ...commands, ...Object.entries(env).flatMap(([key, value]) => ['-e', `${key}=${value}`])];
         const spawnArgs = windows ? ['--enable-native-access=ALL-UNNAMED', '-classpath',
           path.join(path.dirname(path.dirname(maestro)), 'lib', '*'), 'maestro.cli.AppKt', ...argv] : argv;
-        const child = spawn(executable, spawnArgs, { cwd: ROOT, stdio: 'inherit', env: { ...process.env, MAESTRO_CLI_NO_ANALYTICS: '1', MAESTRO_DRIVER_STARTUP_TIMEOUT: '180000' } });
+        const child = spawn(executable, spawnArgs, { cwd: ROOT, stdio: 'inherit', env: { ...process.env, MAESTRO_CLI_NO_ANALYTICS: '1', MAESTRO_DRIVER_STARTUP_TIMEOUT: '420000' } });
         child.once('error', reject); child.once('exit', (code, signal) => resolve(signal ? 1 : code));
       });
       if (metadata.pending && target.platform === 'ios') {

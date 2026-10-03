@@ -11,7 +11,8 @@ tags: [smoke, chats]
 - tapOn: {id: chats-new}
 - extendedWaitUntil: {visible: {id: new-chat-sheet}, timeout: 15000}
 - assertVisible: {id: new-chat-create, enabled: false}
-- tapOn: {id: new-chat-who-model}
+# The "Who works on this" control is native on iOS (segments carry no testID): by label on both platforms.
+- tapOn: "Just a model"
 - tapOn: {id: new-chat-task}
 - inputText: Say hello from the mobile New chat flow
 - runFlow:
@@ -20,4 +21,5 @@ tags: [smoke, chats]
       - hideKeyboard
 - tapOn: {id: new-chat-create}
 - extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- runFlow: ../_subflows/pane-closed.yaml
 - assertVisible: ".*Say hello from the mobile New chat flow.*"

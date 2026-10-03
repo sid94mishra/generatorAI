@@ -1,0 +1,12 @@
+appId: ${APP_ID}
+# Back on both platforms: Android's Back key; on iOS (no Back key) the header's back button or a sheet's close button.
+---
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - back
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: {text: "Back|Close", index: 0}
+      - waitForAnimationToEnd

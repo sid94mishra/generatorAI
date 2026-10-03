@@ -3,6 +3,8 @@ name: automations · create (manual), run now, execution sheet
 # M7-04 (MAutomations, MAutomationCreate1–4, MAutomationDetail, MAutomationExecution). Replaces the automation parts
 # of the web-preview e2e/audit-scenarios.mjs (08 §6.3). Needs write:workflows + exec:agent and a seeded workflow.
 tags: [automations]
+# The paired device has the default scopes; this flow edits, so it adds the route-policy scope for its run.
+env: {DEVICE_SCOPES: "write:workflows"}
 ---
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///automations

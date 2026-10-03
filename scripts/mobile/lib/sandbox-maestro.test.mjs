@@ -15,7 +15,7 @@ test('reads Maestro flow headers and excludes shared command fragments', async (
     assert.equal(await flowMetadata(file), null);
     await fs.writeFile(file, 'appId: ${APP_ID}\nenv: {FRESH_CHAT: invented}\n---\n- launchApp\n');
     await assert.rejects(flowMetadata(file), /Unknown FRESH_CHAT/);
-    await fs.writeFile(file, 'appId: app\nenv: {DEVICE_SCOPES: "admin:settings"}\n---\n- launchApp\n');
+    await fs.writeFile(file, 'appId: app\nenv: {DEVICE_SCOPES: "admin:devices"}\n---\n- launchApp\n');
     await assert.rejects(flowMetadata(file), /Unsupported characterization scope/);
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });

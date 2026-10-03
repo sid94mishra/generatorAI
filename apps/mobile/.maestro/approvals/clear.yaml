@@ -6,11 +6,12 @@ tags: [approvals]
 ---
 - runFlow: ../_subflows/launch.yaml
 - extendedWaitUntil: {visible: {id: home-needs}, timeout: 30000}
+# A row's Review button is announced as "Review <title>" (the row title disambiguates it for VoiceOver).
 - repeat:
-    while: {visible: "Review"}
+    while: {visible: "Review .+"}
     times: 6
     commands:
-      - tapOn: "Review"
+      - tapOn: "Review .+"
       - extendedWaitUntil: {visible: {id: gate-card}, timeout: 20000}
       - tapOn: {id: gate-permission-deny}
       - tapOn: {id: gate-permission-confirm_deny}

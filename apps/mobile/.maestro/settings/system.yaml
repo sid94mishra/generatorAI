@@ -20,8 +20,8 @@ tags: [settings]
 - openLink: generatorai:///settings/security
 - extendedWaitUntil: {visible: {id: security-approval-key}, timeout: 15000}
 - tapOn: {id: security-scopes}
-- extendedWaitUntil: {visible: "read:status", timeout: 10000}
-- back
+- extendedWaitUntil: {visible: ".*read:status", timeout: 10000}
+- runFlow: ../_subflows/back.yaml
 - assertVisible: {id: security-unpair}
 - runFlow:
     when: {visible: {id: security-pair-device}}

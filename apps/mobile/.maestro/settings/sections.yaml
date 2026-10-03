@@ -2,6 +2,8 @@ appId: ${APP_ID}
 name: settings · root, search, general default model, providers, skills, MCP add, templates
 # M7-05 (MSettings, MSettingsMore, MSetGeneral, MSetProviders, MSetSkills, MSetMcp, MSetMcpAdd, MSetTemplates).
 tags: [settings]
+# The paired device has the default scopes; this flow edits, so it adds the route-policy scope for its run.
+env: {DEVICE_SCOPES: "admin:settings"}
 ---
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///settings
@@ -12,7 +14,7 @@ tags: [settings]
 - extendedWaitUntil: {visible: {id: settings-result-appearance}, timeout: 5000}
 - tapOn: {id: settings-result-appearance}
 - extendedWaitUntil: {visible: {id: appearance-mode}, timeout: 10000}
-- back
+- runFlow: ../_subflows/back.yaml
 - openLink: generatorai:///settings/general
 - extendedWaitUntil: {visible: {id: general-default-model}, timeout: 15000}
 - tapOn: {id: general-default-model}

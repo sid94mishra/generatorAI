@@ -9,6 +9,7 @@ env: {FRESH_CHAT: edits, DEVICE_SCOPES: "write:files,write:workspaces", EXPECT_C
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///chats/${CHAT_EDITS_ID}
 - extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- runFlow: ../_subflows/pane-closed.yaml
 - tapOn: {id: composer-input}
 - inputText: Make the edits
 - runFlow:
@@ -30,7 +31,15 @@ env: {FRESH_CHAT: edits, DEVICE_SCOPES: "write:files,write:workspaces", EXPECT_C
 - extendedWaitUntil: {visible: "Kept", timeout: 15000}
 # Undo all (confirmed) reverts everything, the kept file included.
 - tapOn: {id: changes-tray-undo-all}
-- tapOn: "Undo all"
+# The tray's own "Undo all" stays in the iOS tree under the alert; the alert's button is the second match there.
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: {text: "Undo all", index: 1}
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: "Undo all"
 - extendedWaitUntil: {notVisible: {id: changes-file-row}, timeout: 15000}
 - tapOn: {id: pane-close}
 - tapOn: {id: composer-input}
@@ -51,7 +60,11 @@ env: {FRESH_CHAT: edits, DEVICE_SCOPES: "write:files,write:workspaces", EXPECT_C
 - extendedWaitUntil: {visible: {id: commit-message}, timeout: 15000}
 - tapOn: {id: commit-message}
 - inputText: ${EXPECT_COMMIT}
-- hideKeyboard
+# Maestro's hideKeyboard does not work on iOS 27; the commit sheet's footer stays above the keyboard there.
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
 - runFlow:
     when: {visible: {text: Push, checked: true}}
     commands:
