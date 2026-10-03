@@ -136,7 +136,12 @@ export function Header(props: HeaderProps): React.ReactElement {
       <Stack.Screen options={options} />
       <Stack.Toolbar placement="left">{left}</Stack.Toolbar>
       <Stack.Toolbar placement="right">{right}</Stack.Toolbar>
-      {subtitle ? <View className="px-gutter-title pb-2">{subtitle}</View> : null}
+      {subtitle ? (
+        <View className="px-gutter-title pb-2">
+          {/* A plain-string subtitle is set as a footnote (RN renders strings only inside <Text>). */}
+          {typeof subtitle === 'string' ? <Text role="footnote" tone="fg-2">{subtitle}</Text> : subtitle}
+        </View>
+      ) : null}
       {detail && status ? <StatusLine status={status} /> : null}
     </>
   );

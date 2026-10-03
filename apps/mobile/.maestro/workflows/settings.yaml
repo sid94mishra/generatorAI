@@ -26,7 +26,7 @@ env: {DEVICE_SCOPES: "write:workflows"}
 - tapOn: "More builder actions"
 - tapOn: "Workflow settings"
 - extendedWaitUntil: {visible: {id: workflow-settings-variables}, timeout: 5000}
-- assertVisible: "Saved with the workflow draft"
+- assertVisible: ".*Saved with the workflow draft.*"
 - tapOn: {id: workflow-settings-variables}
 - tapOn: "Add variable"
 - tapOn: {id: variable-name}

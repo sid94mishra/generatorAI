@@ -68,6 +68,8 @@ export function TopAppBar(props: HeaderProps): React.ReactElement {
 
   const detail = role === 'detail' || role === 'workspace';
   const home = role === 'top' && largeTitle;
+  // A plain-string subtitle is set as a footnote (RN renders strings only inside <Text>).
+  const line = typeof subtitle === 'string' ? <Text role="footnote" tone="fg-2">{subtitle}</Text> : subtitle;
   return (
     <Animated.View testID={testID} style={[surface, { paddingTop: insets.top }]}>
       <View className={cn('min-h-bar flex-row items-center gap-1 pe-1', leading ? 'ps-1' : 'ps-4')}>
@@ -115,10 +117,10 @@ export function TopAppBar(props: HeaderProps): React.ReactElement {
           <Text role="largeTitle" accessibilityRole="header">
             {title}
           </Text>
-          {subtitle}
+          {line}
         </View>
-      ) : subtitle ? (
-        <View className="px-4 pb-2">{subtitle}</View>
+      ) : line ? (
+        <View className="px-4 pb-2">{line}</View>
       ) : null}
       {detail && status ? <StatusLine status={status} /> : null}
     </Animated.View>

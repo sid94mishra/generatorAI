@@ -14,6 +14,7 @@ env: {DEVICE_SCOPES: "write:workflows"}
 - assertVisible: {id: workflow-version}
 - assertVisible: "Recent runs"
 - scrollUntilVisible: {element: "Setup", direction: DOWN}
+- scrollUntilVisible: {element: {id: workflow-mini-graph}, direction: UP}
 - tapOn: {id: workflow-mini-graph}
 - extendedWaitUntil: {visible: {id: workflow-graph-canvas}, timeout: 10000}
 - tapOn: {id: graph-fit}
