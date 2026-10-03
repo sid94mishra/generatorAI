@@ -77,7 +77,7 @@ Note: there is **no** message-level encryption above the transport (the relay-pr
 ## Notification preferences
 
 Settings › Notifications stores three per-device switches (`notify.gates`, `notify.runs`,
-`notify.chats`). They take effect in two places (`src/notifications/notificationFilter.ts`):
+`notify.chats`). They take effect in two places (`src/services/notifications/notificationFilter.ts`):
 
 - **Foreground** — `setNotificationHandler` suppresses a switched-off category.
 - **Background** — the server has no per-category field, only `PUT /api/auth/push-token/mute`
@@ -167,8 +167,8 @@ What the config guarantees, and why:
   way if the mark changes, e.g. with sharp: `sharp('assets/icon.png').flatten({ background:
   '#0d1117' }).removeAlpha().png().toFile('assets/icon-ios.png')`.
 - **Locked launch.** The session item is `WHEN_UNLOCKED_THIS_DEVICE_ONLY` (trade-off documented in
-  `src/auth/secureItemStore.ts`). A launch while locked reaches a “Unlock to continue” state
-  (`src/auth/restoreState.ts`) and retries when the app becomes active — it never routes to
+  `src/services/auth/secureItemStore.ts`). A launch while locked reaches a “Unlock to continue” state
+  (`src/services/auth/restoreState.ts`) and retries when the app becomes active — it never routes to
   `/pair`. Lock-screen Allow/Deny require device authentication.
 - **Orientation.** All orientations on phone and iPad. `ConnectionStripHost` pays the left/right
   safe-area insets once; full-window surfaces (`Sheet`, iOS form sheets) read the real insets via

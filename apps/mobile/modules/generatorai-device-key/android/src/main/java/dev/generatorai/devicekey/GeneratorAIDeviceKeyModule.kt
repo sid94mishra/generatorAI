@@ -21,7 +21,7 @@
 //     DER; `derToRaw` converts it to the raw `r || s` (64 bytes) JOSE form
 //     that `createDpopProof` base64url-encodes.
 //   • Usable while locked. No `setUserAuthenticationRequired`: lock-screen
-//     Allow/Deny actions (src/auth/backgroundFetch.ts) sign while the phone
+//     Allow/Deny actions (src/services/auth/backgroundFetch.ts) sign while the phone
 //     is locked, and app lock / step-up are enforced in JS instead.
 //   • `setUnlockedDeviceRequired` is deliberately NOT set for the same reason.
 //

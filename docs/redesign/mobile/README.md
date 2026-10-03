@@ -26,7 +26,7 @@ This is the **entry point** for the mobile pass.
 | Doc | What it holds |
 |---|---|
 | `00-overhaul-approach.md` | Analysis: current app, design, gaps, target architecture, stack evidence (read once; background, superseded where `01-decisions.md` differs) |
-| `01-decisions.md` | **MD-01…MD-96, binding.** They override the boards. MD-46…MD-96 consolidate the decisions the other docs made (kit, design system, routes, platform) and the conflicts resolved between them |
+| `01-decisions.md` | **MD-01…MD-197, binding.** They override the boards. MD-46…MD-96 consolidate the decisions the other docs made (kit, design system, routes, platform) and the conflicts resolved between them; MD-97 onward were taken during the build (M1–M10) |
 | `02-design-system.md` | Tokens per platform (the authoritative class names and values), type ramps, icons (SF/Material), motion, haptics, glass, Uniwind theming pipeline, design lint, package table (§10), rulings index (§11 → MD-xx) |
 | `03-components.md` | Component catalogue: 52 MP primitives, 30 ML layout/shell parts, 50 MB blocks, 11 MX native extension targets; prop contracts; iOS vs Android specs; the 34 kept testIDs; the kit-decision index (MD-46…MD-68); the deletion map |
 | `04-screen-map.md` | Route tree; every board → route, presentation, header, components, data, states, phase; parity with desktop; legacy deletion and testID renames per phase; route decisions (MD-79…MD-85) |

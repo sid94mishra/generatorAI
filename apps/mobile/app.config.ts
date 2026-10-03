@@ -191,9 +191,9 @@ const config: ExpoConfig = {
       ITSAppUsesNonExemptEncryption: true,
       NSCameraUsageDescription: CAMERA_USAGE,
       NSMicrophoneUsageDescription: MICROPHONE_USAGE,
-      // Both uses are real (D8): `AppLockGate` (src/auth/AppLock.tsx) locks the
+      // Both uses are real (D8): `AppLockGate` (src/blocks/shell/AppLockGate.tsx) locks the
       // app on cold start and after the configured grace, and `requireStepUp`
-      // (src/auth/stepUp.ts) confirms terminal/browser/computer and admin
+      // (src/services/auth/stepUp.ts) confirms terminal/browser/computer and admin
       // actions and device revocation. Keep this string in step with the
       // `faceIDPermission` plugin value below — Apple reviews the one that
       // ends up in Info.plist, and the plugin writes the same key.

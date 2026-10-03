@@ -6,7 +6,7 @@
 // the white flash we are trying to avoid.
 //
 // NOTHING sensitive goes here. Tokens, resume secrets and key material live
-// in SecureStore — see src/auth/stores.ts.
+// in SecureStore — see src/services/auth/.
 // ────────────────────────────────────────────────────────────────
 
 import { createMMKV } from 'react-native-mmkv';

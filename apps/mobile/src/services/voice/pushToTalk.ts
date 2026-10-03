@@ -3,11 +3,10 @@
 //
 // Hold the mic to dictate, release to accept — instead of tap to start /
 // tap to accept. Stored under the composer's own MMKV key because
-// `src/prefs/preferences.tsx` (Settings → Accessibility) does not yet expose
-// a voice section.
+// `services/prefs/preferences.tsx` exposes no voice preference, and Settings › Audio (MSetAudio)
+// draws no push-to-talk row — so nothing writes it yet (final review F-6).
 //
-// TODO(prefs): move to `PreferencesValue` with a Settings → Audio toggle once
-// that section exists; `readPushToTalk` is the only consumer to update.
+// When a board adds the row: move it to `PreferencesValue`; `readPushToTalk` is the only consumer.
 // ────────────────────────────────────────────────────────────────
 
 import { prefs } from '../storage/prefs';
