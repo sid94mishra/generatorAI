@@ -32,6 +32,7 @@ import { BrandMark } from '../../components/brand/BrandMark';
 import { Button } from '../../components/ui/Button';
 import { useToast } from '../../components/ui/Toast';
 import { useTheme } from '../../theme/ThemeProvider';
+import { setNotificationPreviewRedaction } from '../native/privacy';
 import { readLockPreferences, usePreferences } from '../prefs/preferences';
 import {
   appLockReducer,
@@ -79,7 +80,7 @@ export function AppLockGate({ children }: { children: React.ReactNode }): React.
 }
 
 function NativeAppLockGate({ children }: { children: React.ReactNode }): React.ReactElement {
-  const { biometricLock, lockGraceSeconds, setBiometricLock, hideInSwitcher } = usePreferences();
+  const { biometricLock, lockGraceSeconds, setBiometricLock, hideInSwitcher, hideNotificationPreviews } = usePreferences();
   const toast = useToast();
   const { legacyColors: colors } = useTheme();
 
@@ -94,6 +95,12 @@ function NativeAppLockGate({ children }: { children: React.ReactNode }): React.R
       appState: (AppState.currentState ?? 'active') as AppStateName,
     });
   });
+
+  // The iOS notification service extension reads this flag (MD-92): previews hide while App lock is on, or when chosen.
+  const redactPreviews = biometricLock || hideNotificationPreviews;
+  useEffect(() => {
+    setNotificationPreviewRedaction(redactPreviews);
+  }, [redactPreviews]);
 
   // Preference changes flow into the machine; the machine never writes the
   // preference back except in the "nothing to lock with" case below.

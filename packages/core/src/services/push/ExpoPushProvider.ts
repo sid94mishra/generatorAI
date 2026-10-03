@@ -19,6 +19,7 @@
 // degrades cleanly rather than being load-bearing.
 // ────────────────────────────────────────────────────────────────
 
+import { NOTIFICATION_CATEGORIES } from '@generatorai/shared/ui-contract';
 import type { IHttpClient } from '../../domain/ports/IHttpClient.js';
 import type { PushMessage, PushProviderClient } from './PushDispatcher.js';
 
@@ -27,13 +28,9 @@ const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 /** Expo rejects batches larger than this. */
 const MAX_BATCH = 100;
 
-/**
- * Android channel per category. Approvals get their own high-importance
- * channel (`approvals`, registered by the app with sound + vibration); the
- * other categories keep a channel named after the category.
- */
+/** Android channel per category (shared NOTIFICATION_CATEGORIES; the app creates the channels). */
 function androidChannel(message: PushMessage): string {
-  return message.data.category === 'approval' ? 'approvals' : message.data.category;
+  return NOTIFICATION_CATEGORIES[message.categoryId].channel;
 }
 
 /**
@@ -80,15 +77,24 @@ export class ExpoPushProvider implements PushProviderClient {
       title: message.title,
       body: message.body,
       data: message.data,
-      sound: 'default',
-      // Approvals are the notifications with buttons. `categoryId` names the
-      // UNNotificationCategory / action set the app registered at startup;
-      // `priority: high` is FCM's "wake the device now" — a gate that lands
-      // in the next batching window on a dozing phone has already lost.
-      ...(message.categoryId ? { categoryId: message.categoryId, priority: 'high' as const } : {}),
+      // A completion lands quietly (passive, low channel): no sound.
+      ...(message.interruption === 'passive' ? {} : { sound: 'default' }),
+      // `categoryId` names the UNNotificationCategory / action set the app
+      // registered at startup. `priority: high` is FCM's "wake the device
+      // now" — a gate that lands in the next batching window on a dozing
+      // phone has already lost; outcomes can wait.
+      categoryId: message.categoryId,
+      priority: message.interruption === 'passive' ? ('normal' as const) : ('high' as const),
       // Groups related notifications into one stack on both platforms.
       ...(message.target.platform === 'ios'
-        ? { threadId: message.threadId, interruptionLevel: expoInterruptionLevel(message.interruption) }
+        ? {
+            threadId: message.threadId,
+            interruptionLevel: expoInterruptionLevel(message.interruption),
+            // The service extension swaps in `data.redacted` while App lock hides previews (MD-92).
+            mutableContent: true,
+            // iOS badge = the sender's Needs-you count (06 §5.5); Android launchers count notifications.
+            ...(message.data.counts ? { badge: message.data.counts.needsYou } : {}),
+          }
         : { channelId: androidChannel(message) }),
       // Approvals expire: an hour-old gate has usually been handled at a
       // desk, and delivering it then is pure noise.

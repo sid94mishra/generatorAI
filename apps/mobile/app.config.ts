@@ -104,6 +104,15 @@ const MICROPHONE_USAGE =
 const FACE_ID_USAGE =
   'Unlock GeneratorAI when you return to it, and confirm sensitive actions such as opening a terminal or revoking a device.';
 
+// ── App Group and Apple team (mobile 06 §7.9) ───────────────────────
+// One App Group shared by the app and its extensions (the notification service
+// extension now; widgets, Live Activities and the share extension in M9 batch B).
+// It carries flags and snapshots only, never credentials. The owner registers it
+// on the App ID (with Time Sensitive Notifications) before a device build;
+// @bacons/apple-targets signs the extensions with `APPLE_TEAM_ID`.
+const APP_GROUP = 'group.dev.generatorai.app';
+const appleTeamId = process.env['APPLE_TEAM_ID']?.trim() || undefined;
+
 const config: ExpoConfig = {
   name: 'GeneratorAI',
   slug: 'generatorai',
@@ -126,6 +135,12 @@ const config: ExpoConfig = {
   ios: {
     supportsTablet: true,
     bundleIdentifier: 'dev.generatorai.app',
+    ...(appleTeamId ? { appleTeamId } : {}),
+    entitlements: {
+      'com.apple.security.application-groups': [APP_GROUP],
+      // Approvals break through Focus (06 §7.2); `critical` is never used.
+      'com.apple.developer.usernotifications.time-sensitive': true,
+    },
     // Opaque 1024×1024 (no alpha): App Store Connect rejects an iOS icon
     // with transparency, and iOS paints transparent pixels black anyway.
     // It is icon.png flattened onto the splash colour (#0d1117); regenerate
@@ -290,6 +305,8 @@ const config: ExpoConfig = {
     './plugins/withShadowNodeRaceFix',
     // iOS 27 refuses to launch an app without the UIScene life cycle.
     './plugins/withSceneLifecycle',
+    // Extension targets from ./targets (06 §7.9): the notification service extension (MD-92).
+    '@bacons/apple-targets',
   ],
 
   experiments: {

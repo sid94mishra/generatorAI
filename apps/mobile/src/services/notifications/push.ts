@@ -1,43 +1,34 @@
 // ────────────────────────────────────────────────────────────────
-// Push notification registration and routing.
+// Push notifications v2: presentation, channels, categories, token (06 §7.2, MX-07).
 //
-// Three responsibilities, in the order they matter:
-//
-//   1. REGISTER the device's token with the paired server, and re-register
-//      whenever the OS rotates it (which it does without warning).
-//   2. ROUTE a tap to the exact screen the notification is about. A
-//      notification that dumps you on the home screen is worse than none.
-//   3. HANDLE the cold-start case: the app was killed, the user tapped a
-//      notification, and the route must survive until the router is ready.
+//   1. PRESENT — the foreground handler shows a push unless it is about the item on screen, or the user switched
+//      its kind off; it never sets the badge (the app owns it while open, `BadgeSync`).
+//   2. CHANNELS — Android channels from the shared vocabulary, created before the permission request (Android 13
+//      shows no prompt without one); retired channels are deleted (pre-release cleanup).
+//   3. CATEGORIES — every shared category with its actions, on each launch.
+//   4. TOKEN — permission + Expo token; null is an ordinary outcome.
 // ────────────────────────────────────────────────────────────────
 
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import { NOTIFICATION_CHANNELS, RETIRED_NOTIFICATION_CHANNELS, type NotificationChannelDef } from '@generatorai/shared/ui-contract';
 
 import { prefs } from '../storage/prefs';
 import { readNotifyPrefs, shouldPresent } from './notificationFilter';
-import { APPROVAL_ACTIONS, APPROVAL_CATEGORY_ID, APPROVAL_CHANNEL_ID } from './notificationCategories';
+import { categoryRegistrations } from './notificationCategories';
+import { isOnScreen } from './onScreen';
+import { normalizePushData } from './pushData';
 
-/**
- * Foreground presentation.
- *
- * Banners are shown even while the app is open: the user may be reading one
- * chat while a different run blocks, and silently swallowing that is exactly
- * the failure this feature exists to prevent — unless the user turned that
- * category off in Settings › Notifications, which is the one place the
- * "wake me for" switches take effect while the app is open.
- */
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
-    const present = shouldPresent(
-      notification.request.content.data,
-      readNotifyPrefs((key) => prefs.getString(key)),
-    );
+    const raw = notification.request.content.data;
+    const data = normalizePushData(raw);
+    const present = !isOnScreen(data) && shouldPresent(data ?? raw, readNotifyPrefs((key) => prefs.getString(key)));
     return {
       shouldShowBanner: present,
       shouldShowList: present,
-      shouldPlaySound: present,
-      shouldSetBadge: present,
+      shouldPlaySound: present && data?.category !== 'done',
+      shouldSetBadge: false,
     };
   },
 });
@@ -48,84 +39,52 @@ export interface PushRegistration {
   platform: string;
 }
 
+const IMPORTANCE: Record<NotificationChannelDef['importance'], Notifications.AndroidImportance> = {
+  max: Notifications.AndroidImportance.MAX,
+  high: Notifications.AndroidImportance.HIGH,
+  default: Notifications.AndroidImportance.DEFAULT,
+  low: Notifications.AndroidImportance.LOW,
+};
+
 /**
- * Android notification channels.
- *
- * Created before any token request, because Android 13+ will not even show
- * the permission prompt until a channel exists. Separate channels let a user
- * silence completions while keeping approvals audible — the alternative is
- * an all-or-nothing switch, and users pick "nothing".
+ * Android channels (shared NOTIFICATION_CHANNELS). Every channel is PRIVATE: a secure lock screen shows the redacted
+ * public version without action buttons (MD-33, MD-92), so an inline Allow is reachable only when unlocked.
  */
 export async function ensureAndroidChannels(): Promise<void> {
   if (Platform.OS !== 'android') return;
-
-  // The channel the server targets for approvals (`channelId: 'approvals'`).
-  // Heads-up + sound + vibration: a tool-permission prompt is the one push
-  // that must be seen the moment it lands, because the agent is idle until
-  // it is answered.
-  await Notifications.setNotificationChannelAsync(APPROVAL_CHANNEL_ID, {
-    name: 'Approvals',
-    description: 'Tool permissions, questions and plan reviews your agent is waiting on.',
-    importance: Notifications.AndroidImportance.MAX,
-    sound: 'default',
-    enableVibrate: true,
-    vibrationPattern: [0, 250, 250, 250],
-    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
-    bypassDnd: false,
-  });
-  // Legacy channel id (`approval`, singular) for servers that predate the
-  // `approvals` channel. Android keeps a channel forever once created, so
-  // this costs nothing and keeps old-server pushes audible.
-  await Notifications.setNotificationChannelAsync('approval', {
-    name: 'Approvals (legacy)',
-    importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: [0, 250, 250, 250],
-    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
-  });
-  await Notifications.setNotificationChannelAsync('failed', {
-    name: 'Failures',
-    importance: Notifications.AndroidImportance.HIGH,
-    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
-  });
-  await Notifications.setNotificationChannelAsync('completed', {
-    name: 'Completions',
-    importance: Notifications.AndroidImportance.DEFAULT,
-    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
-  });
-}
-
-/**
- * Register the `approval` category so the OS renders Allow / Deny buttons on
- * every push the server tags with `categoryId: 'approval'`.
- *
- * Idempotent: re-registering replaces the category with identical actions.
- * Both buttons keep the app in the background (`opensAppToForeground:
- * false`); `usePushNotifications` posts the decision from the response
- * listener. Web has no notification categories, so this is a no-op there.
- */
-export async function ensureNotificationCategories(): Promise<void> {
-  if (Platform.OS === 'web') return;
-  try {
-    await Notifications.setNotificationCategoryAsync(APPROVAL_CATEGORY_ID, [...APPROVAL_ACTIONS]);
-  } catch {
-    // Without the category the notification still arrives — it just has no
-    // buttons, and a tap opens the gate. Never let this block registration.
+  for (const id of RETIRED_NOTIFICATION_CHANNELS) await Notifications.deleteNotificationChannelAsync(id).catch(() => undefined);
+  for (const channel of NOTIFICATION_CHANNELS) {
+    const loud = channel.importance === 'max' || channel.importance === 'high';
+    await Notifications.setNotificationChannelAsync(channel.id, {
+      name: channel.name,
+      description: channel.description,
+      importance: IMPORTANCE[channel.importance],
+      ...(loud ? { sound: 'default', enableVibrate: true, vibrationPattern: [0, 250, 250, 250] } : { sound: null, enableVibrate: false }),
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+      bypassDnd: false,
+    });
   }
 }
 
-/**
- * Request permission and obtain a push token.
- *
- * Returns null when the user declines or the device cannot receive push —
- * both are ordinary outcomes, not errors. The app must remain fully usable
- * without notifications.
- */
+/** Register every shared category (idempotent). A category that fails to register leaves its pushes without buttons. */
+export async function ensureNotificationCategories(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  for (const category of categoryRegistrations()) {
+    try {
+      await Notifications.setNotificationCategoryAsync(category.identifier, category.actions, category.options);
+    } catch {
+      // The notification still arrives; a tap opens the item.
+    }
+  }
+}
+
+/** Request permission and obtain a push token; null when declined or unavailable (the app stays usable). */
 export async function requestPushToken(projectId: string): Promise<PushRegistration | null> {
   await ensureAndroidChannels();
   await ensureNotificationCategories();
 
   const existing = await Notifications.getPermissionsAsync();
-  let granted = existing.granted || existing.ios?.status === 2; /* PROVISIONAL */
+  let granted = existing.granted || existing.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
 
   if (!granted && existing.canAskAgain) {
     const requested = await Notifications.requestPermissionsAsync({
@@ -139,23 +98,6 @@ export async function requestPushToken(projectId: string): Promise<PushRegistrat
     const token = await Notifications.getExpoPushTokenAsync({ projectId });
     return { token: token.data, provider: 'expo', platform: Platform.OS };
   } catch {
-    // Offline, or no network at first launch. The caller retries later;
-    // failing to get a token must never block using the app.
     return null;
   }
-}
-
-/** Deep-link target carried in a notification's data payload. */
-export function routeFromNotification(
-  notification: Notifications.Notification | null | undefined,
-): string | null {
-  const data = notification?.request?.content?.data as { route?: unknown } | undefined;
-  const route = data?.route;
-  if (typeof route !== 'string' || route.length === 0) return null;
-
-  // Only in-app paths. A notification is attacker-influenced in the sense
-  // that its content originates from agent output, so an absolute URL here
-  // could open an arbitrary site or another app.
-  if (!route.startsWith('/') || route.startsWith('//')) return null;
-  return route;
 }

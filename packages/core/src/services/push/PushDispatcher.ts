@@ -22,6 +22,12 @@
 
 import { pushRouting } from './pushRouting.js';
 import type { ILogger, PushData } from '@generatorai/shared';
+import {
+  NOTIFICATION_CATEGORIES,
+  NOTIFICATION_REDACTED_BODY,
+  type NotificationCategoryId,
+  type NotificationInterruption,
+} from '@generatorai/shared/ui-contract';
 
 import {
   isMutable,
@@ -57,14 +63,13 @@ export interface PushMessage {
   /** Consumed by the app to deep-link on tap and to act from the lock screen. */
   data: PushData;
   threadId: string;
-  interruption: 'active' | 'timeSensitive';
+  interruption: NotificationInterruption;
   /**
-   * Expo/UNNotification category identifier. The app registers an
-   * `approval` category with Allow/Deny buttons at startup; a push names it
-   * only when it carries those actions (a standard permission gate), so the
-   * OS renders buttons only where a lock-screen answer is allowed (MG-04).
+   * Expo/UNNotification category identifier (shared NOTIFICATION_CATEGORIES,
+   * registered by the app at startup). Only `approval` carries Allow / Deny;
+   * a risky gate is `approval.risky`, whose one action opens the app (MG-04).
    */
-  categoryId?: string;
+  categoryId: NotificationCategoryId;
 }
 
 /** Pluggable delivery, so Expo Push / APNs / FCM can be swapped or faked. */
@@ -75,6 +80,8 @@ export interface PushProviderClient {
 export interface PushDispatcherPorts {
   serverId?: string;
   workflowDefinitionId?(runId: string): Promise<string | null>;
+  /** The server's attention counts at send time (badge, MG-06 part B); null while the feed is unavailable. */
+  attentionCounts?(): { needsYou: number; running: number } | null;
   listTargets(): PushTarget[];
   recordSuccess(deviceId: string): void;
   recordFailure(deviceId: string, error: string): void;
@@ -130,6 +137,12 @@ export class PushDispatcher {
 
     const now = this.clock();
     const messages: PushMessage[] = [];
+    let counts: { needsYou: number; running: number } | null = null;
+    try {
+      counts = this.ports.attentionCounts?.() ?? null;
+    } catch {
+      // The badge is a nicety; a feed that cannot answer never blocks a notification.
+    }
 
     for (const target of this.ports.listTargets()) {
       if (!this.shouldDeliver(target, plan, now)) continue;
@@ -138,12 +151,14 @@ export class PushDispatcher {
         target,
         title: plan.title,
         body: plan.body,
-        data: { ...buildData(plan), ...(this.ports.serverId ? pushRouting(plan, this.ports.serverId, workflowDefinitionId) : {}) },
+        data: {
+          ...buildData(plan),
+          ...(counts ? { counts: { needsYou: counts.needsYou, running: counts.running } } : {}),
+          ...(this.ports.serverId ? pushRouting(plan, this.ports.serverId, workflowDefinitionId) : {}),
+        },
         threadId: plan.threadId,
         interruption: plan.interruption,
-        // The Allow/Deny category only where the push carries those actions: a
-        // risky gate (MG-04) and a run approval (MD-31) open the app instead.
-        ...(plan.interaction?.actions?.length ? { categoryId: APPROVAL_CATEGORY_ID } : {}),
+        categoryId: plan.categoryId,
       });
       this.recentlySent.set(dedupeKey(target.deviceId, plan), now);
     }
@@ -206,7 +221,15 @@ export class PushDispatcher {
 export const APPROVAL_CATEGORY_ID = 'approval';
 
 function buildData(plan: NotificationPlan): PushData {
-  const data: PushData = { route: plan.route, category: plan.category, threadId: plan.threadId };
+  const data: PushData = {
+    route: plan.route,
+    category: plan.categoryId,
+    threadId: plan.threadId,
+    redacted: { title: NOTIFICATION_CATEGORIES[plan.categoryId].redactedTitle, body: NOTIFICATION_REDACTED_BODY },
+  };
+  if (plan.runId) data.runId = plan.runId;
+  if (plan.stageRunId) data.stageRunId = plan.stageRunId;
+  if (plan.question) data.question = plan.question;
   const gate = plan.interaction;
   if (gate) {
     data.chatId = gate.chatId;

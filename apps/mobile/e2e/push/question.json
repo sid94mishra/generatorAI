@@ -1,0 +1,45 @@
+{
+  "aps": {
+    "alert": {
+      "title": "Your agent has a question",
+      "body": "Migrate all 9 custom edge types now, or keep a v11 shim for this PR?"
+    },
+    "sound": "default",
+    "category": "question",
+    "thread-id": "chat:${CHAT_ID}",
+    "interruption-level": "time-sensitive",
+    "mutable-content": 1,
+    "badge": 1
+  },
+  "body": {
+    "v": 2,
+    "serverId": "${SERVER_ID}",
+    "counts": {
+      "needsYou": 1,
+      "running": 1
+    },
+    "route": "/chats/${CHAT_ID}/gate/${INTERACTION_ID}",
+    "href": "/chats/${CHAT_ID}/gate/${INTERACTION_ID}",
+    "category": "question",
+    "threadId": "chat:${CHAT_ID}",
+    "redacted": {
+      "title": "Your agent has a question",
+      "body": "Open GeneratorAI to see it."
+    },
+    "entity": "chat",
+    "entityId": "${CHAT_ID}",
+    "chatId": "${CHAT_ID}",
+    "interactionId": "${INTERACTION_ID}",
+    "kind": "question",
+    "question": {
+      "id": "q1",
+      "options": [
+        "Migrate them now",
+        "Keep a v11 shim"
+      ],
+      "multiSelect": false,
+      "freeText": true,
+      "count": 1
+    }
+  }
+}

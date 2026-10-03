@@ -563,4 +563,4 @@ export type {
   SearchResponse,
 } from './EntitySearch.js';
 export { SEARCH_ENTITY_TYPES } from './EntitySearch.js';
-export type { PushData } from './Push.js';
+export type { PushData, PushQuestion } from './Push.js';

@@ -1,0 +1,33 @@
+{
+  "aps": {
+    "alert": {
+      "title": "Workflow run finished",
+      "body": "Nightly dependency audit"
+    },
+    "category": "done",
+    "thread-id": "run:${RUN_ID}",
+    "interruption-level": "passive",
+    "mutable-content": 1,
+    "badge": 1
+  },
+  "body": {
+    "v": 2,
+    "serverId": "${SERVER_ID}",
+    "counts": {
+      "needsYou": 1,
+      "running": 1
+    },
+    "route": "/workflows/${WORKFLOW_ID}/runs/${RUN_ID}",
+    "href": "/workflows/${WORKFLOW_ID}/runs/${RUN_ID}",
+    "category": "done",
+    "threadId": "run:${RUN_ID}",
+    "redacted": {
+      "title": "Finished",
+      "body": "Open GeneratorAI to see it."
+    },
+    "entity": "workflow_run",
+    "entityId": "${RUN_ID}",
+    "runId": "${RUN_ID}",
+    "workflowDefinitionId": "${WORKFLOW_ID}"
+  }
+}

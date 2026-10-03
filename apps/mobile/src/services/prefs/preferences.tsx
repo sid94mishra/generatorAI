@@ -65,6 +65,9 @@ export interface PreferencesValue {
   /** Cover content in the app switcher even with the lock off (with the lock on it always is). */
   hideInSwitcher: boolean;
   setHideInSwitcher(next: boolean): void;
+  /** iOS: notification titles and bodies become the lock-screen-safe copy (MD-33; with the lock on they always are). */
+  hideNotificationPreviews: boolean;
+  setHideNotificationPreviews(next: boolean): void;
   /**
    * Whether `<Screen>`'s large title collapses into the compact bar on scroll.
    *
@@ -136,6 +139,9 @@ export function PreferencesProvider({
     () => readLockPreferences().lockGraceSeconds,
   );
   const [hideInSwitcher, setHideInSwitcherState] = useState<boolean>(() => prefs.getBoolean(PREF_KEYS.hideInSwitcher, false));
+  const [hideNotificationPreviews, setHideNotificationPreviewsState] = useState<boolean>(() =>
+    prefs.getBoolean(PREF_KEYS.hideNotificationPreviews, false),
+  );
   const [largeTitleCollapse, setLargeTitleCollapseState] = useState<boolean>(() =>
     prefs.getBoolean(PREF_KEYS.largeTitleCollapse, true),
   );
@@ -172,6 +178,11 @@ export function PreferencesProvider({
     prefs.setBoolean(PREF_KEYS.hideInSwitcher, next);
   }, []);
 
+  const setHideNotificationPreviews = useCallback((next: boolean) => {
+    setHideNotificationPreviewsState(next);
+    prefs.setBoolean(PREF_KEYS.hideNotificationPreviews, next);
+  }, []);
+
   const setLargeTitleCollapse = useCallback((next: boolean) => {
     setLargeTitleCollapseState(next);
     prefs.setBoolean(PREF_KEYS.largeTitleCollapse, next);
@@ -191,6 +202,8 @@ export function PreferencesProvider({
       setLockGraceSeconds,
       hideInSwitcher,
       setHideInSwitcher,
+      hideNotificationPreviews,
+      setHideNotificationPreviews,
       largeTitleCollapse,
       setLargeTitleCollapse,
     }),
@@ -207,6 +220,8 @@ export function PreferencesProvider({
       setLockGraceSeconds,
       hideInSwitcher,
       setHideInSwitcher,
+      hideNotificationPreviews,
+      setHideNotificationPreviews,
       largeTitleCollapse,
       setLargeTitleCollapse,
     ],
@@ -228,6 +243,8 @@ const OUTSIDE_PROVIDER: PreferencesValue = {
   setLockGraceSeconds: () => {},
   hideInSwitcher: false,
   setHideInSwitcher: () => {},
+  hideNotificationPreviews: false,
+  setHideNotificationPreviews: () => {},
   largeTitleCollapse: true,
   setLargeTitleCollapse: () => {},
 };

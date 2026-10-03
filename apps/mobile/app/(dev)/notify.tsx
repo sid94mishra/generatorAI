@@ -1,1 +1,1 @@
-export { default } from '../../src/dev/NotifyRoute';
+export { default } from '../../src/features/development/NotifyScreen';

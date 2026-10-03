@@ -136,6 +136,31 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           chatId: { type: 'string' }, interactionId: { type: 'string' },
           kind: { type: 'string', enum: ['permission', 'question', 'plan'] },
           actions: { type: 'array', items: { type: 'string' } },
+          // MG-06 part B (mobile M9-02): `category` is a shared NotificationCategoryId
+          // (approval, approval.risky, question, plan, run.approval, done, failed, scope_request).
+          risk: { type: 'string', enum: ['standard', 'risky'] },
+          runId: { type: 'string' }, stageRunId: { type: 'string' },
+          question: {
+            type: 'object',
+            description: 'A chat question: the first question and up to four option labels, so a lock-screen reply can be matched to an option.',
+            required: ['id', 'options', 'multiSelect', 'freeText', 'count'],
+            properties: {
+              id: { type: 'string' }, options: { type: 'array', items: { type: 'string' }, maxItems: 4 },
+              multiSelect: { type: 'boolean' }, freeText: { type: 'boolean' }, count: { type: 'integer' },
+            },
+          },
+          redacted: {
+            type: 'object',
+            description: 'Lock-screen-safe title and body (no command, path or message text); shown by the iOS service extension while App lock hides previews.',
+            required: ['title', 'body'],
+            properties: { title: { type: 'string' }, body: { type: 'string' } },
+          },
+          counts: {
+            type: 'object',
+            description: "The sending server's attention counts at send time (app badge).",
+            required: ['needsYou', 'running'],
+            properties: { needsYou: { type: 'integer' }, running: { type: 'integer' } },
+          },
         },
       },
       // ── Source control (feature-source-control.md; shapes mirror

@@ -1,6 +1,5 @@
 {
   "legacyRoutes": [
-    "app/(dev)/notify.tsx",
     "app/(dev)/theme.tsx",
     "app/_layout.tsx"
   ],
@@ -164,9 +163,6 @@
       "better-tailwindcss/no-restricted-classes/diagnostic": 9,
       "mobile-design/design/defaultTextSize": 2
     },
-    "src/dev/NotifyRoute.tsx": {
-      "react-hooks/exhaustive-deps/diagnostic": 1
-    },
     "src/dev/ThemeRoute.tsx": {
       "react-hooks/set-state-in-effect/diagnostic": 1
     },
@@ -224,9 +220,6 @@
       "mobile-design/design/platformOs": 3,
       "react-hooks/refs/diagnostic": 1,
       "react-hooks/immutability/diagnostic": 5
-    },
-    "app/(dev)/notify.tsx": {
-      "boundaries/dependencies/diagnostic": 1
     },
     "app/(dev)/theme.tsx": {
       "boundaries/dependencies/diagnostic": 1

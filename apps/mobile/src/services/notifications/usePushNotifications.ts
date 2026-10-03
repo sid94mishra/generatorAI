@@ -15,13 +15,15 @@ import { useEffect, useRef } from 'react';
 import { AppState, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
+import { usePathname } from 'expo-router';
 import { linkQueue } from '../navigation/links';
 
 import { useAuth } from '../auth/AuthProvider';
 import { getAuthenticatedFetch } from '../auth/backgroundFetch';
 import { prefs } from '../storage/prefs';
 import { requestPushToken } from './push';
-import { intentFromResponse, submitDecision, type NotificationIntent } from './notificationCategories';
+import { intentFromResponse, submitAnswer, submitDecision, type NotificationIntent } from './notificationCategories';
+import { setVisibleScreen } from './onScreen';
 import { usePushStatusStore } from './pushStatus';
 import { pauseKey, readNotifyPrefs, serverMuteUntil } from './notificationFilter';
 
@@ -38,6 +40,12 @@ export function usePushNotifications(): void {
   const registeredToken = useRef<string | null>(null);
   const setStatus = usePushStatusStore((s) => s.setStatus);
   const preferencesVersion = usePushStatusStore((s) => s.preferencesVersion);
+  const pathname = usePathname();
+
+  // ── Foreground duplicates (06 §7.2): the handler hides a push about the item on screen ──
+  useEffect(() => {
+    setVisibleScreen(serverId, pathname);
+  }, [serverId, pathname]);
 
   // ── Registration ────────────────────────────────────────────────
   useEffect(() => {
@@ -142,16 +150,13 @@ export function usePushNotifications(): void {
     };
 
     /**
-     * Resolve a permission gate from a lock-screen Allow / Deny.
-     *
-     * The app is in the background (or was just launched in it); nothing is
-     * rendered, so the signed fetch comes from the module-level accessor the
-     * AuthProvider registers. Every failure path falls back to opening the
-     * gate screen — a decision the user believes they made must never be
-     * silently dropped.
+     * Resolve a gate from the notification: Allow once / Deny on an ordinary permission, or a typed reply to a
+     * question. The app is in the background (or was just launched in it); nothing is rendered, so the signed
+     * fetch comes from the module-level accessor the AuthProvider registers, per server. Every failure path falls
+     * back to opening the gate — an answer the user believes they sent must never be silently dropped.
      */
-    const decide = async (
-      intent: Extract<NotificationIntent, { type: 'decide' }>,
+    const resolve = async (
+      intent: Extract<NotificationIntent, { type: 'decide' | 'answer' }>,
       notificationId: string,
     ): Promise<void> => {
       const signedFetch = getAuthenticatedFetch(intent.serverId);
@@ -159,15 +164,13 @@ export function usePushNotifications(): void {
         open(intent.route);
         return;
       }
-      const outcome = await submitDecision(intent, signedFetch);
+      const outcome = intent.type === 'decide' ? await submitDecision(intent, signedFetch) : await submitAnswer(intent, signedFetch);
       if (outcome === 'settled') {
-        // Tidy the shade: an answered prompt left behind invites a second
-        // tap, which would just 409.
+        // Tidy the shade: an answered prompt left behind invites a second tap, which would just 409.
         void Notifications.dismissNotificationAsync(notificationId).catch(() => {});
         return;
       }
-      // Gone / forbidden / failed: show the user what actually happened. For
-      // an expired gate that is the chat, which now says so.
+      // Gone / forbidden / failed: show the user what actually happened.
       open(intent.route);
     };
 
@@ -177,9 +180,10 @@ export function usePushNotifications(): void {
         response.actionIdentifier,
         response.notification?.request?.content?.data,
         Notifications.DEFAULT_ACTION_IDENTIFIER,
+        response.userText,
       );
       if (intent.type === 'open') open(intent.route);
-      else if (intent.type === 'decide') void decide(intent, response.notification.request.identifier);
+      else if (intent.type === 'decide' || intent.type === 'answer') void resolve(intent, response.notification.request.identifier);
     };
 
     // Cold start: the app was killed and launched by a notification tap. The

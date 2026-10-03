@@ -13,8 +13,8 @@ const ALL_OFF: NotifyPrefs = { gates: false, runs: false, chats: false };
 // Shapes copied from PushDispatcher.ts: `data: { route, category, threadId }`.
 const approval = { route: '/runs/r1', category: 'approval', threadId: 'r1' };
 const runFailed = { route: '/runs/r1', category: 'failed', threadId: 'r1' };
-const runDone = { route: '/runs/r1', category: 'completed', threadId: 'r1' };
-const chatDone = { route: '/chats/c1', category: 'completed', threadId: 'c1' };
+const runDone = { route: '/workflows/w/runs/r1', category: 'done', threadId: 'r1' };
+const chatDone = { route: '/chats/c1', category: 'done', threadId: 'c1' };
 
 describe('categoryOf', () => {
   it('maps the server’s categories onto the three switches', () => {

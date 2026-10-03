@@ -159,10 +159,10 @@ describe('planNotification — what earns an interruption', () => {
   it('notifies on failure and completion', () => {
     expect(
       planNotification(event('workflow_run.failed', { workflowRunId: 'r1', error: 'boom' })),
-    ).toMatchObject({ category: 'failed', route: '/runs/r1', interruption: 'active' });
+    ).toMatchObject({ category: 'failed', categoryId: 'failed', route: '/runs/r1', interruption: 'active', runId: 'r1' });
 
     expect(planNotification(event('workflow_run.completed', { workflowRunId: 'r1' }))).toMatchObject(
-      { category: 'completed', interruption: 'active' },
+      { category: 'completed', categoryId: 'done', interruption: 'passive' },
     );
 
     expect(

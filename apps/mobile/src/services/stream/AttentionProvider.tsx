@@ -6,6 +6,7 @@ import type { LifecycleStream } from './lifecycleStream';
 import { useLifecycle } from './lifecycle';
 import { useApi } from '../api/useApi';
 import { LiveModelSync } from '../live/LiveModelSync';
+import { BadgeSync } from '../notifications/BadgeSync';
 
 const Context = createContext<AttentionStore | null>(null);
 const initial = initialAttentionState();
@@ -27,6 +28,7 @@ export function AttentionProvider({ client, children }: { client: LifecycleStrea
     <Context.Provider value={store}>
       {children}
       <LiveModelSync />
+      <BadgeSync />
     </Context.Provider>
   );
 }

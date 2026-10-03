@@ -40,9 +40,10 @@ function completion(platform: string): PushMessage {
     target: target(platform),
     title: 'Workflow run finished',
     body: 'Nightly',
-    data: { route: '/runs/r1', category: 'completed', threadId: 'run:r1' },
+    data: { route: '/runs/r1', category: 'done', threadId: 'run:r1', counts: { needsYou: 2, running: 1 } },
     threadId: 'run:r1',
-    interruption: 'active',
+    interruption: 'passive',
+    categoryId: 'done',
   };
 }
 
@@ -91,6 +92,7 @@ describe('ExpoPushProvider — approval payload', () => {
       priority: 'high',
       threadId: 'chat:c1',
       interruptionLevel: 'time-sensitive',
+      mutableContent: true,
       ttl: 3600,
     });
   });
@@ -109,15 +111,15 @@ describe('ExpoPushProvider — approval payload', () => {
     expect(payload!['threadId']).toBeUndefined();
   });
 
-  it('leaves non-approval notifications on their category channel without buttons', async () => {
+  it('sends a completion quietly: low channel, passive, no sound, normal priority, the Needs-you badge', async () => {
     const { http, requests } = fakeHttp();
     await new ExpoPushProvider(http).send([completion('android'), completion('ios')]);
 
     const [android, ios] = sentPayload(requests);
-    expect(android!['channelId']).toBe('completed');
-    expect(android!['categoryId']).toBeUndefined();
-    expect(android!['priority']).toBeUndefined();
-    expect(ios!['interruptionLevel']).toBe('active');
-    expect(ios!['categoryId']).toBeUndefined();
+    expect(android).toMatchObject({ channelId: 'done', categoryId: 'done', priority: 'normal' });
+    expect(android!['sound']).toBeUndefined();
+    expect(android!['badge']).toBeUndefined();
+    expect(ios).toMatchObject({ interruptionLevel: 'passive', categoryId: 'done', badge: 2, mutableContent: true });
+    expect(ios!['sound']).toBeUndefined();
   });
 });
