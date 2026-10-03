@@ -222,11 +222,15 @@ secrets).
    - Open the link: iOS `xcrun simctl openurl <udid> <url>`; Android
      `adb -s <serial> shell am start -a android.intent.action.VIEW -d <url> dev.generatorai.app` — spawned with an
      argument array (`execFile`), never through a shell string, so the URL is not re-parsed.
-   - The app pre-fills the code and shows the consent screen; it never submits by itself (MD-34). Unless `--no-confirm`,
-     confirm with agent-device: `agent-device snapshot -i --json --platform <p>`, then
-     `agent-device press 'id="pairing-confirm"' --settle` (M1-04 adds this testID to today's "Pair this device" button;
-     fallback selector `label="Pair this device"`), then `agent-device wait 'id="menu-button"' 30000`.
-   - Verify: `GET /api/auth/devices` lists a device named like the target, paired in the last minute. Record
+   - The app pre-fills the 12-character code and the address and shows "Server found" (`pairing-scanned`); it never
+     submits by itself (MD-34). The automation (M7-08 screen, fixed in M10 for MV-33) drives it by testID only:
+     `agent-device wait 'id="pairing-scanned"'` → `scroll down --until 'id="pairing-connect"'` → `press` it (consent
+     step, unless `--no-confirm`) → `wait 'id="pairing-fingerprint"'` → `scroll`/`press 'id="pairing-confirm"'` (Pair)
+     → `/paired` → `press 'id="paired-continue"'` (skips the optional approval-key setup) → Home (`home-new-chat` or
+     `menu-button`). The device keeps its default name ("My iPhone", "My phone"): the Name field auto-capitalises, so a
+     typed name never verifies on iOS (`fill` → `COMMAND_FAILED`, MD-192).
+   - Verify: `GET /api/auth/devices` lists exactly one device that was not there before, not revoked, created in the
+     last minute (`findNewPairing`; the target name only breaks ties, case-insensitively). Record
      `{ platform, udid|serial, deviceId, host }`.
 5. Print `sandbox-pair: ready` and a summary (server, dbPath, dummy repo path, chat ids per key, paired targets).
 

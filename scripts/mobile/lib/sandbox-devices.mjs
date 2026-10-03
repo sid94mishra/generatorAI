@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { agentCommand } from './agent-command.mjs';
 import { ROOT } from './sandbox-session.mjs';
-import { rewritePairUrl } from './sandbox-data.mjs';
+import { findNewPairing, rewritePairUrl } from './sandbox-data.mjs';
 
 const execute = promisify(execFile);
 const activeCommands = new Set();
@@ -155,6 +155,24 @@ async function waitForApp(target) {
   }
   throw new Error('The app did not reach its pairing screen or shell within 120 seconds; check Metro and native logs');
 }
+async function snapshotIdentifiers(target) {
+  // The full tree (not -i on Android): callouts such as `pairing-error` are not interactive.
+  const snapshot = await readSnapshot(target, false);
+  return new Set((snapshot.data?.snapshot?.nodes ?? snapshot.data?.nodes ?? []).map(node => node.identifier).filter(Boolean));
+}
+async function hasIdentifier(target, id) { return (await snapshotIdentifiers(target)).has(id); }
+/** Wait until any of the testIDs is in the native tree (raw on iOS, like waitForApp). */
+async function waitForIdentifier(target, ids, timeout) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    try {
+      const found = await snapshotIdentifiers(target);
+      if (ids.some(id => found.has(id))) return;
+    } catch { /* A transition can briefly leave no readable tree. */ }
+    await delay(500);
+  }
+  throw new Error(`None of ${ids.join(', ')} appeared on ${target.name} within ${timeout / 1000} s`);
+}
 export async function pairTarget(session, target, { repair = false, noConfirm = false } = {}) {
   const id = targetId(target);
   const installed = target.platform === 'ios'
@@ -210,33 +228,25 @@ export async function pairTarget(session, target, { repair = false, noConfirm = 
   else await run(ADB, ['-s', id, 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', url, APP_ID]);
   const linked = await readSnapshot(target);
   await confirmAppLink(target, linked.data?.snapshot ?? linked.data);
-  // M7-08: the link only pre-fills the code and address (MD-34); Connect opens the consent step.
+  // M7-08 (MD-34): the link only pre-fills the 12-character code and the server address ("Server found" callout);
+  // Connect opens the consent step. Every control is reached by its testID — no snapshot refs, no typing.
   await agent(target, ['wait', 'id="pairing-scanned"', '30000']);
   await agent(target, ['scroll', 'down', '--until', 'id="pairing-connect"', '--settle']);
   await agent(target, ['press', 'id="pairing-connect"', '--settle']);
   if (noConfirm) { console.log(`Consent is waiting on ${target.name}; pairing has not completed.`); return; }
   await agent(target, ['wait', 'id="pairing-fingerprint"', '30000']);
-  await agent(target, ['scroll', 'down', '--until', 'label="Name"', '--settle']);
-  const fields = await readSnapshot(target);
-  const name = (fields.data?.snapshot?.nodes ?? fields.data?.nodes ?? []).find(node =>
-    (node.editable || /TextField|EditText/.test(node.type ?? ''))
-    && [node.label, node.contentDescription, node.identifier].includes('Name'));
-  if (!name?.ref) throw new Error('The pairing Name input is not accessible in the current snapshot');
-  await agent(target, ['fill', `@${name.ref}`, target.name, '--settle']);
-  // The single-line Name field has no submit action; Return ends editing.
-  // A software keyboard can otherwise cover the consent button on iOS.
-  if (target.platform === 'ios') await agent(target, ['keyboard', 'enter']);
-  else await agent(target, ['keyboard', 'dismiss']);
+  // The device name keeps its default ("My iPhone", "My phone", …): the Name field auto-capitalises and
+  // auto-corrects, so typed text never verifies on iOS (agent-device fill → COMMAND_FAILED), and the new device is
+  // identified by its id instead (findNewPairing). No keyboard opens, so nothing covers "Pair".
   await agent(target, ['scroll', 'down', '--until', 'id="pairing-confirm"', '--settle']);
-  const consent = await readSnapshot(target);
-  const confirm = (consent.data?.snapshot?.nodes ?? consent.data?.nodes ?? []).find(node =>
-    node.identifier === 'pairing-confirm' || (node.type === 'Button' && node.label === 'Pair'));
-  if (!confirm?.ref) throw new Error('The pairing confirmation button is not accessible');
-  await agent(target, ['press', `@${confirm.ref}`, '--settle']);
-  // The success step (`/paired`) first, then the shell.
-  await agent(target, ['wait', 'id="paired-continue"', '30000']);
+  await agent(target, ['press', 'id="pairing-confirm"', '--settle']);
+  // The success step (`/paired`): Continue skips the optional approval-key setup (Settings › Security later).
+  await waitForIdentifier(target, ['paired-continue', 'pairing-error'], 30000);
+  if (await hasIdentifier(target, 'pairing-error')) throw new Error(`Pairing ${target.name} failed on the consent step; see the app's error callout`);
+  await agent(target, ['scroll', 'down', '--until', 'id="paired-continue"', '--settle']);
   await agent(target, ['press', 'id="paired-continue"', '--settle']);
-  await agent(target, ['wait', 'id="menu-button"', '30000']);
+  // Home on a phone (sidebar toggle `menu-button`) or a tablet (persistent sidebar; `home-new-chat` either way).
+  await waitForIdentifier(target, ['home-new-chat', 'menu-button'], 30000);
   await recordPairing(session, target, before, started);
 }
 
@@ -246,8 +256,7 @@ export async function recordPairing(session, target, before, started) {
   let device;
   for (let attempt = 0; attempt < 10; attempt++) {
     const current = await session.api('/auth/devices');
-    device = current.devices.find(item => !before.has(item.deviceId) && item.name === target.name && !item.revokedAt
-      && new Date(item.createdAt).getTime() >= started - 60000);
+    device = findNewPairing(current.devices, { before, started, name: target.name });
     if (device) break;
     await delay(500);
   }
