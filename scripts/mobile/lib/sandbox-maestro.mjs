@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { ROOT } from './sandbox-session.mjs';
 import { assertDummyRepo } from './sandbox-data.mjs';
 import { CHAT_NAMES, seedSandbox } from './sandbox-seed.mjs';
-import { APP_ID, ADB, run, targetId, targetHost, mintPair, installedBuild, recordPairing, releaseAgent } from './sandbox-devices.mjs';
+import { APP_ID, ADB, run, targetId, targetHost, mintPair, installedBuild, pairTarget, recordPairing, releaseAgent } from './sandbox-devices.mjs';
 
 // The workspace already pins this parser; do not implement a second YAML parser.
 const { parseAllDocuments, stringify } = createRequire(path.join(ROOT, 'packages/core/package.json'))('yaml');
@@ -241,7 +241,12 @@ export async function runMaestro(session, target, args, { verify } = {}) {
         try { reports.push(await fs.readFile(path.resolve(ROOT, flowReport), 'utf8')); }
         catch (error) { if (code === 0 || error.code !== 'ENOENT') throw error; }
       }
-      if (code !== 0) throw new Error(`Maestro failed for ${path.relative(ROOT, file)} (${code})`);
+      if (code !== 0) {
+        // A pairing flow starts from cleared state: when it fails half way the app is left unpaired, and every
+        // later flow would fail at launch. Restore the pairing before reporting the failure.
+        if (pairing) await pairTarget(session, target, { repair: true }).catch((error) => console.error(`sandbox-pair: re-pair after the failed pairing flow: ${error.message}`));
+        throw new Error(`Maestro failed for ${path.relative(ROOT, file)} (${code})`);
+      }
       if (metadata.expectedCommit) {
         const subject = await run('git', ['-C', assertDummyRepo(session.state.dummyRepo), 'log', '-1', '--format=%s']);
         if (subject !== metadata.expectedCommit) throw new Error('Dummy repository did not receive the expected characterization commit');
