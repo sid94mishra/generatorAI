@@ -99,7 +99,7 @@ async function readDiskUsage(dataDir: string): Promise<{ usedBytes: number; tota
 
 export function createSystemRoutes(container: Container): Router {
   const router = Router();
-  const { systemArtifactService, artifactCatalog, mcpSettingsStore, mcpCredentialVault, chatManagementService } = container;
+  const { systemArtifactService, artifactCatalog, mcpSettingsStore, mcpCredentialVault } = container;
   const dataDir = dirname(resolve(container.config.dbPath));
 
   // GET /system/info — Home "System" card + Settings › Diagnostics (G-12).
@@ -117,13 +117,9 @@ export function createSystemRoutes(container: Container): Router {
         serverVersion: readBuildStamp(import.meta.url),
         platform: process.platform,
         uptimeSec: Math.floor(process.uptime()),
-        agents: {
-          // Same source as `GET /health`'s `runningChatIds` / `activeChats` —
-          // chats currently streaming, not a run-history query, so this is
-          // meaningful even with empty run history.
-          running: chatManagementService.getStreamingChatIds().length,
-          max: container.config.maxConcurrentSessions,
-        },
+        // "N running" is the attention feed's count (what Home's Running list
+        // shows), not a second definition here.
+        agents: { max: container.config.maxConcurrentSessions },
         database: { kind: 'sqlite', ...(sizeBytes !== undefined ? { sizeBytes } : {}) },
         ...(disk ? { disk } : {}),
       };

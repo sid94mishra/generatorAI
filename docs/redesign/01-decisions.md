@@ -544,6 +544,16 @@ Chats and runs work in mounts (`workspace_mounts`); the `worktrees` table, which
 - **Shared layout hooks** used by several features live in `lib/` (`useNarrow`); `DataTable` gains `alwaysShowActions`
   for short tables whose row actions are the point (ProjectDetail codebases).
 
+### D-87 One definition of "running" (desktop orchestrator test, 2026-10-03) — Final
+- **Running** = what a person started and is executing now: top-level chats with an active turn, live workflow runs
+  and automation executions — the attention feed's Running list. A chat with an ask is under Needs you only.
+- **Worker chats roll up** (extends D-86): a working worker is not an item of its own; its orchestrator is listed
+  under Running ("2 background tasks running", opened on the Tasks dock, Stop only while the orchestrator's own turn
+  runs). A worker that asks is still listed under Needs you.
+- **One count:** the Home headline, the Running list, the System card's "Agents · N running" and Settings ›
+  Diagnostics all read the feed's `counts.running`. `SystemInfo.agents` keeps only `max`; `/health`'s
+  `activeChats` stays a technical in-flight count for diagnostics.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

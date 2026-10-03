@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // System info (G-12, docs/redesign/05-gap-matrix.md §G-12).
 //
-// The Home "System" card (Server, Agents running/max, Database size, Disk
+// The Home "System" card (Server, Agents max, Database size, Disk
 // usage, Uptime, Version) and Settings › Diagnostics. `GET /api/system/info`.
 //
 // React-free wire types only; web, desktop, CLI and mobile share them.
@@ -20,8 +20,11 @@ export interface SystemInfo {
   platform: string;
   uptimeSec: number;
   agents: {
-    /** Chats currently streaming (the same count `/api/health` calls `activeChats` — no run history dependency). */
-    running: number;
+    /**
+     * The configured concurrency cap. How many are running is the attention
+     * feed's `counts.running` (`GET /api/attention`), the number Home's
+     * Running list shows — one definition, not a second count here.
+     */
     max: number;
   };
   database: {

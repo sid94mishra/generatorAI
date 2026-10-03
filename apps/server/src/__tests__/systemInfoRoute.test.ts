@@ -3,8 +3,7 @@
 //
 // Real temp SQLite database file on disk (not mocked): the route reads its
 // actual byte size (plus -wal/-shm) and the containing directory's real disk
-// usage via `fs.promises.statfs`. Only `chatManagementService` (an
-// in-process registry with no table behind it) is a stand-in.
+// usage via `fs.promises.statfs`.
 // ────────────────────────────────────────────────────────────────
 
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -23,13 +22,11 @@ import { createSystemRoutes } from '../routes/system.js';
 let dir: string;
 let dbPath: string;
 let db: AppDatabase;
-let streamingChatIds: string[];
 
 function makeApp() {
   const container = {
     config: { dbPath, maxConcurrentSessions: 8 },
     logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    chatManagementService: { getStreamingChatIds: () => streamingChatIds },
     reloadVoiceConfig: vi.fn().mockResolvedValue(undefined),
     systemArtifactService: {},
     artifactCatalog: {},
@@ -47,7 +44,6 @@ beforeEach(() => {
   dbPath = join(dir, 'generatorai.db');
   db = createDB(dbPath);
   migrateDB(db);
-  streamingChatIds = [];
 });
 
 afterEach(() => {
@@ -71,7 +67,7 @@ describe('GET /api/system/info', () => {
     expect(body.platform).toBe(process.platform);
     expect(body.uptimeSec).toBeGreaterThanOrEqual(0);
 
-    expect(body.agents).toEqual({ running: 0, max: 8 });
+    expect(body.agents).toEqual({ max: 8 });
 
     // The migrated file is real bytes on disk, not an invented number.
     expect(body.database.kind).toBe('sqlite');
@@ -83,12 +79,6 @@ describe('GET /api/system/info', () => {
       expect(body.disk.usedBytes).toBeGreaterThanOrEqual(0);
       expect(body.disk.usedBytes).toBeLessThanOrEqual(body.disk.totalBytes);
     }
-  });
-
-  it('reflects currently streaming chats, not a run-history query', async () => {
-    streamingChatIds = ['c1', 'c2'];
-    const res = await request(makeApp()).get('/api/system/info');
-    expect((res.body as SystemInfo).agents.running).toBe(2);
   });
 
   it('omits database.sizeBytes rather than inventing 0 when the db file is unreadable', async () => {

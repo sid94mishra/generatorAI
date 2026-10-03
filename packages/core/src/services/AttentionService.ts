@@ -8,8 +8,15 @@
 //   Needs you  pending chat gates (tool_permission, question, plan_review),
 //              stage runs in `awaiting_input` (stage_approval, stage_input),
 //              pending computer consent, and paused runs (run_paused).
-//   Running    streaming chats, runs in running/starting/cancelling, and
-//              automation executions in pending/running.
+//   Running    top-level chats with an active turn (or with background
+//              workers that have one), runs in running/starting/cancelling,
+//              and automation executions in pending/running.
+//
+// Worker chats are internal (D-86): a worker that is working is not an item of
+// its own — it rolls up into its orchestrator's Running item ("2 background
+// tasks running"), so Running, its count and the Home System card all count
+// what a person started. A worker that ASKS is still listed under Needs you
+// (it is waiting on the person), opened on the orchestrator's Tasks dock.
 //
 // An entity with at least one ask is listed under Needs you only: a chat
 // blocked on a permission prompt is technically still streaming, but "it is
@@ -359,6 +366,8 @@ export class AttentionService {
   private readonly dirty = new Set<string>();
   /** chatId → latest tool step of its current turn. */
   private readonly chatLabels = new Map<string, string>();
+  /** worker chatId → its orchestrator, while the worker has an active turn and nothing to ask. */
+  private readonly workingWorkers = new Map<string, string>();
   /** consent requestId → timer that re-reads its chat when the prompt expires unanswered. */
   private readonly consentTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly unsubscribers: Array<() => void> = [];
@@ -576,6 +585,11 @@ export class AttentionService {
       this.dirty.add(entityKey(ref));
       return;
     }
+    // An orchestrator's label also names its working workers: re-read it.
+    if (this.workersOf(chatId).length > 0) {
+      this.schedule(ref);
+      return;
+    }
     const current = this.items.get(`chat:${chatId}`);
     if (!current || current.ask || current.progress?.label === label) return;
     this.apply(ref, [{ ...current, progress: { ...current.progress, label } }]);
@@ -729,13 +743,16 @@ export class AttentionService {
 
   private async computeChat(chatId: string): Promise<Draft[]> {
     const { chats, interactions, streaming, consent } = this.deps;
-    let chat: Chat;
+    let chat: Chat | undefined;
     try {
       chat = await chats.getById(chatId);
     } catch {
+      chat = undefined;
+    }
+    if (!chat || chat.status === 'archived') {
+      this.setWorking(chatId, undefined);
       return [];
     }
-    if (!chat || chat.status === 'archived') return [];
 
     const [pending, project, parent] = await Promise.all([
       interactions ? interactions.listPendingByChat(chatId) : Promise.resolve([] as AgentInteraction[]),
@@ -788,18 +805,58 @@ export class AttentionService {
       });
     }
 
-    if (drafts.length === 0 && streamingSince) {
-      const label = this.chatLabels.get(chatId);
+    // A working worker is not an item of its own: it rolls up into its orchestrator.
+    if (chat.parentChatId) {
+      this.setWorking(chatId, drafts.length === 0 && streamingSince ? chat.parentChatId : undefined);
+      return drafts;
+    }
+
+    const workers = this.workersOf(chatId);
+    if (drafts.length === 0 && (streamingSince || workers.length > 0)) {
+      const label = [
+        streamingSince ? this.chatLabels.get(chatId) : undefined,
+        workers.length > 0 ? `${workers.length} background task${workers.length === 1 ? '' : 's'} running` : undefined,
+      ]
+        .filter((part): part is string => part !== undefined)
+        .join(' · ');
+      const since = streamingSince ?? this.earliestStreaming(workers);
       drafts.push({
         ...base,
         key: `chat:${chatId}`,
-        href: chatHref(),
+        href: chatHref(streamingSince ? undefined : 'tasks'),
         state: stateOf(STATUS_MAPS.stream.streaming, 'running'),
-        since: streamingSince.toISOString(),
+        ...(since ? { since: since.toISOString() } : {}),
         ...(label ? { progress: { label } } : {}),
       });
     }
     return drafts;
+  }
+
+  /** The working workers of an orchestrator chat. */
+  private workersOf(parentChatId: string): string[] {
+    const ids: string[] = [];
+    for (const [workerId, parentId] of this.workingWorkers) if (parentId === parentChatId) ids.push(workerId);
+    return ids;
+  }
+
+  /** Records whether a worker is working (`parentChatId`) or not, and re-reads its orchestrator when that changes. */
+  private setWorking(chatId: string, parentChatId: string | undefined): void {
+    const before = this.workingWorkers.get(chatId);
+    if (before === parentChatId) return;
+    if (parentChatId) this.workingWorkers.set(chatId, parentChatId);
+    else this.workingWorkers.delete(chatId);
+    if (before) this.schedule({ entity: 'chat', id: before });
+    if (parentChatId) this.schedule({ entity: 'chat', id: parentChatId });
+  }
+
+  private earliestStreaming(chatIds: readonly string[]): Date | undefined {
+    const since = this.deps.streaming.getStreamingSince();
+    let earliest: Date | undefined;
+    for (const id of chatIds) {
+      const at = since.get(id);
+      if (at && (!earliest || at < earliest)) earliest = at;
+    }
+    return earliest;
   }
 
   private async parentRef(parentChatId: string | undefined): Promise<AttentionItem['parent']> {

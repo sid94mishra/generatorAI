@@ -1478,8 +1478,8 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
                     uptimeSec: { type: 'number' },
                     agents: {
                       type: 'object',
-                      properties: { running: { type: 'integer' }, max: { type: 'integer' } },
-                      required: ['running', 'max'],
+                      properties: { max: { type: 'integer' } },
+                      required: ['max'],
                     },
                     database: {
                       type: 'object',

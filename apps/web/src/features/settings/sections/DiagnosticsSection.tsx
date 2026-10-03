@@ -6,6 +6,7 @@
 // `useHealth` (5s, for the still-server-health-only OTel + snapshot fields).
 // ────────────────────────────────────────────────────────────────
 
+import { useAttention } from '@/hooks/attentionQueries.js';
 import { useHealth, useHealthConfig } from '@/hooks/queries.js';
 import { useSystemInfo } from '@/hooks/systemQueries.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
@@ -42,13 +43,19 @@ function formatBytes(bytes: number): string {
 function SystemHealthGroup() {
   const info = useSystemInfo();
   const data = info.data;
+  // The Running list's count (Home), not a second definition.
+  const running = useAttention().data?.counts.running;
 
   const items: KeyValueItem[] = [];
   if (data) {
     items.push({ label: 'Server', value: data.serverName, meta: data.platform });
     items.push({ label: 'Version', value: data.serverVersion, mono: true });
     items.push({ label: 'Uptime', value: formatUptime(data.uptimeSec), mono: true });
-    items.push({ label: 'Agents', value: `${data.agents.running} running`, meta: `max ${data.agents.max}` });
+    items.push({
+      label: 'Agents',
+      value: running !== undefined ? `${running} running` : '',
+      meta: `max ${data.agents.max}`,
+    });
     items.push({
       label: 'Database',
       value: 'SQLite',

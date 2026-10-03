@@ -7,6 +7,7 @@
 
 import { useMemo, type MouseEvent } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router';
+import { useAttention } from '@/hooks/attentionQueries.js';
 import { useStatsSummary } from '@/hooks/statsQueries.js';
 import { useSystemInfo } from '@/hooks/systemQueries.js';
 import { useShellStatus } from '@/hooks/useShellStatus.js';
@@ -96,6 +97,9 @@ export function ThisWeekCard({ finishedSignal }: { finishedSignal: number }) {
 
 export function SystemCard() {
   const info = useSystemInfo();
+  // "N running" is the Running list's own count (top-level chats with an active
+  // turn or working background tasks, live runs and executions) — one definition.
+  const running = useAttention().data?.counts.running;
   const shell = useShellStatus();
   const openSettings = useSettingsUiStore((s) => s.openSettings);
 
@@ -114,7 +118,11 @@ export function SystemCard() {
   const bottom: KeyValueItem[] = [];
   const data = info.data;
   if (data) {
-    top.push({ label: 'Agents', value: `${data.agents.running} running`, meta: `max ${data.agents.max}` });
+    top.push({
+      label: 'Agents',
+      value: running !== undefined ? `${running} running` : '',
+      meta: `max ${data.agents.max}`,
+    });
     top.push({
       label: 'Database',
       value: 'SQLite',

@@ -545,6 +545,77 @@ describe('AttentionService — live deltas', () => {
   });
 });
 
+describe('AttentionService — worker chats roll up into their orchestrator (D-86)', () => {
+  it('counts what a person started: one Running item per orchestrator, never one per worker', async () => {
+    await makeChat('orch', { name: 'Orchestrator' });
+    await makeChat('w1', { parentChatId: 'orch' } as Partial<Chat>);
+    await makeChat('w2', { parentChatId: 'orch' } as Partial<Chat>);
+    await makeChat('w3', { parentChatId: 'orch' } as Partial<Chat>);
+    // Two workers working, one blocked on a question; the orchestrator's own turn has ended.
+    streaming.set('w1', () => {});
+    streaming.set('w2', () => {});
+    streaming.set('w3', () => {});
+    openGate('w3', 'question', { questions: [{ id: 'q', header: 'h', question: 'Which branch?' }] });
+    await vi.waitFor(async () => expect(await interactions.listPendingByChat('w3')).toHaveLength(1));
+
+    await startService().start();
+    let snap = service.getSnapshot();
+    expect(snap.running).toHaveLength(1);
+    expect(snap.running[0]).toMatchObject({
+      key: 'chat:orch',
+      title: 'Orchestrator',
+      href: '/chats/orch?dock=tasks',
+      state: 'running',
+      stoppable: false,
+      progress: { label: '2 background tasks running' },
+    });
+    expect(snap.running[0]!.parent).toBeUndefined();
+    // The asking worker still needs the person.
+    expect(snap.needsYou.map((i) => i.entityId)).toEqual(['w3']);
+    expect(snap.counts.running).toBe(1);
+    expect(snap.counts.byEntity.chat).toEqual({ needsYou: 1, running: 1 });
+
+    // A worker finishes: the label follows.
+    streaming.delete('w2');
+    await service.settled();
+    expect(service.getSnapshot().running[0]!.progress).toEqual({ label: '1 background task running' });
+
+    // The orchestrator takes a turn while a worker still works: one item, its step first.
+    streaming.set('orch', () => {});
+    await emitChat('orch', 'harness.tool_start', { tool: 'Bash', args: { command: 'pnpm test' } });
+    await service.settled();
+    snap = service.getSnapshot();
+    expect(snap.running.map((i) => i.key)).toEqual(['chat:orch']);
+    expect(snap.running[0]).toMatchObject({
+      href: '/chats/orch',
+      stoppable: true,
+      progress: { label: 'Running pnpm test · 1 background task running' },
+    });
+
+    // Every worker done, then the orchestrator: nothing is running, and nothing is left behind.
+    streaming.delete('w1');
+    await service.settled();
+    expect(service.getSnapshot().running[0]!.progress).toEqual({ label: 'Running pnpm test' });
+    streaming.delete('orch');
+    await service.settled();
+    expect(service.getSnapshot().running).toEqual([]);
+    expect(service.getSnapshot().counts.running).toBe(0);
+  });
+
+  it('drops an archived worker from its orchestrator', async () => {
+    await makeChat('orch', { name: 'Orchestrator' });
+    await makeChat('w1', { parentChatId: 'orch' } as Partial<Chat>);
+    streaming.set('w1', () => {});
+    await startService().start();
+    expect(service.getSnapshot().counts.running).toBe(1);
+
+    await repos().chats.update('w1', { status: 'archived' });
+    await emitChat('w1', 'chat.archived');
+    await service.settled();
+    expect(service.getSnapshot().running).toEqual([]);
+  });
+});
+
 describe('AttentionService — consent without a chat (P2-R19)', () => {
   it('lists a workspace-level prompt on the top-level chat that owns the workspace, and drops it once answered', async () => {
     await makeChat('owner', { workspaceId: 'w2' } as Partial<Chat>);

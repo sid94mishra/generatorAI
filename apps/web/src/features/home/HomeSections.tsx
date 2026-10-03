@@ -101,7 +101,7 @@ export function NeedsYouSection({ items }: { items: readonly AttentionItem[] }) 
 
 function runningDetail(item: AttentionItem): string | undefined {
   const p = item.progress;
-  if (!p) return item.parent ? `in ${item.parent.title}` : undefined;
+  if (!p) return undefined;
   const step = p.step !== undefined && p.of !== undefined ? `Stage ${p.step} of ${p.of}` : undefined;
   const parts = [step, p.label].filter((s): s is string => !!s);
   return parts.length > 0 ? parts.join(' · ') : undefined;

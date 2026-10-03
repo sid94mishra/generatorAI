@@ -18,7 +18,7 @@ const INFO: SystemInfo = {
   serverVersion: '0.1.0',
   platform: 'darwin',
   uptimeSec: 1234,
-  agents: { running: 1, max: 8 },
+  agents: { max: 8 },
   database: { kind: 'sqlite', sizeBytes: 2048 },
   disk: { usedBytes: 100, totalBytes: 400 },
 };
