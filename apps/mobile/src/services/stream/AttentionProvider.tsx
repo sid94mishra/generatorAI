@@ -6,6 +6,7 @@ import type { LifecycleStream } from './lifecycleStream';
 import { useLifecycle } from './lifecycle';
 import { useApi } from '../api/useApi';
 import { LiveModelSync } from '../live/LiveModelSync';
+import { LiveSurfacesSync } from '../native/live/LiveSurfacesSync';
 import { BadgeSync } from '../notifications/BadgeSync';
 import { QuickActionItemsSync } from '../native/quickActions';
 
@@ -29,6 +30,7 @@ export function AttentionProvider({ client, children }: { client: LifecycleStrea
     <Context.Provider value={store}>
       {children}
       <LiveModelSync />
+      <LiveSurfacesSync />
       <BadgeSync />
       <QuickActionItemsSync />
     </Context.Provider>

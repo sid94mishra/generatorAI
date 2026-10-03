@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import { View } from 'react-native';
 
-import { PREF_KEYS, prefs } from '../../services/storage/prefs';
+import { readLiveSurfacePrefs, setLiveSurfacePref } from '../../services/live/liveStore';
 import { ListRow } from '../../ui/layout/ListRow';
 import { ListSection } from '../../ui/layout/ListSection';
 import { nativePlatform } from '../../ui/platform/geometry';
@@ -17,10 +17,10 @@ import { SettingsPage } from './components/SettingsPage';
 export default function WidgetsScreen(): React.ReactElement {
   const n = nouns();
   const ios = nativePlatform === 'ios';
-  const [runs, setRuns] = useState(() => prefs.getBoolean(PREF_KEYS.liveRuns, true));
-  const [chats, setChats] = useState(() => prefs.getBoolean(PREF_KEYS.liveChats, true));
-  const set = (key: string, apply: (v: boolean) => void) => (v: boolean): void => {
-    prefs.setBoolean(key, v);
+  const [runs, setRuns] = useState(() => readLiveSurfacePrefs().runs);
+  const [chats, setChats] = useState(() => readLiveSurfacePrefs().chats);
+  const set = (key: 'runs' | 'chats', apply: (v: boolean) => void) => (v: boolean): void => {
+    setLiveSurfacePref(key, v);
     apply(v);
   };
 
@@ -30,8 +30,8 @@ export default function WidgetsScreen(): React.ReactElement {
         <Callout tone="info" title={`${n.liveActivities}, widgets and the New chat ${ios ? 'control' : 'tile'} come with a later update`} body={`Choose now what they show on this ${n.device}.`} testID="widgets-coming" />
       </View>
       <ListSection title={n.liveActivities} footer={ios ? 'Shown on the Lock Screen and in the Dynamic Island while the work is live.' : 'Shown as a status bar chip and a live notification while the work is live.'}>
-        <ListRow kind="toggle" icon="workflows" title="Runs I start" subtitle="Stages as progress, gates as milestones" switchValue={runs} onValueChange={set(PREF_KEYS.liveRuns, setRuns)} testID="widgets-live-runs" />
-        <ListRow kind="toggle" icon="chats" title="Chats waiting on me" subtitle="Only while a permission is pending" switchValue={chats} onValueChange={set(PREF_KEYS.liveChats, setChats)} testID="widgets-live-chats" />
+        <ListRow kind="toggle" icon="workflows" title="Runs I start" subtitle="Stages as progress, gates as milestones" switchValue={runs} onValueChange={set('runs', setRuns)} testID="widgets-live-runs" />
+        <ListRow kind="toggle" icon="chats" title="Chats waiting on me" subtitle="Only while a permission is pending" switchValue={chats} onValueChange={set('chats', setChats)} testID="widgets-live-chats" />
       </ListSection>
       <ListSection title="Approving from the Lock Screen" footer={`Lock Screen surfaces show titles and statuses only, never code or message text.`}>
         <ListRow kind="value" icon="hand" title="Ordinary approvals" value="Needs unlock" />

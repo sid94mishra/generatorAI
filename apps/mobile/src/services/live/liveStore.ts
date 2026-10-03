@@ -59,6 +59,12 @@ export function readFollowed(serverId: string, now = Date.now()): Set<string> {
   return followedLiveKeys(serverId, parseFollowMap(prefs.getString(followedPrefKey(serverId)), now));
 }
 
+/** Every followed key of the servers that have items in `map` (the surfaces span servers). */
+export function readFollowedIn(map: LiveMap, now = Date.now()): Set<string> {
+  const servers = new Set(Object.values(map).map((s) => s.serverId));
+  return new Set([...servers].flatMap((id) => [...readFollowed(id, now)]));
+}
+
 /** The follow-set version, for memoising `readFollowed` in components. */
 export function useFollowVersion(): number {
   return useSyncExternalStore(liveStore.subscribe, () => followVersion, () => followVersion);
@@ -67,4 +73,11 @@ export function useFollowVersion(): number {
 /** Settings › Widgets & Live Activities: the per-device choices the surfaces honour. */
 export function readLiveSurfacePrefs(): LiveSurfacePrefs {
   return { runs: prefs.getBoolean(PREF_KEYS.liveRuns, true), chats: prefs.getBoolean(PREF_KEYS.liveChats, true) };
+}
+
+/** Change one choice; the surfaces re-plan at once (a switched-off item's surface ends). */
+export function setLiveSurfacePref(which: keyof LiveSurfacePrefs, value: boolean): void {
+  prefs.setBoolean(which === 'runs' ? PREF_KEYS.liveRuns : PREF_KEYS.liveChats, value);
+  followVersion += 1;
+  emit();
 }

@@ -15,9 +15,8 @@ import { useEffect } from 'react';
 import { Platform } from 'react-native';
 import { requireOptionalNativeModule } from 'expo';
 
-interface ExtensionStorageNative {
-  setInt?: (key: string, value: number, suiteName: string) => void;
-}
+import { setAppGroupInt } from './appGroup';
+
 interface ScreenCaptureNative {
   preventScreenCapture?: () => Promise<void>;
   allowScreenCapture?: () => Promise<void>;
@@ -32,13 +31,10 @@ interface DeviceKeyPrivacyNative {
   setRecentsScreenshotEnabled?: (enabled: boolean) => boolean;
 }
 
-const extensionStorage = requireOptionalNativeModule<ExtensionStorageNative>('ExtensionStorage');
 const screenCapture = requireOptionalNativeModule<ScreenCaptureNative>('ExpoScreenCapture');
 const keepAwake = requireOptionalNativeModule<KeepAwakeNative>('ExpoKeepAwake');
 const deviceKey = requireOptionalNativeModule<DeviceKeyPrivacyNative>('GeneratorAIDeviceKey');
 
-/** Shared with the extension targets and the widgets (06 §7.9). */
-export const APP_GROUP = 'group.dev.generatorai.app';
 export const REDACT_FLAG = 'privacy.redact';
 /** The blur behind the app switcher (06 §6.2). */
 export const APP_SWITCHER_BLUR = 0.6;
@@ -114,9 +110,6 @@ export function useSecretReveal(active: boolean): void {
  */
 export function setNotificationPreviewRedaction(enabled: boolean): void {
   if (Platform.OS !== 'ios') return;
-  try {
-    extensionStorage?.setInt?.(REDACT_FLAG, enabled ? 1 : 0, APP_GROUP);
-  } catch {
-    // No App Group in this build: the system "Show Previews" setting still applies.
-  }
+  // No App Group in this build: the system "Show Previews" setting still applies.
+  setAppGroupInt(REDACT_FLAG, enabled ? 1 : 0);
 }
