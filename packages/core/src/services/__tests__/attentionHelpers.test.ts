@@ -22,7 +22,8 @@ describe('describeToolStep', () => {
   });
 
   it('names an MCP tool by its own name, not the server-qualified one', () => {
-    expect(describeToolStep('mcp__generatorai-tools__check_background_agents', {})).toBe('check_background_agents');
+    expect(describeToolStep('mcp__generatorai-tools__check_background_agents', {})).toBe('Check tasks');
+    expect(describeToolStep('mcp__github__list_issues', { query: 'bug' })).toBe('List issues bug');
   });
 });
 
