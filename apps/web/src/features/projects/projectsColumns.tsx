@@ -9,6 +9,7 @@
 
 import { Link as RouterLink } from 'react-router';
 import { toStatus, type Project } from '@generatorai/shared';
+import { Icon } from '@/ui/icons/Icon.js';
 import { cn } from '@/ui/lib/cn.js';
 import type { DataTableColumn } from '@/ui/patterns/DataTable/DataTable.js';
 import { MenuButton, type MenuButtonItem } from '@/ui/patterns/MenuButton/MenuButton.js';
@@ -67,14 +68,17 @@ export const PROJECTS_COLUMNS: readonly DataTableColumn<Project>[] = [
     header: 'Project',
     width: 'minmax(220px,1fr)',
     cell: (project) => (
-      <span className="flex min-w-0 flex-col">
-        <span className="flex min-w-0 items-center gap-2">
-          <Link render={<RouterLink to={`/projects/${project.id}`} />} className="truncate font-medium">
-            {project.name}
-          </Link>
-          {project.status === 'archived' ? <Badge tone="neutral">Archived</Badge> : null}
+      <span className="flex min-w-0 items-center gap-2.5">
+        <Icon concept="projects" size={16} className="shrink-0 text-fg-3" />
+        <span className="flex min-w-0 flex-col">
+          <span className="flex min-w-0 items-center gap-2">
+            <Link render={<RouterLink to={`/projects/${project.id}`} />} className="truncate font-medium">
+              {project.name}
+            </Link>
+            {project.status === 'archived' ? <Badge tone="neutral">Archived</Badge> : null}
+          </span>
+          {project.description ? <span className="truncate text-small text-fg-3">{project.description}</span> : null}
         </span>
-        {project.description ? <span className="truncate text-small text-fg-3">{project.description}</span> : null}
       </span>
     ),
   },

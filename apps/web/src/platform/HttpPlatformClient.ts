@@ -2695,6 +2695,10 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch<any[]>(`${this.baseUrl}/api/workflow-scripts`);
   }
 
+  async getScriptsStatus(): Promise<{ enabled: boolean; found: number; loaded: number }> {
+    return apiFetch(`${this.baseUrl}/api/workflow-scripts/status`);
+  }
+
   async getScript(id: string): Promise<any> {
     return apiFetch<any>(`${this.baseUrl}/api/workflow-scripts/${id}`);
   }

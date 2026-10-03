@@ -110,8 +110,9 @@ export function BuilderHeader({
                   placeholder="Untitled Workflow"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-64 border-transparent bg-transparent hover:border-line"
-                  inputClassName="font-semibold"
+                  // Sized to the name (board: the status chip sits right after the title).
+                  className="max-w-80 border-transparent bg-transparent hover:border-line"
+                  inputClassName="field-sizing-content min-w-24 font-semibold"
                 />
               ),
             },
@@ -165,13 +166,23 @@ export function BuilderHeader({
             onClick={onToggleHistory}
           />
           <Separator orientation="vertical" className="mx-1" />
-          <Button size="sm" icon="save" shortcut={SAVE_KEYS} loading={isSaving} disabled={blocked} onClick={onSave}>
+          <Button
+            size="sm"
+            icon="save"
+            shortcut={SAVE_KEYS}
+            loading={isSaving}
+            // The problems panel says Save is blocked by errors; the button agrees instead of
+            // answering a click with "Fix the errors before saving".
+            disabled={blocked || counts.errors > 0}
+            title={counts.errors > 0 ? 'Fix the errors to save' : undefined}
+            onClick={onSave}
+          >
             Save
           </Button>
           <Button size="sm" icon={counts.errors > 0 ? 'status-failed' : 'check'} onClick={onValidate} title="Validate the workflow">
             Validate
-            {counts.errors > 0 ? <span className="font-mono text-micro text-err">{counts.errors}</span> : null}
-            {counts.warnings > 0 ? <span className="font-mono text-micro text-warn">{counts.warnings}</span> : null}
+            {counts.errors > 0 ? <span className="ml-1.5 font-mono text-micro text-err">{counts.errors}</span> : null}
+            {counts.warnings > 0 ? <span className="ml-1 font-mono text-micro text-warn">{counts.warnings}</span> : null}
           </Button>
           <Button
             size="sm"

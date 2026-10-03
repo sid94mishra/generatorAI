@@ -3,8 +3,8 @@
 // F-projects-09; 04-screen-map.md R-3, §4.5 #51).
 //
 // PageHeader (Projects / project / alias · status · Logs · More), PageTitle
-// ("Git remote · cloned to <path>" + Fetch), a stats card (Remote + copy ·
-// Default branch picker · Last fetched · Active worktrees), and tabs as path
+// ("Git remote · cloned to <path>"), a stats card (Remote + copy ·
+// Default branch picker · Last fetched · Active worktrees · Fetch), and tabs as path
 // segments: /projects/:id/codebases/:cid/worktrees|files. Fetch runs as a
 // G-16 job; its output streams into the Logs dialog. "Change default branch"
 // lives in More (and on the stats card's branch control).
@@ -207,18 +207,6 @@ export function CodebaseDetailPage() {
                 ) : null}
               </>
             }
-            actions={
-              git ? (
-                <Button
-                  icon="refresh"
-                  loading={fetchAction.pendingId === codebase.id}
-                  disabled={isCodebaseBusy(codebase.status)}
-                  onClick={() => fetchAction.run(codebase)}
-                >
-                  Fetch
-                </Button>
-              ) : undefined
-            }
           />
         }
         banner={
@@ -238,6 +226,19 @@ export function CodebaseDetailPage() {
             <StatCell label="Active worktrees">
               <span className="font-mono text-small">{activeWorktrees ?? '—'}</span>
             </StatCell>
+            {git ? (
+              <div className="flex shrink-0 items-center pr-3">
+                <Button
+                  icon="refresh"
+                  size="sm"
+                  loading={fetchAction.pendingId === codebase.id}
+                  disabled={isCodebaseBusy(codebase.status)}
+                  onClick={() => fetchAction.run(codebase)}
+                >
+                  Fetch
+                </Button>
+              </div>
+            ) : null}
           </Card>
         }
         tabs={

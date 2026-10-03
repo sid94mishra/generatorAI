@@ -16,6 +16,7 @@ import {
   useLatestAutomationExecutions,
   useTriggerAutomation,
 } from '@/hooks/automationQueries.js';
+import { useWorkflowDefinitions } from '@/hooks/workflowQueries.js';
 import { formatNextRun } from '@/lib/nextRun.js';
 import { AutomationTriggerBadge } from './AutomationTriggerBadge.js';
 import { useConfirm } from '@/ui/primitives/AlertDialog/AlertDialog.js';
@@ -47,6 +48,11 @@ export function AutomationsListPage() {
   const disableMutation = useDisableAutomation();
   const triggerMutation = useTriggerAutomation();
   const confirmer = useConfirm();
+  const { data: definitions } = useWorkflowDefinitions();
+  const definitionNames = useMemo(
+    () => new Map((definitions ?? []).map((d: { id: string; name: string }) => [d.id, d.name])),
+    [definitions],
+  );
 
   // Not memoized: `byStatus` is a fresh closure per render over the polling
   // execution queries (useQueries), and automation counts are small (a
@@ -126,8 +132,19 @@ export function AutomationsListPage() {
     {
       id: 'workflows',
       header: 'Workflows',
-      width: 120,
-      cell: (row) => `${row.workflowIds.length} workflow${row.workflowIds.length === 1 ? '' : 's'}`,
+      width: 180,
+      // Board Automations names the workflow ("Nightly dependency audit", "…, +1"); the count is the fallback.
+      cell: (row) => {
+        const names = row.workflowIds.map((id) => definitionNames.get(id)).filter((n): n is string => Boolean(n));
+        if (names.length === 0) return `${row.workflowIds.length} workflow${row.workflowIds.length === 1 ? '' : 's'}`;
+        const rest = row.workflowIds.length - 1;
+        return (
+          <span className="truncate text-small text-fg-2" title={names.join(', ')}>
+            {names[0]}
+            {rest > 0 ? `, +${rest}` : ''}
+          </span>
+        );
+      },
     },
     {
       id: 'dataset',

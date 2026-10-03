@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import type { RunProfile, WorkflowGraph } from '@generatorai/workflow-spec';
 import { newIdempotencyKey } from '@generatorai/client-core';
-import { useMaterializeScript, useScript, useScriptProfiles, useScripts, useReloadScripts } from '@/hooks/scriptQueries.js';
+import { useMaterializeScript, useScript, useScriptProfiles, useScripts, useScriptsStatus, useReloadScripts } from '@/hooks/scriptQueries.js';
 import { useInvokeWorkflow } from '@/hooks/workflowQueries.js';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
@@ -34,6 +34,7 @@ export function ScriptsListPage() {
   const navigate = useNavigate();
   const { data: scripts, isLoading, error } = useScripts();
   const reloadScripts = useReloadScripts();
+  const { data: status } = useScriptsStatus();
   const [search, setSearch] = useState('');
 
   const filtered = (scripts ?? []).filter((s) => {
@@ -54,7 +55,14 @@ export function ScriptsListPage() {
             count={scripts?.length}
             action={<IconButton icon="refresh" label="Reload scripts" onClick={() => reloadScripts.mutate()} disabled={reloadScripts.isPending} />}
             search={<SearchInput value={search} onValueChange={setSearch} label="Filter scripts" placeholder="Filter scripts" size="sm" />}
-            footer={<Callout>Scripts are .workflow.mjs files in templates/scripts on the server. Edit them in your editor, then Reload.</Callout>}
+            footer={
+              <div className="flex flex-col gap-2">
+                {reloadScripts.isError ? (
+                  <Callout tone="err">{reloadScripts.error instanceof Error ? reloadScripts.error.message : String(reloadScripts.error)}</Callout>
+                ) : null}
+                <Callout>Scripts are .workflow.mjs files in templates/scripts on the server. Edit them in your editor, then Reload.</Callout>
+              </div>
+            }
           >
             {isLoading ? (
               <div className="flex flex-col gap-2 px-2 py-1">
@@ -65,12 +73,24 @@ export function ScriptsListPage() {
             ) : error ? (
               <EmptyState tone="error" icon="warning" title="Couldn't load scripts" description={error instanceof Error ? error.message : String(error)} framed={false} />
             ) : filtered.length === 0 ? (
-              <EmptyState
-                icon="scripts"
-                title={search ? 'No scripts match your filter' : 'No workflow scripts found'}
-                description="Place .workflow.mjs files in templates/scripts/ to define programmatic workflows."
-                framed={false}
-              />
+              search ? (
+                <EmptyState icon="scripts" title="No scripts match your filter" framed={false} />
+              ) : status && !status.enabled ? (
+                // "No scripts found" was wrong here: the files exist, the server refuses to load them.
+                <EmptyState
+                  icon="lock"
+                  title="Workflow scripts are turned off"
+                  description={`${status.found > 0 ? `${status.found} .workflow.mjs ${status.found === 1 ? 'file is' : 'files are'} in templates/scripts but not loaded. ` : ''}Scripts run with the server's privileges: set GENERATORAI_ALLOW_WORKFLOW_SCRIPTS=true on a trusted server, restart it, then Reload.`}
+                  framed={false}
+                />
+              ) : (
+                <EmptyState
+                  icon="scripts"
+                  title="No workflow scripts found"
+                  description="Place .workflow.mjs files in templates/scripts/ to define programmatic workflows."
+                  framed={false}
+                />
+              )
             ) : (
               filtered.map((script) => (
                 <EntityRow

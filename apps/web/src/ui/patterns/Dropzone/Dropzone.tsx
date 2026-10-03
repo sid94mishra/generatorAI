@@ -55,7 +55,8 @@ export function Dropzone({ onFiles, accept, multiple = true, label = 'Drop files
       )}
     >
       <Icon concept="upload" size={16} className="shrink-0 text-fg-3" />
-      <span className="min-w-0 flex-1 truncate text-small text-fg-3">{label}</span>
+      {/* "Drop files or [Choose files]" reads as one phrase (board WorkflowRunDialog). */}
+      <span className="min-w-0 truncate text-small text-fg-3">{label}</span>
       <FileInput accept={accept} multiple={multiple} disabled={disabled} onFilesSelected={onFiles}>
         {(open) => (
           <Button size="sm" variant="secondary" disabled={disabled} onClick={open}>

@@ -61,6 +61,7 @@ import {
   type RunOptions,
   type StartError,
 } from './runDialogModel.js';
+import { modChord } from '@/lib/shortcuts.js';
 
 interface UploadSet {
   prompts: File[];
@@ -520,7 +521,7 @@ function RunDialogBody({
             Test run
           </Button>
         ) : null}
-        <Button variant="primary" icon="play" shortcut={['Ctrl', '↵']} loading={starting} onClick={() => void start(target)}>
+        <Button variant="primary" icon="play" shortcut={modChord('Enter')} loading={starting} onClick={() => void start(target)}>
           {submitLabel}
         </Button>
       </DialogFooter>

@@ -67,6 +67,16 @@ export const Width1100: Story = {
   },
 };
 
+/** `alwaysShowActions`: the actions stay visible without hover (ProjectDetail codebases: Fetch / Logs). */
+export const ActionsAlwaysVisible: Story = {
+  render: () => <Stateful alwaysShowActions selection={new Set()} />,
+  play: async ({ canvas }) => {
+    const cell = canvas.getAllByRole('cell').find((c) => c.className.includes('justify-end gap-1'));
+    await expect(cell).toBeDefined();
+    await expect(getComputedStyle(cell as HTMLElement).opacity).toBe('1');
+  },
+};
+
 export const Loading: Story = {
   render: () => <Stateful loading />,
   play: async ({ canvas }) => {

@@ -37,6 +37,12 @@ export function createWorkflowScriptRoutes(container: Container): Router {
     }
   });
 
+  // GET /workflow-scripts/status — enabled? how many files were found / loaded?
+  // Lets a client tell "scripts are switched off on this server" from "none exist".
+  router.get('/status', (_req, res) => {
+    res.json(workflowScriptLoader.status());
+  });
+
   // GET /workflow-scripts/:id — Get single script metadata + full output preview
   router.get('/:id', (req, res, next) => {
     try {

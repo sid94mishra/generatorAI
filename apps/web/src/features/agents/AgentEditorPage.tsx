@@ -72,6 +72,7 @@ import {
   type AgentFormValues,
 } from './agentFormSchema.js';
 import { ROLE_LABEL } from './agentListCopy.js';
+import { modChord } from '@/lib/shortcuts.js';
 
 const AGENT_INSTRUCTIONS_WARN_BYTES = 8 * 1024;
 const AGENT_INSTRUCTIONS_MAX_BYTES = 32 * 1024;
@@ -566,70 +567,7 @@ export function AgentEditorPage() {
             </form.Field>
           </FormSection>
 
-          <FormSection title="Skills" hint="Staged into the workspace at run time.">
-            {catalogLoading ? (
-              <Spinner size={14} />
-            ) : (
-              <form.Field name="skillIds">
-                {(field) => (
-                  <CapabilityToggleList
-                    label="Skills"
-                    icon="skills"
-                    entries={skills}
-                    selectedIds={field.state.value}
-                    onChange={field.handleChange}
-                    disabled={readOnly}
-                    emptyHint="No skills in the catalog yet."
-                    data-testid="agent-skills"
-                  />
-                )}
-              </form.Field>
-            )}
-          </FormSection>
-
-          <FormSection title="MCP servers" hint="Only vetted registry entries.">
-            {catalogLoading ? (
-              <Spinner size={14} />
-            ) : (
-              <form.Field name="mcpServerIds">
-                {(field) => (
-                  <CapabilityToggleList
-                    label="MCP servers"
-                    icon="mcp"
-                    entries={mcpServers}
-                    selectedIds={field.state.value}
-                    onChange={field.handleChange}
-                    disabled={readOnly}
-                    emptyHint="No MCP servers registered."
-                    data-testid="agent-mcp-servers"
-                  />
-                )}
-              </form.Field>
-            )}
-          </FormSection>
-
-          <FormSection title="Capabilities">
-            <form.Field name="tools">
-              {(field) => (
-                <ToolPolicyTriState
-                  value={field.state.value}
-                  onChange={field.handleChange}
-                  {...(projectionResult ? { effective: projectionResult.toolPolicy.groups } : {})}
-                  labels={TOOL_GROUP_LABELS}
-                  disabled={readOnly}
-                  data-testid="agent-capabilities"
-                  {...(isOrchestrator
-                    ? {
-                        lockedGroups: {
-                          orchestration: { value: true, reason: 'Always on for orchestrators — they cannot delegate without it.' },
-                        },
-                      }
-                    : {})}
-                />
-              )}
-            </form.Field>
-          </FormSection>
-
+          {/* Board AgentEditor order: Role (→ Team), Runtime, then Skills / MCP / Capabilities. */}
           {isOrchestrator ? (
             <FormSection title="Team" hint="Agents this orchestrator may spawn. Leave empty to allow any enabled agent.">
               <form.Field name="orchestration">
@@ -769,6 +707,71 @@ export function AgentEditorPage() {
               }}
             </form.Field>
           </FormSection>
+
+          <FormSection title="Skills" hint="Staged into the workspace at run time.">
+            {catalogLoading ? (
+              <Spinner size={14} />
+            ) : (
+              <form.Field name="skillIds">
+                {(field) => (
+                  <CapabilityToggleList
+                    label="Skills"
+                    icon="skills"
+                    entries={skills}
+                    selectedIds={field.state.value}
+                    onChange={field.handleChange}
+                    disabled={readOnly}
+                    emptyHint="No skills in the catalog yet."
+                    data-testid="agent-skills"
+                  />
+                )}
+              </form.Field>
+            )}
+          </FormSection>
+
+          <FormSection title="MCP servers" hint="Only vetted registry entries.">
+            {catalogLoading ? (
+              <Spinner size={14} />
+            ) : (
+              <form.Field name="mcpServerIds">
+                {(field) => (
+                  <CapabilityToggleList
+                    label="MCP servers"
+                    icon="mcp"
+                    entries={mcpServers}
+                    selectedIds={field.state.value}
+                    onChange={field.handleChange}
+                    disabled={readOnly}
+                    emptyHint="No MCP servers registered."
+                    data-testid="agent-mcp-servers"
+                  />
+                )}
+              </form.Field>
+            )}
+          </FormSection>
+
+          <FormSection title="Capabilities">
+            <form.Field name="tools">
+              {(field) => (
+                <ToolPolicyTriState
+                  value={field.state.value}
+                  onChange={field.handleChange}
+                  {...(projectionResult ? { effective: projectionResult.toolPolicy.groups } : {})}
+                  labels={TOOL_GROUP_LABELS}
+                  disabled={readOnly}
+                  data-testid="agent-capabilities"
+                  {...(isOrchestrator
+                    ? {
+                        lockedGroups: {
+                          orchestration: { value: true, reason: 'Always on for orchestrators — they cannot delegate without it.' },
+                        },
+                      }
+                    : {})}
+                />
+              )}
+            </form.Field>
+          </FormSection>
+
         </>
       }
       aside={
@@ -797,7 +800,7 @@ export function AgentEditorPage() {
           primary={
             <Button
               variant="primary"
-              shortcut={['Ctrl', '↵']}
+              shortcut={modChord('S')}
               disabled={!canSave || isSubmitting}
               loading={isSubmitting}
               onClick={handleSave}

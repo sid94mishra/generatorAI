@@ -12,7 +12,7 @@ export { ghCliToken } from './ghCli.js';
 export { createProvider } from './providerFactory.js';
 export type { ProviderFactoryDeps } from './providerFactory.js';
 export { SourceControlRegistry, hostFromAccount, normalizeHost } from './SourceControlRegistry.js';
-export { parseRepoSlug } from './parseRepoSlug.js';
+export { parseRepoSlug, isLocalRemote } from './parseRepoSlug.js';
 export type { RepoSlug } from './parseRepoSlug.js';
 export { ProviderNotConfiguredError, SourceControlError } from './errors.js';
 export type {

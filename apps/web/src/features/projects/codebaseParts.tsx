@@ -131,9 +131,13 @@ export function CodebaseLogsDialog({ projectId, codebase, open, onOpenChange }: 
           <EmptyState
             framed
             icon="terminal"
-            title={logs.isLoading ? 'Loading logs…' : 'No output yet'}
+            title={logs.isLoading ? 'Loading logs…' : job && job.status !== 'running' ? 'No output' : 'No output yet'}
             description={
-              logs.isLoading ? undefined : 'Clone and fetch output appears here while a job runs (kept until the server restarts).'
+              logs.isLoading
+                ? undefined
+                : job && job.status !== 'running'
+                  ? `The last ${job.kind} finished without printing anything.`
+                  : 'Clone and fetch output appears here while a job runs (kept until the server restarts).'
             }
           />
         ) : (

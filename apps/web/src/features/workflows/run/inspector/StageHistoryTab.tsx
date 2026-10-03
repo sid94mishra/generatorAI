@@ -15,6 +15,7 @@ import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
 import { StatusBadge } from '@/ui/primitives/StatusBadge/StatusBadge.js';
 import { focusRing } from '@/ui/lib/focus.js';
 import { compactCount, formatMs, formatUsd, spanMs, usageNumbers } from '../model/format.js';
+import { formatWhen } from '@/lib/formatWhen.js';
 
 const LIMIT = 25;
 
@@ -78,7 +79,7 @@ export function StageHistoryTab({
                   </span>
                   <span className="shrink-0 text-fg-3">
                     {sr.startedAt
-                      ? new Date(sr.startedAt).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+                      ? formatWhen(sr.startedAt)
                       : 'not started'}
                   </span>
                 </div>

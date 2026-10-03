@@ -11,6 +11,7 @@ export const scriptKeys = {
   script: (id: string) => ['script', id] as const,
   profiles: (id: string) => ['script-profiles', id] as const,
   allowlist: ['script-allowlist'] as const,
+  status: ['scripts-status'] as const,
 };
 
 // ── Queries ──
@@ -20,6 +21,16 @@ export function useScripts() {
   return useQuery({
     queryKey: scriptKeys.scripts,
     queryFn: () => platform.listScripts(),
+    staleTime: 30_000,
+  });
+}
+
+/** Whether the server loads workflow scripts at all, and how many files it found. */
+export function useScriptsStatus() {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: scriptKeys.status,
+    queryFn: () => platform.getScriptsStatus(),
     staleTime: 30_000,
   });
 }

@@ -69,6 +69,8 @@ export interface DataTableProps<Row> {
   /** Trailing actions (sm IconButtons, a MenuButton). */
   rowActions?: (row: Row) => ReactNode;
   actionsWidth?: number;
+  /** Keep the row actions visible instead of revealing them on hover / focus / selection. */
+  alwaysShowActions?: boolean;
   onRowClick?: (row: Row) => void;
   virtualized?: boolean;
   /** Called when the last rows scroll into view (virtualized). */
@@ -118,6 +120,7 @@ export function DataTable<Row>({
   sort,
   onSortChange,
   rowActions,
+  alwaysShowActions = false,
   actionsWidth = 64,
   onRowClick,
   virtualized = false,
@@ -223,7 +226,7 @@ export function DataTable<Row>({
           </TableCell>
         ))}
         {rowActions ? (
-          <TableCell actions onClick={(event: MouseEvent) => event.stopPropagation()}>
+          <TableCell actions={alwaysShowActions ? 'always' : true} onClick={(event: MouseEvent) => event.stopPropagation()}>
             {rowActions(row)}
           </TableCell>
         ) : null}

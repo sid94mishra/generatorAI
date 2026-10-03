@@ -35,6 +35,7 @@ import { Icon } from '@/ui/icons/Icon.js';
 import { formatDuration } from '../model/format.js';
 import type { RunView, StageView } from '../model/types.js';
 import { BudgetMeter } from './BudgetMeter.js';
+import { formatWhen } from '@/lib/formatWhen.js';
 
 /** The chat's permission-mode wording, for the run row's layer (W-65). */
 const PERMISSION_OPTIONS: Array<{ value: WorkflowRunPermissionMode; label: string }> = [
@@ -169,7 +170,7 @@ export const RunHeader = memo(function RunHeader({
     if (reveal) more.push({ id: 'reveal', label: `Show in ${FILE_MANAGER}`, icon: 'folder-open', onSelect: () => void reveal() });
   }
 
-  const startedText = new Date(run.startedAt).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+  const startedText = formatWhen(run.startedAt);
 
   return (
     <PageHeader

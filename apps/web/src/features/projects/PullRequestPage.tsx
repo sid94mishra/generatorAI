@@ -44,7 +44,8 @@ import { Textarea } from '@/ui/primitives/Textarea/Textarea.js';
 import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { DetailPage } from '@/ui/templates/DetailPage/DetailPage.js';
 import { PR_STATE_TONE } from './detail/PullRequestsTab.js';
-import { useNarrow } from './useNarrow.js';
+import { useNarrow } from '@/lib/useNarrow.js';
+import { formatWhen } from '@/lib/formatWhen.js';
 
 const FILE_STATUS_TONE: Record<PullRequestFile['status'], string> = {
   added: 'text-ok',
@@ -223,7 +224,7 @@ export function PullRequestPage() {
             <Card.Body>
               <div className="flex flex-wrap items-center gap-2 text-small text-fg-3">
                 <span className="font-medium text-fg">{comment.author}</span>
-                <span>{new Date(comment.createdAt).toLocaleString()}</span>
+                <span>{formatWhen(comment.createdAt)}</span>
                 {comment.path ? (
                   <span className="font-mono">
                     {comment.path}

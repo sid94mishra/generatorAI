@@ -55,6 +55,13 @@ const ROLE_OPTIONS: readonly { value: AgentRole | ''; label: string }[] = [
 // a stray binary never becomes a 100MB request body.
 const MAX_IMPORT_BYTES = 256 * 1024;
 
+type AgentSort = 'name' | 'updated';
+/** Board Agents: a sort chip after the filters ("Name"). */
+const AGENT_SORTS: Record<AgentSort, { label: string; compare: (a: Agent, b: Agent) => number }> = {
+  name: { label: 'Name', compare: (a, b) => a.name.localeCompare(b.name) },
+  updated: { label: 'Updated', compare: (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() },
+};
+
 export function AgentsListPage() {
   const navigate = useNavigate();
   const { data: agents, isLoading, isError, error, refetch } = useAgents();
@@ -67,6 +74,7 @@ export function AgentsListPage() {
   const [search, setSearch] = useState('');
   const [scope, setScope] = useState<Scope>('all');
   const [role, setRole] = useState<AgentRole | ''>('');
+  const [sort, setSort] = useState<AgentSort>('name');
 
   const projectsById = useMemo(() => new Map((projects ?? []).map((p) => [p.id, p.name])), [projects]);
 
@@ -88,8 +96,8 @@ export function AgentsListPage() {
         a.description.toLowerCase().includes(q) ||
         a.tags.some((t) => t.toLowerCase().includes(q))
       );
-    });
-  }, [agents, search, scope, role]);
+    }).sort(AGENT_SORTS[sort].compare);
+  }, [agents, search, scope, role, sort]);
 
   const hasFilters = Boolean(search) || scope !== 'all' || role !== '';
   const clearFilters = () => {
@@ -174,7 +182,7 @@ export function AgentsListPage() {
                     onClick={open}
                     data-testid="agent-import-button"
                   >
-                    Import
+                    Import <span className="font-mono text-small text-fg-2">.agent.md</span>
                   </Button>
                 )}
               </FileInput>
@@ -205,7 +213,26 @@ export function AgentsListPage() {
               </Menu.Popup>
             </Menu.Root>
           }
+          sort={
+            <Menu.Root>
+              <Menu.Trigger render={<Chip dropdown icon="sort">{AGENT_SORTS[sort].label}</Chip>} />
+              <Menu.Popup align="end">
+                <Menu.RadioGroup value={sort} onValueChange={(next) => setSort(next as AgentSort)}>
+                  {(Object.keys(AGENT_SORTS) as AgentSort[]).map((key) => (
+                    <Menu.RadioItem key={key} value={key}>
+                      {AGENT_SORTS[key].label}
+                    </Menu.RadioItem>
+                  ))}
+                </Menu.RadioGroup>
+              </Menu.Popup>
+            </Menu.Root>
+          }
         />
+      }
+      footer={
+        filtered.length > 0
+          ? 'Built-in agents are read-only — export one and import the .agent.md to edit a copy. A chat keeps the agent it started with, even after it is edited or deleted.'
+          : undefined
       }
       content={
         isLoading ? (
@@ -250,8 +277,9 @@ export function AgentsListPage() {
               return (
                 <EntityCard
                   key={agent.id}
-                  role="button"
-                  tabIndex={0}
+                  // Not role="button": the card holds its own buttons (nested-interactive,
+                  // and the card's name swallowed theirs). Keyboard users open it with the
+                  // View/Edit button; a pointer click anywhere on the card still opens it.
                   data-testid={`agent-card-${agent.slug}`}
                   // Opacity would also wash out the "Disabled" badge's and
                   // the description's text below the 4.5:1 contrast floor
@@ -259,11 +287,6 @@ export function AgentsListPage() {
                   // Badge alone signals the state.
                   className="cursor-pointer"
                   onClick={() => navigate(`/agents/${agent.id}`)}
-                  onKeyDown={(e) => {
-                    if (e.key !== 'Enter' && e.key !== ' ') return;
-                    e.preventDefault();
-                    navigate(`/agents/${agent.id}`);
-                  }}
                   leading={
                     <span className="flex size-8 shrink-0 items-center justify-center rounded-card bg-selected">
                       <AgentGlyph size={16} />

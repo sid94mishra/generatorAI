@@ -29,6 +29,7 @@ import {
   type Ref,
 } from 'react';
 import { cva } from 'class-variance-authority';
+import { Field as BaseField } from '@base-ui/react/field';
 import { cn } from '../../lib/cn.js';
 import { fieldFocus, fieldInvalid } from '../../lib/focus.js';
 
@@ -134,7 +135,18 @@ export interface TextareaProps extends Omit<ComponentProps<'textarea'>, 'ref'> {
   textareaClassName?: string;
 }
 
-/** A multi-line text field. Label it with <label>, `aria-label` or (P5) Field. */
+/** Base UI's Field.Control swapped to a <textarea>: same props as the element, plus Field wiring. */
+function FieldTextarea(props: ComponentProps<'textarea'>) {
+  const { rows, ...rest } = props;
+  return (
+    <BaseField.Control
+      {...(rest as unknown as ComponentProps<typeof BaseField.Control>)}
+      render={<textarea rows={rows} />}
+    />
+  );
+}
+
+/** A multi-line text field. Label it with <label>, `aria-label` or a kit Field. */
 export function Textarea({
   variant = 'md',
   autosize = false,
@@ -226,7 +238,9 @@ export function Textarea({
 
   return (
     <div className={cn(textareaShellVariants({ variant, state }), className)} onPointerDown={focusTextarea}>
-      <textarea
+      {/* Field.Control (rendered as a textarea) registers with a surrounding kit Field,
+          so its label names the box; a bare <textarea> was named by its placeholder. */}
+      <FieldTextarea
         ref={setRefs}
         disabled={disabled}
         readOnly={readOnly}

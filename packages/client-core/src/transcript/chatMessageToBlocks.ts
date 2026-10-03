@@ -176,7 +176,7 @@ export function chatMessageToBlocks(message: TranscriptMessageInput): StreamBloc
   //    <tool_calls>/<function_calls> XML.
   //    Skipped when ordered segments already carried the narration, which
   //    ends with this same closing text.
-  if (textSegments.length > 0) return blocks;
+  if (textSegments.length > 0) return withErrorNotes(blocks);
 
   const content = message.content ?? '';
   const segments = parseInlineToolCalls(content);
@@ -201,5 +201,18 @@ export function chatMessageToBlocks(message: TranscriptMessageInput): StreamBloc
     blocks.push({ type: 'text', blockId: nextId++, content });
   }
 
-  return blocks;
+  return withErrorNotes(blocks);
+
+  /**
+   * 4. The turn's provider errors (`systemMessages` "Error: …", recorded by the
+   *    server's TurnRecorder) close the turn, as the live stream's error block
+   *    does — otherwise a failed turn reloads as if nothing went wrong.
+   */
+  function withErrorNotes(out: StreamBlock[]): StreamBlock[] {
+    for (const note of metadata?.systemMessages ?? []) {
+      if (!note.startsWith('Error: ')) continue;
+      out.push({ type: 'system', blockId: nextId++, message: note, category: 'error' });
+    }
+    return out;
+  }
 }

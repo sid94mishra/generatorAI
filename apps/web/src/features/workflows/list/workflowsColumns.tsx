@@ -12,6 +12,7 @@ import { toStatus, type StatsByDefinitionRow } from '@generatorai/shared';
 import type { WorkflowDefinitionSummary } from '@generatorai/workflow-spec';
 import { VersionChip } from '@/blocks/workflow/index.js';
 import { formatRelativeTime } from '@/utils/formatRelativeTime.js';
+import { Icon } from '@/ui/icons/Icon.js';
 import type { DataTableColumn } from '@/ui/patterns/DataTable/DataTable.js';
 import { MenuButton, type MenuButtonItem } from '@/ui/patterns/MenuButton/MenuButton.js';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
@@ -30,6 +31,7 @@ const DASH = <span className="font-mono text-micro text-fg-3">—</span>;
 export function WorkflowNameCell({ row }: { row: WorkflowRow }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
+      <Icon concept="workflows" size={14} className="shrink-0 text-fg-3" />
       <Link render={<RouterLink to={`/workflows/${row.id}`} />} className="truncate font-medium">
         {row.name}
       </Link>

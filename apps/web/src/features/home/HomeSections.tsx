@@ -124,6 +124,7 @@ export function RunningSection({ items }: { items: readonly AttentionItem[] }) {
             detail={runningDetail(item)}
             time={formatElapsed(item.since, now)}
             data-testid="home-running-row"
+            persistentActions
             actions={
               item.stoppable ? (
                 <IconButton
@@ -160,7 +161,8 @@ function scmOutcome(item: RecentActivityItem): string | undefined {
 function finishedDetail(item: RecentActivityItem): ReactNode {
   const text = item.outcome === 'failed' ? `Failed · ${item.summary}` : item.summary;
   const tail = [scmOutcome(item), text].filter(Boolean).join(' · ');
-  if (!item.changes) return tail;
+  // A turn that changed nothing reads like the board's rows without a diff, not "+0 −0".
+  if (!item.changes || (item.changes.additions === 0 && item.changes.deletions === 0)) return tail;
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
       <DiffStat added={item.changes.additions} removed={item.changes.deletions} />
@@ -220,6 +222,7 @@ export function RecentlyFinishedSection({ finishedSignal }: { finishedSignal: nu
           detail={finishedDetail(item)}
           time={formatEndedAt(item.endedAt, now)}
           data-testid="home-recent-row"
+          persistentActions
           actions={
             item.retry ? (
               <IconButton

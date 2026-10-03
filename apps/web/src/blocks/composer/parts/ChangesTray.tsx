@@ -339,7 +339,7 @@ export const ChangesTray = memo(function ChangesTray({
   return (
     <div
       data-testid="chat-changes-tray"
-      className={cn('mb-2 overflow-hidden rounded-card border border-line-soft bg-raised', className)}
+      className={cn('@container/tray mb-2 overflow-hidden rounded-card border border-line-soft bg-raised', className)}
     >
       <div className="flex h-control-lg items-center gap-1.5 px-1.5">
         <IconButton
@@ -383,8 +383,10 @@ export const ChangesTray = memo(function ChangesTray({
           onClick={() => onOpenChanges()}
           title="Open the Changes tab"
           data-testid="chat-changes-tray-review"
+          aria-label="Review changes"
         >
-          Review changes
+          {/* A narrow chat column keeps the summary readable: the buttons drop to icons. */}
+          <span className="hidden @xl/tray:inline">Review changes</span>
         </Button>
         <Button
           type="button"
@@ -395,8 +397,10 @@ export const ChangesTray = memo(function ChangesTray({
           disabled={busy || files.length === keptCount}
           title="Mark every changed file as reviewed"
           data-testid="chat-changes-tray-keep-all"
+          aria-label="Keep all"
         >
-          Keep all
+          {/* A narrow chat column keeps the summary readable: the buttons drop to icons. */}
+          <span className="hidden @xl/tray:inline">Keep all</span>
         </Button>
         <Button
           type="button"
@@ -407,8 +411,10 @@ export const ChangesTray = memo(function ChangesTray({
           disabled={busy}
           title="Restore every changed file to its base revision"
           data-testid="chat-changes-tray-undo-all"
+          aria-label="Undo all"
         >
-          Undo all
+          {/* A narrow chat column keeps the summary readable: the buttons drop to icons. */}
+          <span className="hidden @xl/tray:inline">Undo all</span>
         </Button>
       </div>
       {confirmer.dialog}

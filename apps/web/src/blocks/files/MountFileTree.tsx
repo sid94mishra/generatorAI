@@ -18,7 +18,7 @@ import { Button } from '@/ui/primitives/Button/Button.js';
 import { EmptyState } from '@/ui/primitives/EmptyState/EmptyState.js';
 import { SearchInput } from '@/ui/primitives/SearchInput/SearchInput.js';
 import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
-import { FileTree } from './FileTree.js';
+import { FileTree, type FileTreeStatusEntry } from './FileTree.js';
 import type { FileTabRef } from './fileTabId.js';
 
 export interface MountTreeSection {
@@ -28,6 +28,8 @@ export interface MountTreeSection {
   /** "Worktree · fix/checkout-flake". */
   subtitle?: string;
   paths: string[];
+  /** Git status per repo-relative path (letters in the tree's status lane). */
+  statuses?: readonly FileTreeStatusEntry[];
 }
 
 export interface MountFileTreeProps {
@@ -114,6 +116,7 @@ export function MountFileTree({ sections, loading = false, selection, onSelect, 
                 ) : null}
                 <FileTree
                   paths={section.shown}
+                  {...(section.statuses ? { statuses: section.statuses } : {})}
                   filter={false}
                   activePath={selection?.alias === section.alias ? selection.path : null}
                   onSelect={(p) => {

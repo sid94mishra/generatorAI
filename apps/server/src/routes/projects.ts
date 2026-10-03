@@ -109,7 +109,9 @@ export function createProjectRoutes(container: Container): Router {
       listAllDefinitionSummaries(workflowDefinitionService, { projectId }),
     ]);
 
-    const activeChats = chats.filter((c) => c.status === 'active').length;
+    // Worker chats (an orchestrator's background tasks) are hidden from every chat
+    // list (`includeWorkers` off), so the count leaves them out too.
+    const activeChats = chats.filter((c) => c.status === 'active' && !c.parentChatId).length;
 
     let needsYou: number | undefined;
     let running: number | undefined;

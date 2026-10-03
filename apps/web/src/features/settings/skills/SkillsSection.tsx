@@ -68,7 +68,8 @@ export function SkillsSection() {
                 key={a.id}
                 icon="skills"
                 title={a.name}
-                badges={<Badge tone="neutral" className="capitalize">{a.source}</Badge>}
+                // System artifacts carry no `source` (the badge rendered empty); this list is the system catalog.
+                badges={<Badge tone="neutral">System</Badge>}
                 subtitle={a.description}
                 disabled={!enabled}
                 open={expanded === a.id}
@@ -114,7 +115,7 @@ function SkillPreview({ artifact, onBack }: { artifact: ArtifactWithSource; onBa
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h2 className="text-title text-fg">{artifact.name}</h2>
-            <Badge tone="neutral" className="capitalize">{artifact.source}</Badge>
+            <Badge tone="neutral">System</Badge>
           </div>
           {artifact.description ? <p className="mt-0.5 text-small text-fg-3">{artifact.description}</p> : null}
         </div>

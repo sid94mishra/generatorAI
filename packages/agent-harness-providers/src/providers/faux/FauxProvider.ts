@@ -473,8 +473,9 @@ export class FauxProvider implements IAgentHarness {
     attachments?: AttachmentRef[],
     options?: SendPromptOptions,
   ): Promise<void> {
-    // Fire and forget
-    void this.sendPromptAndWait(conversationId, prompt, attachments, undefined, options);
+    // Fire and forget. A scripted `error` rejects after broadcasting error + idle;
+    // the rejection is already reported, so it must not become an unhandled rejection.
+    void this.sendPromptAndWait(conversationId, prompt, attachments, undefined, options).catch(() => undefined);
   }
 
   async sendPromptAndWait(
@@ -793,6 +794,9 @@ export class FauxProvider implements IAgentHarness {
               kind: 'harness.error',
               data: { message: entry.message, provider: 'faux' },
             });
+            // A failed turn still ends (real providers emit error + idle, see Codex's
+            // failTurn): without idle the chat stayed "Running" for good.
+            this.broadcast(conversationId, { kind: 'harness.idle', data: {} });
             conv.inFlight = false;
             throw new Error(entry.message);
           }

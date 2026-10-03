@@ -49,6 +49,7 @@ import {
   type DraftBasics,
   type StartPoint,
 } from './newWorkflowModel.js';
+import { modChord } from '@/lib/shortcuts.js';
 
 const NO_PROJECT = '__none__';
 
@@ -355,7 +356,7 @@ export function WorkflowNewPage() {
               </Button>
             }
             primary={
-              <Button variant="primary" shortcut={['Ctrl', '↵']} disabled={blocked != null} loading={busy} onClick={() => void submit()}>
+              <Button variant="primary" shortcut={modChord('Enter')} disabled={blocked != null} loading={busy} onClick={() => void submit()}>
                 Create draft and open builder
               </Button>
             }

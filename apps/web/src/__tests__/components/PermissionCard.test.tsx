@@ -119,7 +119,7 @@ describe('PermissionCard — chat.permission.requested renders and answers', () 
     expect(screen.getByText('Run a shell command')).toBeInTheDocument();
     expect(screen.getByText('rm -rf /tmp/scratch')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /allow bash/i }));
+    fireEvent.click(screen.getByRole('button', { name: /allow once bash/i }));
 
     await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
     expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -202,7 +202,7 @@ describe('PermissionCard — chat.permission.resolved settles it in place', () =
     render(<PermissionCard permission={block} onAnswer={() => undefined} />);
 
     // Settled: no Allow/Deny affordance left to click.
-    expect(screen.queryByRole('button', { name: /allow bash/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /allow once bash/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /deny bash/i })).toBeNull();
     expect(screen.getByTestId('permission-outcome')).toHaveTextContent(/allowed/i);
   });
@@ -236,7 +236,7 @@ describe('PermissionCard — chat.permission.resolved settles it in place', () =
 
     render(<PermissionCard permission={block} onAnswer={() => undefined} />);
 
-    expect(screen.queryByRole('button', { name: /allow bash/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /allow once bash/i })).toBeNull();
     expect(screen.getByTestId('permission-outcome')).toHaveTextContent(/denied.*not now/i);
   });
 
@@ -266,7 +266,7 @@ describe('PermissionCard — chat.permission.resolved settles it in place', () =
     expect(block.status).toBe('expired');
 
     render(<PermissionCard permission={block} />);
-    expect(screen.queryByRole('button', { name: /allow bash/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /allow once bash/i })).toBeNull();
     expect(screen.getByText(/no longer answerable/i)).toBeInTheDocument();
   });
 });

@@ -67,6 +67,8 @@ export function DirectoryBrowser({ open, onClose, onPick, initialPath, descripti
     listing.error instanceof Error ? listing.error.message : listing.error ? String(listing.error) : null;
   const entries = data?.entries ?? [];
   const roots = data?.roots ?? [];
+  // The example follows the SERVER's file system (its roots), not the viewer's OS.
+  const windowsServer = [...roots, path ?? '', ...entries.map((e) => e.path)].some((p) => /^[A-Za-z]:([\\/]|$)/.test(p));
 
   return (
     <Dialog
@@ -92,7 +94,7 @@ export function DirectoryBrowser({ open, onClose, onPick, initialPath, descripti
                 goto(typed.trim());
               }
             }}
-            placeholder="Paste a path, e.g. C:\src\my-app"
+            placeholder={windowsServer ? 'Paste a path, e.g. C:\\src\\my-app' : 'Paste a path, e.g. /path/to/my-app'}
             aria-label="Folder path"
           />
           <Button onClick={() => goto(typed.trim())} disabled={!typed.trim()} aria-label="Open this path">

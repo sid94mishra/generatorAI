@@ -12,7 +12,7 @@
 
 import type { ILogger, RepoReadiness, SourceControlSettings } from '@generatorai/shared';
 import type { IGitClient } from '@generatorai/git';
-import { parseRepoSlug, type SourceControlRegistry } from '@generatorai/source-control';
+import { isLocalRemote, parseRepoSlug, type SourceControlRegistry } from '@generatorai/source-control';
 
 export interface RepoReadinessDeps {
   git: IGitClient;
@@ -28,6 +28,7 @@ export const REASON_NOTHING_TO_COMMIT = 'Nothing to commit';
 export const REASON_MERGE_IN_PROGRESS = 'Merge in progress — resolve conflicts first';
 export const REASON_NO_REMOTE_PUSH = 'No git remote configured';
 export const REASON_NO_REMOTE_PR = 'No git remote';
+export const REASON_LOCAL_REMOTE_PR = 'The remote is a local path — pull requests need a hosted remote';
 export const REASON_DETACHED = 'Detached HEAD';
 export const REASON_NOTHING_TO_PROPOSE =
   'Nothing to open a PR from (branch has no commits ahead of base)';
@@ -159,6 +160,10 @@ export class RepoReadinessService {
     if (!hasRemote) {
       can.pullRequest = false;
       reasons.pullRequest = REASON_NO_REMOTE_PR;
+    } else if (!connected && remoteUrl && isLocalRemote(remoteUrl)) {
+      // A path remote has no host: "Remote host var is not connected" named a directory.
+      can.pullRequest = false;
+      reasons.pullRequest = REASON_LOCAL_REMOTE_PR;
     } else if (!connected) {
       can.pullRequest = false;
       reasons.pullRequest = notConnectedReason(slug?.host ?? 'unknown');

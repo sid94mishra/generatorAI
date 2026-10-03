@@ -21,6 +21,7 @@ import type { PermissionBlock } from '@generatorai/client-core';
 import { PERMISSION_GATE_COPY as COPY } from '@generatorai/shared/ui-contract';
 import { GateCardFrame, type GateAction, type GateTone } from '@/ui/patterns/GateCardFrame/GateCardFrame.js';
 import { CodeBlock } from '@/ui/patterns/CodeBlock/CodeBlock.js';
+import { gateInputText } from './gateInput.js';
 import { Icon } from '@/ui/icons/Icon.js';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { InlineCode } from '@/ui/primitives/InlineCode/InlineCode.js';
@@ -72,7 +73,9 @@ export function PermissionCard({ permission, onAnswer, busy = false }: Permissio
       },
       {
         label: COPY.actions.allow_once,
-        ariaLabel: COPY.actionLabel('allow_once', toolName),
+        // WCAG 2.5.3 (label in name): the visible "Allow once" must be in the name
+        // (the shared `actionLabel` says "Allow <tool>"; mobile keeps it).
+        ariaLabel: `${COPY.actions.allow_once} ${toolName}`,
         variant: 'primary',
         shortcut: gateKeyChips('enter'),
         onClick: allow,
@@ -117,7 +120,7 @@ export function PermissionCard({ permission, onAnswer, busy = false }: Permissio
       </div>
       {permission.inputSummary ? (
         <CodeBlock wrap className="max-h-40 overflow-auto">
-          {permission.inputSummary}
+          {gateInputText(permission.inputSummary)}
         </CodeBlock>
       ) : null}
       {answerable && denying ? (

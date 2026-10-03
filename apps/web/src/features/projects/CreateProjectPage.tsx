@@ -47,7 +47,7 @@ import {
   plural,
   retentionHint,
 } from './projectFormat.js';
-import { useNarrow } from './useNarrow.js';
+import { useNarrow } from '@/lib/useNarrow.js';
 
 interface RepoRow extends CodebaseDraft {
   key: string;

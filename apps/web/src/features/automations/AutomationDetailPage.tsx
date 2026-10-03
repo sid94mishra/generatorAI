@@ -22,9 +22,10 @@ import {
   useTriggerAutomation,
 } from '@/hooks/automationQueries.js';
 import { useAutomationExecutionStream } from '@/hooks/useAutomationExecutionStream.js';
-import { useWorkflowRun } from '@/hooks/workflowQueries.js';
+import { useWorkflowDefinitions, useWorkflowRun } from '@/hooks/workflowQueries.js';
 import { ChangesPanel } from '@/blocks/changes/ChangesPanel.js';
 import { IterationsTable, type IterationsColumn } from '@/blocks/workflow/index.js';
+import { useNarrow } from '@/lib/useNarrow.js';
 import { AutomationTriggerBadge } from './AutomationTriggerBadge.js';
 import { useConfirm } from '@/ui/primitives/AlertDialog/AlertDialog.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
@@ -90,6 +91,9 @@ export function AutomationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: automation, isLoading } = useAutomation(id);
+  const { data: definitions } = useWorkflowDefinitions();
+  // Below ~1150px of card the rail stacks under the history (T-02), as Workflow detail does.
+  const [measureRef, narrow] = useNarrow<HTMLDivElement>();
   const { data: executions } = useAutomationExecutions(id);
   const triggerMutation = useTriggerAutomation();
   const enableMutation = useEnableAutomation();
@@ -139,7 +143,7 @@ export function AutomationDetailPage() {
 
   const statItems: StatTileItem[] = [
     { value: stats.executions30d, label: 'Executions · 30 days' },
-    { value: stats.successRate != null ? `${stats.successRate}%` : '—', label: stats.successOf > 0 ? `Success · ${stats.successOf} runs` : 'Success', numeric: false },
+    { value: stats.successRate != null ? `${stats.successRate}%` : '—', label: stats.successOf > 0 ? `Success · ${stats.successOf} ${stats.successOf === 1 ? 'run' : 'runs'}` : 'Success', numeric: false },
     { value: stats.avgDurationMs != null ? formatDuration(stats.avgDurationMs) : '—', label: 'Avg duration', numeric: false },
     { value: nextRun.short, label: 'Next run', tone: nextRun.none ? undefined : 'run', numeric: false },
   ];
@@ -182,21 +186,22 @@ export function AutomationDetailPage() {
   const numberedExecutions = new Map((executions ?? []).map((exec, i) => [exec.id, (executions?.length ?? 0) - i]));
 
   const executionColumns: IterationsColumn<AutomationExecution>[] = [
-    { id: 'index', header: '#', width: 48, mono: true, cell: (row: AutomationExecution) => `#${numberedExecutions.get(row.id) ?? ''}` },
+    { id: 'index', header: '#', width: 40, mono: true, cell: (row: AutomationExecution) => `#${numberedExecutions.get(row.id) ?? ''}` },
     {
       id: 'status',
       header: 'Status',
-      width: 130,
+      width: 120,
       cell: (row: AutomationExecution) => {
         const resolved = resolveStatus('automationExecution', row.status);
         return resolved ? <StatusBadge state={resolved.state} label={resolved.label} context="run" /> : null;
       },
     },
-    { id: 'trigger', header: 'Trigger', width: 130, cell: (row: AutomationExecution) => <AutomationTriggerBadge triggerType={row.triggeredBy} /> },
+    { id: 'trigger', header: 'Trigger', width: 104, cell: (row: AutomationExecution) => <AutomationTriggerBadge triggerType={row.triggeredBy} /> },
     {
       id: 'iterations',
       header: 'Iterations',
-      width: 130,
+      // The flexible column: fixed widths summed past the card at 1440 and clipped "Started".
+      width: 'minmax(72px,1fr)',
       mono: true as const,
       cell: (row: AutomationExecution) => (
         <span>
@@ -208,17 +213,18 @@ export function AutomationDetailPage() {
     {
       id: 'duration',
       header: 'Duration',
-      width: 100,
+      width: 80,
       align: 'end' as const,
       mono: true as const,
       cell: (row: AutomationExecution) => (row.startedAt && row.completedAt ? formatDuration(new Date(row.completedAt).getTime() - new Date(row.startedAt).getTime()) : '—'),
     },
-    { id: 'started', header: 'Started', width: 150, align: 'end' as const, mono: true as const, cell: (row: AutomationExecution) => formatDate(row.createdAt) },
+    { id: 'started', header: 'Started', width: 112, align: 'end' as const, mono: true as const, cell: (row: AutomationExecution) => formatDate(row.createdAt) },
   ];
 
   return (
-    <>
+    <div ref={measureRef} className="h-full min-h-0">
       <DetailPage
+        railStacked={narrow}
         header={
           <PageHeader
             breadcrumb={<Breadcrumb items={[{ label: 'Automations', render: <RouterLink to="/automations" /> }, { label: automation.name }]} />}
@@ -385,7 +391,15 @@ export function AutomationDetailPage() {
                 <KeyValueList
                   labelWidth={92}
                   items={[
-                    { label: 'Workflows', value: `${automation.workflowIds.length} workflow${automation.workflowIds.length === 1 ? '' : 's'}` },
+                    {
+                      label: automation.workflowIds.length === 1 ? 'Workflow' : 'Workflows',
+                      // Board AutomationDetail names the workflow; the count is the fallback.
+                      value:
+                        automation.workflowIds
+                          .map((wid) => definitions?.find((d) => d.id === wid)?.name)
+                          .filter(Boolean)
+                          .join(', ') || `${automation.workflowIds.length} workflow${automation.workflowIds.length === 1 ? '' : 's'}`,
+                    },
                     { label: 'Permission', value: PERMISSION_MODE_LABEL[automation.permissionMode] ?? automation.permissionMode },
                     { label: 'On error', value: automation.onError === 'stop' ? 'Stop on error' : 'Continue on error' },
                     { label: 'Concurrency', value: String(automation.maxConcurrency) },
@@ -448,6 +462,6 @@ export function AutomationDetailPage() {
       {confirmer.dialog}
       <TriggerAutomationDialog key={triggerDialogOpen ? 'open' : 'closed'} open={triggerDialogOpen} onClose={() => setTriggerDialogOpen(false)} automation={automation} />
       <WebhookCredentialsDialog open={webhookCredentials !== null} credentials={webhookCredentials} onClose={() => setWebhookCredentials(null)} />
-    </>
+    </div>
   );
 }

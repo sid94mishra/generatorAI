@@ -23,8 +23,10 @@ import { PageTitle } from '@/ui/patterns/PageTitle/PageTitle.js';
 import { useConfirm } from '@/ui/primitives/AlertDialog/AlertDialog.js';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
+import { Chip } from '@/ui/primitives/Chip/Chip.js';
 import { EmptyState } from '@/ui/primitives/EmptyState/EmptyState.js';
 import { Link } from '@/ui/primitives/Link/Link.js';
+import { Menu } from '@/ui/primitives/Menu/Menu.js';
 import { SearchInput } from '@/ui/primitives/SearchInput/SearchInput.js';
 import { SegmentedControl } from '@/ui/primitives/SegmentedControl/SegmentedControl.js';
 import { SkeletonRows } from '@/ui/primitives/Skeleton/Skeleton.js';
@@ -32,6 +34,15 @@ import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { ListPage } from '@/ui/templates/ListPage/ListPage.js';
 import { plural } from './projectFormat.js';
 import { PROJECTS_COLUMNS, projectRowMenu, type ProjectRowActions } from './projectsColumns.js';
+
+type ProjectSort = 'updated' | 'name' | 'created';
+const time = (d: Date | string) => new Date(d).getTime();
+/** Board Projects: the sort chip after the scope seg ("Updated"); the footnote names the order. */
+const PROJECT_SORTS: Record<ProjectSort, { label: string; footer: string; compare: (a: Project, b: Project) => number }> = {
+  updated: { label: 'Updated', footer: 'last update', compare: (a, b) => time(b.updatedAt) - time(a.updatedAt) },
+  name: { label: 'Name', footer: 'name', compare: (a, b) => a.name.localeCompare(b.name) },
+  created: { label: 'Created', footer: 'creation date', compare: (a, b) => time(b.createdAt) - time(a.createdAt) },
+};
 
 type Scope = 'active' | 'archived';
 type ViewMode = 'list' | 'grid';
@@ -54,6 +65,7 @@ export function ProjectsListPage() {
 
   const [search, setSearch] = useState('');
   const [scope, setScope] = useState<Scope>('active');
+  const [sort, setSort] = useState<ProjectSort>('updated');
   const [view, setView] = useState<ViewMode>(readView);
   const openNewChat = useNewChatStore((s) => s.open);
 
@@ -76,8 +88,8 @@ export function ProjectsListPage() {
     return (projects ?? [])
       .filter((p) => p.status === scope)
       .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.description ?? '').toLowerCase().includes(q))
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  }, [projects, search, scope]);
+      .sort(PROJECT_SORTS[sort].compare);
+  }, [projects, search, scope, sort]);
 
   const actions: ProjectRowActions = {
     onOpen: (p) => navigate(`/projects/${p.id}`),
@@ -201,6 +213,26 @@ export function ProjectsListPage() {
                 ]}
               />
             }
+            sort={
+              <Menu.Root>
+                <Menu.Trigger
+                  render={
+                    <Chip dropdown icon="sort">
+                      {PROJECT_SORTS[sort].label}
+                    </Chip>
+                  }
+                />
+                <Menu.Popup align="end">
+                  <Menu.RadioGroup value={sort} onValueChange={(next) => setSort(next as ProjectSort)}>
+                    {(Object.keys(PROJECT_SORTS) as ProjectSort[]).map((key) => (
+                      <Menu.RadioItem key={key} value={key}>
+                        {PROJECT_SORTS[key].label}
+                      </Menu.RadioItem>
+                    ))}
+                  </Menu.RadioGroup>
+                </Menu.Popup>
+              </Menu.Root>
+            }
             view={
               <SegmentedControl<ViewMode>
                 value={view}
@@ -232,7 +264,7 @@ export function ProjectsListPage() {
             />
           )
         }
-        footer={rows.length > 0 ? 'Sorted by last update. Archived projects keep their codebases and worktrees until deleted.' : undefined}
+        footer={rows.length > 0 ? `Sorted by ${PROJECT_SORTS[sort].footer}. Archived projects keep their codebases and worktrees until deleted.` : undefined}
       />
       {confirmer.dialog}
     </>

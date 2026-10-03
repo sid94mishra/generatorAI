@@ -62,7 +62,7 @@ export function Field({
         style={horizontal && labelWidth != null ? { width: labelWidth } : undefined}
       >
         {label}
-        {optional ? <span className="ml-1 font-normal text-fg-3">(optional)</span> : null}
+        {optional ? <span className="font-normal text-fg-3"> (optional)</span> : null}
       </BaseField.Label>
       <div className={cn('flex flex-col gap-1.5', horizontal && 'min-w-0 flex-1')}>
         {children}
