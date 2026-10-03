@@ -1,49 +1,66 @@
+// Home data (MHome, MHomeMore; M7-01): Needs you / Running from the attention store (G-01, live), Recently finished
+// and the "Finished today" count from `activity.recent` (G-11; PR / commit outcomes MG-13), refreshed when an
+// attention item leaves the feed (it just finished). The week strip and the server footer read MB-40's hooks.
 import { useEffect, useMemo } from 'react';
-import { useQueries, useQueryClient } from '@tanstack/react-query';
-import { queryKeys } from '@generatorai/client-core';
-import { useAuth } from '../../services/auth/AuthProvider';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { RecentActivityItem } from '@generatorai/shared';
+
+import { useAttentionLists } from '../../blocks/AttentionList';
 import { useApi } from '../../services/api/useApi';
 import { useAttention } from '../../services/stream/AttentionProvider';
 import { useMuxStream } from '../../services/stream/MuxStreamProvider';
-import { weekRange } from './weekRange';
-import { activityOperations } from './activityView';
+import { HOME_RECENT_LIMIT, finishedTodayCount, startOfToday } from './homeModel';
 
-export { filterOperations, groupApprovals, needsYouCount, type ActivityFilter, type ApprovalGroups, type GateInfo, type Operation, type OperationKind } from '../../services/api/activityRanking';
+const RECENT_KEY = ['activity', 'recent'] as const;
+/** Enough for a busy day; the tile reads "99+" beyond it. */
+const TODAY_LIMIT = 100;
 
-export function useActivity() {
+export function useHomeData() {
   const api = useApi();
-  const { serverId } = useAuth();
   const attention = useAttention();
+  const lists = useAttentionLists();
   const stream = useMuxStream();
   const client = useQueryClient();
-  const [health, chats, automations, summary, recent] = useQueries({ queries: [
-    { queryKey: queryKeys.health(), queryFn: () => api.health(), refetchInterval: 10_000 },
-    // Legacy module-count tiles use server counts, not the loaded page size.
-    { queryKey: [...queryKeys.chats(), 'counts'], queryFn: () => api.chats.list({ limit: 1 }) },
-    { queryKey: queryKeys.automations(), queryFn: () => api.automations.list(), refetchInterval: 30_000 },
-    { queryKey: ['stats', 'week', weekRange().from], queryFn: () => api.stats.summary(weekRange()), refetchInterval: 60_000 },
-    { queryKey: ['activity', 'recent'], queryFn: () => api.activity.recent({ limit: 50 }) },
-  ] });
-  useEffect(() => stream?.subscribe('global', 'all', () => {
-    void client.invalidateQueries({ queryKey: ['activity', 'recent'] });
-    void client.invalidateQueries({ queryKey: ['stats'] });
-  }, { filter: ['attention.remove'] }), [stream, client]);
-  const operations = useMemo(() => activityOperations(attention.snapshot, recent.data?.items ?? [], serverId), [attention.snapshot, recent.data, serverId]);
-  const results = [health, chats, automations, recent];
+  const today = startOfToday().toISOString();
+
+  const recent = useQuery({
+    queryKey: [...RECENT_KEY, 'home'],
+    meta: { persist: true },
+    queryFn: () => api.activity.recent({ limit: HOME_RECENT_LIMIT }),
+    staleTime: 30_000,
+  });
+  const todays = useQuery({
+    queryKey: [...RECENT_KEY, 'today', today],
+    meta: { persist: true },
+    queryFn: () => api.activity.recent({ since: today, limit: TODAY_LIMIT }),
+    staleTime: 30_000,
+  });
+
+  // A finished item leaves the attention feed: re-read what just finished and the week's numbers.
+  useEffect(
+    () =>
+      stream?.subscribe('global', 'all', () => {
+        void client.invalidateQueries({ queryKey: RECENT_KEY });
+        void client.invalidateQueries({ queryKey: ['stats'] });
+      }, { filter: ['attention.remove'] }),
+    [stream, client],
+  );
+
+  const recentItems: readonly RecentActivityItem[] = recent.data?.items ?? [];
+  const finishedToday = useMemo(() => (todays.data ? finishedTodayCount(todays.data.items) : null), [todays.data]);
+
   return {
-    operations, health: health.data, summary: summary.data, summaryError: summary.error,
-    counts: {
-      chats: chats.data?.counts.active ?? 0,
-      automations: automations.data?.length ?? 0,
-      attention: attention.snapshot?.counts.needsYou ?? 0,
-      running: attention.snapshot?.counts.running ?? 0,
-    },
-    isLoading: (!attention.snapshot && !attention.error) || results.some((result) => result.isLoading),
-    isError: Boolean(attention.error) || results.some((result) => result.isError),
-    isFetching: attention.fetching || results.some((result) => result.isFetching),
-    refetch: () => {
-      void attention.refresh();
-      for (const result of [...results, summary]) void result.refetch();
+    needsYou: lists.needsYou,
+    running: lists.running,
+    attentionLoaded: lists.loaded,
+    attentionError: attention.error,
+    recent: recentItems,
+    recentLoaded: recent.data !== undefined,
+    recentError: recent.isError ? recent.error : null,
+    finishedToday,
+    finishedTodayCapped: (todays.data?.items.length ?? 0) >= TODAY_LIMIT,
+    refetch: async (): Promise<void> => {
+      await Promise.all([attention.refresh(), recent.refetch(), todays.refetch(), client.invalidateQueries({ queryKey: ['stats'] })]);
     },
   };
 }

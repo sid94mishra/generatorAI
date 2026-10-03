@@ -24,7 +24,7 @@ export function useFeature(feature: MobileFeature): FeatureAvailability & {
   const requestAccess = useCallback(() => {
     router.push({
       pathname: '/scope-request',
-      params: firstMissing ? { scope: firstMissing } : {},
+      params: firstMissing ? { scopes: firstMissing } : {},
     } as never);
   }, [firstMissing]);
 

@@ -70,6 +70,13 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
     write: ['read:status'],
     riskLevel: 'high',
   },
+  // A device reading its OWN record (mobile MG-01): name, scopes, approval
+  // key. The route takes the id from the principal, so the read is the same
+  // carve-out as above. Writes stay admin: this prefix also covers
+  // `/auth/devices/:deviceId/...` for a device literally named `me`, and no
+  // self-service write lives here (the approval key and scope requests have
+  // their own, longer entries).
+  { prefix: '/auth/devices/me', read: ['read:status'], write: ['admin:devices'], riskLevel: 'high' },
   { prefix: '/auth/devices', read: ['admin:devices'], write: ['admin:devices'], riskLevel: 'high' },
   // Reviewing and resolving scope requests grants authority, so it is the
   // same bar as editing a device's scopes directly.

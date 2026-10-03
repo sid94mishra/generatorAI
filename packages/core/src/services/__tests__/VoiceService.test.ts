@@ -270,6 +270,31 @@ describe('VoiceService', () => {
     );
   });
 
+  it('MG-17 — a session with no language uses the configured default; an explicit one wins', async () => {
+    const engine = fakeEngine({ transcribe: vi.fn().mockResolvedValue({ text: 'hallo' }) });
+    const svc = new VoiceService(engine, fakeEventBus(), logger);
+    svc.reconfigure({ defaultLanguage: 'de' });
+
+    const first = svc.startSttSession('ws-1', noopCallbacks);
+    first.start();
+    first.pushAudio(new Float32Array(8_000));
+    await first.stop();
+    expect(engine.transcribe).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ language: 'de' }));
+
+    const second = svc.startSttSession('ws-1', noopCallbacks);
+    second.start('fr');
+    second.pushAudio(new Float32Array(8_000));
+    await second.stop();
+    expect(engine.transcribe).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ language: 'fr' }));
+
+    svc.reconfigure({ defaultLanguage: null });
+    const third = svc.startSttSession('ws-1', noopCallbacks);
+    third.start();
+    third.pushAudio(new Float32Array(8_000));
+    await third.stop();
+    expect(engine.transcribe).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ language: undefined }));
+  });
+
   it('stop() finalizes then removes the session with reason stopped', async () => {
     const bus = fakeEventBus();
     const svc = new VoiceService(fakeEngine(), bus, logger);

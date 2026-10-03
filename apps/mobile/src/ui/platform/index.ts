@@ -3,7 +3,7 @@ export { geometry, hairline, nativePlatform, type NativePlatform } from './geome
 export { adjacentGapFor, hitFrame, hitFrameFor, hitSlopFor, type HitFrame } from './hit';
 export { haptic, setHapticsEnabled } from './haptics';
 export { resolveMotion, setMotionPreference, useMotion, useReduceMotion, type MotionConfig, type MotionPreference, type ResolvedMotion } from './motion';
-export { useReduceTransparency } from './transparency';
+export { reduceTransparencyFor, setTransparencyPreference, useOsReduceTransparency, useReduceTransparency, type TransparencyPreference } from './transparency';
 export { useGlass } from './glass';
 export { sizeClassFor, useSizeClass, type SizeClass } from './breakpoints';
 export { FontScaleOverrideContext, effectiveScale, maxScaleFor, useFontScale, useFontScaleOverride } from './fontScale';

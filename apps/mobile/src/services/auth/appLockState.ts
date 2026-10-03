@@ -186,14 +186,18 @@ export function shouldPromptAuth(state: AppLockState): boolean {
 }
 
 /** Content must be covered: locked, or backgrounded with the lock on. */
-export function shouldCoverContent(state: AppLockState): boolean {
-  if (!state.enabled) return false;
+/**
+ * `hideInSwitcher` (Settings › App lock & privacy, 06 §6.2): with the lock off, the privacy overlay can still cover
+ * content whenever the app is not active, so the app switcher shows the brand mark. With the lock on it always does.
+ */
+export function shouldCoverContent(state: AppLockState, hideInSwitcher = false): boolean {
+  if (!state.enabled) return hideInSwitcher && state.appState !== 'active';
   return state.phase !== 'unlocked' || state.appState !== 'active';
 }
 
 /** The opaque privacy overlay (no controls) rather than the lock screen. */
-export function shouldShowPrivacyOverlay(state: AppLockState): boolean {
-  return state.enabled && state.appState !== 'active';
+export function shouldShowPrivacyOverlay(state: AppLockState, hideInSwitcher = false): boolean {
+  return (state.enabled || hideInSwitcher) && state.appState !== 'active';
 }
 
 /** A failure the user can act on by tapping "Unlock" again. */

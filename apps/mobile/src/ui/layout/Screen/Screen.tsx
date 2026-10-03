@@ -49,7 +49,7 @@ function StateBody({ state }: { state: NonNullable<ScreenProps['state']> }): Rea
   }
 }
 
-export function Screen({ header, statusLine, banner, scroll = 'scroll', background = 'plain', onRefresh, bottomAccessory, keyboard = 'none', state, children, testID }: ScreenProps): React.ReactElement {
+export function Screen({ header, statusLine, banner, scroll = 'scroll', background = 'plain', onRefresh, bottomAccessory, keyboard = 'none', state, scrollRef, children, testID }: ScreenProps): React.ReactElement {
   const colors = useThemeColors();
   const { sizeClass } = useSizeClass();
   const scrollY = useSharedValue(0);
@@ -115,6 +115,7 @@ export function Screen({ header, statusLine, banner, scroll = 'scroll', backgrou
   } else {
     main = (
       <Animated.ScrollView
+        ref={scrollRef as never}
         className="flex-1"
         contentContainerClassName={cn(body !== 'content' && 'flex-grow')}
         contentContainerStyle={inset}

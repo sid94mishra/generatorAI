@@ -59,6 +59,9 @@ interface StepUpSession {
 
 const session: StepUpSession = { lastSuccessAt: null, inFlight: null };
 
+/** The web preview has no sensor. */
+const WEB = Platform.OS === 'web';
+
 /** Whether the cached step-up is still valid right now. */
 export function hasFreshStepUp(now: number = Date.now()): boolean {
   return isStepUpFresh(session.lastSuccessAt, now);
@@ -83,7 +86,7 @@ const NOTHING_TO_CHECK = new Set<LocalAuthentication.LocalAuthenticationError>([
 ]);
 
 async function promptOnce(reason: string): Promise<boolean> {
-  if (Platform.OS === 'web') {
+  if (WEB) {
     // eslint-disable-next-line no-console -- web preview has no sensor; say so rather than silently pass
     console.info(`[stepUp] web preview: auto-approving "${reason}"`);
     return true;
@@ -134,6 +137,29 @@ export async function requireStepUp(reason: string): Promise<boolean> {
     });
   session.inFlight = attempt;
   return attempt;
+}
+
+/** Outcome of a per-write step-up (06 §6.4). `no-passcode`: the device has nothing to check the person against. */
+export type WriteStepUpResult = 'ok' | 'cancelled' | 'no-passcode';
+
+/**
+ * Admin writes (MD-30, 06 §6.4): every write prompts — no 10-minute cache — and a device with neither biometrics
+ * nor a passcode is refused ("Set a passcode on this device…"), unlike the exec surfaces above. A success also
+ * refreshes the exec window.
+ */
+export async function requireWriteStepUp(reason: string): Promise<WriteStepUpResult> {
+  if (WEB) return 'ok';
+  let result: LocalAuthentication.LocalAuthenticationResult;
+  try {
+    result = await LocalAuthentication.authenticateAsync({ promptMessage: reason, disableDeviceFallback: false, cancelLabel: 'Cancel' });
+  } catch {
+    return 'cancelled';
+  }
+  if (result.success) {
+    session.lastSuccessAt = Date.now();
+    return 'ok';
+  }
+  return NOTHING_TO_CHECK.has(result.error) ? 'no-passcode' : 'cancelled';
 }
 
 export interface StepUpApi {

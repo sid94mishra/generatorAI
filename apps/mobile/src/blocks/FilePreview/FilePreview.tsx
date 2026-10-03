@@ -30,6 +30,24 @@ export interface FilePreviewProps {
   testID?: string;
 }
 
+/** A file's contents however it was read (a workspace mount, a codebase checkout). */
+export interface FileContent {
+  /** Null when the server would not send a file this large. */
+  contents: string | null;
+  size: number;
+  isBinary?: boolean;
+  lang?: string;
+}
+
+export interface FileContentViewProps {
+  path: string;
+  file: { data: FileContent | undefined; isLoading: boolean; isError: boolean; error: unknown; refetch: () => unknown };
+  /** Changed-line bars, and the change letter in the meta bar. */
+  changed?: ReadonlySet<number>;
+  change?: { status: ChangeStatus } | null;
+  testID?: string;
+}
+
 /** New-side line numbers the diff added or changed. */
 export function changedLines(patch: string | undefined): Set<number> {
   const out = new Set<number>();
@@ -38,17 +56,15 @@ export function changedLines(patch: string | undefined): Set<number> {
   return out;
 }
 
-export function FilePreview({ workspaceId, path, alias, change = null, testID = 'file-preview' }: FilePreviewProps): React.ReactElement {
+/** The read-only file body (MB-26) for any content source: meta bar, code lines or rendered markdown. */
+export function FileContentView({ path, file, changed = NO_LINES, change = null, testID = 'file-preview' }: FileContentViewProps): React.ReactElement {
   const { width: viewport } = useWindowDimensions();
   const { wrap, fontSize } = useDiffPrefs();
-  const file = useFileContent(workspaceId, path, alias);
-  const patch = useFilePatch(workspaceId, { path, ...(alias ? { alias } : {}), ...(change?.oldBlob ? { oldBlob: change.oldBlob } : {}), ...(change?.newBlob ? { newBlob: change.newBlob } : {}) }, 'baseline', Boolean(change));
   const [rendered, setRendered] = useState(true);
   const pinch = useMemo(() => fontPinch(), []);
   const markdown = isMarkdownPath(path);
   const contents = file.data?.contents ?? '';
   const lines = useMemo(() => contents.split('\n').map((text, i) => ({ key: String(i + 1), number: i + 1, text })), [contents]);
-  const changed = useMemo(() => (change ? changedLines(patch.data?.patch) : new Set<number>()), [change, patch.data?.patch]);
   const language = languageForPath(path, file.data?.lang);
   const gutter = gutterWidthFor(lines.length, fontSize);
   const longest = useMemo(() => lines.reduce((n, l) => Math.max(n, l.text.length), 0), [lines]);
@@ -127,4 +143,13 @@ export function FilePreview({ workspaceId, path, alias, change = null, testID = 
       {body}
     </View>
   );
+}
+
+const NO_LINES: ReadonlySet<number> = new Set();
+
+export function FilePreview({ workspaceId, path, alias, change = null, testID = 'file-preview' }: FilePreviewProps): React.ReactElement {
+  const file = useFileContent(workspaceId, path, alias);
+  const patch = useFilePatch(workspaceId, { path, ...(alias ? { alias } : {}), ...(change?.oldBlob ? { oldBlob: change.oldBlob } : {}), ...(change?.newBlob ? { newBlob: change.newBlob } : {}) }, 'baseline', Boolean(change));
+  const changed = useMemo(() => (change ? changedLines(patch.data?.patch) : NO_LINES), [change, patch.data?.patch]);
+  return <FileContentView path={path} file={file} changed={changed} change={change} testID={testID} />;
 }

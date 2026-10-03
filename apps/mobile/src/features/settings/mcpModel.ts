@@ -13,6 +13,14 @@ export interface McpEntryLike {
   headers?: Record<string, string>;
   env?: Record<string, string>;
   needsConfiguration?: { missingInputs?: string[]; missingCredentials?: string[] };
+  hasCredentials?: boolean;
+  /** Bundled-catalog setup fields (system scope only). */
+  inputs?: Array<{ key: string; label: string; description?: string; kind?: 'path' | 'text' | 'url'; required?: boolean; placeholder?: string }>;
+  inputValues?: Record<string, string>;
+  credentials?: {
+    env?: Array<{ name: string; label: string; description?: string; required?: boolean }>;
+    headers?: Array<{ name: string; label: string; description?: string; required?: boolean }>;
+  };
 }
 
 /** The switch position: the user's own toggle, not "on AND fully configured". */

@@ -15,6 +15,8 @@ import { ModelPicker } from '../ModelPicker';
 import { ProjectPicker, codebaseCount } from '../ProjectPicker';
 import { useModelPickerCatalog } from '../TurnSheet';
 import { useAuth } from '../../services/auth/AuthProvider';
+import { useDefaultModel } from '../../services/prefs/defaultModel';
+import { useDisabledSkills } from '../../services/prefs/skillPrefs';
 import type { RemovalSource } from '../../ui/layout/DirtyGuard/DirtyGuard.types';
 import { ListRow } from '../../ui/layout/ListRow';
 import { ListSection } from '../../ui/layout/ListSection';
@@ -27,7 +29,7 @@ import { Chip } from '../../ui/primitives/Chip';
 import { Input } from '../../ui/primitives/Input';
 import { Text } from '../../ui/primitives/Text';
 import { Textarea } from '../../ui/primitives/Textarea';
-import { addTag, overrideIncludes, toggleOverrideId } from './model/newChatModel';
+import { addTag, overrideIncludes, toggleOverrideId, withDeviceSkillsOff } from './model/newChatModel';
 import { CAPABILITIES, agentTool, capabilitiesSummary, createBlocker, createBody, setToolOverride, sourcesFootnote, whoSummary, type NewChatDraft } from './model/newChatSheetModel';
 import { defaultNewBranch, draftFromCodebase, type DraftSource } from './model/sourceModel';
 import { useAgentDetail, useCreateChatWithTask, useMcpCatalog, useProjectCodebases, useProjectsList, useSelectableAgents, useSkillCatalog } from './NewChatSheet.queries';
@@ -106,7 +108,11 @@ export function NewChatSheet({ seed, onCreated, onClose, navigation }: NewChatSh
   const agent: AgentSummary | null = useMemo(() => agents.data?.find((a) => a.ref === draft.agentRef) ?? null, [agents.data, draft.agentRef]);
   const agentDetail = useAgentDetail(draft.who !== 'model' ? (agent?.id ?? null) : null);
   const { catalog } = useModelPickerCatalog();
-  const model = catalog ? findPickerModel(catalog, draft.model || agentDetail.data?.runtime.model) : undefined;
+  // "Just a model" with no pick of its own uses this device's default (Settings › General, MD-30) while it is offered.
+  const deviceDefault = useDefaultModel(serverId);
+  const disabledSkills = useDisabledSkills();
+  const deviceModel = draft.who === 'model' && !draft.model && deviceDefault && catalog && findPickerModel(catalog, deviceDefault.model, deviceDefault.provider) ? deviceDefault.model : undefined;
+  const model = catalog ? findPickerModel(catalog, draft.model || deviceModel || agentDetail.data?.runtime.model) : undefined;
   const projects = useProjectsList();
   const project = projects.data?.find((p) => p.id === draft.projectId) ?? null;
   const codebases = useProjectCodebases(draft.projectId);
@@ -133,7 +139,7 @@ export function NewChatSheet({ seed, onCreated, onClose, navigation }: NewChatSh
   const submit = (): void => {
     if (blocker) return;
     create.mutate(
-      { body: createBody(draft), task: draft.prompt },
+      { body: createBody({ ...draft, ...(deviceModel ? { model: deviceModel } : {}), ...(draft.who !== 'model' ? { overrides: withDeviceSkillsOff(draft.overrides, skillIds, disabledSkills) } : {}) }), task: draft.prompt },
       {
         onSuccess: ({ chat, sent }) => {
           haptic('success');
@@ -315,7 +321,7 @@ export function NewChatSheet({ seed, onCreated, onClose, navigation }: NewChatSh
             </ListSection>
           ) : null}
         </Section>
-        <Section title="Model" hint={draft.model ? undefined : draft.who === 'model' ? 'The server default' : 'From the agent'}>
+        <Section title="Model" hint={draft.model ? undefined : deviceModel ? "This device's default" : draft.who === 'model' ? 'The server default' : 'From the agent'}>
           <ListSection>
             <ListRow kind="navigation" icon="model" title={modelLabel ?? 'Default model'} onPress={() => setPage('model')} testID="new-chat-model" />
           </ListSection>

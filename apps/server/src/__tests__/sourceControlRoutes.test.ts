@@ -301,3 +301,53 @@ describe('legacy surface', () => {
     expect(empty.body).toEqual({ activeProvider: 'none', enabled: false });
   });
 });
+
+// ── POST /source-control/remote-refs (mobile MG-11) ──────────────────
+
+describe('POST /api/source-control/remote-refs', () => {
+  function appWith(lsRemoteBranches: ReturnType<typeof vi.fn>) {
+    const container = {
+      sourceControlConfigService: {},
+      sourceControlService: { getActiveProviderId },
+      editorLauncherService: { listEditors },
+      gitManager: { lsRemoteBranches },
+      logger,
+    };
+    const app = express();
+    app.use(express.json());
+    app.use('/api/source-control', createSourceControlRoutes(container as never));
+    app.use(createErrorMiddleware(logger as never));
+    return app;
+  }
+
+  it('returns the branches, default first', async () => {
+    const ls = vi.fn(async () => ({ ok: true, defaultBranch: 'main', branches: ['main', 'dev'], truncated: false }));
+    const res = await request(appWith(ls)).post('/api/source-control/remote-refs').send({ url: 'https://github.com/a/b.git' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ defaultBranch: 'main', branches: ['main', 'dev'], truncated: false });
+    expect(ls).toHaveBeenCalledWith('https://github.com/a/b.git', { timeoutMs: 15_000, limit: 500 });
+  });
+
+  it('maps each failure to its error code', async () => {
+    for (const [reason, status, code] of [
+      ['invalid_url', 400, 'INVALID_URL'],
+      ['auth', 401, 'AUTH_REQUIRED'],
+      ['not_found', 404, 'NOT_FOUND'],
+      ['timeout', 504, 'TIMEOUT'],
+      ['failed', 502, 'REMOTE_FAILED'],
+    ] as const) {
+      const ls = vi.fn(async () => ({ ok: false, reason, message: `m ${SECRET}` }));
+      const res = await request(appWith(ls)).post('/api/source-control/remote-refs').send({ url: 'https://x.y/z' });
+      expect(res.status, reason).toBe(status);
+      expect(res.body.error.code).toBe(code);
+      expect(JSON.stringify(res.body)).not.toContain(SECRET);
+    }
+  });
+
+  it('refuses a missing url before running git', async () => {
+    const ls = vi.fn();
+    const res = await request(appWith(ls)).post('/api/source-control/remote-refs').send({});
+    expect(res.status).toBe(400);
+    expect(ls).not.toHaveBeenCalled();
+  });
+});

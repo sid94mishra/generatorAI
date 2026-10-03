@@ -79,7 +79,7 @@ export function AppLockGate({ children }: { children: React.ReactNode }): React.
 }
 
 function NativeAppLockGate({ children }: { children: React.ReactNode }): React.ReactElement {
-  const { biometricLock, lockGraceSeconds, setBiometricLock } = usePreferences();
+  const { biometricLock, lockGraceSeconds, setBiometricLock, hideInSwitcher } = usePreferences();
   const toast = useToast();
   const { legacyColors: colors } = useTheme();
 
@@ -160,8 +160,8 @@ function NativeAppLockGate({ children }: { children: React.ReactNode }): React.R
     }
   }, [failure, biometricLock, setBiometricLock, toast]);
 
-  const cover = shouldCoverContent(state);
-  const privacyOnly = shouldShowPrivacyOverlay(state);
+  const cover = shouldCoverContent(state, hideInSwitcher);
+  const privacyOnly = shouldShowPrivacyOverlay(state, hideInSwitcher);
 
   return (
     <View className="flex-1">

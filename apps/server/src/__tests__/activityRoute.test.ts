@@ -7,8 +7,8 @@
 // merge, the `since`/`limit` filters, outcome mapping, retry attribution
 // and the final-page-only enrichment (project name, run commit branch)
 // with canned service responses, the same style the other G-1x route
-// tests use. Pull-request-/commit-derived items are deliberately absent
-// (see `packages/shared/src/types/RecentActivity.ts`).
+// tests use. There are no separate PR/commit items; a chat or run carries
+// the commit / PR its workspace recorded through the SCM flow (MG-13).
 // ────────────────────────────────────────────────────────────────
 
 import express from 'express';
@@ -124,6 +124,7 @@ function makeApp(opts: {
   executionsByAutomation?: Record<string, AutomationExecution[]>;
   worktreesByRun?: Record<string, WorktreeInfo[]>;
   projects?: Record<string, { id: string; name: string }>;
+  workspaces?: Record<string, { status: string; metadata?: Record<string, unknown> }>;
 } = {}) {
   const runsByDefinition = opts.runsByDefinition ?? {};
   const executionsByAutomation = opts.executionsByAutomation ?? {};
@@ -155,6 +156,9 @@ function makeApp(opts: {
         const p = projects[id];
         return p ? Promise.resolve(p) : Promise.reject(new Error('not found'));
       }),
+    },
+    executionWorkspaceRepo: {
+      findById: vi.fn((id: string) => Promise.resolve(opts.workspaces?.[id] ?? null)),
     },
   };
   const app = express();
@@ -258,5 +262,36 @@ describe('GET /api/activity/recent', () => {
     });
     const res = await request(app).get('/api/activity/recent');
     expect(res.body.items[0].pullRequest).toBeUndefined();
+  });
+
+  it('carries the commit and PR the item\'s workspace recorded after its work began (MG-13)', async () => {
+    const outcome = (at: string) => ({
+      scmOutcome: { at, branch: 'fix/flaky', commit: { sha: 'abc123' }, pullRequest: { number: 1176, url: 'https://github.com/a/b/pull/1176' } },
+    });
+    const app = makeApp({
+      chatRows: [
+        chatRow({ id: 'chat-1', workspaceId: 'ws-1' }, { lastTurn: { status: 'succeeded', endedAt: new Date('2026-01-05T00:00:00Z') } }),
+        chatRow({ id: 'chat-2', workspaceId: 'ws-2' }, { lastTurn: { status: 'succeeded', endedAt: new Date('2026-01-05T00:00:00Z') } }),
+      ],
+      definitions: [definition()],
+      runsByDefinition: {
+        'def-1': [run({ id: 'run-1', workspaceId: 'ws-3', startedAt: new Date('2026-01-03T00:00:00Z'), completedAt: new Date('2026-01-04T00:00:00Z') })],
+      },
+      workspaces: {
+        // After the turn ended: belongs to it.
+        'ws-1': { status: 'active', metadata: outcome('2026-01-05T00:10:00Z') },
+        // Before the turn ended: an earlier turn's commit, not this one's.
+        'ws-2': { status: 'active', metadata: outcome('2026-01-04T00:00:00Z') },
+        'ws-3': { status: 'active', metadata: outcome('2026-01-03T12:00:00Z') },
+      },
+    });
+    const res = await request(app).get('/api/activity/recent');
+    const byKey = Object.fromEntries(res.body.items.map((i: { key: string }) => [i.key, i]));
+    expect(byKey['chat:chat-1'].pullRequest).toEqual({ number: 1176, url: 'https://github.com/a/b/pull/1176' });
+    expect(byKey['chat:chat-1'].commit).toEqual({ branch: 'fix/flaky', sha: 'abc123' });
+    expect(byKey['chat:chat-2'].pullRequest).toBeUndefined();
+    expect(byKey['chat:chat-2'].commit).toBeUndefined();
+    expect(byKey['run:run-1'].pullRequest).toEqual({ number: 1176, url: 'https://github.com/a/b/pull/1176' });
+    expect(byKey['run:run-1'].commit).toEqual({ branch: 'fix/flaky', sha: 'abc123' });
   });
 });

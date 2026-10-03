@@ -14,6 +14,8 @@ export interface AudioSettings {
   textFormatter: string;
   endpointSilenceMs: number;
   interimResults?: boolean;
+  /** MG-17: 'auto' (the engine detects it) or a BCP-47 tag; older servers omit it ('auto'). */
+  sttLanguage: string;
   ttsEnabled: boolean;
   ttsVoice?: string;
   ttsSpeed: number;
@@ -96,6 +98,7 @@ export function parseAudioSettings(raw: unknown): AudioSettings | null {
     textFormatter: str(r['textFormatter'], 'rule-based'),
     endpointSilenceMs: num(r['endpointSilenceMs'], 800),
     ...(typeof r['interimResults'] === 'boolean' ? { interimResults: r['interimResults'] } : {}),
+    sttLanguage: str(r['sttLanguage'], 'auto'),
     ttsEnabled: r['ttsEnabled'] !== false,
     ...(typeof r['ttsVoice'] === 'string' ? { ttsVoice: r['ttsVoice'] } : {}),
     ttsSpeed: num(r['ttsSpeed'], 1),
@@ -106,3 +109,17 @@ export function parseAudioSettings(raw: unknown): AudioSettings | null {
     engineLockedByEnv: typeof r['engineLockedByEnv'] === 'string' && r['engineLockedByEnv'] ? r['engineLockedByEnv'] : null,
   };
 }
+
+/** "Auto-detect", or the language's own name for a BCP-47 tag (falls back to the tag). */
+export function languageLabel(tag: string): string {
+  if (!tag || tag === 'auto') return 'Auto-detect';
+  try {
+    const name = new Intl.DisplayNames(undefined, { type: 'language' }).of(tag);
+    return name && name !== tag ? name : tag;
+  } catch {
+    return tag;
+  }
+}
+
+/** MB size of a byte count ("790 MB"). */
+export const megabytes = (bytes: number | undefined): string => `${Math.round((bytes ?? 0) / 1024 / 1024)} MB`;

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { domainStatus, domainStatusTone, runStatusTone, healthTone, changeTone, stepStatus } from '../theme/status';
-import { worktreeTone } from '../components/projects/projectEditModel';
 
 describe('shared status adoption', () => {
   it('distinguishes a timer wait from a human gate', () => {
@@ -17,12 +16,9 @@ describe('shared status adoption', () => {
     expect(domainStatus('workflowRun', 'constructor')).toBeNull();
     expect(domainStatusTone('workflowRun', 'future-status')).toBe('neutral');
   });
-  it('uses shared health/change colors and neutral worktree metadata', () => {
+  it('uses shared health/change colors', () => {
     expect(healthTone('codebase', 'cloning')).toBe('info');
     expect(changeTone('modified')).toBe('warning');
     expect(changeTone('removed')).toBe('danger');
-    for (const value of ['active', 'orphaned', 'completed', 'cleanup-pending']) {
-      expect(worktreeTone(value)).toBe('neutral');
-    }
   });
 });

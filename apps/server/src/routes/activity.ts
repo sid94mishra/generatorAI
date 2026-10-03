@@ -24,6 +24,7 @@ import type {
 import type { WorkflowDefinitionSummary } from '@generatorai/workflow-spec';
 import type { Container } from '../composition-root.js';
 import { listAllDefinitionSummaries } from './definitionSummaries.js';
+import { activityScmFields, readScmOutcome } from './scmOutcome.js';
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 const TERMINAL_EXECUTION_STATUSES = new Set(['completed', 'partial', 'failed', 'cancelled']);
@@ -45,8 +46,15 @@ function executionOutcome(status: string): RecentActivityItem['outcome'] | undef
 
 export function createActivityRoutes(container: Container): Router {
   const router = Router();
-  const { chatEntityRepo, workflowDefinitionService, workflowRunRepo, automationService, worktreeService, projectService } =
-    container;
+  const {
+    chatEntityRepo,
+    workflowDefinitionService,
+    workflowRunRepo,
+    automationService,
+    worktreeService,
+    projectService,
+    executionWorkspaceRepo,
+  } = container;
 
   // GET /activity/recent
   router.get('/recent', async (req, res, next) => {
@@ -66,6 +74,8 @@ export function createActivityRoutes(container: Container): Router {
       const projectId = req.query['projectId'] as string | undefined;
 
       const items: RecentActivityItem[] = [];
+      /** MG-13: the workspace whose SCM outcome an item may carry, and when the item's work began. */
+      const scmSource = new Map<string, { workspaceId: string; sinceMs: number }>();
 
       // ── Chats: each chat's most recent FINISHED turn (G-02) ──
       const chatPage = await chatEntityRepo.listPage({
@@ -91,6 +101,8 @@ export function createActivityRoutes(container: Container): Router {
           ...(row.activity.changes ? { changes: row.activity.changes } : {}),
           ...(lastTurn.status === 'failed' ? { retry: 'chat_prompt' as const } : {}),
         });
+        // A chat's commit / PR follows the turn the user reviewed (MD-164).
+        if (row.chat.workspaceId) scmSource.set(`chat:${row.chat.id}`, { workspaceId: row.chat.workspaceId, sinceMs: endedAtMs });
       }
 
       // ── Workflow runs: joined through the definition ──
@@ -119,6 +131,12 @@ export function createActivityRoutes(container: Container): Router {
             summary: run.error ?? (outcome === 'succeeded' ? `${definition.name} completed` : `${definition.name} ${outcome}`),
             ...(outcome === 'failed' ? { retry: 'run_retry' as const } : {}),
           });
+          if (run.workspaceId) {
+            scmSource.set(`run:${run.id}`, {
+              workspaceId: run.workspaceId,
+              sinceMs: (run.startedAt ?? run.createdAt).getTime(),
+            });
+          }
         }
       }
 
@@ -170,10 +188,20 @@ export function createActivityRoutes(container: Container): Router {
 
       const enriched = await Promise.all(
         page.map(async (item) => {
-          const withName = item.project
+          const named = item.project
             ? { ...item, project: { id: item.project.id, name: projectNames.get(item.project.id) ?? item.project.id } }
             : item;
-          if (withName.entity !== 'run') return withName;
+          const source = scmSource.get(item.key);
+          let withName: RecentActivityItem = named;
+          if (source) {
+            try {
+              const ws = await executionWorkspaceRepo.findById(source.workspaceId);
+              withName = { ...named, ...activityScmFields(readScmOutcome(ws?.metadata), source.sinceMs) };
+            } catch {
+              /* a missing workspace just means no outcome to show */
+            }
+          }
+          if (withName.entity !== 'run' || withName.commit) return withName;
           try {
             const worktrees = await worktreeService.listWorktrees(undefined, withName.entityId);
             const branch = worktrees.find((w) => w.branchName)?.branchName;

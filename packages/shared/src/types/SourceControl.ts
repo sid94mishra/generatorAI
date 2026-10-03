@@ -276,3 +276,25 @@ export interface OpenInEditorResult {
   fallbackUrl?: string;
   error?: string;
 }
+
+// ── Remote branch list before clone (mobile MG-11) ──
+
+/** `POST /api/source-control/remote-refs` body. */
+export interface RemoteRefsRequest {
+  /** `https://`, `http://`, `ssh://`, `git://` or scp-style `user@host:path`. */
+  url: string;
+}
+
+/**
+ * The branches a Git remote advertises, read with `git ls-remote` before any
+ * codebase exists — the add-codebase form's default-branch options. Errors:
+ * `AUTH_REQUIRED`, `NOT_FOUND`, `TIMEOUT` (15 s), `INVALID_URL`.
+ */
+export interface RemoteRefs {
+  /** The remote's HEAD branch, when it advertises one. */
+  defaultBranch?: string;
+  /** Branch names (without `refs/heads/`), default branch first, then sorted. At most 500. */
+  branches: string[];
+  /** True when the remote had more than 500 branches. */
+  truncated: boolean;
+}

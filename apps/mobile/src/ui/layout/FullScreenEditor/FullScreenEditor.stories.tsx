@@ -38,6 +38,15 @@ function AgentEditor({ long = false }: { long?: boolean }): React.ReactElement {
   );
 }
 
+/** A wizard: Cancel only in the header; the sticky bar carries Back · Continue (MD-85). */
+function WizardFrame(): React.ReactElement {
+  return (
+    <FullScreenEditor title="New automation" onCancel={noop} dirty stickyBar={<View className="flex-row justify-between px-4 py-3"><Button label="Back" onPress={noop} /><Button label="Continue" variant="primary" onPress={noop} /></View>}>
+      <Input label="Name" presentation="standalone" value="Nightly audit" onChangeText={noop} />
+    </FullScreenEditor>
+  );
+}
+
 function FullScreenEditorGallery(): React.ReactElement {
   return (
     <View className="flex-1 bg-surface">
@@ -58,3 +67,5 @@ function FullScreenEditorGallery(): React.ReactElement {
 const meta = { title: 'UI/Layout/FullScreenEditor', component: FullScreenEditorGallery } satisfies Meta<typeof FullScreenEditorGallery>;
 export default meta;
 export const AgentEditorFrame: StoryObj<typeof meta> = {};
+
+export const Wizard: StoryObj<typeof meta> = { render: () => <WizardFrame /> };

@@ -1,93 +1,92 @@
+// Automations data (M7-04): the list (full rows on the wire), one automation with its executions (polled while one
+// runs), an execution with its iteration runs, the workflow names, the 30-day stats (MB-40), and every write —
+// enable / disable (optimistic), trigger (with an idempotency key; optional dataset), cancel an execution, rotate the
+// webhook token (returned once, NG-02), create / update / delete.
+import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { queryKeys, type AdminApi } from '@generatorai/client-core';
+import { queryKeys } from '@generatorai/client-core';
+import type { Automation, AutomationExecution, AutomationExecutionWithRuns, CreateAutomationParams, UpdateAutomationParams } from '@generatorai/shared';
+
 import { useAdminApi } from '../../services/api/useAdminApi';
 import { useApi } from '../../services/api/useApi';
-import type { MutationCallbacks } from '../../services/api/queryCallbacks';
-import { executionPollInterval, type AutomationView, type ExecutionView } from './model';
-
-type AutomationUpdate = Awaited<ReturnType<AdminApi['automations']['enable']>>;
-type TriggerResult = Awaited<ReturnType<AdminApi['automations']['trigger']>>;
-type ToggleContext = { previous: AutomationView | undefined };
+import { executionPollInterval, isExecutionActive, makeIdempotencyKey } from './model';
 
 export function useAutomations() {
   const api = useApi();
-  return useQuery({ queryKey: queryKeys.automations(), meta: { persist: true }, queryFn: () => api.automations.list() });
+  return useQuery({ queryKey: queryKeys.automations(), meta: { persist: true }, queryFn: async () => (await api.automations.list()) as unknown as Automation[] });
 }
 
 export function useAutomation(id: string) {
   const admin = useAdminApi();
   return useQuery({
     queryKey: queryKeys.automation(id),
-    queryFn: async () => await admin.automations.get(id) as unknown as AutomationView,
+    queryFn: async () => (await admin.automations.get(encodeURIComponent(id))) as unknown as Automation & { executions?: AutomationExecution[] },
     enabled: id.length > 0,
-    refetchInterval: (query) => executionPollInterval(query.state.data?.executions),
+    refetchInterval: (query) => executionPollInterval(query.state.data?.executions as never),
   });
 }
 
-export function useAutomationExecutions(id: string, enabled: boolean) {
+export function useExecution(id: string, executionId: string) {
   const admin = useAdminApi();
   return useQuery({
-    queryKey: queryKeys.automationExecutions(id),
-    queryFn: async () => await admin.automations.executions(id) as unknown as ExecutionView[],
-    enabled,
-    refetchInterval: (query) => executionPollInterval(query.state.data),
+    queryKey: [...queryKeys.automationExecutions(id), executionId],
+    queryFn: (): Promise<AutomationExecutionWithRuns> => admin.automations.execution(encodeURIComponent(id), encodeURIComponent(executionId)),
+    enabled: Boolean(id && executionId),
+    refetchInterval: (query) => (isExecutionActive(query.state.data?.status) ? 3_000 : false),
   });
 }
 
-export function useRemoveAutomation(id: string, callbacks: MutationCallbacks<void>) {
-  const admin = useAdminApi();
-  const client = useQueryClient();
-  return useMutation({
-    ...callbacks,
-    mutationFn: () => admin.automations.remove(id),
-    onSuccess: (...args) => {
-      client.removeQueries({ queryKey: queryKeys.automation(id) });
-      void client.invalidateQueries({ queryKey: queryKeys.automations() });
-      return callbacks.onSuccess?.(...args);
-    },
-  });
+/** id → name / stage count for the workflow rows (one list call, shared with the Workflows screen's cache). */
+export function useWorkflowNames(projectId?: string | null) {
+  const api = useApi();
+  const workflows = useQuery({ queryKey: [...queryKeys.workflows(), projectId ?? 'all'], meta: { persist: true }, queryFn: () => api.workflows.list(projectId ?? undefined), staleTime: 60_000 });
+  const byId = useMemo(() => new Map((workflows.data ?? []).map((w) => [w.id, w])), [workflows.data]);
+  return { workflows, byId };
 }
 
-export function useToggleAutomation(id: string, callbacks: MutationCallbacks<AutomationUpdate, boolean, ToggleContext>) {
-  const admin = useAdminApi();
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: (next: boolean) => next ? admin.automations.enable(id) : admin.automations.disable(id),
-    onMutate: async (next) => {
-      await client.cancelQueries({ queryKey: queryKeys.automation(id), exact: true });
-      const previous = client.getQueryData<AutomationView>(queryKeys.automation(id));
-      if (previous) client.setQueryData<AutomationView>(queryKeys.automation(id), { ...previous, enabled: next });
-      return { previous };
-    },
-    onError: (...args) => {
-      const context = args[2];
-      if (context?.previous) client.setQueryData(queryKeys.automation(id), context.previous);
-      return callbacks.onError?.(...args);
-    },
-    onSuccess: (...args) => {
-      // Enable/disable responses omit history; retain the detail cache's executions.
-      const updated = args[0] as unknown as Partial<AutomationView>;
-      client.setQueryData<AutomationView>(queryKeys.automation(id), (previous) => previous ? {
-        ...previous, enabled: updated.enabled ?? previous.enabled, nextRunAt: updated.nextRunAt ?? null,
-      } : previous);
-      return callbacks.onSuccess?.(...args);
-    },
-    onSettled: (...args) => {
-      void client.invalidateQueries({ queryKey: queryKeys.automations() });
-      return callbacks.onSettled?.(...args);
-    },
-  });
+export function useProjectsList() {
+  const api = useApi();
+  return useQuery({ queryKey: [...queryKeys.projects(), 'summary'], meta: { persist: true }, queryFn: () => api.projects.list({ includeSummary: true }), staleTime: 60_000 });
 }
 
-export function useTriggerAutomation(id: string, callbacks: MutationCallbacks<TriggerResult, string>) {
+export function useAutomationWrites() {
+  const admin = useAdminApi();
+  const client = useQueryClient();
+  const refresh = (id?: string) => {
+    void client.invalidateQueries({ queryKey: queryKeys.automations() });
+    if (id) void client.invalidateQueries({ queryKey: queryKeys.automation(id) });
+  };
+  const enc = encodeURIComponent;
+  return {
+    setEnabled: async (id: string, enabled: boolean) => {
+      // Optimistic in both caches; the server's answer (or a refetch on error) settles it.
+      client.setQueryData<Automation[]>(queryKeys.automations(), (list) => list?.map((a) => (a.id === id ? { ...a, enabled } : a)));
+      client.setQueryData<Automation>(queryKeys.automation(id), (a) => (a ? { ...a, enabled } : a));
+      try {
+        return await (enabled ? admin.automations.enable(enc(id)) : admin.automations.disable(enc(id)));
+      } finally {
+        refresh(id);
+      }
+    },
+    trigger: (id: string, dataset?: unknown) => admin.automations.trigger(enc(id), dataset ? { dataset } : undefined, { idempotencyKey: makeIdempotencyKey(id) }).finally(() => refresh(id)),
+    cancelExecution: (id: string, executionId: string) =>
+      admin.automations.cancelExecution(enc(id), enc(executionId)).finally(() => {
+        refresh(id);
+        void client.invalidateQueries({ queryKey: queryKeys.automationExecutions(id) });
+      }),
+    /** `{ token, signingSecret? }` — shown once (NG-02). */
+    rotate: async (id: string) => (await admin.automations.rotateWebhookToken(enc(id))) as { token: string; signingSecret?: string },
+    remove: (id: string) => admin.automations.remove(enc(id)).finally(() => refresh()),
+    update: (id: string, body: UpdateAutomationParams) => admin.automations.update(enc(id), body).finally(() => refresh(id)),
+  };
+}
+
+/** Create returns the automation; a webhook one also carries `webhookToken` + `webhookSigningSecret` once. */
+export function useCreateAutomation() {
   const admin = useAdminApi();
   const client = useQueryClient();
   return useMutation({
-    ...callbacks,
-    mutationFn: (key: string) => admin.automations.trigger(id, undefined, { idempotencyKey: key }),
-    onSettled: (...args) => {
-      void client.invalidateQueries({ queryKey: queryKeys.automation(id) });
-      return callbacks.onSettled?.(...args);
-    },
+    mutationFn: async (body: CreateAutomationParams) => (await admin.automations.create(body)) as Automation & { webhookSigningSecret?: string },
+    onSettled: () => void client.invalidateQueries({ queryKey: queryKeys.automations() }),
   });
 }

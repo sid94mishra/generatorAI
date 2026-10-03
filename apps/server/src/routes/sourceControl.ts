@@ -19,6 +19,7 @@ import type { Container } from '../composition-root.js';
 import type { ActiveProvider } from '@generatorai/core';
 import type {
   EditorId,
+  RemoteRefs,
   ScmProviderId,
   SourceControlAuthMethod,
 } from '@generatorai/shared';
@@ -55,6 +56,7 @@ export function createSourceControlRoutes(container: Container): Router {
     sourceControlConfigService,
     sourceControlService,
     editorLauncherService,
+    gitManager,
     logger,
   } = container;
 
@@ -266,6 +268,44 @@ export function createSourceControlRoutes(container: Container): Router {
         return;
       }
       res.json(status);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /source-control/remote-refs — the branches a Git remote advertises,
+  // before any codebase exists (mobile MG-11: the add-codebase and create-
+  // project default-branch options). `git ls-remote` through the git runner
+  // (argument array, network transports only, no credential prompt, 15 s).
+  // `write:projects` — it is part of adding a codebase, and it makes the
+  // server open an outbound connection to a caller-chosen host.
+  const REMOTE_REF_ERRORS = {
+    invalid_url: { status: 400, code: 'INVALID_URL' },
+    auth: { status: 401, code: 'AUTH_REQUIRED' },
+    not_found: { status: 404, code: 'NOT_FOUND' },
+    timeout: { status: 504, code: 'TIMEOUT' },
+    failed: { status: 502, code: 'REMOTE_FAILED' },
+  } as const;
+  router.post('/remote-refs', async (req, res, next) => {
+    try {
+      const body: unknown = req.body ?? {};
+      const url = isPlainObject(body) ? body['url'] : undefined;
+      if (typeof url !== 'string' || !url.trim() || url.length > 2048) {
+        badRequest(res, 'url must be a non-empty string');
+        return;
+      }
+      const result = await gitManager.lsRemoteBranches(url, { timeoutMs: 15_000, limit: 500 });
+      if (!result.ok) {
+        const mapped = REMOTE_REF_ERRORS[result.reason];
+        res.status(mapped.status).json({ error: { code: mapped.code, message: redactTokens(result.message) } });
+        return;
+      }
+      const payload: RemoteRefs = {
+        ...(result.defaultBranch ? { defaultBranch: result.defaultBranch } : {}),
+        branches: result.branches,
+        truncated: result.truncated,
+      };
+      res.json(payload);
     } catch (err) {
       next(err);
     }

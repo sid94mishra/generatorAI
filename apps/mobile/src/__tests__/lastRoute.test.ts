@@ -34,7 +34,7 @@ describe('last route — expiry', () => {
   });
 
   it('never restores the entry, pairing, revoked or settings routes', () => {
-    for (const route of ['/', '', '/pair', '/revoked', '/settings', '/settings/security']) {
+    for (const route of ['/', '', '/pair', '/paired', '/revoked', '/settings', '/settings/security']) {
       expect(isRestorableRoute(route), route).toBe(false);
       expect(resolveLastRoute({ route, savedAt: NOW - 1000 }, NOW), route).toBeNull();
     }

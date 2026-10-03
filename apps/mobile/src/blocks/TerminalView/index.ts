@@ -6,3 +6,5 @@ export { KeyRow, type KeyRowProps } from './KeyRow';
 export { AgentCommands } from './AgentCommands';
 export * from './model/keyRow';
 export { agentConsoleRows, isShellTool, rowFromToolCall, type AgentConsoleRow } from './engine/agentConsoleRows';
+export { getTerminalFont, setTerminalFont, subscribeTerminalFont } from './model/fontStore';
+export { FONT_SIZE_MAX, FONT_SIZE_MIN, TERMINAL_PREF_KEYS, type KeyBarMode } from './engine/terminalSettings';

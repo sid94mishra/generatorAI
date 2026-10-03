@@ -1,0 +1,29 @@
+appId: ${APP_ID}
+name: automations · create (manual), run now, execution sheet
+# M7-04 (MAutomations, MAutomationCreate1–4, MAutomationDetail, MAutomationExecution). Replaces the automation parts
+# of the web-preview e2e/audit-scenarios.mjs (08 §6.3). Needs write:workflows + exec:agent and a seeded workflow.
+tags: [automations]
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///automations
+- extendedWaitUntil: {visible: {id: automations-new}, timeout: 20000}
+- tapOn: {id: automations-new}
+- extendedWaitUntil: {visible: {id: automation-wizard-name}, timeout: 10000}
+- tapOn: {id: automation-wizard-name}
+- inputText: Maestro automation
+- tapOn: {id: automation-wizard-next}
+- tapOn: {id: automation-wizard-trigger-manual}
+- tapOn: {id: automation-wizard-next}
+- tapOn: {id: automation-wizard-add-workflow}
+- extendedWaitUntil: {visible: "Add a workflow", timeout: 10000}
+- tapOn: {id: "automation-wizard-workflow-.*", index: 0}
+- tapOn: {id: automation-wizard-next}
+- tapOn: {id: automation-wizard-next}
+- tapOn: {id: automation-wizard-next}
+- extendedWaitUntil: {visible: "Review", timeout: 10000}
+- tapOn: {id: automation-wizard-next}
+- extendedWaitUntil: {visible: {id: automation-detail}, timeout: 20000}
+- tapOn: {id: automation-run}
+- extendedWaitUntil: {visible: "Open", timeout: 15000}
+- tapOn: "Open"
+- extendedWaitUntil: {visible: {id: automation-execution}, timeout: 15000}

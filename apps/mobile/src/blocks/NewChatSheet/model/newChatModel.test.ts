@@ -15,6 +15,7 @@ import {
   overrideIncludes,
   sourceControlSummary,
   toggleOverrideId,
+  withDeviceSkillsOff,
 } from './newChatModel';
 import {
   defaultNewBranch,
@@ -243,5 +244,13 @@ describe('tags + overrides', () => {
     expect(isEmptyOverrides(undefined)).toBe(true);
     expect(isEmptyOverrides({ addSkillIds: [], appendInstructions: '' })).toBe(true);
     expect(isEmptyOverrides({ addSkillIds: ['x'] })).toBe(false);
+  });
+});
+
+describe('device skill switches at create (MD-30)', () => {
+  it('removes agent skills and drops added ones the device switched off', () => {
+    expect(withDeviceSkillsOff({}, ['a', 'b'], [])).toEqual({});
+    expect(withDeviceSkillsOff({ addSkillIds: ['c', 'd'] }, ['a', 'b'], ['b', 'c'])).toEqual({ addSkillIds: ['d'], removeSkillIds: ['b'] });
+    expect(withDeviceSkillsOff({ addSkillIds: ['c'], removeSkillIds: ['a'] }, ['a'], ['c'])).toEqual({ removeSkillIds: ['a'] });
   });
 });

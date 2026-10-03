@@ -9,6 +9,7 @@ import React from 'react';
 import { View } from 'react-native';
 
 import { cn } from '../../ui/lib/cn';
+import { projectLabelRole } from '../../ui/lib/projectLabel';
 import { EntityRow } from '../../ui/layout/EntityRow';
 import type { RowPosition } from '../../ui/layout/ListSection/ListSection.types';
 import { IOS_GROUP_CORNERS } from '../../ui/layout/ListSection/listSectionModel';
@@ -31,14 +32,11 @@ export interface ChatRowProps {
   position?: RowPosition;
 }
 
-/** MChats sets the project *slug* in mono; a display name ("Mobile sandbox repo") reads as prose (MD-163). */
-const isSlug = (name: string): boolean => /^[a-z0-9][a-z0-9._/-]*$/.test(name);
-
 export function ChatRow({ row, onAction, selection, swipe = true, position }: ChatRowProps): React.ReactElement {
   const meta = [
     ...(row.project
       ? [
-          <Text key="project" role={isSlug(row.project) ? 'monoSm' : 'footnote'} tone="fg-3" numberOfLines={1} className="shrink">
+          <Text key="project" role={projectLabelRole(row.project)} tone="fg-3" numberOfLines={1} className="shrink">
             {row.project}
           </Text>,
         ]

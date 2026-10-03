@@ -32,7 +32,7 @@ function Leading({ leading }: Pick<EntityRowProps, 'leading'>): React.ReactEleme
 }
 
 export function EntityRow(props: EntityRowProps): React.ReactElement {
-  const { title, leading, meta, time, pinned, unread, archived, trailing, selected = false, onPress, menu, onMenuSelect, preview, position, swipeActions, testID } = props;
+  const { title, titleMono = false, description, footer, leading, meta, time, pinned, unread, archived, trailing, selected = false, onPress, menu, onMenuSelect, preview, position, swipeActions, testID } = props;
   const selecting = 'checkbox' in leading;
   const swipe = swipeActions ?? [];
   const row = (
@@ -53,7 +53,7 @@ export function EntityRow(props: EntityRowProps): React.ReactElement {
       </View>
       <View className="flex-1 gap-1">
         <View className="flex-row items-center gap-1.5">
-          <Text role="transcript" weight={unread ? 600 : 500} tone={archived ? 'fg-3' : 'fg'} numberOfLines={1} className="shrink">
+          <Text role={titleMono ? 'mono' : 'transcript'} weight={unread ? 600 : 500} tone={archived ? 'fg-3' : 'fg'} numberOfLines={1} className="shrink">
             {title}
           </Text>
           {pinned ? <Icon concept="pin" size={14} tone="fg-3" filled /> : null}
@@ -65,6 +65,11 @@ export function EntityRow(props: EntityRowProps): React.ReactElement {
             </Text>
           ) : null}
         </View>
+        {description ? (
+          <Text role="subhead" tone="fg-2" numberOfLines={1}>
+            {description}
+          </Text>
+        ) : null}
         {meta?.length || trailing || archived ? (
           <View className="flex-row items-center gap-2">
             <View className="flex-1 flex-row flex-wrap items-center gap-x-1">
@@ -89,6 +94,7 @@ export function EntityRow(props: EntityRowProps): React.ReactElement {
             {trailing}
           </View>
         ) : null}
+        {footer ? <View className="flex-row flex-wrap items-center gap-x-1.5">{footer}</View> : null}
       </View>
     </Pressable>
   );

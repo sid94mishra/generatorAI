@@ -5,8 +5,7 @@ import {
   readNotifyPrefs,
   shouldMuteOnServer,
   shouldPresent,
-  type NotifyPrefs,
-} from '../services/notifications/notificationFilter';
+  type NotifyPrefs, pauseUntil, serverMuteUntil } from '../services/notifications/notificationFilter';
 
 const ALL_ON: NotifyPrefs = { gates: true, runs: true, chats: true };
 const ALL_OFF: NotifyPrefs = { gates: false, runs: false, chats: false };
@@ -70,5 +69,23 @@ describe('shouldMuteOnServer', () => {
     expect(shouldMuteOnServer({ gates: false, runs: false, chats: false })).toBe(true);
     expect(shouldMuteOnServer({ gates: true, runs: true, chats: false })).toBe(false);
     expect(shouldMuteOnServer({ gates: true, runs: false, chats: true })).toBe(false);
+  });
+});
+
+describe('pause (MDF-114)', () => {
+  const on = { gates: true, runs: true, chats: false };
+  const off = { gates: true, runs: false, chats: false };
+  it('mutes until the pause ends, or indefinitely when both switches are off', () => {
+    expect(serverMuteUntil(on, null, 1_000)).toBeNull();
+    expect(serverMuteUntil(on, 5_000, 1_000)).toBe(5_000);
+    expect(serverMuteUntil(on, 500, 1_000)).toBeNull();
+    expect(serverMuteUntil(off, null, 1_000)).toBeGreaterThan(1_000_000);
+  });
+  it('offers 1 h, 8 h and 8:00 tomorrow', () => {
+    const now = new Date(2026, 9, 3, 22, 15);
+    expect(pauseUntil('1h', now)).toBe(now.getTime() + 3_600_000);
+    expect(pauseUntil('8h', now)).toBe(now.getTime() + 8 * 3_600_000);
+    expect(new Date(pauseUntil('tomorrow', now)).getHours()).toBe(8);
+    expect(new Date(pauseUntil('tomorrow', now)).getDate()).toBe(4);
   });
 });

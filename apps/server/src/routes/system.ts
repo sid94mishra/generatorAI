@@ -27,6 +27,7 @@ import {
   TEXT_FORMATTER_CHOICES,
   MIN_ENDPOINT_MS,
   MAX_ENDPOINT_MS,
+  STT_LANGUAGE_PATTERN,
 } from '../settings/audio.js';
 import {
   nemotronModelStatus,
@@ -273,6 +274,7 @@ export function createSystemRoutes(container: Container): Router {
     ttsEnabled: z.boolean().optional(),
     ttsVoice: z.string().min(1).max(64).optional(),
     ttsSpeed: z.number().min(0.5).max(2).optional(),
+    sttLanguage: z.string().max(35).regex(STT_LANGUAGE_PATTERN).optional(),
   });
 
   // A download runs in the server, not in the request that started it: it is
@@ -341,6 +343,10 @@ export function createSystemRoutes(container: Container): Router {
       const status = await nemotronModelStatus();
       res.json({
         ...status,
+        // MG-17: the multilingual Nemotron ONNX build only auto-detects (its
+        // 40 locales have no published id mapping), so it offers no forced
+        // language. A model that can be told one lists its BCP-47 tags here.
+        languages: [],
         downloading: modelDownload !== null,
         progress: modelDownload?.progress ?? (status.present ? 1 : 0),
         ...(modelDownload?.error ? { error: modelDownload.error } : {}),

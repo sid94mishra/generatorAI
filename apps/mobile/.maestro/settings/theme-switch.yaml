@@ -1,16 +1,16 @@
 appId: ${APP_ID}
 name: settings · theme and mode persist
 tags: [characterization, full]
-# Legacy rows omit accessibility selected; inspect the real provider (MD-103).
+# Inspect the real provider (MD-103). Theme group and mode segments carry glyphs / counts, so they take the drawn
+# segmented path with per-segment ids (MD-130).
 ---
 - runFlow: ../_subflows/launch.yaml
 - runFlow: ../_subflows/open-sidebar.yaml
 - tapOn: {id: drawer-settings}
 - tapOn: {id: settings-appearance}
-- scrollUntilVisible: {element: {id: theme-option-solarized}, direction: DOWN}
+- tapOn: {id: appearance-theme-group-reading}
 - tapOn: {id: theme-option-solarized}
-- scrollUntilVisible: {element: {id: mode-option-light}, direction: UP}
-- tapOn: {id: mode-option-light}
+- tapOn: {id: appearance-mode-light}
 - openLink: generatorai:///theme?inspect=1
 - extendedWaitUntil: {visible: "Theme: solarized", timeout: 15000}
 - assertVisible: "Mode: light"

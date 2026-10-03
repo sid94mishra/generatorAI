@@ -24,7 +24,7 @@ export function changeCountText(dirty: boolean, count?: number): string | undefi
   return `${count} ${count === 1 ? 'change' : 'changes'}`;
 }
 
-function Confirm({ label, onPress, disabled = false, loading = false }: FullScreenEditorProps['primary']): React.ReactElement {
+function Confirm({ label, onPress, disabled = false, loading = false }: NonNullable<FullScreenEditorProps['primary']>): React.ReactElement {
   return (
     <Pressable onPress={onPress} disabled={disabled || loading} feedback="none" accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ busy: loading }} className="px-3">
       {loading ? (
@@ -68,7 +68,7 @@ export function FullScreenEditor({ title, primary, cancelLabel = 'Cancel', onCan
         )}
         {heading}
         {android ? null : <View className="flex-1" />}
-        <Confirm {...primary} />
+        {primary ? <Confirm {...primary} /> : null}
       </View>
       {stepper ? <View className="px-gutter pb-2">{stepper}</View> : null}
       <KeyboardAwareScrollView className="flex-1" contentContainerClassName="gap-6 px-gutter pb-8 pt-2" keyboardShouldPersistTaps="handled" bottomOffset={16}>

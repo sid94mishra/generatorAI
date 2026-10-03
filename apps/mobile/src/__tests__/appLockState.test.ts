@@ -37,6 +37,10 @@ describe('app lock — cold start', () => {
     expect(shouldCoverContent(state)).toBe(false);
     const away = appLockReducer(state, { type: 'appState', next: 'background', now: T0 });
     expect(shouldShowPrivacyOverlay(away)).toBe(false);
+    // "Hide content in app switcher" with the lock off: the overlay alone (06 §6.2).
+    expect(shouldShowPrivacyOverlay(away, true)).toBe(true);
+    expect(shouldCoverContent(away, true)).toBe(true);
+    expect(shouldCoverContent(state, true)).toBe(false);
   });
 
   it('does not prompt while the app is not in the foreground', () => {

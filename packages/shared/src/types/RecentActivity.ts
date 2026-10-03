@@ -5,15 +5,13 @@
 // finished". Merges chats' finished turns, terminal workflow runs and
 // terminal automation executions into one feed, newest first.
 //
-// D-36 / no fake data — **pull-request- and commit-derived items are left
-// out of this pass entirely**: the only existing source
-// (`sourceControlService.listPullRequests` / `GET /projects/:id/pull-
-// requests`) makes a live git-host call per codebase, and fanning that out
-// across every codebase on every dashboard load would be slow, flaky
-// (rate limits, auth) and outside this gap's **M** effort — better to omit
-// the source than to fake or silently drop failures. `commit.branch` is
-// populated only where a workflow run has a tracked worktree; it is never
-// invented. `pullRequest` is always absent for now.
+// D-36 / no fake data — there are no separate pull-request or commit ITEMS:
+// listing PRs is a live git-host call per codebase. Instead (mobile MG-13)
+// a chat or run item carries `pullRequest` / `commit` when ITS workspace ran
+// the commit → push → PR flow (`POST /workspaces/:id/scm/flow`) after the
+// turn ended / the run started; the server records that outcome on the
+// workspace. A run with a tracked worktree also reports its `commit.branch`.
+// Nothing is invented.
 //
 // React-free wire types only; web, desktop, CLI and mobile share them.
 // ────────────────────────────────────────────────────────────────
@@ -53,10 +51,13 @@ export interface RecentActivityItem {
   summary: string;
   /** Chats only — the workspace's net change stats (G-02). */
   changes?: RecentActivityChanges;
-  /** Reserved — always absent in this pass (see file header). */
+  /** MG-13 — a PR the item's workspace opened through the SCM flow (see file header). */
   pullRequest?: { number: number; url: string };
-  /** Workflow runs only, and only when a tracked worktree exists for the run. */
-  commit?: { branch: string };
+  /**
+   * The branch the item's work landed on: a commit made through the SCM flow
+   * (MG-13, then `sha` is set), or a run's tracked worktree branch.
+   */
+  commit?: { branch: string; sha?: string };
   /** Present only on a `failed` item that has a retry action. */
   retry?: 'chat_prompt' | 'run_retry';
 }

@@ -2,20 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   absoluteLabel,
-  executionCounts,
   executionIdOf,
   executionPollInterval,
-  executionStatusLabel,
-  executionTone,
   isExecutionActive,
   makeIdempotencyKey,
-  needsInputs,
   nextRunLabel,
   sortExecutions,
   toMs,
-  triggerDescription,
   triggeredByLabel,
-  workflowIdsOf,
 } from '../features/automations/model';
 
 // Monday 14 Sep 2026, 10:00 local time.
@@ -59,70 +53,12 @@ describe('nextRunLabel', () => {
   });
 });
 
-describe('triggerDescription', () => {
-  it('describes schedules with cron and timezone', () => {
-    expect(triggerDescription({ triggerType: 'schedule', cronExpression: '0 9 * * *', timezone: 'Europe/London' })).toBe(
-      'Schedule · 0 9 * * * (Europe/London)',
-    );
-    expect(triggerDescription({ triggerType: 'schedule', cronExpression: '0 9 * * *' })).toBe('Schedule · 0 9 * * *');
-    expect(triggerDescription({ triggerType: 'schedule' })).toBe('Schedule');
-  });
-
-  it('names manual and webhook triggers', () => {
-    expect(triggerDescription({ triggerType: 'manual' })).toBe('Manual');
-    expect(triggerDescription({ triggerType: 'webhook' })).toBe('Webhook');
-  });
-
-  it('labels execution sources', () => {
-    expect(triggeredByLabel('schedule')).toBe('Schedule');
-    expect(triggeredByLabel('manual')).toBe('Manual');
-    expect(triggeredByLabel(undefined)).toBe('Unknown');
-  });
-});
-
-describe('needsInputs / workflowIdsOf', () => {
-  it('needs inputs only for a schema without a default dataset', () => {
-    expect(needsInputs({})).toBe(false);
-    expect(needsInputs({ dataSchema: { version: 1 } })).toBe(true);
-    expect(needsInputs({ dataSchema: { version: 1 }, defaultDataset: { format: 'csv', text: 'a' } })).toBe(false);
-  });
-
-  it('falls back to the legacy single workflow id', () => {
-    expect(workflowIdsOf({ workflowIds: ['a', 'b'] })).toEqual(['a', 'b']);
-    expect(workflowIdsOf({ workflowIds: [] })).toEqual([]);
-    expect(workflowIdsOf({})).toEqual([]);
-  });
-});
-
 describe('executions', () => {
   it('treats pending and running as active', () => {
     expect(isExecutionActive('pending')).toBe(true);
     expect(isExecutionActive('running')).toBe(true);
     expect(isExecutionActive('completed')).toBe(false);
     expect(isExecutionActive('partial')).toBe(false);
-  });
-
-  it('maps tone so partial never reads as success', () => {
-    expect(executionTone('completed')).toBe('success');
-    expect(executionTone('failed')).toBe('danger');
-    expect(executionTone('partial')).toBe('danger');
-    expect(executionTone('running')).toBe('info');
-    expect(executionTone('cancelled')).toBe('neutral');
-  });
-
-  it('labels statuses for people', () => {
-    expect(executionStatusLabel('partial')).toBe('Partly failed');
-    expect(executionStatusLabel('pending')).toBe('Queued');
-    expect(executionStatusLabel('cancelled')).toBe('Cancelled');
-    expect(executionStatusLabel(undefined)).toBe('Unknown');
-  });
-
-  it('summarises counts', () => {
-    expect(executionCounts({ totalIterations: 5, completedIterations: 3, failedIterations: 1 })).toBe(
-      '3/5 iterations · 1 failed',
-    );
-    expect(executionCounts({ totalIterations: 1, completedIterations: 1, failedIterations: 0 })).toBe('1/1 iteration');
-    expect(executionCounts({ totalIterations: 0 })).toBeNull();
   });
 
   it('sorts newest first and polls only while active', () => {

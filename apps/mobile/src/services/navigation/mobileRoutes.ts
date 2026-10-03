@@ -5,26 +5,20 @@
 /** First path segments with a screen in the (app) tree. */
 const ROOTS = new Set(['', 'chats', 'projects', 'agents', 'workflows', 'automations', 'scripts', 'settings', 'needs-you', 'search', 'servers', 'scope-request']);
 
-/** Settings sections with a screen today; web section ids that live inside one of them; anything else → /settings. */
+/** Settings sections (web SETTINGS_NAV ids + the device rows); anything else → /settings. */
 const SETTINGS_SECTIONS = new Set([
-  'appearance', 'audio', 'capabilities', 'diagnostics', 'extensions', 'notifications', 'providers', 'security', 'source-control', 'tools', 'accessibility', 'about',
+  'general', 'appearance', 'providers', 'agents', 'skills', 'mcp', 'templates',
+  'source-control', 'browser-terminal', 'computer-use', 'audio', 'extensions', 'security', 'storage', 'diagnostics',
+  'notifications', 'app-lock', 'widgets',
 ]);
-const SETTINGS_ALIASES: Record<string, string> = {
-  'browser-terminal': 'tools',
-  agents: 'capabilities',
-  skills: 'capabilities',
-  mcp: 'capabilities',
-  templates: 'capabilities',
-  'app-lock': 'accessibility',
-};
 
 /** `/x/new` create links: the module's own creation UI until its route lands (New chat is `/chats/new` since M6-05). */
 const CREATE: Record<string, string> = {
   chats: '/chats/new',
   workflows: '/workflows?new=1',
-  projects: '/projects?new=1',
-  agents: '/agents',
-  automations: '/automations',
+  projects: '/projects/new',
+  agents: '/agents/new',
+  automations: '/automations/new',
   scripts: '/scripts',
 };
 
@@ -66,8 +60,7 @@ function mapRoute(route: string | null): string | null {
       return route;
     case 'settings': {
       if (!id) return withQuery('/settings', query);
-      const section = SETTINGS_ALIASES[id] ?? id;
-      return SETTINGS_SECTIONS.has(section) ? `/settings/${section}` : '/settings';
+      return SETTINGS_SECTIONS.has(id) ? `/settings/${id}` : '/settings';
     }
     case 'workflows':
       // The builder (M8) and the stage approval sheet (M8) are not built: open the workflow / the run, whose stage
@@ -76,13 +69,14 @@ function mapRoute(route: string | null): string | null {
       if (id && sub === 'runs' && subId && leaf === 'approval') return withQuery(`/workflows/${id}/runs/${subId}`, query);
       return route;
     case 'automations':
-      // Edit (M7) and an execution's sheet (M7): the automation itself, which lists its executions.
-      if (id && (sub === 'edit' || sub === 'executions')) return `/automations/${id}`;
+      // The webhook credentials are a section of the automation (MD-169); edit and executions have their routes.
+      if (id && sub === 'webhook') return `/automations/${id}`;
+      if (id && sub === 'executions' && !subId) return `/automations/${id}`;
       return route;
     case 'agents':
-      if (id && sub === 'edit') return `/agents/${id}`;
-      // No agent detail screen before M7: agents open from their list.
-      return id ? '/agents' : route;
+      // `/agents/<id>` and `/agents/<id>/edit` have screens since M7-03 (MD-83).
+      if (id && sub && sub !== 'edit') return `/agents/${id}`;
+      return route;
     case 'scripts':
       return route;
     case 'projects':
