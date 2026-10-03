@@ -79,6 +79,7 @@ import {
   type WorkflowRun,
   type WorkflowRunStatus,
 } from '@generatorai/shared';
+import { humanizeToolName } from '@generatorai/shared/ui-contract';
 
 // ── Ports (narrow, so tests can hand in real repositories or fakes) ──
 
@@ -214,8 +215,10 @@ function iso(value: Date | string | number | undefined | null): string | undefin
  * streaming chat, from a `harness.tool_start` event.
  */
 export function describeToolStep(tool: unknown, args: unknown): string | undefined {
-  const name = str(tool);
-  if (!name) return undefined;
+  const raw = str(tool);
+  if (!raw) return undefined;
+  // `mcp__generatorai-tools__check_background_agents` reads as the tool's own name.
+  const name = humanizeToolName(raw);
   const a = record(args);
   const command = str(a?.['command']) ?? str(a?.['cmd']) ?? str(a?.['fullCommandText']);
   if (command) return clip(`Running ${command.split('\n')[0] ?? command}`, LABEL_MAX);

@@ -20,6 +20,10 @@ describe('describeToolStep', () => {
     expect(describeToolStep('think', undefined)).toBe('think');
     expect(describeToolStep('', {})).toBeUndefined();
   });
+
+  it('names an MCP tool by its own name, not the server-qualified one', () => {
+    expect(describeToolStep('mcp__generatorai-tools__check_background_agents', {})).toBe('check_background_agents');
+  });
 });
 
 describe('describeInteraction', () => {
