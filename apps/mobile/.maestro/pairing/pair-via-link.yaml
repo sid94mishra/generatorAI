@@ -17,6 +17,7 @@ tags: [characterization, smoke, pairing]
 - scrollUntilVisible:
     element: {id: pairing-connect}
     direction: DOWN
+    visibilityPercentage: 50
 - tapOn: {id: pairing-connect}
 - extendedWaitUntil: {visible: {id: pairing-fingerprint}, timeout: 30000}
 - assertNotVisible: {id: home-new-chat}

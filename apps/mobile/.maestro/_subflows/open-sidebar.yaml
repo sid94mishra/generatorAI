@@ -10,3 +10,4 @@ appId: ${APP_ID}
     when: {platform: iOS}
     commands:
       - tapOn: "Open sidebar"
+- waitForAnimationToEnd

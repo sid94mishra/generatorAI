@@ -5,6 +5,19 @@ import type { AttentionItem } from '@generatorai/shared';
 export const DRAWER_LIMIT = 5;
 
 /** The short trailing hint of a Needs you row: the ask's verb or the command ("Approve", "git push", "Plan"). */
+/**
+ * A gate's detail as one readable line. The feed carries the tool input as a clipped JSON summary
+ * (`{ "command": "pnpm test" }`, often cut mid-object); show the command / path / url it names, other details as given
+ * (the same rule as web's `askDetailLine`).
+ */
+export function askDetailLine(detail: string | undefined): string | undefined {
+  if (!detail) return undefined;
+  const text = detail.trim();
+  if (!text.startsWith('{')) return text;
+  const field = /"(command|file_path|path|url|query)"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(text);
+  return field?.[2] ? field[2].replace(/\\"/g, '"') : text;
+}
+
 export function askHint(item: Pick<AttentionItem, 'ask'>): string | undefined {
   const ask = item.ask;
   if (!ask) return undefined;
@@ -23,7 +36,7 @@ export function askHint(item: Pick<AttentionItem, 'ask'>): string | undefined {
       return 'Paused';
     case 'tool_permission': {
       // The command's first two words carry it ("git push -u origin x" → "git push"); otherwise the verb.
-      const words = (ask.detail ?? '').trim().split(/\s+/).filter(Boolean);
+      const words = (askDetailLine(ask.detail) ?? '').trim().split(/\s+/).filter(Boolean);
       return words.length ? words.slice(0, 2).join(' ') : 'Allow';
     }
     default:
