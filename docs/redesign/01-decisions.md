@@ -572,6 +572,18 @@ Profiled in the production build (Electron, CDP CPU profiles + Long Animation Fr
   counted from the derived segments. (A deferred streaming-markdown source was dropped in D-91.)
 - **Fences:** `agent-tests/perf/transcript-stream.spec.ts` (reporting, generous limits) and the `markdownBlocks` unit test.
 
+### D-89 Task detail: brief, review rounds, last steps (2026-10-04) — Final
+Closes the DockTasks/ChatTasks detail gap (D-36 kept it hidden). `GET /chats/:id/background-tasks/:taskId/detail`
+(`BackgroundTaskDetail`, OpenAPI) reads the worker chat's persisted messages — durable across restarts, unlike the
+in-memory task record: the **brief** is the first user message (sections Objective / Context / Out of scope parsed
+from `renderBriefMessage`); **review rounds** are the later user messages (the orchestrator's follow-ups), so
+`reviewRounds` no longer reads 0 after a restart; **last steps** are the latest ≤ 8 tool calls (args clipped to
+2 KB, file-op stats without hunks); `outcome` is accepted / in_review / reworking / running / failed / cancelled.
+client-core `chats.backgroundTaskDetail`, `queryKeys.chatTaskDetail`, `taskDetailSteps` (the transcript's own
+timeline steps) and `taskReviewLine`; web renders Review · Brief · Last steps · Result in the Tasks dock detail (board
+order), mobile the same in its task detail. The board's per-round outcome text and "See in Changes" for a step are not
+drawn (no per-round verdict is recorded).
+
 ### D-90 Provider-neutral composer and empty chat (owner, 2026-10-03) — Final
 Overrides the ComposerStates/Main boards' "Message Claude Sonnet 5…" (owner: the box said "Message Copilot…", which
 read as if the chat were that product). `composerPromptPlaceholder` (ui-contract, web + mobile): "Reply to <agent>…"

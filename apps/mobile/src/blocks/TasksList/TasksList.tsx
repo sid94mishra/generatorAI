@@ -32,7 +32,8 @@ import { Skeleton } from '../../ui/primitives/Skeleton';
 import { StatusBadge } from '../../ui/primitives/StatusBadge';
 import { StatusDot } from '../../ui/primitives/StatusDot';
 import { Text } from '../../ui/primitives/Text';
-import { useCancelTask, useTaskDigest } from './TasksList.queries';
+import { taskDetailSteps, taskReviewLine } from '@generatorai/client-core';
+import { useCancelTask, useTaskDetail, useTaskDigest } from './TasksList.queries';
 import { filterTasks, isActiveTask, taskNote, taskStatus, taskSummary, type TaskFilter } from './model/tasksModel';
 
 export interface TasksListProps {
@@ -73,6 +74,9 @@ function TaskRow({ task, onOpen }: { task: BackgroundTaskListItem; onOpen: () =>
 function TaskDetail({ chatId, task, index, total, onBack, onStep, active }: { chatId: string; task: BackgroundTaskListItem; index: number; total: number; onBack: () => void; onStep: (delta: -1 | 1) => void; active: boolean }): React.ReactElement {
   const insets = useInsets();
   const digest = useTaskDigest(chatId, task.taskId, active);
+  const detail = useTaskDetail(chatId, task.taskId, active).data;
+  const steps = useMemo(() => (detail ? taskDetailSteps(detail) : []), [detail]);
+  const reviewLine = detail ? taskReviewLine(detail) : undefined;
   const cancel = useCancelTask(chatId);
   const cancelCap = useCapability('cancelTask');
   const status = taskStatus(task.status);
@@ -118,13 +122,50 @@ function TaskDetail({ chatId, task, index, total, onBack, onStep, active }: { ch
             ) : null}
           </View>
         </View>
-        {task.reviewRounds > 0 ? (
-          <View className="flex-row items-center gap-2 rounded-card bg-raised px-3 py-2">
-            <Icon concept="message" size={16} tone="fg-2" />
-            <Text role="footnote" weight={600} className="flex-1">
-              {task.status === 'completed' ? 'Accepted by the orchestrator' : 'Orchestrator reviewed this work'}
+        {reviewLine ? (
+          <View className="gap-1 rounded-card bg-raised px-3 py-2" testID="task-review">
+            <View className="flex-row items-center gap-2">
+              <Icon concept="message" size={16} tone="fg-2" />
+              <Text role="footnote" weight={600} className="flex-1">
+                {reviewLine}
+              </Text>
+            </View>
+            {detail?.rounds.map((r) => (
+              <Text key={r.round} role="footnote" tone="fg-2" numberOfLines={2}>
+                {`Round ${r.round} asked for: ${r.request.trim().split('\n')[0] ?? ''}`}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+        {detail?.brief ? (
+          <View className="gap-1.5" testID="task-brief">
+            <Text role="footnote" weight={600} tone="fg-2">
+              Brief
             </Text>
-            <Text role="monoSm" tone="fg-3">{`round ${task.reviewRounds}`}</Text>
+            <Text role="footnote" selectable>
+              {detail.brief.objective ?? detail.brief.text}
+            </Text>
+            {detail.brief.boundaries ? (
+              <Text role="footnote" tone="fg-3">{`Out of scope: ${detail.brief.boundaries}`}</Text>
+            ) : null}
+          </View>
+        ) : null}
+        {steps.length > 0 ? (
+          <View className="gap-1" testID="task-last-steps">
+            <Text role="footnote" weight={600} tone="fg-2">
+              Last steps
+            </Text>
+            {steps.map((s) => (
+              <View key={s.id} className="flex-row items-center gap-2">
+                <StatusDot state={s.status === 'failed' ? 'failed' : s.status === 'running' ? 'running' : 'succeeded'} size="sm" />
+                <Text role="footnote" numberOfLines={1} className="flex-1">
+                  {`${s.verb} `}
+                  <Text role="monoSm" tone="fg-2">
+                    {s.target}
+                  </Text>
+                </Text>
+              </View>
+            ))}
           </View>
         ) : null}
         {digest.isLoading ? (

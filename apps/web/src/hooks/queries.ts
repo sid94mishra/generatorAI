@@ -659,6 +659,17 @@ export function useBackgroundTaskDigest(chatId: string | undefined, taskId: stri
   });
 }
 
+/** D-89: one worker's brief, review rounds and latest steps; polled while it works. */
+export function useBackgroundTaskDetail(chatId: string | undefined, taskId: string | undefined, live = false) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: [...backgroundTasksKeys.detail(chatId ?? '', taskId ?? ''), 'detail'] as const,
+    queryFn: () => platform.getBackgroundTaskDetail(chatId!, taskId!),
+    enabled: !!chatId && !!taskId,
+    refetchInterval: live ? 3000 : false,
+  });
+}
+
 /** Send a prompt to a v2 Chat */
 export function useSendChatPrompt(chatId: string) {
   const platform = usePlatform();

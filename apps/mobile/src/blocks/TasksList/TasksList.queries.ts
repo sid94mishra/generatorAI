@@ -17,6 +17,17 @@ export function useTaskDigest(chatId: string, taskId: string, active: boolean) {
   });
 }
 
+/** D-89: the brief, the orchestrator's review rounds and the worker's latest steps (shared client-core call). */
+export function useTaskDetail(chatId: string, taskId: string, active: boolean) {
+  const api = useApi();
+  return useQuery({
+    queryKey: queryKeys.chatTaskDetail(chatId, taskId),
+    queryFn: () => api.chats.backgroundTaskDetail(chatId, taskId),
+    staleTime: 5_000,
+    subscribed: active,
+  });
+}
+
 export function useCancelTask(chatId: string) {
   const api = useApi();
   const client = useQueryClient();

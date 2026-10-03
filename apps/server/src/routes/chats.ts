@@ -1168,6 +1168,24 @@ export function createChatApiRoutes(container: Container): Router {
     }
   });
 
+  // GET /chats/:id/background-tasks/:taskId/detail — brief, review rounds and
+  // latest steps of one worker (D-89), from its persisted messages.
+  router.get('/:id/background-tasks/:taskId/detail', async (req, res, next) => {
+    try {
+      const detail = await container.orchestratorService.getBackgroundTaskDetail(
+        String(req.params['id']),
+        String(req.params['taskId']),
+      );
+      if (!detail) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such background task in this chat' } });
+        return;
+      }
+      res.json(detail);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // POST /chats/:id/background-tasks/:taskId/cancel — abort a running worker.
   router.post('/:id/background-tasks/:taskId/cancel', async (req, res, next) => {
     try {

@@ -54,4 +54,10 @@ describe('plan and worker contracts', () => {
     await api.chats.backgroundTaskDigest('c/a', 't/b');
     expect(fetch).toHaveBeenCalledWith('/api/chats/c%2Fa/background-tasks/t%2Fb', undefined);
   });
+
+  it('reads a worker task detail (D-89) using encoded chat and task ids', async () => {
+    const { api, fetch } = setup();
+    await api.chats.backgroundTaskDetail('c/a', 't/b');
+    expect(fetch).toHaveBeenCalledWith('/api/chats/c%2Fa/background-tasks/t%2Fb/detail', undefined);
+  });
 });

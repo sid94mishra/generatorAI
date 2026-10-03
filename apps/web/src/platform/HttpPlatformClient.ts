@@ -57,6 +57,7 @@ import {
   type ChatListPage,
   type ChatListQuery,
   type BackgroundTaskCancelResult,
+  type BackgroundTaskDetail,
   type ComputerConsentAnswer,
   type ComputerConsentAnswerResult,
   type ComputerControlMode,
@@ -839,6 +840,11 @@ export class HttpPlatformClient implements IPlatformClient {
 
   async getBackgroundTaskDigest(chatId: string, taskId: string): Promise<Record<string, unknown>> {
     return apiFetch(`${this.baseUrl}/api/chats/${chatId}/background-tasks/${taskId}`);
+  }
+
+  /** D-89: the brief, review rounds and latest steps of one worker. */
+  async getBackgroundTaskDetail(chatId: string, taskId: string): Promise<BackgroundTaskDetail> {
+    return apiFetch<BackgroundTaskDetail>(`${this.baseUrl}/api/chats/${chatId}/background-tasks/${taskId}/detail`);
   }
 
   /** G-20: the server attributes this cancel to the user and answers who/when. */

@@ -13,8 +13,15 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router';
 import { resolveStatus, type AttentionItem, type BackgroundTaskListItem } from '@generatorai/shared';
-import type { BackgroundTaskBlock } from '@generatorai/client-core';
-import { useBackgroundTaskDigest, useBackgroundTasks, useCancelBackgroundTask } from '@/hooks/queries.js';
+import { taskDetailSteps, taskReviewLine, type BackgroundTaskBlock } from '@generatorai/client-core';
+import {
+  useBackgroundTaskDetail,
+  useBackgroundTaskDigest,
+  useBackgroundTasks,
+  useCancelBackgroundTask,
+} from '@/hooks/queries.js';
+import { StepList } from '@/blocks/transcript/StepRow/StepList.js';
+import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import { useAttention } from '@/hooks/attentionQueries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { Avatar } from '@/ui/primitives/Avatar/Avatar.js';
@@ -273,6 +280,11 @@ function TaskDetail({
   const navigate = useNavigate();
   const { data, isLoading } = useBackgroundTaskDigest(chatId, task.taskId);
   const digest = data as Digest | undefined;
+  // D-89: the brief, the orchestrator's review and the worker's latest steps (board DockTasks).
+  const working = task.status === 'spawned' || task.status === 'running' || task.status === 'needs_review';
+  const { data: detail } = useBackgroundTaskDetail(chatId, task.taskId, working);
+  const lastSteps = useMemo(() => (detail ? taskDetailSteps(detail) : []), [detail]);
+  const reviewLine = detail ? taskReviewLine(detail) : undefined;
   const elapsed = elapsedOf(block, now);
   const hasResult =
     !!digest &&
@@ -305,6 +317,41 @@ function TaskDetail({
             <LiveStep block={block} />
           </div>
         </div>
+
+        {reviewLine ? (
+          <section
+            className="flex flex-col gap-1.5 rounded-card border border-line-soft bg-sunken px-3 py-2"
+            aria-label="Review"
+            data-testid="bg-task-review"
+          >
+            <p className="flex items-center gap-2 text-ui text-fg">
+              <Icon concept={detail?.outcome === 'accepted' ? 'check' : 'view'} size={14} className="shrink-0 text-fg-3" />
+              <span className="min-w-0">{reviewLine}</span>
+            </p>
+            {detail?.rounds.map((r) => (
+              <p key={r.round} className="pl-5.5 text-small break-words text-fg-2">
+                Round {r.round} asked for: {firstLine(r.request)}
+              </p>
+            ))}
+          </section>
+        ) : null}
+
+        {detail?.brief ? (
+          <section className="flex flex-col gap-2" aria-label="Brief" data-testid="bg-task-brief">
+            <SectionHeader title="Brief" hint="what the orchestrator asked" level={4} />
+            <Markdown size="compact">{detail.brief.objective ?? detail.brief.text}</Markdown>
+            {detail.brief.boundaries ? (
+              <p className="text-small break-words text-fg-3">Out of scope: {detail.brief.boundaries}</p>
+            ) : null}
+          </section>
+        ) : null}
+
+        {lastSteps.length > 0 ? (
+          <section className="flex flex-col gap-2" aria-label="Last steps" data-testid="bg-task-last-steps">
+            <SectionHeader title="Last steps" level={4} />
+            <StepList steps={lastSteps} label="Last steps" />
+          </section>
+        ) : null}
 
         <section className="flex flex-col gap-2" aria-label="Result">
           <SectionHeader title="Result" hint="from the task’s digest" level={4} />
@@ -345,6 +392,12 @@ function TaskDetail({
       </div>
     </div>
   );
+}
+
+/** The first line of a follow-up request, for the review round list. */
+function firstLine(text: string): string {
+  const line = text.trim().split('\n').find((l) => l.trim()) ?? '';
+  return line.length > 160 ? `${line.slice(0, 159)}…` : line;
 }
 
 export function BackgroundTasksSection({ chatId, chat, stacked }: TasksSectionContext) {

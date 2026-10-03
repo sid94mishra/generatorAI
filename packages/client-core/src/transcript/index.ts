@@ -12,3 +12,4 @@ export * from './messageInput.js';
 export * from './wireMessage.js';
 export * from './stepStatus.js';
 export * from './textPacer.js';
+export * from './taskDetail.js';

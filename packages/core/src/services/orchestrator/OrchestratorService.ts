@@ -12,6 +12,7 @@ import type {
   AgentEvent,
   TaskBrief,
   TaskResultDigest,
+  BackgroundTaskDetail,
   BackgroundTaskStatus,
   BackgroundTaskCancellation,
   BackgroundTaskCancelledBy,
@@ -189,6 +190,39 @@ function cancellationFields(
 }
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** A tool call's arguments for the task detail: strings clipped, at most 2 KB of JSON. */
+function clipArgs(args: unknown): unknown {
+  try {
+    const json = JSON.stringify(args);
+    if (json === undefined || json.length <= 2048) return args;
+    return { summary: `${json.slice(0, 2047)}…` };
+  } catch {
+    return undefined;
+  }
+}
+
+/** The sections of a brief rendered by `renderTaskBrief` (`renderBriefMessage`, prompts.ts). */
+export function parseBrief(text: string): NonNullable<BackgroundTaskDetail['brief']> {
+  const section = (title: RegExp): string | undefined => {
+    const lines = text.split('\n');
+    const start = lines.findIndex((l) => title.test(l));
+    if (start < 0) return undefined;
+    const body: string[] = [];
+    for (let i = start + 1; i < lines.length && !/^## /.test(lines[i]!); i += 1) body.push(lines[i]!);
+    const out = body.join('\n').trim();
+    return out || undefined;
+  };
+  const objective = section(/^## Objective\b/);
+  const context = section(/^## Context\b/);
+  const boundaries = section(/^## Out of scope\b/);
+  return {
+    text,
+    ...(objective ? { objective } : {}),
+    ...(context ? { context } : {}),
+    ...(boundaries ? { boundaries } : {}),
+  };
+}
 
 /**
  * Minimum gap between two `chat.background_task.progress` events for the SAME
@@ -887,6 +921,77 @@ export class OrchestratorService {
       out.push({ ...(await this.buildDigest(r)), taskId: r.taskId, taskName: r.taskName, model: r.model });
     }
     return out;
+  }
+
+  /**
+   * D-89 — the task detail beyond the digest: the brief, the orchestrator's
+   * review rounds and the worker's latest steps, read from the worker chat's
+   * persisted messages (durable across restarts, unlike the task record).
+   * Null when `taskId` is not a worker of `parentChatId`.
+   */
+  async getBackgroundTaskDetail(parentChatId: string, taskId: string): Promise<BackgroundTaskDetail | null> {
+    const chat = await this.chatRepo.getById(taskId).catch(() => null);
+    if (!chat || chat.parentChatId !== parentChatId) return null;
+    const total = await this.messageRepo.countByChatId(taskId).catch(() => 0);
+    const WINDOW = 200;
+    const [first] = total > 0 ? await this.messageRepo.getByChatId(taskId, 1, 0) : [];
+    const recent = total > 0 ? await this.messageRepo.getByChatId(taskId, WINDOW, Math.max(0, total - WINDOW)) : [];
+    const messages = first && recent[0]?.id !== first.id ? [first, ...recent] : recent;
+
+    const briefMessage = messages.find((m) => m.role === 'user');
+    const followUps = messages.filter((m) => m.role === 'user' && m !== briefMessage);
+    const rounds = followUps.map((m, i) => ({
+      round: i + 1,
+      at: new Date(m.timestamp).toISOString(),
+      request: m.content.length > 4000 ? `${m.content.slice(0, 3999)}…` : m.content,
+    }));
+
+    const lastSteps: BackgroundTaskDetail['lastSteps'] = [];
+    for (let i = messages.length - 1; i >= 0 && lastSteps.length < 8; i -= 1) {
+      const m = messages[i]!;
+      if (m.role !== 'assistant') continue;
+      const calls = m.metadata?.toolCalls ?? [];
+      for (let j = calls.length - 1; j >= 0 && lastSteps.length < 8; j -= 1) {
+        const c = calls[j]!;
+        lastSteps.unshift({
+          id: c.id,
+          tool: c.tool,
+          ...(c.args !== undefined ? { args: clipArgs(c.args) } : {}),
+          status: c.status,
+          ...(c.success !== undefined ? { success: c.success } : {}),
+          ...(c.fileOp
+            ? { fileOp: { kind: c.fileOp.kind, filePath: c.fileOp.filePath, additions: c.fileOp.additions, deletions: c.fileOp.deletions } }
+            : {}),
+          at: new Date(m.timestamp).toISOString(),
+        });
+      }
+    }
+
+    const record = this.tasks.get(taskId);
+    const status: BackgroundTaskStatus = record?.status ?? chat.backgroundTask?.status ?? 'spawned';
+    const outcome: BackgroundTaskDetail['outcome'] =
+      status === 'completed'
+        ? 'accepted'
+        : status === 'needs_review'
+          ? 'in_review'
+          : status === 'failed' || status === 'cancelled'
+            ? status
+            : rounds.length > 0
+              ? 'reworking'
+              : 'running';
+    const model = record?.model ?? chat.model;
+    return {
+      taskId,
+      taskName: record?.taskName ?? chat.backgroundTask?.taskName ?? chat.name,
+      status,
+      ...(model ? { model } : {}),
+      brief: briefMessage ? parseBrief(briefMessage.content) : null,
+      rounds,
+      reviewRounds: rounds.length,
+      maxReviewRounds: this.config.maxReviewRounds,
+      outcome,
+      lastSteps,
+    };
   }
 
   async listBackgroundAgents(

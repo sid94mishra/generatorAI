@@ -19,6 +19,7 @@ import {
   runChatBulk,
   type AttentionFilter,
   type BackgroundTaskCancelResult,
+  type BackgroundTaskDetail,
   type BackgroundTaskListItem,
   type AttentionSnapshot,
   type ChatBulkResult,
@@ -1003,6 +1004,7 @@ export const queryKeys = {
   chatPlans: (id: string) => ['chats', id, 'plans'] as const,
   chatInteractions: (id: string) => ['chats', id, 'interactions'] as const,
   chatTasks: (id: string) => ['chats', id, 'background-tasks'] as const,
+  chatTaskDetail: (id: string, taskId: string) => ['chats', id, 'background-tasks', taskId, 'detail'] as const,
   /** The runs a chat started (`GET /chats/:id/workflow-runs`), patched live by `chat.workflow_run.*`. */
   chatWorkflowRuns: (id: string) => ['chats', id, 'workflow-runs'] as const,
   models: () => ['models'] as const,
@@ -1327,6 +1329,13 @@ export function createApiClient(fetchImpl: ApiFetch) {
 
       backgroundTaskDigest: (id: string, taskId: string) =>
         request<TaskDigest>(fetchImpl, `/api/chats/${encodeURIComponent(id)}/background-tasks/${encodeURIComponent(taskId)}`),
+
+      /** D-89: the brief, review rounds and latest steps of one worker. */
+      backgroundTaskDetail: (id: string, taskId: string) =>
+        request<BackgroundTaskDetail>(
+          fetchImpl,
+          `/api/chats/${encodeURIComponent(id)}/background-tasks/${encodeURIComponent(taskId)}/detail`,
+        ),
 
       prepareWorkspace: (id: string) => request<unknown>(fetchImpl, `/api/chats/${encodeURIComponent(id)}/workspace/prepare`, { method: 'POST' }),
 

@@ -3596,6 +3596,86 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       },
     },
 
+    '/api/chats/{id}/background-tasks/{taskId}/detail': {
+      get: {
+        tags: ['Chats'],
+        summary: 'One background worker: the brief, review rounds and latest steps (D-89)',
+        description:
+          'Read from the worker chat\'s persisted messages, so it survives a server restart. `rounds` are the ' +
+          'follow-ups the orchestrator sent after reading a result; `lastSteps` the worker\'s latest tool calls (≤ 8).',
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string' } },
+          { in: 'path', name: 'taskId', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'The task detail',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    taskId: { type: 'string' },
+                    taskName: { type: 'string' },
+                    status: { type: 'string', enum: ['spawned', 'running', 'needs_review', 'completed', 'failed', 'cancelled'] },
+                    model: { type: 'string' },
+                    brief: {
+                      type: 'object',
+                      nullable: true,
+                      properties: {
+                        text: { type: 'string' },
+                        objective: { type: 'string' },
+                        context: { type: 'string' },
+                        boundaries: { type: 'string' },
+                      },
+                      required: ['text'],
+                    },
+                    rounds: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: { round: { type: 'integer' }, at: { type: 'string', format: 'date-time' }, request: { type: 'string' } },
+                        required: ['round', 'at', 'request'],
+                      },
+                    },
+                    reviewRounds: { type: 'integer' },
+                    maxReviewRounds: { type: 'integer' },
+                    outcome: { type: 'string', enum: ['accepted', 'in_review', 'reworking', 'running', 'failed', 'cancelled'] },
+                    lastSteps: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          tool: { type: 'string' },
+                          args: {},
+                          status: { type: 'string', enum: ['running', 'complete'] },
+                          success: { type: 'boolean' },
+                          fileOp: {
+                            type: 'object',
+                            properties: {
+                              kind: { type: 'string' },
+                              filePath: { type: 'string' },
+                              additions: { type: 'integer' },
+                              deletions: { type: 'integer' },
+                            },
+                          },
+                          at: { type: 'string', format: 'date-time' },
+                        },
+                        required: ['id', 'tool', 'status', 'at'],
+                      },
+                    },
+                  },
+                  required: ['taskId', 'taskName', 'status', 'brief', 'rounds', 'reviewRounds', 'maxReviewRounds', 'outcome', 'lastSteps'],
+                },
+              },
+            },
+          },
+          '404': { description: 'Not a background task of this chat', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+
     '/api/chats/{id}/background-tasks/{taskId}/cancel': {
       post: {
         tags: ['Chats'],

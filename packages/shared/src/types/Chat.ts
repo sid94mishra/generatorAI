@@ -1,3 +1,4 @@
+import type { FileOpStat } from './AgentEvent.js';
 // ────────────────────────────────────────────────────────────────
 // Chat — First-class top-level domain entity
 // 1 Chat → 1 Session → 1 Harness Conversation
@@ -89,6 +90,51 @@ export interface BackgroundTaskListItem {
   /** G-20: present while `status === 'cancelled'`. */
   cancelledBy?: BackgroundTaskCancelledBy;
   cancelledAt?: number;
+}
+
+/**
+ * `GET /chats/:id/background-tasks/:taskId/detail` (D-89): what the task
+ * detail shows beyond the digest — the brief the orchestrator sent, its review
+ * rounds and the worker's latest steps. Read from the worker chat's persisted
+ * messages, so it survives a restart (the live task record does not).
+ */
+export interface BackgroundTaskDetail {
+  taskId: string;
+  taskName: string;
+  status: BackgroundTaskStatus;
+  model?: string;
+  /** The orchestrator's brief (the worker chat's first message). Null when it is not there. */
+  brief: {
+    /** The whole brief as sent (markdown). */
+    text: string;
+    objective?: string;
+    context?: string;
+    /** "Out of scope" as the orchestrator wrote it. */
+    boundaries?: string;
+  } | null;
+  /** Follow-ups the orchestrator sent after reading a result (rework requests), oldest first. */
+  rounds: Array<{ round: number; at: string; request: string }>;
+  /** `rounds.length`; the orchestrator may send at most `maxReviewRounds`. */
+  reviewRounds: number;
+  maxReviewRounds: number;
+  /**
+   * How the orchestrator's review ended: `accepted` (it read the result and
+   * moved on), `in_review` (it is reading it), `reworking` (a follow-up is
+   * running), else the task's own state.
+   */
+  outcome: 'accepted' | 'in_review' | 'reworking' | 'running' | 'failed' | 'cancelled';
+  /** The worker's most recent tool calls, oldest first (at most 8). */
+  lastSteps: Array<{
+    id: string;
+    tool: string;
+    /** Tool arguments, clipped. */
+    args?: unknown;
+    status: 'running' | 'complete';
+    success?: boolean;
+    fileOp?: Pick<FileOpStat, 'kind' | 'filePath' | 'additions' | 'deletions'>;
+    /** When the message holding it was written. */
+    at: string;
+  }>;
 }
 
 /** Chat domain entity */

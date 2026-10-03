@@ -113,7 +113,7 @@ export {
 } from './Agent.js';
 
 // ── v2 New Types ──
-export type { Chat, ChatStatus, ChatLocalFolder, CreateChatParams, BackgroundTaskStatus, BackgroundTaskMeta, BackgroundTaskCancelledBy, BackgroundTaskCancellation, BackgroundTaskCancelResult, BackgroundTaskListItem, ChatPermissionMode, ChatPrincipal } from './Chat.js';
+export type { Chat, ChatStatus, ChatLocalFolder, CreateChatParams, BackgroundTaskStatus, BackgroundTaskMeta, BackgroundTaskCancelledBy, BackgroundTaskCancellation, BackgroundTaskCancelResult, BackgroundTaskDetail, BackgroundTaskListItem, ChatPermissionMode, ChatPrincipal } from './Chat.js';
 export { BACKGROUND_TASK_CANCELLERS } from './Chat.js';
 export { DEFAULT_CHAT_PERMISSION_MODE } from './Chat.js';
 
