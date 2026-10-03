@@ -62,6 +62,9 @@ export interface PreferencesValue {
   setBiometricLock(next: boolean): void;
   lockGraceSeconds: LockGraceSeconds;
   setLockGraceSeconds(next: LockGraceSeconds): void;
+  /** Cover content in the app switcher even with the lock off (with the lock on it always is). */
+  hideInSwitcher: boolean;
+  setHideInSwitcher(next: boolean): void;
   /**
    * Whether `<Screen>`'s large title collapses into the compact bar on scroll.
    *
@@ -132,6 +135,7 @@ export function PreferencesProvider({
   const [lockGraceSeconds, setLockGraceState] = useState<LockGraceSeconds>(
     () => readLockPreferences().lockGraceSeconds,
   );
+  const [hideInSwitcher, setHideInSwitcherState] = useState<boolean>(() => prefs.getBoolean(PREF_KEYS.hideInSwitcher, false));
   const [largeTitleCollapse, setLargeTitleCollapseState] = useState<boolean>(() =>
     prefs.getBoolean(PREF_KEYS.largeTitleCollapse, true),
   );
@@ -163,6 +167,11 @@ export function PreferencesProvider({
     prefs.setNumber(PREF_KEYS.lockGraceSeconds, coerced);
   }, []);
 
+  const setHideInSwitcher = useCallback((next: boolean) => {
+    setHideInSwitcherState(next);
+    prefs.setBoolean(PREF_KEYS.hideInSwitcher, next);
+  }, []);
+
   const setLargeTitleCollapse = useCallback((next: boolean) => {
     setLargeTitleCollapseState(next);
     prefs.setBoolean(PREF_KEYS.largeTitleCollapse, next);
@@ -180,6 +189,8 @@ export function PreferencesProvider({
       setBiometricLock,
       lockGraceSeconds,
       setLockGraceSeconds,
+      hideInSwitcher,
+      setHideInSwitcher,
       largeTitleCollapse,
       setLargeTitleCollapse,
     }),
@@ -194,6 +205,8 @@ export function PreferencesProvider({
       setBiometricLock,
       lockGraceSeconds,
       setLockGraceSeconds,
+      hideInSwitcher,
+      setHideInSwitcher,
       largeTitleCollapse,
       setLargeTitleCollapse,
     ],
@@ -213,6 +226,8 @@ const OUTSIDE_PROVIDER: PreferencesValue = {
   setBiometricLock: () => {},
   lockGraceSeconds: DEFAULT_LOCK_GRACE_SECONDS,
   setLockGraceSeconds: () => {},
+  hideInSwitcher: false,
+  setHideInSwitcher: () => {},
   largeTitleCollapse: true,
   setLargeTitleCollapse: () => {},
 };

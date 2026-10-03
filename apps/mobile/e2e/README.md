@@ -45,9 +45,6 @@ copy rotates the resume credential and the original is logged out), `E2E_OUT` (s
 | `gatelive.mjs` | Turn options → Ask me → tool prompt → in-chat permission card → Allow → Changes pane → diff → Stop |
 | `stop.mjs <chat>` | Stop while a permission is pending clears the gate (two-phase stop wire) |
 | `clear.mjs` | Deny every stale gate from the Approvals sheet |
-| `companion.mjs <chat>` | a companion-scope device streams (read:activity), panes lock honestly, request-access sheet |
-| `legacy.mjs <chat>` | a device WITHOUT read:activity gets the explanatory strip and its chat stream still connects |
-| `request.mjs` / `approveadmin.mjs` / `unlocked.mjs <chat>` | scope request → admin approve (confirm sheet + step-up) → phone unlock |
 | `light.mjs <chat>` | light mode + alternate theme screenshots |
 | `net2.mjs <chat>` | network timeline of a streaming turn |
 

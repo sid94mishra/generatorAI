@@ -46,6 +46,8 @@ export const PREF_KEYS = {
   biometricLock: 'generatorai.biometric-lock',
   /** Seconds in the background before the app lock re-arms. `0` = immediately. */
   lockGraceSeconds: 'generatorai.lock-grace-seconds',
+  /** Privacy overlay in the app switcher with the lock off. */
+  hideInSwitcher: 'generatorai.hide-in-switcher',
   localOnly: 'generatorai.local-only',
   /** Last visited route, restored on a cold start within `LAST_ROUTE_TTL_MS`. */
   lastRoute: 'generatorai.last-route',
@@ -57,6 +59,9 @@ export const PREF_KEYS = {
   haptics: 'generatorai.haptics',
   /** Whether `<Screen>`'s large title collapses on scroll. */
   largeTitleCollapse: 'generatorai.large-title-collapse',
+  /** Settings › Widgets & Live Activities: which live surfaces this device shows (read by the M9 surfaces). */
+  liveRuns: 'generatorai.live.runs',
+  liveChats: 'generatorai.live.chats',
   /** Locally disabled skills — mirrors the web's `catalogPrefsStore`. */
   disabledSkills: 'generatorai.disabled-skills',
 } as const;

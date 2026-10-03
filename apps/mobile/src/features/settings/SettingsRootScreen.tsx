@@ -19,6 +19,9 @@ import { useGrantedScopes } from '../../services/auth/useCapability';
 import { usePreferences } from '../../services/prefs/preferences';
 import { useDisabledSkills } from '../../services/prefs/skillPrefs';
 import { useDefaultModel } from '../../services/prefs/defaultModel';
+import { readNotifyPrefs } from '../../services/notifications/notificationFilter';
+import { useNotificationPermission } from '../../services/notifications/permission';
+import { prefs } from '../../services/storage/prefs';
 import { useTheme } from '../../theme/ThemeProvider';
 import { ListRow } from '../../ui/layout/ListRow';
 import { ListSection } from '../../ui/layout/ListSection';
@@ -111,6 +114,7 @@ function useRowValues(): { values: Partial<Record<string, string>>; marks: Parti
   const health = useHealth(30_000);
   const pending = usePendingScopeRequests(deviceAdmin);
   const mine = useMyScopeRequests(!deviceAdmin);
+  const notifications = useNotificationPermission();
 
   const values: Partial<Record<string, string>> = {};
   const marks: Partial<Record<string, React.ReactElement>> = {};
@@ -119,6 +123,11 @@ function useRowValues(): { values: Partial<Record<string, string>>; marks: Parti
   values.general = model?.name ?? (defaultModel ? defaultModel.model : 'Server default');
   values.appearance = getThemeDef(themeId).label;
   values['app-lock'] = biometricLock ? nouns().biometric : 'Off';
+  if (notifications.status === 'granted' || notifications.status === 'provisional') {
+    const on = readNotifyPrefs((k) => prefs.getString(k));
+    const kinds = [on.gates ? 'Approvals' : null, on.runs ? 'runs' : null, on.chats ? 'chats' : null].filter(Boolean).join(', ');
+    values.notifications = kinds ? kinds.charAt(0).toUpperCase() + kinds.slice(1) : 'Muted';
+  } else if (notifications.status === 'denied' || notifications.status === 'undetermined') values.notifications = 'Off';
   if (providers.data) values.providers = `${ofCount(all.filter((p) => p.ready).length, all.length)} connected`;
   if (agents.data) values.agents = ofCount(agents.data.filter((a) => a.enabled).length, agents.data.length);
   const skills = (artifacts.data ?? []).filter((a) => a.type === 'skill');

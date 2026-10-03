@@ -1,0 +1,18 @@
+appId: ${APP_ID}
+name: settings · request a scope, see it pending, cancel it
+# M7-07 (MScopeRequest, MB-38). Replaces e2e request.mjs / unlocked.mjs. Runs on a device that lacks a tool scope
+# (the companion preset lacks exec:terminal); a device holding all of them sees no card and the flow ends early.
+tags: [settings, scopes]
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///settings/browser-terminal
+- extendedWaitUntil: {visible: {id: terminal-shell}, timeout: 20000}
+- runFlow:
+    when: {visible: {id: capability-request-card-request}}
+    commands:
+      - tapOn: {id: capability-request-card-request}
+      - extendedWaitUntil: {visible: {id: scope-request}, timeout: 15000}
+      - tapOn: {id: scope-request-send}
+      - extendedWaitUntil: {visible: {id: scope-request-pending}, timeout: 15000}
+      - tapOn: {id: scope-request-cancel}
+      - extendedWaitUntil: {visible: {id: scope-request-send}, timeout: 15000}

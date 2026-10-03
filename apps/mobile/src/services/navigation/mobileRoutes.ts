@@ -5,15 +5,12 @@
 /** First path segments with a screen in the (app) tree. */
 const ROOTS = new Set(['', 'chats', 'projects', 'agents', 'workflows', 'automations', 'scripts', 'settings', 'needs-you', 'search', 'servers', 'scope-request']);
 
-/** Settings sections with a screen today; web section ids that live inside one of them; anything else → /settings. */
+/** Settings sections (web SETTINGS_NAV ids + the device rows); anything else → /settings. */
 const SETTINGS_SECTIONS = new Set([
   'general', 'appearance', 'providers', 'agents', 'skills', 'mcp', 'templates',
   'source-control', 'browser-terminal', 'computer-use', 'audio', 'extensions', 'security', 'storage', 'diagnostics',
-  'notifications', 'accessibility',
+  'notifications', 'app-lock', 'widgets',
 ]);
-const SETTINGS_ALIASES: Record<string, string> = {
-  'app-lock': 'accessibility',
-};
 
 /** `/x/new` create links: the module's own creation UI until its route lands (New chat is `/chats/new` since M6-05). */
 const CREATE: Record<string, string> = {
@@ -63,8 +60,7 @@ function mapRoute(route: string | null): string | null {
       return route;
     case 'settings': {
       if (!id) return withQuery('/settings', query);
-      const section = SETTINGS_ALIASES[id] ?? id;
-      return SETTINGS_SECTIONS.has(section) ? `/settings/${section}` : '/settings';
+      return SETTINGS_SECTIONS.has(id) ? `/settings/${id}` : '/settings';
     }
     case 'workflows':
       // The builder (M8) and the stage approval sheet (M8) are not built: open the workflow / the run, whose stage

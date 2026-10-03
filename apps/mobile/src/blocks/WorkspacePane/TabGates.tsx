@@ -11,12 +11,12 @@ import type { FeatureAvailability } from '../../services/auth/featureGate';
 import { EmptyState } from '../../ui/primitives/EmptyState';
 import { PermissionState } from '../../ui/primitives/PermissionState';
 import { Text } from '../../ui/primitives/Text';
-import { SCOPE_REQUEST_HREF } from '../shell/hrefs';
+import { scopeRequestHref } from '../shell/hrefs';
 
 export function LockedTab({ title, feature, scope }: { title: string; feature: FeatureAvailability; scope: string }): React.ReactElement {
   return (
     <View className="flex-1 gap-2 p-4" testID="pane-locked">
-      <PermissionState kind="scope" status="missing-scope" scope={title} {...(feature.grantable ? { onRequest: () => router.push({ pathname: SCOPE_REQUEST_HREF, params: { scope } } as never) } : {})} />
+      <PermissionState kind="scope" status="missing-scope" scope={title} {...(feature.grantable ? { onRequest: () => router.push(scopeRequestHref([scope]) as never) } : {})} />
       {feature.reason ? (
         <Text role="footnote" tone="fg-3" align="center">
           {feature.reason}

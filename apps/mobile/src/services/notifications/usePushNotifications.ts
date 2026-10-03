@@ -23,7 +23,7 @@ import { prefs } from '../storage/prefs';
 import { requestPushToken } from './push';
 import { intentFromResponse, submitDecision, type NotificationIntent } from './notificationCategories';
 import { usePushStatusStore } from './pushStatus';
-import { readNotifyPrefs, SERVER_MUTE_HORIZON_MS, shouldMuteOnServer } from './notificationFilter';
+import { pauseKey, readNotifyPrefs, serverMuteUntil } from './notificationFilter';
 
 export function projectId(): string | null {
   const value =
@@ -33,7 +33,7 @@ export function projectId(): string | null {
 }
 
 export function usePushNotifications(): void {
-  const { state, fetch: authFetch } = useAuth();
+  const { state, fetch: authFetch, serverId } = useAuth();
   const authenticated = state.status === 'authenticated';
   const registeredToken = useRef<string | null>(null);
   const setStatus = usePushStatusStore((s) => s.setStatus);
@@ -119,11 +119,12 @@ export function usePushNotifications(): void {
   // sent rather than merely hidden in the foreground.
   useEffect(() => {
     if (!authenticated || Platform.OS === 'web') return;
-    const mute = shouldMuteOnServer(readNotifyPrefs((k) => prefs.getString(k)));
-    void createApiClient(authFetch).auth.mutePush(mute ? Date.now() + SERVER_MUTE_HORIZON_MS : null).catch(() => {
+    const paused = serverId ? prefs.getNumber(pauseKey(serverId), 0) : 0;
+    const mutedUntil = serverMuteUntil(readNotifyPrefs((k) => prefs.getString(k)), paused || null, Date.now());
+    void createApiClient(authFetch).auth.mutePush(mutedUntil).catch(() => {
       // Offline. The foreground filter still applies; re-synced next change.
     });
-  }, [authenticated, authFetch, preferencesVersion]);
+  }, [authenticated, authFetch, preferencesVersion, serverId]);
 
   // ── Tap routing ─────────────────────────────────────────────────
   useEffect(() => {

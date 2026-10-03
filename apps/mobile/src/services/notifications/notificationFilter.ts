@@ -93,3 +93,22 @@ export function shouldMuteOnServer(prefs: NotifyPrefs): boolean {
  * integer). Re-asserted on every registration anyway.
  */
 export const SERVER_MUTE_HORIZON_MS = 10 * 365 * 24 * 60 * 60 * 1000;
+
+/** Settings › Notifications "Pause" (MDF-114): until when run outcomes and chat replies are held (MMKV, per server). */
+export const pauseKey = (serverId: string): string => `srv.${serverId}.notify.pausedUntil`;
+
+/** The server mute to send: an active pause wins; else the switches decide (both off → muted indefinitely). */
+export function serverMuteUntil(prefs: NotifyPrefs, pausedUntil: number | null, now: number): number | null {
+  if (pausedUntil && pausedUntil > now) return shouldMuteOnServer(prefs) ? now + SERVER_MUTE_HORIZON_MS : pausedUntil;
+  return shouldMuteOnServer(prefs) ? now + SERVER_MUTE_HORIZON_MS : null;
+}
+
+/** The pause choices: 1 h, 8 h, until 8:00 tomorrow (local). */
+export function pauseUntil(choice: '1h' | '8h' | 'tomorrow', now: Date): number {
+  if (choice === '1h') return now.getTime() + 3_600_000;
+  if (choice === '8h') return now.getTime() + 8 * 3_600_000;
+  const t = new Date(now);
+  t.setDate(t.getDate() + 1);
+  t.setHours(8, 0, 0, 0);
+  return t.getTime();
+}
