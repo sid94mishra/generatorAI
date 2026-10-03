@@ -42,6 +42,9 @@ describe('deepLinkToRoute', () => {
     expect(deepLinkToRoute('https://example.com/chats')).toBeNull();
     expect(deepLinkToRoute('generatorai-evil://chats')).toBeNull();
     expect(deepLinkToRoute('generatorai://chats/../../api/x')).toBeNull();
+    expect(deepLinkToRoute('generatorai://chats/%2e%2e/settings')).toBeNull();
+    expect(deepLinkToRoute('generatorai://chats/%2E/x')).toBeNull();
+    expect(deepLinkToRoute('generatorai://chats/%E0%A4%A')).toBeNull();
     expect(deepLinkToRoute('')).toBeNull();
   });
 });

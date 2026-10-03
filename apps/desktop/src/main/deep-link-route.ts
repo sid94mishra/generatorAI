@@ -68,8 +68,12 @@ export function deepLinkToRoute(url: string): string | null {
 
   const segments = rawPath.split('/').filter((s) => s.length > 0);
   // A dot segment would let the route climb out of its prefix once the page
-  // resolves it; a link never needs one.
-  if (segments.some((s) => s === '.' || s === '..')) return null;
+  // resolves it; a link never needs one. Percent-encoded too (`%2e%2e`: the
+  // URL parser treats it as `..`), and a malformed escape is no route.
+  if (segments.some((s) => {
+    const decoded = safeDecode(s);
+    return decoded === '' || decoded === '.' || decoded === '..';
+  })) return null;
   const params = new URLSearchParams(rawQuery);
 
   if (segments.length === 1 && segments[0]!.toLowerCase() === 'pair') {
