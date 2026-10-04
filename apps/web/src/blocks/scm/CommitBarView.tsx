@@ -109,13 +109,14 @@ export function CommitBarView({
   const prOn = openPr && canOpenPr;
   const pushOn = push && canPush;
   // One note for what the toggles cannot do (the connect link covers the PR when it is the fix).
+  // A reason another one already says ("No git remote" beside "No git remote configured") is dropped.
   const unavailable = [
     ...new Set(
       [!canPush ? selected.reasons.push : undefined, !canOpenPr && !needsConnect ? selected.reasons.pullRequest : undefined].filter(
         (r): r is string => !!r,
       ),
     ),
-  ];
+  ].filter((r, _i, all) => !all.some((other) => other !== r && other.startsWith(r)));
   const showHead = !!selected.branch && !selected.onDefaultBranch;
 
   return (
