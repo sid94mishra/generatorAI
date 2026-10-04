@@ -102,6 +102,14 @@ describe('live-state model', () => {
     expect(liveReducer(map, { type: 'sweep', now: at(2000 + END_DISMISS_MS.failed) })[key]).toBeUndefined();
   });
 
+  it('a succeeded run ends with a complete bar, even when progress never reached the last stages', () => {
+    let map = apply({}, [run]);
+    const key = 'srv1:workflow_run:r1';
+    map = liveReducer(map, { type: 'progress', key, segments: ['done', 'current', 'pending', 'pending'], now: at(1000) });
+    map = liveReducer(apply(map, [], at(2000)), { type: 'ended', key, outcome: 'succeeded', now: at(3000) });
+    expect(map[key]).toMatchObject({ phase: 'succeeded', segments: ['done', 'done', 'done', 'done'] });
+  });
+
   it('never invents an outcome: an ending item that learns none is forgotten', () => {
     let map = apply(apply({}, [run]), [], at(1000));
     map = liveReducer(map, { type: 'sweep', now: at(1000 + OUTCOME_GRACE_MS) });

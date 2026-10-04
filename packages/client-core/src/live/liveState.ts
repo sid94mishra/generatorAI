@@ -287,8 +287,13 @@ export function liveReducer(map: LiveMap, event: LiveEvent): LiveMap {
       };
       delete ended.ask;
       if (ended.segments) {
-        const mark: LiveSegment = event.outcome === 'failed' ? 'failed' : 'done';
-        ended.segments = ended.segments.map((s) => (s === 'current' || s === 'needs_you' ? mark : s));
+        // Succeeded: every stage ran, so the bar is complete (stages the last progress never reached were left
+        // pending — a "Succeeded" banner with grey segments). Failed / cancelled: only the active stage changes.
+        if (event.outcome === 'succeeded') ended.segments = ended.segments.map(() => 'done');
+        else {
+          const mark: LiveSegment = event.outcome === 'failed' ? 'failed' : 'done';
+          ended.segments = ended.segments.map((s) => (s === 'current' || s === 'needs_you' ? mark : s));
+        }
       }
       return { ...map, [event.key]: ended };
     }
