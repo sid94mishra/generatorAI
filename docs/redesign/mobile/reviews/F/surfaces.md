@@ -29,3 +29,22 @@ between driver commands; agent-device reports Face ID simulation as unsupported 
 | Share | **pass**: Photos → Share → GeneratorAI → app opens the **Send to agent** sheet pre-filled with the image (name, type, size), nothing sent | `ios-share-from-photos.png` |
 | App-switcher privacy | **pass**: with "Hide content in app switcher" on, the app's card is blank; off, content shows | `ios-app-switcher-privacy-on.png` |
 | Risky approval signing (MV-29) | **not possible on a simulator** (owner, real iPhone) | — |
+
+## Android 16 (API 36) — gai-phone emulator (dev client, sandbox :3197 at 10.0.2.2)
+
+Setup fixes first: the dev client died at launch until `DETECT_SCREEN_CAPTURE` was unblocked (4214be1e); pairing waited
+on an off-screen Continue (a54f7a2d); the emulator needs 3 GB (`-memory 3072`; at 2 GB System UI and the Maestro driver
+stalled). A PIN (1111) and an enrolled emulator fingerprint (`adb emu finger touch 1`) make the approval key usable.
+
+| Surface | Result | Evidence (`docs/redesign/shots/mobile/F/android/`) |
+|---|---|---|
+| Live Update | **pass**: `generatorai:///live?script=run-needs-you&step=5` posts the ongoing notification with the status-bar chip, title "Typecheck", "Nightly dependency audit · Running", elapsed time and the four-segment bar; it ends as "Succeeded" | `live-shade-1.png`, `live-shade-3.png` |
+| — segments on success | **finding (owner, client-core)**: the ended state keeps 2 of 4 segments filled — `liveState` turns only current / needs-you segments into done, pending stages stay grey on "Succeeded" (the script never sent stage 3–4 progress; a real run sends it) | `live-shade-4.png` |
+| Notifications | **pass**: `notify?case=question` → "Your agent has a question" with **Reply / Open**; `approval` + `approval.risky` group under the app; `done` posts silently ("Workflow run finished") | `notify-shade.png`, `notify-approval.png` |
+| Inline Allow (`notifications/approval-action`) | **flow/fixture mismatch**: the dev `approval` case marks the sandbox gate `standard`, but the fixture gate is risky (MG-04) — the unsigned answer is refused by design, the flow expects it accepted (owner: give the flow a standard gate) | maestro.md |
+| Quick Settings tile | **pass**: `cmd statusbar add-tile …/NewChatTileService` → "New chat" tile → New chat sheet | `qs-tile.png`, `qs-tile-open.png` |
+| Share intent | **pass**: `am start -a SEND -t text/plain` → **Send to agent** sheet with the text and chat picker | `share.png` |
+| Quick actions | **partial**: the four dynamic shortcuts are registered (`dumpsys shortcut`: New chat, Run workflow…, Home, Search); the launcher long-press was not drivable by `adb input` | — |
+| Recents privacy | **fail**: with *Hide content in Recents* on (`Activity.setRecentsScreenshotEnabled(false)` via the device-key module) the Recents card still shows the screen on the API 36 emulator, twice, with a fresh snapshot (owner: check on a phone; if it reproduces, fall back to FLAG_SECURE while the choice is on) | `recents-private.png` |
+| Risky approval signing (MV-29, Android half) | **pass on the emulator**: Register approval key → fingerprint → **Allow once** / **Deny** signed and accepted (`chat/send-stream-approve`, `approvals/clear`); terminal and browser step-up the same way | maestro.md |
+| Dev log noise | **finding**: every local notification logs `expo-notifications: Custom sound 'default' not found` (LogBox banner over the UI); `ReactNativeJNI: Unsupported FontVariant value: ""` on most screens | logcat |

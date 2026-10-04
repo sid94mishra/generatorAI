@@ -37,3 +37,17 @@ sheets as centred form sheets, the run graph and run sheet render correctly in b
 
 Not run on the iPad: hardware-keyboard shortcuts and rotation with a live terminal (MV-28; the terminal tab needs the
 step-up the simulator cannot satisfy).
+
+## Android 16 — gai-phone (emulator), Instrument dark and light
+
+Same 32-route link walk over adb (`android-phone-dark/`, `android-phone-light/`). Every route renders with sandbox data
+in both appearances after the fixes found here: pane tabs and TabRow filled the screen (464331ba, 8f0eb45a), so the
+Changes / Files / Terminal / Browser panes and the project / PR / stage-editor tabs had no body.
+
+| Finding | Where | Notes |
+|---|---|---|
+| The app renders an empty root after the scripted walk passes the New chat link (Back then leaves the app) | twice, in the 32-link walk at 4 s per link | not reproduced in shorter link sequences; the walk was finished in two halves from a fresh start. Owner: likely the same family as the New chat → chat Fabric crash (maestro.md) |
+| Diagnostics' DSN field spans the full width (no side gutter) | Settings › Diagnostics › Crash reports | `android/crash-dsn.png`; the Input is `presentation="standalone"` outside a padded group |
+| A just-opened chat restores its open pane (the pane covers the transcript on a phone) | chat by link | expected from the remembered pane state, worth a design glance on phones |
+
+Not run: gai-tablet (the AVD is configured but has never been booted — a second emulator did not fit next to the phone in 8 GB RAM and ~7 GB free disk; MV-28), hardware keyboard, rotation with a live terminal.

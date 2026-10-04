@@ -34,3 +34,9 @@ Stability re-run on an idle host (same variant, 97): **46 match, 49 diff, 2 miss
 
 Baselines committed as a first recording (95 PNGs, 5.7 MB, `META.json` iPhone 18 Pro / iOS 27.0); the other four
 variants and the stability gate remain open (MV-26, owner).
+
+## Android
+
+Not run: a Storybook-mode Metro (`EXPO_PUBLIC_STORYBOOK=1 EXPO_PUBLIC_VRT=1`) and 97+ captures per variant did not fit
+after the Android rebuilds and suite (MV-26, owner): `node scripts/mobile/vrt.mjs --platform=android --device=phone
+--update`, then a no-update run.

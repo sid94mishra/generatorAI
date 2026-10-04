@@ -13,3 +13,10 @@ crashed in the Dynamic Type check — a Fabric debug assertion (`ShadowTree::com
 `handleContentSizeCategoryDidChangeNotification`, `GeneratorAI-2026-10-04-063235.ips`). The test now skips the
 font-size checks in Debug builds (eb87946a); a re-run after that did not reach Home before its 60 s readiness wait
 (the dev client was still loading), so a full XCUITest result is still open (owner, ideally on Release).
+
+## Android
+
+**Not possible on this host in this session**: `assembleRelease` needs another full native build (35–40 min under this
+load, ~5 GB peak) after five debug builds; free disk stayed at 5–8 GB and twice fell under the 2 GB guard during
+debug builds. The 16 KB alignment check (`zipalign -c -P 16 -v 4`) therefore was not run either. Owner: on a machine
+with ≥ 15 GB free — `./gradlew :app:assembleRelease`, `zipalign -c -P 16 -v 4 app-release.apk`, install, smoke flows.

@@ -18,3 +18,17 @@ comparable with the budgets (08 §4.7 wants release) — recorded as a first rel
 | transcript scroll | janky frames, p95 | — | 5 %, 20 ms | unmeasured (same) |
 
 Owner: a Release build on a machine with room (or the owner's phones, 08 §4.7) for the budget verdicts.
+
+## Android 16 — gai-phone emulator, **dev build** (not release)
+
+| Scenario | Metric | Value | Budget | Verdict |
+|---|---|---|---|---|
+| cold start | launch → Home | 3,808 ms | 3,000 ms | over (dev build: bundle from Metro) |
+| streaming 2,000 lines | janky frames | 100 % | 8 % | over |
+| streaming | longest frame | 652 ms | 100 ms | over |
+| streaming | memory after completion | 1,274 MB | 400 MB | over — 6.7× the iOS dev figure (190 MB); dev-build overhead (Metro symbolication, LogBox, dev Hermes) inflates it, but the gap to iOS is worth a release measurement first (owner) |
+| transcript scroll | janky frames | 0 % | 5 % | pass |
+| transcript scroll | p95 frame | — | 20 ms | unmeasured (gfxinfo percentiles absent on this emulator) |
+
+A dev build on an emulator sharing a loaded 8 GB host is not comparable with the budgets; the streaming numbers are
+recorded as a first relative point. Release `assembleRelease` was not built (release.md).
