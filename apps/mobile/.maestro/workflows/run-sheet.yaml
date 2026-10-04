@@ -22,7 +22,8 @@ tags: [workflows]
 - tapOn: {id: run-permission-acceptEdits}
 - tapOn: {id: run-sheet-review, retryTapIfNoChange: false}
 - extendedWaitUntil: {visible: "Plan preview", timeout: 15000}
-- assertVisible: "L1.*"
+# Android exposes the row's texts ("L1"), iOS its label ("Layer 1: plan").
+- assertVisible: "(L1|Layer 1).*"
 - tapOn: {id: run-sheet-options}
 - tapOn: {id: run-sheet-run}
-- extendedWaitUntil: {visible: "Plan", timeout: 30000}
+- extendedWaitUntil: {visible: "Plan.*", timeout: 30000}

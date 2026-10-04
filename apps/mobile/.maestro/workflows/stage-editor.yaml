@@ -45,6 +45,8 @@ env: {DEVICE_SCOPES: "write:workflows"}
     commands:
       - hideKeyboard
 - tapOn: {id: stage-tab-policy}
+# On iOS the first tap only ends editing (the keyboard swallows it); a second tap on the selected tab is a no-op.
+- tapOn: {id: stage-tab-policy}
 - scrollUntilVisible: {element: {id: stage-retry}, direction: DOWN, timeout: 20000}
 - tapOn: {id: stage-retry}
 - scrollUntilVisible: {element: {id: stage-retry-sentence}, direction: DOWN, timeout: 10000}

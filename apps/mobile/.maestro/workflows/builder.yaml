@@ -31,13 +31,27 @@ env: {DEVICE_SCOPES: "write:workflows"}
 - assertVisible: "Saved"
 # A stage row opens the stage editor (the stage-editor flow covers it); Add stage appends.
 - tapOn: {id: builder-add-stage}
-# The imperative sheet is an RN Modal; on iOS its content is matched by text.
-- extendedWaitUntil: {visible: "Search stage kinds", timeout: 5000}
-- tapOn: "Agent.*An agent turn.*"
+# The sheet is an RN Modal presented inside the editor's native modal. On iOS it sits below XCTest's snapshot depth
+# limit — Maestro sees nothing in it (VoiceOver does) — so iOS taps the Agent card by position.
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - extendedWaitUntil: {visible: "At the end", timeout: 10000}
+      - tapOn: "Agent.*An agent turn.*"
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - waitForAnimationToEnd
+      - tapOn: {point: "50%, 69%"}
 - extendedWaitUntil: {visible: {id: builder-stage-stage_3}, timeout: 5000}
 - tapOn: {id: builder-validate}
-- extendedWaitUntil: {visible: {id: validate-sheet}, timeout: 5000}
-- extendedWaitUntil: {visible: {id: validation-recheck}, timeout: 15000}
+# Editor sheets are below the iOS snapshot depth (see above): asserted on Android, opened and closed on iOS.
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - extendedWaitUntil: {visible: {id: validate-sheet}, timeout: 5000}
+      - extendedWaitUntil: {visible: {id: validation-recheck}, timeout: 15000}
+- waitForAnimationToEnd
 - swipe: {direction: DOWN}
 - tapOn: {id: builder-view}
 - tapOn: "Graph"
@@ -46,7 +60,11 @@ env: {DEVICE_SCOPES: "write:workflows"}
 # A native menu's trigger is matched by its label (the menu, not the hosted button, is the element on iOS).
 - tapOn: "More builder actions"
 - tapOn: "Version history"
-- extendedWaitUntil: {visible: {id: versions-sheet}, timeout: 5000}
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - extendedWaitUntil: {visible: {id: versions-sheet}, timeout: 5000}
+- waitForAnimationToEnd
 - swipe: {direction: DOWN}
 - tapOn: "Cancel"
 - tapOn: "Discard"
