@@ -35,6 +35,7 @@ import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { SectionHeader } from '@/ui/patterns/SectionHeader/SectionHeader.js';
 import { cn } from '@/ui/lib/cn.js';
 import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
+import { withoutLeadingTitle } from './planContent.js';
 import { modChord } from '@/lib/shortcuts.js';
 
 export interface PlanPanelProps {
@@ -292,7 +293,7 @@ export function PlanPanel({ chatId, planId }: PlanPanelProps) {
               ) : null}
             </div>
             <div onMouseUp={() => setSelection(selectionIn(revision.content))} data-testid="plan-document">
-              <Markdown>{revision.content}</Markdown>
+              <Markdown>{withoutLeadingTitle(revision.content, plan.title)}</Markdown>
             </div>
 
             {selection ? (
