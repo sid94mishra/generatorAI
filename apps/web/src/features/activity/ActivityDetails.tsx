@@ -156,7 +156,8 @@ export function ActivityDetails({ entry, now, modelLabel, onDone, onNavigate, ti
             // D-86: the command / path the gate names, not its JSON wrapper.
             <ActivityPopoverCode>{subject.text}</ActivityPopoverCode>
           ) : (
-            <p className="line-clamp-3 text-small text-fg-2">{ask.detail}</p>
+            // The aside already says where the gate sits: drop the detail's "Stage n of m · " prefix.
+            <p className="line-clamp-3 text-small text-fg-2">{stageAside ? ask.detail.replace(/^Stage \d+ of \d+( · )?/, '') : ask.detail}</p>
           )
         ) : null}
         {entry.worker && !subject?.command ? <p className="text-small text-fg-2">{ask.summary}</p> : null}
@@ -300,7 +301,12 @@ export function ActivityDetails({ entry, now, modelLabel, onDone, onNavigate, ti
   if (entry.kind === 'orchestrator' && workers.data && workers.data.tasks.length > 0) {
     const tasks = workers.data.tasks;
     sections = (
-      <ActivityPopoverSection title="Workers" count={tasks.length} data-testid="activity-popover-workers">
+      // The list holds this server session's workers; the tally counts every wave (D-92).
+      <ActivityPopoverSection
+        title={entry.meta?.workers && entry.meta.workers.total > tasks.length ? 'Latest workers' : 'Workers'}
+        count={tasks.length}
+        data-testid="activity-popover-workers"
+      >
         {tasks.map((task) => {
           const status = resolveStatus('backgroundTask', task.status);
           const asking = entry.worker?.id === task.taskId;

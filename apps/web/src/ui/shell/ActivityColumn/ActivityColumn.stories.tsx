@@ -45,6 +45,7 @@ function Tabs() {
     <SegmentedControl
       semantics="tabs"
       fullWidth
+      distribute="content"
       label="Activity kind"
       value={value}
       onValueChange={setValue}

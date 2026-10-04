@@ -22,7 +22,7 @@ import type {
   WorkflowRun,
 } from '@generatorai/shared';
 import type { WorkflowDefinitionSummary } from '@generatorai/workflow-spec';
-import { chatActivityMeta, tallyWorkers } from '@generatorai/core';
+import { chatActivityMeta, stripRunEpoch, tallyWorkers } from '@generatorai/core';
 import type { Container } from '../composition-root.js';
 import { listAllDefinitionSummaries } from './definitionSummaries.js';
 import { activityScmFields, readScmOutcome } from './scmOutcome.js';
@@ -55,7 +55,23 @@ export function createActivityRoutes(container: Container): Router {
     worktreeService,
     projectService,
     executionWorkspaceRepo,
+    stageRunRepo,
   } = container;
+
+  /** "Typecheck: pnpm typecheck exited 2" — a failed run's first failed stage (D-92), when the run has no error of its own. */
+  const failureLine = async (run: WorkflowRun): Promise<string | undefined> => {
+    if (run.error) return run.error;
+    try {
+      const stages = await stageRunRepo.getByRunId(run.id);
+      const failed = stages
+        .filter((s) => !s.scopeId && s.status === 'failed')
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
+      const line = failed?.error?.split('\n')[0]?.trim();
+      return failed && line ? `${failed.name}: ${line}` : undefined;
+    } catch {
+      return undefined;
+    }
+  };
 
   // GET /activity/recent
   router.get('/recent', async (req, res, next) => {
@@ -124,9 +140,18 @@ export function createActivityRoutes(container: Container): Router {
       const runsByDefinition = await Promise.all(
         definitions.map(async (d) => ({ definition: d, runs: await workflowRunRepo.getByDefinitionId(d.id) })),
       );
+      /** D-92: the run an automation execution started (its item reports the run's failure). */
+      const runOfExecution = new Map<string, WorkflowRun>();
+      const executionErrors = new Set<string>();
       for (const { definition, runs } of runsByDefinition) {
         for (const run of runs) {
           if (!TERMINAL_RUN_STATUSES.has(run.status)) continue;
+          // An automation's run rolls up into its execution's item (one card, like the attention feed).
+          if (run.trigger?.kind === 'automation') {
+            const executionId = run.trigger['executionId'];
+            if (typeof executionId === 'string') runOfExecution.set(executionId, run);
+            continue;
+          }
           const outcome = runOutcome(run.status);
           if (!outcome) continue;
           const endedAt = run.completedAt ?? run.updatedAt;
@@ -135,7 +160,8 @@ export function createActivityRoutes(container: Container): Router {
             key: `run:${run.id}`,
             entity: 'run',
             entityId: run.id,
-            title: run.name || definition.name,
+            // The server mints `<definition> - Run <epoch-ms>`; the suffix is bookkeeping (as in the attention feed).
+            title: stripRunEpoch(run.name || definition.name),
             href: `/workflows/${definition.id}/runs/${run.id}`,
             ...(definition.projectId ? { project: { id: definition.projectId, name: definition.projectId } } : {}),
             endedAt: endedAt.toISOString(),
@@ -164,6 +190,7 @@ export function createActivityRoutes(container: Container): Router {
           if (!outcome) continue;
           const endedAt = execution.completedAt ?? execution.createdAt;
           if (endedAt.getTime() < sinceMs) continue;
+          if (execution.error) executionErrors.add(execution.id);
           items.push({
             key: `automation_execution:${execution.id}`,
             entity: 'automation_execution',
@@ -175,7 +202,7 @@ export function createActivityRoutes(container: Container): Router {
             outcome,
             summary:
               execution.error ??
-              `${execution.completedIterations}/${execution.totalIterations} iteration${execution.totalIterations === 1 ? '' : 's'} completed`,
+              `${execution.completedIterations} of ${execution.totalIterations} iteration${execution.totalIterations === 1 ? '' : 's'} completed`,
             meta: {
               automation: {
                 id: automation.id,
@@ -204,6 +231,18 @@ export function createActivityRoutes(container: Container): Router {
           } catch {
             // Deleted since the underlying row was read — leave the id as the label.
           }
+        }),
+      );
+
+      // D-92: a failed item without an error says which stage failed and why (final page only).
+      const runById = new Map(runsByDefinition.flatMap(({ runs }) => runs.map((r) => [r.id, r] as const)));
+      await Promise.all(
+        page.map(async (item, index) => {
+          if (item.outcome !== 'failed') return;
+          const run = item.entity === 'run' ? runById.get(item.entityId) : item.entity === 'automation_execution' ? runOfExecution.get(item.entityId) : undefined;
+          if (!run || (item.entity === 'run' && run.error) || executionErrors.has(item.entityId)) return;
+          const line = await failureLine(run);
+          if (line) page[index] = { ...item, summary: line };
         }),
       );
 

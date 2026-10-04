@@ -131,8 +131,8 @@ export function ConnectedRail({
       {/* D-92: the Activity toggle, then (column not docked) the live items as quick-access tiles. */}
       <RailDivider />
       <ActivityToggle size="lg" tooltipSide="right" />
-      {activityDocked ? null : <RailActivity />}
-      <RailSpacer />
+      {/* The tiles take the spacer's place, so they get every pixel the rail has left. */}
+      {activityDocked ? <RailSpacer /> : <RailActivity />}
       {strip ? null : <ConnectedUpdatePill placement="rail" />}
       <RailStatusDot data-testid="rail-connection" tone={status.connection.tone} label={connectionLabel} />
       <IconButton

@@ -313,6 +313,7 @@ export {
   redactAttentionEventPayload,
   tallyWorkers,
   chatActivityMeta,
+  stripRunEpoch,
 } from './AttentionService.js';
 export type {
   AttentionServiceDeps,

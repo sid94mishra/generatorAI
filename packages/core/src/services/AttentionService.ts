@@ -128,7 +128,9 @@ export interface AttentionServiceDeps {
   stageRuns: { getByRunId(workflowRunId: string): Promise<StageRun[]> };
   /** The definition store: only the working graph's name and project are read. */
   definitions: {
-    getGraph(id: string): Promise<{ graph: { workflow: { name: string; projectId?: string | null | undefined } } }>;
+    getGraph(id: string): Promise<{
+      graph: { workflow: { name: string; projectId?: string | null | undefined }; stages?: ReadonlyArray<{ key: string }> };
+    }>;
   };
   automations: {
     getAll(): Promise<Automation[]>;
@@ -196,7 +198,7 @@ function lastSegment(path: string): string {
 }
 
 /** The server mints run names as `<definition> - Run <epoch-ms>`; the suffix is bookkeeping. */
-function stripRunEpoch(name: string): string {
+export function stripRunEpoch(name: string): string {
   const stripped = name.replace(/\s*[-–—]\s*Run\s+\d{10,}\s*$/i, '').trim();
   return stripped.length > 0 ? stripped : name;
 }
@@ -957,17 +959,22 @@ export class AttentionService {
     }
     if (!run || !LIVE_RUN_STATUSES.includes(run.status)) return [];
 
-    const [instances, definition] = await Promise.all([
+    const [instances, graph] = await Promise.all([
       stageRuns.getByRunId(runId).catch(() => [] as StageRun[]),
-      definitions.getGraph(run.workflowDefinitionId).then((d) => d.graph.workflow).catch(() => null),
+      definitions.getGraph(run.workflowDefinitionId).then((d) => d.graph).catch(() => null),
     ]);
+    const definition = graph?.workflow ?? null;
+    // Graph order breaks creation-time ties (instances created together; the repository's row order is not it).
+    const graphIndex = new Map((graph?.stages ?? []).map((stage, index) => [stage.key, index] as const));
+    const order = (s: StageRun): number => graphIndex.get(s.stageKey) ?? Number.MAX_SAFE_INTEGER;
     const project = await this.projectRef(run.projectId ?? definition?.projectId ?? undefined);
     // "Stage N of M" counts the run's own stages, in the order they were
     // created: the body instances of a loop or map (`scopeId`) are iterations
-    // inside one stage, and the repository returns rows unordered.
+    // inside one stage.
     const stages = instances
       .filter((s) => !s.scopeId)
-      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.instancePath.localeCompare(b.instancePath));
+      // An alphabetical tie-break put "Apply upgrades" second of six (D-92 desktop test).
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || order(a) - order(b) || a.instancePath.localeCompare(b.instancePath));
     const of = stages.length;
     const done = stages.filter((s) => TERMINAL_STAGE_STATUSES.has(s.status)).length;
     const step = of > 0 ? Math.min(done + 1, of) : undefined;
@@ -982,12 +989,16 @@ export class AttentionService {
     };
 
     const drafts: Draft[] = [];
-    // A gate can sit on any instance, a loop or map body stage included.
+    // A gate can sit on any instance, a loop or map body stage included. An
+    // approval `wait` stage parks as `waiting` with `{kind:'wait', type:'approval'}`
+    // (D-92: it waits on a person, so it is Needs you, not Running).
     for (const stage of instances) {
-      if (stage.status !== 'awaiting_input') continue;
       const data = record(stage.interruptData) ?? {};
+      const approvalWait = stage.status === 'waiting' && data['kind'] === 'wait' && data['type'] === 'approval';
+      if (stage.status !== 'awaiting_input' && !approvalWait) continue;
       const gate = str(data['kind']);
-      const isApproval = gate === 'stage_completion_review' || gate === 'tool_permission' || data['approval'] === true;
+      const isApproval =
+        approvalWait || gate === 'stage_completion_review' || gate === 'tool_permission' || data['approval'] === true;
       const reason = str(data['reason']) ?? str(data['prompt']) ?? str(record(data['request'])?.['description']);
       const index = stages.indexOf(stage);
       const position = of > 0 && index >= 0 ? `Stage ${index + 1} of ${of}` : undefined;
@@ -997,6 +1008,8 @@ export class AttentionService {
         ...base,
         key: `workflow_run:${runId}:${stage.id}`,
         state: stateOf(STATUS_MAPS.stageRun.awaiting_input, 'needs_you'),
+        // D-92: where the gate sits, for the card's "Stage 4 of 6" and its stage bar.
+        ...(of > 0 && index >= 0 ? { progress: { step: index + 1, of } } : {}),
         ask: {
           kind: isApproval ? 'stage_approval' : 'stage_input',
           id: stage.id,
@@ -1022,6 +1035,10 @@ export class AttentionService {
         },
       });
     }
+
+    // D-92: a run an automation started rolls up into its execution's item (one
+    // card, one count, like workers into their orchestrator); its asks still show.
+    if (drafts.length === 0 && run.trigger?.kind === 'automation') return [];
 
     if (drafts.length === 0) {
       const live = instances.filter((s) => !TERMINAL_STAGE_STATUSES.has(s.status));

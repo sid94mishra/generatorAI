@@ -126,6 +126,7 @@ function makeApp(opts: {
   projects?: Record<string, { id: string; name: string }>;
   workspaces?: Record<string, { status: string; metadata?: Record<string, unknown> }>;
   workersByChat?: Record<string, Chat[]>;
+  stagesByRun?: Record<string, Array<{ name: string; status: string; error?: string; scopeId?: string; createdAt: Date }>>;
 } = {}) {
   const runsByDefinition = opts.runsByDefinition ?? {};
   const executionsByAutomation = opts.executionsByAutomation ?? {};
@@ -161,6 +162,7 @@ function makeApp(opts: {
         return p ? Promise.resolve(p) : Promise.reject(new Error('not found'));
       }),
     },
+    stageRunRepo: { getByRunId: vi.fn((id: string) => Promise.resolve(opts.stagesByRun?.[id] ?? [])) },
     executionWorkspaceRepo: {
       findById: vi.fn((id: string) => Promise.resolve(opts.workspaces?.[id] ?? null)),
     },
@@ -170,6 +172,33 @@ function makeApp(opts: {
   app.use('/api/activity', createActivityRoutes(container as never));
   return app;
 }
+
+describe('GET /api/activity/recent — D-92 rollup and failure lines', () => {
+  it('rolls an automation\'s run into its execution and says which stage failed', async () => {
+    const app = makeApp({
+      definitions: [definition({ id: 'def-1', name: 'Deploy preview' })],
+      runsByDefinition: {
+        'def-1': [
+          run({ id: 'run-1', name: 'Deploy preview - Run 1791123895582', status: 'failed', completedAt: new Date('2026-01-05T00:00:00Z') }),
+          run({ id: 'run-2', status: 'failed', completedAt: new Date('2026-01-04T00:00:00Z'), trigger: { kind: 'automation', executionId: 'exec-1' } }),
+        ],
+      },
+      stagesByRun: {
+        'run-1': [
+          { name: 'Install', status: 'completed', createdAt: new Date(1) },
+          { name: 'Typecheck', status: 'failed', error: 'pnpm typecheck exited 2\nmore', createdAt: new Date(2) },
+        ],
+        'run-2': [{ name: 'Summarise', status: 'failed', error: 'boom', createdAt: new Date(1) }],
+      },
+      automations: [automation()],
+      executionsByAutomation: { 'auto-1': [execution({ id: 'exec-1', status: 'failed', completedIterations: 0, totalIterations: 1, completedAt: new Date('2026-01-04T00:00:01Z') })] },
+    });
+    const res = await request(app).get('/api/activity/recent');
+    expect(res.body.items.map((i: { key: string }) => i.key)).toEqual(['run:run-1', 'automation_execution:exec-1']);
+    expect(res.body.items[0]).toMatchObject({ title: 'Deploy preview', summary: 'Typecheck: pnpm typecheck exited 2' });
+    expect(res.body.items[1].summary).toBe('Summarise: boom');
+  });
+});
 
 describe('GET /api/activity/recent — D-92 meta', () => {
   it('carries agent, model, unread and an orchestrator\'s worker tally; an automation\'s trigger', async () => {

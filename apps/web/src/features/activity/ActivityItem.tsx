@@ -100,6 +100,8 @@ export function ActivityItem({ entry, now, selected, modelLabel, tabIndex, linkR
   const localLink = useRef<HTMLAnchorElement | null>(null);
   const titleId = useId();
   const [expanded, setExpanded] = useState(false);
+  /** Focus handed back after the popover closed: do not reopen it on that focus. */
+  const returning = useRef(false);
   const act = useAttentionAction();
   const retry = useRetryActivity();
   const dismiss = useActivityStore((s) => s.dismiss);
@@ -133,6 +135,7 @@ export function ActivityItem({ entry, now, selected, modelLabel, tabIndex, linkR
     if (e.key === 'ArrowLeft' && !(e.target instanceof HTMLInputElement)) {
       e.preventDefault();
       preview.close();
+      returning.current = true;
       localLink.current?.focus();
     }
   };
@@ -146,7 +149,14 @@ export function ActivityItem({ entry, now, selected, modelLabel, tabIndex, linkR
       <PopoverRoot
         open={preview.open}
         onOpenChange={(next) => {
-          if (!next) preview.close();
+          if (next) return;
+          // Esc / an outside press while focus is in the popover: back to the card, never to nowhere.
+          const inside = popupRef.current?.contains(document.activeElement) ?? false;
+          preview.close();
+          if (inside) {
+            returning.current = true;
+            localLink.current?.focus();
+          }
         }}
       >
         <ContextMenu.Trigger
@@ -182,7 +192,8 @@ export function ActivityItem({ entry, now, selected, modelLabel, tabIndex, linkR
                 tabIndex,
                 onFocus: (e: { currentTarget: HTMLElement }) => {
                   onFocusCard(entry.key);
-                  if (e.currentTarget.matches(':focus-visible')) preview.openSoon();
+                  if (returning.current) returning.current = false;
+                  else if (e.currentTarget.matches(':focus-visible')) preview.openSoon();
                 },
                 onBlur: (e: { relatedTarget: EventTarget | null }) => {
                   if (e.relatedTarget instanceof Node && popupRef.current?.contains(e.relatedTarget)) return;

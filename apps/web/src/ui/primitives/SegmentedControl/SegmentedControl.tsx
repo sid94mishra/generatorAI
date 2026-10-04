@@ -5,7 +5,8 @@
 // (sm) / 28h in a 32h track (md), pad 0 10, small 500 fg-2; selected
 // `bg-raised text-fg` + 1px `line` ring. Items may carry an icon, a mono
 // count, be icon-only (`ariaLabel` is then the accessible name) or disabled with a
-// `reason` tooltip. `fullWidth` stretches the items.
+// `reason` tooltip. `fullWidth` stretches the items (`distribute`: equal, or
+// grown from each item's own width — the Activity column's kind tabs).
 //
 // `semantics` says what the control does (03 §10 issue 9):
 //   radio — picks a value (mode, density, effort): Base UI RadioGroup/Radio.
@@ -57,9 +58,15 @@ const itemVariants = cva(
     variants: {
       size: { sm: 'h-control-sm', md: 'h-control' },
       iconOnly: { true: 'px-1.75', false: '' },
-      fullWidth: { true: 'flex-1', false: '' },
+      fullWidth: { true: '', false: '' },
+      distribute: { equal: '', content: '' },
     },
-    defaultVariants: { size: 'sm', iconOnly: false, fullWidth: false },
+    compoundVariants: [
+      { fullWidth: true, distribute: 'equal', className: 'flex-1' },
+      // Grow from each item's own width: a label with a count is never squeezed by icon-only neighbours.
+      { fullWidth: true, distribute: 'content', className: 'flex-auto' },
+    ],
+    defaultVariants: { size: 'sm', iconOnly: false, fullWidth: false, distribute: 'equal' },
   },
 );
 
@@ -71,6 +78,8 @@ export interface SegmentedControlProps<V extends string = string> {
   semantics?: 'radio' | 'tabs';
   size?: 'sm' | 'md';
   fullWidth?: boolean;
+  /** With `fullWidth`: `equal` items (default) or items that grow from their own width (`content`). */
+  distribute?: 'equal' | 'content';
   /** Accessible name of the group ("Chat scope", "Density"). */
   label: string;
   className?: string;
@@ -107,6 +116,7 @@ export function SegmentedControl<V extends string = string>({
   semantics = 'radio',
   size = 'sm',
   fullWidth = false,
+  distribute = 'equal',
   label,
   className,
   'data-testid': testId,
@@ -122,7 +132,7 @@ export function SegmentedControl<V extends string = string>({
       node
     );
   const itemClass = (item: SegmentedItem<V>) =>
-    itemVariants({ size, iconOnly: !item.label, fullWidth });
+    itemVariants({ size, iconOnly: !item.label, fullWidth, distribute });
 
   if (semantics === 'tabs') {
     return (

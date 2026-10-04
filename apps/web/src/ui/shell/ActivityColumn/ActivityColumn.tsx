@@ -106,7 +106,10 @@ export function ActivityColumn({
     >
       {header}
       {toolbar}
-      <div className="-mx-2 flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-2">{children}</div>
+      {/* Not a tab stop of its own (Chrome makes scrollers focusable): the cards inside carry the focus. */}
+      <div tabIndex={-1} className="-mx-2 flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-2 outline-none">
+        {children}
+      </div>
       {!overlay && onWidthChange ? (
         <div
           role="separator"

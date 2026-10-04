@@ -118,12 +118,12 @@ async function makeChat(id: string, over: Partial<Chat> = {}): Promise<Chat> {
  * working graph (whose `workflow` carries the name and project) plus the
  * immutable version a run pins.
  */
-async function makeDefinition(id: string, over: { name?: string; projectId?: string } = {}): Promise<void> {
+async function makeDefinition(id: string, over: { name?: string; projectId?: string; stageKeys?: string[] } = {}): Promise<void> {
   const store = repos().definitions;
   const graph = {
     formatVersion: 2,
     workflow: { name: over.name ?? 'Dependency upgrade', ...(over.projectId ? { projectId: over.projectId } : {}) },
-    stages: [],
+    stages: (over.stageKeys ?? []).map((key) => ({ key, name: key, kind: 'agent', prompts: [{ label: 'P', text: 'x' }] })),
     edges: [],
   } as unknown as WorkflowGraph;
   await store.insert({ id, status: 'published', graph });
@@ -629,6 +629,35 @@ describe('AttentionService — worker chats roll up into their orchestrator (D-8
     await emitChat('orch', 'chat.background_task.status', { parentChatId: 'orch', taskId: 'w2', status: 'running' });
     await service.settled();
     expect(service.getSnapshot().running[0]!.meta?.workers).toMatchObject({ running: 2, queued: 0 });
+  });
+
+  it('D-92: an approval wait stage waits on a person: Needs you with Approve / Reject, not Running', async () => {
+    await makeDefinition('d1', { stageKeys: ['z1', 'm2', 'a3'] });
+    await makeRun('r-wait', 'd1', 'waiting');
+    // Ids/paths deliberately out of alphabetical order: the position follows creation order.
+    makeStage('z1', 'r-wait', 'Scan', 'completed');
+    makeStage('m2', 'r-wait', 'Apply upgrades', 'waiting', { kind: 'wait', type: 'approval', label: 'Approve', prompt: '14 packages' });
+    makeStage('a3', 'r-wait', 'Verify', 'pending');
+    await startService().start();
+    const snap = service.getSnapshot();
+    expect(snap.running).toEqual([]);
+    expect(snap.needsYou[0]).toMatchObject({
+      key: 'workflow_run:r-wait:m2',
+      state: 'needs_you',
+      ask: { kind: 'stage_approval', id: 'm2', summary: 'Approve “Apply upgrades”', detail: 'Stage 2 of 3 · 14 packages', actions: ['approve', 'reject', 'open'] },
+      progress: { step: 2, of: 3 },
+    });
+  });
+
+  it('D-92: a run an automation started rolls up into its execution (one Running item)', async () => {
+    await makeDefinition('d1');
+    await makeRun('r-auto', 'd1', 'running');
+    sqliteHandle(db).prepare('UPDATE workflow_runs SET trigger = ? WHERE id = ?').run(JSON.stringify({ kind: 'automation', automationId: 'a1', executionId: 'e1' }), 'r-auto');
+    makeStage('s1', 'r-auto', 'Collect', 'running');
+    await makeAutomation('a1');
+    await makeExecution('e1', 'a1', 'running');
+    await startService().start();
+    expect(service.getSnapshot().running.map((i) => i.key)).toEqual(['automation_execution:e1']);
   });
 
   it('D-92: a live automation execution names its trigger and can be stopped', async () => {

@@ -100,3 +100,31 @@ export const FocusVisible: Story = {
 };
 
 export const Compact: Story = { globals: { density: 'compact' }, render: Matrix.render };
+
+/** `distribute="content"`: a labelled item with a count keeps its text beside icon-only items (Activity kind tabs, D-92). */
+export const DistributeContent: Story = {
+  render: () => (
+    <div className="w-68">
+      <SegmentedControl
+        semantics="tabs"
+        fullWidth
+        distribute="content"
+        label="Activity kind"
+        value="all"
+        onValueChange={() => undefined}
+        items={[
+          { value: 'all', label: 'All', count: 12 },
+          { value: 'chat', ariaLabel: 'Chats', icon: 'chats', count: 2 },
+          { value: 'orchestrator', ariaLabel: 'Orchestrators', icon: 'users', count: 1 },
+          { value: 'workflow', ariaLabel: 'Workflows', icon: 'workflows', count: 5 },
+          { value: 'automation', ariaLabel: 'Automations', icon: 'automations', count: 4 },
+        ]}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const all = canvasElement.querySelector('[role="tab"]') as HTMLElement;
+    const label = all.querySelector('span') as HTMLElement;
+    await expect(label.scrollWidth).toBeLessThanOrEqual(label.clientWidth);
+  },
+};

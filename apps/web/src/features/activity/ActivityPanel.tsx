@@ -106,6 +106,9 @@ export function useActivityPanel({ onClose, onNavigate }: ActivityPanelProps) {
 
   const onPanelKeyDown = (e: KeyboardEvent<HTMLElement>) => {
     if (e.key !== 'Escape' || e.defaultPrevented) return;
+    // Inside a popover or menu (portaled, but its events bubble through React): it closes itself and
+    // hands focus back to its card.
+    if (e.target instanceof Element && e.target.closest('[data-gai-overlay]')) return;
     if (useActivityStore.getState().preview) {
       useActivityStore.getState().setPreview(null);
       e.preventDefault();
@@ -157,6 +160,7 @@ export function useActivityPanel({ onClose, onNavigate }: ActivityPanelProps) {
     <SegmentedControl<ActivityKindFilter>
       semantics="tabs"
       fullWidth
+      distribute="content"
       label="Activity kind"
       data-testid="activity-kinds"
       value={kind}

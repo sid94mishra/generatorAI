@@ -8,7 +8,7 @@
 // Replaces the rail's running counter: every running item is a tile.
 // ────────────────────────────────────────────────────────────────
 
-import { useId, useRef, type KeyboardEvent } from 'react';
+import { useCallback, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { ActivityEntry } from '@generatorai/client-core';
 import { useNow } from '@/lib/elapsed.js';
 import { useActivityStore } from '@/stores/activityStore.js';
@@ -19,34 +19,75 @@ import { usePreview } from './ActivityItem.js';
 import { kindIcon, tileLabel, tileTone } from './activityView.js';
 import { useActivityModel } from './useActivityModel.js';
 
-/** Tiles before the "+N" overflow (board: six fit a 760px window). */
+/** Most tiles before the "+N" overflow (board EnhRailQuickAccess). */
 export const RAIL_TILE_LIMIT = 6;
+/** A tile (34) + the group gap (2); the divider and the "+N" button. */
+const TILE_PX = 36;
+const DIVIDER_PX = 13;
+const OVERFLOW_PX = 26;
 
+/** How many tiles fit the space the rail has left (it takes the spacer's place), never more than the limit. */
+export function railTileCapacity(heightPx: number, items: number): number {
+  const room = heightPx - DIVIDER_PX;
+  if (items * TILE_PX <= room) return Math.min(items, RAIL_TILE_LIMIT);
+  return Math.max(0, Math.min(RAIL_TILE_LIMIT, Math.floor((room - OVERFLOW_PX) / TILE_PX)));
+}
+
+/**
+ * Fills the rail's free space (in place of RailSpacer) and shows as many
+ * tiles as fit it — the rest are "+N", which opens the column.
+ */
 export function RailActivity() {
   const { model, modelLabel } = useActivityModel({ kind: 'all' });
   const now = useNow(Boolean(model && (model.header.running > 0 || model.header.needsYou > 0)), 1000);
   const open = useActivityStore((s) => s.setOpen);
-  if (!model) return null;
-  const live = [...model.groups.needs_you, ...model.groups.failed, ...model.groups.running];
-  if (live.length === 0) return null;
-  const shown = live.slice(0, RAIL_TILE_LIMIT);
+  const [height, setHeight] = useState(0);
+  const observer = useRef<ResizeObserver | null>(null);
+  const measure = useCallback((node: HTMLDivElement | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+    setHeight(node.clientHeight);
+    observer.current = new ResizeObserver(([entry]) => entry && setHeight(entry.contentRect.height));
+    observer.current.observe(node);
+  }, []);
+  const live = model ? [...model.groups.needs_you, ...model.groups.failed, ...model.groups.running] : [];
+  const shown = live.slice(0, railTileCapacity(height, live.length));
   const overflow = live.length - shown.length;
   return (
-    <>
-      <RailDivider />
-      <RailGroup role="list" aria-label="Live activity" data-testid="rail-activity">
-        {shown.map((entry) => (
-          <div role="listitem" key={entry.key}>
-            <RailTile entry={entry} now={now} modelLabel={modelLabel} />
-          </div>
-        ))}
-        {overflow > 0 ? <RailLiveOverflow count={overflow} data-testid="rail-activity-more" onClick={() => open(true)} /> : null}
-      </RailGroup>
-    </>
+    <div
+      ref={measure}
+      className="flex min-h-2 w-full flex-1 flex-col items-center overflow-hidden"
+      data-testid="rail-activity-area"
+    >
+      {live.length === 0 ? null : (
+        <>
+          <RailDivider />
+          <RailGroup role="list" aria-label="Live activity" data-testid="rail-activity">
+            {shown.map((entry) => (
+              <div role="listitem" key={entry.key}>
+                <RailTile entry={entry} now={now} modelLabel={modelLabel} />
+              </div>
+            ))}
+            {overflow > 0 ? (
+              <RailLiveOverflow count={overflow} data-testid="rail-activity-more" onClick={() => open(true)} />
+            ) : null}
+          </RailGroup>
+        </>
+      )}
+    </div>
   );
 }
 
-function RailTile({ entry, now, modelLabel }: { entry: ActivityEntry; now: number; modelLabel: (id: string) => string }) {
+function RailTile({
+  entry,
+  now,
+  modelLabel,
+}: {
+  entry: ActivityEntry;
+  now: number;
+  modelLabel: (id: string) => string;
+}) {
   const preview = usePreview(`rail:${entry.key}`);
   const tileRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
@@ -63,7 +104,10 @@ function RailTile({ entry, now, modelLabel }: { entry: ActivityEntry; now: numbe
     <PopoverRoot
       open={preview.open}
       onOpenChange={(next) => {
-        if (!next) preview.close();
+        if (next) return;
+        const inside = popupRef.current?.contains(document.activeElement) ?? false;
+        preview.close();
+        if (inside) tileRef.current?.focus();
       }}
     >
       <RailLiveTile
@@ -107,7 +151,7 @@ function RailTile({ entry, now, modelLabel }: { entry: ActivityEntry; now: numbe
           sideOffset={10}
           collisionPadding={8}
           initialFocus={false}
-          finalFocus={tileRef}
+          finalFocus={false}
           aria-labelledby={titleId}
           className="w-aside overflow-hidden rounded-panel"
           onPointerEnter={() => preview.cancel()}
