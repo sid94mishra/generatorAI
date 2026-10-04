@@ -1,0 +1,17 @@
+diff --git a/android/src/main/java/expo/modules/ui/HostView.kt b/android/src/main/java/expo/modules/ui/HostView.kt
+index 94f57671a000634b77a48dc12aebd2ceb4242df7..fa4529f488e6107eb6766aca88bcd52df136d6ec 100644
+--- a/android/src/main/java/expo/modules/ui/HostView.kt
++++ b/android/src/main/java/expo/modules/ui/HostView.kt
+@@ -232,7 +232,11 @@ internal class HostView(context: Context, appContext: AppContext) :
+         shadowNodeProxy.setStyleSize(styleWidth?.toDouble(), styleHeight?.toDouble())
+       }
+ 
+-      onLayoutContent(LayoutContentEvent(width.toDouble(), height.toDouble()))
++      // GeneratorAI patch: dispatch after the current measure pass. onSizeChanged runs inside Compose's measure;
++      // a synchronous event lets Reanimated (onEventDispatch -> performOperations) mount and re-measure this view
++      // mid-measure, which throws "updateRootConstraints called while measuring" on Android (MD-198).
++      val event = LayoutContentEvent(width.toDouble(), height.toDouble())
++      post { onLayoutContent(event) }
+     }
+   }
+ 
