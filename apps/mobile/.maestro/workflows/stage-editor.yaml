@@ -39,9 +39,16 @@ env: {DEVICE_SCOPES: "write:workflows"}
 - tapOn: {id: stage-rule-0-value}
 - inputText: DONE
 - assertNotVisible: "Enter the text the output must contain."
+# Android: the first tap with the keyboard up only closes the keyboard.
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
 - tapOn: {id: stage-tab-policy}
+- scrollUntilVisible: {element: {id: stage-retry}, direction: DOWN, timeout: 20000}
 - tapOn: {id: stage-retry}
-- assertVisible: {id: stage-retry-sentence}
+- scrollUntilVisible: {element: {id: stage-retry-sentence}, direction: DOWN, timeout: 10000}
+- scrollUntilVisible: {element: {id: stage-tab-hooks}, direction: UP, timeout: 20000}
 - tapOn: {id: stage-tab-hooks}
 - assertVisible: "Stage hooks"
 - tapOn: "Save"
