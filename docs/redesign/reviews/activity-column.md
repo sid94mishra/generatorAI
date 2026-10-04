@@ -92,4 +92,4 @@ Enabled state comes from Chromium's session history (main → renderer push).
 
 - Windows / Linux runs of the desktop smokes and a hands-on check of `app-command` / swipe on hardware (CI after a push).
 - VRT baselines for the new stories (P1-R7, Docker).
-- Mobile equivalent (`mobile/reviews/PENDING.md` MV-35).
+- Mobile equivalent (`mobile/reviews/PENDING.md` MV-40).
