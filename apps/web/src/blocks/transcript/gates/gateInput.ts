@@ -19,7 +19,18 @@ export function gateInputText(summary: string): string {
       }
     }
   } catch {
-    /* not JSON: show it as given */
+    // The server caps the summary (600 characters, "…"), so a long command arrives as cut-off JSON: show the
+    // command it starts with rather than the raw object.
+    const cut = /^\s*\{\s*"command"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(summary);
+    if (cut?.[1]) {
+      try {
+        const closed = summary.charAt(cut.index + cut[0].length) === '"';
+        const text = JSON.parse(`"${cut[1].replace(/\\u[0-9a-fA-F]{0,3}$|\\$/, '')}"`) as string;
+        return closed ? text : `${text}…`;
+      } catch {
+        /* fall through */
+      }
+    }
   }
   return summary;
 }
