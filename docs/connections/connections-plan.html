@@ -1,0 +1,585 @@
+<title>GeneratorAI Connections Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a working plan document — sticky contents rail on wide screens, one reading column, tables in scroll boxes.
+   Palette and type follow GeneratorAI's own Instrument theme (light + dark). */
+:root {
+  --bg: #ffffff; --raised: #fafaf9; --card: #f1f1ef; --sunken: #f6f6f4;
+  --fg: #18181b; --muted: #55555d; --line: #dcdcd7; --line-soft: #ecece9;
+  --blue: #1d6ae5; --green: #16804c; --yellow: #935f00; --red: #d1242f; --purple: #7152e0;
+  --green-bg: #e6f3ec; --yellow-bg: #f8efdc; --red-bg: #fbe7e8; --blue-bg: #e7effc;
+  --sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --measure: 72ch;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0b0b0c; --raised: #17171a; --card: #111113; --sunken: #0d0d0f;
+  --fg: #ededef; --muted: #a1a1aa; --line: #2c2c31; --line-soft: #1c1c20;
+  --blue: #6aa6ff; --green: #4cc38a; --yellow: #f0b429; --red: #ff6369; --purple: #a48cff;
+  --green-bg: #12261c; --yellow-bg: #2a2110; --red-bg: #2c1416; --blue-bg: #142035;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0b0b0c; --raised: #17171a; --card: #111113; --sunken: #0d0d0f;
+  --fg: #ededef; --muted: #a1a1aa; --line: #2c2c31; --line-soft: #1c1c20;
+  --blue: #6aa6ff; --green: #4cc38a; --yellow: #f0b429; --red: #ff6369; --purple: #a48cff;
+  --green-bg: #12261c; --yellow-bg: #2a2110; --red-bg: #2c1416; --blue-bg: #142035;
+  color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.6;
+  padding-inline: 20px; padding-block: 0 64px; -webkit-font-smoothing: antialiased; }
+a { color: var(--blue); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+code { background: var(--card); border: 1px solid var(--line-soft); border-radius: 4px; padding: 0 4px; }
+
+.shell { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 56px; }
+@media (max-width: 960px) { .shell { grid-template-columns: minmax(0, 1fr); gap: 0; } .toc { display: none; } }
+
+.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 28px); align-self: start; padding-top: 40px; font-size: 13px; }
+.toc .label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; border-left: 1px solid var(--line); }
+.toc a { display: block; padding: 4px 0 4px 12px; color: var(--muted); text-decoration: none; margin-left: -1px; border-left: 1px solid transparent; }
+.toc a:hover { color: var(--fg); border-left-color: var(--fg); }
+
+main { min-width: 0; padding-top: 40px; }
+header.top { padding-bottom: 28px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.eyebrow { font-family: var(--mono); font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 14px; }
+h1 { font-size: clamp(30px, 4.4vw, 44px); line-height: 1.1; letter-spacing: -0.02em; font-weight: 600; margin: 14px 0 12px; text-wrap: balance; }
+.lede { font-size: 17px; color: var(--muted); max-width: var(--measure); margin: 0; }
+
+section { padding-top: 44px; scroll-margin-top: 16px; }
+h2 { font-size: 23px; letter-spacing: -0.01em; font-weight: 600; margin: 0 0 6px; text-wrap: balance; display: flex; gap: 12px; align-items: baseline; }
+h2 .n { font-family: var(--mono); font-size: 13px; font-weight: 400; color: var(--muted); }
+h3 { font-size: 16px; font-weight: 600; margin: 26px 0 6px; }
+p, li { max-width: var(--measure); }
+p { margin: 8px 0; }
+ul, ol { padding-left: 20px; margin: 8px 0; }
+li { margin: 4px 0; }
+.muted { color: var(--muted); }
+
+.tablebox { overflow-x: auto; margin: 14px 0; border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line-soft); }
+th { font-weight: 600; font-size: 12px; color: var(--muted); background: var(--raised); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 500; }
+
+.chip { display: inline-block; font-family: var(--mono); font-size: 11px; line-height: 1; padding: 4px 7px; border-radius: 999px; white-space: nowrap; border: 1px solid transparent; }
+.chip.ok { color: var(--green); background: var(--green-bg); }
+.chip.ext { color: var(--yellow); background: var(--yellow-bg); }
+.chip.miss { color: var(--red); background: var(--red-bg); }
+.chip.info { color: var(--blue); background: var(--blue-bg); }
+.chip.plain { color: var(--muted); border-color: var(--line); }
+
+.callout { border: 1px solid var(--line); background: var(--raised); border-radius: 10px; padding: 14px 16px; margin: 16px 0; max-width: 80ch; }
+.callout strong { font-weight: 600; }
+
+/* Three layers */
+.layers { display: grid; gap: 10px; margin: 16px 0; }
+.layer { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 16px; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: var(--raised); }
+.layer .tag { font-family: var(--mono); font-size: 12px; }
+.layer h4 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.layer p { margin: 0; color: var(--muted); font-size: 14px; }
+@media (max-width: 560px) { .layer { grid-template-columns: minmax(0, 1fr); gap: 6px; } }
+
+/* Architecture */
+.arch { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 16px 0; background: var(--sunken); display: grid; gap: 10px; }
+.arch .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.box { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.box b { display: block; font-size: 13.5px; font-weight: 600; }
+.box span { display: block; font-size: 12.5px; color: var(--muted); line-height: 1.45; margin-top: 2px; }
+.box.core { border-color: var(--fg); }
+.arch .lane { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.flow { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: center; }
+
+/* Phases */
+.phases { display: grid; gap: 0; margin: 16px 0; border-left: 1px solid var(--line); }
+.phase { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 14px; padding: 12px 0 12px 16px; position: relative; border-bottom: 1px solid var(--line-soft); }
+.phase::before { content: ""; position: absolute; left: -5px; top: 18px; width: 9px; height: 9px; border-radius: 50%; background: var(--bg); border: 2px solid var(--muted); }
+.phase.first::before { border-color: var(--blue); background: var(--blue); }
+.phase .id { font-family: var(--mono); font-size: 13px; font-weight: 500; padding-top: 1px; }
+.phase h4 { margin: 0; font-size: 15px; font-weight: 600; }
+.phase p { margin: 3px 0 0; font-size: 13.5px; color: var(--muted); }
+.phase .exit { font-size: 13px; margin-top: 6px; }
+.phase .exit em { font-style: normal; font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.05em; text-transform: uppercase; margin-right: 6px; }
+.size { font-family: var(--mono); font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; align-self: start; white-space: nowrap; }
+.release { font-family: var(--mono); font-size: 11px; color: var(--blue); letter-spacing: 0.05em; text-transform: uppercase; padding: 10px 0 2px 16px; }
+@media (max-width: 560px) { .phase { grid-template-columns: 48px minmax(0, 1fr); } .size { grid-column: 2; justify-self: start; } }
+
+/* Slack walkthrough */
+.steps { counter-reset: s; list-style: none; padding: 0; display: grid; gap: 8px; margin: 14px 0; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; max-width: 80ch; }
+.steps li::before { content: counter(s); font-family: var(--mono); font-size: 12px; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; color: var(--muted); }
+
+/* Decisions */
+.decisions { display: grid; gap: 10px; margin: 14px 0; }
+.decision { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; gap: 4px; }
+.decision b { font-weight: 600; }
+.decision .rec { font-size: 13.5px; color: var(--muted); }
+.decision .rec span { color: var(--green); font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 6px; }
+
+/* Prompt */
+.prompt-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-top: 14px; }
+button.copy { font: 500 13px var(--sans); color: var(--bg); background: var(--fg); border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+button.copy:hover { opacity: 0.88; }
+.copied { font-family: var(--mono); font-size: 12px; color: var(--green); }
+pre.prompt { white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; background: var(--sunken); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 10px 0 0; max-height: 560px; overflow: auto; }
+
+.sources { columns: 2 280px; column-gap: 32px; font-size: 13px; padding-left: 18px; }
+.sources li { break-inside: avoid; margin: 0 0 6px; }
+footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+
+<div class="shell">
+<nav class="toc" aria-label="Contents">
+  <div class="label">Contents</div>
+  <ol>
+    <li><a href="#ask">The ask</a></li>
+    <li><a href="#market">How others do it</a></li>
+    <li><a href="#layers">What a connection is</a></li>
+    <li><a href="#foundations">Our foundations</a></li>
+    <li><a href="#architecture">Architecture</a></li>
+    <li><a href="#security">Sign-in &amp; safety</a></li>
+    <li><a href="#events">Events &amp; Slack flow</a></li>
+    <li><a href="#vendors">Per app</a></li>
+    <li><a href="#ui">The page</a></li>
+    <li><a href="#phases">Phases</a></li>
+    <li><a href="#impact">Impact</a></li>
+    <li><a href="#why">Why this approach</a></li>
+    <li><a href="#decisions">Decisions needed</a></li>
+    <li><a href="#prompt">Claude Design prompt</a></li>
+    <li><a href="#sources">Sources</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="top">
+  <div class="eyebrow"><span>GeneratorAI</span><span>Proposal · 4 Oct 2026</span><span>docs/connections/</span></div>
+  <h1>Connections: bringing Slack, Gmail, Notion and the rest to every agent</h1>
+  <p class="lede">A left-nav area where people connect the apps they use, so agents can work with them in chats, workflows and automations, and so a message in Slack can start work in GeneratorAI. This plan covers how other agent products do it, what we already have, the architecture we recommend, and a phased build.</p>
+</header>
+
+<section id="ask">
+  <h2><span class="n">01</span>The ask</h2>
+  <p>A <strong>Connections</strong> entry in the left navigation where a person adds, signs in to and manages connections to third-party apps: Slack, Gmail and Google Workspace, Microsoft 365, Notion, Figma, Discord, GitHub and more.</p>
+  <ul>
+    <li><strong>Use them anywhere an agent runs:</strong> chats, workflow stages, automations.</li>
+    <li><strong>Let events start work:</strong> someone @mentions the agent in Slack, and a chat or automation starts in GeneratorAI.</li>
+    <li><strong>Keep it safe:</strong> real sign-in, scoped access, approvals for risky actions, and a record of every action.</li>
+  </ul>
+</section>
+
+<section id="market">
+  <h2><span class="n">02</span>How other agent products do it</h2>
+  <p><strong>Every one of them connects through MCP.</strong> Claude, ChatGPT and Codex, Gemini CLI, Copilot Studio, Cursor, Windsurf, Zed, Raycast, Perplexity, Grok, Manus, Make, n8n, Dust and Hermes all reach third-party apps through MCP servers. What they call "connectors", "apps" or "plugins" is a directory plus an OAuth sign-in layer on top of remote MCP servers.</p>
+  <p>Two patterns sit side by side. The Slack example needs both.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>Pattern</th><th>What happens</th><th>Who does it</th></tr></thead>
+    <tbody>
+      <tr><td>Connector pulls</td><td>The agent holds a token and calls the app's MCP server or API while it works.</td><td>Claude connectors, ChatGPT apps and plugins, Codex, Grok Connectors, Meta Muse, Manus</td></tr>
+      <tr><td>Bot lives in the app</td><td>An installed bot receives @mentions and DMs as events and replies in the thread.</td><td>Claude in Slack, Dust, Gemini Enterprise for Slack, Hermes Agent and OpenClaw (Slack Socket Mode, Discord Gateway), OpenAI Dots in Slack and Teams, @grok on X</td></tr>
+    </tbody>
+  </table></div>
+  <h3>The products named in the brief</h3>
+  <div class="tablebox"><table>
+    <thead><tr><th>Name in the brief</th><th>Closest real product</th><th>How it connects</th></tr></thead>
+    <tbody>
+      <tr><td>Grok bot</td><td>xAI Grok Connectors (May 2026) and the @grok account on X</td><td>OAuth connectors plus bring-your-own MCP; replies when mentioned on X. No Grok Slack bot found.</td></tr>
+      <tr><td>Hermes agent</td><td>Hermes Agent, Nous Research, open source</td><td>Slack over Socket Mode with a deny-by-default user list; also Discord, Telegram and others.</td></tr>
+      <tr><td>Meta Muse</td><td>Meta Muse agent (Sept 2026)</td><td>Settings › Connectors (Gmail, Notion, Slack, Figma…). Details only from a third-party tracker.</td></tr>
+      <tr><td>Dots from ChatGPT</td><td>OpenAI Dots (DevDay, 29 Sept 2026)</td><td>Always-on agents using plugins; can be messaged in Slack and Teams.</td></tr>
+      <tr><td>Hyper Agent</td><td>Hyperagent, from the Airtable team (early access)</td><td>Cloud agents deployed into Slack; connector mechanism not documented.</td></tr>
+      <tr><td>Intent agent</td><td>Probably Augment Code's Intent</td><td>A multi-agent coding workspace without connectors. This match is uncertain.</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Managed integration platforms</h3>
+  <p>Composio, Pipedream Connect, Merge, Zapier MCP and Arcade all <strong>hold the user's tokens in their own cloud</strong>. That conflicts with GeneratorAI running locally. Only Nango and Klavis can be self-hosted for free. People can still add any of them as an ordinary custom MCP connection, but the core shouldn't depend on them.</p>
+</section>
+
+<section id="layers">
+  <h2><span class="n">03</span>What a connection actually is</h2>
+  <p>Is it a bundled plugin, a deep private integration, or something anyone can use? It's three layers, and only the top one is private.</p>
+  <div class="layers">
+    <div class="layer"><div class="tag"><span class="chip ok">open</span></div><div><h4>The app's own interface</h4><p>Most large apps host an official remote MCP server (Slack, Notion, GitHub, Figma, Linear, Atlassian, Google Workspace, Microsoft Work IQ) and publish REST APIs with OAuth apps anyone can register. Discord has no official MCP server.</p></div></div>
+    <div class="layer"><div class="tag"><span class="chip ext">open, gated</span></div><div><h4>The OAuth client</h4><p>Anyone can register one, but each vendor decides which clients may connect. Details in the table below.</p></div></div>
+    <div class="layer"><div class="tag"><span class="chip plain">private</span></div><div><h4>Directories and partnerships</h4><p>What feels like deep integration in Claude or ChatGPT is mostly their directory, vendor-held OAuth clients, Figma catalogue admission and Slack Marketplace listing. OpenAI plugins bundle skills with apps; Claude Desktop extensions bundle a local MCP server with a manifest.</p></div></div>
+  </div>
+  <div class="tablebox"><table>
+    <thead><tr><th>App</th><th>Who may connect</th><th>What it means for us</th></tr></thead>
+    <tbody>
+      <tr><td>Notion, Linear, GitHub</td><td>Any compliant client (dynamic registration or client metadata documents, PKCE)</td><td>Works with our own sign-in.</td></tr>
+      <tr><td>Slack</td><td>Only a registered Slack app that is Marketplace-listed or internal to the workspace</td><td>Desktop-style sign-in can't get bot permissions. Socket Mode apps can't be Marketplace-listed. Distributed non-Marketplace apps get 1 request a minute on channel history; internal apps are exempt.</td></tr>
+      <tr><td>Figma</td><td>Only clients in Figma's MCP catalogue (waitlist)</td><td>Use the desktop Figma MCP server or a personal token for now; apply to the catalogue.</td></tr>
+      <tr><td>Google Workspace</td><td>An OAuth client in the customer's own Google Cloud project; MCP servers are in Developer Preview</td><td>Restricted Gmail permissions need an annual security assessment if data passes through a third party's server. Testing-mode tokens expire after 7 days.</td></tr>
+      <tr><td>Microsoft 365</td><td>A tenant app registration; Work IQ MCP needs an M365 Copilot licence</td><td>Graph through the user's own registration, with device code or a local redirect.</td></tr>
+    </tbody>
+  </table></div>
+  <div class="callout"><strong>No private deals are needed.</strong> A self-distributed app can do all of this with open standards. Slack, Google, Microsoft and Figma need guided setup steps.</div>
+</section>
+
+<section id="foundations">
+  <h2><span class="n">04</span>Do our foundations hold?</h2>
+  <p>Yes for the core, no for the plumbing. The agent, chat, workflow and automation core is the right base, and connector tools fit into the existing tool-assembly path.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>Area</th><th>Status</th><th>What we have</th></tr></thead>
+    <tbody>
+      <tr><td>Secrets vault</td><td><span class="chip ok">reuse</span></td><td>Per-entry encryption, key kept in the OS keychain on desktop, refuses to run insecurely off this machine.</td></tr>
+      <tr><td>MCP config and tool assembly</td><td><span class="chip ok">reuse</span></td><td>MCP server lists per agent, workflow stage, project and chat, frozen per conversation.</td></tr>
+      <tr><td>Approvals</td><td><span class="chip ok">extend</span></td><td>Gates, risk classification, Face ID-signed approvals on mobile.</td></tr>
+      <tr><td>Activity feed</td><td><span class="chip ok">extend</span></td><td>Needs you / Running, the new Activity column.</td></tr>
+      <tr><td>Inbound webhook</td><td><span class="chip ext">skeleton</span></td><td>A public token route with signatures and idempotency; it only starts workflow runs.</td></tr>
+      <tr><td>Device sign-in, route policy, deep links</td><td><span class="chip ok">extend</span></td><td>Unlisted routes fail closed; <code>generatorai://</code> links on desktop.</td></tr>
+      <tr><td>MCP itself</td><td><span class="chip miss">missing</span></td><td>We pass configs to the provider SDKs. No MCP client, health checks, tool list or restart.</td></tr>
+      <tr><td>Sign-in to third-party apps</td><td><span class="chip miss">missing</span></td><td>Only GitHub device flow. No OAuth code flow, discovery, refresh or callback.</td></tr>
+      <tr><td>Risk of connector actions</td><td><span class="chip miss">unsafe today</span></td><td>Every MCP action counts as "standard", so a Slack post or a Gmail send has no Risky badge and can be approved from a phone lock screen.</td></tr>
+      <tr><td>Accounts</td><td><span class="chip miss">missing</span></td><td>IDs name servers, not accounts; two Slack workspaces would collide.</td></tr>
+      <tr><td>Events without a public address</td><td><span class="chip miss">missing</span></td><td>The server listens only on this machine; the relay only carries paired devices.</td></tr>
+      <tr><td>Multiple users</td><td><span class="chip plain">out of scope</span></td><td>One owner per server today.</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Five foundational changes</h3>
+  <ol>
+    <li><strong>Our own MCP gateway</strong> (client and proxy) instead of forwarding raw configs.</li>
+    <li><strong>An OAuth broker and token records</strong> with refresh, issuer checks and reconnect prompts.</li>
+    <li><strong>Risk classes for connector tools</strong> (read, write, send/delete) wired into gates and signed approvals.</li>
+    <li><strong>Connection identities</strong> (app × account) with access grants to agents, projects, workflows and automations.</li>
+    <li><strong>Event intake</strong>: event sources, then triggers, then a chat or automation, starting with outbound connections.</li>
+  </ol>
+</section>
+
+<section id="architecture">
+  <h2><span class="n">05</span>Recommended architecture</h2>
+  <div class="arch" role="img" aria-label="Architecture: the UI talks to the Connections API, OAuth broker and token vault; agents reach apps through the MCP gateway, which applies tool policy and audit; event sources feed triggers that start chats or automations.">
+    <div class="lane">People</div>
+    <div class="row">
+      <div class="box"><b>Connections page</b><span>Web, desktop and mobile: catalogue, accounts, tools, access, events</span></div>
+      <div class="box"><b>Activity &amp; gates</b><span>Reconnect asks, approvals for risky actions, event-started runs</span></div>
+    </div>
+    <div class="flow">↓</div>
+    <div class="lane">GeneratorAI server, on your machine</div>
+    <div class="row">
+      <div class="box"><b>Connections API</b><span>Catalogue, accounts, access grants, per-tool policy</span></div>
+      <div class="box"><b>OAuth broker</b><span>Discovery, PKCE, issuer checks, refresh, reconnect</span></div>
+      <div class="box"><b>Token vault</b><span>Existing secrets store, one record per connection</span></div>
+    </div>
+    <div class="row">
+      <div class="box core"><b>MCP gateway</b><span>One local MCP server per connection for every agent provider. Adds and refreshes tokens, enforces allow / ask / block, records every call.</span></div>
+      <div class="box core"><b>Event sources → triggers</b><span>Slack Socket Mode, Discord Gateway, polling, webhooks. Each trigger starts a chat or an automation, tagged with its source.</span></div>
+    </div>
+    <div class="flow">↓</div>
+    <div class="lane">Apps</div>
+    <div class="row">
+      <div class="box"><b>Remote MCP servers</b><span>Notion, Linear, GitHub, Slack, Google, Microsoft</span></div>
+      <div class="box"><b>Local MCP servers</b><span>Figma desktop, custom commands</span></div>
+      <div class="box"><b>Native adapters</b><span>Discord bot, Slack bot events</span></div>
+    </div>
+  </div>
+  <h3>Core concepts</h3>
+  <ul>
+    <li><strong>Connector</strong>: a catalogue entry. Name, icon, MCP address or command, sign-in method, default permissions, tool risk map, events it can send, setup guide. A custom MCP server is a connector too.</li>
+    <li><strong>Connection</strong>: one signed-in account of a connector. Account name, status (Connected, Reconnect needed, Error, Off), permissions, who created it, last used.</li>
+    <li><strong>Access grant</strong>: which agents, projects, workflows and automations may use a connection, and with which tools.</li>
+    <li><strong>Tool policy</strong>: Allow, Ask or Block per tool. Reads default to Allow, writes to Ask, sends and deletes to Ask and are marked Risky.</li>
+    <li><strong>Trigger</strong>: an event from a connection, with a filter, mapped to a new chat (agent, project, permission mode, reply in the thread) or an automation run.</li>
+  </ul>
+  <h3>Why a gateway, not "give the token to each provider"</h3>
+  <div class="tablebox"><table>
+    <thead><tr><th>Option</th><th>Verdict</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Put the token in each provider's MCP config (today's static headers)</td><td><span class="chip miss">no</span></td><td>Tokens expire in 1–8 hours while sessions run longer; Codex can't swap servers mid-session; Copilot and others don't support MCP; tokens land in CLI processes and logs; no shared approvals or audit.</td></tr>
+      <tr><td>Let each provider CLI sign in itself</td><td><span class="chip miss">no</span></td><td>Tokens split across tools, no shared catalogue, no access grants, no events, nothing on mobile.</td></tr>
+      <tr><td>A GeneratorAI gateway</td><td><span class="chip ok">recommended</span></td><td>One MCP client we control: transparent refresh, tokens stay in our vault, per-tool policy and risk, every call recorded, same behaviour for every provider, health and tool lists for the UI. Matches the MCP spec's rule that servers never pass tokens through.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="security">
+  <h2><span class="n">06</span>Sign-in and safety</h2>
+  <h3>Sign-in, to the current MCP spec (2026-07-28)</h3>
+  <ul>
+    <li><strong>Discovery and checks:</strong> protected-resource metadata, then server metadata; resource indicators; PKCE (refuse servers without it); <code>state</code>; issuer validation with credentials tied to their issuer. Missing issuer checks were the bug in the 28 Sept 2026 MCP Python SDK advisory.</li>
+    <li><strong>Client registration order:</strong> pre-registered, then a client metadata document (one static HTTPS file we host, as Claude Code does), then dynamic registration as a fallback, then a client ID the user enters.</li>
+    <li><strong>Where sign-in returns:</strong>
+      <ul>
+        <li><strong>Desktop:</strong> a local port on this machine.</li>
+        <li><strong>Web on the same machine:</strong> the server's own callback.</li>
+        <li><strong>Phones and remote web:</strong> the system browser, finishing on the server; only a tokenless "done" signal travels by deep link.</li>
+      </ul>
+    </li>
+    <li><strong>Refresh:</strong> 5 minutes before expiry and again on a 401, one refresh at a time per connection, saving rotated tokens safely. If refresh fails, the connection shows "Reconnect needed" and an Activity card asks you to reconnect.</li>
+    <li><strong>Address safety:</strong> HTTPS only, private network ranges blocked during discovery, sign-in pages never opened through a shell (the cause of CVE-2025-6514).</li>
+  </ul>
+  <h3>Approvals and prompt injection</h3>
+  <ul>
+    <li><strong>Gate cards name the app and the action</strong>, e.g. "Post to #releases in Acme Slack". Risky actions need the Face ID-signed approval on mobile, like shell commands today.</li>
+    <li><strong>Untrusted input never auto-approves a write.</strong> A run started by a Slack message or an email never auto-approves a write or send. Automations get an explicit tool allowlist, since nobody is there to approve. "Bypass permissions" stays admin-only and is never the default for event-started runs.</li>
+    <li><strong>No remote images or links rendered automatically</strong> from connector output. That was the exfiltration path in the Slack AI and AgentFlayer incidents.</li>
+    <li><strong>Everything is logged:</strong> connections created, authorised, refreshed, revoked; every tool call with its approver; every inbound event received or rejected.</li>
+  </ul>
+</section>
+
+<section id="events">
+  <h2><span class="n">07</span>Events, and the Slack @mention flow</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>Tier</th><th>How it works</th><th>Apps</th><th>Needs a public address?</th></tr></thead>
+    <tbody>
+      <tr><td>A · Outbound connection</td><td>The server keeps a connection open to the app</td><td>Slack Socket Mode, Discord Gateway</td><td><span class="chip ok">no</span></td></tr>
+      <tr><td>B · Polling</td><td>Scheduled checks with a cursor</td><td>Gmail, Microsoft Graph, GitHub, Notion, Linear</td><td><span class="chip ok">no</span></td></tr>
+      <tr><td>C · Webhooks</td><td>The app calls us; each app's signature is verified</td><td>Slack Events, GitHub, Notion, Figma, Graph, Gmail push</td><td><span class="chip ext">yes</span> your own tunnel, or an optional relay later</td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted">Webhook subscriptions need renewing: Gmail every 7 days, Microsoft Graph every 1 to 7 days (Teams 3). These become scheduled jobs.</p>
+  <h3>The Slack example, end to end</h3>
+  <ol class="steps">
+    <li><span>Connections › Add › Slack opens a guided setup.</span></li>
+    <li><span>We generate a Slack app manifest. The person creates it in their workspace as an <strong>internal app</strong>: no Marketplace review, and no history rate cap.</span></li>
+    <li><span>They paste the bot token and the app-level token. Optionally they also connect Slack's own MCP tools with their user account.</span></li>
+    <li><span>The server opens a Socket Mode connection. No public address is needed.</span></li>
+    <li><span>Someone writes "@GeneratorAI why is checkout failing?" and a trigger starts a new chat with the chosen agent and project, bound to that Slack thread.</span></li>
+    <li><span>The agent works. Its replies post back to the thread, and risky actions still ask.</span></li>
+    <li><span>The run appears in the Activity column as "From Slack · #support · @maya".</span></li>
+  </ol>
+  <p>This is the model Hermes Agent uses. A Marketplace-listed GeneratorAI Slack app would need webhooks and a relay, so it's a later option.</p>
+</section>
+
+<section id="vendors">
+  <h2><span class="n">08</span>The plan per app</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>App</th><th>First version</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Notion, Linear, GitHub, Atlassian, Sentry</td><td>Official remote MCP with our sign-in</td><td>Works out of the box. Atlassian admins allowlist our callback domain.</td></tr>
+      <tr><td>Slack</td><td>Your own internal Slack app: Socket Mode bot plus Slack MCP with a user token</td><td>See the flow above.</td></tr>
+      <tr><td>Discord</td><td>Your own bot: token, Gateway, read and post tools</td><td>No official MCP. Reading message content is a privileged intent.</td></tr>
+      <tr><td>Gmail, Google Workspace</td><td>Your own Google Cloud client: Workspace MCP (preview) or REST; polling for new mail</td><td>Avoids restricted-scope verification for personal use. Warn clearly about 7-day tokens in Testing mode.</td></tr>
+      <tr><td>Microsoft 365</td><td>Your own Entra app registration: Graph by device code or local redirect; Work IQ for Copilot-licensed tenants</td><td>Graph delta queries for events.</td></tr>
+      <tr><td>Figma</td><td>Desktop Figma MCP server, or REST with a personal token</td><td>Remote MCP is catalogue-gated; apply.</td></tr>
+      <tr><td>Anything else</td><td>Custom MCP server (address or command) with OAuth, API key or none</td><td>Zapier MCP and Composio can be added this way.</td></tr>
+    </tbody>
+  </table></div>
+  <p>"Bring your own app" is the honest answer for Slack, Google and Microsoft in a local-first product. The setup is guided, with generated manifests, links and copy buttons. Verified GeneratorAI clients (Slack Marketplace, Google verification, Microsoft publisher verification) are an upgrade path once there are enough users.</p>
+</section>
+
+<section id="ui">
+  <h2><span class="n">09</span>The Connections page</h2>
+  <ul>
+    <li><strong>Left nav "Connections"</strong> on web, desktop and mobile, plus a command in the palette and the desktop menu.
+      <ul>
+        <li><strong>Catalogue:</strong> featured apps, categories, and "Custom MCP server".</li>
+        <li><strong>My connections:</strong> account, status, who uses it, events, last used.</li>
+        <li><strong>Connection detail:</strong> account and permissions, tools with Allow / Ask / Block, access, events and triggers, an activity log, reconnect and disconnect.</li>
+      </ul>
+    </li>
+    <li><strong>Settings › MCP servers</strong> folds into Connections. Existing servers are migrated once, then the old screens are removed.</li>
+    <li><strong>Pickers</strong> in the agent editor, workflow stage tools, chat composer and project settings choose connections and tools, not raw servers.</li>
+    <li><strong>The Activity column</strong> shows "Reconnect Slack" and "This agent wants to use Gmail" asks, and labels runs started by events.</li>
+    <li><strong>Boards come first.</strong> The design rule is no screens without data, so the boards are commissioned before the UI phase. The prompt is in section 14.</li>
+  </ul>
+</section>
+
+<section id="phases">
+  <h2><span class="n">10</span>Phases</h2>
+  <p>Each phase ships safely on its own and ends with the usual checks plus a real-user pass in the desktop app.</p>
+  <div class="phases">
+    <div class="phase"><div class="id">C0</div><div><h4>Decisions and design</h4><p>Architecture decisions, threat model, Connections boards, the hosted client metadata file, and settling whether Copilot really supports MCP.</p><div class="exit"><em>Done when</em>decisions recorded, boards in the repo, metadata URL live</div></div><span class="size">small</span></div>
+    <div class="phase"><div class="id">C1</div><div><h4>Safety first</h4><p>Risk classes for MCP actions, gate cards, signed approvals for risky ones, address checks on MCP servers, audit of secret changes. Fixes a live gap for today's MCP servers.</p><div class="exit"><em>Done when</em>a post or send through any MCP server shows Risky and needs Face ID on mobile</div></div><span class="size">small–medium</span></div>
+    <div class="release">First release</div>
+    <div class="phase first"><div class="id">C2</div><div><h4>Data model and vault</h4><p>Tables for connections, access grants, tool policies, event sources, triggers, inbound events and tool calls; one vault record per connection; shared types and queries; existing MCP servers migrated into connections.</p><div class="exit"><em>Done when</em>today's MCP servers appear as connections</div></div><span class="size">medium</span></div>
+    <div class="phase first"><div class="id">C3</div><div><h4>MCP gateway</h4><p>One local MCP endpoint per connection with session-bound tokens; our own MCP client to the app (current and previous spec, local commands too); tool list and health; policy and audit for every provider.</p><div class="exit"><em>Done when</em>one connection works in Claude, Codex and Copilot sessions, and a token rotating mid-run doesn't break a 2-hour session</div></div><span class="size">large</span></div>
+    <div class="phase first"><div class="id">C4</div><div><h4>Sign-in and first apps</h4><p>The OAuth broker, refresh, reconnect asks, sign-in on desktop, web and phone, device code. First apps: Notion, Linear, GitHub, Atlassian, Sentry and custom MCP.</p><div class="exit"><em>Done when</em>Notion connects from desktop, web and phone, an agent uses it in a chat, and revoking works</div></div><span class="size">large</span></div>
+    <div class="phase first"><div class="id">C5</div><div><h4>Connections page</h4><p>Left-nav page, detail, tools, access and activity; pickers in agents, workflows, chats and projects; Activity column; mobile screens; end-to-end tests and board comparison.</p><div class="exit"><em>Done when</em>a real-user pass on desktop, web and mobile matches the boards</div></div><span class="size">medium–large</span></div>
+    <div class="release">Second release</div>
+    <div class="phase"><div class="id">C6</div><div><h4>Events and triggers</h4><p>Triggers that start a chat bound to a thread with replies back, or an automation run; source labels; untrusted-input guard. Slack with your own app over Socket Mode; Discord bot over the Gateway.</p><div class="exit"><em>Done when</em>an @mention in a test Slack workspace starts a chat that replies in the thread, with risky actions still gated</div></div><span class="size">large</span></div>
+    <div class="phase"><div class="id">C7</div><div><h4>Google and Microsoft</h4><p>Guided own-client setup, Workspace MCP or REST tools and Gmail polling; Entra setup, Graph tools and delta events; Work IQ when licensed.</p><div class="exit"><em>Done when</em>a new email starts an automation, and sending mail is risky and gated</div></div><span class="size">large</span></div>
+    <div class="phase"><div class="id">C8</div><div><h4>Polling and webhooks</h4><p>A polling framework with cursors and backoff; webhook verification per app on your own tunnel address; renewals; a view of failed deliveries.</p><div class="exit"><em>Done when</em>GitHub and Notion webhooks arrive through a tunnel and renewals survive restarts</div></div><span class="size">medium–large</span></div>
+    <div class="phase"><div class="id">C9</div><div><h4>Ecosystem and hardening</h4><p>MCP Apps and URL-based sign-in requests in the chat view; admin allow and deny lists; signed connector bundles through extensions; an optional hosted relay for webhooks; optional Nango for long-tail APIs.</p></div><span class="size">medium each</span></div>
+  </div>
+</section>
+
+<section id="impact">
+  <h2><span class="n">11</span>Impact on existing code</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>Area</th><th>Change</th><th>Risk</th></tr></thead>
+    <tbody>
+      <tr><td>Database</td><td>New migration and lock entry, baseline regenerated</td><td><span class="chip ext">medium</span></td></tr>
+      <tr><td>Secrets</td><td>New connection namespace; workflow and provider references must never resolve a connection secret</td><td><span class="chip miss">high</span> if a resolver is widened</td></tr>
+      <tr><td>Session assembly</td><td>MCP lists become gateway addresses; frozen snapshots store connection references so resumed chats re-resolve</td><td><span class="chip ext">medium</span></td></tr>
+      <tr><td>Provider adapters</td><td>MCP tool names map to the new permission kind; verify Copilot's MCP support</td><td><span class="chip ext">medium</span></td></tr>
+      <tr><td>Shared contracts</td><td>Connection types and statuses, permission kind and risk, reconnect and consent gate kinds, nav entry, tool names, app icons</td><td><span class="chip ext">medium</span> coordinate with mobile</td></tr>
+      <tr><td>Route policy</td><td>Connections routes for credential admins; a public sign-in callback tied to <code>state</code>; public inbound routes that verify before doing anything</td><td><span class="chip miss">high</span> each public route reviewed</td></tr>
+      <tr><td>Automations</td><td>An "event" trigger type and a chat target; the webhook route generalised</td><td><span class="chip ext">medium</span></td></tr>
+      <tr><td>Electron</td><td>Local sign-in listener; deep links carry only a "done" signal, never codes or tokens</td><td><span class="chip ok">low–medium</span></td></tr>
+      <tr><td>Web and mobile UI</td><td>New Connections areas; MCP settings screens removed after migration</td><td><span class="chip ext">medium</span></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="why">
+  <h2><span class="n">12</span>Why this approach</h2>
+  <ul>
+    <li><strong>MCP first</strong>, because it's what the whole industry uses and the big apps host their own servers. Every connector we don't write is maintained by the app's vendor.</li>
+    <li><strong>Our own gateway</strong>, because it's the only option that keeps tokens away from model-facing processes, behaves the same for every provider, survives token expiry in long runs, and gives one place for approvals and audit.</li>
+    <li><strong>Tokens on your machine, with "bring your own app"</strong>, because GeneratorAI is local-first and single-owner. Managed platforms take custody in their cloud. The same trade is made by Hermes Agent, Raycast (its own credentials for Slack) and Claude Code.</li>
+    <li><strong>Outbound connections before webhooks</strong>, because they need no public address or relay and they cover the flagship case: Slack and Discord mentions.</li>
+    <li><strong>Safety before breadth</strong>, because the incident record is about connector data driving write tools (GitHub MCP, Slack AI, AgentFlayer), and our MCP actions are unclassified today.</li>
+  </ul>
+  <h3>Rejected</h3>
+  <ul>
+    <li><strong>Building on Composio, Pipedream or Merge:</strong> tokens in their cloud, per-call pricing.</li>
+    <li><strong>One hand-written integration per app:</strong> high upkeep, and it duplicates the vendors' own MCP servers.</li>
+    <li><strong>A hosted relay as the default for events:</strong> breaks local-first, and today's relay isn't end-to-end encrypted.</li>
+    <li><strong>Multiple users now:</strong> no user model exists yet. Version one is per server, with a "created by" field to keep that door open.</li>
+  </ul>
+</section>
+
+<section id="decisions">
+  <h2><span class="n">13</span>Decisions needed</h2>
+  <div class="decisions">
+    <div class="decision"><b>Where to host the client metadata file</b><div class="rec"><span>Recommended</span>A stable HTTPS URL on the project website. It's one static file.</div></div>
+    <div class="decision"><b>Slack model for version one</b><div class="rec"><span>Recommended</span>Each user's own internal Slack app over Socket Mode. The alternative, our own Marketplace app, needs review, webhooks and a relay.</div></div>
+    <div class="decision"><b>Google</b><div class="rec"><span>Recommended</span>Each user's own Google Cloud client. The alternative is Google verification for a GeneratorAI client, with annual assessments.</div></div>
+    <div class="decision"><b>Navigation</b><div class="rec"><span>Recommended</span>A top-level Connections entry, with Settings › MCP servers folded into it.</div></div>
+    <div class="decision"><b>Order</b><div class="rec"><span>Recommended</span>C1 now; C2 to C5 as the first release; C6, the Slack @mention flow, as the second.</div></div>
+    <div class="decision"><b>Boards</b><div class="rec"><span>Recommended</span>Commission the Connections boards with the prompt below before C5.</div></div>
+  </div>
+</section>
+
+<section id="prompt">
+  <h2><span class="n">14</span>Prompt for Claude Design</h2>
+  <p>Paste this into the GeneratorAI Redesign – Desktop &amp; Web canvas. It adds a Connections page with 13 boards plus an anatomy board.</p>
+  <div class="prompt-head"><span class="muted">Also saved as <code>docs/connections/claude-design-prompt.md</code></span><span><span class="copied" id="copied" hidden>Copied</span> <button class="copy" id="copyBtn" type="button">Copy prompt</button></span></div>
+<pre class="prompt" id="promptText">Add a new page called Connections to the "GeneratorAI Redesign – Desktop &amp; Web" canvas, and design its boards in the same design language as the existing boards (Instrument theme, the current sidebar, rail, header, dock, Activity column, cards, gate cards, steppers and settings layouts). Reuse existing components wherever one fits. Desktop boards are 1440×900, narrow-window variants 1100×760. Draw every board in Instrument dark, and draw the catalogue, the connection detail and the Slack setup in Instrument light as well. Use real, specific copy (no lorem ipsum, no invented statistics). Where a brand mark is needed, use a simple neutral monogram tile with the app's name rather than an official logo.
+
+WHAT CONNECTIONS IS
+Connections let a person connect GeneratorAI to the third-party apps they already use — Slack, Discord, Gmail and Google Drive, Outlook and Teams, Notion, Figma, GitHub, Linear, Jira and Confluence, Sentry — or to any MCP server. Agents then use those apps as tools in chats, workflow stages and automations. Some connections can also start work: when someone @mentions GeneratorAI in Slack, a new chat (or an automation run) starts and replies in the same Slack thread.
+
+Everything runs on the person's own machine: tokens stay in the local vault and never reach the model. Every tool a connection offers has a risk class:
+- Read — allowed by default.
+- Write — asks by default.
+- Send / post / delete — asks and is marked Risky. On a phone it needs Face ID.
+Each tool can be set to Allow, Ask or Block.
+
+Connections authenticate in three ways, and the boards should make the difference clear without jargon:
+1. Sign in — OAuth in the system browser (Notion, Linear, GitHub, Atlassian, Sentry).
+2. Your own app — a guided setup where the person creates an internal app in their own Slack workspace, Google Cloud project or Microsoft tenant and pastes the credentials. It's needed because those vendors only let registered apps connect, and it keeps the data private.
+3. Token or key — Discord bot token, Figma personal token, API keys, or none, for a custom MCP server.
+
+NAVIGATION
+Add Connections as a top-level destination in the sidebar and the rail, after Scripts, with a plug icon. It replaces Settings › MCP servers (a custom MCP server is now just another connection).
+
+BOARDS TO CREATE
+1. Connections · catalogue. Sidebar with Connections selected.
+   - Header: "Connections", a search field, and tabs "All apps / Connected".
+   - Featured row: Slack, Gmail, Notion, GitHub.
+   - Category sections: Communication (Slack, Discord, Gmail, Outlook, Teams); Docs and knowledge (Notion, Google Drive, Docs, SharePoint, Confluence); Design (Figma); Development (GitHub, Linear, Jira, Sentry); Custom (Custom MCP server).
+   - Each tile: monogram, name, one line on what agents can do with it ("Read and post messages, reply in threads"), an auth badge (Sign in / Your own app / Token), and "Connected · 2 accounts" when connected.
+2. Connections · my connections. A list or table:
+   - Columns: app and account (e.g. "Slack · Acme workspace", "Gmail · maya@acme.dev"), status, used by ("3 agents · 1 workflow · 1 automation"), events ("@mentions on" / off), last used, row actions.
+   - Status chips: Connected / Reconnect needed / Error / Off.
+   - Two accounts of the same app: two Slack workspaces.
+   - Empty state too.
+3. Connect · sign in (OAuth) — Notion as the example, in a dialog.
+   - Before: what agents will be able to read and do, the permissions requested in plain words, which server it connects to, and "Continue in browser".
+   - Waiting: "Finish signing in in your browser", with Cancel.
+   - Success: account name and "14 tools found · 9 read, 4 write, 1 risky", with "Choose who can use it".
+   - Errors: sign-in cancelled; "This server's sign-in page changed — reconnect to be safe" (issuer mismatch); timed out.
+4. Connect · Slack (your own app). A stepper:
+   1. Create the app: a generated app manifest with Copy, and "Open Slack app setup". Explain in one line why ("Slack only lets registered apps connect. Your own app stays private to your workspace.").
+   2. Install it to your workspace.
+   3. Paste the bot token and the app-level token: masked inputs, inline validation, where to find each.
+   4. Test: "Connected to Acme · listening for @mentions".
+   5. Optional: "Also connect Slack's own tools" (sign in with your Slack account for search and canvases).
+5. Connect · Google and Microsoft (your own app). One board with two variants of the same stepper:
+   - Shared steps: create the OAuth client, copy the redirect address, paste the client ID and secret, sign in, test.
+   - Google: a clear note that a Google Cloud client in Testing mode needs reconnecting every 7 days, and how to avoid that.
+   - Microsoft: a "Use a device code instead" option.
+6. Connection detail. "Slack · Acme workspace" with status, Reconnect and Disconnect. Tabs:
+   - Overview: account, permissions granted, health ("Listening · last event 2 min ago"), token renewal ("Renews automatically").
+   - Tools: every tool with a read/write/risky chip and an Allow/Ask/Block segmented control; bulk actions by risk class.
+   - Access: which agents, projects, workflows and automations may use this connection, and with which tools.
+   - Events: the event sources and the triggers attached to them.
+   - Activity: a log of every tool call — time, agent, chat or run, tool, result, who approved — with links.
+   Include a "Reconnect needed" banner variant. Also draw the 1100×760 narrow variant.
+7. Trigger editor — "When someone @mentions GeneratorAI in Slack".
+   - Filters: channels, and which people may trigger it (allowlist, deny by default).
+   - Target, as two choices:
+     - Start a new chat: agent, project, permission mode, "Reply in the Slack thread" toggle.
+     - Run an automation: pick one, map the message to its inputs.
+   - Safety note: "Messages from Slack are untrusted. Risky actions in these chats always ask, even if the agent normally allows them."
+   - Test: "Send a test event", with a preview of the chat it would start.
+8. Chat started from Slack. A normal chat page whose header shows where it came from ("From Slack · #support · @maya · thread"). Replies show "Posted to the Slack thread". The Activity column shows it too.
+9. Approvals for connector actions.
+   - In a chat: a gate card for "Post to #releases in Acme Slack", marked Risky, with a preview of the message and Deny / Allow once / Always allow this tool. Also a write-but-not-risky example: "Create a Notion page in Engineering".
+   - Consent card: "This agent wants to use Gmail, which isn't connected" with Connect / Not now.
+   - Activity card: the same gate as a Needs-you card in the Activity column.
+10. Reconnect states. "Reconnect Notion" as:
+   - a Needs-you card in the Activity column;
+   - a banner on the connection;
+   - a tool-error step in a chat transcript with a Reconnect button.
+11. Choosing connections where agents are set up.
+   - Agent editor Tools section: a "Connections" picker — pick a connection, then all tools or selected tools.
+   - Workflow stage Tools tab: the same picker.
+   - Chat composer "+" menu: connections available to this chat, with their status.
+12. Add a custom MCP server.
+   - Address or command: a URL, or a command to run on this computer, with a clear warning that a command runs with your permissions and shows exactly what will run.
+   - Sign-in method: automatic sign-in / API key / none.
+   - Test: tool discovery — "Found 8 tools".
+13. Connections · narrow window (1100×760). The catalogue and the my-connections list at narrow width.
+
+Also add a short annotation board, Connection card · anatomy and states, showing the tile, list row and status chips in every state (Connected, Connecting, Reconnect needed, Error, Off, Listening for events), in the style of the existing "Activity card · anatomy and states" board.</pre>
+</section>
+
+<section id="sources">
+  <h2><span class="n">15</span>Key sources</h2>
+  <p class="muted">The full research, with a link for every claim, is in <code>docs/connections/research-external.md</code>. The audit of our own code is in <code>current-foundations.md</code>.</p>
+  <ul class="sources">
+    <li><a href="https://claude.com/docs/connectors/building/authentication">Claude connectors: authentication</a></li>
+    <li><a href="https://code.claude.com/docs/en/mcp">Claude Code: MCP</a></li>
+    <li><a href="https://developers.openai.com/apps-sdk/build/auth">OpenAI Apps SDK: auth</a></li>
+    <li><a href="https://help.openai.com/en/articles/20001256-plugins-in-chatgpt-and-codex">Plugins in ChatGPT and Codex</a></li>
+    <li><a href="https://learn.chatgpt.com/docs/extend/mcp?surface=cli">Codex: MCP</a></li>
+    <li><a href="https://modelcontextprotocol.io/specification/2026-07-28/changelog">MCP spec 2026-07-28 changelog</a></li>
+    <li><a href="https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization">MCP authorization (2025-11-25)</a></li>
+    <li><a href="https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices">MCP security best practices</a></li>
+    <li><a href="https://docs.slack.dev/ai/slack-mcp-server">Slack MCP server</a></li>
+    <li><a href="https://docs.slack.dev/apis/events-api/using-socket-mode">Slack Socket Mode</a></li>
+    <li><a href="https://docs.slack.dev/changelog/2025/05/29/rate-limit-changes-for-non-marketplace-apps">Slack non-Marketplace rate limits</a></li>
+    <li><a href="https://developers.google.com/workspace/guides/configure-mcp-servers">Google Workspace MCP servers</a></li>
+    <li><a href="https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification">Google restricted-scope verification</a></li>
+    <li><a href="https://learn.microsoft.com/microsoft-agent-365/tooling-servers-overview">Microsoft Agent 365 / Work IQ MCP</a></li>
+    <li><a href="https://developers.notion.com/guides/mcp/build-mcp-client">Notion MCP for clients</a></li>
+    <li><a href="https://developers.figma.com/docs/figma-mcp-server/rate-limits-access/">Figma MCP access</a></li>
+    <li><a href="https://github.com/github/github-mcp-server">GitHub MCP server</a></li>
+    <li><a href="https://hermes-agent.nousresearch.com/docs/user-guide/messaging/slack">Hermes Agent: Slack</a></li>
+    <li><a href="https://x.ai/news/grok-connectors">xAI Grok Connectors</a></li>
+    <li><a href="https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/">The lethal trifecta</a></li>
+    <li><a href="https://invariantlabs.ai/blog/mcp-github-vulnerability">GitHub MCP toxic agent flow</a></li>
+    <li><a href="https://github.com/modelcontextprotocol/python-sdk/security/advisories/GHSA-qx49-fqc8-xw99">MCP Python SDK issuer advisory</a></li>
+  </ul>
+</section>
+
+<footer>Research and plan for GeneratorAI · 4 October 2026 · source files in <code>docs/connections/</code> on the <code>desktop_redesign</code> branch.</footer>
+</main>
+</div>
+
+<script>
+(function () {
+  var btn = document.getElementById('copyBtn');
+  var text = document.getElementById('promptText');
+  var note = document.getElementById('copied');
+  function selectText() {
+    var range = document.createRange(); range.selectNodeContents(text);
+    var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+  }
+  btn.addEventListener('click', function () {
+    var value = text.innerText;
+    var done = function () { note.hidden = false; note.textContent = 'Copied'; setTimeout(function () { note.hidden = true; }, 2000); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(value).then(done, function () { selectText(); note.hidden = false; note.textContent = 'Selected — press Ctrl/⌘ C'; });
+    } else { selectText(); note.hidden = false; note.textContent = 'Selected — press Ctrl/⌘ C'; }
+  });
+})();
+</script>
