@@ -710,6 +710,18 @@ rest · Full access (never ask) — for root chats (workers follow their orchest
 ("Auto · Ask first"); full access shows nothing extra. Labels are shared with the run header's W-65 control
 (`APPROVAL_MODE_LABELS` in `ui-contract/composer.ts`). Turning approvals off still needs `admin:settings` (server).
 
+### D-97 Orchestrations may run dependent waves (2026-10-04) — Final
+Found building an app through an orchestrator (`reviews/desktop-e2e-build.md`): after the foundation worker (WP1)
+finished, every further `spawn_background_agent` was refused with "Convergence threshold met (1/1 workers in wave 1
+converged)", so the packages that depend on WP1 could never start; the orchestrator asked the user whether to do the
+work itself. Cause: the worker prompt told every finished worker to report `converged: true`, and the guard's default
+threshold of 1.0 read that as "stop the whole orchestration".
+- **Convergence is opt-in.** `convergenceThreshold` defaults to 0 (off); `GENERATORAI_ORCH_CONVERGENCE_THRESHOLD`
+  turns it on for iterative "until nothing new" loops. The worker prompt says to report `converged` only when its
+  brief asks for it — finishing is `status: "completed"`, not convergence.
+- **Time budget 120 min** per request (was 30): a multi-wave build (foundation → parallel packages → reviews → docs)
+  ran past 30 min and later spawns were refused. `maxWaves` (10) and the time budget stay the runaway guards.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

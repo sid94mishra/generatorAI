@@ -137,8 +137,7 @@ machine: the tags must be on their own lines and the body must be valid JSON.
       "keyFindings": ["short factual statements"],
       "artifacts": [{ "path": "tasks/<taskName>/notes.md", "kind": "response_md" }],
       "risks": ["what could be wrong or break"],
-      "openQuestions": ["what you could not resolve"],
-      "converged": true
+      "openQuestions": ["what you could not resolve"]
     }
     </TASK_RESULT>
 
@@ -151,10 +150,10 @@ Field rules:
   • artifacts — array of OBJECTS, each with a "path" (workspace-relative) and
     an optional "kind". A bare string is not valid here. Use [] when you wrote
     no files.
-  • converged — OPTIONAL boolean. Set true ONLY when the task is genuinely done
-    and you expect no follow-up this wave: nothing pending, nothing blocked.
-    The orchestrator may stop spawning once enough workers report it. Omit it
-    (or set false) if you are mid-task, blocked, or expect a review round.
+  • converged — OPTIONAL boolean. Omit it unless your brief asks you to report
+    convergence (an iterative search or "until nothing new" loop); then set
+    true only when another round would find nothing new. Finishing your task
+    is what "status": "completed" says — it is not convergence.
 
 Emit nothing after the closing </TASK_RESULT> tag.
 `.trim();

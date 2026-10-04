@@ -71,7 +71,8 @@ export interface OrchestratorConfig {
    * When `Date.now() - orchestrationStartedAt >= timeBudgetMs` the
    * orchestrator is told to consolidate immediately regardless of wave count.
    *
-   * Default: 30 min. Set to 0 to disable.
+   * Default: 120 min (D-97: a multi-wave build — foundation, parallel packages, reviews, docs — ran past
+   * the old 30 min and every later spawn was refused). Set to 0 to disable.
    */
   timeBudgetMs: number;
 
@@ -83,8 +84,11 @@ export interface OrchestratorConfig {
    * work"), not something finishing a turn implies; a failed or cancelled
    * worker never converges.
    *
-   * Default: 1.0 (every worker in the wave must report it). Set to 0 to
-   * disable the guard entirely.
+   * Default: 0 — off (D-97). Workers report `converged` only when their brief asks for it (iterative,
+   * until-dry loops); with the old default of 1.0 every finished worker of a build wave claimed it and the
+   * next, dependent wave was refused ("Convergence threshold met"), so WP2 could never follow WP1. Set
+   * `GENERATORAI_ORCH_CONVERGENCE_THRESHOLD` to enable it; `maxWaves` and `timeBudgetMs` remain the
+   * runaway guards.
    */
   convergenceThreshold: number;
   /**
@@ -112,8 +116,8 @@ export const DEFAULT_ORCHESTRATOR_CONFIG: OrchestratorConfig = {
   warmFirst: true,
   // W24 / X-20 termination conditions.
   maxWaves: 10,
-  timeBudgetMs: 30 * 60 * 1000, // 30 min
-  convergenceThreshold: 1.0,
+  timeBudgetMs: 120 * 60 * 1000, // 120 min (D-97)
+  convergenceThreshold: 0, // off by default (D-97)
 };
 
 /** Result of a spawn call, surfaced to the orchestrator as a tool result. */

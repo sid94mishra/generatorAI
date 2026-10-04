@@ -244,6 +244,15 @@ describe('OrchestratorService — W24 termination guards (the arbiter)', () => {
     expect(third.error).toMatch(/Convergence threshold met/);
   });
 
+  it('the shipped default lets a dependent second wave follow a finished, converged first wave (D-97)', async () => {
+    // A build: WP1 (foundation) must finish before WP2… can start. Every finished worker of wave 1 claimed
+    // converged:true, and the old default (1.0) refused the whole second wave.
+    const h = await makeHarness({ convergenceThreshold: DEFAULT_ORCHESTRATOR_CONFIG.convergenceThreshold });
+    await spawnAndFinish(h, 'wp1-foundation', { status: 'completed', converged: true });
+    const wp2 = await h.orchestrator.spawnBackgroundAgent(h.parentChatId, BRIEF('wp2-auth'));
+    expect(wp2.ok).toBe(true);
+  });
+
   it('convergenceThreshold=0 disables the convergence guard entirely', async () => {
     const h = await makeHarness({ convergenceThreshold: 0 });
     await spawnAndFinish(h, 'task-1', { status: 'completed', converged: true });
