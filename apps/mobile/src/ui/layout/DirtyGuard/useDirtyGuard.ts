@@ -43,6 +43,10 @@ export function useDirtyGuard(dirty: boolean, options: DirtyGuardOptions = {}): 
   const guard = useCallback(async <T,>(fn: () => T): Promise<T | undefined> => ((await confirmDiscard()) ? discarded(fn) : undefined), [confirmDiscard, discarded]);
 
   useBackHandler(dirty && Boolean(options.onDiscard), () => {
+    // A guarded editor stays mounted under the screens pushed over it (the builder under Workflow settings): Back
+    // there belongs to the top screen, not to this guard.
+    const nav = latest.current.options.navigation;
+    if (nav?.isFocused && !nav.isFocused()) return false;
     void confirmDiscard().then((discard) => discard && discarded(() => latest.current.options.onDiscard?.()));
     return true;
   });
