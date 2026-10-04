@@ -9,6 +9,8 @@ import type { DirtyGuard, DirtyGuardOptions } from './DirtyGuard.types';
 
 /** How long a blocked removal waits for a just-saved screen to re-render clean before asking. */
 export const REMOVAL_SETTLE_MS = 60;
+/** How long a confirmed discard lets the following removal through without asking again. */
+const DISCARD_BYPASS_MS = 1000;
 
 export const DISCARD_DEFAULTS = { title: 'Discard changes?', message: 'Your edits are not saved.', confirmLabel: 'Discard', cancelLabel: 'Keep editing' } as const;
 
@@ -29,13 +31,13 @@ export function useDirtyGuard(dirty: boolean, options: DirtyGuardOptions = {}): 
   const bypass = useRef(false);
   // A confirmed discard runs its action with the removal guard off: Cancel → "Discard" → router.back() must not ask
   // a second time from beforeRemove (seen on device: the builder's Cancel showed the dialog twice).
+  // The removal can arrive a frame later (expo-router queues router.back()), so the bypass outlives the call briefly.
   const discarded = useCallback(<T,>(fn: () => T): T => {
     bypass.current = true;
-    try {
-      return fn();
-    } finally {
+    setTimeout(() => {
       bypass.current = false;
-    }
+    }, DISCARD_BYPASS_MS);
+    return fn();
   }, []);
 
   const guard = useCallback(async <T,>(fn: () => T): Promise<T | undefined> => ((await confirmDiscard()) ? discarded(fn) : undefined), [confirmDiscard, discarded]);

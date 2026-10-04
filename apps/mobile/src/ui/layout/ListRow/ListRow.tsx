@@ -32,7 +32,7 @@ export function ListRow(props: ListRowProps): React.ReactElement {
   if (kind === 'picker' && props.picker) {
     return (
       <View className={surface}>
-        <Select {...props.picker} label={title} presentation="row" disabled={disabled || props.picker.disabled} testID={testID} />
+        <Select {...props.picker} label={title} presentation="row" disabled={disabled || props.picker.disabled} testID={props.picker.testID ?? testID} />
       </View>
     );
   }
