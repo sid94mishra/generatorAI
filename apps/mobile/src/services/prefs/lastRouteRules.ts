@@ -43,6 +43,16 @@ export function isRestorableRoute(pathname: string | null | undefined): pathname
   return true;
 }
 
+/**
+ * What a route change does to the record: a restorable screen replaces it; a sheet keeps the screen under it; any
+ * other non-restorable route (Home, Settings, pairing) clears it — otherwise going Home and closing the app brought
+ * back the chat visited before.
+ */
+export function lastRouteAction(pathname: string): 'record' | 'keep' | 'clear' {
+  if (isRestorableRoute(pathname)) return 'record';
+  return isSheetRoute(pathname) ? 'keep' : 'clear';
+}
+
 /** Is a record written at `savedAt` still fresh at `now`? */
 export function isLastRouteFresh(
   savedAt: number | undefined,

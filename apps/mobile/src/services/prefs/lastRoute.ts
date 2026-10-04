@@ -27,7 +27,7 @@ import { usePathname } from 'expo-router';
 
 import { useAuth } from '../auth/AuthProvider';
 import { PREF_KEYS, prefs } from '../storage/prefs';
-import { isRestorableRoute, resolveLastRoute } from './lastRouteRules';
+import { lastRouteAction, resolveLastRoute } from './lastRouteRules';
 
 export {
   LAST_ROUTE_TTL_MS,
@@ -37,7 +37,9 @@ export {
 } from './lastRouteRules';
 
 export function recordLastRoute(pathname: string, serverId: string, now: number = Date.now()): void {
-  if (!isRestorableRoute(pathname)) return;
+  const action = lastRouteAction(pathname);
+  if (action === 'clear') clearLastRoute(serverId);
+  if (action !== 'record') return;
   prefs.setString(`srv.${serverId}.${PREF_KEYS.lastRoute}`, pathname);
   prefs.setNumber(`srv.${serverId}.${PREF_KEYS.lastRouteAt}`, now);
 }

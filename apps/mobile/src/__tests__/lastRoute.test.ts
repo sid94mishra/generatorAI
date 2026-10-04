@@ -5,6 +5,7 @@ import {
   isLastRouteFresh,
   isRestorableRoute,
   isSheetRoute,
+  lastRouteAction,
   resolveLastRoute,
 } from '../services/prefs/lastRouteRules';
 import { STEP_UP_WINDOW_MS, isStepUpFresh } from '../services/auth/stepUpRules';
@@ -90,5 +91,13 @@ describe('step-up — cache window', () => {
   it('is never fresh without a success or with a clock step backwards', () => {
     expect(isStepUpFresh(null, NOW)).toBe(false);
     expect(isStepUpFresh(NOW + 1, NOW)).toBe(false);
+  });
+
+  it('clears on Home and Settings, keeps the screen under a sheet', () => {
+    expect(lastRouteAction('/chats/abc')).toBe('record');
+    expect(lastRouteAction('/')).toBe('clear');
+    expect(lastRouteAction('/settings/appearance')).toBe('clear');
+    expect(lastRouteAction('/chats/abc/turn')).toBe('keep');
+    expect(lastRouteAction('/search')).toBe('keep');
   });
 });
