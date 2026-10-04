@@ -28,7 +28,8 @@ env: {FRESH_CHAT: stream}
 - tapOn: {id: composer-input}
 - inputText: /
 - extendedWaitUntil: {visible: {id: composer-suggestions}, timeout: 15000}
-- assertVisible: "Commands & skills"
+# Android reads the header and its count as one node ("Commands & skills, 12").
+- assertVisible: "Commands & skills.*"
 - eraseText
 - inputText: "@"
 - extendedWaitUntil: {visible: {id: composer-suggestions}, timeout: 15000}
