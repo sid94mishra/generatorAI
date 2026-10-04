@@ -40,8 +40,10 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 }
 
 export function RunPlanPreview({ plan, loading, error, stale, unavailable, footnote }: RunPlanPreviewProps) {
+  // Body stages (a loop's or map's) are drawn inside their container, not as parallel stages of the layer.
   const layers = new Map<number, InvocationPlan['stages']>();
-  for (const s of plan?.stages ?? []) layers.set(s.layer, [...(layers.get(s.layer) ?? []), s]);
+  for (const s of plan?.stages ?? []) if (!s.parentKey) layers.set(s.layer, [...(layers.get(s.layer) ?? []), s]);
+  const bodyOf = (key: string) => (plan?.stages ?? []).filter((s) => s.parentKey === key);
   const ordered = [...layers.entries()].sort(([a], [b]) => a - b);
   const approvals = (plan?.stages ?? []).filter((s) => s.approvalRequired && !s.skipped);
   const skippedByGuard = (plan?.stages ?? []).filter((s) => s.skipReason === 'guard_false');
@@ -107,6 +109,9 @@ export function RunPlanPreview({ plan, loading, error, stale, unavailable, footn
                       {s.key}
                       {s.approvalRequired && !s.skipped ? <Icon concept="hand" size={12} className="text-warn" /> : null}
                     </Chip>
+                    {bodyOf(s.key).length > 0 ? (
+                      <span className="font-mono text-micro text-fg-3">({bodyOf(s.key).map((b) => b.key).join(' → ')})</span>
+                    ) : null}
                   </Fragment>
                 ))}
               </li>
@@ -129,11 +134,11 @@ export function RunPlanPreview({ plan, loading, error, stale, unavailable, footn
             {plan.preprocessing.length > 0 ? <Row label="Before">{plan.preprocessing.join(', ')}</Row> : null}
             <Row label="Post-processing">{plan.postProcessing.length > 0 ? plan.postProcessing.join(' → ') : 'Nothing'}</Row>
             <Row label="Permission">{PERMISSION_LABELS[plan.permissionMode]}</Row>
-            {plan.stages.some((s) => s.model && !s.skipped) ? (
+            {plan.stages.some((s) => (s.model || s.agentRef) && !s.skipped) ? (
               <Row label="Models">
                 {plan.stages
-                  .filter((s) => s.model && !s.skipped)
-                  .map((s) => `${s.key}: ${s.model}`)
+                  .filter((s) => (s.model || s.agentRef) && !s.skipped)
+                  .map((s) => `${s.key}: ${s.model ?? "the agent's model"}`)
                   .join(', ')}
               </Row>
             ) : null}
