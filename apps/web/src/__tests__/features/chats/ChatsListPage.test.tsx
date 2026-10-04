@@ -2,7 +2,8 @@
 // ChatsListPage (P3-07) — render smoke + bulk delete partial-failure
 // (ported from the legacy page's test, P2-R36): a partial failure keeps
 // only the failed rows selected, so a retry does not resend ids that are
-// already gone.
+// already gone. Selection across a filter change keeps only the rows the
+// new list still shows (P2-R14).
 // ────────────────────────────────────────────────────────────────
 
 import { beforeAll, afterEach, describe, expect, it, vi } from 'vitest';
@@ -132,6 +133,28 @@ describe('ChatsListPage', () => {
     await user.click(screen.getByRole('button', { name: /^Delete$/ }));
     await user.click(await screen.findByRole('button', { name: 'Delete 1' }));
     await waitFor(() => expect(platform.deleteChats).toHaveBeenLastCalledWith(['c']));
+    await waitFor(() => expect(screen.queryByText(/selected/)).not.toBeInTheDocument());
+  });
+
+  it('a row ticked while the search debounces stays selected; a filter that hides it drops it (P2-R14)', async () => {
+    const user = userEvent.setup();
+    const platform = new MockPlatformClient();
+    platform.listChats.mockImplementation(async (q?: { q?: string }) =>
+      page(q?.q === 'Chat a' ? ['a'] : q?.q === 'Chat b' ? ['b'] : ['a', 'b']),
+    );
+    renderPage(platform);
+
+    // Tick the row before the 250 ms debounce runs the search (the e2e flake).
+    await user.type(screen.getByPlaceholderText('Search chats'), 'Chat a');
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Chat a' }));
+    await waitFor(() => expect(platform.listChats).toHaveBeenCalledWith(expect.objectContaining({ q: 'Chat a' })));
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'Chat b' })).not.toBeInTheDocument());
+    expect(screen.getByText((_, el) => el?.textContent === '1 selected')).toBeInTheDocument();
+
+    // A search the ticked chat is not in: no selection carries into a bulk action.
+    await user.clear(screen.getByPlaceholderText('Search chats'));
+    await user.type(screen.getByPlaceholderText('Search chats'), 'Chat b');
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'Chat a' })).not.toBeInTheDocument());
     await waitFor(() => expect(screen.queryByText(/selected/)).not.toBeInTheDocument());
   });
 

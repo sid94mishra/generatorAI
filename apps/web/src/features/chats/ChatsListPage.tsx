@@ -109,6 +109,7 @@ export function ChatsListPage() {
 
   const {
     data: chatList,
+    isPlaceholderData,
     isLoading,
     isError,
     error,
@@ -130,10 +131,20 @@ export function ChatsListPage() {
     [chatList, live, projectsById],
   );
 
-  // A new filter is a new list: a selection from the previous one must not
-  // carry into a bulk action (P2-R14, same rule as the legacy page).
+  // A new filter is a new list: a selection never carries a chat the list no
+  // longer shows into a bulk action (P2-R14). Once the new list has loaded
+  // (not the previous list kept on screen while it fetches), the selection
+  // keeps only the rows still in it. Clearing on every filter change instead
+  // dropped a row ticked while the search was still debouncing.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  useEffect(() => setSelectedIds(new Set()), [scope, projectIds, agentRefs, states, tags, debouncedSearch, sort]);
+  useEffect(() => {
+    if (isPlaceholderData) return;
+    const shown = new Set(rows.map((r) => r.id));
+    setSelectedIds((prev) => {
+      const kept = [...prev].filter((id) => shown.has(id));
+      return kept.length === prev.size ? prev : new Set(kept);
+    });
+  }, [rows, isPlaceholderData]);
 
   const confirmer = useConfirm();
   const bulkArchive = useBulkArchiveChats();
