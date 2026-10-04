@@ -311,6 +311,8 @@ export {
   redactAttentionItem,
   redactAttentionSnapshot,
   redactAttentionEventPayload,
+  tallyWorkers,
+  chatActivityMeta,
 } from './AttentionService.js';
 export type {
   AttentionServiceDeps,

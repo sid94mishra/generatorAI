@@ -125,6 +125,7 @@ function makeApp(opts: {
   worktreesByRun?: Record<string, WorktreeInfo[]>;
   projects?: Record<string, { id: string; name: string }>;
   workspaces?: Record<string, { status: string; metadata?: Record<string, unknown> }>;
+  workersByChat?: Record<string, Chat[]>;
 } = {}) {
   const runsByDefinition = opts.runsByDefinition ?? {};
   const executionsByAutomation = opts.executionsByAutomation ?? {};
@@ -137,7 +138,10 @@ function makeApp(opts: {
     counts: { active: opts.chatRows?.length ?? 0, archived: 0 },
   };
   const container = {
-    chatEntityRepo: { listPage: vi.fn().mockResolvedValue(chatPage) },
+    chatEntityRepo: {
+      listPage: vi.fn().mockResolvedValue(chatPage),
+      listBackgroundTasks: vi.fn((id: string) => Promise.resolve(opts.workersByChat?.[id] ?? [])),
+    },
     workflowDefinitionService: { list: vi.fn().mockResolvedValue({ items: opts.definitions ?? [] }) },
     workflowRunRepo: {
       getByDefinitionId: vi.fn((id: string) => Promise.resolve(runsByDefinition[id] ?? [])),
@@ -166,6 +170,47 @@ function makeApp(opts: {
   app.use('/api/activity', createActivityRoutes(container as never));
   return app;
 }
+
+describe('GET /api/activity/recent — D-92 meta', () => {
+  it('carries agent, model, unread and an orchestrator\'s worker tally; an automation\'s trigger', async () => {
+    const worker = (id: string, status: string) =>
+      ({ id, name: id, status: 'active', parentChatId: 'orch', backgroundTask: { orchestratorChatId: 'orch', taskName: id, status } }) as unknown as Chat;
+    const app = makeApp({
+      chatRows: [
+        chatRow(
+          {
+            id: 'orch',
+            orchestratorMode: true,
+            model: 'claude-sonnet-5',
+            agentSnapshot: { driving: { name: 'Release Captain' } } as Chat['agentSnapshot'],
+            lastReadAt: '2026-01-05T00:00:00.000Z',
+          },
+          { lastTurn: { status: 'succeeded', endedAt: new Date('2026-01-04T00:00:00Z') } },
+        ),
+        chatRow({ id: 'plain' }, { lastTurn: { status: 'succeeded', endedAt: new Date('2026-01-03T00:00:00Z') } }),
+      ],
+      workersByChat: { orch: [worker('w1', 'completed'), worker('w2', 'completed'), worker('w3', 'failed'), worker('w4', 'cancelled')] },
+      automations: [automation({ id: 'auto-1', triggerType: 'schedule', cronExpression: '0 * * * *' })],
+      executionsByAutomation: { 'auto-1': [execution({ id: 'exec-1', completedAt: new Date('2026-01-02T00:00:00Z') })] },
+    });
+    const res = await request(app).get('/api/activity/recent');
+    const byKey = Object.fromEntries(res.body.items.map((i: { key: string }) => [i.key, i]));
+    expect(byKey['chat:orch']).toMatchObject({
+      meta: {
+        agent: 'Release Captain',
+        model: 'claude-sonnet-5',
+        workers: { total: 4, running: 0, queued: 0, inReview: 0, done: 2, failed: 1 },
+      },
+    });
+    // Read after the turn ended: not unread. Never read: unread.
+    expect(byKey['chat:orch'].unread).toBeUndefined();
+    expect(byKey['chat:plain'].unread).toBe(true);
+    expect(byKey['chat:plain'].meta).toBeUndefined();
+    expect(byKey['automation_execution:exec-1'].meta).toEqual({
+      automation: { id: 'auto-1', triggerType: 'schedule', cronExpression: '0 * * * *' },
+    });
+  });
+});
 
 describe('GET /api/activity/recent', () => {
   it('rejects an unparseable since', async () => {

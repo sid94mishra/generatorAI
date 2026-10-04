@@ -602,6 +602,46 @@ describe('AttentionService — worker chats roll up into their orchestrator (D-8
     expect(service.getSnapshot().counts.running).toBe(0);
   });
 
+  it('D-92: an orchestrator carries its workers by lifecycle, kept current by the worker events', async () => {
+    const task = (status: string) => ({ orchestratorChatId: 'orch', taskName: 't', status }) as Chat['backgroundTask'];
+    await makeChat('orch', {
+      name: 'Orchestrator',
+      orchestratorMode: true,
+      model: 'claude-sonnet-5',
+      agentSnapshot: { driving: { name: 'Release Captain' } } as Chat['agentSnapshot'],
+    } as Partial<Chat>);
+    await makeChat('w1', { parentChatId: 'orch', backgroundTask: task('running') } as Partial<Chat>);
+    await makeChat('w2', { parentChatId: 'orch', backgroundTask: task('spawned') } as Partial<Chat>);
+    await makeChat('w3', { parentChatId: 'orch', backgroundTask: task('completed') } as Partial<Chat>);
+    streaming.set('w1', () => {});
+    await startService().start();
+    expect(service.getSnapshot().running[0]).toMatchObject({
+      key: 'chat:orch',
+      meta: {
+        agent: 'Release Captain',
+        model: 'claude-sonnet-5',
+        workers: { total: 3, running: 1, queued: 1, inReview: 0, done: 1, failed: 0 },
+      },
+    });
+
+    // The queued worker starts: the orchestrator is re-read on the worker's status event.
+    await repos().chats.updateBackgroundTaskStatus('w2', 'running');
+    await emitChat('orch', 'chat.background_task.status', { parentChatId: 'orch', taskId: 'w2', status: 'running' });
+    await service.settled();
+    expect(service.getSnapshot().running[0]!.meta?.workers).toMatchObject({ running: 2, queued: 0 });
+  });
+
+  it('D-92: a live automation execution names its trigger and can be stopped', async () => {
+    await makeAutomation('a1');
+    await makeExecution('e1', 'a1', 'running');
+    await startService().start();
+    expect(service.getSnapshot().running[0]).toMatchObject({
+      key: 'automation_execution:e1',
+      stoppable: true,
+      meta: { automation: { id: 'a1', triggerType: 'manual' } },
+    });
+  });
+
   it('drops an archived worker from its orchestrator', async () => {
     await makeChat('orch', { name: 'Orchestrator' });
     await makeChat('w1', { parentChatId: 'orch' } as Partial<Chat>);

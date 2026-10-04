@@ -69,6 +69,36 @@ export interface AttentionProgress {
   of?: number;
 }
 
+/**
+ * An orchestrator's workers by lifecycle (D-92): "2 running · 1 done · 1 queued"
+ * on the Activity card. `queued` = spawned, not started; `inReview` = finished,
+ * the orchestrator is reading the result (D-87). Cancelled workers count in
+ * `total` only.
+ */
+export interface ActivityWorkerTally {
+  total: number;
+  running: number;
+  queued: number;
+  inReview: number;
+  done: number;
+  failed: number;
+}
+
+/**
+ * What runs an item, for a card's meta line without a second request (D-92).
+ * Every field is optional and omitted when unknown — never invented (D-36).
+ */
+export interface ActivityMeta {
+  /** Chats: the bound agent's name ("Bug Fixer"). */
+  agent?: string;
+  /** Chats: the model id the chat runs on (clients map it to a label). */
+  model?: string;
+  /** Orchestrator chats (orchestrator mode, or any worker spawned). */
+  workers?: ActivityWorkerTally;
+  /** Automation executions: the automation and how it is triggered. */
+  automation?: { id: string; triggerType: 'manual' | 'schedule' | 'webhook'; cronExpression?: string };
+}
+
 export interface AttentionItem {
   /** `${entity}:${entityId}`, plus `:${ask.id}` for asks. */
   key: string;
@@ -88,6 +118,8 @@ export interface AttentionItem {
   progress?: AttentionProgress;
   /** A Stop endpoint exists for this item right now. */
   stoppable: boolean;
+  /** Who/what runs it (D-92). */
+  meta?: ActivityMeta;
 }
 
 export interface AttentionEntityCounts {

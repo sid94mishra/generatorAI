@@ -16,6 +16,8 @@
 // React-free wire types only; web, desktop, CLI and mobile share them.
 // ────────────────────────────────────────────────────────────────
 
+import type { ActivityMeta } from './Attention.js';
+
 /** The three sources this pass merges. (`pull_request` / `commit` are reserved for later.) */
 export type ActivityEntity = 'chat' | 'run' | 'automation_execution';
 
@@ -60,6 +62,10 @@ export interface RecentActivityItem {
   commit?: { branch: string; sha?: string };
   /** Present only on a `failed` item that has a retry action. */
   retry?: 'chat_prompt' | 'run_retry';
+  /** Who/what ran it (D-92): agent and model, an orchestrator's workers, an automation's trigger. */
+  meta?: ActivityMeta;
+  /** Chats: finished after the person last read the chat (D-83's read mark). */
+  unread?: boolean;
 }
 
 export interface RecentActivityPage {

@@ -14,6 +14,7 @@ export * from './api/index.js';
 export * from './diff/parseUnifiedDiff.js';
 export * from './runTitle.js';
 export * from './attention/index.js';
+export * from './activity/index.js';
 export * from './live/index.js';
 export * from './chats/index.js';
 export * from './models/index.js';

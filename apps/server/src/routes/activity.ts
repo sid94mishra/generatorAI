@@ -22,6 +22,7 @@ import type {
   WorkflowRun,
 } from '@generatorai/shared';
 import type { WorkflowDefinitionSummary } from '@generatorai/workflow-spec';
+import { chatActivityMeta, tallyWorkers } from '@generatorai/core';
 import type { Container } from '../composition-root.js';
 import { listAllDefinitionSummaries } from './definitionSummaries.js';
 import { activityScmFields, readScmOutcome } from './scmOutcome.js';
@@ -76,6 +77,8 @@ export function createActivityRoutes(container: Container): Router {
       const items: RecentActivityItem[] = [];
       /** MG-13: the workspace whose SCM outcome an item may carry, and when the item's work began. */
       const scmSource = new Map<string, { workspaceId: string; sinceMs: number }>();
+      /** D-92: chats whose worker tally is read for the final page (orchestrators). */
+      const orchestrators = new Set<string>();
 
       // ── Chats: each chat's most recent FINISHED turn (G-02) ──
       const chatPage = await chatEntityRepo.listPage({
@@ -100,7 +103,16 @@ export function createActivityRoutes(container: Container): Router {
           summary: lastTurn.error ?? (lastTurn.status === 'succeeded' ? 'Turn completed' : `Turn ${lastTurn.status}`),
           ...(row.activity.changes ? { changes: row.activity.changes } : {}),
           ...(lastTurn.status === 'failed' ? { retry: 'chat_prompt' as const } : {}),
+          ...(() => {
+            const meta = chatActivityMeta(row.chat);
+            return meta ? { meta } : {};
+          })(),
+          // D-83's read mark: finished after the person last opened the chat.
+          ...(row.chat.lastReadAt === undefined || row.chat.lastReadAt === null || Date.parse(row.chat.lastReadAt) < endedAtMs
+            ? { unread: true }
+            : {}),
         });
+        if (row.chat.orchestratorMode) orchestrators.add(row.chat.id);
         // A chat's commit / PR follows the turn the user reviewed (MD-164).
         if (row.chat.workspaceId) scmSource.set(`chat:${row.chat.id}`, { workspaceId: row.chat.workspaceId, sinceMs: endedAtMs });
       }
@@ -164,6 +176,15 @@ export function createActivityRoutes(container: Container): Router {
             summary:
               execution.error ??
               `${execution.completedIterations}/${execution.totalIterations} iteration${execution.totalIterations === 1 ? '' : 's'} completed`,
+            meta: {
+              automation: {
+                id: automation.id,
+                triggerType: automation.triggerType,
+                ...(automation.triggerType === 'schedule' && automation.cronExpression
+                  ? { cronExpression: automation.cronExpression }
+                  : {}),
+              },
+            },
           });
         }
       }
@@ -199,6 +220,15 @@ export function createActivityRoutes(container: Container): Router {
               withName = { ...named, ...activityScmFields(readScmOutcome(ws?.metadata), source.sinceMs) };
             } catch {
               /* a missing workspace just means no outcome to show */
+            }
+          }
+          if (named.entity === 'chat' && orchestrators.has(named.entityId)) {
+            // D-92: an orchestrator's worker tally (one indexed read per orchestrator on the page).
+            try {
+              const workers = await chatEntityRepo.listBackgroundTasks(named.entityId);
+              withName = { ...withName, meta: { ...withName.meta, workers: tallyWorkers(workers) } };
+            } catch {
+              /* no tally rather than a wrong one */
             }
           }
           if (withName.entity !== 'run' || withName.commit) return withName;

@@ -451,6 +451,8 @@ export type {
   AttentionRemoveEventData,
   AttentionCountsEventData,
   AttentionEventKind,
+  ActivityWorkerTally,
+  ActivityMeta,
 } from './Attention.js';
 export {
   ATTENTION_ENTITIES,

@@ -1020,8 +1020,63 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
             },
           },
           stoppable: { type: 'boolean' },
+          meta: { $ref: '#/components/schemas/ActivityMeta' },
         },
         required: ['key', 'entity', 'entityId', 'title', 'href', 'state', 'since', 'stoppable'],
+      },
+      ActivityMeta: {
+        type: 'object',
+        description:
+          'Who/what runs an attention or recent-activity item (D-92). Every field is omitted when unknown. ' +
+          '`workers` is set on orchestrator chats: their workers by lifecycle (queued = spawned, inReview = ' +
+          'finished and being read by the orchestrator; cancelled workers count in `total` only).',
+        properties: {
+          agent: { type: 'string', description: 'The bound agent\'s name' },
+          model: { type: 'string', description: 'Model id the chat runs on' },
+          workers: {
+            type: 'object',
+            properties: {
+              total: { type: 'integer' },
+              running: { type: 'integer' },
+              queued: { type: 'integer' },
+              inReview: { type: 'integer' },
+              done: { type: 'integer' },
+              failed: { type: 'integer' },
+            },
+            required: ['total', 'running', 'queued', 'inReview', 'done', 'failed'],
+          },
+          automation: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              triggerType: { type: 'string', enum: ['manual', 'schedule', 'webhook'] },
+              cronExpression: { type: 'string' },
+            },
+            required: ['id', 'triggerType'],
+          },
+        },
+      },
+      RecentActivityItem: {
+        type: 'object',
+        description: 'One finished chat turn, terminal workflow run or terminal automation execution (G-11).',
+        properties: {
+          key: { type: 'string' },
+          entity: { type: 'string', enum: ['chat', 'run', 'automation_execution'] },
+          entityId: { type: 'string' },
+          title: { type: 'string' },
+          href: { type: 'string' },
+          project: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } }, required: ['id', 'name'] },
+          endedAt: { type: 'string', format: 'date-time' },
+          outcome: { type: 'string', enum: ['succeeded', 'failed', 'cancelled'] },
+          summary: { type: 'string' },
+          changes: { $ref: '#/components/schemas/ChatChangeStats' },
+          pullRequest: { type: 'object', properties: { number: { type: 'integer' }, url: { type: 'string' } }, required: ['number', 'url'] },
+          commit: { type: 'object', properties: { branch: { type: 'string' }, sha: { type: 'string' } }, required: ['branch'] },
+          retry: { type: 'string', enum: ['chat_prompt', 'run_retry'] },
+          meta: { $ref: '#/components/schemas/ActivityMeta' },
+          unread: { type: 'boolean', description: 'Chats: finished after the person last read the chat (D-83)' },
+        },
+        required: ['key', 'entity', 'entityId', 'title', 'href', 'endedAt', 'outcome', 'summary'],
       },
       AttentionCounts: {
         type: 'object',
@@ -1395,7 +1450,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
               'application/json': {
                 schema: {
                   type: 'object',
-                  properties: { items: { type: 'array', items: { type: 'object' } } },
+                  properties: { items: { type: 'array', items: { $ref: '#/components/schemas/RecentActivityItem' } } },
                   required: ['items'],
                 },
               },

@@ -68,6 +68,8 @@ import {
   type AttentionItem,
   type AttentionItemState,
   type AttentionSnapshot,
+  type ActivityMeta,
+  type ActivityWorkerTally,
   type Automation,
   type AutomationExecution,
   type Chat,
@@ -110,6 +112,8 @@ export interface AttentionServiceDeps {
     getById(id: string): Promise<Chat>;
     /** The chats on a workspace — resolves a computer consent that carries no `chatId`. */
     getByWorkspaceId(workspaceId: string): Promise<Chat[]>;
+    /** An orchestrator's worker chats, for its `meta.workers` tally (D-92). Optional: no tally without it. */
+    listBackgroundTasks?(parentChatId: string): Promise<Chat[]>;
   };
   projects: { getById(id: string): Promise<Project> };
   interactions?: {
@@ -268,6 +272,50 @@ export function describeInteraction(
   }
 }
 
+/** An orchestrator's workers by lifecycle (D-92). Archived workers are not counted. */
+export function tallyWorkers(workers: readonly Pick<Chat, 'status' | 'backgroundTask'>[]): ActivityWorkerTally {
+  const tally: ActivityWorkerTally = { total: 0, running: 0, queued: 0, inReview: 0, done: 0, failed: 0 };
+  for (const worker of workers) {
+    if (worker.status === 'archived') continue;
+    tally.total += 1;
+    switch (worker.backgroundTask?.status) {
+      case 'spawned':
+        tally.queued += 1;
+        break;
+      case 'running':
+        tally.running += 1;
+        break;
+      case 'needs_review':
+        tally.inReview += 1;
+        break;
+      case 'completed':
+        tally.done += 1;
+        break;
+      case 'failed':
+        tally.failed += 1;
+        break;
+      default:
+        break;
+    }
+  }
+  return tally;
+}
+
+/** Agent, model and worker tally of a chat (D-92); undefined when nothing is known. */
+export function chatActivityMeta(
+  chat: Pick<Chat, 'model' | 'harnessConfig' | 'agentSnapshot'>,
+  workers?: ActivityWorkerTally,
+): ActivityMeta | undefined {
+  const agent = str(chat.agentSnapshot?.driving?.name);
+  const model = str(chat.model) ?? str((chat.harnessConfig as { model?: unknown } | undefined)?.model);
+  const meta: ActivityMeta = {
+    ...(agent ? { agent } : {}),
+    ...(model ? { model } : {}),
+    ...(workers ? { workers } : {}),
+  };
+  return Object.keys(meta).length > 0 ? meta : undefined;
+}
+
 /**
  * The summary shown instead of one written from the agent's own words, for a
  * principal that may not read the entity. A tool, app or stage NAME is fine
@@ -358,6 +406,14 @@ const CHAT_TRIGGER_KINDS: ReadonlySet<string> = new Set([
   'session.active',
   'computer.consent_required',
   'computer.consent_resolved',
+]);
+
+/** Worker lifecycle events (emitted on the orchestrator's session, `chatId` = the orchestrator). */
+const BACKGROUND_TASK_TRIGGER_KINDS: ReadonlySet<string> = new Set([
+  'chat.background_task.spawned',
+  'chat.background_task.status',
+  'chat.background_task.completed',
+  'chat.background_task.failed',
 ]);
 
 export class AttentionService {
@@ -536,7 +592,9 @@ export class AttentionService {
       if (
         kind.startsWith('chat.permission.') ||
         kind.startsWith('chat.question.') ||
-        CHAT_TRIGGER_KINDS.has(kind)
+        CHAT_TRIGGER_KINDS.has(kind) ||
+        // A worker's lifecycle changes its orchestrator's tally (`chatId` is the orchestrator).
+        BACKGROUND_TASK_TRIGGER_KINDS.has(kind)
       ) {
         this.schedule({ entity: 'chat', id: chatId });
       }
@@ -757,11 +815,13 @@ export class AttentionService {
       return [];
     }
 
-    const [pending, project, parent] = await Promise.all([
+    const [pending, project, parent, tally] = await Promise.all([
       interactions ? interactions.listPendingByChat(chatId) : Promise.resolve([] as AgentInteraction[]),
       this.projectRef(chat.projectId),
       this.parentRef(chat.parentChatId),
+      chat.parentChatId ? Promise.resolve(undefined) : this.workerTally(chat),
     ]);
+    const meta = chatActivityMeta(chat, tally);
     // A prompt without a chat is shown on the top-level chat that owns its workspace (P2-R19).
     const ownsWorkspace = !chat.parentChatId && chat.workspaceId !== undefined;
     const consents = (consent?.listAllPending() ?? []).filter(
@@ -776,6 +836,7 @@ export class AttentionService {
       ...(project ? { project } : {}),
       ...(parent ? { parent } : {}),
       stoppable: streamingSince !== undefined,
+      ...(meta ? { meta } : {}),
     };
     const chatHref = (dock?: string): string =>
       parent ? `/chats/${parent.id}?dock=tasks` : `/chats/${chatId}${dock ? `?dock=${dock}` : ''}`;
@@ -833,6 +894,20 @@ export class AttentionService {
       });
     }
     return drafts;
+  }
+
+  /** The worker tally of an orchestrator chat; undefined for a chat that never orchestrated (D-92). */
+  private async workerTally(chat: Chat): Promise<ActivityWorkerTally | undefined> {
+    const list = this.deps.chats.listBackgroundTasks;
+    if (!list) return undefined;
+    let tasks: Chat[];
+    try {
+      tasks = await list.call(this.deps.chats, chat.id);
+    } catch {
+      return undefined;
+    }
+    if (tasks.length === 0 && !chat.orchestratorMode) return undefined;
+    return tallyWorkers(tasks);
   }
 
   /** The working workers of an orchestrator chat. */
@@ -996,7 +1071,17 @@ export class AttentionService {
         state: stateOf(STATUS_MAPS.automationExecution[execution.status], 'running'),
         since: iso(execution.startedAt ?? execution.createdAt),
         ...(step !== undefined ? { progress: { label: `Iteration ${step} of ${total}`, step, of: total } } : {}),
-        stoppable: false,
+        // `POST /automations/:id/executions/:executionId/cancel` stops a live execution.
+        stoppable: true,
+        meta: {
+          automation: {
+            id: execution.automationId,
+            triggerType: automation?.triggerType ?? 'manual',
+            ...(automation?.triggerType === 'schedule' && automation.cronExpression
+              ? { cronExpression: automation.cronExpression }
+              : {}),
+          },
+        },
       },
     ];
   }

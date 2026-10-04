@@ -187,12 +187,17 @@ export function useAttentionCounts(options: UseAttentionOptions = {}): Attention
 // stage input, computer consent — its answer needs the app identity only the
 // computer panel holds — and a paused run) are opened, never answered here.
 
-/** An inline action Home can run on an attention item. */
-export type AttentionInlineAction = 'allow_once' | 'approve' | 'stop';
+/** An inline action Home or the Activity column can run on an attention item. */
+export type AttentionInlineAction = 'allow_once' | 'deny' | 'approve' | 'reject' | 'stop';
 
 export interface AttentionActionInput {
-  item: Pick<AttentionItem, 'entity' | 'entityId' | 'ask'>;
+  item: Pick<AttentionItem, 'entity' | 'entityId' | 'ask' | 'href'> & Partial<Pick<AttentionItem, 'meta'>>;
   action: AttentionInlineAction;
+}
+
+/** The automation an execution item belongs to: its meta (D-92), else its `/automations/:id` link. */
+function automationIdOf(item: AttentionActionInput['item']): string | undefined {
+  return item.meta?.automation?.id ?? /^\/automations\/([^/?#]+)/.exec(item.href)?.[1];
 }
 
 /** Runs one inline action on an attention item, then refetches the feed. */
@@ -209,23 +214,32 @@ export function useAttentionAction() {
           return;
         }
         if (entity === 'workflow_run') return platform.runCommand(entityId, { command: 'cancel' });
+        const automationId = entity === 'automation_execution' ? automationIdOf(item) : undefined;
+        if (automationId) {
+          await platform.cancelAutomationExecution(automationId, entityId);
+          return;
+        }
         throw new Error('This item cannot be stopped from here.');
       }
       if (!ask) throw new Error('Nothing is waiting on this item.');
-      if (action === 'allow_once' && entity === 'chat' && ask.kind === 'tool_permission') {
-        return platform.respondToChatPermission(entityId, ask.id, { behavior: 'allow' });
+      if ((action === 'allow_once' || action === 'deny') && entity === 'chat' && ask.kind === 'tool_permission') {
+        return platform.respondToChatPermission(entityId, ask.id, { behavior: action === 'deny' ? 'deny' : 'allow' });
       }
-      if (action === 'approve' && entity === 'chat' && ask.kind === 'plan_review') {
+      if ((action === 'approve' || action === 'reject') && entity === 'chat' && ask.kind === 'plan_review') {
         // The ask is the gate; the decision route is keyed by the plan the gate carries.
         const gates = await platform.getChatInteractions(entityId);
         const planId = gates.find((g) => g.interactionId === ask.id)?.payload?.['planId'];
         if (typeof planId !== 'string') throw new Error('This plan is no longer awaiting review.');
-        return platform.decideChatPlan(entityId, planId, { approved: true });
+        return platform.decideChatPlan(entityId, planId, { approved: action === 'approve' });
       }
-      if (action === 'approve' && entity === 'workflow_run' && ask.kind === 'stage_approval') {
+      if ((action === 'approve' || action === 'reject') && entity === 'workflow_run' && ask.kind === 'stage_approval') {
         // Engine v2: an approval gate is resolved by the run's `approve` command
         // on the waiting instance; a refused command (409) rejects with the reason.
-        return platform.runCommand(entityId, { command: 'approve', instanceId: ask.id, outcome: 'approved' });
+        return platform.runCommand(entityId, {
+          command: 'approve',
+          instanceId: ask.id,
+          outcome: action === 'approve' ? 'approved' : 'rejected',
+        });
       }
       throw new Error('This request has to be answered where it was asked.');
     },
