@@ -3,6 +3,7 @@
 // main process. Every channel is explicitly registered and validated.
 // ────────────────────────────────────────────────────────────────
 
+import { findInPageOptions } from './find-options';
 import { app, dialog, shell, nativeTheme, BrowserWindow } from 'electron';
 import * as fs from 'node:fs';
 import {
@@ -200,14 +201,8 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
   guardedHandle(IPC.findInPage, (e, arg: unknown): void => {
     const a = (arg ?? {}) as { text?: unknown; forward?: unknown; findNext?: unknown };
     if (typeof a.text !== 'string' || a.text.length === 0) return;
-    // `findNext` is OMITTED rather than set to false for a new search.
-    // Electron 42 answers a request carrying an explicit `findNext: false`
-    // without ever emitting `found-in-page`, so the bar showed no match count
-    // at all; leaving the key out takes the same code path as the documented
-    // default and reports normally.
-    const options: Electron.FindInPageOptions = { forward: a.forward !== false };
-    if (a.findNext === true) options.findNext = true;
-    e.sender.findInPage(a.text, options);
+    // The renderer's `findNext` means "step"; Electron's means "new session" (find-options.ts).
+    e.sender.findInPage(a.text, findInPageOptions(a));
   });
 
   guardedHandle(IPC.stopFindInPage, (e): void => {
