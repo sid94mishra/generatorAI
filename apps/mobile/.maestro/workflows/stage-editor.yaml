@@ -28,7 +28,9 @@ env: {DEVICE_SCOPES: "write:workflows"}
 - tapOn: {id: stage-tab-session}
 - assertVisible: {id: stage-model}
 - tapOn: {id: stage-tab-tools}
-- assertVisible: {id: stage-tool-browser}
+# The platform tools sit below the skills and MCP lists on a phone.
+- scrollUntilVisible: {element: {id: stage-tool-browser}, direction: DOWN, timeout: 20000}
+- scrollUntilVisible: {element: {id: stage-tab-output}, direction: UP, timeout: 20000}
 - tapOn: {id: stage-tab-output}
 - tapOn: {id: stage-add-rule-contains}
 - assertVisible: {id: stage-rule-0}

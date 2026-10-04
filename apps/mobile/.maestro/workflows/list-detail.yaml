@@ -44,4 +44,8 @@ env: {DEVICE_SCOPES: "write:workflows"}
 # The confirmation names the workflow; its button repeats the label (the menu is gone by then).
 - extendedWaitUntil: {visible: "Delete Maestro draft.*", timeout: 10000}
 - tapOn: "Delete workflow"
+# Delete goes back one screen: here that is Sandbox Workflow's detail (the draft was opened over it by link).
+- extendedWaitUntil: {notVisible: {id: builder}, timeout: 15000}
+- openLink: generatorai:///workflows
 - extendedWaitUntil: {visible: {id: workflows}, timeout: 15000}
+- assertNotVisible: "Maestro draft.*"
