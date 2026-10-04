@@ -2744,6 +2744,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
         await sandboxLifecycleManager.destroyAll();
       }
 
+      // Persist every turn still streaming as cut short before the providers go away: a quit or restart
+      // mid-turn used to drop the whole turn (an orchestrator's six minutes of steps, delegations and an
+      // open question vanished; only the user's message survived).
+      await chatManagementService.flushInFlightTurns().catch((err: unknown) => {
+        logger.warn(`[Container] flushing in-flight turns failed: ${String(err)}`);
+      });
       await harness.shutdown();
       // Flush the security audit queue before the DB closes, otherwise the
       // final revoke/denied events would be written against a closed handle.

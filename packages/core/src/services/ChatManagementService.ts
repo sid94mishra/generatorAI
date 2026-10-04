@@ -213,6 +213,15 @@ export class ChatManagementService {
    */
   private turnFinalizers = new Map<string, (opts?: { partial?: boolean }) => Promise<void>>();
 
+  /**
+   * Shutdown: persist every turn still in flight as cut short (`complete = false`), the way a Stop does, so a
+   * quit or restart keeps what streamed — steps, delegations, cards — instead of only the user's message.
+   */
+  async flushInFlightTurns(): Promise<void> {
+    const pending = [...this.turnFinalizers.values()];
+    await Promise.all(pending.map((finalize) => finalize({ partial: true }).catch(() => undefined)));
+  }
+
   /** Chats whose current turn the user stopped, so the abort rejection that
    *  follows is not reported as an error. */
   private cancelledTurns = new Set<string>();
