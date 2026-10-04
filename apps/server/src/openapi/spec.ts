@@ -3635,6 +3635,8 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
                           taskName: { type: 'string' },
                           status: { type: 'string', enum: ['spawned', 'running', 'needs_review', 'completed', 'failed', 'cancelled'] },
                           model: { type: 'string' },
+                          agentRef: { type: 'string' },
+                          agentName: { type: 'string' },
                           reviewRounds: { type: 'integer' },
                           cancelledBy: { type: 'string', enum: ['user', 'orchestrator'] },
                           cancelledAt: { type: 'integer' },

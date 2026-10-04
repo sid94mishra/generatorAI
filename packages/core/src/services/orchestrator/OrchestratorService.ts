@@ -133,6 +133,9 @@ interface TaskRecord {
   parentSessionId: string;
   workerSessionId: string;
   model?: string;
+  /** The agent the worker was bound to, with its display name (the Tasks dock shows it). */
+  agentRef?: string;
+  agentName?: string;
   status: BackgroundTaskStatus;
   /**
    * W24 — the spawn wave this worker belongs to. Convergence is a property of
@@ -648,6 +651,7 @@ export class OrchestratorService {
 
     // A worker agent must be one this orchestrator is allowed to spawn.
     let workerAgentRef: string | undefined;
+    let workerAgentName: string | undefined;
     if (brief.agentRef) {
       const assignable = await this.listAssignableAgents(parentChatId);
       const hit = assignable.find((a) => a.ref === brief.agentRef);
@@ -660,6 +664,7 @@ export class OrchestratorService {
         };
       }
       workerAgentRef = hit.ref;
+      workerAgentName = hit.name;
     }
 
     // Warm-first: if a wave leader for this parent is still priming, wait
@@ -763,6 +768,8 @@ export class OrchestratorService {
       parentSessionId: parent.sessionId,
       workerSessionId: worker.sessionId,
       model: workerModel,
+      ...(workerAgentRef ? { agentRef: workerAgentRef } : {}),
+      ...(workerAgentName ? { agentName: workerAgentName } : {}),
       status: 'running',
       wave: this.waveCount.get(parentChatId) ?? 1,
       reviewRounds: 0,
@@ -1008,6 +1015,8 @@ export class OrchestratorService {
       taskName: string;
       status: BackgroundTaskStatus;
       model?: string;
+      agentRef?: string;
+      agentName?: string;
       reviewRounds: number;
       cancelledBy?: BackgroundTaskCancelledBy;
       cancelledAt?: number;
@@ -1021,6 +1030,8 @@ export class OrchestratorService {
         taskName: t.taskName,
         status: t.status,
         model: t.model,
+        ...(t.agentRef ? { agentRef: t.agentRef } : {}),
+        ...(t.agentName ? { agentName: t.agentName } : {}),
         reviewRounds: t.reviewRounds,
         ...cancellationFields(t.status, t.cancellation),
       }));
@@ -1046,6 +1057,8 @@ export class OrchestratorService {
         taskName: c.backgroundTask?.taskName ?? c.name,
         status,
         model: c.model,
+        ...(c.agentRef ? { agentRef: c.agentRef } : {}),
+        ...(c.agentSnapshot?.driving?.name ? { agentName: c.agentSnapshot.driving.name } : {}),
         reviewRounds: 0,
         ...(status === 'cancelled' && c.backgroundTask?.cancelledBy && c.backgroundTask.cancelledAt !== undefined
           ? { cancelledBy: c.backgroundTask.cancelledBy, cancelledAt: c.backgroundTask.cancelledAt }

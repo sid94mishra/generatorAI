@@ -86,6 +86,9 @@ export interface BackgroundTaskListItem {
   taskName: string;
   status: BackgroundTaskStatus;
   model?: string;
+  /** The agent the orchestrator bound the worker to (`agentRef` on spawn), and its name — DockTasks rows show it. */
+  agentRef?: string;
+  agentName?: string;
   reviewRounds: number;
   /** G-20: present while `status === 'cancelled'`. */
   cancelledBy?: BackgroundTaskCancelledBy;

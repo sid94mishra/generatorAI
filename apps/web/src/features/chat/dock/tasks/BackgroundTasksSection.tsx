@@ -118,13 +118,15 @@ function TaskMeta({ task, showModel = true }: { task: BackgroundTaskListItem; sh
   const cancelled = task.status === 'cancelled' ? cancelledLine(task) : null;
   if (cancelled) parts.push(cancelled);
   const model = showModel ? task.model : undefined;
-  if (!model && parts.length === 0) return null;
+  const agent = showModel ? task.agentName : undefined;
+  if (!model && !agent && parts.length === 0) return null;
   return (
     <div className="flex min-w-0 items-center gap-1.5 text-small text-fg-3">
+      {agent ? <span className="shrink-0 text-fg-2">{agent}</span> : null}
       {model ? <span className="truncate font-mono">{model}</span> : null}
       {parts.map((p, i) => (
         <span key={p} className="shrink-0">
-          {model || i > 0 ? '· ' : ''}
+          {model || agent || i > 0 ? '· ' : ''}
           {p}
         </span>
       ))}
@@ -187,7 +189,7 @@ function TaskRow({
 
   return (
     <li className="group flex items-start gap-2 px-3 py-2.5 hover:bg-hover">
-      <Avatar name={task.taskName} size={24} decorative className="mt-0.5" />
+      <Avatar name={task.agentName ?? task.taskName} size={24} decorative className="mt-0.5" />
       <div
         role="button"
         tabIndex={0}
@@ -304,11 +306,12 @@ function TaskDetail({
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 pt-2 pb-3">
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-2">
-            <Avatar name={task.taskName} size={24} decorative />
+            <Avatar name={task.agentName ?? task.taskName} size={24} decorative />
             <h3 className="min-w-0 truncate text-title text-fg">{task.taskName}</h3>
           </div>
           <div className="flex flex-wrap items-center gap-2 pl-8">
             <TaskStatus status={task.status} />
+            {task.agentName ? <span className="text-small text-fg-2">{task.agentName}</span> : null}
             {task.model ? <span className="font-mono text-small text-fg-3">{task.model}</span> : null}
             {elapsed ? <Count>{elapsed}</Count> : null}
           </div>
