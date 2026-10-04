@@ -273,7 +273,11 @@ export class HookExecutor {
 
         switch (hook.failurePolicy) {
           case 'abort':
-            return { shouldContinue: false, mergedResult };
+            // Say which hook failed and why: the run used to end with only "aborted by an on_run_start hook".
+            return {
+              shouldContinue: false,
+              mergedResult: { ...mergedResult, abortReason: `Hook '${hook.name}' failed: ${String(result.error ?? 'unknown error').slice(0, 500)}` },
+            };
           case 'skip':
           case 'continue':
             break;

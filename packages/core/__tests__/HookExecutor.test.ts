@@ -243,6 +243,8 @@ describe('HookExecutor', () => {
       };
       const ok = await exec.executePhase('pre_run', [hook], makeContext());
       expect(ok.shouldContinue).toBe(false); // abort on failure
+      // The run's error names the hook and why it failed, not just "aborted by a hook".
+      expect(ok.mergedResult.abortReason).toMatch(new RegExp(`^Hook '${hook.name}' failed: .+`));
     });
 
     it('falls back to modulePath subprocess when handlerName is absent', async () => {
