@@ -18,6 +18,11 @@ env: {DEVICE_SCOPES: "admin:settings"}
 - tapOn: {id: agent-editor-description}
 - inputText: Checks the Maestro flow end to end
 # The keyboard covers the instructions field (a tap "on" it landed in the description): bring it to the centre.
+# Android counts a field under the keyboard as visible: close the keyboard first.
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
 - scrollUntilVisible: {element: {id: agent-editor-instructions}, direction: DOWN, centerElement: true}
 - tapOn: {id: agent-editor-instructions}
 - inputText: Say hello.

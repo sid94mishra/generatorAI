@@ -6,6 +6,8 @@ type Replay = (scope: string, id: string, after: number) => Promise<{ rows: Arra
 export interface LifecycleStream extends Stream {
   suspend(): void;
   resume(): Promise<void>;
+  /** True while the transport is closed (suspended, or a resume still pending). */
+  isSuspended(): boolean;
 }
 
 /** Keep mounted subscriptions and their cursors while the native process sleeps. */
@@ -57,6 +59,7 @@ export function createLifecycleStream(create: () => Stream, replay: Replay): Lif
       };
     },
     suspend,
+    isSuspended() { return paused || pending !== null; },
     resume() {
       if (disposed) return Promise.resolve();
       if (pending) return pending;
