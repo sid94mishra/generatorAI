@@ -77,6 +77,11 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
     },
   };
 
+  // A wait blocks up to workerTimeoutMs (default 5 min); the provider's per-tool budget (120 s) abandoned
+  // check_background_agents({ wait: true }) mid-wait ("exceeded its 120000ms budget"), and three such strikes
+  // would have quarantined the orchestrator's only way to read its workers.
+  const waitBudgetMs = orchestratorService.getConfig().workerTimeoutMs + 60_000;
+
   const checkAll: ToolDefinition = {
     name: 'check_background_agents',
     description:
@@ -90,6 +95,7 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
       },
     },
     skipPermission: true,
+    timeoutMs: waitBudgetMs,
     owner: owner ?? `orchestrator:${parentId}`,
     handler: async (args) => {
       const wait = Boolean((args as { wait?: unknown }).wait);
@@ -110,6 +116,7 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
       required: ['taskId'],
     },
     skipPermission: true,
+    timeoutMs: waitBudgetMs,
     owner: owner ?? `orchestrator:${parentId}`,
     handler: async (args) => {
       const a = args as { taskId?: unknown; wait?: unknown };

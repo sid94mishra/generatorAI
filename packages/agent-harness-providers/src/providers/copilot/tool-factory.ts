@@ -45,6 +45,7 @@ export function createSdkTool(
       const result = semaphore
         ? await semaphore.runGuarded(toolDef.name, runHandler, {
             ...(conversationId !== undefined ? { conversationId } : {}),
+            ...(toolDef.timeoutMs !== undefined ? { timeoutMs: toolDef.timeoutMs } : {}),
           })
         : await runHandler();
 

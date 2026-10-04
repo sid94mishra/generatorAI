@@ -146,6 +146,15 @@ describe('W13 — claude-agent tool factory', () => {
     expect(out.isError).toBe(true);
     expect(out.content[0]?.text).toMatch(/exceeded its 60ms budget/);
   });
+
+  it("honours a tool's own longer budget (a wait for background workers)", async () => {
+    const sem = new ToolSemaphore(8, { perItemTimeoutMs: 30 });
+    const slow = { ...def('Wait', () => new Promise<string>((r) => setTimeout(() => r('done'), 80))), timeoutMs: 500 };
+    const [handler] = claudeHandlers([slow], sem);
+    const out = await handler!({});
+    expect(out.isError).toBeFalsy();
+    expect(out.content[0]?.text).toContain('done');
+  });
 });
 
 describe('W13 — copilot tool factory', () => {

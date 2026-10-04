@@ -77,6 +77,7 @@ export function buildClaudeAgentMcpTools(
           const result = semaphore
             ? await semaphore.runGuarded(def.name, runHandler, {
                 ...(conversationId !== undefined ? { conversationId } : {}),
+                ...(def.timeoutMs !== undefined ? { timeoutMs: def.timeoutMs } : {}),
               })
             : await runHandler();
           // MCP content blocks carry images natively, so an attachment goes on

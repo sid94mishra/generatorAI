@@ -375,6 +375,11 @@ export interface ToolDefinition {
    */
   skipPermission?: boolean;
   /**
+   * The tool's own run budget (ms) when it legitimately blocks longer than the provider's per-tool default
+   * (`GENERATORAI_TOOL_TIMEOUT_MS`, 120 s) — e.g. waiting for background workers. Omitted: the default.
+   */
+  timeoutMs?: number;
+  /**
    * TOL-02 — declarative list of permissions the tool may exercise.
    * Evaluated by the domain `PermissionPolicy` before execution; also
    * surfaced in docs / MCP metadata. Empty/omitted means "no declared
