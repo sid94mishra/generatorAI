@@ -34,7 +34,9 @@ export interface CompareModes {
 export function compareModesOf(options: readonly CompareOption[]): CompareModes {
   const turn = options.find((o) => o.value.startsWith('turn:'))?.value ?? null;
   const branchOption = options.find((o) => o.value.startsWith('ref:'));
-  const ref = branchOption?.label.match(/^Branch base \((.*)\)$/)?.[1];
+  const rawRef = branchOption?.label.match(/^Branch base \((.*)\)$/)?.[1];
+  // A fork's base is a commit, not a branch name: show it the way git does (7 characters), not all 40.
+  const ref = rawRef && /^[0-9a-f]{40}$/i.test(rawRef) ? rawRef.slice(0, 7) : rawRef;
   return {
     turn,
     branch: branchOption ? { value: branchOption.value, label: ref ? `Branch vs ${ref}` : 'Branch' } : null,
