@@ -251,11 +251,11 @@ export function NewChatDialog() {
             <h3 className="text-ui font-semibold text-fg">Who</h3>
             <span className="text-small text-fg-3">The agent brings its own instructions, skills and MCP servers.</span>
           </div>
-          <div className="grid grid-cols-3 items-end gap-x-3 gap-y-1.5">
-            {/* Column labels (board NewChat); each control keeps its own accessible name. */}
+          {/* Column labels (board NewChat); each control keeps its own accessible name. Effort gets its own row:
+              a model with five or six levels truncated every label in a third of the dialog. */}
+          <div className="grid grid-cols-2 items-end gap-x-3 gap-y-1.5">
             <span className="text-small text-fg-2">Agent</span>
             <span className="text-small text-fg-2">Model</span>
-            <span className="text-small text-fg-2">{reasoningLevels.length > 0 ? 'Effort' : null}</span>
             <AgentPicker
               value={agentRef}
               onChange={(ref, agent) => {
@@ -271,17 +271,18 @@ export function NewChatDialog() {
               showSummary={false}
             />
             <ModelPicker value={model} onChange={setModel} variant="field" ariaLabel="Model" />
-            {reasoningLevels.length > 0 ? (
+          </div>
+          {reasoningLevels.length > 0 ? (
+            <div className="flex items-center gap-3">
+              <span className="text-small text-fg-2">Effort</span>
               <SegmentedControl
                 label="Reasoning effort"
                 value={effectiveEffort ?? reasoningLevels[0] ?? 'medium'}
                 onValueChange={setReasoningEffort}
                 items={reasoningLevels.map((level) => ({ value: level, label: reasoningEffortLabel(level) }))}
               />
-            ) : (
-              <div />
-            )}
-          </div>
+            </div>
+          ) : null}
           <div className="flex items-center gap-2 text-small text-fg-3">
             <Icon concept="skills" size={14} />
             {capabilitySummary}

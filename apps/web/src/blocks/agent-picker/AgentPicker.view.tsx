@@ -120,12 +120,11 @@ export function AgentPickerView({
                 trailingIcon="chevron-down"
                 disabled={disabled}
                 data-testid={testId}
-                className={cn(
-                  'w-full justify-between border-line-strong bg-sunken font-normal data-popup-open:border-focus',
-                  selected && 'pr-10',
-                )}
+                className="w-full justify-between border-line-strong bg-sunken font-normal data-popup-open:border-focus"
               >
-                <span className="flex min-w-0 items-center gap-2">
+                {/* Room for the Clear button, which sits between the name and the chevron (it used to cover the
+                    chevron: the reserve was on the button, so the chevron moved under it). */}
+                <span className={cn('flex min-w-0 items-center gap-2', selected && !disabled && 'pr-7')}>
                   {selected ? (
                     <>
                       <Avatar name={selected.name} size={20} decorative />
