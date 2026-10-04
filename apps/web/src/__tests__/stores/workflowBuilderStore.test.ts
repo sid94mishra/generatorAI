@@ -132,6 +132,19 @@ describe('workflowBuilderStore', () => {
     expect((graph.stages[1] as AgentStage).context.from).toEqual(['research']);
   });
 
+  it('renaming the selected stage keeps the selection (the inspector stays mounted); selecting another changes it', () => {
+    store().loadRecord(makeRecord());
+    store().selectNode('analyze');
+    const seq = store().selectionSeq;
+    expect(store().renameStageKey('analyze', 'research')).toBeNull();
+    expect(store().selectedNodeId).toBe('research');
+    expect(store().selectionSeq).toBe(seq);
+    store().selectNode('research');
+    expect(store().selectionSeq).toBe(seq);
+    store().selectNode('build');
+    expect(store().selectionSeq).toBe(seq + 1);
+  });
+
   // ── Wholesale graph: clearing a field removes it (D-4) ──
 
   it('setting a field to undefined removes it from the saved graph', () => {

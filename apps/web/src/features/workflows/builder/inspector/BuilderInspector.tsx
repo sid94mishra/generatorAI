@@ -28,6 +28,7 @@ export interface BuilderInspectorProps {
 export function BuilderInspector({ settingsTab, onSettingsTabChange }: BuilderInspectorProps) {
   const selectedNodeId = useWorkflowBuilderStore((s) => s.selectedNodeId);
   const selectedEdgeId = useWorkflowBuilderStore((s) => s.selectedEdgeId);
+  const selectionSeq = useWorkflowBuilderStore((s) => s.selectionSeq);
   const stage = useWorkflowBuilderStore((s) => s.nodes.find((n) => n.id === s.selectedNodeId)?.data.stage);
   const allIssues = useWorkflowBuilderStore((s) => s.issues);
   const updateStage = useWorkflowBuilderStore((s) => s.updateStage);
@@ -47,12 +48,13 @@ export function BuilderInspector({ settingsTab, onSettingsTabChange }: BuilderIn
   const kind = stage.kind;
   const tab = tabs[kind];
   const onTabChange = (next: string) => setTabs((t) => ({ ...t, [kind]: next }));
-  // Keyed by stage so local drafts (key, JSON, names) reset on selection.
+  // Keyed by the selection so local drafts (key, JSON, names) reset when another stage is selected — not by the
+  // stage key, which a rename changes mid-edit (the remount swallowed the next click and keystrokes).
   return stage.kind === 'agent' ? (
-    <AgentStageInspector key={stage.key} stage={stage} issues={stageIssues} onUpdate={onUpdate} tab={tab} onTabChange={onTabChange} />
+    <AgentStageInspector key={selectionSeq} stage={stage} issues={stageIssues} onUpdate={onUpdate} tab={tab} onTabChange={onTabChange} />
   ) : (
     <KindStageInspector
-      key={stage.key}
+      key={selectionSeq}
       stage={stage as OtherStageSpec}
       issues={stageIssues}
       onUpdate={onUpdate}

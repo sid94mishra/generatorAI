@@ -114,6 +114,12 @@ interface WorkflowBuilderState {
   edges: Edge<StageEdgeData>[];
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
+  /**
+   * Changes when the person selects another stage or edge, not when the selected stage's key is renamed
+   * (node ids are stage keys). The inspector is keyed by it: keyed by the stage key, a rename remounted it
+   * mid-edit and the next click and keystrokes fell to the canvas (its "A" shortcut opened Add stage).
+   */
+  selectionSeq: number;
   /** A request to bring a stage into view on the canvas (an issue was clicked). */
   focusRequest: { key: string; token: number } | null;
 
@@ -561,6 +567,7 @@ function blankState() {
     edges: [] as Edge<StageEdgeData>[],
     selectedNodeId: null,
     selectedEdgeId: null,
+    selectionSeq: 0,
     focusRequest: null as { key: string; token: number } | null,
     isDirty: false,
     isSaving: false,
@@ -902,6 +909,7 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
       ),
       edges: [...s.edges, ...copiedEdges],
       selectedNodeId: newKey,
+      selectionSeq: state.selectionSeq + 1,
       selectedEdgeId: null,
       isDirty: true,
     }));
@@ -1004,6 +1012,7 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
       nodes: fitContainers(orderParentsFirst(nodes)),
       edges,
       selectedNodeId: containerKey,
+      selectionSeq: state.selectionSeq + 1,
       selectedEdgeId: null,
       isDirty: true,
     });
@@ -1131,14 +1140,23 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   },
 
   // ── Selection ──
-  selectNode: (nodeId) => set({ selectedNodeId: nodeId, selectedEdgeId: null }),
-  selectEdge: (id) => set({ selectedEdgeId: id, selectedNodeId: null }),
+  selectNode: (nodeId) =>
+    set((s) =>
+      s.selectedNodeId === nodeId && s.selectedEdgeId === null
+        ? s
+        : { selectedNodeId: nodeId, selectedEdgeId: null, selectionSeq: s.selectionSeq + 1 },
+    ),
+  selectEdge: (id) =>
+    set((s) =>
+      s.selectedEdgeId === id && s.selectedNodeId === null ? s : { selectedEdgeId: id, selectedNodeId: null, selectionSeq: s.selectionSeq + 1 },
+    ),
   focusStage: (key) => {
     if (!get().nodes.some((n) => n.id === key)) return;
     set((s) => ({
       nodes: s.nodes.map((n) => (n.selected === (n.id === key) ? n : { ...n, selected: n.id === key })),
       selectedNodeId: key,
       selectedEdgeId: null,
+      ...(s.selectedNodeId === key ? {} : { selectionSeq: s.selectionSeq + 1 }),
       focusRequest: { key, token: (s.focusRequest?.token ?? 0) + 1 },
     }));
   },
