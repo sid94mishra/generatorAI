@@ -273,9 +273,10 @@ export async function pairTarget(session, target, { repair = false, noConfirm = 
   // The device name keeps its default ("My iPhone", "My phone", …): the Name field auto-capitalises and
   // auto-corrects, so typed text never verifies on iOS (agent-device fill → COMMAND_FAILED), and the new device is
   // identified by its id instead (findNewPairing). No keyboard opens, so nothing covers "Pair".
-  await scrollAndPress(target, 'pairing-confirm', ['paired-continue', 'pairing-error']);
+  await scrollAndPress(target, 'pairing-confirm', ['paired', 'paired-continue', 'pairing-error']);
   // The success step (`/paired`): Continue skips the optional approval-key setup (Settings › Security later).
-  await waitForIdentifier(target, ['paired-continue', 'pairing-error'], STEP_WAIT_MS);
+  // Its screen id, not Continue: on a phone Continue sits below the scope list, and Android's tree has only what is on screen.
+  await waitForIdentifier(target, ['paired', 'paired-continue', 'pairing-error'], STEP_WAIT_MS);
   if (await hasIdentifier(target, 'pairing-error')) throw new Error(`Pairing ${target.name} failed on the consent step; see the app's error callout`);
   await scrollAndPress(target, 'paired-continue', ['home-new-chat', 'menu-button']);
   // Home on a phone (sidebar toggle `menu-button`) or a tablet (persistent sidebar; `home-new-chat` either way).
