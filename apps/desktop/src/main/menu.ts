@@ -25,7 +25,7 @@
 
 import { app, Menu, shell, type MenuItemConstructorOptions } from 'electron';
 import * as path from 'node:path';
-import { getWindowManager } from './window-manager';
+import { getWindowManager, navigateHistory } from './window-manager';
 import { getServerManager } from './server-manager';
 import { resolvePaths } from './paths';
 import { loadSettings } from './config';
@@ -316,22 +316,27 @@ export function buildMenu(actions: MenuActions): void {
       // because it also surfaces a window that was hidden to the tray.
       ...NAV_DESTINATIONS.map((d) => commandItem(d.command, { label: d.label, click: () => nav(d.path) })),
       { type: 'separator' },
+      // D-93: on Windows/Linux Alt+←/→ are shown but not registered — the renderer handles them,
+      // so a surface that owns its keys (the terminal's word-back) keeps them. ⌘[ / ⌘] stay accelerators.
       commandItem('nav.back', {
         enabled: navHistory().back,
+        ...(isMac ? {} : { registerAccelerator: false }),
         click: () => {
-          const wc = wm.getMainWindow()?.webContents;
-          if (wc?.navigationHistory.canGoBack()) wc.navigationHistory.goBack();
+          const win = wm.getMainWindow();
+          if (win) navigateHistory(win, 'back');
         },
       }),
       commandItem('nav.forward', {
         enabled: navHistory().forward,
+        ...(isMac ? {} : { registerAccelerator: false }),
         click: () => {
-          const wc = wm.getMainWindow()?.webContents;
-          if (wc?.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
+          const win = wm.getMainWindow();
+          if (win) navigateHistory(win, 'forward');
         },
       }),
       { type: 'separator' },
       commandItem('sidebar.toggle', { type: 'checkbox', checked: menuState.sidebarOpen }),
+      commandItem('activity.toggle'),
       commandItem('dock.toggle', { type: 'checkbox', checked: menuState.rightPaneOpen }),
       { type: 'separator' },
       {

@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { COMMANDS, NAV_DESTINATIONS, type CommandId } from '@generatorai/shared/ui-contract';
 
 interface Item {
+  registerAccelerator?: boolean;
   label?: string;
   role?: string;
   type?: string;
@@ -181,6 +182,21 @@ describe.each([true, false])('application menu (mac=%s)', (mac) => {
     expect(find(items, 'Forward')?.accelerator).toBe(expected('nav.forward', mac));
     expect(find(items, 'Reload')?.accelerator).toBe(expected('window.reload', mac));
     expect(find(items, 'Toggle Developer Tools')?.accelerator).toBe(expected('devtools.toggle', mac));
+  });
+
+  it('D-93: Back / Forward show their chord; Windows / Linux leave Alt+←/→ to the renderer (key-owning surfaces keep them)', async () => {
+    const { items } = await loadMenu(mac);
+    for (const label of ['Back', 'Forward']) {
+      expect(find(items, label)?.registerAccelerator).toBe(mac ? undefined : false);
+    }
+  });
+
+  it('D-92: View ▸ Toggle Activity Column sends activity.toggle with its chord', async () => {
+    const { items } = await loadMenu(mac);
+    const item = find(items, 'Toggle Activity Column')!;
+    expect(item.accelerator).toBe(expected('activity.toggle', mac));
+    item.click?.();
+    expect(state.sendCommand).toHaveBeenCalledWith('activity.toggle');
   });
 
   it('accel() never yields a Mod or a sequence', async () => {

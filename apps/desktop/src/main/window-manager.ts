@@ -47,6 +47,16 @@ export function shouldHideOnClose(state: { minimizeToTray: boolean; quitting: bo
   return state.minimizeToTray && !state.quitting;
 }
 
+/** One step through the window's session history, when it can move that way (D-93). */
+export function navigateHistory(win: Pick<BrowserWindow, 'isDestroyed' | 'webContents'>, direction: 'back' | 'forward'): boolean {
+  if (win.isDestroyed()) return false;
+  const history = win.webContents.navigationHistory;
+  if (direction === 'back' ? !history.canGoBack() : !history.canGoForward()) return false;
+  if (direction === 'back') history.goBack();
+  else history.goForward();
+  return true;
+}
+
 export class WindowManager {
   private mainWindow: BrowserWindow | null = null;
   private splashWindow: BrowserWindow | null = null;
@@ -319,6 +329,19 @@ export class WindowManager {
     // sidebar row. Chromium's session history is the authority (as for the
     // menu, see `menu.ts`); SPA route changes arrive here.
     win.webContents.on('did-navigate-in-page', () => this.emitNavHistory(win));
+    // D-93: the mouse's Back / Forward buttons and the keyboard's Browser Back
+    // / Forward keys (Windows, Linux) and the trackpad swipe (macOS, when
+    // "Swipe between pages" is a two/three-finger swipe) move through the same
+    // session history as the menu and the buttons. macOS mouse buttons 4/5
+    // reach the page and are handled in the renderer (useCommandHost).
+    win.on('app-command', (_event, command) => {
+      if (command === 'browser-backward') navigateHistory(win, 'back');
+      else if (command === 'browser-forward') navigateHistory(win, 'forward');
+    });
+    win.on('swipe', (_event, direction) => {
+      if (direction === 'left') navigateHistory(win, 'back');
+      else if (direction === 'right') navigateHistory(win, 'forward');
+    });
 
     // Security: open external links in the OS browser, never new Electron windows.
     win.webContents.setWindowOpenHandler(({ url }) => {

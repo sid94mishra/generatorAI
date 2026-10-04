@@ -48,6 +48,8 @@ const { FakeBrowserWindow, openExternal } = vi.hoisted(() => {
     navigationHistory = {
       canGoBack: () => this.history.back,
       canGoForward: () => this.history.forward,
+      goBack: vi.fn(),
+      goForward: vi.fn(),
     };
     emit(event: string, ...args: unknown[]) {
       for (const fn of this.listeners.get(event) ?? []) fn(...args);
@@ -658,5 +660,23 @@ describe('nav history push (06 §3.4)', () => {
     wc.history.forward = true;
     finishLoad(win, `${APP}/`);
     expect(historyPushes(win).at(-1)).toEqual({ back: true, forward: true });
+  });
+});
+
+describe('D-93: mouse buttons, Browser keys and swipe move through the session history', () => {
+  it('app-command browser-backward / -forward and swipe left / right step back / forward, only where history can move', () => {
+    const { win } = makeWindow();
+    const history = win.webContents.navigationHistory;
+    win.emit('app-command', {}, 'browser-backward');
+    expect(history.goBack).not.toHaveBeenCalled();
+    win.webContents.history = { back: true, forward: true };
+    win.emit('app-command', {}, 'browser-backward');
+    win.emit('app-command', {}, 'browser-forward');
+    win.emit('swipe', {}, 'left');
+    win.emit('swipe', {}, 'right');
+    win.emit('app-command', {}, 'media-play-pause');
+    win.emit('swipe', {}, 'up');
+    expect(history.goBack).toHaveBeenCalledTimes(2);
+    expect(history.goForward).toHaveBeenCalledTimes(2);
   });
 });
