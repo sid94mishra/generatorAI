@@ -121,6 +121,7 @@ import LGroup from 'lucide-react-native/icons/group';
 import LUngroup from 'lucide-react-native/icons/ungroup';
 import LBraces from 'lucide-react-native/icons/braces';
 import LWand from 'lucide-react-native/icons/wand-sparkles';
+import LFilter from 'lucide-react-native/icons/list-filter';
 import LWrap from 'lucide-react-native/icons/text-wrap';
 import LHide from 'lucide-react-native/icons/eye-off';
 import LGrip from 'lucide-react-native/icons/grip-vertical';
@@ -249,6 +250,7 @@ export const LUCIDE_ALL = {
   'ungroup': LUngroup,
   'braces': LBraces,
   'wand': LWand,
+  'filter': LFilter,
   'wrap': LWrap,
   'hide': LHide,
   'grip': LGrip,

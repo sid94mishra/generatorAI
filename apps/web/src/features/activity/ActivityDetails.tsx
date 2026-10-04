@@ -47,7 +47,7 @@ import type { KeyValueItem } from '@/ui/patterns/KeyValueList/KeyValueList.js';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { StatusBadge } from '@/ui/primitives/StatusBadge/StatusBadge.js';
-import { askAnswers, kindIcon, kindLabel, openLabel, stopLabel } from './activityView.js';
+import { askAnswers, kindIcon, kindLabel, openLabel, stopLabel, stopTarget } from './activityView.js';
 
 export interface ActivityDetailsProps {
   entry: ActivityEntry;
@@ -344,13 +344,13 @@ export function ActivityDetails({ entry, now, modelLabel, onDone, onNavigate, ti
   }
 
   // ── Footer ──
-  const stoppable = entry.live?.stoppable ?? entry.stoppable;
+  const stopItem = stopTarget(entry);
   const footerEnd =
     entry.group === 'failed' && entry.dismissKey ? (
       <Button size="sm" variant="ghost" onClick={() => { dismiss(entry.dismissKey!); onDone(); }}>
         Dismiss
       </Button>
-    ) : stoppable && entry.live ? (
+    ) : stopItem ? (
       <Button
         size="sm"
         variant="danger-ghost"
@@ -358,7 +358,7 @@ export function ActivityDetails({ entry, now, modelLabel, onDone, onNavigate, ti
         loading={act.isPending && act.variables?.action === 'stop'}
         disabled={busy}
         aria-label={`${stopLabel(entry)} — ${entry.title}`}
-        onClick={() => act.mutate({ item: entry.live!, action: 'stop' }, { onSuccess: onDone })}
+        onClick={() => act.mutate({ item: stopItem, action: 'stop' }, { onSuccess: onDone })}
       >
         {stopLabel(entry)}
       </Button>

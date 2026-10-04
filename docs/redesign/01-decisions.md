@@ -616,6 +616,78 @@ and web, at 1440×900 and 1100×760 (`reviews/desktop-orchestrator-test.md`, add
   stages (Workspace `bottom`, the chat composer's frame via Composer `docked`, "To stage <name>"), like the chat's;
   the run footer's "Show event timeline" went (the header's More menu keeps it).
 
+### D-92 Activity column as built (Enhancements boards, 2026-10-04) — Final
+Boards EnhActivityColumn, EnhSidebarHidden, EnhRailQuickAccess, EnhActivityCards, EnhActivityPopovers. Analysis and
+evidence: `reviews/activity-column.md`, `shots/activity/DIFF.md`.
+- **Data, no polling.** Live cards = the attention feed (G-01, SSE). Failed + Recent = G-11 `?since=<local midnight>`
+  (limit 100), refetched when the feed loses an item plus one follow-up 1.5 s later (a finished turn's list row lands a
+  moment after the feed drops the chat). A popover reads the entity's existing endpoints only while open and refetches
+  when its card changes (`useWorkflowRun` / `useBackgroundTasks` gain `poll: false`). Items carry `meta` (agent, model,
+  an orchestrator's worker tally kept current by `chat.background_task.*`, an automation's trigger) and recent chats
+  `unread` — additive, OpenAPI `ActivityMeta` / `RecentActivityItem`.
+- **Shared rules** (`client-core` `activity/`, vocabulary in `shared/ui-contract/activity.ts`, for mobile too): one card
+  per entity (asks grouped, oldest first; a worker's ask is shown on its orchestrator, which then is not also Running);
+  a live entity is never also listed as finished; order **Needs you → Failed → Running → Recent** (the drawing — the
+  board's comment said Running before Failed; actionable first wins); the header badges and kind-tab counts count
+  cards, before the kind filter; a failure stays until dismissed or the entity runs again, and a dismissal names that
+  failure (`key@endedAt`, per device — there is no per-user server store, and the run itself stays failed in its list).
+- **Not drawn (D-36):** the server filter and the per-card server name (the feed is the connected server's; other
+  origins are unreachable from the page — the slot shows the project instead); the dimmed "server offline" state;
+  "Run #248" (no run numbers, D-82); "Mute updates" (no such setting); a chat popover's recent tool steps and context
+  gauge; "Switch model" on a failed chat.
+- **Geometry.** 288 wide, resizable 248–400 from its right edge (pointer, ←/→ 16 px, Home/End, double-click resets),
+  persisted. It docks only at ≥ 1200 px **and** while the main card keeps 720 px (`SHELL.activityColumn`); otherwise it
+  opens as an overlay over the card (`data-gai-overlay="sheet"`, closes on Esc, an outside press or opening a card).
+  Dragging never undocks it (clamped to the room left). While it is open the sidebar's Needs you / Running move into it.
+- **Rail quick access.** When the column is not docked the rail shows live cards as status-tinted kind tiles (amber
+  needs you, red failed, blue running) filling only the space the rail has left, then "+N" (opens the column). They
+  replace the rail's running counter (`rail-running` / `RailCounterButton` removed). A tile's hover / focus / click
+  opens the same popover.
+- **Keyboard and screen readers.** `activity.toggle` (web `Mod+.`, ⌘. / Ctrl+.) in the registry, palette and View
+  menu; the toggle sits in the sidebar header and the rail. Opening by toggle or command focuses the open page's card;
+  one card is in the tab order (roving), ↑/↓/Home/End move, Enter opens, → enters the popover (← or Esc returns to the
+  card without reopening it), Esc then closes the column and focus returns to the toggle. The popover also opens on
+  keyboard focus (300 ms, like hover). A card is one link named "Kind: Title", described by its status, meta and time;
+  the scroller is not a tab stop.
+- **Contrast.** On the amber / red tints the card's secondary text is fg-2 / fg (fg-3 fails 4.5:1 there; fg-2 on
+  err-bg is 4.49:1 in Solarized light). Kind tabs use `SegmentedControl distribute="content"` so "All 12" never
+  truncates beside icon-only tabs.
+- **Inline actions** use the existing endpoints (`useAttentionAction` gains `deny`, `reject` and automation stop):
+  Allow once / Deny (chat tool gates), Approve / Reject (plans, stage approvals), Stop / Cancel run / Stop all, Retry
+  (G-11), Dismiss, Open; a card's context menu adds Pin / Unpin (chats) and Copy link. A computer-consent ask, a
+  question and a stage input are opened, never answered inline (as on Home).
+
+### D-93 Back / Forward on desktop (owner, 2026-10-04) — Final
+"On the desktop app the user cannot go back": the strip (Windows, Linux custom title bar) and the Linux native sidebar
+row had buttons, macOS and every rail had none, and nothing handled mouse buttons.
+- **Buttons** (desktop only; a browser tab has its own, so the web draws none): macOS — at the end of the 44 px
+  traffic-light row (drag region, buttons no-drag) and, with the sidebar collapsed, in the rail under Expand; Windows /
+  Linux custom title bar — the strip (unchanged, visible in both sidebar modes); Linux native frame — the sidebar's
+  top row and the rail. Disabled from Chromium's session history (main pushes `canGoBack/canGoForward`); tooltips name
+  the host chord.
+- **Keys.** `nav.back` / `nav.forward` become renderer commands (the palette lists them; web binding stays null).
+  macOS ⌘[ / ⌘] stay menu accelerators (no surface uses them). Windows / Linux Alt+← / Alt+→ are shown in the View
+  menu but not registered (`registerAccelerator: false`): the renderer handles them, so a key-owning surface
+  (`data-gai-keys="own"`, the terminal's word-back) keeps them; they fire in text fields, as in Chrome.
+- **Mouse and gestures.** Windows / Linux: `app-command` `browser-backward` / `browser-forward` (mouse buttons 4/5 and
+  keyboard Browser keys) in main. macOS: mouse buttons 4/5 reach the page and are handled in the renderer; the trackpad
+  `swipe` event in main (only when "Swipe between pages" is set to two/three fingers). All of them step the same
+  session history as the menu (`navigateHistory`). Known limit: `app-command` with the pointer over the dock's native
+  browser view moves the app, not that view.
+
+### D-94 Attention feed corrections from the desktop activity test (2026-10-04) — Final
+Found while driving real chats, an orchestrator, workflow runs and automations in the Electron app:
+- **Approval waits wait on a person.** An approval `wait` stage parks as `waiting` with `{kind:'wait',type:'approval'}`;
+  the feed listed its run as Running "Waiting" and Home never showed it. It is now a Needs you `stage_approval`
+  (Approve / Reject through the run's `approve` command).
+- **Stage position.** Instances created together were ordered alphabetically by path ("Stage 2 of 6" for the 4th
+  stage); creation time, then graph order, decides. Stage asks carry `progress {step, of}` (card meta and stage bar).
+- **An automation's run rolls up into its execution** (one Running item, one count, like workers into their
+  orchestrator — D-87); its asks are still listed. G-11 does the same for finished runs, and a failed run or execution
+  without an error names its failed stage and why ("Typecheck: pnpm typecheck exited 2"). Run titles drop the minted
+  "- Run <epoch>" suffix in G-11 as they already did in the feed. Live automation executions are `stoppable` (the cancel
+  endpoint exists).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

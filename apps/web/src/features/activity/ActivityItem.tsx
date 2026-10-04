@@ -30,7 +30,7 @@ import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { ContextMenu } from '@/ui/primitives/Menu/Menu.js';
 import { PopoverPopup, PopoverRoot } from '@/ui/primitives/Popover/Popover.js';
 import { ActivityDetails } from './ActivityDetails.js';
-import { cardLine, cardMeta, cardStages, cardTone, kindIcon, kindLabel, stopLabel } from './activityView.js';
+import { cardLine, cardMeta, cardStages, cardTone, kindIcon, kindLabel, stopLabel, stopTarget } from './activityView.js';
 
 /** Hover / focus delay before the popover opens (board: 300 ms). */
 export const PREVIEW_OPEN_MS = 300;
@@ -141,6 +141,7 @@ export function ActivityItem({ entry, now, selected, modelLabel, tabIndex, linkR
   };
 
   const tone = cardTone(entry);
+  const stopItem = stopTarget(entry);
   const moreAsks = entry.asks.length - 1;
   const canExpand = entry.kind === 'orchestrator' && (entry.meta?.workers?.total ?? 0) > 0 && entry.group !== 'recent';
 
@@ -276,10 +277,10 @@ export function ActivityItem({ entry, now, selected, modelLabel, tabIndex, linkR
             Dismiss
           </ContextMenu.Item>
         ) : null}
-        {entry.live && (entry.live.stoppable || entry.stoppable) ? (
+        {stopItem ? (
           <>
             <ContextMenu.Separator />
-            <ContextMenu.Item icon="stop" danger onClick={() => act.mutate({ item: entry.live!, action: 'stop' })}>
+            <ContextMenu.Item icon="stop" danger onClick={() => act.mutate({ item: stopItem, action: 'stop' })}>
               {stopLabel(entry)}
             </ContextMenu.Item>
           </>

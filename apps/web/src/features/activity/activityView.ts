@@ -113,3 +113,14 @@ export function openLabel(entry: ActivityEntry): string {
       return entry.kind === 'workflow' ? 'Open run' : 'Open';
   }
 }
+
+/**
+ * What Stop acts on: the running item, else (a run or chat parked on an ask) the
+ * asking item itself when the entity is stoppable — a waiting run can be cancelled.
+ */
+export function stopTarget(entry: ActivityEntry): ActivityEntry['live'] {
+  if (entry.live?.stoppable) return entry.live;
+  const ask = entry.asks[0];
+  // A worker's ask: Stop would stop the worker, not the card's orchestrator — not offered.
+  return ask && ask.stoppable && !entry.worker ? ask : undefined;
+}

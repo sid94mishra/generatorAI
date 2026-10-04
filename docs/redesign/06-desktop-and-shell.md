@@ -279,7 +279,7 @@ These replace `app-header`, `app-titlebar` and `header-toggle-sidebar`. `sidebar
 | `app-frame` | AppFrame root. `data-layout="mac\|strip\|native"`, `data-sidebar="expanded\|rail\|drawer"` |
 | `titlestrip` | Windows / Linux-custom 36px strip. Children: `titlestrip-back`, `titlestrip-forward`, `titlestrip-toggle-sidebar`, `titlestrip-search`, `update-pill`, `titlestrip-server` |
 | `sidebar` | 232px sidebar. Children: `sidebar-traffic-row` (mac), `sidebar-nav-row` (Linux native), `sidebar-server-switcher`, `sidebar-toggle`, `sidebar-search`, `sidebar-new-chat`, `sidebar-nav` (`<nav>` of links `nav-home` … `nav-scripts`), `sidebar-needs-you`, `sidebar-running`, `sidebar-connection`, `sidebar-settings` |
-| `rail` | 48px rail. Children: `rail-drag-row` (mac), `rail-server`, `rail-expand`, `rail-search`, `rail-new-chat`, `rail-nav`, `rail-running`, `rail-connection`, `rail-settings` |
+| `rail` | 48px rail. Children: `rail-drag-row` (mac), `rail-server`, `rail-expand`, `rail-search`, `rail-new-chat`, `rail-nav`, `rail-history` (desktop, D-93), `activity-toggle`, `rail-activity-area` / `rail-activity` / `rail-activity-tile` / `rail-activity-more` (D-92; replaced `rail-running`), `rail-connection`, `rail-settings` |
 | `sidebar-flyout`, `sidebar-drawer` | forced-rail flyout and phone drawer |
 | `main-card` | inset card |
 | `page-header` | ported page header (C-xx `PageHeader`). Contains `page-header-dock-toggle` on dock pages |
