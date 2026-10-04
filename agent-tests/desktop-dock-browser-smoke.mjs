@@ -189,7 +189,11 @@ if (!page) {
   await finish();
 }
 record('SPA window appears', true, page.url());
-await page.waitForFunction(() => document.querySelector('#root')?.children.length > 0, { timeout: 30_000 }).catch(() => {});
+// The SPA pairs with the embedded server before it renders the app frame; the
+// smoke's own fetches below go out through that pairing. Any `#root` child (the
+// boot screen) was not enough on a loaded first launch: NotPairedError / a
+// fetch before the server answered (same wait as right-pane-desktop-smoke).
+await page.getByTestId('app-frame').waitFor({ timeout: 60_000 });
 await setWindowSize(1440, 900);
 
 // ── A chat with a workspace, its dock open on the Browser tab ────
