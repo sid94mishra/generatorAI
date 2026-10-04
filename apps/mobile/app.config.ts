@@ -238,8 +238,10 @@ const config: ExpoConfig = {
     // Cleartext (`http://`) is enabled by `./plugins/withCleartextTraffic`
     // below — see that file and README "Android cleartext".
     // expo-screen-capture (M9-09) declares screenshot-detection permissions the app never uses (it only blocks
-    // capture and hides Recents); READ_MEDIA_IMAGES in particular is a Play-policy permission.
-    blockedPermissions: ['android.permission.READ_MEDIA_IMAGES', 'android.permission.DETECT_SCREEN_CAPTURE'],
+    // capture and hides Recents); READ_MEDIA_IMAGES in particular is a Play-policy permission. DETECT_SCREEN_CAPTURE
+    // stays (a normal, install-time permission): on Android 14+ the module registers its capture callback when it is
+    // created, and without the permission that throws and the app never starts (MD-198).
+    blockedPermissions: ['android.permission.READ_MEDIA_IMAGES'],
     permissions: [
       'android.permission.CAMERA',
       'android.permission.RECORD_AUDIO',

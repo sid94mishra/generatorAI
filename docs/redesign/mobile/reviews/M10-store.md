@@ -28,7 +28,7 @@ App Store Connect / Play Console / a device build; the exact step is given. Noth
 | 16 KB page alignment | owner | `"$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -P 16 -v 4 app-release.apk` — every `.so` passes (quick-crypto, MMKV, nitro, Hermes) |
 | Adaptive icon + themed (monochrome) | done: `adaptiveIcon.monochromeImage` (`assets/icon-android-monochrome.png`) | — |
 | Splash | done (dark, MD-124) | — |
-| Permissions | declared: `CAMERA`, `RECORD_AUDIO`, `USE_BIOMETRIC`, `POST_NOTIFICATIONS`; merged from `generatorai-live`: `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `POST_PROMOTED_NOTIFICATIONS`; blocked: `READ_MEDIA_IMAGES`, `DETECT_SCREEN_CAPTURE` | owner: `aapt2 dump permissions app-release.apk` shows nothing else (INTERNET and Expo's defaults aside) |
+| Permissions | declared: `CAMERA`, `RECORD_AUDIO`, `USE_BIOMETRIC`, `POST_NOTIFICATIONS`; merged from `generatorai-live`: `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `POST_PROMOTED_NOTIFICATIONS`, `DETECT_SCREEN_CAPTURE` (expo-screen-capture, normal permission; required on 14+, MD-198); blocked: `READ_MEDIA_IMAGES` | owner: `aapt2 dump permissions app-release.apk` shows nothing else (INTERNET and Expo's defaults aside) |
 | Foreground-service declaration | owner | text below + a 30 s screen recording of a run's Live Update |
 | Data Safety | owner | notes below |
 | R8 mapping retained per release | done with M10-06 (Sentry Gradle upload when the env is set) | `android/app/build/outputs/mapping/release/mapping.txt` archived per release otherwise |
