@@ -15,7 +15,16 @@ env: {FRESH_CHAT: stream, DEVICE_SCOPES: "exec:terminal"}
 - tapOn: New terminal
 - extendedWaitUntil: {visible: {id: terminal-view}, timeout: 30000}
 - tapOn: {id: terminal-view}
-- inputText: echo gai-characterization-ok
+# xterm's rows are not in the accessibility tree, so the output is checked through Find in scrollback: the shell
+# prints 42gai, which the typed command line does not contain (a dropped key would change both).
+- inputText: echo $((6*7))gai-characterization-ok
 - pressKey: Enter
-- extendedWaitUntil: {visible: ".*gai-characterization-ok.*", timeout: 15000}
+- tapOn: {id: terminal-find}
+- inputText: 42gai-characterization-ok
+- waitForAnimationToEnd
+- assertNotVisible: {id: terminal-find-status}
+- eraseText: 30
+- inputText: 42gai-not-printed
+- extendedWaitUntil: {visible: {id: terminal-find-status}, timeout: 10000}
+- tapOn: "Close find"
 - tapOn: {id: terminal-key-esc}
