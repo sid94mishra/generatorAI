@@ -610,7 +610,11 @@ and web, at 1440×900 and 1100×760 (`reviews/desktop-orchestrator-test.md`, add
   workflow run page follows its stage output the same way once the reader is at the end.
 - **Steady tail** — no spinner row under an answer that is itself streaming (its caret shows the activity); the
   streaming markdown is not rendered from a deferred value (that skipped frames and committed bursts — D-88's other
-  deferrals stay).
+  deferrals stay). The caret is the last element's `::after` (`[data-gai-caret]`), not an element that travels with
+  the text, so its motion is not a layout shift.
+- **Nothing below the output inside the scroller** — the workflow run's focused-stage composer is pinned under the
+  stages (Workspace `bottom`, the chat composer's frame via Composer `docked`, "To stage <name>"), like the chat's;
+  the run footer's "Show event timeline" went (the header's More menu keeps it).
 
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)

@@ -234,3 +234,81 @@ AssistantText / TasksList suites.
   scroller (as the chat does) would remove it — a layout change for the run page, not done here.
 - Event Timing for a mode switch reads 48–56 ms p95 in production (presentation delay; processing ≤ 2 ms).
 - `chats` bulk-archive e2e load flake; the right-pane smoke's first-launch race.
+
+## Addendum 2 — the remaining open items (2026-10-04)
+
+Same setup: desktop_redesign, isolated profiles and sandbox DB (startup `dbPath` asserted), production web build in the
+Electron app, real Sonnet 5.5 for the workflow stage, the Faux report fixture for mode switches.
+
+### 1. Run page layout shift — `506104a9`
+
+Cause: the focused stage's composer and the "Show event timeline" footer sat inside `run-scroll`, below the streaming
+output, and glided with every frame of the follow spring; the streaming caret was an element travelling with the text.
+Fix: the composer is pinned under the stages in the Workspace `bottom` slot — the chat composer's own frame
+(`Composer docked`, same padding and reading width), with a "To stage <name>" line since it no longer sits in that
+stage's row; `StageRow` no longer takes a composer. The footer button went (board WorkflowRun has none; the header's
+More menu keeps Event timeline). The caret is the last element's `::after` (`[data-gai-caret]`) — D-91 updated.
+
+| Real Sonnet stage, following | Layout-shift sum | Max scroll step | Long tasks |
+|---|---|---|---|
+| Run page 1440×900 | 0.68 → **0.027** | 10 px | 0 |
+| Run page 1100×760 | 1.15 → **0.031** | 9 px | 0 |
+| Chat, same build, 1440 / 1100 | 0.024 / 0.026 | 10 / 9 px | 0 |
+
+Keyboard: from the stage row, Tab runs through the stage's controls (Actions, Copy, Details, context gauge) and then
+reaches the composer (outside the scroller); at 1100×760 the composer is fully on screen (613–751 of 760 px).
+Screenshot `fix1-composer-1100.png`.
+
+### 2. Mode-switch click latency — closed as pipeline remainder (no code change)
+
+Event Timing for a trusted click on Normal / Verbose / Summary, production build: input delay 2–4 ms, processing
+1–2 ms, presentation 45–54 ms. Evidence that the remainder is not the app's work:
+- Trace (CDP, `disabled-by-default-devtools.timeline.frame`, `viz`): the click's urgent commit finishes 4.8 ms after the
+  handler and is activated at +5.5 ms, drawn at the next vsync (+12.4 ms); macOS presents it ~23 ms after the draw.
+- Interleaved, jittered, 30 clicks each in one session: the real mode switch p50 48 / p95 56 ms; **the same radio
+  restyled by a DOM-only `aria-checked` toggle with every app handler bypassed** p50 48 / p95 56 ms; an inline-style
+  toggle on an injected button p50 24 / p95 48 ms. Disabling the item's transitions or ring changes nothing; the
+  accessibility pass is 0.4 ms for the whole trace.
+- Tried and reverted: starting the transcript re-render after the urgent frame is painted (rAF + task, and two rAFs) —
+  click latency unchanged (48–64 ms), the settled frame one frame later (65 → 83 ms).
+The app adds nothing measurable over restyling that control; the 8-ms-quantised Event Timing value is the Electron/
+macOS frame pipeline. The rAF-based click → painted frame stays at p95 33–43 ms (addendum 1).
+
+### 3. Chats bulk-archive e2e flake — `2da830e4`
+
+Reproduced: 3/10 passes alone, 5/10 under load. Cause (app, user-hittable): `ChatsListPage` cleared the selection on
+every filter change, including the 250 ms search debounce — a row ticked in the still-visible list was unticked when the
+search landed. Fix: once the new list has loaded (not the previous list kept on screen while it fetches), the selection
+keeps only the rows it still shows — P2-R14 still holds (no hidden chat reaches a bulk action); unit test for both
+sides (fails without the fix). After: **10/10 alone; 5/5 full `chats.spec` runs** (`--repeat-each=2 --workers=5`, all
+cores busy with a CPU burner).
+Seen while proving it: "New chat dialog → Start chat" timed out once under the burner. Not a race: on Vite dev under a
+full CPU burn a page load takes 25–30 s and Playwright's 10 s action timeout expires after the `New chat` click was
+dispatched (15/15 passes in an instrumented run under the same load; no remount, no lost input).
+
+### 4. Right-pane smoke first-launch timeout — `0e51442f`
+
+Reproduced 4/5 on fresh profiles. Cause (harness): on a first launch the run route's chunk is still loading when the
+URL changes, so the chat page stays on screen; the smoke's unscoped breadcrumb / `dock-toggle` waits matched the chat's
+header and its click closed the chat's dock (`dock:chat:open` 1 → 0); the run page then mounted with its dock closed.
+Fix: waits and click scoped to `run-workspace`, and the toggle is clicked only when the run dock is closed. After:
+**right-pane 5/5 consecutive fresh-profile passes** (9/9 checks each); dock-browser: see below.
+
+Proving it surfaced the same class of race in `desktop-dock-browser-smoke.mjs` — `401fb7f1`: it waited only for any
+`#root` child (the boot screen; timeout swallowed) and then called the API through the SPA before it had paired with
+the embedded server (`NotPairedError`, `Failed to fetch`; 3/5 failed while the machine ran an Android NDK build at load
+20–30). It now waits for `app-frame`, as right-pane does. After: **dock-browser 5/5 consecutive fresh-profile passes**
+(23/23 checks) at load 15–21.
+
+### Gates (this pass)
+
+web typecheck · lint (0 errors, 75 pre-existing warnings) · check:design · full unit (129 files, 1,583) · story tests
+(workflows, composer, Markdown, transcript) · build · check:bundle · check:css. e2e (sandbox, `--workers=1`):
+`workflow-run`, `chats`, `composer` — 12 passed, 1 skipped (Faux composer). A first attempt at load 33 timed out in two
+tests (a route chunk still loading, the run badge not yet rendered); the rerun at normal load passed. Desktop smokes,
+one at a time: right-pane 5/5, dock-browser 5/5. VRT not run: no Docker (D-53).
+
+### Left open
+
+Nothing from this list. The mode-switch Event Timing value stays at 48–56 ms p95, which is the platform's frame
+pipeline (item 2).
