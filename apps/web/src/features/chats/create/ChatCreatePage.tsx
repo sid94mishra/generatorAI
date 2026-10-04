@@ -27,7 +27,7 @@ import { useLocation, useNavigate, Link as RouterLink } from 'react-router';
 import { useForm, useStore } from '@tanstack/react-form';
 import { z } from 'zod';
 import { MODEL_TIER_LABELS, type Agent, type HarnessCatalogModel, type ModelTier } from '@generatorai/shared';
-import { EMPTY_CREATE_CHAT_DRAFT, type ChatCreateWho, type CreateChatDraft } from '@generatorai/shared/ui-contract';
+import { EMPTY_CREATE_CHAT_DRAFT, reasoningEffortLabel, type ChatCreateWho, type CreateChatDraft } from '@generatorai/shared/ui-contract';
 import { AgentPicker } from '@/blocks/agent-picker/index.js';
 import { ModelPicker } from '@/blocks/model-picker/index.js';
 import { SourcePicker, describeDraft, type DraftSource } from '@/blocks/sources/index.js';
@@ -59,7 +59,7 @@ import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { cn } from '@/ui/lib/cn.js';
 import { BrowserVisibilityField, DEFAULT_BROWSER_SETTINGS } from './BrowserVisibilityField.js';
 import { buildCreateChatParams, chatCreateBlockingReason, chatCreateDisplayName } from './mapDraftToParams.js';
-import { contextTiersFor, defaultReasoningEffortFor, reasoningLevelsFor, type ContextTier } from './modelControls.js';
+import { agentRuntimeSelection, contextTiersFor, defaultReasoningEffortFor, reasoningLevelsFor, type ContextTier } from './modelControls.js';
 import { modChord } from '@/lib/shortcuts.js';
 
 // ── Constants ───────────────────────────────────────────────────
@@ -191,7 +191,7 @@ export function ChatCreatePage() {
         const chat = await createChat.mutateAsync(buildCreateChatParams({ draft, sourceDrafts }));
         // Fire-and-forget: the server answers before it persists the user
         // message (useSendChatPromptTo's own note); SSE carries the rest.
-        sendFirstPrompt.mutate({ chatId: chat.id, prompt: draft.prompt });
+        sendFirstPrompt.mutate({ chatId: chat.id, prompt: draft.prompt, ...(draft.planFirst ? { mode: 'plan' as const } : {}) });
         navigate(`/chats/${chat.id}`);
       } catch (err) {
         toast.error("Couldn't create the chat", { description: err instanceof Error ? err.message : String(err) });
@@ -251,6 +251,9 @@ export function ChatCreatePage() {
   function setAgent(ref: string | undefined, agent: Agent | undefined) {
     form.setFieldValue('agentRef', ref);
     if (agent?.role === 'orchestrator') form.setFieldValue('orchestratorMode', true);
+    const runtime = agentRuntimeSelection(agent);
+    if (runtime.model) form.setFieldValue('model', runtime.model);
+    if (runtime.reasoningEffort) form.setFieldValue('reasoningEffort', runtime.reasoningEffort);
   }
 
   function addTag() {
@@ -427,6 +430,20 @@ export function ChatCreatePage() {
           data-testid="chat-create-orchestrate"
         />
       </div>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-ui text-fg">Plan first</span>
+          <span className="text-small text-fg-3">
+            The first message runs in plan mode: the agent proposes a plan and waits for your review before it changes
+            anything.
+          </span>
+        </div>
+        <Switch
+          aria-label="Plan first"
+          checked={draft.planFirst ?? false}
+          onCheckedChange={(next) => form.setFieldValue('planFirst', next)}
+        />
+      </div>
       {showPowerfulNudge ? (
         <Callout tone="warn" title="Pick a powerful model">
           {activeModel.name} is {tierLabel(activeModel.category)?.toLowerCase()}. Orchestrating works best on a powerful
@@ -459,7 +476,7 @@ export function ChatCreatePage() {
               label="Reasoning effort"
               value={draft.reasoningEffort ?? ''}
               onValueChange={(v) => form.setFieldValue('reasoningEffort', v)}
-              items={effortLevels.map((level) => ({ value: level, label: titleCase(level) }))}
+              items={effortLevels.map((level) => ({ value: level, label: reasoningEffortLabel(level) }))}
             />
           </div>
         ) : null}
@@ -579,7 +596,7 @@ export function ChatCreatePage() {
 
   const modelMeta = [
     tierLabel(activeModel?.category),
-    draft.reasoningEffort ? `effort ${titleCase(draft.reasoningEffort)}` : null,
+    draft.reasoningEffort ? `effort ${reasoningEffortLabel(draft.reasoningEffort)}` : null,
     providerLabel,
   ].filter(Boolean);
 

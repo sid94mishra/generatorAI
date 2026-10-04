@@ -129,3 +129,13 @@ export function composerPromptPlaceholder(who: { agent?: string | null; orchestr
   if (who.orchestrator) return 'Reply to the orchestrator…';
   return who.files ? 'Ask anything — @ for files, / for skills' : 'Ask anything — / for skills';
 }
+
+/**
+ * Display name of a reasoning-effort level, the same on every surface (composer chip, create flows, agent editor,
+ * workflow session editor, mobile): "Low", "Medium", "High", "Extra high", "Max", "Ultra". Unknown levels a provider
+ * adds are title-cased.
+ */
+export function reasoningEffortLabel(level: string): string {
+  if (level === 'xhigh') return 'Extra high';
+  return level ? level.charAt(0).toUpperCase() + level.slice(1) : level;
+}

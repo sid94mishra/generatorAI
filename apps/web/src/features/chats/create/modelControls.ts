@@ -12,7 +12,7 @@
 // model in.
 // ────────────────────────────────────────────────────────────────
 
-import type { HarnessCatalogModel } from '@generatorai/shared';
+import type { Agent, HarnessCatalogModel } from '@generatorai/shared';
 
 export type ContextTier = 'default' | 'long_context';
 
@@ -43,4 +43,17 @@ export function contextTiersFor(model: HarnessCatalogModel | undefined): readonl
     { tier: 'default', tokens: standard },
     { tier: 'long_context', tokens: long },
   ];
+}
+
+/**
+ * The model and effort a chosen agent runs on. The create flows show (and send) these instead of the defaults:
+ * the chat's own model outranks the agent's at run time (AgentResolver, most specific wins), so keeping the default
+ * there would silently run an Opus agent on the default model.
+ */
+export function agentRuntimeSelection(agent: Pick<Agent, 'runtime'> | undefined): { model?: string; reasoningEffort?: string } {
+  const runtime = agent?.runtime;
+  return {
+    ...(runtime?.model ? { model: runtime.model } : {}),
+    ...(runtime?.reasoningEffort ? { reasoningEffort: runtime.reasoningEffort } : {}),
+  };
 }

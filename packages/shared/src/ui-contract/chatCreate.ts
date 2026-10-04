@@ -72,6 +72,11 @@ export interface CreateChatDraft {
   agentRef?: string;
   /** Forced on for an orchestrator agent; freely toggleable for `who: 'model'`. */
   orchestratorMode: boolean;
+  /**
+   * The first message runs in plan mode: the agent proposes a plan and waits for its review before it changes
+   * anything. Per turn only — later messages use the chat's default mode.
+   */
+  planFirst?: boolean;
   /** Model id, `''` = the caller's default. */
   model: string;
   reasoningEffort?: string;

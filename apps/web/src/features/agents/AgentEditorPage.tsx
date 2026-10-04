@@ -25,6 +25,7 @@ import {
   type AgentRuntimePolicy,
   type ResolvedAgentProjection,
 } from '@generatorai/shared';
+import { reasoningEffortLabel } from '@generatorai/shared/ui-contract';
 import {
   useAgent,
   useCreateAgent,
@@ -87,7 +88,7 @@ const EFFORT_ITEMS: readonly SegmentedItem<EffortValue>[] = [
   { value: '', label: 'Inherit' },
   ...REASONING_EFFORTS.map((value) => ({
     value,
-    label: value === 'xhigh' ? 'Extra high' : value.charAt(0).toUpperCase() + value.slice(1),
+    label: reasoningEffortLabel(value),
   })),
 ];
 

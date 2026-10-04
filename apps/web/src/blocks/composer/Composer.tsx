@@ -29,7 +29,7 @@ import {
   type Chat,
   type WorkspacePrepStatus,
 } from '@generatorai/shared';
-import type { ComposerVariant } from '@generatorai/shared/ui-contract';
+import { reasoningEffortLabel, type ComposerVariant } from '@generatorai/shared/ui-contract';
 import {
   formatTokenLimit,
   slashCommandGroup,
@@ -430,13 +430,12 @@ export function Composer({
         key={level}
         asOption={asOption}
         selected={effectiveEffort === level}
-        className="capitalize"
         onClick={() => {
           onReasoningEffortChange?.(level);
           if (close) setOpenMenu(null);
         }}
       >
-        {level}
+        {reasoningEffortLabel(level)}
       </ToolbarOption>
     ));
   const tierList = (asOption: boolean, close: boolean) =>
@@ -633,7 +632,7 @@ export function Composer({
                       title="Reasoning effort"
                       onClick={() => toggleMenu('effort')}
                     >
-                      Effort: <span className="capitalize">{effectiveEffort ?? 'default'}</span>
+                      Effort: {effectiveEffort ? reasoningEffortLabel(effectiveEffort) : 'Default'}
                     </ToolbarChip>
                     {openMenu === 'effort' ? (
                       <ToolbarPopup widthClass="w-44" role="listbox" aria-label="Reasoning effort">

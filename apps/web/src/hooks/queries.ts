@@ -707,7 +707,8 @@ export function useSendChatPrompt(chatId: string) {
 export function useSendChatPromptTo() {
   const platform = usePlatform();
   return useMutation({
-    mutationFn: ({ chatId, prompt }: { chatId: string; prompt: string }) => platform.sendChatPrompt(chatId, prompt),
+    mutationFn: ({ chatId, prompt, mode }: { chatId: string; prompt: string; mode?: AgentMode }) =>
+      platform.sendChatPrompt(chatId, prompt, undefined, mode),
     meta: { errorTitle: 'Message not sent' },
   });
 }

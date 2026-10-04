@@ -688,6 +688,19 @@ Found while driving real chats, an orchestrator, workflow runs and automations i
   "- Run <epoch>" suffix in G-11 as they already did in the feed. Live automation executions are `stoppable` (the cancel
   endpoint exists).
 
+### D-95 Create flows from the desktop end-to-end build test (2026-10-04) — Final
+Found while building a full-stack app through the desktop app (`reviews/desktop-e2e-build.md`).
+- **The chosen agent's model and effort fill the form.** The session's own model outranks the agent's at run time
+  (AgentResolver: most specific wins), and both create flows always sent their default model — an Opus/High agent ran
+  on the default Sonnet/Medium while the dialog showed nothing wrong. Picking an agent now sets Model and Effort to its
+  runtime values (when it has them); the person can still change them before starting.
+- **Plan first.** Neither create flow could start in plan mode: the first message always ran in `auto`, so "plan the
+  architecture, then I review" was impossible from the start. Options (dialog) and the Agent section (page) gain
+  "Plan first": the first message is sent with the per-turn `mode: 'plan'` (the chat's `defaultAgentMode` is not
+  changed, so later messages use the composer's mode). Not on the boards; a switch in the existing options block.
+- **One effort vocabulary.** "Low · Medium · High · Extra high · Max · Ultra" everywhere (`reasoningEffortLabel` in
+  `ui-contract/composer.ts`); the dialog showed "xhigh" / "max" and the composer "Xhigh".
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

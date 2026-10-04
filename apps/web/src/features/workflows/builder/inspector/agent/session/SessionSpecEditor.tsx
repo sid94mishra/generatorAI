@@ -23,6 +23,7 @@ import {
   type SessionSpec,
 } from '@generatorai/workflow-spec';
 import { sessionCapabilityWarnings, type Agent } from '@generatorai/shared';
+import { reasoningEffortLabel } from '@generatorai/shared/ui-contract';
 import { useModels } from '@/hooks/harnessQueries.js';
 import { PROVIDER_LABELS } from '@/lib/agentCopy.js';
 import { ModelPicker } from '@/blocks/model-picker/ModelPicker.js';
@@ -68,7 +69,6 @@ export interface SessionSpecEditorProps {
   className?: string;
 }
 
-const EFFORT_LABEL = (e: string) => (e === 'xhigh' ? 'Extra high' : e[0]!.toUpperCase() + e.slice(1));
 
 const PERMISSION_LABELS: Record<(typeof RUN_PERMISSION_MODES)[number], string> = {
   default: 'Ask before tools run',
@@ -149,7 +149,7 @@ export function SessionSpecEditor({
                 aria-label={`${scope} reasoning effort`}
                 value={session.reasoningEffort ?? ''}
                 onValueChange={(v) => onChange({ reasoningEffort: (v || undefined) as SessionSpec['reasoningEffort'] })}
-                items={[{ value: '', label: inherits }, ...REASONING_EFFORTS.map((e) => ({ value: e, label: EFFORT_LABEL(e) }))]}
+                items={[{ value: '', label: inherits }, ...REASONING_EFFORTS.map((e) => ({ value: e, label: reasoningEffortLabel(e) }))]}
               />
             </Row>
             <Row label="Context window">

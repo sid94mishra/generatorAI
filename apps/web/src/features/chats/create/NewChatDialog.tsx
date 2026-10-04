@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import type { Agent, HarnessCatalogModel } from '@generatorai/shared';
-import { EMPTY_CREATE_CHAT_DRAFT, type CreateChatDraft } from '@generatorai/shared/ui-contract';
+import { EMPTY_CREATE_CHAT_DRAFT, reasoningEffortLabel, type CreateChatDraft } from '@generatorai/shared/ui-contract';
 import { AgentPicker } from '@/blocks/agent-picker/index.js';
 import { ModelPicker } from '@/blocks/model-picker/index.js';
 import { SourcePicker, type DraftSource } from '@/blocks/sources/index.js';
@@ -33,11 +33,10 @@ import { Textarea } from '@/ui/primitives/Textarea/Textarea.js';
 import { KbdHintRow } from '@/ui/patterns/KbdHintRow/KbdHintRow.js';
 import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { BrowserVisibilityField, DEFAULT_BROWSER_SETTINGS } from './BrowserVisibilityField.js';
-import { defaultReasoningEffortFor, reasoningLevelsFor } from './modelControls.js';
+import { agentRuntimeSelection, defaultReasoningEffortFor, reasoningLevelsFor } from './modelControls.js';
 import { buildCreateChatParams, chatCreateBlockingReason, chatCreateDisplayName } from './mapDraftToParams.js';
 import { modChord } from '@/lib/shortcuts.js';
 
-const EFFORT_LABEL: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High' };
 
 /** The dialog and its wiring — no props, it reads/writes `useNewChatStore`. */
 export function NewChatDialog() {
@@ -62,6 +61,7 @@ export function NewChatDialog() {
   const [model, setModel] = useState(() => getDefaultChatModel());
   const [reasoningEffort, setReasoningEffort] = useState<string | undefined>(undefined);
   const [orchestratorMode, setOrchestratorMode] = useState(false);
+  const [planFirst, setPlanFirst] = useState(false);
   const [browser, setBrowser] = useState(DEFAULT_BROWSER_SETTINGS);
   const [submitting, setSubmitting] = useState(false);
 
@@ -86,6 +86,7 @@ export function NewChatDialog() {
     setModel(getDefaultChatModel());
     setReasoningEffort(undefined);
     setOrchestratorMode(false);
+    setPlanFirst(false);
     setBrowser(DEFAULT_BROWSER_SETTINGS);
   }
 
@@ -106,6 +107,7 @@ export function NewChatDialog() {
       who: agentRef ? (selectedAgent?.role === 'orchestrator' ? 'orchestrator' : 'agent') : 'model',
       agentRef,
       orchestratorMode: selectedAgent?.role === 'orchestrator' ? true : orchestratorMode,
+      planFirst,
       model,
       reasoningEffort: effectiveEffort,
       projectId: projectId || undefined,
@@ -125,7 +127,7 @@ export function NewChatDialog() {
       const chat = await createChat.mutateAsync(params);
       // Fire-and-forget: the server returns before persisting the user
       // message (useSendChatPromptTo's own doc comment); SSE handles the rest.
-      sendFirstPrompt.mutate({ chatId: chat.id, prompt: task });
+      sendFirstPrompt.mutate({ chatId: chat.id, prompt: task, ...(planFirst ? { mode: 'plan' as const } : {}) });
       close();
       reset();
       navigate(`/chats/${chat.id}`);
@@ -174,6 +176,7 @@ export function NewChatDialog() {
     // ref — the picker looks it up itself; `selectedAgent`-derived state
     // (who/orchestratorMode/capability summary) catches up once it resolves.
     if (initialDraft.agentRef) setAgentRef(initialDraft.agentRef);
+    if (initialDraft.planFirst) setPlanFirst(true);
     // Only on open: this seeds the form once, it must not fight the user's edits.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
@@ -186,6 +189,7 @@ export function NewChatDialog() {
     description.trim() ? 'Description' : null,
     tags.length > 0 ? `${tags.length} tag${tags.length === 1 ? '' : 's'}` : 'tags',
     `orchestrate mode ${orchestratorMode ? 'on' : 'off'}`,
+    planFirst ? 'plan first' : null,
     `browser ${browser.visibility}`,
   ]
     .filter(Boolean)
@@ -258,6 +262,9 @@ export function NewChatDialog() {
                 setAgentRef(ref);
                 setSelectedAgent(agent);
                 if (agent?.role === 'orchestrator') setOrchestratorMode(true);
+                const runtime = agentRuntimeSelection(agent);
+                if (runtime.model) setModel(runtime.model);
+                if (runtime.reasoningEffort) setReasoningEffort(runtime.reasoningEffort);
               }}
               projectId={projectId || undefined}
               placeholder="No agent"
@@ -269,7 +276,7 @@ export function NewChatDialog() {
                 label="Reasoning effort"
                 value={effectiveEffort ?? reasoningLevels[0] ?? 'medium'}
                 onValueChange={setReasoningEffort}
-                items={reasoningLevels.map((level) => ({ value: level, label: EFFORT_LABEL[level] ?? level }))}
+                items={reasoningLevels.map((level) => ({ value: level, label: reasoningEffortLabel(level) }))}
               />
             ) : (
               <div />
@@ -324,6 +331,7 @@ export function NewChatDialog() {
                 onCheckedChange={setOrchestratorMode}
                 label="Orchestrate mode"
               />
+              <Switch checked={planFirst} onCheckedChange={setPlanFirst} label="Plan first — review a plan before anything changes" />
               <BrowserVisibilityField value={browser} onChange={setBrowser} compact />
               <Button variant="ghost" size="sm" onClick={openFullPage} className="self-start">
                 More options — open the full page
