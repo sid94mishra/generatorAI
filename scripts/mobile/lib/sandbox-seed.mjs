@@ -10,6 +10,8 @@ const execute = promisify(execFile);
 export const CHAT_NAMES = Object.freeze({
   stream: 'Mobile — Stream', gate: 'Mobile — Gate', stop: 'Mobile — Stop',
   edits: 'Mobile — Edits', long: 'Mobile — Long stream',
+  // A standard (in-workspace file write) gate: answerable from a notification without the approval key (MG-04).
+  write: 'Mobile — Write gate',
 });
 
 async function waitForWorkspace(session, chat, key) {

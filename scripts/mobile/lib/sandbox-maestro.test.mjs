@@ -10,7 +10,7 @@ test('reads Maestro flow headers and excludes shared command fragments', async (
   try {
     const file = path.join(dir, 'flow.yaml');
     await fs.writeFile(file, 'appId: ${APP_ID}\ntags: [smoke, pairing]\nenv:\n  FRESH_CHAT: gate,stream\n  PENDING_GATE: true\n---\n- launchApp\n');
-    assert.deepEqual(await flowMetadata(file), { fresh: ['gate', 'stream'], scopes: [], pending: true, tags: ['smoke', 'pairing'], name: 'flow' });
+    assert.deepEqual(await flowMetadata(file), { fresh: ['gate', 'stream'], scopes: [], pending: 'gate', tags: ['smoke', 'pairing'], name: 'flow' });
     await fs.writeFile(file, '- tapOn: Continue\n');
     assert.equal(await flowMetadata(file), null);
     await fs.writeFile(file, 'appId: ${APP_ID}\nenv: {FRESH_CHAT: invented}\n---\n- launchApp\n');
