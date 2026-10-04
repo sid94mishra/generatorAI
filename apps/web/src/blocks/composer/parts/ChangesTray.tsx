@@ -27,6 +27,7 @@ import { useStreamStore } from '@/stores/streamStore.js';
 import { splitWorkspaceChanges } from '@/blocks/changes/changeVisibility.js';
 import { CHANGE_TONE_CLASS } from '@/blocks/changes/ChangeFileRow.js';
 import {
+  isInMount,
   shouldPrefixAlias,
   statusFromOpKind,
   toDisplayPath,
@@ -196,6 +197,8 @@ export const ChangesTray = memo(function ChangesTray({
     const byPath = new Map<string, ChangedFile>();
     for (const b of blocks) {
       if (b.type !== 'tool_call' || !b.fileOp) continue;
+      // The plan file and other workspace scaffolding are not code changes (the Changes tab hides them too).
+      if (!isInMount(b.fileOp.filePath, roots)) continue;
       const path = toDisplayPath(b.fileOp.filePath, roots);
       const prev = byPath.get(path);
       if (prev) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isInMount,
   shouldPrefixAlias,
   statusFromOpKind,
   toDisplayPath,
@@ -107,5 +108,21 @@ describe('statusFromOpKind', () => {
     expect(statusFromOpKind('delete')).toBe('D');
     expect(statusFromOpKind('edit')).toBe('M');
     expect(statusFromOpKind('update')).toBe('M');
+  });
+});
+
+describe('isInMount', () => {
+  const roots = [{ alias: 'app', path: '/data/workspaces/executions/c1/source/app' }];
+  it('keeps files inside a mount and relative paths', () => {
+    expect(isInMount('/data/workspaces/executions/c1/source/app/src/x.ts', roots)).toBe(true);
+    expect(isInMount('src/x.ts', roots)).toBe(true);
+    expect(isInMount('C:\\w\\app\\x.ts', [{ alias: 'app', path: 'C:\\w\\app' }])).toBe(true);
+  });
+  it('drops workspace scaffolding outside the mounts (the plan file)', () => {
+    expect(isInMount('/data/workspaces/executions/c1/plans/2026-plan.md', roots)).toBe(false);
+    expect(isInMount('/data/workspaces/executions/c1/source/application/x.ts', roots)).toBe(false);
+  });
+  it('counts every path when no mounts are loaded', () => {
+    expect(isInMount('/anywhere/plans/p.md', [])).toBe(true);
   });
 });

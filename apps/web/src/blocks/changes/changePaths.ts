@@ -112,6 +112,24 @@ export function toDisplayPath(raw: string, roots: readonly PathRoot[] = []): str
 }
 
 /**
+ * Whether a path the agent reported is code the Changes tab lists: inside one of the chat's mounts, or relative
+ * (relative paths resolve against the working directory, the primary mount). With no mounts loaded every path counts.
+ * Workspace scaffolding outside the mounts — the plan file under `plans/`, scratch notes — is hidden from the change
+ * counts the same way `splitWorkspaceChanges` hides it from the tab.
+ */
+export function isInMount(raw: string, roots: readonly PathRoot[] = []): boolean {
+  const mounts = roots.map(asMountRoot).filter((m) => m.path);
+  if (mounts.length === 0) return true;
+  const norm = normalizeSlashes(raw);
+  if (!/^([a-z]:)?\//i.test(norm)) return true;
+  const lower = norm.toLowerCase();
+  return mounts.some((m) => {
+    const r = normalizeSlashes(m.path).replace(/\/+$/, '').toLowerCase();
+    return r !== '' && (lower === r || lower.startsWith(`${r}/`));
+  });
+}
+
+/**
  * An absolute path for a repo-relative file inside a mount, in the mount's
  * own separator style (a Windows mount path gets `\`, everything else `/`).
  * Hands "Open in editor" a real path on the server host.
