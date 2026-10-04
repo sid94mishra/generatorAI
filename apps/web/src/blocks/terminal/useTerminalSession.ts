@@ -168,6 +168,9 @@ export function useTerminalSession(
         return;
       }
       if (cancelled) return;
+      // The footer's "cols×rows" read the size the session was created with (80×24) and never followed a fit.
+      const syncSize = (cols: number, rows: number) =>
+        setDescriptor((d) => (d && (d.cols !== cols || d.rows !== rows) ? { ...d, cols, rows } : d));
       const ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';
       wsRef.current = ws;
@@ -177,6 +180,7 @@ export function useTerminalSession(
         if (cancelled) return;
         setConnecting(false);
         try { ws.send(JSON.stringify({ t: 'resize', cols: term.cols, rows: term.rows })); } catch { /* ignore */ }
+        syncSize(term.cols, term.rows);
       };
       ws.onmessage = (ev) => {
         if (typeof ev.data === 'string') {
@@ -214,6 +218,7 @@ export function useTerminalSession(
       const resizeSub = term.onResize((size) => {
         if (ws.readyState !== WebSocket.OPEN) return;
         try { ws.send(JSON.stringify({ t: 'resize', cols: size.cols, rows: size.rows })); } catch { /* ignore */ }
+        syncSize(size.cols, size.rows);
       });
       detach = () => {
         try { inputSub.dispose(); } catch { /* ignore */ }
