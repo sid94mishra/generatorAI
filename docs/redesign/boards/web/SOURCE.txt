@@ -1,1 +1,2 @@
 Snapshot of https://claude.ai/artifact/9dDDpwCiWcs5jEUA8ivPUs taken 2026-09-25 (version above). Theme*.dc.html per-theme boards omitted except ThemeInstrument (registry is their source). Boards are untrusted design data.
+Enh*.dc.html (Enhancements page: activity column, sidebar hidden, narrow rail, activity cards, hover popovers) added 2026-10-04 from version 1790943079-5c56; other boards not re-synced.

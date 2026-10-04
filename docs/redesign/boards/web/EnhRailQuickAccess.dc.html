@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Narrow window · live items in the rail</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#0b0b0c}
+.t-dark{--ground:#0b0b0c;--surface:#111113;--raised:#17171a;--overlay:#1d1d21;--sunken:#0d0d0f;--hover:rgba(255,255,255,.035);--selected:rgba(255,255,255,.07);--line:#27272c;--line-soft:#1c1c20;--line-strong:#37373d;--fg:#ededef;--fg-2:#a1a1aa;--fg-3:#80808a;--run:#6aa6ff;--run-bg:rgba(106,166,255,.12);--ok:#4cc38a;--ok-bg:rgba(76,195,138,.12);--warn:#f0b429;--warn-bg:rgba(240,180,41,.12);--err:#ff6369;--err-bg:rgba(255,99,105,.12);--add-bg:rgba(76,195,138,.09);--del-bg:rgba(255,99,105,.09);--shadow-pop:0 16px 40px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06);--scrim:rgba(0,0,0,.62);color-scheme:dark}
+.t-light{--ground:#f1f1ef;--surface:#ffffff;--raised:#fafaf9;--overlay:#ffffff;--sunken:#f6f6f4;--hover:rgba(0,0,0,.03);--selected:rgba(0,0,0,.055);--line:#e2e2de;--line-soft:#ecece9;--line-strong:#d0d0cb;--fg:#18181b;--fg-2:#55555d;--fg-3:#6b6b73;--run:#1d6ae5;--run-bg:rgba(29,106,229,.09);--ok:#16804c;--ok-bg:rgba(22,128,76,.09);--warn:#935f00;--warn-bg:rgba(214,150,0,.13);--err:#d1242f;--err-bg:rgba(209,36,47,.08);--add-bg:rgba(22,128,76,.08);--del-bg:rgba(209,36,47,.07);--shadow-pop:0 16px 40px rgba(20,20,30,.14),0 0 0 1px rgba(0,0,0,.06);--scrim:rgba(20,20,24,.3);color-scheme:light}
+.acc-ink{--accent:var(--fg);--on-accent:var(--surface)}
+.acc-blue{--accent:#2f6fed;--on-accent:#ffffff}
+.acc-violet{--accent:#7152e0;--on-accent:#ffffff}
+.acc-green{--accent:#1b8a52;--on-accent:#ffffff}
+.acc-orange{--accent:#d4561c;--on-accent:#ffffff}
+.acc-rose{--accent:#c8325f;--on-accent:#ffffff}
+.acc-teal{--accent:#0f7f7a;--on-accent:#ffffff}
+.app{font-family:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:13px;line-height:1.45;color:var(--fg);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.app *{box-sizing:border-box}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.i12{width:12px;height:12px}.i14{width:14px;height:14px}.i20{width:20px;height:20px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line);background:var(--raised);color:var(--fg);font-family:inherit;font-size:13px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;text-decoration:none}
+.btn-p{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.btn-g{background:transparent;border-color:transparent;color:var(--fg-2)}
+.btn-d{color:var(--err)}
+.btn-sm{height:24px;padding:0 8px;font-size:12px;border-radius:5px}
+.btn-lg{height:32px;padding:0 12px}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;border:0;background:transparent;color:var(--fg-2);padding:0;cursor:pointer;flex-shrink:0}
+.ib-sm{width:24px;height:24px;border-radius:5px}
+.ib.on{background:var(--selected);color:var(--fg)}
+.kbd{display:inline-flex;align-items:center;justify-content:center;height:18px;min-width:18px;padding:0 4px;border-radius:4px;border:1px solid var(--line);background:var(--sunken);color:var(--fg-3);font-family:"JetBrains Mono",monospace;font-size:11px;line-height:1;font-weight:400}
+.bdg{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border-radius:4px;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.s-run{color:var(--run);background:var(--run-bg)}.s-ok{color:var(--ok);background:var(--ok-bg)}.s-warn{color:var(--warn);background:var(--warn-bg)}.s-err{color:var(--err);background:var(--err-bg)}.s-idle{color:var(--fg-2);background:var(--selected)}
+.c-run{color:var(--run)}.c-ok{color:var(--ok)}.c-warn{color:var(--warn)}.c-err{color:var(--err)}.c-1{color:var(--fg)}.c-2{color:var(--fg-2)}.c-3{color:var(--fg-3)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.inp{display:flex;align-items:center;gap:8px;height:32px;border-radius:6px;border:1px solid var(--line);background:var(--sunken);color:var(--fg);padding:0 10px;font-family:inherit;font-size:13px;width:100%}
+.lbl{font-size:12px;font-weight:500;color:var(--fg-2)}
+.hint{font-size:12px;color:var(--fg-3)}
+.nav{display:flex;align-items:center;gap:10px;height:30px;padding:0 8px;border-radius:6px;color:var(--fg-2);font-size:13px;font-weight:500;text-decoration:none}
+.nav.on{background:var(--selected);color:var(--fg)}
+.cnt{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--fg-3)}
+.sec{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tabs{display:flex;gap:20px;border-bottom:1px solid var(--line-soft)}
+.tab{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0;border:0;background:none;font-family:inherit;font-size:13px;font-weight:500;color:var(--fg-2);text-decoration:none}
+.tab.on{color:var(--fg);box-shadow:inset 0 -2px 0 var(--fg)}
+.seg{display:inline-flex;gap:2px;padding:2px;border-radius:7px;background:var(--sunken);border:1px solid var(--line-soft)}
+.seg button{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:5px;border:0;background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;line-height:1}
+.seg button.on{background:var(--raised);color:var(--fg);box-shadow:0 0 0 1px var(--line)}
+.card{background:var(--raised);border:1px solid var(--line-soft);border-radius:8px}
+.th{display:flex;align-items:center;height:32px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tr{display:flex;align-items:center;gap:16px;height:44px;padding:0 20px;border-bottom:1px solid var(--line-soft);font-size:13px}
+.sw{position:relative;display:inline-block;width:28px;height:16px;border-radius:999px;border:0;padding:0;background:var(--line-strong);flex-shrink:0}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#ffffff}
+.sw.on{background:var(--accent)}
+.sw.on::after{left:14px;background:var(--on-accent)}
+.cb{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:4px;border:1px solid var(--line-strong);flex-shrink:0;color:var(--on-accent)}
+.cb.on{background:var(--accent);border-color:var(--accent)}
+.av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:var(--selected);color:var(--fg-2);font-size:11px;font-weight:600;flex-shrink:0}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.mono span{white-space:pre}
+.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+/* Activity column (Enhancements) */
+.acol{width:288px;flex-shrink:0;display:flex;flex-direction:column;padding:8px 8px 8px 8px;border-left:1px solid var(--line-soft)}
+.acol-h{display:flex;align-items:center;gap:6px;height:36px;padding:0 0 0 6px;flex-shrink:0}
+.cbdg{display:inline-flex;align-items:center;gap:3px;height:18px;padding:0 5px;border-radius:4px;font-family:"JetBrains Mono",monospace;font-size:11px;font-weight:500;line-height:1}
+.fseg{display:flex;gap:2px;padding:2px;border-radius:7px;background:var(--sunken);border:1px solid var(--line-soft)}
+.fseg button{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:5px;height:24px;padding:0 6px;border-radius:5px;border:0;background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;line-height:1}
+.fseg button.on{background:var(--raised);color:var(--fg);box-shadow:0 0 0 1px var(--line)}
+.fseg .n{font-family:"JetBrains Mono",monospace;font-size:10px;color:var(--fg-3)}
+.asec{display:flex;align-items:center;gap:6px;height:28px;padding:0 6px;margin-top:6px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.act{display:flex;gap:10px;padding:7px 8px;border-radius:8px;color:var(--fg);text-decoration:none;position:relative}
+.act.sel{background:var(--selected)}
+.act.hov{background:var(--hover);box-shadow:inset 0 0 0 1px var(--line)}
+.act.ask{background:var(--warn-bg)}
+.act.fail{background:var(--err-bg)}
+.act.ask.sel{box-shadow:inset 0 0 0 1px var(--warn)}
+.act.focus{box-shadow:0 0 0 2px var(--ground),0 0 0 4px var(--run)}
+.act.stale{opacity:.6}
+.kg{position:relative;display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;background:var(--selected);color:var(--fg-3);flex-shrink:0;margin-top:1px}
+.kg .ud{position:absolute;top:-2px;right:-2px;width:8px;height:8px;border-radius:50%;background:var(--run);box-shadow:0 0 0 2px var(--ground)}
+.ab{display:flex;flex-direction:column;gap:2px;min-width:0;flex-grow:1}
+.at{display:flex;align-items:center;gap:6px;min-width:0;height:18px;font-size:13px;font-weight:500;color:var(--fg);text-decoration:none}
+.as{display:flex;align-items:center;gap:5px;min-width:0;height:16px;font-size:12px;color:var(--fg-2)}
+.am{display:flex;align-items:center;gap:6px;min-width:0;height:16px;font-size:11px;color:var(--fg-3)}
+.tm{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;font-weight:400;color:var(--fg-3);flex-shrink:0}
+.srv{margin-left:auto;display:inline-flex;align-items:center;gap:4px;flex-shrink:0;font-size:11px;color:var(--fg-3);white-space:nowrap}
+.tag{display:inline-flex;align-items:center;height:16px;padding:0 4px;border-radius:3px;background:var(--selected);color:var(--fg-2);font-size:10.5px;font-weight:500;flex-shrink:0}
+.steps{display:flex;gap:2px;height:3px;margin:3px 0 1px 0}
+.steps span{flex:1;border-radius:2px;background:var(--line)}
+.steps .d{background:var(--fg-3)}.steps .c{background:var(--run)}.steps .w{background:var(--warn)}.steps .x{background:var(--err)}
+.qa{display:flex;gap:6px;margin-top:6px}
+.wk{display:flex;flex-direction:column;margin:4px 0 0 0;position:relative}
+.wk::before{content:"";position:absolute;left:5px;top:4px;bottom:10px;width:1px;background:var(--line)}
+.wkr{display:flex;align-items:center;gap:8px;height:22px;font-size:12px;color:var(--fg-2);position:relative}
+.wkr svg{background:var(--ground)}
+/* hover popover */
+.pop{width:320px;display:flex;flex-direction:column;background:var(--overlay);border-radius:10px;box-shadow:var(--shadow-pop);overflow:hidden;font-size:12px}
+.pop-h{display:flex;flex-direction:column;gap:4px;padding:12px 14px 10px 14px}
+.pop-k{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--fg-3)}
+.pop-t{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;color:var(--fg)}
+.band{display:flex;flex-direction:column;gap:8px;margin:0 10px 10px 10px;padding:10px;border-radius:8px}
+.kv{display:grid;grid-template-columns:84px minmax(0,1fr);row-gap:6px;column-gap:8px;padding:10px 14px;border-top:1px solid var(--line-soft)}
+.kv dt{color:var(--fg-3)}
+.kv dd{margin:0;display:flex;align-items:center;gap:6px;min-width:0;color:var(--fg)}
+.pop-f{display:flex;align-items:center;gap:6px;padding:8px 10px;border-top:1px solid var(--line-soft);background:var(--sunken)}
+.pop-sec{padding:8px 14px 10px 14px;border-top:1px solid var(--line-soft);display:flex;flex-direction:column;gap:2px}
+.pop-sec h4{margin:0 0 4px 0;font-size:11px;font-weight:500;color:var(--fg-3)}
+.rail-live{display:inline-flex;align-items:center;justify-content:center;position:relative;width:34px;height:34px;border-radius:8px;border:0;background:var(--selected);padding:0;flex-shrink:0}
+.rail-live .rt{position:absolute;bottom:-3px;right:-3px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;font-family:"JetBrains Mono",monospace;font-size:9px;line-height:14px;font-weight:600;text-align:center;box-shadow:0 0 0 2px var(--ground)}
+.callout{display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--fg-2);line-height:1.45}
+.callout b{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--fg);color:var(--ground);font-size:10px;font-weight:700;flex-shrink:0}
+.pin{position:absolute;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--fg);color:var(--ground);font-size:10px;font-weight:700;box-shadow:0 0 0 2px var(--ground)}
+main header a{white-space:nowrap}
+</style>
+</helmet>
+<div class="app {{rootClass}}" style="width: 1100px; height: 760px; position: relative; display: flex; background: var(--ground); overflow: hidden;">
+<!-- NARROW WINDOW (or sidebar + Activity column both hidden): live items fold into the rail as tiles.
+     Kind = icon, status = colour. Needs you → Failed → Running, oldest first. Hover or focus a tile for the popover. -->
+<aside aria-label="Sidebar (collapsed)" style="width: 48px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 0 8px 0;">
+<button aria-label="Switch server · This computer" style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 0; background: transparent; border-radius: 6px; padding: 0;">
+<svg viewBox="0 0 20 20" style="width: 22px; height: 22px;"><rect width="20" height="20" rx="5" style="fill: var(--fg);"></rect><circle cx="6.5" cy="6.5" r="2.1" style="fill: var(--ground);"></circle><circle cx="13.5" cy="13.5" r="2.1" style="fill: var(--ground);"></circle><path d="M6.5 8.8v2.4a2.3 2.3 0 0 0 2.3 2.3h2.4" style="fill: none; stroke: var(--ground); stroke-width: 1.6; stroke-linecap: round;"></path></svg>
+</button>
+<button class="ib" aria-label="Expand sidebar" style="margin-top: 4px;"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path></svg></button>
+<div style="width: 20px; height: 1px; background: var(--line-soft); margin: 6px 0;"></div>
+<button class="ib" aria-label="Search or jump to (Ctrl K)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg></button>
+<button class="ib" aria-label="New chat"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button>
+<div style="width: 20px; height: 1px; background: var(--line-soft); margin: 6px 0;"></div>
+<nav style="display: flex; flex-direction: column; align-items: center; gap: 2px;">
+<a class="ib" href="#" aria-label="Home"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"></path><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg></a>
+<a class="ib on" href="#" aria-label="Chats" aria-current="page"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></a>
+<a class="ib" href="#" aria-label="Projects"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg></a>
+<a class="ib" href="#" aria-label="Agents"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg></a>
+<a class="ib" href="#" aria-label="Workflows"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></svg></a>
+<a class="ib" href="#" aria-label="Automations"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"></path><path d="M16 2v4"></path><path d="M8 2v4"></path><path d="M3 10h5"></path><path d="M17.5 17.5 16 16.3V14"></path><circle cx="16" cy="16" r="6"></circle></svg></a>
+<a class="ib" href="#" aria-label="Scripts"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="m5 12-3 3 3 3"></path><path d="m9 18 3-3-3-3"></path></svg></a>
+</nav>
+<div style="width: 20px; height: 1px; background: var(--line-soft); margin: 6px 0;"></div>
+<button class="ib" aria-label="Show Activity column" aria-pressed="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg></button>
+<div role="list" aria-label="Live activity" style="display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 4px;">
+<a role="listitem" class="rail-live" href="#" aria-label="Fix flaky checkout test · needs you · Allow git push?" aria-current="page" style="background: var(--warn-bg); color: var(--warn); box-shadow: 0 0 0 2px var(--ground), 0 0 0 3px var(--fg-3);"><svg class="i i14" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></a>
+<a role="listitem" class="rail-live" href="#" aria-label="Release 4.2 rollout · orchestrator · 1 worker needs you" style="background: var(--warn-bg); color: var(--warn);"><svg class="i i14" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg><span class="rt" style="background: var(--warn); color: var(--ground);">1</span></a>
+<a role="listitem" class="rail-live" href="#" aria-label="Nightly dependency audit · needs you · Approve Apply upgrades" style="background: var(--warn-bg); color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn);"><svg class="i i14" viewBox="0 0 24 24" aria-hidden="true"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></svg></a>
+<span style="width: 12px; height: 1px; background: var(--line-soft); margin: 2px 0;"></span>
+<a role="listitem" class="rail-live" href="#" aria-label="Deploy preview · failed" style="background: var(--err-bg); color: var(--err);"><svg class="i i14" viewBox="0 0 24 24" aria-hidden="true"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></svg></a>
+<span style="width: 12px; height: 1px; background: var(--line-soft); margin: 2px 0;"></span>
+<a role="listitem" class="rail-live" href="#" aria-label="Upgrade React Flow to v12 · running 4:12" style="color: var(--run);"><svg class="i i14" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></a>
+<a role="listitem" class="rail-live" href="#" aria-label="Migrate billing to Stripe v3 · orchestrator · running" style="color: var(--run);"><svg class="i i14" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></a>
+<a role="listitem" class="rail-live" href="#" aria-label="2 more running" style="background: transparent; color: var(--fg-3); font-family: 'JetBrains Mono', monospace; font-size: 11px; text-decoration: none;">+2</a>
+</div>
+<div style="flex-grow: 1;"></div>
+<span role="img" aria-label="Connected · local:3100" style="display: flex; align-items: center; justify-content: center; width: 28px; height: 24px;"><span class="dot" style="width: 6px; height: 6px; background: var(--ok);"></span></span>
+<button class="ib" aria-label="Settings"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+</aside>
+
+<main style="flex-grow: 1; min-width: 0; margin: 8px 8px 8px 0; display: flex; flex-direction: column; position: relative; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden;">
+<header style="display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 10px 0 16px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;">
+<a href="#" style="font-size: 13px; color: var(--fg-3); text-decoration: none;">payments-service</a>
+<span style="color: var(--fg-3);">/</span>
+<span class="trunc" style="font-size: 13px; font-weight: 600;">Fix flaky checkout test</span>
+<span class="bdg s-warn"><svg class="i i12" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"></path><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>Needs you</span>
+<div style="flex-grow: 1;"></div>
+
+<button class="ib" aria-label="More"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg></button>
+<button class="ib on" aria-label="Hide side dock"><svg class="i" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M15 3v18"></path></svg></button>
+</header>
+
+<!-- chat column: the dock sheet floats on the right; the column keeps a 380px gutter so nothing sits under it -->
+<div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 20px 404px 0 24px; display: flex; flex-direction: column; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; background: var(--raised); border: 1px solid var(--line-soft); border-radius: 10px;">
+<p style="margin: 0; font-size: 14px; line-height: 1.6;">The <span class="mono" style="font-size: 12px; padding: 1px 4px; border-radius: 4px; background: var(--selected);">checkout.spec.ts › applies coupon</span> test fails about 1 in 5 runs on CI. Find the cause and fix it without adding retries.</p>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-3);">
+<span class="av" style="width: 20px; height: 20px; font-size: 10px;">BF</span>
+<span style="color: var(--fg-2); font-weight: 500;">Bug Fixer</span><span>Claude Sonnet 5</span><span class="mono" style="font-size: 11px; margin-left: auto;">14:02</span>
+</div>
+<button style="display: flex; align-items: center; gap: 8px; height: 24px; padding: 0; border: 0; background: none; color: var(--fg-3); font-family: inherit; font-size: 13px;"><svg class="i i14" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></svg>6 steps · 2m 44s</button>
+<div style="display: flex; align-items: center; gap: 10px; height: 28px; padding-left: 2px;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok);"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>
+<span style="font-weight: 500;">Ran</span><span class="mono trunc c-2">pnpm test checkout --repeat 50</span><span style="font-size: 12px; color: var(--ok);">50 of 50 passed</span><span class="mono c-3" style="font-size: 11px; margin-left: auto;">1m 52s</span>
+</div>
+<p style="margin: 0; font-size: 14px; line-height: 1.6;">The coupon request and the total recalculation raced each other, so the assertion sometimes saw the old total. The total now derives from the coupon response instead of a second fetch.</p>
+<div style="border: 1px solid var(--line); border-radius: 10px; background: var(--raised); overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; background: var(--warn-bg); border-bottom: 1px solid var(--line-soft);">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--warn);"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"></path><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>
+<span style="font-weight: 600;">Allow this command?</span>
+<span style="margin-left: auto; font-size: 12px; color: var(--fg-3);">Network · writes to remote</span>
+</div>
+<div style="padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+<div class="mono" style="padding: 8px 10px; border-radius: 6px; background: var(--sunken); border: 1px solid var(--line-soft); font-size: 12px;">git push -u origin fix/checkout-flake</div>
+<div style="display: flex; align-items: center; gap: 8px;">
+<span class="trunc" style="font-size: 12px; color: var(--fg-3);">Publishes the branch so Bug Fixer can open a PR.</span>
+<div style="flex-grow: 1;"></div>
+<button class="btn btn-sm">Deny<span class="kbd">Esc</span></button>
+<button class="btn btn-sm">Always in this chat</button>
+<button class="btn btn-sm btn-p">Allow once<span class="kbd" style="background: transparent; border-color: currentColor; color: inherit; opacity: .7;">↵</span></button>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<div style="flex-shrink: 0; padding: 12px 404px 10px 24px; display: flex; flex-direction: column; gap: 8px;">
+<div style="border: 1px solid var(--line); border-radius: 12px; background: var(--raised); padding: 12px 10px 8px 14px; display: flex; flex-direction: column; gap: 10px;">
+<div style="font-size: 14px; color: var(--fg-3); height: 22px;">Reply to Bug Fixer…</div>
+<div style="display: flex; align-items: center; gap: 4px;">
+<button class="ib ib-sm" aria-label="Attach"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+<button class="chip" style="border-color: transparent;"><svg class="i i12" viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>Bug Fixer<svg class="i i12" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></button>
+<button class="chip" style="border-color: transparent;">Sonnet 5<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<button class="chip" style="border-color: transparent;">Effort: Medium<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<button class="chip" style="border-color: transparent;">Auto<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="btn btn-g btn-sm" style="gap: 6px;" aria-label="Context usage 42 percent"><svg viewBox="0 0 16 16" style="width: 14px; height: 14px;"><circle cx="8" cy="8" r="6" style="fill: none; stroke: var(--line-strong); stroke-width: 2;"></circle><path d="M8 2a6 6 0 0 1 5.2 9" style="fill: none; stroke: var(--fg-2); stroke-width: 2; stroke-linecap: round;"></path></svg><span class="mono" style="font-size: 11px;">42%</span></button><button class="ib ib-sm" aria-label="Dictate"><svg class="i" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" x2="12" y1="19" y2="22"></line></svg></button>
+<button class="ib" style="background: var(--accent); color: var(--on-accent); border-radius: 8px;" aria-label="Send"><svg class="i" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg></button>
+</div>
+</div>
+<div style="display: flex; gap: 14px; padding: 0 4px; font-size: 11px; color: var(--fg-3);">
+<span style="display: flex; align-items: center; gap: 4px;"><span class="kbd">↵</span>Send</span>
+<span style="display: flex; align-items: center; gap: 4px;"><span class="kbd">Shift ↵</span>New line</span>
+<span style="display: flex; align-items: center; gap: 4px;"><span class="kbd">/</span>Skills</span>
+<span style="display: flex; align-items: center; gap: 4px;"><span class="kbd">@</span>Files</span>
+<span style="display: flex; align-items: center; gap: 4px; margin-left: auto;"><span class="dot" style="background: var(--warn); width: 6px; height: 6px;"></span>Waiting for you · 3m 10s</span>
+</div>
+</div>
+
+<!-- DOCK as overlay sheet (window < 1200px) -->
+<aside role="dialog" aria-label="Side dock · Changes" style="position: absolute; top: 44px; right: 0; bottom: 0; width: 380px; display: flex; flex-direction: column; background: var(--overlay); border-left: 1px solid var(--line); box-shadow: var(--shadow-pop);">
+<div style="display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 6px 0 8px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;" role="tablist" aria-label="Side dock">
+<button class="btn btn-sm" style="height: 28px; background: var(--selected); border-color: transparent;" role="tab" aria-selected="true"><svg class="i i14" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><path d="M11 18H8a2 2 0 0 1-2-2V9"></path></svg>Changes<span class="mono c-3" style="font-size: 11px;">2</span></button>
+<button class="ib" role="tab" aria-label="Files"><svg class="i i14" viewBox="0 0 24 24"><path d="M20 7h-3a2 2 0 0 1-2-2V2"></path><path d="M9 18a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h7l4 4v10a2 2 0 0 1-2 2Z"></path><path d="M3 7.6v12.8A1.6 1.6 0 0 0 4.6 22h9.8"></path></svg></button>
+<button class="ib" role="tab" aria-label="Terminal"><svg class="i i14" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg></button>
+<button class="ib" role="tab" aria-label="Browser"><svg class="i i14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg></button>
+<button class="ib" role="tab" aria-label="Background tasks"><svg class="i i14" viewBox="0 0 24 24"><path d="M21 12h-8"></path><path d="M21 6H8"></path><path d="M21 18h-8"></path><path d="M3 6v4c0 1.1.9 2 2 2h3"></path><path d="M3 10v6c0 1.1.9 2 2 2h3"></path></svg></button>
+<button class="ib ib-sm" aria-label="Open another panel"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="ib ib-sm" aria-label="Maximize dock"><svg class="i i14" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" x2="14" y1="3" y2="10"></line><line x1="3" x2="10" y1="21" y2="14"></line></svg></button>
+<button class="ib ib-sm" aria-label="Close dock"><svg class="i i14" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button>
+</div>
+
+<div style="display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 8px 0 12px; flex-shrink: 0;">
+<span class="mono" style="font-size: 12px;"><span class="c-ok">+18</span> <span class="c-err">−8</span></span>
+<span style="font-size: 12px; color: var(--fg-3);">2 files · this chat</span>
+<div style="flex-grow: 1;"></div>
+<button class="ib ib-sm" aria-label="Checkpoints"><svg class="i i14" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path></svg></button>
+</div>
+<div style="display: flex; flex-direction: column; padding: 0 6px 8px 6px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;">
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px; background: var(--selected);">
+<span class="mono" style="width: 16px; font-size: 11px; font-weight: 500; color: var(--warn);">M</span>
+<span class="mono trunc" style="font-size: 12px;"><span class="c-3">src/cart/</span>applyCoupon.ts</span>
+<span class="mono" style="font-size: 11px; margin-left: auto;"><span class="c-ok">+14</span> <span class="c-err">−6</span></span>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px;">
+<span class="mono" style="width: 16px; font-size: 11px; font-weight: 500; color: var(--warn);">M</span>
+<span class="mono trunc" style="font-size: 12px;"><span class="c-3">tests/</span>checkout.spec.ts</span>
+<span class="mono" style="font-size: 11px; margin-left: auto;"><span class="c-ok">+4</span> <span class="c-err">−2</span></span>
+</div>
+</div>
+<div style="display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;">
+<span class="mono trunc" style="font-size: 12px; font-weight: 500;">applyCoupon.ts</span>
+<div style="flex-grow: 1;"></div>
+<button class="btn btn-g btn-sm">Discard</button>
+<button class="btn btn-sm"><svg class="i i12" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path></svg>Keep</button>
+</div>
+<div class="mono" style="flex-grow: 1; min-height: 0; overflow: hidden; font-size: 12px; line-height: 20px;">
+<div style="display: flex; height: 26px; align-items: center; padding: 0 12px; color: var(--fg-3); background: var(--sunken); font-size: 11px;">@@ -18,14 +18,22 @@</div>
+<div style="display: flex;"><span style="width: 36px; padding-right: 8px; text-align: right; color: var(--fg-3); flex-shrink: 0;">18</span><span style="width: 14px; color: var(--fg-3);"> </span><span class="trunc">  const cart = useCart.getState();</span></div>
+<div style="display: flex; background: var(--del-bg);"><span style="width: 36px; padding-right: 8px; text-align: right; color: var(--fg-3); flex-shrink: 0;">19</span><span style="width: 14px; color: var(--err);">−</span><span class="trunc">  await api.applyCoupon(code);</span></div>
+<div style="display: flex; background: var(--del-bg);"><span style="width: 36px; padding-right: 8px; text-align: right; color: var(--fg-3); flex-shrink: 0;">20</span><span style="width: 14px; color: var(--err);">−</span><span class="trunc">  const totals = await api.getTotals(cart.id);</span></div>
+<div style="display: flex; background: var(--del-bg);"><span style="width: 36px; padding-right: 8px; text-align: right; color: var(--fg-3); flex-shrink: 0;">21</span><span style="width: 14px; color: var(--err);">−</span><span class="trunc">  setTotals(totals);</span></div>
+<div style="display: flex; background: var(--add-bg);"><span style="width: 36px; padding-right: 8px; text-align: right; color: var(--fg-3); flex-shrink: 0;">19</span><span style="width: 14px; color: var(--ok);">+</span><span class="trunc">  const { discount } = await api.applyCoupon(code);</span></div>
+<div style="display: flex; background: var(--add-bg);"><span style="width: 36px; padding-right: 8px; text-align: right; color: var(--fg-3); flex-shrink: 0;">20</span><span style="width: 14px; color: var(--ok);">+</span><span class="trunc">  setTotals(recalculate(cart, discount));</span></div>
+<div style="display: flex;"><span style="width: 36px; padding-right: 8px; text-align: right; color: var(--fg-3); flex-shrink: 0;">21</span><span style="width: 14px;"> </span><span></span></div>
+<div style="display: flex;"><span style="width: 36px; padding-right: 8px; text-align: right; color: var(--fg-3); flex-shrink: 0;">22</span><span style="width: 14px;"> </span><span class="trunc">  track('coupon_applied', { code });</span></div>
+<div style="display: flex;"><span style="width: 36px; padding-right: 8px; text-align: right; color: var(--fg-3); flex-shrink: 0;">23</span><span style="width: 14px;"> </span><span>}</span></div>
+<div style="display: flex; margin-top: 6px; height: 26px; align-items: center; padding: 0 12px; color: var(--fg-3); background: var(--sunken); font-size: 11px;">@@ -61,6 +69,12 @@</div>
+<div style="display: flex; background: var(--add-bg);"><span style="width: 36px; padding-right: 8px; text-align: right; color: var(--fg-3); flex-shrink: 0;">69</span><span style="width: 14px; color: var(--ok);">+</span><span class="trunc">export function recalculate(cart: Cart, d = 0) {</span></div>
+<div style="display: flex; background: var(--add-bg);"><span style="width: 36px; padding-right: 8px; text-align: right; color: var(--fg-3); flex-shrink: 0;">70</span><span style="width: 14px; color: var(--ok);">+</span><span class="trunc">  const subtotal = sum(cart.lines);</span></div>
+<div style="display: flex; background: var(--add-bg);"><span style="width: 36px; padding-right: 8px; text-align: right; color: var(--fg-3); flex-shrink: 0;">71</span><span style="width: 14px; color: var(--ok);">+</span><span class="trunc">  return { subtotal, total: subtotal - d };</span></div>
+<div style="display: flex; background: var(--add-bg);"><span style="width: 36px; padding-right: 8px; text-align: right; color: var(--fg-3); flex-shrink: 0;">72</span><span style="width: 14px; color: var(--ok);">+</span><span>}</span></div>
+</div>
+<div style="flex-shrink: 0; border-top: 1px solid var(--line-soft); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;">
+<div class="inp" style="font-size: 13px;">Fix coupon/total race in checkout</div>
+<div style="display: flex; align-items: center; gap: 8px;">
+<span style="font-size: 12px; color: var(--fg-3);">into</span><span class="mono trunc" style="font-size: 11px; color: var(--fg-2);">fix/checkout-flake</span>
+<div style="flex-grow: 1;"></div>
+<button class="btn btn-sm">Commit</button>
+<button class="btn btn-sm btn-p">Commit &amp; open PR</button>
+</div>
+</div>
+</aside>
+</main>
+
+<!-- HOVER POPOVER from the rail tile "Nightly dependency audit" (tile gets a hover ring) -->
+<div class="pop" role="dialog" aria-label="Nightly dependency audit run 248, details" style="position: absolute; left: 56px; top: 316px; z-index: 5;">
+<div class="pop-h">
+<div class="pop-k"><svg class="i i12" viewBox="0 0 24 24" aria-hidden="true"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></svg>Workflow run #248<span>·</span>platform-deps</div>
+<div class="pop-t"><span class="trunc">Nightly dependency audit</span><span class="bdg s-warn" style="margin-left: auto;"><svg class="i i12" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"></path><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>Needs you</span></div>
+</div>
+<div class="band" style="background: var(--warn-bg);">
+<div style="display: flex; align-items: center; gap: 6px; font-weight: 500;">Approve “Apply upgrades”<span class="c-3" style="font-weight: 400; margin-left: auto;">stage 4 of 6</span></div>
+<span class="steps" role="img" aria-label="Stage 4 of 6" style="margin: 0;"><span class="d"></span><span class="d"></span><span class="d"></span><span class="w"></span><span></span><span></span></span>
+<div style="color: var(--fg-2);">Upgrades 14 packages, 2 of them major (<span class="mono" style="font-size: 11px;">vite</span>, <span class="mono" style="font-size: 11px;">zod</span>).</div>
+<div style="display: flex; align-items: center; gap: 6px;"><button class="btn btn-sm">Review</button><div style="flex-grow: 1;"></div><button class="btn btn-sm">Reject</button><button class="btn btn-sm btn-p">Approve</button></div>
+</div>
+<dl class="kv" style="margin: 0;">
+<dt>Waiting</dt><dd>12m<span class="c-3">run started 02:00 · 31m total</span></dd>
+<dt>Trigger</dt><dd>Schedule<span class="c-3">nightly at 02:00</span></dd>
+<dt>Agent</dt><dd>Dependency Auditor</dd>
+<dt>Model</dt><dd>Claude Sonnet 5<span class="c-3">Anthropic</span></dd>
+<dt>Server</dt><dd><span class="dot" style="background: var(--ok); width: 6px; height: 6px;"></span>This computer<span class="mono c-3" style="font-size: 11px;">local:3100</span></dd>
+<dt>Workspace</dt><dd><svg class="i i12" viewBox="0 0 24 24" style="color: var(--fg-3);" aria-hidden="true"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg><span class="mono trunc" style="font-size: 11px;">chore/deps-nightly</span><span class="c-3">worktree</span></dd>
+</dl>
+<div class="pop-f"><button class="btn btn-sm">Open run<span class="kbd">↵</span></button><div style="flex-grow: 1;"></div><button class="btn btn-g btn-sm btn-d"><svg class="i i12" viewBox="0 0 24 24" aria-hidden="true"><rect width="14" height="14" x="5" y="5" rx="2"></rect></svg>Cancel run</button></div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["dark","light"],"default":"dark","section":"Theme"},"accent":{"editor":"enum","options":["ink","blue","violet","green","orange","rose","teal"],"default":"ink","section":"Theme"},"$preview":{"width":1100,"height":760}}'>
+class Component extends DCLogic {
+renderVals() {
+const mode = this.props.mode ?? 'dark';
+const accent = this.props.accent ?? 'ink';
+return { rootClass: 't-' + mode + ' acc-' + accent };
+}
+}
+</script>
+</body>
+</html>
