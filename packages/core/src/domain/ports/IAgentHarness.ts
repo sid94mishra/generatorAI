@@ -285,7 +285,7 @@ export interface PlanReviewRequest {
 export interface PlanReviewDecision {
   approved: boolean;
   action?: PlanAction;
-  /** Free-form “request changes” text handed back to the model. */
+  /** Review text handed back to the model: the requested changes, or the notes given with an approval. */
   feedback?: string;
   /** User-edited plan content, when the user edited before approving. */
   editedContent?: string;

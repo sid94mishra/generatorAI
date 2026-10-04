@@ -467,6 +467,7 @@ export class ChatManagementService {
       return {
         approved: true,
         action: decision?.action ?? request.recommendedAction ?? 'implement_interactive',
+        ...(decision?.feedback ? { feedback: decision.feedback } : {}),
         ...(decision?.editedContent ? { editedContent: decision.editedContent } : {}),
       };
     }
@@ -977,18 +978,20 @@ export class ChatManagementService {
 
     const chat = await this.chatRepo.getById(chatId).catch(() => null);
 
+    // Compose unresolved inline comments + free text into one message — for an approval too: "Approve" with notes
+    // ("implement only WP0") used to drop them, and the agent implemented the whole plan.
     let feedback = decision.feedback;
-    if (!decision.approved) {
-      // Compose unresolved inline comments + free text into one message.
-      const comments = await planService.listComments(planId);
-      if (comments.some((c) => !c.resolved) || feedback) {
-        feedback = planService.buildFeedbackMessage({
-          title: plan.title,
-          revision: plan.currentRevision,
-          comments,
-          ...(feedback ? { freeText: feedback } : {}),
-        });
-      }
+    const isExitOnlyDecision = decision.approved && decision.action === 'exit_only';
+    const comments = isExitOnlyDecision ? [] : await planService.listComments(planId);
+    const delivered = comments.filter((c) => !c.resolved);
+    if (!isExitOnlyDecision && (delivered.length > 0 || feedback?.trim())) {
+      feedback = planService.buildFeedbackMessage({
+        title: plan.title,
+        revision: plan.currentRevision,
+        comments,
+        ...(feedback?.trim() ? { freeText: feedback } : {}),
+        ...(decision.approved ? { approved: true } : {}),
+      });
     }
 
     const editedRevision =
@@ -1021,6 +1024,8 @@ export class ChatManagementService {
     if (!result.ok) return result;
 
     await planService.recordDecision(planId, status, record);
+    // The agent has these comments now: settle them so the next revision's decision does not send them again.
+    for (const c of delivered) await planService.resolveComment(c.id, true).catch(() => undefined);
 
     if (chat) {
       await this.eventBus.emit(chat.sessionId, {

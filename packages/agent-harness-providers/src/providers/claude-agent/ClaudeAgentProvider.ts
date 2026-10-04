@@ -2864,7 +2864,13 @@ export class ClaudeAgentProvider implements IAgentHarness {
                   decision.action === 'implement_autopilot' ? 'bypassPermissions' : 'acceptEdits',
                 planText: '',
               });
-              return { behavior: 'allow', updatedInput: input };
+              // The approved tool result echoes `plan` ("## Approved Plan: …"): carry the reviewer's edited plan
+              // and the notes given with the approval there, or the model never sees them.
+              const approvedPlan = approvedPlanText(decision.editedContent ?? planContent, decision.feedback);
+              return {
+                behavior: 'allow',
+                updatedInput: approvedPlan !== planContent || decision.editedContent ? { ...input, plan: approvedPlan } : input,
+              };
             }
 
             return {
@@ -3990,3 +3996,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
   }
 }
 
+/** The plan the model is told was approved: the (possibly edited) plan, then the reviewer's approval notes. */
+export function approvedPlanText(plan: string, notes: string | undefined): string {
+  const trimmed = notes?.trim();
+  return trimmed ? `${plan.trimEnd()}\n\n${trimmed}\n` : plan;
+}

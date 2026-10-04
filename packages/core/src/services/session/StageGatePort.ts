@@ -231,7 +231,12 @@ export class StageGatePort implements GatePort {
       ...(feedback ? { feedback } : {}),
     });
     if (r.outcome === 'approved') {
-      return { approved: true, action: value.action ?? req.recommendedAction ?? 'implement_interactive' };
+      return {
+        approved: true,
+        action: value.action ?? req.recommendedAction ?? 'implement_interactive',
+        // Only what the reviewer wrote (r.reason is the gate's own wording).
+        ...(value.feedback?.trim() ? { feedback: value.feedback } : {}),
+      };
     }
     if (r.outcome === 'changes_requested') {
       return { approved: false, feedback: feedback ?? 'The reviewer requested changes to the plan.' };
