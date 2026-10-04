@@ -42,6 +42,7 @@ import {
   resolveTurnPermissionMode,
   shouldAttachPermissionHandler,
   decideToolPermission,
+  isAttachedFileRead,
   buildToolPermissionPayload,
 } from './agentModePolicy.js';
 import type { EventBus } from '../events/EventBus.js';
@@ -519,6 +520,8 @@ export class ChatManagementService {
     }
 
     const mode = ctx.permissionMode;
+    // The person attached these files to this very message; asking whether the agent may read them was noise.
+    if (isAttachedFileRead(request, ctx.attachedPaths)) return { granted: true };
     const verdict = decideToolPermission(mode, request.type);
     if (verdict === 'allow') return { granted: true };
     if (verdict === 'deny') {
@@ -1956,6 +1959,7 @@ export class ChatManagementService {
       nextSequence: 0,
       cardSequence: new Map(),
       ...(workerPolicy ? { policy: workerPolicy } : {}),
+      ...(attachments?.length ? { attachedPaths: attachments.map((a) => a.path) } : {}),
     });
 
     if (agentMode === 'plan') {

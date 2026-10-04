@@ -165,6 +165,8 @@ export interface TurnContext {
   cardSequence: Map<string, number>;
   /** The owner's tool policy; absent means the compose-time binding decides. */
   policy?: TurnPolicy | undefined;
+  /** Files the person attached to this turn: reading them never asks (they are stored outside the workspace). */
+  attachedPaths?: string[] | undefined;
   /**
    * Give back the flow keys the turn holds while one of its tools blocks on
    * other work (a workflow tool waiting for a run, ECON-R7); the returned

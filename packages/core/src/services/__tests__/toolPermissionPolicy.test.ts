@@ -14,7 +14,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, expect, it } from 'vitest';
-import { decideToolPermission, buildToolPermissionPayload } from '../agentModePolicy.js';
+import { decideToolPermission, buildToolPermissionPayload, isAttachedFileRead } from '../agentModePolicy.js';
 import type { PermissionRequest } from '../../domain/ports/IAgentHarness.js';
 
 describe('decideToolPermission (review 5.1)', () => {
@@ -83,5 +83,18 @@ describe('buildToolPermissionPayload — what the approval card shows', () => {
       'default',
     );
     expect(payload.toolName).toBe('file_write');
+  });
+});
+
+describe('isAttachedFileRead', () => {
+  const attached = ['/data/artifacts/s1/abc-ARCHITECTURE.md'];
+  it('allows reading a file attached to the turn (Claude and Copilot shapes)', () => {
+    expect(isAttachedFileRead({ type: 'file_read', description: 'Read', details: { toolName: 'Read', input: { file_path: attached[0] } } }, attached)).toBe(true);
+    expect(isAttachedFileRead({ type: 'file_read', description: 'Read', details: { kind: 'read', path: attached[0] } }, attached)).toBe(true);
+  });
+  it('leaves every other read and every write to the permission mode', () => {
+    expect(isAttachedFileRead({ type: 'file_read', description: 'Read', details: { input: { file_path: '/etc/passwd' } } }, attached)).toBe(false);
+    expect(isAttachedFileRead({ type: 'file_write', description: 'Write', details: { input: { file_path: attached[0] } } }, attached)).toBe(false);
+    expect(isAttachedFileRead({ type: 'file_read', description: 'Read', details: { input: { file_path: attached[0] } } }, undefined)).toBe(false);
   });
 });

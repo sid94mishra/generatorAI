@@ -121,6 +121,21 @@ export function decideToolPermission(
   }
 }
 
+/**
+ * A read of a file attached to the current turn. Attachments are stored as artifacts outside the workspace, so
+ * the provider asks before reading them; the person who attached a file already said the agent may read it.
+ * Claude reports `{ input: { file_path } }`, Copilot `{ path }`.
+ */
+export function isAttachedFileRead(request: PermissionRequest, attachedPaths: readonly string[] | undefined): boolean {
+  if (request.type !== 'file_read' || !attachedPaths?.length) return false;
+  const details = (request.details ?? {}) as Record<string, unknown>;
+  const input = (details['input'] ?? {}) as Record<string, unknown>;
+  const target = [input['file_path'], input['path'], details['path']].find((v): v is string => typeof v === 'string');
+  if (!target) return false;
+  const norm = (p: string) => p.replace(/\\/g, '/');
+  return attachedPaths.some((p) => norm(p) === norm(target));
+}
+
 const INPUT_SUMMARY_MAX_CHARS = 600;
 const SECRET_KEY_PATTERN = /token|secret|password|passwd|api[_-]?key|authorization|cookie/i;
 
