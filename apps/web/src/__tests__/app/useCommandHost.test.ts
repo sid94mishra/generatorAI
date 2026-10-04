@@ -6,7 +6,8 @@
 // OS — P1-R1: Ctrl+B / Ctrl+K are editing keys on Windows and Linux.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RENDERER_COMMAND_IDS, type RendererCommandId } from '@generatorai/shared/ui-contract';
-import { HANDLERS, installWebKeyHandler, isKeyOwnerTarget, isTypingTarget, modalOverlayOpen } from '@/app/shell/useCommandHost.js';
+import { HANDLERS, installDesktopNavHandlers, installWebKeyHandler, isKeyOwnerTarget, isTypingTarget, modalOverlayOpen } from '@/app/shell/useCommandHost.js';
+import { activityPlacement } from '@/app/shell/ConnectedActivityColumn.js';
 import { shortcutSections } from '@/app/shell/ShortcutsSheet.js';
 
 function press(target: EventTarget, key: string, init: KeyboardEventInit = {}) {
@@ -189,6 +190,61 @@ describe('installWebKeyHandler on macOS (Mod = Cmd): same rule', () => {
     expect(b.defaultPrevented).toBe(false);
     press(document.body, 'b', { metaKey: true });
     expect(run).toHaveBeenLastCalledWith('sidebar.toggle');
+  });
+});
+
+describe('installDesktopNavHandlers (D-93)', () => {
+  let run: ReturnType<typeof vi.fn<(id: 'nav.back' | 'nav.forward') => void>>;
+  let cleanup: () => void = () => undefined;
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    run = vi.fn<(id: 'nav.back' | 'nav.forward') => void>();
+  });
+  afterEach(() => cleanup());
+
+  it('Windows / Linux: Alt+← / Alt+→ go back / forward, also from a text field, but never inside a key-owning surface', () => {
+    cleanup = installDesktopNavHandlers(window, run, { mac: false });
+    const back = press(document.body, 'ArrowLeft', { altKey: true });
+    expect(back.defaultPrevented).toBe(true);
+    press(document.body, 'ArrowRight', { altKey: true });
+    expect(run.mock.calls).toEqual([['nav.back'], ['nav.forward']]);
+
+    document.body.innerHTML = '<input id="f" /><div data-gai-keys="own"><textarea id="t"></textarea></div>';
+    press(document.getElementById('f')!, 'ArrowLeft', { altKey: true });
+    expect(run).toHaveBeenCalledTimes(3);
+    const owned = press(document.getElementById('t')!, 'ArrowLeft', { altKey: true });
+    expect(owned.defaultPrevented).toBe(false);
+    expect(run).toHaveBeenCalledTimes(3);
+    // Plain arrows and other chords are left alone.
+    press(document.body, 'ArrowLeft');
+    press(document.body, 'ArrowLeft', { ctrlKey: true });
+    expect(run).toHaveBeenCalledTimes(3);
+  });
+
+  it('macOS: mouse buttons 4 / 5 go back / forward; the keys stay with the menu (⌘[ / ⌘])', () => {
+    cleanup = installDesktopNavHandlers(window, run, { mac: true });
+    document.body.dispatchEvent(new MouseEvent('mouseup', { button: 3, bubbles: true, cancelable: true }));
+    document.body.dispatchEvent(new MouseEvent('mouseup', { button: 4, bubbles: true, cancelable: true }));
+    document.body.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true, cancelable: true }));
+    press(document.body, 'ArrowLeft', { altKey: true });
+    expect(run.mock.calls).toEqual([['nav.back'], ['nav.forward']]);
+  });
+
+  it('Windows / Linux ignore mouse buttons in the page (main handles app-command)', () => {
+    cleanup = installDesktopNavHandlers(window, run, { mac: false });
+    document.body.dispatchEvent(new MouseEvent('mouseup', { button: 3, bubbles: true }));
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe('activityPlacement (D-92)', () => {
+  it('docks only at ≥ 1200px and while the card keeps 720px beside it', () => {
+    expect(activityPlacement({ windowWidth: 1440, sidebarWidth: 232, columnWidth: 288 })).toBe('docked');
+    expect(activityPlacement({ windowWidth: 1200, sidebarWidth: 48, columnWidth: 288 })).toBe('docked');
+    expect(activityPlacement({ windowWidth: 1230, sidebarWidth: 232, columnWidth: 288 })).toBe('overlay');
+    expect(activityPlacement({ windowWidth: 1440, sidebarWidth: 232, columnWidth: 400 })).toBe('docked');
+    // The board's 1100px window: the rail's quick access, the column only as an overlay.
+    expect(activityPlacement({ windowWidth: 1100, sidebarWidth: 48, columnWidth: 288 })).toBe('overlay');
   });
 });
 

@@ -39,6 +39,7 @@ import { commandHost, isMacOS, onDesktopCommand } from '@/lib/desktop.js';
 import { registerCommandRunner } from '@/lib/commandRunner.js';
 import { useShellStore } from '@/stores/shellStore.js';
 import { useDockStore } from '@/stores/dockStore.js';
+import { useActivityStore } from '@/stores/activityStore.js';
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
 import { useNewChatStore } from '@/stores/newChatStore.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
@@ -81,7 +82,11 @@ export const HANDLERS: Record<RendererCommandId, (ctx: CommandCtx) => void> = {
   'project.new': navTo('/projects/new'),
   'automation.new': navTo('/automations/new'),
   'agent.new': navTo('/agents/new'),
+  // D-93: Chromium's session history (the same entries the menu's Back / Forward move through).
+  'nav.back': (ctx) => ctx.navigate(-1),
+  'nav.forward': (ctx) => ctx.navigate(1),
   'sidebar.toggle': () => useShellStore.getState().toggleSidebar(),
+  'activity.toggle': () => useActivityStore.getState().toggle(),
   'dock.toggle': () => useDockStore.getState().controller?.toggle(),
   'theme.toggle': (ctx) => ctx.toggleTheme(),
   // FindBar owns the find-in-page state and subscribes to these directly.
@@ -176,6 +181,45 @@ export function installWebKeyHandler(
   return () => target.removeEventListener('keydown', onKeyDown, true);
 }
 
+/**
+ * Desktop Back / Forward from the keyboard and the mouse (D-93), in the
+ * renderer so a surface that owns its keys keeps them:
+ *   - Windows / Linux: Alt+← / Alt+→ (the menu shows them but does not
+ *     register them — `registerAccelerator: false` in main), except inside a
+ *     key-owning surface (the terminal's Alt+← is readline's word-back);
+ *   - macOS: mouse buttons 4 / 5 (Chromium delivers them to the page; main
+ *     handles `app-command` on Windows / Linux and the trackpad `swipe`).
+ * ⌘[ / ⌘] stay menu accelerators on macOS, where no surface uses them.
+ * Exported for tests.
+ */
+export function installDesktopNavHandlers(
+  target: Window,
+  run: (id: 'nav.back' | 'nav.forward') => void,
+  options: { mac: boolean },
+): () => void {
+  const backChord = COMMANDS['nav.back'].desktopWinLinux;
+  const forwardChord = COMMANDS['nav.forward'].desktopWinLinux;
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (options.mac || e.defaultPrevented || e.isComposing || e.repeat) return;
+    if (isKeyOwnerTarget(e.target)) return;
+    const id = backChord && matchesChord(e, backChord, false) ? 'nav.back' : forwardChord && matchesChord(e, forwardChord, false) ? 'nav.forward' : null;
+    if (!id) return;
+    e.preventDefault();
+    run(id);
+  };
+  const onMouseUp = (e: MouseEvent) => {
+    if (!options.mac || (e.button !== 3 && e.button !== 4)) return;
+    e.preventDefault();
+    run(e.button === 3 ? 'nav.back' : 'nav.forward');
+  };
+  target.addEventListener('keydown', onKeyDown, true);
+  target.addEventListener('mouseup', onMouseUp, true);
+  return () => {
+    target.removeEventListener('keydown', onKeyDown, true);
+    target.removeEventListener('mouseup', onMouseUp, true);
+  };
+}
+
 export function useCommandHost(): void {
   const navigate = useNavigate();
   const { resolvedTheme, setMode } = useTheme();
@@ -194,9 +238,11 @@ export function useCommandHost(): void {
     // The palette (and any other caller) runs commands through the same table.
     const unregister = registerCommandRunner(run);
     const uninstall = commandHost !== 'web' ? onDesktopCommand(run) : installWebKeyHandler(window, run, { mac: isMacOS });
+    const uninstallNav = commandHost !== 'web' ? installDesktopNavHandlers(window, run, { mac: commandHost === 'desktopMac' }) : () => undefined;
     return () => {
       unregister();
       uninstall();
+      uninstallNav();
     };
   }, []);
 }

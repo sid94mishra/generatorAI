@@ -173,6 +173,8 @@ const UI_CONCEPTS = {
   ungroup: { lucide: 'ungroup', sfSymbol: 'square.split.2x2', material: 'deselect' },
   braces: { lucide: 'braces', sfSymbol: 'curlybraces', material: 'data_object' },
   wand: { lucide: 'wand-sparkles', sfSymbol: 'wand.and.stars', material: 'wand_stars' },
+  /** Narrow a list (the Activity column's filter menu, D-92). */
+  filter: { lucide: 'list-filter', sfSymbol: 'line.3.horizontal.decrease', material: 'filter_list' },
 } as const satisfies Record<string, IconConceptDef>;
 
 export const ICON_CONCEPTS = {

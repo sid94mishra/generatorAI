@@ -8,7 +8,6 @@ import {
   homeHeadline,
   needsYouActions,
   weekRange,
-  askDetailLine,
 } from '@/features/home/homeModel.js';
 
 const ask = (kind: AttentionAsk['kind'], actions: AttentionAsk['actions']): AttentionAsk => ({ kind, id: 'a1', summary: 's', actions });
@@ -81,18 +80,5 @@ describe('formatters', () => {
     const name = chatNameFromPrompt(long);
     expect(name.length).toBeLessThanOrEqual(60);
     expect(name.endsWith('…')).toBe(true);
-  });
-});
-
-describe('askDetailLine', () => {
-  it('shows the command or path a clipped JSON detail names', () => {
-    expect(askDetailLine('{ "path": "src/config.ts" }')).toBe('src/config.ts');
-    expect(askDetailLine('{\n  "command": "git push -u origin fix/checkout-fl')).toBe('git push -u origin fix/checkout-fl');
-    expect(askDetailLine('{ "command": "echo \\"hi\\"" }')).toBe('echo "hi"');
-  });
-  it('keeps anything else as given', () => {
-    expect(askDetailLine('Approve "Apply upgrades"')).toBe('Approve "Apply upgrades"');
-    expect(askDetailLine('{ "count": 3 }')).toBe('{ "count": 3 }');
-    expect(askDetailLine(undefined)).toBeUndefined();
   });
 });

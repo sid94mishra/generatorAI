@@ -609,14 +609,18 @@ export const backgroundTasksKeys = {
   detail: (chatId: string, taskId: string) => ['background-tasks', chatId, taskId] as const,
 };
 
-/** Poll the list of background worker tasks spawned by an orchestrator chat. */
-export function useBackgroundTasks(chatId: string | undefined, enabled = true) {
+/**
+ * Poll the list of background worker tasks spawned by an orchestrator chat.
+ * `poll: false` for a caller that refetches on its own trigger (the Activity
+ * popover follows the attention feed's worker tally, D-92).
+ */
+export function useBackgroundTasks(chatId: string | undefined, enabled = true, opts: { poll?: boolean } = {}) {
   const platform = usePlatform() as HttpPlatformClient;
   return useQuery({
     queryKey: backgroundTasksKeys.list(chatId ?? ''),
     queryFn: () => platform.getBackgroundTasks(chatId!),
     enabled: !!chatId && enabled,
-    refetchInterval: 2500,
+    refetchInterval: opts.poll === false ? false : 2500,
   });
 }
 

@@ -4,6 +4,7 @@
 // unit-tested.
 // ────────────────────────────────────────────────────────────────
 
+import { askDetailLine } from '@generatorai/client-core';
 import type { AttentionCounts, AttentionItem } from '@generatorai/shared';
 
 /** The H1: "2 need you · 3 running", "Nothing needs you". Undefined until the feed has loaded. */
@@ -53,19 +54,6 @@ export function needsYouActions(item: Pick<AttentionItem, 'entity' | 'ask'>): Ne
     default:
       return { openLabel: 'Open' };
   }
-}
-
-/**
- * A gate's detail as one readable line. The feed carries the tool input as a
- * clipped JSON summary (`{ "path": "src/config.ts" }`, often cut mid-object);
- * the row shows the command or path it names (board Home: "Allow git push?").
- */
-export function askDetailLine(detail: string | undefined): string | undefined {
-  if (!detail) return undefined;
-  const text = detail.trim();
-  if (!text.startsWith('{')) return text;
-  const field = /"(command|file_path|path|url|query)"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(text);
-  return field?.[2] ? field[2].replace(/\\"/g, '"') : text;
 }
 
 /** The second line of a Needs you row: the ask's detail, else its summary. */

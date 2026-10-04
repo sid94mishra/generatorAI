@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent, waitFor, screen } from 'storybook/test';
 import { demoRail, type DemoOptions } from '../Sidebar/Sidebar.fixtures.js';
-import { Rail } from './Rail.js';
+import { Rail, RailLiveOverflow, RailLiveTile } from './Rail.js';
 
 /** The 48px rail (board ChatNarrow): below 1200px, collapsed, or the builder. */
 const meta = {
@@ -14,12 +14,31 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** Web / Linux: app mark, Expand, Search, New chat, nav, running counter, connection, Settings. */
+/** Web / Linux: app mark, Expand, Search, New chat, nav, Activity + live tiles (D-92), connection, Settings. */
 export const Default: Story = {
   parameters: { demo: {} },
   play: async ({ canvas }) => {
     await expect(canvas.getByRole('link', { name: 'Chats' })).toHaveAttribute('aria-current', 'page');
-    await expect(canvas.getByRole('button', { name: '3 running' })).toBeVisible();
+    await expect(canvas.getByRole('button', { name: 'Upgrade React Flow to v12 · running' })).toBeVisible();
+    await expect(canvas.getByRole('button', { name: /2 more live items/ })).toBeVisible();
+  },
+};
+
+/** The live tiles: every tone, a count, the hover ring, the overflow (board EnhRailQuickAccess). */
+export const LiveTiles: Story = {
+  render: () => (
+    <div className="flex gap-4 bg-ground p-4">
+      <RailLiveTile icon="chats" tone="warn" label="Chat · needs you" />
+      <RailLiveTile icon="users" tone="warn" count={3} label="Orchestrator · 3 need you" />
+      <RailLiveTile icon="workflows" tone="warn" active label="Workflow · needs you, popover open" />
+      <RailLiveTile icon="workflows" tone="err" label="Workflow · failed" />
+      <RailLiveTile icon="chats" tone="run" label="Chat · running" />
+      <RailLiveTile icon="automations" tone="run" label="Automation · running" />
+      <RailLiveOverflow count={2} />
+    </div>
+  ),
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole('button', { name: 'Workflow · failed' })).toHaveAttribute('data-tone', 'err');
   },
 };
 
@@ -34,7 +53,7 @@ export const Strip: Story = {
   },
 };
 
-/** The attention feed has not loaded: no dot, no counter (D-36). */
+/** The attention feed has not loaded: no dot, no live tiles (D-36). */
 export const FeedNotLoaded: Story = {
   parameters: { demo: { live: false } },
   play: async ({ canvas }) => {

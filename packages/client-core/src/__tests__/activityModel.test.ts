@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AttentionItem, RecentActivityItem } from '@generatorai/shared';
 import {
+  askDetailLine,
   activityDismissKey,
   activityMatchesPath,
   activityStages,
@@ -180,6 +181,19 @@ describe('what a card says', () => {
       recent: [],
     }).groups.running[0]!;
 
+  it('names what a gate asks for: a command as "Allow …?", a path after the summary', () => {
+    const card = (detail: string) =>
+      buildActivityModel({
+        attention: {
+          needsYou: [ask({ key: 'chat:a:g', entity: 'chat', entityId: 'a', ask: { kind: 'tool_permission', id: 'g', summary: 'Allow file_write?', detail, actions: ['allow_once'] } })],
+          running: [],
+        },
+        recent: [],
+      }).groups.needs_you[0]!;
+    expect(describeActivityNow(card('{ "path": "src/config.ts" }'))).toMatchObject({ text: 'Allow file_write? · src/config.ts', mono: false });
+    expect(describeActivityNow(card('{ "command": "git push -u origin main" }'))).toMatchObject({ text: 'Allow git push -u origin main?', mono: true });
+  });
+
   it('describes running work by kind', () => {
     expect(describeActivityNow(runCard({ progress: { label: 'Review diff', step: 2, of: 4 } }))).toEqual({
       tone: 'run',
@@ -242,5 +256,18 @@ describe('what a card says', () => {
   it('matches the open page by path, ignoring the dock query', () => {
     expect(activityMatchesPath({ href: '/chats/orch?dock=tasks' }, '/chats/orch')).toBe(true);
     expect(activityMatchesPath({ href: '/chats/orch' }, '/chats/other')).toBe(false);
+  });
+});
+
+describe('askDetailLine (moved from Home, D-86)', () => {
+  it('shows the command or path a clipped JSON detail names', () => {
+    expect(askDetailLine('{ "path": "src/config.ts" }')).toBe('src/config.ts');
+    expect(askDetailLine('{\n  "command": "git push -u origin fix/checkout-fl')).toBe('git push -u origin fix/checkout-fl');
+    expect(askDetailLine('{ "command": "echo \\"hi\\"" }')).toBe('echo "hi"');
+  });
+  it('keeps anything else as given', () => {
+    expect(askDetailLine('Approve "Apply upgrades"')).toBe('Approve "Apply upgrades"');
+    expect(askDetailLine('{ "count": 3 }')).toBe('{ "count": 3 }');
+    expect(askDetailLine(undefined)).toBeUndefined();
   });
 });

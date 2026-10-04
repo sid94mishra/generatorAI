@@ -219,14 +219,20 @@ export function useDefinitionVersions(id: string | undefined, opts: { enabled?: 
   });
 }
 
-/** Get a single workflow run with stage runs */
-export function useWorkflowRun(id: string | undefined) {
+/**
+ * Get a single workflow run with stage runs. Polls while the run is live unless
+ * `poll: false` (a caller that refetches on its own trigger — the Activity
+ * popover follows the attention feed, D-92).
+ */
+export function useWorkflowRun(id: string | undefined, opts: { poll?: boolean } = {}) {
   const platform = usePlatform();
+  const poll = opts.poll !== false;
   return useQuery({
     queryKey: workflowKeys.run(id ?? ''),
     queryFn: () => platform.getRun(id!),
     enabled: !!id,
     refetchInterval: (query) => {
+      if (!poll) return false;
       const run = query.state.data;
       if (run && ['completed', 'failed', 'cancelled'].includes(run.status)) {
         return false;

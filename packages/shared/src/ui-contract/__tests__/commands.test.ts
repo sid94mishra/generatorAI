@@ -100,7 +100,8 @@ describe('COMMANDS registry (D-24, 06 §5)', () => {
   it('RendererCommandId = global commands that run in the renderer', () => {
     expect(RENDERER_COMMAND_IDS).toContain('shortcuts.show');
     expect(RENDERER_COMMAND_IDS).toContain('find.open');
-    expect(RENDERER_COMMAND_IDS).not.toContain('nav.back');
+    expect(RENDERER_COMMAND_IDS).toContain('nav.back');
+    expect(RENDERER_COMMAND_IDS).not.toContain('window.reload');
     expect(RENDERER_COMMAND_IDS).not.toContain('composer.send');
     expect(isRendererCommandId('chat.new')).toBe(true);
     expect(isRendererCommandId('window.reload')).toBe(false);

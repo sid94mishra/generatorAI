@@ -336,17 +336,46 @@ function firstLine(text: string): string {
   return (text.split('\n')[0] ?? text).trim();
 }
 
+const SUBJECT_FIELD = /"(command|file_path|path|url|query)"\s*:\s*"((?:[^"\\]|\\.)*)/;
+
+/**
+ * A gate's detail as one readable line (D-86: shown as what it names). The
+ * feed carries the tool input as a clipped JSON summary (`{ "path":
+ * "src/config.ts" }`, often cut mid-object); this returns the command or path
+ * it names, else the text as written.
+ */
+export function askDetailLine(detail: string | undefined): string | undefined {
+  return askSubject(detail)?.text;
+}
+
+/**
+ * The gate detail's subject, and whether it is a command (`Allow git push?`).
+ * `plainIsCommand`: a tool gate's plain-text detail is the command line it runs.
+ */
+export function askSubject(detail: string | undefined, options: { plainIsCommand?: boolean } = {}): { text: string; command: boolean } | undefined {
+  if (!detail) return undefined;
+  const text = detail.trim();
+  if (!text.startsWith('{')) return { text: firstLine(text), command: options.plainIsCommand === true };
+  const field = SUBJECT_FIELD.exec(text);
+  if (!field?.[2]) return { text, command: false };
+  return { text: firstLine(field[2].replace(/\\"/g, '"')), command: field[1] === 'command' };
+}
+
 /** The card's status line: the ask, the current step, the error, or the outcome (EnhActivityCards ④). */
 export function describeActivityNow(entry: ActivityEntry): ActivityNow {
   if (entry.group === 'needs_you' && entry.ask) {
     const ask = entry.ask;
-    const command = ask.kind === 'tool_permission' && ask.detail ? `Allow ${firstLine(ask.detail)}?` : undefined;
-    const text = command ?? ask.summary;
+    // "Allow git push?" for a command; "Allow file_write? · src/config.ts" for a path; else the summary.
+    const subject =
+      ask.kind === 'tool_permission' || ask.kind === 'computer_consent'
+        ? askSubject(ask.detail, { plainIsCommand: ask.kind === 'tool_permission' })
+        : undefined;
+    const text = subject?.command ? `Allow ${subject.text}?` : subject ? `${ask.summary} · ${subject.text}` : ask.summary;
     return {
       tone: 'warn',
       icon: ACTIVITY_ASK_ICONS[ask.kind] ?? 'hand',
       text: entry.worker ? `${entry.worker.title}: ${text}` : text,
-      mono: command !== undefined,
+      mono: subject?.command === true,
     };
   }
   if (entry.group === 'failed') {

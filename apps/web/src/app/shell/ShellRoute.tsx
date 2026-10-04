@@ -7,6 +7,7 @@
 //                 mac | strip (Windows, Linux custom) | native (Linux, web)
 //   sidebar mode  useSidebarMode: the rail below 1200px or on a forceRail
 //                 route, the saved preference otherwise
+//   activity      the Activity column (D-92), docked or as an overlay
 //   overlays      the flyout (forced rail), the command palette, the find bar,
 //                 the shortcuts sheet and the Settings modal
 //   page          `useRoutes(PAGE_ROUTES, pageLocation)` in the MainCard; each
@@ -27,6 +28,9 @@ import { MainCard } from '@/ui/shell/MainCard/MainCard.js';
 import { SidebarFlyout } from '@/ui/shell/SidebarFlyout/SidebarFlyout.js';
 import { CommandPalette } from '@/features/palette/index.js';
 import { NewChatDialog } from '@/features/chats/create/NewChatDialog.js';
+import { CHROME } from '@generatorai/design-tokens';
+import { useActivityStore } from '@/stores/activityStore.js';
+import { ConnectedActivityColumn, useActivityPlacement } from './ConnectedActivityColumn.js';
 import { ConnectedRail } from './ConnectedRail.js';
 import { ConnectedSidebar } from './ConnectedSidebar.js';
 import { ConnectedTitleStrip } from './ConnectedTitleStrip.js';
@@ -61,6 +65,12 @@ export function ShellRoute() {
   const { mode } = useSidebarMode(useMemo(() => routeForcesRail(pageLocation), [pageLocation]));
   const flyoutOpen = useShellStore((s) => s.flyoutOpen);
   const setFlyoutOpen = useShellStore((s) => s.setFlyoutOpen);
+  // The Activity column (D-92): docked while the card keeps room beside it, else an overlay.
+  const activityOpen = useActivityStore((s) => s.open);
+  const activityWidth = useActivityStore((s) => s.width);
+  const sidebarWidth = mode === 'expanded' ? CHROME.sidebarWidth : CHROME.railWidth;
+  const placement = useActivityPlacement(sidebarWidth, activityWidth);
+  const activityDocked = activityOpen && placement === 'docked';
 
   // Publishes window chrome, follows native route pushes, and mirrors UI
   // state back into the menu. No-op outside the Electron shell.
@@ -83,7 +93,14 @@ export function ShellRoute() {
       layout={LAYOUT}
       sidebarMode={mode}
       titleStrip={<ConnectedTitleStrip />}
-      sidebar={mode === 'expanded' ? <ConnectedSidebar layout={LAYOUT} /> : <ConnectedRail layout={LAYOUT} covered={flyoutOpen} />}
+      sidebar={
+        mode === 'expanded' ? (
+          <ConnectedSidebar layout={LAYOUT} activityOpen={activityOpen} />
+        ) : (
+          <ConnectedRail layout={LAYOUT} covered={flyoutOpen} activityDocked={activityDocked} />
+        )
+      }
+      activity={activityOpen ? <ConnectedActivityColumn placement={placement} sidebarWidth={sidebarWidth} /> : null}
       flyout={
         flyoutOpen ? (
           <SidebarFlyout onClose={() => setFlyoutOpen(false)}>

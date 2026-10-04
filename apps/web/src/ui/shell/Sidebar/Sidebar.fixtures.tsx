@@ -12,7 +12,7 @@ import { StatusDot } from '../../primitives/StatusDot/StatusDot.js';
 import type { ShellLayout } from '../AppFrame/AppFrame.js';
 import { MacTrafficLightRow } from '../MacTrafficLightRow/MacTrafficLightRow.js';
 import { UpdatePill } from '../UpdatePill/UpdatePill.js';
-import { Rail, RailCounterButton, RailDivider, RailGroup, RailMark, RailSpacer, RailStatusDot } from '../Rail/Rail.js';
+import { Rail, RailDivider, RailGroup, RailLiveOverflow, RailLiveTile, RailMark, RailSpacer, RailStatusDot } from '../Rail/Rail.js';
 import {
   ServerSwitcher,
   Sidebar,
@@ -183,10 +183,19 @@ export function demoRail({ layout = 'native', active = 'chats', live = true, cov
           />
         ))}
       </RailGroup>
+      <RailDivider />
+      <IconButton icon="activity" label="Show activity" size="lg" tooltipSide="right" />
       {live ? (
         <>
           <RailDivider />
-          <RailCounterButton count={3} label="3 running" />
+          {/* D-92 quick access (board EnhRailQuickAccess): amber needs you, red failed, blue running. */}
+          <RailGroup role="list" aria-label="Live activity">
+            <span role="listitem"><RailLiveTile icon="chats" tone="warn" label="Fix flaky checkout test · needs you" /></span>
+            <span role="listitem"><RailLiveTile icon="users" tone="warn" count={2} label="Release 4.2 rollout · needs you" /></span>
+            <span role="listitem"><RailLiveTile icon="workflows" tone="err" label="Deploy preview · failed" /></span>
+            <span role="listitem"><RailLiveTile icon="chats" tone="run" label="Upgrade React Flow to v12 · running" /></span>
+            <span role="listitem"><RailLiveOverflow count={2} /></span>
+          </RailGroup>
         </>
       ) : null}
       <RailSpacer />

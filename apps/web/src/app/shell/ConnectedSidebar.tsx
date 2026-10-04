@@ -18,10 +18,11 @@
 // ────────────────────────────────────────────────────────────────
 
 import { Link, useLocation } from 'react-router';
-import { NAV_DESTINATIONS, navDestinationFor } from '@generatorai/shared/ui-contract';
 import type { AttentionItem } from '@generatorai/shared';
 import { isDesktop, type ShellLayout } from '@/lib/desktop.js';
-import { useAttention } from '@/hooks/attentionQueries.js';
+import { ACTIVITY_COPY, NAV_DESTINATIONS, navDestinationFor } from '@generatorai/shared/ui-contract';
+import { useAttention, useAttentionCounts } from '@/hooks/attentionQueries.js';
+import { useActivityStore } from '@/stores/activityStore.js';
 import { useRefetchAfterGap } from '@/hooks/useConnectionSummary.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Count } from '@/ui/primitives/Count/Count.js';
@@ -53,9 +54,11 @@ export interface ConnectedSidebarProps {
   layout: ShellLayout;
   /** Rendered inside the SidebarFlyout over a forced rail. */
   inFlyout?: boolean;
+  /** The Activity column is open: Needs you / Running move into it (D-92). */
+  activityOpen?: boolean;
 }
 
-export function ConnectedSidebar({ layout, inFlyout = false }: ConnectedSidebarProps) {
+export function ConnectedSidebar({ layout, inFlyout = false, activityOpen = false }: ConnectedSidebarProps) {
   const actions = useShellActions();
   const status = useShellStatus();
   const { pathname } = useLocation();
@@ -64,10 +67,12 @@ export function ConnectedSidebar({ layout, inFlyout = false }: ConnectedSidebarP
 
   const topRow =
     layout === 'mac' ? (
-      <MacTrafficLightRow data-testid="sidebar-drag-region" aria-hidden />
+      // D-93: Back / Forward at the end of the traffic-light row (desktop only; the row is a drag handle, the buttons no-drag).
+      <MacTrafficLightRow data-testid="sidebar-drag-region">{isDesktop ? <NavHistoryButtons testIdPrefix="sidebar" /> : null}</MacTrafficLightRow>
     ) : layout === 'native' && isDesktop ? (
       <NativeNavRow />
     ) : undefined;
+  const activityToggle = <ActivityToggle />;
 
   const collapse = (
     <IconButton
@@ -98,12 +103,14 @@ export function ConnectedSidebar({ layout, inFlyout = false }: ConnectedSidebarP
         strip ? (
           <SidebarHeaderRow className="mb-1.5 pl-2">
             <SidebarBrand />
+            {inFlyout ? null : activityToggle}
             {newChat}
             {inFlyout ? collapse : null}
           </SidebarHeaderRow>
         ) : (
-          <SidebarHeaderRow>
+          <SidebarHeaderRow className="gap-1">
             <ServersMenu trigger={<ServerSwitcher data-testid="sidebar-server-switcher" server={status.serverName} />} />
+            {inFlyout ? null : activityToggle}
             {collapse}
           </SidebarHeaderRow>
         )
@@ -134,7 +141,7 @@ export function ConnectedSidebar({ layout, inFlyout = false }: ConnectedSidebarP
           ))}
         </SidebarNav>
       }
-      live={<LiveSections />}
+      live={activityOpen && !inFlyout ? null : <LiveSections />}
       footer={
         <SidebarFooter
           data-testid="sidebar-connection"
@@ -160,20 +167,64 @@ export function ConnectedSidebar({ layout, inFlyout = false }: ConnectedSidebarP
 
 /** Linux native frame (desktop): Back / Forward at the top of the sidebar. */
 function NativeNavRow() {
+  return (
+    <SidebarNavRow data-testid="sidebar-nav-row">
+      <NavHistoryButtons testIdPrefix="sidebar" />
+    </SidebarNavRow>
+  );
+}
+
+/**
+ * Back / Forward (D-93): disabled when Chromium's session history cannot move
+ * that way; the tooltip names this host's chord (⌘[ / Alt+←).
+ */
+export function NavHistoryButtons({ testIdPrefix, tooltipSide = 'bottom' }: { testIdPrefix: string; tooltipSide?: 'bottom' | 'right' }) {
   const actions = useShellActions();
   const history = useNavHistory();
   return (
-    <SidebarNavRow data-testid="sidebar-nav-row">
-      <IconButton icon="back" label="Back" size="sm" data-testid="sidebar-back" disabled={!history.back} onClick={actions.back} />
+    <>
+      <IconButton
+        icon="back"
+        label="Back"
+        size="sm"
+        tooltipSide={tooltipSide}
+        shortcut={shortcutFor('nav.back')}
+        data-testid={`${testIdPrefix}-back`}
+        disabled={!history.back}
+        onClick={actions.back}
+      />
       <IconButton
         icon="forward"
         label="Forward"
         size="sm"
-        data-testid="sidebar-forward"
+        tooltipSide={tooltipSide}
+        shortcut={shortcutFor('nav.forward')}
+        data-testid={`${testIdPrefix}-forward`}
         disabled={!history.forward}
         onClick={actions.forward}
       />
-    </SidebarNavRow>
+    </>
+  );
+}
+
+/** Shows / hides the Activity column (D-92); `activity.toggle`. */
+export function ActivityToggle({ size = 'md', tooltipSide = 'bottom' }: { size?: 'md' | 'lg'; tooltipSide?: 'bottom' | 'right' }) {
+  const open = useActivityStore((s) => s.open);
+  const toggle = useActivityStore((s) => s.toggle);
+  const counts = useAttentionCounts();
+  const needsYou = counts?.needsYou ?? 0;
+  return (
+    <IconButton
+      icon="activity"
+      label={open ? ACTIVITY_COPY.hide : needsYou > 0 ? `${ACTIVITY_COPY.show} · ${needsYou} need you` : ACTIVITY_COPY.show}
+      size={size}
+      tooltipSide={tooltipSide}
+      pressed={open}
+      shortcut={shortcutFor('activity.toggle')}
+      data-testid="activity-toggle"
+      data-activity-toggle=""
+      onClick={toggle}
+    />
   );
 }
 

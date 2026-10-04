@@ -65,6 +65,13 @@ export const SHELL = {
   dialogWidth: { sm: 420, md: 640, lg: 960, xl: 1040 },
   pickerWidth: { model: 620, agent: 760 },
   menuWidth: { min: 176, default: 240 },
+  /**
+   * The Activity column (D-92, board EnhActivityColumn): 288 wide, resizable
+   * 248–400. It docks beside the sidebar/rail only while the main card keeps
+   * `minMain` px; otherwise it opens as an overlay over the card (the 1100px
+   * window: the rail's quick access, board EnhRailQuickAccess).
+   */
+  activityColumn: { width: 288, min: 248, max: 400, minMain: 720, popoverWidth: 320 },
 } as const;
 
 /**

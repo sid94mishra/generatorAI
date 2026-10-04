@@ -8,6 +8,7 @@
 // (`mac | strip | native`) and the sidebar mode are decided by app/shell from
 // the window chrome and the window width, and passed in.
 //
+// The Activity column (D-92) sits between the sidebar/rail and the card.
 // `data-layout` / `data-sidebar` are the hooks the desktop-chrome CSS in
 // globals.css keys off (the macOS rail-mode page-header inset, 06 §3.5), and
 // what the shell smokes assert. The frame never writes the `<html>` classes
@@ -28,6 +29,8 @@ export interface AppFrameProps extends ComponentProps<'div'> {
   titleStrip?: ReactNode;
   /** S-02 Sidebar or S-03 Rail. */
   sidebar: ReactNode;
+  /** The Activity column (D-92): docked between the sidebar and the card, or an overlay over the card. */
+  activity?: ReactNode;
   /** The SidebarFlyout, while open (rail mode). */
   flyout?: ReactNode;
   /** S-04 MainCard. */
@@ -42,6 +45,7 @@ export function AppFrame({
   sidebarMode,
   titleStrip,
   sidebar,
+  activity,
   flyout,
   children,
   overlays,
@@ -59,6 +63,7 @@ export function AppFrame({
       {layout === 'strip' ? titleStrip : null}
       <div className="relative flex min-h-0 flex-1">
         {sidebar}
+        {activity}
         {children}
         {sidebarMode === 'rail' ? flyout : null}
       </div>

@@ -71,8 +71,10 @@ export const COMMANDS = {
   'nav.workflows': { label: 'Workflows', group: 'navigate', scope: 'global', runsIn: 'renderer', web: 'G W', desktopMac: 'Cmd+Shift+W', desktopWinLinux: 'Ctrl+5', icon: 'workflows', palette: true },
   'nav.automations': { label: 'Automations', group: 'navigate', scope: 'global', runsIn: 'renderer', web: 'G A', desktopMac: 'Cmd+Shift+A', desktopWinLinux: 'Ctrl+6', icon: 'automations', palette: true },
   'nav.scripts': { label: 'Scripts', group: 'navigate', scope: 'global', runsIn: 'renderer', web: 'G S', desktopMac: 'Cmd+Shift+S', desktopWinLinux: 'Ctrl+7', icon: 'scripts', palette: true },
-  'nav.back': { label: 'Back', group: 'navigate', scope: 'global', runsIn: 'main', web: null, desktopMac: 'Cmd+[', desktopWinLinux: 'Alt+Left', icon: 'back' },
-  'nav.forward': { label: 'Forward', group: 'navigate', scope: 'global', runsIn: 'main', web: null, desktopMac: 'Cmd+]', desktopWinLinux: 'Alt+Right', icon: 'forward' },
+  // D-93: renderer commands (the palette lists them; the web keeps the browser's own keys, so `web` is null).
+  // Desktop Windows/Linux handle Alt+←/→ in the renderer, so a surface that owns its keys keeps them.
+  'nav.back': { label: 'Back', group: 'navigate', scope: 'global', runsIn: 'renderer', web: null, desktopMac: 'Cmd+[', desktopWinLinux: 'Alt+Left', icon: 'back', palette: true },
+  'nav.forward': { label: 'Forward', group: 'navigate', scope: 'global', runsIn: 'renderer', web: null, desktopMac: 'Cmd+]', desktopWinLinux: 'Alt+Right', icon: 'forward', palette: true },
   'app.settings': { label: 'Open settings', group: 'app', scope: 'global', runsIn: 'renderer', web: 'G ,', desktopMac: 'Cmd+,', desktopWinLinux: 'Ctrl+,', icon: 'settings', palette: true },
   'chat.new': { label: 'New chat', group: 'create', scope: 'global', runsIn: 'renderer', web: 'N', desktopMac: 'Cmd+N', desktopWinLinux: 'Ctrl+N', icon: 'plus', palette: true, deepLink: true },
   'workflow.new': { label: 'New workflow', group: 'create', scope: 'global', runsIn: 'renderer', web: 'Shift+N', desktopMac: 'Cmd+Shift+N', desktopWinLinux: 'Ctrl+Shift+N', icon: 'plus', palette: true, deepLink: true },
@@ -80,6 +82,7 @@ export const COMMANDS = {
   'automation.new': { label: 'New automation', group: 'create', scope: 'global', runsIn: 'renderer', web: null, desktopMac: null, desktopWinLinux: null, icon: 'plus', palette: true },
   'agent.new': { label: 'New agent', group: 'create', scope: 'global', runsIn: 'renderer', web: null, desktopMac: null, desktopWinLinux: null, icon: 'plus', palette: true },
   'sidebar.toggle': { label: 'Toggle sidebar', group: 'view', scope: 'global', runsIn: 'renderer', web: 'Mod+B', desktopMac: 'Cmd+B', desktopWinLinux: 'Ctrl+B', icon: 'sidebar', palette: true },
+  'activity.toggle': { label: 'Toggle activity column', group: 'view', scope: 'global', runsIn: 'renderer', web: 'Mod+.', desktopMac: 'Cmd+.', desktopWinLinux: 'Ctrl+.', icon: 'activity', palette: true },
   'dock.toggle': { label: 'Toggle side dock', group: 'view', scope: 'global', runsIn: 'renderer', web: 'Mod+Alt+B', desktopMac: 'Cmd+Alt+B', desktopWinLinux: 'Ctrl+Alt+B', icon: 'dock', palette: true },
   'theme.toggle': { label: 'Toggle theme', group: 'view', scope: 'global', runsIn: 'renderer', web: null, desktopMac: null, desktopWinLinux: null, icon: 'mode-dark', palette: true },
   'find.open': { label: 'Find…', group: 'edit', scope: 'global', runsIn: 'renderer', web: null, desktopMac: 'Cmd+F', desktopWinLinux: 'Ctrl+F', icon: 'search' },

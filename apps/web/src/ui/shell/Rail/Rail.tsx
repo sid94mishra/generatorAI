@@ -7,14 +7,15 @@
 //   topRow (macOS: the empty 44px drag row the traffic lights sit over)
 //   app mark 32 · Expand · divider · Search · New chat · divider ·
 //   7 nav icon buttons (Home carries the needs-you dot) · divider ·
-//   running counter · spacer · connection dot · Settings
+//   Activity toggle · live tiles (D-92) · spacer · connection dot · Settings
 // Every icon has a tooltip (IconButton). Presentational: app/shell
 // (ConnectedRail) supplies the children and decides what is omitted per
 // layout (the strip layout drops the app mark and Search, which the title
 // strip holds).
 // ────────────────────────────────────────────────────────────────
 
-import type { ComponentProps, ReactNode } from 'react';
+import type { ComponentProps, ReactNode, Ref } from 'react';
+import type { IconConcept } from '@generatorai/design-tokens';
 import { cn } from '../../lib/cn.js';
 import { focusRing } from '../../lib/focus.js';
 import { AppMark } from '../../icons/vendor/VendorIcons.js';
@@ -94,31 +95,6 @@ export function RailMark({ label, className, ...rest }: RailMarkProps) {
   );
 }
 
-export interface RailCounterButtonProps extends Omit<ComponentProps<'button'>, 'children' | 'ref'> {
-  count: number;
-  /** Accessible name and tooltip, e.g. "3 running". */
-  label: string;
-}
-
-/** The running counter: a run-coloured spinner glyph with the count under it (40h). */
-export function RailCounterButton({ count, label, className, ...rest }: RailCounterButtonProps) {
-  return (
-    <Tooltip content={label} side="right">
-      <Button
-        variant="ghost"
-        aria-label={label}
-        className={cn('h-auto min-h-10 w-8 flex-col gap-px px-0 py-1 text-run hover:not-disabled:text-run', className)}
-        {...rest}
-      >
-        <span className="flex flex-col items-center gap-px">
-          <Icon concept="status-running" size={16} />
-          <span className="font-mono text-micro leading-none text-fg-3 tabular-nums">{count}</span>
-        </span>
-      </Button>
-    </Tooltip>
-  );
-}
-
 export interface RailStatusDotProps extends Omit<ComponentProps<'span'>, 'children'> {
   tone: DotTone;
   /** Accessible name and tooltip: "Connected · local:3100". */
@@ -138,6 +114,84 @@ export function RailStatusDot({ tone, label, className, ...rest }: RailStatusDot
       >
         <StatusDot tone={tone} size="sm" />
       </span>
+    </Tooltip>
+  );
+}
+
+const LIVE_TILE_TONE = {
+  warn: 'bg-warn-bg text-warn ring-1 ring-warn/40 ring-inset hover:not-disabled:bg-warn-bg hover:not-disabled:text-warn',
+  err: 'bg-err-bg text-err ring-1 ring-err/40 ring-inset hover:not-disabled:bg-err-bg hover:not-disabled:text-err',
+  run: 'bg-run-bg text-run hover:not-disabled:bg-run-bg hover:not-disabled:text-run',
+} as const;
+
+const LIVE_TILE_BADGE = {
+  warn: 'bg-warn text-ground',
+  err: 'bg-err text-ground',
+  run: 'bg-run text-ground',
+} as const;
+
+export interface RailLiveTileProps extends Omit<ComponentProps<'button'>, 'children' | 'ref'> {
+  /** Kind glyph (chat, orchestrator, workflow, automation). */
+  icon: IconConcept;
+  /** amber = needs you, red = failed, blue = running (D-92, board EnhRailQuickAccess). */
+  tone: keyof typeof LIVE_TILE_TONE;
+  /** Accessible name: "Nightly dependency audit · needs you". */
+  label: string;
+  /** Corner count (asks waiting on one card). */
+  count?: number;
+  /** Its popover is open (the hover ring). */
+  active?: boolean;
+  ref?: Ref<HTMLButtonElement>;
+}
+
+/** A live item in the rail (narrow window quick access): a 34px status-tinted kind tile. */
+export function RailLiveTile({ icon, tone, label, count, active = false, className, ...rest }: RailLiveTileProps) {
+  return (
+    <Button
+      variant="ghost"
+      aria-label={label}
+      data-tone={tone}
+      className={cn(
+        'size-8.5 rounded-card px-0',
+        LIVE_TILE_TONE[tone],
+        active && 'outline-2 outline-offset-2 outline-line-strong',
+        className,
+      )}
+      {...rest}
+    >
+      <Icon concept={icon} size={16} />
+      {count !== undefined && count > 1 ? (
+        <span
+          aria-hidden
+          className={cn(
+            'absolute -right-0.75 -bottom-0.75 flex min-h-3.5 min-w-3.5 items-center justify-center rounded-full px-0.75 font-mono text-micro leading-none font-semibold ring-2 ring-ground',
+            LIVE_TILE_BADGE[tone],
+          )}
+        >
+          {count}
+        </span>
+      ) : null}
+    </Button>
+  );
+}
+
+export interface RailLiveOverflowProps extends Omit<ComponentProps<'button'>, 'children' | 'ref'> {
+  /** How many live items did not fit. */
+  count: number;
+}
+
+/** "+2": the live items that did not fit; opens the Activity column. */
+export function RailLiveOverflow({ count, className, ...rest }: RailLiveOverflowProps) {
+  return (
+    <Tooltip content={`${count} more — show activity`} side="right">
+      <Button
+        variant="ghost"
+        aria-label={`${count} more live items — show activity`}
+        className={cn('h-control-sm w-8.5 rounded-control px-0 font-mono text-micro text-fg-3', className)}
+        {...rest}
+      >
+        +{count}
+      </Button>
     </Tooltip>
   );
 }

@@ -8,10 +8,13 @@
 // when the attention feed (G-01) loses an item (something just finished).
 // ────────────────────────────────────────────────────────────────
 
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { startOfDay } from '@generatorai/client-core';
 import type { ChatMessage, RecentActivityItem } from '@generatorai/shared';
 import { attachmentUrl } from '@/lib/attachmentUrl.js';
 import { usePlatform } from '../providers/PlatformProvider.js';
+import { useAttention } from './attentionQueries.js';
 
 export interface RecentActivityQuery {
   since?: string;
@@ -31,6 +34,57 @@ export function useRecentActivity(query?: RecentActivityQuery) {
     queryFn: () => platform.getRecentActivity(query),
     staleTime: 30_000,
   });
+}
+
+/** Most items a day's feed asks for (the endpoint's own cap). */
+const TODAY_LIMIT = 100;
+/**
+ * A finished turn's list row (G-02) is written a moment after the attention
+ * feed drops the chat: one more read after this delay catches it. A single
+ * follow-up, not a polling loop.
+ */
+const FINISH_SETTLE_MS = 1_500;
+
+/**
+ * Everything that finished today (since local midnight), newest first — the
+ * Activity column's Failed and Recent groups (D-92). No SSE of its own: it
+ * refetches when the attention feed loses an item (something finished or was
+ * answered), and moves to the new day at midnight.
+ */
+export function useTodayActivity(options: { enabled?: boolean } = {}) {
+  const platform = usePlatform();
+  const enabled = options.enabled !== false;
+  const [day, setDay] = useState(() => startOfDay(Date.now()));
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const wait = Math.max(1_000, day + 86_400_000 - Date.now() + 1_000);
+    const timer = setTimeout(() => setDay(startOfDay(Date.now())), wait);
+    return () => clearTimeout(timer);
+  }, [day, enabled]);
+
+  const query = useQuery({
+    queryKey: activityKeys.recent({ since: new Date(day).toISOString(), limit: TODAY_LIMIT }),
+    queryFn: () => platform.getRecentActivity({ since: new Date(day).toISOString(), limit: TODAY_LIMIT }),
+    enabled,
+    staleTime: 30_000,
+  });
+
+  const { data: attention } = useAttention({ enabled });
+  const joined = attention ? [...attention.needsYou, ...attention.running].map((i) => i.key).join('\n') : undefined;
+  const previous = useRef<ReadonlySet<string> | null>(null);
+  const { refetch } = query;
+  useEffect(() => {
+    if (joined === undefined) return undefined;
+    const current = new Set(joined ? joined.split('\n') : []);
+    const before = previous.current;
+    previous.current = current;
+    if (!before || ![...before].some((key) => !current.has(key))) return undefined;
+    void refetch();
+    const timer = setTimeout(() => void refetch(), FINISH_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [joined, refetch]);
+
+  return query;
 }
 
 /** How many of the chat's latest messages are searched for the prompt to resend. */
