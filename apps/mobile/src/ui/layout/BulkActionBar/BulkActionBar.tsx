@@ -24,7 +24,7 @@ function Action({ action }: { action: BulkAction }): React.ReactElement {
   const android = nativePlatform === 'android';
   return (
     <Pressable testID={action.testID} onPress={action.onPress} disabled={action.disabled} feedback="scale" borderless accessibilityRole="button" accessibilityLabel={action.label}>
-      <View className={cn('items-center justify-center', action.disabled && 'opacity-40')}>
+      <View collapsable={false} className={cn('items-center justify-center', action.disabled && 'opacity-40')}>
         <Icon concept={action.icon} size={android ? 24 : 22} tone={action.destructive ? 'err' : 'fg'} />
       </View>
     </Pressable>
