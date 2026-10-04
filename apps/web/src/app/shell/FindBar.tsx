@@ -36,6 +36,27 @@ export function FindBar() {
   // later one as "step to the next match"; getting this wrong makes the first
   // Enter jump two matches forward.
   const searchStarted = useRef(false);
+  // Chromium moves focus to the active match when it searches, so after the first character the bar lost the
+  // caret and the rest of the query went to the page ("WP0" left "W" in the field). Remember where the caret
+  // was and put it back on each result (the focus moves ~0.3 s after the call, just before `found-in-page`);
+  // the restore ends 1.5 s after the search.
+  const restoreFocus = useRef<{ start: number | null; end: number | null } | null>(null);
+  const restoreTimer = useRef<number | undefined>(undefined);
+  const typingTimer = useRef<number | undefined>(undefined);
+
+  // Every found event re-asserts it (Chromium reports several and may move focus after the first); the timer's
+  // call is the last one and ends the restore.
+  const refocusInput = useCallback((final: boolean) => {
+    const pending = restoreFocus.current;
+    if (final) {
+      restoreFocus.current = null;
+      window.clearTimeout(restoreTimer.current);
+    }
+    const el = inputRef.current;
+    if (!pending || !el || document.activeElement === el) return;
+    el.focus({ preventScroll: true });
+    if (pending.start != null && pending.end != null) el.setSelectionRange(pending.start, pending.end);
+  }, []);
 
   const search = useCallback((text: string, forward: boolean, step: boolean) => {
     const api = bridge();
@@ -53,11 +74,28 @@ export function FindBar() {
       void api.stopFindInPage?.();
       searchStarted.current = false;
     }
+    // Chromium starts a follow-up search from the selection: with the caret in the field every step restarted
+    // at match 1 (the Next button too). A step takes focus and the selection off the bar first (keys still reach the bar — onKey).
+    const focused = document.activeElement;
+    if (step && focused instanceof HTMLElement && focused.closest('[data-testid="find-bar"]')) {
+      focused.blur();
+      window.getSelection()?.removeAllRanges();
+    }
+    // Only a new query restores the caret: focusing the input after a step resets Chromium's find start point,
+    // so every Enter landed on match 1 again. After a step the window handler below routes keys to the bar.
+    const el = inputRef.current;
+    if (!step && el && document.activeElement === el) {
+      restoreFocus.current = { start: el.selectionStart, end: el.selectionEnd };
+      window.clearTimeout(restoreTimer.current);
+      restoreTimer.current = window.setTimeout(() => refocusInput(true), 1500);
+    }
     void api.findInPage(text, { forward, findNext: step && searchStarted.current });
     searchStarted.current = true;
-  }, []);
+  }, [refocusInput]);
 
   const close = useCallback(() => {
+    window.clearTimeout(typingTimer.current);
+    restoreFocus.current = null;
     setOpen(false);
     setResult(null);
     searchStarted.current = false;
@@ -91,22 +129,42 @@ export function FindBar() {
   useEffect(() => {
     const api = bridge();
     if (!api?.onFoundInPage) return undefined;
-    return api.onFoundInPage(setResult);
-  }, []);
+    return api.onFoundInPage((r) => {
+      setResult(r);
+      refocusInput(false);
+    });
+  }, [refocusInput]);
 
   // The shell has no browser chrome, so nothing else would close this (the
   // widget's own Escape covers focus inside it; this covers focus elsewhere).
+  // While the bar is open and the search took focus to the page: Enter / Shift+Enter step, and a typed
+  // character goes back into the field (focus moved in keydown receives the character).
   useEffect(() => {
     if (!open) return undefined;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close();
+      if (e.key === 'Escape') {
+        close();
+        return;
+      }
+      const el = inputRef.current;
+      // An Enter typed in the field was already handled by the field (which then moved focus to the page).
+      if (!el || e.target === el || document.activeElement !== document.body) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        search(el.value, !e.shiftKey, true);
+      } else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        el.focus({ preventScroll: true });
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, close]);
+  }, [open, close, search]);
 
+  // Opening selects the previous query, so typing replaces it (a second Cmd+F does the same while open).
   useEffect(() => {
-    if (open) inputRef.current?.focus();
+    if (!open) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
   }, [open]);
 
   if (!isDesktop || !open) return null;
@@ -118,7 +176,9 @@ export function FindBar() {
       onQueryChange={(next) => {
         setQuery(next);
         searchStarted.current = false;
-        search(next, true, false);
+        // One search per pause in typing, not per keystroke: each search moves Chromium's focus.
+        window.clearTimeout(typingTimer.current);
+        typingTimer.current = window.setTimeout(() => search(next, true, false), 120);
       }}
       {...(result && query ? { matches: { current: result.activeMatchOrdinal, total: result.matches } } : {})}
       onPrev={() => search(query, false, true)}
