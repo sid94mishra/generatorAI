@@ -8,7 +8,7 @@
 //            permission mode and the WF-06 BudgetMeter
 //   main     the run graph (toggle), compensation / error banners, pending
 //            decisions, the stage table (every row through StageRow, control
-//            flow through ControlFlowNode), the focused stage's composer
+//            flow through ControlFlowNode), the focused stage's composer (pinned under the stages)
 //   dock     blocks/dock Dock at 440 px (`generatorai:dock:run:*`): Inspector,
 //            Changes, Files, Terminal, Browser pinned; Usage and Widget from
 //            "+"; extra Terminal / Browser instances and file tabs
@@ -495,7 +495,7 @@ export function WorkflowRunPage() {
   const focusedComposer = useMemo(
     () =>
       runId && focusedStage && focusedStage.kind === 'agent' && focusedStage.status !== 'skipped' && focusedStage.status !== 'cancelled' ? (
-        <StageComposer runId={runId} stage={focusedStage} workspaceId={runWorkspaceId} />
+        <StageComposer runId={runId} stage={focusedStage} workspaceId={runWorkspaceId} docked />
       ) : null,
     [runId, focusedStage, runWorkspaceId],
   );
@@ -528,7 +528,6 @@ export function WorkflowRunPage() {
         onResolveGate={handleResolveGate}
         gateBusy={gateBusyStage === s.id}
         menu={stageMenu}
-        composer={focusedStageId === s.id ? focusedComposer : undefined}
         {...(runIsTerminal ? { onRetry: handleRetryStage } : {})}
         onOpenInspector={handleOpenInspector}
         approveStarts={s.status === 'awaiting_input' ? successorsOf(s.id) : undefined}
@@ -558,7 +557,6 @@ export function WorkflowRunPage() {
       handleResolveGate,
       gateBusyStage,
       stageMenu,
-      focusedComposer,
       handleRetryStage,
       handleOpenInspector,
       successorsOf,
@@ -744,11 +742,6 @@ export function WorkflowRunPage() {
               })}
             </section>
           </RunDecisionsContext.Provider>
-          <div className="flex justify-center pt-2 pb-4">
-            <Button variant="ghost" size="sm" icon="history" onClick={() => setTimelineOpen(true)}>
-              Show event timeline
-            </Button>
-          </div>
         </div>
       </div>
     </div>
@@ -797,6 +790,7 @@ export function WorkflowRunPage() {
                   />
                 }
                 main={main}
+                bottom={focusedComposer}
                 dockHost={(column) => (
                   <Dock
                     open={dockOpen}

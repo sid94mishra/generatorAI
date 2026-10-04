@@ -4,8 +4,9 @@
 // time · "…" menu. Expanded, the row is a compact chat (P03b): the stage
 // prompt, the stage transcript (blocks/transcript TurnBody, its in-turn gates
 // answered through the stage conversation API), the output chips, the WF-09
-// review card when the stage parked on its completion review, and — for the
-// focused stage — the composer's `stage` variant.
+// review card when the stage parked on its completion review. The focused
+// stage's composer is pinned under the run's stages (WorkflowRunPage), like the
+// chat composer, so the growing output never pushes it along.
 //
 // Every row of the page renders through here (top-level stages, a loop's
 // own row, loop/map body instances), so focus, gates, the menu and the
@@ -70,8 +71,6 @@ export interface StageRowProps {
   /** A gate answer or approval of this stage is in flight (D-13). */
   gateBusy?: boolean;
   menu?: StageMenuActions;
-  /** The compact composer, for the focused stage only. */
-  composer?: ReactNode;
   onRetry?: (id: string) => void;
   /** Open the dock's Inspector on this stage. */
   onOpenInspector?: (id: string) => void;
@@ -143,7 +142,6 @@ export const StageRow = memo(function StageRow({
   onResolveGate,
   gateBusy = false,
   menu,
-  composer,
   onRetry,
   onOpenInspector,
   approveStarts,
@@ -372,7 +370,6 @@ export const StageRow = memo(function StageRow({
             />
           ) : null}
 
-          {composer}
         </div>
       ) : null}
 

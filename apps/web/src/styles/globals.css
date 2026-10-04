@@ -4971,6 +4971,18 @@ label:has(> input[type="radio"]) {
   color: color-mix(in oklab, var(--gai-fg) 80%, transparent);
 }
 
+/* Streaming caret (D-91): the 2px bar after the last word, drawn on the host
+   element Markdown marks — a pseudo-element, so its travel is not a layout shift. */
+[data-gai-caret]::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1lh;
+  margin-left: 2px;
+  vertical-align: top;
+  background-color: var(--gai-fg);
+}
+
 /* Prose for the transcript and Streamdown output (02 §5.3). */
 .gai-prose {
   font-size: var(--gai-text-body);

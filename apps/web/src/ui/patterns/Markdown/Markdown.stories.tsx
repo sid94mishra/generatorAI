@@ -155,7 +155,8 @@ export const StreamingIncompleteBold: Story = {
     await expect(canvasElement.textContent).not.toContain('**');
     const strong = canvas.getByText(/important part is the guard/).closest('strong');
     await expect(strong).not.toBeNull();
-    await expect(strong!.querySelector('span[aria-hidden="true"].bg-fg')).not.toBeNull();
+    // The caret is the bold run's own ::after (D-91): it hosts the `data-gai-caret` mark.
+    await expect(strong!.hasAttribute('data-gai-caret')).toBe(true);
   },
 };
 

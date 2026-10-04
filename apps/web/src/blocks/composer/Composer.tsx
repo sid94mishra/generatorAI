@@ -80,6 +80,11 @@ export interface ComposerProps {
   sessionId: string;
   disabled: boolean;
   placeholder: string;
+  /**
+   * Pinned under a page's scrolling column, like the chat's composer: the same frame (padding,
+   * centred reading width). The `chat` variant always is; a `stage` box is when a run page pins it.
+   */
+  docked?: boolean;
   /** `chat` (default): the full composer. `stage`: the compact box for a workflow stage message (no meta or hint row). */
   variant?: Extract<ComposerVariant, 'chat' | 'stage'>;
   onBeforeSend?: () => Promise<void>;
@@ -205,6 +210,7 @@ export function Composer({
   chat,
   onOpenTasks,
   aboveComposer,
+  docked,
   promptHistory,
   restoredDraft,
 }: ComposerProps) {
@@ -451,12 +457,12 @@ export function Composer({
 
   return (
     <div
-      className={cn('bg-surface', !compact && 'px-2 pt-3 pb-3 sm:px-4')}
+      className={cn('bg-surface', (!compact || docked) && 'px-2 pt-3 pb-3 sm:px-4')}
       onDrop={draft.handleDrop}
       onDragOver={draft.handleDragOver}
       data-testid="composer"
     >
-      <div className={cn('mx-auto w-full', !compact && 'max-w-190')}>
+      <div className={cn('mx-auto w-full', (!compact || docked) && 'max-w-190')}>
         {aboveComposer}
         <BlockingBar
           blocking={blocking}

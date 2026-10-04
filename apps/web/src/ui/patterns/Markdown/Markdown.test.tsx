@@ -18,7 +18,8 @@ vi.mock('../CodeBlock/CodeBlock.js', () => ({
 
 import { Markdown } from './Markdown.js';
 
-const CARET = 'span[aria-hidden="true"].bg-fg';
+/** The caret: a host element's `::after` (D-91), or the bar element when nothing can host it. */
+const CARET = '[data-gai-caret], span[aria-hidden="true"].bg-fg';
 
 describe('Markdown', () => {
   it('renders GFM prose with design-vocabulary elements', () => {
@@ -70,7 +71,7 @@ describe('Markdown', () => {
     const caret = container.querySelector(CARET);
     expect(caret).not.toBeNull();
     // Inside the bold run being typed, not on a line of its own.
-    expect(caret!.parentElement!.tagName).toBe('STRONG');
+    expect(caret!.tagName).toBe('STRONG');
     expect(container.querySelectorAll(CARET)).toHaveLength(1);
   });
 

@@ -153,7 +153,13 @@ interface HastNode {
 /** Elements that cannot hold the caret (void, or whose text is code). */
 const NO_CARET_INSIDE = new Set(['pre', 'img', 'hr', 'br', 'input']);
 
-/** Rehype pass: append a caret element to the deepest last element of the tree. */
+/**
+ * Rehype pass: mark the deepest last element of the tree as the caret's host —
+ * `[data-gai-caret]::after` (globals.css) draws the 2px bar after its last
+ * word. A pseudo-element, not a child element, so the caret travelling with
+ * the text is not a layout shift (D-91). With no element to hold it (the tail
+ * is an open code fence) a caret element goes after the block.
+ */
 function rehypeStreamingCaret() {
   return (tree: HastNode) => {
     let host = tree;
@@ -167,6 +173,10 @@ function rehypeStreamingCaret() {
         continue;
       }
       break;
+    }
+    if (host !== tree) {
+      host.properties = { ...(host.properties ?? {}), dataGaiCaret: '' };
+      return;
     }
     host.children = [...(host.children ?? []), { type: 'element', tagName: CARET_TAG, properties: {}, children: [] }];
   };
