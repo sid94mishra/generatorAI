@@ -37,9 +37,9 @@ const providers: HarnessProvidersResponse = {
   ],
 };
 
-function setup(value = '') {
+function setup(value = '', catalog: HarnessProvidersResponse = providers) {
   const platform = new MockPlatformClient();
-  platform.getHarnessProviders.mockResolvedValue(providers);
+  platform.getHarnessProviders.mockResolvedValue(catalog);
   const onChange = vi.fn();
   const user = userEvent.setup();
   renderWithProviders(<ModelPicker value={value} onChange={onChange} />, { platform });
@@ -103,6 +103,26 @@ describe('ModelPicker', () => {
     await user.type(search, 'claude');
     await user.keyboard('{ArrowDown}{Enter}');
     expect(onChange).toHaveBeenCalledWith('claude-opus-5-5');
+  });
+
+  it('a search with no match in the open provider shows the ready provider that matches', async () => {
+    const withCodex: HarnessProvidersResponse = {
+      ...providers,
+      providers: providers.providers.map((p) =>
+        p.type === 'codex'
+          ? { ...p, installed: true, connected: true, authenticated: true, ready: true, modelCount: 1,
+              models: [{ id: 'gpt-5.6-terra', name: 'GPT-5.6-Terra', category: 'versatile', promptTokenLimit: 272_000 }] }
+          : p,
+      ),
+    };
+    const { user, onChange } = setup('claude-sonnet-5', withCodex);
+    const popup = await openPicker(user);
+    await within(popup).findByRole('listbox', { name: 'Claude Code models' });
+    await user.type(within(popup).getByRole('searchbox', { name: 'Search models' }), 'terra');
+    expect(within(popup).getByRole('listbox', { name: 'Codex models' })).toBeInTheDocument();
+    expect(within(popup).getByRole('button', { name: /^Codex/ })).toHaveAttribute('aria-pressed', 'true');
+    await user.keyboard('{Enter}');
+    expect(onChange).toHaveBeenCalledWith('gpt-5.6-terra');
   });
 
   it('refresh re-probes the providers', async () => {

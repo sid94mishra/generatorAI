@@ -47,6 +47,7 @@ import {
   filterModels,
   groupModels,
   initialProvider,
+  searchProvider,
   modelMeta,
 } from './modelPickerModel.js';
 
@@ -219,7 +220,7 @@ function ModelPickerPanel({ value, catalog, loading, refreshing, onRefresh, onOp
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const listId = useId();
 
-  const providerType = browse ?? initialProvider(catalog, value);
+  const providerType = searchProvider(catalog, browse ?? initialProvider(catalog, value), query);
   const provider = catalog?.providers.find((p) => p.type === providerType);
   const groups = useMemo(() => groupModels(filterModels(provider?.models ?? [], query)), [provider, query]);
   const visible = useMemo(() => groups.flatMap((g) => g.models), [groups]);

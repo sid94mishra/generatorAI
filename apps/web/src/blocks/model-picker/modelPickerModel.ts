@@ -66,6 +66,20 @@ export function filterModels(models: readonly PickerModel[], query: string): Pic
   return models.filter((m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
 }
 
+/**
+ * The provider whose models a search shows: the browsed one while it has a
+ * match (or nothing is typed), else the first ready provider that matches —
+ * typing "terra" with Claude Code open finds Codex's GPT-5.6-Terra instead of
+ * "No models match". Falls back to the browsed provider when nothing matches.
+ */
+export function searchProvider(catalog: ModelPickerCatalog | undefined, browsed: string | null, query: string): string | null {
+  if (!catalog || !query.trim()) return browsed;
+  const current = catalog.providers.find((p) => p.type === browsed);
+  if (current?.availability === 'ready' && filterModels(current.models, query).length > 0) return browsed;
+  const match = catalog.providers.find((p) => p.availability === 'ready' && filterModels(p.models, query).length > 0);
+  return match?.type ?? browsed;
+}
+
 /** "200K · 1M" — the default prompt budget, then the long-context one when the model has it. */
 export function contextSummary(model: PickerModel): string | null {
   const parts = [model.contextTokens, model.longContextTokens].filter((n): n is number => n != null);
