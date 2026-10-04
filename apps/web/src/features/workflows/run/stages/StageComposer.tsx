@@ -122,6 +122,9 @@ export function StageComposer({ runId, stage, workspaceId, agentName, docked = f
         onStop={stop.press}
         agentMode={agentMode}
         onAgentModeChange={setAgentMode}
+        // A stage message runs in the stage's own session (its model and effort); the picker read
+        // "Default (recommended)" for every stage and its choice was never sent.
+        showModelSelector={false}
         pendingInteractionLabel={pending}
       />
       {outcome ? (

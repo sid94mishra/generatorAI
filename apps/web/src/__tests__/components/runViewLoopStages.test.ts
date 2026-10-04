@@ -27,7 +27,8 @@ function input(): DeriveRunViewInput {
     ],
     edges: [{ from: 'implement', to: 'test' }, { from: 'loop_1', to: 'review' }],
     elapsedMs: 0,
-    streams: {},
+    // The check's stream entry never got a terminal event (no agent turn).
+    streams: { 'stageRun:test': { status: 'pending', blocks: [] } },
   } as unknown as DeriveRunViewInput;
 }
 
@@ -42,5 +43,9 @@ describe('run view — loops', () => {
 
   it("renders a stage prompt's references to earlier stages, as the engine sent it", () => {
     expect(byKey.review!.prompt).toBe('Review Task search. The implementer reported: Search is in; tests pass.');
+  });
+
+  it('a finished check stage is not streaming even if its stream entry never closed', () => {
+    expect(byKey.test!.streaming).toBe(false);
   });
 });

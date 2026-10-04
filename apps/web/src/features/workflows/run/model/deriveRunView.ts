@@ -517,7 +517,9 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
     summary: sr.summary,
     outputData: sr.outputData,
     ...(sr.outputText ? { outputText: sr.outputText } : {}),
-    streaming: isLive(stream),
+    // A check or wait stage has no agent turn to end its stream entry; a finished stage is never "streaming"
+    // (the expanded Test check showed a loading skeleton after it had passed).
+    streaming: isLive(stream) && !['completed', 'failed', 'cancelled', 'skipped'].includes(status),
     hooks: hooksFrom(stream, sr.id),
     usage: usageFrom(stream),
     contextUsage: stream?.contextUsage ?? undefined,
