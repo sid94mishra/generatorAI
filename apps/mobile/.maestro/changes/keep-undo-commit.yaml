@@ -60,18 +60,15 @@ env: {FRESH_CHAT: edits, DEVICE_SCOPES: "write:files,write:workspaces", EXPECT_C
 - extendedWaitUntil: {visible: {id: commit-message}, timeout: 15000}
 - tapOn: {id: commit-message}
 - inputText: ${EXPECT_COMMIT}
-# Maestro's hideKeyboard does not work on iOS 27; the commit sheet's footer stays above the keyboard there.
+# No hideKeyboard: on iOS 27 it does nothing, on Android its Back press can close the sheet. The rows are reached by
+# id and scrolled to while the keyboard is up.
+- scrollUntilVisible: {element: {id: commit-push}, direction: DOWN, timeout: 15000}
 - runFlow:
-    when: {platform: Android}
+    when: {visible: {id: commit-push, checked: true}}
     commands:
-      - hideKeyboard
-# The switch rows read "<title>, <subtitle>".
-- runFlow:
-    when: {visible: {text: "Push.*", checked: true}}
-    commands:
-      - tapOn: {text: "Push.*", checked: true}
-- assertVisible: {text: "Push.*", checked: false}
-- assertNotVisible: {text: "Open pull request.*", checked: true}
+      - tapOn: {id: commit-push}
+- assertVisible: {id: commit-push, checked: false}
+- assertNotVisible: {id: commit-pr, checked: true}
 - assertVisible: {id: commit-submit, text: Commit}
 - tapOn: {id: commit-submit}
 - extendedWaitUntil: {visible: {id: commit-done}, timeout: 30000}
