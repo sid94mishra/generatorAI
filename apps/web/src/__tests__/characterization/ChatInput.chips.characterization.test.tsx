@@ -135,9 +135,9 @@ describe('ChatInput — effort and context-tier chips (03 §6.1 #16)', () => {
 
   it('default effort is the middle level; the model default wins; the prop wins over both', () => {
     const r = renderComposer({ selectedModel: 'model-full' }, { models: [MODEL_FULL] });
-    expect(effortChip()).toHaveTextContent('medium');
+    expect(effortChip()).toHaveTextContent('Medium');
     r.update({ reasoningEffort: 'low' });
-    expect(effortChip()).toHaveTextContent('low');
+    expect(effortChip()).toHaveTextContent('Low');
   });
 
   it('uses the model default effort when no effort is chosen', () => {
@@ -145,12 +145,12 @@ describe('ChatInput — effort and context-tier chips (03 §6.1 #16)', () => {
       { selectedModel: 'model-full' },
       { models: [{ ...MODEL_FULL, defaultReasoningEffort: 'high' }] },
     );
-    expect(effortChip()).toHaveTextContent('high');
+    expect(effortChip()).toHaveTextContent('High');
   });
 
   it('falls back to low/medium/high when the model lists no levels', () => {
     renderComposer({ selectedModel: 'model-full' }, { models: [{ ...MODEL_FULL, reasoningEfforts: [] }] });
-    expect(effortChip()).toHaveTextContent('medium');
+    expect(effortChip()).toHaveTextContent('Medium');
   });
 
   it('picking an effort calls onReasoningEffortChange and closes the list', async () => {
@@ -158,10 +158,10 @@ describe('ChatInput — effort and context-tier chips (03 §6.1 #16)', () => {
     const onReasoningEffortChange = vi.fn();
     renderComposer({ selectedModel: 'model-full', onReasoningEffortChange }, { models: [MODEL_FULL] });
     await user.click(effortChip()!);
-    expect(screen.getByRole('option', { name: 'medium' })).toHaveAttribute('aria-selected', 'true');
-    await user.click(screen.getByRole('option', { name: 'high' }));
+    expect(screen.getByRole('option', { name: 'Medium' })).toHaveAttribute('aria-selected', 'true');
+    await user.click(screen.getByRole('option', { name: 'High' }));
     expect(onReasoningEffortChange).toHaveBeenCalledWith('high');
-    expect(screen.queryByRole('option', { name: 'high' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'High' })).not.toBeInTheDocument();
   });
 
   it('the tier chip shows the active tier limit', () => {
@@ -264,9 +264,9 @@ describe('ChatInput — one per-turn menu at a time (03 §6.1 #18)', () => {
     expect(screen.getByRole('listbox', { name: 'Agent mode' })).toBeInTheDocument();
     await user.click(effortChip()!);
     expect(screen.queryByRole('listbox', { name: 'Agent mode' })).not.toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'high' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'High' })).toBeInTheDocument();
     await user.click(tierChip()!);
-    expect(screen.queryByRole('option', { name: 'high' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'High' })).not.toBeInTheDocument();
     expect(screen.getByRole('option', { name: /Long context/ })).toBeInTheDocument();
     await user.click(modeChip());
     expect(screen.queryByRole('option', { name: /Long context/ })).not.toBeInTheDocument();
@@ -278,7 +278,7 @@ describe('ChatInput — one per-turn menu at a time (03 §6.1 #18)', () => {
     renderComposer({ selectedModel: 'model-full' }, { models: [MODEL_FULL] });
     await user.click(effortChip()!);
     fireEvent.keyDown(document.body, { key: 'Escape' });
-    expect(screen.queryByRole('option', { name: 'high' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'High' })).not.toBeInTheDocument();
   });
 });
 
@@ -322,7 +322,7 @@ describe('ChatInput — toolbar collapse below 420 px (09 §5.1; 03 §6.1 #17)',
     await user.click(more);
     expect(screen.getByText('Reasoning effort')).toBeInTheDocument();
     expect(screen.getByText('Context window')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'high' }));
+    await user.click(screen.getByRole('button', { name: 'High' }));
     await user.click(screen.getByRole('button', { name: /Long context/ }));
     expect(onReasoningEffortChange).toHaveBeenCalledWith('high');
     expect(onContextTierChange).toHaveBeenCalledWith('long_context');
