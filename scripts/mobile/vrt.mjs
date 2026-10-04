@@ -94,7 +94,7 @@ async function capture(target, plan, outDir) {
     const file = path.join(outDir, `${item.storyId}--${item.variant}.png`);
     try {
       await agent(target, ['open', captureUrl(item.storyId, item.variant)]);
-      await agent(target, ['wait', 'id="vrt-ready"', '10000']);
+      await agent(target, ['wait', 'id="vrt-ready"', '30000']);
       await agent(target, ['screenshot', '--out', file, '--crop-on', 'id="vrt-root"', ...(target.platform === 'ios' ? ['--normalize-status-bar'] : ['--scale', ANDROID_SCALE])]);
       shots.push({ ...item, file });
     } catch (error) {
