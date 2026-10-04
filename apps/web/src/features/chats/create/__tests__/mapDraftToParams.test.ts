@@ -154,3 +154,17 @@ describe('buildCreateChatParams', () => {
     expect('orchestratorMode' in params).toBe(false);
   });
 });
+
+describe('buildCreateChatParams — effort and context tier', () => {
+  it('sends the chosen effort and context tier in the harness config', () => {
+    const params = buildCreateChatParams({
+      draft: draft({ prompt: 'Plan it', model: 'opus', reasoningEffort: 'high', contextTier: 'long_context' }),
+      sourceDrafts: [],
+    });
+    expect(params.harnessConfig).toEqual({ reasoningEffort: 'high', contextTier: 'long_context' });
+  });
+
+  it('sends no harness config when neither is set', () => {
+    expect(buildCreateChatParams({ draft: draft({ prompt: 'x' }), sourceDrafts: [] }).harnessConfig).toBeUndefined();
+  });
+});

@@ -65,6 +65,13 @@ export function chatCreateDisplayName(draft: Pick<CreateChatDraft, 'name' | 'pro
  * itself carries no message field (`CreateChatParams` has none; the task is
  * a turn, not chat metadata).
  */
+function harnessConfigOf(draft: CreateChatDraft): Pick<CreateChatParams, 'harnessConfig'> {
+  const harnessConfig: NonNullable<CreateChatParams['harnessConfig']> = {};
+  if (draft.reasoningEffort) harnessConfig.reasoningEffort = draft.reasoningEffort as NonNullable<typeof harnessConfig.reasoningEffort>;
+  if (draft.contextTier === 'default' || draft.contextTier === 'long_context') harnessConfig.contextTier = draft.contextTier;
+  return Object.keys(harnessConfig).length > 0 ? { harnessConfig } : {};
+}
+
 export function buildCreateChatParams(input: ChatCreateFormInput): CreateChatParams {
   const { draft, sourceDrafts } = input;
   const name = chatCreateDisplayName(draft) || 'Untitled chat';
@@ -76,6 +83,8 @@ export function buildCreateChatParams(input: ChatCreateFormInput): CreateChatPar
     name,
     ...(draft.description.trim() ? { description: draft.description.trim() } : {}),
     ...(draft.model ? { model: draft.model } : {}),
+    // The Effort / Context controls of both create flows: without these the chat ran on the model's defaults.
+    ...harnessConfigOf(draft),
     ...(draft.tags.length > 0 ? { tags: [...draft.tags] } : {}),
     ...(draft.projectId ? { projectId: draft.projectId } : {}),
     ...(sources.length > 0 ? { sources } : {}),
