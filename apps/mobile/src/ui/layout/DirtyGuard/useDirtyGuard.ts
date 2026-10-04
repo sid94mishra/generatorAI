@@ -25,16 +25,27 @@ export function useDirtyGuard(dirty: boolean, options: DirtyGuardOptions = {}): 
     return confirm({ ...DISCARD_DEFAULTS, title: o.title ?? DISCARD_DEFAULTS.title, message: o.message ?? DISCARD_DEFAULTS.message });
   }, []);
 
-  const guard = useCallback(async <T,>(fn: () => T): Promise<T | undefined> => ((await confirmDiscard()) ? fn() : undefined), [confirmDiscard]);
+  // After "Discard" the removal is replayed once without asking again.
+  const bypass = useRef(false);
+  // A confirmed discard runs its action with the removal guard off: Cancel → "Discard" → router.back() must not ask
+  // a second time from beforeRemove (seen on device: the builder's Cancel showed the dialog twice).
+  const discarded = useCallback(<T,>(fn: () => T): T => {
+    bypass.current = true;
+    try {
+      return fn();
+    } finally {
+      bypass.current = false;
+    }
+  }, []);
+
+  const guard = useCallback(async <T,>(fn: () => T): Promise<T | undefined> => ((await confirmDiscard()) ? discarded(fn) : undefined), [confirmDiscard, discarded]);
 
   useBackHandler(dirty && Boolean(options.onDiscard), () => {
-    void confirmDiscard().then((discard) => discard && latest.current.options.onDiscard?.());
+    void confirmDiscard().then((discard) => discard && discarded(() => latest.current.options.onDiscard?.()));
     return true;
   });
 
   const navigation = options.navigation;
-  // After "Discard" the removal is replayed once without asking again.
-  const bypass = useRef(false);
   useEffect(() => {
     if (!navigation || !dirty) return undefined;
     bypass.current = false;
