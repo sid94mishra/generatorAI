@@ -161,10 +161,14 @@ try {
   await navigateSpa(`/workflows/${run.workflowDefinitionId}/runs/${run.id}`);
   // The run page renders its own RunHeader (PW-c): breadcrumb + the kit dock
   // toggle, which drives the blocks/dock Dock (same `right-pane*` ids).
-  await page.waitForSelector('nav[aria-label="Breadcrumb"]', { timeout: 15_000 });
-  await page.waitForSelector('[data-testid="dock-toggle"]', { timeout: 15_000 });
-  await page.click('[data-testid="dock-toggle"]');
-  await page.waitForSelector('[data-testid="right-pane"]', { timeout: 10_000 });
+  // Scoped to the run workspace: on a first launch the run route's chunk is
+  // still loading when the URL changes, so the chat page (its own breadcrumb
+  // and dock-toggle) stays on screen meanwhile — an unscoped click closed the
+  // CHAT's dock and the run page then mounted with its dock closed.
+  const runToggle = '[data-testid="run-workspace"] [data-testid="dock-toggle"]';
+  await page.waitForSelector(runToggle, { timeout: 15_000 });
+  if ((await page.getAttribute(runToggle, 'aria-pressed')) !== 'true') await page.click(runToggle);
+  await page.waitForSelector('[data-testid="run-workspace"] [data-testid="right-pane"]', { timeout: 10_000 });
   record('workflow: right pane opens', true);
 
   // Inspector and Changes are pinned run tabs (board WorkflowRun).
