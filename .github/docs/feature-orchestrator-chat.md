@@ -221,8 +221,8 @@ Hooks: `useBackgroundTasks` / `useBackgroundTaskDigest` / `cancelBackgroundTask`
 | `GENERATORAI_ORCH_WORKER_TIMEOUT_MS` | governor default | Per-worker wall clock before it is failed. |
 | `GENERATORAI_ORCH_WARM_FIRST` | `1` | Set `0` to release the whole wave in parallel (loses the shared prompt-cache prefix). |
 | `GENERATORAI_ORCH_MAX_WAVES` | `10` | Max spawn waves per orchestration. At the cap the orchestrator must consolidate instead of spawning. |
-| `GENERATORAI_ORCH_TIME_BUDGET_MS` | `1800000` (30 min) | Wall-clock budget for the whole orchestration. `0` disables it. |
-| `GENERATORAI_ORCH_CONVERGENCE_THRESHOLD` | `1.0` | Fraction (0–1) of the CURRENT wave's workers that must report `converged: true` for the orchestration to stop. `0` disables the guard. |
+| `GENERATORAI_ORCH_TIME_BUDGET_MS` | `7200000` (120 min) | Wall-clock budget for one request's orchestration. `0` disables it. |
+| `GENERATORAI_ORCH_CONVERGENCE_THRESHOLD` | `0` (off) | Fraction (0–1) of the CURRENT wave's workers that must report `converged: true` for the orchestration to stop. Opt-in for iterative until-dry loops (workers report it only when the brief asks, D-97). |
 
 All three termination conditions are evaluated together by `evaluateTermination`; the first that trips stops further spawning. They are wired in [`createCoreServices`](../../packages/core/src/bootstrap/createCoreServices.ts) alongside the five above.
 
