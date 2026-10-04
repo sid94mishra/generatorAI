@@ -29,7 +29,13 @@ import {
   type Chat,
   type WorkspacePrepStatus,
 } from '@generatorai/shared';
-import { reasoningEffortLabel, type ComposerVariant } from '@generatorai/shared/ui-contract';
+import {
+  APPROVAL_MODE_LABELS,
+  CHAT_APPROVAL_MODES,
+  reasoningEffortLabel,
+  type ApprovalMode,
+  type ComposerVariant,
+} from '@generatorai/shared/ui-contract';
 import {
   formatTokenLimit,
   slashCommandGroup,
@@ -118,6 +124,12 @@ export interface ComposerProps {
   onBuiltinCommand?: (commandId: string) => void | Promise<void>;
   agentMode?: AgentMode;
   onAgentModeChange?: (mode: AgentMode) => void;
+  /**
+   * The chat's tool-approval policy and its setter: with both, the Agent mode menu gains an Approvals group
+   * (ask before tools run / accept edits / full access) and the chip names a non-default policy.
+   */
+  approvalMode?: ApprovalMode | undefined;
+  onApprovalModeChange?: ((mode: ApprovalMode) => void) | undefined;
   /** Hidden in background-worker chats. */
   showAgentModePicker?: boolean;
   /** Set while a gate is open; the server refuses prompts until it closes. */
@@ -199,6 +211,8 @@ export function Composer({
   onBuiltinCommand,
   agentMode,
   onAgentModeChange,
+  approvalMode,
+  onApprovalModeChange,
   showAgentModePicker = true,
   pendingInteractionLabel,
   onCancelPendingInteraction,
@@ -217,6 +231,7 @@ export function Composer({
   const compact = variant === 'stage';
   const [openMenu, setOpenMenu] = useState<PerTurnMenu>(null);
   const activeAgentMode: AgentMode = agentMode ?? DEFAULT_AGENT_MODE;
+  const approvalShort = onApprovalModeChange && approvalMode ? APPROVAL_MODE_LABELS[approvalMode].short : null;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -597,28 +612,48 @@ export function Composer({
                       accent={activeAgentMode === 'plan'}
                       aria-haspopup="listbox"
                       aria-expanded={openMenu === 'mode'}
-                      aria-label={`Agent mode: ${AGENT_MODE_REGISTRY[activeAgentMode].label}`}
+                      aria-label={`Agent mode: ${AGENT_MODE_REGISTRY[activeAgentMode].label}${approvalShort ? `, ${approvalShort}` : ''}`}
                       title={AGENT_MODE_REGISTRY[activeAgentMode].description}
                       onClick={() => toggleMenu('mode')}
                     >
                       {AGENT_MODE_REGISTRY[activeAgentMode].label}
+                      {approvalShort ? <span className="text-fg-3"> · {approvalShort}</span> : null}
                     </ToolbarChip>
                     {openMenu === 'mode' ? (
                       <ToolbarPopup widthClass="w-64" role="listbox" aria-label="Agent mode">
-                        <ToolbarPopupHeader>Agent mode</ToolbarPopupHeader>
-                        {AGENT_MODE_OPTIONS.map((o) => (
-                          <ToolbarOption
-                            key={o.mode}
-                            selected={activeAgentMode === o.mode}
-                            description={o.description}
-                            onClick={() => {
-                              onAgentModeChange?.(o.mode);
-                              setOpenMenu(null);
-                            }}
-                          >
-                            {o.label}
-                          </ToolbarOption>
-                        ))}
+                        <div role="group" aria-label="Agent mode">
+                          <ToolbarPopupHeader>Agent mode</ToolbarPopupHeader>
+                          {AGENT_MODE_OPTIONS.map((o) => (
+                            <ToolbarOption
+                              key={o.mode}
+                              selected={activeAgentMode === o.mode}
+                              description={o.description}
+                              onClick={() => {
+                                onAgentModeChange?.(o.mode);
+                                setOpenMenu(null);
+                              }}
+                            >
+                              {o.label}
+                            </ToolbarOption>
+                          ))}
+                        </div>
+                        {onApprovalModeChange ? (
+                          <div role="group" aria-label="Approvals" className="mt-1 border-t border-line-soft">
+                            <ToolbarPopupHeader>Approvals · from the next message</ToolbarPopupHeader>
+                            {CHAT_APPROVAL_MODES.map((mode) => (
+                              <ToolbarOption
+                                key={mode}
+                                selected={(approvalMode ?? 'bypassPermissions') === mode}
+                                onClick={() => {
+                                  onApprovalModeChange(mode);
+                                  setOpenMenu(null);
+                                }}
+                              >
+                                {APPROVAL_MODE_LABELS[mode].label}
+                              </ToolbarOption>
+                            ))}
+                          </div>
+                        ) : null}
                       </ToolbarPopup>
                     ) : null}
                   </span>

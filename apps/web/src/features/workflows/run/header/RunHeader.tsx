@@ -27,6 +27,7 @@ import { MenuButton, type MenuButtonItem } from '@/ui/patterns/MenuButton/MenuBu
 import { StatusBadge } from '@/ui/primitives/StatusBadge/StatusBadge.js';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
+import { APPROVAL_MODE_LABELS } from '@generatorai/shared/ui-contract';
 import { Chip } from '@/ui/primitives/Chip/Chip.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { Select } from '@/ui/primitives/Select/Select.js';
@@ -38,12 +39,9 @@ import { BudgetMeter } from './BudgetMeter.js';
 import { formatWhen } from '@/lib/formatWhen.js';
 
 /** The chat's permission-mode wording, for the run row's layer (W-65). */
-const PERMISSION_OPTIONS: Array<{ value: WorkflowRunPermissionMode; label: string }> = [
-  { value: 'default', label: 'Ask before tools run' },
-  { value: 'acceptEdits', label: 'Accept edits, ask for the rest' },
-  { value: 'plan', label: 'Plan only (no changes)' },
-  { value: 'bypassPermissions', label: 'Full access (never ask)' },
-];
+const PERMISSION_OPTIONS: Array<{ value: WorkflowRunPermissionMode; label: string }> = (
+  ['default', 'acceptEdits', 'plan', 'bypassPermissions'] as const
+).map((value) => ({ value, label: APPROVAL_MODE_LABELS[value].label }));
 
 export interface RunHeaderProps {
   run: Pick<RunView, 'name' | 'status' | 'startedAt' | 'completedAt' | 'permissionMode'> & { stages: StageView[] };

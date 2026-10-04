@@ -255,6 +255,7 @@ export class MockPlatformClient implements IPlatformClient {
     mode: 'default' as const,
   }));
   setPermissionMode = vi.fn(async (_runId: string, _mode: string): Promise<void> => {});
+  setChatPermissionMode = vi.fn(async (chatId: string, mode: string) => ({ chatId, mode }));
   // ── Attention feed (G-01) ──
   getAttention = vi.fn(async (_filter?: AttentionFilter): Promise<AttentionSnapshot> => ({
     seq: 0,

@@ -139,3 +139,20 @@ export function reasoningEffortLabel(level: string): string {
   if (level === 'xhigh') return 'Extra high';
   return level ? level.charAt(0).toUpperCase() + level.slice(1) : level;
 }
+
+/** A chat's or run's tool-approval policy (the server's `permissionMode`). */
+export type ApprovalMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
+
+/**
+ * How each approval policy is named: `label` in pickers (composer Agent mode menu, run header), `short` beside the
+ * mode on the composer chip (null = the default "never ask" state shows nothing extra).
+ */
+export const APPROVAL_MODE_LABELS: Record<ApprovalMode, { label: string; short: string | null }> = {
+  default: { label: 'Ask before tools run', short: 'Ask first' },
+  acceptEdits: { label: 'Accept edits, ask for the rest', short: 'Accept edits' },
+  plan: { label: 'Plan only (no changes)', short: 'Plan only' },
+  bypassPermissions: { label: 'Full access (never ask)', short: null },
+};
+
+/** The approval policies a person picks for a chat (plan-only is the Plan agent mode there). */
+export const CHAT_APPROVAL_MODES: readonly ApprovalMode[] = ['default', 'acceptEdits', 'bypassPermissions'];

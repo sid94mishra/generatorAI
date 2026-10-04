@@ -17,8 +17,9 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { awaitsUserDecision, type ScmResultBlock, type WidgetBlock } from '@generatorai/client-core';
-import { composerPromptPlaceholder, harnessProviderLabel } from '@generatorai/shared/ui-contract';
+import { composerPromptPlaceholder, harnessProviderLabel, type ApprovalMode } from '@generatorai/shared/ui-contract';
 import { useMarkChatRead } from '@/hooks/chatListQueries.js';
+import { useSetChatPermissionMode } from '@/hooks/queries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useEditSourcesStore } from '@/stores/editSourcesStore.js';
 import { parseWidgetTabId } from '@/lib/widgetTabId.js';
@@ -84,6 +85,7 @@ export function ChatPage() {
   const view = useChatView({ chatId, dockOpen, setDockOpen, toggleDock });
   // MG-02 / MD-112: the chat is read while it is open (D-83).
   useMarkChatRead(chatId);
+  const setPermissionMode = useSetChatPermissionMode(chatId ?? '');
   const { chat, sessionId, workspace, stream, transcript, gates, stopRewind, dock } = view;
   const { isWorking } = stream;
   const { messages, promptHistory } = transcript;
@@ -402,6 +404,9 @@ export function ChatPage() {
           workspace.persistAgentMode(mode);
         }}
         showAgentModePicker={!chat.parentChatId}
+        {...(!chat.parentChatId
+          ? { approvalMode: chat.permissionMode, onApprovalModeChange: (mode: ApprovalMode) => setPermissionMode.mutate(mode) }
+          : {})}
         {...(agentName ? { agentName } : {})}
         pendingInteractionLabel={gates.pendingInteractionLabel}
         onCancelPendingInteraction={stopRewind.cancelPendingInteraction}

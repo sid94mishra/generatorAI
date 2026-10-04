@@ -589,6 +589,19 @@ export function useUpdateChat(chatId: string) {
   });
 }
 
+/** A chat's tool-approval policy (the composer's Agent mode menu ▸ Approvals); applies from the next turn. */
+export function useSetChatPermissionMode(chatId: string) {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (mode: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan') => platform.setChatPermissionMode(chatId, mode),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId) });
+    },
+    meta: { errorTitle: 'Approvals not changed' },
+  });
+}
+
 /** Rename a chat (PATCH `/chats/:id` `{ name }`; the chat header's More ▸ Rename). */
 export function useRenameChat(chatId: string) {
   const platform = usePlatform();

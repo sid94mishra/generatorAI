@@ -117,6 +117,11 @@ export interface IPlatformClient {
   listChats(query?: ChatListQuery): Promise<ChatListPage>;
   getChat(chatId: string): Promise<Chat>;
   updateChat(chatId: string, updates: Partial<Pick<Chat, 'name' | 'model' | 'harnessConfig'>>): Promise<Chat>;
+  /** A chat's tool-approval policy (`PATCH /chats/:id/permission-mode`); applies from the next turn. */
+  setChatPermissionMode(
+    chatId: string,
+    mode: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan',
+  ): Promise<{ chatId: string; mode: string }>;
   archiveChat(chatId: string): Promise<void>;
   /** Restore an archived chat to Active (`PATCH { status: 'active' }`; P3-07 row action). */
   unarchiveChat(chatId: string): Promise<void>;

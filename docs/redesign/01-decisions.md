@@ -701,6 +701,15 @@ Found while building a full-stack app through the desktop app (`reviews/desktop-
 - **One effort vocabulary.** "Low · Medium · High · Extra high · Max · Ultra" everywhere (`reasoningEffortLabel` in
   `ui-contract/composer.ts`); the dialog showed "xhigh" / "max" and the composer "Xhigh".
 
+### D-96 Chat approvals in the composer (2026-10-04) — Final
+No surface let a chat ask before tools run: chats are created in `bypassPermissions` and the client's
+`setChatPermissionMode` had no caller (legacy had none either), so permission gates were reachable only through the
+API. The composer's Agent mode menu gains an **Approvals** group — Ask before tools run · Accept edits, ask for the
+rest · Full access (never ask) — for root chats (workers follow their orchestrator). It applies from the next message
+(the turn pins its mode; the session rebinds on the new key). The chip names a gated policy after the mode
+("Auto · Ask first"); full access shows nothing extra. Labels are shared with the run header's W-65 control
+(`APPROVAL_MODE_LABELS` in `ui-contract/composer.ts`). Turning approvals off still needs `admin:settings` (server).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
