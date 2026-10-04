@@ -10,9 +10,11 @@
 
 import { Fragment, type ReactNode } from 'react';
 import type { ChatMessage } from '@generatorai/shared';
-import { TRANSCRIPT_COPY } from '@generatorai/shared/ui-contract';
+import { TRANSCRIPT_COPY, parseReviewPrompt, type ParsedReviewPrompt } from '@generatorai/shared/ui-contract';
 import { cn } from '@/ui/lib/cn.js';
 import { InlineCode } from '@/ui/primitives/InlineCode/InlineCode.js';
+import { Badge } from '@/ui/primitives/Badge/Badge.js';
+import { Icon } from '@/ui/icons/Icon.js';
 import { AttachmentList } from './AttachmentList.js';
 import { formatTurnTime } from '../formatTime.js';
 
@@ -50,10 +52,15 @@ export function UserMessage({ content, attachments, chatId, timestamp, pending =
     : timestamp != null
       ? formatTurnTime(timestamp)
       : null;
+  const review = parseReviewPrompt(content);
   return (
     <div className={cn('group relative min-w-0', className)} data-chat-row data-gai-block="user">
       <div className="flex min-w-0 flex-col gap-2 rounded-panel border border-line bg-raised px-3.5 py-3">
-        <p className="pr-16 text-body break-words whitespace-pre-wrap text-fg">{withInlineCode(content)}</p>
+        {review ? (
+          <ReviewComments review={review} />
+        ) : (
+          <p className="pr-16 text-body break-words whitespace-pre-wrap text-fg">{withInlineCode(content)}</p>
+        )}
         {attachments && attachments.length > 0 ? <AttachmentList attachments={attachments} chatId={chatId} /> : null}
       </div>
       <div
@@ -66,6 +73,34 @@ export function UserMessage({ content, attachments, chatId, timestamp, pending =
         {time ? <span className="font-mono text-micro text-fg-3">{time}</span> : null}
         {actions}
       </div>
+    </div>
+  );
+}
+
+/**
+ * A review-comment prompt ("Add & send" from the Changes dock) as the comments the person wrote — not the
+ * machine-formatted XML the agent receives.
+ */
+function ReviewComments({ review }: { review: ParsedReviewPrompt }) {
+  const n = review.comments.length;
+  return (
+    <div className="flex min-w-0 flex-col gap-2 pr-16" data-testid="user-review-comments">
+      <p className="flex items-center gap-1.5 text-small text-fg-2">
+        <Icon concept="message" size={14} />
+        {n === 1 ? 'Review comment' : `${n} review comments`}
+      </p>
+      <ul className="flex min-w-0 flex-col gap-1.5">
+        {review.comments.map((c, i) => (
+          <li key={i} className="flex min-w-0 flex-col gap-0.5">
+            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <InlineCode>{c.lines ? `${c.path}:${c.lines}` : c.path}</InlineCode>
+              {c.intent ? <Badge>{c.intent.charAt(0).toUpperCase() + c.intent.slice(1)}</Badge> : null}
+            </span>
+            <span className="text-body break-words whitespace-pre-wrap text-fg">{c.body}</span>
+          </li>
+        ))}
+      </ul>
+      {review.note ? <p className="text-body break-words whitespace-pre-wrap text-fg">{withInlineCode(review.note)}</p> : null}
     </div>
   );
 }

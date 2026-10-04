@@ -18,3 +18,4 @@ export * from './deepLinks.js';
 export * from './scopes.js';
 export * from './notifications.js';
 export * from './activity.js';
+export * from './reviewPrompt.js';
