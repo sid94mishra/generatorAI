@@ -14,7 +14,7 @@ import type {
   WorkflowRunWithStages, StageRun, StageRunStatus, WorkflowRunStatus,
   WorkflowRunPermissionMode,
 } from '@generatorai/shared';
-import { mapMergeMode, plannerKeyOf, type EdgeSpec, type StageSpec } from '@generatorai/workflow-spec';
+import { mapMergeMode, plannerKeyOf, renderTemplate, type EdgeSpec, type StageSpec } from '@generatorai/workflow-spec';
 import { interpolateVariables } from '@generatorai/shared';
 import type { StreamState, StreamHookInvocation } from '@/stores/streamStore.js';
 import type { UsageInfo } from '@generatorai/client-core';
@@ -108,6 +108,16 @@ function computeDepths(
 
 function computeParallelPeers(stageRuns: StageRun[]): Map<string, string[]> {
   const overlaps = new Map<string, string[]>();
+  // A loop's or map's body runs INSIDE it, so their times always overlap: that is nesting, not parallelism
+  // (Implement and Test of one loop read "parallel(2)").
+  const byId = new Map(stageRuns.map((sr) => [sr.id, sr]));
+  const encloses = (outer: StageRun, inner: StageRun): boolean => {
+    for (let at = inner.scopeId ? byId.get(inner.scopeId) : undefined; at; at = at.scopeId ? byId.get(at.scopeId) : undefined) {
+      if (at.id === outer.id) return true;
+    }
+    return false;
+  };
+  const nested = (a: StageRun, b: StageRun) => encloses(a, b) || encloses(b, a);
   interface Endpoint { time: number; kind: 'start' | 'end'; sr: StageRun; }
   const now = Date.now();
   const endpoints: Endpoint[] = [];
@@ -119,11 +129,13 @@ function computeParallelPeers(stageRuns: StageRun[]): Map<string, string[]> {
     endpoints.push({ time: start, kind: 'start', sr });
     endpoints.push({ time: end, kind: 'end', sr });
   }
-  endpoints.sort((a, b) => a.time - b.time || (a.kind === b.kind ? 0 : a.kind === 'start' ? -1 : 1));
+  // At the same instant an end comes first: a stage that starts as another finishes follows it, it does not overlap it.
+  endpoints.sort((a, b) => a.time - b.time || (a.kind === b.kind ? 0 : a.kind === 'end' ? -1 : 1));
   const active = new Map<string, StageRun>();
   for (const ep of endpoints) {
     if (ep.kind === 'start') {
       for (const other of active.values()) {
+        if (nested(ep.sr, other)) continue;
         overlaps.get(ep.sr.id)!.push(other.id);
         overlaps.get(other.id)!.push(ep.sr.id);
       }
@@ -133,6 +145,33 @@ function computeParallelPeers(stageRuns: StageRun[]): Map<string, string[]> {
     }
   }
   return overlaps;
+}
+
+// ── Stage prompt as sent ──
+
+/**
+ * `stages.<key>.output` for the run's finished top-level stages, from what the run view already holds: a loop's,
+ * map's or check's structured output, else an agent stage's text. Rebuilt only when a stage changes.
+ */
+let scopeCache: { key: string; scope: Record<string, unknown> } | null = null;
+function stageOutputScope(stageRuns: StageRun[]): Record<string, unknown> {
+  const done = stageRuns.filter((sr) => !sr.scopeId && (sr.outputData !== undefined || sr.outputText));
+  const key = done.map((sr) => `${sr.id}:${sr.version ?? ''}:${sr.status}`).join('|');
+  if (scopeCache?.key === key) return scopeCache.scope;
+  const stages: Record<string, unknown> = {};
+  for (const sr of done) stages[sr.stageKey] = { output: sr.outputData ?? sr.outputText, summary: sr.summary };
+  scopeCache = { key, scope: stages };
+  return stages;
+}
+
+/**
+ * The stage prompt the way the engine renders it (variables and the stage outputs it can read). A prompt that
+ * reads a stage that has not finished yet keeps its placeholders, with the variables filled in. Before, every
+ * `{{ stages.… }}` showed raw, so a correctly-sent prompt looked broken.
+ */
+function renderStagePrompt(text: string, vars: Record<string, unknown>, stages: Record<string, unknown>): string {
+  const r = renderTemplate(text, { variables: vars, stages });
+  return r.ok ? r.text : interpolateVariables(text, vars);
 }
 
 // ── Predecessor names per stage (for pending "Waiting for X" text) ──
@@ -229,6 +268,8 @@ interface StageViewInputs {
   dependsOn: string;
   shared: boolean;
   vars: Record<string, unknown> | undefined;
+  /** What `{{ stages.<key>… }}` in the stage prompt reads: each finished stage's output (the run's view). */
+  stageScope: Record<string, unknown>;
   /** The enclosing loop or map instance's id (a body instance). */
   loopId: string | undefined;
   /** The flow key the instance waits on for a launch slot. */
@@ -249,6 +290,7 @@ function sameInputs(a: StageViewInputs, b: StageViewInputs): boolean {
   return (
     a.sr === b.sr && a.stream === b.stream && a.def === b.def && a.order === b.order && a.depth === b.depth &&
     a.parallel === b.parallel && a.dependsOn === b.dependsOn && a.shared === b.shared && a.vars === b.vars &&
+    a.stageScope === b.stageScope &&
     a.loopId === b.loopId && a.containerKind === b.containerKind && a.plannerName === b.plannerName &&
     a.admission === b.admission
   );
@@ -315,6 +357,7 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
   const plannedDefs = new Map<string, StageSpec>();
   for (const sr of run.stageRuns) for (const s of sr.expansionState?.stages ?? []) plannedDefs.set(`${sr.id}/${s.key}`, s as unknown as StageSpec);
 
+  const stageScope = stageOutputScope(run.stageRuns);
   const seen = new Set<string>();
   const stages: StageView[] = sorted.map((sr, idx) => {
     const def = stageDefByKey.get(sr.stageKey) ?? (sr.scopeId ? plannedDefs.get(`${sr.scopeId}/${sr.stageKey}`) : undefined);
@@ -331,6 +374,7 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
       dependsOn: dependsOn.join(','),
       shared: !!sr.sessionId && (stageCountBySession.get(sr.sessionId) ?? 0) > 1,
       vars: run.variables as Record<string, unknown> | undefined,
+      stageScope,
       loopId: loopIdOf(sr),
       containerKind: def?.parentKey ? stageDefByKey.get(def.parentKey)?.kind : undefined,
       plannerName: sr.kind === 'expansion' ? stageDefByKey.get(plannerKeyOf(sr.stageKey) ?? '')?.name : undefined,
@@ -442,7 +486,7 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
   // authors can spot missing variables at a glance.
   const runVars = inputs.vars ?? {};
   const rawPrompt = def?.kind === 'agent' ? def.prompts[0]?.text?.trim() : undefined;
-  const prompt = rawPrompt ? interpolateVariables(rawPrompt, runVars) : undefined;
+  const prompt = rawPrompt ? renderStagePrompt(rawPrompt, runVars, inputs.stageScope) : undefined;
 
   return {
     id: sr.id,
