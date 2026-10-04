@@ -44,7 +44,7 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
         taskName: { type: 'string', description: 'Short, unique-ish name shown in the UI.' },
         objective: { type: 'string', description: 'The ONE outcome this worker must produce.' },
         context: { type: 'string', description: 'ONLY the facts/decisions the worker needs. Self-contained, no "see above".' },
-        model: { type: 'string', description: 'Optional model/tier for the worker. Omit to use the default worker model.' },
+        model: { type: 'string', description: 'Model for the worker. Ignored when agentRef names an agent with its own model (list_available_agents shows it). Omit to use the default worker model.' },
         inputArtifacts: { type: 'array', items: { type: 'string' }, description: 'Read-only artifact paths the worker may open.' },
         boundaries: { type: 'string', description: 'Explicit out-of-scope list to prevent duplicated work.' },
         budget: {
@@ -180,8 +180,8 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
     name: 'list_available_agents',
     description:
       'List the custom agents you may assign to background workers. Each entry has a ' +
-      '`ref` (pass it as `agentRef` to spawn_background_agent), a name and a description ' +
-      'of when to use it. Prefer picking a specialised agent over writing the same ' +
+      '`ref` (pass it as `agentRef` to spawn_background_agent), a name, a description ' +
+      'of when to use it and, when it sets one, the `model` it always runs on. Prefer picking a specialised agent over writing the same ' +
       'instructions into every brief. After calling this, every spawn whose subtask ' +
       'matches one of these agents MUST carry that agent\'s `ref` in `agentRef`.',
     parametersSchema: {

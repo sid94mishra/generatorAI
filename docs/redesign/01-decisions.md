@@ -722,6 +722,18 @@ threshold of 1.0 read that as "stop the whole orchestration".
 - **Time budget 120 min** per request (was 30): a multi-wave build (foundation → parallel packages → reviews → docs)
   ran past 30 min and later spawns were refused. `maxWaves` (10) and the time budget stay the runaway guards.
 
+### D-98 Who decides a worker's model (2026-10-04) — Final
+Found in the same build: the person bound Frontend Dev to GPT-5.6-Terra ("it runs on Codex") and Reviewer to
+GPT-5.6-Luna, yet every worker ran on Sonnet — the orchestrator prompt said to pass `model` on every spawn, the
+spawn's model outranked the agent's, and `list_available_agents` never said an agent had a model. The Tech Lead's own
+"Max concurrent workers" and "Default worker model" were saved by the agent editor and read by nothing.
+- A worker bound to an agent that sets a model **runs on that model**; a different `model` on the spawn is ignored
+  and the spawn result says so (`note`). `list_available_agents` returns `model` for such agents, and the ROUTE step
+  tells the orchestrator to omit `model` for them and to route the rest by cost as before.
+- Unbound (or model-less) workers: the spawn's `model`, else the orchestrator agent's **Default worker model**, else
+  `GENERATORAI_ORCH_DEFAULT_WORKER_MODEL`, else the medium-tier heuristic.
+- The orchestrator agent's **Max concurrent workers** caps running workers (else `GENERATORAI_ORCH_MAX_WORKERS`).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

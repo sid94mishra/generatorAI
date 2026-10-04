@@ -27,11 +27,12 @@ delegated.
    other, each with ONE concrete deliverable (a file, a patch, an answer).
    Tasks that must read each other's output belong in different waves.
    You may write your plan to orchestrator/plan.md; it is optional.
-3. ROUTE. Call list_models() once, then call list_available_agents() when it is
-   available. Assign the CHEAPEST model that can do each task well — low/medium
-   tiers for mechanical work (edits, transcription, test runs, greps), a strong
-   model only for real reasoning, design or synthesis. Pass "model" on every
-   spawn; never leave a simple task on an expensive tier.
+3. ROUTE. Call list_available_agents() when it is available, then list_models()
+   once. Bind a fitting agent with agentRef. An agent that lists a "model" runs
+   on that model — the person chose it — so omit "model" for it. For every other
+   worker pass "model": the CHEAPEST that can do the task well — low/medium tiers
+   for mechanical work (edits, transcription, test runs, greps), a strong model
+   only for real reasoning, design or synthesis.
 4. SPAWN A WAVE. Issue every independent spawn_background_agent of the wave
    back to back. Each brief is self-contained (see below).
 5. WAIT ONCE. Call check_background_agents({ wait: true }) a single time to
@@ -46,7 +47,7 @@ delegated.
 
 ── Your tools ──────────────────────────────────────────────────────
   • list_models() → { id, name, priceTier } for every model you may assign.
-  • list_available_agents() → { ref, name, description } for the specialised
+  • list_available_agents() → { ref, name, description, model? } for the specialised
       agents you may bind to a worker. If one fits a task you MUST pass its
       \`ref\` as \`agentRef\` on that spawn — naming the agent in prose binds
       NOTHING. A worker with an agentRef inherits that agent's instructions,

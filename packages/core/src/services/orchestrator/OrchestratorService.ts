@@ -128,6 +128,8 @@ export interface SpawnResult {
   status?: BackgroundTaskStatus;
   model?: string;
   error?: string;
+  /** Something the orchestrator should know about how the spawn was resolved (e.g. the agent's own model won). */
+  note?: string;
 }
 
 interface TaskRecord {
@@ -509,7 +511,7 @@ export class OrchestratorService {
    */
   async listAssignableAgents(
     parentChatId: string,
-  ): Promise<Array<{ ref: string; name: string; description: string }>> {
+  ): Promise<Array<{ ref: string; name: string; description: string; model?: string }>> {
     if (!this.agentService) return [];
     const parent = await this.parentView(parentChatId).catch(() => null);
     const selectable = await this.agentService.listSelectable(parent?.projectId);
@@ -519,7 +521,12 @@ export class OrchestratorService {
     const pool = team.length > 0
       ? selectable.filter((a) => team.includes(a.ref))
       : selectable.filter((a) => a.role !== 'orchestrator');
-    return pool.map((a) => ({ ref: a.ref, name: a.name, description: a.description }));
+    return pool.map((a) => ({
+      ref: a.ref,
+      name: a.name,
+      description: a.description,
+      ...(a.runtime?.model ? { model: a.runtime.model } : {}),
+    }));
   }
 
   getConfig(): OrchestratorConfig {
@@ -624,19 +631,47 @@ export class OrchestratorService {
     for (const c of existing) {
       if (isActive(c.backgroundTask?.status)) active.add(c.id);
     }
-    if (active.size >= this.config.maxWorkers) {
+    const parent = await this.parentView(parentChatId);
+    // The orchestrator agent's own settings (agent editor ▸ Team): they were saved and never read.
+    const lead = parent.agentRef && this.agentService ? await this.agentService.getByRef(parent.agentRef).catch(() => null) : null;
+    const maxWorkers = lead?.orchestration?.maxWorkers ?? this.config.maxWorkers;
+    if (active.size >= maxWorkers) {
       return {
         ok: false,
-        error: `Worker limit reached (${this.config.maxWorkers}). Consolidate existing results instead of spawning more.`,
+        error: `Worker limit reached (${maxWorkers}). Wait for running workers (check_background_agents) before spawning more.`,
       };
     }
 
-    const parent = await this.parentView(parentChatId);
+    // A worker agent must be one this orchestrator is allowed to spawn.
+    let workerAgentRef: string | undefined;
+    let workerAgentName: string | undefined;
+    let workerAgentModel: string | undefined;
+    if (brief.agentRef) {
+      const assignable = await this.listAssignableAgents(parentChatId);
+      const hit = assignable.find((a) => a.ref === brief.agentRef);
+      if (!hit) {
+        return {
+          ok: false,
+          error:
+            `Agent "${brief.agentRef}" is not assignable from this orchestrator. ` +
+            `Call list_available_agents to see valid refs, or omit agentRef.`,
+        };
+      }
+      workerAgentRef = hit.ref;
+      workerAgentName = hit.name;
+      workerAgentModel = hit.model;
+    }
 
     // Resolve + validate the worker model. When the orchestrator doesn't pick
     // one, this defaults to a CHEAPER tier (not the orchestrator's own model)
     // so background work doesn't silently run on an expensive model.
-    let workerModel = await this.resolveWorkerModel(brief.model, parent.model);
+    // A bound agent that names its model runs on it: the person chose it for that agent ("Frontend Dev runs on
+    // Codex"), and the orchestrator's habit of passing `model` on every spawn silently moved it to its own pick.
+    let workerModel = workerAgentModel ?? (await this.resolveWorkerModel(brief.model, parent.model, lead?.orchestration?.defaultWorkerModel));
+    const modelNote =
+      workerAgentModel && brief.model && brief.model !== workerAgentModel
+        ? `${workerAgentName ?? 'The agent'} runs on its own model "${workerAgentModel}"; the requested "${brief.model}" was not used.`
+        : undefined;
     if (workerModel) {
       const ids = await this.getModelIds();
       if (ids && ids.size > 0 && !ids.has(workerModel)) {
@@ -652,24 +687,6 @@ export class OrchestratorService {
     }
 
     const taskIndex = existing.length;
-
-    // A worker agent must be one this orchestrator is allowed to spawn.
-    let workerAgentRef: string | undefined;
-    let workerAgentName: string | undefined;
-    if (brief.agentRef) {
-      const assignable = await this.listAssignableAgents(parentChatId);
-      const hit = assignable.find((a) => a.ref === brief.agentRef);
-      if (!hit) {
-        return {
-          ok: false,
-          error:
-            `Agent "${brief.agentRef}" is not assignable from this orchestrator. ` +
-            `Call list_available_agents to see valid refs, or omit agentRef.`,
-        };
-      }
-      workerAgentRef = hit.ref;
-      workerAgentName = hit.name;
-    }
 
     // Warm-first: if a wave leader for this parent is still priming, wait
     // (bounded) for it to start producing before spawning more, so the shared
@@ -851,7 +868,7 @@ export class OrchestratorService {
       void this.chatRepo.updateBackgroundTaskStatus(record.taskId, 'failed').catch(() => {});
     });
 
-    return { ok: true, taskId: record.taskId, taskName: record.taskName, status: 'running', model: workerModel };
+    return { ok: true, taskId: record.taskId, taskName: record.taskName, status: 'running', model: workerModel, ...(modelNote ? { note: modelNote } : {}) };
   }
 
   // ── Follow-up ────────────────────────────────────────────────
@@ -1608,8 +1625,13 @@ export class OrchestratorService {
    *   4. parent.model (last-resort safety net)
    * Returns undefined when nothing resolves (harness will use its own default).
    */
-  private async resolveWorkerModel(briefModel: string | undefined, parentModel: string | undefined): Promise<string | undefined> {
+  private async resolveWorkerModel(
+    briefModel: string | undefined,
+    parentModel: string | undefined,
+    leadDefault?: string | undefined,
+  ): Promise<string | undefined> {
     if (briefModel) return briefModel;
+    if (leadDefault) return leadDefault;
     if (this.config.defaultWorkerModel) return this.config.defaultWorkerModel;
     const models = await this.getModelsCached();
     if (models.length > 0) {
