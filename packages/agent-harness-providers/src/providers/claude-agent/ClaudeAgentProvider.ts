@@ -518,7 +518,7 @@ function versionedModelName(displayName: string, description?: string): string {
  */
 const DEFAULT_EFFORT = 'medium';
 
-function mapClaudeModelInfo(m: ClaudeModelInfo, runtimeDefaultEffort?: string): HarnessModel {
+export function mapClaudeModelInfo(m: ClaudeModelInfo, runtimeDefaultEffort?: string): HarnessModel {
   const id = m.value;
   const longContext = /\[1m\]/i.test(id);
   const model: HarnessModel = {
@@ -527,8 +527,12 @@ function mapClaudeModelInfo(m: ClaudeModelInfo, runtimeDefaultEffort?: string): 
     provider: 'claude-agent',
   };
   if (m.description) model.description = m.description;
-  if (/opus|fable/i.test(id)) model.category = 'powerful';
-  else if (/haiku/i.test(id)) model.category = 'lightweight';
+  // The `default` alias is whichever model Anthropic recommends ("Opus 5.5 · Best for everyday, complex tasks"):
+  // its tier is that model's. Read from the id alone it was Balanced, and an orchestrator routing workers to the
+  // cheapest medium-tier model picked it — Opus — for a README.
+  const tierSource = id === 'default' ? `${m.description ?? ''} ${m.displayName ?? ''}` : id;
+  if (/opus|fable/i.test(tierSource)) model.category = 'powerful';
+  else if (/haiku/i.test(tierSource)) model.category = 'lightweight';
   else model.category = 'versatile';
 
   if (longContext) {
