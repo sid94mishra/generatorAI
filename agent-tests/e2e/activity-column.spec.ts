@@ -60,10 +60,11 @@ test.describe('Activity column (D-92)', () => {
     // The sidebar's own Needs you list moves into the column while it is open.
     await expect(page.getByTestId('sidebar-needs-you')).toHaveCount(0);
 
+    // The sandbox seeds a pending chat of the same name and Needs you lists oldest first: address this test's card.
     const needsYou = column.getByRole('list', { name: 'Needs you' });
-    const card = needsYou.getByRole('link', { name: `Chat: ${GATE_CHAT}` }).first();
+    const ownCard = (list: typeof needsYou) => list.getByRole('link', { name: `Chat: ${GATE_CHAT}` }).and(page.locator(`[href="/chats/${chatId}"]`));
+    const card = ownCard(needsYou);
     await expect(card).toBeVisible();
-    await expect(card).toHaveAttribute('href', `/chats/${chatId}`);
 
     // Hover → the popover, then answer the gate inline.
     await card.hover();
@@ -71,8 +72,8 @@ test.describe('Activity column (D-92)', () => {
     await expect(popover).toBeVisible();
     await expect(popover.getByTestId('activity-popover-ask')).toContainText('src/config.ts');
     await popover.getByRole('button', { name: `Allow once — ${GATE_CHAT}` }).click();
-    await expect(needsYou.getByRole('link', { name: `Chat: ${GATE_CHAT}` })).toHaveCount(0);
-    await expect(column.getByRole('list', { name: 'Recent' }).getByRole('link', { name: `Chat: ${GATE_CHAT}` }).first()).toBeVisible({
+    await expect(ownCard(needsYou)).toHaveCount(0);
+    await expect(ownCard(column.getByRole('list', { name: 'Recent' }))).toBeVisible({
       timeout: 15_000,
     });
 
