@@ -30,6 +30,27 @@ export function num(value: number | null, fallback = 0): number {
   return value ?? fallback;
 }
 
+/** Whether a pointer is held down right now (a blur during a press comes from that press). */
+let pointerHeld = false;
+if (typeof document !== 'undefined') {
+  document.addEventListener('pointerdown', () => { pointerHeld = true; }, true);
+  document.addEventListener('pointerup', () => { pointerHeld = false; }, true);
+  document.addEventListener('pointercancel', () => { pointerHeld = false; }, true);
+}
+
+/**
+ * Run `fn` once the press that caused a blur is over (after its click), or now when no pointer is down. Renaming a
+ * stage reflows the inspector (its warnings and hint quote the key), so committing on the press moved the control
+ * under the pointer and the click — Add prompt, the Arguments field — landed on something else.
+ */
+function afterPress(fn: () => void): void {
+  if (!pointerHeld) {
+    fn();
+    return;
+  }
+  window.addEventListener('pointerup', () => setTimeout(fn, 0), { once: true, capture: true });
+}
+
 /**
  * The stage key: the stable identity edges, context sources and
  * `stages.<key>` expressions refer to. Edited as a draft and renamed on
@@ -59,7 +80,7 @@ export function StageKeyField({ stage, issues, stacked = false }: { stage: Stage
         size="sm"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
+        onBlur={() => afterPress(commit)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') commit();
         }}
