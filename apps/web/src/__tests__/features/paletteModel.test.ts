@@ -34,7 +34,8 @@ describe('buildPaletteModel', () => {
     const actions = group(buildPaletteModel({ ...base, host: 'web', mac: false }), 'Actions').items.map((i) => i.value);
     expect(actions.slice(0, 4)).toEqual(['cmd:chat.new', 'cmd:workflow.new', 'cmd:theme.toggle', 'cmd:app.settings']);
     expect(actions).toContain('cmd:shortcuts.show');
-    expect(actions.some((v) => v.startsWith('cmd:nav.'))).toBe(false);
+    // Destinations are not actions; Back / Forward are commands since D-93.
+    expect(actions.some((v) => v.startsWith('cmd:nav.') && v !== 'cmd:nav.back' && v !== 'cmd:nav.forward')).toBe(false);
     expect(actions).not.toContain('cmd:palette.toggle');
   });
 
