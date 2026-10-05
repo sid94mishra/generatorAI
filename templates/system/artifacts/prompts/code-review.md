@@ -1,3 +1,8 @@
+---
+name: code-review
+description: Review a diff or files for correctness, security, tests and maintainability, and return prioritised findings with file:line and a fix.
+---
+
 # Code Review Prompt
 
 Review the provided code for:
