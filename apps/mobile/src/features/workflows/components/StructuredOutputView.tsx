@@ -59,7 +59,7 @@ export function StructuredOutputView({ value, testID = 'structured-output' }: { 
         ))}
       </View>
       {rows.map((row, r) => (
-        <View key={r} className="flex-row gap-2 border-b border-line-soft py-2" accessible accessibilityLabel={view.columns.map((c, i) => `${humanKey(c)} ${row[i]}`).join(', ')}>
+        <View accessibilityRole="text" key={r} className="flex-row gap-2 border-b border-line-soft py-2" accessible accessibilityLabel={view.columns.map((c, i) => `${humanKey(c)} ${row[i]}`).join(', ')}>
           {row.map((v, i) => (
             <Text key={i} role="monoSm" tone={i === 0 ? 'fg' : 'fg-2'} numberOfLines={2} selectable align={i === row.length - 1 && row.length > 1 ? 'end' : 'start'} className="flex-1">
               {v}

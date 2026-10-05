@@ -40,7 +40,7 @@ export function Stepper({ steps, current, done, variant = 'wizard', onStepPress,
 
   if (variant === 'inline') {
     return (
-      <View testID={testID} accessible accessibilityLabel={label} className="flex-row flex-wrap items-center gap-1.5">
+      <View accessibilityRole="text" testID={testID} accessible accessibilityLabel={label} className="flex-row flex-wrap items-center gap-1.5">
         {steps.map((s, i) => (
           <React.Fragment key={s.id}>
             {i > 0 ? <Icon concept="chevron-right" size={12} tone="fg-3" /> : null}
@@ -56,7 +56,7 @@ export function Stepper({ steps, current, done, variant = 'wizard', onStepPress,
   const vertical = size === 'expanded';
   const labels = size !== 'compact';
   return (
-    <View testID={testID} accessible={!labels || !onStepPress} accessibilityLabel={label} className={cn(vertical ? 'gap-2' : 'gap-2')}>
+    <View accessibilityRole={!labels || !onStepPress ? 'text' : undefined} testID={testID} accessible={!labels || !onStepPress} accessibilityLabel={label} className={cn(vertical ? 'gap-2' : 'gap-2')}>
       <View className={cn(vertical ? 'gap-3' : 'flex-row items-center')}>
         {steps.map((s, i) => {
           const state = stepState(i, current, done);

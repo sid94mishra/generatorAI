@@ -116,7 +116,7 @@ export default function ScriptDetailScreen(): React.ReactElement {
           </View>
           <ListSection title="Stages" count={stages.filter((s) => s.depth === 0).length} {...(loops ? { footer: `${loops} loop${loops === 1 ? '' : 's'}` } : {})}>
             {stages.map((s) => (
-              <View key={s.key} className="min-h-row flex-row items-center gap-3 px-4 py-2" style={{ paddingStart: 16 + s.depth * 20 }} accessible accessibilityLabel={[s.index ? `Stage ${s.index}` : 'Inside the loop', s.name, s.detail, s.agent ? `agent ${s.agent}` : null, s.approval ? 'needs approval' : null].filter(Boolean).join(', ')}>
+              <View accessibilityRole="text" key={s.key} className="min-h-row flex-row items-center gap-3 px-4 py-2" style={{ paddingStart: 16 + s.depth * 20 }} accessible accessibilityLabel={[s.index ? `Stage ${s.index}` : 'Inside the loop', s.name, s.detail, s.agent ? `agent ${s.agent}` : null, s.approval ? 'needs approval' : null].filter(Boolean).join(', ')}>
                 <Text role="monoSm" tone="fg-3">
                   {s.index ? String(s.index) : ' '}
                 </Text>

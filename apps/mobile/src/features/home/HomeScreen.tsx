@@ -56,7 +56,7 @@ function HomeSubtitle(): React.ReactElement {
   const { health, address } = useConnectionHealth();
   const word = health === 'reconnecting' ? `${HEALTH.connection.reconnecting.label}…` : HEALTH.connection[health].label;
   return (
-    <View className="flex-row flex-wrap items-center gap-x-1.5" accessible accessibilityLabel={[homeDate(), word, address].filter(Boolean).join(', ')} testID="home-subtitle">
+    <View accessibilityRole="text" className="flex-row flex-wrap items-center gap-x-1.5" accessible accessibilityLabel={[homeDate(), word, address].filter(Boolean).join(', ')} testID="home-subtitle">
       <Text role="footnote" tone="fg-2">
         {homeDate()} ·
       </Text>

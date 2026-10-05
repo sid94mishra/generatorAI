@@ -337,7 +337,7 @@ export function DiffView({ workspaceId, file, base, review, revisions, agentName
       ) : null}
       <DiffStat {...(file.additions !== undefined ? { additions: file.additions } : {})} {...(file.deletions !== undefined ? { deletions: file.deletions } : {})} />
       {threads.length > 0 ? (
-        <View className="flex-row items-center gap-1" accessible accessibilityLabel={`${threads.length} ${threads.length === 1 ? 'comment' : 'comments'}`}>
+        <View accessibilityRole="text" className="flex-row items-center gap-1" accessible accessibilityLabel={`${threads.length} ${threads.length === 1 ? 'comment' : 'comments'}`}>
           <Icon concept="message" size={14} tone="fg-3" />
           <Text role="monoSm" tone="fg-3">
             {threads.length}

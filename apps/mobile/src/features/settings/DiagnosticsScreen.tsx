@@ -97,7 +97,7 @@ export default function DiagnosticsScreen(): React.ReactElement {
       keyboard="form"
       testID="settings-diagnostics-screen"
     >
-      <View className="flex-row items-center gap-1.5 px-4" accessible accessibilityLabel={`${health.isError ? 'Disconnected' : 'Auto-refreshing every 5 seconds'}${updated ? `, updated ${updated}` : ''}`}>
+      <View accessibilityRole="text" className="flex-row items-center gap-1.5 px-4" accessible accessibilityLabel={`${health.isError ? 'Disconnected' : 'Auto-refreshing every 5 seconds'}${updated ? `, updated ${updated}` : ''}`}>
         <StatusDot health={health.isError ? 'err' : 'run'} size="sm" />
         <Text role="footnote" tone="fg-3">
           {health.isError ? "Can't reach the server" : 'Auto-refreshing every 5 s'}

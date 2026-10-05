@@ -69,7 +69,7 @@ function Preset({ preset, count = 3 }: { preset: NonNullable<SkeletonProps['pres
 
 export function Skeleton({ shape, width, height, preset, count, testID }: SkeletonProps): React.ReactElement {
   return (
-    <View testID={testID} accessible accessibilityLabel="Loading" accessibilityState={{ busy: true }}>
+    <View accessibilityRole="progressbar" testID={testID} accessible accessibilityLabel="Loading" accessibilityState={{ busy: true }}>
       <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
         {preset ? <Preset preset={preset} count={count} /> : <Shape shape={shape} width={width} height={height} />}
       </View>

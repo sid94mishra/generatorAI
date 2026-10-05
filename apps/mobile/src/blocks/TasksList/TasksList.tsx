@@ -248,7 +248,7 @@ export function TasksList({ chatId, active }: TasksListProps): React.ReactElemen
 
   return (
     <ScrollView className="flex-1" contentContainerClassName="gap-3 pb-8 pt-2" testID="tasks">
-      <View className="mx-4 gap-2.5 rounded-group bg-raised p-4" accessible accessibilityLabel={`${summary.total} workers, ${summary.active} active, ${summary.done} done`}>
+      <View accessibilityRole="text" className="mx-4 gap-2.5 rounded-group bg-raised p-4" accessible accessibilityLabel={`${summary.total} workers, ${summary.active} active, ${summary.done} done`}>
         <View className="flex-row items-baseline gap-2">
           <Text role="headline">{`${summary.total} ${summary.total === 1 ? 'worker' : 'workers'}`}</Text>
           <View className="flex-1" />

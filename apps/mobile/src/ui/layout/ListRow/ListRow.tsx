@@ -120,7 +120,7 @@ export function ListRow(props: ListRowProps): React.ReactElement {
   const role = listRowRole(kind);
   if (!press && !copy) {
     return (
-      <View testID={testID} className={frame} accessible={kind !== 'stepper' && kind !== 'segmented'} accessibilityLabel={kind === 'stepper' || kind === 'segmented' ? undefined : listRowLabel(props)}>
+      <View accessibilityRole={kind === 'stepper' || kind === 'segmented' ? undefined : 'text'} testID={testID} className={frame} accessible={kind !== 'stepper' && kind !== 'segmented'} accessibilityLabel={kind === 'stepper' || kind === 'segmented' ? undefined : listRowLabel(props)}>
         {row}
       </View>
     );

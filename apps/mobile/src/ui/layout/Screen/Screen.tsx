@@ -26,7 +26,7 @@ function StateBody({ state }: { state: NonNullable<ScreenProps['state']> }): Rea
   switch (state.kind) {
     case 'loading':
       return (
-        <View accessible accessibilityLabel="Loading" accessibilityState={{ busy: true }} className={state.skeleton ? undefined : 'flex-1 items-center justify-center p-8'}>
+        <View accessibilityRole="progressbar" accessible accessibilityLabel="Loading" accessibilityState={{ busy: true }} className={state.skeleton ? undefined : 'flex-1 items-center justify-center p-8'}>
           {state.skeleton ?? <ProgressIndicator label="Loading" />}
         </View>
       );

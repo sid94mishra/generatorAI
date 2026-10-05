@@ -208,7 +208,7 @@ export function ComputerView({ workspaceId, active }: ComputerViewProps): React.
       ) : rows.length > 0 ? (
         <ListSection title="Replay" count={rows.length}>
           {rows.map((row) => (
-            <View key={row.key} className="min-h-row flex-row items-center gap-3 px-4 py-2" accessible accessibilityLabel={`${row.title}${row.subtitle ? `, ${row.subtitle}` : ''}`}>
+            <View accessibilityRole="text" key={row.key} className="min-h-row flex-row items-center gap-3 px-4 py-2" accessible accessibilityLabel={`${row.title}${row.subtitle ? `, ${row.subtitle}` : ''}`}>
               <Text role="monoSm" tone="fg-3" className="w-10">
                 {formatRelativeShort(row.createdAt)}
               </Text>

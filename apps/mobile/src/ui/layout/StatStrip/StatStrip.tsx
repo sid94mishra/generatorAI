@@ -33,7 +33,7 @@ function Tile({ item }: { item: StatItem }): React.ReactElement {
   const label = `${statValue(item.value)}, ${item.label}`;
   if (!item.onPress) {
     return (
-      <View className="flex-1" accessible accessibilityLabel={label}>
+      <View accessibilityRole="text" className="flex-1" accessible accessibilityLabel={label}>
         {body}
       </View>
     );
@@ -62,7 +62,7 @@ export function StatStrip({ variant, items, testID }: StatStripProps): React.Rea
       {items.map((item, i) => (
         <React.Fragment key={item.id}>
           {i > 0 ? <Separator orientation="vertical" /> : null}
-          <View className={cn('flex-1 items-center gap-0.5 px-2')} accessible accessibilityLabel={`${statValue(item.value)}, ${item.label}`}>
+          <View accessibilityRole="text" className={cn('flex-1 items-center gap-0.5 px-2')} accessible accessibilityLabel={`${statValue(item.value)}, ${item.label}`}>
             <Text role="detailTitle" tone={item.tone ?? 'fg'} tabular chrome>
               {statValue(item.value)}
             </Text>

@@ -65,7 +65,7 @@ const PHASE_ICON: Record<PhaseState, { concept: 'status-succeeded' | 'status-run
 function Phase({ label, state, detail }: { label: string; state: PhaseState; detail?: string }): React.ReactElement {
   const p = PHASE_ICON[state];
   return (
-    <View className="flex-row items-center gap-1.5" accessible accessibilityLabel={`${label}, ${detail ?? p.word}`}>
+    <View accessibilityRole="text" className="flex-row items-center gap-1.5" accessible accessibilityLabel={`${label}, ${detail ?? p.word}`}>
       <Icon concept={p.concept} size={14} tone={p.tone} spinning={state === 'running'} />
       <Text role="subhead" weight={600}>
         {label}
