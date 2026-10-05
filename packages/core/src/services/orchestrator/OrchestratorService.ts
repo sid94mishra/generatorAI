@@ -1425,7 +1425,7 @@ export class OrchestratorService {
         if (!record.waveSlot) break;
         record.waveSlot = false;
         record.resolveFirstOutput();
-        const hasDigest = /<TASK_RESULT>/i.test(record.lastAssistantText);
+        const hasDigest = TASK_RESULT_OPEN.test(record.lastAssistantText);
         // F4 fix: the original condition `record.lastError && !record.lastAssistantText`
         // incorrectly yielded 'needs_review' for cancelled workers that produced partial
         // output before the cancellation — lastAssistantText was non-empty, so the
@@ -1541,9 +1541,9 @@ export class OrchestratorService {
 
   private parseDigest(text: string): TaskResultDigest | null {
     if (!text) return null;
-    const m = text.match(/<TASK_RESULT>\s*([\s\S]*?)\s*<\/TASK_RESULT>/i);
-    if (!m || !m[1]) return null;
-    let raw = m[1].trim();
+    const body = taskResultBody(text);
+    if (!body) return null;
+    let raw = body;
     // Tolerate a fenced ```json block inside the tag.
     const fence = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
     if (fence && fence[1]) raw = fence[1].trim();
@@ -1782,4 +1782,18 @@ export class OrchestratorService {
       // Non-fatal — the scratchpad is an optimization, not a correctness dep.
     }
   }
+}
+
+/** `<TASK_RESULT>`, tolerating the stray spaces models emit ("< TASK_RESULT>"). */
+const TASK_RESULT_OPEN = /<\s*TASK_RESULT\s*>/i;
+
+/**
+ * The text inside a worker's `<TASK_RESULT>` block, or null. Tolerates whitespace inside the tags and a missing
+ * closing tag at the end of the message — a reviewer's digest arrived as "< TASK_RESULT>{…}" and the orchestrator
+ * got the raw JSON as an unstructured summary.
+ */
+export function taskResultBody(text: string): string | null {
+  const m = /<\s*TASK_RESULT\s*>\s*([\s\S]*?)\s*(?:<\s*\/\s*TASK_RESULT\s*>|$)/i.exec(text);
+  const body = m?.[1]?.trim();
+  return body ? body : null;
 }
