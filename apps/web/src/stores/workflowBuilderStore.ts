@@ -292,6 +292,10 @@ export function newAgentStage(key: string, name: string): AgentStage {
 /**
  * A new check stage in parsed form. The command is a placeholder from the
  * default allow-list; the panel's picker offers the server's list.
+ *
+ * D-99: a non-zero exit fails the stage. A standalone `npm test` that failed used to complete with
+ * `passed: false`, so the run "completed" and its automation reported "Succeeded". Inside a loop the loop
+ * reads `passed` instead — `wrapInContainer('loop')` turns it off for the checks it wraps.
  */
 export function newCheckStage(key: string, name: string): CheckStage {
   return {
@@ -299,7 +303,7 @@ export function newCheckStage(key: string, name: string): CheckStage {
     key,
     name,
     join: { mode: 'all' },
-    check: { command: 'npm', args: ['test'], timeoutMs: 600_000, parseJson: false, failOnNonZero: false, tailBytes: 16_384 },
+    check: { command: 'npm', args: ['test'], timeoutMs: 600_000, parseJson: false, failOnNonZero: true, tailBytes: 16_384 },
   };
 }
 
@@ -993,7 +997,11 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
         nodes.push({ ...node, selected: false });
         return;
       }
-      const stage = withParentKey(node.data.stage, containerKey);
+      // A loop iterates on a failing check (its exit rules read `passed`): a check that failed its stage would
+      // fail the loop on the first red run instead (D-99).
+      const wrapped = withParentKey(node.data.stage, containerKey);
+      const stage: StageSpec =
+        kind === 'loop' && wrapped.kind === 'check' ? { ...wrapped, check: { ...wrapped.check, failOnNonZero: false } } : wrapped;
       nodes.push({
         ...withParent(node, containerKey),
         selected: false,

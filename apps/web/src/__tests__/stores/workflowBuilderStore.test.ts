@@ -145,6 +145,16 @@ describe('workflowBuilderStore', () => {
     expect(store().selectionSeq).toBe(seq + 1);
   });
 
+  it('a new check fails its stage on a non-zero exit; wrapped in a loop it completes with passed: false (D-99)', () => {
+    store().loadRecord(makeRecord());
+    const key = store().addStage('Run tests', { kind: 'check' });
+    const check = () => store().toGraph().stages.find((s) => s.key === key) as { check: { failOnNonZero: boolean } };
+    expect(check().check.failOnNonZero).toBe(true);
+    const r = store().wrapInContainer([key], 'loop');
+    expect('key' in r).toBe(true);
+    expect(check().check.failOnNonZero).toBe(false);
+  });
+
   // ── Wholesale graph: clearing a field removes it (D-4) ──
 
   it('setting a field to undefined removes it from the saved graph', () => {

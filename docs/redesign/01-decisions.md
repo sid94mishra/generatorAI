@@ -734,6 +734,14 @@ spawn's model outranked the agent's, and `list_available_agents` never said an a
   `GENERATORAI_ORCH_DEFAULT_WORKER_MODEL`, else the medium-tier heuristic.
 - The orchestrator agent's **Max concurrent workers** caps running workers (else `GENERATORAI_ORCH_MAX_WORKERS`).
 
+### D-99 A failing check fails its stage by default (2026-10-05) — Final
+Found with a nightly automation (Install → `npm test`): both checks exited 127 (`vitest: command not found`), each
+completed with `passed: false` (the schema default `failOnNonZero: false`), the run "completed" and the automation
+listed the execution as Succeeded. The builder's **new** check stage now has "Fail the stage on a non-zero exit" on; a
+check wrapped into a **loop** gets it turned off, since the loop's exit rules read `passed` (test-until-green). The
+schema default stays `false` (existing definitions and the bundled templates are unchanged; they set it explicitly
+where it matters).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
