@@ -24,7 +24,7 @@
 // `chatRowState(row, chatLiveSets(useAttention().data))`.
 // ────────────────────────────────────────────────────────────────
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   keepPreviousData,
   useInfiniteQuery,
@@ -264,7 +264,7 @@ export function useSetChatUnread() {
  * another device. Silent on failure (a device without `write:chats`): the
  * mark simply stays. The server's `chat.updated` refreshes every list.
  */
-export function useMarkChatRead(chatId: string | undefined): void {
+export function useMarkChatRead(chatId: string | undefined, working = false): void {
   const platform = usePlatform();
   useEffect(() => {
     if (!chatId) return;
@@ -276,4 +276,21 @@ export function useMarkChatRead(chatId: string | undefined): void {
     mark();
     return mark;
   }, [platform, chatId]);
+  // A turn that finishes while the chat is open was read as it streamed: the server marks the chat unread when
+  // the turn ends, and the Activity card and chat list showed the unread dot on the chat on screen.
+  const wasWorking = useRef(working);
+  useEffect(() => {
+    // Unread is "last activity after the read mark", and the turn's message is persisted just after the idle the
+    // page reacts to: mark a moment later so the mark is the newer of the two.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (chatId && wasWorking.current && !working) {
+      timer = setTimeout(() => {
+        void platform.updateChat(chatId, { unread: false }).catch(() => undefined);
+      }, 1500);
+    }
+    wasWorking.current = working;
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [platform, chatId, working]);
 }

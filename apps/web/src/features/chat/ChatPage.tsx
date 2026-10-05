@@ -84,10 +84,10 @@ export function ChatPage() {
   const [dockOpen, setDockOpen, toggleDock] = useDockOpen(CHAT_DOCK_KEYS.open, false);
   const view = useChatView({ chatId, dockOpen, setDockOpen, toggleDock });
   // MG-02 / MD-112: the chat is read while it is open (D-83).
-  useMarkChatRead(chatId);
   const setPermissionMode = useSetChatPermissionMode(chatId ?? '');
   const { chat, sessionId, workspace, stream, transcript, gates, stopRewind, dock } = view;
   const { isWorking } = stream;
+  useMarkChatRead(chatId, isWorking);
   const { messages, promptHistory } = transcript;
   const { stop, canRewind, restoredDraft } = stopRewind;
   const activeHarnessLabel = workspace.harnessProvider ? harnessProviderLabel(workspace.harnessProvider) : null;
