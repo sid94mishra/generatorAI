@@ -3629,6 +3629,10 @@ export class ClaudeAgentProvider implements IAgentHarness {
     const { conversationId } = session;
     try {
       for await (const message of session.query) {
+        // Record the SDK session id before the message is applied: applying a `result` publishes
+        // `harness.idle`, and the chat persists the provider session from that handler — it read nothing,
+        // so a Claude chat never stored a resumable session and lost its context on every restart.
+        this.rememberSdkSessionId(session, message as { session_id?: string });
         const turn = this.turns.get(conversationId);
         if (!turn || turn.aborted) {
           // Nothing is waiting for this (a cancelled turn, or output that

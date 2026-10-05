@@ -2091,6 +2091,9 @@ export class ChatManagementService {
       opts: { partial?: boolean; cancelled?: boolean; error?: string } = {},
     ): Promise<void> => {
       recordTurnOutcome(opts);
+      // Every way a turn ends (idle, a stop, the shutdown flush) records the provider's session handle, so a
+      // restart resumes the model's history — a turn cut short by a quit used to leave none.
+      await rememberProviderSession(this.harness, this.sessionRepo, session);
       if (recorder.persisted) return;
       // Whether this turn was CANCELLED is a fact about the chat, not about
       // who happened to call this function.
@@ -2201,7 +2204,6 @@ export class ChatManagementService {
         // Persist on idle — all tool calls have completed by now
         if (event.kind === 'harness.idle') {
           await finalizeTurn();
-          void rememberProviderSession(this.harness, this.sessionRepo, session);
 
           // Checkpoint the workspace AFTER the agent has finished. The
           // pre-turn snapshot alone is not enough: without an "after" the

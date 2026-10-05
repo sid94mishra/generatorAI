@@ -132,6 +132,19 @@ describe('a resumed Claude session', () => {
     expect(supervisor.snapshot().activeExecutions).toBe(0);
   });
 
+  it('knows the SDK session id by the time harness.idle is published (the chat persists it from that handler)', async () => {
+    const { query, turn } = await turnInFlight('c5', 'hello');
+    let idAtIdle: string | undefined = 'unset';
+    provider.onConversationEvent('c5', (e) => {
+      if (e.kind === 'harness.idle') idAtIdle = provider.getProviderSessionId('c5');
+    });
+    query.push({ type: 'system', subtype: 'init', session_id: 'sdk-9' });
+    query.push({ ...ANSWER, session_id: 'sdk-9' });
+    query.push({ ...REAL_RESULT, session_id: 'sdk-9' });
+    await turn.done;
+    expect(idAtIdle).toBe('sdk-9');
+  });
+
   it('still ends a CLI-local command, whose only result has zero turns', async () => {
     const { query, turn } = await turnInFlight('c2', '/compact');
     query.push(HOUSEKEEPING);
