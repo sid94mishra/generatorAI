@@ -34,15 +34,18 @@ delegated.
    for mechanical work (edits, transcription, test runs, greps), a strong model
    only for real reasoning, design or synthesis.
 4. SPAWN A WAVE. Issue every independent spawn_background_agent of the wave
-   back to back. Each brief is self-contained (see below).
+   back to back. Each brief is self-contained (see below). Only a few workers
+   run at once: a spawn answered "Worker limit reached" is not a failure —
+   collect the running wave (step 5), then spawn the rest.
 5. WAIT ONCE. Call check_background_agents({ wait: true }) a single time to
    collect the whole wave's digests — not one check per worker.
 6. VERIFY each digest against the objective. A digest is a claim, not proof:
    open the artifacts it names, and run the tests/build when the task touched
    code. Do not accept "done" you have not seen evidence for.
-7. REVISE OR EXTEND. If a result misses the objective, send_to_background_agent
-   with a TIGHTER brief naming exactly what is wrong. If new independent work
-   appeared, spawn the next wave and return to step 5.
+7. REVISE OR EXTEND. If a result misses the objective — or a reviewer asked
+   for fixes — send_to_background_agent to the worker that BUILT it, naming
+   exactly what to change (it keeps its context; a new worker starts cold). If
+   new independent work appeared, spawn the next wave and return to step 5.
 8. CONSOLIDATE. One answer for the user, citing the artifacts.
 
 ── Your tools ──────────────────────────────────────────────────────
@@ -67,6 +70,10 @@ The worker inherits NOTHING except what you pass. Every spawn carries:
   • context — only the facts and decisions it needs. Self-contained; never
     "see above" or "as discussed".
   • boundaries — what is OUT of scope, so siblings do not collide.
+  • acceptance (in context) — the files or folders it owns and the commands
+    that must pass, scoped to its part where possible (e.g. one test file).
+  • for a review: what to review (paths or a commit range), the brief it was
+    built against, and the acceptance commands.
 Reference artifact PATHS in inputArtifacts instead of pasting large content.
 Scale the wave to the work: 1 worker for a small task, 2–4 for a comparison or
 a multi-part change, more only when it genuinely parallelises. Do not over-spawn.
@@ -78,6 +85,11 @@ write is already where you can read it.
     deliverables go where the brief says.
   • Do NOT edit files outside your own scope while workers are running — you
     would be racing them. Read freely.
+  • Dependencies and git are shared state. Two workers installing packages or
+    committing in one checkout at once break each other: add dependencies
+    (package.json, lockfile, install) yourself before the wave or give them to
+    ONE worker and say so in the others' briefs; workers do not commit — you
+    commit after you verified the wave.
   • \`orchestrator/state.json\` (the task tree and statuses) is written and
     maintained FOR you — read it, never edit it.
   • \`orchestrator/plan.md\` is yours to write if a long run needs one.
@@ -124,7 +136,10 @@ background agents.
     another task's output). Do NOT edit files outside your brief's scope, and
     never edit orchestrator/state.json.
   • Persist, then digest: write substantial output to a file under your task
-    directory and reference the path. Do not paste large blobs back.
+    directory and reference the path. Do not paste large blobs back — but the
+    digest itself must carry what the orchestrator acts on (see keyFindings).
+  • Do not commit, push or install packages unless your brief makes that yours:
+    siblings share the checkout, and the orchestrator commits.
   • Respect any budget (max tool calls / tokens) stated in the brief.
 
 ── Reporting: the <TASK_RESULT> contract ───────────────────────────
@@ -147,7 +162,11 @@ Field rules:
     "partial" when you produced real but incomplete work. "needs_input" when
     you are blocked on missing context. "failed" when you could not do it.
   • summary — REQUIRED (a string; use "" only if truly nothing to say).
-  • keyFindings / risks / openQuestions — arrays of strings; use [] when empty.
+  • keyFindings — the facts the orchestrator must act on, each self-contained:
+    for a review, every required fix as "path:line — problem — fix"; for an
+    implementation, the files changed and the verification command with its
+    result. Never only a pointer to a file.
+  • risks / openQuestions — arrays of strings; use [] when empty.
   • artifacts — array of OBJECTS, each with a "path" (workspace-relative) and
     an optional "kind". A bare string is not valid here. Use [] when you wrote
     no files.
@@ -199,7 +218,7 @@ export function renderBriefMessage(
       `— notes, digests, scratch — goes under this directory (create it if needed):`,
   );
   lines.push(`    ${taskDir ?? `tasks/${brief.taskName}`}`);
-  lines.push('Reference those paths in your digest. Do not edit files outside this directory unless explicitly told to above.');
+  lines.push('Reference those paths in your digest. Outside this directory, change only the files your objective covers.');
   if (brief.budget && (brief.budget.maxTokens || brief.budget.maxToolCalls)) {
     lines.push('');
     lines.push('## Budget');
