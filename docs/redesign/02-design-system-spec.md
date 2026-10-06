@@ -381,6 +381,9 @@ Popups rendered by Base UI portal to `<body>`, so a select opened inside a dialo
 | `--gai-duration-normal` | 180ms | 0ms |
 | `--gai-duration-slow` | 220ms | 0ms |
 | `--gai-ease-standard` (vocabulary `--ease-standard`) | `cubic-bezier(0.2, 0, 0, 1)` | — |
+| `--gai-ease-in-out` (vocabulary `--ease-in-out`, D-109) | `cubic-bezier(0.4, 0, 0.2, 1)` | — |
+
+Design utilities (D-109): `duration-fast` · `duration-normal` · `duration-slow` (theme `--transition-duration-*`), `ease-standard`, `ease-in-out`. Expand / collapse and show / hide go through the hand-written `motion-*` utilities in globals.css ("Motion") and the kit's `Collapsible` / `Accordion` / `CollapsiblePanel` / `Reveal` (ui/primitives/Collapsible) and AppFrame — never ad-hoc transitions in features. The full list and rules: D-109, `reviews/motion.md`.
 
 - `@utility transition-control { transition-property: color, background-color, border-color, outline-color, box-shadow, opacity; transition-duration: var(--gai-duration-fast); transition-timing-function: var(--gai-ease-standard); }`, the only transition kit components use (hover/press ≤ 120 ms).
 - `@custom-variant reduced (&:where([data-motion="reduce"], [data-motion="reduce"] *));` so the kit can write `reduced:animate-none`.
