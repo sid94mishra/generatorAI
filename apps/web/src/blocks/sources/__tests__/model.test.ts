@@ -275,3 +275,14 @@ describe('draftsFromSpecs (prefill)', () => {
     expect(drafts[0]!.meta.dirty).toBe(true);
   });
 });
+
+describe('autoIncludedCodebase (D-108)', () => {
+  it('picks a project\'s only codebase when nothing is chosen yet, and nothing otherwise', async () => {
+    const { autoIncludedCodebase } = await import('../model.js');
+    expect(autoIncludedCodebase([{ id: 'a' }], [])).toEqual({ id: 'a' });
+    expect(autoIncludedCodebase([{ id: 'a' }, { id: 'b' }], [])).toBeUndefined();
+    expect(autoIncludedCodebase([], [])).toBeUndefined();
+    expect(autoIncludedCodebase(undefined, [])).toBeUndefined();
+    expect(autoIncludedCodebase([{ id: 'a' }], [{ kind: 'folder' } as never])).toBeUndefined();
+  });
+});

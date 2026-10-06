@@ -51,6 +51,7 @@ import {
   type CodebaseLike,
   type DraftSource,
   type SourceMode,
+  autoIncludedCodebase,
 } from './model.js';
 
 export interface SourcePickerProps {
@@ -179,6 +180,16 @@ export function SourcePicker({
     },
     [drafts, removeAt, atLimit, takenAliases, onChange, onPrimaryChange],
   );
+
+  // D-108: a project's only codebase is included when the project is picked (once per project, so unticking sticks).
+  const autoIncludedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!projectId || !codebases || autoIncludedFor.current === projectId) return;
+    autoIncludedFor.current = projectId;
+    const only = autoIncludedCodebase(codebases, drafts);
+    if (only) toggleCodebase(toCodebaseLike(only));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- decided once, when the project's codebases arrive
+  }, [projectId, codebases]);
 
   /**
    * Add a folder, resolving its git facts FIRST.

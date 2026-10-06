@@ -830,6 +830,13 @@ attention ask, the push and mobile read the same words); client-core carries the
 locally for older gates; the web card and the Activity band show them, and an Activity status line reads
 "Run <command>?". `PERMISSION_GATE_COPY.title` stays only as a fallback.
 
+### D-108 A project's only codebase is included in a new chat by default (2026-10-06) — Final
+In the build every chat started in a one-codebase project ran in an empty managed workspace until the person ticked
+the codebase (New chat dialog and page). When a project is picked and its codebases load, the only codebase is now
+included (once per project, so unticking it sticks; never with two or more codebases, never on top of sources
+already chosen). The Run dialog keeps its rule — it pre-selects the workflow's `lifecycle.codebaseAliases`, and none
+when the workflow names none — because the workflow author decides what a run mounts.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

@@ -418,3 +418,13 @@ function draftFromMount(mount: WorkspaceMount, byId: Map<string, CodebaseLike>):
     },
   };
 }
+
+/**
+ * D-108: a chat started in a project with exactly one codebase works on that codebase unless the person says
+ * otherwise — it is included once, when the project's codebases first load and nothing is chosen yet. With several
+ * codebases (or none) nothing is picked for them.
+ */
+export function autoIncludedCodebase<T>(codebases: readonly T[] | undefined, drafts: readonly DraftSource[]): T | undefined {
+  if (!codebases || codebases.length !== 1 || drafts.length > 0) return undefined;
+  return codebases[0];
+}
