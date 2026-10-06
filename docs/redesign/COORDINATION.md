@@ -61,3 +61,11 @@ re-resolve also changed which versions `shamefully-hoist` puts at the root — n
 the hoisted pick: `metro`/`metro-*` 0.84.5 → 0.84.6, `hermes-parser` 0.25.1 → 0.36.1, `jest-worker` 27 → 29,
 `source-map` 0.7.6 → 0.5.7. Nothing in the workspace imports them, but Expo resolves `metro` from the root, so run the
 Metro/Expo smoke once after merging. `zod`, `esbuild`, `rollup` keep their hoisted versions.
+
+**Desktop open-items pass (2026-10-06, note for the mobile session).** **DB migration v66 `automation_codebases` is
+taken** (one `automations` column, D-103); a new mobile migration takes **v67**. Contract changes the mobile app gets
+on the next merge: `BackgroundTaskStatus` gains `interrupted` (status map `paused "Interrupted"`) and
+`POST /chats/:id/background-tasks/:taskId/resume` (D-100); `Automation.codebases` / `CreateAutomationParams.codebases`
+(D-103); the Codex sandbox now allows the network (D-101) and Ask-mode chats ask before browser / widget tools (D-102)
+— server-side, nothing to port. Mirror items: `mobile/reviews/PENDING.md` MV-41 (D-95 / D-96 create flow and composer approvals) and MV-42 (D-99, D-100,
+D-103, D-104).
