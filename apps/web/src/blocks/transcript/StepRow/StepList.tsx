@@ -45,6 +45,11 @@ export interface StepListProps {
   mode?: 'normal' | 'verbose';
   /** The turn is streaming (registered cards receive it). */
   live?: boolean;
+  /**
+   * Fold related steps into group rows (default). A group's own children render with
+   * `grouping={false}`: grouping them again would yield the same group inside itself, forever.
+   */
+  grouping?: boolean;
   /** Accessible name of the list. */
   label?: string;
   className?: string;
@@ -264,7 +269,7 @@ function groupItem(group: StepGroup, live: boolean): StepRailItem {
     expandable: true,
     detail: (
       <div data-testid="step-group-children">
-        <StepList steps={group.steps} live={live} />
+        <StepList steps={group.steps} live={live} grouping={false} />
       </div>
     ),
     busy: running,
@@ -280,7 +285,7 @@ function sameSteps(a: readonly TimelineStep[], b: readonly TimelineStep[]): bool
   return true;
 }
 
-function StepListImpl({ steps, mode = 'normal', live = false, label = 'Steps', className }: StepListProps) {
+function StepListImpl({ steps, mode = 'normal', live = false, grouping = true, label = 'Steps', className }: StepListProps) {
   const actions = useTranscriptActions();
   // Verbose (G-06) opens every step — including ones that arrive while the turn
   // streams and every step already on screen when the mode is switched — so the
@@ -295,9 +300,9 @@ function StepListImpl({ steps, mode = 'normal', live = false, label = 'Steps', c
     });
   }, []);
   const entries = useMemo<Entry[]>(() => {
-    if (mode === 'verbose') return steps.map((step) => ({ type: 'step' as const, step }));
+    if (mode === 'verbose' || !grouping) return steps.map((step) => ({ type: 'step' as const, step }));
     return foldDelegations(groupSteps(steps));
-  }, [steps, mode]);
+  }, [steps, mode, grouping]);
 
   // One rail per contiguous run; a DelegationGroup breaks the rail (it draws its own sub-rows).
   const blocks: ReactNode[] = [];
