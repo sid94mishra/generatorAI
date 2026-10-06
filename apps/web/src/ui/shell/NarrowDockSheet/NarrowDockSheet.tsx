@@ -22,6 +22,10 @@
 // The sheet's look is P-33's `sheetPopupVariants` (shared, not copied).
 // `open={false}` hides it with `visibility:hidden` + `inert` (never
 // `display:none`: `NativeBrowserView.isContainerHidden()` relies on it).
+// Motion (D-108, `motion-dock`): as a sheet it slides in from the right edge
+// and back out; as the panel surface it follows the split's easing. Either
+// way `visibility` turns hidden only when the close has finished, and it is
+// inert from the moment it starts closing.
 // ────────────────────────────────────────────────────────────────
 
 import type { ComponentProps, Ref } from 'react';
@@ -64,7 +68,8 @@ export function NarrowDockSheet({
           'z-dock',
           fullWidth ? 'w-full border-l-0' : 'w-sheet',
         ],
-        !open && 'invisible',
+        'motion-dock',
+        !open && ['invisible', active && 'translate-x-full'],
         className,
       )}
     >

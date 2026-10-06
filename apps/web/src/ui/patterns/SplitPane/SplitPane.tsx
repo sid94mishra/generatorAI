@@ -24,9 +24,12 @@
 // `react-resizable-panels:<id>:main:side`.
 // `resizable={false}` removes the separator (the dock's sheet and maximized
 // modes); `separatorLabel` names it.
+// Motion (D-108, `motion-split`): collapsing and re-opening the side pane eases
+// both panes' share of the row; a drag follows the pointer with no easing. It is
+// switched on a frame after mount, so the first layout never animates.
 // ────────────────────────────────────────────────────────────────
 
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Group,
   Panel,
@@ -143,6 +146,12 @@ export function SplitPane({
   // A side pane at 0 stays mounted (its state survives) but is `invisible`: out
   // of the tab order and the accessibility tree, like a closed disclosure.
   const [sideShut, setSideShut] = useState(collapsed);
+  // The first layout (saved sizes, a split that mounts open) lands without easing.
+  const [eased, setEased] = useState(false);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setEased(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   useLayoutEffect(() => {
     if (!sidePanel) return;
@@ -172,7 +181,7 @@ export function SplitPane({
       onLayoutChanged={(layout, meta) => {
         if ((layout['side'] ?? 0) > 0) onLayoutChanged(layout, meta);
       }}
-      className={cn('flex min-h-0 min-w-0 flex-1', vertical ? 'flex-col' : 'flex-row', className)}
+      className={cn('flex min-h-0 min-w-0 flex-1', vertical ? 'flex-col' : 'flex-row', eased && 'motion-split', className)}
     >
       <Panel
         id="main"

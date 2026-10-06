@@ -9,6 +9,10 @@
 // the window chrome and the window width, and passed in.
 //
 // The Activity column (D-92) sits between the sidebar/rail and the card.
+// Motion (D-108): the sidebar slot eases between the sidebar and rail widths
+// (the card flexes with it); the Activity slot eases open from 0 to the
+// column's width when docked and slides in when it floats over the card; the
+// flyout slides in over the rail. Each part leaves the DOM once it has closed.
 // `data-layout` / `data-sidebar` are the hooks the desktop-chrome CSS in
 // globals.css keys off (the macOS rail-mode page-header inset, 06 §3.5), and
 // what the shell smokes assert. The frame never writes the `<html>` classes
@@ -17,6 +21,7 @@
 
 import type { ComponentProps, ReactNode } from 'react';
 import { cn } from '../../lib/cn.js';
+import { Reveal } from '../../primitives/Collapsible/Collapsible.js';
 import { ToasterRegion } from '../ToasterRegion/ToasterRegion.js';
 
 export type ShellLayout = 'mac' | 'strip' | 'native';
@@ -31,8 +36,14 @@ export interface AppFrameProps extends ComponentProps<'div'> {
   sidebar: ReactNode;
   /** The Activity column (D-92): docked between the sidebar and the card, or an overlay over the card. */
   activity?: ReactNode;
-  /** The SidebarFlyout, while open (rail mode). */
+  /** The Activity column is open (it eases in and out; mounted only while open or closing). */
+  activityOpen?: boolean;
+  /** The column floats over the card instead of docking beside it. */
+  activityOverlay?: boolean;
+  /** The SidebarFlyout (rail mode). */
   flyout?: ReactNode;
+  /** The flyout is open (it slides in and out; mounted only while open or closing). */
+  flyoutOpen?: boolean;
   /** S-04 MainCard. */
   children: ReactNode;
   /** Other shell layers (palette, shortcuts sheet, find bar), rendered after the body. */
@@ -46,7 +57,10 @@ export function AppFrame({
   titleStrip,
   sidebar,
   activity,
+  activityOpen = false,
+  activityOverlay = false,
   flyout,
+  flyoutOpen = false,
   children,
   overlays,
   className,
@@ -62,10 +76,24 @@ export function AppFrame({
     >
       {layout === 'strip' ? titleStrip : null}
       <div className="relative flex min-h-0 flex-1">
-        {sidebar}
-        {activity}
+        <div
+          data-slot="sidebar-slot"
+          className={cn('flex shrink-0 overflow-clip motion-size', sidebarMode === 'expanded' ? 'w-sidebar' : 'w-rail')}
+        >
+          {sidebar}
+        </div>
+        <Reveal
+          open={activityOpen}
+          motion={activityOverlay ? 'slide-start' : 'width'}
+          // Overlay: a zero-width layer at the row's start; the column inside places itself (offset, width).
+          className={activityOverlay ? 'absolute inset-y-0 left-0 z-dock' : 'flex shrink-0'}
+        >
+          {activity}
+        </Reveal>
         {children}
-        {sidebarMode === 'rail' ? flyout : null}
+        <Reveal open={sidebarMode === 'rail' && flyoutOpen} motion="slide-start" className="absolute inset-y-0 left-0 z-sidebar">
+          {flyout}
+        </Reveal>
       </div>
       {overlays}
       <ToasterRegion />

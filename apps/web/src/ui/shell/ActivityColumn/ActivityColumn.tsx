@@ -11,7 +11,8 @@
 // default).
 //
 // `variant="overlay"`: the same column floating over the main card (the
-// window is too narrow to dock it — D-92): absolute, `shadow-pop`,
+// window is too narrow to dock it — D-92): absolute (inside S-01's overlay
+// layer, which owns the stacking and the slide-in, D-108), `shadow-pop`,
 // `data-gai-overlay="sheet"` so the desktop's native browser view steps
 // aside; not resizable.
 // Presentational: app/shell decides the variant and owns the width.
@@ -27,7 +28,7 @@ const columnVariants = cva('flex min-h-0 shrink-0 flex-col gap-1 bg-ground p-2 t
   variants: {
     variant: {
       docked: 'relative border-l border-line-soft',
-      overlay: 'absolute inset-y-0 z-dock rounded-r-panel border-r border-line-soft shadow-pop',
+      overlay: 'absolute inset-y-0 rounded-r-panel border-r border-line-soft shadow-pop',
     },
   },
   defaultVariants: { variant: 'docked' },

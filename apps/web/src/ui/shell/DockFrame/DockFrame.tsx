@@ -209,7 +209,8 @@ export function DockFrame({
             key="main"
             inert={maximized}
             className={cn(
-              'flex min-h-0 min-w-0 flex-1 flex-col',
+              // The sheet's gutter eases in with the sheet's slide (D-108).
+              'flex min-h-0 min-w-0 flex-1 flex-col motion-size',
               maximized && 'invisible',
               mode === 'sheet' && open && !maximized && workspaceNarrowPadding,
             )}
@@ -231,7 +232,8 @@ export interface DockPanelProps extends ComponentProps<'div'> {
 
 /**
  * One tab's body: always mounted, `absolute inset-0`; inactive = `visibility:hidden`
- * + `aria-hidden` + no pointer events (never `display:none`).
+ * + `aria-hidden` + no pointer events (never `display:none`). The tab switched to
+ * fades in (D-108, `duration-fast`); the one left hides at once, so two never overlap.
  */
 export function DockPanel({ active, label, className, children, ...rest }: DockPanelProps) {
   return (
@@ -239,7 +241,11 @@ export function DockPanel({ active, label, className, children, ...rest }: DockP
       role="tabpanel"
       aria-label={label}
       aria-hidden={!active}
-      className={cn('absolute inset-0 flex min-h-0 flex-col overflow-hidden', !active && 'pointer-events-none invisible', className)}
+      className={cn(
+        'absolute inset-0 flex min-h-0 flex-col overflow-hidden',
+        active ? 'transition-opacity duration-fast ease-in-out' : 'pointer-events-none invisible opacity-0',
+        className,
+      )}
       {...rest}
     >
       {children}

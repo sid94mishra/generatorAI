@@ -100,14 +100,16 @@ export function ShellRoute() {
           <ConnectedRail layout={LAYOUT} covered={flyoutOpen} activityDocked={activityDocked} />
         )
       }
-      activity={activityOpen ? <ConnectedActivityColumn placement={placement} sidebarWidth={sidebarWidth} /> : null}
+      // Mounted only while open or easing closed (AppFrame's Reveal, D-108).
+      activity={<ConnectedActivityColumn placement={placement} sidebarWidth={sidebarWidth} />}
+      activityOpen={activityOpen}
+      activityOverlay={placement === 'overlay'}
       flyout={
-        flyoutOpen ? (
-          <SidebarFlyout onClose={() => setFlyoutOpen(false)}>
-            <ConnectedSidebar layout={LAYOUT} inFlyout />
-          </SidebarFlyout>
-        ) : null
+        <SidebarFlyout onClose={() => setFlyoutOpen(false)}>
+          <ConnectedSidebar layout={LAYOUT} inFlyout />
+        </SidebarFlyout>
       }
+      flyoutOpen={flyoutOpen}
       overlays={
         <>
           {/* The command palette (palette.toggle: Mod+K, menu, Search buttons). */}
