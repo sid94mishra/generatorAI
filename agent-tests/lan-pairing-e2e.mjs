@@ -1,10 +1,16 @@
 // Real LAN multi-device pairing probe.
 // Run: node --import tsx agent-tests/lan-pairing-e2e.mjs
+//
+// Two lanes once Network exposure is on (D-110…D-112): the native app pairs
+// over the plain-HTTP LAN lane (DPoP-bound, as before), and a browser-class
+// client pairs over the built-in HTTPS on the same port, trusting the
+// install's local CA — its DPoP proofs are bound to https:// URLs.
 
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { X509Certificate } from 'node:crypto';
 import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -177,6 +183,63 @@ try {
   const streamTicket = new URL(streamUrl).searchParams.get('ticket');
   check('stream ticket was minted', typeof streamTicket === 'string' && streamTicket.length > 0);
   check('stream ticket is not exposed in logs', Boolean(streamTicket) && !logs.join('').includes(streamTicket));
+
+  // ── Built-in HTTPS (D-110, D-111) ──
+  const caPem = await fetch(`${liveOrigin}/api/auth/tls/ca.crt`).then((response) => response.text());
+  check('the local CA certificate is served (public)', caPem.includes('BEGIN CERTIFICATE'));
+  const caFingerprint = new X509Certificate(caPem).fingerprint256;
+  check(
+    'the mobile offer carries the CA fingerprint for pinning (base64url)',
+    consent.offer.certificateFingerprint ===
+      Buffer.from(caFingerprint.replace(/:/g, ''), 'hex').toString('base64url'),
+  );
+  const { Agent, fetch: undiciFetch } = await import('undici');
+  const trustingCa = new Agent({ connect: { ca: caPem } });
+  const httpsFetch = (url, init) => undiciFetch(url, { ...init, dispatcher: trustingCa });
+  const httpsOrigin = `https://${lan.address}:${port}`;
+  const secureInfo = await httpsFetch(`${httpsOrigin}/api/auth/server-info`).then((response) => response.json());
+  check('the LAN port answers HTTPS with a certificate the local CA issued', secureInfo.tls?.enabled === true);
+  check(
+    'browser endpoints are https://',
+    secureInfo.endpoints?.some((endpoint) => endpoint.origin === httpsOrigin),
+    JSON.stringify(secureInfo.endpoints),
+  );
+  check('the CA fingerprint is published', secureInfo.tls?.caFingerprintSha256 === caFingerprint);
+
+  const webPair = await fetch(`${liveOrigin}/api/auth/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${API_KEY}` },
+    body: JSON.stringify({ deviceName: 'LAN E2E Browser', platform: 'web' }),
+  }).then((response) => response.json());
+  check('web pairing response describes the certificate', webPair.tls?.fingerprintSha256 === secureInfo.tls?.fingerprintSha256);
+  const webRuntime = new AuthenticatedClientRuntime({
+    endpoint: httpsOrigin,
+    keyStore: new MemoryDeviceKeyStore(),
+    sessionStore: new MemorySessionStore(),
+    fetchImpl: httpsFetch,
+  });
+  const webSession = await webRuntime.completePairing({
+    endpoint: httpsOrigin,
+    serverId: secureInfo.serverId,
+    pairingToken: webPair.shortCode.replace(/-/g, ''),
+    deviceName: 'LAN E2E Browser',
+    platform: 'web',
+    connectionMode: 'auto',
+  });
+  check('a browser-class client pairs over https:// (DPoP htu https)', webSession.endpoint === httpsOrigin);
+  const secureProjects = await webRuntime.fetch('/api/projects');
+  check('DPoP-authenticated request succeeds over HTTPS', secureProjects.ok, `status=${secureProjects.status}`);
+
+  const browserOverHttp = await fetch(`${liveOrigin}/api/projects`, { headers: { origin: 'http://evil.example' } });
+  const refusal = await browserOverHttp.json().catch(() => ({}));
+  check('a browser request over plain HTTP from the LAN is refused', browserOverHttp.status === 403 && refusal.error?.code === 'HTTPS_REQUIRED');
+  const page = await fetch(`${liveOrigin}/settings`, { redirect: 'manual' });
+  check(
+    'a page request over plain HTTP is redirected to https://',
+    page.status === 308 && page.headers.get('location') === `${httpsOrigin}/settings`,
+    `${page.status} ${page.headers.get('location')}`,
+  );
+  await trustingCa.close();
 } finally {
   await stop(child);
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
