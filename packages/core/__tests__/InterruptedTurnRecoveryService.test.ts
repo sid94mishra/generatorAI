@@ -51,7 +51,11 @@ function build(chats: Chat[]) {
   const eventBus = new EventBus();
   eventBus.setEventStore(store);
   const created: unknown[] = [];
-  const messageRepo = { create: vi.fn(async (m: unknown) => { created.push(m); return m; }) } as unknown as IChatMessageRepository;
+  const messageRepo = {
+    create: vi.fn(async (m: unknown) => { created.push(m); return m; }),
+    countByChatId: vi.fn(async (chatId: string) => created.filter((m) => (m as { chatId: string }).chatId === chatId).length),
+    getByChatId: vi.fn(async (chatId: string) => created.filter((m) => (m as { chatId: string }).chatId === chatId)),
+  } as unknown as IChatMessageRepository;
   const chatRepo = { getByStatus: vi.fn(async () => chats) } as unknown as IChatRepository;
   const service = new InterruptedTurnRecoveryService(chatRepo, messageRepo, eventBus, logger);
   return { store, eventBus, service, created, messageRepo };
@@ -84,6 +88,20 @@ describe('InterruptedTurnRecoveryService', () => {
     expect(tail).toEqual(['harness.error', 'harness.idle']);
     const error = h.store.rows.get(c.sessionId)!.at(-2)!.data as { code: string };
     expect(error.code).toBe(INTERRUPTED_BY_RESTART_CODE);
+  });
+
+  it('does not save the partial turn a second time when the quit already saved it', async () => {
+    const c = chat('chat-q');
+    const h = build([c]);
+    await h.eventBus.emit(c.sessionId, ev('harness.turn_start', { turnId: 't-q' }));
+    await h.eventBus.emit(c.sessionId, ev('harness.token', { text: 'Worker spawned.' }));
+    // The quit's flush (ChatManagementService.flushInFlightTurns) persisted it, then the process exited.
+    h.created.push({ chatId: 'chat-q', role: 'assistant', content: 'Worker spawned.', metadata: { turnId: 't-q', partial: true } });
+
+    const summary = await h.service.recover();
+    expect(summary).toMatchObject({ interrupted: 1, persistedPartials: 0 });
+    expect(h.messageRepo.create).not.toHaveBeenCalled();
+    expect(h.store.rows.get(c.sessionId)!.at(-1)!.kind).toBe('harness.idle');
   });
 
   it('leaves a turn that finished normally alone', async () => {

@@ -120,7 +120,9 @@ export class InterruptedTurnRecoveryService {
     const content = reconstructText(turnEvents);
 
     let persisted = false;
-    if (content.trim().length > 0) {
+    // A quit (not a crash) already saved the partial turn (`ChatManagementService.flushInFlightTurns`); saving it
+    // again showed the same partial answer twice after the restart.
+    if (content.trim().length > 0 && !(turnId && (await this.hasAssistantMessageFor(chat.id, turnId)))) {
       const metadata: ChatMessageMetadata = { partial: true } as ChatMessageMetadata;
       (metadata as Record<string, unknown>)['interrupted'] = 'server_restart';
       if (turnId) metadata.turnId = turnId;
@@ -150,6 +152,13 @@ export class InterruptedTurnRecoveryService {
         (persisted ? ` — persisted ${content.length} chars of partial output` : ' — no output had streamed'),
     );
     return { interrupted: true, persisted };
+  }
+
+  private async hasAssistantMessageFor(chatId: string, turnId: string): Promise<boolean> {
+    const total = await this.messageRepo.countByChatId(chatId).catch(() => 0);
+    if (total === 0) return false;
+    const recent = await this.messageRepo.getByChatId(chatId, 10, Math.max(0, total - 10)).catch(() => []);
+    return recent.some((m) => m.role === 'assistant' && m.metadata?.turnId === turnId);
   }
 }
 
