@@ -12,10 +12,11 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { dirname, resolve } from 'node:path';
-import { networkInterfaces } from 'node:os';
 import { SCOPES } from '@generatorai/auth';
 import type { Container } from '../composition-root.js';
-import { resolveAdvertisedEndpoints } from '../network/advertisedEndpoints.js';
+import { serverEndpoints } from '../network/serverEndpoints.js';
+import { trustProxyPolicy } from '../network/requestOrigin.js';
+import { CustomCertificateError, MAX_CERTIFICATE_PEM_BYTES, MAX_KEY_PEM_BYTES } from '../network/tls/customCertificate.js';
 import {
   describeExposurePreconditions,
   readExposureMode,
@@ -24,6 +25,12 @@ import {
 
 const networkAccessSchema = z.object({
   mode: z.enum(['local-only', 'network-accessible']),
+});
+
+/** `PUT /security/tls/certificate` — a PEM certificate (chain allowed) and its unencrypted key (D-113). */
+const customCertificateSchema = z.object({
+  certificatePem: z.string().min(1).max(MAX_CERTIFICATE_PEM_BYTES),
+  privateKeyPem: z.string().min(1).max(MAX_KEY_PEM_BYTES),
 });
 
 export function createSecurityRoutes(container: Container): Router {
@@ -99,12 +106,93 @@ export function createSecurityRoutes(container: Container): Router {
           unauthenticatedLoopback: posture.unauthenticatedLoopback,
           secretStoreSecure: backend.secure,
         }),
-        endpoints: resolveAdvertisedEndpoints({
+        endpoints: serverEndpoints({
           port: container.config.port,
           bindHost: posture.bindHost,
-          networkInterfaces: networkInterfaces(),
+          tls: container.security.tls,
+          audience: 'browser',
         }),
+        /**
+         * Built-in HTTPS for other devices (D-110). `null` while the listener is
+         * loopback-only; `unavailableReason` says why an exposed server is not
+         * serving it.
+         */
+        tls: container.security.tls
+          ? { ...container.security.tls.status(), unavailableReason: null }
+          : posture.loopbackOnly
+            ? null
+            : { enabled: false, unavailableReason: posture.tlsUnavailableReason },
+        /** D-114 — whether X-Forwarded-Proto/Host are honoured, and from whom. */
+        trustProxy: describeTrustProxy(),
       });
+    })();
+  });
+
+  /**
+   * Serve an admin-supplied certificate instead of the generated one (D-113).
+   * Validated before it is stored: it must match its key, be a server
+   * certificate valid now, and name this computer.
+   */
+  router.put('/tls/certificate', (req: Request, res: Response) => {
+    void (async () => {
+      const tls = container.security.tls;
+      if (!tls) {
+        res.status(409).json({
+          error: {
+            code: 'TLS_NOT_ACTIVE',
+            message: 'Turn on Network exposure first — a certificate is only served to other devices.',
+          },
+        });
+        return;
+      }
+      const parsed = customCertificateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: { code: 'INVALID_BODY', message: parsed.error.message } });
+        return;
+      }
+      try {
+        const status = await tls.installCustomCertificate(parsed.data.certificatePem, parsed.data.privateKeyPem);
+        container.security.audit.record({
+          action: 'settings.updated',
+          result: 'success',
+          ...(req.principal ? { principal: req.principal } : {}),
+          resourceType: 'security',
+          resourceId: 'tls-certificate',
+          metadata: { source: 'custom', fingerprintSha256: status.fingerprintSha256, names: status.names },
+          severity: 'warn',
+        });
+        res.json({ tls: { ...status, unavailableReason: null } });
+      } catch (err) {
+        if (err instanceof CustomCertificateError) {
+          res.status(400).json({ error: { code: err.code, message: err.message } });
+          return;
+        }
+        res.status(400).json({
+          error: { code: 'INVALID_CERTIFICATE', message: err instanceof Error ? err.message : String(err) },
+        });
+      }
+    })();
+  });
+
+  /** Go back to the generated certificate. */
+  router.delete('/tls/certificate', (req: Request, res: Response) => {
+    void (async () => {
+      const tls = container.security.tls;
+      if (!tls) {
+        res.status(409).json({ error: { code: 'TLS_NOT_ACTIVE', message: 'This server is not serving HTTPS.' } });
+        return;
+      }
+      const status = await tls.removeCustomCertificate();
+      container.security.audit.record({
+        action: 'settings.updated',
+        result: 'success',
+        ...(req.principal ? { principal: req.principal } : {}),
+        resourceType: 'security',
+        resourceId: 'tls-certificate',
+        metadata: { source: 'generated', fingerprintSha256: status.fingerprintSha256 },
+        severity: 'warn',
+      });
+      res.json({ tls: { ...status, unavailableReason: null } });
     })();
   });
 
@@ -212,9 +300,10 @@ function buildWarnings(
     warnings.push({
       code: 'NON_LOOPBACK_BIND',
       severity: 'warn',
-      message:
-        `This server is reachable on ${posture.bindHost}. Ensure TLS terminates in front of it ` +
-        'or that clients connect over SSH/relay.',
+      message: container.security.tls
+        ? `This server is reachable on ${posture.bindHost}. Other devices connect over HTTPS and must pair.`
+        : `This server is reachable on ${posture.bindHost} over plain HTTP. ` +
+          (posture.tlsUnavailableReason ?? 'Ensure TLS terminates in front of it.'),
     });
   }
   if (posture.relayEnabled) {
@@ -227,4 +316,9 @@ function buildWarnings(
     });
   }
   return warnings;
+}
+
+function describeTrustProxy(): { mode: 'off' | 'loopback' | 'addresses'; addresses: string[] } {
+  const policy = trustProxyPolicy();
+  return { mode: policy.mode, addresses: policy.mode === 'addresses' ? [...policy.addresses] : [] };
 }

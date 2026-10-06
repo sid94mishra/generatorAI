@@ -38,11 +38,10 @@ import { dirname, resolve } from 'node:path';
 import type { Container } from '../composition-root.js';
 import { removeBootstrapFile } from '../composition/bootstrapPairing.js';
 import { isLoopbackRequest } from '../middleware/auth.js';
-import {
-  resolveAdvertisedEndpoints,
-  selectPairingEndpoint,
-  type AdvertisedEndpointCandidate,
-} from '../network/advertisedEndpoints.js';
+import { requestAbsoluteUrl } from '../network/requestOrigin.js';
+import { selectPairingEndpoint, type AdvertisedEndpointCandidate } from '../network/advertisedEndpoints.js';
+import { serverEndpoints, type EndpointAudience } from '../network/serverEndpoints.js';
+import { classifyTransport } from '../middleware/transportPolicy.js';
 
 const PLATFORMS = ['web', 'desktop', 'cli', 'mobile', 'mcp', 'other'] as const;
 
@@ -127,8 +126,8 @@ export function createAuthRoutes(container: Container): Router {
    * token public JWK is the *verification* key, and the fingerprint is what a
    * pairing QR pins so a client can detect a substituted host.
    */
-  router.get('/server-info', (_req: Request, res: Response) => {
-    const endpoints = advertisedEndpoints(container);
+  router.get('/server-info', (req: Request, res: Response) => {
+    const endpoints = advertisedEndpoints(container, audienceFor(req));
     res.json({
       issuer: 'generatorai',
       audience: posture.tokenAudience,
@@ -151,8 +150,33 @@ export function createAuthRoutes(container: Container): Router {
         relay: false,
       },
       endpoints,
+      /**
+       * Built-in HTTPS (D-110): the served certificate's fingerprint, which a
+       * person compares with the one their browser shows in its certificate
+       * warning, and the CA fingerprint a native client pins. Null when this
+       * server does not terminate TLS.
+       */
+      tls: container.security.tls?.status() ?? null,
       scopes: SCOPES,
     });
+  });
+
+  /**
+   * The local CA certificate (public). Installing it on a device makes the
+   * browser trust this server's generated certificate, so the warning stops
+   * appearing; the CA is name-constrained to private addresses and `.local`
+   * names, so it cannot vouch for anything else (D-110).
+   */
+  router.get('/tls/ca.crt', (_req: Request, res: Response) => {
+    const pem = container.security.tls?.caCertificatePem();
+    if (!pem) {
+      res.status(404).json({ error: { code: 'TLS_NOT_ACTIVE', message: 'This server does not use a generated certificate.' } });
+      return;
+    }
+    res
+      .type('application/x-x509-ca-cert')
+      .set('Content-Disposition', 'attachment; filename="generatorai-local-ca.crt"')
+      .send(pem);
   });
 
   /** Issues a DPoP nonce for clients whose clock is outside the skew window. */
@@ -269,7 +293,8 @@ export function createAuthRoutes(container: Container): Router {
           serverId: identity.hostId,
           serverPublicKey: identity.publicKeyBase64Url,
           serverName: serverDisplayName(),
-          endpoints: advertisedEndpoints(container),
+          endpoints: advertisedEndpoints(container, audienceFor(req)),
+          tls: container.security.tls?.status() ?? null,
           ...preview,
         });
       } catch (err) {
@@ -352,7 +377,9 @@ export function createAuthRoutes(container: Container): Router {
           return;
         }
 
-        const endpoints = advertisedEndpoints(container);
+        // A browser needs https:// to create its device key; the native app
+        // keeps the plain-HTTP lane until it can pin the certificate (D-112).
+        const endpoints = advertisedEndpoints(container, pairingAudience(platform));
         const selectedEndpoint = selectPairingEndpoint(endpoints, platform);
         if (!selectedEndpoint) {
           res.status(409).json({
@@ -392,6 +419,11 @@ export function createAuthRoutes(container: Container): Router {
           })),
           serverId: identity.hostId,
           serverPublicKey: identity.publicKeyBase64Url,
+          // The CA a native client will pin once it can (MV-44); absent for a
+          // custom certificate, which is trusted through its own CA.
+          ...(container.security.tls?.pinnedFingerprint()
+            ? { certificateFingerprint: container.security.tls.pinnedFingerprint()! }
+            : {}),
           pairingGrant: grant.pairingToken,
           pairingExpiresAt: grant.expiresAt,
           requestedScopes: grant.requestedScopes,
@@ -434,6 +466,8 @@ export function createAuthRoutes(container: Container): Router {
            * for clients that cannot reach this server same-origin.
            */
           joinUrl: selectedEndpoint.origin,
+          /** The certificate the joining browser will be shown (D-110). Null without TLS. */
+          tls: container.security.tls?.status() ?? null,
           /** Encoded offer — render as a QR code. */
           pairingCode: encodePairingOffer(offerResult.data),
           pairingUrl: pairingOfferUrl(offerResult.data),
@@ -834,14 +868,9 @@ function systemPrincipal(): Principal {
   };
 }
 
+/** DPoP `htu`: the URL the client signed, scheme-aware (D-111, D-114). */
 function absoluteUrl(req: Request): string {
-  const proto = firstValue(req.headers['x-forwarded-proto']) ?? (req.secure ? 'https' : 'http');
-  const host = firstValue(req.headers['host']) ?? 'localhost';
-  return `${proto}://${host}${req.originalUrl}`;
-}
-
-function firstValue(v: string | string[] | undefined): string | undefined {
-  return Array.isArray(v) ? v[0] : v;
+  return requestAbsoluteUrl(req, req.originalUrl);
 }
 
 /** Express 5 types path params as `string | string[]`; we only ever want one. */
@@ -854,17 +883,23 @@ function pathParam(req: Request, name: string): string {
  * Explicit origins are authoritative. Interface origins are derived only when
  * the server is deliberately bound beyond loopback.
  */
-function advertisedEndpoints(container: Container): AdvertisedEndpointCandidate[] {
-  const configured = [
-    ...(process.env['GENERATORAI_ADVERTISED_URLS']?.split(',') ?? []),
-    ...(process.env['GENERATORAI_ADVERTISED_URL'] ? [process.env['GENERATORAI_ADVERTISED_URL']] : []),
-  ];
-  return resolveAdvertisedEndpoints({
+function advertisedEndpoints(container: Container, audience: EndpointAudience): AdvertisedEndpointCandidate[] {
+  return serverEndpoints({
     port: container.config.port,
     bindHost: container.security.posture.bindHost,
-    configuredOrigins: configured,
-    networkInterfaces: os.networkInterfaces(),
+    tls: container.security.tls,
+    audience,
   });
+}
+
+/** A request on the native plain-HTTP lane is answered with that lane's addresses. */
+function audienceFor(req: Request): EndpointAudience {
+  return classifyTransport(req) === 'native-lan' ? 'native' : 'browser';
+}
+
+/** Browsers (web, a desktop window) need https://; everything else is a native client. */
+function pairingAudience(platform: DevicePlatform): EndpointAudience {
+  return platform === 'web' || platform === 'desktop' ? 'browser' : 'native';
 }
 
 function buildTransportCapabilities(endpoints: readonly AdvertisedEndpointCandidate[]): string[] {

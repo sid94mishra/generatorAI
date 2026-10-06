@@ -12,6 +12,7 @@ import { requestMetricsMiddleware } from './middleware/requestMetrics.js';
 import { createCorsMiddleware } from './middleware/cors.js';
 import { createCspMiddleware } from './middleware/csp.js';
 import { createSecurityHeadersMiddleware } from './middleware/securityHeaders.js';
+import { createTransportPolicyMiddleware } from './middleware/transportPolicy.js';
 import { createAuthMiddleware } from './middleware/auth.js';
 import { createRateLimitMiddleware } from './middleware/rateLimit.js';
 import { createErrorMiddleware } from './middleware/errorHandler.js';
@@ -42,6 +43,13 @@ export function createApp(container: Container): Express {
   // 1b. Request metrics (OTel) — must be after requestId, before routes
   app.use(requestMetricsMiddleware);
 
+  // 1c. D-111 — once the network-facing listener speaks HTTPS, plain HTTP
+  // from another device is redirected (pages) or refused (browser API calls);
+  // only this machine and the native app's DPoP-bound lane keep using it.
+  app.use(
+    createTransportPolicyMiddleware({ tlsActive: () => container.security.tls !== null }),
+  );
+
   // 2. CORS middleware
   //
   // The widget-asset origin is appended here rather than being baked into the
@@ -52,14 +60,8 @@ export function createApp(container: Container): Express {
   // already lists it in CORS_ORIGINS doesn't get it twice.
   const widgetOrigin =
     process.env['WIDGET_ORIGIN'] ?? `http://127.0.0.1:${process.env['WIDGET_PORT'] ?? '3101'}`;
-  const corsOrigins = [
-    ...new Set([
-      ...container.config.security.corsOrigins,
-      widgetOrigin,
-      ...reachableOrigins(container),
-    ]),
-  ];
-  app.use(createCorsMiddleware({ origins: corsOrigins }));
+  const corsOrigins = [...new Set([...container.config.security.corsOrigins, widgetOrigin])];
+  app.use(createCorsMiddleware({ origins: corsOrigins, dynamicOrigins: () => reachableOrigins(container) }));
 
   // 2b. W31 — Content Security Policy. See middleware/csp.ts for the full
   // rationale, including why `script-src` uses a hash-source rather than

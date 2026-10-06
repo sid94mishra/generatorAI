@@ -17,7 +17,9 @@ import {
   REFERRER_POLICY,
   createSecurityHeadersMiddleware,
   isHttpsRequest,
+  shouldSendHsts,
 } from '../middleware/securityHeaders.js';
+import { parseTrustProxy } from '../network/requestOrigin.js';
 
 function makeApp() {
   const app = express();
@@ -45,21 +47,40 @@ describe('security headers middleware', () => {
     expect(res.headers['strict-transport-security']).toBeUndefined();
   });
 
-  it('emits Strict-Transport-Security when a TLS-terminating proxy forwards https', async () => {
+  it('ignores X-Forwarded-Proto from a client when no proxy is trusted (D-114)', async () => {
     const res = await request(makeApp()).get('/x').set('X-Forwarded-Proto', 'https');
+    expect(res.headers['strict-transport-security']).toBeUndefined();
+  });
+
+  it('emits Strict-Transport-Security when a trusted loopback proxy forwards https for a hostname', async () => {
+    const app = express();
+    app.use(createSecurityHeadersMiddleware(parseTrustProxy('loopback')));
+    app.get('/x', (_req, res) => res.send('ok'));
+    const res = await request(app).get('/x').set('X-Forwarded-Proto', 'https').set('X-Forwarded-Host', 'box.tailnet.ts.net');
     expect(res.headers['strict-transport-security']).toBe(HSTS_VALUE);
   });
 
-  it('keys HSTS on the client-facing hop of a proxy chain, case-insensitively', () => {
-    const mk = (proto: string | string[] | undefined) => ({
-      secure: false,
+  it('keys on the client-facing hop of a trusted proxy chain, case-insensitively', () => {
+    const trusted = parseTrustProxy('loopback');
+    const mk = (proto: string | string[] | undefined, encrypted = false) => ({
+      socket: { remoteAddress: '127.0.0.1', encrypted },
       headers: proto === undefined ? {} : { 'x-forwarded-proto': proto },
     });
-    expect(isHttpsRequest(mk('https, http'))).toBe(true);
-    expect(isHttpsRequest(mk('HTTPS'))).toBe(true);
-    expect(isHttpsRequest(mk('http, https'))).toBe(false);
-    expect(isHttpsRequest(mk(['https']))).toBe(true);
-    expect(isHttpsRequest(mk(undefined))).toBe(false);
-    expect(isHttpsRequest({ secure: true, headers: {} })).toBe(true);
+    expect(isHttpsRequest(mk('https, http'), trusted)).toBe(true);
+    expect(isHttpsRequest(mk('HTTPS'), trusted)).toBe(true);
+    expect(isHttpsRequest(mk('http, https'), trusted)).toBe(false);
+    expect(isHttpsRequest(mk(['https']), trusted)).toBe(true);
+    expect(isHttpsRequest(mk(undefined), trusted)).toBe(false);
+    expect(isHttpsRequest(mk(undefined, true), trusted)).toBe(true);
+    // An untrusted peer's header is ignored.
+    expect(isHttpsRequest({ socket: { remoteAddress: '192.168.1.9' }, headers: { 'x-forwarded-proto': 'https' } }, trusted)).toBe(false);
+  });
+
+  it('never pins HSTS to an IP address or localhost, even over TLS', () => {
+    const tlsReq = (host: string) => ({ socket: { remoteAddress: '192.168.1.9', encrypted: true }, headers: { host } });
+    expect(shouldSendHsts(tlsReq('192.168.1.20:3100'))).toBe(false);
+    expect(shouldSendHsts(tlsReq('[fd00::1]:3100'))).toBe(false);
+    expect(shouldSendHsts(tlsReq('localhost:3100'))).toBe(false);
+    expect(shouldSendHsts(tlsReq('box.local:3100'))).toBe(true);
   });
 });

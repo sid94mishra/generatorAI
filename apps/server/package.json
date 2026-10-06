@@ -35,6 +35,7 @@
     "@opentelemetry/sdk-node": "^0.214.0",
     "@opentelemetry/sdk-trace-node": "^2.6.1",
     "@opentelemetry/semantic-conventions": "^1.40.0",
+    "@peculiar/x509": "^1.14.3",
     "@playwright/cli": "^0.1.1",
     "@playwright/test": "^1.58.2",
     "cors": "^2.8.5",

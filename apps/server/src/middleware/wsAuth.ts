@@ -22,6 +22,8 @@ import {
 } from '@generatorai/auth';
 import type { Container } from '../composition-root.js';
 import { reachableOrigins } from '../network/reachableOrigins.js';
+import { requestAbsoluteUrl, type OriginRequest } from '../network/requestOrigin.js';
+import { classifyTransport } from './transportPolicy.js';
 
 export interface UpgradeAuthResult {
   ok: boolean;
@@ -50,6 +52,16 @@ export async function authorizeWebSocketUpgrade(
   const { container, req, socket, requiredScopes, ticketScope, label } = params;
   const { auth, audit } = container.security;
 
+  // D-111 — a browser on another device must use https://; only the native
+  // app's DPoP-bound lane may upgrade over plain HTTP from the LAN.
+  if (container.security.tls && classifyTransport(req as OriginRequest) === 'browser-lan') {
+    container.logger.warn(`[${label}] upgrade rejected: plain HTTP from another device`, {
+      origin: req.headers.origin ?? '(none)',
+    });
+    reject(socket, 403, 'Forbidden');
+    return { ok: false };
+  }
+
   if (!isOriginAllowed(req, container)) {
     container.logger.warn(`[${label}] upgrade rejected: origin not allowed`, {
       origin: req.headers.origin ?? '(none)',
@@ -61,7 +73,7 @@ export async function authorizeWebSocketUpgrade(
   try {
     const principal = await auth.authenticate({
       method: 'GET',
-      url: absoluteUrl(req),
+      url: requestAbsoluteUrl(req as OriginRequest, req.url ?? '/'),
       headers: req.headers as Record<string, string | string[] | undefined>,
       query: parseQuery(req.url),
       remoteAddress: req.socket.remoteAddress,
@@ -107,11 +119,6 @@ function reject(socket: Duplex, status: number, text: string): void {
   socket.destroy();
 }
 
-function absoluteUrl(req: IncomingMessage): string {
-  const host = firstValue(req.headers['host']) ?? 'localhost';
-  const proto = firstValue(req.headers['x-forwarded-proto']) ?? 'http';
-  return `${proto}://${host}${req.url ?? '/'}`;
-}
 
 function parseQuery(url: string | undefined): Record<string, string | string[] | undefined> {
   const out: Record<string, string | string[] | undefined> = {};
@@ -143,6 +150,11 @@ export function isOriginAllowed(req: IncomingMessage, container: Container): boo
   }
   const allowed = container.config.security.corsOrigins;
   if (allowed.includes(origin)) return true;
+
+  // React Native's WebSocket sends the server's own `http://<host>` as its
+  // Origin. With TLS on that is the native lane (D-112): no page can carry
+  // that Origin, because the page itself would have been redirected to https.
+  if (container.security.tls && classifyTransport(req as OriginRequest) === 'native-lan') return true;
 
   // Must match the CORS allowlist exactly. An origin accepted for REST but
   // refused here yields a session that loads and then cannot open a terminal

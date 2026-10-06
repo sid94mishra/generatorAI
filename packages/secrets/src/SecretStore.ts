@@ -54,6 +54,12 @@ export function parseSecretRef(value: string): SecretRef | null {
 export const SecretNamespace = {
   /** Server identity keypair, URL signing key, DB encryption keys. */
   system: 'system',
+  /**
+   * Built-in LAN HTTPS (D-110, D-113): the install's local CA, the leaf it
+   * issued for this machine's addresses, and an admin-supplied certificate.
+   * Certificates are public; their private keys are why this is the vault.
+   */
+  tls: 'system/tls',
   /** Per-device resume credentials + relay bindings. */
   device: (deviceId: string) => `device/${deviceId}`,
   /** Per-harness-instance provider credentials (never shared across instances). */

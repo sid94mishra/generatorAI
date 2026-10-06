@@ -872,6 +872,87 @@ number was taken concurrently; this is the decision they implement.)
   flex share of the diff panel), the variables table's edit row (a CSS-grid row group), the version list's "older"
   rows (list items), the composer's `/` and `@` menu (typeahead stays instant), toasts (sonner animates them).
 
+### D-110 Built-in HTTPS for Network exposure: a per-install local CA and a leaf for this machine (owner, 2026-10-07) — Final
+A browser on another device opened `http://<lan-ip>:<port>`, which is not a secure context, so `crypto.subtle` was
+missing and pairing failed ("WebCrypto is unavailable"); the native app's LAN traffic was unencrypted. Pairing is not
+weakened (no non-DPoP fallback). Evidence: `reviews/lan-https.md`.
+- **Certificates.** On first need the server generates a **local CA** (ECDSA P-256, 10 years, `pathLen 0`, critical
+  Name Constraints: 10/8, 172.16/12, 192.168/16, 127/8, 100.64/10, fc00::/7, ::1, `.local`, `localhost` — a user who
+  installs it has not trusted a CA that could vouch for any public name) and a **leaf** it signs (ECDSA P-256,
+  397 days, serverAuth, SANs = private IPv4 + unique-local IPv6 addresses on this machine, `<hostname>.local`,
+  `localhost`, 127.0.0.1, ::1). Chosen over a bare self-signed leaf so the thing that is pinned or installed (the CA)
+  never changes when the leaf is re-issued. Library: `@peculiar/x509` (MIT, already in the lockfile via selfsigned)
+  over Node WebCrypto; inspection, key matching and host checks use Node's `X509Certificate`.
+- **Storage.** Key material only in the encrypted vault, namespace `system/tls` (`local-ca`, `leaf`, `custom`); never a
+  plaintext file.
+- **Renewal.** A 60 s timer (and every start) re-issues the leaf when the machine's addresses or hostname change,
+  within 30 days of expiry, or when it was not issued by the current CA. The new `SecureContext` applies to the next
+  handshake; open connections are untouched. The CA is never re-issued.
+- **Only when exposed.** Loopback-only servers do not generate anything (the same machine is a secure context over
+  plain HTTP). `GENERATORAI_LAN_TLS=0` opts an exposed server out; a failure to prepare the certificate is logged and
+  shown in the posture, and the server still starts.
+- **Shown to people.** `GET /api/auth/server-info`, `POST /api/auth/pair`, `/pair/preview` and
+  `GET /api/security/network-access` carry `tls` (leaf SHA-256 — what a browser's certificate viewer shows — CA SHA-256,
+  names, expiry). Settings › Security & devices and the pairing panel show the `https://` address and the fingerprint
+  (first 8 bytes in pairs, full value copied) with "compare this with the certificate warning on the other device".
+  The joining device's gate does not show a fingerprint it got from the server: a man in the middle would relay the
+  real one. `GET /api/auth/tls/ca.crt` (public) serves the CA for a user who wants the warning gone for good.
+
+### D-111 One port answers HTTPS and plain HTTP; plain HTTP from another device is the native lane only (2026-10-07) — Final
+- **Listener.** With exposure on, a TCP listener on `0.0.0.0:<port>` reads the first byte (0x16 = TLS ClientHello)
+  and hands the socket — wrapped in a server-side `TLSSocket` or as is — to the one `http.Server`. Every WebSocket
+  `upgrade` handler, timeout and `closeAllConnections` applies to both; `req.socket.encrypted` makes `req.secure`
+  true. One port keeps the desktop window, local CLI, port identity probe and loop-turn prober on
+  `http://127.0.0.1:<port>`, and keeps the remembered port and the firewall rule a user already accepted. A client
+  that sends nothing for 10 s, or stalls a handshake for 10 s, is dropped; a refused handshake (a browser that has not
+  accepted the certificate yet) is debug noise, not a fault.
+- **Transport policy** (`middleware/transportPolicy.ts`, mirrored in the WebSocket upgrade check): HTTPS and this
+  machine always pass. Plain HTTP from another device: a page request is redirected 308 to the same path on
+  `https://`; a request whose `Origin` is anything but this server's own `http://<host>` gets 403 `HTTPS_REQUIRED`
+  naming the https address; `/api/*` with no `Origin`, or with the server's own `http://<host>` (React Native's
+  WebSocket default on iOS and Android — no page can carry it, because the page would have been redirected), is the
+  native lane (D-112).
+- **Scheme-aware checks.** DPoP `htu` is rebuilt from the socket (`https://` over TLS) in the REST middleware, the
+  WebSocket upgrade and the pairing/refresh routes (one helper, `network/requestOrigin.ts`); the CORS allowlist is
+  consulted per request and holds the `https://` LAN and `<host>.local` origins (re-derived when the addresses change);
+  advertised endpoints for browsers are `https://`; HSTS only over HTTPS and never for an IP literal or `localhost`.
+  There are no cookies. Stream tickets and signed links are bound to a scope, not a URL, so they need no change; the
+  widget-asset origin stays a loopback-only listener (a remote browser cannot reach it before or after this change).
+
+### D-112 The mobile app keeps a plain-HTTP LAN lane until it can pin the certificate (2026-10-07) — Final
+Pinning a self-signed certificate in React Native needs native work on both platforms (an `NSURLSession` challenge
+handler on iOS and an OkHttp trust manager on Android, for `fetch`, the streaming transport and WebSockets) — more than
+a contained change. So, for now:
+- a **mobile** (and CLI / MCP / other native) pairing offer lists the plain-HTTP LAN addresses first, as before; web
+  and desktop offers list `https://`. Every offer carries `certificateFingerprint` = the local CA's SHA-256 (absent
+  for a custom certificate), so the app can pin it when MV-44 lands without a new QR format;
+- the server answers the native lane (D-111) on the LAN. DPoP is still required on every non-public route, and the
+  pairing grant still needs a DPoP proof of the device key. What the lane does not have is confidentiality or
+  protection from an active attacker on the LAN during pairing — the risk MV-44 closes;
+- a browser can never use the lane: it has no secure context there, and the policy redirects or refuses it.
+MV-44 (`mobile/reviews/PENDING.md`) is the pinning work; when it lands, native offers switch to `https://` and the lane
+is removed.
+
+### D-113 Bring your own certificate (2026-10-07) — Final
+Settings › Security & devices › "Use your own certificate" (`PUT/DELETE /api/security/tls/certificate`,
+`admin:settings`) loads a PEM certificate (chain allowed, any order — the one matching the key is moved first) and an
+unencrypted PEM key — e.g. `tailscale cert`, mkcert, a company CA. Validated before storing: it matches the key, is
+not a CA, is valid now, and names this computer — a LAN address, `<hostname>.local`, `localhost`, an advertised URL's
+host, or a DNS name whose first label is this hostname (`<host>.<tailnet>.ts.net`; such names are advertised as
+https endpoints). Errors name what the certificate covers and what was expected. Stored in the vault; on a restart it
+is re-loaded without the name check (an IP-only certificate whose address moved is the admin's to replace), and an
+expired one falls back to the generated certificate with the reason shown. Its expiry is shown; no CA fingerprint is
+offered for pinning (it is trusted through its own CA).
+
+### D-114 Forwarded headers are honoured only from a proxy the operator names (2026-10-07) — Final
+Three copies of the request-URL logic trusted `X-Forwarded-Proto` from any client, so a request could choose the scheme
+its DPoP proof was checked against, and `isHttpsRequest` (HSTS) did the same. `GENERATORAI_TRUST_PROXY` now decides:
+unset / `0` → never; `1` / `true` / `loopback` → a proxy on this machine (Tailscale Serve, Caddy, nginx forwarding to
+127.0.0.1); a comma-separated list of IPs → exactly those peers. Only then are `X-Forwarded-Proto` and
+`X-Forwarded-Host` used for `htu`, the transport policy and HSTS. A forwarded request is never "loopback" for the
+unauthenticated-loopback check (unchanged). Set `GENERATORAI_ADVERTISED_URL` to the proxy's public origin so pairing
+offers and CORS know it. Documented in the docs site (Guides › Remote access over HTTPS).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

@@ -9,7 +9,7 @@
 //
 // The default allowlist is written for single-machine development and only
 // knows the loopback spellings. Once network access is on, a second device
-// loads the SPA from `http://<lan-ip>:<port>` and the browser attaches that
+// loads the SPA from `https://<lan-ip>:<port>` (D-110) and the browser attaches that
 // Origin to every request, which the server then rejected — a CORS failure on
 // the one flow whose entire purpose is connecting a second device.
 //
@@ -17,28 +17,29 @@
 // widens the allowlist to exactly the surface the server already exposes and
 // not one origin further.
 
-import { networkInterfaces } from 'node:os';
 import type { Container } from '../composition-root.js';
-import { resolveAdvertisedEndpoints } from './advertisedEndpoints.js';
+import { serverEndpoints } from './serverEndpoints.js';
 
-let cached: { key: string; origins: string[] } | null = null;
+/**
+ * How long one enumeration of the network adapters is reused. Interfaces
+ * change when a laptop moves network — and with TLS on, the https:// origins
+ * move with them (D-110) — but enumerating on every request, including every
+ * WebSocket upgrade, is wasteful.
+ */
+const CACHE_TTL_MS = 30_000;
+
+let cached: { key: string; at: number; origins: string[] } | null = null;
 
 export function reachableOrigins(container: Container): string[] {
   const production = process.env['NODE_ENV'] === 'production';
   const port = container.config.port;
   const bindHost = container.security.posture.bindHost;
+  const tls = container.security.tls;
 
-  // Interfaces change when a laptop moves network, but enumerating them on
-  // every request (including every WebSocket upgrade) is wasteful. Key the
-  // cache on the inputs that would change the answer.
-  const key = `${production}|${port}|${bindHost}`;
-  if (cached?.key === key) return cached.origins;
+  const key = `${production}|${port}|${bindHost}|${tls ? tls.version : 'plain'}`;
+  if (cached?.key === key && Date.now() - cached.at < CACHE_TTL_MS) return cached.origins;
 
-  const endpoints = resolveAdvertisedEndpoints({
-    port,
-    bindHost,
-    networkInterfaces: networkInterfaces(),
-  });
+  const endpoints = serverEndpoints({ port, bindHost, tls, audience: 'browser' });
 
   // In development the UI and the API are different origins on the same host,
   // so the Vite ports have to be allowed too. In production the server serves
@@ -47,20 +48,31 @@ export function reachableOrigins(container: Container): string[] {
     ? [String(port)]
     : [String(port), '5173', '5174', '5175', '5176'];
 
-  const origins: string[] = [];
+  const origins = new Set<string>();
   for (const endpoint of endpoints) {
-    const { hostname } = new URL(endpoint.origin);
-    const host = hostname.includes(':') ? `[${hostname}]` : hostname;
+    const url = new URL(endpoint.origin);
+    if (endpoint.source === 'configured') {
+      // An operator-configured URL (a Tailscale Serve name, a reverse proxy)
+      // is an origin exactly as written.
+      origins.add(url.origin);
+      continue;
+    }
+    const host = url.hostname.includes(':') && !url.hostname.startsWith('[') ? `[${url.hostname}]` : url.hostname;
     for (const candidate of ports) {
-      origins.push(`http://${host}:${candidate}`);
+      origins.add(`${url.protocol}//${host}:${candidate}`);
       // The dev server can run over TLS (GENERATORAI_DEV_HTTPS=1) so a second
       // machine gets the secure context a browser demands before it will
       // generate a device key. That changes the Origin scheme, and an
       // allowlist holding only the http:// spelling rejects it.
-      if (!production) origins.push(`https://${host}:${candidate}`);
+      if (!production) origins.add(`https://${host}:${candidate}`);
     }
   }
+  // With TLS on the same port also answers https on loopback (D-111).
+  if (tls) {
+    origins.add(`https://127.0.0.1:${port}`);
+    origins.add(`https://localhost:${port}`);
+  }
 
-  cached = { key, origins };
-  return origins;
+  cached = { key, at: Date.now(), origins: [...origins] };
+  return cached.origins;
 }

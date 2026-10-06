@@ -1302,6 +1302,22 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
         required: ['seq', 'generatedAt', 'needsYou', 'running', 'counts'],
       },
+      TlsStatus: {
+        type: 'object',
+        description: 'Built-in HTTPS for other devices (D-110). Public: never contains key material.',
+        properties: {
+          enabled: { type: 'boolean', enum: [true] },
+          source: { type: 'string', enum: ['generated', 'custom'] },
+          fingerprintSha256: { type: 'string', description: 'SHA-256 of the served certificate, colon-separated hex — what a browser shows in its warning.' },
+          caFingerprintSha256: { type: ['string', 'null'], description: 'SHA-256 of the local CA (generated only) — what a native client pins.' },
+          issuer: { type: 'string' },
+          notBefore: { type: 'number' },
+          notAfter: { type: 'number' },
+          names: { type: 'array', items: { type: 'string' } },
+          customCertificateProblem: { type: ['string', 'null'] },
+        },
+        required: ['enabled', 'source', 'fingerprintSha256', 'caFingerprintSha256', 'issuer', 'notBefore', 'notAfter', 'names', 'customCertificateProblem'],
+      },
     },
     securitySchemes: {
       bearerAuth: {
@@ -1393,6 +1409,47 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
             },
           },
           '404': { description: 'NOT_A_DEVICE or NOT_FOUND' },
+        },
+      },
+    },
+    '/api/auth/tls/ca.crt': {
+      get: {
+        tags: ['Auth'], summary: "This install's local CA certificate (D-110)",
+        description: 'Public. Installing it on a device makes browsers trust the generated certificate. Name-constrained to private addresses, `.local` and `localhost`.',
+        security: [],
+        responses: {
+          '200': { description: 'PEM certificate', content: { 'application/x-x509-ca-cert': { schema: { type: 'string' } } } },
+          '404': { description: 'TLS_NOT_ACTIVE — loopback-only server or a custom certificate' },
+        },
+      },
+    },
+    '/api/security/tls/certificate': {
+      put: {
+        tags: ['Security'], summary: 'Serve your own certificate to other devices (D-113)',
+        description: 'admin:settings. The certificate must match the key, be a server certificate valid now, and name this computer (a LAN address, `<host>.local`, an advertised URL host, or `<host>.<domain>`). The key must be unencrypted PEM.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: { certificatePem: { type: 'string', maxLength: 65536 }, privateKeyPem: { type: 'string', maxLength: 16384 } },
+                required: ['certificatePem', 'privateKeyPem'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Now serving it', content: { 'application/json': { schema: { type: 'object', properties: { tls: { $ref: '#/components/schemas/TlsStatus' } } } } } },
+          '400': { description: 'INVALID_CERTIFICATE, INVALID_KEY, ENCRYPTED_KEY, KEY_MISMATCH, CA_CERTIFICATE, EXPIRED, NOT_YET_VALID or NAME_MISMATCH' },
+          '409': { description: 'TLS_NOT_ACTIVE — Network exposure is off' },
+        },
+      },
+      delete: {
+        tags: ['Security'], summary: 'Go back to the generated certificate (D-113)',
+        responses: {
+          '200': { description: 'Serving the generated certificate', content: { 'application/json': { schema: { type: 'object', properties: { tls: { $ref: '#/components/schemas/TlsStatus' } } } } } },
+          '409': { description: 'TLS_NOT_ACTIVE' },
         },
       },
     },

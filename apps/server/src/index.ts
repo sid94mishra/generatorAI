@@ -3,8 +3,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { Server } from 'node:http';
+import type { Server as NetServer } from 'node:net';
 import { randomUUID } from 'node:crypto';
-import { homedir, hostname, networkInterfaces } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { resolve, dirname } from 'node:path';
 import { mkdirSync, readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -44,8 +45,9 @@ import { attachBrowserWebSocket } from './browser-ws.js';
 import { attachTerminalWebSocket } from './terminal-ws.js';
 import { attachSttWebSocket } from './stt-ws.js';
 import { attachTtsWebSocket } from './tts-ws.js';
-import { resolveAdvertisedEndpoints } from './network/advertisedEndpoints.js';
 import { readExposureMode, resolveBindHost } from './network/exposure.js';
+import { serverEndpoints } from './network/serverEndpoints.js';
+import { createDualProtocolListener } from './network/tls/dualProtocolListener.js';
 import { readComputerUsePreferences } from './settings/computerUse.js';
 import { publishLocalAdminToken, removeLocalAdminToken } from './composition/localAdminToken.js';
 import { exitAfterBoundedFlush } from './boundedFlush.js';
@@ -565,16 +567,41 @@ async function startServer(): Promise<void> {
     }
   };
 
+  // D-110/D-111 — with Network exposure on, the same port answers HTTPS and
+  // plain HTTP: the socket is accepted by a small TCP listener that looks at
+  // the first byte and hands the connection, decrypted or not, to ONE
+  // http.Server. Everything below that (`upgrade` handlers, timeouts,
+  // `closeAllConnections`) is unchanged; `tlsListener` is only what accepts.
+  const tls = container.security.tls;
+  let tlsListener: NetServer | undefined;
+
   const listenOn = (port: number): Promise<Server> =>
     new Promise<Server>((resolvePort, rejectPort) => {
-      const candidate = app.listen(port, bindHost);
+      let httpServer: Server | undefined;
+      const candidate: NetServer = tls
+        ? createDualProtocolListener({
+            httpServer: (httpServer = createServer(app)),
+            secureContext: () => tls.secureContext(),
+            onTlsError: (err, remoteAddress) => {
+              // Every visit before the user accepts the certificate ends in an
+              // aborted handshake; debug, not warn.
+              container.logger.debug?.('[TLS] handshake failed', { remoteAddress, error: err.message });
+            },
+          })
+        : app.listen(port, bindHost);
+      if (tls) candidate.listen(port, bindHost);
       const onError = (err: Error): void => {
         candidate.removeListener('listening', onListening);
         rejectPort(err);
       };
       const onListening = (): void => {
         candidate.removeListener('error', onError);
-        resolvePort(candidate);
+        if (httpServer) {
+          tlsListener = candidate;
+          resolvePort(httpServer);
+        } else {
+          resolvePort(candidate as Server);
+        }
       };
       candidate.once('error', onError);
       candidate.once('listening', onListening);
@@ -629,6 +656,10 @@ async function startServer(): Promise<void> {
         dbPath: config.dbPath,
         authenticationRequired: container.security.posture.authenticationRequired,
         secretBackend: container.security.posture.secretBackend.kind,
+        // D-110 — what other devices use, and the fingerprint to compare.
+        https: tls
+          ? { fingerprintSha256: tls.status().fingerprintSha256, source: tls.status().source }
+          : container.security.posture.tlsUnavailableReason,
         streaming: {
           enabled: config.streaming.enabled,
           heartbeatMs: config.streaming.heartbeatIntervalMs,
@@ -722,14 +753,11 @@ async function startServer(): Promise<void> {
   //     unclaimed (no device, no service account), so a normal restart is a
   //     no-op. Deliberately AFTER `listen` because the pairing offer has to
   //     advertise a reachable endpoint.
-  const bootstrapEndpoints = resolveAdvertisedEndpoints({
+  const bootstrapEndpoints = serverEndpoints({
     port: listenPort,
     bindHost,
-    configuredOrigins: [
-      ...(process.env['GENERATORAI_ADVERTISED_URLS']?.split(',') ?? []),
-      ...(process.env['GENERATORAI_ADVERTISED_URL'] ? [process.env['GENERATORAI_ADVERTISED_URL']] : []),
-    ],
-    networkInterfaces: networkInterfaces(),
+    tls,
+    audience: 'browser',
   });
   const advertisedEndpoint = bootstrapEndpoints[0]?.origin ?? `http://127.0.0.1:${listenPort}`;
   try {
@@ -814,7 +842,18 @@ async function startServer(): Promise<void> {
     // Don't keep the event loop alive just for this timer.
     forceExit.unref?.();
 
-    server.close(async () => {
+    // In dual-protocol mode the http.Server never listened itself — the TCP
+    // listener accepted every socket — so that is what has to stop accepting,
+    // and its close callback is the one that waits for connections to end.
+    const closeListener = (done: () => void): void => {
+      if (tlsListener) {
+        tlsListener.close(() => done());
+      } else {
+        server.close(() => done());
+      }
+    };
+
+    closeListener(async () => {
       timings.httpCloseMs = Date.now() - shutdownStart;
 
       try {

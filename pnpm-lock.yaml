@@ -727,6 +727,9 @@ importers:
       '@opentelemetry/semantic-conventions':
         specifier: ^1.40.0
         version: 1.40.0
+      '@peculiar/x509':
+        specifier: ^1.14.3
+        version: 1.14.3
       '@playwright/cli':
         specifier: ^0.1.1
         version: 0.1.1

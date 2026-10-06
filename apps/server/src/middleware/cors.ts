@@ -7,6 +7,12 @@ import type { RequestHandler } from 'express';
 
 export interface CorsConfig {
   origins?: string[];
+  /**
+   * Origins that come and go at runtime — the https:// LAN origins follow the
+   * machine's addresses as it changes network (D-110). Consulted per request,
+   * after the static list.
+   */
+  dynamicOrigins?: () => readonly string[];
 }
 
 /**
@@ -86,7 +92,7 @@ export function createCorsMiddleware(config?: CorsConfig): RequestHandler {
   return cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (same-origin, curl, server-to-server).
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || allowedOrigins.includes(origin) || config?.dynamicOrigins?.().includes(origin)) {
         callback(null, true);
       } else {
         callback(new Error(`CORS: origin ${origin} not allowed`));

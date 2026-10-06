@@ -50,6 +50,9 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   { prefix: '/auth/token/refresh', read: [], write: [], public: true },
   { prefix: '/auth/nonce', read: [], write: [], public: true },
   { prefix: '/auth/server-info', read: [], write: [], public: true },
+  // The local CA certificate (D-110): public material a user downloads to
+  // trust this server's generated certificate. Only GET is routed.
+  { prefix: '/auth/tls/ca.crt', read: [], write: [], public: true },
   // A device asking for MORE scopes for ITSELF (plan S2). `read:status`
   // rather than `admin:devices` for the same reason as `/auth/push-token`
   // below: the device id comes from the authenticated principal, never from

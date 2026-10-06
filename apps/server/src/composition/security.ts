@@ -58,6 +58,8 @@ import {
   type AppDatabase,
 } from '@generatorai/db';
 import { hostIdFromPublicKey, keyPairFromSecretKey, toBase64Url } from '@generatorai/relay-protocol';
+import { TlsManager } from '../network/tls/TlsManager.js';
+import { configuredAdvertisedHosts } from '../network/serverEndpoints.js';
 import { setDefaultChatPermissionMode } from '@generatorai/core';
 import type { AppConfig, ILogger } from '@generatorai/shared';
 
@@ -112,6 +114,15 @@ export interface SecurityContext {
   /** Effective posture, surfaced by `GET /api/security/posture`. */
   posture: SecurityPosture;
 
+  /**
+   * Built-in HTTPS for the network-facing listener (D-110). Null on a
+   * loopback-only server (nothing off the machine to protect, and the same
+   * machine is a secure context over plain HTTP), when the operator opted out
+   * with `GENERATORAI_LAN_TLS=0`, or when the certificate could not be
+   * prepared — the server then still starts, and the posture says why.
+   */
+  tls: TlsManager | null;
+
   /** Stops background sweepers and flushes the audit queue. */
   shutdown(): Promise<void>;
 }
@@ -126,6 +137,8 @@ export interface SecurityPosture {
   legacyApiKeyActive: boolean;
   relayEnabled: boolean;
   tokenAudience: string;
+  /** Why a network-facing server is NOT serving HTTPS, or null when it is (or need not). */
+  tlsUnavailableReason: string | null;
 }
 
 /** Thrown when the process must refuse to start. */
@@ -342,6 +355,37 @@ export async function createSecurityContext(
     });
   }
 
+  // ── Built-in LAN HTTPS (D-110) ──────────────────────────────────
+  //
+  // Only off loopback: that is where a second device needs a secure context.
+  // Prepared here, after the vault, because its key material lives there.
+  let tls: TlsManager | null = null;
+  let tlsUnavailableReason: string | null = null;
+  if (!loopbackOnly) {
+    if (process.env['GENERATORAI_LAN_TLS'] === '0') {
+      tlsUnavailableReason = 'GENERATORAI_LAN_TLS=0 is set, so this server speaks plain HTTP on the network.';
+    } else {
+      const manager = new TlsManager({
+        secretStore,
+        logger: {
+          info: (m, meta) => logger.info(m, meta),
+          warn: (m, meta) => logger.warn(m, meta),
+        },
+        hostname: () => os.hostname(),
+        networkInterfaces: () => os.networkInterfaces(),
+        advertisedHosts: () => configuredAdvertisedHosts(),
+      });
+      try {
+        await manager.initialize();
+        manager.startAutoRefresh();
+        tls = manager;
+      } catch (err) {
+        tlsUnavailableReason = `The HTTPS certificate could not be prepared: ${err instanceof Error ? err.message : String(err)}`;
+        logger.error(`[TLS] ${tlsUnavailableReason} Browsers on other devices will not be able to pair.`);
+      }
+    }
+  }
+
   // ── Background sweepers ─────────────────────────────────────────
   const retentionMs = security.auditRetentionDays * 24 * 60 * 60_000;
   const sweeper = setInterval(() => {
@@ -370,6 +414,7 @@ export async function createSecurityContext(
     legacyApiKeyActive: Boolean(legacyApiKey),
     relayEnabled: security.relayEnabled,
     tokenAudience: security.tokenAudience,
+    tlsUnavailableReason,
   };
 
   logSecurityBanner(logger, posture);
@@ -430,8 +475,10 @@ export async function createSecurityContext(
     relayOutboxRepo,
     scopeRequestRepo,
     posture,
+    tls,
     async shutdown() {
       clearInterval(sweeper);
+      tls?.stop();
       await audit.flush();
     },
   };

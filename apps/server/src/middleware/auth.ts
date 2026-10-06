@@ -26,6 +26,7 @@ import {
 } from '@generatorai/auth';
 import { redactDeep } from '@generatorai/secrets';
 import type { ILogger } from '@generatorai/shared';
+import { requestAbsoluteUrl } from '../network/requestOrigin.js';
 
 export interface ApiAuthOptions {
   auth: AuthService;
@@ -33,13 +34,6 @@ export interface ApiAuthOptions {
   logger: ILogger;
 }
 
-/** Absolute URL for DPoP `htu` binding. Must match what the client signed. */
-function absoluteUrl(req: Request): string {
-  const forwardedProto = firstValue(req.headers['x-forwarded-proto']);
-  const proto = forwardedProto ?? (req.secure ? 'https' : 'http');
-  const host = firstValue(req.headers['host']) ?? 'localhost';
-  return `${proto}://${host}${req.originalUrl}`;
-}
 
 function firstValue(v: string | string[] | undefined): string | undefined {
   if (Array.isArray(v)) return v[0];
@@ -123,7 +117,9 @@ export function createAuthMiddleware(options: ApiAuthOptions): RequestHandler {
 
         const principal = await auth.authenticate({
           method: req.method,
-          url: absoluteUrl(req),
+          // DPoP `htu` binding: the URL the client signed — `https://` when it
+          // reached us over TLS or through a trusted proxy (D-111, D-114).
+          url: requestAbsoluteUrl(req, req.originalUrl),
           headers: req.headers as Record<string, string | string[] | undefined>,
           query: req.query as Record<string, string | string[] | undefined>,
           remoteAddress: req.socket.remoteAddress,
