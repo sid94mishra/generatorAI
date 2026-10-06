@@ -74,6 +74,17 @@ export function documentSummary(document: unknown): { name: string; description:
   };
 }
 
+/**
+ * The codebases a template or an imported document names (`lifecycle.codebaseAliases`) that the picked project has —
+ * what the Codebases field starts with. The field used to start empty and the create overwrote the document's own
+ * list with it, so an imported workflow lost its codebases.
+ */
+export function startingCodebaseAliases(workflow: unknown, projectAliases: readonly string[]): string[] {
+  const lifecycle = workflow && typeof workflow === 'object' ? (workflow as { lifecycle?: { codebaseAliases?: unknown } }).lifecycle : undefined;
+  const named = Array.isArray(lifecycle?.codebaseAliases) ? lifecycle.codebaseAliases.filter((a): a is string => typeof a === 'string') : [];
+  return named.filter((alias) => projectAliases.includes(alias));
+}
+
 /** The imported document with the basics applied (the server validates the rest). */
 export function importDocumentWith(document: unknown, basics: DraftBasics): unknown {
   if (!documentSummary(document)) return document;

@@ -43,6 +43,7 @@ import {
   TEMPLATE_CATEGORY_LABELS,
   blockingReason,
   documentSummary,
+  startingCodebaseAliases,
   draftGraph,
   importDocumentWith,
   stageOutline,
@@ -73,6 +74,15 @@ export function WorkflowNewPage() {
   const { data: codebases } = useProjectCodebases(basics.projectId || undefined);
 
   const template = templates?.find((t) => t.id === templateId);
+  // The Codebases field starts with what the template / document names that this project has, until it is edited.
+  const [codebasesTouched, setCodebasesTouched] = useState(false);
+  const sourceWorkflow = start === 'template' ? template?.graph.workflow : start === 'import' ? (document?.value as { workflow?: unknown } | undefined)?.workflow : undefined;
+  const projectAliasesKey = (codebases ?? []).map((c) => c.alias).join('\n');
+  useEffect(() => {
+    if (codebasesTouched || !projectAliasesKey) return;
+    const seeded = startingCodebaseAliases(sourceWorkflow, projectAliasesKey.split('\n'));
+    setBasics((prev) => (prev.codebaseAliases.join('\n') === seeded.join('\n') ? prev : { ...prev, codebaseAliases: seeded }));
+  }, [sourceWorkflow, projectAliasesKey, codebasesTouched]);
   const setBasic = <K extends keyof DraftBasics>(key: K, value: DraftBasics[K]) => setBasics((prev) => ({ ...prev, [key]: value }));
 
   // The basics follow the chosen template/document until the person edits the name.
@@ -277,7 +287,10 @@ export function WorkflowNewPage() {
           <Select
             value={basics.projectId || NO_PROJECT}
             onValueChange={(v) =>
-              setBasics((prev) => ({ ...prev, projectId: !v || v === NO_PROJECT ? '' : v, codebaseAliases: [] }))
+              {
+                setCodebasesTouched(false);
+                setBasics((prev) => ({ ...prev, projectId: !v || v === NO_PROJECT ? '' : v, codebaseAliases: [] }));
+              }
             }
             items={[{ value: NO_PROJECT, label: 'No project', icon: 'projects' }, ...(projects ?? []).filter((p) => p.status === 'active').map((p) => ({ value: p.id, label: p.name }))]}
           />
@@ -295,7 +308,10 @@ export function WorkflowNewPage() {
                   <Checkbox
                     checked={basics.codebaseAliases.includes(c.alias)}
                     onCheckedChange={(on) =>
-                      setBasic('codebaseAliases', on ? [...basics.codebaseAliases, c.alias] : basics.codebaseAliases.filter((a) => a !== c.alias))
+                      {
+                        setCodebasesTouched(true);
+                        setBasic('codebaseAliases', on ? [...basics.codebaseAliases, c.alias] : basics.codebaseAliases.filter((a) => a !== c.alias));
+                      }
                     }
                     aria-label={`Mount ${c.alias}`}
                   />

@@ -62,3 +62,12 @@ describe('new workflow model', () => {
     expect(blockingReason('blank', basics, {})).toBeNull();
   });
 });
+
+describe('startingCodebaseAliases', () => {
+  it('starts with the codebases the document names that the project has', async () => {
+    const { startingCodebaseAliases } = await import('./newWorkflowModel.js');
+    expect(startingCodebaseAliases({ lifecycle: { codebaseAliases: ['app', 'docs'] } }, ['app', 'web'])).toEqual(['app']);
+    expect(startingCodebaseAliases({ lifecycle: {} }, ['app'])).toEqual([]);
+    expect(startingCodebaseAliases(undefined, ['app'])).toEqual([]);
+  });
+});
