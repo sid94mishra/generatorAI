@@ -69,3 +69,9 @@ on the next merge: `BackgroundTaskStatus` gains `interrupted` (status map `pause
 (D-103); the Codex sandbox now allows the network (D-101) and Ask-mode chats ask before browser / widget tools (D-102)
 — server-side, nothing to port. Mirror items: `mobile/reviews/PENDING.md` MV-41 (D-95 / D-96 create flow and composer approvals) and MV-42 (D-99, D-100,
 D-103, D-104).
+
+**Desktop close-out (2026-10-06, note for the mobile session).** Shared contract changes on the next merge:
+`classifyPermissionRisk` only marks risky shell commands (D-106); `ToolPermissionRequestPayload` gains `title` /
+`kindLabel`, the attention ask's `summary` for a tool gate is that title, and `ui-contract` exports
+`permissionWording` (D-107); client-core's `PermissionBlock` carries `title` / `kindLabel`. Mirror item: MV-43. The
+mobile Vitest suite passes on this branch (1108/1108, run read-only).

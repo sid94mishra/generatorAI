@@ -152,21 +152,15 @@ acceptance commands) and title/summary generation; compaction was not reached.
 
 ## Left open
 
-- Every shell gate is badged "Risky" (the badge carries no signal); the permission card's title is "Allow this
-  command?" with the raw type `other` for tool gates — owner: security policy / gates copy.
-- In the desktop app an allowed `open_browser_page` failed with "Timed out waiting for a scoped CDP endpoint … Ensure
-  the desktop app has an active browser tab" when no Browser dock tab was open (Ask-mode check of D-102) — owner:
-  desktop browser.
-- New chats / Run dialog don't include a project's only codebase by default.
-- Run page usage reads "0 turns · 0 tokens" while a stage runs (filled at completion).
-- Unpackaged app menu reads "@generatorai/desktop" (packaged builds take productName; changing it moves userData).
-- A cheap worker model (Haiku) may "wait" with `run_in_background` and report done early (seen while testing D-100) —
-  model behaviour, not platform.
-- Not done at the owner's request: dock-browser / terminal / browser desktop smokes, a second prompt before/after
-  round on the skills, VRT (no Docker), Windows/Linux runs (CI after a push).
-- Not re-verified in the app (unit-tested only): run-page parallel badge / stage prompt rendering / check-row
-  loading / stage composer (`8731bff5`, `6cf5acab`), terminal footer size, attached-file read gate, unread dot.
-- Mobile parity: `mobile/reviews/PENDING.md` MV-41 (D-95 / D-96) and MV-42 (D-99, D-100, D-103, D-104).
+Nothing that can be done on this machine. Two items need things this environment does not have, and are on the
+owner's backlog:
+
+- **Windows / Linux runs** of the desktop smokes and the per-OS matrix (09 §6.7): CI, after a push.
+- **VRT baselines** (`pnpm vrt`): Docker.
+
+By design rather than open: the unpackaged app's menu reads "@generatorai/desktop" (a packaged build takes
+`productName`; renaming the dev app would move every developer's userData). A cheap worker model (Haiku) sometimes
+"waits" with `run_in_background` and reports done early — model behaviour, not platform.
 
 ## Addendum — open items closed (2026-10-06)
 
@@ -189,3 +183,38 @@ server 713 + background-task and automation route tests; migrations lock + DB ba
 chats, workflow-builder, workflow-run, workflows-crud, automations 31/31, then builder + chats again after the D-104
 correction 18/18; desktop smokes chrome 59/59 and right-pane (all checks) on a fresh isolated profile. No OpenAPI test
 exists; the spec documents the resume route and `Automation.codebases`.
+
+## Final addendum — desktop work complete (2026-10-06)
+
+The owner's last list, each verified in the desktop app (isolated profiles and DBs, `DB_PATH` asserted on every
+launch, real Claude Haiku / Codex providers, throwaway repos) and committed per fix.
+
+| Item | Decision · commits | Evidence in the app |
+|---|---|---|
+| `open_browser_page` failed with the Browser dock closed | **D-105** — `94304ca4`, `ecf1c1a7`, `e07a95b4` | A fresh chat with the dock closed: the server asks main over IPC, main opens a hidden agent tab in a never-shown window (1280×800), and open + read + **screenshot** succeed ("Example Domain"; screens 340–343). A view hidden in, or placed outside, the app window rendered at 0×0, so screenshots failed until the agent tab moved into its own window. Opening the Browser dock afterwards shows the agent's page and the agent tab is destroyed (345). The never-loaded agent window page stalled CDP clients; it loads `about:blank`. |
+| Every shell gate "Risky" | **D-106** — `ed2a5f9e` | Ask-mode chat: `touch note.txt` → no badge; `git push origin main` → **Risky** (350–351). Unit: 20+ command cases, JSON / cut-off summaries, unreadable command stays risky; mobile Vitest 1108/1108 with the shared change. |
+| "Allow this command?" with the raw type `other` | **D-107** — `575eb57e` | Cards read "Run this command? · Shell command" and "Open a page in the browser? · Browser" (350–352); the Needs you summary and Activity use the same words; the payload carries `title` / `kindLabel` for mobile. |
+| Skipped smokes | — | dock-browser (all checks), terminal (all checks), browser (all checks), each alone on a fresh isolated profile. |
+| Step group nested itself on expand (parent session `039619a0`) | — | Normal: "3 browser actions" expands to Opened browser · Took screenshot · Read page, once (346); Verbose lists them flat; Summary collapses to "4 steps". |
+
+Found and fixed while re-verifying the items the earlier addenda listed as unit-tested only:
+
+| Defect (seen in the app) | Commit |
+|---|---|
+| A chat in a one-codebase project started in an empty workspace (**D-108**: the only codebase is included) | `a830449c` (360) |
+| The run header read "0 turns · 0 tokens" mid-turn — now "Usage after the first turn" | `b439bff7` |
+| Terminal footer stayed 80×24 (the `ready` frame overwrote the fitted size) — now matches `stty size` (63×33) | `0c557873` (363–364) |
+| A queued stage's prompt rendered unfinished references empty ("Tests passed: .") and an exhausted loop's last iteration read "#1 running" | `6bd9d90b` (367–370) |
+| An imported workflow lost its `lifecycle.codebaseAliases` (the create overwrote them with an empty field) | `9aca7779` (371) |
+| Activity spec flaky (Esc closed a card's popover first) | `e3dd38ce` |
+
+Also re-checked in the app, no change needed: the attached-file read ran with no gate in Ask mode (361); a turn that
+finished on screen left no unread dot (362); the run page's loop body has no "parallel" badge, a finished check shows
+no loader, and the stage composer has no model picker (367–369).
+
+**Final gates (macOS):** web typecheck · lint (0 errors) · check:design · full web unit 1624/1624 · story tests for
+the touched blocks · web build · check:bundle · check:css; shared 476 · client-core 829 · core 1836 · workflow-spec
+344 · providers 776 · db 169 · desktop 455 · server 713; mobile Vitest 1108 (read-only, shared changes); migrations
+lock + DB baseline v66; full e2e suite on a fresh sandbox **89 passed, 4 skipped** (live-provider specs; an earlier
+run's activity-column flake was fixed in `e3dd38ce`, then 3/3 alone and green in the suite); desktop smokes chrome
+59/59, right-pane, dock-browser, terminal, browser — all pass. diff-review (real provider) not run (optional).
