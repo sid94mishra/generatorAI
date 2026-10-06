@@ -837,6 +837,41 @@ included (once per project, so unticking it sticks; never with two or more codeb
 already chosen). The Run dialog keeps its rule — it pre-selects the workflow's `lifecycle.codebaseAliases`, and none
 when the workflow names none — because the workflow author decides what a run mounts.
 
+### D-109 One motion system for expand / collapse and show / hide (owner, 2026-10-06) — Final
+Supersedes D-20's "the design has no motion" (the reduced-motion half stands). The owner found every expand/collapse
+(the changes tray, step rows, tool output) and every panel show/hide (dock, sidebar, Activity) jittery. Evidence and
+inventory: `reviews/motion.md`. (The three `redesign(motion)` commits 26ec3054 · 2fcd5320 · f5dfcd2d say D-108 — that
+number was taken concurrently; this is the decision they implement.)
+- **Tokens.** `--gai-ease-in-out` `cubic-bezier(0.4, 0, 0.2, 1)` joins `--gai-ease-standard`; the durations become
+  design utilities `duration-fast` 120 · `duration-normal` 180 · `duration-slow` 220 and `ease-in-out` (vocabulary,
+  tailwind-merge groups). Hover / press keeps `transition-control` (≤ 120 ms, ease-standard).
+- **One mechanism.** Base UI's enter / exit states (`data-starting-style` / `data-ending-style`, unmount after the
+  exit transition) and its measured Collapsible size, through hand-written utilities in globals.css: `motion-collapse`
+  / `motion-accordion` (height + fade, 180 ms), `motion-reveal-x` (a docked side panel's width), `motion-slide-start`
+  (a floating side panel: 12 px + fade), `motion-pop` (popups: 97 % scale + fade from `--transform-origin`, 120 ms, none
+  between tooltips), `motion-dialog`, `motion-fade` (backdrops), `motion-sheet-start/-end` (220 ms), `motion-size`
+  (sidebar ↔ rail width, the sheet gutter), `motion-dock`, `motion-split` (flex-grow).
+- **Kit.** `Collapsible` / `Accordion` panels animate; `CollapsiblePanel` is the styled panel inside a caller's root
+  (StepRail); `Reveal open motion="height|width|slide-start" gap?` replaces every `{open && …}` toggle — mounted only
+  while open or closing, inert while closing, unmounted once closed. Spacing lives inside the moving panel; in a
+  gapped column `gap` moves the gap with the panel (negative margin + padding), so the open is one motion. A panel is
+  clipped while it moves (no paint or scroll overflow — a step opening at the bottom of a streaming transcript must not
+  grow the scroller before it is visible) and unclipped at rest (`data-settled`, ui/lib/motion `settleOnOpen`), so
+  focus rings and hit slop show.
+- **Panels.** AppFrame owns the shell motion: the sidebar slot eases its width (the card flexes), Activity opens from
+  0 to its width when docked (the column keeps its width, so cards never reflow) and slides in as the overlay, the
+  flyout slides in. SplitPane eases collapse / re-open but never a separator drag (`:has([data-separator=active])`)
+  or the first layout; the dock surface keeps `visibility` until its close has finished and slides as the narrow sheet;
+  a dock tab fades in (the one left hides at once). Resizing the Activity column never animates (the panel's width is
+  `auto` at rest).
+- **Streaming.** A height panel is `auto` once open, so a step opened while its turn streams keeps growing; the
+  follow-scroll spring (D-91) tracks the panel frame by frame (measured: ≤ 7 px per frame, no jump).
+- **Reduced motion.** The setting or the OS: durations are 0 and the global rule cuts transitions to 0.01 ms — every
+  change lands at once, Base UI still unmounts on transitionend. `useStickToBottom` reads the setting too.
+- **Not animated (by design):** rows of the virtualized diff list (fixed row heights), the Changes "Kept" group (a
+  flex share of the diff panel), the variables table's edit row (a CSS-grid row group), the version list's "older"
+  rows (list items), the composer's `/` and `@` menu (typeahead stays instant), toasts (sonner animates them).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
