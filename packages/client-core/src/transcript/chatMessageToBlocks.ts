@@ -23,6 +23,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ChatMessage } from '@generatorai/shared';
+import { permissionWording } from '@generatorai/shared/ui-contract';
 import type { TranscriptMessageInput } from './messageInput.js';
 import type { StreamBlock } from '../stream/types.js';
 import { parseInlineToolCalls } from '../stream/parseInlineToolCalls.js';
@@ -158,6 +159,7 @@ export function chatMessageToBlocks(message: TranscriptMessageInput): StreamBloc
         status: card.status === 'pending' ? 'expired' : card.status,
         ...(card.message ? { message: card.message } : {}),
         ...(card.risk ? { risk: card.risk } : {}),
+        ...permissionWording(card.toolName, card.type),
       }),
     });
   }

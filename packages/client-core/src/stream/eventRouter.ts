@@ -22,7 +22,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ScmFlowResult, TransportCapabilitySet } from '@generatorai/shared';
-import { isSpawnWorkerTool } from '@generatorai/shared/ui-contract';
+import { isSpawnWorkerTool, permissionWording } from '@generatorai/shared/ui-contract';
 import type { WorkflowRunCardEvent } from './workflowRuns.js';
 
 import type {
@@ -1072,6 +1072,7 @@ export class StreamEventRouter {
             permissionMode: str(data['permissionMode']),
             status: 'pending',
             ...(data['risk'] === 'risky' || data['risk'] === 'standard' ? { risk: data['risk'] } : {}),
+            ...wordingOf(data),
           },
         });
         out.push({ op: 'invalidate', resource: 'interactions', ...chatId() });
@@ -1831,4 +1832,14 @@ export class StreamEventRouter {
 
     return out;
   }
+}
+
+/** D-107: the server-stamped question and kind label, worded here for gates raised before they existed. */
+function wordingOf(data: Record<string, unknown>): { title: string; kindLabel: string } {
+  const text = (v: unknown) => (typeof v === 'string' ? v : '');
+  const fallback = permissionWording(text(data['toolName']), text(data['type']));
+  return {
+    title: typeof data['title'] === 'string' && data['title'] ? data['title'] : fallback.title,
+    kindLabel: typeof data['kindLabel'] === 'string' && data['kindLabel'] ? data['kindLabel'] : fallback.kindLabel,
+  };
 }

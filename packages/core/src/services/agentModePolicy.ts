@@ -19,6 +19,7 @@ import type {
   PermissionRequest,
 } from '../domain/ports/IAgentHarness.js';
 import { classifyPermissionRisk, type ToolPermissionRequestPayload } from '@generatorai/shared';
+import { permissionWording } from '@generatorai/shared/ui-contract';
 
 /** The behavioural contract for a mode. Re-exported so callers need one import. */
 export function resolveModeDescriptor(mode: AgentMode | undefined): AgentModeDescriptor {
@@ -200,7 +201,11 @@ export function buildToolPermissionPayload(
   // MG-04: stamped once, here, so the stored gate, its event, the attention
   // ask and the push all carry the same verdict.
   const { risk, reasons } = classifyPermissionRisk({ type: request.type, toolName, inputSummary });
+  // D-107: what the card asks, in words, for every client (the push and the attention ask too).
+  const { title, kindLabel } = permissionWording(toolName, request.type);
   return {
+    title,
+    kindLabel,
     toolName,
     type: request.type,
     description: request.description,

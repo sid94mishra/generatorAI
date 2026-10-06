@@ -113,7 +113,7 @@ describe('buildActivityModel — groups and order', () => {
     expect(describeActivityNow(card)).toEqual({
       tone: 'warn',
       icon: 'hand',
-      text: 'api-migrator: Allow pnpm db:migrate --env staging?',
+      text: 'api-migrator: Run pnpm db:migrate --env staging?',
       mono: true,
     });
     expect(model.counts).toMatchObject({ all: 1, orchestrator: 1, chat: 0 });
@@ -181,17 +181,17 @@ describe('what a card says', () => {
       recent: [],
     }).groups.running[0]!;
 
-  it('names what a gate asks for: a command as "Allow …?", a path after the summary', () => {
+  it('names what a gate asks for: a command as "Run …?", a path after the summary (D-107)', () => {
     const card = (detail: string) =>
       buildActivityModel({
         attention: {
-          needsYou: [ask({ key: 'chat:a:g', entity: 'chat', entityId: 'a', ask: { kind: 'tool_permission', id: 'g', summary: 'Allow file_write?', detail, actions: ['allow_once'] } })],
+          needsYou: [ask({ key: 'chat:a:g', entity: 'chat', entityId: 'a', ask: { kind: 'tool_permission', id: 'g', summary: 'Change this file?', detail, actions: ['allow_once'] } })],
           running: [],
         },
         recent: [],
       }).groups.needs_you[0]!;
-    expect(describeActivityNow(card('{ "path": "src/config.ts" }'))).toMatchObject({ text: 'Allow file_write? · src/config.ts', mono: false });
-    expect(describeActivityNow(card('{ "command": "git push -u origin main" }'))).toMatchObject({ text: 'Allow git push -u origin main?', mono: true });
+    expect(describeActivityNow(card('{ "path": "src/config.ts" }'))).toMatchObject({ text: 'Change this file? · src/config.ts', mono: false });
+    expect(describeActivityNow(card('{ "command": "git push -u origin main" }'))).toMatchObject({ text: 'Run git push -u origin main?', mono: true });
   });
 
   it('describes running work by kind', () => {

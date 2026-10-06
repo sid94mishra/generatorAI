@@ -47,7 +47,7 @@ export interface AttentionAsk {
   kind: AttentionAskKind;
   /** interactionId | stageRunId | consent requestId | runId (run_paused). */
   id: string;
-  /** One line, e.g. "Allow Bash?", "Approve “Apply upgrades”". */
+  /** One line, e.g. "Run this command?", "Approve “Apply upgrades”". */
   summary: string;
   /**
    * Command, file or stage context. Stripped for principals without

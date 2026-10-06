@@ -10,7 +10,8 @@ import type { ComputerConsentGateAction, PermissionGateAction, PlanGateAction, Q
 
 /** Words of the tool-permission gate (B-20 PermissionCard). */
 export const PERMISSION_GATE_COPY = {
-  title: 'Allow this command?',
+  /** Fallback only: a card names its action with `permissionWording` (D-107). */
+  title: 'Allow this tool call?',
   titleAllowed: 'Tool call allowed',
   titleDenied: 'Tool call denied',
   titleExpired: 'Permission request expired',

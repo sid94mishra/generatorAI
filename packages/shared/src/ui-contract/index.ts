@@ -13,6 +13,7 @@ export * from './providers.js';
 export * from './settings.js';
 export * from './status.js';
 export * from './toolVerbs.js';
+export * from './permissionWording.js';
 export * from './workflowRisk.js';
 export * from './deepLinks.js';
 export * from './scopes.js';

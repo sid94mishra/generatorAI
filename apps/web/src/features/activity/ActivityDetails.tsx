@@ -145,7 +145,8 @@ export function ActivityDetails({ entry, now, modelLabel, onDone, onNavigate, ti
     const more = entry.asks.length - 1;
     const item = entry.asks[0]!;
     const subject = ask.kind === 'tool_permission' || ask.kind === 'computer_consent' ? askSubject(ask.detail, { plainIsCommand: ask.kind === 'tool_permission' }) : undefined;
-    const bandTitle = entry.worker ? `Worker ${entry.worker.title} asks` : subject?.command ? 'Allow this command?' : ask.summary;
+    // D-107: the gate's own question ("Run this command?", "Open a page in the browser?").
+    const bandTitle = entry.worker ? `Worker ${entry.worker.title} asks` : ask.summary;
     const stageAside = isRun && entry.progress?.step !== undefined && entry.progress.of !== undefined ? `stage ${entry.progress.step} of ${entry.progress.of}` : undefined;
     const stages = activityStages(entry);
     band = (

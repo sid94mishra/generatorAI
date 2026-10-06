@@ -1,5 +1,5 @@
 // ────────────────────────────────────────────────────────────────
-// B-20 PermissionCard — the tool-permission gate ("Allow this command?").
+// B-20 PermissionCard — the tool-permission gate ("Run this command?", "Open a page in the browser?": D-107).
 //
 // A chat set to ask before tools (`default` / `acceptEdits`) parks the agent on
 // `chat.permission.requested` until the user allows or denies the call. Deny
@@ -18,7 +18,7 @@
 
 import { useState } from 'react';
 import type { PermissionBlock } from '@generatorai/client-core';
-import { PERMISSION_GATE_COPY as COPY } from '@generatorai/shared/ui-contract';
+import { PERMISSION_GATE_COPY as COPY, permissionWording } from '@generatorai/shared/ui-contract';
 import { GateCardFrame, type GateAction, type GateTone } from '@/ui/patterns/GateCardFrame/GateCardFrame.js';
 import { CodeBlock } from '@/ui/patterns/CodeBlock/CodeBlock.js';
 import { gateInputText } from './gateInput.js';
@@ -52,8 +52,11 @@ export function PermissionCard({ permission, onAnswer, busy = false }: Permissio
     setReason('');
   };
 
+  const wording = permission.title && permission.kindLabel
+    ? { title: permission.title, kindLabel: permission.kindLabel }
+    : permissionWording(toolName, permission.permissionType);
   const title = answerable
-    ? COPY.title
+    ? wording.title
     : status === 'allowed'
       ? COPY.titleAllowed
       : status === 'denied'
@@ -107,7 +110,7 @@ export function PermissionCard({ permission, onAnswer, busy = false }: Permissio
       tone={tone}
       icon="hand"
       title={title}
-      meta={permission.permissionType}
+      meta={wording.kindLabel}
       actions={actions}
       onKeyDown={onKeyDown}
       data-testid="permission-card"

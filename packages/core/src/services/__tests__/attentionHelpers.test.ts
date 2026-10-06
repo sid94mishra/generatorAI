@@ -30,10 +30,14 @@ describe('describeToolStep', () => {
 describe('describeInteraction', () => {
   it('summarises each gate kind with its actions', () => {
     expect(describeInteraction({ kind: 'tool_permission', payload: { toolName: 'Bash', inputSummary: 'git push' } })).toEqual({
-      summary: 'Allow Bash?',
+      summary: 'Run this command?',
       detail: 'git push',
       actions: ['allow_once', 'deny', 'open'],
     });
+    // D-107: the question the server stamped on the gate wins.
+    expect(describeInteraction({ kind: 'tool_permission', payload: { toolName: 'open_browser_page', type: 'other', title: 'Open a page in the browser?' } }).summary).toBe(
+      'Open a page in the browser?',
+    );
     expect(
       describeInteraction({ kind: 'question', payload: { questions: [{ question: 'Which DB?' }, { question: 'Why?' }] } }),
     ).toEqual({ summary: 'Which DB?', detail: '2 questions', actions: ['answer', 'open'] });

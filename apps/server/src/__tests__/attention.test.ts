@@ -363,7 +363,7 @@ describe('AttentionService — boot rebuild', () => {
       href: '/chats/c-ask',
       project: { id: P1, name: 'Website' },
       stoppable: true,
-      ask: { kind: 'tool_permission', summary: 'Allow Bash?', detail: 'git push origin main', actions: ['allow_once', 'deny', 'open'] },
+      ask: { kind: 'tool_permission', summary: 'Run this command?', detail: 'git push origin main', actions: ['allow_once', 'deny', 'open'] },
     });
 
     // A worker's ask rolls up to its orchestrator, opened on the Tasks dock.

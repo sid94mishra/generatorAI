@@ -365,12 +365,12 @@ export function askSubject(detail: string | undefined, options: { plainIsCommand
 export function describeActivityNow(entry: ActivityEntry): ActivityNow {
   if (entry.group === 'needs_you' && entry.ask) {
     const ask = entry.ask;
-    // "Allow git push?" for a command; "Allow file_write? · src/config.ts" for a path; else the summary.
+    // "Run git push?" for a command; "Change this file? · src/config.ts" for a path; else the summary (D-107).
     const subject =
       ask.kind === 'tool_permission' || ask.kind === 'computer_consent'
         ? askSubject(ask.detail, { plainIsCommand: ask.kind === 'tool_permission' })
         : undefined;
-    const text = subject?.command ? `Allow ${subject.text}?` : subject ? `${ask.summary} · ${subject.text}` : ask.summary;
+    const text = subject?.command ? `Run ${subject.text}?` : subject ? `${ask.summary} · ${subject.text}` : ask.summary;
     return {
       tone: 'warn',
       icon: ACTIVITY_ASK_ICONS[ask.kind] ?? 'hand',

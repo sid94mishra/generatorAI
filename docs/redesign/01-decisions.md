@@ -816,6 +816,18 @@ cut off). Network gates and file writes that leave the workspace stay risky. The
 the server and copied to the attention ask and the push, and mobile computes it with the same shared function, so a
 truly risky gate still needs a signed answer.
 
+### D-107 A permission gate says what it will do (2026-10-06) — Final
+Every tool-permission card read "Allow this command?" with the raw permission type (`other`) in its corner, and the
+Needs you list said "Allow open_browser_page?". The shared `permissionWording(toolName, type)` (ui-contract, built on
+the tool-verb registry) gives a title and a kind label: "Run this command?" · Shell command; "Create / Change this
+file?" · File change; "Read this file?"; "Fetch this page?" / "Search the web?" · Network; the browser tools by action
+("Open a page in the browser?", "Take a screenshot of the page?") · Browser; "Show a widget?" · Widget; an MCP
+connector's tool as "Allow github: Create issue?" · MCP · github (the platform's own in-process server is not a
+connector); else "Allow <tool in words>?" · Tool. The server stamps `title` / `kindLabel` on the gate payload (so the
+attention ask, the push and mobile read the same words); client-core carries them on the permission block, worded
+locally for older gates; the web card and the Activity band show them, and an Activity status line reads
+"Run <command>?". `PERMISSION_GATE_COPY.title` stays only as a fallback.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

@@ -211,6 +211,9 @@ export interface PermissionBlock {
   message?: string;
   /** MG-04 — the server's verdict; absent on gates raised before it existed. */
   risk?: 'standard' | 'risky';
+  /** D-107 — the card's question and kind label in words (`permissionWording`); absent on hand-built blocks. */
+  title?: string;
+  kindLabel?: string;
   /** See {@link PlanBlock.openedAt}. */
   openedAt?: number;
 }

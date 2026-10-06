@@ -373,6 +373,10 @@ export interface ToolPermissionRequestPayload {
   /** Server verdict (MG-04): a risky gate needs a signed approval from a phone (MG-05). */
   risk?: GateRisk;
   riskReasons?: string[];
+  /** D-107: the card's question in plain words ("Run this command?", "Open a page in the browser?"). */
+  title?: string;
+  /** D-107: the kind of access for the card's corner ("Shell command", "Browser", "MCP · github"). */
+  kindLabel?: string;
 }
 
 /** What the user posts back to `POST /chats/:id/interactions/:interactionId/permission`. */

@@ -1008,7 +1008,10 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
                 ],
               },
               id: { type: 'string' },
-              summary: { type: 'string' },
+              summary: {
+                type: 'string',
+                description: 'One line. A tool-permission gate states its action in words (D-107): "Run this command?", "Open a page in the browser?", "Allow github: Create issue?".',
+              },
               detail: { type: 'string' },
               actions: {
                 type: 'array',
@@ -1017,7 +1020,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
               risk: {
                 type: 'string',
                 enum: ['standard', 'risky'],
-                description: 'Tool-permission gates only (MG-04): a risky gate needs a signed answer from a phone.',
+                description: 'Tool-permission gates only (MG-04, D-106): a risky gate needs a signed answer from a phone. Shell commands are risky only when they use the network, install or publish packages, push, delete or overwrite data, need elevated rights, pipe into a shell or write outside the workspace.',
               },
             },
             required: ['kind', 'id', 'summary', 'actions'],

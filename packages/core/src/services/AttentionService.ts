@@ -81,7 +81,7 @@ import {
   type WorkflowRun,
   type WorkflowRunStatus,
 } from '@generatorai/shared';
-import { toolDisplayName } from '@generatorai/shared/ui-contract';
+import { permissionWording, toolDisplayName } from '@generatorai/shared/ui-contract';
 
 // ── Ports (narrow, so tests can hand in real repositories or fakes) ──
 
@@ -245,8 +245,10 @@ export function describeInteraction(
       const tool = str(payload['toolName']) ?? 'a tool';
       const detail = str(payload['inputSummary']) ?? str(payload['description']);
       const risk = payload['risk'];
+      // D-107: the gate's own question ("Run this command?"), worded for payloads stamped before it existed.
+      const title = str(payload['title']) ?? permissionWording(tool, str(payload['type']) ?? 'other').title;
       return {
-        summary: clip(`Allow ${tool}?`, SUMMARY_MAX),
+        summary: clip(title, SUMMARY_MAX),
         ...(detail ? { detail: clip(detail, DETAIL_MAX) } : {}),
         actions: ['allow_once', 'deny', 'open'],
         ...(risk === 'risky' || risk === 'standard' ? { risk } : {}),
