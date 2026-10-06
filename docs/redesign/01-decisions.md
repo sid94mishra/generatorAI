@@ -783,6 +783,16 @@ update refuse otherwise; aliases are unique). The wizard's Workflow step lists t
 dialog's row (`blocks/workflow/CodebaseMountRow`, branch suggestions from the codebase, no checkout-mode control); the
 detail page shows "alias @ branch".
 
+### D-104 Wrapping in a loop rewrites the references to the wrapped stages (2026-10-06) — Final
+Outside a loop's body a body stage is read through the loop, `stages.<loop>.output.last.<key>` (the validator's
+scope rule). "Wrap in loop" used to leave every `{{ stages.test.output.passed }}` and edge `when` elsewhere in the
+graph pointing at the old path, so the workflow failed validation until each was fixed by hand. Wrapping now
+rewrites, in every string of the stages and edges outside the body, `stages.<key>` → `stages.<loop>.output.last.<key>`
+for each wrapped key, and moves a context source on a wrapped stage to the loop (as its edges move); unwrapping does
+the reverse (references through the loop become direct, the loop as a context source becomes the body's leaves).
+Map containers are not rewritten: a map body's outputs are a list (`stages.<map>.output.results`), with no
+single-value equivalent. The rewrite lives in `@generatorai/workflow-spec` (`qualifyBodyRefs` / `unqualifyBodyRefs`).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

@@ -20,6 +20,8 @@ import {
   WORKFLOW_FORMAT_VERSION,
   validateWorkflow,
   VALIDATION_CODES,
+  qualifyBodyRefs,
+  unqualifyBodyRefs,
   type AgentStage,
   type CheckStage,
   type DefinitionStatus,
@@ -980,7 +982,9 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
       const id = edgeId(from, to);
       if (seen.has(id)) continue;
       seen.add(id);
-      edges.push(from === e.source && to === e.target ? e : edgeToFlowEdge({ ...e.data.edge, from, to }));
+      // D-104 (loops only): outside the body a body stage is read through the loop.
+      const spec = kind === 'loop' && !(fromIn && toIn) ? qualifyBodyRefs(e.data.edge, containerKey, [...inSel]) : e.data.edge;
+      edges.push(from === e.source && to === e.target && spec === e.data.edge ? e : edgeToFlowEdge({ ...spec, from, to }));
     }
 
     // The container sits around the selection's bounding box, in the selection's frame.
@@ -994,7 +998,14 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     state.nodes.forEach((node, i) => {
       if (i === firstIndex) nodes.push(loopNode);
       if (!inSel.has(node.id)) {
-        nodes.push({ ...node, selected: false });
+        // D-104: the rest of the graph reads the wrapped stages through the loop; a context source moves to it
+        // like the edges do.
+        let stage = kind === 'loop' ? qualifyBodyRefs(node.data.stage, containerKey, [...inSel]) : node.data.stage;
+        if (stage.kind === 'agent' && stage.context.from?.some((k) => inSel.has(k))) {
+          const from = [...new Set(stage.context.from.map((k) => (inSel.has(k) ? containerKey : k)))];
+          stage = { ...stage, context: { ...stage.context, from } };
+        }
+        nodes.push({ ...node, selected: false, ...(stage !== node.data.stage ? { data: { ...node.data, stage } } : {}) });
         return;
       }
       // A loop iterates on a failing check (its exit rules read `passed`): a check that failed its stage would
@@ -1049,11 +1060,15 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
       seen.add(id);
       edges.push(flow ?? edgeToFlowEdge(edge));
     };
+    // D-104: references through the loop to its body become direct again (loops only; a map's are lists).
+    const isLoop = loopNode.data.stage.kind === 'loop';
+    const direct = <T extends StageSpec | EdgeSpec>(spec: T): T => (isLoop ? unqualifyBodyRefs(spec, key, [...bodyKeys]) : spec);
     for (const e of state.edges) {
       if (!e.data) continue;
-      if (e.target === key) roots.forEach((r) => add({ ...e.data!.edge, to: r }));
-      else if (e.source === key) leaves.forEach((l) => add({ ...e.data!.edge, from: l }));
-      else add(e.data.edge, e);
+      const spec = bodyKeys.has(e.source) && bodyKeys.has(e.target) ? e.data.edge : direct(e.data.edge);
+      if (e.target === key) roots.forEach((r) => add({ ...spec, to: r }));
+      else if (e.source === key) leaves.forEach((l) => add({ ...spec, from: l }));
+      else add(spec, spec === e.data.edge ? e : undefined);
     }
 
     const nodes = state.nodes
@@ -1067,11 +1082,13 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
             data: { ...n.data, stage: withParentKey(stage, outerKey) },
           };
         }
-        if (stage.kind === 'agent' && stage.context.from?.includes(key)) {
-          const context = { ...stage.context, from: stage.context.from.filter((k) => k !== key) };
-          return { ...n, data: { ...n.data, stage: { ...stage, context } } };
+        let next = direct(stage);
+        if (next.kind === 'agent' && next.context.from?.includes(key)) {
+          // The loop's place as a context source goes to the body's leaves, as its outgoing edges do.
+          const context = { ...next.context, from: [...new Set(next.context.from.flatMap((k) => (k === key ? leaves : [k])))] };
+          next = { ...next, context };
         }
-        return n;
+        return next === stage ? n : { ...n, data: { ...n.data, stage: next } };
       });
 
     set({

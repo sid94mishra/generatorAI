@@ -52,3 +52,4 @@ export * from './secretRefs.js';
 // persisted definitions, templates, script profiles
 export * from './definition.js';
 export * from './authoring.js';
+export * from './stageRefs.js';

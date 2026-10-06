@@ -155,6 +155,37 @@ describe('workflowBuilderStore', () => {
     expect(check().check.failOnNonZero).toBe(false);
   });
 
+  it('wrapping stages in a loop reads them through the loop from outside, and unwrapping reads them directly again (D-104)', () => {
+    const review = {
+      ...newAgentStage('review', 'Review'),
+      prompts: [{ label: 'p', text: 'Review {{ stages.build.output.summary }} after {{ stages.analyze.output }}' }],
+      context: { mode: 'summary' as const, from: ['build'] },
+      position: { x: 800, y: 20 },
+    };
+    store().loadRecord(
+      makeRecord({
+        stages: [...makeRecord().graph.stages, review],
+        edges: [
+          { from: 'analyze', to: 'build', on: 'success' },
+          { from: 'build', to: 'review', on: 'success', when: 'stages.build.output.ok == true' },
+        ],
+      }),
+    );
+    const r = store().wrapInContainer(['build'], 'loop');
+    if (!('key' in r)) throw new Error(r.error);
+    const loop = r.key;
+    const graph = () => store().toGraph();
+    const reviewNow = () => graph().stages.find((s) => s.key === 'review') as AgentStage;
+    expect(reviewNow().prompts[0]!.text).toBe(`Review {{ stages.${loop}.output.last.build.output.summary }} after {{ stages.analyze.output }}`);
+    expect(reviewNow().context.from).toEqual([loop]);
+    expect(graph().edges.find((e) => e.to === 'review')).toMatchObject({ from: loop, when: `stages.${loop}.output.last.build.output.ok == true` });
+
+    store().unwrapContainer(loop);
+    expect(reviewNow().prompts[0]!.text).toBe('Review {{ stages.build.output.summary }} after {{ stages.analyze.output }}');
+    expect(reviewNow().context.from).toEqual(['build']);
+    expect(graph().edges.find((e) => e.to === 'review')).toMatchObject({ from: 'build', when: 'stages.build.output.ok == true' });
+  });
+
   // ── Wholesale graph: clearing a field removes it (D-4) ──
 
   it('setting a field to undefined removes it from the saved graph', () => {
