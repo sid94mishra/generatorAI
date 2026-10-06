@@ -13,6 +13,7 @@ import type {
   DataSchema,
   IterationMode,
   AutomationDataset,
+  AutomationCodebase,
   AutomationRetryPolicy,
 } from '@generatorai/shared';
 import { NotFoundError, StorageError } from '@generatorai/shared';
@@ -20,7 +21,7 @@ import { automations } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 import { safeJsonColumn } from '../utils/safeJsonColumn.js';
 import { validateJsonColumn } from '../utils/validateJsonColumn.js';
-import { jsonRecord, stringArray } from '../utils/jsonColumnSchemas.js';
+import { jsonArray, jsonRecord, stringArray } from '../utils/jsonColumnSchemas.js';
 
 // DB-03 — JSON column guards for `automations`. Used on both the write
 // and read paths so the same Zod schema defines valid shape end-to-end.
@@ -31,6 +32,7 @@ function validateAutomationJson(obj: {
   iterationMode?: unknown;
   defaultDataset?: unknown;
   retryPolicy?: unknown;
+  codebases?: unknown;
 }, table = 'automations'): void {
   if (obj.workflowIds !== undefined) validateJsonColumn(obj.workflowIds, stringArray, { column: 'workflowIds', table });
   if (obj.variables !== undefined) validateJsonColumn(obj.variables, jsonRecord, { column: 'variables', table });
@@ -40,6 +42,7 @@ function validateAutomationJson(obj: {
   if (obj.iterationMode !== undefined && obj.iterationMode !== null) validateJsonColumn(obj.iterationMode, jsonRecord, { column: 'iterationMode', table });
   if (obj.defaultDataset !== undefined && obj.defaultDataset !== null) validateJsonColumn(obj.defaultDataset, jsonRecord, { column: 'defaultDataset', table });
   if (obj.retryPolicy !== undefined && obj.retryPolicy !== null) validateJsonColumn(obj.retryPolicy, jsonRecord, { column: 'retryPolicy', table });
+  if (obj.codebases !== undefined && obj.codebases !== null) validateJsonColumn(obj.codebases, jsonArray, { column: 'codebases', table });
 }
 
 export { hashWebhookToken };
@@ -72,6 +75,7 @@ export class DrizzleAutomationRepository {
         nextRunAt: automation.nextRunAt ?? null,
         projectId: automation.projectId ?? null,
         useWorktree: automation.useWorktree ?? true,
+        codebases: automation.codebases?.length ? automation.codebases : null,
         // ── Track C / A ──
         dataSchema: automation.dataSchema ?? null,
         iterationMode: automation.iterationMode ?? null,
@@ -169,6 +173,7 @@ export class DrizzleAutomationRepository {
     if (updates.nextRunAt !== undefined) values.nextRunAt = updates.nextRunAt ?? null;
     if (updates.projectId !== undefined) values.projectId = updates.projectId ?? null;
     if (updates.useWorktree !== undefined) values.useWorktree = updates.useWorktree;
+    if (updates.codebases !== undefined) values.codebases = updates.codebases?.length ? updates.codebases : null;
     // ── Track C / A — explicit null-preserving semantics ──
     if (updates.dataSchema !== undefined) values.dataSchema = updates.dataSchema ?? null;
     if (updates.iterationMode !== undefined) values.iterationMode = updates.iterationMode ?? null;
@@ -300,6 +305,10 @@ export class DrizzleAutomationRepository {
       nextRunAt: row.nextRunAt ?? undefined,
       projectId: row.projectId ?? undefined,
       useWorktree: row.useWorktree ?? true,
+      ...(() => {
+        const codebases = safeJsonColumn(row.codebases, jsonArray, { fallback: undefined }) as AutomationCodebase[] | undefined;
+        return codebases?.length ? { codebases } : {};
+      })(),
       // ── Track C / A ──
       dataSchema: safeJsonColumn(row.dataSchema, jsonRecord, { fallback: undefined }) as DataSchema | undefined,
       iterationMode: safeJsonColumn(row.iterationMode, jsonRecord, { fallback: undefined }) as IterationMode | undefined,

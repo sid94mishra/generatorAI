@@ -26,13 +26,13 @@ import {
 import { blankStageOverrides, codebaseDrafts, newIdempotencyKey, type CodebaseDraft, type StageOverrideDraft } from '@generatorai/client-core';
 import type { ProjectCodebase } from '@generatorai/shared';
 import { useInvokeWorkflow, usePlanWorkflowInvocation } from '@/hooks/workflowQueries.js';
-import { useCodebaseBranches, useProjectCodebases } from '@/hooks/projectQueries.js';
+import { useProjectCodebases } from '@/hooks/projectQueries.js';
+import { CodebaseMountRow } from '../CodebaseMountRow/CodebaseMountRow.js';
 import { useMediaQuery } from '@/hooks/useMediaQuery.js';
 import { ModelPicker } from '@/blocks/model-picker/index.js';
 import { Dropzone } from '@/ui/patterns/Dropzone/Dropzone.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Callout } from '@/ui/primitives/Callout/Callout.js';
-import { Checkbox } from '@/ui/primitives/Checkbox/Checkbox.js';
 import { Chip } from '@/ui/primitives/Chip/Chip.js';
 import { Dialog, DialogFooter } from '@/ui/primitives/Dialog/Dialog.js';
 import { Field } from '@/ui/primitives/Field/Field.js';
@@ -428,7 +428,7 @@ function RunDialogBody({
         <Section title="Codebases" meta={`${codebases.filter((c) => c.selected).length} of ${codebases.length} mounted`}>
           <div className="flex flex-col" role="list" aria-label="Codebases">
             {codebases.map((draft) => (
-              <CodebaseRow
+              <CodebaseMountRow
                 key={draft.alias}
                 projectId={projectId}
                 draft={draft}
@@ -601,53 +601,3 @@ function VariableField({
   );
 }
 
-function CodebaseRow({
-  projectId,
-  draft,
-  codebase,
-  onChange,
-}: {
-  projectId: string;
-  draft: CodebaseDraft;
-  codebase: ProjectCodebase | undefined;
-  onChange: (patch: Partial<CodebaseDraft>) => void;
-}) {
-  // Branches are listed only for a codebase that is mounted.
-  const { data: branches } = useCodebaseBranches(projectId, draft.selected ? codebase?.id : undefined);
-  const listId = `run-branches-${draft.alias}`;
-  return (
-    <div role="listitem" className="flex items-center gap-3 border-b border-line-soft py-2 last:border-b-0">
-      <Checkbox checked={draft.selected} onCheckedChange={(selected) => onChange({ selected })} aria-label={`Mount ${draft.alias}`} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="font-mono text-ui text-fg">{draft.alias}</span>
-        {codebase ? <span className="truncate text-small text-fg-3">{codebase.url ?? codebase.localPath}</span> : null}
-      </div>
-      <Input
-        size="sm"
-        leading="branch"
-        value={draft.baseRef}
-        onChange={(e) => onChange({ baseRef: e.target.value })}
-        disabled={!draft.selected}
-        placeholder={codebase?.defaultBranch ?? 'default branch'}
-        aria-label={`${draft.alias} branch`}
-        list={listId}
-        className="w-40"
-      />
-      <datalist id={listId}>
-        {(branches ?? []).map((b) => (
-          <option key={b} value={b} />
-        ))}
-      </datalist>
-      <SegmentedControl<CodebaseDraft['mode']>
-        value={draft.mode}
-        onValueChange={(mode) => onChange({ mode })}
-        label={`${draft.alias} checkout`}
-        size="sm"
-        items={[
-          { value: 'worktree', label: 'Worktree', disabled: !draft.selected },
-          { value: 'in_place', label: 'In place', disabled: !draft.selected },
-        ]}
-      />
-    </div>
-  );
-}

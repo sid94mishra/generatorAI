@@ -279,3 +279,29 @@ describe('Automation routes — token/credential redaction on read paths', () =>
     expect(secretStore.remove).toHaveBeenCalledWith('automation-webhook', 'old-hash');
   });
 });
+
+describe('Automation routes — codebases and branches (D-103)', () => {
+  const base = { name: 'nightly', triggerType: 'manual', workflowIds: ['00000000-0000-0000-0000-000000000001'], permissionMode: 'acceptEdits' };
+  const projectId = '00000000-0000-0000-0000-0000000000aa';
+
+  it('passes the codebases and their branches to the service', async () => {
+    const { app, automationService } = buildApp({ createAutomation: vi.fn(async () => makeAutomation({})) });
+    const res = await request(app).post('/api/automations').send({ ...base, projectId, codebases: [{ alias: 'api', baseRef: 'release/2.0' }, { alias: 'web' }] });
+    expect(res.status).toBe(201);
+    expect(automationService.createAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({ codebases: [{ alias: 'api', baseRef: 'release/2.0' }, { alias: 'web' }] }),
+    );
+  });
+
+  it('refuses codebases without a project, a duplicated alias or an empty branch', async () => {
+    const { app, automationService } = buildApp();
+    for (const body of [
+      { ...base, codebases: [{ alias: 'api' }] },
+      { ...base, projectId, codebases: [{ alias: 'api' }, { alias: 'api' }] },
+      { ...base, projectId, codebases: [{ alias: 'api', baseRef: '  ' }] },
+    ]) {
+      expect((await request(app).post('/api/automations').send(body)).status).toBe(400);
+    }
+    expect(automationService.createAutomation).not.toHaveBeenCalled();
+  });
+});

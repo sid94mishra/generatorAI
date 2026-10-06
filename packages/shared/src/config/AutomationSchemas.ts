@@ -124,6 +124,19 @@ export const PreviewIterationsBodySchema = z.object({
 /** The permission modes an automation's runs can use (PD-18). */
 export const AutomationPermissionModeSchema = z.enum(['default', 'acceptEdits', 'plan', 'bypassPermissions']);
 
+/** D-103 — a codebase an automation's runs mount and the branch it is cut from. */
+export const AutomationCodebaseSchema = z
+  .object({
+    // Same rule as the workflow spec's codebase alias (CODEBASE_ALIAS_PATTERN).
+    alias: z.string().min(1).max(50).regex(/^[A-Za-z0-9._-]+$/, 'Aliases may contain letters, digits, . _ -'),
+    baseRef: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict();
+const AutomationCodebasesSchema = z
+  .array(AutomationCodebaseSchema)
+  .max(10)
+  .refine((list) => new Set(list.map((c) => c.alias)).size === list.length, { message: 'A codebase is listed twice' });
+
 export const CreateAutomationSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
@@ -138,6 +151,7 @@ export const CreateAutomationSchema = z.object({
   onError: z.enum(['continue', 'stop']).default('continue'),
   projectId: z.string().uuid().optional(),
   useWorktree: z.boolean().optional(),
+  codebases: AutomationCodebasesSchema.optional(),
   // ── Track C ──
   dataSchema: DataSchemaSchema.optional(),
   iterationMode: IterationModeSchema.optional(),
@@ -169,6 +183,9 @@ export const CreateAutomationSchema = z.object({
     return true;
   },
   { message: 'Schedule triggers require a defaultDataset when using dataSchema', path: ['defaultDataset'] },
+).refine(
+  (data) => !data.codebases?.length || !!data.projectId,
+  { message: 'Codebases need a project scope', path: ['codebases'] },
 );
 
 export const UpdateAutomationSchema = z.object({
@@ -186,6 +203,7 @@ export const UpdateAutomationSchema = z.object({
   onError: z.enum(['continue', 'stop']).optional(),
   projectId: z.string().uuid().optional(),
   useWorktree: z.boolean().optional(),
+  codebases: AutomationCodebasesSchema.nullable().optional(),
   // ── Track C ── (nullable so callers can clear a schema back to a single run)
   dataSchema: DataSchemaSchema.nullable().optional(),
   iterationMode: IterationModeSchema.nullable().optional(),

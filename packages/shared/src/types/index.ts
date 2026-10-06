@@ -212,6 +212,7 @@ export type {
   DataSchema,
   IterationMode,
   AutomationDataset,
+  AutomationCodebase,
   PlannedIterations,
   IterationPreview,
 } from './Automation.js';

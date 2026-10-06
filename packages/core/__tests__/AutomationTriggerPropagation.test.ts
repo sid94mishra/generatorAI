@@ -64,11 +64,12 @@ function automation(overrides: Partial<Automation> = {}): Automation {
 
 describe('X-21 — the trigger reaches the workflow run', () => {
   let service: AutomationService;
-  let created: Array<{ variables: Record<string, unknown>; trigger: unknown }>;
+  let created: Array<{ variables: Record<string, unknown>; trigger: unknown; codebases?: unknown }>;
+  let automations: Map<string, Automation>;
 
   beforeEach(() => {
     created = [];
-    const automations = new Map<string, Automation>([
+    automations = new Map<string, Automation>([
       [AUTOMATION_ID, automation({ triggerType: 'webhook', webhookToken: 'tok' } as Partial<Automation>)],
     ]);
     const executions = new Map<string, AutomationExecution>();
@@ -100,9 +101,9 @@ describe('X-21 — the trigger reaches the workflow run', () => {
     } as unknown as IAutomationExecutionRepository;
 
     const invocation = {
-      invoke: async (req: { target: { workflowDefinitionId: string }; variables?: Record<string, unknown> }, ctx: InvocationContext) => {
+      invoke: async (req: { target: { workflowDefinitionId: string }; variables?: Record<string, unknown>; codebases?: unknown }, ctx: InvocationContext) => {
         counter += 1;
-        created.push({ variables: req.variables ?? {}, trigger: ctx.trigger });
+        created.push({ variables: req.variables ?? {}, trigger: ctx.trigger, codebases: req.codebases });
         const run = { id: `run-${counter}`, workflowDefinitionId: req.target.workflowDefinitionId, status: 'completed', variables: req.variables ?? {} } as unknown as WorkflowRun;
         runs.set(run.id, run);
         return { runId: run.id };
@@ -141,6 +142,26 @@ describe('X-21 — the trigger reaches the workflow run', () => {
     // Without a data schema the payload is recorded on the execution, not
     // spread into run variables (the legacy extraction is gone, P01 WP-1.4).
     expect(created[0]!.variables['topic']).toBeUndefined();
+  });
+
+  it('D-103: a run mounts the automation\'s codebases, each on its branch, as worktrees', async () => {
+    automations.set(AUTOMATION_ID, automation({ projectId: 'p-1', codebases: [{ alias: 'api', baseRef: 'release/2.0' }, { alias: 'web' }] }));
+    await service.triggerManual(AUTOMATION_ID);
+    await vi.waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]!.codebases).toEqual([
+      { alias: 'api', mode: 'worktree', baseRef: 'release/2.0' },
+      { alias: 'web', mode: 'worktree' },
+    ]);
+  });
+
+  it('D-103: without codebases the run mounts the workflow\'s own', async () => {
+    await service.triggerManual(AUTOMATION_ID);
+    await vi.waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]!.codebases).toBeUndefined();
+  });
+
+  it('D-103: codebases need a project scope', async () => {
+    await expect(service.updateAutomation(AUTOMATION_ID, { codebases: [{ alias: 'api' }] })).rejects.toThrow(/project scope/);
   });
 
   it('ECON-R8: the trigger debounce keys on the full payload, not its first 5000 chars', async () => {

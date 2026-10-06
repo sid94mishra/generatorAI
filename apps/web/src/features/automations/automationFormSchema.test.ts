@@ -148,3 +148,26 @@ describe('automationFormToParams', () => {
     expect(scheduled.overlapPolicy).toBe('queue');
   });
 });
+
+
+describe('automation codebases (D-103)', () => {
+  it('sends the selected codebases with trimmed branches, only with a project', async () => {
+    const { automationFormToParams, emptyAutomationForm } = await import('./automationFormSchema.js');
+    const base = { ...emptyAutomationForm(), name: 'n', workflowIds: ['w'] };
+    const withProject = automationFormToParams({ ...base, projectId: 'p', codebases: [{ alias: 'api', baseRef: ' release/2.0 ' }, { alias: 'web', baseRef: '' }] });
+    expect(withProject.codebases).toEqual([{ alias: 'api', baseRef: 'release/2.0' }, { alias: 'web' }]);
+    expect(automationFormToParams({ ...base, codebases: [{ alias: 'api' }] }).codebases).toBeUndefined();
+    expect(automationFormToParams({ ...base, projectId: 'p' }).codebases).toBeUndefined();
+  });
+
+  it('toggles and edits a codebase in the project order', async () => {
+    const { patchAutomationCodebase } = await import('./automationFormSchema.js');
+    const order = ['api', 'web', 'docs'];
+    let sel = patchAutomationCodebase([], order, 'docs', { selected: true });
+    sel = patchAutomationCodebase(sel, order, 'api', { selected: true });
+    expect(sel.map((c) => c.alias)).toEqual(['api', 'docs']);
+    sel = patchAutomationCodebase(sel, order, 'api', { baseRef: 'dev' });
+    expect(sel[0]).toEqual({ alias: 'api', baseRef: 'dev' });
+    expect(patchAutomationCodebase(sel, order, 'api', { selected: false })).toEqual([{ alias: 'docs' }]);
+  });
+});

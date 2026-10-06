@@ -776,6 +776,17 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
             },
           },
           enabled: { type: 'boolean' },
+          projectId: { type: 'string' },
+          codebases: {
+            type: 'array',
+            description:
+              "D-103: the project codebases its runs mount (always as worktrees), each cut from `baseRef` (omitted: the codebase's default branch). Omitted: the workflow's own codebases.",
+            items: {
+              type: 'object',
+              properties: { alias: { type: 'string' }, baseRef: { type: 'string' } },
+              required: ['alias'],
+            },
+          },
         },
       },
       RunCommand: {
@@ -2705,6 +2716,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       post: {
         tags: ['Automations'],
         summary: 'Create automation',
+        description: '`codebases` (D-103) needs `projectId`; see the Automation schema.',
         requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } },
         responses: { '201': { description: 'Created' } },
       },

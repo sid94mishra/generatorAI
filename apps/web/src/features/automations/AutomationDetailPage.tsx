@@ -403,6 +403,10 @@ export function AutomationDetailPage() {
                     { label: 'Permission', value: PERMISSION_MODE_LABEL[automation.permissionMode] ?? automation.permissionMode },
                     { label: 'On error', value: automation.onError === 'stop' ? 'Stop on error' : 'Continue on error' },
                     { label: 'Concurrency', value: String(automation.maxConcurrency) },
+                    // D-103: the codebases runs mount and the branch each is cut from.
+                    ...(automation.codebases?.length
+                      ? [{ label: 'Codebases', value: automation.codebases.map((c) => `${c.alias} @ ${c.baseRef ?? 'default branch'}`).join(', ') }]
+                      : []),
                   ]}
                 />
               </Card.Body>

@@ -15,6 +15,7 @@
 import { z } from 'zod';
 import type {
   Automation,
+  AutomationCodebase,
   AutomationErrorPolicy,
   AutomationMissedRunPolicy,
   AutomationOverlapPolicy,
@@ -31,6 +32,8 @@ export interface AutomationFormValues {
   name: string;
   description: string;
   projectId: string;
+  /** D-103: the project codebases runs mount, each with the branch typed for it ('' = its default). */
+  codebases: AutomationCodebase[];
   triggerType: AutomationTriggerType;
   cronExpression: string;
   timezone: string;
@@ -75,6 +78,7 @@ export function emptyAutomationForm(): AutomationFormValues {
     name: '',
     description: '',
     projectId: '',
+    codebases: [],
     triggerType: 'manual',
     cronExpression: '0 9 * * *',
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -116,6 +120,7 @@ export function automationToForm(automation: Automation): AutomationFormValues {
     name: automation.name,
     description: automation.description ?? '',
     projectId: automation.projectId ?? '',
+    codebases: automation.codebases ?? [],
     triggerType: automation.triggerType,
     cronExpression: automation.cronExpression ?? base.cronExpression,
     timezone: automation.timezone ?? base.timezone,
@@ -180,6 +185,8 @@ export function automationFormToParams(values: AutomationFormValues): CreateAuto
     permissionMode: values.permissionMode,
     projectId: values.projectId || undefined,
   };
+  const codebases = automationCodebasesOf(values);
+  if (codebases.length > 0) params.codebases = codebases;
 
   if (values.inputMode !== 'single') {
     params.dataSchema = JSON.parse(values.dataSchemaText) as DataSchema;
@@ -209,6 +216,27 @@ export function automationFormToParams(values: AutomationFormValues): CreateAuto
   }
 
   return params;
+}
+
+/** D-103: the selected codebases with their branches trimmed (an empty branch is the default); none without a project. */
+export function automationCodebasesOf(values: Pick<AutomationFormValues, 'projectId' | 'codebases'>): AutomationCodebase[] {
+  if (!values.projectId) return [];
+  return values.codebases.map((c) => (c.baseRef?.trim() ? { alias: c.alias, baseRef: c.baseRef.trim() } : { alias: c.alias }));
+}
+
+/** Toggle a codebase in or out of the selection, or change its branch, keeping the project's order. */
+export function patchAutomationCodebase(
+  selection: readonly AutomationCodebase[],
+  order: readonly string[],
+  alias: string,
+  patch: { selected?: boolean; baseRef?: string },
+): AutomationCodebase[] {
+  const current = selection.find((c) => c.alias === alias);
+  let next = [...selection];
+  if (patch.selected === false) next = next.filter((c) => c.alias !== alias);
+  else if (patch.selected === true && !current) next.push({ alias });
+  if (patch.baseRef !== undefined) next = next.map((c) => (c.alias === alias ? { ...c, baseRef: patch.baseRef } : c));
+  return next.sort((a, b) => order.indexOf(a.alias) - order.indexOf(b.alias));
 }
 
 /**

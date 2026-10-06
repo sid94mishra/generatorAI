@@ -128,6 +128,12 @@ export interface Automation {
   /** Whether to create worktrees for project codebases during execution */
   useWorktree?: boolean;
 
+  /**
+   * D-103: the project codebases its runs mount, each cut from `baseRef` (a branch or ref; omitted = the codebase's
+   * default branch). Omitted or empty: the workflow's own codebases (`lifecycle.codebaseAliases`) on their defaults.
+   */
+  codebases?: AutomationCodebase[];
+
   // ── Schema-driven fields (new; Track C) ──
 
   /**
@@ -226,6 +232,13 @@ export interface AutomationWithExecutions extends Automation {
   executions: AutomationExecution[];
 }
 
+/** D-103: a codebase an automation's runs mount, and the branch or ref it is cut from. */
+export interface AutomationCodebase {
+  alias: string;
+  /** Branch or ref; omitted = the codebase's default branch. */
+  baseRef?: string;
+}
+
 /** Params for creating an automation */
 export interface CreateAutomationParams {
   name: string;
@@ -243,6 +256,8 @@ export interface CreateAutomationParams {
   projectId?: string;
   /** Whether to create worktrees for project codebases during execution */
   useWorktree?: boolean;
+  /** D-103 — see `Automation.codebases`. */
+  codebases?: AutomationCodebase[];
   // ── Track C — schema-driven pipeline ──
   dataSchema?: DataSchema;
   iterationMode?: IterationMode;
@@ -266,6 +281,8 @@ export interface UpdateAutomationParams {
   onError?: AutomationErrorPolicy;
   projectId?: string;
   useWorktree?: boolean;
+  /** D-103 — the codebases runs mount; null or [] clears back to the workflow's own. */
+  codebases?: AutomationCodebase[] | null;
   // ── Track C ──
   dataSchema?: DataSchema | null;
   iterationMode?: IterationMode | null;

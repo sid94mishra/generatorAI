@@ -2831,6 +2831,12 @@ export const MIGRATIONS: readonly Migration[] = [
         `ALTER TABLE auth_devices ADD COLUMN approval_key_presence TEXT;`,
       ],
     },
+    // Desktop D-103: the codebases (and branches) an automation's runs mount.
+    {
+      version: 66,
+      name: 'automation_codebases',
+      sql: [`ALTER TABLE automations ADD COLUMN codebases TEXT;`],
+    },
   ];
 
 

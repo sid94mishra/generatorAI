@@ -773,6 +773,16 @@ session composer, the bound agent's tool groups applied first); denied, the tool
 tools set `skipPermission`, so a provider that would prompt natively (Copilot) asks once. Full access, plan turns and
 unattended runs are unchanged. Computer-use tools keep their own consent flow.
 
+### D-103 An automation picks its codebases and their branches (2026-10-06) — Final
+In the build the nightly automation could only run the workflow's lifecycle codebases on their default branches
+(the Run dialog could pick a branch, an automation could not). An automation now stores `codebases: [{ alias,
+baseRef? }]` (migration v66): its runs mount exactly those project codebases, each cut from `baseRef` (omitted: the
+default branch), always as worktrees — an unattended run never edits a checkout in place (that needs
+`admin:settings`). None stored: the workflow's own codebases, as before. Codebases need a project scope (create and
+update refuse otherwise; aliases are unique). The wizard's Workflow step lists the project's codebases with the Run
+dialog's row (`blocks/workflow/CodebaseMountRow`, branch suggestions from the codebase, no checkout-mode control); the
+detail page shows "alias @ branch".
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

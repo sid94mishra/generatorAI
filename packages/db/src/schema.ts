@@ -11,6 +11,7 @@ import type {
   DataSchema,
   IterationMode,
   AutomationDataset,
+  AutomationCodebase,
   AutomationRetryPolicy,
   AgentToolPolicy,
   AgentRuntimePolicy,
@@ -853,6 +854,8 @@ export const automations = sqliteTable(
     scope: text('scope').default('global'),
     projectId: text('project_id'),
     useWorktree: integer('use_worktree', { mode: 'boolean' }).notNull().default(true),
+    /** v66 (D-103) — the codebases runs mount and the branch each is cut from. Null: the workflow's own. */
+    codebases: text('codebases', { mode: 'json' }).$type<AutomationCodebase[]>(),
     // ── Track C — schema-driven pipeline ──
     dataSchema: text('data_schema', { mode: 'json' }).$type<DataSchema>(),
     iterationMode: text('iteration_mode', { mode: 'json' }).$type<IterationMode>(),

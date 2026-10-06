@@ -236,6 +236,7 @@ export class AutomationService {
       onError: params.onError ?? 'continue',
       projectId: params.projectId,
       useWorktree: params.useWorktree,
+      ...(params.codebases?.length ? { codebases: params.codebases } : {}),
       // ── Track C / A ──
       dataSchema: params.dataSchema,
       iterationMode: params.iterationMode,
@@ -288,6 +289,11 @@ export class AutomationService {
     }
     if (params.triggerType === 'webhook' && existing.triggerType !== 'webhook') {
       Object.assign(updates, this.mintWebhookToken());
+    }
+    // D-103: the codebases a run mounts are a project's.
+    const codebases = params.codebases === undefined ? existing.codebases : params.codebases;
+    if (codebases?.length && !(params.projectId ?? existing.projectId)) {
+      throw new ValidationError('Codebases need a project scope');
     }
 
     const updated = await this.automationRepo.update(id, updates);
@@ -767,6 +773,7 @@ ${serialized}`).digest('hex');
                     iterIdx,
                     iterationLabel,
                     automation.projectId,
+                    automation.codebases,
                     automation.retryPolicy,
                     execution.triggeredBy,
                     automation.permissionMode,
@@ -989,6 +996,8 @@ ${serialized}`).digest('hex');
     iterationIndex: number,
     iterationLabel: string | undefined,
     projectId: string | undefined,
+    /** D-103 — the codebases (and branches) the run mounts; none: the workflow's own. */
+    codebases: Automation['codebases'],
     retryPolicy: AutomationRetryPolicy | undefined,
     /**
      * X-21 — how this execution was triggered. Threaded down to the run so a
@@ -1023,6 +1032,7 @@ ${serialized}`).digest('hex');
           target: { kind: 'definition', workflowDefinitionId: workflowDefId },
           variables,
           ...(projectId ? { projectId } : {}),
+          ...(projectId && codebases?.length ? { codebases: automationCodebases(codebases) } : {}),
         },
         {
           principal: { kind: 'system', id: `automation:${automationId}`, scopes: [] },
@@ -1429,4 +1439,13 @@ ${serialized}`).digest('hex');
   shutdown(): void {
     this.stopPoller();
   }
+}
+
+
+/**
+ * D-103: an automation's codebases as the invocation's selection. Always a worktree: an unattended run never edits a
+ * checkout in place (that needs `admin:settings`, which the automation principal does not hold).
+ */
+export function automationCodebases(codebases: NonNullable<Automation['codebases']>): Array<{ alias: string; baseRef?: string; mode: 'worktree' }> {
+  return codebases.map((c) => ({ alias: c.alias, mode: 'worktree' as const, ...(c.baseRef?.trim() ? { baseRef: c.baseRef.trim() } : {}) }));
 }

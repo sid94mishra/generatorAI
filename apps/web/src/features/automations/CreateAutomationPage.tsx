@@ -19,7 +19,8 @@ import { useForm, useStore } from '@tanstack/react-form';
 import { Link as RouterLink } from 'react-router';
 import { getNextCronRun } from '@generatorai/shared';
 import { useCreateAutomation } from '@/hooks/automationQueries.js';
-import { useProjects } from '@/hooks/projectQueries.js';
+import { useProjectCodebases, useProjects } from '@/hooks/projectQueries.js';
+import { CodebaseMountRow } from '@/blocks/workflow/CodebaseMountRow/CodebaseMountRow.js';
 import { useWorkflowDefinitions } from '@/hooks/workflowQueries.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Callout } from '@/ui/primitives/Callout/Callout.js';
@@ -41,6 +42,7 @@ import {
   automationFormSchema,
   automationFormToParams,
   emptyAutomationForm,
+  patchAutomationCodebase,
   validateAutomationForm,
   type AutomationFormValues,
   type AutomationInputMode,
@@ -118,6 +120,10 @@ export function CreateAutomationPage() {
   const isSubmitting = useStore(form.store, (s) => s.isSubmitting);
   const errors = validateAutomationForm(values);
   const showErrors = errors.length > 0 && saveAttempted;
+
+  // D-103: the project's codebases, each mountable on a chosen branch.
+  const { data: projectCodebases } = useProjectCodebases(values.projectId || undefined);
+  const codebaseOrder = (projectCodebases ?? []).map((c) => c.alias);
 
   const runnableWorkflows = (workflows ?? []).filter((w) => w.status === 'published' && !w.archivedAt);
   const filteredWorkflows = values.projectId ? runnableWorkflows.filter((w) => w.projectId === values.projectId || !w.projectId) : runnableWorkflows;
@@ -238,6 +244,7 @@ export function CreateAutomationPage() {
                         onValueChange={(v) => {
                           field.handleChange(v ?? '');
                           form.setFieldValue('workflowIds', []);
+                          form.setFieldValue('codebases', []);
                         }}
                         items={[{ value: '', label: 'All projects (global)' }, ...(projects ?? []).filter((p) => p.status === 'active').map((p) => ({ value: p.id, label: p.name }))]}
                       />
@@ -371,6 +378,31 @@ export function CreateAutomationPage() {
                     </Field>
                   )}
                 </form.Field>
+              </FormSection>
+            ) : null}
+
+            {step === 'workflow' && values.projectId && (projectCodebases ?? []).length > 0 ? (
+              <FormSection
+                title="Codebases"
+                hint="The runs check these out as worktrees, each from the branch you name. None selected: the workflow's own codebases on their default branches."
+              >
+                <div className="flex flex-col" role="list" aria-label="Codebases">
+                  {(projectCodebases ?? []).map((codebase) => {
+                    const chosen = values.codebases.find((c) => c.alias === codebase.alias);
+                    return (
+                      <CodebaseMountRow
+                        key={codebase.alias}
+                        projectId={values.projectId}
+                        codebase={codebase}
+                        showMode={false}
+                        draft={{ alias: codebase.alias, selected: !!chosen, baseRef: chosen?.baseRef ?? '', mode: 'worktree' }}
+                        onChange={(patch) =>
+                          form.setFieldValue('codebases', patchAutomationCodebase(values.codebases, codebaseOrder, codebase.alias, patch))
+                        }
+                      />
+                    );
+                  })}
+                </div>
               </FormSection>
             ) : null}
 
