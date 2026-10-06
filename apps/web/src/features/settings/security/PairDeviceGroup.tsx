@@ -39,7 +39,12 @@ function PairingQr({ text }: { text: string }) {
       try {
         const mod = await import('qrcode');
         if (cancelled || !canvasRef.current) return;
-        await mod.toCanvas(canvasRef.current, text, { width: 132, margin: 1, errorCorrectionLevel: 'M' });
+        // Two device pixels per module, whatever the payload: a fixed width
+        // made qrcode fall back to 4 px per module (a 550 px code) once the
+        // offer outgrew 130 modules, and squeezed smaller codes to one pixel
+        // per module, which phone cameras misread. `L` correction is plenty
+        // for a code shown on a screen and keeps the module count down.
+        await mod.toCanvas(canvasRef.current, text, { scale: 2, margin: 2, errorCorrectionLevel: 'L' });
       } catch {
         if (!cancelled) setFailed(true);
       }

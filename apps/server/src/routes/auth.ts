@@ -39,6 +39,7 @@ import type { Container } from '../composition-root.js';
 import { removeBootstrapFile } from '../composition/bootstrapPairing.js';
 import { isLoopbackRequest } from '../middleware/auth.js';
 import { requestAbsoluteUrl } from '../network/requestOrigin.js';
+import { fingerprintToBase64Url } from '../network/tls/certificates.js';
 import { selectPairingEndpoint, type AdvertisedEndpointCandidate } from '../network/advertisedEndpoints.js';
 import { serverEndpoints, type EndpointAudience } from '../network/serverEndpoints.js';
 import { classifyTransport } from '../middleware/transportPolicy.js';
@@ -409,6 +410,7 @@ export function createAuthRoutes(container: Container): Router {
         // Validate through the SAME schema clients use to decode. If the host
         // cannot produce a valid offer, that is a server bug — never ship a
         // half-valid offer that a client will reject after scanning.
+        const pinned = container.security.tls?.pinnedFingerprint() ?? null;
         const offerResult = PairingOfferSchema.safeParse({
           v: 2,
           endpoint: selectedEndpoint.origin,
@@ -419,11 +421,10 @@ export function createAuthRoutes(container: Container): Router {
           })),
           serverId: identity.hostId,
           serverPublicKey: identity.publicKeyBase64Url,
-          // The CA a native client will pin once it can (MV-44); absent for a
-          // custom certificate, which is trusted through its own CA.
-          ...(container.security.tls?.pinnedFingerprint()
-            ? { certificateFingerprint: container.security.tls.pinnedFingerprint()! }
-            : {}),
+          // The CA a native client will pin once it can (MV-44): base64url of
+          // its SHA-256, compact for the QR. Absent for a custom certificate,
+          // which is trusted through its own CA.
+          ...(pinned ? { certificateFingerprint: fingerprintToBase64Url(pinned) } : {}),
           pairingGrant: grant.pairingToken,
           pairingExpiresAt: grant.expiresAt,
           requestedScopes: grant.requestedScopes,

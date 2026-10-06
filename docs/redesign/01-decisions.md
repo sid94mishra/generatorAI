@@ -924,8 +924,8 @@ Pinning a self-signed certificate in React Native needs native work on both plat
 handler on iOS and an OkHttp trust manager on Android, for `fetch`, the streaming transport and WebSockets) — more than
 a contained change. So, for now:
 - a **mobile** (and CLI / MCP / other native) pairing offer lists the plain-HTTP LAN addresses first, as before; web
-  and desktop offers list `https://`. Every offer carries `certificateFingerprint` = the local CA's SHA-256 (absent
-  for a custom certificate), so the app can pin it when MV-44 lands without a new QR format;
+  and desktop offers list `https://`. Every offer carries `certificateFingerprint` = the local CA's SHA-256 as base64url
+  (43 characters, to keep the QR small; absent for a custom certificate), so the app can pin it when MV-44 lands without a new QR format;
 - the server answers the native lane (D-111) on the LAN. DPoP is still required on every non-public route, and the
   pairing grant still needs a DPoP proof of the device key. What the lane does not have is confidentiality or
   protection from an active attacker on the LAN during pairing — the risk MV-44 closes;

@@ -315,6 +315,14 @@ export function describeCertificate(certPem: string): CertificateSummary {
   };
 }
 
+/**
+ * `AB:CD:…` → the 43-character base64url of the same 32 bytes: how a pairing
+ * offer carries a fingerprint, where every character costs QR modules.
+ */
+export function fingerprintToBase64Url(fingerprintSha256: string): string {
+  return Buffer.from(fingerprintSha256.replace(/:/g, ''), 'hex').toString('base64url');
+}
+
 /** True when `leafPem` carries a valid signature from `caPem`. */
 export function isIssuedBy(leafPem: string, caPem: string): boolean {
   try {

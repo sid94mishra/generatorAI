@@ -12,6 +12,7 @@ import {
   issueLeafCertificate,
   describeCertificate,
   isIssuedBy,
+  fingerprintToBase64Url,
   LEAF_VALIDITY_DAYS,
   type CertificateKeyPair,
 } from '../network/tls/certificates.js';
@@ -62,6 +63,10 @@ describe('certificate generation (D-110)', () => {
     expect(summary.notAfter - summary.notBefore).toBeLessThanOrEqual((LEAF_VALIDITY_DAYS + 1) * DAY);
     expect(summary.fingerprintSha256).toMatch(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
     expect(isIssuedBy(leaf.certPem, ca.certPem)).toBe(true);
+    // The pairing offer carries the CA fingerprint compactly: same 32 bytes, base64url.
+    const caFingerprint = describeCertificate(ca.certPem).fingerprintSha256;
+    expect(fingerprintToBase64Url(caFingerprint)).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(Buffer.from(fingerprintToBase64Url(caFingerprint), 'base64url').toString('hex').toUpperCase()).toBe(caFingerprint.replace(/:/g, ''));
     // A client trusting only the CA accepts the leaf by IP and by name.
     await expect(verifyAgainst(ca.certPem, leaf, leaf.certPem + ca.certPem, '127.0.0.1')).resolves.toBeNull();
     await expect(verifyAgainst(ca.certPem, leaf, leaf.certPem + ca.certPem, 'localhost')).resolves.toBeNull();
