@@ -39,7 +39,9 @@ export function nextPinned(pinned: boolean, scroll: { near: boolean; movedUp: bo
   return pinned;
 }
 
+/** The "Reduce motion" setting (`data-motion="reduce"` on <html>, D-20) or the OS preference. */
 function prefersReducedMotion(): boolean {
+  if (typeof document !== 'undefined' && document.documentElement.getAttribute('data-motion') === 'reduce') return true;
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 

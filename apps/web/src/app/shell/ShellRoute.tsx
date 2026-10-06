@@ -100,7 +100,7 @@ export function ShellRoute() {
           <ConnectedRail layout={LAYOUT} covered={flyoutOpen} activityDocked={activityDocked} />
         )
       }
-      // Mounted only while open or easing closed (AppFrame's Reveal, D-108).
+      // Mounted only while open or easing closed (AppFrame's Reveal, D-109).
       activity={<ConnectedActivityColumn placement={placement} sidebarWidth={sidebarWidth} />}
       activityOpen={activityOpen}
       activityOverlay={placement === 'overlay'}

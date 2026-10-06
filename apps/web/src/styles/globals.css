@@ -4950,7 +4950,7 @@ label:has(> input[type="radio"]) {
   transition-timing-function: var(--gai-ease-standard);
 }
 
-/* ── Motion (D-108) ───────────────────────────────────────────────
+/* ── Motion (D-109) ───────────────────────────────────────────────
    Every expand / collapse and show / hide eases in and out on the motion
    tokens. Reduced motion (the setting or the OS) zeroes the durations and the
    rules around this block cut every transition to 0.01 ms: each change lands

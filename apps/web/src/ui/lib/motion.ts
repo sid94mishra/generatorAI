@@ -1,5 +1,5 @@
 // ────────────────────────────────────────────────────────────────
-// Motion helpers for the kit (D-108; the utilities live in globals.css
+// Motion helpers for the kit (D-109; the utilities live in globals.css
 // "Motion"). Every expand / collapse and show / hide uses one of:
 //
 //   motion-collapse / motion-accordion  inline height + fade (Collapsible,

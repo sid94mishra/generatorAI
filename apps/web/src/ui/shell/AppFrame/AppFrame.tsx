@@ -9,7 +9,7 @@
 // the window chrome and the window width, and passed in.
 //
 // The Activity column (D-92) sits between the sidebar/rail and the card.
-// Motion (D-108): the sidebar slot eases between the sidebar and rail widths
+// Motion (D-109): the sidebar slot eases between the sidebar and rail widths
 // (the card flexes with it); the Activity slot eases open from 0 to the
 // column's width when docked and slides in when it floats over the card; the
 // flyout slides in over the rail. Each part leaves the DOM once it has closed.

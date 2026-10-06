@@ -129,7 +129,7 @@ function AgentResponse({
       )}
       {/* One TurnBody in every mode (Summary keeps only the final answer, TurnBody filters):
           a mode switch re-renders the answer's AssistantText instead of remounting and re-parsing it.
-          Folding eases the body closed (D-108), the column's gap with it. A folded body is not mounted. */}
+          Folding eases the body closed (D-109), the column's gap with it. A folded body is not mounted. */}
       <Reveal open={!folded} {...(isTool ? {} : { gap: 2 as const })}>
         <TurnBody segments={segments} streamKey={message.sessionId} />
       </Reveal>

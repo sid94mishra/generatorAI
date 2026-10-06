@@ -443,7 +443,7 @@ export function ChatPage() {
                   main={
                     <>
                       {/* The turn's state in words, under the header (the badge carries it too).
-                          It eases in and out (D-108), so the transcript under it never jumps. */}
+                          It eases in and out (D-109), so the transcript under it never jumps. */}
                       <Reveal open={isWorking} className="shrink-0">
                         <div role="status" className="flex items-center gap-2 border-b border-line-soft px-7 py-1.5 text-small font-medium text-run">
                           {awaitingUserDecision ? <Icon concept="pause" size={14} /> : <Spinner size={14} />}

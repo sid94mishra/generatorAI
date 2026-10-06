@@ -11,7 +11,7 @@
 // ────────────────────────────────────────────────────────────────
 
 /**
- * Enter / exit motion of a Base UI popup (D-108): a 120 ms fade and 97 % scale
+ * Enter / exit motion of a Base UI popup (D-109): a 120 ms fade and 97 % scale
  * from the side facing the anchor, on the Popup element (globals.css `motion-pop`).
  */
 export const popupMotion = 'motion-pop';

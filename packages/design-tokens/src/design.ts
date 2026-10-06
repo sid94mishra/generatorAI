@@ -386,9 +386,9 @@ export const Z_INDEX = {
 } as const satisfies Record<ZName, number>;
 
 /**
- * Transition timing (D-20, D-108, 02 §6.7). `MOTION` (tokens.ts) holds the same durations as numbers.
+ * Transition timing (D-20, D-109, 02 §6.7). `MOTION` (tokens.ts) holds the same durations as numbers.
  * `standard` decelerates (hover / press, ≤ 120 ms); `in-out` eases both ends — every expand /
- * collapse, panel reveal and popup enter / exit (D-108).
+ * collapse, panel reveal and popup enter / exit (D-109).
  */
 export const MOTION_CSS = {
   duration: { fast: `${MOTION.fast}ms`, normal: `${MOTION.normal}ms`, slow: `${MOTION.slow}ms` },

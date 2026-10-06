@@ -33,7 +33,7 @@ export const LiveActivityLine = memo(function LiveActivityLine({
     sessionId ? formatLiveCounters(computeLiveCounters(state.streams[sessionId]?.blocks)) : null,
   );
   const shown = active && !!line;
-  // Eases in above the composer (D-108), so the transcript above shrinks smoothly; leaves at once.
+  // Eases in above the composer (D-109), so the transcript above shrinks smoothly; leaves at once.
   return (
     <Reveal open={shown}>
       {shown ? (

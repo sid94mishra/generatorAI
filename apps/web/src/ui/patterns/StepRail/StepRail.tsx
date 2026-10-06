@@ -15,7 +15,7 @@
 //
 // Expansion is controlled with `expandedIds` + `onExpandedChange`, or left to
 // the rail (`defaultExpandedIds`). The detail opens and closes with the kit's
-// shared height + fade motion (P-45 CollapsiblePanel, D-108); the chevron
+// shared height + fade motion (P-45 CollapsiblePanel, D-109); the chevron
 // turns with it.
 // ────────────────────────────────────────────────────────────────
 

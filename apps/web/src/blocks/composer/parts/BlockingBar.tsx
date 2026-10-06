@@ -28,7 +28,7 @@ export interface BlockingBarProps {
 
 const barBase = 'flex min-h-9 items-center gap-2 rounded-card border px-3 py-1.5 text-ui';
 
-/** The bar eases in above the box when Send is held back (D-108), and leaves at once. */
+/** The bar eases in above the box when Send is held back (D-109), and leaves at once. */
 export function BlockingBar(props: BlockingBarProps) {
   const bar = barFor(props);
   return <Reveal open={bar != null}>{bar != null ? <div className="pb-2">{bar}</div> : null}</Reveal>;

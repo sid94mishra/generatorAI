@@ -29,7 +29,7 @@ export const Default: Story = {
     await expect(trigger).toHaveAttribute('aria-expanded', 'false');
     await userEvent.click(trigger);
     await expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    // The panel eases open (D-108).
+    // The panel eases open (D-109).
     await waitFor(() => expect(canvas.getByText(/traced the null/)).toBeVisible());
   },
 };
@@ -125,7 +125,7 @@ export const TargetSize: Story = {
 
 export const Compact: Story = { globals: { density: 'compact' }, render: Matrix.render };
 
-/** The panel eases its height and fades (D-108); once closed it leaves the DOM. */
+/** The panel eases its height and fades (D-109); once closed it leaves the DOM. */
 export const Motion: Story = {
   play: async ({ canvas, canvasElement }) => {
     const trigger = canvas.getByRole('button', { name: 'Thought for 12s' });

@@ -10,6 +10,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useEffect, type RefObject } from 'react';
+import { prefersReducedMotion } from '@/ui/lib/motion.js';
 
 const NAMES = ['gai-reveal-1', 'gai-reveal-2', 'gai-reveal-3'] as const;
 /** Upper age, in ms, of the text each highlight covers (newest first). */
@@ -69,7 +70,7 @@ function rangesFor(root: Element, total: number, cuts: readonly number[]): Range
 export function useRevealFade(ref: RefObject<HTMLElement | null>, active: boolean): void {
   useEffect(() => {
     if (!active || !api()) return undefined;
-    if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return undefined;
+    if (prefersReducedMotion()) return undefined;
     if (document.documentElement.dataset['motion'] === 'reduce') return undefined;
     const id = Symbol('reveal');
     const history: Array<{ len: number; t: number }> = [];

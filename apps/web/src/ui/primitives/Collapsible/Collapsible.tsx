@@ -16,7 +16,7 @@
 //                       by a control of the caller's (an IconButton with
 //                       aria-expanded, a toggle elsewhere): no trigger.
 //
-// Motion (D-108): every panel eases its height (Reveal also width or a slide)
+// Motion (D-109): every panel eases its height (Reveal also width or a slide)
 // and fades, on the motion tokens (`motion-collapse` / `motion-accordion` /
 // `motion-reveal-x` / `motion-slide-start`, globals.css), instant under
 // reduced motion. A closed panel is unmounted once its close has finished and

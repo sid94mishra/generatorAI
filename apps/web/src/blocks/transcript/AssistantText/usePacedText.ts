@@ -12,13 +12,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { INITIAL_PACER_STATE, advancePacer, flushPacer, type TextPacerState } from '@generatorai/client-core';
+import { prefersReducedMotion } from '@/ui/lib/motion.js';
 
 /** Text longer than this when the panel mounts is shown at once, not replayed. */
 const MOUNT_REPLAY_LIMIT = 240;
-
-function prefersReducedMotion(): boolean {
-  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
 
 /** While text streams, a burst is shown within this; after the turn ends the rest catches up within END_DRAIN_MS. */
 const STREAM_DRAIN_MS = 900;

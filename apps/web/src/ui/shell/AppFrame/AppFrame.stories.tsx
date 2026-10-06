@@ -123,7 +123,7 @@ function MotionHarness() {
   );
 }
 
-/** D-108: the sidebar slot eases between sidebar and rail, Activity eases open docked or slides in as an overlay, the flyout slides in. */
+/** D-109: the sidebar slot eases between sidebar and rail, Activity eases open docked or slides in as an overlay, the flyout slides in. */
 export const Motion: Story = {
   render: () => <MotionHarness />,
   play: async ({ canvas }) => {

@@ -228,7 +228,7 @@ export function ActivityItem({ entry, now, selected, modelLabel, tabIndex, linkR
               }
             >
               {canExpand ? (
-                // The workers ease open under the card (D-108); the gap rides inside the panel.
+                // The workers ease open under the card (D-109); the gap rides inside the panel.
                 <Reveal open={expanded}>
                   <div className="pt-1.5">
                     <InlineWorkers entry={entry} modelLabel={modelLabel} />

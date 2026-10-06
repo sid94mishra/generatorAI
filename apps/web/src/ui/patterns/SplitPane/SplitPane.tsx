@@ -24,7 +24,7 @@
 // `react-resizable-panels:<id>:main:side`.
 // `resizable={false}` removes the separator (the dock's sheet and maximized
 // modes); `separatorLabel` names it.
-// Motion (D-108, `motion-split`): collapsing and re-opening the side pane eases
+// Motion (D-109, `motion-split`): collapsing and re-opening the side pane eases
 // both panes' share of the row; a drag follows the pointer with no easing. It is
 // switched on a frame after mount, so the first layout never animates.
 // ────────────────────────────────────────────────────────────────

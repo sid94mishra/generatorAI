@@ -333,7 +333,7 @@ export const ChangesTray = memo(function ChangesTray({
   const pulsing = streaming && pending;
 
   // The tray eases in above the composer when the first file changes, and its file
-  // list eases open and closed (D-108). It leaves at once when nothing is left to show.
+  // list eases open and closed (D-109). It leaves at once when nothing is left to show.
   return (
     <Reveal open={hasFiles}>
       {hasFiles ? (

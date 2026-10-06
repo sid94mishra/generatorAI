@@ -12,7 +12,7 @@
 //
 // `variant="overlay"`: the same column floating over the main card (the
 // window is too narrow to dock it — D-92): absolute (inside S-01's overlay
-// layer, which owns the stacking and the slide-in, D-108), `shadow-pop`,
+// layer, which owns the stacking and the slide-in, D-109), `shadow-pop`,
 // `data-gai-overlay="sheet"` so the desktop's native browser view steps
 // aside; not resizable.
 // Presentational: app/shell decides the variant and owns the width.

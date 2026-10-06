@@ -507,7 +507,7 @@ export function Composer({
             footerNote={highlightedCommand?.argHint ? `Then: ${highlightedCommand.argHint}` : undefined}
           />
 
-          {/* Attachments: the row eases open when the first chip arrives (D-108). */}
+          {/* Attachments: the row eases open when the first chip arrives (D-109). */}
           <Reveal open={attachments.length > 0 || (pendingCaptures?.length ?? 0) > 0 || mentionLoading}>
             <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
               {attachments.map((att) => (

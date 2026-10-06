@@ -166,7 +166,7 @@ export function FilesPanel({ workspaceId, initialFile, onOpenFile, onSelectionCh
         </Callout>
       ) : null}
       <div className="flex min-h-0 flex-1">
-        {/* Beside a preview the tree eases open and shut from its edge (D-108); one element either way, so the tree keeps its state. */}
+        {/* Beside a preview the tree eases open and shut from its edge (D-109); one element either way, so the tree keeps its state. */}
         <Reveal open={showTree} motion="width" className={selection ? 'flex shrink-0' : 'flex min-w-0 flex-1'}>
           <div className={selection ? 'flex w-60 shrink-0 flex-col border-r border-line-soft' : 'flex min-w-0 flex-1 flex-col'}>
             <MountFileTree

@@ -126,10 +126,10 @@ export const CONTAINER_NAMES = [
 ] as const;
 export type ContainerName = (typeof CONTAINER_NAMES)[number];
 
-/** Easing curves (D-108): `ease-standard` (hover / press), `ease-in-out` (expand, reveal, enter / exit). */
+/** Easing curves (D-109): `ease-standard` (hover / press), `ease-in-out` (expand, reveal, enter / exit). */
 export const EASE_NAMES = ['standard', 'in-out'] as const;
 
-/** Transition durations (D-108): `duration-fast` 120 · `duration-normal` 180 · `duration-slow` 220; 0 under reduced motion. */
+/** Transition durations (D-109): `duration-fast` 120 · `duration-normal` 180 · `duration-slow` 220; 0 under reduced motion. */
 export const DURATION_NAMES = ['fast', 'normal', 'slow'] as const;
 
 /** Every side/corner form of `rounded-*`. */
