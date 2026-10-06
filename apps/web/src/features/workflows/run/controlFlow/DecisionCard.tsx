@@ -27,6 +27,7 @@ import { ProgressBar } from '@/ui/primitives/ProgressBar/ProgressBar.js';
 import { Textarea } from '@/ui/primitives/Textarea/Textarea.js';
 import { loopRulesText } from '../model/loopView.js';
 import type { LoopDecisionView, LoopView } from '../model/types.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 
 export interface DecisionCardProps {
   loopId: string;
@@ -237,7 +238,7 @@ export function DecisionCard({ loopId, loop, decision, version, onCommand }: Dec
         </Button>
       </div>
 
-      {panel === 'budget' && (
+      <Reveal open={panel === 'budget'} gap={2.5}>
         <div className="flex flex-col gap-2 rounded-card border border-line-soft bg-sunken p-2.5">
           <p className="text-small text-fg-3">Add to the loop’s cumulative budget (leave a field empty to keep it).</p>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -285,9 +286,9 @@ export function DecisionCard({ loopId, loop, decision, version, onCommand }: Dec
             </Button>
           </div>
         </div>
-      )}
+      </Reveal>
 
-      {panel === 'input' && (
+      <Reveal open={panel === 'input'} gap={2.5}>
         <div className="flex flex-col gap-2">
           <Textarea
             value={input}
@@ -315,7 +316,7 @@ export function DecisionCard({ loopId, loop, decision, version, onCommand }: Dec
             </Button>
           </div>
         </div>
-      )}
+      </Reveal>
 
       <div className="flex flex-wrap items-center gap-2 border-t border-line-soft pt-2.5">
         <Button

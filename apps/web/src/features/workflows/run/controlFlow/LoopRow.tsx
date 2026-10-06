@@ -164,7 +164,7 @@ export function LoopRow({ runId, stage, bodies, focusedId, showConnector, render
   const { data: rows } = useLoopIterations(runId, stage.id, { enabled: loop.k >= 0 });
   const rowByK = useMemo(() => new Map((rows ?? []).map((r) => [r.k, r])), [rows]);
   const lastRow = useMemo(() => (rows ?? []).reduce<LoopIteration | undefined>((a, r) => (!a || r.k > a.k ? r : a), undefined), [rows]);
-  const liveK = !settled && !wrapUpLive && loop.k >= 0 ? loop.k : null;
+  const liveK = !settled && !wrapUpLive && !loop.decision && loop.k >= 0 && !rowByK.has(loop.k) ? loop.k : null;
 
   const parent = { runId, bodies, focusedId, renderStage, onCommand, depth };
   const carryNames = Object.keys(lastRow?.carry ?? {});
@@ -173,7 +173,8 @@ export function LoopRow({ runId, stage, bodies, focusedId, showConnector, render
     ...(iterations.length > 1 ? [{ value: 'all', label: 'All' }] : []),
     ...iterations.map((k): SegmentedItem => {
       const row = rowByK.get(k);
-      const live = current === k && !settled;
+      // An iteration with a recorded row has finished — also while the loop waits for a decision after it.
+      const live = current === k && !settled && !row && !loop.decision;
       const glyph = row ? outcomeStatus(row.outcome)?.def.glyph : undefined;
       return {
         value: String(k),

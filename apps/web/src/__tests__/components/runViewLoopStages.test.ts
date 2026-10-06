@@ -49,3 +49,13 @@ describe('run view — loops', () => {
     expect(byKey.test!.streaming).toBe(false);
   });
 });
+
+describe('renderStagePrompt — a stage that has not finished', () => {
+  it('keeps the placeholder instead of rendering it empty, and fills it once the stage finished', async () => {
+    const { renderStagePrompt } = await import('@/features/workflows/run/model/deriveRunView.js');
+    const text = 'Tests passed: {{ stages.loop_1.output.last.test.passed }} for {{ name }}.';
+    // Variables are filled; the unfinished stage's reference stays visible rather than rendering empty.
+    expect(renderStagePrompt(text, { name: 'x' }, {})).toMatch(/^Tests passed: \{\{ ?stages\.loop_1\.output\.last\.test\.passed ?\}\} for x\.$/);
+    expect(renderStagePrompt(text, { name: 'x' }, { loop_1: { output: { last: { test: { passed: true } } } } })).toBe('Tests passed: true for x.');
+  });
+});

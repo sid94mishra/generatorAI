@@ -169,7 +169,10 @@ function stageOutputScope(stageRuns: StageRun[]): Record<string, unknown> {
  * reads a stage that has not finished yet keeps its placeholders, with the variables filled in. Before, every
  * `{{ stages.… }}` showed raw, so a correctly-sent prompt looked broken.
  */
-function renderStagePrompt(text: string, vars: Record<string, unknown>, stages: Record<string, unknown>): string {
+export function renderStagePrompt(text: string, vars: Record<string, unknown>, stages: Record<string, unknown>): string {
+  // A template renders a missing stage as an empty string ("Tests passed: ."), which read as a sent prompt.
+  const reads = [...text.matchAll(/\bstages\.([a-z][a-z0-9_]*)/g)].map((m) => m[1]!);
+  if (reads.some((key) => !(key in stages))) return interpolateVariables(text, vars);
   const r = renderTemplate(text, { variables: vars, stages });
   return r.ok ? r.text : interpolateVariables(text, vars);
 }
