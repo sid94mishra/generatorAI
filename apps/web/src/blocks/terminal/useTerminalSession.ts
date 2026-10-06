@@ -186,7 +186,9 @@ export function useTerminalSession(
         if (typeof ev.data === 'string') {
           try {
             const frame = JSON.parse(ev.data) as ServerFrame;
-            if (frame.t === 'ready') setDescriptor(frame.descriptor);
+            // The server's descriptor carries the size the session was created with; the `ready` frame arrives after
+            // the open handler synced the fitted size, and replacing it put the footer back on 80×24.
+            if (frame.t === 'ready') setDescriptor({ ...frame.descriptor, cols: term.cols || frame.descriptor.cols, rows: term.rows || frame.descriptor.rows });
             else if (frame.t === 'exit') setExit({ code: frame.code, ...(frame.signal ? { signal: frame.signal } : {}) });
             else if (frame.t === 'error') setError(frame.message);
           } catch { /* not a control frame */ }
