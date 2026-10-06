@@ -96,6 +96,23 @@ export function withAgentToolPolicy(gate: GatePort, groups: AgentToolPolicy): Ga
 }
 
 
+/** How long a platform tool waits for an answer: the chat interaction's own maximum age (AgentInteractionService). */
+const APPROVAL_WAIT_MS = 24 * 60 * 60 * 1000;
+
+/** The provider default per-tool budget (`GENERATORAI_TOOL_TIMEOUT_MS`, 120 s). */
+function toolTimeoutMs(): number {
+  const raw = Number(process.env['GENERATORAI_TOOL_TIMEOUT_MS'] ?? 120_000);
+  return Number.isFinite(raw) && raw > 0 ? raw : 120_000;
+}
+
+function withBudget<T>(work: Promise<T>, ms: number, name: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${name} timed out after ${Math.round(ms / 1000)} s`)), ms);
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
+}
+
 /** The turn permission modes in which a platform tool asks before it runs ("Ask before tools run", "Accept edits, ask for the rest"). */
 const ASKING_MODES: ReadonlySet<string> = new Set(['default', 'acceptEdits']);
 
@@ -111,19 +128,32 @@ export function askBeforeRunning(
   tools: readonly ToolDefinition[],
   opts: { turnOf: () => TurnContext | undefined; port: GatePort | undefined },
 ): ToolDefinition[] {
-  return tools.map((tool) => ({
-    ...tool,
-    skipPermission: true,
-    handler: async (args: Record<string, unknown>, ctx?: ToolCallContext) => {
-      const turn = opts.turnOf();
-      if (opts.port && turn && ASKING_MODES.has(turn.permissionMode)) {
+  return tools.map((tool) => {
+    const runBudgetMs = tool.timeoutMs ?? toolTimeoutMs();
+    return {
+      ...tool,
+      skipPermission: true,
+      // The provider's per-tool budget would otherwise count the person's think time: an answer after 120 s found
+      // the call abandoned and the question still pending. The wait is bounded by the interaction's own expiry;
+      // the tool itself keeps its budget once allowed (below).
+      timeoutMs: APPROVAL_WAIT_MS + runBudgetMs,
+      handler: async (args: Record<string, unknown>, ctx?: ToolCallContext) => {
+        const turn = opts.turnOf();
+        if (!(opts.port && turn && ASKING_MODES.has(turn.permissionMode))) return tool.handler(args, ctx);
         const answer = await opts.port.permission(
-          { type: 'other', description: tool.name, details: { toolName: tool.name, input: args, provider: 'platform' } },
+          { type: 'other', description: toolSummary(tool), details: { toolName: tool.name, input: args, provider: 'platform' } },
           turn,
         );
         if (!answer.granted) throw new Error(answer.reason ?? `Using ${tool.name} was not allowed.`);
-      }
-      return tool.handler(args, ctx);
-    },
-  }));
+        return withBudget(tool.handler(args, ctx), runBudgetMs, tool.name);
+      },
+    };
+  });
+}
+
+/** What the gate card says the tool does: the first sentence of its description (the card shows the name already). */
+function toolSummary(tool: ToolDefinition): string {
+  const first = tool.description.trim().split(/(?<=[.!?])\s/)[0]?.trim() ?? '';
+  if (!first) return tool.name;
+  return first.length > 140 ? `${first.slice(0, 139)}…` : first;
 }

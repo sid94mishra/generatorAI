@@ -155,9 +155,11 @@ describe('askBeforeRunning (D-102)', () => {
       const permission = vi.fn(async () => ({ granted: true }));
       const [wrapped] = askBeforeRunning([tool], { turnOf: () => turnIn(mode), port: { permission } });
       expect(wrapped!.skipPermission).toBe(true);
+      // The person's think time is not the tool's run budget.
+      expect(wrapped!.timeoutMs).toBeGreaterThan(60 * 60 * 1000);
       await expect(wrapped!.handler({ url: 'http://x' })).resolves.toBe('navigated');
       expect(permission).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'other', details: expect.objectContaining({ toolName: 'navigate_page', input: { url: 'http://x' } }) }),
+        expect.objectContaining({ type: 'other', description: 'Go', details: expect.objectContaining({ toolName: 'navigate_page', input: { url: 'http://x' } }) }),
         expect.anything(),
       );
     }
