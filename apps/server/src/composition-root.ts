@@ -1700,7 +1700,13 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // `POST /internal/browser/cdp-endpoint` as the active tab changes, and
   // drives the human's WCV directly, so agent + user see the same tab).
   // `ServerPlaywrightHost` is the fallback used everywhere else and by CI.
-  const electronBridgeAdapter = new ElectronBridgeAdapter(logger);
+  // D-105: under the desktop app (spawned with an IPC channel) a workspace with no Browser dock tab gets a hidden
+  // agent tab on the agent's first browser call.
+  const electronBridgeAdapter = new ElectronBridgeAdapter(logger, {
+    ...(typeof process.send === 'function'
+      ? { requestTab: (workspaceId: string) => { process.send?.({ type: 'browser.ensure-tab', workspaceId }); } }
+      : {}),
+  });
   const serverPlaywrightHost = new ServerPlaywrightHost(logger);
   const browserService = new BrowserService(
     executionWorkspaceRepo,

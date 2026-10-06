@@ -98,6 +98,13 @@ export interface ElectronBridgeAdapterOptions {
   /** How long to wait for a workspace's scoped proxy endpoint to be
    *  registered before failing. */
   discoveryTimeoutMs?: number;
+  /**
+   * D-105: ask the desktop app for a tab when a workspace has none (no Browser dock tab is open). The desktop main
+   * process creates a hidden agent tab, makes it the workspace's active tab and pushes its scoped endpoint; the dock
+   * adopts it when the person opens a Browser tab. Without it an agent's first browser call failed unless the person
+   * had opened the Browser dock first.
+   */
+  requestTab?: (workspaceId: string) => void;
 }
 
 export class ElectronBridgeAdapter implements IBrowserBridge {
@@ -112,7 +119,7 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
    *  `setEndpoint()` (routes/internal-browser.ts). Populated lazily — a
    *  workspace has no entry until its desktop tab starts a proxy. */
   private endpoints = new Map<string, string>();
-  private readonly opts: Required<ElectronBridgeAdapterOptions>;
+  private readonly opts: Required<Omit<ElectronBridgeAdapterOptions, 'requestTab'>> & Pick<ElectronBridgeAdapterOptions, 'requestTab'>;
 
   constructor(
     private readonly logger: ILogger,
@@ -121,6 +128,7 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
     this.opts = {
       cdpEndpoint: opts?.cdpEndpoint ?? '',
       discoveryTimeoutMs: opts?.discoveryTimeoutMs ?? 10_000,
+      ...(opts?.requestTab ? { requestTab: opts.requestTab } : {}),
     };
   }
 
@@ -136,6 +144,13 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
 
   private async waitForEndpoint(workspaceId: string): Promise<string> {
     if (this.opts.cdpEndpoint) return this.opts.cdpEndpoint;
+    if (!this.endpoints.has(workspaceId) && this.opts.requestTab) {
+      try {
+        this.opts.requestTab(workspaceId);
+      } catch (err) {
+        this.logger.warn(`[ElectronBridgeAdapter] could not ask the desktop app for a browser tab: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     const deadline = Date.now() + this.opts.discoveryTimeoutMs;
     while (Date.now() < deadline) {
       const ep = this.endpoints.get(workspaceId);

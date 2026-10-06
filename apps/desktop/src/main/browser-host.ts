@@ -590,11 +590,49 @@ export class NativeBrowserHost extends EventEmitter {
    */
   setActiveTab(workspaceId: string, tabId: string): void {
     if (!this.sessions.has(tabId)) return;
+    const previous = this.activeTab.get(workspaceId);
     this.activeTab.set(workspaceId, tabId);
+    // D-105: the person opened a Browser tab where the agent was browsing in its hidden tab — the new tab takes over
+    // the agent's page and the hidden tab goes away, so the agent and the person keep seeing one page.
+    if (previous && previous !== tabId && isAgentTabId(previous)) this.handOverAgentTab(previous, tabId);
     for (const s of this.sessions.values()) {
       if (s.workspaceId === workspaceId) this.applyMarker(s);
     }
     void this.ensureActiveProxy(workspaceId);
+  }
+
+  /**
+   * D-105: a tab for the agent when the workspace has none (the server asked over IPC: an agent's browser call with the
+   * Browser dock closed). Hidden, laid out at a desktop size so pages render and screenshots have pixels, made the
+   * workspace's active tab so its scoped CDP endpoint is pushed. An existing tab is used as it is.
+   */
+  ensureAgentTab(workspaceId: string): void {
+    if (!this.isEnabled() || !this.ownerWindow) return;
+    const active = this.activeTab.get(workspaceId);
+    if (active && this.sessions.has(active)) {
+      void this.ensureActiveProxy(workspaceId);
+      return;
+    }
+    const tabId = agentTabId(workspaceId);
+    this.create(tabId, workspaceId, true);
+    const sess = this.sessions.get(tabId);
+    if (sess) {
+      sess.lastBounds = { ...AGENT_TAB_BOUNDS };
+      sess.view.setBounds(sess.lastBounds);
+    }
+    log.info(`[NativeBrowserHost] agent tab for workspace=${workspaceId} (no Browser dock tab was open)`);
+  }
+
+  private handOverAgentTab(agentTab: string, toTab: string): void {
+    const agent = this.sessions.get(agentTab);
+    const next = this.sessions.get(toTab);
+    if (agent && next) {
+      const url = agent.view.webContents.getURL();
+      if (url && !url.startsWith('about:') && next.view.webContents.getURL().startsWith('about:')) {
+        void this.navigate(toTab, url).catch(() => undefined);
+      }
+    }
+    this.destroy(agentTab);
   }
 
   destroy(tabId: string): void {
@@ -1108,6 +1146,16 @@ export class NativeBrowserHost extends EventEmitter {
       cdpEndpoint: null,
     };
   }
+}
+
+/** D-105: the hidden tab an agent browses in while no Browser dock tab is open. */
+const AGENT_TAB_PREFIX = 'agent-';
+const AGENT_TAB_BOUNDS = { x: 0, y: 0, width: 1280, height: 800 };
+export function agentTabId(workspaceId: string): string {
+  return `${AGENT_TAB_PREFIX}${workspaceId}`;
+}
+export function isAgentTabId(tabId: string): boolean {
+  return tabId.startsWith(AGENT_TAB_PREFIX);
 }
 
 let instance: NativeBrowserHost | null = null;

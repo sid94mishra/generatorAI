@@ -219,3 +219,32 @@ describe('restoring a page into a tab that was only just created', () => {
     await expect(pending).rejects.toThrow(/No browser tab/);
   });
 });
+
+describe('the agent tab (D-105)', () => {
+  it('is created hidden at a desktop size and made active when the workspace has no tab', () => {
+    host.ensureAgentTab('ws-9');
+    const view = views[views.length - 1]!;
+    expect(view.visible).toBe(false);
+    expect(view.bounds).toEqual({ x: 0, y: 0, width: 1280, height: 800 });
+    expect(host.describe('agent-ws-9').workspaceId).toBe('ws-9');
+  });
+
+  it('is not created when the workspace already has a tab', () => {
+    openTab(host);
+    const count = views.length;
+    host.ensureAgentTab('ws-1');
+    expect(views.length).toBe(count);
+  });
+
+  it('hands its page to the Browser tab the person opens, then goes away', async () => {
+    host.ensureAgentTab('ws-1');
+    const agent = views[views.length - 1]!;
+    agent.webContents.getURL = () => 'https://example.com/';
+    host.create('browser-1', 'ws-1', false);
+    const dock = views[views.length - 1]!;
+    host.setActiveTab('ws-1', 'browser-1');
+    await vi.waitFor(() => expect(dock.webContents.loadURL).toHaveBeenCalledWith('https://example.com/'));
+    expect(agent.webContents.close).toHaveBeenCalled();
+    expect(win.children).not.toContain(agent);
+  });
+});

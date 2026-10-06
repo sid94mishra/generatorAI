@@ -794,6 +794,16 @@ the reverse (references through the loop become direct, the loop as a context so
 Map containers are not rewritten: a map body's outputs are a list (`stages.<map>.output.results`), with no
 single-value equivalent. The rewrite lives in `@generatorai/workflow-spec` (`qualifyBodyRefs` / `unqualifyBodyRefs`).
 
+### D-105 An agent's browser call opens its own tab when the Browser dock is closed (2026-10-06) — Final
+In the desktop app the agent's browser drives the scoped CDP endpoint of the workspace's active Browser tab, which
+only exists once the person opens a Browser dock tab; with the dock closed `open_browser_page` waited 10 s and failed
+("waiting for a scoped CDP endpoint … Ensure the desktop app has an active browser tab"). Now the server asks the
+desktop main process over the existing server IPC channel (`browser.ensure-tab`) and main creates a hidden **agent
+tab** (`agent-<workspaceId>`, laid out at 1280×800 so pages render and screenshots have pixels), makes it active and
+pushes its endpoint; the call proceeds. When the person later opens a Browser tab for that workspace and it becomes
+active, it takes over the agent tab's page (navigates to its URL when blank) and the agent tab is destroyed, so agent
+and person keep looking at one page. A workspace that already has a tab is used as it is.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

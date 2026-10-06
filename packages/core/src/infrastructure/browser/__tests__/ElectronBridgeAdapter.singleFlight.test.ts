@@ -57,3 +57,28 @@ describe('ElectronBridgeAdapter — one CDP connection at a time', () => {
     expect(connects).toEqual(['ws://127.0.0.1:1/a', 'ws://127.0.0.1:1/b']);
   });
 });
+
+describe('ElectronBridgeAdapter — a workspace with no Browser tab (D-105)', () => {
+  it('asks the desktop app for a tab once and connects when its endpoint arrives', async () => {
+    const asked: string[] = [];
+    let adapter!: InstanceType<typeof ElectronBridgeAdapter>;
+    adapter = new ElectronBridgeAdapter(logger, {
+      discoveryTimeoutMs: 2_000,
+      requestTab: (ws) => {
+        asked.push(ws);
+        setTimeout(() => adapter.setEndpoint(ws, 'ws://127.0.0.1:1/agent'), 50);
+      },
+    });
+    await adapter.start(startOpts);
+    expect(asked).toEqual(['ws-1']);
+    expect(connects).toEqual(['ws://127.0.0.1:1/agent']);
+  });
+
+  it('does not ask when the workspace already has an endpoint', async () => {
+    const requestTab = vi.fn();
+    const adapter = new ElectronBridgeAdapter(logger, { requestTab });
+    adapter.setEndpoint('ws-1', 'ws://127.0.0.1:1/dock');
+    await adapter.start(startOpts);
+    expect(requestTab).not.toHaveBeenCalled();
+  });
+});

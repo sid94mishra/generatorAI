@@ -272,6 +272,14 @@ export class ServerManager extends EventEmitter {
     });
     this.child = child;
 
+    // D-105: the server asks for a browser tab for a workspace that has none (an agent's first browser call with
+    // the Browser dock closed). Only this child can send on the channel.
+    child.on('message', (msg: unknown) => {
+      const m = msg as { type?: unknown; workspaceId?: unknown } | null;
+      if (m && m.type === 'browser.ensure-tab' && typeof m.workspaceId === 'string' && /^[\w-]{1,128}$/.test(m.workspaceId)) {
+        this.emit('browser-ensure-tab', m.workspaceId);
+      }
+    });
     child.stdout?.on('data', (b: Buffer) => this.pipeServerLog('info', b));
     child.stderr?.on('data', (b: Buffer) => this.pipeServerLog('warn', b));
 

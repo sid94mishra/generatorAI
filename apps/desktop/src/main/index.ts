@@ -14,7 +14,7 @@ import { loadSettings } from './config';
 import { getServerManager, VAULT_UNREADABLE_MESSAGE } from './server-manager';
 import { resolveTarget } from './serverConnections';
 import { getWindowManager } from './window-manager';
-import { nativeBrowserEnabled } from './browser-host';
+import { getNativeBrowserHost, nativeBrowserEnabled } from './browser-host';
 import { initComputerHost } from './computer-host-registry';
 import { setIpcToken } from './cdp/ipc-token';
 import { registerIpc } from './ipc';
@@ -132,6 +132,8 @@ async function onReady(): Promise<void> {
   // spawned server sees it as env and can authenticate the per-workspace
   // CDP-endpoint pushes NativeBrowserHost sends as tabs become active.
   sm.setElectronIpcToken(ipcToken);
+  // D-105: an agent's browser call with no Browser dock tab open gets a hidden agent tab.
+  sm.on('browser-ensure-tab', (workspaceId: string) => getNativeBrowserHost().ensureAgentTab(workspaceId));
 
   registerIpc(mode);
   registerDownloadHandler(session.defaultSession);
