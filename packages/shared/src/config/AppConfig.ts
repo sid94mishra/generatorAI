@@ -100,6 +100,8 @@ export const AppConfigSchema = z.object({
            *  its approvals to the chat's approval UI. */
           approvalPolicy: z.enum(['untrusted', 'on-request', 'never']).optional(),
           sandboxMode: z.enum(['read-only', 'workspace-write', 'danger-full-access']).optional(),
+          /** Commands in the sandbox may use the network (localhost test servers). Default on. */
+          networkAccess: z.boolean().optional(),
         })
         .default({}),
     })

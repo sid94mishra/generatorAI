@@ -165,6 +165,13 @@ export interface CodexProviderOptions {
    */
   sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access';
   /**
+   * Whether commands in a `workspace-write` / `read-only` sandbox may use the network. Default `true`: a test that
+   * starts a server on localhost needs it, and Codex's sandbox has no loopback-only setting (an agent that may not
+   * write files — a reviewer — could otherwise not run the HTTP tests it reviews). Network access never widens what
+   * may be written; the bound agent's tool groups still gate network requests the provider asks about.
+   */
+  networkAccess?: boolean;
+  /**
    * Decides server-initiated approvals (command execution, file changes, MCP
    * elicitations). Omit to decline everything, which is the fail-closed
    * default and the correct behaviour for an unattended host.

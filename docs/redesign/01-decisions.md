@@ -755,6 +755,15 @@ A worker's turn is fire-and-forget in the server process; a quit or restart kill
 - Not automatic on boot: resuming spends provider tokens, so a person (or the orchestrator, when asked to continue)
   decides.
 
+### D-101 Codex sandbox commands may use the network (2026-10-06) — Final
+In the build the Reviewer (Codex GPT-5.6-Luna, Write files off) could not run the server's supertest suite: Codex's
+`workspace-write` sandbox denies every socket by default, so `listen()` on localhost failed with EPERM and reviews fell
+back to typecheck. Codex has no loopback-only setting (`networkAccess` is a boolean), and Claude / Copilot shell
+commands already run with the network, so the Codex sandbox now allows it by default (thread config
+`sandbox_workspace_write.network_access` and every turn's `sandboxPolicy.networkAccess`; `harness.codex.networkAccess:
+false` turns it off). Write access is unchanged: what may be written is still the sandbox's roots and the bound
+agent's `fileWrite` group, enforced at the permission gate.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

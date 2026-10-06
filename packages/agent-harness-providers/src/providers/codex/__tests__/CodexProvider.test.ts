@@ -560,7 +560,20 @@ describe('CodexProvider — per-conversation workspace', () => {
     expect((await echo(p, 'c-roots')).turn['sandboxPolicy']).toEqual({
       type: 'workspaceWrite',
       writableRoots: ['/work/docs', '/work/.generatorai/scratch'],
+      networkAccess: true,
     });
+  }, 20_000);
+
+  it('networkAccess: false keeps the sandbox off the network, at thread start and on every turn', async () => {
+    const p = await started({ defaultCwd: SERVER_CWD, sandboxMode: 'workspace-write', networkAccess: false });
+    await p.createConversation({
+      conversationId: 'c-offline',
+      workingDirectory: '/work/repo',
+      additionalDirectories: ['/work/docs'],
+    } as CreateConversationParams);
+    const echoed = await echo(p, 'c-offline');
+    expect((echoed.thread['config'] as Record<string, unknown>)['sandbox_workspace_write']).toEqual({ network_access: false });
+    expect(echoed.turn['sandboxPolicy']).toMatchObject({ type: 'workspaceWrite', networkAccess: false });
   }, 20_000);
 
   it('warns instead of reshaping the roots when the sandbox has none', async () => {
@@ -691,6 +704,8 @@ describe('CodexProvider — integration parity with the other providers', () => 
       skillRoots: string[] | null;
     };
     expect(echoed.thread.config?.projects).toEqual({ [process.cwd()]: { trust_level: 'trusted' } });
+    // A localhost test server needs a socket; the workspace sandbox denies them unless network access is on.
+    expect((echoed.thread.config as Record<string, unknown> | undefined)?.['sandbox_workspace_write']).toEqual({ network_access: true });
     expect(echoed.thread.config?.mcp_servers).toEqual({
       node_repl: { enabled: false },
       local: { command: 'node', args: ['srv.js'], env: { A: '1' }, enabled_tools: ['t1'], tool_timeout_sec: 2 },
@@ -788,6 +803,7 @@ describe('CodexProvider — integration parity with the other providers', () => 
     expect(echoed.thread.developerInstructions).toBe('You are an orchestrator.');
     expect(echoed.thread.config).toEqual({
       projects: { [process.cwd()]: { trust_level: 'trusted' } },
+      sandbox_workspace_write: { network_access: true },
       plugins: {
         'unified-computer-use@openai-bundled': { enabled: false },
         'computer-use@openai-bundled': { enabled: false },

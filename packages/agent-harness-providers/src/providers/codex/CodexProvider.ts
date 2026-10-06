@@ -788,6 +788,7 @@ export class CodexProvider implements IAgentHarness {
       defaultCwd: opts.defaultCwd ?? process.cwd(),
       approvalPolicy: opts.approvalPolicy ?? 'never',
       sandboxMode: opts.sandboxMode ?? 'workspace-write',
+      networkAccess: opts.networkAccess ?? true,
       baseBackoffMs: opts.baseBackoffMs ?? 1_000,
       maxBackoffRetries: opts.maxBackoffRetries ?? 4,
       rpcTimeoutMs: opts.rpcTimeoutMs ?? 30_000,
@@ -1291,6 +1292,11 @@ export class CodexProvider implements IAgentHarness {
       const cwd = params.workingDirectory ?? this.opts.defaultCwd;
       config['projects'] = { [cwd]: { trust_level: 'trusted' } };
     }
+    // Codex's workspace sandbox denies every socket by default, so a test that listens on localhost failed with
+    // EPERM; see `CodexProviderOptions.networkAccess`.
+    if (this.opts.sandboxMode === 'workspace-write') {
+      config['sandbox_workspace_write'] = { network_access: this.opts.networkAccess };
+    }
     config['plugins'] = Object.fromEntries(CODEX_DEVICE_CONTROL_PLUGINS.map((id) => [id, { enabled: false }]));
     // The chat's own servers are listed after, so one it names explicitly wins.
     config['mcp_servers'] = {
@@ -1380,7 +1386,7 @@ export class CodexProvider implements IAgentHarness {
       });
       return {};
     }
-    return { sandboxPolicy: { type: 'workspaceWrite', writableRoots: dirs } };
+    return { sandboxPolicy: { type: 'workspaceWrite', writableRoots: dirs, networkAccess: this.opts.networkAccess } };
   }
 
   async resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void> {
@@ -2372,9 +2378,9 @@ export class CodexProvider implements IAgentHarness {
       case 'danger-full-access':
         return { sandboxPolicy: { type: 'dangerFullAccess' } };
       case 'read-only':
-        return { sandboxPolicy: { type: 'readOnly' } };
+        return { sandboxPolicy: { type: 'readOnly', networkAccess: this.opts.networkAccess } };
       default:
-        return { sandboxPolicy: { type: 'workspaceWrite' } };
+        return { sandboxPolicy: { type: 'workspaceWrite', networkAccess: this.opts.networkAccess } };
     }
   }
 

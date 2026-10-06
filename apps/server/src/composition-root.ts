@@ -394,6 +394,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // still overrides this per turn (see CodexProvider.approvalPolicyForTurn).
       approvalPolicy: config.harness?.codex?.approvalPolicy ?? 'on-request',
       sandboxMode: config.harness?.codex?.sandboxMode ?? 'workspace-write',
+      networkAccess: config.harness?.codex?.networkAccess ?? true,
       clientName: 'generatorai',
       logger,
     } : undefined,
