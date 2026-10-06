@@ -63,12 +63,13 @@ describe('tasks section registry', () => {
 });
 
 describe('background tasks model', () => {
-  it('an interrupted worker (D-100) offers Resume, not Cancel, and counts with the failed ones', () => {
+  it('an interrupted worker (D-100) offers Resume, not Cancel, and has its own bucket', () => {
     expect(canResumeTask('interrupted')).toBe(true);
     expect(canCancelTask('interrupted')).toBe(false);
     for (const s of ['spawned', 'running', 'needs_review', 'completed', 'failed', 'cancelled'] as const) expect(canResumeTask(s)).toBe(false);
     const b = bucketTasks([{ taskId: 'a', taskName: 'a', status: 'interrupted', reviewRounds: 0 }]);
-    expect(b).toMatchObject({ failed: 1, active: 0, done: 1 });
+    expect(b).toMatchObject({ interrupted: 1, failed: 0, active: 0, done: 1 });
+    expect(progressSegments(b, 0)).toEqual([expect.objectContaining({ key: 'interrupted', count: 1, label: 'interrupted' })]);
   });
 
   const tasks = [

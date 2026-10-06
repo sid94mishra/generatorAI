@@ -35,18 +35,21 @@ export interface TaskBuckets {
   inReview: number;
   completed: number;
   failed: number;
+  /** D-100: stopped by a restart, resumable. */
+  interrupted: number;
   cancelled: number;
 }
 
 export function bucketTasks(tasks: readonly BackgroundTaskListItem[]): TaskBuckets {
-  const b: TaskBuckets = { total: tasks.length, active: 0, done: 0, running: 0, inReview: 0, completed: 0, failed: 0, cancelled: 0 };
+  const b: TaskBuckets = { total: tasks.length, active: 0, done: 0, running: 0, inReview: 0, completed: 0, failed: 0, interrupted: 0, cancelled: 0 };
   for (const t of tasks) {
     if (isActiveTask(t.status)) b.active += 1;
     else b.done += 1;
     if (t.status === 'spawned' || t.status === 'running') b.running += 1;
     else if (t.status === 'needs_review') b.inReview += 1;
     else if (t.status === 'completed') b.completed += 1;
-    else if (t.status === 'failed' || t.status === 'interrupted') b.failed += 1;
+    else if (t.status === 'failed') b.failed += 1;
+    else if (t.status === 'interrupted') b.interrupted += 1;
     else if (t.status === 'cancelled') b.cancelled += 1;
   }
   return b;
@@ -74,6 +77,7 @@ export function progressSegments(b: TaskBuckets, needsYou: number): ProgressSegm
     { key: 'review', tone: 'line', count: b.inReview, label: 'in review' },
     { key: 'completed', tone: 'ok', count: b.completed, label: 'completed' },
     { key: 'failed', tone: 'err', count: b.failed, label: 'failed' },
+    { key: 'interrupted', tone: 'warn', count: b.interrupted, label: 'interrupted' },
     { key: 'cancelled', tone: 'muted', count: b.cancelled, label: 'cancelled' },
   ];
   return all.filter((s) => s.count > 0);
