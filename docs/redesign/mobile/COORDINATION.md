@@ -39,6 +39,9 @@ It also records every merge of `desktop_redesign` into this branch.
 
 | 2026-10-03 | M7-03 | `packages/client-core/src/api/admin.ts` `agents.remove(id, force)` sends `?force=1` (was `force=true`, which `DELETE /agents/:id` ignores); test in `api/__tests__/m7Gaps.test.ts` | wire fix (web calls the route itself with `?force=1`; no other client-core caller) | MD-168: deleting an agent that is in use disables it instead of 409. |
 
+| 2026-10-07 | desktop LAN HTTPS (D-110…D-114) | server: `network/tls/*` (local CA + leaf, BYO), `network/requestOrigin.ts`, `network/serverEndpoints.ts`, `middleware/transportPolicy.ts`, `routes/auth.ts` (server-info / pair / preview `tls`, offer `certificateFingerprint`, `GET /auth/tls/ca.crt`), `routes/security.ts` (`network-access.tls`, `PUT/DELETE /security/tls/certificate`), `index.ts` (one port, HTTPS + HTTP); `packages/auth` route policy; `packages/secrets` `SecretNamespace.tls` | additive for mobile: mobile pairing offers keep the plain-HTTP LAN endpoints first (native lane, DPoP unchanged); `network-access.endpoints` and `server-info.endpoints` for a browser are now `https://`; new optional `tls` fields | Browsers on other devices need a secure context to pair. The mobile app keeps working over the native lane; HTTPS + pinning for it is MV-44 (`reviews/PENDING.md`). No `apps/mobile` code changed. |
+
+
 ## Merges of `desktop_redesign`
 
 | Date | desktop_redesign sha | Conflicts | Notes |

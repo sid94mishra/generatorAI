@@ -25,7 +25,7 @@ pnpm --filter @generatorai/server start
 
 The entrypoint also loads `.env` one directory above its entry module (`apps/server/.env` in the source or ordinary `dist` layout), filling only variables absent from the process environment. This is not restricted to development. The development launcher additionally uses `--env-file-if-exists=.env`. Supply managed production settings explicitly, especially telemetry: preloaded instrumentation runs before the entrypoint loader. Set explicit data paths for a managed deployment and preserve the secret key/backend required to reopen the vault.
 
-Configure reachable origins, TLS termination, and device pairing together. Browser cryptography needs a secure context for remote access. A reverse proxy must preserve the request information used for origin and DPoP validation; arbitrary host/scheme rewriting can invalidate proofs.
+Configure reachable origins, TLS termination, and device pairing together. Browser cryptography needs a secure context for remote access: with Network exposure on, the server serves HTTPS itself with a certificate from a per-install local CA, or one you load. A reverse proxy must preserve the request information used for origin and DPoP validation, and its forwarded headers are honoured only when `GENERATORAI_TRUST_PROXY` names it. See [Remote access over HTTPS](../guide/remote-access.md).
 
 ## Container
 
