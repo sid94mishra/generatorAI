@@ -804,6 +804,18 @@ pushes its endpoint; the call proceeds. When the person later opens a Browser ta
 active, it takes over the agent tab's page (navigates to its URL when blank) and the agent tab is destroyed, so agent
 and person keep looking at one page. A workspace that already has a tab is used as it is.
 
+### D-106 Only risky shell commands are "Risky" (2026-10-06) — Final
+`classifyPermissionRisk` (MG-04) marked every shell gate risky, so `ls` and `npm test` carried the same "Risky" badge
+as `git push` and a phone had to sign them. A shell gate is now risky only when its command uses the network (curl,
+ssh, git fetch/pull/clone…), downloads or publishes packages (npm install, npx, pip install…), pushes to a git
+remote, deletes or overwrites data (rm -r/-f, git reset --hard, git clean -f, a force push, dd, kill…), needs elevated
+rights (sudo, chown, chmod -R), pipes into a shell or evals, or writes outside the workspace (a redirect or a writing
+command targeting `..`, `~` or an absolute path other than `/dev/null`) — or when its command cannot be read. The
+command is read out of the server's input summary (raw, or the `command` / `cmd` field of the input as JSON, also when
+cut off). Network gates and file writes that leave the workspace stay risky. The verdict is still stamped once on
+the server and copied to the attention ask and the push, and mobile computes it with the same shared function, so a
+truly risky gate still needs a signed answer.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

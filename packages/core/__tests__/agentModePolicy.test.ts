@@ -165,7 +165,10 @@ describe('buildToolPermissionPayload — gate risk (MG-04)', () => {
       { type: 'shell_exec', description: 'Run', details: { toolName: 'Bash', input: { command: 'git push origin main' } } },
       'default',
     );
-    expect(risky).toMatchObject({ risk: 'risky', riskReasons: ['runs a shell command', 'pushes to a git remote'] });
+    expect(risky).toMatchObject({ risk: 'risky', riskReasons: ['pushes to a git remote'] });
+    // D-106: a shell command that stays in the workspace is standard (the JSON summary's command is what is judged).
+    const local = buildToolPermissionPayload({ type: 'shell_exec', description: 'Run', details: { toolName: 'Bash', input: { command: 'npm test', description: 'Run the tests' } } }, 'default');
+    expect(local.risk).toBe('standard');
     const standard = buildToolPermissionPayload({ type: 'file_write', description: 'Edit', details: { toolName: 'Edit', input: { file_path: 'src/a.ts' } } }, 'default');
     expect(standard.risk).toBe('standard');
     expect(standard).not.toHaveProperty('riskReasons');
