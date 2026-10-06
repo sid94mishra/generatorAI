@@ -1,9 +1,9 @@
 // WP-2.6 — GatePort, TurnContextRegistry, the tool-policy wrapper, StageGatePort.
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_AGENT_TOOL_POLICY, type AgentToolPolicy } from '@generatorai/shared';
 import type { PermissionRequest } from '../../src/domain/ports/IAgentHarness.js';
-import { TurnContextRegistry, type GatePort } from '../../src/services/session/gates.js';
+import { TurnContextRegistry, askBeforeRunning, type GatePort } from '../../src/services/session/gates.js';
 import { applyModeConfig } from '../../src/services/session/modeConfig.js';
 import { StageGatePort } from '../../src/services/session/StageGatePort.js';
 import type { SessionOwner, TurnContext } from '../../src/services/session/types.js';
@@ -141,5 +141,38 @@ describe('StageGatePort on the engine park', () => {
     const plan = await env.services.planService!.findById(result!.planId);
     expect(plan).toMatchObject({ stageRunId, workflowRunId: runId, status: 'recorded' });
     expect(events).toContain('stage.plan.created');
+  });
+});
+
+describe('askBeforeRunning (D-102)', () => {
+  const run = vi.fn(async () => 'navigated');
+  const tool = { name: 'navigate_page', description: 'Go', parametersSchema: {}, handler: run };
+  const turnIn = (permissionMode: string) => ({ permissionMode }) as unknown as TurnContext;
+
+  it('asks the gate in "Ask before tools run" and "Accept edits", and runs only when allowed', async () => {
+    for (const mode of ['default', 'acceptEdits']) {
+      run.mockClear();
+      const permission = vi.fn(async () => ({ granted: true }));
+      const [wrapped] = askBeforeRunning([tool], { turnOf: () => turnIn(mode), port: { permission } });
+      expect(wrapped!.skipPermission).toBe(true);
+      await expect(wrapped!.handler({ url: 'http://x' })).resolves.toBe('navigated');
+      expect(permission).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'other', details: expect.objectContaining({ toolName: 'navigate_page', input: { url: 'http://x' } }) }),
+        expect.anything(),
+      );
+    }
+    const denied = askBeforeRunning([tool], { turnOf: () => turnIn('default'), port: { permission: async () => ({ granted: false, reason: 'No.' }) } });
+    run.mockClear();
+    await expect(denied[0]!.handler({})).rejects.toThrow('No.');
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('runs unasked in full access, plan or without a turn or an approval channel', async () => {
+    const permission = vi.fn(async () => ({ granted: false }));
+    for (const turnOf of [() => turnIn('bypassPermissions'), () => turnIn('plan'), () => undefined]) {
+      await expect(askBeforeRunning([tool], { turnOf, port: { permission } })[0]!.handler({})).resolves.toBe('navigated');
+    }
+    await expect(askBeforeRunning([tool], { turnOf: () => turnIn('default'), port: undefined })[0]!.handler({})).resolves.toBe('navigated');
+    expect(permission).not.toHaveBeenCalled();
   });
 });

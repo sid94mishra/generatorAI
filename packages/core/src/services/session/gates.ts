@@ -17,6 +17,8 @@ import type {
   PlanReviewDecision,
   PlanReviewRequest,
   QuestionRequest,
+  ToolCallContext,
+  ToolDefinition,
 } from '../../domain/ports/IAgentHarness.js';
 import type { RecordPlanArgs, RecordPlanResult } from '../../tools/recordPlanTool.js';
 import type { TurnContext } from './types.js';
@@ -91,4 +93,37 @@ export function withAgentToolPolicy(gate: GatePort, groups: AgentToolPolicy): Ga
     ...(gate.planReview ? { planReview: gate.planReview.bind(gate) } : {}),
     ...(gate.recordPlan ? { recordPlan: gate.recordPlan.bind(gate) } : {}),
   };
+}
+
+
+/** The turn permission modes in which a platform tool asks before it runs ("Ask before tools run", "Accept edits, ask for the rest"). */
+const ASKING_MODES: ReadonlySet<string> = new Set(['default', 'acceptEdits']);
+
+/**
+ * D-96 / D-102: platform tools that act — the integrated browser, widgets — ask through the session's permission gate
+ * when the turn's mode asks. Providers pre-approve host tools (Claude lists them in `allowedTools`, Codex runs dynamic
+ * tools client-side), so without this "Ask before tools run" asked for shell and file tools but let the browser
+ * navigate and widgets render unasked. The wrapped tool sets `skipPermission` so a provider that would prompt for a
+ * host tool natively (Copilot) does not ask a second time. Outside an asking mode, or with no approval channel (an
+ * unattended run), the tool runs as before.
+ */
+export function askBeforeRunning(
+  tools: readonly ToolDefinition[],
+  opts: { turnOf: () => TurnContext | undefined; port: GatePort | undefined },
+): ToolDefinition[] {
+  return tools.map((tool) => ({
+    ...tool,
+    skipPermission: true,
+    handler: async (args: Record<string, unknown>, ctx?: ToolCallContext) => {
+      const turn = opts.turnOf();
+      if (opts.port && turn && ASKING_MODES.has(turn.permissionMode)) {
+        const answer = await opts.port.permission(
+          { type: 'other', description: tool.name, details: { toolName: tool.name, input: args, provider: 'platform' } },
+          turn,
+        );
+        if (!answer.granted) throw new Error(answer.reason ?? `Using ${tool.name} was not allowed.`);
+      }
+      return tool.handler(args, ctx);
+    },
+  }));
 }

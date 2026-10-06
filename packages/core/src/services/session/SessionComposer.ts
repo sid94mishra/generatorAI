@@ -34,6 +34,7 @@ import type {
   CreateConversationParams,
   IAgentHarness,
   SendPromptOptions,
+  ToolDefinition,
 } from '../../domain/ports/IAgentHarness.js';
 import { getDefaultChatPermissionMode, providerHasNativePlanGate, resolveTurnPermissionMode } from '../agentModePolicy.js';
 import { inheritWorkerCapabilitiesFrom } from '../orchestrator/OrchestratorService.js';
@@ -41,7 +42,7 @@ import { appendAgentInstructions, applyAgentProjection, applyExplicitSpec, deliv
 import { formatConversationBindingKey } from './bindingKey.js';
 import { appendSystemBlock, systemContent, unionList, type ConversationConfig } from './cfg.js';
 import { capabilityLevelsFor } from './capabilityLevels.js';
-import type { GatePort, TurnContextRegistry } from './gates.js';
+import { askBeforeRunning, withAgentToolPolicy, type GatePort, type TurnContextRegistry } from './gates.js';
 import { applyModeConfig, planPromptPrefix } from './modeConfig.js';
 import { checkPermissionGating, turnOptionsFrom, type PermissionModeSource } from './permissionSource.js';
 import { PlatformToolBinder, type BindTarget } from './PlatformToolBinder.js';
@@ -228,6 +229,7 @@ export class SessionComposer {
       groups: projection.toolPolicy.groups,
     };
     const toolsBefore = toolCount(cfg);
+    const namesBefore = new Set(toolNamesOf(cfg));
     await this.binder.browser(cfg, target, {
       autoStart: i.platform.browser.autoStart,
       ...(i.platform.browser.reattach ? { reattach: true } : {}),
@@ -237,7 +239,18 @@ export class SessionComposer {
       enabled: this.computerUseAllowed(computerUse, mode, warnings),
       refusal: () => this.computerRefusal(i.conversationId),
     });
+    const afterComputer = new Set(toolNamesOf(cfg));
+    const browserTools = [...afterComputer].filter((n) => !namesBefore.has(n) && !n.startsWith('computer_'));
     this.binder.widgets(cfg, target, { enabled: i.spec.widgets !== false });
+    // D-102: the browser and widget tools ask before they run when the turn's mode asks.
+    if (i.gates && i.attended && Array.isArray(cfg['tools'])) {
+      const asking = new Set([...browserTools, ...toolNamesOf(cfg).filter((n) => !afterComputer.has(n))]);
+      const port = withAgentToolPolicy(i.gates, projection.toolPolicy.groups);
+      const turnOf = () => this.turns.get(i.conversationId);
+      cfg['tools'] = (cfg['tools'] as ToolDefinition[]).map((tool) =>
+        asking.has(tool.name) ? askBeforeRunning([tool], { turnOf, port })[0]! : tool,
+      );
+    }
     this.binder.sourceControlHint(cfg, i.platform.sourceControl);
     const mcpWarnings = await resolveMcp(
       cfg,
@@ -482,4 +495,8 @@ function computerUsePolicy(i: ComposeInput): TurnPolicy['computerUse'] {
 
 function toolCount(cfg: ConversationConfig): number {
   return Array.isArray(cfg['tools']) ? (cfg['tools'] as unknown[]).length : 0;
+}
+
+function toolNamesOf(cfg: ConversationConfig): string[] {
+  return Array.isArray(cfg['tools']) ? (cfg['tools'] as Array<{ name?: string }>).map((t) => t.name ?? '').filter(Boolean) : [];
 }

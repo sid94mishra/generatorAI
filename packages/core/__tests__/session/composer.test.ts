@@ -160,7 +160,7 @@ describe('composer platform gating', () => {
 
   it("a bypass stage orchestrator's worker gets no computer use and is refused per call (PD-5, review R5)", async () => {
     const parents: StageOrchestratorParent[] = [];
-    const orchestratorService = { registerStageParent: (p: StageOrchestratorParent) => parents.push(p) } as unknown as OrchestratorService;
+    const orchestratorService = { registerStageParent: (p: StageOrchestratorParent) => parents.push(p), getConfig: () => ({ workerTimeoutMs: 1_000 }) } as unknown as OrchestratorService;
     type Tool = { name: string; handler: (a: Record<string, unknown>) => Promise<unknown> };
     const computerTools = (p: unknown) => ((p as { tools?: Tool[] }).tools ?? []).filter((t) => t.name.startsWith('computer'));
 

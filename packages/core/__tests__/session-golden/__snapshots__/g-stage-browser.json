@@ -183,7 +183,8 @@
           "pageId"
         ],
         "additionalProperties": false
-      }
+      },
+      "skipPermission": true
     },
     {
       "name": "type_in_page",
@@ -217,7 +218,8 @@
           "pageId"
         ],
         "additionalProperties": false
-      }
+      },
+      "skipPermission": true
     },
     {
       "name": "hover_element",
@@ -243,7 +245,8 @@
           "pageId"
         ],
         "additionalProperties": false
-      }
+      },
+      "skipPermission": true
     },
     {
       "name": "drag_element",
@@ -277,7 +280,8 @@
           "pageId"
         ],
         "additionalProperties": false
-      }
+      },
+      "skipPermission": true
     },
     {
       "name": "screenshot_page",
@@ -335,7 +339,8 @@
           "action"
         ],
         "additionalProperties": false
-      }
+      },
+      "skipPermission": true
     },
     {
       "name": "run_playwright_code",
@@ -375,7 +380,8 @@
           "pageId"
         ],
         "additionalProperties": false
-      }
+      },
+      "skipPermission": true
     },
     {
       "name": "record_plan",

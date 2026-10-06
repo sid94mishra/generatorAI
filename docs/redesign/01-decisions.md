@@ -764,6 +764,15 @@ commands already run with the network, so the Codex sandbox now allows it by def
 false` turns it off). Write access is unchanged: what may be written is still the sandbox's roots and the bound
 agent's `fileWrite` group, enforced at the permission gate.
 
+### D-102 "Ask before tools run" asks for the browser and widget tools too (2026-10-06) — Final
+D-96's Approvals menu made a chat ask before shell and file tools, but the platform's own tools ran unasked: providers
+pre-approve host tools (Claude lists them in `allowedTools`, Codex runs dynamic tools client-side). In a turn whose
+mode is `default` ("Ask before tools run") or `acceptEdits` ("Accept edits, ask for the rest") the integrated
+browser's and widget tools now ask through the session's permission gate first (`askBeforeRunning`, bound by the
+session composer, the bound agent's tool groups applied first); denied, the tool fails with the reason. The wrapped
+tools set `skipPermission`, so a provider that would prompt natively (Copilot) asks once. Full access, plan turns and
+unattended runs are unchanged. Computer-use tools keep their own consent flow.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
