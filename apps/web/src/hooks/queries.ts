@@ -665,6 +665,22 @@ export function useCancelBackgroundTask(chatId: string | undefined) {
   });
 }
 
+/** D-100: resume a worker a restart interrupted; the row flips to running before the next poll. */
+export function useResumeBackgroundTask(chatId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId: string) => platform.resumeBackgroundTask(chatId!, taskId),
+    onSuccess: (result) => {
+      const key = backgroundTasksKeys.list(chatId ?? '');
+      queryClient.setQueryData<{ tasks: BackgroundTaskListItem[] }>(key, (prev) =>
+        prev ? { tasks: prev.tasks.map((t) => (t.taskId === result.taskId ? { ...t, status: 'running' } : t)) } : prev,
+      );
+      void queryClient.invalidateQueries({ queryKey: key });
+    },
+  });
+}
+
 /** Poll the compact digest for one background worker task. */
 export function useBackgroundTaskDigest(chatId: string | undefined, taskId: string | undefined) {
   const platform = usePlatform() as HttpPlatformClient;

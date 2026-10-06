@@ -1391,6 +1391,13 @@ export function createApiClient(fetchImpl: ApiFetch) {
           `/api/chats/${encodeURIComponent(id)}/background-tasks/${encodeURIComponent(taskId)}/cancel`,
           { method: 'POST' },
         ),
+      /** D-100: continue a worker a server restart interrupted. */
+      resumeBackgroundTask: (id: string, taskId: string) =>
+        request<{ ok: true; taskId: string }>(
+          fetchImpl,
+          `/api/chats/${encodeURIComponent(id)}/background-tasks/${encodeURIComponent(taskId)}/resume`,
+          { method: 'POST' },
+        ),
       /** The runs this chat started through its workflow tools, as run cards (P06). */
       workflowRuns: (id: string) => request<{ runs: ChatWorkflowRunCard[] }>(fetchImpl, `/api/chats/${id}/workflow-runs`),
 

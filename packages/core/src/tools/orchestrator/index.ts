@@ -129,7 +129,8 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
     name: 'send_to_background_agent',
     description:
       'Send a follow-up message to a background worker (resumes its context) — use to request a revision after ' +
-      'reviewing its digest. Bounded by a per-worker review-round limit.',
+      'reviewing its digest. Bounded by a per-worker review-round limit. A worker whose status is "interrupted" ' +
+      '(the app restarted mid-task) resumes from its transcript when sent a follow-up.',
     parametersSchema: {
       type: 'object',
       properties: {

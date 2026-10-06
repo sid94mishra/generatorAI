@@ -742,6 +742,19 @@ check wrapped into a **loop** gets it turned off, since the loop's exit rules re
 schema default stays `false` (existing definitions and the bundled templates are unchanged; they set it explicitly
 where it matters).
 
+### D-100 Orchestrator workers across a restart: interrupted, then Resume (2026-10-06) — Final
+A worker's turn is fire-and-forget in the server process; a quit or restart killed it and the worker was shown
+"Failed — Interrupted by a server restart" with no way on. Its chat, transcript and provider session are durable, so:
+- On the first list after a restart a worker the DB still calls running/spawned becomes **`interrupted`** (a new
+  `BackgroundTaskStatus`; status map `paused "Interrupted"`; counts with failed in the dock and Attention).
+- **Resume** (Tasks dock row and task detail; `POST /chats/:id/background-tasks/:taskId/resume`) re-attaches it and
+  prompts it with a restart note and its brief repeated (a provider that lost its session starts from that message),
+  told to check the files first and finish, not restart. It rejoins its wave (no new wave counted); when it settles,
+  the wave-complete nudge wakes the orchestrator to collect the result.
+- The orchestrator's `send_to_background_agent` on an interrupted worker resumes it with the follow-up.
+- Not automatic on boot: resuming spends provider tokens, so a person (or the orchestrator, when asked to continue)
+  decides.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

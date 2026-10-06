@@ -112,6 +112,8 @@ function workerStepLabel(step: string): string {
 export function backgroundTaskStatus(status: string): StepStatus {
   if (status === 'failed' || status === 'cancelled') return 'failed';
   if (status === 'completed' || status === 'needs_review') return 'done';
+  // D-100: stopped by a restart — nothing runs it until someone resumes it.
+  if (status === 'interrupted') return 'waiting';
   // `spawned` / `running`. The block's status is the worker's own, kept
   // current by its `chat.background_task.*` events — and a worker outlives
   // the turn that spawned it, so the orchestrator's turn being settled says

@@ -389,7 +389,7 @@ describe('OrchestratorService — W24 termination guards (the arbiter)', () => {
     expect(sent[0]).toMatch(/Every background agent in the current wave has finished/);
   }, 15_000);
 
-  it('a worker the DB still calls running after a restart is reported failed, not running forever', async () => {
+  it('a worker the DB still calls running after a restart is reported interrupted, not running forever (D-100)', async () => {
     const chatRepo = new MockChatRepository();
     await chatRepo.create({
       id: 'parent-x', name: 'Orchestrator', sessionId: 'parent-x-session', status: 'active', orchestratorMode: true,
@@ -406,8 +406,8 @@ describe('OrchestratorService — W24 termination guards (the arbiter)', () => {
     );
     fresh.setChatManagementService(fakeChatManagementService());
     const list = await fresh.listBackgroundAgents('parent-x');
-    expect(list).toEqual([expect.objectContaining({ taskId: 'worker-stale', status: 'failed' })]);
-    expect((await chatRepo.getById('worker-stale')).backgroundTask?.status).toBe('failed');
+    expect(list).toEqual([expect.objectContaining({ taskId: 'worker-stale', status: 'interrupted' })]);
+    expect((await chatRepo.getById('worker-stale')).backgroundTask?.status).toBe('interrupted');
   });
 
   it('disposeForParent clears the persisted wave state (archive path)', async () => {

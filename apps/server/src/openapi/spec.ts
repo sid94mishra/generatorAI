@@ -3633,7 +3633,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
                         properties: {
                           taskId: { type: 'string' },
                           taskName: { type: 'string' },
-                          status: { type: 'string', enum: ['spawned', 'running', 'needs_review', 'completed', 'failed', 'cancelled'] },
+                          status: { type: 'string', enum: ['spawned', 'running', 'needs_review', 'completed', 'failed', 'cancelled', 'interrupted'] },
                           model: { type: 'string' },
                           agentRef: { type: 'string' },
                           agentName: { type: 'string' },
@@ -3674,7 +3674,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
                   properties: {
                     taskId: { type: 'string' },
                     taskName: { type: 'string' },
-                    status: { type: 'string', enum: ['spawned', 'running', 'needs_review', 'completed', 'failed', 'cancelled'] },
+                    status: { type: 'string', enum: ['spawned', 'running', 'needs_review', 'completed', 'failed', 'cancelled', 'interrupted'] },
                     model: { type: 'string' },
                     brief: {
                       type: 'object',
@@ -3764,6 +3764,31 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
             },
           },
           '404': { description: 'Unknown task', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/chats/{id}/background-tasks/{taskId}/resume': {
+      post: {
+        tags: ['Chats'],
+        summary: 'Resume a worker a server restart interrupted (D-100)',
+        description:
+          'Only an `interrupted` worker resumes: it is re-attached and prompted to finish from its transcript; when it ' +
+          'settles the orchestrator is prompted to collect the result. Progress arrives on the orchestrator chat stream.',
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string' } },
+          { in: 'path', name: 'taskId', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '202': {
+            description: 'Resumed',
+            content: {
+              'application/json': {
+                schema: { type: 'object', properties: { ok: { type: 'boolean' }, taskId: { type: 'string' } }, required: ['ok', 'taskId'] },
+              },
+            },
+          },
+          '404': { description: 'Unknown task', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'The task is not interrupted', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },

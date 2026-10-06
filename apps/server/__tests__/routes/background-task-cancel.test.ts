@@ -132,3 +132,61 @@ describe('G-20 background-task cancel route', () => {
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
 });
+
+// D-100 — a worker a restart interrupted, over a fresh service (the previous process's live records are gone).
+describe('D-100 background-task resume route', () => {
+  async function afterRestart() {
+    const chatRepo = new DrizzleChatRepository(db);
+    const eventBus = new EventBus();
+    const now = new Date();
+    for (const id of [PARENT_SESSION, 'worker-9-session']) {
+      await db.insert(sessions).values({ id, name: id, status: 'active', createdAt: now, updatedAt: now });
+    }
+    await chatRepo.create({ id: PARENT, name: 'Orchestrator', sessionId: PARENT_SESSION, tags: [], status: 'active', orchestratorMode: true, createdAt: now, updatedAt: now } as Chat);
+    await chatRepo.create({
+      id: 'worker-9',
+      name: 'api',
+      sessionId: 'worker-9-session',
+      tags: [],
+      status: 'active',
+      parentChatId: PARENT,
+      backgroundTask: { orchestratorChatId: PARENT, taskName: 'api', status: 'running' },
+      createdAt: now,
+      updatedAt: now,
+    } as Chat);
+    const sendPrompt = vi.fn(async () => {});
+    const orchestratorService = new OrchestratorService(
+      chatRepo,
+      { getById: async (id: string) => ({ id, status: 'active' }) } as never,
+      { getByChatId: async () => [] } as never,
+      { getModels: async () => [] } as unknown as IAgentHarness,
+      eventBus,
+      { ...DEFAULT_ORCHESTRATOR_CONFIG, defaultWorkerModel: 'faux-model', warmFirst: false },
+    );
+    orchestratorService.setChatManagementService({ sendPrompt, getStreamingChatIds: () => [] } as unknown as ChatManagementService);
+    const container = createMockContainer();
+    (container as unknown as { orchestratorService: OrchestratorService }).orchestratorService = orchestratorService;
+    return { app: createApp(container), chatRepo, sendPrompt };
+  }
+
+  it('lists the worker as interrupted, resumes it once, and refuses a second resume', async () => {
+    const { app, chatRepo, sendPrompt } = await afterRestart();
+    const list = await request(app).get(`/api/chats/${PARENT}/background-tasks`).expect(200);
+    expect(list.body.tasks).toEqual([expect.objectContaining({ taskId: 'worker-9', status: 'interrupted' })]);
+    expect((await chatRepo.getById('worker-9')).backgroundTask?.status).toBe('interrupted');
+
+    const res = await request(app).post(`/api/chats/${PARENT}/background-tasks/worker-9/resume`).expect(202);
+    expect(res.body).toEqual({ ok: true, taskId: 'worker-9' });
+    expect(sendPrompt).toHaveBeenCalledWith('worker-9', expect.stringContaining('The app restarted'));
+    expect((await chatRepo.getById('worker-9')).backgroundTask?.status).toBe('running');
+
+    const again = await request(app).post(`/api/chats/${PARENT}/background-tasks/worker-9/resume`).expect(409);
+    expect(again.body.error.code).toBe('CONFLICT');
+  });
+
+  it('404s an unknown task or one under another orchestrator', async () => {
+    const { app } = await afterRestart();
+    await request(app).post(`/api/chats/${PARENT}/background-tasks/nope/resume`).expect(404);
+    await request(app).post(`/api/chats/other/background-tasks/worker-9/resume`).expect(404);
+  });
+});

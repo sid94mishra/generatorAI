@@ -8,7 +8,7 @@ import {
   visibleTasksSections,
   type TasksSectionDefinition,
 } from '../tasksSections.js';
-import { bucketTasks, cancelledLine, filterTasks, formatElapsed, progressSegments } from '../backgroundTasksModel.js';
+import { bucketTasks, canCancelTask, canResumeTask, cancelledLine, filterTasks, formatElapsed, progressSegments } from '../backgroundTasksModel.js';
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -63,6 +63,14 @@ describe('tasks section registry', () => {
 });
 
 describe('background tasks model', () => {
+  it('an interrupted worker (D-100) offers Resume, not Cancel, and counts with the failed ones', () => {
+    expect(canResumeTask('interrupted')).toBe(true);
+    expect(canCancelTask('interrupted')).toBe(false);
+    for (const s of ['spawned', 'running', 'needs_review', 'completed', 'failed', 'cancelled'] as const) expect(canResumeTask(s)).toBe(false);
+    const b = bucketTasks([{ taskId: 'a', taskName: 'a', status: 'interrupted', reviewRounds: 0 }]);
+    expect(b).toMatchObject({ failed: 1, active: 0, done: 1 });
+  });
+
   const tasks = [
     { taskId: 'a', taskName: 'A', status: 'running', reviewRounds: 0 },
     { taskId: 'b', taskName: 'B', status: 'needs_review', reviewRounds: 1 },

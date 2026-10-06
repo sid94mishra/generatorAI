@@ -19,6 +19,7 @@ import {
   useBackgroundTaskDigest,
   useBackgroundTasks,
   useCancelBackgroundTask,
+  useResumeBackgroundTask,
 } from '@/hooks/queries.js';
 import { StepList } from '@/blocks/transcript/StepRow/StepList.js';
 import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
@@ -40,6 +41,7 @@ import type { TasksSectionContext } from './tasksSections.js';
 import {
   bucketTasks,
   canCancelTask,
+  canResumeTask,
   cancelledLine,
   filterTasks,
   formatElapsed,
@@ -148,6 +150,8 @@ function TaskRow({
   onOpen,
   onCancel,
   cancelling,
+  onResume,
+  resuming,
 }: {
   task: BackgroundTaskListItem;
   block: BackgroundTaskBlock | undefined;
@@ -155,6 +159,8 @@ function TaskRow({
   onOpen: () => void;
   onCancel: () => void;
   cancelling: boolean;
+  onResume: () => void;
+  resuming: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
   const elapsed = elapsedOf(block, now);
@@ -205,6 +211,11 @@ function TaskRow({
       <div className="flex shrink-0 items-center gap-1.5">
         <TaskStatus status={task.status} />
         {elapsed ? <Count>{elapsed}</Count> : null}
+        {canResumeTask(task.status) ? (
+          <Button size="sm" icon="play" loading={resuming} aria-label={`Resume ${task.taskName}`} onClick={onResume}>
+            Resume
+          </Button>
+        ) : null}
         {canCancelTask(task.status) ? (
           <IconButton icon="x" size="sm" label={`Cancel ${task.taskName}`} onClick={() => setConfirming(true)} />
         ) : (
@@ -270,6 +281,8 @@ function TaskDetail({
   onBack,
   onCancel,
   cancelling,
+  onResume,
+  resuming,
 }: {
   chatId: string;
   task: BackgroundTaskListItem;
@@ -278,6 +291,8 @@ function TaskDetail({
   onBack: () => void;
   onCancel: () => void;
   cancelling: boolean;
+  onResume: () => void;
+  resuming: boolean;
 }) {
   const navigate = useNavigate();
   const { data, isLoading } = useBackgroundTaskDigest(chatId, task.taskId);
@@ -387,6 +402,11 @@ function TaskDetail({
         <Button size="sm" icon="message" onClick={() => navigate(`/chats/${task.taskId}`)}>
           Open task chat
         </Button>
+        {canResumeTask(task.status) ? (
+          <Button size="sm" icon="play" variant="primary" className="ml-auto" loading={resuming} onClick={onResume}>
+            Resume
+          </Button>
+        ) : null}
         {canCancelTask(task.status) ? (
           <Button size="sm" variant="danger-ghost" className="ml-auto" loading={cancelling} onClick={onCancel}>
             Cancel task
@@ -406,6 +426,7 @@ function firstLine(text: string): string {
 export function BackgroundTasksSection({ chatId, chat, stacked }: TasksSectionContext) {
   const { data, isLoading } = useBackgroundTasks(chatId);
   const cancelTask = useCancelBackgroundTask(chatId);
+  const resumeTask = useResumeBackgroundTask(chatId);
   const live = useLiveTaskBlocks(chat.sessionId);
   const attention = useAttention();
   const [filter, setFilter] = useState<TaskFilter>('all');
@@ -425,6 +446,8 @@ export function BackgroundTasksSection({ chatId, chat, stacked }: TasksSectionCo
 
   const cancel = (taskId: string) => cancelTask.mutate(taskId);
   const cancellingId = cancelTask.isPending ? cancelTask.variables : undefined;
+  const resume = (taskId: string) => resumeTask.mutate(taskId);
+  const resumingId = resumeTask.isPending ? resumeTask.variables : undefined;
 
   if (openTask) {
     return (
@@ -436,6 +459,8 @@ export function BackgroundTasksSection({ chatId, chat, stacked }: TasksSectionCo
         onBack={() => setOpenTaskId(null)}
         onCancel={() => cancel(openTask.taskId)}
         cancelling={cancellingId === openTask.taskId}
+        onResume={() => resume(openTask.taskId)}
+        resuming={resumingId === openTask.taskId}
       />
     );
   }
@@ -512,6 +537,8 @@ export function BackgroundTasksSection({ chatId, chat, stacked }: TasksSectionCo
                 onOpen={() => setOpenTaskId(task.taskId)}
                 onCancel={() => cancel(task.taskId)}
                 cancelling={cancellingId === task.taskId}
+                onResume={() => resume(task.taskId)}
+                resuming={resumingId === task.taskId}
               />
             ))}
           </ul>

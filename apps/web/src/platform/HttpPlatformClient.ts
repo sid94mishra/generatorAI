@@ -855,6 +855,14 @@ export class HttpPlatformClient implements IPlatformClient {
     );
   }
 
+  /** D-100: continue a worker a server restart interrupted. */
+  async resumeBackgroundTask(chatId: string, taskId: string): Promise<{ ok: true; taskId: string }> {
+    return apiFetch<{ ok: true; taskId: string }>(
+      `${this.baseUrl}/api/chats/${chatId}/background-tasks/${taskId}/resume`,
+      { method: 'POST' },
+    );
+  }
+
   // ── Workflow runs a chat started (P06 WP-6.2) ──
 
   /** The chat's run cards: status, stage progress, parked decisions. */

@@ -12,6 +12,11 @@ export function isActiveTask(status: BackgroundTaskStatus): boolean {
   return ACTIVE.has(status);
 }
 
+/** D-100: Resume is offered only for a worker a restart interrupted. */
+export function canResumeTask(status: BackgroundTaskStatus): boolean {
+  return status === 'interrupted';
+}
+
 /** Cancel is offered only while a task is starting or running (the board's rule). */
 export function canCancelTask(status: BackgroundTaskStatus): boolean {
   return status === 'spawned' || status === 'running';
@@ -41,7 +46,7 @@ export function bucketTasks(tasks: readonly BackgroundTaskListItem[]): TaskBucke
     if (t.status === 'spawned' || t.status === 'running') b.running += 1;
     else if (t.status === 'needs_review') b.inReview += 1;
     else if (t.status === 'completed') b.completed += 1;
-    else if (t.status === 'failed') b.failed += 1;
+    else if (t.status === 'failed' || t.status === 'interrupted') b.failed += 1;
     else if (t.status === 'cancelled') b.cancelled += 1;
   }
   return b;

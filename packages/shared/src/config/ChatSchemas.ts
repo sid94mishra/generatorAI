@@ -151,7 +151,7 @@ export const CreateChatSchema = z.object({
     orchestratorChatId: z.string().uuid(),
     taskName: z.string().min(1).max(120),
     taskIndex: z.number().int().min(0).optional(),
-    status: z.enum(['spawned', 'running', 'needs_review', 'completed', 'failed', 'cancelled']).optional(),
+    status: z.enum(['spawned', 'running', 'needs_review', 'completed', 'failed', 'cancelled', 'interrupted']).optional(),
   }).optional(),
   /** Sticky per-chat default agent mode; overridable per turn from the composer. */
   defaultAgentMode: AgentModeSchema.optional(),

@@ -99,6 +99,8 @@ export const STATUS_MAPS = {
     completed: m('succeeded', 'Done'),
     failed: m('failed'),
     cancelled: m('skipped', 'Cancelled'),
+    // D-100: stopped by a restart, resumable from the Tasks dock.
+    interrupted: m('paused', 'Interrupted'),
   } satisfies Record<BackgroundTaskStatus, StatusMapping | null>,
 
   /** Lifecycle only; "Archived" renders as a neutral chip, not a status badge. */

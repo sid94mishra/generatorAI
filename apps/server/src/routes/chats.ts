@@ -1202,6 +1202,26 @@ export function createChatApiRoutes(container: Container): Router {
     }
   });
 
+  // POST /chats/:id/background-tasks/:taskId/resume — continue a worker a restart interrupted (D-100).
+  router.post('/:id/background-tasks/:taskId/resume', async (req, res, next) => {
+    try {
+      const chatId = String(req.params['id']);
+      const taskId = String(req.params['taskId']);
+      const result = await container.orchestratorService.resumeBackgroundAgent(taskId, { parentChatId: chatId });
+      if (result.notFound) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: `Background task ${taskId} not found` } });
+        return;
+      }
+      if (!result.ok) {
+        res.status(409).json({ error: { code: 'CONFLICT', message: result.error ?? 'The task is not interrupted' } });
+        return;
+      }
+      res.status(202).json({ ok: true, taskId });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // ══════════════════════════════════════════════════════════════
   // PLN-01 — Plan mode
   //

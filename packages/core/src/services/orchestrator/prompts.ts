@@ -229,3 +229,25 @@ export function renderBriefMessage(
   lines.push('When done, end your final message with the <TASK_RESULT>…</TASK_RESULT> digest block described in your instructions.');
   return lines.join('\n');
 }
+
+/**
+ * D-100: the message that resumes a worker whose turn died with the previous server process. The brief is
+ * repeated because a provider that could not resume its own session starts from this message alone; the worker
+ * is told to look at the files first so a resumed worker does not redo (or undo) finished work.
+ */
+export function renderResumeMessage(brief: string | undefined, followup?: string): string {
+  const lines = [
+    '[system] The app restarted while you were working on this task, so your last turn stopped part-way.',
+    'Before you continue, check the current state of the files you were changing — some of your work may already be',
+    'there. Finish what is left; do not start over.',
+  ];
+  if (followup?.trim()) {
+    lines.push('', '## From the orchestrator', followup.trim());
+  }
+  if (brief?.trim()) {
+    lines.push('', '## Your brief (repeated)', brief.trim());
+  } else {
+    lines.push('', 'When done, end your final message with the <TASK_RESULT>…</TASK_RESULT> digest block described in your instructions.');
+  }
+  return lines.join('\n');
+}

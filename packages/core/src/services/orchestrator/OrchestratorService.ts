@@ -28,7 +28,7 @@ import type { ChatManagementService } from '../ChatManagementService.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
 import type { Agent, AgentOverrides, AgentToolPolicy, Chat, HarnessConfig } from '@generatorai/shared';
 import type { TurnPolicy } from '../session/types.js';
-import { WORKER_SYSTEM_PROMPT, renderBriefMessage } from './prompts.js';
+import { WORKER_SYSTEM_PROMPT, renderBriefMessage, renderResumeMessage } from './prompts.js';
 
 /**
  * Narrow view of AgentService. Structural rather than a direct import so the
@@ -782,7 +782,7 @@ export class OrchestratorService {
         .catch(() => undefined);
     }
 
-    const record: TaskRecord = {
+    const record = this.newRecord({
       taskId: worker.id,
       taskName: brief.taskName,
       parentChatId,
@@ -791,21 +791,8 @@ export class OrchestratorService {
       model: workerModel,
       ...(workerAgentRef ? { agentRef: workerAgentRef } : {}),
       ...(workerAgentName ? { agentName: workerAgentName } : {}),
-      status: 'running',
       wave: this.waveCount.get(parentChatId) ?? 1,
-      reviewRounds: 0,
-      lastAssistantText: '',
-      startedAt: Date.now(),
-      toolCalls: 0,
-      lastProgressAt: 0,
-      idlePromise: Promise.resolve(),
-      resolveIdle: () => {},
-      firstOutput: Promise.resolve(),
-      resolveFirstOutput: () => {},
-      unsub: undefined,
-      waveSlot: false,
-    };
-    this.armIdle(record);
+    });
     this.tasks.set(record.taskId, record);
     record.waveSlot = true;
     this.activeByParent.set(parentChatId, (this.activeByParent.get(parentChatId) ?? 0) + 1);
@@ -815,26 +802,7 @@ export class OrchestratorService {
       this.waveWarmup.set(parentChatId, record.firstOutput);
     }
 
-    // Subscribe to the worker's event stream to detect first-output + idle.
-    record.unsub = this.eventBus.subscribe(
-      record.workerSessionId,
-      (event) => this.onWorkerEvent(record, event),
-      `orchestrator:${record.taskId}`,
-    );
-
-    // Subscribe once to the PARENT orchestrator session. When the orchestrator's
-    // own turn ends (harness.idle) — i.e. it has finished reading digests and
-    // consolidating — any worker still sitting in `needs_review` (not sent a
-    // follow-up) is implicitly ACCEPTED, so we flip it to `completed`.
-    this.parentSessions.set(parentChatId, record.parentSessionId);
-    if (!this.parentSubs.has(parentChatId)) {
-      const unsub = this.eventBus.subscribe(
-        record.parentSessionId,
-        (event) => this.onParentEvent(parentChatId, event),
-        `orchestrator-parent:${parentChatId}`,
-      );
-      this.parentSubs.set(parentChatId, unsub);
-    }
+    this.attachRecord(record);
 
     // Persist + announce.
     await this.chatRepo.updateBackgroundTaskStatus(record.taskId, 'running').catch(() => {});
@@ -875,7 +843,8 @@ export class OrchestratorService {
 
   async sendToBackgroundAgent(taskId: string, followup: string): Promise<{ ok: boolean; error?: string }> {
     const record = this.tasks.get(taskId);
-    if (!record) return { ok: false, error: `Unknown task ${taskId}` };
+    // D-100: a worker a restart interrupted has no live record; the follow-up resumes it.
+    if (!record) return this.resumeBackgroundAgent(taskId, { followup });
     if (record.reviewRounds >= this.config.maxReviewRounds) {
       return {
         ok: false,
@@ -914,6 +883,116 @@ export class OrchestratorService {
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * D-100: continue a worker whose turn died with the previous server process. Its chat, transcript and provider
+   * session are durable, so the worker is re-attached (live record, wave slot, event subscriptions) and prompted to
+   * finish from where it stopped; when it settles, the wave-complete nudge wakes the orchestrator to consolidate.
+   * Only an `interrupted` task resumes — anything else either still runs or already reported.
+   */
+  async resumeBackgroundAgent(
+    taskId: string,
+    opts: { followup?: string; parentChatId?: string } = {},
+  ): Promise<{ ok: boolean; error?: string; notFound?: boolean }> {
+    const { followup } = opts;
+    const worker = await this.chatRepo.getById(taskId).catch(() => null);
+    const meta = worker?.backgroundTask;
+    if (!worker || !meta || !worker.parentChatId || (opts.parentChatId && worker.parentChatId !== opts.parentChatId)) {
+      return { ok: false, notFound: true, error: `Unknown task ${taskId}` };
+    }
+    if (this.tasks.has(taskId)) return { ok: false, error: `Task "${meta.taskName}" is not interrupted` };
+    if (meta.status === 'running' || meta.status === 'spawned') {
+      // Listed before the sweep ran: it is interrupted all the same (nothing in this process drives it).
+      await this.chatRepo.updateBackgroundTaskStatus(taskId, 'interrupted').catch(() => undefined);
+    } else if (meta.status !== 'interrupted') {
+      return { ok: false, error: `Task "${meta.taskName}" is ${meta.status}, not interrupted — spawn a new worker instead.` };
+    }
+    const parentChatId = worker.parentChatId;
+    const parent = await this.chatRepo.getById(parentChatId).catch(() => null);
+    if (!parent?.sessionId || !worker.sessionId) return { ok: false, error: `Task ${taskId} has no session to resume` };
+
+    const record = this.newRecord({
+      taskId,
+      taskName: meta.taskName,
+      parentChatId,
+      parentSessionId: parent.sessionId,
+      workerSessionId: worker.sessionId,
+      ...(worker.model ? { model: worker.model } : {}),
+      ...(worker.agentRef ? { agentRef: worker.agentRef } : {}),
+      ...(worker.agentSnapshot?.driving?.name ? { agentName: worker.agentSnapshot.driving.name } : {}),
+      wave: (await this.getOrInitWaveState(parentChatId)).waveCount || 1,
+    });
+    this.tasks.set(taskId, record);
+    record.waveSlot = true;
+    this.activeByParent.set(parentChatId, (this.activeByParent.get(parentChatId) ?? 0) + 1);
+    // The resumed worker belongs to the wave it was spawned in: no new wave is counted.
+    this.waveOpen.add(parentChatId);
+    this.suppressNudge.delete(parentChatId);
+    this.attachRecord(record);
+
+    await this.chatRepo.updateBackgroundTaskStatus(taskId, 'running').catch(() => undefined);
+    await this.emitToParent(record.parentSessionId, {
+      kind: 'chat.background_task.status',
+      data: { chatId: parentChatId, parentChatId, taskId, taskName: record.taskName, status: 'running' },
+    });
+    void this.writeScratchpad(parentChatId);
+
+    const [first] = await this.messageRepo.getByChatId(taskId, 1, 0).catch(() => []);
+    const brief = first?.role === 'user' ? first.content : undefined;
+    this.chatManagementService.sendPrompt(taskId, renderResumeMessage(brief, followup)).catch((err) => {
+      record.status = 'failed';
+      record.lastError = err instanceof Error ? err.message : String(err);
+      record.resolveIdle();
+      void this.chatRepo.updateBackgroundTaskStatus(taskId, 'failed').catch(() => {});
+    });
+    return { ok: true };
+  }
+
+  /** A live record for a worker (spawned now, or resumed after a restart). */
+  private newRecord(
+    init: Pick<TaskRecord, 'taskId' | 'taskName' | 'parentChatId' | 'parentSessionId' | 'workerSessionId' | 'wave'> &
+      Partial<Pick<TaskRecord, 'model' | 'agentRef' | 'agentName'>>,
+  ): TaskRecord {
+    const record: TaskRecord = {
+      ...init,
+      status: 'running',
+      reviewRounds: 0,
+      lastAssistantText: '',
+      startedAt: Date.now(),
+      toolCalls: 0,
+      lastProgressAt: 0,
+      idlePromise: Promise.resolve(),
+      resolveIdle: () => {},
+      firstOutput: Promise.resolve(),
+      resolveFirstOutput: () => {},
+      unsub: undefined,
+      waveSlot: false,
+    };
+    this.armIdle(record);
+    return record;
+  }
+
+  /**
+   * Subscribe to the worker's stream (first output, idle) and, once per orchestrator, to the parent's: when the
+   * orchestrator's own turn ends, a worker still in `needs_review` (not sent a follow-up) is accepted.
+   */
+  private attachRecord(record: TaskRecord): void {
+    record.unsub = this.eventBus.subscribe(
+      record.workerSessionId,
+      (event) => this.onWorkerEvent(record, event),
+      `orchestrator:${record.taskId}`,
+    );
+    this.parentSessions.set(record.parentChatId, record.parentSessionId);
+    if (!this.parentSubs.has(record.parentChatId)) {
+      const parentChatId = record.parentChatId;
+      const unsub = this.eventBus.subscribe(
+        record.parentSessionId,
+        (event) => this.onParentEvent(parentChatId, event),
+        `orchestrator-parent:${parentChatId}`,
+      );
+      this.parentSubs.set(parentChatId, unsub);
     }
   }
 
@@ -1043,34 +1122,30 @@ export class OrchestratorService {
       cancelledAt?: number;
     }>
   > {
-    // Prefer in-memory records; fall back to DB for durability across restarts.
-    const mem = [...this.tasks.values()].filter((t) => t.parentChatId === parentChatId);
-    if (mem.length > 0) {
-      return mem.map((t) => ({
-        taskId: t.taskId,
-        taskName: t.taskName,
-        status: t.status,
-        model: t.model,
-        ...(t.agentRef ? { agentRef: t.agentRef } : {}),
-        ...(t.agentName ? { agentName: t.agentName } : {}),
-        reviewRounds: t.reviewRounds,
-        ...cancellationFields(t.status, t.cancellation),
-      }));
-    }
+    // In-memory records are live; the DB has the rest (workers of an earlier process, durable across restarts).
+    const mem = new Map([...this.tasks.values()].filter((t) => t.parentChatId === parentChatId).map((t) => [t.taskId, t]));
+    const live = (t: TaskRecord) => ({
+      taskId: t.taskId,
+      taskName: t.taskName,
+      status: t.status,
+      model: t.model,
+      ...(t.agentRef ? { agentRef: t.agentRef } : {}),
+      ...(t.agentName ? { agentName: t.agentName } : {}),
+      reviewRounds: t.reviewRounds,
+      ...cancellationFields(t.status, t.cancellation),
+    });
     const rows = await this.chatRepo.listBackgroundTasks(parentChatId).catch(() => []);
-    return Promise.all(rows.map(async (c) => {
+    const persisted = await Promise.all(rows.filter((c) => !mem.has(c.id)).map(async (c) => {
       let status: BackgroundTaskStatus = c.backgroundTask?.status ?? 'spawned';
-      // A worker the DB still calls running has no record in this process, so
-      // nothing is driving it: its turn died with the previous server process
-      // (background turns are fire-and-forget and are not resumed on boot).
-      // Left as "running" it spun in the panel forever and blocked the
-      // concurrency cap. Say what happened instead.
+      // D-100: a worker the DB still calls running has no record in this process, so nothing is driving it — its
+      // turn died with the previous server process. Left as "running" it spun in the panel forever and blocked the
+      // concurrency cap; it is `interrupted`, and Resume (or a follow-up from the orchestrator) continues it.
       if (status === 'running' || status === 'spawned') {
-        status = 'failed';
-        await this.chatRepo.updateBackgroundTaskStatus(c.id, 'failed').catch(() => undefined);
+        status = 'interrupted';
+        await this.chatRepo.updateBackgroundTaskStatus(c.id, 'interrupted').catch(() => undefined);
         void this.emitToParent(this.parentSessions.get(parentChatId) ?? '', {
-          kind: 'chat.background_task.failed',
-          data: { chatId: parentChatId, parentChatId, taskId: c.id, taskName: c.backgroundTask?.taskName ?? c.name, error: 'Interrupted by a server restart' },
+          kind: 'chat.background_task.status',
+          data: { chatId: parentChatId, parentChatId, taskId: c.id, taskName: c.backgroundTask?.taskName ?? c.name, status },
         });
       }
       return {
@@ -1086,6 +1161,10 @@ export class OrchestratorService {
           : {}),
       };
     }));
+    const order = new Map(rows.map((c, i) => [c.id, i]));
+    return [...[...mem.values()].map(live), ...persisted].sort(
+      (a, b) => (order.get(a.taskId) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.taskId) ?? Number.MAX_SAFE_INTEGER),
+    );
   }
 
   /**

@@ -294,6 +294,7 @@ export function tallyWorkers(workers: readonly Pick<Chat, 'status' | 'background
         tally.done += 1;
         break;
       case 'failed':
+      case 'interrupted': // D-100: stopped by a restart; like a failure, it needs someone to act.
         tally.failed += 1;
         break;
       default:

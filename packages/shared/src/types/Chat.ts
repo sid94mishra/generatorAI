@@ -35,7 +35,9 @@ export type BackgroundTaskStatus =
   | 'needs_review'
   | 'completed'
   | 'failed'
-  | 'cancelled';
+  | 'cancelled'
+  /** D-100: its turn died with the previous server process; Resume continues it from its transcript. */
+  | 'interrupted';
 
 /**
  * Metadata attached to a chat that was spawned as a background agent task by
