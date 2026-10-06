@@ -149,14 +149,17 @@ export function accessLevel(scopes: readonly string[]): { label: string; tone: B
 
 /**
  * An endpoint rewritten to the address a second device should open. In
+ * production the server serves this page, so the endpoint — `https://` once
+ * the server speaks TLS to other devices (D-110) — is used as it is. In
  * development the SPA and the API sit on different ports, so the host comes
- * from the endpoint and the scheme and port from where this page was served
- * (identical to the server's own origin in production).
+ * from the endpoint and the scheme and port from where this page was served.
  */
 export function browserAddressFor(endpointOrigin: string, pageOrigin: string): string {
   try {
+    const endpoint = new URL(endpointOrigin);
     const here = new URL(pageOrigin);
-    here.hostname = new URL(endpointOrigin).hostname;
+    if (endpoint.port === here.port) return endpoint.origin;
+    here.hostname = endpoint.hostname;
     return here.origin;
   } catch {
     return endpointOrigin;
@@ -169,16 +172,28 @@ export function usableEndpoints(endpoints: readonly NetworkEndpoint[]): NetworkE
 }
 
 /**
- * The address to read out to the joining device: this page's origin, with a
- * loopback hostname swapped for the first routable endpoint.
+ * The address to read out to the joining device. The server picks it per
+ * platform (`https://` for a browser, the native lane for the mobile app,
+ * D-112), so it is used as it is unless this page is the dev server, where
+ * only its host carries over.
  */
-export function joinAddress(serverJoinUrl: string, endpoints: readonly NetworkEndpoint[] | undefined, pageOrigin: string): string {
-  const here = new URL(pageOrigin);
-  if (!/^(localhost|127\.|\[?::1)/i.test(here.hostname)) return here.origin;
-  const routable = endpoints?.find((e) => e.reachability !== 'loopback');
-  if (!routable) return serverJoinUrl;
-  here.hostname = new URL(routable.origin).hostname;
-  return here.origin;
+export function joinAddress(serverJoinUrl: string, pageOrigin: string): string {
+  return browserAddressFor(serverJoinUrl, pageOrigin);
+}
+
+/**
+ * A certificate fingerprint as people compare it: the first 8 bytes as
+ * upper-case pairs, the way Chrome, Safari and Firefox print SHA-256
+ * fingerprints in their certificate viewers (`3F A9 1C 07 88 2B D4 E1 …`).
+ */
+export function shortCertificateFingerprint(fingerprintSha256: string): string {
+  const pairs = fingerprintSha256.toUpperCase().split(/[:\s]+/).filter(Boolean);
+  return pairs.length > 8 ? `${pairs.slice(0, 8).join(' ')} …` : pairs.join(' ');
+}
+
+/** `12 Mar 2027` — a certificate's expiry. */
+export function certificateDate(ts: number): string {
+  return new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 /** `m:ss` until `expiresAt`. */

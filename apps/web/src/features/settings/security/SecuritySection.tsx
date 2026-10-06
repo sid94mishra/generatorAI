@@ -64,7 +64,7 @@ export function SecuritySection() {
       <NetworkExposureGroup network={network.data} isPending={network.isPending} onError={onError} />
       <AccessRequestsGroup requests={requests.data ?? []} onError={onError} />
       <PairedDevicesGroup devices={devices.data} isPending={devices.isPending} onError={onError} />
-      <PairDeviceGroup posture={posture.data} network={network.data} pending={pending.data ?? []} onError={onError} />
+      <PairDeviceGroup posture={posture.data} pending={pending.data ?? []} onError={onError} />
     </SettingsSection>
   );
 }

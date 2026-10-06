@@ -44,6 +44,26 @@ export interface PendingPairing {
   maxAttempts: number;
 }
 
+/**
+ * Built-in HTTPS for other devices (D-110). `fingerprintSha256` is the served
+ * certificate — what the other device's browser shows in its certificate
+ * details; `caFingerprintSha256` is the local CA (generated certificates only).
+ */
+export interface TlsStatus {
+  enabled: true;
+  source: 'generated' | 'custom';
+  fingerprintSha256: string;
+  caFingerprintSha256: string | null;
+  issuer: string;
+  notBefore: number;
+  notAfter: number;
+  names: string[];
+  customCertificateProblem: string | null;
+}
+
+/** `network-access.tls`: serving HTTPS, or exposed without it (and why). Null on a loopback-only server. */
+export type NetworkTls = (TlsStatus & { unavailableReason: null }) | { enabled: false; unavailableReason: string | null };
+
 /** `POST /api/auth/pair` response. */
 export interface PairingResponse {
   grantId: string;
@@ -56,6 +76,8 @@ export interface PairingResponse {
   shortCode: string;
   /** Origin the joining device should open in its browser. */
   joinUrl: string;
+  /** The certificate the joining browser will be shown; null when the server does not serve HTTPS. */
+  tls: TlsStatus | null;
 }
 
 export interface NetworkEndpoint {
@@ -76,6 +98,9 @@ export interface NetworkAccess {
   envOverride: string | null;
   blockers: { code: string; message: string }[];
   endpoints: NetworkEndpoint[];
+  tls: NetworkTls | null;
+  /** D-114 — whose X-Forwarded-Proto/Host the server honours. */
+  trustProxy: { mode: 'off' | 'loopback' | 'addresses'; addresses: string[] };
 }
 
 /** `GET /api/security/posture`. */
@@ -181,6 +206,18 @@ export function useSetNetworkAccess() {
     await apiFetch('/api/security/network-access', post({ mode }));
     if (desktopServer.canRestart()) await desktopServer.restart();
   });
+}
+
+/** Serve an admin-supplied certificate instead of the generated one (D-113). */
+export function useInstallCertificate() {
+  return useSecurityMutation((input: { certificatePem: string; privateKeyPem: string }) =>
+    apiFetch<{ tls: TlsStatus }>('/api/security/tls/certificate', { method: 'PUT', body: JSON.stringify(input) }),
+  );
+}
+
+/** Go back to the certificate this server generated. */
+export function useRemoveCertificate() {
+  return useSecurityMutation(() => apiFetch<{ tls: TlsStatus }>('/api/security/tls/certificate', { method: 'DELETE' }));
 }
 
 export function useCreatePairing() {

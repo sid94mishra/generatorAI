@@ -1,6 +1,8 @@
 // Security › This server (posture) and Network exposure. The exposure control
 // offers only what the server supports — loopback only or the local network
-// (D-42: the board's "Custom" has no server mode and is not offered).
+// (D-42: the board's "Custom" has no server mode and is not offered). While
+// exposed, the addresses other devices use are https:// and the certificate
+// they will be shown is described below them (D-110).
 
 import type { UseQueryResult } from '@tanstack/react-query';
 import {
@@ -18,6 +20,7 @@ import { SegmentedControl } from '@/ui/primitives/SegmentedControl/SegmentedCont
 import { KeyValueList } from '@/ui/patterns/KeyValueList/KeyValueList.js';
 import { SectionHeader } from '@/ui/patterns/SectionHeader/SectionHeader.js';
 import { browserAddressFor, shortFingerprint, usableEndpoints } from './securityModel.js';
+import { CertificateGroup } from './CertificatePanel.js';
 
 export function ThisServerGroup({
   posture,
@@ -183,6 +186,18 @@ export function NetworkExposureGroup({
             'Connect to Wi-Fi or Ethernet.'
           )}
         </Callout>
+      ) : null}
+
+      {network.active && network.tls ? <CertificateGroup tls={network.tls} onError={onError} /> : null}
+
+      {network.active && network.trustProxy.mode !== 'off' ? (
+        <p className="text-small text-fg-3" data-testid="security-trust-proxy">
+          Forwarded HTTPS headers are trusted from{' '}
+          <span className="font-mono text-fg-2">
+            {network.trustProxy.mode === 'loopback' ? 'a proxy on this computer' : network.trustProxy.addresses.join(', ')}
+          </span>{' '}
+          (GENERATORAI_TRUST_PROXY).
+        </p>
       ) : null}
 
       {network.pendingRestart ? (

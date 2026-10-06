@@ -10,6 +10,14 @@
 // RENDERS a QR for a host to show, never reads one), so it would be a button
 // that does nothing (D-36 no fake data).
 //
+// HTTPS (D-110): a browser creates its device key only in a secure context, so
+// on a plain-HTTP page from another machine (the dev server without
+// GENERATORAI_DEV_HTTPS — the packaged server redirects to https://) the gate
+// says so instead of failing at Connect. On an https:// page from another
+// machine it says where to compare the certificate fingerprint — on the
+// server's screen, never a value this page received, which a man in the
+// middle would simply relay.
+//
 // Replaces the view half of `components/AuthGate.tsx`; the gate logic
 // (server-info probe, auto-pairing guard, which of the three outcomes
 // applies) is `hooks/authQueries.ts`, driven from `app/shell/AuthGate.tsx`.
@@ -26,6 +34,7 @@ import {
   type PairingConsent,
 } from '@/hooks/authQueries.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
+import { Callout } from '@/ui/primitives/Callout/Callout.js';
 import { Field } from '@/ui/primitives/Field/Field.js';
 import { Input } from '@/ui/primitives/Input/Input.js';
 import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
@@ -119,6 +128,9 @@ export function PairingGate({ state, endpoint, reachable }: PairingGateProps) {
   }, [consent, deviceName]);
 
   const revoked = state.status === 'revoked';
+  // `!== false`: an environment without the property (jsdom) is not a reason to block.
+  const secureContext = window.isSecureContext !== false;
+  const remoteHttps = window.location.protocol === 'https:' && !/^(localhost|127\.|\[::1\])/.test(window.location.hostname);
 
   return (
     <Gate
@@ -134,6 +146,13 @@ export function PairingGate({ state, endpoint, reachable }: PairingGateProps) {
       }
       note="Find the code in the desktop app under Settings › Security & devices › Pair a new device, or run generatorai device invite on the server."
     >
+      {secureContext ? null : (
+        <Callout tone="err" title="This page cannot pair over plain HTTP" data-testid="pairing-insecure-context">
+          Browsers only create the key pairing needs on a secure page. Open this server&apos;s https:// address instead — the desktop app
+          shows it under Settings › Security &amp; devices.
+        </Callout>
+      )}
+
       <Field label="Server address">
         <Input
           readOnly
@@ -189,11 +208,18 @@ export function PairingGate({ state, endpoint, reachable }: PairingGateProps) {
         </div>
       ) : null}
 
+      {remoteHttps ? (
+        <p className="text-small text-fg-3" data-testid="pairing-certificate-hint">
+          Did your browser warn about this server&apos;s certificate? Check that the SHA-256 fingerprint in its certificate details matches
+          the one shown on the server under Settings › Security &amp; devices before you connect.
+        </p>
+      ) : null}
+
       <Field label="Name this device">
         <Input value={deviceName} onChange={(e) => setDeviceName(e.target.value)} />
       </Field>
 
-      <Button variant="primary" size="lg" fullWidth disabled={!consent || busy} loading={busy} onClick={() => void connect()}>
+      <Button variant="primary" size="lg" fullWidth disabled={!consent || busy || !secureContext} loading={busy} onClick={() => void connect()}>
         {busy ? 'Pairing…' : 'Connect'}
       </Button>
     </Gate>

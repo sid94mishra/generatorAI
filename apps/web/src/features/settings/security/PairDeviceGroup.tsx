@@ -9,7 +9,6 @@ import { PAIRING_CODE_LENGTH } from '@generatorai/shared';
 import {
   useCancelPairing,
   useCreatePairing,
-  type NetworkAccess,
   type PairingResponse,
   type PendingPairing,
   type SecurityPosture,
@@ -23,24 +22,9 @@ import { Select } from '@/ui/primitives/Select/Select.js';
 import { PairingCodeInput } from '@/ui/patterns/PairingCodeInput/PairingCodeInput.js';
 import { SectionHeader } from '@/ui/patterns/SectionHeader/SectionHeader.js';
 import { PAIRING_PLATFORMS, SCOPE_PRESETS, ago, countdown, joinAddress, type PairingPlatform } from './securityModel.js';
+import { CertificateCheckNote, useCopied } from './CertificatePanel.js';
 
 type OnError = (err: unknown) => void;
-
-function useCopied(): [boolean, (text: string) => void] {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
-  return [
-    copied,
-    (text) => {
-      void navigator.clipboard.writeText(text).then(() => {
-        setCopied(true);
-        if (timer.current) clearTimeout(timer.current);
-        timer.current = setTimeout(() => setCopied(false), 1500);
-      });
-    },
-  ];
-}
 
 /**
  * The pairing URL as a QR code, drawn locally: the code must never leave this
@@ -70,19 +54,21 @@ function PairingQr({ text }: { text: string }) {
 
 function ActivePairing({
   pairing,
-  network,
   onCancel,
   onExpired,
 }: {
   pairing: PairingResponse;
-  network: NetworkAccess | undefined;
   onCancel: () => void;
   onExpired: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
   const [urlCopied, copyUrl] = useCopied();
   const [codeCopied, copyCode] = useCopied();
-  const address = joinAddress(pairing.joinUrl, network?.endpoints, window.location.origin);
+  const address = joinAddress(pairing.joinUrl, window.location.origin);
+  // A browser opening an https:// address it does not trust yet is shown a
+  // warning; say what to compare (D-110). The native app's lane is plain HTTP
+  // and shows none (D-112).
+  const certificate = pairing.tls && address.startsWith('https://') ? pairing.tls : null;
   const code = pairing.shortCode.replace(/[^A-Za-z0-9]/g, '').slice(0, PAIRING_CODE_LENGTH);
 
   useEffect(() => {
@@ -101,11 +87,12 @@ function ActivePairing({
           <span className="min-w-0 flex-1 truncate font-mono text-ui text-fg select-all">{address}</span>
           <IconButton size="sm" icon={urlCopied ? 'check' : 'copy'} label="Copy address" onClick={() => copyUrl(address)} />
         </div>
+        {certificate ? <CertificateCheckNote tls={certificate} /> : null}
       </div>
       <div className="flex flex-col gap-1.5">
         <span className="text-small text-fg-2">2 · Enter this code</span>
         <div className="flex items-center gap-2">
-          <PairingCodeInput value={code} onValueChange={() => undefined} readOnly />
+          <PairingCodeInput value={code} onValueChange={() => undefined} readOnly className="flex-1" />
           <IconButton size="sm" icon={codeCopied ? 'check' : 'copy'} label="Copy code" onClick={() => copyCode(pairing.shortCode)} />
         </div>
       </div>
@@ -134,12 +121,10 @@ function ActivePairing({
 
 export function PairDeviceGroup({
   posture,
-  network,
   pending,
   onError,
 }: {
   posture: SecurityPosture | undefined;
-  network: NetworkAccess | undefined;
   pending: readonly PendingPairing[];
   onError: OnError;
 }) {
@@ -178,7 +163,6 @@ export function PairDeviceGroup({
       {pairing ? (
         <ActivePairing
           pairing={pairing}
-          network={network}
           onCancel={() => cancelGrant(pairing.grantId)}
           onExpired={() => setPairing(null)}
         />
