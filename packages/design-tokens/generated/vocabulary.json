@@ -52,7 +52,9 @@
     "z-tooltip",
     "w-sidebar",
     "max-w-dialog",
-    "ease-standard"
+    "ease-standard",
+    "ease-in-out",
+    "duration-normal"
   ],
   "legacyUtilityNames": [
     "background",
@@ -292,7 +294,19 @@
         "ease"
       ],
       "names": [
-        "standard"
+        "standard",
+        "in-out"
+      ]
+    },
+    {
+      "id": "duration",
+      "prefixes": [
+        "duration"
+      ],
+      "names": [
+        "fast",
+        "normal",
+        "slow"
       ]
     }
   ]

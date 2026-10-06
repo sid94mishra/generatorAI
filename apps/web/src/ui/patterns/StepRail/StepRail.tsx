@@ -14,7 +14,9 @@
 // nested inside the row's button.
 //
 // Expansion is controlled with `expandedIds` + `onExpandedChange`, or left to
-// the rail (`defaultExpandedIds`).
+// the rail (`defaultExpandedIds`). The detail opens and closes with the kit's
+// shared height + fade motion (P-45 CollapsiblePanel, D-108); the chevron
+// turns with it.
 // ────────────────────────────────────────────────────────────────
 
 import { useState, type ComponentProps, type ReactNode } from 'react';
@@ -22,6 +24,7 @@ import { Collapsible } from '@base-ui/react/collapsible';
 import { cn } from '../../lib/cn.js';
 import { focusRing } from '../../lib/focus.js';
 import { Icon } from '../../icons/Icon.js';
+import { CollapsiblePanel } from '../../primitives/Collapsible/Collapsible.js';
 
 export type StepResultTone = 'neutral' | 'muted' | 'run' | 'ok' | 'warn' | 'err';
 
@@ -97,7 +100,7 @@ function RowBody({ item, expandable }: { item: StepRailItem; expandable: boolean
             <Icon
               concept="chevron-right"
               size={14}
-              className="text-fg-3 transition-transform group-data-panel-open:rotate-90"
+              className="text-fg-3 transition-transform duration-normal ease-in-out group-data-panel-open:rotate-90"
             />
           ) : null}
         </span>
@@ -172,7 +175,7 @@ export function StepRail({
                 {actions}
               </div>
               {item.below != null ? <div className="min-w-0 pb-1.5 pl-6">{item.below}</div> : null}
-              <Collapsible.Panel className="min-w-0 pt-1 pb-2 pl-6">{item.detail}</Collapsible.Panel>
+              <CollapsiblePanel innerClassName="pt-1 pb-2 pl-6">{item.detail}</CollapsiblePanel>
             </Collapsible.Root>
           );
         })}

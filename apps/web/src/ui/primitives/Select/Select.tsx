@@ -17,7 +17,7 @@ import type { IconConcept } from '@generatorai/design-tokens';
 import { cn } from '../../lib/cn.js';
 import { fieldFocus, fieldInvalid } from '../../lib/focus.js';
 import { overlayProps } from '../../lib/overlay.js';
-import { anchorWidth, floatSurface, listPopup } from '../../lib/popup.js';
+import { anchorWidth, floatSurface, popupMotion, listPopup } from '../../lib/popup.js';
 import { Icon } from '../../icons/Icon.js';
 
 export interface SelectItem {
@@ -92,7 +92,7 @@ export function Select({
       </BaseSelect.Trigger>
       <BaseSelect.Portal>
         <BaseSelect.Positioner sideOffset={4} align="start" className="z-dropdown outline-none" {...overlayProps('select')}>
-          <BaseSelect.Popup className={cn(floatSurface, listPopup, anchorWidth)}>
+          <BaseSelect.Popup className={cn(floatSurface, popupMotion, listPopup, anchorWidth)}>
             <BaseSelect.List>
               {items.map((item) => (
                 <BaseSelect.Item

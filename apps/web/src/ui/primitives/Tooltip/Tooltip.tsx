@@ -15,7 +15,7 @@ import type { ReactElement, ReactNode } from 'react';
 import { Tooltip as BaseTooltip } from '@base-ui/react/tooltip';
 import { cn } from '../../lib/cn.js';
 import { overlayProps } from '../../lib/overlay.js';
-import { floatSurface } from '../../lib/popup.js';
+import { floatSurface, popupMotion } from '../../lib/popup.js';
 import { Kbd } from '../Kbd/Kbd.js';
 
 const OPEN_DELAY = 400;
@@ -75,6 +75,7 @@ export function Tooltip({
           <BaseTooltip.Popup
             className={cn(
               floatSurface,
+              popupMotion,
               'flex max-w-80 items-center gap-2 rounded-control px-2 py-1 text-small',
               shortcut && 'h-control py-0',
               className,

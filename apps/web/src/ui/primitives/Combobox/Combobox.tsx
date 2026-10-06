@@ -30,7 +30,7 @@ import type { IconConcept } from '@generatorai/design-tokens';
 import { cn } from '../../lib/cn.js';
 import { fieldFocus, focusRing, hitSlop, HIT_ATTRS } from '../../lib/focus.js';
 import { overlayProps } from '../../lib/overlay.js';
-import { anchorWidth, floatSurface, listPopup } from '../../lib/popup.js';
+import { anchorWidth, floatSurface, popupMotion, listPopup } from '../../lib/popup.js';
 import { Icon } from '../../icons/Icon.js';
 import { HighlightMatch, matchesQuery, optionSecondaryText } from '../Autocomplete/Autocomplete.js';
 import { chipVariants } from '../Chip/Chip.js';
@@ -246,7 +246,7 @@ export function Combobox<T extends ComboboxItem = ComboboxItem>(props: ComboboxP
         <BaseCombobox.Popup
           // The input-inside-popup form is a dialog (Base UI); name it.
           {...(field ? {} : { 'aria-label': label })}
-          className={cn(floatSurface, listPopup, anchorWidth, 'flex flex-col overflow-hidden p-0', popupClassName)}
+          className={cn(floatSurface, popupMotion, listPopup, anchorWidth, 'flex flex-col overflow-hidden p-0', popupClassName)}
           style={popupWidth !== undefined ? { width: popupWidth } : undefined}
         >
           <div className="flex min-h-0 flex-1">

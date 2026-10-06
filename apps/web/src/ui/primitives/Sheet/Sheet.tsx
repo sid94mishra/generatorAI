@@ -127,13 +127,18 @@ export function Sheet({
         {/* Non-modal: no backdrop element at all (D-19). */}
         {modal ? (
           <BaseDialog.Backdrop
-            className={cn(contained ? 'absolute' : 'fixed', 'inset-0 z-dialog bg-scrim')}
+            className={cn(contained ? 'absolute' : 'fixed', 'inset-0 z-dialog bg-scrim motion-fade')}
             {...overlayProps('backdrop')}
           />
         ) : null}
         <BaseDialog.Popup
           {...rest}
-          className={cn(sheetPopupVariants({ side, contained }), width === undefined && 'w-sheet', className)}
+          className={cn(
+            sheetPopupVariants({ side, contained }),
+            side === 'left' ? 'motion-sheet-start' : 'motion-sheet-end',
+            width === undefined && 'w-sheet',
+            className,
+          )}
           style={width !== undefined ? { ...style, width } : style}
           {...(initialFocus !== undefined ? { initialFocus } : {})}
           {...(finalFocus !== undefined ? { finalFocus } : {})}

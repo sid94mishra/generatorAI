@@ -46,6 +46,9 @@ describe('cn — the 02 §10.3 extras', () => {
     [['max-w-dialog', 'max-w-dialog-lg'], 'max-w-dialog-lg'],
     [['min-h-row', 'min-h-0'], 'min-h-0'],
     [['ease-standard', 'ease-linear'], 'ease-linear'],
+    [['ease-standard', 'ease-in-out'], 'ease-in-out'],
+    [['duration-normal', 'duration-fast'], 'duration-fast'],
+    [['duration-150', 'duration-slow'], 'duration-slow'],
     [['bg-accent', 'bg-accent-tint'], 'bg-accent-tint'], // design vs legacy name, same group
     [['hover:bg-hover', 'hover:bg-selected'], 'hover:bg-selected'],
   ] as const)('cn(%j) → %s', (input, expected) => {

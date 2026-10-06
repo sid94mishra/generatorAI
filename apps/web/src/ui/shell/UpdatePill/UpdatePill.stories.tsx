@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, fn, screen, userEvent } from 'storybook/test';
+import { expect, fn, screen, userEvent, waitFor } from 'storybook/test';
 import { UpdatePill } from './UpdatePill.js';
 
 /**
@@ -67,6 +67,6 @@ export const AfterFailure: Story = {
   args: { error: 'The installer did not start.' },
   play: async ({ canvas }) => {
     await userEvent.hover(canvas.getByRole('button', { name: 'Restart to update' }));
-    await expect(await screen.findByText(/could not be installed: The installer did not start\./)).toBeVisible();
+    await waitFor(async () => expect(await screen.findByText(/could not be installed: The installer did not start\./)).toBeVisible());
   },
 };

@@ -83,6 +83,8 @@ describe('design vocabulary compiles to --gai-* utilities', () => {
     ['w-sidebar', ['width: var(--gai-w-sidebar)']],
     ['max-w-dialog', ['max-width: var(--gai-w-dialog)']],
     ['ease-standard', ['var(--gai-ease-standard)']],
+    ['ease-in-out', ['var(--gai-ease-in-out)']],
+    ['duration-normal', ['transition-duration: var(--gai-duration-normal)']],
   ])('scale utility %s', (cls, declarations) => {
     const css = build([cls]);
     const body = rule(css, cls);

@@ -74,9 +74,9 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
   play: async ({ canvas, args }) => {
     const list = canvas.getByRole('tablist', { name: 'Side dock' });
-    await expect(list).toBeVisible();
+    await waitFor(() => expect(list).toBeVisible());
     await expect(canvas.getByRole('tab', { name: /Changes/ })).toHaveAttribute('aria-selected', 'true');
-    await expect(canvas.getByTestId('right-pane-tab-changes')).toBeVisible();
+    await waitFor(() => expect(canvas.getByTestId('right-pane-tab-changes')).toBeVisible());
     await userEvent.click(canvas.getByRole('tab', { name: /Files/ }));
     await expect(canvas.getByRole('tab', { name: /Files/ })).toHaveAttribute('aria-selected', 'true');
     await userEvent.keyboard('{ArrowRight}{Enter}');
@@ -107,7 +107,7 @@ export const Compact: Story = {
   play: async ({ canvas, args }) => {
     const files = canvas.getByRole('tab', { name: 'Files' });
     await expect(files).not.toHaveTextContent('Files');
-    await expect(canvas.getByRole('tab', { name: 'Terminal (Running)' })).toBeVisible();
+    await waitFor(() => expect(canvas.getByRole('tab', { name: 'Terminal (Running)' })).toBeVisible());
     await userEvent.click(files);
     await expect(files).toHaveAttribute('aria-selected', 'true');
     await expect(files).toHaveTextContent('Files');
@@ -125,7 +125,7 @@ export const AddMenu: Story = {
     await userEvent.click(add);
     await screen.findByRole('menu');
     await expect(document.querySelector('[data-gai-overlay="menu"]')).not.toBeNull();
-    await expect(screen.getByText('Open another panel')).toBeVisible();
+    await waitFor(() => expect(screen.getByText('Open another panel')).toBeVisible());
     await expect(screen.getByRole('menuitem', { name: /Terminal/ })).toHaveAttribute('aria-disabled', 'true');
     await userEvent.click(screen.getByRole('menuitem', { name: /Widget/ }));
     await expect(args.onAddSelect).toHaveBeenCalledWith('widget');
@@ -141,7 +141,7 @@ export const Overflow: Story = {
     const add = await canvas.findByRole('button', { name: /^Add tab, \d+ more$/ });
     await userEvent.click(add);
     await screen.findByRole('menu');
-    await expect(screen.getByText('More tabs')).toBeVisible();
+    await waitFor(() => expect(screen.getByText('More tabs')).toBeVisible());
     await userEvent.click(screen.getByTestId('right-pane-overflow-browser'));
     const picked = canvas.getByRole('tab', { name: /Browser 2/ });
     await expect(picked).toHaveAttribute('aria-selected', 'true');
@@ -172,7 +172,7 @@ export const CloseTab: Story = {
     // Non-closable tabs ignore Delete.
     await userEvent.click(canvas.getByRole('tab', { name: /Files/ }));
     await userEvent.keyboard('{Delete}');
-    await expect(canvas.getByRole('tab', { name: /Files/ })).toBeVisible();
+    await waitFor(() => expect(canvas.getByRole('tab', { name: /Files/ })).toBeVisible());
   },
 };
 

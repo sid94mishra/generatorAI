@@ -107,9 +107,9 @@ export function Dialog({
     >
       {trigger ? <BaseDialog.Trigger render={trigger} /> : null}
       <BaseDialog.Portal>
-        <BaseDialog.Backdrop className="fixed inset-0 z-dialog bg-scrim" {...overlayProps('backdrop')} />
+        <BaseDialog.Backdrop className="fixed inset-0 z-dialog bg-scrim motion-fade" {...overlayProps('backdrop')} />
         <BaseDialog.Popup
-          className={cn(dialogPopupVariants({ size, placement }), className)}
+          className={cn(dialogPopupVariants({ size, placement }), 'motion-dialog', className)}
           {...(initialFocus !== undefined ? { initialFocus } : {})}
           {...(finalFocus !== undefined ? { finalFocus } : {})}
           data-testid={testId}

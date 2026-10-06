@@ -17,6 +17,7 @@
 import { HEIGHTS, TYPE_SCALE } from '../design.js';
 import {
   CONTAINER_NAMES,
+  DURATION_NAMES,
   EASE_NAMES,
   RADIUS_STEPS,
   SIZE_NAMES,
@@ -70,6 +71,7 @@ export function emitVocabularyCss(): string {
   for (const name of Z_NAMES) lines.push(`  --z-index-${name}: var(--gai-z-${name});`);
   lines.push('', '  /* Motion (D-20). */');
   for (const name of EASE_NAMES) lines.push(`  --ease-${name}: var(--gai-ease-${name});`);
+  for (const name of DURATION_NAMES) lines.push(`  --transition-duration-${name}: var(--gai-duration-${name});`);
   lines.push('', '  /* Shell widths (02 §8): w-sidebar, max-w-dialog …. */');
   for (const name of CONTAINER_NAMES) lines.push(`  --container-${name}: var(--gai-w-${name});`);
   lines.push('', '  /* Shared layer: kept through P7 (02 §2.3 "Kept tokens"). */');

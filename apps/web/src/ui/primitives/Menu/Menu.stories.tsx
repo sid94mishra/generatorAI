@@ -83,7 +83,7 @@ export const Default: Story = {
     await userEvent.click(trigger);
     const menu = await screen.findByRole('menu');
     await expect(document.querySelector('[data-gai-overlay="menu"]')).not.toBeNull();
-    await expect(within(menu).getByRole('menuitem', { name: /Delete/ })).toBeVisible();
+    await waitFor(() => expect(within(menu).getByRole('menuitem', { name: /Delete/ })).toBeVisible());
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
     await expect(trigger).toHaveFocus();

@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, userEvent } from 'storybook/test';
+import { expect, userEvent, waitFor } from 'storybook/test';
 import { assertTargetSize } from '../../lib/test/targetSize.js';
-import { Accordion, Collapsible, type CollapsibleVariant } from './Collapsible.js';
+import { IconButton } from '../IconButton/IconButton.js';
+import { Accordion, Collapsible, Reveal, type CollapsibleVariant, type RevealMotion } from './Collapsible.js';
 
 const VARIANTS: CollapsibleVariant[] = ['disclosure', 'attached', 'section'];
 
@@ -28,7 +29,8 @@ export const Default: Story = {
     await expect(trigger).toHaveAttribute('aria-expanded', 'false');
     await userEvent.click(trigger);
     await expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    await expect(canvas.getByText(/traced the null/)).toBeVisible();
+    // The panel eases open (D-108).
+    await waitFor(() => expect(canvas.getByText(/traced the null/)).toBeVisible());
   },
 };
 
@@ -122,3 +124,88 @@ export const TargetSize: Story = {
 };
 
 export const Compact: Story = { globals: { density: 'compact' }, render: Matrix.render };
+
+/** The panel eases its height and fades (D-108); once closed it leaves the DOM. */
+export const Motion: Story = {
+  play: async ({ canvas, canvasElement }) => {
+    const trigger = canvas.getByRole('button', { name: 'Thought for 12s' });
+    await userEvent.click(trigger);
+    const panel = canvasElement.querySelector<HTMLElement>('.motion-collapse');
+    await expect(panel).not.toBeNull();
+    await waitFor(() => expect(panel).toHaveAttribute('data-settled'));
+    await userEvent.click(trigger);
+    await waitFor(() => expect(canvas.queryByText(/traced the null/)).toBeNull());
+  },
+};
+
+/** Reduce motion on: the same toggles land at once. */
+export const ReducedMotion: Story = {
+  globals: { reduceMotion: 'on' },
+  render: Matrix.render,
+  play: async ({ canvas }) => {
+    const trigger = canvas.getByRole('button', { name: 'disclosure closed' });
+    await userEvent.click(trigger);
+    await waitFor(() => expect(canvas.getAllByText('Panel content.')[0]).toBeVisible(), { timeout: 100 });
+  },
+};
+
+function RevealDemo({ motion, defaultOpen = false }: { motion: RevealMotion; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const id = `reveal-${motion}`;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="flex items-center gap-1.5 text-small text-fg-2">
+        <IconButton
+          size="sm"
+          icon={open ? 'chevron-down' : 'chevron-right'}
+          label={`${open ? 'Hide' : 'Show'} ${motion}`}
+          aria-expanded={open}
+          aria-controls={id}
+          onClick={() => setOpen((v) => !v)}
+        />
+        {motion}
+      </span>
+      <div className={motion === 'height' ? 'flex flex-col' : 'relative flex h-tile rounded-card border border-line-soft'}>
+        <Reveal id={id} open={open} motion={motion} className={motion === 'slide-start' ? 'absolute inset-y-0 left-0' : undefined}>
+          <div
+            className={
+              motion === 'height'
+                ? 'rounded-card border border-line-soft bg-raised p-2.5 text-small text-fg-2'
+                : 'h-full w-55 border-r border-line-soft bg-raised p-2.5 text-small text-fg-2'
+            }
+          >
+            Content a control elsewhere shows and hides.
+          </div>
+        </Reveal>
+        {motion === 'height' ? null : <div className="flex-1 p-2.5 text-small text-fg-3">Main column</div>}
+      </div>
+    </div>
+  );
+}
+
+/** Reveal: shown / hidden by the caller's own control — height (inline), width (a docked side panel), slide-start (floating). */
+export const RevealMotions: Story = {
+  render: () => (
+    <div className="flex w-120 flex-col gap-4">
+      <RevealDemo motion="height" />
+      <RevealDemo motion="width" defaultOpen />
+      <RevealDemo motion="slide-start" />
+    </div>
+  ),
+  play: async ({ canvas }) => {
+    const show = canvas.getByRole('button', { name: 'Show height' });
+    await userEvent.click(show);
+    const hide = canvas.getByRole('button', { name: 'Hide height' });
+    await expect(hide).toHaveAttribute('aria-expanded', 'true');
+    const region = document.getElementById('reveal-height');
+    await expect(region).not.toBeNull();
+    await userEvent.click(hide);
+    // Inert while it closes, gone once closed.
+    await waitFor(() => expect(document.getElementById('reveal-height')).toBeNull());
+  },
+};
+
+export const RevealReducedMotion: Story = {
+  globals: { reduceMotion: 'on' },
+  render: RevealMotions.render,
+};

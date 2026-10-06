@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, userEvent, within } from 'storybook/test';
+import { expect, userEvent, within, waitFor } from 'storybook/test';
 import { Button } from '../Button/Button.js';
 import { PopoverClose, PopoverPopup, PopoverRoot, PopoverTitle, PopoverTrigger } from './Popover.js';
 
@@ -33,7 +33,7 @@ export const Default: Story = {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole('button', { name: 'Sources' }));
     const body = within(canvasElement.ownerDocument.body);
-    await expect(await body.findByText('Sources · 2 mounts')).toBeVisible();
+    await waitFor(async () => expect(await body.findByText('Sources · 2 mounts')).toBeVisible());
     await expect(canvasElement.ownerDocument.querySelector('[data-gai-overlay="popover"]')).not.toBeNull();
     await userEvent.click(body.getByRole('button', { name: 'Done' }));
   },

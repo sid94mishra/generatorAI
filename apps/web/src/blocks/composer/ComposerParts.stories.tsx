@@ -2,7 +2,7 @@
 // `Composer` needs a server; each panel of the board is reproduced here from
 // its pure parts, and the characterization suites cover the host.
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, fn, userEvent, within } from 'storybook/test';
+import { expect, fn, userEvent, within, waitFor } from 'storybook/test';
 import type { ResolvedContextUsage } from '@generatorai/client-core';
 import type { WorkspaceMount } from '@generatorai/shared';
 import { AttachingChip, ComposerChip } from './parts/AttachmentChips.js';
@@ -45,7 +45,7 @@ export const BlockingBars: Story = {
     const canvas = within(canvasElement);
     await expect(canvas.getByTestId('workspace-prep-bar')).toHaveAttribute('role', 'status');
     await expect(canvas.getByTestId('workspace-prep-error')).toHaveTextContent('checked out elsewhere');
-    await expect(canvas.getByRole('button', { name: 'Cancel and send' })).toBeVisible();
+    await waitFor(() => expect(canvas.getByRole('button', { name: 'Cancel and send' })).toBeVisible());
   },
 };
 
@@ -90,8 +90,8 @@ export const SlashMenu: Story = {
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText('Commands & skills')).toBeVisible();
-    await expect(canvas.getByRole('button', { name: /^\/browser/ })).toBeVisible();
+    await waitFor(() => expect(canvas.getByText('Commands & skills')).toBeVisible());
+    await waitFor(() => expect(canvas.getByRole('button', { name: /^\/browser/ })).toBeVisible());
   },
 };
 
@@ -127,7 +127,7 @@ export const Attachments: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getAllByTestId('composer-attachment')).toHaveLength(4);
-    await expect(canvas.getByRole('button', { name: 'Remove ci-log-4412.txt' })).toBeVisible();
+    await waitFor(() => expect(canvas.getByRole('button', { name: 'Remove ci-log-4412.txt' })).toBeVisible());
   },
 };
 
@@ -143,7 +143,7 @@ export const Dictation: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole('button', { name: 'Start voice input' })).toBeEnabled();
-    await expect(canvas.getByRole('button', { name: 'Resume dictation' })).toBeVisible();
+    await waitFor(() => expect(canvas.getByRole('button', { name: 'Resume dictation' })).toBeVisible());
   },
 };
 
@@ -221,7 +221,8 @@ export const SourcesAndSkills: Story = {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole('button', { name: /payments-api/ }));
     const body = within(canvasElement.ownerDocument.body);
-    await expect(await body.findByText('Edits apply to the next turn; existing mounts keep their history.')).toBeVisible();
+    const note = await body.findByText('Edits apply to the next turn; existing mounts keep their history.');
+    await waitFor(() => expect(note).toBeVisible());
   },
 };
 
@@ -264,6 +265,6 @@ export const ToolToggles: Story = {
   play: async ({ canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: 'Tools in this chat' }));
     const body = within(canvasElement.ownerDocument.body);
-    await expect(await body.findByRole('switch', { name: 'Workflows' })).toBeVisible();
+    await waitFor(async () => expect(await body.findByRole('switch', { name: 'Workflows' })).toBeVisible());
   },
 };

@@ -10,6 +10,12 @@
 // arbitrary `calc()` values).
 // ────────────────────────────────────────────────────────────────
 
+/**
+ * Enter / exit motion of a Base UI popup (D-108): a 120 ms fade and 97 % scale
+ * from the side facing the anchor, on the Popup element (globals.css `motion-pop`).
+ */
+export const popupMotion = 'motion-pop';
+
 /** Level-1 float (menus, popovers, listboxes, tooltips, toasts): overlay fill, line border, `shadow-pop`. */
 export const floatSurface = 'border border-line bg-overlay text-fg shadow-pop';
 

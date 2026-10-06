@@ -21,7 +21,7 @@ import { Menu as BaseMenu } from '@base-ui/react/menu';
 import type { IconConcept } from '@generatorai/design-tokens';
 import { cn } from '../../lib/cn.js';
 import { overlayProps } from '../../lib/overlay.js';
-import { floatSurface, listPopup } from '../../lib/popup.js';
+import { floatSurface, popupMotion, listPopup } from '../../lib/popup.js';
 import { Icon } from '../../icons/Icon.js';
 import { Kbd } from '../Kbd/Kbd.js';
 
@@ -66,7 +66,7 @@ export function MenuPopup({ anchor, side = 'bottom', align = 'start', sideOffset
         className="z-dropdown outline-none"
         {...overlayProps('menu')}
       >
-        <BaseMenu.Popup className={cn(floatSurface, listPopup, className)} {...rest}>
+        <BaseMenu.Popup className={cn(floatSurface, popupMotion, listPopup, className)} {...rest}>
           {children}
         </BaseMenu.Popup>
       </BaseMenu.Positioner>
@@ -246,7 +246,7 @@ export function ContextMenuPopup({ className, children, ...rest }: ContextMenuPo
   return (
     <BaseContextMenu.Portal>
       <BaseContextMenu.Positioner className="z-dropdown outline-none" {...overlayProps('menu')}>
-        <BaseContextMenu.Popup className={cn(floatSurface, listPopup, className)} {...rest}>
+        <BaseContextMenu.Popup className={cn(floatSurface, popupMotion, listPopup, className)} {...rest}>
           {children}
         </BaseContextMenu.Popup>
       </BaseContextMenu.Positioner>

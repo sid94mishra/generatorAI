@@ -1766,6 +1766,7 @@
     --gai-duration-normal: 180ms;
     --gai-duration-slow: 220ms;
     --gai-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --gai-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
     @variant ios {
       --gai-text-micro: 12px;
       --gai-leading-micro: 16px;
@@ -1893,6 +1894,7 @@
       --gai-duration-normal: 180ms;
       --gai-duration-slow: 220ms;
       --gai-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+      --gai-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
     }
     @variant android {
       --gai-text-micro: 12px;
@@ -2021,6 +2023,7 @@
       --gai-duration-normal: 180ms;
       --gai-duration-slow: 220ms;
       --gai-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+      --gai-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
     }
   }
 }

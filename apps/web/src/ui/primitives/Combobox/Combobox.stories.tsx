@@ -119,8 +119,8 @@ export const Default: Story = {
     await userEvent.click(trigger);
     const search = await screen.findByRole('combobox', { name: 'Search Model' });
     await expect(document.querySelector('[data-gai-overlay="combobox"]')).not.toBeNull();
-    await expect(screen.getByRole('dialog', { name: 'Model' })).toBeVisible();
-    await expect(screen.getByText('Balanced')).toBeVisible();
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Model' })).toBeVisible());
+    await waitFor(() => expect(screen.getByText('Balanced')).toBeVisible());
     await userEvent.type(search, 'opus');
     await waitFor(() => expect(screen.getByRole('option', { name: /Claude Opus/ })).toBeVisible());
     await expect(screen.queryByRole('option', { name: /Claude Haiku/ })).toBeNull();
@@ -158,7 +158,7 @@ export const WithDetail: Story = {
   play: async ({ canvas }) => {
     await userEvent.click(canvas.getByRole('combobox', { name: /Model/ }));
     const pane = await screen.findByTestId('combobox-detail');
-    await expect(within(pane).getByText('Claude Sonnet 4.5')).toBeVisible();
+    await waitFor(() => expect(within(pane).getByText('Claude Sonnet 4.5')).toBeVisible());
     await userEvent.hover(screen.getByRole('option', { name: /GPT-5 mini/ }));
     await waitFor(() => expect(within(pane).getByText('GPT-5 mini')).toBeVisible());
     await expect(document.querySelector('[data-gai-overlay="combobox"]')).not.toBeNull();
@@ -173,7 +173,7 @@ export const MultipleField: Story = {
     </div>
   ),
   play: async ({ canvas, canvasElement }) => {
-    await expect(canvas.getByText('frontend')).toBeVisible();
+    await waitFor(() => expect(canvas.getByText('frontend')).toBeVisible());
     assertTargetSize(canvasElement);
     await userEvent.click(canvas.getByRole('button', { name: 'Remove frontend' }));
     await waitFor(() => expect(onValueChange).toHaveBeenLastCalledWith(['infra']));

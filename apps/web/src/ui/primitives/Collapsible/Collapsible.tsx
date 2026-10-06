@@ -10,6 +10,19 @@
 //   Both pass every other prop (data-testid, aria-*, id …) to the Base UI root.
 //   `className` styles the root; `triggerClassName` / `panelClassName` the parts.
 //   Accordion is single-open by default (Base UI); `multiple` opens several.
+//   <CollapsiblePanel>  the styled panel alone, inside a Collapsible root of
+//                       the caller's (StepRail rows).
+//   <Reveal open motion?="height|width|slide-start">  content shown / hidden
+//                       by a control of the caller's (an IconButton with
+//                       aria-expanded, a toggle elsewhere): no trigger.
+//
+// Motion (D-108): every panel eases its height (Reveal also width or a slide)
+// and fades, on the motion tokens (`motion-collapse` / `motion-accordion` /
+// `motion-reveal-x` / `motion-slide-start`, globals.css), instant under
+// reduced motion. A closed panel is unmounted once its close has finished and
+// is inert while it closes, so collapsed content is never focusable. Spacing
+// lives on an inner box (`panelClassName`), never on the moving panel: a
+// padded panel could not close to 0.
 //
 // Trigger variants (the panel follows the trigger):
 //   disclosure  24h (h-control-sm) inline row, no chrome, `text-ui text-fg-3`
@@ -30,6 +43,7 @@ import { Collapsible as BaseCollapsible } from '@base-ui/react/collapsible';
 import type { IconConcept } from '@generatorai/design-tokens';
 import { cn } from '../../lib/cn.js';
 import { focusRing, hitSlop, HIT_ATTRS } from '../../lib/focus.js';
+import { settleOnOpen } from '../../lib/motion.js';
 import { Icon } from '../../icons/Icon.js';
 
 export type CollapsibleVariant = 'disclosure' | 'attached' | 'section';
@@ -58,11 +72,98 @@ const PANEL: Record<CollapsibleVariant, string> = {
   section: 'pt-2',
 };
 
+/** The chevron turns with the panel: same duration and easing as the height. */
+const chevronMotion = 'transition-transform duration-normal ease-in-out';
+
 const CHEVRON: Record<CollapsibleVariant, { concept: IconConcept; className: string }> = {
-  disclosure: { concept: 'chevron-right', className: 'group-data-panel-open:rotate-90' },
-  attached: { concept: 'chevron-down', className: 'ml-auto text-fg-3 group-data-panel-open:rotate-180' },
-  section: { concept: 'chevron-down', className: 'ml-auto text-fg-3 group-data-panel-open:rotate-180' },
+  disclosure: { concept: 'chevron-right', className: cn(chevronMotion, 'group-data-panel-open:rotate-90') },
+  attached: { concept: 'chevron-down', className: cn(chevronMotion, 'ml-auto text-fg-3 group-data-panel-open:rotate-180') },
+  section: { concept: 'chevron-down', className: cn(chevronMotion, 'ml-auto text-fg-3 group-data-panel-open:rotate-180') },
 };
+
+/** Inert while closing: the content on its way out is not focusable or clickable. */
+const inertWhenClosed = (props: ComponentProps<'div'>, state: { open: boolean }) => (
+  <div {...props} inert={!state.open || undefined} />
+);
+
+// ── CollapsiblePanel (inside a Collapsible root) ───────────────
+
+export interface CollapsiblePanelProps
+  extends Omit<ComponentProps<typeof BaseCollapsible.Panel>, 'className' | 'render' | 'keepMounted' | 'hiddenUntilFound'> {
+  /** The moving panel (no padding or vertical margin: it closes to 0). */
+  className?: string;
+  /** The inner box: spacing, borders, background. */
+  innerClassName?: string;
+}
+
+/** A Collapsible panel with the shared height + fade motion; spacing goes on the inner box. */
+export function CollapsiblePanel({ className, innerClassName, children, ...rest }: CollapsiblePanelProps) {
+  return (
+    <BaseCollapsible.Panel ref={settleOnOpen} render={inertWhenClosed} className={cn('motion-collapse', className)} {...rest}>
+      <div className={cn('min-w-0', innerClassName)}>{children}</div>
+    </BaseCollapsible.Panel>
+  );
+}
+
+// ── Reveal (controlled, no trigger) ────────────────────────────
+
+export type RevealMotion = 'height' | 'width' | 'slide-start';
+
+const REVEAL_MOTION: Record<RevealMotion, string> = {
+  height: 'motion-collapse',
+  width: 'motion-reveal-x',
+  'slide-start': 'motion-slide-start',
+};
+
+/**
+ * The `gap` of the flex column a height Reveal sits in: the gap then moves
+ * with the panel (a negative top margin on the panel, the same space as
+ * padding inside it), so opening is one continuous motion instead of the gap
+ * appearing at once and the content easing in after it.
+ */
+export type RevealGap = 1 | 1.5 | 2 | 2.5 | 3 | 4;
+
+const GAP: Record<RevealGap, { panel: string; inner: string }> = {
+  1: { panel: '-mt-1', inner: 'pt-1' },
+  1.5: { panel: '-mt-1.5', inner: 'pt-1.5' },
+  2: { panel: '-mt-2', inner: 'pt-2' },
+  2.5: { panel: '-mt-2.5', inner: 'pt-2.5' },
+  3: { panel: '-mt-3', inner: 'pt-3' },
+  4: { panel: '-mt-4', inner: 'pt-4' },
+};
+
+export interface RevealProps extends Omit<ComponentProps<'div'>, 'hidden' | 'inert'> {
+  open: boolean;
+  /** Height Reveal inside a gapped flex column, after a sibling: that column's gap. */
+  gap?: RevealGap;
+  /**
+   * `height` (default): inline content opening downward. `width`: a docked
+   * side panel opening from its edge (the child keeps its own width). `slide-start`:
+   * a floating panel sliding in from the inline start.
+   */
+  motion?: RevealMotion;
+}
+
+/**
+ * Content shown and hidden by a control of the caller's, with the shared
+ * motion: mounted while open or closing, inert while closing, unmounted once
+ * closed. The caller's control carries `aria-expanded` (+ `aria-controls`
+ * pointing at this `id`). Put spacing inside: the element itself moves.
+ */
+export function Reveal({ open, motion = 'height', gap, className, children, ...rest }: RevealProps) {
+  return (
+    <BaseCollapsible.Root open={open} className="contents">
+      <BaseCollapsible.Panel
+        ref={settleOnOpen}
+        render={inertWhenClosed}
+        className={cn(REVEAL_MOTION[motion], gap !== undefined && GAP[gap].panel, className)}
+        {...rest}
+      >
+        {gap !== undefined ? <div className={GAP[gap].inner}>{children}</div> : children}
+      </BaseCollapsible.Panel>
+    </BaseCollapsible.Root>
+  );
+}
 
 function TriggerContent({
   variant,
@@ -153,7 +254,7 @@ export function Collapsible({
       ) : (
         triggerNode
       )}
-      <BaseCollapsible.Panel className={cn(PANEL[variant], panelClassName)}>{children}</BaseCollapsible.Panel>
+      <CollapsiblePanel innerClassName={cn(PANEL[variant], panelClassName)}>{children}</CollapsiblePanel>
     </BaseCollapsible.Root>
   );
 }
@@ -209,7 +310,9 @@ export function Accordion({
               </TriggerContent>
             </BaseAccordion.Trigger>
           </BaseAccordion.Header>
-          <BaseAccordion.Panel className={cn(PANEL[variant], panelClassName)}>{item.children}</BaseAccordion.Panel>
+          <BaseAccordion.Panel ref={settleOnOpen} render={inertWhenClosed} className="motion-accordion">
+            <div className={cn('min-w-0', PANEL[variant], panelClassName)}>{item.children}</div>
+          </BaseAccordion.Panel>
         </BaseAccordion.Item>
       ))}
     </BaseAccordion.Root>

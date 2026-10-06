@@ -105,6 +105,10 @@
 
   /* Motion (D-20). */
   --ease-standard: var(--gai-ease-standard);
+  --ease-in-out: var(--gai-ease-in-out);
+  --transition-duration-fast: var(--gai-duration-fast);
+  --transition-duration-normal: var(--gai-duration-normal);
+  --transition-duration-slow: var(--gai-duration-slow);
 
   /* Shell widths (02 §8): w-sidebar, max-w-dialog …. */
   --container-sidebar: var(--gai-w-sidebar);

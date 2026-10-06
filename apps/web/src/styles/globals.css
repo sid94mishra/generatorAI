@@ -4612,6 +4612,7 @@
   --gai-duration-normal: 180ms;
   --gai-duration-slow: 220ms;
   --gai-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --gai-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   /* Stacking layers (D-41) */
   --gai-z-base: 0;
   --gai-z-sticky: 10;
@@ -4695,7 +4696,7 @@
   --font-mono: var(--font-mono);
 }
 
-@source inline("bg-ground bg-surface bg-raised bg-overlay bg-sunken bg-hover bg-selected border-line border-line-soft border-line-strong text-fg text-fg-2 text-fg-3 bg-accent text-on-accent outline-focus bg-run text-run bg-run-bg text-ok text-warn text-err bg-add-bg bg-del-bg shadow-pop bg-scrim text-micro text-small text-ui text-body text-title text-heading text-display rounded-badge rounded-control-sm rounded-control rounded-seg rounded-card rounded-panel rounded-dialog h-control-sm h-control h-control-lg h-bar h-tab h-row h-nav size-control z-dialog z-tooltip w-sidebar max-w-dialog ease-standard");
+@source inline("bg-ground bg-surface bg-raised bg-overlay bg-sunken bg-hover bg-selected border-line border-line-soft border-line-strong text-fg text-fg-2 text-fg-3 bg-accent text-on-accent outline-focus bg-run text-run bg-run-bg text-ok text-warn text-err bg-add-bg bg-del-bg shadow-pop bg-scrim text-micro text-small text-ui text-body text-title text-heading text-display rounded-badge rounded-control-sm rounded-control rounded-seg rounded-card rounded-panel rounded-dialog h-control-sm h-control h-control-lg h-bar h-tab h-row h-nav size-control z-dialog z-tooltip w-sidebar max-w-dialog ease-standard ease-in-out duration-normal");
 
 /* @generated-tokens:end */
 
@@ -4947,6 +4948,183 @@ label:has(> input[type="radio"]) {
   transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
   transition-duration: var(--gai-duration-fast);
   transition-timing-function: var(--gai-ease-standard);
+}
+
+/* ── Motion (D-108) ───────────────────────────────────────────────
+   Every expand / collapse and show / hide eases in and out on the motion
+   tokens. Reduced motion (the setting or the OS) zeroes the durations and the
+   rules around this block cut every transition to 0.01 ms: each change lands
+   at once. Base UI drives the enter / exit states — `data-starting-style` on
+   the first frame of an open, `data-ending-style` while it closes (the part
+   unmounts when the transition ends) — and a Collapsible / Accordion panel
+   publishes its measured size as `--collapsible-panel-*` /
+   `--accordion-panel-*` (`auto` once open, so content that keeps streaming in
+   keeps growing). The kit's panels add `data-settled` once an open transition
+   has ended (ui/lib/motion.ts `settleOnOpen`): clipped while they move, so
+   the content neither paints nor scrolls outside them; unclipped at rest, so
+   focus rings and hit areas show. */
+
+/* Inline expand / collapse: Collapsible, CollapsiblePanel, Reveal, StepRail. */
+@utility motion-collapse {
+  height: var(--collapsible-panel-height);
+  transition-property: height, opacity;
+  transition-duration: var(--gai-duration-normal);
+  transition-timing-function: var(--gai-ease-in-out);
+  &:not([data-settled]),
+  &[data-ending-style] {
+    overflow: clip;
+  }
+  &[data-starting-style],
+  &[data-ending-style] {
+    height: 0;
+    opacity: 0;
+  }
+}
+
+/* The same for an Accordion item's panel (its own variable: a nested
+   Collapsible must not read its ancestor's height). */
+@utility motion-accordion {
+  height: var(--accordion-panel-height);
+  transition-property: height, opacity;
+  transition-duration: var(--gai-duration-normal);
+  transition-timing-function: var(--gai-ease-in-out);
+  &:not([data-settled]),
+  &[data-ending-style] {
+    overflow: clip;
+  }
+  &[data-starting-style],
+  &[data-ending-style] {
+    height: 0;
+    opacity: 0;
+  }
+}
+
+/* A docked side panel (the Activity column) opening from 0 to its width; the
+   panel inside keeps its own width, so its content never reflows. */
+@utility motion-reveal-x {
+  width: var(--collapsible-panel-width);
+  transition-property: width, opacity;
+  transition-duration: var(--gai-duration-normal);
+  transition-timing-function: var(--gai-ease-in-out);
+  &:not([data-settled]),
+  &[data-ending-style] {
+    overflow: clip;
+  }
+  &[data-starting-style],
+  &[data-ending-style] {
+    width: 0;
+    opacity: 0;
+  }
+}
+
+/* A floating side panel (the Activity overlay, the sidebar flyout) entering
+   from its inline-start edge: a short slide and a fade. */
+@utility motion-slide-start {
+  transition-property: transform, opacity;
+  transition-duration: var(--gai-duration-normal);
+  transition-timing-function: var(--gai-ease-in-out);
+  &[data-starting-style],
+  &[data-ending-style] {
+    transform: translateX(-12px);
+    opacity: 0;
+  }
+}
+
+/* Popups (menus, popovers, listboxes, tooltips): a fade and a 97 % scale from
+   the side that faces the anchor (Base UI's `--transform-origin`). */
+@utility motion-pop {
+  transform-origin: var(--transform-origin, center);
+  transition-property: transform, opacity;
+  transition-duration: var(--gai-duration-fast);
+  transition-timing-function: var(--gai-ease-in-out);
+  &[data-starting-style],
+  &[data-ending-style] {
+    transform: scale(0.97);
+    opacity: 0;
+  }
+  /* Moving between tooltips of one group (Base UI marks it): no motion. */
+  &[data-instant] {
+    transition-duration: 0ms;
+  }
+}
+
+/* Dialogs: the same, centred and a little slower. */
+@utility motion-dialog {
+  transition-property: transform, opacity;
+  transition-duration: var(--gai-duration-normal);
+  transition-timing-function: var(--gai-ease-in-out);
+  &[data-starting-style],
+  &[data-ending-style] {
+    transform: scale(0.98);
+    opacity: 0;
+  }
+}
+
+/* Backdrops: a fade. */
+@utility motion-fade {
+  transition-property: opacity;
+  transition-duration: var(--gai-duration-normal);
+  transition-timing-function: var(--gai-ease-in-out);
+  &[data-starting-style],
+  &[data-ending-style] {
+    opacity: 0;
+  }
+}
+
+/* Sheets (the Sheet primitive): the whole panel slides in from its edge. */
+@utility motion-sheet-start {
+  transition-property: transform;
+  transition-duration: var(--gai-duration-slow);
+  transition-timing-function: var(--gai-ease-in-out);
+  &[data-starting-style],
+  &[data-ending-style] {
+    transform: translateX(-100%);
+  }
+}
+@utility motion-sheet-end {
+  transition-property: transform;
+  transition-duration: var(--gai-duration-slow);
+  transition-timing-function: var(--gai-ease-in-out);
+  &[data-starting-style],
+  &[data-ending-style] {
+    transform: translateX(100%);
+  }
+}
+
+/* A shell slot whose size moves between two token sizes: the sidebar slot
+   (sidebar ↔ rail width), the dock's main column (the gutter it keeps beside
+   the narrow-window sheet). */
+@utility motion-size {
+  transition-property: width, padding-right;
+  transition-duration: var(--gai-duration-normal);
+  transition-timing-function: var(--gai-ease-in-out);
+}
+
+/* The dock's surface (S-08/S-09): it follows the split while it opens and
+   closes, and stays visible until the close has finished (`visibility` turns
+   hidden at the end); as the narrow-window sheet it slides from the edge. */
+@utility motion-dock {
+  transition-property: translate, visibility;
+  transition-duration: var(--gai-duration-normal);
+  transition-timing-function: var(--gai-ease-in-out);
+}
+
+/* A resizable split (C-20): collapsing and re-opening a pane eases its share
+   of the row; a drag on the separator follows the pointer with no easing. */
+@utility motion-split {
+  & > [data-panel] {
+    transition-property: flex-grow;
+    transition-duration: var(--gai-duration-normal);
+    transition-timing-function: var(--gai-ease-in-out);
+  }
+  /* A pane shut to 0 turns `invisible` (C-20) only once it has finished closing. */
+  & > [data-panel] > * {
+    transition-property: visibility;
+    transition-duration: var(--gai-duration-normal);
+  }
+  &:has(> [data-separator='active']) > [data-panel] {
+    transition: none;
+  }
 }
 
 /* The in-app "Reduce motion" setting, mirroring the OS media rule above. */

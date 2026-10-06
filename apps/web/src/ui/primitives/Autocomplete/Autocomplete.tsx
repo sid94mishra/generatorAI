@@ -22,7 +22,7 @@ import type { IconConcept } from '@generatorai/design-tokens';
 import { cn } from '../../lib/cn.js';
 import { fieldFocus } from '../../lib/focus.js';
 import { overlayProps } from '../../lib/overlay.js';
-import { anchorWidth, floatSurface, listPopup } from '../../lib/popup.js';
+import { anchorWidth, floatSurface, popupMotion, listPopup } from '../../lib/popup.js';
 import { Icon } from '../../icons/Icon.js';
 import { Kbd } from '../Kbd/Kbd.js';
 
@@ -238,7 +238,7 @@ export function Autocomplete<T extends AutocompleteItem = AutocompleteItem>({
       ) : (
         <BaseAutocomplete.Portal>
           <BaseAutocomplete.Positioner sideOffset={4} align="start" className="z-dropdown outline-none" {...overlayProps('combobox')}>
-            <BaseAutocomplete.Popup className={cn(floatSurface, listPopup, anchorWidth)}>{list}</BaseAutocomplete.Popup>
+            <BaseAutocomplete.Popup className={cn(floatSurface, popupMotion, listPopup, anchorWidth)}>{list}</BaseAutocomplete.Popup>
           </BaseAutocomplete.Positioner>
         </BaseAutocomplete.Portal>
       )}

@@ -126,8 +126,11 @@ export const CONTAINER_NAMES = [
 ] as const;
 export type ContainerName = (typeof CONTAINER_NAMES)[number];
 
-/** Easing curves: `ease-standard`. */
-export const EASE_NAMES = ['standard'] as const;
+/** Easing curves (D-108): `ease-standard` (hover / press), `ease-in-out` (expand, reveal, enter / exit). */
+export const EASE_NAMES = ['standard', 'in-out'] as const;
+
+/** Transition durations (D-108): `duration-fast` 120 · `duration-normal` 180 · `duration-slow` 220; 0 under reduced motion. */
+export const DURATION_NAMES = ['fast', 'normal', 'slow'] as const;
 
 /** Every side/corner form of `rounded-*`. */
 export const RADIUS_UTILITY_PREFIXES = [
@@ -245,6 +248,7 @@ export const VOCABULARY_NAMESPACES: readonly VocabularyNamespace[] = [
   { id: 'z', prefixes: ['z'], names: Z_NAMES },
   { id: 'container', prefixes: ['w', 'min-w', 'max-w'], names: CONTAINER_NAMES },
   { id: 'ease', prefixes: ['ease'], names: EASE_NAMES },
+  { id: 'duration', prefixes: ['duration'], names: DURATION_NAMES },
 ];
 
 /**
@@ -306,6 +310,8 @@ export const REQUIRED_UTILITIES = [
   'w-sidebar',
   'max-w-dialog',
   'ease-standard',
+  'ease-in-out',
+  'duration-normal',
 ] as const;
 
 /**
@@ -335,6 +341,7 @@ export function twMergeExtension() {
         'max-h': [{ 'max-h': [...HEIGHT_NAMES] }],
         size: [{ size: [...SIZE_NAMES] }],
         z: [{ z: [...Z_NAMES] }],
+        duration: [{ duration: [...DURATION_NAMES] }],
       },
     },
   };

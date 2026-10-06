@@ -18,7 +18,7 @@ import type { ComponentProps } from 'react';
 import { Popover as BasePopover } from '@base-ui/react/popover';
 import { cn } from '../../lib/cn.js';
 import { overlayProps } from '../../lib/overlay.js';
-import { floatSurface } from '../../lib/popup.js';
+import { floatSurface, popupMotion } from '../../lib/popup.js';
 
 /** Popover state container (open / onOpenChange, modal). All Base UI Popover.Root props. */
 export const PopoverRoot = BasePopover.Root;
@@ -64,7 +64,7 @@ export function PopoverPopup({
         className="z-popover outline-none"
         {...overlayProps('popover')}
       >
-        <BasePopover.Popup className={cn(floatSurface, 'rounded-card text-ui outline-none', className)} {...rest}>
+        <BasePopover.Popup className={cn(floatSurface, popupMotion, 'rounded-card text-ui outline-none', className)} {...rest}>
           {children}
         </BasePopover.Popup>
       </BasePopover.Positioner>

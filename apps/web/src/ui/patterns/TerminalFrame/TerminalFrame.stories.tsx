@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, fn, screen, userEvent } from 'storybook/test';
+import { expect, fn, screen, userEvent, waitFor } from 'storybook/test';
 import { assertTargetSize } from '../../lib/test/targetSize.js';
 import { Badge } from '../../primitives/Badge/Badge.js';
 import { Button } from '../../primitives/Button/Button.js';
@@ -77,13 +77,13 @@ type Story = StoryObj<typeof meta>;
 /** Toolbar (instances, cwd, host) + Clear + Kill; key-owning body; status footer. */
 export const Default: Story = {
   play: async ({ canvas, canvasElement, args }) => {
-    await expect(canvas.getByTestId('terminal-panel')).toBeVisible();
+    await waitFor(() => expect(canvas.getByTestId('terminal-panel')).toBeVisible());
     await expect(canvasElement.querySelector('[data-gai-keys="own"]')).toContainElement(canvas.getByTestId('terminal-container'));
     await userEvent.click(canvas.getByRole('button', { name: 'Clear scrollback' }));
     await expect(args.onClear).toHaveBeenCalledOnce();
     await userEvent.click(canvas.getByRole('button', { name: 'Kill the terminal process' }));
     await expect(args.onKill).toHaveBeenCalledOnce();
-    await expect(canvas.getByText(/Connected/)).toBeVisible();
+    await waitFor(() => expect(canvas.getByText(/Connected/)).toBeVisible());
   },
 };
 
@@ -116,7 +116,7 @@ export const WithFind: Story = {
   render: () => <WithFindFrame />,
   play: async ({ canvas, canvasElement }) => {
     const search = canvas.getByRole('search');
-    await expect(search).toBeVisible();
+    await waitFor(() => expect(search).toBeVisible());
     await expect(canvasElement.querySelector('[data-gai-keys="own"]')).not.toContainElement(search);
   },
 };
@@ -178,7 +178,7 @@ export const WithHeaderAndKillConfirm: Story = {
   },
   play: async ({ canvas }) => {
     await userEvent.click(canvas.getByRole('button', { name: 'Kill the terminal process' }));
-    await expect(await screen.findByText('Kill zsh?')).toBeVisible();
+    await waitFor(async () => expect(await screen.findByText('Kill zsh?')).toBeVisible());
     await userEvent.keyboard('{Escape}');
   },
 };

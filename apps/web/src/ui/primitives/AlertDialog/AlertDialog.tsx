@@ -80,11 +80,11 @@ export function AlertDialog({
     >
       {trigger ? <BaseAlertDialog.Trigger render={trigger} /> : null}
       <BaseAlertDialog.Portal>
-        <BaseAlertDialog.Backdrop className="fixed inset-0 z-dialog bg-scrim" {...overlayProps('backdrop')} />
+        <BaseAlertDialog.Backdrop className="fixed inset-0 z-dialog bg-scrim motion-fade" {...overlayProps('backdrop')} />
         <BaseAlertDialog.Popup
           className={cn(
             'fixed top-1/2 left-1/2 z-dialog flex w-dialog-sm -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden',
-            'rounded-dialog border border-line bg-overlay text-fg shadow-pop outline-none',
+            'rounded-dialog border border-line bg-overlay text-fg shadow-pop outline-none motion-dialog',
             dialogClamp,
             className,
           )}

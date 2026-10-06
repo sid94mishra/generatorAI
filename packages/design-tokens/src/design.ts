@@ -385,10 +385,14 @@ export const Z_INDEX = {
   tooltip: 1200,
 } as const satisfies Record<ZName, number>;
 
-/** Transition timing (D-20, 02 §6.7). `MOTION` (tokens.ts) holds the same durations as numbers. */
+/**
+ * Transition timing (D-20, D-108, 02 §6.7). `MOTION` (tokens.ts) holds the same durations as numbers.
+ * `standard` decelerates (hover / press, ≤ 120 ms); `in-out` eases both ends — every expand /
+ * collapse, panel reveal and popup enter / exit (D-108).
+ */
 export const MOTION_CSS = {
   duration: { fast: `${MOTION.fast}ms`, normal: `${MOTION.normal}ms`, slow: `${MOTION.slow}ms` },
-  ease: { standard: 'cubic-bezier(0.2, 0, 0, 1)' },
+  ease: { standard: 'cubic-bezier(0.2, 0, 0, 1)', 'in-out': 'cubic-bezier(0.4, 0, 0.2, 1)' },
 } as const;
 
 /**

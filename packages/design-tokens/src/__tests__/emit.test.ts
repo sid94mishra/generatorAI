@@ -219,7 +219,7 @@ describe('design scales (L1c)', () => {
     const root = css.slice(css.indexOf(':root {', start), css.indexOf('}', css.indexOf(':root {', start)));
     for (const name of ['--gai-h-row: 44px', '--gai-h-control: 28px', '--gai-text-ui: 13px', '--gai-leading-body: 1.6',
       '--gai-weight-title: 600', '--gai-tracking-heading: -0.01em', '--gai-duration-fast: 120ms',
-      '--gai-ease-standard: cubic-bezier(0.2, 0, 0, 1)', '--gai-z-dialog: 1000', '--gai-z-dropdown: 1100', '--gai-w-sidebar: 232px']) {
+      '--gai-ease-standard: cubic-bezier(0.2, 0, 0, 1)', '--gai-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1)', '--gai-z-dialog: 1000', '--gai-z-dropdown: 1100', '--gai-w-sidebar: 232px']) {
       expect(root, name).toContain(`  ${name};`);
     }
   });
@@ -270,6 +270,8 @@ describe('shared class vocabulary', () => {
     expect(vocab).toContain('  --z-index-dialog: var(--gai-z-dialog);');
     expect(vocab).toContain('  --container-sidebar: var(--gai-w-sidebar);');
     expect(vocab).toContain('  --ease-standard: var(--gai-ease-standard);');
+    expect(vocab).toContain('  --ease-in-out: var(--gai-ease-in-out);');
+    expect(vocab).toContain('  --transition-duration-normal: var(--gai-duration-normal);');
     for (const name of SHARED_COLOR_NAMES) expect(vocab).toContain(`  --color-${name}: var(--${name});`);
   });
 
