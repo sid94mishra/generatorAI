@@ -77,8 +77,9 @@ test.describe('Activity column (D-92)', () => {
       timeout: 15_000,
     });
 
-    // Esc closes the column and returns focus to its toggle.
-    await column.getByRole('link').first().focus();
+    // Esc closes the column and returns focus to its toggle. Focus sits on the kind tabs, not a card: a focused card
+    // opens its popover, and Esc closes that popover first (the run failed whenever the popover won the race).
+    await column.getByRole('tab').first().focus();
     await page.keyboard.press('Escape');
     await expect(column).toHaveCount(0);
     await expect(toggle).toBeFocused();
