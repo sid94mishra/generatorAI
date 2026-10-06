@@ -472,6 +472,13 @@ export class NativeBrowserHost extends EventEmitter {
     sess.ready = wc.loadURL(`about:blank${frag}`).then(() => undefined, () => undefined);
 
     log.info(`[NativeBrowserHost] created tab=${tabId} workspace=${workspaceId} active=${isActive} partition=${partition}`);
+    // D-105: the person opened a Browser tab while the agent browses in its hidden tab — this tab takes over now
+    // (its first "visible" tick can arrive before this create resolved, so waiting for it raced).
+    const current = this.activeTab.get(workspaceId);
+    if (!isAgentTabId(tabId) && current && current !== tabId && isAgentTabId(current)) {
+      this.setActiveTab(workspaceId, tabId);
+      return this.describe(tabId);
+    }
     void this.ensureActiveProxy(workspaceId);
     return this.describe(tabId);
   }
@@ -649,6 +656,8 @@ export class NativeBrowserHost extends EventEmitter {
       webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
     });
     win.on('closed', () => { if (this.agentWindow === win) this.agentWindow = null; });
+    // Its own page is never used, but a never-loaded page stalls CDP clients that enumerate the app's targets.
+    void win.loadURL('about:blank').catch(() => undefined);
     this.agentWindow = win;
     return win;
   }
@@ -658,7 +667,9 @@ export class NativeBrowserHost extends EventEmitter {
     const next = this.sessions.get(toTab);
     if (agent && next) {
       const url = agent.view.webContents.getURL();
-      if (url && !url.startsWith('about:') && next.view.webContents.getURL().startsWith('about:')) {
+      const nextUrl = next.view.webContents.getURL();
+      // A tab created a moment ago has no URL yet (its blank discovery page is still loading).
+      if (url && !url.startsWith('about:') && (!nextUrl || nextUrl.startsWith('about:'))) {
         void this.navigate(toTab, url).catch(() => undefined);
       }
     }

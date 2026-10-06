@@ -24,8 +24,10 @@ const { FakeView, views, FakeAgentWindow } = vi.hoisted(() => {
     on(_e: string, _fn: Listener) { return this; }
     once(_e: string, _fn: Listener) { return this; }
     setWindowOpenHandler() {}
-    loadURL = vi.fn(async (_url: string): Promise<void> => undefined);
-    getURL = () => 'about:blank';
+    /** Like Electron: no URL until the first load commits (a tick after loadURL starts). */
+    url = '';
+    loadURL = vi.fn((url: string): Promise<void> => Promise.resolve().then(() => { this.url = url; }));
+    getURL = () => this.url;
     getTitle = () => '';
     isLoading = () => false;
     isDestroyed = () => this.destroyed;
@@ -55,6 +57,7 @@ const { FakeView, views, FakeAgentWindow } = vi.hoisted(() => {
     on() { return this; }
     isDestroyed = () => this.destroyed;
     destroy = vi.fn(() => { this.destroyed = true; });
+    loadURL = vi.fn(async () => undefined);
   }
   return { FakeView, views, FakeAgentWindow };
 });
@@ -260,9 +263,10 @@ describe('the agent tab (D-105)', () => {
     host.ensureAgentTab('ws-1');
     const agent = views[views.length - 1]!;
     agent.webContents.getURL = () => 'https://example.com/';
+    // Opening the Browser dock creates its tab: it takes over at once, before any visibility tick — while the new
+    // tab still reports no URL.
     host.create('browser-1', 'ws-1', false);
     const dock = views[views.length - 1]!;
-    host.setActiveTab('ws-1', 'browser-1');
     await vi.waitFor(() => expect(dock.webContents.loadURL).toHaveBeenCalledWith('https://example.com/'));
     expect(agent.webContents.close).toHaveBeenCalled();
     expect(win.children).not.toContain(agent);
