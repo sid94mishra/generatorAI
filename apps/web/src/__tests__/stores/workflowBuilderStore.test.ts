@@ -176,9 +176,9 @@ describe('workflowBuilderStore', () => {
     const loop = r.key;
     const graph = () => store().toGraph();
     const reviewNow = () => graph().stages.find((s) => s.key === 'review') as AgentStage;
-    expect(reviewNow().prompts[0]!.text).toBe(`Review {{ stages.${loop}.output.last.build.output.summary }} after {{ stages.analyze.output }}`);
+    expect(reviewNow().prompts[0]!.text).toBe(`Review {{ stages.${loop}.output.last.build.summary }} after {{ stages.analyze.output }}`);
     expect(reviewNow().context.from).toEqual([loop]);
-    expect(graph().edges.find((e) => e.to === 'review')).toMatchObject({ from: loop, when: `stages.${loop}.output.last.build.output.ok == true` });
+    expect(graph().edges.find((e) => e.to === 'review')).toMatchObject({ from: loop, when: `stages.${loop}.output.last.build.ok == true` });
 
     store().unwrapContainer(loop);
     expect(reviewNow().prompts[0]!.text).toBe('Review {{ stages.build.output.summary }} after {{ stages.analyze.output }}');

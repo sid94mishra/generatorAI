@@ -784,11 +784,12 @@ dialog's row (`blocks/workflow/CodebaseMountRow`, branch suggestions from the co
 detail page shows "alias @ branch".
 
 ### D-104 Wrapping in a loop rewrites the references to the wrapped stages (2026-10-06) — Final
-Outside a loop's body a body stage is read through the loop, `stages.<loop>.output.last.<key>` (the validator's
-scope rule). "Wrap in loop" used to leave every `{{ stages.test.output.passed }}` and edge `when` elsewhere in the
+Outside a loop's body a body stage's output is read through the loop: `stages.<loop>.output.last.<key>` is what
+`stages.<key>.output` was (the validator's scope rule). "Wrap in loop" used to leave every `{{ stages.test.output.passed }}` and edge `when` elsewhere in the
 graph pointing at the old path, so the workflow failed validation until each was fixed by hand. Wrapping now
-rewrites, in every string of the stages and edges outside the body, `stages.<key>` → `stages.<loop>.output.last.<key>`
-for each wrapped key, and moves a context source on a wrapped stage to the loop (as its edges move); unwrapping does
+rewrites, in every string of the stages and edges outside the body, `stages.<key>.output` →
+`stages.<loop>.output.last.<key>` for each wrapped key (other fields such as `.status` have no equivalent and are left
+to the validator), and moves a context source on a wrapped stage to the loop (as its edges move); unwrapping does
 the reverse (references through the loop become direct, the loop as a context source becomes the body's leaves).
 Map containers are not rewritten: a map body's outputs are a list (`stages.<map>.output.results`), with no
 single-value equivalent. The rewrite lives in `@generatorai/workflow-spec` (`qualifyBodyRefs` / `unqualifyBodyRefs`).
