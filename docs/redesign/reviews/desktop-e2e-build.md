@@ -152,21 +152,40 @@ acceptance commands) and title/summary generation; compaction was not reached.
 
 ## Left open
 
-- **Orchestrator workers do not survive a restart** (marked "Interrupted by a server restart"; fire-and-forget by
-  design) — owner: core.
-- **A read-only Codex reviewer cannot run HTTP tests** (its sandbox refuses `listen`, EPERM); reviews fall back to
-  typecheck + non-HTTP tests — owner: providers (sandbox mapping for "Write files: Off").
-- In "Ask before tools run" the platform's browser/widget MCP tools stay pre-approved (`CLAUDE_SDK_CAN_USE_TOOL_SHADOWED`);
-  every shell gate is badged "Risky" (badge carries no signal) — owner: security policy.
-- Automations cannot pick a codebase branch (lifecycle codebases use the default branch); new projects/runs don't
-  include a project's only codebase by default (New chat and Run dialog) — owner: workflows / create flows.
-- Builder "Wrap in loop" doesn't rewrite downstream `stages.<body>` references (validation shows the right path) —
-  owner: builder.
+- Every shell gate is badged "Risky" (the badge carries no signal); the permission card's title is "Allow this
+  command?" with the raw type `other` for tool gates — owner: security policy / gates copy.
+- In the desktop app an allowed `open_browser_page` failed with "Timed out waiting for a scoped CDP endpoint … Ensure
+  the desktop app has an active browser tab" when no Browser dock tab was open (Ask-mode check of D-102) — owner:
+  desktop browser.
+- New chats / Run dialog don't include a project's only codebase by default.
 - Run page usage reads "0 turns · 0 tokens" while a stage runs (filled at completion).
 - Unpackaged app menu reads "@generatorai/desktop" (packaged builds take productName; changing it moves userData).
-- Not done at the owner's request to close out: dock-browser / terminal / browser desktop smokes, a second
-  prompt before/after round on the skills, a full workflow run after D-99 in the app (unit-tested; builder default
-  verified).
-- Not re-verified in the app after the fix (unit-tested only): run-page parallel badge / stage prompt rendering /
-  check-row loading / stage composer (`8731bff5`, `6cf5acab`), terminal footer size, attached-file read gate, unread
-  dot. Windows/Linux runs of everything (CI after a push). Mobile parity for D-95/D-96 (approval chip, plan first).
+- A cheap worker model (Haiku) may "wait" with `run_in_background` and report done early (seen while testing D-100) —
+  model behaviour, not platform.
+- Not done at the owner's request: dock-browser / terminal / browser desktop smokes, a second prompt before/after
+  round on the skills, VRT (no Docker), Windows/Linux runs (CI after a push).
+- Not re-verified in the app (unit-tested only): run-page parallel badge / stage prompt rendering / check-row
+  loading / stage composer (`8731bff5`, `6cf5acab`), terminal footer size, attached-file read gate, unread dot.
+- Mobile parity: `mobile/reviews/PENDING.md` MV-41 (D-95 / D-96) and MV-42 (D-99, D-100, D-103, D-104).
+
+## Addendum — open items closed (2026-10-06)
+
+Fresh isolated environment (`/private/tmp/gae3`: own `--user-data-dir`, `DB_PATH` asserted on each of 4 launches,
+server on an OS-picked port), throwaway project `ping-svc` (a socket test: `listen(0)` on 127.0.0.1 + `fetch`), real
+providers (Claude Haiku for the orchestrator and Ask-mode chats, Codex **GPT-5.6-Luna** for D-101).
+
+| # | Item | Decision · commits | Evidence |
+|---|---|---|---|
+| 1 | Orchestrator workers did not survive a restart | **D-100** — `78d43a0b`, `4959950c`; also `a81eda41` (found here) | Spawned a worker, quit the app while it ran, relaunched: the Tasks dock showed it **Interrupted** with **Resume** (screens 315–316); Resume → running → In review, and the wave-complete nudge woke the orchestrator, which collected the digest (317–318). The restart also showed the orchestrator's partial turn twice (quit flush + boot recovery) — fixed in `a81eda41`. Unit: `OrchestratorService.restart.test.ts`, resume route over SQLite, dock model. |
+| 2 | Read-only Codex reviewer could not run HTTP tests | **D-101** — `2e17dbe3` | Before: `codex sandbox -P :workspace -- npm test` → `listen EPERM: operation not permitted 127.0.0.1` (also `:read-only`). After: a GPT-5.6-Luna chat on `ping-svc` ran `npm test` → `✔ GET /ping answers pong over a real localhost socket`, pass 1 (308). Unit: thread config + per-turn `networkAccess`, off switch. |
+| 3 | Browser / widget tools pre-approved in Ask mode | **D-102** — `86fa827e`, `0149b5b0` | Ask-mode Haiku chat asked to open example.com → a gate for `open_browser_page` appeared (310, 319). The first try exposed a second bug: answering after 120 s found the call abandoned by the tool budget and its question still pending (the retry then hit the one-pending-gate-per-turn index) — fixed in `0149b5b0`; re-checked by allowing after 135 s: "Tool call allowed" and the tool ran (320). Unit: `askBeforeRunning` (modes, deny, no channel, budget), golden snapshots. |
+| 4 | Automations could not pick a branch | **D-103** — `c9574b03` (migration v66, OpenAPI, wizard + detail) | Wizard: Workflow step lists `app` with branch suggestions (`feature/marker`, `main`, …) (324–325); detail shows "app @ feature/marker" (326); Run now: the server cut the worktree from `feature/marker` (`git worktree add … feature/marker`; `MARKER.txt` present) and the run succeeded after the check was switched to `npm test` (run #1 failed by my own `node -e` check, which policy refuses) (327–330). Unit/route: service, zod (project required, no duplicate alias, no blank branch), form model. |
+| 5 | Wrap in loop did not rewrite references | **D-104** — `bbdb615c`, `4b11ec0b` | Imported a 3-stage graph whose Review prompt reads `{{ stages.test.output.passed }}`; Wrap in loop on Test → prompt became `stages.loop_1.output.last.test.passed`, **Workflow is valid** (335). The first version wrote `…last.test.output.passed`, which the validator refused (334) — `last.<key>` is the output itself; fixed in `4b11ec0b`. Unwrap → `stages.test.output.passed`, valid (336). Unit: `stageRefs.test.ts`, store wrap/unwrap. |
+| 6 | Mobile parity for D-95 / D-96 | `5c95e41f` | `mobile/reviews/PENDING.md` **MV-41** (create flow: agent model/effort, effort/context tier sent, Plan first, effort labels; composer Approvals → `PATCH /chats/:id/permission-mode`) and **MV-42** (D-99/100/103/104 contract changes); `COORDINATION.md`: migration v66 taken, next mobile migration v67. |
+
+**Gates (macOS):** web typecheck · lint (0 errors) · check:design · full web unit 1614/1614 · web build ·
+check:bundle · check:css; core 1834 · workflow-spec 344 · shared 469 · providers 776 · client-core 829 · db 169 ·
+server 713 + background-task and automation route tests; migrations lock + DB baseline v66; e2e on a fresh sandbox:
+chats, workflow-builder, workflow-run, workflows-crud, automations 31/31, then builder + chats again after the D-104
+correction 18/18; desktop smokes chrome 59/59 and right-pane (all checks) on a fresh isolated profile. No OpenAPI test
+exists; the spec documents the resume route and `Automation.codebases`.
