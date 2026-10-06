@@ -798,9 +798,11 @@ single-value equivalent. The rewrite lives in `@generatorai/workflow-spec` (`qua
 In the desktop app the agent's browser drives the scoped CDP endpoint of the workspace's active Browser tab, which
 only exists once the person opens a Browser dock tab; with the dock closed `open_browser_page` waited 10 s and failed
 ("waiting for a scoped CDP endpoint … Ensure the desktop app has an active browser tab"). Now the server asks the
-desktop main process over the existing server IPC channel (`browser.ensure-tab`) and main creates a hidden **agent
-tab** (`agent-<workspaceId>`, laid out at 1280×800 so pages render and screenshots have pixels), makes it active and
-pushes its endpoint; the call proceeds. When the person later opens a Browser tab for that workspace and it becomes
+desktop main process over the existing server IPC channel (`browser.ensure-tab`) and main creates an **agent tab**
+(`agent-<workspaceId>`) in a never-shown window of its own (`show: false`, `paintWhenInitiallyHidden`), shown there at
+1280×800 — a view hidden in, or placed outside, the app window renders at 0×0, so pages had no layout and screenshots
+failed — makes it active and pushes its endpoint; the call proceeds. The hidden window closes with its last agent tab
+and with the app window. When the person later opens a Browser tab for that workspace and it becomes
 active, it takes over the agent tab's page (navigates to its URL when blank) and the agent tab is destroyed, so agent
 and person keep looking at one page. A workspace that already has a tab is used as it is.
 

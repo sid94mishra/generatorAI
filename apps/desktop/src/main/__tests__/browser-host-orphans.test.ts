@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Listener = (...args: unknown[]) => unknown;
 
-const { FakeView, views } = vi.hoisted(() => {
+const { FakeView, views, FakeAgentWindow } = vi.hoisted(() => {
   type Listener = (...args: unknown[]) => unknown;
   const views: InstanceType<typeof FakeView>[] = [];
   class FakeTabContents {
@@ -41,11 +41,27 @@ const { FakeView, views } = vi.hoisted(() => {
     setBounds = vi.fn((b: { x: number; y: number; width: number; height: number }) => { this.bounds = b; });
     constructor(_opts: unknown) { views.push(this); }
   }
-  return { FakeView, views };
+  /** The hidden window agent tabs live in (D-105). */
+  class FakeAgentWindow {
+    static last: FakeAgentWindow | null = null;
+    children: unknown[] = [];
+    destroyed = false;
+    opts: Record<string, unknown>;
+    contentView = {
+      addChildView: (v: unknown) => { this.children.push(v); },
+      removeChildView: (v: unknown) => { this.children = this.children.filter((c) => c !== v); },
+    };
+    constructor(opts: Record<string, unknown>) { this.opts = opts; FakeAgentWindow.last = this; }
+    on() { return this; }
+    isDestroyed = () => this.destroyed;
+    destroy = vi.fn(() => { this.destroyed = true; });
+  }
+  return { FakeView, views, FakeAgentWindow };
 });
 
 vi.mock('electron', () => ({
   WebContentsView: FakeView,
+  BrowserWindow: FakeAgentWindow,
   session: { fromPartition: () => ({}) },
 }));
 vi.mock('../logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
@@ -221,10 +237,14 @@ describe('restoring a page into a tab that was only just created', () => {
 });
 
 describe('the agent tab (D-105)', () => {
-  it('is created hidden at a desktop size and made active when the workspace has no tab', () => {
+  it('lives in a hidden window at a desktop size, shown there, and is made active when the workspace has no tab', () => {
     host.ensureAgentTab('ws-9');
     const view = views[views.length - 1]!;
-    expect(view.visible).toBe(false);
+    // A view hidden in the app window renders at 0x0; in the never-shown agent window it is shown and laid out.
+    expect(FakeAgentWindow.last!.opts).toMatchObject({ show: false, paintWhenInitiallyHidden: true });
+    expect(FakeAgentWindow.last!.children).toContain(view);
+    expect(win.children).not.toContain(view);
+    expect(view.visible).toBe(true);
     expect(view.bounds).toEqual({ x: 0, y: 0, width: 1280, height: 800 });
     expect(host.describe('agent-ws-9').workspaceId).toBe('ws-9');
   });
@@ -246,5 +266,7 @@ describe('the agent tab (D-105)', () => {
     await vi.waitFor(() => expect(dock.webContents.loadURL).toHaveBeenCalledWith('https://example.com/'));
     expect(agent.webContents.close).toHaveBeenCalled();
     expect(win.children).not.toContain(agent);
+    // No agent tab left: the hidden window goes too (it would keep the app from quitting on Windows / Linux).
+    expect(FakeAgentWindow.last!.destroy).toHaveBeenCalled();
   });
 });

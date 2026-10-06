@@ -17,7 +17,7 @@
 // preserving parity with the web build.
 // ────────────────────────────────────────────────────────────────
 
-import { WebContentsView, session as electronSession } from 'electron';
+import { BrowserWindow as ElectronBrowserWindow, WebContentsView, session as electronSession } from 'electron';
 import type { BrowserWindow } from 'electron';
 import { EventEmitter } from 'node:events';
 import { log } from './logger';
@@ -262,6 +262,11 @@ export class NativeBrowserHost extends EventEmitter {
   private cdpProxies = new Map<string, ScopedCdpProxy>();
   /** Pending sweep of views orphaned by the last document change. */
   private orphanReaper: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * D-105: the never-shown window agent tabs live in. A view hidden in (or placed outside) the app window renders at
+   * 0×0 — no layout, empty screenshots — while a hidden window that paints keeps a real viewport.
+   */
+  private agentWindow: BrowserWindow | null = null;
 
   isEnabled(): boolean {
     return nativeBrowserEnabled();
@@ -603,11 +608,15 @@ export class NativeBrowserHost extends EventEmitter {
 
   /**
    * D-105: a tab for the agent when the workspace has none (the server asked over IPC: an agent's browser call with the
-   * Browser dock closed). Hidden, laid out at a desktop size so pages render and screenshots have pixels, made the
-   * workspace's active tab so its scoped CDP endpoint is pushed. An existing tab is used as it is.
+   * Browser dock closed). Laid out at a desktop size outside the window's visible area, so pages render and
+   * screenshots have pixels, and made the workspace's active tab so its scoped CDP endpoint is pushed. An existing tab
+   * is used as it is.
    */
   ensureAgentTab(workspaceId: string): void {
-    if (!this.isEnabled() || !this.ownerWindow) return;
+    if (!this.isEnabled() || !this.ownerWindow) {
+      log.warn(`[NativeBrowserHost] no agent tab for workspace=${workspaceId}: ${this.isEnabled() ? 'no app window' : 'native browser off'}`);
+      return;
+    }
     const active = this.activeTab.get(workspaceId);
     if (active && this.sessions.has(active)) {
       void this.ensureActiveProxy(workspaceId);
@@ -617,10 +626,31 @@ export class NativeBrowserHost extends EventEmitter {
     this.create(tabId, workspaceId, true);
     const sess = this.sessions.get(tabId);
     if (sess) {
+      // Moved into the hidden agent window, shown there at a desktop size: nobody sees it, pages lay out and
+      // screenshots have pixels.
+      try { this.ownerWindow.contentView.removeChildView(sess.view); } catch { /* not attached */ }
+      this.agentHost().contentView.addChildView(sess.view);
       sess.lastBounds = { ...AGENT_TAB_BOUNDS };
+      sess.visible = true;
       sess.view.setBounds(sess.lastBounds);
+      sess.view.setVisible(true);
     }
     log.info(`[NativeBrowserHost] agent tab for workspace=${workspaceId} (no Browser dock tab was open)`);
+  }
+
+  private agentHost(): BrowserWindow {
+    if (this.agentWindow && !this.agentWindow.isDestroyed()) return this.agentWindow;
+    const win = new ElectronBrowserWindow({
+      show: false,
+      width: AGENT_TAB_BOUNDS.width,
+      height: AGENT_TAB_BOUNDS.height,
+      paintWhenInitiallyHidden: true,
+      skipTaskbar: true,
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
+    });
+    win.on('closed', () => { if (this.agentWindow === win) this.agentWindow = null; });
+    this.agentWindow = win;
+    return win;
   }
 
   private handOverAgentTab(agentTab: string, toTab: string): void {
@@ -652,6 +682,9 @@ export class NativeBrowserHost extends EventEmitter {
       }
     } catch { /* ignore */ }
     try {
+      if (this.agentWindow && !this.agentWindow.isDestroyed()) this.agentWindow.contentView.removeChildView(sess.view);
+    } catch { /* ignore */ }
+    try {
       // Cast through unknown to invoke destroy() where Electron typings
       // vary between minor versions.
       const wc = sess.view.webContents as unknown as { destroy?: () => void; close?: () => void };
@@ -663,6 +696,9 @@ export class NativeBrowserHost extends EventEmitter {
     // If this was the workspace's active tab, drop the pointer so the next
     // create()/setActiveTab() promotes a sibling tab to carry the marker.
     if (this.activeTab.get(sess.workspaceId) === tabId) this.activeTab.delete(sess.workspaceId);
+    // The hidden agent window lives only while it hosts an agent tab: a lingering window would keep the app from
+    // quitting where closing the last visible window quits it (Windows, Linux).
+    if (isAgentTabId(tabId) && ![...this.sessions.keys()].some(isAgentTabId)) this.closeAgentWindow();
     log.info(`[NativeBrowserHost] destroyed tab=${tabId} workspace=${sess.workspaceId}`);
   }
 
@@ -1131,6 +1167,13 @@ export class NativeBrowserHost extends EventEmitter {
     for (const wid of Array.from(this.sessions.keys())) {
       this.destroy(wid);
     }
+    this.closeAgentWindow();
+  }
+
+  private closeAgentWindow(): void {
+    const win = this.agentWindow;
+    this.agentWindow = null;
+    if (win && !win.isDestroyed()) win.destroy();
   }
 
   private blankDescriptor(tabId: string, workspaceId: string): NativeBrowserDescriptor {

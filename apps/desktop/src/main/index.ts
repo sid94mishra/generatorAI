@@ -133,7 +133,13 @@ async function onReady(): Promise<void> {
   // CDP-endpoint pushes NativeBrowserHost sends as tabs become active.
   sm.setElectronIpcToken(ipcToken);
   // D-105: an agent's browser call with no Browser dock tab open gets a hidden agent tab.
-  sm.on('browser-ensure-tab', (workspaceId: string) => getNativeBrowserHost().ensureAgentTab(workspaceId));
+  sm.on('browser-ensure-tab', (workspaceId: string) => {
+    const host = getNativeBrowserHost();
+    // The window is otherwise attached on the first renderer-created tab, which is exactly what is missing here.
+    const win = wm.getMainWindow();
+    if (win) host.attachOwnerWindow(win);
+    host.ensureAgentTab(workspaceId);
+  });
 
   registerIpc(mode);
   registerDownloadHandler(session.defaultSession);
