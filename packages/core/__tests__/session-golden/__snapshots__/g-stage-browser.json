@@ -72,7 +72,8 @@
           }
         },
         "additionalProperties": false
-      }
+      },
+      "timeoutMs": 86520000
     },
     {
       "name": "read_page",
@@ -91,7 +92,8 @@
           "pageId"
         ],
         "additionalProperties": false
-      }
+      },
+      "timeoutMs": 86520000
     },
     {
       "name": "navigate_page",
@@ -131,7 +133,8 @@
           "type"
         ],
         "additionalProperties": false
-      }
+      },
+      "timeoutMs": 86520000
     },
     {
       "name": "click_element",
@@ -184,7 +187,8 @@
         ],
         "additionalProperties": false
       },
-      "skipPermission": true
+      "skipPermission": true,
+      "timeoutMs": 86520000
     },
     {
       "name": "type_in_page",
@@ -219,7 +223,8 @@
         ],
         "additionalProperties": false
       },
-      "skipPermission": true
+      "skipPermission": true,
+      "timeoutMs": 86520000
     },
     {
       "name": "hover_element",
@@ -246,7 +251,8 @@
         ],
         "additionalProperties": false
       },
-      "skipPermission": true
+      "skipPermission": true,
+      "timeoutMs": 86520000
     },
     {
       "name": "drag_element",
@@ -281,7 +287,8 @@
         ],
         "additionalProperties": false
       },
-      "skipPermission": true
+      "skipPermission": true,
+      "timeoutMs": 86520000
     },
     {
       "name": "screenshot_page",
@@ -308,7 +315,8 @@
           "pageId"
         ],
         "additionalProperties": false
-      }
+      },
+      "timeoutMs": 86520000
     },
     {
       "name": "handle_dialog",
@@ -340,7 +348,8 @@
         ],
         "additionalProperties": false
       },
-      "skipPermission": true
+      "skipPermission": true,
+      "timeoutMs": 86520000
     },
     {
       "name": "run_playwright_code",
@@ -381,7 +390,8 @@
         ],
         "additionalProperties": false
       },
-      "skipPermission": true
+      "skipPermission": true,
+      "timeoutMs": 86520000
     },
     {
       "name": "record_plan",
