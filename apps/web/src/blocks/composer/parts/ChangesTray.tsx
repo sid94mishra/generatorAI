@@ -18,11 +18,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CHANGE_KIND, type ChangeKindValue } from '@generatorai/shared';
 import { useInvalidateWorkspaceChangeSummary } from '@/hooks/changesQueries.js';
-import {
-  useDiscardWorkspaceChanges,
-  useReviewWorkspaceChanges,
-  useWorkspaceChangeSummary,
-} from '@/hooks/queries.js';
+import { useDiscardWorkspaceChanges, useReviewWorkspaceChanges, useWorkspaceChangeSummary } from '@/hooks/queries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { splitWorkspaceChanges } from '@/blocks/changes/changeVisibility.js';
 import { CHANGE_TONE_CLASS } from '@/blocks/changes/ChangeFileRow.js';
@@ -42,6 +38,7 @@ import { useConfirm } from '@/ui/primitives/AlertDialog/AlertDialog.js';
 import { StatusDot } from '@/ui/primitives/StatusDot/StatusDot.js';
 import { DiffStat } from '@/ui/patterns/DiffStat/DiffStat.js';
 import { cn } from '@/ui/lib/cn.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 
 export interface ChangesTrayProps {
   workspaceId?: string | undefined;
@@ -160,10 +157,7 @@ export const ChangesTray = memo(function ChangesTray({
   const confirmer = useConfirm();
   // Root-workspace scaffolding is hidden while a codebase is linked (same
   // rule as the Changes tab), so the count here is the count of code changes.
-  const summary = useMemo(
-    () => splitWorkspaceChanges(summaryQuery.data, false).visible,
-    [summaryQuery.data],
-  );
+  const summary = useMemo(() => splitWorkspaceChanges(summaryQuery.data, false).visible, [summaryQuery.data]);
   const codebaseAliases = useMemo(
     () => new Set((summaryQuery.data?.repos ?? []).filter((r) => r.kind !== 'root').map((r) => r.alias)),
     [summaryQuery.data],
@@ -332,140 +326,152 @@ export const ChangesTray = memo(function ChangesTray({
     });
   }, []);
 
-  if (files.length === 0) return null;
-
+  const hasFiles = files.length > 0;
   const totalAdd = files.reduce((n, f) => n + f.additions, 0);
   const totalDel = files.reduce((n, f) => n + f.deletions, 0);
   const pending = files.some((f) => f.live);
   const pulsing = streaming && pending;
 
+  // The tray eases in above the composer when the first file changes, and its file
+  // list eases open and closed (D-108). It leaves at once when nothing is left to show.
   return (
-    <div
-      data-testid="chat-changes-tray"
-      className={cn('@container/tray mb-2 overflow-hidden rounded-card border border-line-soft bg-raised', className)}
-    >
-      <div className="flex h-control-lg items-center gap-1.5 px-1.5">
-        <IconButton
-          size="sm"
-          icon={open ? 'chevron-down' : 'chevron-right'}
-          label={open ? 'Hide changed files' : 'Show changed files'}
-          aria-expanded={open}
-          aria-controls={LIST_ID}
-          onClick={toggle}
-        />
-        <span className="relative inline-flex shrink-0 items-center justify-center">
-          <Icon concept="changes" size={14} className="text-accent" />
-          {pulsing ? (
-            <StatusDot tone="run" size="sm" className="absolute -top-0.5 -right-0.5 animate-pulse" />
-          ) : null}
-        </span>
-        <span className="flex min-w-0 flex-1 items-baseline gap-2">
-          <span className="min-w-0 truncate text-small font-medium text-fg">
-            {keptCount > 0 ? (
-              <>
-                {files.length - keptCount} to review
-                <span className="font-normal text-fg-3"> · {keptCount} kept</span>
-              </>
-            ) : (
-              <>
-                {files.length} {files.length === 1 ? 'file' : 'files'} changed
-                <span className="font-normal text-fg-3"> · in this chat</span>
-              </>
-            )}
-          </span>
-          <DiffStat added={totalAdd} removed={totalDel} className="shrink-0" />
-          {pulsing ? (
-            <span className="hidden shrink-0 animate-pulse text-micro text-fg-3 sm:inline">updating…</span>
-          ) : null}
-        </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          icon="changes"
-          onClick={() => onOpenChanges()}
-          title="Open the Changes tab"
-          data-testid="chat-changes-tray-review"
-          aria-label="Review changes"
-        >
-          {/* A narrow chat column keeps the summary readable: the buttons drop to icons. */}
-          <span className="hidden @xl/tray:inline">Review changes</span>
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          icon="check"
-          onClick={onKeepAll}
-          disabled={busy || files.length === keptCount}
-          title="Mark every changed file as reviewed"
-          data-testid="chat-changes-tray-keep-all"
-          aria-label="Keep all"
-        >
-          {/* A narrow chat column keeps the summary readable: the buttons drop to icons. */}
-          <span className="hidden @xl/tray:inline">Keep all</span>
-        </Button>
-        <Button
-          type="button"
-          variant="danger-ghost"
-          size="sm"
-          icon="undo"
-          onClick={onUndoAll}
-          disabled={busy}
-          title="Restore every changed file to its base revision"
-          data-testid="chat-changes-tray-undo-all"
-          aria-label="Undo all"
-        >
-          {/* A narrow chat column keeps the summary readable: the buttons drop to icons. */}
-          <span className="hidden @xl/tray:inline">Undo all</span>
-        </Button>
-      </div>
-      {confirmer.dialog}
-
-      {open ? (
-        <div id={LIST_ID} className="max-h-56 overflow-y-auto border-t border-line-soft px-1.5 py-1">
-          {rows.map((row) => {
-            if (row.kind === 'dir') {
-              return (
-                <div
-                  key={row.key}
-                  className="flex h-control-sm items-center gap-1.5 text-micro text-fg-3"
-                  style={indent(row.depth)}
-                >
-                  <Icon concept="folder-open" size={14} />
-                  <span className="truncate">{row.label}</span>
-                </div>
-              );
-            }
-            const file = row.file!;
-            const kind = CHANGE_KIND[LETTER_KIND[file.status]];
-            return (
+    <Reveal open={hasFiles}>
+      {hasFiles ? (
+        <div className="pb-2">
+          <div
+            data-testid="chat-changes-tray"
+            className={cn('@container/tray overflow-hidden rounded-card border border-line-soft bg-raised', className)}
+          >
+            <div className="flex h-control-lg items-center gap-1.5 px-1.5">
+              <IconButton
+                size="sm"
+                icon={open ? 'chevron-down' : 'chevron-right'}
+                label={open ? 'Hide changed files' : 'Show changed files'}
+                aria-expanded={open}
+                aria-controls={LIST_ID}
+                onClick={toggle}
+              />
+              <span className="relative inline-flex shrink-0 items-center justify-center">
+                <Icon concept="changes" size={14} className="text-accent" />
+                {pulsing ? (
+                  <StatusDot tone="run" size="sm" className="absolute -top-0.5 -right-0.5 animate-pulse" />
+                ) : null}
+              </span>
+              <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                <span className="min-w-0 truncate text-small font-medium text-fg">
+                  {keptCount > 0 ? (
+                    <>
+                      {files.length - keptCount} to review
+                      <span className="font-normal text-fg-3"> · {keptCount} kept</span>
+                    </>
+                  ) : (
+                    <>
+                      {files.length} {files.length === 1 ? 'file' : 'files'} changed
+                      <span className="font-normal text-fg-3"> · in this chat</span>
+                    </>
+                  )}
+                </span>
+                <DiffStat added={totalAdd} removed={totalDel} className="shrink-0" />
+                {pulsing ? (
+                  <span className="hidden shrink-0 animate-pulse text-micro text-fg-3 sm:inline">updating…</span>
+                ) : null}
+              </span>
               <Button
-                key={row.key}
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => onOpenChanges(file.path)}
-                title={`${kind.label} · ${file.path} — open in Changes`}
-                // The Button wraps its children in one span: lay that span out as the row.
-                className="w-full min-w-0 justify-start pr-1.5 font-normal *:flex *:flex-1 *:items-center *:gap-1.5"
-                style={indent(row.depth)}
-                data-testid="chat-changes-tray-file"
+                icon="changes"
+                onClick={() => onOpenChanges()}
+                title="Open the Changes tab"
+                data-testid="chat-changes-tray-review"
+                aria-label="Review changes"
               >
-                <Icon concept="file" size={14} className="shrink-0 text-fg-3" />
-                <span className="min-w-0 flex-1 truncate text-left font-mono text-micro text-fg">{row.label}</span>
-                <span
-                  className={cn('w-3 shrink-0 text-center font-mono text-small font-semibold', CHANGE_TONE_CLASS[kind.tone])}
-                  aria-label={kind.label}
-                >
-                  {kind.letter}
-                </span>
-                <DiffStat added={file.additions} removed={file.deletions} className="w-16 shrink-0 justify-end" />
+                {/* A narrow chat column keeps the summary readable: the buttons drop to icons. */}
+                <span className="hidden @xl/tray:inline">Review changes</span>
               </Button>
-            );
-          })}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                icon="check"
+                onClick={onKeepAll}
+                disabled={busy || files.length === keptCount}
+                title="Mark every changed file as reviewed"
+                data-testid="chat-changes-tray-keep-all"
+                aria-label="Keep all"
+              >
+                {/* A narrow chat column keeps the summary readable: the buttons drop to icons. */}
+                <span className="hidden @xl/tray:inline">Keep all</span>
+              </Button>
+              <Button
+                type="button"
+                variant="danger-ghost"
+                size="sm"
+                icon="undo"
+                onClick={onUndoAll}
+                disabled={busy}
+                title="Restore every changed file to its base revision"
+                data-testid="chat-changes-tray-undo-all"
+                aria-label="Undo all"
+              >
+                {/* A narrow chat column keeps the summary readable: the buttons drop to icons. */}
+                <span className="hidden @xl/tray:inline">Undo all</span>
+              </Button>
+            </div>
+            {confirmer.dialog}
+
+            <Reveal id={LIST_ID} open={open}>
+              <div className="max-h-56 overflow-y-auto border-t border-line-soft px-1.5 py-1">
+                {rows.map((row) => {
+                  if (row.kind === 'dir') {
+                    return (
+                      <div
+                        key={row.key}
+                        className="flex h-control-sm items-center gap-1.5 text-micro text-fg-3"
+                        style={indent(row.depth)}
+                      >
+                        <Icon concept="folder-open" size={14} />
+                        <span className="truncate">{row.label}</span>
+                      </div>
+                    );
+                  }
+                  const file = row.file!;
+                  const kind = CHANGE_KIND[LETTER_KIND[file.status]];
+                  return (
+                    <Button
+                      key={row.key}
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onOpenChanges(file.path)}
+                      title={`${kind.label} · ${file.path} — open in Changes`}
+                      // The Button wraps its children in one span: lay that span out as the row.
+                      className="w-full min-w-0 justify-start pr-1.5 font-normal *:flex *:flex-1 *:items-center *:gap-1.5"
+                      style={indent(row.depth)}
+                      data-testid="chat-changes-tray-file"
+                    >
+                      <Icon concept="file" size={14} className="shrink-0 text-fg-3" />
+                      <span className="min-w-0 flex-1 truncate text-left font-mono text-micro text-fg">
+                        {row.label}
+                      </span>
+                      <span
+                        className={cn(
+                          'w-3 shrink-0 text-center font-mono text-small font-semibold',
+                          CHANGE_TONE_CLASS[kind.tone],
+                        )}
+                        aria-label={kind.label}
+                      >
+                        {kind.letter}
+                      </span>
+                      <DiffStat added={file.additions} removed={file.deletions} className="w-16 shrink-0 justify-end" />
+                    </Button>
+                  );
+                })}
+              </div>
+            </Reveal>
+          </div>
         </div>
       ) : null}
-    </div>
+    </Reveal>
   );
 });

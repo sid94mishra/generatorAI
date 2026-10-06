@@ -46,6 +46,7 @@ import { DetailPage } from '@/ui/templates/DetailPage/DetailPage.js';
 import { PR_STATE_TONE } from './detail/PullRequestsTab.js';
 import { useNarrow } from '@/lib/useNarrow.js';
 import { formatWhen } from '@/lib/formatWhen.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 
 const FILE_STATUS_TONE: Record<PullRequestFile['status'], string> = {
   added: 'text-ok',
@@ -103,7 +104,7 @@ function PrFileRow({ file }: { file: PullRequestFile }) {
           </span>
         </span>
       </Button>
-      {open ? (
+      <Reveal open={open}>
         <div className="border-t border-line-soft">
           {source ? (
             <DiffCodeView sources={[source]} renderHeader={() => null} headerHeight={0} style={{ height }} />
@@ -111,7 +112,7 @@ function PrFileRow({ file }: { file: PullRequestFile }) {
             <p className="px-3.5 py-3 text-small text-fg-3">No diff available for this file (binary, or too large to include).</p>
           )}
         </div>
-      ) : null}
+      </Reveal>
     </li>
   );
 }

@@ -14,7 +14,7 @@
 // streamed token (which only grows the answer) re-renders none of this.
 // ────────────────────────────────────────────────────────────────
 
-import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
+import { memo, useCallback, useId, useMemo, useState, type ReactNode } from 'react';
 import { Link as RouterLink } from 'react-router';
 import {
   formatStepDuration,
@@ -27,6 +27,7 @@ import { cn } from '@/ui/lib/cn.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { Link } from '@/ui/primitives/Link/Link.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 import { CodeBlock } from '@/ui/patterns/CodeBlock/CodeBlock.js';
 import { DiffStat } from '@/ui/patterns/DiffStat/DiffStat.js';
 import { StepRail, type StepRailItem } from '@/ui/patterns/StepRail/StepRail.js';
@@ -100,10 +101,13 @@ function resultOf(step: TimelineStep): Pick<StepRailItem, 'result' | 'resultTone
 /** Expand panel of a step: diff first, raw tool I/O one click away, nested children. */
 function StepDetail({ step, mode, live }: { step: TimelineStep; mode: 'normal' | 'verbose'; live: boolean }) {
   const actions = useTranscriptActions();
+  const rawId = useId();
   const [showRaw, setShowRaw] = useState(mode === 'verbose');
+  // Once shown, the raw text stays built, so it can ease closed instead of vanishing.
+  const [rawSeen, setRawSeen] = useState(showRaw);
   const diffOf = step.diff;
   const diff = useMemo(() => (diffOf ? diffOf() : null), [diffOf]);
-  const wantRaw = !!step.detail && (!diff || showRaw);
+  const wantRaw = !!step.detail && (!diff || rawSeen);
   const detailText = useMemo(() => {
     if (!wantRaw || !step.detail) return null;
     return typeof step.detail === 'function' ? step.detail() : step.detail;
@@ -133,12 +137,22 @@ function StepDetail({ step, mode, live }: { step: TimelineStep; mode: 'normal' |
           variant="ghost"
           className="self-start"
           aria-expanded={showRaw}
-          onClick={() => setShowRaw((v) => !v)}
+          aria-controls={rawId}
+          onClick={() => {
+            setRawSeen(true);
+            setShowRaw((v) => !v);
+          }}
         >
           {showRaw ? TRANSCRIPT_COPY.hideRawToolCall : TRANSCRIPT_COPY.showRawToolCall}
         </Button>
       ) : null}
-      {detailText ? <CodeBlock wrap>{detailText}</CodeBlock> : null}
+      {detailText && diff ? (
+        <Reveal id={rawId} open={showRaw} gap={1.5}>
+          <CodeBlock wrap>{detailText}</CodeBlock>
+        </Reveal>
+      ) : detailText ? (
+        <CodeBlock wrap>{detailText}</CodeBlock>
+      ) : null}
       {step.children && step.children.length > 0 ? (
         <StepList steps={step.children} mode={mode} live={live} />
       ) : null}

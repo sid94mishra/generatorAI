@@ -12,6 +12,7 @@ import type { ComposerBlockingState } from '@generatorai/shared/ui-contract';
 import { Icon } from '@/ui/icons/Icon.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 
 export interface BlockingBarProps {
   blocking: ComposerBlockingState;
@@ -25,9 +26,15 @@ export interface BlockingBarProps {
   onCancelWaiting?: (() => void) | undefined;
 }
 
-const barBase = 'mb-2 flex min-h-9 items-center gap-2 rounded-card border px-3 py-1.5 text-ui';
+const barBase = 'flex min-h-9 items-center gap-2 rounded-card border px-3 py-1.5 text-ui';
 
-export function BlockingBar({
+/** The bar eases in above the box when Send is held back (D-108), and leaves at once. */
+export function BlockingBar(props: BlockingBarProps) {
+  const bar = barFor(props);
+  return <Reveal open={bar != null}>{bar != null ? <div className="pb-2">{bar}</div> : null}</Reveal>;
+}
+
+function barFor({
   blocking,
   prepError,
   onRetryPrep,

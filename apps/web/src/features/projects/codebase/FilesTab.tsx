@@ -24,6 +24,7 @@ import { SearchInput } from '@/ui/primitives/SearchInput/SearchInput.js';
 import { SegmentedControl } from '@/ui/primitives/SegmentedControl/SegmentedControl.js';
 import { SkeletonRows } from '@/ui/primitives/Skeleton/Skeleton.js';
 import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 import { formatBytes } from '../projectFormat.js';
 
 /** Past this size a file shows as plain text: highlighting it would stall the page. */
@@ -66,8 +67,8 @@ function TreeNode({ entry, depth, ...props }: TreeProps & { entry: FileEntry; de
           {!dir && entry.size !== undefined ? <span className="shrink-0 font-mono text-micro text-fg-3">{formatBytes(entry.size)}</span> : null}
         </span>
       </Button>
-      {dir && open ? (
-        isLoading ? (
+      <Reveal open={dir && open}>
+        {isLoading ? (
           <div className="flex items-center gap-1.5 py-1 text-micro text-fg-3" style={{ paddingLeft: (depth + 1) * INDENT_PX + 8 }}>
             <Spinner size={12} /> Loading…
           </div>
@@ -81,8 +82,8 @@ function TreeNode({ entry, depth, ...props }: TreeProps & { entry: FileEntry; de
               <TreeNode key={child.path} entry={child} depth={depth + 1} {...props} />
             ))}
           </ul>
-        )
-      ) : null}
+        )}
+      </Reveal>
     </li>
   );
 }

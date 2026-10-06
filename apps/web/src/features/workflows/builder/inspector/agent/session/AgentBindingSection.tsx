@@ -16,6 +16,7 @@ import { Button } from '@/ui/primitives/Button/Button.js';
 import { InspectorNote } from '../../../fields/InspectorLayout.js';
 import { AgentOverridesEditor } from './AgentOverridesEditor.js';
 import { useBoundAgent } from './sessionModel.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 
 export interface AgentBindingSectionProps {
   /** The (partial) session being edited. */
@@ -86,7 +87,7 @@ export function AgentBindingSection({ session, onChange, projectId, scope, onAge
           {showCapabilities ? 'Hide capabilities' : 'Customize capabilities'}
         </Button>
       </div>
-      {showCapabilities ? (
+      <Reveal open={showCapabilities} gap={2}>
         <AgentOverridesEditor
           agent={selectedAgent}
           value={overrides}
@@ -94,7 +95,7 @@ export function AgentBindingSection({ session, onChange, projectId, scope, onAge
           projectId={projectId}
           effectiveGroups={projection?.toolPolicy.groups}
         />
-      ) : null}
+      </Reveal>
       {agentRef || overridesKey !== '{}' ? (
         <EffectiveCapabilities
           className="w-full"

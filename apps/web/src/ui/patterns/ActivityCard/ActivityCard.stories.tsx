@@ -100,7 +100,7 @@ export const States: Story = {
         meta: ['Orchestrator', 'Sonnet 5'],
         trailing: <IconButton icon="chevron-up" label="Hide workers" size="sm" aria-expanded />,
         children: (
-          <div className="mt-1 flex flex-col border-l border-line pl-2">
+          <div className="mt-1.5 flex flex-col border-l border-line pl-2">
             <ActivityListRow icon="status-succeeded" tone="ok" name="schema-writer" end="done" />
             <ActivityListRow icon="status-running" tone="run" spin name="api-port" detail="billing/client.ts" end="2:10" />
             <ActivityListRow icon="status-needs-you" tone="warn" name="webhooks" detail="Allow curl?" end="needs you" endTone />

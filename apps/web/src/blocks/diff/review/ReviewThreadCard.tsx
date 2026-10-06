@@ -23,6 +23,7 @@ import { StatusBadge } from '@/ui/primitives/StatusBadge/StatusBadge.js';
 import { Textarea } from '@/ui/primitives/Textarea/Textarea.js';
 import type { ReviewAuthor, ReviewThread } from '@/types/review.js';
 import { MOD_ENTER_TEXT, isModEnter } from './modEnter.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 
 export interface ReviewThreadCardProps {
   thread: ReviewThread;
@@ -141,7 +142,7 @@ export function ReviewThreadCard({
         ) : null}
       </div>
 
-      {expanded ? (
+      <Reveal open={expanded}>
         <div className="flex flex-col gap-2.5 px-3 pt-1 pb-2.5">
           {thread.reviewRound > 0 ? <span className="text-micro text-fg-3">Round {thread.reviewRound}</span> : null}
 
@@ -249,7 +250,7 @@ export function ReviewThreadCard({
             </div>
           ) : null}
         </div>
-      ) : null}
+      </Reveal>
     </div>
   );
 }

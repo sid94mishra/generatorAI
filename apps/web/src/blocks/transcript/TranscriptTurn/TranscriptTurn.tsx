@@ -26,6 +26,7 @@ import { TRANSCRIPT_COPY } from '@generatorai/shared/ui-contract';
 import { cn } from '@/ui/lib/cn.js';
 import { Callout } from '@/ui/primitives/Callout/Callout.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 import { Icon } from '@/ui/icons/Icon.js';
 import { AgentTurnHeader } from '../AgentTurnHeader/AgentTurnHeader.js';
 import { TurnBody } from '../TurnBody/TurnBody.js';
@@ -95,6 +96,8 @@ function AgentResponse({
   const durationMs = turnDurationMs(startedAt, message.timestamp);
   const digest = useMemo(() => digestSegments(segments, blocks, durationMs), [segments, blocks, durationMs]);
   const digestLine = folded || summary ? formatDigest(digest, formatStepDuration) : undefined;
+  const hasAttachments = !!message.attachments && message.attachments.length > 0;
+  const actionsNode = renderActions ? renderActions(message, engaged) : null;
 
   return (
     <div
@@ -125,13 +128,20 @@ function AgentResponse({
         />
       )}
       {/* One TurnBody in every mode (Summary keeps only the final answer, TurnBody filters):
-          a mode switch re-renders the answer's AssistantText instead of remounting and re-parsing it. */}
-      {folded ? null : <TurnBody segments={segments} streamKey={message.sessionId} />}
+          a mode switch re-renders the answer's AssistantText instead of remounting and re-parsing it.
+          Folding eases the body closed (D-108), the column's gap with it. A folded body is not mounted. */}
+      <Reveal open={!folded} {...(isTool ? {} : { gap: 2 as const })}>
+        <TurnBody segments={segments} streamKey={message.sessionId} />
+      </Reveal>
       {partial ? <StoppedNote partial={segments.length > 0} testId="message-stopped-note" /> : null}
-      {!folded && message.attachments && message.attachments.length > 0 ? (
-        <AttachmentList attachments={message.attachments} chatId={message.chatId} download />
+      {hasAttachments || actionsNode != null ? (
+        <Reveal open={!folded} gap={2}>
+          <div className="flex flex-col gap-2">
+            {hasAttachments ? <AttachmentList attachments={message.attachments!} chatId={message.chatId} download /> : null}
+            {actionsNode}
+          </div>
+        </Reveal>
       ) : null}
-      {!folded && renderActions ? renderActions(message, engaged) : null}
     </div>
   );
 }

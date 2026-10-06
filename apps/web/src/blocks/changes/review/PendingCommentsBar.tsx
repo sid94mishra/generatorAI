@@ -12,6 +12,7 @@ import { Icon } from '@/ui/icons/Icon.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { Textarea } from '@/ui/primitives/Textarea/Textarea.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 
 export interface PendingCommentsBarProps {
   pendingCount: number;
@@ -86,7 +87,7 @@ export function PendingCommentsBar({
         ) : null}
       </div>
 
-      {showNote && pendingCount > 0 ? (
+      <Reveal open={showNote && pendingCount > 0} gap={1.5}>
         <Textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
@@ -94,7 +95,7 @@ export function PendingCommentsBar({
           placeholder="Extra instruction appended after the comments (optional)"
           aria-label="Extra instruction for the agent"
         />
-      ) : null}
+      </Reveal>
 
       {disabledReason && pendingCount > 0 && !onSendAll ? (
         <p className="m-0 text-small text-fg-3">{disabledReason}</p>

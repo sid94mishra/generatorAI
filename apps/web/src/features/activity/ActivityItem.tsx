@@ -29,6 +29,7 @@ import { ActivityListRow } from '@/ui/patterns/ActivityPopover/ActivityPopover.j
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { ContextMenu } from '@/ui/primitives/Menu/Menu.js';
 import { PopoverPopup, PopoverRoot } from '@/ui/primitives/Popover/Popover.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 import { ActivityDetails } from './ActivityDetails.js';
 import { cardLine, cardMeta, cardStages, cardTone, kindIcon, kindLabel, stopLabel, stopTarget } from './activityView.js';
 
@@ -226,7 +227,14 @@ export function ActivityItem({ entry, now, selected, modelLabel, tabIndex, linkR
                 ) : undefined
               }
             >
-              {canExpand && expanded ? <InlineWorkers entry={entry} modelLabel={modelLabel} /> : null}
+              {canExpand ? (
+                // The workers ease open under the card (D-108); the gap rides inside the panel.
+                <Reveal open={expanded}>
+                  <div className="pt-1.5">
+                    <InlineWorkers entry={entry} modelLabel={modelLabel} />
+                  </div>
+                </Reveal>
+              ) : null}
             </ActivityCard>
           }
         />
@@ -316,7 +324,7 @@ function InlineWorkers({ entry, modelLabel }: { entry: ActivityEntry; modelLabel
   }, [tally, refetch]);
   if (!tasks.data) return null;
   return (
-    <div className="mt-1 flex flex-col border-l border-line pl-2" data-testid="activity-card-workers">
+    <div className="flex flex-col border-l border-line pl-2" data-testid="activity-card-workers">
       {tasks.data.tasks.map((task) => {
         const status = resolveStatus('backgroundTask', task.status);
         const asking = entry.worker?.id === task.taskId;

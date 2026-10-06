@@ -37,6 +37,7 @@ import { Button } from '@/ui/primitives/Button/Button.js';
 import { Link } from '@/ui/primitives/Link/Link.js';
 import { useConfirm } from '@/ui/primitives/AlertDialog/AlertDialog.js';
 import { KeyChip } from '@/blocks/workflow/chips/WorkflowChips.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 
 export type DraftNodeTag = 'added' | 'changed';
 
@@ -300,21 +301,23 @@ export function AgentDraftBanner({ record, graph, onPublish, publishing }: Agent
         </div>
       ) : null}
 
-      {reviewing && diff && changed ? (
-        <ul className="flex flex-col gap-1 border-t border-line-soft pt-2 text-small" data-testid="agent-draft-diff-detail">
-          <DiffLine label="Stages added" items={diff.stagesAdded} tone="text-ok" />
-          <DiffLine label="Stages removed" items={diff.stagesRemoved} tone="text-err" />
-          <DiffLine label="Stages changed" items={diff.stagesChanged} tone="text-warn" />
-          <DiffLine label="Edges added" items={diff.edgesAdded} tone="text-ok" />
-          <DiffLine label="Edges removed" items={diff.edgesRemoved} tone="text-err" />
-          {diff.settingsChanged ? (
-            <li>
-              <span className="text-warn">Workflow settings changed</span>
-              <span className="text-fg-3"> (session, lifecycle or variables)</span>
-            </li>
-          ) : null}
-        </ul>
-      ) : null}
+      <Reveal open={reviewing && !!diff && !!changed} gap={2}>
+        {diff ? (
+          <ul className="flex flex-col gap-1 border-t border-line-soft pt-2 text-small" data-testid="agent-draft-diff-detail">
+            <DiffLine label="Stages added" items={diff.stagesAdded} tone="text-ok" />
+            <DiffLine label="Stages removed" items={diff.stagesRemoved} tone="text-err" />
+            <DiffLine label="Stages changed" items={diff.stagesChanged} tone="text-warn" />
+            <DiffLine label="Edges added" items={diff.edgesAdded} tone="text-ok" />
+            <DiffLine label="Edges removed" items={diff.edgesRemoved} tone="text-err" />
+            {diff.settingsChanged ? (
+              <li>
+                <span className="text-warn">Workflow settings changed</span>
+                <span className="text-fg-3"> (session, lifecycle or variables)</span>
+              </li>
+            ) : null}
+          </ul>
+        ) : null}
+      </Reveal>
       {confirmer.dialog}
     </div>
   );

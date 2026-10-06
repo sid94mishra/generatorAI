@@ -50,6 +50,7 @@ import { cn } from '@/ui/lib/cn.js';
 import { Input } from '@/ui/primitives/Input/Input.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { Textarea } from '@/ui/primitives/Textarea/Textarea.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 import { KbdHintRow, type KbdHint } from '@/ui/patterns/KbdHintRow/KbdHintRow.js';
 import type { CaptureSource } from './model/types.js';
 import type { PromptHistoryEntry } from './model/promptHistory.js';
@@ -506,8 +507,8 @@ export function Composer({
             footerNote={highlightedCommand?.argHint ? `Then: ${highlightedCommand.argHint}` : undefined}
           />
 
-          {/* Attachments */}
-          {attachments.length > 0 || (pendingCaptures?.length ?? 0) > 0 || mentionLoading ? (
+          {/* Attachments: the row eases open when the first chip arrives (D-108). */}
+          <Reveal open={attachments.length > 0 || (pendingCaptures?.length ?? 0) > 0 || mentionLoading}>
             <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
               {attachments.map((att) => (
                 <ComposerChip
@@ -531,7 +532,7 @@ export function Composer({
                 />
               ))}
             </div>
-          ) : null}
+          </Reveal>
 
           {/* Text (+ the active /command pill) */}
           <div className={cn('pr-2.5 pl-3.5', compact ? 'pt-2' : 'pt-3')}>

@@ -206,7 +206,8 @@ export function ActivityCard({
             {metaEnd != null ? <span className="ml-auto flex shrink-0 items-center gap-1 truncate">{metaEnd}</span> : null}
           </div>
         ) : null}
-        {children != null ? <div className="relative z-10">{children}</div> : null}
+        {/* -mt-0.5 cancels the column's gap: a closed disclosure (a Reveal) adds no height. */}
+        {children != null ? <div className="relative z-10 -mt-0.5">{children}</div> : null}
       </div>
     </div>
   );

@@ -30,6 +30,7 @@ import { formatStageDuration } from '../model/format.js';
 import type { StageView } from '../model/types.js';
 import { ReviewCard } from './ReviewCard.js';
 import { formatWhen } from '@/lib/formatWhen.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 
 /** An answer to one of a stage's in-turn gates, in the chat's shapes (the stage conversation API). */
 export type StageGateResolution =
@@ -280,7 +281,7 @@ export const StageRow = memo(function StageRow({
         ) : null}
       </div>
 
-      {open && !isSkippedOrCancelled ? (
+      <Reveal open={open && !isSkippedOrCancelled}>
         <div className={cn('flex flex-col gap-2.5 pt-1 pr-4 pb-3', BODY_PAD[d])}>
           {body}
 
@@ -371,7 +372,7 @@ export const StageRow = memo(function StageRow({
           ) : null}
 
         </div>
-      ) : null}
+      </Reveal>
 
       {isSkippedOrCancelled ? (
         <p className={cn('pr-4 pb-2 text-small text-fg-3', BODY_PAD[d])}>

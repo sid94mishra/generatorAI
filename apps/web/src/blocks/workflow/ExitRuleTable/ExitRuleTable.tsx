@@ -19,6 +19,7 @@
 
 import { useState, type ReactNode } from 'react';
 import { LOOP_EXIT_ACTIONS, type ExitRule, type LoopExitAction } from '@generatorai/workflow-spec';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 import { cn } from '@/ui/lib/cn.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
@@ -271,7 +272,9 @@ function QuickExitRow({
         ariaLabel: `${row.label} condition`,
         placeholder: row.placeholder,
       })}
-      {expanded ? <StreakAndReason rule={current} onChange={update} label={row.label} /> : null}
+      <Reveal open={expanded} gap={1.5}>
+        <StreakAndReason rule={current} onChange={update} label={row.label} />
+      </Reveal>
       {index !== undefined ? renderIssues?.([`/${index}/consecutive`, `/${index}/reason`], false) : null}
       {index !== undefined ? renderIssues?.([`/${index}`], true) : null}
     </div>

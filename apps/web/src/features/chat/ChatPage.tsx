@@ -40,6 +40,7 @@ import { Banner } from '@/ui/patterns/Banner/Banner.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Skeleton } from '@/ui/primitives/Skeleton/Skeleton.js';
 import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 import { Icon } from '@/ui/icons/Icon.js';
 import { ChatHeader } from './components/ChatHeader.js';
 import { ChatTranscript } from './components/ChatTranscript.js';
@@ -441,9 +442,10 @@ export function ChatPage() {
                   }
                   main={
                     <>
-                      {/* The turn's state in words, under the header (the badge carries it too). */}
-                      {isWorking ? (
-                        <div role="status" className="flex shrink-0 items-center gap-2 border-b border-line-soft px-7 py-1.5 text-small font-medium text-run">
+                      {/* The turn's state in words, under the header (the badge carries it too).
+                          It eases in and out (D-108), so the transcript under it never jumps. */}
+                      <Reveal open={isWorking} className="shrink-0">
+                        <div role="status" className="flex items-center gap-2 border-b border-line-soft px-7 py-1.5 text-small font-medium text-run">
                           {awaitingUserDecision ? <Icon concept="pause" size={14} /> : <Spinner size={14} />}
                           <span>
                             {awaitingUserDecision
@@ -453,7 +455,7 @@ export function ChatPage() {
                                 : 'Processing...'}
                           </span>
                         </div>
-                      ) : null}
+                      </Reveal>
                       {chat.status === 'archived' ? (
                         <div className="shrink-0 px-7 pt-3">
                           <Banner tone="warn" lead="This chat has been archived" detail="You can read it, but it takes no new messages." />

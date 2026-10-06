@@ -62,6 +62,7 @@ import {
   type StartError,
 } from './runDialogModel.js';
 import { modChord } from '@/lib/shortcuts.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 
 interface UploadSet {
   prompts: File[];
@@ -360,7 +361,7 @@ function RunDialogBody({
                       {varCount > 0 ? `${varCount} variable${varCount === 1 ? '' : 's'}` : 'Override'}
                     </Button>
                   </div>
-                  {varsOpen && !o.skip ? (
+                  <Reveal open={varsOpen && !o.skip} gap={2}>
                     <Field label={`${o.stageName} variables`} error={varError} hint="key=value, one per line">
                       <Textarea
                         value={stageVarText[o.stageKey] ?? ''}
@@ -371,7 +372,7 @@ function RunDialogBody({
                         textareaClassName="font-mono"
                       />
                     </Field>
-                  ) : null}
+                  </Reveal>
                 </div>
               );
             })}

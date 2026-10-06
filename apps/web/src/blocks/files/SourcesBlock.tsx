@@ -22,6 +22,7 @@ import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
 import { Tooltip } from '@/ui/primitives/Tooltip/Tooltip.js';
 import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import { cn } from '@/ui/lib/cn.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 
 const MODE_LABEL: Record<string, string> = {
   'in-place': 'In place',
@@ -74,7 +75,7 @@ export function SourcesBlock({ workspaceId, onEditSources, embedded = false, cla
         )}
       </div>
 
-      {open && (
+      <Reveal open={open}>
         <div className="p-1.5">
           {isLoading ? (
             <div className="flex items-center gap-2 px-1.5 py-2 text-fg-3">
@@ -94,7 +95,7 @@ export function SourcesBlock({ workspaceId, onEditSources, embedded = false, cla
             </ul>
           )}
         </div>
-      )}
+      </Reveal>
     </div>
   );
 }

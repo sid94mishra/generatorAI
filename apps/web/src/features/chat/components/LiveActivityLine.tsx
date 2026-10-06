@@ -14,6 +14,7 @@ import { memo } from 'react';
 import { computeLiveCounters, countRunningBackgroundTasks, formatLiveCounters } from '@generatorai/client-core';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
+import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 
 /** Running-or-pending background workers, for the Tasks tab badge. */
 export function useRunningBackgroundTaskCount(sessionId: string | undefined): number {
@@ -31,16 +32,21 @@ export const LiveActivityLine = memo(function LiveActivityLine({
   const line = useStreamStore((state) =>
     sessionId ? formatLiveCounters(computeLiveCounters(state.streams[sessionId]?.blocks)) : null,
   );
-  if (!active || !line) return null;
+  const shown = active && !!line;
+  // Eases in above the composer (D-108), so the transcript above shrinks smoothly; leaves at once.
   return (
-    <div
-      data-testid="live-activity-strip"
-      role="status"
-      aria-live="polite"
-      className="flex items-center gap-1.5 px-1 pb-1 text-small text-fg-3"
-    >
-      <Spinner size={12} className="shrink-0 text-run" />
-      <span className="truncate">{line}</span>
-    </div>
+    <Reveal open={shown}>
+      {shown ? (
+        <div
+          data-testid="live-activity-strip"
+          role="status"
+          aria-live="polite"
+          className="flex items-center gap-1.5 px-1 pb-1 text-small text-fg-3"
+        >
+          <Spinner size={12} className="shrink-0 text-run" />
+          <span className="truncate">{line}</span>
+        </div>
+      ) : null}
+    </Reveal>
   );
 });
