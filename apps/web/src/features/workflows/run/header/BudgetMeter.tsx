@@ -66,6 +66,15 @@ export function tightestItem(items: readonly BudgetItem[]): BudgetItem | undefin
   return best;
 }
 
+/**
+ * The trigger's text. Providers report usage when a turn finishes, so while a run's first turn is still going the
+ * meter says that instead of "0 turns · 0 tokens", which read as if nothing was happening.
+ */
+export function budgetSummary(items: readonly BudgetItem[], usage: RunUsage | undefined, active: boolean): string {
+  if (active && !usage?.turns) return 'Usage after the first turn';
+  return items.map(triggerText).join(' · ');
+}
+
 function triggerText(i: BudgetItem): string {
   if (i.key === 'cost') return i.limitText ? `${i.usedText} of ${i.limitText}` : i.usedText;
   if (i.key === 'wall') return i.limitText ? `${i.usedText} of ${i.limitText}` : i.usedText;
@@ -76,12 +85,14 @@ export interface BudgetMeterProps {
   usage?: RunUsage | undefined;
   budget?: Record<string, unknown> | undefined;
   elapsedMs: number;
+  /** The run is going (not pending or finished). */
+  active?: boolean;
 }
 
-export function BudgetMeter({ usage, budget, elapsedMs }: BudgetMeterProps) {
+export function BudgetMeter({ usage, budget, elapsedMs, active = false }: BudgetMeterProps) {
   const items = budgetItems(usage, budget, elapsedMs);
   const tight = tightestItem(items);
-  const summary = items.map(triggerText).join(' · ');
+  const summary = budgetSummary(items, usage, active);
   return (
     <PopoverRoot>
       <PopoverTrigger

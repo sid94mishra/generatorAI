@@ -1,7 +1,7 @@
 // WF-06 BudgetMeter: which dimensions show, and tokens-only when no provider
 // reported a cost (D-35, D-81).
 import { describe, expect, it } from 'vitest';
-import { budgetItems, tightestItem } from '../BudgetMeter.js';
+import { budgetItems, budgetSummary, tightestItem } from '../BudgetMeter.js';
 
 describe('budgetItems', () => {
   it('shows turns and tokens only when nothing else is limited or reported', () => {
@@ -30,5 +30,14 @@ describe('budgetItems', () => {
     const items = budgetItems({ turns: 250, inputTokens: 10 }, { maxTurns: 250, maxTokens: 1000 }, 0);
     expect(items.find((i) => i.key === 'turns')?.over).toBe(true);
     expect(tightestItem(items)?.key).toBe('turns');
+  });
+});
+
+describe('budgetSummary', () => {
+  it('says usage comes after the first turn while a run has not reported one, and the numbers after', () => {
+    expect(budgetSummary(budgetItems(undefined, undefined, 5_000), undefined, true)).toBe('Usage after the first turn');
+    expect(budgetSummary(budgetItems({ turns: 2, inputTokens: 900, outputTokens: 100 }, undefined, 5_000), { turns: 2 }, true)).toBe('2 turns · 1.0k tokens');
+    // A finished run with nothing reported shows its zeros.
+    expect(budgetSummary(budgetItems(undefined, undefined, 5_000), undefined, false)).toBe('0 turns · 0 tokens');
   });
 });

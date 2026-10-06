@@ -256,7 +256,7 @@ export const RunHeader = memo(function RunHeader({
             />
           </span>
           <span aria-hidden className="h-control-sm w-px shrink-0 bg-line-soft" />
-          <BudgetMeter usage={usage} budget={budget} elapsedMs={elapsedMs} />
+          <BudgetMeter usage={usage} budget={budget} elapsedMs={elapsedMs} active={isRunning || isPaused} />
           {budgetExhausted ? (
             <>
               <Badge
