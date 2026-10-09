@@ -976,6 +976,18 @@ the streams that rely on a removed scope (`stream:events`, the feed's read scope
 WebSocket closes with 4401. Relay-bridged streams end with their loopback socket, and a revocation drains the relay
 revoke outbox immediately instead of on the 30 s sweep.
 
+### D-117 Pairing throttle: per source first, a high server ceiling, this machine exempt (2026-10-09) — Final
+Audit F-3: one process-wide bucket (60/min) counted every attempt, so one LAN host spamming `/pair/preview` locked
+pairing out for everyone. Now the per-source budget (10/min) is checked first and is the primary limit; the
+server-wide ceiling (600/min) counts only attempts a source's own budget admitted, so exhausting it takes ≥60
+distinct sources. A genuinely local request (`isLoopbackRequest`: both socket ends loopback, no forwarded headers —
+the desktop window completing its admin-token-minted grant, the owner's local browser) has its own budget and is
+exempt from the ceiling. The exemption is by source, not by grant: exempting a valid code after looking it up would
+let throttled guesses keep being evaluated. Guessing stays bounded by the code (60 bits, single-use, 10 minutes,
+5 redemption attempts; preview still burns none). A throttled call answers 429 `THROTTLED` with `Retry-After`,
+`retryAfterSeconds`, `limit: 'source' | 'server'` and a message the UI shows as-is ("Too many pairing attempts from
+this network address — try again in N s.").
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

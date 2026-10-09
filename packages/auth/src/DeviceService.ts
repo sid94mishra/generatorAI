@@ -65,6 +65,8 @@ export class PairingError extends Error {
   constructor(
     message: string,
     readonly code: PairingErrorCode,
+    /** For `THROTTLED`: when to try again, and whose budget ran out. */
+    readonly throttle?: { retryAfterMs: number; limit: 'source' | 'server' },
   ) {
     super(message);
     this.name = 'PairingError';
@@ -119,6 +121,14 @@ export interface PairingGrantResult {
 export interface PreviewPairingParams {
   pairingToken: string;
   sourceAddress?: string | null;
+  /**
+   * True only for a request that genuinely originated on this machine
+   * (`isLoopbackRequest`): the desktop window completing its own
+   * admin-token-minted grant, or the owner's local browser. Such a request
+   * has its own per-source bucket and is exempt from the server-wide ceiling,
+   * so a LAN flood can never lock the owner out of pairing locally (F-3).
+   */
+  trustedSource?: boolean;
   requestId?: string | null;
 }
 
@@ -141,6 +151,8 @@ export interface CompletePairingParams {
   platform?: DevicePlatform;
   connectionMode?: DeviceConnectionMode;
   sourceAddress?: string | null;
+  /** See {@link PreviewPairingParams.trustedSource}. */
+  trustedSource?: boolean;
   requestId?: string | null;
 }
 
@@ -206,7 +218,34 @@ export interface DeviceServiceOptions {
    */
   resumeCredentialTtlMs?: number | undefined;
   logger?: { warn(msg: string, meta?: unknown): void; info(msg: string, meta?: unknown): void };
+  /** Overrides {@link DEFAULT_PAIRING_THROTTLE} (tests). */
+  pairingThrottle?: Partial<PairingThrottleLimits> | undefined;
 }
+
+export interface PairingThrottleLimits {
+  /** Attempts per source address per window — the primary limit. */
+  perSource: number;
+  /**
+   * Server-wide ceiling per window. Only attempts a source's own budget
+   * admitted count toward it, so one source contributes at most `perSource`
+   * and exhausting it takes `global / perSource` distinct sources.
+   */
+  global: number;
+  windowMs: number;
+}
+
+/**
+ * F-3 (D-117). Guessing is bounded by the code itself (60 bits, single-use,
+ * 10-minute life, 5 redemption attempts): even 600 guesses a minute for a
+ * grant's whole life is ~2^-43. The ceiling therefore only has to stop a
+ * flood, not a guess, and is set high enough that a handful of sources cannot
+ * starve every other one.
+ */
+export const DEFAULT_PAIRING_THROTTLE: PairingThrottleLimits = {
+  perSource: 10,
+  global: 600,
+  windowMs: 60_000,
+};
 
 /** Bounded, per-source throttle for unauthenticated pairing attempts. */
 class AttemptThrottle {
@@ -229,6 +268,12 @@ class AttemptThrottle {
     return bucket.count <= this.limit;
   }
 
+  /** Milliseconds until `key`'s window resets (0 when it has none). */
+  retryAfterMs(key: string, now = Date.now()): number {
+    const bucket = this.buckets.get(key);
+    return bucket && bucket.resetAt > now ? bucket.resetAt - now : 0;
+  }
+
   private evict(now: number): void {
     for (const [key, bucket] of this.buckets) {
       if (bucket.resetAt <= now) this.buckets.delete(key);
@@ -242,8 +287,9 @@ class AttemptThrottle {
 }
 
 export class DeviceService {
-  private readonly perSourceThrottle = new AttemptThrottle(10, 60_000);
-  private readonly globalThrottle = new AttemptThrottle(60, 60_000);
+  private readonly throttleLimits: PairingThrottleLimits;
+  private readonly perSourceThrottle: AttemptThrottle;
+  private readonly globalThrottle: AttemptThrottle;
   /**
    * Resolved once so a malformed override cannot mint a credential that has
    * already expired (or never expires) halfway through the process lifetime.
@@ -252,6 +298,9 @@ export class DeviceService {
   private readonly accessListeners = new Set<DeviceAccessListener>();
 
   constructor(private readonly deps: DeviceServiceOptions) {
+    this.throttleLimits = { ...DEFAULT_PAIRING_THROTTLE, ...(deps.pairingThrottle ?? {}) };
+    this.perSourceThrottle = new AttemptThrottle(this.throttleLimits.perSource, this.throttleLimits.windowMs);
+    this.globalThrottle = new AttemptThrottle(this.throttleLimits.global, this.throttleLimits.windowMs);
     const configured = deps.resumeCredentialTtlMs;
     this.resumeTtlMs =
       typeof configured === 'number' && Number.isFinite(configured) && configured > 0
@@ -279,6 +328,46 @@ export class DeviceService {
         });
       }
     }
+  }
+
+  /**
+   * F-3 — per-source first, then the server-wide ceiling. Only an attempt the
+   * source's own budget admitted counts toward the ceiling, so one source can
+   * never spend it; a genuinely local request skips the ceiling entirely.
+   */
+  private assertPairingBudget(
+    params: { sourceAddress?: string | null; trustedSource?: boolean; requestId?: string | null },
+    reasonCode: string,
+    now: number,
+  ): void {
+    const sourceKey = params.trustedSource ? 'local:trusted' : `addr:${params.sourceAddress ?? 'unknown'}`;
+    let limit: 'source' | 'server' | null = null;
+    let retryAfterMs = 0;
+    if (!this.perSourceThrottle.hit(sourceKey, now)) {
+      limit = 'source';
+      retryAfterMs = this.perSourceThrottle.retryAfterMs(sourceKey, now);
+    } else if (!params.trustedSource && !this.globalThrottle.hit('global', now)) {
+      limit = 'server';
+      retryAfterMs = this.globalThrottle.retryAfterMs('global', now);
+    }
+    if (!limit) return;
+    this.deps.audit.record({
+      action: AuditAction.rateLimited,
+      result: 'denied',
+      reasonCode,
+      sourceAddress: params.sourceAddress ?? null,
+      requestId: params.requestId ?? null,
+      metadata: { limit },
+      severity: 'warn',
+    });
+    const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+    throw new PairingError(
+      limit === 'source'
+        ? `Too many pairing attempts from this network address — try again in ${seconds} s.`
+        : `This server is receiving too many pairing attempts right now — try again in ${seconds} s.`,
+      'THROTTLED',
+      { retryAfterMs: seconds * 1000, limit },
+    );
   }
 
   // ── Pairing ────────────────────────────────────────────────────
@@ -382,26 +471,16 @@ export class DeviceService {
    * and burning the 5-attempt budget on the consent screen would mean a user
    * who typed a code, read the screen and hit back a few times would lock
    * themselves out of a code they hold legitimately. Guessing is still bounded
-   * by the per-source and global throttles applied here, which over a grant's
-   * 10-minute life allow ~100 attempts against a 60-bit space.
+   * by the per-source budget and the server-wide ceiling applied here, which
+   * against a 60-bit space leave a negligible chance over a grant's 10-minute
+   * life (see {@link DEFAULT_PAIRING_THROTTLE}).
    *
    * Returns only what the holder of the code is already entitled to see. It
    * does NOT return the grant id or any device credential.
    */
   async previewPairingGrant(params: PreviewPairingParams): Promise<PairingGrantPreview> {
     const now = Date.now();
-    const source = params.sourceAddress ?? 'unknown';
-    if (!this.globalThrottle.hit('global', now) || !this.perSourceThrottle.hit(source, now)) {
-      this.deps.audit.record({
-        action: AuditAction.rateLimited,
-        result: 'denied',
-        reasonCode: 'pairing_preview_throttled',
-        sourceAddress: params.sourceAddress ?? null,
-        requestId: params.requestId ?? null,
-        severity: 'warn',
-      });
-      throw new PairingError('Too many pairing attempts — try again shortly', 'THROTTLED');
-    }
+    this.assertPairingBudget(params, 'pairing_preview_throttled', now);
 
     const canonicalToken = isPairingCode(params.pairingToken)
       ? normalizePairingCode(params.pairingToken)
@@ -436,18 +515,7 @@ export class DeviceService {
    */
   async completePairing(params: CompletePairingParams): Promise<DeviceSessionResult> {
     const now = Date.now();
-    const source = params.sourceAddress ?? 'unknown';
-    if (!this.globalThrottle.hit('global', now) || !this.perSourceThrottle.hit(source, now)) {
-      this.deps.audit.record({
-        action: AuditAction.rateLimited,
-        result: 'denied',
-        reasonCode: 'pairing_throttled',
-        sourceAddress: params.sourceAddress ?? null,
-        requestId: params.requestId ?? null,
-        severity: 'warn',
-      });
-      throw new PairingError('Too many pairing attempts — try again shortly', 'THROTTLED');
-    }
+    this.assertPairingBudget(params, 'pairing_throttled', now);
 
     // Normalise before hashing so the dashes we render for readability, a
     // lowercase paste, or a stray space from a phone keyboard all resolve to

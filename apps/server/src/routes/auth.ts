@@ -230,6 +230,7 @@ export function createAuthRoutes(container: Container): Router {
           ...(parsed.data.platform ? { platform: parsed.data.platform } : {}),
           ...(parsed.data.connectionMode ? { connectionMode: parsed.data.connectionMode } : {}),
           sourceAddress: req.socket.remoteAddress ?? null,
+          trustedSource: isLoopbackRequest(req),
           requestId: req.requestId,
         });
 
@@ -288,6 +289,9 @@ export function createAuthRoutes(container: Container): Router {
         const preview = await devices.previewPairingGrant({
           pairingToken: parsed.data.pairingToken,
           sourceAddress: req.socket.remoteAddress ?? null,
+          // F-3 — this machine (the desktop window, the owner's local browser)
+          // has its own budget and is never starved by a LAN flood.
+          trustedSource: isLoopbackRequest(req),
           requestId: req.requestId,
         });
         res.json({
@@ -928,6 +932,15 @@ function handlePairingError(
   if (err instanceof PairingError) {
     const status =
       err.code === 'SCOPE_ESCALATION' ? 403 : err.code === 'THROTTLED' ? 429 : 400;
+    if (err.throttle) {
+      // F-3 — say when, and whose budget ran out, so the UI can show it.
+      const retryAfterSeconds = Math.ceil(err.throttle.retryAfterMs / 1000);
+      res.set('Retry-After', String(retryAfterSeconds));
+      res.status(status).json({
+        error: { code: err.code, message: err.message, retryAfterSeconds, limit: err.throttle.limit },
+      });
+      return;
+    }
     res.status(status).json({ error: { code: err.code, message: err.message } });
     return;
   }
