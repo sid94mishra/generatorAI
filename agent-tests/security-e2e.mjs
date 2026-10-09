@@ -9,7 +9,9 @@
 //   5. scope enforcement (a default device must NOT get exec:terminal)
 //   6. stream ticket mint + single-use redemption
 //   7. DPoP replay rejection
-//   8. device revocation ⇒ immediate 401
+//   8. device revocation ⇒ immediate 401, and its open stream ends (F-2)
+//   +  route policy on every path spelling (F-1), Host allow-list (D-119),
+//      CORS refusal as 403 (F-9)
 //
 // Run: node agent-tests/security-e2e.mjs
 // ────────────────────────────────────────────────────────────────
@@ -350,6 +352,45 @@ async function main() {
       );
     }
 
+    console.log('\n=== 8b. Route policy holds for every path spelling (F-1, D-115) ===');
+    {
+      for (const path of ['/api/auth/Devices', '/api/AUTH/devices/', '/api/auth/%64evices']) {
+        const res = await authedFetch(path);
+        check(`${path} ⇒ 403 for a device without admin:devices`, res.status === 403, `got ${res.status}`);
+      }
+      const { request: rawRequest } = await import('node:http');
+      const status = await new Promise((resolve) => {
+        const req = rawRequest({ host: '127.0.0.1', port: PORT, path: '/api/auth/x/../devices' }, (res) => {
+          res.resume();
+          resolve(res.statusCode);
+        });
+        req.on('error', () => resolve(0));
+        req.end();
+      });
+      check('a dot-segment path is refused as non-canonical', status === 400, `got ${status}`);
+    }
+
+    console.log('\n=== 8c. Host allow-list and CORS refusal (D-119, F-9) ===');
+    {
+      const { request: rawRequest } = await import('node:http');
+      const get = (headers) =>
+        new Promise((resolve) => {
+          const req = rawRequest({ host: '127.0.0.1', port: PORT, path: '/api/health', headers }, (res) => {
+            let body = '';
+            res.on('data', (d) => (body += d));
+            res.on('end', () => resolve({ status: res.statusCode, body }));
+          });
+          req.on('error', () => resolve({ status: 0, body: '' }));
+          req.end();
+        });
+      const rebound = await get({ host: `evil.example:${PORT}` });
+      check('a rebinding Host is refused with 421', rebound.status === 421 && rebound.body.includes('HOST_NOT_ALLOWED'), `got ${rebound.status}`);
+      check('localhost still answers', (await get({ host: `localhost:${PORT}` })).status === 200);
+      const cors = await get({ host: `127.0.0.1:${PORT}`, origin: 'http://evil.example' });
+      check('a foreign Origin gets 403 ORIGIN_NOT_ALLOWED (not 502)', cors.status === 403 && cors.body.includes('ORIGIN_NOT_ALLOWED'), `got ${cors.status}`);
+      check('no stack in the refusal', !cors.body.includes('stack'));
+    }
+
     console.log('\n=== 9. Stream tickets ===');
     let ticket;
     {
@@ -444,12 +485,44 @@ async function main() {
       check('paired device appears in the device list', Boolean(device));
       check('device list never leaks key material', !JSON.stringify(list).includes('publicJwk'));
 
+      // F-2 — a stream the device opened BEFORE the revocation must end.
+      const ticketUrl = `${BASE}/api/stream/tickets`;
+      const ticketRes = await fetch(ticketUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `DPoP ${refreshed.accessToken}`,
+          dpop: await dpopProof(key, 'POST', ticketUrl, { accessToken: refreshed.accessToken }),
+        },
+        body: JSON.stringify({ scope: 'global', id: null }),
+      });
+      const { ticket: liveTicket } = await ticketRes.json();
+      const liveAbort = new AbortController();
+      const live = await fetch(`${BASE}/api/stream?scope=global&ticket=${encodeURIComponent(liveTicket)}`, {
+        signal: liveAbort.signal,
+      });
+      check('the device has a live stream open', live.ok, `got ${live.status}`);
+      const liveEnded = (async () => {
+        const reader = live.body.getReader();
+        try {
+          for (;;) {
+            const { done } = await reader.read();
+            if (done) return true;
+          }
+        } catch {
+          return true;
+        }
+      })();
+
       const res = await fetch(`${BASE}/api/auth/devices/${session.deviceId}`, {
         method: 'DELETE',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${API_KEY}` },
         body: JSON.stringify({ reason: 'smoke test' }),
       });
       check('device revoked', res.status === 204, `got ${res.status}`);
+      const ended = await Promise.race([liveEnded, new Promise((r) => setTimeout(() => r(false), 2_000))]);
+      check('the revoked device\'s open stream ends within 2 s (F-2)', ended === true);
+      liveAbort.abort();
 
       const after = await fetch(`${BASE}/api/projects`, {
         headers: {
