@@ -184,7 +184,21 @@ record('no legacy shared API key in localStorage', !leaks.hasLegacyKey);
 record('no token/secret-named localStorage keys', leaks.suspicious.length === 0, leaks.suspicious.join(','));
 record('auth runtime is not exposed on window', !leaks.globalRuntime);
 
-const keyIsNonExtractable = await page.evaluate(async () => {
+// Credentials are stored per server: the key id is derived from the active
+// connection's serverId by the same helpers the app uses (connections.ts).
+const { loadCatalog, activeConnection, deviceKeyId } = await import(
+  '../packages/client-runtime/src/connections.ts'
+);
+const lsSnapshot = await page.evaluate(() => ({ ...localStorage }));
+const memoryStorage = {
+  getItem: (k) => (Object.hasOwn(lsSnapshot, k) ? lsSnapshot[k] : null),
+  setItem: () => {},
+  removeItem: () => {},
+};
+const activeServerId = activeConnection(loadCatalog(memoryStorage))?.serverId ?? null;
+const deviceKeyName = activeServerId ? deviceKeyId(activeServerId) : null;
+
+const keyIsNonExtractable = await page.evaluate(async (keyName) => {
   try {
     const db = await new Promise((res, rej) => {
       const r = indexedDB.open('generatorai-auth');
@@ -192,13 +206,16 @@ const keyIsNonExtractable = await page.evaluate(async () => {
       r.onerror = () => rej(r.error);
     });
     if (!db.objectStoreNames.contains('keys')) return 'no key store';
+    if (!keyName) return 'no active connection';
     const pair = await new Promise((res, rej) => {
-      // Must match `KEY_ID` in packages/client-runtime/src/browserStores.ts.
-      const tx = db.transaction('keys', 'readonly').objectStore('keys').get('device-key');
+      const tx = db.transaction('keys', 'readonly').objectStore('keys').get(keyName);
       tx.onsuccess = () => res(tx.result);
       tx.onerror = () => rej(tx.error);
     });
     if (!pair?.privateKey) return 'no private key';
+    const k = pair.privateKey;
+    if (k.extractable || k.algorithm?.name !== 'ECDSA' || k.algorithm?.namedCurve !== 'P-256')
+      return `bad key: extractable=${k.extractable} alg=${k.algorithm?.name}/${k.algorithm?.namedCurve}`;
     // A non-extractable key throws on export. That is the whole point: XSS
     // can *use* the key while the page lives, but can never steal it.
     try {
@@ -210,7 +227,7 @@ const keyIsNonExtractable = await page.evaluate(async () => {
   } catch (e) {
     return `error: ${String(e).slice(0, 60)}`;
   }
-});
+}, deviceKeyName);
 record(
   'device private key is non-extractable',
   keyIsNonExtractable === 'non-extractable',
