@@ -169,12 +169,12 @@ Workflow hook phases (`workflow.hooks[].phase`):
 
 | Phase | Category | When |
 |---|---|---|
-| `on_run_start` | run | When a workflow run starts |
+| `on_run_start` | run | When a workflow run starts, before its codebases are mounted (use Post Clone to work in the code) |
 | `on_run_complete` | run | When a workflow run completes |
 | `on_run_failed` | run | When a workflow run fails |
 | `on_run_cancelled` | run | When a workflow run is cancelled |
 | `pre_clone` | git | Before the run prepares its codebases |
-| `post_clone` | git | After the run prepared its codebases |
+| `post_clone` | git | After the run prepared its codebases; runs in the first codebase |
 | `pre_commit` | git | Before post-processing commits |
 | `post_commit` | git | After post-processing committed |
 | `on_pr_created` | git | After post-processing opened a pull request |
