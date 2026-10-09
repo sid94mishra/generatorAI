@@ -51,6 +51,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 import { RUNTIME_PACKAGES, ABI_SENSITIVE_PACKAGES, NATIVE_PACKAGES, driverPlatformPackage } from '../../server/bundle-externals.mjs';
+import { nonExecutableNodePtyHelpers, restoreNodePtyExecBits } from '../../../scripts/lib/nativeExecBits.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(here, '..');
@@ -228,6 +229,23 @@ for (const name of NATIVE_PACKAGES) {
         `        node-pty ships no Linux prebuild, so a Linux build needs python3 and a C++ toolchain.`,
     );
   }
+}
+
+// node-pty exec's `spawn-helper` on macOS/Linux, and this install is a fresh
+// unpack of the tarball that the root postinstall's exec-bit fix never sees —
+// a 0644 helper installs cleanly and fails the first terminal with
+// `posix_spawnp failed`. Restore the bit here, then refuse to continue if any
+// helper is still not executable. Windows (ConPTY) has no helper: no-op.
+const restored = restoreNodePtyExecBits(nodeModules, { platform: targetPlatform });
+if (restored.length > 0) {
+  console.log(`[stage] restored the exec bit on ${restored.map((f) => path.relative(stageDir, f)).join(', ')}`);
+}
+const notExecutable = nonExecutableNodePtyHelpers(nodeModules, { platform: targetPlatform });
+if (notExecutable.length > 0) {
+  fail(
+    `node-pty spawn-helper is not executable: ${notExecutable.map((f) => path.relative(stageDir, f)).join(', ')}.\n` +
+      '        Terminals in the packaged app would fail with posix_spawnp.',
+  );
 }
 
 // The driver's library lives in a per-target optional dependency, so the loop
