@@ -220,11 +220,23 @@ export function consumePairingCodeFromUrl(): string {
   if (typeof window === 'undefined') return '';
   const params = new URLSearchParams(window.location.search);
   const fromUrl = params.get('pair');
-  if (!fromUrl) return '';
+  if (!fromUrl) return carriedPairCode ?? '';
   params.delete('pair');
   const rest = params.toString();
   window.history.replaceState({}, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`);
+  // Kept in this page's memory (never storage) so a pairing screen that
+  // remounts — the auth gate passes through a checking state first — still
+  // shows the code the link carried (D-126: the desktop opens another
+  // server's page at `/?pair=<offer>`).
+  carriedPairCode = fromUrl;
   return fromUrl;
+}
+
+let carriedPairCode: string | null = null;
+
+/** Forget the linked code once it has been used. */
+export function clearCarriedPairingCode(): void {
+  carriedPairCode = null;
 }
 
 /** Resolves typed/pasted/linked pairing input into a consent screen. */
@@ -237,4 +249,5 @@ export async function confirmPairing(
   platform: 'web' | 'desktop' = 'web',
 ): Promise<void> {
   await acceptPairing(consent, deviceName, platform);
+  clearCarriedPairingCode();
 }

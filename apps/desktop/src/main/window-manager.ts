@@ -436,7 +436,7 @@ export class WindowManager {
    * swap is deliberate: changing origin makes the browser discard every store,
    * cache and open stream from the previous server.
    */
-  repointMainWindow(url: string): void {
+  repointMainWindow(url: string, initialPath?: string): void {
     this.appUrl = url;
     this.appPageLoaded = false;
     // The new origin's page reports its own state; the old one's is stale now
@@ -448,7 +448,9 @@ export class WindowManager {
       return;
     }
     log.info('Repointing main window', { url });
-    win.loadURL(url).catch((err: unknown) => {
+    // `initialPath` (e.g. `/?pair=…`) is part of the first load, so a page that
+    // reads its query once on mount (the pairing screen) sees it. Never logged.
+    win.loadURL(initialPath ? `${url}${initialPath}` : url).catch((err: unknown) => {
       log.error('Failed to load backend', err);
       this.showError(`Could not load ${url}.\n\n${err instanceof Error ? err.message : String(err)}`);
     });

@@ -1088,6 +1088,30 @@ only authority.
 is verified normally and never pinned; `none` for http. The mobile pinning work (MV-44) and the desktop client (D-126)
 apply the same split, so a ts.net endpoint from an offer works with ordinary HTTPS on every client.
 
+### D-126 The desktop app as a client pins the other server's CA for that host only (G-4, 2026-10-09) — Final
+Remote mode refused another machine's built-in HTTPS (the `certificate-error` handler trusts loopback only), so a
+desktop could not use a LAN server at all. **Connect to a server…** now takes an address or that server's pairing link
+/ code (Settings › Security & devices › Pair a new device, platform Desktop) and decides trust before the window loads
+it (`remote-connect.ts`, `pinnedTrust.ts`):
+- **Offer.** Its addresses are tried in order (loopback skipped, a native-lane `http://` tried as `https://` on the same
+  port). One TLS connection without trust reads the chain; a publicly trusted certificate (ts.net) is used as is;
+  otherwise the CA that signed the leaf must hash to the offer's `certificateFingerprint`, and `server-info` over that
+  pin must answer the offer's `serverId`. A mismatch is refused ("does not match this pairing code").
+- **Typed address.** A public certificate needs nothing; a self-signed one shows **Trust this server?** with the
+  served certificate's SHA-256 (what that server's Settings shows) and the CA's, defaulting to Cancel.
+- **Pin.** `serverConnections[].pinnedCa = { sha256 (base64url, the offer format), pem, trustedAt }`, sanitised on load;
+  re-adding a server never swaps its CA (`PinMismatchError` → forget it first).
+- **Verify proc.** `session.defaultSession.setCertificateVerifyProc`: Chromium's `net::OK` is kept; otherwise accept
+  (0) only a leaf that is signed by the pinned CA (whose stored DER still hashes to the pin), is valid now, is not a CA,
+  and names the host being verified — for a saved server whose host is that host; anything else returns -3. Browser
+  tabs use their own partitions and are unaffected. The same rule checks `server-info` before trusting (OpenSSL's
+  chain builder rejects the D-110 CA's name-constraint encoding, so it is not used).
+- The remote page's first load is `/?pair=<offer>`; the pairing screen keeps a linked code in memory across its own
+  remounts. **The desktop's `requestPairingCode` bridge now answers only a page of the embedded server's origin**: a
+  remote server shown in the main window could otherwise mint an all-scope grant for this computer.
+- Not done: the native browser-tab and other bridge calls a remote page can still reach are unchanged (pre-existing
+  remote-mode surface; follow-up).
+
 ### D-127 The plain-HTTP LAN lane is gone: every other device uses HTTPS; offers carry a standby CA (MV-44, 2026-10-09) — Final
 Supersedes D-112. The mobile app now pins the local CA natively for fetch, the stream and WebSockets (mobile MD-199…MD-202),
 so nothing needs plain HTTP from another device.

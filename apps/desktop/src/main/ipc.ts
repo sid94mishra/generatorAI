@@ -105,6 +105,16 @@ async function confirmPairingNatively(deviceName: string | undefined): Promise<b
   return response === 0;
 }
 
+/** True when `frameUrl` is a page of the embedded server at `embeddedUrl`. */
+export function isEmbeddedServerOrigin(frameUrl: string | undefined, embeddedUrl: string | null): boolean {
+  if (!frameUrl || !embeddedUrl) return false;
+  try {
+    return new URL(frameUrl).origin === new URL(embeddedUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
 export function registerIpc(mode: 'dev' | 'standalone'): void {
   const wm = getWindowManager();
   const sm = getServerManager();
@@ -226,8 +236,13 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
   // the renderer shows on its manual pairing screen.
   guardedHandle(
     IPC.requestPairingCode,
-    async (_e, deviceName?: unknown): Promise<DesktopPairingCode | null> => {
+    async (e, deviceName?: unknown): Promise<DesktopPairingCode | null> => {
       if (mode === 'dev') return null;
+      // Only a page served by THIS shell's own server may pair itself with it.
+      // Another machine's server shown in the window (remote mode, D-126) is
+      // the main window's document too, and must never be able to mint an
+      // all-scope grant for this computer.
+      if (!isEmbeddedServerOrigin(e.senderFrame?.url, sm.url)) return null;
       const name = typeof deviceName === 'string' && deviceName.length > 0 ? deviceName.slice(0, 64) : undefined;
       await admitPairingRequest(name, { gate: pairingGate, confirm: confirmPairingNatively, log });
       return sm.requestPairingCode(name);

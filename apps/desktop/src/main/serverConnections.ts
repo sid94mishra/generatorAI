@@ -12,6 +12,8 @@
 // Everything in this module is pure so it can be tested without Electron; the
 // only I/O is the settings file the caller passes state in and out of.
 
+import type { PinnedCa } from './pinnedTrust';
+
 export type ServerMode = 'embedded' | 'remote';
 
 export interface RemoteServerConnection {
@@ -22,6 +24,12 @@ export interface RemoteServerConnection {
   /** Host fingerprint, recorded after the first successful connection. */
   serverId?: string;
   lastConnectedAt?: number;
+  /**
+   * The server's own CA, trusted for this server's host only (G-4, D-126):
+   * from the pairing offer's fingerprint or a confirmed "trust this server?"
+   * step. Absent for a publicly trusted server (ts.net) or plain loopback.
+   */
+  pinnedCa?: PinnedCa;
 }
 
 export interface ServerConnectionState {
@@ -94,6 +102,7 @@ export function sanitizeConnectionState(raw: unknown): ServerConnectionState {
       label: typeof entry.label === 'string' && entry.label ? entry.label : defaultLabelFor(url),
       ...(typeof entry.serverId === 'string' ? { serverId: entry.serverId } : {}),
       ...(typeof entry.lastConnectedAt === 'number' ? { lastConnectedAt: entry.lastConnectedAt } : {}),
+      ...(sanitizePinnedCa(entry.pinnedCa) ? { pinnedCa: sanitizePinnedCa(entry.pinnedCa)! } : {}),
     });
   }
 
@@ -111,9 +120,28 @@ export function sanitizeConnectionState(raw: unknown): ServerConnectionState {
   return { serverMode, connections, activeConnectionId };
 }
 
+/** A pin from disk is kept only when every field is the right shape (an https-only, PEM-carrying record). */
+function sanitizePinnedCa(raw: unknown): PinnedCa | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const pin = raw as Partial<PinnedCa>;
+  if (typeof pin.sha256 !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(pin.sha256)) return null;
+  if (typeof pin.pem !== 'string' || !pin.pem.includes('BEGIN CERTIFICATE') || pin.pem.length > 16_384) return null;
+  return { sha256: pin.sha256, pem: pin.pem, trustedAt: typeof pin.trustedAt === 'number' ? pin.trustedAt : 0 };
+}
+
+export class PinMismatchError extends Error {
+  constructor(readonly url: string) {
+    super(
+      `${url} now presents a different certificate authority than the one this app trusted for it. ` +
+        'If that server was reset on purpose, forget it under Server › Forget, then add it again.',
+    );
+    this.name = 'PinMismatchError';
+  }
+}
+
 export function addConnection(
   state: ServerConnectionState,
-  input: { url: string; label?: string; id?: string },
+  input: { url: string; label?: string; id?: string; pinnedCa?: PinnedCa },
 ): { state: ServerConnectionState; connection: RemoteServerConnection } {
   const url = normalizeServerUrl(input.url);
   if (!url) throw new Error(`Not a valid server address: ${input.url}`);
@@ -122,7 +150,16 @@ export function addConnection(
   // than producing two entries that switch to an identical place.
   const existing = state.connections.find((c) => c.url === url);
   if (existing) {
-    const updated = { ...existing, ...(input.label ? { label: input.label } : {}) };
+    // Re-adding never swaps the trusted CA: a different one is exactly what an
+    // impersonator would present (D-126).
+    if (existing.pinnedCa && input.pinnedCa && existing.pinnedCa.sha256 !== input.pinnedCa.sha256) {
+      throw new PinMismatchError(url);
+    }
+    const updated = {
+      ...existing,
+      ...(input.label ? { label: input.label } : {}),
+      ...(!existing.pinnedCa && input.pinnedCa ? { pinnedCa: input.pinnedCa } : {}),
+    };
     return {
       state: {
         ...state,
@@ -136,6 +173,7 @@ export function addConnection(
     id: input.id ?? `srv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     url,
     label: input.label?.trim() || defaultLabelFor(url),
+    ...(input.pinnedCa ? { pinnedCa: input.pinnedCa } : {}),
   };
   return {
     state: { ...state, connections: [...state.connections, connection] },

@@ -13,6 +13,10 @@
     "./connections": {
       "types": "./src/connections.ts",
       "import": "./src/connections.ts"
+    },
+    "./pairing-offer": {
+      "types": "./src/pairingOffer.ts",
+      "import": "./src/pairingOffer.ts"
     }
   },
   "publishConfig": {

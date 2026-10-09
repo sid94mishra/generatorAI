@@ -13,6 +13,7 @@ import { log } from './logger';
 import { loadSettings } from './config';
 import { getServerManager, VAULT_UNREADABLE_MESSAGE } from './server-manager';
 import { resolveTarget } from './serverConnections';
+import { VERIFY_USE_CHROMIUM, verifyWithPins } from './pinnedTrust';
 import { getWindowManager } from './window-manager';
 import { getNativeBrowserHost, nativeBrowserEnabled } from './browser-host';
 import { initComputerHost } from './computer-host-registry';
@@ -143,6 +144,25 @@ async function onReady(): Promise<void> {
 
   registerIpc(mode);
   registerDownloadHandler(session.defaultSession);
+
+  // G-4 (D-126): another machine's GeneratorAI server is trusted through the
+  // CA pinned for it when it was added — for that server's host only. Chromium's
+  // own OK (a ts.net or other public certificate) is kept; everything else
+  // gets Chromium's verdict, so an unpinned self-signed server still fails.
+  // The app's session only: native browser tabs have their own partitions.
+  session.defaultSession.setCertificateVerifyProc((request, callback) => {
+    try {
+      callback(
+        verifyWithPins(
+          { hostname: request.hostname, verificationResult: request.verificationResult, certificatePem: request.certificate.data },
+          loadSettings().servers.connections,
+        ),
+      );
+    } catch (err) {
+      log.warn('Certificate check failed; using Chromium’s verdict', err);
+      callback(VERIFY_USE_CHROMIUM);
+    }
+  });
 
   // Trust self-signed/invalid certs on loopback only — for a browser tab
   // hitting the user's own `https://localhost:PORT` dev server. Checks the
