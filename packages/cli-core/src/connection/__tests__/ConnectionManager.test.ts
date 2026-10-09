@@ -35,7 +35,7 @@ describe('probeEndpoint', () => {
             serverId: 'srv_1',
             serverName: 'workstation',
             protocolVersion: 2,
-            authentication: { required: true, dpopRequired: true, legacyApiKeyAccepted: false },
+            authentication: { required: true, dpopRequired: true },
             transports: { loopback: true, lan: false, privateNetwork: false, relay: false },
           }),
           { status: 200 },
@@ -54,7 +54,7 @@ describe('probeEndpoint', () => {
     expect(probe.serverName).toBe('workstation');
     expect(probe.protocolVersion).toBe(2);
     expect(probe.capabilities).toEqual({
-      authentication: { required: true, dpopRequired: true, legacyApiKeyAccepted: false },
+      authentication: { required: true, dpopRequired: true },
       transports: { loopback: true, lan: false, privateNetwork: false, relay: false },
     });
   });

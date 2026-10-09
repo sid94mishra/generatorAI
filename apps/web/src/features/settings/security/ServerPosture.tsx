@@ -40,7 +40,7 @@ export function ThisServerGroup({
   const relayLabel = p
     ? p.relay.clientAvailable
       ? p.relay.enabled
-        ? p.relay.state
+        ? (p.relay.state ?? 'enabled')
         : 'disabled'
       : p.relay.enabled
         ? 'client unavailable'
@@ -72,15 +72,20 @@ export function ThisServerGroup({
                   </span>
                 ),
               },
-              {
-                label: 'Secret storage',
-                value: (
-                  <span className="flex items-center gap-1.5">
-                    <Badge tone={p.secretStore.secure ? 'ok' : 'err'}>{p.secretStore.secure ? 'Protected' : 'Weak'}</Badge>
-                    <span className="font-mono text-small text-fg-3">{p.secretStore.kind}</span>
-                  </span>
-                ),
-              },
+              // Admin-only detail (D-120): absent in the limited view, not invented.
+              ...(p.secretStore
+                ? [
+                    {
+                      label: 'Secret storage',
+                      value: (
+                        <span className="flex items-center gap-1.5">
+                          <Badge tone={p.secretStore.secure ? 'ok' : 'err'}>{p.secretStore.secure ? 'Protected' : 'Weak'}</Badge>
+                          <span className="font-mono text-small text-fg-3">{p.secretStore.kind}</span>
+                        </span>
+                      ),
+                    },
+                  ]
+                : []),
               { label: 'Host identity', value: shortFingerprint(p.server.hostId), mono: true },
               {
                 label: 'Relay',
@@ -97,6 +102,11 @@ export function ThisServerGroup({
               {w.message}
             </Callout>
           ))}
+          {p.detail === 'limited' ? (
+            <p className="text-small text-fg-3" data-testid="security-limited-detail">
+              Secret storage, bind address and warnings are shown to devices with admin:settings.
+            </p>
+          ) : null}
         </>
       ) : (
         <p className="text-small text-fg-3">{posture.isPending ? 'Loading…' : 'Security posture is unavailable.'}</p>
@@ -128,7 +138,7 @@ export function NetworkExposureGroup({
   }
 
   const locked = network.envOverride != null;
-  const addresses = usableEndpoints(network.endpoints).map((e) => browserAddressFor(e.origin, pageOrigin));
+  const addresses = usableEndpoints(network.endpoints ?? []).map((e) => browserAddressFor(e.origin, pageOrigin));
 
   return (
     <section className="flex flex-col gap-2" data-testid="security-network">
@@ -148,8 +158,16 @@ export function NetworkExposureGroup({
         }
       />
       <p className="text-small text-fg-3">
-        Bound to <span className="font-mono text-fg-2">{network.bindHost}</span>
-        {network.active ? ' · reachable from this network' : ' · only this computer can connect'}
+        {network.bindHost ? (
+          <>
+            Bound to <span className="font-mono text-fg-2">{network.bindHost}</span>
+            {network.active ? ' · reachable from this network' : ' · only this computer can connect'}
+          </>
+        ) : network.active ? (
+          'Reachable from this network'
+        ) : (
+          'Only this computer can connect'
+        )}
       </p>
 
       {locked ? (
@@ -169,7 +187,7 @@ export function NetworkExposureGroup({
         </Callout>
       ) : null}
 
-      {network.active ? (
+      {network.active && network.endpoints ? (
         <Callout tone="warn" title={addresses.length > 0 ? undefined : 'No routable network address was detected'}>
           {addresses.length > 0 ? (
             <>
@@ -190,7 +208,7 @@ export function NetworkExposureGroup({
 
       {network.active && network.tls ? <CertificateGroup tls={network.tls} onError={onError} /> : null}
 
-      {network.active && network.trustProxy.mode !== 'off' ? (
+      {network.active && network.trustProxy && network.trustProxy.mode !== 'off' ? (
         <p className="text-small text-fg-3" data-testid="security-trust-proxy">
           Forwarded HTTPS headers are trusted from{' '}
           <span className="font-mono text-fg-2">

@@ -15,6 +15,11 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch, ApiError } from '../platform/apiFetch.js';
 import { desktopServer } from '../lib/desktop.js';
+import type { NetworkAccess, SecurityPosture, TlsStatus } from '@generatorai/shared';
+
+// The security wire types live in `@generatorai/shared` (D-120): `detail`
+// says whether this device got the admin view or the limited one.
+export type { NetworkAccess, NetworkEndpoint, NetworkTls, SecurityPosture, TlsStatus } from '@generatorai/shared';
 
 /** `GET /api/auth/devices` row. The server omits key material on purpose. */
 export interface DeviceSummary {
@@ -44,26 +49,6 @@ export interface PendingPairing {
   maxAttempts: number;
 }
 
-/**
- * Built-in HTTPS for other devices (D-110). `fingerprintSha256` is the served
- * certificate — what the other device's browser shows in its certificate
- * details; `caFingerprintSha256` is the local CA (generated certificates only).
- */
-export interface TlsStatus {
-  enabled: true;
-  source: 'generated' | 'custom';
-  fingerprintSha256: string;
-  caFingerprintSha256: string | null;
-  issuer: string;
-  notBefore: number;
-  notAfter: number;
-  names: string[];
-  customCertificateProblem: string | null;
-}
-
-/** `network-access.tls`: serving HTTPS, or exposed without it (and why). Null on a loopback-only server. */
-export type NetworkTls = (TlsStatus & { unavailableReason: null }) | { enabled: false; unavailableReason: string | null };
-
 /** `POST /api/auth/pair` response. */
 export interface PairingResponse {
   grantId: string;
@@ -78,39 +63,6 @@ export interface PairingResponse {
   joinUrl: string;
   /** The certificate the joining browser will be shown; null when the server does not serve HTTPS. */
   tls: TlsStatus | null;
-}
-
-export interface NetworkEndpoint {
-  origin: string;
-  reachability: string;
-  priority?: number;
-  /** Host-only adapter (WSL/Hyper-V/Docker) that nothing off-box can reach. */
-  virtual?: boolean;
-}
-
-/** `GET /api/security/network-access`. The server supports exactly these two modes (D-42). */
-export interface NetworkAccess {
-  mode: 'local-only' | 'network-accessible';
-  /** What the listener is doing now; lags `mode` until a restart. */
-  active: boolean;
-  pendingRestart: boolean;
-  bindHost: string;
-  envOverride: string | null;
-  blockers: { code: string; message: string }[];
-  endpoints: NetworkEndpoint[];
-  tls: NetworkTls | null;
-  /** D-114 — whose X-Forwarded-Proto/Host the server honours. */
-  trustProxy: { mode: 'off' | 'loopback' | 'addresses'; addresses: string[] };
-}
-
-/** `GET /api/security/posture`. */
-export interface SecurityPosture {
-  server: { hostId: string; bindHost: string; loopbackOnly: boolean; production: boolean; tokenAudience: string };
-  authentication: { required: boolean; unauthenticatedLoopback: boolean; legacyApiKeyActive: boolean; dpopRequired: boolean };
-  secretStore: { kind: string; secure: boolean; reason: string | null; supportsRotation: boolean };
-  devices: { active: number; revoked: number; relayBound: number };
-  relay: { enabled: boolean; clientAvailable: boolean; state: string; hostId: string | null };
-  warnings: { code: string; severity: 'warn' | 'critical'; message: string }[];
 }
 
 /** `GET /api/auth/scope-requests?status=pending` row. */

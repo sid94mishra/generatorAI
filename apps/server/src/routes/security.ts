@@ -7,12 +7,18 @@
 //
 // Read is `read:status`; anything that changes state requires `admin:settings`
 // (see ROUTE_POLICIES). No endpoint here ever returns secret material.
+//
+// F-6 (D-120): `read:status` is held by every device, so the reads answer it
+// with a `limited` view. Configuration detail that maps or fingerprints the
+// host — bind address, secret backend, legacy key, every address, the
+// certificate's names, proxy trust, warnings — is for `admin:settings`.
 // ────────────────────────────────────────────────────────────────
 
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { dirname, resolve } from 'node:path';
-import { SCOPES } from '@generatorai/auth';
+import { SCOPES, type Principal } from '@generatorai/auth';
+import type { NetworkAccess, SecurityPosture } from '@generatorai/shared';
 import type { Container } from '../composition-root.js';
 import { serverEndpoints } from '../network/serverEndpoints.js';
 import { trustProxyPolicy } from '../network/requestOrigin.js';
@@ -38,12 +44,24 @@ export function createSecurityRoutes(container: Container): Router {
   const { posture, identity, secretStore, deviceRepo } = container.security;
 
   /** Effective security posture. Safe to render in the settings UI. */
-  router.get('/posture', (_req: Request, res: Response) => {
+  router.get('/posture', (req: Request, res: Response) => {
     void (async () => {
+      const limited: SecurityPosture = {
+        detail: 'limited',
+        server: { hostId: identity.hostId, loopbackOnly: posture.loopbackOnly },
+        authentication: { required: posture.authenticationRequired, dpopRequired: true },
+        relay: { enabled: posture.relayEnabled, clientAvailable: false },
+        scopes: SCOPES,
+      };
+      if (!seesSecurityDetail(req.principal)) {
+        res.json(limited);
+        return;
+      }
       const backend = await secretStore.backendInfo();
       const devices = await deviceRepo.list();
       const active = devices.filter((d) => d.revokedAt == null);
-      res.json({
+      const full: SecurityPosture = {
+        detail: 'full',
         server: {
           hostId: identity.hostId,
           bindHost: posture.bindHost,
@@ -80,7 +98,8 @@ export function createSecurityRoutes(container: Container): Router {
          * have to read logs to discover an unsafe configuration.
          */
         warnings: buildWarnings(container, backend),
-      });
+      };
+      res.json(full);
     })();
   });
 
@@ -89,16 +108,24 @@ export function createSecurityRoutes(container: Container): Router {
    * which addresses other devices would use, and what (if anything) is
    * blocking the server from being exposed.
    */
-  router.get('/network-access', (_req: Request, res: Response) => {
+  router.get('/network-access', (req: Request, res: Response) => {
     void (async () => {
-      const backend = await secretStore.backendInfo();
       const dataDir = dirname(resolve(container.config.dbPath));
       const mode = readExposureMode(dataDir);
-      res.json({
+      const base = {
         mode,
         /** What the server is doing right now, which may lag `mode` until a restart. */
         active: !posture.loopbackOnly,
         pendingRestart: (mode === 'network-accessible') !== !posture.loopbackOnly,
+      };
+      if (!seesSecurityDetail(req.principal)) {
+        res.json({ detail: 'limited', ...base, blockers: [] } satisfies NetworkAccess);
+        return;
+      }
+      const backend = await secretStore.backendInfo();
+      const full: NetworkAccess = {
+        detail: 'full',
+        ...base,
         bindHost: posture.bindHost,
         /** Set in the environment, in which case the toggle cannot take effect. */
         envOverride: process.env['GENERATORAI_BIND_HOST'] ?? null,
@@ -124,7 +151,8 @@ export function createSecurityRoutes(container: Container): Router {
             : { enabled: false, unavailableReason: posture.tlsUnavailableReason },
         /** D-114 — whether X-Forwarded-Proto/Host are honoured, and from whom. */
         trustProxy: describeTrustProxy(),
-      });
+      };
+      res.json(full);
     })();
   });
 
@@ -259,6 +287,14 @@ export function createSecurityRoutes(container: Container): Router {
   });
 
   return router;
+}
+
+/**
+ * Whether a caller sees the configuration detail (D-120). No principal means
+ * the dev unauthenticated-loopback mode, which already carries every scope.
+ */
+function seesSecurityDetail(principal: Principal | undefined): boolean {
+  return !principal || principal.scopes.includes('admin:settings');
 }
 
 function buildWarnings(

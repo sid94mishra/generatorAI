@@ -1011,6 +1011,20 @@ request from a trusted proxy (D-114, it does its own host routing); and `GENERAT
 Request`). The desktop window (127.0.0.1), the Vite dev proxy (`changeOrigin:false`, Host `localhost:5173` or an IP),
 LAN HTTPS (IPs, `.local`) and Docker (`localhost:3100`) need no configuration.
 
+### D-120 Public server-info names nothing about the machine; security reads have a limited view (2026-10-09) — Final
+Audit F-6. `GET /api/auth/server-info` (public) keeps what identifying a server needs — `serverId`, keys, protocol,
+`authentication.required`, transports, scopes — but `serverName` is only the operator-set `GENERATORAI_SERVER_NAME`
+(absent otherwise; never `os.hostname()`), `endpoints` lists only the endpoint the request used, `tls` carries the
+fingerprints and expiry but not the certificate's names or issuer, and `legacyApiKeyAccepted` is gone. The code
+holder still gets the friendly name, every endpoint and the full certificate from the pairing offer / preview.
+`GET /api/security/posture` and `/network-access` stay `read:status` but answer `detail: 'limited'` unless the caller
+holds `admin:settings`: posture → host id, loopback-only, authentication required, relay availability, scopes;
+network → mode, active, pending restart, `blockers: []` (only an admin can act on them). Bind address, secret
+backend, legacy key, device counts, warnings, every address, certificate names and proxy trust are admin-only and
+absent — not invented — in the limited view. Wire types moved to `@generatorai/shared` (`SecurityPosture.ts`); the
+web Settings view renders the limited view; mobile already reads those fields optionally (COORDINATION.md). The
+served certificate still shows its names in the TLS handshake — inherent to TLS, out of scope here.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

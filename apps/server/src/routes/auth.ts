@@ -33,12 +33,12 @@ import {
   type Scope,
 } from '@generatorai/auth';
 import { PairingOfferSchema, encodePairingOffer, pairingOfferUrl } from '@generatorai/relay-protocol';
-import { formatPairingCode, type SelfDeviceView } from '@generatorai/shared';
+import { formatPairingCode, type PublicServerInfo, type SelfDeviceView } from '@generatorai/shared';
 import { dirname, resolve } from 'node:path';
 import type { Container } from '../composition-root.js';
 import { removeBootstrapFile } from '../composition/bootstrapPairing.js';
 import { isLoopbackRequest } from '../middleware/auth.js';
-import { requestAbsoluteUrl } from '../network/requestOrigin.js';
+import { requestAbsoluteUrl, requestOrigin } from '../network/requestOrigin.js';
 import { fingerprintToBase64Url } from '../network/tls/certificates.js';
 import { selectPairingEndpoint, type AdvertisedEndpointCandidate } from '../network/advertisedEndpoints.js';
 import { serverEndpoints, type EndpointAudience } from '../network/serverEndpoints.js';
@@ -126,23 +126,32 @@ export function createAuthRoutes(container: Container): Router {
    * Server identity + capabilities. Deliberately reveals nothing secret: the
    * token public JWK is the *verification* key, and the fingerprint is what a
    * pairing QR pins so a client can detect a substituted host.
+   *
+   * Public by necessity, so it is also trimmed to what identifying a server
+   * needs (F-6, D-120): the operator-set display name only (never the machine
+   * hostname), only the endpoint this request used, the certificate's
+   * fingerprints but not its name list, and no legacy-key posture. The
+   * address map and the full certificate are in the pairing offer (shown to
+   * the code holder) and in `/security/network-access` (admin).
    */
   router.get('/server-info', (req: Request, res: Response) => {
-    const endpoints = advertisedEndpoints(container, audienceFor(req));
-    res.json({
+    const audience = audienceFor(req);
+    const endpoints = advertisedEndpoints(container, audience);
+    const here = requestOrigin(req);
+    const ownOrigin = `${here.scheme}://${here.host}`.toLowerCase();
+    const tls = container.security.tls?.status() ?? null;
+    const configuredName = configuredServerName();
+    const body: PublicServerInfo = {
       issuer: 'generatorai',
       audience: posture.tokenAudience,
-      /** Ed25519 JWS verification key for access tokens — safe to publish. */
-      tokenPublicJwk: tokens.publicJwk(),
-      /** X25519 host identity that paired clients pin. */
+      tokenPublicJwk: tokens.publicJwk() as unknown as Record<string, unknown>,
       serverId: identity.hostId,
       serverPublicKey: identity.publicKeyBase64Url,
-      serverName: serverDisplayName(),
+      ...(configuredName ? { serverName: configuredName } : {}),
       protocolVersion: 2,
       authentication: {
         required: posture.authenticationRequired,
         dpopRequired: true,
-        legacyApiKeyAccepted: posture.legacyApiKeyActive,
       },
       transports: {
         loopback: endpoints.some((endpoint) => endpoint.reachability === 'loopback'),
@@ -150,16 +159,21 @@ export function createAuthRoutes(container: Container): Router {
         privateNetwork: endpoints.some((endpoint) => endpoint.reachability === 'private-network'),
         relay: false,
       },
-      endpoints,
-      /**
-       * Built-in HTTPS (D-110): the served certificate's fingerprint, which a
-       * person compares with the one their browser shows in its certificate
-       * warning, and the CA fingerprint a native client pins. Null when this
-       * server does not terminate TLS.
-       */
-      tls: container.security.tls?.status() ?? null,
+      endpoints: endpoints
+        .filter((endpoint) => endpoint.origin.toLowerCase() === ownOrigin)
+        .map((endpoint) => ({ origin: endpoint.origin, reachability: endpoint.reachability })),
+      tls: tls
+        ? {
+            enabled: true,
+            source: tls.source,
+            fingerprintSha256: tls.fingerprintSha256,
+            caFingerprintSha256: tls.caFingerprintSha256,
+            notAfter: tls.notAfter,
+          }
+        : null,
       scopes: SCOPES,
-    });
+    };
+    res.json(body);
   });
 
   /**
@@ -921,7 +935,13 @@ function buildTransportCapabilities(endpoints: readonly AdvertisedEndpointCandid
  * at the hostname.
  */
 export function serverDisplayName(): string {
-  return (process.env['GENERATORAI_SERVER_NAME'] ?? os.hostname() ?? 'GeneratorAI').slice(0, 120);
+  return (configuredServerName() ?? os.hostname() ?? 'GeneratorAI').slice(0, 120);
+}
+
+/** The display name the operator set, or null — the only name the public `server-info` may show (D-120). */
+export function configuredServerName(): string | null {
+  const name = process.env['GENERATORAI_SERVER_NAME']?.trim();
+  return name ? name.slice(0, 120) : null;
 }
 
 function handlePairingError(

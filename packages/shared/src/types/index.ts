@@ -544,6 +544,19 @@ export { MODEL_TIERS, MODEL_TIER_LABELS } from './HarnessCatalog.js';
 // ── System info (G-12) ──
 export type { SystemInfo } from './SystemInfo.js';
 
+// ── Security reads: server-info, posture, network access (F-6, D-120) ──
+export type {
+  NetworkAccess,
+  NetworkEndpoint,
+  NetworkTls,
+  PublicServerInfo,
+  PublicTlsStatus,
+  SecurityDetail,
+  SecurityPosture,
+  SecurityWarning,
+  TlsStatus,
+} from './SecurityPosture.js';
+
 // ── Project-scoped workflow runs (G-15) ──
 export type { ProjectRunListItem, ProjectRunListQuery, ProjectRunListPage } from './ProjectRuns.js';
 
