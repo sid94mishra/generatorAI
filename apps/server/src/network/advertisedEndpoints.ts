@@ -37,8 +37,8 @@ export interface ResolveAdvertisedEndpointsInput {
   networkInterfaces: NetworkInterfaces;
   /**
    * Scheme for addresses on this machine's network adapters. `https` once the
-   * server terminates TLS on its network-facing listener (D-110); `http` for
-   * the native-app lane (D-112) and when TLS is off. Loopback is always
+   * server terminates TLS on its network-facing listener (D-110, for every
+   * client — D-127); `http` only when TLS is off. Loopback is always
    * `http://127.0.0.1` — the same machine is a secure context without TLS.
    */
   lanScheme?: 'http' | 'https';

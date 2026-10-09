@@ -516,13 +516,13 @@ describe('endpoint order with Tailscale on', () => {
     expect(browser.map((e) => e.origin)).toEqual([`https://${NAME}`, 'https://192.168.1.20:3100', 'http://127.0.0.1:3100']);
     expect(selectPairingEndpoint(browser, 'web')?.origin).toBe(`https://${NAME}`);
 
-    const native = serverEndpoints({ port: 3100, bindHost: '127.0.0.1', tls: null, audience: 'native', tailscaleOrigin: `https://${NAME}`, configuredOrigins: [] });
+    const native = serverEndpoints({ port: 3100, bindHost: '127.0.0.1', tls: null, tailscaleOrigin: `https://${NAME}`, configuredOrigins: [] });
     expect(native.map((e) => e.origin)).toEqual([`https://${NAME}`, 'http://127.0.0.1:3100']);
     expect(selectPairingEndpoint(native, 'mobile')?.origin).toBe(`https://${NAME}`);
   });
 
   it('a loopback-only server without Tailscale still has nothing for a phone', () => {
-    const native = serverEndpoints({ port: 3100, bindHost: '127.0.0.1', tls: null, audience: 'native', tailscaleOrigin: null, configuredOrigins: [] });
+    const native = serverEndpoints({ port: 3100, bindHost: '127.0.0.1', tls: null, tailscaleOrigin: null, configuredOrigins: [] });
     expect(selectPairingEndpoint(native, 'mobile')).toBeNull();
   });
 });

@@ -15,6 +15,12 @@
 //   * the leaf was not issued by the current CA (vault restored from elsewhere).
 // The CA itself is never re-issued, so a fingerprint a phone pinned and a CA a
 // user installed both survive every leaf change.
+//
+// A standby CA (D-127) is generated with it and never served: its fingerprint
+// rides in every pairing offer (`backupCertificateFingerprint`) and the mobile
+// app pins it next to the CA, so a future rotation — promote the standby,
+// generate a new standby, re-issue the leaf — keeps paired phones working
+// without pairing again. The rotation itself is not built yet.
 // ────────────────────────────────────────────────────────────────
 
 import { createSecureContext, type SecureContext } from 'node:tls';
@@ -35,6 +41,7 @@ import { CustomCertificateError, validateCustomCertificate, type ValidatedCustom
 
 export const TLS_SECRET_NAMESPACE = SecretNamespace.tls;
 const CA_SECRET = 'local-ca';
+const STANDBY_CA_SECRET = 'local-ca-standby';
 const LEAF_SECRET = 'leaf';
 const CUSTOM_SECRET = 'custom';
 
@@ -76,6 +83,7 @@ export interface TlsManagerOptions {
 
 export class TlsManager {
   private ca: CertificateKeyPair | null = null;
+  private standbyCa: CertificateKeyPair | null = null;
   private leaf: CertificateKeyPair | null = null;
   private custom: ValidatedCustomCertificate | null = null;
   private customProblem: string | null = null;
@@ -114,6 +122,11 @@ export class TlsManager {
       this.options.logger.info('[TLS] Generated this install\'s local certificate authority', {
         fingerprintSha256: describeCertificate(this.ca.certPem).fingerprintSha256,
       });
+    }
+    this.standbyCa = await getSecretJson<CertificateKeyPair>(store, TLS_SECRET_NAMESPACE, STANDBY_CA_SECRET);
+    if (!this.standbyCa) {
+      this.standbyCa = await generateLocalCa({ commonName: `GeneratorAI local CA (${this.commonName()}, standby)`, now: this.now() });
+      await setSecretJson(store, TLS_SECRET_NAMESPACE, STANDBY_CA_SECRET, this.standbyCa);
     }
     this.leaf = await getSecretJson<CertificateKeyPair>(store, TLS_SECRET_NAMESPACE, LEAF_SECRET);
 
@@ -247,6 +260,14 @@ export class TlsManager {
    */
   pinnedFingerprint(): string | null {
     return !this.custom && this.ca ? describeCertificate(this.ca.certPem).fingerprintSha256 : null;
+  }
+
+  /**
+   * The standby CA a rotation will promote (D-127), pinned by native clients
+   * next to `pinnedFingerprint()`; null for a custom certificate.
+   */
+  backupPinnedFingerprint(): string | null {
+    return !this.custom && this.standbyCa ? describeCertificate(this.standbyCa.certPem).fingerprintSha256 : null;
   }
 
   /** The local CA certificate (public), for a user who wants to install it. */

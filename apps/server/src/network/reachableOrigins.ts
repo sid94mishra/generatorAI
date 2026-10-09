@@ -41,7 +41,7 @@ export function reachableOrigins(container: Container): string[] {
   const key = `${production}|${port}|${bindHost}|${tls ? tls.version : 'plain'}|${tailscale ?? ''}`;
   if (cached?.key === key && Date.now() - cached.at < CACHE_TTL_MS) return cached.origins;
 
-  const endpoints = serverEndpoints({ port, bindHost, tls, audience: 'browser' });
+  const endpoints = serverEndpoints({ port, bindHost, tls });
 
   // In development the UI and the API are different origins on the same host,
   // so the Vite ports have to be allowed too. In production the server serves

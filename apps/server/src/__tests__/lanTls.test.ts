@@ -131,7 +131,11 @@ describe('TlsManager — persistence and renewal', () => {
     expect(status.source).toBe('generated');
     expect(status.names).toEqual(expect.arrayContaining(['box.local', 'localhost', '192.168.1.20', '127.0.0.1', '::1']));
     expect(status.caFingerprintSha256).toBe(first.pinnedFingerprint());
-    expect((await store.list(TLS_SECRET_NAMESPACE)).sort()).toEqual(['leaf', 'local-ca']);
+    expect((await store.list(TLS_SECRET_NAMESPACE)).sort()).toEqual(['leaf', 'local-ca', 'local-ca-standby']);
+    // The standby CA (D-127) is a different CA, offered for pinning, never served.
+    const backup = first.backupPinnedFingerprint();
+    expect(backup).toMatch(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+    expect(backup).not.toBe(first.pinnedFingerprint());
 
     // A restart on the same network re-uses both: the browser's accepted
     // exception and any pinned fingerprint keep working.
@@ -139,6 +143,7 @@ describe('TlsManager — persistence and renewal', () => {
     await second.initialize();
     expect(second.status().fingerprintSha256).toBe(status.fingerprintSha256);
     expect(second.status().caFingerprintSha256).toBe(status.caFingerprintSha256);
+    expect(second.backupPinnedFingerprint()).toBe(backup);
   });
 
   it('re-issues the leaf when the LAN address changes, under the same CA', async () => {
@@ -195,6 +200,7 @@ describe('bring your own certificate (D-113)', () => {
     expect(status.fingerprintSha256).toBe(describeCertificate(leaf.certPem).fingerprintSha256);
     expect(status.caFingerprintSha256).toBeNull();
     expect(manager.pinnedFingerprint()).toBeNull();
+    expect(manager.backupPinnedFingerprint()).toBeNull();
     await expect(verifyAgainst(ca.certPem, leaf, leaf.certPem, 'box.local')).resolves.toBeNull();
 
     // It survives a restart, and removing it brings the generated one back.

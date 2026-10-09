@@ -145,7 +145,6 @@ export function createSecurityRoutes(container: Container): Router {
           port: container.config.port,
           bindHost: posture.bindHost,
           tls: container.security.tls,
-          audience: 'browser',
         }),
         /**
          * Built-in HTTPS for other devices (D-110). `null` while the listener is

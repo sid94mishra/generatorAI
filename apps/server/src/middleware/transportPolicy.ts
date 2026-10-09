@@ -1,24 +1,16 @@
 // ────────────────────────────────────────────────────────────────
-// What plain HTTP may do once the server speaks HTTPS (D-111, D-112).
+// What plain HTTP may do once the server speaks HTTPS (D-111, D-127).
 //
 // The network-facing port answers both protocols (dualProtocolListener.ts).
 // Plain HTTP stays fully usable from THIS machine — the desktop window, a
 // local browser, a local CLI, a reverse proxy on the same host — and from a
 // trusted proxy that terminated TLS for us. From another device it is
-// narrowed to the native-app lane:
+// refused: a page navigation is redirected (308) to the https:// URL;
+// anything else gets 403 HTTPS_REQUIRED naming the https address.
 //
-//   browser   any request whose `Origin` is not this server's own plain-HTTP
-//             origin. A page navigation is redirected (308) to the https://
-//             URL; anything else gets 403 HTTPS_REQUIRED. A browser can never
-//             load the SPA over plain HTTP from the LAN, so it can never sit
-//             in the non-secure context where pairing fails.
-//   native    `/api/*` with no `Origin` (React Native `fetch`), or with this
-//             server's own `http://<host>` origin (React Native's WebSocket
-//             adds that by default on iOS and Android, and no web page can
-//             produce it — the page itself would have been redirected).
-//             Authentication is unchanged: every non-public route still needs
-//             a DPoP-bound credential, which is what keeps this lane safe
-//             until the mobile app can pin the certificate (MV-44).
+// There is no native plain-HTTP lane any more (D-112 is superseded by D-127):
+// the mobile app pins the server's local CA and talks https:// (MV-44), so
+// every other device — browser, phone, CLI, MCP client — uses TLS.
 // ────────────────────────────────────────────────────────────────
 
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
@@ -30,19 +22,14 @@ export type TransportLane =
   | 'https'
   /** Plain HTTP from this machine. */
   | 'loopback'
-  /** Plain HTTP from another device, from a native client. */
-  | 'native-lan'
-  /** Plain HTTP from another device, from a browser. */
-  | 'browser-lan';
+  /** Plain HTTP from another device: refused while TLS is on. */
+  | 'lan-http';
 
 export function classifyTransport(req: OriginRequest, policy?: TrustProxyPolicy): TransportLane {
   const origin = requestOrigin(req, policy);
   if (origin.scheme === 'https') return 'https';
   if (!origin.forwarded && isLoopbackAddress(req.socket.remoteAddress)) return 'loopback';
-  const header = req.headers['origin'];
-  const sent = Array.isArray(header) ? header[0] : header;
-  if (sent === undefined || sent.toLowerCase() === `http://${origin.host}`) return 'native-lan';
-  return 'browser-lan';
+  return 'lan-http';
 }
 
 /** The https:// URL a plain-HTTP request should have used. */
@@ -54,8 +41,8 @@ export const HTTPS_REQUIRED_CODE = 'HTTPS_REQUIRED';
 
 export function httpsRequiredMessage(httpsOrigin: string): string {
   return (
-    `Open ${httpsOrigin} instead. This server uses HTTPS for other devices: browsers need it to create ` +
-    'the key pairing uses, and it keeps the connection private.'
+    `Use ${httpsOrigin} instead. This server accepts only encrypted connections from other devices: ` +
+    'browsers need HTTPS to create the key pairing uses, and it keeps the connection private.'
   );
 }
 
@@ -73,7 +60,7 @@ export function createTransportPolicyMiddleware(options: TransportPolicyOptions)
     }
     const lane = classifyTransport(req, options.policy);
     const isApi = req.path === '/api' || req.path.startsWith('/api/');
-    if (lane === 'https' || lane === 'loopback' || (lane === 'native-lan' && isApi)) {
+    if (lane === 'https' || lane === 'loopback') {
       next();
       return;
     }

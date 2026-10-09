@@ -44,7 +44,12 @@ Click **Download certificate authority** under the certificate details, or open 
 
 ### The mobile app
 
-The GeneratorAI mobile app does not use the browser path yet. Its pairing QR still lists the plain-HTTP LAN address. Each request is signed with the phone's device key (DPoP), as before, but the traffic is not encrypted. The QR also carries the CA fingerprint, so a later version can pin it and switch to HTTPS.
+The GeneratorAI mobile app uses HTTPS on the LAN too, with nothing to install. The pairing QR carries the fingerprint of this computer's local CA (and of a standby CA for a future rotation). The app trusts exactly that CA for the server's LAN addresses and nothing else, for every request, live stream and WebSocket. It never sends plain HTTP to another device, and the server refuses plain HTTP from other devices.
+
+- If you type the code instead of scanning the QR, the app reads the certificate the server presents and shows its fingerprint. Check that it matches the fingerprint in **Settings › Security & devices** on this computer before you tap **Pair**.
+- If the app says **This server's identity changed — pair again**, the server presented a certificate from a different CA. That is expected after you reinstall GeneratorAI or switch to your own certificate. Otherwise, something on the network may be impersonating your server.
+- A phone paired before this change shows **Pair again for an encrypted connection**. Pair it again with a new code.
+- A command-line or MCP client on another computer also needs HTTPS: use **Connect with Tailscale**, or point Node at the CA with `NODE_EXTRA_CA_CERTS=<path to ca.crt>`.
 
 ## Use your own certificate
 

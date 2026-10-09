@@ -4,7 +4,6 @@
 
 import { describe, expect, it } from 'vitest';
 import { parseTrustProxy, requestAbsoluteUrl, requestOrigin } from '../network/requestOrigin.js';
-import { classifyTransport } from '../middleware/transportPolicy.js';
 
 const off = parseTrustProxy(undefined);
 
@@ -19,13 +18,5 @@ describe('request origin host case (F-7)', () => {
       socket: { remoteAddress: '127.0.0.1' },
     };
     expect(requestAbsoluteUrl(proxied, '/api/x', parseTrustProxy('loopback'))).toBe('https://gen.example.org/api/x');
-  });
-
-  it('matches the native lane’s own-origin header case-insensitively', () => {
-    const req = {
-      headers: { host: 'Studio-Mac.local:3100', origin: 'http://studio-mac.LOCAL:3100' },
-      socket: { remoteAddress: '192.168.1.9' },
-    };
-    expect(classifyTransport(req, off)).toBe('native-lan');
   });
 });

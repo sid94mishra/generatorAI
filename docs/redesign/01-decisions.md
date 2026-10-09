@@ -919,7 +919,7 @@ weakened (no non-DPoP fallback). Evidence: `reviews/lan-https.md`.
   There are no cookies. Stream tickets and signed links are bound to a scope, not a URL, so they need no change; the
   widget-asset origin stays a loopback-only listener (a remote browser cannot reach it before or after this change).
 
-### D-112 The mobile app keeps a plain-HTTP LAN lane until it can pin the certificate (2026-10-07) — Final
+### D-112 The mobile app keeps a plain-HTTP LAN lane until it can pin the certificate (2026-10-07) — Superseded by D-127
 Pinning a self-signed certificate in React Native needs native work on both platforms (an `NSURLSession` challenge
 handler on iOS and an OkHttp trust manager on Android, for `fetch`, the streaming transport and WebSockets) — more than
 a contained change. So, for now:
@@ -1087,6 +1087,30 @@ only authority.
 `certificateFingerprint` for them; `system` for every other https name (ts.net, a reverse proxy, a custom domain), which
 is verified normally and never pinned; `none` for http. The mobile pinning work (MV-44) and the desktop client (D-126)
 apply the same split, so a ts.net endpoint from an offer works with ordinary HTTPS on every client.
+
+### D-127 The plain-HTTP LAN lane is gone: every other device uses HTTPS; offers carry a standby CA (MV-44, 2026-10-09) — Final
+Supersedes D-112. The mobile app now pins the local CA natively for fetch, the stream and WebSockets (mobile MD-199…MD-202),
+so nothing needs plain HTTP from another device.
+- **Offers.** One endpoint list for every platform (`serverEndpoints` lost its `audience`): with TLS on, every network
+  address is `https://` (plus `<host>.local`), the ts.net origin first when Tailscale serves (D-123), loopback stays
+  `http://127.0.0.1`. `server-info` and `pair/preview` answer the same list whoever asks.
+- **Transport policy.** Lanes are `https`, `loopback` (plain HTTP from this machine) and `lan-http` (plain HTTP from
+  another device). While TLS is on, `lan-http` is refused for everyone — a page GET is redirected 308 to `https://`,
+  anything else is 403 `HTTPS_REQUIRED` ("Use https://… instead"), a WebSocket upgrade is 403. The own-`http://<host>`
+  Origin allowance for React Native's WebSocket is removed (RN sends `https://<host>` over `wss://`, which the
+  reachable-origin allowlist already holds). With `GENERATORAI_LAN_TLS=0` (or a certificate that failed) the server
+  still speaks plain HTTP on the network and the app refuses to pair with it: the operator chose that.
+- **Standby CA.** `TlsManager` generates a second, never-served CA with the first (`system/tls/local-ca-standby`, same
+  profile and name constraints) and every offer carries its fingerprint as `backupCertificateFingerprint` (relay-protocol
+  schema, additive). The app pins both, so a future rotation (promote the standby, make a new one, re-issue the leaf)
+  will not force a re-pair. The rotation itself is not built. A custom certificate (D-113) offers neither.
+- **Other native clients.** A CLI or MCP client on another machine now needs TLS too: Connect with Tailscale (publicly
+  trusted) or `NODE_EXTRA_CA_CERTS=<ca.crt from GET /api/auth/tls/ca.crt>`. On this machine nothing changes.
+- **Migration.** None (pre-release): a phone paired over the lane shows "Pair again for an encrypted connection" and
+  never sends plain HTTP; pairing again replaces the session.
+Evidence: `agent-tests/lan-pairing-e2e.mjs` (29 checks: https-only mobile offer, CA + standby fingerprints, pinned
+pairing and DPoP over https, plain-HTTP API / server-info / ws:// refused from the LAN), `lanTransport.test.ts`,
+`lanTls.test.ts`; device evidence in `docs/redesign/mobile/reviews/mv44-pinning.md`.
 
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)

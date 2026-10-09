@@ -1,5 +1,5 @@
 // ────────────────────────────────────────────────────────────────
-// The one place that answers "which URLs reach this server?" (D-110, D-112).
+// The one place that answers "which URLs reach this server?" (D-110, D-127).
 //
 // Four callers used to assemble this separately — the pairing routes, the
 // Network exposure route, the first-run bootstrap and the CORS/WebSocket
@@ -8,14 +8,11 @@
 // "Connect with Tailscale" (D-123) puts `https://<machine>.<tailnet>.ts.net`
 // first for every audience while it serves this server.
 //
-// Two audiences:
-//   browser  a browser must be in a secure context to create its device key,
-//            so once TLS is on every network address is `https://`, plus the
-//            `<host>.local` name the certificate covers.
-//   native   the mobile app cannot yet trust a self-signed certificate
-//            (MV-44), so its pairing offer keeps the plain-HTTP LAN addresses
-//            — still DPoP-bound on every request — and carries the CA
-//            fingerprint it will pin once it can.
+// One list for every client (D-127): once TLS is on, every network address
+// is `https://`, plus the `<host>.local` name the certificate covers. A
+// browser needs the secure context to create its device key; the mobile app
+// pins the local CA the offer names (MV-44). Loopback stays
+// `http://127.0.0.1` — the same machine needs no TLS.
 // ────────────────────────────────────────────────────────────────
 
 import { hostname as osHostname, networkInterfaces as osNetworkInterfaces } from 'node:os';
@@ -23,8 +20,6 @@ import { resolveAdvertisedEndpoints, type AdvertisedEndpointCandidate, type Netw
 import { mdnsHostname } from './tls/certificateNames.js';
 import type { TlsManager } from './tls/TlsManager.js';
 import { tailscaleAdvertisedOrigin } from './tailscale/TailscaleAccess.js';
-
-export type EndpointAudience = 'browser' | 'native';
 
 /** `GENERATORAI_ADVERTISED_URLS` (comma-separated) and `GENERATORAI_ADVERTISED_URL`. */
 export function configuredAdvertisedOrigins(env: NodeJS.ProcessEnv = process.env): string[] {
@@ -53,7 +48,6 @@ export interface ServerEndpointsInput {
   port: number;
   bindHost: string;
   tls: TlsManager | null;
-  audience: EndpointAudience;
   hostname?: string;
   networkInterfaces?: NetworkInterfaces;
   configuredOrigins?: readonly string[];
@@ -62,7 +56,7 @@ export interface ServerEndpointsInput {
 }
 
 export function serverEndpoints(input: ServerEndpointsInput): AdvertisedEndpointCandidate[] {
-  const secure = input.tls !== null && input.audience === 'browser';
+  const secure = input.tls !== null;
   const mdns = secure ? mdnsHostname(input.hostname ?? osHostname()) : null;
   return resolveAdvertisedEndpoints({
     port: input.port,
@@ -71,8 +65,7 @@ export function serverEndpoints(input: ServerEndpointsInput): AdvertisedEndpoint
     networkInterfaces: input.networkInterfaces ?? osNetworkInterfaces(),
     lanScheme: secure ? 'https' : 'http',
     hostnames: secure ? [...(mdns ? [mdns] : []), ...(input.tls?.extraHostnames() ?? [])] : [],
-    // Both audiences: the ts.net certificate is publicly trusted, so the
-    // native app needs no pinning for it (D-125).
+    // The ts.net certificate is publicly trusted: no client pins it (D-125).
     tailscaleOrigin: input.tailscaleOrigin === undefined ? tailscaleAdvertisedOrigin() : input.tailscaleOrigin,
   });
 }

@@ -771,7 +771,6 @@ async function startServer(): Promise<void> {
     port: listenPort,
     bindHost,
     tls,
-    audience: 'browser',
   });
   const advertisedEndpoint = bootstrapEndpoints[0]?.origin ?? `http://127.0.0.1:${listenPort}`;
   try {

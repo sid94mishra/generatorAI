@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // One port, two protocols — the dual listener, scheme-aware request URLs,
 // proxy trust, the plain-HTTP transport policy and https endpoints
-// (D-111, D-112, D-114).
+// (D-111, D-114, D-127).
 // ────────────────────────────────────────────────────────────────
 
 import * as http from 'node:http';
@@ -181,7 +181,7 @@ describe('request origin and proxy trust (D-114)', () => {
   });
 });
 
-describe('plain-HTTP transport policy (D-111, D-112)', () => {
+describe('plain-HTTP transport policy (D-111, D-127)', () => {
   const host = '192.168.1.20:3100';
   const lane = (remoteAddress: string, headers: Record<string, string>, encrypted = false) =>
     classifyTransport({ socket: { remoteAddress, encrypted }, headers: { host, ...headers } }, parseTrustProxy('off'));
@@ -189,11 +189,11 @@ describe('plain-HTTP transport policy (D-111, D-112)', () => {
   it('classifies requests into lanes', () => {
     expect(lane('192.168.1.9', {}, true)).toBe('https');
     expect(lane('127.0.0.1', { origin: 'http://localhost:5173' })).toBe('loopback');
-    expect(lane('192.168.1.9', {})).toBe('native-lan');
-    // React Native's WebSocket default Origin — the server's own http origin.
-    expect(lane('192.168.1.9', { origin: `http://${host}` })).toBe('native-lan');
-    expect(lane('192.168.1.9', { origin: 'https://evil.example' })).toBe('browser-lan');
-    expect(lane('192.168.1.9', { origin: `http://evil.example:3100` })).toBe('browser-lan');
+    // No native lane any more: plain HTTP from another device is one lane, whoever sends it.
+    expect(lane('192.168.1.9', {})).toBe('lan-http');
+    expect(lane('192.168.1.9', { origin: `http://${host}` })).toBe('lan-http');
+    expect(lane('192.168.1.9', { origin: 'https://evil.example' })).toBe('lan-http');
+    expect(lane('192.168.1.9', { origin: `http://evil.example:3100` })).toBe('lan-http');
   });
 
   function appWithPolicy(tlsActive: boolean) {
@@ -251,11 +251,20 @@ describe('plain-HTTP transport policy (D-111, D-112)', () => {
     expect(JSON.stringify(result.body)).toContain(`https://${host}`);
   });
 
-  it('lets the native lane, this machine and https through; does nothing while TLS is off', async () => {
-    await expect(run(true, { method: 'POST', url: '/api/chats', headers: {}, remoteAddress: '192.168.1.9' })).resolves.toEqual({ status: 0 });
+  it('refuses a native client (no Origin, or its own http Origin) over plain HTTP from the LAN', async () => {
+    for (const headers of [{}, { origin: `http://${host}` }]) {
+      const result = await run(true, { method: 'POST', url: '/api/chats', headers, remoteAddress: '192.168.1.9' });
+      expect(result.status).toBe(403);
+      expect(result.body).toMatchObject({ error: { code: 'HTTPS_REQUIRED' } });
+    }
+    const info = await run(true, { method: 'GET', url: '/api/auth/server-info', headers: {}, remoteAddress: '192.168.1.9' });
+    expect(info.status).toBe(403);
+  });
+
+  it('lets this machine and https through; does nothing while TLS is off', async () => {
     await expect(run(true, { method: 'GET', url: '/', headers: {}, remoteAddress: '127.0.0.1' })).resolves.toEqual({ status: 0 });
+    await expect(run(true, { method: 'POST', url: '/api/chats', headers: {}, remoteAddress: '127.0.0.1' })).resolves.toEqual({ status: 0 });
     await expect(run(false, { method: 'GET', url: '/', headers: { origin: 'https://evil.example' }, remoteAddress: '192.168.1.9' })).resolves.toEqual({ status: 0 });
-    // The native lane covers the API only; a page is still redirected.
     await expect(run(true, { method: 'GET', url: '/', headers: {}, remoteAddress: '192.168.1.9' })).resolves.toMatchObject({ status: 308 });
   });
 

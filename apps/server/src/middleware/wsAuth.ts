@@ -81,9 +81,9 @@ export async function authorizeWebSocketUpgrade(
     : [];
   const requiredScopes = [...new Set<Scope>([...params.requiredScopes, ...policyScopes])];
 
-  // D-111 — a browser on another device must use https://; only the native
-  // app's DPoP-bound lane may upgrade over plain HTTP from the LAN.
-  if (container.security.tls && classifyTransport(req as OriginRequest) === 'browser-lan') {
+  // D-111, D-127 — another device must upgrade over https:// (wss://); plain
+  // HTTP is for this machine only.
+  if (container.security.tls && classifyTransport(req as OriginRequest) === 'lan-http') {
     container.logger.warn(`[${label}] upgrade rejected: plain HTTP from another device`, {
       origin: req.headers.origin ?? '(none)',
     });
@@ -179,11 +179,6 @@ export function isOriginAllowed(req: IncomingMessage, container: Container): boo
   }
   const allowed = container.config.security.corsOrigins;
   if (allowed.includes(origin)) return true;
-
-  // React Native's WebSocket sends the server's own `http://<host>` as its
-  // Origin. With TLS on that is the native lane (D-112): no page can carry
-  // that Origin, because the page itself would have been redirected to https.
-  if (container.security.tls && classifyTransport(req as OriginRequest) === 'native-lan') return true;
 
   // Must match the CORS allowlist exactly. An origin accepted for REST but
   // refused here yields a session that loads and then cannot open a terminal

@@ -41,8 +41,7 @@ import { isLoopbackRequest } from '../middleware/auth.js';
 import { requestAbsoluteUrl, requestClientAddress, requestOrigin } from '../network/requestOrigin.js';
 import { fingerprintToBase64Url } from '../network/tls/certificates.js';
 import { selectPairingEndpoint, type AdvertisedEndpointCandidate } from '../network/advertisedEndpoints.js';
-import { serverEndpoints, type EndpointAudience } from '../network/serverEndpoints.js';
-import { classifyTransport } from '../middleware/transportPolicy.js';
+import { serverEndpoints } from '../network/serverEndpoints.js';
 
 const PLATFORMS = ['web', 'desktop', 'cli', 'mobile', 'mcp', 'other'] as const;
 
@@ -135,8 +134,7 @@ export function createAuthRoutes(container: Container): Router {
    * the code holder) and in `/security/network-access` (admin).
    */
   router.get('/server-info', (req: Request, res: Response) => {
-    const audience = audienceFor(req);
-    const endpoints = advertisedEndpoints(container, audience);
+    const endpoints = advertisedEndpoints(container);
     const here = requestOrigin(req);
     const ownOrigin = `${here.scheme}://${here.host}`.toLowerCase();
     const tls = container.security.tls?.status() ?? null;
@@ -314,7 +312,7 @@ export function createAuthRoutes(container: Container): Router {
           serverId: identity.hostId,
           serverPublicKey: identity.publicKeyBase64Url,
           serverName: serverDisplayName(),
-          endpoints: advertisedEndpoints(container, audienceFor(req)),
+          endpoints: advertisedEndpoints(container),
           tls: container.security.tls?.status() ?? null,
           ...preview,
         });
@@ -398,9 +396,9 @@ export function createAuthRoutes(container: Container): Router {
           return;
         }
 
-        // A browser needs https:// to create its device key; the native app
-        // keeps the plain-HTTP lane until it can pin the certificate (D-112).
-        const endpoints = advertisedEndpoints(container, pairingAudience(platform));
+        // Every client gets the https:// addresses (D-127): a browser needs the
+        // secure context, the mobile app pins the local CA named below (MV-44).
+        const endpoints = advertisedEndpoints(container);
         const selectedEndpoint = selectPairingEndpoint(endpoints, platform);
         if (!selectedEndpoint) {
           res.status(409).json({
@@ -431,6 +429,7 @@ export function createAuthRoutes(container: Container): Router {
         // cannot produce a valid offer, that is a server bug — never ship a
         // half-valid offer that a client will reject after scanning.
         const pinned = container.security.tls?.pinnedFingerprint() ?? null;
+        const backup = container.security.tls?.backupPinnedFingerprint() ?? null;
         const offerResult = PairingOfferSchema.safeParse({
           v: 2,
           endpoint: selectedEndpoint.origin,
@@ -441,10 +440,12 @@ export function createAuthRoutes(container: Container): Router {
           })),
           serverId: identity.hostId,
           serverPublicKey: identity.publicKeyBase64Url,
-          // The CA a native client will pin once it can (MV-44): base64url of
-          // its SHA-256, compact for the QR. Absent for a custom certificate,
-          // which is trusted through its own CA.
+          // The CA a native client pins for the LAN addresses (MV-44): base64url
+          // of its SHA-256, compact for the QR, plus the standby CA a rotation
+          // will promote (D-127). Absent for a custom certificate, which is
+          // trusted through its own CA.
           ...(pinned ? { certificateFingerprint: fingerprintToBase64Url(pinned) } : {}),
+          ...(backup ? { backupCertificateFingerprint: fingerprintToBase64Url(backup) } : {}),
           pairingGrant: grant.pairingToken,
           pairingExpiresAt: grant.expiresAt,
           requestedScopes: grant.requestedScopes,
@@ -904,23 +905,12 @@ function pathParam(req: Request, name: string): string {
  * Explicit origins are authoritative. Interface origins are derived only when
  * the server is deliberately bound beyond loopback.
  */
-function advertisedEndpoints(container: Container, audience: EndpointAudience): AdvertisedEndpointCandidate[] {
+function advertisedEndpoints(container: Container): AdvertisedEndpointCandidate[] {
   return serverEndpoints({
     port: container.config.port,
     bindHost: container.security.posture.bindHost,
     tls: container.security.tls,
-    audience,
   });
-}
-
-/** A request on the native plain-HTTP lane is answered with that lane's addresses. */
-function audienceFor(req: Request): EndpointAudience {
-  return classifyTransport(req) === 'native-lan' ? 'native' : 'browser';
-}
-
-/** Browsers (web, a desktop window) need https://; everything else is a native client. */
-function pairingAudience(platform: DevicePlatform): EndpointAudience {
-  return platform === 'web' || platform === 'desktop' ? 'browser' : 'native';
 }
 
 function buildTransportCapabilities(endpoints: readonly AdvertisedEndpointCandidate[]): string[] {
