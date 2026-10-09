@@ -19,6 +19,20 @@
 //                         nginx on the same host forwarding to 127.0.0.1
 //   <ip>[,<ip>…]          those exact proxy addresses (a reverse proxy on
 //                         another host). Loopback is not implied.
+//
+// "Connect with Tailscale" (D-123, D-124) adds one narrow lane without that
+// opt-in: `tailscale serve` terminates HTTPS for `<machine>.<tailnet>.ts.net`
+// and forwards to 127.0.0.1:<port>, keeping the client's Host and setting
+// `X-Forwarded-Host` (= Host), `X-Forwarded-Proto: https` and
+// `X-Forwarded-For` (the tailnet peer). Its forwarded scheme is honoured only
+// when ALL hold: the peer is loopback, Tailscale access is on, and both
+// `Host` and `X-Forwarded-Host` (when sent) are exactly that ts.net name. A
+// page rebinding its own name to 127.0.0.1 cannot meet it (its Host is its
+// own name), and a local process that forges it only makes its request
+// non-loopback — never more privileged. Unlike a GENERATORAI_TRUST_PROXY
+// peer, the lane never bypasses the Host allow-list (the name is simply on
+// it), and `Tailscale-User-*` headers are never read: device pairing (DPoP)
+// stays the only authority.
 // ────────────────────────────────────────────────────────────────
 
 import { isLoopbackAddress } from '@generatorai/auth';
@@ -53,6 +67,39 @@ export function resetTrustProxyPolicy(): void {
   processPolicy = null;
 }
 
+let tailscaleHost: string | null = null;
+
+/**
+ * The ts.net name `tailscale serve` forwards for, while Tailscale access is on
+ * (lower-case, no trailing dot); null turns the lane off.
+ */
+export function setTailscaleServeHost(name: string | null): void {
+  tailscaleHost = name ? name.trim().toLowerCase().replace(/\.$/, '') || null : null;
+}
+
+export function tailscaleServeHost(): string | null {
+  return tailscaleHost;
+}
+
+/** `name[:port]` → `name`, lower-cased; IPv6 literals are never a ts.net name. */
+function hostOnly(value: string): string {
+  const v = value.trim().toLowerCase();
+  if (v.startsWith('[')) return v;
+  const colon = v.lastIndexOf(':');
+  return (colon >= 0 && v.indexOf(':') === colon ? v.slice(0, colon) : v).replace(/\.$/, '');
+}
+
+/** True when this request came through `tailscale serve` for our ts.net name (the D-124 lane). */
+export function isTailscaleServeRequest(req: OriginRequest, serveHost: string | null = tailscaleHost): boolean {
+  if (!serveHost) return false;
+  if (!isLoopbackAddress(req.socket.remoteAddress)) return false;
+  const host = first(req.headers['host']);
+  if (!host || hostOnly(host) !== serveHost) return false;
+  const forwardedHost = first(req.headers['x-forwarded-host']);
+  if (forwardedHost !== undefined && hostOnly(forwardedHost) !== serveHost) return false;
+  return true;
+}
+
 export function isTrustedProxyPeer(policy: TrustProxyPolicy, remoteAddress: string | undefined): boolean {
   if (!remoteAddress) return false;
   if (policy.mode === 'off') return false;
@@ -80,13 +127,22 @@ export interface RequestOrigin {
   forwarded: boolean;
 }
 
-export function requestOrigin(req: OriginRequest, policy: TrustProxyPolicy = trustProxyPolicy()): RequestOrigin {
+export function requestOrigin(
+  req: OriginRequest,
+  policy: TrustProxyPolicy = trustProxyPolicy(),
+  serveHost: string | null = tailscaleHost,
+): RequestOrigin {
   const direct: RequestOrigin = {
     scheme: req.socket.encrypted ? 'https' : 'http',
     host: (first(req.headers['host']) ?? 'localhost').toLowerCase(),
     forwarded: false,
   };
-  if (!isTrustedProxyPeer(policy, req.socket.remoteAddress)) return direct;
+  if (!isTrustedProxyPeer(policy, req.socket.remoteAddress)) {
+    if (!isTailscaleServeRequest(req, serveHost)) return direct;
+    // The Host is already the ts.net name; only the scheme comes from the proxy.
+    const proto = first(req.headers['x-forwarded-proto'])?.toLowerCase();
+    return { scheme: proto === 'https' ? 'https' : direct.scheme, host: direct.host, forwarded: true };
+  }
   const proto = first(req.headers['x-forwarded-proto'])?.toLowerCase();
   const host = first(req.headers['x-forwarded-host']);
   if (!proto && !host) return direct;
@@ -95,6 +151,18 @@ export function requestOrigin(req: OriginRequest, policy: TrustProxyPolicy = tru
     host: host?.toLowerCase() ?? direct.host,
     forwarded: true,
   };
+}
+
+/**
+ * The address of the client itself, for per-source limits and audit: the
+ * left-most `X-Forwarded-For` entry when the request came through a proxy we
+ * trust (so every tailnet device does not share the proxy's 127.0.0.1
+ * budget), otherwise the socket peer.
+ */
+export function requestClientAddress(req: OriginRequest, policy?: TrustProxyPolicy): string | null {
+  const peer = req.socket.remoteAddress ?? null;
+  if (!requestOrigin(req, policy).forwarded) return peer;
+  return first(req.headers['x-forwarded-for']) ?? peer;
 }
 
 /** Absolute URL for DPoP `htu` binding: what the client signed. */

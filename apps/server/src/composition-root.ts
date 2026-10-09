@@ -14,7 +14,9 @@ import type { ProviderInstanceId } from '@generatorai/core';
 import { readWorkspaceRetentionPreferences } from './settings/workspaceRetention.js';
 import { defaultSttLanguage, readAudioPreferences } from './settings/audio.js';
 import { AgentHostClient, HostSupervisor, resolveWorktreePath, sessionHookBridgeFactory } from '@generatorai/core';
-import { createSecurityContext, type SecurityContext } from './composition/security.js';
+import { applyReachabilityToPermissionDefault, createSecurityContext, type SecurityContext } from './composition/security.js';
+import { TailscaleAccess } from './network/tailscale/TailscaleAccess.js';
+import { describeExposurePreconditions } from './network/exposure.js';
 import { registerHarnessInstances } from './composition/harnessInstances.js';
 import { mintLocalAdminToken } from './composition/localAdminToken.js';
 import { loadOrCreateCallbackKey } from './composition/callbackKey.js';
@@ -256,6 +258,27 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // when the process is configured in a way that would expose an
   // unauthenticated API, and we want that to happen before anything binds.
   const security = await createSecurityContext({ config, db, logger });
+
+  // "Connect with Tailscale" (D-123). Started by index.ts once the listener
+  // has bound its port; the same blockers as Network exposure apply.
+  const tailscale = new TailscaleAccess({
+    dataDir: dirname(resolve(config.dbPath)),
+    port: () => config.port,
+    logger: {
+      info: (m, meta) => logger.info(m, meta),
+      warn: (m, meta) => logger.warn(m, meta),
+    },
+    blockers: async () =>
+      describeExposurePreconditions({
+        unauthenticatedLoopback: security.posture.unauthenticatedLoopback,
+        secretStoreSecure: (await security.secretStore.backendInfo()).secure,
+      }),
+    onReachableChange: (reachable) =>
+      applyReachabilityToPermissionDefault({
+        reachableBeyondLoopback: reachable || !security.posture.loopbackOnly,
+        production: security.posture.production,
+      }),
+  });
 
   // Recovery channel for a lost admin device. Only meaningful once pairing is
   // actually enforced; in unauthenticated loopback mode it would be a live
@@ -2318,6 +2341,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     logger,
     eventBus,
     security,
+    tailscale,
     localAdminToken,
     relayHostBroker,
     pushTokens,
@@ -2695,6 +2719,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
 
     /** Graceful shutdown. */
     async shutdown(): Promise<void> {
+      tailscale.stop();
       attentionService.stop();
       chatChangeStatsService.stop();
       chatListInvalidator.stop();
@@ -2793,6 +2818,8 @@ export interface Container {
   eventBus: EventBus;
   /** Secret store, device/pairing services, DPoP verification, audit log. */
   security: SecurityContext;
+  /** "Connect with Tailscale": `tailscale serve` → this server on loopback (D-123). */
+  tailscale: TailscaleAccess;
   /**
    * Per-launch token proving a caller is the OS user who owns this server.
    * Null when authentication is disabled, where it would grant nothing.

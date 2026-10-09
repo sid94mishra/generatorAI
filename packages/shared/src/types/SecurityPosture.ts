@@ -101,3 +101,42 @@ export interface NetworkAccess {
   /** D-114 — whose X-Forwarded-Proto/Host the server honours. */
   trustProxy?: { mode: 'off' | 'loopback' | 'addresses'; addresses: string[] };
 }
+
+/**
+ * Where "Connect with Tailscale" stands (D-123), from the Tailscale CLI on the
+ * server's machine:
+ *   not-installed   no `tailscale` CLI found
+ *   not-running     installed, but tailscaled is down or disconnected
+ *   needs-login     installed and running, not signed in
+ *   https-disabled  signed in, but MagicDNS or HTTPS certificates are off for the tailnet
+ *   ready           everything is in place; not serving this server
+ *   on              `https://<machine>.<tailnet>.ts.net` serves this server
+ *   error           the CLI answered something unreadable
+ */
+export type TailscaleState = 'not-installed' | 'not-running' | 'needs-login' | 'https-disabled' | 'ready' | 'on' | 'error';
+
+/** `GET /api/security/tailscale`. Optional fields are present only when `detail === 'full'`. */
+export interface TailscaleAccessStatus {
+  detail: SecurityDetail;
+  /** The owner's choice; re-applied whenever the server starts. */
+  enabled: boolean;
+  state: TailscaleState;
+  /** `https://<machine>.<tailnet>.ts.net` while on (admin view only). */
+  origin: string | null;
+  dnsName?: string | null;
+  tailnet?: string | null;
+  version?: string | null;
+  cliPath?: string | null;
+  /** Tailscale's sign-in link, while it needs one. */
+  loginUrl?: string | null;
+  /** Where to turn HTTPS on for the tailnet (Tailscale's own link when the CLI printed one). */
+  enableHttpsUrl?: string | null;
+  /** The last thing that went wrong, in plain words. */
+  problem?: string | null;
+  /** Another app already uses Tailscale Serve on 443 for this machine. */
+  conflict?: string | null;
+  /** Tailscale Funnel publishes the same handler to the whole internet. */
+  funnel?: boolean;
+  /** Why this server must not be reachable from other devices right now (same as Network exposure's). */
+  blockers?: { code: string; message: string }[];
+}

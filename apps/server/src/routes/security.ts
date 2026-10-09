@@ -22,6 +22,7 @@ import type { NetworkAccess, SecurityPosture } from '@generatorai/shared';
 import type { Container } from '../composition-root.js';
 import { serverEndpoints } from '../network/serverEndpoints.js';
 import { trustProxyPolicy } from '../network/requestOrigin.js';
+import { limitedTailscaleStatus } from '../network/tailscale/TailscaleAccess.js';
 import { CustomCertificateError, MAX_CERTIFICATE_PEM_BYTES, MAX_KEY_PEM_BYTES } from '../network/tls/customCertificate.js';
 import {
   describeExposurePreconditions,
@@ -31,6 +32,13 @@ import {
 
 const networkAccessSchema = z.object({
   mode: z.enum(['local-only', 'network-accessible']),
+});
+
+/** `POST /security/tailscale` — turn "Connect with Tailscale" on or off (D-123). */
+const tailscaleSchema = z.object({
+  enabled: z.boolean(),
+  /** Replace another app's Tailscale Serve handler on 443 (the status names it). */
+  replace: z.boolean().optional(),
 });
 
 /** `PUT /security/tls/certificate` — a PEM certificate (chain allowed) and its unencrypted key (D-113). */
@@ -153,6 +161,65 @@ export function createSecurityRoutes(container: Container): Router {
         trustProxy: describeTrustProxy(),
       };
       res.json(full);
+    })();
+  });
+
+  /**
+   * "Connect with Tailscale" (D-123): what Tailscale on this machine reports
+   * and whether `https://<machine>.<tailnet>.ts.net` serves this server. The
+   * name and tailnet identify the machine, so a device without
+   * `admin:settings` sees only on/off (D-120).
+   */
+  router.get('/tailscale', (req: Request, res: Response) => {
+    void (async () => {
+      const status = await container.tailscale.status();
+      res.json(seesSecurityDetail(req.principal) ? status : limitedTailscaleStatus(status));
+    })();
+  });
+
+  /**
+   * Turns Tailscale access on (`tailscale serve --bg --https=443
+   * http://127.0.0.1:<port>`) or off. 409 with the reason — and the status, so
+   * the UI can show Tailscale's own "enable HTTPS" link — when it cannot.
+   */
+  router.post('/tailscale', (req: Request, res: Response) => {
+    void (async () => {
+      const parsed = tailscaleSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: { code: 'INVALID_BODY', message: parsed.error.message } });
+        return;
+      }
+      if (!parsed.data.enabled) {
+        const status = await container.tailscale.disconnect();
+        container.security.audit.record({
+          action: 'settings.updated',
+          result: 'success',
+          ...(req.principal ? { principal: req.principal } : {}),
+          resourceType: 'security',
+          resourceId: 'tailscale-access',
+          metadata: { enabled: false },
+          severity: 'warn',
+        });
+        res.json(status);
+        return;
+      }
+      const result = await container.tailscale.connect({ replace: parsed.data.replace === true });
+      container.security.audit.record({
+        action: 'settings.updated',
+        result: result.ok ? 'success' : 'failure',
+        ...(req.principal ? { principal: req.principal } : {}),
+        resourceType: 'security',
+        resourceId: 'tailscale-access',
+        metadata: result.ok
+          ? { enabled: true, origin: result.status.origin }
+          : { enabled: true, code: result.code },
+        severity: 'warn',
+      });
+      if (result.ok) {
+        res.json(result.status);
+        return;
+      }
+      res.status(409).json({ error: { code: result.code, message: result.message, tailscale: result.status } });
     })();
   });
 

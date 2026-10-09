@@ -61,6 +61,7 @@ import { hostIdFromPublicKey, keyPairFromSecretKey, toBase64Url } from '@generat
 import { TlsManager } from '../network/tls/TlsManager.js';
 import { configuredAdvertisedHosts } from '../network/serverEndpoints.js';
 import { setDefaultChatPermissionMode } from '@generatorai/core';
+import { readTailscaleAccess } from '../network/tailscale/TailscaleAccess.js';
 import type { AppConfig, ILogger } from '@generatorai/shared';
 import { liveConnections } from '../streaming/liveConnections.js';
 
@@ -140,6 +141,24 @@ export interface SecurityPosture {
   tokenAudience: string;
   /** Why a network-facing server is NOT serving HTTPS, or null when it is (or need not). */
   tlsUnavailableReason: string | null;
+}
+
+/**
+ * The default agent permission mode (plan G14): autonomous only on a
+ * development server nothing else can reach. `GENERATORAI_DEFAULT_PERMISSION_MODE=bypassPermissions`
+ * keeps full autonomy regardless.
+ */
+export function defaultPermissionModeFor(input: {
+  reachableBeyondLoopback: boolean;
+  production: boolean;
+}): 'bypassPermissions' | 'acceptEdits' {
+  if (process.env['GENERATORAI_DEFAULT_PERMISSION_MODE'] === 'bypassPermissions') return 'bypassPermissions';
+  return !input.reachableBeyondLoopback && !input.production ? 'bypassPermissions' : 'acceptEdits';
+}
+
+/** Re-derives the default when Tailscale access turns on or off at runtime (D-123). */
+export function applyReachabilityToPermissionDefault(input: { reachableBeyondLoopback: boolean; production: boolean }): void {
+  setDefaultChatPermissionMode(defaultPermissionModeFor(input));
 }
 
 /** Thrown when the process must refuse to start. */
@@ -441,19 +460,17 @@ export async function createSecurityContext(
   // loopback — LAN, SSH-forwarded, relay, or production — must not run agents
   // that can touch the host with no approval gate, because the blast radius of
   // one compromised client becomes the whole workstation.
-  const permissionDefault: 'bypassPermissions' | 'acceptEdits' =
-    process.env['GENERATORAI_DEFAULT_PERMISSION_MODE'] === 'bypassPermissions'
-      ? 'bypassPermissions'
-      : loopbackOnly && !production
-        ? 'bypassPermissions'
-        : 'acceptEdits';
+  // "Connect with Tailscale" (D-123) makes a loopback listener reachable from
+  // the owner's other devices, so it counts as beyond loopback here.
+  const tailscaleOn = readTailscaleAccess(path.dirname(path.resolve(config.dbPath))).enabled;
+  const permissionDefault = defaultPermissionModeFor({ reachableBeyondLoopback: !loopbackOnly || tailscaleOn, production });
   setDefaultChatPermissionMode(permissionDefault);
   if (permissionDefault !== 'bypassPermissions') {
     logger.info(
       '[Security] Agents default to `acceptEdits` on this deployment. Chats may still opt ' +
         'into full autonomy individually.',
     );
-  } else if (!loopbackOnly || production) {
+  } else if (!loopbackOnly || production || tailscaleOn) {
     // Only reachable via the explicit env override above.
     logger.warn(
       '[Security] GENERATORAI_DEFAULT_PERMISSION_MODE=bypassPermissions is set on a ' +
@@ -464,7 +481,7 @@ export async function createSecurityContext(
       result: 'success',
       resourceType: 'security',
       resourceId: 'default-permission-mode',
-      metadata: { mode: permissionDefault, loopbackOnly, production },
+      metadata: { mode: permissionDefault, loopbackOnly, production, tailscaleOn },
       severity: 'critical',
     });
   }

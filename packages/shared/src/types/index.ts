@@ -554,6 +554,8 @@ export type {
   SecurityDetail,
   SecurityPosture,
   SecurityWarning,
+  TailscaleAccessStatus,
+  TailscaleState,
   TlsStatus,
 } from './SecurityPosture.js';
 

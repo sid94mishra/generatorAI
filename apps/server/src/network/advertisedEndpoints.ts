@@ -14,7 +14,7 @@ export interface AdvertisedEndpointCandidate {
    * advertised only over HTTPS because only a certificate makes a name worth
    * more than the address it resolves to (D-110).
    */
-  source: 'configured' | 'interface' | 'bind' | 'hostname';
+  source: 'configured' | 'interface' | 'bind' | 'hostname' | 'tailscale';
   /**
    * True when this address belongs to a hypervisor/container adapter (WSL,
    * Hyper-V, Docker, VirtualBox, VMware).
@@ -44,6 +44,12 @@ export interface ResolveAdvertisedEndpointsInput {
   lanScheme?: 'http' | 'https';
   /** Names that resolve to this machine (`<host>.local`), advertised after its addresses. */
   hostnames?: readonly string[];
+  /**
+   * `https://<machine>.<tailnet>.ts.net` while "Connect with Tailscale" serves
+   * this server (D-123). Listed FIRST: it works on any network where the
+   * device is signed in to the tailnet, with a publicly trusted certificate.
+   */
+  tailscaleOrigin?: string | null;
 }
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
@@ -132,6 +138,7 @@ export function resolveAdvertisedEndpoints(
     result.push(candidate(normalized, source, interfaceName));
   };
 
+  if (input.tailscaleOrigin) add(input.tailscaleOrigin, 'tailscale');
   for (const configured of input.configuredOrigins ?? []) add(configured, 'configured');
   const scheme = input.lanScheme ?? 'http';
 

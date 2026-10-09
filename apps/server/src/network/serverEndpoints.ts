@@ -5,6 +5,9 @@
 // Network exposure route, the first-run bootstrap and the CORS/WebSocket
 // origin allowlist — and they have to agree, so they now all ask here.
 //
+// "Connect with Tailscale" (D-123) puts `https://<machine>.<tailnet>.ts.net`
+// first for every audience while it serves this server.
+//
 // Two audiences:
 //   browser  a browser must be in a secure context to create its device key,
 //            so once TLS is on every network address is `https://`, plus the
@@ -19,6 +22,7 @@ import { hostname as osHostname, networkInterfaces as osNetworkInterfaces } from
 import { resolveAdvertisedEndpoints, type AdvertisedEndpointCandidate, type NetworkInterfaces } from './advertisedEndpoints.js';
 import { mdnsHostname } from './tls/certificateNames.js';
 import type { TlsManager } from './tls/TlsManager.js';
+import { tailscaleAdvertisedOrigin } from './tailscale/TailscaleAccess.js';
 
 export type EndpointAudience = 'browser' | 'native';
 
@@ -53,6 +57,8 @@ export interface ServerEndpointsInput {
   hostname?: string;
   networkInterfaces?: NetworkInterfaces;
   configuredOrigins?: readonly string[];
+  /** Defaults to the live "Connect with Tailscale" origin (D-123). */
+  tailscaleOrigin?: string | null;
 }
 
 export function serverEndpoints(input: ServerEndpointsInput): AdvertisedEndpointCandidate[] {
@@ -65,5 +71,8 @@ export function serverEndpoints(input: ServerEndpointsInput): AdvertisedEndpoint
     networkInterfaces: input.networkInterfaces ?? osNetworkInterfaces(),
     lanScheme: secure ? 'https' : 'http',
     hostnames: secure ? [...(mdns ? [mdns] : []), ...(input.tls?.extraHostnames() ?? [])] : [],
+    // Both audiences: the ts.net certificate is publicly trusted, so the
+    // native app needs no pinning for it (D-125).
+    tailscaleOrigin: input.tailscaleOrigin === undefined ? tailscaleAdvertisedOrigin() : input.tailscaleOrigin,
   });
 }

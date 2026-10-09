@@ -1038,6 +1038,56 @@ client signed agree on host case; the native-lane own-origin check compares case
 byte-exact in `htu`: DPoP binds exactly the path that was signed, and which policy a path spelling falls under is the
 route policy's job (D-115), not DPoP's.
 
+### D-123 "Connect with Tailscale": one click, `tailscale serve` to loopback, no LAN exposure (owner, 2026-10-09) — Final
+The decided default for "use it from my other devices" without hosting anything (security-analysis S4,
+seamless-connections Option 1). Settings › Security & devices › **Access from other devices** › Connect with Tailscale
+runs `tailscale serve --bg --https=443 http://127.0.0.1:<port>`: every device signed in to the same tailnet (Personal
+plan: free, up to 6 users, unlimited devices) opens `https://<machine>.<tailnet>.ts.net` with a publicly trusted
+certificate Tailscale provisions, over WireGuard. The server stays bound to 127.0.0.1; Network exposure (LAN) moves under
+**Advanced** and is not needed.
+- **Server-side, so desktop and headless agree.** `network/tailscale/`: the CLI is found in `GENERATORAI_TAILSCALE_CLI`,
+  `PATH`, then the OS install path (macOS `/Applications/Tailscale.app/Contents/MacOS/Tailscale`, Windows
+  `%ProgramFiles%\Tailscale\tailscale.exe`, Linux `/usr/bin`, `/usr/sbin`, `/usr/local/bin`, `/snap/bin`); always an
+  argument array with `shell: false` and a timeout (`serve` blocks while waiting for HTTPS to be enabled). State from
+  `tailscale status --json` (BackendState, Self.DNSName, CertDomains / the `https` capability, MagicDNS) and
+  `tailscale serve status --json`, parsed defensively: not installed · not running · needs login (its AuthURL, only a
+  tailscale.com link) · HTTPS off (Tailscale's own `login.tailscale.com/f/serve?node=…` link when the CLI printed one,
+  else the DNS admin page) · ready · on · error.
+- **Persisted and re-applied.** `tailscale-access.json` (0600, next to the DB) holds the choice, the name and the last
+  port. The server re-applies Serve after `listen` (the desktop's embedded server may move port) and every 60 s while on
+  (Tailscale started later, Serve cleared by hand). Off removes the 443 root handler only when it still points at this
+  server; another app's handler is never replaced without `replace: true` (the UI says whose it is).
+- **Same gates as LAN exposure.** Unauthenticated loopback mode or a weak vault blocks Connect (409 `TAILSCALE_BLOCKED`)
+  and pauses a persisted choice at start. While on, the server counts as reachable beyond loopback for the agent
+  permission default (`acceptEdits`, plan G14), at start and live.
+- **API.** `GET /api/security/tailscale` (read:status; limited view `{detail, enabled, state, origin: null}` without
+  admin:settings, D-120), `POST /api/security/tailscale {enabled, replace?}` (admin:settings, audited; 409 codes in the
+  OpenAPI spec carry the status for the UI). Wire type `TailscaleAccessStatus` in `@generatorai/shared`.
+- **Offers.** The ts.net origin is the first endpoint for every audience (reachability `private-network`): web/desktop
+  `joinUrl`, the QR, `pair/preview`. The pairing panel says "Works on any network where your devices are signed in to
+  Tailscale".
+- Not done: Funnel (public internet) is never turned on; the status reports it if the owner enabled it by hand.
+
+### D-124 `tailscale serve`'s forwarded headers are trusted for its name only, from loopback (2026-10-09) — Final
+`tailscale serve` keeps the client's Host (`r.Out.Host = r.In.Host`), sets `X-Forwarded-Host` = Host,
+`X-Forwarded-Proto: https`, `X-Forwarded-For` = the tailnet peer, and strips client-sent copies (Go `ReverseProxy`
+`Rewrite`; `ipn/ipnlocal/serve.go addProxyForwardedHeaders`). The DPoP `htu`, CORS and HSTS need the `https://<name>`
+origin, but D-114's `GENERATORAI_TRUST_PROXY=loopback` would also make every loopback peer bypass the D-119 Host check —
+undoing the DNS-rebinding defence. So `requestOrigin` has a narrow lane: honoured only when the peer is loopback,
+Tailscale access is on, and `Host` and `X-Forwarded-Host` (if sent) are exactly the ts.net name. It never bypasses the
+Host allow-list (the name is simply on it), so a rebinding page (its Host is its own name) is refused as before; a local
+process forging the lane only makes its request non-loopback (forwarded), never more privileged. Per-source pairing limits
+use the left-most `X-Forwarded-For` behind a trusted proxy or the lane (`requestClientAddress`), so tailnet devices do not
+share 127.0.0.1's budget. `Tailscale-User-*` / `Tailscale-Headers-Info` are never read: device pairing (DPoP) stays the
+only authority.
+
+### D-125 One endpoint-trust rule for every client: install CA for private names, system trust for the rest (2026-10-09) — Final
+`@generatorai/shared` `endpointTrust(origin)`: `install-ca` for https to a private/loopback/100.64 IP literal, `.local`,
+`localhost` — the only names the D-110 local CA (name-constrained) can vouch for, so a native client pins
+`certificateFingerprint` for them; `system` for every other https name (ts.net, a reverse proxy, a custom domain), which
+is verified normally and never pinned; `none` for http. The mobile pinning work (MV-44) and the desktop client (D-126)
+apply the same split, so a ts.net endpoint from an offer works with ordinary HTTPS on every client.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

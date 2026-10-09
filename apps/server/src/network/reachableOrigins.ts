@@ -19,6 +19,7 @@
 
 import type { Container } from '../composition-root.js';
 import { serverEndpoints } from './serverEndpoints.js';
+import { tailscaleServeHost } from './requestOrigin.js';
 
 /**
  * How long one enumeration of the network adapters is reused. Interfaces
@@ -36,7 +37,8 @@ export function reachableOrigins(container: Container): string[] {
   const bindHost = container.security.posture.bindHost;
   const tls = container.security.tls;
 
-  const key = `${production}|${port}|${bindHost}|${tls ? tls.version : 'plain'}`;
+  const tailscale = tailscaleServeHost();
+  const key = `${production}|${port}|${bindHost}|${tls ? tls.version : 'plain'}|${tailscale ?? ''}`;
   if (cached?.key === key && Date.now() - cached.at < CACHE_TTL_MS) return cached.origins;
 
   const endpoints = serverEndpoints({ port, bindHost, tls, audience: 'browser' });
@@ -51,7 +53,7 @@ export function reachableOrigins(container: Container): string[] {
   const origins = new Set<string>();
   for (const endpoint of endpoints) {
     const url = new URL(endpoint.origin);
-    if (endpoint.source === 'configured') {
+    if (endpoint.source === 'configured' || endpoint.source === 'tailscale') {
       // An operator-configured URL (a Tailscale Serve name, a reverse proxy)
       // is an origin exactly as written.
       origins.add(url.origin);
@@ -67,6 +69,9 @@ export function reachableOrigins(container: Container): string[] {
       if (!production) origins.add(`https://${host}:${candidate}`);
     }
   }
+  // "Connect with Tailscale" (D-123): pages served at https://<name>.ts.net
+  // call the API with that Origin.
+  if (tailscale) origins.add(`https://${tailscale}`);
   // With TLS on the same port also answers https on loopback (D-111).
   if (tls) {
     origins.add(`https://127.0.0.1:${port}`);

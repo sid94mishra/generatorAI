@@ -1318,6 +1318,27 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
         required: ['enabled', 'source', 'fingerprintSha256', 'caFingerprintSha256', 'issuer', 'notBefore', 'notAfter', 'names', 'customCertificateProblem'],
       },
+      TailscaleAccessStatus: {
+        type: 'object',
+        description: '"Connect with Tailscale" (D-123). Fields after `origin` are present only with `detail: "full"` (admin:settings).',
+        properties: {
+          detail: { type: 'string', enum: ['full', 'limited'] },
+          enabled: { type: 'boolean', description: "The owner's choice; re-applied when the server starts." },
+          state: { type: 'string', enum: ['not-installed', 'not-running', 'needs-login', 'https-disabled', 'ready', 'on', 'error'] },
+          origin: { type: ['string', 'null'], description: '`https://<machine>.<tailnet>.ts.net` while on.' },
+          dnsName: { type: ['string', 'null'] },
+          tailnet: { type: ['string', 'null'] },
+          version: { type: ['string', 'null'] },
+          cliPath: { type: ['string', 'null'] },
+          loginUrl: { type: ['string', 'null'] },
+          enableHttpsUrl: { type: ['string', 'null'] },
+          problem: { type: ['string', 'null'] },
+          conflict: { type: ['string', 'null'] },
+          funnel: { type: 'boolean' },
+          blockers: { type: 'array', items: { type: 'object', properties: { code: { type: 'string' }, message: { type: 'string' } } } },
+        },
+        required: ['detail', 'enabled', 'state', 'origin'],
+      },
     },
     securitySchemes: {
       bearerAuth: {
@@ -1450,6 +1471,34 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         responses: {
           '200': { description: 'Serving the generated certificate', content: { 'application/json': { schema: { type: 'object', properties: { tls: { $ref: '#/components/schemas/TlsStatus' } } } } } },
           '409': { description: 'TLS_NOT_ACTIVE' },
+        },
+      },
+    },
+    '/api/security/tailscale': {
+      get: {
+        tags: ['Security'], summary: 'Connect with Tailscale — status (D-123)',
+        description:
+          'read:status. What the Tailscale CLI on this machine reports and whether `https://<machine>.<tailnet>.ts.net` serves this server. ' +
+          'Without admin:settings the answer is `{ detail: "limited", enabled, state, origin: null }` (D-120).',
+        responses: { '200': { description: 'TailscaleAccessStatus', content: { 'application/json': { schema: { $ref: '#/components/schemas/TailscaleAccessStatus' } } } } },
+      },
+      post: {
+        tags: ['Security'], summary: 'Turn Tailscale access on or off (D-123)',
+        description:
+          'admin:settings. On runs `tailscale serve --bg --https=443 http://127.0.0.1:<port>` (no shell) and persists the choice; it is re-applied ' +
+          'when the server starts. Off removes the 443 handler only when it still points at this server. `replace` overrides another app\'s handler.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { type: 'object', properties: { enabled: { type: 'boolean' }, replace: { type: 'boolean' } }, required: ['enabled'] } } },
+        },
+        responses: {
+          '200': { description: 'TailscaleAccessStatus after the change', content: { 'application/json': { schema: { $ref: '#/components/schemas/TailscaleAccessStatus' } } } },
+          '400': { description: 'INVALID_BODY' },
+          '409': {
+            description:
+              'TAILSCALE_BLOCKED, TAILSCALE_NOT_INSTALLED, TAILSCALE_NOT_RUNNING, TAILSCALE_NEEDS_LOGIN, TAILSCALE_HTTPS_DISABLED (error.tailscale.enableHttpsUrl is ' +
+              "Tailscale's link), TAILSCALE_SERVE_CONFLICT, TAILSCALE_NO_NAME, TAILSCALE_SERVE_FAILED or TAILSCALE_ERROR; `error.tailscale` carries the status",
+          },
         },
       },
     },

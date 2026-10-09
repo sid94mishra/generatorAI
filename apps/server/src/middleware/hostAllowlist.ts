@@ -21,7 +21,11 @@
 //     certificate (generated or brought), and `GENERATORAI_ALLOWED_HOSTS`
 //     (comma list; `.example.com` allows a suffix; `*` turns the check off);
 //   * a request from a proxy the operator trusts (D-114): it does its own
-//     host routing.
+//     host routing;
+//   * the `<machine>.<tailnet>.ts.net` name while "Connect with Tailscale"
+//     is on (D-123) — by name only: `tailscale serve` keeps the client's
+//     Host, so its requests need no proxy bypass, and a loopback peer with
+//     any other Host is still refused.
 // Everything else gets 421 `HOST_NOT_ALLOWED`, before auth and before CORS.
 // ────────────────────────────────────────────────────────────────
 
@@ -30,7 +34,7 @@ import { hostname as osHostname } from 'node:os';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { isLoopbackAddress } from '@generatorai/auth';
 import { configuredAdvertisedHosts } from '../network/serverEndpoints.js';
-import { isTrustedProxyPeer, trustProxyPolicy, type TrustProxyPolicy } from '../network/requestOrigin.js';
+import { isTrustedProxyPeer, tailscaleServeHost, trustProxyPolicy, type TrustProxyPolicy } from '../network/requestOrigin.js';
 
 export const HOST_NOT_ALLOWED_CODE = 'HOST_NOT_ALLOWED';
 
@@ -191,6 +195,7 @@ export function serverHostAllowlist(source: HostAllowlistSource): HostAllowlist 
     process.env['GENERATORAI_ALLOWED_HOSTS'] ?? '',
     process.env['GENERATORAI_ADVERTISED_URL'] ?? '',
     process.env['GENERATORAI_ADVERTISED_URLS'] ?? '',
+    tailscaleServeHost() ?? '',
   ].join('|');
   if (cached?.key === key && Date.now() - cached.at < CACHE_TTL_MS) return cached.allowlist;
   let certificateNames: string[] = [];
@@ -201,6 +206,8 @@ export function serverHostAllowlist(source: HostAllowlistSource): HostAllowlist 
   } catch {
     // Not initialised yet — the loopback and hostname names still apply.
   }
+  const tailscale = tailscaleServeHost();
+  if (tailscale) extraHostnames = [...extraHostnames, tailscale];
   const allowlist = buildHostAllowlist({ bindHost, certificateNames, extraHostnames });
   cached = { key, at: Date.now(), allowlist };
   return allowlist;

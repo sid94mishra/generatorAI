@@ -673,6 +673,17 @@ async function startServer(): Promise<void> {
     );
   }
 
+  // 5a-1b. "Connect with Tailscale" (D-123): point `tailscale serve` at the
+  //        port this process actually bound (it moves past a busy one) and
+  //        trust the persisted ts.net name. Never blocks startup: the CLI
+  //        may be slow, absent or signed out.
+  container.tailscale.setListenPort(listenPort);
+  void container.tailscale.start().catch((err: unknown) => {
+    container.logger.warn('[Tailscale] could not re-apply access at startup', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+
   // 5a-2. W21 — start the loop-turn prober now that the bound port is known.
   //       It probes an endpoint answered FROM the event loop, so a slow or
   //       absent response is direct evidence the loop is not turning — unlike

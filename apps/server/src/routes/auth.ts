@@ -38,7 +38,7 @@ import { dirname, resolve } from 'node:path';
 import type { Container } from '../composition-root.js';
 import { removeBootstrapFile } from '../composition/bootstrapPairing.js';
 import { isLoopbackRequest } from '../middleware/auth.js';
-import { requestAbsoluteUrl, requestOrigin } from '../network/requestOrigin.js';
+import { requestAbsoluteUrl, requestClientAddress, requestOrigin } from '../network/requestOrigin.js';
 import { fingerprintToBase64Url } from '../network/tls/certificates.js';
 import { selectPairingEndpoint, type AdvertisedEndpointCandidate } from '../network/advertisedEndpoints.js';
 import { serverEndpoints, type EndpointAudience } from '../network/serverEndpoints.js';
@@ -243,7 +243,8 @@ export function createAuthRoutes(container: Container): Router {
           ...(parsed.data.deviceName ? { deviceName: parsed.data.deviceName } : {}),
           ...(parsed.data.platform ? { platform: parsed.data.platform } : {}),
           ...(parsed.data.connectionMode ? { connectionMode: parsed.data.connectionMode } : {}),
-          sourceAddress: req.socket.remoteAddress ?? null,
+          // The tailnet peer, not the proxy's 127.0.0.1, behind tailscale serve (D-124).
+          sourceAddress: requestClientAddress(req),
           trustedSource: isLoopbackRequest(req),
           requestId: req.requestId,
         });
@@ -302,7 +303,8 @@ export function createAuthRoutes(container: Container): Router {
       try {
         const preview = await devices.previewPairingGrant({
           pairingToken: parsed.data.pairingToken,
-          sourceAddress: req.socket.remoteAddress ?? null,
+          // The tailnet peer, not the proxy's 127.0.0.1, behind tailscale serve (D-124).
+          sourceAddress: requestClientAddress(req),
           // F-3 — this machine (the desktop window, the owner's local browser)
           // has its own budget and is never starved by a LAN flood.
           trustedSource: isLoopbackRequest(req),
