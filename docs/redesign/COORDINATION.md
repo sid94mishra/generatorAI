@@ -75,3 +75,14 @@ D-103, D-104).
 `kindLabel`, the attention ask's `summary` for a tool gate is that title, and `ui-contract` exports
 `permissionWording` (D-107); client-core's `PermissionBlock` carries `title` / `kindLabel`. Mirror item: MV-43. The
 mobile Vitest suite passes on this branch (1108/1108, run read-only).
+
+**Pending-items pass (2026-10-09, notes for the mobile and desktop sessions).** Shared-script / cross-tree changes, each in
+its own commit: `scripts/redesign/sandbox.mjs` merges every `agent-tests/e2e/fixtures/faux-*.json` into its default Faux
+script and accepts `GENERATORAI_SANDBOX_BUNDLE` (D-129; `GENERATORAI_SANDBOX_FAUX_SCRIPT` still wins as-is, so the mobile
+sandbox is unaffected); mobile `ReorderList`'s `itemLabel` prop is now `itemName` (check:no-legacy), and
+`usePacedText` reads no ref during render (lint). The packaged desktop app runs its server in an Electron utility process
+with RunAsNode / NODE_OPTIONS / --inspect fuses off and hands the vault key over the process channel (D-128): Playwright's
+`_electron.launch` cannot attach to a packaged build any more — use `GENERATORAI_SMOKE_EXECUTABLE` (CDP) as
+`packaged-app-smoke` / `terminal-desktop-smoke` do. `build:server` stages Electron-ABI native modules into
+`apps/server/dist-bundle/node_modules`, so a sandbox started from that bundle needs `GENERATORAI_SANDBOX_BUNDLE` pointing
+at a bundle without them.

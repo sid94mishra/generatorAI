@@ -1136,6 +1136,45 @@ Evidence: `agent-tests/lan-pairing-e2e.mjs` (29 checks: https-only mobile offer,
 pairing and DPoP over https, plain-HTTP API / server-info / ws:// refused from the LAN), `lanTransport.test.ts`,
 `lanTls.test.ts`; device evidence in `docs/redesign/mobile/reviews/mv44-pinning.md`.
 
+### D-128 The packaged app runs its server in a utility process, ships hardened fuses, and hands the vault key over the channel (F-4, F-8, 2026-10-09) — Final
+- **Process.** Packaged: `utilityProcess.fork(resources/server/server.mjs)` (Electron's Node, `serviceName`
+  "GeneratorAI Server", stdout/stderr piped to the main log). Unpackaged/dev and `GENERATORAI_DESKTOP_NODE`: the Node child
+  as before (system-Node ABI, tsx). Both behind `ServerChild` (`apps/desktop/src/main/server-child.ts`); lifecycle unchanged:
+  graceful `{type:'shutdown'}` message on every OS, SIGTERM / `taskkill /t` fallback, force kill after 15 s, bounded
+  restart with backoff, no restart on an unreadable vault. The server speaks either channel through
+  `apps/server/src/parentChannel.ts`; a utility process gets no `disconnect`, so it polls its parent (2 s) and shuts down
+  when it is gone. The server environment is this process's minus `ELECTRON_RUN_AS_NODE` (agent children keep their own
+  allowlist).
+- **Fuses** (electron-builder `electronFuses`, flipped after afterPack, before signing): `RunAsNode`,
+  `EnableNodeOptionsEnvironmentVariable`, `EnableNodeCliInspectArguments`, `GrantFileProtocolExtraPrivileges` off;
+  `EnableEmbeddedAsarIntegrityValidation`, `OnlyLoadAppFromAsar`, `EnableCookieEncryption` on; an unsigned macOS build
+  resets its ad-hoc signature. The splash/error/prompt `file://` pages load their same-directory fonts without the file
+  privileges (checked on a fused Electron).
+- **Nothing runs Electron as Node any more.** The bundled Codex launcher is replaced by the native binary it would exec
+  (`nativeCodexForScript`, same `CODEX_MANAGED_*` env); a `.js`/shim Codex in Electron without a native binary is not
+  offered; the script sandbox never falls back to `process.execPath` inside Electron. The opt-in agent-host / pty-host
+  (`child_process.fork`) are not shipped in the packaged app; enabling them there would need a utility process too.
+- **Vault key (F-8).** The shell sets `GENERATORAI_SECRET_KEY_HANDOFF=parent`; the server sends `secret-key-request`
+  before building the container and the shell answers `{type:'secret-key', key}` on that child's channel; the key goes to
+  `EnvKeyProvider` in memory (`createSecretStore({ suppliedKey })`, backend still `env-key`). It is never in the server's
+  environment (`ps eww`, `/proc/<pid>/environ`, inherited by children). A headless server keeps
+  `GENERATORAI_SECRET_KEY`; an operator key in the shell's own environment still passes through.
+- **Testing a fused build.** Playwright's `_electron` needs the Node inspector, so `packaged-app-smoke` and
+  `GENERATORAI_SMOKE_EXECUTABLE=<binary>` smokes start the binary with Chromium's renderer-only `--remote-debugging-port`
+  and connect over CDP. Signing and notarization still need release credentials (`resolveSigning`).
+Evidence: `agent-tests/packaged-app-smoke.mjs` 32/32 on the fused macOS arm64 build, `terminal-desktop-smoke` against the
+packaged app, `desktop-security-smoke` 17/17; `server-child.test.ts`, `parentChannel.test.ts`, `suppliedKey.test.ts`,
+`resolveCodexBinary.test.ts`, `build-config.test.mjs`.
+
+### D-129 A plain sandbox runs the whole e2e suite: its Faux script includes every e2e fixture (2026-10-09) — Final
+`scripts/redesign/sandbox.mjs` writes one Faux script per sandbox: `agent-tests/vrt/fixtures/sandbox.faux.json` plus every
+`agent-tests/e2e/fixtures/faux-*.json` (plus an explicit `GENERATORAI_TEST_FAUX_SCRIPT`); a conversation scripted twice is an
+error. `GENERATORAI_SANDBOX_FAUX_SCRIPT` still replaces it as-is (the mobile sandbox). The composer and changes-dock specs no
+longer read `GENERATORAI_TEST_FAUX_SCRIPT` on the test-runner side (setting it there only stopped them skipping while the
+sandbox served its own fixture — the "regression" seen after aa5cd74b); they skip only when no Faux provider is ready and
+name the missing script when the scripted turn never comes. `GENERATORAI_SANDBOX_BUNDLE` runs another server bundle, because
+`build:server` stages Electron-ABI native modules into `dist-bundle/node_modules`.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

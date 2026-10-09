@@ -18,9 +18,10 @@ temp DB before any probe (e.g.
 
 > **Status (2026-10-09, fix pass).** F-1, F-2, F-3, F-5, F-6, F-7, F-9 and the missing Host
 > allow-list (DNS rebinding, research §3.8) are **fixed** on `desktop_redesign` — see
-> [§6 Fixed](#6-fixed-finding--commit--verification). F-4 (Electron fuses / `utilityProcess`), F-8,
-> mobile CA pinning (MV-44), relay E2EE, per-install public certificates and the desktop-remote
-> TOFU are left for the owner's design decisions.
+> [§6 Fixed](#6-fixed-finding--commit--verification). F-4 (server in a `utilityProcess`, hardened
+> fuses) and F-8 (vault key over the process channel) followed in the pending-items pass (D-128);
+> code signing / notarization still need release credentials. Relay E2EE and per-install public
+> certificates remain owner decisions.
 
 > **Top findings (detail below).** F-1 (**critical**) the route→scope policy is
 > case-sensitive but Express routing is not, so `GET /api/auth/Devices`, `POST /api/auth/Pair`,
@@ -195,7 +196,10 @@ generous budget for `/pair/complete` (which also presents a DPoP proof) vs `/pai
 
 ### F-4 — MEDIUM — Packaged desktop app: permissive Electron fuses and no ASAR integrity
 
-> **Open** — owner design decision (`utilityProcess` migration, fuses, signing). Not changed in the fix pass.
+> **Fixed** (`75a64d39`, D-128) — the server runs in a `utilityProcess` and the packaged binary ships with
+> `RunAsNode` / `EnableNodeOptionsEnvironmentVariable` / `EnableNodeCliInspectArguments` /
+> `GrantFileProtocolExtraPrivileges` off and ASAR integrity / only-load-from-asar / cookie encryption on.
+> Signing and notarization still need release credentials. See §6.
 
 **Scenario.** Local privilege/escape hardening on the shipped macOS build.
 
@@ -310,7 +314,8 @@ defense-in-depth against F-1.
 
 ### F-8 — LOW / informational — Vault KEK is visible to any process of the same OS user
 
-> **Open / accepted** — documented single-user threat model. Not changed in the fix pass.
+> **Fixed** (`75a64d39`, D-128) — the desktop app hands the key over the server's process channel; a headless
+> server keeps the env var. See §6.
 
 **Scenario.** The embedded/headless server receives the vault KEK via `GENERATORAI_SECRET_KEY` in
 its environment.
@@ -484,7 +489,9 @@ audit's reproduction was re-run against an **isolated** server (bare `DB_PATH` /
 | F-6 medium | `8cd3151e` (D-120) | `server-info`: `serverName` only when `GENERATORAI_SERVER_NAME` is set (never `os.hostname()`), `endpoints` = the endpoint the request used, `tls` = fingerprints + expiry (no names/issuer), no `legacyApiKeyAccepted`. `/security/posture` + `/network-access`: `detail:'limited'` unless `admin:settings` (no bind host, backend, legacy key, warnings, addresses, cert names, proxy trust). Types in `@generatorai/shared` (`SecurityPosture.ts`); web Settings renders the limited view; mobile logged in `docs/redesign/mobile/COORDINATION.md`. | `apps/server/src/__tests__/securityInfoExposure.test.ts`, cli-core probe test | `server-info` contained the hostname + every LAN endpoint + SAN list → hostname absent, one endpoint; web device posture: `bindHost`/`secretStore`/legacy key → `detail:"limited"`; admin still `full` |
 | F-7 low | `61f30128` (D-122) | `canonicalHtu` lower-cases the host explicitly; `requestOrigin` lower-cases `Host` / trusted `X-Forwarded-Host`; native-lane own-origin compare case-insensitive. Path stays byte-exact (route case is D-115's job). | `packages/auth/src/__tests__/dpopHtu.test.ts`, `apps/server/src/__tests__/requestOriginCase.test.ts` | Mixed-case `Host` now rebuilds a lower-case `htu`; a proof for a different path case still fails `HTU_MISMATCH` |
 | F-9 low | `b15f649a` (D-121) | CORS gate answers a disallowed origin itself: 403 `ORIGIN_NOT_ALLOWED` (preflight too, no CORS headers). The error handler never sends `stack` in any environment (logged with the requestId). | `apps/server/__tests__/middleware/corsRejection.test.ts`; security-e2e §8c | `Origin: http://evil.example` → 502 `UNKNOWN_ERROR` + dev stack → **403 `ORIGIN_NOT_ALLOWED`**, no stack |
-| F-4, F-8 | — | Not changed (owner design decisions: fuses / `utilityProcess`, KEK hand-off). Also out of scope: MV-44 CA pinning, relay E2EE, per-install public certificates, desktop-remote TOFU. | — | — |
+| F-4 medium | `75a64d39` (D-128) | Packaged server forked with `utilityProcess.fork` behind `ServerChild` (`apps/desktop/src/main/server-child.ts`): piped logs, graceful message shutdown on every OS, SIGTERM / `taskkill /t` fallback, force kill, same restart/backoff and vault-unreadable stop; the server speaks `parentPort` or Node IPC (`apps/server/src/parentChannel.ts`) and watches its parent. electron-builder `electronFuses` (before signing): `RunAsNode`, NODE_OPTIONS, `--inspect`, file-protocol privileges off; embedded ASAR integrity, only-load-from-asar, cookie encryption on; ad-hoc signature reset for the unsigned mac build. Electron-as-Node spawns removed (bundled Codex runs its native binary; the script sandbox never uses Electron's execPath). Signing / notarization: credentials needed (unchanged). | `server-child.test.ts`, `build-config.test.mjs` (fuses), `resolveCodexBinary.test.ts`; `agent-tests/packaged-app-smoke.mjs` | `npx @electron/fuses read` on `release/mac-arm64/GeneratorAI.app`: RunAsNode / NodeOptions / NodeCliInspect **Enabled → Disabled**, EmbeddedAsarIntegrity / OnlyLoadAppFromAsar / CookieEncryption **Disabled → Enabled**, GrantFileProtocolExtraPrivileges **Enabled → Disabled**. `ELECTRON_RUN_AS_NODE=1 GeneratorAI -e …` printed nothing and started the app; `NODE_OPTIONS=--require probe.cjs` and `--inspect=0` had no effect; server `ps` shows `GeneratorAI Helper --type=utility`; killed server restarted in 1 s; killing the app ended the server in 2 s; terminal (node-pty), Codex (native binary), Claude, Copilot and the cua driver all start in the utility process |
+| F-8 low | `75a64d39` (D-128) | Shell sets `GENERATORAI_SECRET_KEY_HANDOFF=parent` and answers the server's `secret-key-request` on that child's channel; `createSecretStore({ suppliedKey })` keeps it in memory (`env-key` backend). Headless servers keep `GENERATORAI_SECRET_KEY`. | `parentChannel.test.ts`, `suppliedKey.test.ts`; `desktop-security-smoke` §5b, `packaged-app-smoke` | `ps eww <server pid>`: `GENERATORAI_SECRET_KEY=gQSyV…` → **absent** (dev Node child and packaged utility process); posture still `encrypted-file/env-key`, secure |
+| Out of scope | — | Relay E2EE, per-install public certificates (owner decisions). MV-44 CA pinning and the desktop-remote TOFU were done separately (D-126, D-127). | — | — |
 
 **Gates run (2026-10-09).** `pnpm typecheck` 51/51. `turbo lint` 27/28 — the one failure is
 pre-existing in `apps/mobile/src/blocks/AssistantText/usePacedText.ts` (not touched here);
@@ -503,3 +510,25 @@ a stale non-executable `node-pty` spawn-helper in the staged bundle (passes once
 from the pre-fix commit `8da675ce` (pre-existing); `activity-column` "opens from the sidebar" is
 order-dependent flaky (passed on re-run). Desktop smokes one at a time:
 `desktop-chrome-smoke` 59/59, `right-pane-desktop-smoke` all pass, `desktop-security-smoke` 15/15.
+
+**Pending-items pass (2026-10-09, F-4 / F-8 and the open gates above).** The `changes-dock` / `composer` e2e failures were
+not a product regression: setting `GENERATORAI_TEST_FAUX_SCRIPT` on the test runner un-skipped them while the sandbox served
+its own fixture (reproduced on a default sandbox; D-129 merges the e2e fixtures into the sandbox script, `f8d70cdf`).
+`activity-column` was a timing race, not seeded state: an answered gate's popover reopened on the card's new Recent entry
+when the attention feed beat the response (`1e8cd82f`); it now passes after each of the 16 other specs. The staged
+`node-pty` spawn-helper lost its exec bit in the staging install itself (`restored the exec bit on …/spawn-helper` in the
+`build:server` log; `49446fc5`). `check:no-legacy` scanned git-ignored build output and three real name collisions
+(`29818a13`); `lifecycle.md` regenerated (`a5516847`); `check:syncio` lints only its governed files and passes at the
+default heap (~430 MB, `bcf07ec6`); the mobile `usePacedText` lint (`5ade5a8e`). The dock-browser smoke found a motion
+regression (an eased close re-opened the dock below its minimum; `423aeea3`). Gates: `turbo typecheck` 51/51, `turbo lint`
+28/28, every root `check:*` script, web `check:design` / build / `check:bundle` / `check:css`; tests server 837,
+desktop 480, providers 777, secrets 18, scripts 109, core infrastructure 474, related web 173. Full e2e on a fresh default
+sandbox: 90 passed, 2 skipped (live-provider), 1 failed on the first run (`changes-dock`: the chat route was still loading
+at the dock-toggle click) and passed alone. Desktop smokes one at a time (macOS): chrome 59/59, right-pane 9/9,
+dock-browser 23/23, terminal 16/16, browser 22/22, security 17/17; packaged (fused build): `packaged-app-smoke` 32/32 and
+`terminal-desktop-smoke` against the packaged binary. The final installer
+(`apps/desktop/release/GeneratorAI-0.0.1-alpha.1-arm64.dmg`) reads the same fuse wire inside the DMG. Caveat for unsigned
+rebuilds: each new ad-hoc signature makes macOS ask for access to the shared "GeneratorAI Safe Storage" keychain item; with
+cookie encryption on, that prompt now blocks at launch (before, it blocked when the vault key was read at server start).
+A launch of the second rebuild waited on that prompt, so its smokes did not get past start-up; a signed build with a stable
+identity does not prompt.
