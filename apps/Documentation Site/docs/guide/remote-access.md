@@ -1,16 +1,54 @@
 # Remote access over HTTPS
 
-A browser only creates the key a device needs for pairing on a **secure page**: `https://`, or `localhost` on the same machine. `http://192.168.1.20:3100` from another laptop or phone is neither, so pairing a second device needs HTTPS. GeneratorAI provides it in three ways.
+A browser only creates the key a device needs for pairing on a **secure page**: `https://`, or `localhost` on the same machine. `http://192.168.1.20:3100` from another laptop or phone is neither, so pairing a second device needs HTTPS. GeneratorAI provides it in four ways.
 
 | Setup | Use it when | Warning on the other device |
 | --- | --- | --- |
-| Built-in HTTPS (Network exposure) | Devices on the same Wi-Fi or LAN | Once per device, unless you install the CA |
-| Your own certificate | You already have one devices trust: `tailscale cert`, mkcert, a company CA | None |
-| A proxy in front (Tailscale Serve, Caddy, nginx) | Access from outside the LAN, or a proxy already terminates TLS | None with a publicly trusted certificate |
+| **Connect with Tailscale** (recommended) | Your phone and other computers, on any network: home, office, mobile data | None |
+| Built-in HTTPS (Network exposure, under Advanced) | Devices on the same Wi-Fi or LAN, with no internet | Once per device, unless you install the CA |
+| Your own certificate | You already have one devices trust: mkcert, a company CA | None |
+| A proxy in front (Caddy, nginx) | A proxy already terminates TLS | None with a publicly trusted certificate |
+
+## Access from anywhere with Tailscale — free
+
+[Tailscale](https://tailscale.com) connects your own devices into a private network (a *tailnet*), encrypted end to end with WireGuard. Its Personal plan is free (up to 6 users, unlimited devices). GeneratorAI uses it so that every device signed in to your Tailscale account opens this computer at `https://<machine>.<tailnet>.ts.net`, with a certificate every browser and phone already trusts. Nothing is installed on the devices besides Tailscale, no port is opened on your router, and this computer stays closed to everything outside your tailnet.
+
+### Set it up once
+
+1. **Install Tailscale on this computer** and sign in: [macOS](https://tailscale.com/download/mac), [Windows](https://tailscale.com/download/windows), [Linux](https://tailscale.com/download/linux).
+2. **Install Tailscale on your phone or other computer** and sign in with the **same account**: [iPhone and iPad](https://tailscale.com/download/ios), [Android](https://tailscale.com/download/android), or the desktop links above.
+3. On this computer, open **Settings › Security & devices › Access from other devices** and click **Connect with Tailscale**.
+4. The first time, Tailscale may ask you to turn on **HTTPS certificates** for your tailnet. The card shows Tailscale's own link: open it, approve, then click **Connect with Tailscale** again. (MagicDNS must be on too; it is by default.)
+5. The card now says **On** and shows the address, for example `https://studio.tail1234.ts.net`.
+
+### Pair a phone or laptop
+
+1. Under **Pair a new device**, choose the platform and click **Generate pairing code**. The address to open is the Tailscale one, with the note *Works on any network where your devices are signed in to Tailscale*.
+2. **Browser:** open that address on the other device. There is no certificate warning. Type the 12-character code and click **Connect**.
+3. **Mobile app:** scan the QR. The Tailscale address is listed first; the app uses ordinary HTTPS for it (the certificate is publicly trusted, so nothing is pinned).
+
+### What it does, exactly
+
+- GeneratorAI runs `tailscale serve --bg --https=443 http://127.0.0.1:<port>` on this computer. Tailscale terminates HTTPS for your machine's tailnet name and forwards to the server on loopback. The server itself keeps listening on `127.0.0.1` only; **Network exposure stays off**.
+- The choice is remembered. When the server starts again — including on another port — it points Tailscale Serve at the new port. **Turn off Tailscale access** removes the handler, and only if it still points at GeneratorAI.
+- Every device still has to pair. Tailscale's identity headers (`Tailscale-User-Login` …) are not used for authorization.
+- If another app already uses Tailscale Serve on port 443 for this machine, the card names it and offers **Replace and connect**.
+- Funnel (publishing to the public internet) is never turned on. If you enabled it yourself, the card warns.
+
+### Troubleshooting
+
+| The card says | Do this |
+| --- | --- |
+| Not installed | Install Tailscale (links above) and sign in. On macOS GeneratorAI finds the app's built-in CLI; elsewhere the `tailscale` command must be on `PATH`, or set `GENERATORAI_TAILSCALE_CLI` to its path. |
+| Not running | Open Tailscale and connect. |
+| Signed out | Sign in to Tailscale on this computer. |
+| HTTPS off | Open the **Turn on HTTPS** link (Tailscale admin console › DNS › HTTPS Certificates), approve, connect again. |
+| "Tailscale refused to change Serve for your user" (Linux) | Run `sudo tailscale set --operator=$USER` once. |
+| The other device cannot open the address | Sign it in to the same Tailscale account, and check that Tailscale is connected there. |
 
 ## Built-in HTTPS
 
-Turn on **Settings › Security & devices › Network exposure › LAN**. The desktop app restarts its server. From then on:
+For networks without internet, open **Settings › Security & devices › Access from other devices › Advanced: Network exposure (LAN)** and choose **LAN**. The desktop app restarts its server. From then on:
 
 - The server listens on all interfaces. Its port answers **HTTPS** for other devices and keeps plain HTTP for this computer, so the desktop window and the local CLI are unchanged.
 - On first use the server creates a **local certificate authority (CA)** for this installation. That CA issues a certificate for this computer's LAN addresses, `<hostname>.local`, `localhost`, and `127.0.0.1`. The private keys are stored in the encrypted vault, not as files.
@@ -21,7 +59,7 @@ The CA can only vouch for private addresses, `.local` names and `localhost` (X.5
 
 ### Pair a laptop or phone browser
 
-1. On the computer running GeneratorAI, open **Settings › Security & devices**. Under **Network exposure**, check the `https://` address and the **HTTPS certificate** fingerprint.
+1. On the computer running GeneratorAI, open **Settings › Security & devices**. Under **Advanced: Network exposure (LAN)**, check the `https://` address and the **HTTPS certificate** fingerprint.
 2. Under **Pair a new device**, choose **Web browser** and **Generate pairing code**.
 3. On the other device, open the `https://…` address shown in step 1 of the pairing panel.
 4. The browser warns that the connection is not private, because no public authority signed the certificate. Open the certificate details:
@@ -51,6 +89,19 @@ The GeneratorAI mobile app uses HTTPS on the LAN too, with nothing to install. T
 - A phone paired before this change shows **Pair again for an encrypted connection**. Pair it again with a new code.
 - A command-line or MCP client on another computer also needs HTTPS: use **Connect with Tailscale**, or point Node at the CA with `NODE_EXTRA_CA_CERTS=<path to ca.crt>`.
 
+## Connect the desktop app to another computer
+
+The desktop app can work against a GeneratorAI server on another machine: **Server › Add Server…** in the menu bar, or **Settings › Security & devices › Servers › Add server**.
+
+1. On the other computer, open **Settings › Security & devices › Pair a new device**, choose **Desktop** and **Generate pairing code**, then click **Copy pairing link** (`generatorai://pair?code=…`). Or note the address and the 12-character code.
+2. On this computer, paste the link — or type the address — into the **Connect to a server** box.
+3. A Tailscale address (or any publicly trusted one) connects directly. For the other computer's own built-in HTTPS, the app shows **Trust this server?** with the certificate fingerprint:
+   - from a pairing link, it says the fingerprint matches the code;
+   - from a typed address, compare it with **Settings › Security & devices › HTTPS certificate** on the other computer, and choose **Cancel** if it differs.
+4. The app then trusts exactly that server's certificate authority, for that address only, and remembers it. The other computer's pairing screen opens with the code filled in; click **Connect**.
+
+If that server later presents a certificate from a different authority, the app refuses to load it. If you reset the server on purpose, forget it under **Server › Forget Server** and add it again.
+
 ## Use your own certificate
 
 **Settings › Security & devices › HTTPS certificate › Use your own certificate…** accepts a PEM certificate and its private key. You can paste them or load the files. The certificate file can contain a chain in any order.
@@ -64,14 +115,11 @@ The server stores them only if all of these are true:
 If it fails a check, the error message lists the names the certificate covers. The key is stored in the encrypted vault. **Use the generated certificate** switches back.
 
 ```bash
-# Tailscale: a publicly trusted certificate for <machine>.<tailnet>.ts.net
-tailscale cert sids-macbook.tail1234.ts.net
-
 # mkcert: trusted on every device where you ran `mkcert -install`
 mkcert sids-macbook.local 192.168.1.20 localhost
 ```
 
-A `tailscale cert` name is advertised as an extra `https://` address in the pairing QR. Devices on the same tailnet can use it with no warning. Tailscale certificates last 90 days. Load the renewed certificate before the old one expires. When a custom certificate expires, the server shows the reason and serves its generated certificate instead.
+A `tailscale cert` certificate also works here (its name is advertised as an extra `https://` address), but **Connect with Tailscale** is simpler: Tailscale renews that certificate itself. When a custom certificate expires, the server shows the reason and serves its generated certificate instead.
 
 ## Behind a proxy
 
@@ -85,21 +133,18 @@ When a proxy terminates TLS, GeneratorAI receives plain HTTP from the proxy. The
 
 Also set `GENERATORAI_ADVERTISED_URL` to the public address. Pairing offers then include it, and the browser's `Origin` is allowed.
 
-### Tailscale Serve
+### Tailscale Serve, by hand
 
-Keep GeneratorAI loopback-only (**Network exposure › Loopback only**) and let Tailscale publish it on your tailnet with a trusted certificate:
+**Connect with Tailscale** does this for you. To run a standalone server behind Tailscale Serve without the button, publish it and tell the server its name:
 
 ```bash
-# On the GeneratorAI machine. The desktop app picks a free port unless `serverPort`
-# is set in its settings.json; use that port here.
 tailscale serve --bg --https=443 http://127.0.0.1:3100
 
 # In the server's environment (apps/server/.env for a standalone server)
-GENERATORAI_TRUST_PROXY=loopback
 GENERATORAI_ADVERTISED_URL=https://sids-macbook.tail1234.ts.net
 ```
 
-Open `https://sids-macbook.tail1234.ts.net` on any device on the tailnet and pair as usual.
+With the button, no `GENERATORAI_TRUST_PROXY` is needed: the server trusts `tailscale serve`'s `X-Forwarded-Proto` only for requests from loopback whose `Host` is exactly its ts.net name, and never lets them skip the host check below.
 
 ### Caddy or nginx
 
@@ -133,6 +178,7 @@ To stop DNS rebinding, every request must address the server by a name it owns. 
 - any IP address, `localhost` and `*.localhost`;
 - the computer's hostname and `<hostname>.local`. With Network exposure on, it also answers to the hostname in any zone, such as `<hostname>.lan` or `<hostname>.<tailnet>.ts.net`;
 - the hosts in `GENERATORAI_ADVERTISED_URL(S)` and the DNS names of the certificate it serves;
+- its `<machine>.<tailnet>.ts.net` name while **Connect with Tailscale** is on;
 - requests from a proxy named in `GENERATORAI_TRUST_PROXY`.
 
 Any other name gets `421 HOST_NOT_ALLOWED`. To add names, list them in `GENERATORAI_ALLOWED_HOSTS`, separated by commas. A leading dot allows every name under a domain, as in `.home.arpa`. `*` turns the check off.
@@ -141,4 +187,6 @@ Any other name gets `421 HOST_NOT_ALLOWED`. To add names, list them in `GENERATO
 
 - `GENERATORAI_LAN_TLS=0`: an exposed server speaks plain HTTP only. Use it only when something else terminates TLS. Browsers on other devices cannot pair without HTTPS.
 - `GET /api/auth/server-info` and `GET /api/security/network-access` return `tls`: the certificate fingerprint, the CA fingerprint, the covered names and the expiry date.
-- Decisions: D-110 to D-114 and D-119 in the redesign decision log.
+- `GET /api/security/tailscale` (read) and `POST /api/security/tailscale` with `{ "enabled": true | false }` (admin) — what the Tailscale card shows and does.
+- `GENERATORAI_TAILSCALE_CLI`: the Tailscale CLI's path, when it is neither on `PATH` nor in its default install location.
+- Decisions: D-110 to D-114, D-119 and D-123 to D-127 in the redesign decision log.

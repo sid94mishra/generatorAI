@@ -707,35 +707,35 @@
       "method": "GET",
       "path": "/api/auth/server-info",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 137,
+      "line": 136,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/auth/tls/ca.crt",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 185,
+      "line": 183,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/auth/nonce",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 198,
+      "line": 196,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/auth/pair/complete",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 210,
+      "line": 208,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/auth/pair/preview",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 294,
+      "line": 293,
       "mounted": true
     },
     {
@@ -756,119 +756,119 @@
       "method": "GET",
       "path": "/api/auth/pair/pending",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 500,
+      "line": 503,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/auth/pair/:grantId",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 519,
+      "line": 522,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/auth/devices",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 526,
+      "line": 529,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/auth/devices/me",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 538,
+      "line": 541,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/auth/devices/:deviceId",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 554,
+      "line": 557,
       "mounted": true
     },
     {
       "method": "PATCH",
       "path": "/api/auth/devices/:deviceId",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 565,
+      "line": 568,
       "mounted": true
     },
     {
       "method": "PUT",
       "path": "/api/auth/devices/:deviceId/scopes",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 582,
+      "line": 585,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/auth/devices/:deviceId/rotate",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 625,
+      "line": 628,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/auth/devices/:deviceId",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 640,
+      "line": 643,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/auth/devices/:deviceId/revoke",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 644,
+      "line": 647,
       "mounted": true
     },
     {
       "method": "PUT",
       "path": "/api/auth/push-token",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 653,
+      "line": 656,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/auth/push-token",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 700,
+      "line": 703,
       "mounted": true
     },
     {
       "method": "PUT",
       "path": "/api/auth/push-token/mute",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 709,
+      "line": 712,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/auth/approval-nonce",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 729,
+      "line": 732,
       "mounted": true
     },
     {
       "method": "PUT",
       "path": "/api/auth/devices/me/approval-key",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 740,
+      "line": 743,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/auth/devices/me/approval-key",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 778,
+      "line": 781,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/auth/audit",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 798,
+      "line": 801,
       "mounted": true
     },
     {
@@ -2051,35 +2051,49 @@
       "method": "GET",
       "path": "/api/security/posture",
       "source": "apps/server/src/routes/security.ts",
-      "line": 47,
+      "line": 55,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/security/network-access",
       "source": "apps/server/src/routes/security.ts",
-      "line": 111,
+      "line": 119,
+      "mounted": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/security/tailscale",
+      "source": "apps/server/src/routes/security.ts",
+      "line": 172,
+      "mounted": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/security/tailscale",
+      "source": "apps/server/src/routes/security.ts",
+      "line": 184,
       "mounted": true
     },
     {
       "method": "PUT",
       "path": "/api/security/tls/certificate",
       "source": "apps/server/src/routes/security.ts",
-      "line": 164,
+      "line": 230,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/security/tls/certificate",
       "source": "apps/server/src/routes/security.ts",
-      "line": 206,
+      "line": 272,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/security/network-access",
       "source": "apps/server/src/routes/security.ts",
-      "line": 238,
+      "line": 304,
       "mounted": true
     },
     {
@@ -3187,6 +3201,7 @@
     "apps/mobile/app/(app)/workspaces/[workspaceId]/commit.tsx",
     "apps/mobile/app/(app)/workspaces/[workspaceId]/diff.tsx",
     "apps/mobile/app/(app)/workspaces/[workspaceId]/file.tsx",
+    "apps/mobile/app/(dev)/crash.tsx",
     "apps/mobile/app/(dev)/live.tsx",
     "apps/mobile/app/(dev)/notify.tsx",
     "apps/mobile/app/(dev)/storybook.tsx",
@@ -3210,6 +3225,7 @@
     "apps/web/src/features/settings/sections/ExtensionsSection.tsx",
     "apps/web/src/features/settings/sections/StorageSection.tsx",
     "apps/web/src/features/settings/sections/WorkflowEngineSection.tsx",
+    "apps/web/src/features/settings/security/AccessGroup.tsx",
     "apps/web/src/features/settings/security/CertificatePanel.tsx",
     "apps/web/src/features/settings/security/DevicesGroups.tsx",
     "apps/web/src/features/settings/security/PairDeviceGroup.tsx",
@@ -3538,12 +3554,15 @@
     "apps/desktop/src/main/navigation-guard.ts",
     "apps/desktop/src/main/pairing-gate.ts",
     "apps/desktop/src/main/paths.ts",
+    "apps/desktop/src/main/pinnedTrust.ts",
     "apps/desktop/src/main/platform.ts",
     "apps/desktop/src/main/ports.ts",
     "apps/desktop/src/main/prompt-window.ts",
     "apps/desktop/src/main/quit-coordinator.ts",
+    "apps/desktop/src/main/remote-connect.ts",
     "apps/desktop/src/main/repoint.ts",
     "apps/desktop/src/main/secret-protection.ts",
+    "apps/desktop/src/main/server-child.ts",
     "apps/desktop/src/main/server-manager.ts",
     "apps/desktop/src/main/server-probe.ts",
     "apps/desktop/src/main/serverConnections.ts",
@@ -3642,6 +3661,7 @@
     "apps/mobile/app/(app)/workspaces/[workspaceId]/commit.tsx",
     "apps/mobile/app/(app)/workspaces/[workspaceId]/diff.tsx",
     "apps/mobile/app/(app)/workspaces/[workspaceId]/file.tsx",
+    "apps/mobile/app/(dev)/crash.tsx",
     "apps/mobile/app/(dev)/live.tsx",
     "apps/mobile/app/(dev)/notify.tsx",
     "apps/mobile/app/(dev)/storybook.tsx",
@@ -3650,10 +3670,9 @@
     "apps/mobile/app/+not-found.tsx",
     "apps/mobile/app/pair.tsx",
     "apps/mobile/app/revoked.tsx",
+    "apps/mobile/ios/ShareExtension/ShareExtensionPreprocessor.js",
     "apps/mobile/jest.setup.ts",
-    "apps/mobile/plugins/androidManifestCleartext.js",
     "apps/mobile/plugins/withA11yAuditTarget.js",
-    "apps/mobile/plugins/withCleartextTraffic.js",
     "apps/mobile/plugins/withSceneLifecycle.js",
     "apps/mobile/plugins/withShadowNodeRaceFix.js",
     "apps/mobile/plugins/withUniqueAppGroups.js",
@@ -3912,6 +3931,7 @@
     "apps/mobile/src/features/chats/ChatsListScreen.tsx",
     "apps/mobile/src/features/chats/NewChatScreen.tsx",
     "apps/mobile/src/features/chats/queries.ts",
+    "apps/mobile/src/features/development/CrashScreen.tsx",
     "apps/mobile/src/features/development/LiveScreen.tsx",
     "apps/mobile/src/features/development/liveScripts.ts",
     "apps/mobile/src/features/development/NotifyScreen.tsx",
@@ -4069,6 +4089,7 @@
     "apps/mobile/src/services/auth/backgroundFetch.ts",
     "apps/mobile/src/services/auth/biometrics.ts",
     "apps/mobile/src/services/auth/capabilities.ts",
+    "apps/mobile/src/services/auth/connectionProblem.ts",
     "apps/mobile/src/services/auth/describeTransport.ts",
     "apps/mobile/src/services/auth/featureGate.ts",
     "apps/mobile/src/services/auth/pairingFailure.ts",
@@ -4081,6 +4102,7 @@
     "apps/mobile/src/services/auth/serverRegistry.ts",
     "apps/mobile/src/services/auth/ServerScope.tsx",
     "apps/mobile/src/services/auth/serverStorageKeys.ts",
+    "apps/mobile/src/services/auth/serverTrust.ts",
     "apps/mobile/src/services/auth/stepUp.ts",
     "apps/mobile/src/services/auth/stepUpRules.ts",
     "apps/mobile/src/services/auth/stores.ts",
@@ -4120,12 +4142,14 @@
     "apps/mobile/src/services/native/runtimeOs.ts",
     "apps/mobile/src/services/native/shareIntent.ts",
     "apps/mobile/src/services/native/sharePayload.ts",
+    "apps/mobile/src/services/native/trustModule.ts",
     "apps/mobile/src/services/native/widgetPalette.ts",
     "apps/mobile/src/services/native/widgets/homeWidgets.ts",
     "apps/mobile/src/services/native/widgets/HomeWidgets.tsx",
     "apps/mobile/src/services/native/widgets/HomeWidgetsSync.tsx",
     "apps/mobile/src/services/navigation/links.ts",
     "apps/mobile/src/services/navigation/mobileRoutes.ts",
+    "apps/mobile/src/services/navigation/presentedRoutes.ts",
     "apps/mobile/src/services/navigation/useLinkRouting.ts",
     "apps/mobile/src/services/notifications/badges.ts",
     "apps/mobile/src/services/notifications/BadgeSync.tsx",
@@ -4165,6 +4189,7 @@
     "apps/mobile/src/services/stream/useTwoPhaseStop.ts",
     "apps/mobile/src/services/terminal/terminalFocus.ts",
     "apps/mobile/src/services/transport/endpointPlan.ts",
+    "apps/mobile/src/services/transport/trust.ts",
     "apps/mobile/src/services/voice/audioSession.ts",
     "apps/mobile/src/services/voice/dictationCommit.ts",
     "apps/mobile/src/services/voice/pcm.ts",
@@ -4733,12 +4758,16 @@
     "apps/server/src/network/reachableOrigins.ts",
     "apps/server/src/network/requestOrigin.ts",
     "apps/server/src/network/serverEndpoints.ts",
+    "apps/server/src/network/tailscale/TailscaleAccess.ts",
+    "apps/server/src/network/tailscale/tailscaleCli.ts",
+    "apps/server/src/network/tailscale/tailscaleStatus.ts",
     "apps/server/src/network/tls/certificateNames.ts",
     "apps/server/src/network/tls/certificates.ts",
     "apps/server/src/network/tls/customCertificate.ts",
     "apps/server/src/network/tls/dualProtocolListener.ts",
     "apps/server/src/network/tls/TlsManager.ts",
     "apps/server/src/openapi/spec.ts",
+    "apps/server/src/parentChannel.ts",
     "apps/server/src/relay/RelayHostBroker.ts",
     "apps/server/src/relay/RelayStreamBridge.ts",
     "apps/server/src/routes/activity.ts",
@@ -5157,6 +5186,7 @@
     "apps/web/src/features/settings/sections/ExtensionsSection.tsx",
     "apps/web/src/features/settings/sections/StorageSection.tsx",
     "apps/web/src/features/settings/sections/WorkflowEngineSection.tsx",
+    "apps/web/src/features/settings/security/AccessGroup.tsx",
     "apps/web/src/features/settings/security/CertificatePanel.tsx",
     "apps/web/src/features/settings/security/DevicesGroups.tsx",
     "apps/web/src/features/settings/security/PairDeviceGroup.tsx",
@@ -5809,6 +5839,7 @@
     "packages/client-runtime/src/index.ts",
     "packages/client-runtime/src/nodeStores.ts",
     "packages/client-runtime/src/pairing.ts",
+    "packages/client-runtime/src/pairingOffer.ts",
     "packages/client-transport/src/Backoff.ts",
     "packages/client-transport/src/DirectTransport.ts",
     "packages/client-transport/src/EndpointSupervisor.ts",
@@ -6330,6 +6361,7 @@
     "packages/shared/src/review.ts",
     "packages/shared/src/security/approvalProof.ts",
     "packages/shared/src/security/atomicWrite.ts",
+    "packages/shared/src/security/endpointTrust.ts",
     "packages/shared/src/security/gateRisk.ts",
     "packages/shared/src/security/webhookToken.ts",
     "packages/shared/src/status/health.ts",

@@ -108,6 +108,18 @@ try {
     })
     .catch(() => {});
 
+  // The shell pairs its own window after the first load and then reloads;
+  // navigating away mid-pairing would leave it on the pairing screen.
+  for (let i = 0; i < 60; i += 1) {
+    const status = await page
+      .evaluate(async () => (await fetch('/api/auth/devices/me')).status)
+      .catch(() => 0);
+    if (status === 200) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  await page.waitForLoadState('networkidle').catch(() => {});
+  await new Promise((r) => setTimeout(r, 2000));
+
   // ── Turn Network exposure on, like a user ──
   await page.goto(`${origin}/settings/security`);
   // Network exposure lives under Access from other devices › Advanced (D-123),

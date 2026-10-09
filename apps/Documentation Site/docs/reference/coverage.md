@@ -156,6 +156,7 @@ Guide: [Mobile route files](/clients/mobile.md).
 - `apps/mobile/app/(app)/workspaces/[workspaceId]/commit.tsx`
 - `apps/mobile/app/(app)/workspaces/[workspaceId]/diff.tsx`
 - `apps/mobile/app/(app)/workspaces/[workspaceId]/file.tsx`
+- `apps/mobile/app/(dev)/crash.tsx`
 - `apps/mobile/app/(dev)/live.tsx`
 - `apps/mobile/app/(dev)/notify.tsx`
 - `apps/mobile/app/(dev)/storybook.tsx`
@@ -182,6 +183,7 @@ Guide: [Desktop/web settings components](/clients/settings.md).
 - `apps/web/src/features/settings/sections/ExtensionsSection.tsx`
 - `apps/web/src/features/settings/sections/StorageSection.tsx`
 - `apps/web/src/features/settings/sections/WorkflowEngineSection.tsx`
+- `apps/web/src/features/settings/security/AccessGroup.tsx`
 - `apps/web/src/features/settings/security/CertificatePanel.tsx`
 - `apps/web/src/features/settings/security/DevicesGroups.tsx`
 - `apps/web/src/features/settings/security/PairDeviceGroup.tsx`
