@@ -64,7 +64,7 @@ export function ScopeRequestCard({ verb, scopes, body, testID = 'scope-request-c
         ) : null}
         <View className="gap-1">
           {rows.map((r) => (
-            <View key={r.scope} className="min-h-item flex-row items-center gap-2" accessible accessibilityLabel={`${r.label}, ${r.scope}${r.sensitive ? ', sensitive' : ''}`}>
+            <View accessibilityRole="text" key={r.scope} className="min-h-item flex-row items-center gap-2" accessible accessibilityLabel={`${r.label}, ${r.scope}${r.sensitive ? ', sensitive' : ''}`}>
               <Text role="body">{r.label}</Text>
               {r.sensitive ? <Badge label="Sensitive" icon="warning" tone="outline" size="sm" /> : null}
               <View className="flex-1" />

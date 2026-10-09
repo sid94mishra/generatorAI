@@ -8,6 +8,7 @@ env: {FRESH_CHAT: edits, DEVICE_SCOPES: "write:files,write:workspaces"}
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///chats/${CHAT_EDITS_ID}
 - extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- runFlow: ../_subflows/pane-closed.yaml
 - runFlow: ../_subflows/open-pane.yaml
 - extendedWaitUntil: {visible: {id: pane-tab-changes}, timeout: 15000}
 - assertVisible: {id: pane-tab-files}

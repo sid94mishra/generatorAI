@@ -21,7 +21,6 @@ import { ListRow } from '../../ui/layout/ListRow';
 import { ListSection } from '../../ui/layout/ListSection';
 import { errorText } from '../../ui/lib/format';
 import { SegmentedControl } from '../../ui/native/SegmentedControl';
-import { Select } from '../../ui/native/Select';
 import { useSheet } from '../../ui/native/Sheet';
 import { haptic } from '../../ui/platform/haptics';
 import { Button } from '../../ui/primitives/Button';
@@ -140,10 +139,10 @@ export default function AgentEditorScreen(): React.ReactElement {
     (editing ? writes.update(params.id!, updateBody(draft)) : writes.create(createBody(draft)))
       .then((agent) => {
         haptic('success');
-        if (editing) {
-          setDraft(null);
-          close();
-        } else router.replace(agentHref(agent.id) as Href);
+        // Clean before leaving: `saving` turns false again in `finally`, and a dirty editor would ask to discard.
+        setDraft(null);
+        if (editing) close();
+        else router.replace(agentHref(agent.id) as Href);
       })
       .catch((e: unknown) => toast({ kind: 'error', message: e instanceof ApiError && e.status === 409 ? 'Another agent in this scope uses this slug.' : errorText(e) }))
       .finally(() => setSaving(false));
@@ -203,7 +202,7 @@ export default function AgentEditorScreen(): React.ReactElement {
       <Section title="Identity">
         <ListSection>
           <Field {...(touched && errors.name ? { error: errors.name } : {})}>
-            <Input label="Name" value={draft.name} onChangeText={(name) => setDraft(withName(draft, name))} trailing={<Text role="monoSm" tone="fg-3">{`slug ${draft.slug}`}</Text>} testID="agent-editor-name" />
+            <Input label="Name" value={draft.name} onChangeText={(name) => setDraft(withName(draft, name))} testID="agent-editor-name" />
           </Field>
           <Field {...(touched && errors.slug ? { error: errors.slug } : {})}>
             <Input label="Slug" value={draft.slug} onChangeText={(slug) => set({ slug: slug.toLowerCase(), slugTouched: true })} kind="mono" testID="agent-editor-slug" />

@@ -176,7 +176,7 @@ function NativeAppLockGate({ children }: { children: React.ReactNode }): React.R
 /** The app mark, the same one the splash shows. */
 function AppMark(): React.ReactElement {
   return (
-    <View className="items-center gap-3" accessible accessibilityLabel="GeneratorAI">
+    <View accessibilityRole="text" className="items-center gap-3" accessible accessibilityLabel="GeneratorAI">
       <BrandMark mark="app" size={36} />
       <Text role="headline" weight={600}>
         GeneratorAI

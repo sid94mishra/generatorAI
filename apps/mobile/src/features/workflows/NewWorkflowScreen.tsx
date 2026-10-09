@@ -19,6 +19,7 @@ import { errorText } from '../../ui/lib/format';
 import { haptic } from '../../ui/platform/haptics';
 import { Badge } from '../../ui/primitives/Badge';
 import { Button } from '../../ui/primitives/Button';
+import { useGrantedScopes } from '../../services/auth/useCapability';
 import { Callout } from '../../ui/primitives/Callout';
 import { Card } from '../../ui/primitives/Card';
 import { ChipGroup } from '../../ui/primitives/ChipGroup';
@@ -92,6 +93,7 @@ export default function NewWorkflowScreen(): React.ReactElement {
     if (summary && !nameTouched) set({ name: summary.name, description: summary.description });
   };
 
+  const canCreate = useGrantedScopes().includes('write:workflows');
   const close = (): void => {
     if (router.canGoBack()) router.back();
     else router.replace(WORKFLOWS_HREF as Href);
@@ -121,12 +123,14 @@ export default function NewWorkflowScreen(): React.ReactElement {
   return (
     <FullScreenEditor
       title="New workflow"
-      primary={{ label: 'Create', onPress: submit, loading: creating, disabled: creating || Boolean(blocker) }}
+      primary={{ label: 'Create', onPress: submit, loading: creating, disabled: creating || Boolean(blocker) || !canCreate }}
       onCancel={close}
       dirty={dirty && !creating}
       navigation={navigation as never}
       testID="workflow-new"
     >
+      {/* The palette and links reach this editor even without the scope; say why Create is off rather than 403. */}
+      {!canCreate ? <Callout tone="warn" title="Creating workflows needs workflow-edit permission" body="Ask for it in Settings › Security & devices, or create it on the desktop." testID="workflow-new-locked" /> : null}
       <View className="gap-3 px-4">
         <Text role="footnote" tone="fg-2">
           New workflows start as a draft.

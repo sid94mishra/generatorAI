@@ -5,10 +5,11 @@ tags: [smoke, home]
 ---
 - runFlow: ../_subflows/launch.yaml
 - extendedWaitUntil: {visible: {id: home-counts}, timeout: 30000}
-- assertVisible: "Need you"
-- assertVisible: "Finished today"
+# A count tile reads "<n>, <label>" as one element.
+- assertVisible: ".*Need you"
+- assertVisible: ".*Finished today"
 - assertVisible: {id: home-needs}
-- tapOn: "Finished today"
+- tapOn: ".*Finished today"
 - extendedWaitUntil: {visible: {id: home-recent}, timeout: 10000}
 - scrollUntilVisible: {element: {id: home-server}, direction: DOWN, timeout: 20000}
 - assertVisible: "This week"

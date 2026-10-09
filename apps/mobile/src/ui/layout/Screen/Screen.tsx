@@ -26,7 +26,7 @@ function StateBody({ state }: { state: NonNullable<ScreenProps['state']> }): Rea
   switch (state.kind) {
     case 'loading':
       return (
-        <View accessible accessibilityLabel="Loading" accessibilityState={{ busy: true }} className={state.skeleton ? undefined : 'flex-1 items-center justify-center p-8'}>
+        <View accessibilityRole="progressbar" accessible accessibilityLabel="Loading" accessibilityState={{ busy: true }} className={state.skeleton ? undefined : 'flex-1 items-center justify-center p-8'}>
           {state.skeleton ?? <ProgressIndicator label="Loading" />}
         </View>
       );
@@ -90,16 +90,18 @@ export function Screen({ header, statusLine, banner, scroll = 'scroll', backgrou
     : undefined;
 
   const body = screenBody(state);
+  const fixed = scroll === 'none' || (scroll === 'list' && body === 'content');
+  // A fixed screen's content fills the height (graphs, logs, files size themselves with flex-1); on iOS it still sits
+  // in a non-scrolling ScrollView for the header insets, whose content only grows when told to.
   const content =
     body === 'content' ? (
-      <View className={cn('w-full', sizeClass === 'expanded' && 'self-center')} style={sizeClass === 'expanded' ? { maxWidth: READING_WIDTH } : undefined}>
+      <View className={cn('w-full', fixed && 'flex-1', sizeClass === 'expanded' && 'self-center')} style={sizeClass === 'expanded' ? { maxWidth: READING_WIDTH } : undefined}>
         {children}
       </View>
     ) : (
       <StateBody state={state!} />
     );
   const inset = { paddingBottom: accessoryHeight };
-  const fixed = scroll === 'none' || (scroll === 'list' && body === 'content');
 
   let main: React.ReactNode;
   if (scroll === 'list' && body === 'content') {
@@ -117,7 +119,7 @@ export function Screen({ header, statusLine, banner, scroll = 'scroll', backgrou
       <Animated.ScrollView
         ref={scrollRef as never}
         className="flex-1"
-        contentContainerClassName={cn(body !== 'content' && 'flex-grow')}
+        contentContainerClassName={cn((body !== 'content' || fixed) && 'flex-grow')}
         contentContainerStyle={inset}
         contentInsetAdjustmentBehavior="automatic"
         scrollEnabled={!fixed}

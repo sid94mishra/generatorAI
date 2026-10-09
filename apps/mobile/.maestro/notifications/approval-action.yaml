@@ -1,7 +1,8 @@
 appId: ${APP_ID}
 name: notifications · approval action
 tags: [characterization, full]
-env: {FRESH_CHAT: gate, PENDING_GATE: true}
+# A standard gate (in-workspace file write): the risky shell gate is answered only in the app, signed (MD-31).
+env: {FRESH_CHAT: write, PENDING_GATE: write}
 # iOS: runner performs native consent setup and injects the APNs template.
 # Android: the local notification uses real pending sandbox interaction IDs.
 ---
@@ -9,7 +10,7 @@ env: {FRESH_CHAT: gate, PENDING_GATE: true}
     when: {platform: Android}
     commands:
       - runFlow: ../_subflows/launch.yaml
-      - openLink: generatorai:///notify?case=approval&chat=${CHAT_GATE_ID}&interaction=${INTERACTION_ID}
+      - openLink: generatorai:///notify?case=approval&chat=${CHAT_PENDING_ID}&interaction=${INTERACTION_ID}
       # sandbox-pair grants notification permission. Do not tap a generic Allow
       # here: it can already be the notification action in a heads-up banner.
       - extendedWaitUntil: {visible: Notification scheduled, timeout: 30000}
@@ -27,4 +28,4 @@ env: {FRESH_CHAT: gate, PENDING_GATE: true}
       - extendedWaitUntil: {visible: ".*Allow Bash: pnpm test.*", timeout: 15000}
       - tapOn: {id: ListCell, text: ".*Allow Bash: pnpm test.*", index: 0}
       - extendedWaitUntil: {visible: {id: gate-card}, timeout: 30000}
-      - assertVisible: ".*Run pnpm test.*"
+      - assertVisible: ".*notes.md.*"

@@ -61,7 +61,7 @@ export function IconButton({
       accessibilityState={{ selected }}
     >
       <Surface glass={variant === 'glass'} className={cn(iconButtonSurface({ variant, size, selected }))}>
-        <View className={disabled ? 'opacity-40' : undefined}>
+        <View collapsable={false} className={disabled ? 'opacity-40' : undefined}>
           <Icon concept={icon} size={iconButtonGlyph(size)} tone={variant === 'filled' ? 'on-accent' : 'fg'} filled={filled} />
         </View>
         {badge?.count !== undefined || badge?.dot ? (

@@ -46,7 +46,9 @@ export function Button({
       className={cn(fullWidth && 'self-stretch')}
     >
       <View className={cn(buttonSurface({ variant, size }), fullWidth && 'w-full')}>
-        <View className={cn('flex-row items-center gap-2', disabled && 'opacity-40')}>
+        {/* Never flattened: opacity toggles flattening, and an unflatten while the label re-renders re-parents the
+            label's native view on Android Fabric ("addViewAt … already has a parent", MD-198). */}
+        <View collapsable={false} className={cn('flex-row items-center gap-2', disabled && 'opacity-40')}>
           {loading ? (
             <Icon concept="loader" size={iconSize} tone={tone} spinning />
           ) : icon ? (

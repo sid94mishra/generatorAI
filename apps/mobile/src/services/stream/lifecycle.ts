@@ -25,7 +25,9 @@ export function useLifecycle(stream: LifecycleStream | null, attention: Attentio
       if (running) return;
       running = true;
       const current = ++generation;
-      if (reason !== 'network') useStreamHealth.getState().setConnection('reconnecting');
+      // Only a closed transport reconnects. A quick return inside Android's grace period finds the socket still
+      // open: resume() is a no-op and no new "connected" arrives, so marking it reconnecting stuck the banner.
+      if (reason !== 'network' && stream.isSuspended()) useStreamHealth.getState().setConnection('reconnecting');
       // Transport recovery is independent of TanStack, which must not keep a
       // failed server permanently offline while its socket tries to reconnect.
       const attempt = async (index: number): Promise<void> => {

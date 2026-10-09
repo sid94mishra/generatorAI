@@ -59,7 +59,9 @@ export async function ensureAndroidChannels(): Promise<void> {
       name: channel.name,
       description: channel.description,
       importance: IMPORTANCE[channel.importance],
-      ...(loud ? { sound: 'default', enableVibrate: true, vibrationPattern: [0, 250, 250, 250] } : { sound: null, enableVibrate: false }),
+      // A loud channel leaves `sound` out: the system default applies. `'default'` was looked up as a raw resource and
+      // logged "Custom sound 'default' not found" on every channel setup (each local notification, MV-37).
+      ...(loud ? { enableVibrate: true, vibrationPattern: [0, 250, 250, 250] } : { sound: null, enableVibrate: false }),
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
       bypassDnd: false,
     });

@@ -102,7 +102,7 @@ function ProviderCard({
             <View className="gap-1">
               <SectionHeader title="Available models" variant="label" count={provider.models.length} />
               {provider.models.map((m) => (
-                <View key={m.id} className="min-h-item flex-row items-center gap-2" accessible accessibilityLabel={`${m.name ?? m.id}, ${m.id}`}>
+                <View accessibilityRole="text" key={m.id} className="min-h-item flex-row items-center gap-2" accessible accessibilityLabel={`${m.name ?? m.id}, ${m.id}`}>
                   <Icon concept="model" size={14} tone="fg-3" />
                   <Text role="subhead" numberOfLines={1} className="flex-1">
                     {m.name ?? m.id}

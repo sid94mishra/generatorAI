@@ -8,14 +8,10 @@ import { Stack, router, usePathname } from 'expo-router';
 
 import { AppShell } from '../../src/blocks/shell/AppShell';
 import { parentHref } from '../../src/blocks/shell/parentHref';
+import { EDITOR_ROUTES as EDITORS, LARGE_SHEET_ROUTES as LARGE_SHEETS, PALETTE_ROUTE, PICKER_ROUTE, SHEET_ROUTES as SHEETS } from '../../src/services/navigation/presentedRoutes';
 import { fullScreenModalOptions, moduleRootOptions, paletteOptions, sheetOptions, useStackScreenOptions } from '../../src/ui/platform';
 
 const MODULE_ROOTS = ['index', 'chats/index', 'projects/index', 'agents/index', 'workflows/index', 'automations/index', 'scripts/index', 'settings/index'];
-const SHEETS = ['chats/[id]/gate/[interactionId]', 'workflows/[id]/runs/[runId]/approval/[stageRunId]', 'scope-request'];
-/** Full-screen modal editors (MD-21). */
-const EDITORS = ['workflows/new', 'workflows/[id]/edit', 'projects/new', 'projects/[id]/skills/[configId]/edit', 'agents/create', 'agents/[id]/edit', 'automations/new', 'automations/[id]/edit', 'settings/mcp/add'];
-/** Route sheets at the large detent. */
-const LARGE_SHEETS = ['workflows/[id]/run', 'chats/[id]/turn', 'chats/new', 'workspaces/[workspaceId]/commit', 'projects/[id]/add-codebase', 'agents/new', 'agents/import', 'automations/[id]/executions/[executionId]', 'scripts/[id]/run', 'pickers/model', 'share'];
 
 type Href = Parameters<typeof router.replace>[0];
 
@@ -49,8 +45,8 @@ export default function AppLayout(): React.ReactElement {
         {SHEETS.map((name) => (
           <Stack.Screen key={name} name={name} options={sheetOptions('approval')} />
         ))}
-        <Stack.Screen name="search" options={paletteOptions} />
-        <Stack.Screen name="servers" options={sheetOptions('picker')} />
+        <Stack.Screen name={PALETTE_ROUTE} options={paletteOptions} />
+        <Stack.Screen name={PICKER_ROUTE} options={sheetOptions('picker')} />
         {LARGE_SHEETS.map((name) => (
           <Stack.Screen key={name} name={name} options={sheetOptions('large')} />
         ))}

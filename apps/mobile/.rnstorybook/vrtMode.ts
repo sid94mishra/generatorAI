@@ -2,6 +2,8 @@
 // clock is frozen at 2026-10-01 09:41 UTC (so "3 min ago", elapsed timers and dates never move), Math.random is seeded,
 // and Reduce Motion is forced (spinners and the scan line hold still, panels jump). Imported first by Screen.tsx so it
 // runs before any story module evaluates. Never part of a release build (the Storybook route redirects there).
+import { LogBox } from 'react-native';
+
 import { setMotionPreference } from '../src/ui/platform/motion';
 
 export const VRT = __DEV__ && process.env.EXPO_PUBLIC_VRT === '1';
@@ -28,4 +30,6 @@ if (VRT) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
   setMotionPreference('reduced');
+  // A story's dev warning would draw the LogBox banner into the capture (and over the ready marker).
+  LogBox.ignoreAllLogs(true);
 }

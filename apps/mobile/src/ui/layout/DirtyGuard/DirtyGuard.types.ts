@@ -4,6 +4,8 @@
 export interface RemovalSource {
   addListener: (event: 'beforeRemove', callback: (e: { preventDefault: () => void; data: { action: unknown } }) => void) => () => void;
   dispatch: (action: never) => void;
+  /** False while another screen is pushed over this one (Android Back then belongs to that screen). */
+  isFocused?: () => boolean;
 }
 
 export interface DirtyGuardOptions {

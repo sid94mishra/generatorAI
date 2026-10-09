@@ -62,6 +62,13 @@ describe('vendored xterm bundle', () => {
 describe('terminalHtml()', () => {
   const html = terminalHtml({ theme: THEME, fontSize: 12 });
 
+  it('the bridge script parses (a raw control character from the template literal would break it)', () => {
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1] ?? '');
+    const bridge = scripts[scripts.length - 1] ?? '';
+    expect(bridge).toContain('beforeinput');
+    expect(() => new Function(bridge)).not.toThrow();
+  });
+
   it('inlines xterm and the addons', () => {
     expect(html).toContain('<script>!function(e,t)');
     expect(html).toContain('new Terminal(');

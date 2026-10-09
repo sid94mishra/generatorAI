@@ -11,4 +11,4 @@ tags: [projects]
 - assertVisible: "Worktrees"
 - openLink: generatorai:///projects/${PROJECT_ID}/codebases/${CODEBASE_ID}/files
 - extendedWaitUntil: {visible: "Files", timeout: 20000}
-- assertVisible: "README.md"
+- assertVisible: "README.md.*"

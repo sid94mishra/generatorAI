@@ -1,7 +1,9 @@
 // `generatorai:///live?script=<id>` (dev builds only; 08 §6 system-surface smoke, M9-01): plays a fixture script
 // into the live store a step every few seconds and lists what the model makes of it — the state, the surface
-// candidates, the lock-screen form and the dismissal. With no script it lists the store as it is.
+// candidates, the lock-screen form and the dismissal. With no script it lists the store as it is. `&step=<seconds>`
+// (1–60, default 3) slows the script down for drivers that need time to reach the island or the Lock Screen.
 import React, { useEffect, useState } from 'react';
+import { Linking } from 'react-native';
 import { Redirect, useLocalSearchParams } from 'expo-router';
 import { isLiveStale, liveDismissal, redactForLockScreen, type LiveState } from '@generatorai/client-core';
 
@@ -12,7 +14,7 @@ import { ListRow } from '../../ui/layout/ListRow';
 import { ListSection } from '../../ui/layout/ListSection';
 import { Screen } from '../../ui/layout/Screen';
 import { Header } from '../../ui/native/router/Header';
-import { FIXTURE_KEYS, FIXTURE_SERVER, isLiveScriptId, liveScript } from './liveScripts';
+import { FIXTURE_KEYS, FIXTURE_SERVER, isLiveScriptId, liveScript, parseLiveLink, type LiveRun } from './liveScripts';
 
 const STEP_MS = 3000;
 
@@ -26,15 +28,26 @@ function describe(s: LiveState, now: Date): string {
 }
 
 function LiveInspector(): React.ReactElement {
-  const params = useLocalSearchParams<{ script?: string }>();
+  const params = useLocalSearchParams<{ script?: string; step?: string }>();
   const onBack = useHeaderBack();
   const map = useLiveMap();
   useFollowVersion();
   const [played, setPlayed] = useState<string>('');
+  // The run to play: the mount-time params, then every incoming `/live` link. Re-opening the same link while this
+  // screen is on top does not give the router new params, so the link itself is the trigger (a re-open restarts).
+  const [run, setRun] = useState<LiveRun>(() => ({ script: params.script, step: params.step, n: 0 }));
+  useEffect(() => {
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      const next = parseLiveLink(url);
+      if (next) setRun((prev) => ({ ...next, n: prev.n + 1 }));
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
-    if (!isLiveScriptId(params.script)) return;
-    const steps = liveScript(params.script, new Date());
+    if (!isLiveScriptId(run.script)) return;
+    const steps = liveScript(run.script, new Date());
+    const stepMs = Math.min(60, Math.max(1, Number(run.step) || STEP_MS / 1000)) * 1000;
     followLive(FIXTURE_SERVER.id, 'workflow_run', FIXTURE_KEYS.run.split(':')[2]!);
     followLive(FIXTURE_SERVER.id, 'chat', FIXTURE_KEYS.chat.split(':')[2]!);
     liveStore.dispatch({ type: 'forgetServer', serverId: FIXTURE_SERVER.id });
@@ -42,10 +55,10 @@ function LiveInspector(): React.ReactElement {
       setTimeout(() => {
         liveStore.dispatch(step.event(new Date()));
         setPlayed(`${i + 1}/${steps.length} · ${step.label}`);
-      }, i * STEP_MS),
+      }, i * stepMs),
     );
     return () => timers.forEach(clearTimeout);
-  }, [params.script]);
+  }, [run]);
 
   const now = new Date();
   const states = Object.values(map);
@@ -56,7 +69,7 @@ function LiveInspector(): React.ReactElement {
   return (
     <Screen header={<Header role="detail" title="Live state" onBack={onBack} />} background="grouped" testID="dev-live-screen">
       <ListSection title="Script" footer={`Scripts: ${['run-needs-you', 'run-fails', 'chat-permission'].join(', ')}`}>
-        <ListRow kind="value" title={isLiveScriptId(params.script) ? params.script : 'None'} value={played || '—'} testID="dev-live-step" />
+        <ListRow kind="value" title={isLiveScriptId(run.script) ? run.script : 'None'} value={played || '—'} testID="dev-live-step" />
       </ListSection>
       <ListSection title="Items" count={states.length}>
         {states.length ? (

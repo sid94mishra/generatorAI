@@ -10,14 +10,26 @@ tags: [smoke, chats]
 - extendedWaitUntil: {visible: {id: chats-new}, timeout: 15000}
 - tapOn: {id: chats-new}
 - extendedWaitUntil: {visible: {id: new-chat-sheet}, timeout: 15000}
-- assertVisible: {id: new-chat-create, enabled: false}
-- tapOn: {id: new-chat-who-model}
+# The sheet keeps an unsent draft (MD-152): clear it first.
+- tapOn: {id: new-chat-task}
+- eraseText: 80
+# The "Who works on this" control is native on iOS (segments carry no testID): by label on both platforms.
+- tapOn: "Just a model"
 - tapOn: {id: new-chat-task}
 - inputText: Say hello from the mobile New chat flow
 - runFlow:
     when: {platform: Android}
     commands:
       - hideKeyboard
+# iOS: a tap on plain text in the sheet's scroll view ends editing (keyboardShouldPersistTaps="handled"). With the
+# keyboard up the footer is lifted by a transform its accessibility frame does not follow, so the driver would tap
+# the old place (MD-198 finding).
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: "Who works on this"
+      - waitForAnimationToEnd
 - tapOn: {id: new-chat-create}
 - extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- runFlow: ../_subflows/pane-closed.yaml
 - assertVisible: ".*Say hello from the mobile New chat flow.*"

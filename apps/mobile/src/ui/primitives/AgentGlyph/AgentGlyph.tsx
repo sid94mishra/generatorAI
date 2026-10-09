@@ -27,7 +27,7 @@ export function AgentGlyph(props: AgentGlyphProps): React.ReactElement {
   const glyph = GLYPH[kind];
   const role = ROLE[size];
   return (
-    <View testID={testID} accessible accessibilityLabel={agentGlyphLabel(props)} className="min-w-0 flex-row items-center gap-1.5">
+    <View accessibilityRole="text" testID={testID} accessible accessibilityLabel={agentGlyphLabel(props)} className="min-w-0 flex-row items-center gap-1.5">
       {glyph ? <Icon concept={glyph} size={size} tone="fg-3" /> : null}
       <Text role={role} weight={600} numberOfLines={1} className="shrink">
         {kind === 'you' ? 'You' : name}

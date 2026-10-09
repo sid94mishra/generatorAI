@@ -75,7 +75,10 @@ final class A11yAuditTests: XCTestCase {
         screenshot.lifetime = .keepAlways
         activity.add(screenshot)
         do {
-          try app.performAccessibilityAudit(for: .all) { issue in
+          // Debug builds: the Dynamic Type and clipped-text checks post a content-size change that trips a Fabric debug assertion
+          // (ShadowTree::commit) and kills the app; the AX5 route sweep (a11y-audit.mjs --text-size=ax) covers it there.
+          let types: XCUIAccessibilityAuditType = Self.isDebugBuild ? XCUIAccessibilityAuditType.all.subtracting([.dynamicType, .textClipped]) : .all
+          try app.performAccessibilityAudit(for: types) { issue in
             Self.isAllowed(issue, exceptions: exceptions)
           }
         } catch {
@@ -85,6 +88,14 @@ final class A11yAuditTests: XCTestCase {
         }
       }
     }
+  }
+
+  private static var isDebugBuild: Bool {
+    #if DEBUG
+    return true
+    #else
+    return false
+    #endif
   }
 
   private static func isAllowed(_ issue: XCUIAccessibilityAuditIssue, exceptions: [AuditException]) -> Bool {

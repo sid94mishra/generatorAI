@@ -15,7 +15,7 @@ export function FactStrip({ facts, testID }: FactStripProps): React.ReactElement
       {facts.map((f, i) => (
         <React.Fragment key={`${f.label}-${i}`}>
           {i > 0 ? <Separator orientation="vertical" /> : null}
-          <View className="flex-1 items-center gap-1 px-2" accessible={typeof f.value === 'string'} accessibilityLabel={typeof f.value === 'string' ? `${f.label}, ${f.value}` : undefined}>
+          <View accessibilityRole={typeof f.value === 'string' ? 'text' : undefined} className="flex-1 items-center gap-1 px-2" accessible={typeof f.value === 'string'} accessibilityLabel={typeof f.value === 'string' ? `${f.label}, ${f.value}` : undefined}>
             {typeof f.value === 'string' ? (
               <Text role={f.mono ? 'monoLg' : 'body'} weight={500} numberOfLines={1} chrome>
                 {f.value}

@@ -37,7 +37,7 @@ export function SourcesCard({ mounts, testID = 'sources-card' }: { mounts: reado
         {mounts.map((m, i) => (
           <React.Fragment key={m.alias}>
             {i > 0 ? <Separator inset={48} /> : null}
-            <View className="min-h-row-2 flex-row items-center gap-3 py-2 pe-1 ps-3" accessible accessibilityLabel={[m.alias, m.mode ? (MOUNT_MODE_LABEL[m.mode] ?? m.mode) : null, m.git?.branch ? `branch ${m.git.branch}` : null, m.hasUncommittedChanges ? 'uncommitted changes' : null, m.path].filter(Boolean).join(', ')}>
+            <View accessibilityRole="text" className="min-h-row-2 flex-row items-center gap-3 py-2 pe-1 ps-3" accessible accessibilityLabel={[m.alias, m.mode ? (MOUNT_MODE_LABEL[m.mode] ?? m.mode) : null, m.git?.branch ? `branch ${m.git.branch}` : null, m.hasUncommittedChanges ? 'uncommitted changes' : null, m.path].filter(Boolean).join(', ')}>
               <Icon concept="folder-open" size={20} tone="fg-2" />
               <View className="flex-1 gap-0.5">
                 <View className="flex-row items-center gap-2">

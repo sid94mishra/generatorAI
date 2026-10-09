@@ -75,3 +75,34 @@ export function resetToasts(): void {
   current = null;
   notify();
 }
+
+// ── Hosts ──────────────────────────────────────────────────────
+// The shell mounts a ToastHost; full-screen editors and route sheets mount their own, because on iOS a native modal
+// screen covers the shell's (an editor's error toast was invisible). Only the most recently mounted host renders.
+let hosts: number[] = [];
+let nextHost = 1;
+const hostListeners = new Set<() => void>();
+const notifyHosts = (): void => hostListeners.forEach((l) => l());
+
+export function nextToastHostId(): number {
+  return nextHost++;
+}
+
+/** Adds the host; returns its release. */
+export function registerToastHost(id: number): () => void {
+  hosts = [...hosts, id];
+  notifyHosts();
+  return () => {
+    hosts = hosts.filter((h) => h !== id);
+    notifyHosts();
+  };
+}
+
+export function subscribeToastHosts(listener: () => void): () => void {
+  hostListeners.add(listener);
+  return () => hostListeners.delete(listener);
+}
+
+export function topToastHost(): number | null {
+  return hosts.at(-1) ?? null;
+}

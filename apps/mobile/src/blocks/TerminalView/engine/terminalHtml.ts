@@ -197,6 +197,26 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
   if (term.textarea) {
     term.textarea.addEventListener('focus', function () { post({ type: 'focused' }); });
     term.textarea.addEventListener('blur', function () { post({ type: 'unfocused' }); });
+    // Soft-keyboard (IME) input: keydown arrives as keyCode 229 and xterm diffs the textarea a tick later, which
+    // drops characters when they come faster than that tick (Android: "gai-characterization-ok" reached the shell
+    // as "ai-caractrizaio-ok"). Own those events instead: each beforeinput after an IME keydown is sent as it is.
+    // Hardware keys (real keyCodes, keypress) and IME compositions (compositionend) stay with xterm.
+    var imeKey = false;
+    term.textarea.addEventListener('keydown', function (e) {
+      imeKey = e.keyCode === 229;
+      if (imeKey && !e.isComposing) e.stopImmediatePropagation();
+    }, true);
+    term.textarea.addEventListener('beforeinput', function (e) {
+      if (!imeKey || e.isComposing) return;
+      var data = null;
+      if ((e.inputType === 'insertText' || e.inputType === 'insertReplacementText') && e.data) data = e.data;
+      else if (e.inputType === 'deleteContentBackward') data = '\\x7f';
+      else if (e.inputType === 'insertLineBreak' || e.inputType === 'insertParagraph') data = '\\r';
+      if (data === null) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      post({ type: 'input', b64: encodeUtf8(data) });
+    }, true);
   }
   term.onSelectionChange(function () {
     if (term.hasSelection()) post({ type: 'selection', text: term.getSelection() });

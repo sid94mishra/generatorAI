@@ -3,7 +3,7 @@
 // ToastHost shows the store's one toast bottom-centred 16 above the safe area (+ bottomOffset), times it out (never
 // while a screen reader is on), announces it, and dismisses on swipe (iOS down, Android sideways) or the "Dismiss"
 // accessibility action.
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { AccessibilityInfo, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown, SlideInDown, SlideOutDown } from 'react-native-reanimated';
@@ -17,7 +17,7 @@ import { Icon } from '../Icon';
 import { Pressable } from '../Pressable';
 import { Text } from '../Text';
 import type { ToastHostProps, ToastOptions } from './Toast.types';
-import { closeToast, pressToastAction, toastActionLabel, toastDuration, useCurrentToast } from './toastModel';
+import { closeToast, pressToastAction, nextToastHostId, registerToastHost, subscribeToastHosts, toastActionLabel, toastDuration, topToastHost, useCurrentToast } from './toastModel';
 
 export type { ToastHandle, ToastHostProps, ToastKind, ToastOptions } from './Toast.types';
 
@@ -52,7 +52,11 @@ export function Toast({ options, onAction }: { options: ToastOptions; onAction?:
 }
 
 export function ToastHost({ bottomOffset = 0 }: ToastHostProps): React.ReactElement | null {
-  const entry = useCurrentToast();
+  const [host] = useState(nextToastHostId);
+  useEffect(() => registerToastHost(host), [host]);
+  const top = useSyncExternalStore(subscribeToastHosts, topToastHost);
+  const current = useCurrentToast();
+  const entry = host === top ? current : null;
   const insets = useInsets();
   const reduced = useReduceMotion();
   const [screenReader, setScreenReader] = useState(false);

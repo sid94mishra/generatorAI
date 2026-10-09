@@ -11,7 +11,15 @@ env: {FRESH_CHAT: stream}
 - assertVisible: {id: chats-scope-all}
 - extendedWaitUntil: {visible: {id: "chat-row-${CHAT_STREAM_ID}"}, timeout: 15000}
 # Selection mode only from the header (MD-60); Cancel leaves it.
-- tapOn: {id: chats-select}
+# iOS header toolbar items are native and carry no testID: tap by label there (MD-133).
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: {id: chats-select}
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: "Select"
 - assertVisible: {id: chats-bulk-delete}
 - tapOn: "Cancel"
 - assertVisible: {id: chats-new}

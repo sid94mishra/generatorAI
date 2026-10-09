@@ -43,43 +43,48 @@ export function ChangeFileRow({ row, showAlias, comments, busy, can, onAction }:
   const prefix = showAlias && row.alias !== '.' ? `${row.alias}/` : '';
   const menu = changeRowMenu(row, can);
   const items = menu.filter((e): e is Extract<MenuEntry, { id: string }> => !('type' in e));
+  // The actions menu sits beside the row, not inside it: an accessible row hides its children, so a nested button
+  // was unreachable for VoiceOver focus and for automation (the row's custom actions stay for screen readers).
   return (
-    <Pressable
-      testID="changes-file-row"
-      frame="none"
-      onPress={() => onAction('open', row)}
-      accessibilityRole="button"
-      accessibilityLabel={changeRowLabel(row, comments)}
-      accessibilityHint="Opens the diff"
-      accessibilityActions={items.filter((e) => e.id !== 'open').map((e) => ({ name: e.id, label: e.label }))}
-      onAccessibilityAction={(name) => onAction(name as ChangeRowAction, row)}
-      className="min-h-item flex-row items-center gap-3 pe-1 ps-4"
-    >
-      <Text role="mono" weight={600} tone={changeTone(row.status)} className="w-3">
-        {changeLetter(row.status)}
-      </Text>
-      <Text role="mono" numberOfLines={1} ellipsizeMode="middle" className="flex-1">
-        {row.status === 'renamed' && row.oldPath ? (
-          <Text role="mono" tone="fg-3">{`${row.oldPath} → `}</Text>
+    <View className="min-h-item flex-row items-center pe-1">
+      <Pressable
+        testID="changes-file-row"
+        frame="none"
+        onPress={() => onAction('open', row)}
+        accessibilityRole="button"
+        accessibilityLabel={changeRowLabel(row, comments)}
+        accessibilityHint="Opens the diff"
+        accessibilityActions={items.filter((e) => e.id !== 'open').map((e) => ({ name: e.id, label: e.label }))}
+        onAccessibilityAction={(name) => onAction(name as ChangeRowAction, row)}
+        className="min-h-item flex-1 flex-row items-center gap-3 ps-4"
+      >
+        <Text role="mono" weight={600} tone={changeTone(row.status)} className="w-3">
+          {changeLetter(row.status)}
+        </Text>
+        <Text role="mono" numberOfLines={1} ellipsizeMode="middle" className="flex-1">
+          {row.status === 'renamed' && row.oldPath ? (
+            <Text role="mono" tone="fg-3">{`${row.oldPath} → `}</Text>
+          ) : null}
+          <Text role="mono" tone="fg-3">{`${prefix}${dir}`}</Text>
+          {name}
+        </Text>
+        {comments > 0 ? (
+          <View className="flex-row items-center gap-0.5">
+            <Icon concept="message" size={12} tone="fg-3" />
+            <Text role="monoSm" tone="fg-3">
+              {comments}
+            </Text>
+          </View>
         ) : null}
-        <Text role="mono" tone="fg-3">{`${prefix}${dir}`}</Text>
-        {name}
-      </Text>
-      {comments > 0 ? (
-        <View className="flex-row items-center gap-0.5">
-          <Icon concept="message" size={12} tone="fg-3" />
-          <Text role="monoSm" tone="fg-3">
-            {comments}
-          </Text>
-        </View>
-      ) : null}
-      {busy ? <Spinner size={14} /> : <DiffStat additions={row.additions} deletions={row.deletions} />}
+        {busy ? <Spinner size={14} /> : <DiffStat additions={row.additions} deletions={row.deletions} />}
+      </Pressable>
       <Menu
         items={menu}
         onSelect={(id) => onAction(id as ChangeRowAction, row)}
         accessibilityLabel={`Actions for ${row.path}`}
-        trigger={<IconButton icon={overflowIcon} size="sm" label={`Actions for ${row.path}`} onPress={() => undefined} testID="changes-file-menu" />}
+        trigger={<IconButton icon={overflowIcon} size="sm" label={`Actions for ${row.path}`} onPress={() => undefined} />}
+        testID="changes-file-menu"
       />
-    </Pressable>
+    </View>
   );
 }

@@ -1,6 +1,6 @@
 appId: ${APP_ID}
 name: servers · switch between two paired sandboxes (MB-20, MD-05)
-# Needs a second paired sandbox (M2-08: A on :3197, B on :3297). Pass its label: -e SERVER_B_NAME="<label>".
+# Needs a second paired sandbox named "Sandbox B" (F: GENERATORAI_SERVER_NAME="Sandbox B" sandbox-pair pair --port=3399).
 tags: [full, multi-server]
 env: {SERVER_B_NAME: "Sandbox B"}
 ---
@@ -17,3 +17,8 @@ env: {SERVER_B_NAME: "Sandbox B"}
 - extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 60000}
 - runFlow: ../_subflows/open-sidebar.yaml
 - assertVisible: "${SERVER_B_NAME}.*"
+# Back to the suite's sandbox (a server-scoped link switches), so the flows after this one run on A.
+- openLink: generatorai:///?server=${SERVER_ID}
+- extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 60000}
+- runFlow: ../_subflows/open-sidebar.yaml
+- assertNotVisible: "${SERVER_B_NAME}.*"

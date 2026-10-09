@@ -98,7 +98,7 @@ function PlanPage({ plan, loading, error, onRetry }: { plan: InvocationPlan | un
     <View className="gap-4">
       <ListSection title="Layers" footer={planHeadline(plan)}>
         {layers.map((l) => (
-          <View key={l.layer} className="min-h-row flex-row items-center gap-3 px-4 py-2" accessible accessibilityLabel={`Layer ${l.layer + 1}: ${l.stages.map((s) => `${s.key}${s.skipped ? ', skipped' : ''}${s.approvalRequired ? ', approval' : ''}`).join('; ')}`}>
+          <View accessibilityRole="text" key={l.layer} className="min-h-row flex-row items-center gap-3 px-4 py-2" accessible accessibilityLabel={`Layer ${l.layer + 1}: ${l.stages.map((s) => `${s.key}${s.skipped ? ', skipped' : ''}${s.approvalRequired ? ', approval' : ''}`).join('; ')}`}>
             <Text role="monoSm" tone="fg-3">{`L${l.layer + 1}`}</Text>
             <View className="flex-1 flex-row flex-wrap items-center gap-x-2 gap-y-1">
               {l.stages.map((s, i) => (

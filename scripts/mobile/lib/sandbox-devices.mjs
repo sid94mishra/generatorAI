@@ -99,10 +99,11 @@ export async function mintPair(session, target) {
 // toolbar as an overlay. Raw XCTest preserves the native hittability/refs;
 // fill/press still enforce keyboard and target checks. No coordinate fallback.
 async function readSnapshot(target, interactive = true) {
-  const deadline = Date.now() + 15000;
+  // A raw iOS tree of Home takes 5-10 s while the runner is busy; a 5 s cap cancelled every read.
+  const deadline = Date.now() + 45000;
   let lastError;
   do {
-    try { return JSON.parse(await agent(target, ['snapshot', ...(target.platform === 'ios' ? ['--raw'] : interactive ? ['-i'] : []), '--timeout', '5000'])); }
+    try { return JSON.parse(await agent(target, ['snapshot', ...(target.platform === 'ios' ? ['--raw'] : interactive ? ['-i'] : []), '--timeout', '20000'])); }
     catch (error) { lastError = error; await delay(500); }
   } while (Date.now() < deadline);
   throw lastError;
@@ -120,8 +121,12 @@ async function pressExpoControl(target, nodes, label) {
   if (!control?.ref) throw new Error(`Expo ${label} control is missing from the native snapshot`);
   await agent(target, ['press', `@${control.ref}`, '--settle']);
 }
+// A fresh install's first Metro bundle plus a cold XCTest runner can take a few minutes on a loaded machine.
+const APP_READY_MS = 300000;
+// One iOS snapshot can take 5–17 s while the XCTest runner is busy; a 30 s step wait then sees only one or two.
+const STEP_WAIT_MS = 90000;
 async function waitForApp(target) {
-  const deadline = Date.now() + 120000;
+  const deadline = Date.now() + APP_READY_MS;
   while (Date.now() < deadline) {
     let snapshot;
     try {
@@ -148,12 +153,12 @@ async function waitForApp(target) {
       await pressExpoControl(target, nodes, 'Close');
       continue;
     }
-    if (nodes.some(node => node.identifier === 'menu-button' || node.identifier === 'pairing-connect' || node.identifier === 'pairing-confirm' || node.label === 'Connect to a GeneratorAI server')) return;
+    if (nodes.some(node => ['menu-button', 'home-new-chat', 'pairing-connect', 'pairing-confirm', 'paired-continue'].includes(node.identifier) || node.label === 'Connect to a GeneratorAI server')) return;
     if (nodes.some(node => node.label === 'Unlock to continue')) throw new Error('The installed app is locked; unlock it before native verification');
     await confirmAppLink(target, snapshot);
     await delay(500);
   }
-  throw new Error('The app did not reach its pairing screen or shell within 120 seconds; check Metro and native logs');
+  throw new Error(`The app did not reach its pairing screen or shell within ${APP_READY_MS / 1000} seconds; check Metro and native logs`);
 }
 async function snapshotIdentifiers(target) {
   // The full tree (not -i on Android): callouts such as `pairing-error` are not interactive.
@@ -172,6 +177,37 @@ async function waitForIdentifier(target, ids, timeout) {
     await delay(500);
   }
   throw new Error(`None of ${ids.join(', ')} appeared on ${target.name} within ${timeout / 1000} s`);
+}
+/**
+ * Scroll a control into view and press it. A press that lands while a screen is still animating in (the
+ * consent → /paired transition) fails with COMMAND_FAILED, so it retries after the transition settles.
+ */
+/** Screen-point centre of the element with this testID, from the native tree. */
+async function centreOf(target, id) {
+  const snapshot = await readSnapshot(target, false);
+  const node = (snapshot.data?.snapshot?.nodes ?? snapshot.data?.nodes ?? []).find(item => item.identifier === id);
+  const rect = node?.rect ?? node?.frame ?? node?.bounds;
+  if (!rect) throw new Error(`${id} is not in the native tree on ${target.name}`);
+  return [String(Math.round(rect.x + rect.width / 2)), String(Math.round(rect.y + rect.height / 2))];
+}
+async function scrollAndPress(target, id, next = []) {
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      // A press reported as failed may still have landed: stop once the next screen is showing.
+      if (attempt > 0 && next.length && [...(await snapshotIdentifiers(target))].some(found => next.includes(found))) return;
+      await agent(target, ['scroll', 'down', '--until', `id="${id}"`, '--settle']);
+      try {
+        await agent(target, ['press', `id="${id}"`, '--settle']);
+      } catch {
+        // agent-device refuses a selector press when a full-screen pass-through container (the native toolbar
+        // host, the overlay window) overlaps the control, although a real tap reaches it. Tap its centre as a user would.
+        await agent(target, ['press', ...(await centreOf(target, id)), '--settle']);
+      }
+      return;
+    } catch (error) { lastError = error; await delay(1500); }
+  }
+  throw lastError;
 }
 export async function pairTarget(session, target, { repair = false, noConfirm = false } = {}) {
   const id = targetId(target);
@@ -230,23 +266,21 @@ export async function pairTarget(session, target, { repair = false, noConfirm = 
   await confirmAppLink(target, linked.data?.snapshot ?? linked.data);
   // M7-08 (MD-34): the link only pre-fills the 12-character code and the server address ("Server found" callout);
   // Connect opens the consent step. Every control is reached by its testID — no snapshot refs, no typing.
-  await agent(target, ['wait', 'id="pairing-scanned"', '30000']);
-  await agent(target, ['scroll', 'down', '--until', 'id="pairing-connect"', '--settle']);
-  await agent(target, ['press', 'id="pairing-connect"', '--settle']);
+  await agent(target, ['wait', 'id="pairing-scanned"', String(STEP_WAIT_MS)]);
+  await scrollAndPress(target, 'pairing-connect', ['pairing-fingerprint']);
   if (noConfirm) { console.log(`Consent is waiting on ${target.name}; pairing has not completed.`); return; }
-  await agent(target, ['wait', 'id="pairing-fingerprint"', '30000']);
+  await agent(target, ['wait', 'id="pairing-fingerprint"', String(STEP_WAIT_MS)]);
   // The device name keeps its default ("My iPhone", "My phone", …): the Name field auto-capitalises and
   // auto-corrects, so typed text never verifies on iOS (agent-device fill → COMMAND_FAILED), and the new device is
   // identified by its id instead (findNewPairing). No keyboard opens, so nothing covers "Pair".
-  await agent(target, ['scroll', 'down', '--until', 'id="pairing-confirm"', '--settle']);
-  await agent(target, ['press', 'id="pairing-confirm"', '--settle']);
+  await scrollAndPress(target, 'pairing-confirm', ['paired', 'paired-continue', 'pairing-error']);
   // The success step (`/paired`): Continue skips the optional approval-key setup (Settings › Security later).
-  await waitForIdentifier(target, ['paired-continue', 'pairing-error'], 30000);
+  // Its screen id, not Continue: on a phone Continue sits below the scope list, and Android's tree has only what is on screen.
+  await waitForIdentifier(target, ['paired', 'paired-continue', 'pairing-error'], STEP_WAIT_MS);
   if (await hasIdentifier(target, 'pairing-error')) throw new Error(`Pairing ${target.name} failed on the consent step; see the app's error callout`);
-  await agent(target, ['scroll', 'down', '--until', 'id="paired-continue"', '--settle']);
-  await agent(target, ['press', 'id="paired-continue"', '--settle']);
+  await scrollAndPress(target, 'paired-continue', ['home-new-chat', 'menu-button']);
   // Home on a phone (sidebar toggle `menu-button`) or a tablet (persistent sidebar; `home-new-chat` either way).
-  await waitForIdentifier(target, ['home-new-chat', 'menu-button'], 30000);
+  await waitForIdentifier(target, ['home-new-chat', 'menu-button'], STEP_WAIT_MS);
   await recordPairing(session, target, before, started);
 }
 

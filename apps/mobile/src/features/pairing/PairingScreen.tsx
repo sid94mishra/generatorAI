@@ -40,7 +40,7 @@ function ReachLine({ reach }: { reach: Reachability | null }): React.ReactElemen
   if (!reach) return null;
   const view = reach.kind === 'reachable' ? { health: 'ok' as const, word: 'Reachable' } : reach.kind === 'checking' ? { health: 'idle' as const, word: 'Checking…' } : { health: 'err' as const, word: "Can't reach" };
   return (
-    <View className="flex-row items-center gap-1.5" accessible accessibilityLabel={view.word} testID="pairing-reach">
+    <View accessibilityRole="text" className="flex-row items-center gap-1.5" accessible accessibilityLabel={view.word} testID="pairing-reach">
       <StatusDot health={view.health} size="sm" />
       <Text role="footnote" tone="fg-3">
         {view.word}

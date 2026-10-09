@@ -6,6 +6,7 @@ env: {FRESH_CHAT: gate}
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///chats/${CHAT_GATE_ID}
 - extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- runFlow: ../_subflows/pane-closed.yaml
 - tapOn: {id: composer-input}
 - inputText: Please run the tests
 - runFlow:

@@ -3,8 +3,8 @@
 //
 //   • App switcher / Recents (`setAppSwitcherPrivacy`): iOS — expo-screen-capture's blur while the app is inactive
 //     (`enableAppSwitcherProtection(0.6)`), under the JS privacy overlay (AppLock.tsx) as a second layer. Android 13+
-//     — the device-key module's `Activity.setRecentsScreenshotEnabled(false)` (a blank Recents card; screenshots stay
-//     possible). Android 12 and older — FLAG_SECURE through expo-screen-capture (it also blocks screenshots).
+//     — the device-key module's `Activity.setRecentsScreenshotEnabled(false)` (the stored Recents card) plus FLAG_SECURE
+//     through expo-screen-capture (the live tile when Recents opens from the app; it also blocks screenshots).
 //   • Secret reveals (`useSecretReveal`): no screenshots or recordings (FLAG_SECURE / iOS secure layer) and no
 //     auto-lock while a one-time secret is on screen.
 //   • Notification previews (iOS): the App Group flag the notification service extension reads.
@@ -68,14 +68,15 @@ export function setAppSwitcherPrivacy(enabled: boolean): void {
     return;
   }
   if (Platform.OS !== 'android') return;
-  let applied = false;
   try {
-    applied = deviceKey?.setRecentsScreenshotEnabled?.(!enabled) === true;
+    deviceKey?.setRecentsScreenshotEnabled?.(!enabled);
   } catch {
-    applied = false;
+    // Below API 33 or a dev client without the module: FLAG_SECURE alone covers it.
   }
-  // Android 12 and older have no Recents-only switch: FLAG_SECURE (blocks screenshots too) while the choice is on.
-  if (enabled && !applied) preventCapture(SWITCHER_KEY);
+  // FLAG_SECURE as well, on every version: setRecentsScreenshotEnabled(false) only blanks the stored snapshot, and
+  // opening Recents straight from the app shows the launcher's live tile — the real screen (seen on the API 36
+  // emulator). FLAG_SECURE blanks both, at the cost of blocking screenshots while the choice is on (MD-198).
+  if (enabled) preventCapture(SWITCHER_KEY);
   else allowCapture(SWITCHER_KEY);
 }
 

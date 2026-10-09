@@ -70,8 +70,9 @@ async function prepare(target) {
     await demo('battery', '-e', 'level', '100', '-e', 'plugged', 'false');
     await demo('network', '-e', 'wifi', 'show', '-e', 'level', '4');
     await demo('notifications', '-e', 'visible', 'false');
+    await agent(target, ['settings', 'animations', 'off']);
   }
-  await agent(target, ['settings', 'animations', 'off']);
+  // iOS: agent-device has no animation setting for the simulator; VRT mode forces Reduce Motion in the app.
 }
 
 async function restore(target) {
@@ -93,7 +94,7 @@ async function capture(target, plan, outDir) {
     const file = path.join(outDir, `${item.storyId}--${item.variant}.png`);
     try {
       await agent(target, ['open', captureUrl(item.storyId, item.variant)]);
-      await agent(target, ['wait', 'id="vrt-ready"', '10000']);
+      await agent(target, ['wait', 'id="vrt-ready"', '30000']);
       await agent(target, ['screenshot', '--out', file, '--crop-on', 'id="vrt-root"', ...(target.platform === 'ios' ? ['--normalize-status-bar'] : ['--scale', ANDROID_SCALE])]);
       shots.push({ ...item, file });
     } catch (error) {

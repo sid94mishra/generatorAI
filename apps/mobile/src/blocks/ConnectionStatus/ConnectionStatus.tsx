@@ -28,7 +28,7 @@ export function ConnectionFooter({ testID = 'connection-status' }: { testID?: st
   const { health, address } = useConnectionHealth();
   const word = health === 'reconnecting' ? `${HEALTH.connection.reconnecting.label}…` : HEALTH.connection[health].label;
   return (
-    <View testID={testID} accessible accessibilityLabel={[word, address].filter(Boolean).join(', ')} className="min-w-0 flex-1 flex-row items-center gap-2">
+    <View accessibilityRole="text" testID={testID} accessible accessibilityLabel={[word, address].filter(Boolean).join(', ')} className="min-w-0 flex-1 flex-row items-center gap-2">
       {health === 'reconnecting' ? <Spinner size={12} tone="warn" /> : <StatusDot health={HEALTH.connection[health].tone} size="sm" />}
       <Text role="subhead" tone="fg-2" chrome numberOfLines={1}>
         {word}

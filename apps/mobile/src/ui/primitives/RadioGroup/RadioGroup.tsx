@@ -23,7 +23,7 @@ export function Radio({ selected, disabled = false }: RadioProps): React.ReactEl
   if (nativePlatform !== 'android') {
     // iOS: a fixed-width slot so labels stay aligned; the ✓ appears only when selected.
     return (
-      <View className={cn('size-4.5 items-center justify-center', disabled && 'opacity-40')}>
+      <View collapsable={false} className={cn('size-4.5 items-center justify-center', disabled && 'opacity-40')}>
         {selected ? <Icon concept="check" size={r.checkmark as IconSize} tone="accent" /> : null}
       </View>
     );

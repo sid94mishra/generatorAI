@@ -14,7 +14,7 @@ import { focusManager, onlineManager } from '@tanstack/react-query';
 import { initialAttentionState } from '@generatorai/client-core';
 import { useLifecycle, resumeApp } from '../lifecycle';
 import { useStreamHealth } from '../streamHealth';
-const stream = () => ({ subscribe: vi.fn(), disposeAll: vi.fn(), rejectedScopes: () => [], resetRejections: vi.fn(), suspend: vi.fn(), resume: vi.fn(async () => {}) });
+const stream = () => ({ subscribe: vi.fn(), disposeAll: vi.fn(), rejectedScopes: () => [], resetRejections: vi.fn(), suspend: vi.fn(), resume: vi.fn(async () => {}), isSuspended: vi.fn(() => true) });
 const attention = () => ({ getState: () => initialAttentionState(), subscribe: () => () => {}, start: vi.fn(), stop: vi.fn(), refresh: vi.fn(async () => {}) });
 afterEach(() => { harness.cleanup?.(); harness.cleanup = undefined; vi.useRealTimers(); focusManager.setFocused(true); onlineManager.setOnline(true); harness.invalidate.mockClear(); });
 it('cancels the Android grace period on a quick return and suspends a longer background stay', async () => {
@@ -49,4 +49,20 @@ it('backs off failed resumes, declares offline, and allows manual recovery', asy
   expect(onlineManager.isOnline()).toBe(true);
   expect(focusManager.isFocused()).toBe(true);
   expect(feed.refresh).toHaveBeenCalledOnce();
+});
+it('a quick return with the socket still open keeps the connection state', async () => {
+  vi.useFakeTimers();
+  const mux = stream(); const feed = attention();
+  mux.resume.mockImplementation(async () => { useStreamHealth.getState().setConnection('connected'); });
+  useLifecycle(mux, feed);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(useStreamHealth.getState().connection).toBe('connected');
+  mux.isSuspended.mockReturnValue(false);
+  mux.resume.mockImplementation(async () => {});
+  harness.change?.('background');
+  await vi.advanceTimersByTimeAsync(3000);
+  harness.change?.('active');
+  await vi.advanceTimersByTimeAsync(0);
+  expect(mux.suspend).not.toHaveBeenCalled();
+  expect(useStreamHealth.getState().connection).toBe('connected');
 });

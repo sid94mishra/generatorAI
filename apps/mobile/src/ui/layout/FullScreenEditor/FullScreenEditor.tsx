@@ -8,9 +8,11 @@
 // no provider inside a native modal), so it pays the window's top inset; an Android modal stays inside the column.
 import React from 'react';
 import { View } from 'react-native';
-import { KeyboardAwareScrollView, KeyboardStickyView } from '../../lib/styled';
+import { KeyboardAwareScrollView } from '../../lib/styled';
 
 import { useDirtyGuard } from '../DirtyGuard/useDirtyGuard';
+import { SheetOutlet } from '../../native/Sheet/SheetJs';
+import { ToastHost } from '../../primitives/Toast';
 import { nativePlatform } from '../../platform/geometry';
 import { useModalInsets } from '../../platform/insets';
 import { IconButton } from '../../primitives/IconButton';
@@ -81,11 +83,12 @@ export function FullScreenEditor({ title, primary, cancelLabel = 'Cancel', onCan
           {children}
         </KeyboardAwareScrollView>
       )}
-      {stickyBar ? (
-        <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
-          <View style={{ paddingBottom: insets.bottom }}>{stickyBar}</View>
-        </KeyboardStickyView>
-      ) : null}
+      {/* StickyActionBar rides the keyboard and pads the home indicator itself; wrapping it in a second
+          KeyboardStickyView lifted it by twice the keyboard (the wizard's Continue jumped under the stepper). */}
+      {stickyBar ?? null}
+      {/* A full-screen editor is a native modal screen: sheets presented from it render here (iOS presents only from the top screen). */}
+      <SheetOutlet />
+      <ToastHost />
     </View>
   );
 }

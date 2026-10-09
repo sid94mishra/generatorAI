@@ -8,8 +8,9 @@ env: {FRESH_CHAT: stream}
 - runFlow: ../_subflows/open-sidebar.yaml
 - tapOn: {id: drawer-search}
 - extendedWaitUntil: {visible: {id: search-palette}, timeout: 15000}
-- assertVisible: {id: search-group-actions}
-- assertVisible: {id: search-group-nav}
+# With Recent above them the groups can sit under the keyboard: scroll to them.
+- scrollUntilVisible: {element: {id: search-group-actions}, direction: DOWN, timeout: 10000}
+- scrollUntilVisible: {element: {id: search-group-nav}, direction: DOWN, timeout: 10000}
 - tapOn: {id: search-input}
 - inputText: chats
 - extendedWaitUntil: {visible: {id: "search-row-nav:chats"}, timeout: 15000}

@@ -34,7 +34,7 @@ export function ServerSwitcherTrigger({ onPress }: { onPress?: () => void }): Re
   );
   if (!onPress) {
     return (
-      <View accessible accessibilityLabel={`${name}, ${where}`} className="min-h-icon-button min-w-0 flex-1 flex-row items-center gap-2.5">
+      <View accessibilityRole="text" accessible accessibilityLabel={`${name}, ${where}`} className="min-h-icon-button min-w-0 flex-1 flex-row items-center gap-2.5">
         {body}
       </View>
     );

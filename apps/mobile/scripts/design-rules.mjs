@@ -77,7 +77,9 @@ const reportRule = {
       if (source === 'uniwind' && !ui && !path.startsWith('src/theme/')) report(node, 'uniwindImport');
       if (names.some((n) => ['useThemeColors', 'getThemeColors'].includes(n)) && !/^src\/(ui|services|theme)\//.test(path)) report(node, 'themeColorsInFeature');
       if (ui && /^expo-router(?:\/|$)/.test(source)) {
-        if (!nativeRouter || source !== 'expo-router' || names.some((n) => !['Stack', 'Link'].includes(n))) report(node, 'routerPresentation');
+        // The native router wrappers configure the screen they render in: Stack / Link, and the focus hooks that re-apply
+        // header options (MD-198).
+        if (!nativeRouter || source !== 'expo-router' || names.some((n) => !['Stack', 'Link', 'useNavigation', 'useFocusEffect'].includes(n))) report(node, 'routerPresentation');
       }
       if (ui && /^(?:@tanstack\/react-query|zustand|@generatorai\/client-(?:core|runtime|transport))(?:\/|$)/.test(source) && node.importKind !== 'type') report(node, 'uiData');
       if (/^src\/features\//.test(path) && !/\/queries\.tsx?$/.test(path) && /^(?:@tanstack\/react-query|@generatorai\/client-(?:runtime|transport))(?:\/|$)/.test(source) && node.importKind !== 'type') report(node, 'featureData');

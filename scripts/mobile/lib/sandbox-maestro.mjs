@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { ROOT } from './sandbox-session.mjs';
 import { assertDummyRepo } from './sandbox-data.mjs';
 import { CHAT_NAMES, seedSandbox } from './sandbox-seed.mjs';
-import { APP_ID, ADB, run, targetId, targetHost, mintPair, installedBuild, recordPairing, releaseAgent } from './sandbox-devices.mjs';
+import { APP_ID, ADB, run, targetId, targetHost, mintPair, installedBuild, pairTarget, recordPairing, releaseAgent } from './sandbox-devices.mjs';
 
 // The workspace already pins this parser; do not implement a second YAML parser.
 const { parseAllDocuments, stringify } = createRequire(path.join(ROOT, 'packages/core/package.json'))('yaml');
@@ -20,6 +20,17 @@ async function flowFiles(input) {
     .map(entry => flowFiles(path.join(input, entry.name))))).flat().sort();
 }
 
+/** Scopes a flow may add for its run (DEVICE_SCOPES), beyond the pairing's defaults; restored afterwards. */
+const FLOW_SCOPES = ['write:files', 'write:workspaces', 'exec:terminal', 'exec:browser', 'write:projects', 'write:workflows', 'admin:settings'];
+
+/** PENDING_GATE: true → the risky `gate` fixture; a fixture key (`write`) → that chat's gate; absent → none. */
+function pendingKey(value, file) {
+  if (value == null || value === false || value === 'false') return null;
+  const key = value === true || value === 'true' ? 'gate' : String(value);
+  if (!(key in CHAT_NAMES)) throw new Error(`Unknown PENDING_GATE '${key}' in ${file}`);
+  return key;
+}
+
 export async function flowMetadata(file) {
   const docs = parseAllDocuments(await fs.readFile(file, 'utf8'));
   if (docs.some(doc => doc.errors.length)) throw new Error(`Invalid Maestro YAML: ${file}`);
@@ -28,10 +39,10 @@ export async function flowMetadata(file) {
   const fresh = config.env?.FRESH_CHAT == null ? [] : String(config.env.FRESH_CHAT).split(',').map(key => key.trim());
   for (const key of fresh) if (!(key in CHAT_NAMES)) throw new Error(`Unknown FRESH_CHAT '${key}' in ${file}`);
   const scopes = config.env?.DEVICE_SCOPES == null ? [] : String(config.env.DEVICE_SCOPES).split(',').map(scope => scope.trim());
-  for (const scope of scopes) if (!['write:files', 'write:workspaces', 'exec:terminal'].includes(scope)) {
+  for (const scope of scopes) if (!FLOW_SCOPES.includes(scope)) {
     throw new Error(`Unsupported characterization scope '${scope}' in ${file}`);
   }
-  return { fresh, scopes, pending: config.env?.PENDING_GATE === true || config.env?.PENDING_GATE === 'true', tags: config.tags ?? [], name: config.name ?? path.basename(file).replace(/\.ya?ml$/, ''),
+  return { fresh, scopes, pending: pendingKey(config.env?.PENDING_GATE, file), tags: config.tags ?? [], name: config.name ?? path.basename(file).replace(/\.ya?ml$/, ''),
     ...(config.env?.EXPECT_COMMIT ? { expectedCommit: String(config.env.EXPECT_COMMIT) } : {}) };
 }
 
@@ -101,8 +112,8 @@ export async function discoverFlows(input, configPath) {
   return { entries, config };
 }
 
-async function pendingGate(session) {
-  const chat = session.state.chats.gate;
+async function pendingGate(session, key) {
+  const chat = session.state.chats[key];
   await session.api(`/chats/${chat}/prompt`, { prompt: 'Run the mobile approval fixture.' });
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
@@ -181,16 +192,19 @@ export async function runMaestro(session, target, args, { verify } = {}) {
       const { file } = metadata;
       if ((includes.length && !includes.some(tag => metadata.tags.includes(tag))) || excludes.some(tag => metadata.tags.includes(tag))) continue;
       const fresh = new Set(metadata.fresh);
-      if (metadata.pending) fresh.add('gate');
+      if (metadata.pending) fresh.add(metadata.pending);
       await seedSandbox(session, [...fresh]);
       const env = { APP_ID, PLATFORM: target.platform, BUILD: build, METRO_URL: encodeURIComponent(`http://${host}:8081`),
         SERVER_URL: `http://${host}:${session.port}`, DEVICE_NAME: target.name, DUMMY_REPO: assertDummyRepo(session.state.dummyRepo),
-        PROJECT_ID: session.state.projectId, CODEBASE_ID: session.state.fixtures.edits.codebaseId,
+        PROJECT_ID: session.state.projectId, SERVER_ID: session.state.server.serverId, CODEBASE_ID: session.state.fixtures.edits.codebaseId,
         ...Object.fromEntries(Object.entries(session.state.chats).map(([key, id]) => [`CHAT_${key.toUpperCase()}_ID`, id])) };
       const pairing = metadata.tags.includes('pairing');
       const devicesBefore = pairing ? new Set((await session.api('/auth/devices')).devices.map(device => device.deviceId)) : null;
       if (pairing) env.PAIR_URL = await mintPair(session, target);
-      if (metadata.pending) env.INTERACTION_ID = await pendingGate(session);
+      if (metadata.pending) {
+        env.INTERACTION_ID = await pendingGate(session, metadata.pending);
+        env.CHAT_PENDING_ID = session.state.chats[metadata.pending];
+      }
       const commandArgs = [];
       for (let index = 0; index < args.length; index++) {
         if (args[index] === '--config') { index++; continue; }
@@ -218,7 +232,7 @@ export async function runMaestro(session, target, args, { verify } = {}) {
         const argv = ['--device', id, ...commands, ...Object.entries(env).flatMap(([key, value]) => ['-e', `${key}=${value}`])];
         const spawnArgs = windows ? ['--enable-native-access=ALL-UNNAMED', '-classpath',
           path.join(path.dirname(path.dirname(maestro)), 'lib', '*'), 'maestro.cli.AppKt', ...argv] : argv;
-        const child = spawn(executable, spawnArgs, { cwd: ROOT, stdio: 'inherit', env: { ...process.env, MAESTRO_CLI_NO_ANALYTICS: '1', MAESTRO_DRIVER_STARTUP_TIMEOUT: '180000' } });
+        const child = spawn(executable, spawnArgs, { cwd: ROOT, stdio: 'inherit', env: { ...process.env, MAESTRO_CLI_NO_ANALYTICS: '1', MAESTRO_DRIVER_STARTUP_TIMEOUT: '420000' } });
         child.once('error', reject); child.once('exit', (code, signal) => resolve(signal ? 1 : code));
       });
       if (metadata.pending && target.platform === 'ios') {
@@ -226,7 +240,7 @@ export async function runMaestro(session, target, args, { verify } = {}) {
         if (await invoke(['test', setup, '--config', runtimeConfig]) !== 0) throw new Error('Native notification consent setup failed');
         const template = await fs.readFile(path.join(ROOT, 'apps/mobile/e2e/push/approval.json'), 'utf8');
         // v2 fixture (apps/mobile/src/features/development/pushFixtures.ts): the gate chat and the sandbox's server id.
-        const payload = template.replaceAll('${CHAT_ID}', env.CHAT_GATE_ID).replaceAll('${INTERACTION_ID}', env.INTERACTION_ID)
+        const payload = template.replaceAll('${CHAT_ID}', env.CHAT_PENDING_ID).replaceAll('${INTERACTION_ID}', env.INTERACTION_ID)
           .replaceAll('${SERVER_ID}', session.state.server.serverId);
         JSON.parse(payload);
         const payloadFile = path.join(runtimeDir, 'approval.json');
@@ -238,13 +252,18 @@ export async function runMaestro(session, target, args, { verify } = {}) {
         try { reports.push(await fs.readFile(path.resolve(ROOT, flowReport), 'utf8')); }
         catch (error) { if (code === 0 || error.code !== 'ENOENT') throw error; }
       }
-      if (code !== 0) throw new Error(`Maestro failed for ${path.relative(ROOT, file)} (${code})`);
+      if (code !== 0) {
+        // A pairing flow starts from cleared state: when it fails half way the app is left unpaired, and every
+        // later flow would fail at launch. Restore the pairing before reporting the failure.
+        if (pairing) await pairTarget(session, target, { repair: true }).catch((error) => console.error(`sandbox-pair: re-pair after the failed pairing flow: ${error.message}`));
+        throw new Error(`Maestro failed for ${path.relative(ROOT, file)} (${code})`);
+      }
       if (metadata.expectedCommit) {
         const subject = await run('git', ['-C', assertDummyRepo(session.state.dummyRepo), 'log', '-1', '--format=%s']);
         if (subject !== metadata.expectedCommit) throw new Error('Dummy repository did not receive the expected characterization commit');
         console.log('Characterization commit verified in the dummy repository');
       }
-      if (metadata.pending && target.platform === 'android') await verifyAllowedGate(session, env.CHAT_GATE_ID, env.INTERACTION_ID);
+      if (metadata.pending && target.platform === 'android') await verifyAllowedGate(session, env.CHAT_PENDING_ID, env.INTERACTION_ID);
       if (pairing) await recordPairing(session, target, devicesBefore, started);
       count++;
     }

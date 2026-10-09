@@ -46,11 +46,15 @@ async function coldStart(target) {
     return total ? { coldStartMs: Number(total[1]) } : {};
   }
   // iOS: launch to the first Home frame, through the driver (includes its polling — relative numbers only).
+  // Leave Home last: a cold start within 30 min restores the last route (lastRouteRules), and Home is what we time.
+  await agent(target, ['open', 'generatorai:///']).catch(() => undefined);
+  await delay(2000);
   await run('xcrun', ['simctl', 'terminate', target.udid, APP_ID]).catch(() => undefined);
   await delay(1000);
   const started = Date.now();
   await agent(target, ['open', APP_ID, '--relaunch']);
-  await agent(target, ['wait', 'id="home-new-chat"', '30000']);
+  // A dev build downloads its bundle on a cold start (well over 30 s on a loaded host).
+  await agent(target, ['wait', 'id="home-new-chat"', '120000']);
   const coldStartMs = Date.now() - started;
   await releaseAgent(target);
   return { coldStartMs };
@@ -67,7 +71,10 @@ async function main() {
   }
   const config = JSON.parse(await fs.readFile(budgetsFile, 'utf8'));
   const only = values.only?.split(',').filter(Boolean);
-  const scenarios = Object.keys(config.scenarios).filter((name) => !only || only.includes(name));
+  // The scroll scenario flings the reply the streaming scenario produces: run streaming first on a fresh sandbox.
+  const ORDER = ['cold-start', 'streaming', 'transcript-scroll'];
+  const rank = (name) => (ORDER.includes(name) ? ORDER.indexOf(name) : ORDER.length);
+  const scenarios = Object.keys(config.scenarios).filter((name) => !only || only.includes(name)).sort((a, b) => rank(a) - rank(b));
   const [target] = await findTargets({ platform: values.platform, udid: values.udid, serial: values.serial });
   const build = await installedBuild(target);
   if (build !== 'release') console.warn(`perf: ${target.name} runs a ${build} build — numbers are not comparable with the budgets (08 §4.7 wants release)`);

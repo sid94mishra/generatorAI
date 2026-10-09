@@ -6,6 +6,7 @@ tags: [smoke]
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///chats/${CHAT_STREAM_ID}?execute=delete
 - extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- runFlow: ../_subflows/pane-closed.yaml
 - assertVisible: Dictate a message
 - openLink: generatorai:///chats/${CHAT_STREAM_ID}?server=not-paired
 - extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 30000}

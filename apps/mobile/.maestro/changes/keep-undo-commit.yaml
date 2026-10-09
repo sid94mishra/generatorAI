@@ -9,6 +9,7 @@ env: {FRESH_CHAT: edits, DEVICE_SCOPES: "write:files,write:workspaces", EXPECT_C
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///chats/${CHAT_EDITS_ID}
 - extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- runFlow: ../_subflows/pane-closed.yaml
 - tapOn: {id: composer-input}
 - inputText: Make the edits
 - runFlow:
@@ -30,7 +31,15 @@ env: {FRESH_CHAT: edits, DEVICE_SCOPES: "write:files,write:workspaces", EXPECT_C
 - extendedWaitUntil: {visible: "Kept", timeout: 15000}
 # Undo all (confirmed) reverts everything, the kept file included.
 - tapOn: {id: changes-tray-undo-all}
-- tapOn: "Undo all"
+# The tray's own "Undo all" stays in the iOS tree under the alert; the alert's button is the second match there.
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: {text: "Undo all", index: 1}
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: "Undo all"
 - extendedWaitUntil: {notVisible: {id: changes-file-row}, timeout: 15000}
 - tapOn: {id: pane-close}
 - tapOn: {id: composer-input}
@@ -51,13 +60,15 @@ env: {FRESH_CHAT: edits, DEVICE_SCOPES: "write:files,write:workspaces", EXPECT_C
 - extendedWaitUntil: {visible: {id: commit-message}, timeout: 15000}
 - tapOn: {id: commit-message}
 - inputText: ${EXPECT_COMMIT}
-- hideKeyboard
+# No hideKeyboard: on iOS 27 it does nothing, on Android its Back press can close the sheet. The rows are reached by
+# id and scrolled to while the keyboard is up.
+- scrollUntilVisible: {element: {id: commit-push}, direction: DOWN, timeout: 15000}
 - runFlow:
-    when: {visible: {text: Push, checked: true}}
+    when: {visible: {id: commit-push, checked: true}}
     commands:
-      - tapOn: {text: Push, checked: true}
-- assertVisible: {text: Push, checked: false}
-- assertNotVisible: {text: Open pull request, checked: true}
+      - tapOn: {id: commit-push}
+- assertVisible: {id: commit-push, checked: false}
+- assertNotVisible: {id: commit-pr, checked: true}
 - assertVisible: {id: commit-submit, text: Commit}
 - tapOn: {id: commit-submit}
 - extendedWaitUntil: {visible: {id: commit-done}, timeout: 30000}

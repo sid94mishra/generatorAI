@@ -5,6 +5,7 @@ import {
   isLastRouteFresh,
   isRestorableRoute,
   isSheetRoute,
+  lastRouteAction,
   resolveLastRoute,
 } from '../services/prefs/lastRouteRules';
 import { STEP_UP_WINDOW_MS, isStepUpFresh } from '../services/auth/stepUpRules';
@@ -51,6 +52,16 @@ describe('last route — expiry', () => {
       '/scope-request?scope=exec%3Aterminal',
       '/chats/abc/gate/int-1',
       '/chats/abc/plan/plan-1',
+      // Every presented route of the stack: a Turn sheet left open used to come back on every cold start.
+      '/chats/abc/turn',
+      '/pickers/model',
+      '/workflows/w1/run',
+      '/workflows/w1/runs/r1/approval/s1',
+      '/workflows/new',
+      '/workflows/w1/edit/stages/plan',
+      '/agents/a1/edit',
+      '/workspaces/ws1/commit',
+      '/settings/mcp/add',
     ]) {
       expect(isSheetRoute(route), route).toBe(true);
       expect(isRestorableRoute(route), route).toBe(false);
@@ -80,5 +91,13 @@ describe('step-up — cache window', () => {
   it('is never fresh without a success or with a clock step backwards', () => {
     expect(isStepUpFresh(null, NOW)).toBe(false);
     expect(isStepUpFresh(NOW + 1, NOW)).toBe(false);
+  });
+
+  it('clears on Home and Settings, keeps the screen under a sheet', () => {
+    expect(lastRouteAction('/chats/abc')).toBe('record');
+    expect(lastRouteAction('/')).toBe('clear');
+    expect(lastRouteAction('/settings/appearance')).toBe('clear');
+    expect(lastRouteAction('/chats/abc/turn')).toBe('keep');
+    expect(lastRouteAction('/search')).toBe('keep');
   });
 });

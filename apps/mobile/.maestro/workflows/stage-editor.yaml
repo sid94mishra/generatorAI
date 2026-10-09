@@ -1,15 +1,25 @@
 appId: ${APP_ID}
 name: workflows · stage editor (tabs, simple fields, save into the builder draft)
 # M8-06 (MStagePrompt, MStageModel, MStageTools, MStageOutput, MStagePolicy, MStageHooks). Edits the sandbox's
-# "Sandbox Workflow" plan stage, saves into the builder draft, then cancels the builder — nothing is saved.
+# "Sandbox Workflow.*" plan stage, saves into the builder draft, then cancels the builder — nothing is saved.
 tags: [workflows]
+# The paired device has the default scopes; this flow edits, so it adds the route-policy scope for its run.
+env: {DEVICE_SCOPES: "write:workflows"}
 ---
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///workflows
-- extendedWaitUntil: {visible: "Sandbox Workflow", timeout: 20000}
-- tapOn: "Sandbox Workflow"
-- extendedWaitUntil: {visible: {id: workflow-more}, timeout: 15000}
-- tapOn: {id: workflow-more}
+- extendedWaitUntil: {visible: {id: "workflow-row-.*"}, timeout: 20000}
+- tapOn: {id: "workflow-row-.*", index: 0}
+- extendedWaitUntil: {visible: {id: workflow-detail}, timeout: 15000}
+# A header action: by testID on Android, by its label on iOS (native toolbar items take no testID, MD-133).
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: {id: workflow-more}
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: "Workflow actions"
 - tapOn: "Edit in builder"
 - extendedWaitUntil: {visible: {id: builder-stage-plan}, timeout: 15000}
 - tapOn: {id: builder-stage-plan}
@@ -18,7 +28,9 @@ tags: [workflows]
 - tapOn: {id: stage-tab-session}
 - assertVisible: {id: stage-model}
 - tapOn: {id: stage-tab-tools}
-- assertVisible: {id: stage-tool-browser}
+# The platform tools sit below the skills and MCP lists on a phone.
+- scrollUntilVisible: {element: {id: stage-tool-browser}, direction: DOWN, timeout: 20000}
+- scrollUntilVisible: {element: {id: stage-tab-output}, direction: UP, timeout: 20000}
 - tapOn: {id: stage-tab-output}
 - tapOn: {id: stage-add-rule-contains}
 - assertVisible: {id: stage-rule-0}
@@ -27,13 +39,22 @@ tags: [workflows]
 - tapOn: {id: stage-rule-0-value}
 - inputText: DONE
 - assertNotVisible: "Enter the text the output must contain."
+# Android: the first tap with the keyboard up only closes the keyboard.
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
 - tapOn: {id: stage-tab-policy}
+# On iOS the first tap only ends editing (the keyboard swallows it); a second tap on the selected tab is a no-op.
+- tapOn: {id: stage-tab-policy}
+- scrollUntilVisible: {element: {id: stage-retry}, direction: DOWN, timeout: 20000}
 - tapOn: {id: stage-retry}
-- assertVisible: {id: stage-retry-sentence}
+- scrollUntilVisible: {element: {id: stage-retry-sentence}, direction: DOWN, timeout: 10000}
+- scrollUntilVisible: {element: {id: stage-tab-hooks}, direction: UP, timeout: 20000}
 - tapOn: {id: stage-tab-hooks}
 - assertVisible: "Stage hooks"
 - tapOn: "Save"
 - extendedWaitUntil: {visible: "● Unsaved changes", timeout: 5000}
 - tapOn: "Cancel"
 - tapOn: "Discard"
-- extendedWaitUntil: {visible: {id: workflow-more}, timeout: 10000}
+- extendedWaitUntil: {visible: {id: workflow-detail}, timeout: 10000}

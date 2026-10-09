@@ -51,6 +51,8 @@ import { hostLabel, statusLine, withModifiers, type KeyDef } from './model/keyRo
 const ACK_BYTE_INTERVAL = 64 * 1024;
 /** Reconnect backoff after an unexpected socket drop. */
 const RECONNECT_DELAYS_MS = [1000, 2000, 4000];
+/** Input kept while the stream reattaches (a paste can be long; beyond this the oldest bytes go). */
+const PENDING_INPUT_MAX = 16_384;
 
 export type ConnectionState = 'connecting' | 'attached' | 'reconnecting' | 'closed';
 type Phase = { state: 'idle' } | { state: 'live' } | { state: 'exited'; code: number | null; signal?: string } | { state: 'error'; message: string };
@@ -129,7 +131,15 @@ export function TerminalView({ workspaceId, sessionId, active, initialInput, age
   }, []);
   const send = useCallback((frame: Record<string, unknown>) => {
     const socket = socketRef.current;
-    if (socket && socket.readyState === 1) socket.send(JSON.stringify(frame));
+    if (socket && socket.readyState === 1) {
+      socket.send(JSON.stringify(frame));
+      return;
+    }
+    // Typed while the stream is (re)attaching: keep it for the open handler instead of dropping it (seen on Android:
+    // keys typed during a reconnect vanished — "gai-characterization-ok" reached the shell as "ai-caractrizaio-ok").
+    if (frame.t === 'input' && typeof frame.data === 'string') {
+      pendingInputRef.current = ((pendingInputRef.current ?? '') + frame.data).slice(-PENDING_INPUT_MAX);
+    }
   }, []);
   const closeSocket = useCallback(
     (intentional: boolean) => {
@@ -528,6 +538,14 @@ export function TerminalView({ workspaceId, sessionId, active, initialInput, age
           <IconButton icon="chevron-up" size="sm" label="Previous match" onPress={() => runFind(find.query, 'searchPrev')} />
           <IconButton icon="chevron-down" size="sm" label="Next match" onPress={() => runFind(find.query, 'searchNext')} />
           <IconButton icon="x" size="sm" label="Close find" onPress={closeFind} />
+        </View>
+      ) : null}
+      {/* A standalone field shows its error only as colour; say it in words too (and give tests something to read). */}
+      {find.open && find.query && find.found === false ? (
+        <View className="px-4 pt-1" accessibilityLiveRegion="polite">
+          <Text role="footnote" tone="err" testID="terminal-find-status">
+            No match
+          </Text>
         </View>
       ) : null}
       <GestureDetector gesture={gestures}>

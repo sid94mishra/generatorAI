@@ -80,7 +80,8 @@
       "@protobufjs/utf8": "^1.1.1"
     },
     "patchedDependencies": {
-      "@bacons/apple-targets@5.0.0": "patches/@bacons__apple-targets@5.0.0.patch"
+      "@bacons/apple-targets@5.0.0": "patches/@bacons__apple-targets@5.0.0.patch",
+      "@expo/ui@57.0.21": "patches/@expo__ui@57.0.21.patch"
     },
     "packageExtensions": {
       "react-native-worklets": {

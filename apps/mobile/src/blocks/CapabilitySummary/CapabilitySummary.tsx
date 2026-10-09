@@ -87,7 +87,7 @@ export function CapabilitySummary({ projection, loading, error, onRetry, unsaved
           <Separator />
           <View className="flex-row flex-wrap px-4 py-3">
             {tools.map((t) => (
-              <View key={t.key} className="w-1/2 flex-row items-center gap-2 py-1" accessible accessibilityLabel={`${t.label}, ${t.on ? 'on' : 'off'}`}>
+              <View accessibilityRole="text" key={t.key} className="w-1/2 flex-row items-center gap-2 py-1" accessible accessibilityLabel={`${t.label}, ${t.on ? 'on' : 'off'}`}>
                 <Icon concept={t.on ? 'check' : 'x'} size={14} tone={t.on ? 'ok' : 'fg-3'} />
                 <Text role="subhead" tone={t.on ? 'fg' : 'fg-3'}>
                   {t.label}

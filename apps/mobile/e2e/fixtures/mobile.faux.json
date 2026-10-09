@@ -103,5 +103,30 @@
         "type": "complete"
       }
     ]
+  ],
+  "Mobile — Write gate": [
+    [
+      {
+        "type": "text",
+        "content": "I need approval before writing the notes file."
+      },
+      {
+        "type": "permission_request",
+        "request": {
+          "type": "file_write",
+          "description": "Write notes.md",
+          "details": {
+            "path": "notes.md"
+          }
+        }
+      },
+      {
+        "type": "text",
+        "content": "Thanks — notes written."
+      },
+      {
+        "type": "complete"
+      }
+    ]
   ]
 }

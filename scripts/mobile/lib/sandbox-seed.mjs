@@ -10,6 +10,8 @@ const execute = promisify(execFile);
 export const CHAT_NAMES = Object.freeze({
   stream: 'Mobile — Stream', gate: 'Mobile — Gate', stop: 'Mobile — Stop',
   edits: 'Mobile — Edits', long: 'Mobile — Long stream',
+  // A standard (in-workspace file write) gate: answerable from a notification without the approval key (MG-04).
+  write: 'Mobile — Write gate',
 });
 
 async function waitForWorkspace(session, chat, key) {
@@ -50,8 +52,9 @@ export async function seedSandbox(session, fresh = []) {
     }
     // Independent source directories prevent shared shadow-store registration and
     // one characterization flow's edits from leaking into another (MD-98).
+    // 14 s measured on a loaded machine; 30 s killed it mid-commit under heavier load.
     const result = await execute(process.execPath, [path.join(ROOT, 'scripts/redesign/make-dummy-repo.mjs')], {
-      cwd: ROOT, timeout: 30000,
+      cwd: ROOT, timeout: 120000,
     });
     const repo = assertDummyRepo(result.stdout.trim());
     const codebase = await session.api(`/projects/${project.id}/codebases`, {

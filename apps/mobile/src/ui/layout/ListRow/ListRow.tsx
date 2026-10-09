@@ -32,7 +32,7 @@ export function ListRow(props: ListRowProps): React.ReactElement {
   if (kind === 'picker' && props.picker) {
     return (
       <View className={surface}>
-        <Select {...props.picker} label={title} presentation="row" disabled={disabled || props.picker.disabled} testID={testID} />
+        <Select {...props.picker} label={title} presentation="row" disabled={disabled || props.picker.disabled} testID={props.picker.testID ?? testID} />
       </View>
     );
   }
@@ -120,7 +120,7 @@ export function ListRow(props: ListRowProps): React.ReactElement {
   const role = listRowRole(kind);
   if (!press && !copy) {
     return (
-      <View testID={testID} className={frame} accessible={kind !== 'stepper' && kind !== 'segmented'} accessibilityLabel={kind === 'stepper' || kind === 'segmented' ? undefined : listRowLabel(props)}>
+      <View accessibilityRole={kind === 'stepper' || kind === 'segmented' ? undefined : 'text'} testID={testID} className={frame} accessible={kind !== 'stepper' && kind !== 'segmented'} accessibilityLabel={kind === 'stepper' || kind === 'segmented' ? undefined : listRowLabel(props)}>
         {row}
       </View>
     );

@@ -8,8 +8,9 @@ tags: [settings, scopes]
 - openLink: generatorai:///settings/security
 - extendedWaitUntil: {visible: {id: security-scopes}, timeout: 20000}
 - tapOn: {id: security-scopes}
-- extendedWaitUntil: {visible: "read:status", timeout: 10000}
-- back
+# Each row reads "<label>, <scope>" (one accessibility element).
+- extendedWaitUntil: {visible: ".*read:status", timeout: 10000}
+- runFlow: ../_subflows/back.yaml
 - runFlow:
     when: {visible: {id: security-devices-requires-admin}}
     commands:

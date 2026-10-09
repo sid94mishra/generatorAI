@@ -111,7 +111,3 @@ export function Sheet({ navigation, ...props }: RouteSheetProps): React.ReactEle
   );
 }
 
-/** A route sheet's body (options: routeSheetOptions(kind, dirty)); pass the screen's navigation to guard removal. */
-export function RouteSheet(props: RouteSheetProps): React.ReactElement {
-  return <Sheet {...props} />;
-}

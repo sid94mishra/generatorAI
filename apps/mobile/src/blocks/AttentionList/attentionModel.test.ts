@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AttentionItem } from '@generatorai/shared';
 
-import { askHint, attentionLabel, sectionRows } from './attentionModel';
+import { askDetailLine, askHint, attentionLabel, sectionRows } from './attentionModel';
 
 const item = (over: Partial<AttentionItem>): AttentionItem => ({
   key: 'chat:c1:i1', entity: 'chat', entityId: 'c1', title: 'Fix flaky checkout test', href: '/chats/c1',
@@ -15,6 +15,16 @@ describe('AttentionList model (MB-19)', () => {
     expect(askHint(item({ ask: { kind: 'tool_permission', id: 'i', summary: 'Allow Bash?', detail: 'git push -u origin fix', actions: [] } }))).toBe('git push');
     expect(askHint(item({ ask: { kind: 'tool_permission', id: 'i', summary: 'Allow Bash?', actions: [] } }))).toBe('Allow');
     expect(askHint(item({}))).toBeUndefined();
+    // The feed's detail is the clipped JSON tool input: the hint names the command, never `{ "command":`.
+    expect(askHint(item({ ask: { kind: 'tool_permission', id: 'i', summary: 'Allow shell_exec?', detail: '{\n "command": "pnpm test --watch', actions: [] } }))).toBe('pnpm test');
+    expect(askHint(item({ ask: { kind: 'tool_permission', id: 'i', summary: 'Allow file_write?', detail: '{ "path": "src/config.ts" }', actions: [] } }))).toBe('src/config.ts');
+  });
+
+  it('reads the command, path or url out of a JSON detail', () => {
+    expect(askDetailLine('{ "command": "git push -u origin \\"x\\"" }')).toBe('git push -u origin "x"');
+    expect(askDetailLine('{ "count": 3 }')).toBe('{ "count": 3 }');
+    expect(askDetailLine('plain words')).toBe('plain words');
+    expect(askDetailLine(undefined)).toBeUndefined();
   });
 
   it('shows five rows and offers the rest behind "Show all"', () => {

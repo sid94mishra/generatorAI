@@ -69,7 +69,7 @@ export function WebhookCredentials({ automationId, fields, canEdit }: { automati
         .catch((e: unknown) => toast({ kind: 'error', message: errorText(e) }));
     });
   const masked = (label: string): React.ReactElement => (
-    <View className="flex-row items-center gap-2 px-4 py-3" accessible accessibilityLabel={`${label}, hidden`}>
+    <View accessibilityRole="text" className="flex-row items-center gap-2 px-4 py-3" accessible accessibilityLabel={`${label}, hidden`}>
       <View className="flex-1 gap-0.5">
         <Text role="caption" tone="fg-3">
           {label}

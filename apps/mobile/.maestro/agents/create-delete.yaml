@@ -2,6 +2,8 @@ appId: ${APP_ID}
 name: agents · new from blank, detail, delete
 # M7-03 (MAgents, MAgentNew, MAgentEdit1–3, MAgentDetail, MAgentDelete). Needs admin:settings on the paired device.
 tags: [agents]
+# The paired device has the default scopes; this flow edits, so it adds the route-policy scope for its run.
+env: {DEVICE_SCOPES: "admin:settings"}
 ---
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///agents
@@ -15,7 +17,13 @@ tags: [agents]
 - inputText: Maestro Agent
 - tapOn: {id: agent-editor-description}
 - inputText: Checks the Maestro flow end to end
-- scrollUntilVisible: {element: {id: agent-editor-instructions}, direction: DOWN}
+# The keyboard covers the instructions field (a tap "on" it landed in the description): bring it to the centre.
+# Android counts a field under the keyboard as visible: close the keyboard first.
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
+- scrollUntilVisible: {element: {id: agent-editor-instructions}, direction: DOWN, centerElement: true}
 - tapOn: {id: agent-editor-instructions}
 - inputText: Say hello.
 - tapOn: "Create"

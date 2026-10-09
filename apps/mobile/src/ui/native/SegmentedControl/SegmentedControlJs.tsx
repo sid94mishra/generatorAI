@@ -43,6 +43,7 @@ export function SegmentedControlJs<V extends string>({ segments, value, onValueC
             className={cn('flex-row px-0.5', fullWidth && 'flex-1')}
           >
             <View
+              collapsable={false}
               className={cn(
                 'grow flex-row items-center justify-center gap-1.5 px-3',
                 android

@@ -50,7 +50,7 @@ function ServerCard(): React.ReactElement {
   return (
     <View className="px-4">
       <Card radius="group" padding="sm" testID="settings-server-card">
-        <View className="flex-row items-center gap-3" accessible accessibilityLabel={[name, address, word].filter(Boolean).join(', ')}>
+        <View accessibilityRole="text" className="flex-row items-center gap-3" accessible accessibilityLabel={[name, address, word].filter(Boolean).join(', ')}>
           <View className="size-11 items-center justify-center rounded-card bg-selected">
             <Icon concept="computer" size={20} tone="fg-2" />
           </View>
@@ -218,7 +218,7 @@ export default function SettingsRootScreen(): React.ReactElement {
             );
           })
         )}
-        <View className="items-center gap-0.5 px-4 pt-2" accessible accessibilityLabel={`GeneratorAI ${version}. Connected to ${info.data?.serverName ?? 'this server'}${address ? ` ${address}` : ''}`}>
+        <View accessibilityRole="text" className="items-center gap-0.5 px-4 pt-2" accessible accessibilityLabel={`GeneratorAI ${version}. Connected to ${info.data?.serverName ?? 'this server'}${address ? ` ${address}` : ''}`}>
           <View className="flex-row items-center gap-1">
             <Text role="footnote" tone="fg-3">
               GeneratorAI

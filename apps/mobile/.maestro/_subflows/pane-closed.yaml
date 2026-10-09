@@ -1,0 +1,9 @@
+appId: ${APP_ID}
+# The pane's open flag persists per server and scope (06 §6.7): a chat opens with the pane over it when an earlier
+# flow left it open. Close it so the composer is reachable.
+---
+- runFlow:
+    when: {visible: {id: pane-close}}
+    commands:
+      - tapOn: {id: pane-close}
+      - waitForAnimationToEnd

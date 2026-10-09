@@ -17,6 +17,7 @@ tags: [characterization, smoke, pairing]
 - scrollUntilVisible:
     element: {id: pairing-connect}
     direction: DOWN
+    visibilityPercentage: 50
 - tapOn: {id: pairing-connect}
 - extendedWaitUntil: {visible: {id: pairing-fingerprint}, timeout: 30000}
 - assertNotVisible: {id: home-new-chat}
@@ -31,7 +32,9 @@ tags: [characterization, smoke, pairing]
     element: {id: pairing-confirm}
     direction: DOWN
 - tapOn: {id: pairing-confirm}
-- extendedWaitUntil: {visible: {id: paired-continue}, timeout: 30000}
+- extendedWaitUntil: {visible: "Paired with.*", timeout: 30000}
+# Continue sits below the granted-scope list on a phone.
+- scrollUntilVisible: {element: {id: paired-continue}, direction: DOWN, visibilityPercentage: 50}
 - tapOn: {id: paired-continue}
 - extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 30000}
 - runFlow: ../_subflows/open-sidebar.yaml

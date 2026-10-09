@@ -51,7 +51,7 @@ export function TabRow({ tabs, active, onSelect, accessibilityLabel, testID }: T
                 accessibilityState={{ selected }}
                 className={cn('justify-center', android ? 'min-h-item px-3' : 'min-h-hit')}
               >
-                <View className={cn('flex-row items-center gap-1.5', android ? 'h-full' : cn('h-tab rounded-control-sm px-3', selected && 'bg-selected'))}>
+                <View className={cn('flex-row items-center gap-1.5', android ? 'flex-1' : cn('h-tab rounded-control-sm px-3', selected && 'bg-selected'))}>
                   <Text role="subhead" weight={selected ? 600 : 500} tone={selected ? 'fg' : 'fg-2'} chrome numberOfLines={1}>
                     {tab.label}
                   </Text>

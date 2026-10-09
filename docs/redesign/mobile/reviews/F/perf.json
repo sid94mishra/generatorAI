@@ -1,0 +1,127 @@
+{
+  "ios": {
+    "device": "gai-iphone",
+    "build": "dev",
+    "recordedAt": "2026-10-04T02:20:06.585Z",
+    "commit": "066a4806",
+    "scenarios": {
+      "cold-start": {
+        "measured": {
+          "coldStartMs": 16220
+        },
+        "rows": [
+          {
+            "metric": "coldStartMs",
+            "budget": 3000,
+            "value": 16220,
+            "status": "over"
+          }
+        ]
+      },
+      "streaming": {
+        "measured": {
+          "memoryMb": 190.4
+        },
+        "rows": [
+          {
+            "metric": "jankPercent",
+            "budget": 8,
+            "status": "unmeasured"
+          },
+          {
+            "metric": "longestFrameMs",
+            "budget": 100,
+            "status": "unmeasured"
+          },
+          {
+            "metric": "memoryMb",
+            "budget": 400,
+            "value": 190.4,
+            "status": "pass"
+          }
+        ]
+      },
+      "transcript-scroll": {
+        "measured": {},
+        "rows": [
+          {
+            "metric": "jankPercent",
+            "budget": 5,
+            "status": "unmeasured"
+          },
+          {
+            "metric": "p95FrameMs",
+            "budget": 20,
+            "status": "unmeasured"
+          }
+        ]
+      }
+    }
+  },
+  "android": {
+    "device": "gai-phone",
+    "build": "dev",
+    "recordedAt": "2026-10-04T12:33:02.915Z",
+    "commit": "d5740738",
+    "scenarios": {
+      "cold-start": {
+        "measured": {
+          "coldStartMs": 3808
+        },
+        "rows": [
+          {
+            "metric": "coldStartMs",
+            "budget": 3000,
+            "value": 3808,
+            "status": "over"
+          }
+        ]
+      },
+      "streaming": {
+        "measured": {
+          "jankPercent": 100,
+          "longestFrameMs": 652.2,
+          "memoryMb": 1274.3
+        },
+        "rows": [
+          {
+            "metric": "jankPercent",
+            "budget": 8,
+            "value": 100,
+            "status": "over"
+          },
+          {
+            "metric": "longestFrameMs",
+            "budget": 100,
+            "value": 652.2,
+            "status": "over"
+          },
+          {
+            "metric": "memoryMb",
+            "budget": 400,
+            "value": 1274.3,
+            "status": "over"
+          }
+        ]
+      },
+      "transcript-scroll": {
+        "measured": {
+          "jankPercent": 0
+        },
+        "rows": [
+          {
+            "metric": "jankPercent",
+            "budget": 5,
+            "value": 0,
+            "status": "pass"
+          },
+          {
+            "metric": "p95FrameMs",
+            "budget": 20,
+            "status": "unmeasured"
+          }
+        ]
+      }
+    }
+  }
+}

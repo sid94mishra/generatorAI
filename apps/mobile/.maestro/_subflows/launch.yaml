@@ -15,12 +15,13 @@ appId: ${APP_ID}
           when: {platform: iOS, visible: Development Build}
           commands:
             - tapOn: ".*http://127.0.0.1:8081.*"
-# Expo may restore the preceding product link across a native relaunch.
+# Expo may restore the preceding product link across a native relaunch. A dev build re-fetches its bundle on every
+# cold launch, which takes over a minute on a loaded machine.
 - extendedWaitUntil:
     visible: "Open sidebar|Back.*"
-    timeout: 60000
+    timeout: 120000
 - openLink: generatorai:///
 # Home is up when its New chat action is (the sidebar toggle has no testID on iOS, MD-133).
 - extendedWaitUntil:
     visible: {id: home-new-chat}
-    timeout: 60000
+    timeout: 120000

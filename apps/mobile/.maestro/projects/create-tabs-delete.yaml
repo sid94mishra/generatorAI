@@ -2,6 +2,8 @@ appId: ${APP_ID}
 name: projects · create, tabs, settings and delete
 # M7-02 (MProjects, MProjectCreate, MProjectDetail, MProjectSettings). Needs write:projects on the paired device.
 tags: [projects]
+# The paired device has the default scopes; this flow edits, so it adds the route-policy scope for its run.
+env: {DEVICE_SCOPES: "write:projects"}
 ---
 - runFlow: ../_subflows/launch.yaml
 - openLink: generatorai:///projects

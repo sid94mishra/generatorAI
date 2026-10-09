@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { Alert, type AlertButton } from 'react-native';
 import { act } from '@testing-library/react-native';
-import { useDirtyGuard } from './useDirtyGuard';
+import { REMOVAL_SETTLE_MS, useDirtyGuard } from './useDirtyGuard';
 import type { DirtyGuard, RemovalSource } from './DirtyGuard.types';
 import { renderThemed } from '../../__tests__/themed';
 import { useBackHandler } from '../../platform/back';
@@ -60,8 +60,10 @@ describe('DirtyGuard (ML-30)', () => {
     const preventDefault = jest.fn();
     act(() => listener!({ preventDefault, data: { action: { type: 'GO_BACK' } } }));
     expect(preventDefault).toHaveBeenCalled();
+    await act(async () => new Promise((r) => setTimeout(r, REMOVAL_SETTLE_MS + 10)));
     await act(async () => pressAlert(1));
     expect(navigation.dispatch).toHaveBeenCalledWith({ type: 'GO_BACK' });
   });
+
 
 });

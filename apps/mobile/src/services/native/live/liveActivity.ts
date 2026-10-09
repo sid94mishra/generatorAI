@@ -2,7 +2,7 @@
 // `staleDate` covers suspension). One activity per followed item; the ActivityKit id per live key is kept in MMKV and
 // reconciled with `getInstances()` after a relaunch, so an activity the app lost track of is ended rather than left
 // stale on the Lock Screen. Null when this is not iOS or the client was built without expo-widgets.
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { requireOptionalNativeModule } from 'expo';
 import type { LiveState } from '@generatorai/client-core';
 
@@ -92,7 +92,10 @@ function createDriver(factory: ActivityFactory): LiveSurfaceDriver {
         sent.set(state.key, fingerprint);
         return;
       }
-      if (Date.now() - refusedAt < 60_000) return;
+      // ActivityKit starts an activity only for a foreground app: a start attempted while going to the background
+      // (the background flush) would be refused and then block the retry for a minute; the next foreground
+      // evaluation starts it instead.
+      if (AppState.currentState !== 'active' || Date.now() - refusedAt < 60_000) return;
       try {
         const activity = factory.start(props, state.deepLink, staleDate);
         ids[state.key] = activity.getId();
