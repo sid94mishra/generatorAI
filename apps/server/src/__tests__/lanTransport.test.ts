@@ -252,7 +252,7 @@ describe('plain-HTTP transport policy (D-111, D-127)', () => {
   });
 
   it('refuses a native client (no Origin, or its own http Origin) over plain HTTP from the LAN', async () => {
-    for (const headers of [{}, { origin: `http://${host}` }]) {
+    for (const headers of [{}, { origin: `http://${host}` }] as Record<string, string>[]) {
       const result = await run(true, { method: 'POST', url: '/api/chats', headers, remoteAddress: '192.168.1.9' });
       expect(result.status).toBe(403);
       expect(result.body).toMatchObject({ error: { code: 'HTTPS_REQUIRED' } });
