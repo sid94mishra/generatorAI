@@ -531,4 +531,7 @@ dock-browser 23/23, terminal 16/16, browser 22/22, security 17/17; packaged (fus
 rebuilds: each new ad-hoc signature makes macOS ask for access to the shared "GeneratorAI Safe Storage" keychain item; with
 cookie encryption on, that prompt now blocks at launch (before, it blocked when the vault key was read at server start).
 A launch of the second rebuild waited on that prompt, so its smokes did not get past start-up; a signed build with a stable
-identity does not prompt.
+identity does not prompt. Added in the same pass (coordinator request, pre-existing): a remote server's page shown in the
+desktop window could call every preload channel except pairing — restart the local server, read/write the desktop
+settings, probe local paths, reach the update installer and native-browser tabs; bridge channels are now local-only by
+default (`ce7f1e54`, D-130; `desktop-remote-ipc-smoke` 14/14, 9 failed before).

@@ -1175,6 +1175,16 @@ sandbox served its own fixture — the "regression" seen after aa5cd74b); they s
 name the missing script when the scripted turn never comes. `GENERATORAI_SANDBOX_BUNDLE` runs another server bundle, because
 `build:server` stages Electron-ABI native modules into `dist-bundle/node_modules`.
 
+### D-130 Bridge channels are local-only by default; a remote server's page keeps window-level calls only (2026-10-09) — Final
+The preload bridge is the same for every page in the main window, including another machine's server (D-126). The IPC
+guard's scope (`apps/desktop/src/main/ipc-scope.ts`) is default-deny: a channel not on the remote allowlist requires the
+sending frame to be this computer's server (embedded, or the dev server; never while in remote mode). Allowlisted for
+remote pages: window chrome, find, appearance and menu state, reload / devtools, `openExternal` (validated), the server
+list / switch / add (the way back to this computer), update state (not install), `browser.available` (false while remote),
+and a redacted `getAppInfo` (no data dir, log file or server URL). Local-only: server status / restart, file and directory
+dialogs, save-to-disk, reveal-in-folder, desktop settings, update install, pairing, every native-browser tab operation.
+Evidence: `agent-tests/desktop-remote-ipc-smoke.mjs` (14/14; 9 of its checks failed before), `ipc-guard.test.ts`.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
