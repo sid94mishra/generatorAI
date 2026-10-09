@@ -56,6 +56,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { subscribeAgentTokenStream, type AgentTokenStreamHandle, type SpeechSessionHandle } from '@generatorai/core';
 import type { Container } from './composition-root.js';
 import { authorizeWebSocketUpgrade } from './middleware/wsAuth.js';
+import { trackWebSocket } from './streaming/liveConnections.js';
 
 const PATH = '/api/tts/stream';
 
@@ -85,7 +86,10 @@ export function attachTtsWebSocket(server: HttpServer, container: Container): vo
         label: 'tts-ws',
       });
       if (!result.ok) return;
-      wss.handleUpgrade(req, socket, head, (ws) => handleConnection(ws));
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        trackWebSocket(result.principal, ws, 'tts-ws', ['read:chats']);
+        handleConnection(ws);
+      });
     })().catch((err: unknown) => {
       logger.warn?.(`[tts-ws] upgrade failed: ${(err as Error).message}`);
       socket.destroy();

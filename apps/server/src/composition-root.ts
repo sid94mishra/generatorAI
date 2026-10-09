@@ -274,6 +274,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     directorUrl: config.security.relayDirectorUrl,
     signingKey: security.relaySigningKey,
   });
+  // F-2 — tell the relay cell about a revocation now rather than on the next
+  // 30 s outbox sweep, so new relay streams for the device stop at once. The
+  // device's open bridged streams end with its local streams (liveConnections).
+  security.devices.onAccessChanged((change) => {
+    if (change.kind === 'revoked') relayHostBroker.drainRevokeOutbox().catch(() => undefined);
+  });
 
   // ── Harness Providers (multi-provider) ──
   // Every installed provider runs side by side. `harness.type` only decides

@@ -966,6 +966,16 @@ would need the option), and with a case-insensitive policy the router and the po
 spelling belongs to. Regression: every `ROUTE_POLICIES` entry is checked under mixed case, trailing slash and escaped
 letters (`routePolicyCanonical.test.ts`), plus an HTTP test on the real auth router.
 
+### D-116 Revocation, rotation and scope cuts end a device's open streams (2026-10-09) — Final
+Audit F-2: a stream is authorised once, so a revoked device kept its SSE stream. `DeviceService.onAccessChanged`
+announces `revoked`, `credentials-rotated` and `scopes-changed` (with the removed scopes); the server's
+`liveConnections` registry indexes every live SSE stream (single-scope and multiplexed) and WebSocket (terminal,
+browser, STT, TTS) by device id. Revocation and rotation close all of the device's streams; a scope change closes only
+the streams that rely on a removed scope (`stream:events`, the feed's read scope, `admin:settings` for an unrestricted
+`global` feed, the WebSocket's upgrade scope). SSE ends with an `access-ended` frame and a destroyed socket; a
+WebSocket closes with 4401. Relay-bridged streams end with their loopback socket, and a revocation drains the relay
+revoke outbox immediately instead of on the 30 s sweep.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

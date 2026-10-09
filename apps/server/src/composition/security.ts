@@ -62,6 +62,7 @@ import { TlsManager } from '../network/tls/TlsManager.js';
 import { configuredAdvertisedHosts } from '../network/serverEndpoints.js';
 import { setDefaultChatPermissionMode } from '@generatorai/core';
 import type { AppConfig, ILogger } from '@generatorai/shared';
+import { liveConnections } from '../streaming/liveConnections.js';
 
 /**
  * The host's long-term X25519 identity. Clients pin `hostId` at pairing time,
@@ -270,6 +271,19 @@ export async function createSecurityContext(
       warn: (m, meta) => logger.warn(m, meta as Record<string, unknown>),
       info: (m, meta) => logger.info(m, meta as Record<string, unknown>),
     },
+  });
+
+  // F-2 — a revocation, credential rotation or scope cut also ends the
+  // device's already-open streams (SSE, WebSockets, relay-bridged sockets).
+  devices.onAccessChanged((change) => {
+    const closed = liveConnections.apply(change);
+    if (closed > 0) {
+      logger.info('[Security] Closed live connections after a device access change', {
+        deviceId: change.deviceId,
+        kind: change.kind,
+        closed,
+      });
+    }
   });
 
   const auth = new AuthService({

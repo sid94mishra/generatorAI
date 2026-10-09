@@ -48,6 +48,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import type { SttSessionHandle } from '@generatorai/core';
 import type { Container } from './composition-root.js';
 import { authorizeWebSocketUpgrade } from './middleware/wsAuth.js';
+import { trackWebSocket } from './streaming/liveConnections.js';
 
 const PATH = '/api/stt/stream';
 
@@ -79,7 +80,10 @@ export function attachSttWebSocket(server: HttpServer, container: Container): vo
         label: 'stt-ws',
       });
       if (!result.ok) return;
-      wss.handleUpgrade(req, socket, head, (ws) => handleConnection(ws));
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        trackWebSocket(result.principal, ws, 'stt-ws', ['write:chats']);
+        handleConnection(ws);
+      });
     })().catch((err: unknown) => {
       logger.warn?.(`[stt-ws] upgrade failed: ${(err as Error).message}`);
       socket.destroy();

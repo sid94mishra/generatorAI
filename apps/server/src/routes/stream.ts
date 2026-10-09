@@ -30,6 +30,7 @@ import { LIFECYCLE_EVENT_KINDS } from '../composition/streamScopes.js';
 import { redactAttentionEventPayload } from '@generatorai/core';
 import { SseConnection, parseCursor } from '../streaming/sseConnection.js';
 import { MuxSseConnection } from '../streaming/muxConnection.js';
+import { endEventStream, liveConnections } from '../streaming/liveConnections.js';
 import {
   EPHEMERAL_SCOPES,
   hasEphemeralProducer,
@@ -146,6 +147,22 @@ function missingStreamScope(principal: Principal, scope: string): Scope | undefi
   // Report the LESSER scope that would have sufficed: a device pairing screen
   // acting on `requiredScopes` should ask for `read:activity`, not for admin.
   return scope === 'global' ? GLOBAL_ACTIVITY_SCOPE : required;
+}
+
+/**
+ * The scopes an open subscription keeps relying on (F-2): `stream:events`
+ * for the endpoint, the scope's read requirement, and `admin:settings` for an
+ * UNRESTRICTED `global` feed — losing it must not leave a full-feed stream
+ * open where a fresh one would be narrowed to lifecycle kinds.
+ */
+function scopesReliedOn(scope: string, lifecycleRestricted: boolean): Scope[] {
+  const out: Scope[] = ['stream:events'];
+  if (scope === 'global') out.push(lifecycleRestricted ? GLOBAL_ACTIVITY_SCOPE : 'admin:settings');
+  else {
+    const required = STREAM_SCOPE_READ_REQUIREMENTS[scope];
+    if (required) out.push(required);
+  }
+  return out;
 }
 
 /**
@@ -697,9 +714,11 @@ export function createUnifiedStreamRoutes(container: Container): Router {
     let unsubscribe: (() => void) | null = null;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
     let released = false;
+    let unregisterLive: () => void = () => undefined;
     const cleanup = (): void => {
       if (released) return;
       released = true;
+      unregisterLive();
       if (heartbeat) clearInterval(heartbeat);
       const { droppedDeltas, shed } = conn.stats;
       conn.close();
@@ -718,6 +737,16 @@ export function createUnifiedStreamRoutes(container: Container): Router {
       }
     };
     res.on('close', cleanup);
+    // F-2 — a revocation, rotation or scope cut ends this stream at once.
+    const reliedOn = scopesReliedOn(scope, lifecycleRestricted);
+    unregisterLive = liveConnections.register(req.principal, {
+      label: 'sse',
+      requiredScopes: () => reliedOn,
+      close: (reason) => {
+        cleanup();
+        endEventStream(res, reason);
+      },
+    });
 
     // Initial comment flush — bypasses some proxies that buffer until first write.
     conn.writeComment(`connected scope=${scope} id=${scopeId}`);
@@ -866,9 +895,11 @@ export function createUnifiedStreamRoutes(container: Container): Router {
     const active = new Map<string, () => void>();
     let heartbeat: ReturnType<typeof setInterval> | undefined;
     let released = false;
+    let unregisterLive: () => void = () => undefined;
     const cleanup = (): void => {
       if (released) return;
       released = true;
+      unregisterLive();
       if (heartbeat) clearInterval(heartbeat);
       conn.close();
       for (const detach of active.values()) detach();
@@ -879,6 +910,23 @@ export function createUnifiedStreamRoutes(container: Container): Router {
     // Registered before the first await: `subscribe` replays, and a client
     // that aborts inside that window fires 'close' exactly once.
     res.on('close', cleanup);
+    // F-2 — what the stream relies on is read live, because subscriptions
+    // are added and removed after it opens.
+    unregisterLive = liveConnections.register(principal, {
+      label: 'mux',
+      requiredScopes: () => [
+        ...new Set(
+          [...record.subs.values()].flatMap((sub) =>
+            scopesReliedOn(sub.scope, sub.lifecycleOnly === true || restrictsGlobalToLifecycle(principal, sub.scope)),
+          ),
+        ),
+        'stream:events' as const,
+      ],
+      close: (reason) => {
+        cleanup();
+        endEventStream(res, reason);
+      },
+    });
 
     conn.writeComment(`connected c=${connectionId}`);
 

@@ -169,6 +169,18 @@ export function defaultScopesForPlatform(platform: DevicePlatform): readonly Sco
   }
 }
 
+/**
+ * A change that may cut a device's EXISTING live connections short (audit
+ * F-2). REST re-reads the device on every request, but an SSE stream or a
+ * WebSocket authorised before the change would otherwise keep flowing.
+ */
+export type DeviceAccessChange =
+  | { kind: 'revoked'; deviceId: string; reason: string }
+  | { kind: 'credentials-rotated'; deviceId: string }
+  | { kind: 'scopes-changed'; deviceId: string; scopes: readonly Scope[]; removed: readonly Scope[] };
+
+export type DeviceAccessListener = (change: DeviceAccessChange) => void;
+
 /** An MCP device never holds administration or the terminal (CONVINV-R9). */
 function assertPlatformScopes(platform: DevicePlatform, scopes: readonly string[]): void {
   const forbidden = scopesForbiddenFor(platform, scopes);
@@ -237,6 +249,7 @@ export class DeviceService {
    * already expired (or never expires) halfway through the process lifetime.
    */
   private readonly resumeTtlMs: number;
+  private readonly accessListeners = new Set<DeviceAccessListener>();
 
   constructor(private readonly deps: DeviceServiceOptions) {
     const configured = deps.resumeCredentialTtlMs;
@@ -244,6 +257,28 @@ export class DeviceService {
       typeof configured === 'number' && Number.isFinite(configured) && configured > 0
         ? configured
         : RESUME_CREDENTIAL_TTL_MS;
+  }
+
+  /**
+   * Subscribes to revocations, credential rotations and scope changes, so the
+   * server can close the device's live streams (F-2). Returns the unsubscribe.
+   */
+  onAccessChanged(listener: DeviceAccessListener): () => void {
+    this.accessListeners.add(listener);
+    return () => this.accessListeners.delete(listener);
+  }
+
+  private emitAccessChange(change: DeviceAccessChange): void {
+    for (const listener of this.accessListeners) {
+      try {
+        listener(change);
+      } catch (err) {
+        this.deps.logger?.warn('[DeviceService] access-change listener failed', {
+          kind: change.kind,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   }
 
   // ── Pairing ────────────────────────────────────────────────────
@@ -695,7 +730,10 @@ export class DeviceService {
     }
     const device = await this.deps.devices.findById(deviceId);
     if (device) assertPlatformScopes(device.platform, next);
+    const previous = [...(device?.scopes ?? [])];
     await this.deps.devices.update(deviceId, { scopes: next });
+    const removed = previous.filter((s) => !next.includes(s));
+    this.emitAccessChange({ kind: 'scopes-changed', deviceId, scopes: next, removed });
     // AuthService reads scopes from the live device record on every request,
     // so reductions and grants take effect immediately without invalidating
     // the device's DPoP-bound resume credential.
@@ -724,6 +762,7 @@ export class DeviceService {
       credentialVersion: device.credentialVersion + 1,
       previousCredentialGraceUntil: null,
     });
+    this.emitAccessChange({ kind: 'credentials-rotated', deviceId });
     this.deps.audit.record({
       action: AuditAction.deviceCredentialRotated,
       result: 'success',
@@ -767,6 +806,10 @@ export class DeviceService {
         severity: 'warn',
       });
     }
+
+    // Local state (and the relay outbox) is revoked; now cut the device's live
+    // streams, which were authorised before this moment (F-2).
+    this.emitAccessChange({ kind: 'revoked', deviceId, reason });
 
     this.deps.audit.record({
       action: AuditAction.deviceRevoked,
