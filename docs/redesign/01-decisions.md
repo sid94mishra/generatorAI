@@ -988,6 +988,16 @@ let throttled guesses keep being evaluated. Guessing stays bounded by the code (
 `retryAfterSeconds`, `limit: 'source' | 'server'` and a message the UI shows as-is ("Too many pairing attempts from
 this network address — try again in N s.").
 
+### D-118 A pairing grant's platform is authoritative; the joining device may only refine it (2026-10-09) — Final
+Audit F-5: `completePairing` stored the body's `platform` over the grant's, so an MCP grant completed as `cli` escaped
+the MCP forbidden scopes (no admin, no terminal) and the person/agent predicate; a `mobile` grant completed as `web`
+would also escape the approval-proof requirement. `pairedPlatform(grant, claimed)`: no claim or the same platform →
+the grant's; a grant for `mcp` or `mobile` cannot be moved to anything else (400 `PLATFORM_MISMATCH`, audited as
+`pairing.failed` / `platform_mismatch`, severity critical); a general-purpose grant (web, desktop, cli, other) may be
+refined to another label (honest device list) or into `mobile` / `mcp`. The grant's scopes are re-checked against
+the recorded platform before the grant is consumed, and every later scope change checks the device's (now pinned)
+platform as before.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

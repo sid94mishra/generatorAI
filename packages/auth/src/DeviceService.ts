@@ -59,6 +59,7 @@ export type PairingErrorCode =
   | 'INVALID_KEY'
   | 'DUPLICATE_KEY'
   | 'SCOPE_ESCALATION'
+  | 'PLATFORM_MISMATCH'
   | 'CREDENTIAL_SUPERSEDED';
 
 export class PairingError extends Error {
@@ -192,6 +193,24 @@ export type DeviceAccessChange =
   | { kind: 'scopes-changed'; deviceId: string; scopes: readonly Scope[]; removed: readonly Scope[] };
 
 export type DeviceAccessListener = (change: DeviceAccessChange) => void;
+
+/**
+ * The platform a joining device is recorded with (audit F-5, D-118).
+ *
+ * The grant's platform is decided by the admin who minted it, and it is what
+ * the security rules key on: `mcp` is an agent principal (no admin, no
+ * terminal, never a "person"), `mobile` must sign risky approvals with its
+ * hardware key. So the joining party may never move a grant OUT of either
+ * class. It may only refine a general-purpose grant (web, desktop, cli,
+ * other) — to another general-purpose label for an honest device list, or
+ * into the stricter `mobile` / `mcp` class. Returns null for a conflict.
+ */
+export function pairedPlatform(grantPlatform: DevicePlatform, claimed: DevicePlatform | undefined): DevicePlatform | null {
+  if (!claimed || claimed === grantPlatform) return grantPlatform;
+  const restricted = (p: DevicePlatform): boolean => p === 'mcp' || p === 'mobile';
+  if (restricted(grantPlatform)) return null;
+  return claimed;
+}
 
 /** An MCP device never holds administration or the terminal (CONVINV-R9). */
 function assertPlatformScopes(platform: DevicePlatform, scopes: readonly string[]): void {
@@ -550,6 +569,34 @@ export class DeviceService {
       throw new PairingError('Too many attempts for this pairing code', 'TOO_MANY_ATTEMPTS');
     }
 
+    // F-5 — the grant's platform is the admin's decision; the joining party
+    // may refine a general-purpose grant but never leave mcp/mobile, and the
+    // scopes are re-checked against the platform actually recorded.
+    const platform = pairedPlatform(grant.platform, params.platform);
+    if (platform === null) {
+      this.deps.audit.record({
+        action: AuditAction.pairingFailed,
+        result: 'denied',
+        reasonCode: 'platform_mismatch',
+        resourceType: 'pairing_grant',
+        resourceId: grant.grantId,
+        requestId: params.requestId ?? null,
+        sourceAddress: params.sourceAddress ?? null,
+        metadata: { grantPlatform: grant.platform, claimedPlatform: params.platform },
+        severity: 'critical',
+      });
+      throw new PairingError(
+        `This pairing code was created for a "${grant.platform}" device and cannot pair a "${params.platform ?? 'different'}" client. Create a code for this kind of device.`,
+        'PLATFORM_MISMATCH',
+      );
+    }
+    try {
+      assertPlatformScopes(platform, grant.requestedScopes);
+    } catch (err) {
+      this.auditPairingFailure('platform_scopes', params, grant.grantId);
+      throw err;
+    }
+
     // Validate the device key BEFORE consuming the grant, so a malformed key
     // does not burn a single-use code.
     let thumbprint: string;
@@ -585,7 +632,7 @@ export class DeviceService {
       deviceId: crypto.randomUUID(),
       ownerId: this.deps.defaultOwnerId ?? 'local',
       name: (params.deviceName ?? grant.deviceNameHint).slice(0, 120),
-      platform: params.platform ?? grant.platform,
+      platform,
       publicJwk: canonicalJwk,
       jwkThumbprint: thumbprint,
       scopes: grant.requestedScopes,
@@ -613,6 +660,7 @@ export class DeviceService {
       metadata: {
         name: device.name,
         platform: device.platform,
+        ...(platform !== grant.platform ? { grantPlatform: grant.platform } : {}),
         scopes: device.scopes,
         thumbprint,
       },
