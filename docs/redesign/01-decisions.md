@@ -1025,6 +1025,12 @@ absent — not invented — in the limited view. Wire types moved to `@generator
 web Settings view renders the limited view; mobile already reads those fields optionally (COORDINATION.md). The
 served certificate still shows its names in the TLS handshake — inherent to TLS, out of scope here.
 
+### D-121 A refused CORS origin is a 403 policy answer; no response body carries a stack (2026-10-09) — Final
+Audit F-9: the `cors` origin callback threw, so a disallowed origin reached the generic error handler as 502
+`UNKNOWN_ERROR`, with a stack (absolute paths) in development. The CORS middleware now answers it directly: 403
+`{ code: 'ORIGIN_NOT_ALLOWED', message, requestId }`, preflight included, with no CORS headers. The error handler
+never puts `stack` in a response body in any environment; it stays in the server log under the request id.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

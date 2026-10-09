@@ -65,8 +65,6 @@ export function createErrorMiddleware(logger: ILogger) {
       status = ERROR_STATUS_MAP[normalized.category] ?? 500;
     }
 
-    const isDev = process.env['NODE_ENV'] === 'development';
-
     // Always log the full stack server-side so ops can correlate by requestId
     // even when the client response omits it (production).
     logger.error(`[ErrorHandler] ${normalized.code}: ${normalized.message}`, {
@@ -90,7 +88,9 @@ export function createErrorMiddleware(logger: ILogger) {
     }
 
     // Always include requestId so clients can cite it when reporting issues.
-    // Only include stack in dev — avoid leaking internal paths in prod.
+    // The stack is never sent, not even in development (audit F-9): it carries
+    // absolute filesystem paths, and the log line above holds it under the
+    // same requestId.
     const response: Record<string, unknown> = {
       error: {
         code: normalized.code,
@@ -107,10 +107,6 @@ export function createErrorMiddleware(logger: ILogger) {
       (response['error'] as Record<string, unknown>)['issues'] = normalized.issues;
     } else if (normalized instanceof RevisionConflictError) {
       (response['error'] as Record<string, unknown>)['current'] = normalized.current;
-    }
-
-    if (isDev && normalized.stack) {
-      (response['error'] as Record<string, unknown>)['stack'] = normalized.stack;
     }
 
     res.status(status).json(response);
