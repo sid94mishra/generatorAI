@@ -11,7 +11,8 @@
 // providers/faux/FauxProvider.ts) standing in for a real model. The server
 // reads GENERATORAI_TEST_FAUX_HARNESS / GENERATORAI_TEST_FAUX_SCRIPT once at
 // boot (apps/server/src/composition-root.ts) — this spec cannot set them
-// itself, so it self-skips when the fixture is not wired up on the server.
+// itself. It self-skips only when no Faux provider is ready; a Faux server
+// whose script lacks "E2E Composer Faux" fails with a message saying so.
 //
 // The fixture (fixtures/faux-composer-changes.json) scripts the chat named
 // "E2E Composer Faux": one turn that emits text, then an `ask_question`
@@ -19,29 +20,21 @@
 // the `role="status"` banner with `pendingInteractionLabel` (ChatPage.tsx:
 // "The agent is waiting for your answer." for a generic question gate).
 //
-// Run (three terminals, from the repo root):
-//   FAUX=$(pwd)/agent-tests/e2e/fixtures/faux-composer-changes.json
-//
-//   # 1. server — isolated DB/artifacts/workspaces dirs per
-//   #    .claude/CLAUDE.md's "Isolated test servers" rule, PLUS the Faux flags:
-//   GENERATORAI_TEST_FAUX_HARNESS=true GENERATORAI_TEST_FAUX_SCRIPT="$FAUX" \
-//     DB_PATH=/tmp/gai-e2e/db.sqlite ARTIFACTS_DIR=/tmp/gai-e2e/artifacts \
-//     WORKSPACES_DIR=/tmp/gai-e2e/workspaces GENERATORAI_BIND_HOST=127.0.0.1 \
-//     pnpm --filter @generatorai/server dev
-//
-//   # 2. web
-//   pnpm --filter @generatorai/web dev
-//
-//   # 3. this spec — GENERATORAI_TEST_FAUX_SCRIPT is read here too, only to
-//   #    decide whether to self-skip (it never reaches the server from here):
-//   cd agent-tests && GENERATORAI_TEST_FAUX_SCRIPT="$FAUX" \
+// Run: the sandbox (scripts/redesign/sandbox.mjs) loads every
+// fixtures/faux-*.json by default (scripts/redesign/lib/sandbox-faux.mjs):
+//   node scripts/redesign/sandbox.mjs --port=3341 --web-port=5341
+//   cd agent-tests && TARGET_URL=http://localhost:5341 API_URL=http://localhost:3341/api \
 //     npx playwright test e2e/composer.spec.ts
+// Any other server needs GENERATORAI_TEST_FAUX_HARNESS=true and
+// GENERATORAI_TEST_FAUX_SCRIPT=<a script with this conversation> in ITS
+// environment (plus the isolated DB_PATH / ARTIFACTS_DIR / WORKSPACES_DIR /
+// GENERATORAI_BIND_HOST of .claude/CLAUDE.md) — setting it for the test
+// runner does nothing.
 // ────────────────────────────────────────────────────────────────
 
 import { test, expect } from '../helpers/test';
 import { apiRequest } from '../helpers/api';
 
-const FAUX_SCRIPT = process.env.GENERATORAI_TEST_FAUX_SCRIPT;
 const CHAT_NAME = 'E2E Composer Faux';
 
 /** Mirrors subsystems-live.spec.ts's provider-availability check (GET /harness/providers). */
@@ -59,10 +52,6 @@ test.describe('Composer — Faux-scripted (09 §5.1)', () => {
     gotoApp,
     tracker,
   }) => {
-    test.skip(
-      !FAUX_SCRIPT,
-      'Set GENERATORAI_TEST_FAUX_SCRIPT to fixtures/faux-composer-changes.json (same path the server was started with) to run this spec.',
-    );
     test.skip(
       !(await fauxProviderReady()),
       'The server is not running with GENERATORAI_TEST_FAUX_HARNESS=true — no "faux" provider is ready.',
@@ -131,6 +120,9 @@ test.describe('Composer — Faux-scripted (09 §5.1)', () => {
     //    "The agent is waiting for your answer." copy for a `question` gate,
     //    rendered by ChatInput.tsx in a `role="status"` banner. ──
     const waitingBanner = page.getByRole('status').filter({ hasText: 'waiting for your answer' });
-    await expect(waitingBanner).toBeVisible({ timeout: 15_000 });
+    await expect(
+      waitingBanner,
+      `no scripted ask_question — does the server's GENERATORAI_TEST_FAUX_SCRIPT script "${CHAT_NAME}"? (the sandbox loads fixtures/faux-*.json)`,
+    ).toBeVisible({ timeout: 15_000 });
   });
 });

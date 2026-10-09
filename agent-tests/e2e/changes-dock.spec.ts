@@ -21,28 +21,21 @@
 //
 // Like composer.spec.ts, the server reads GENERATORAI_TEST_FAUX_HARNESS /
 // GENERATORAI_TEST_FAUX_SCRIPT once at boot and this spec cannot set them —
-// it self-skips when the fixture is not wired up.
+// it self-skips only when no Faux provider is ready.
 //
 // Cross-platform: the dummy repo lives under os.tmpdir() (never this
 // checkout) and every filesystem/git check uses Node's path/child_process
 // APIs (execFileSync with an argv array, no shell), so this runs unmodified
 // on Windows, Linux and macOS (.claude/CLAUDE.md's cross-platform rule).
 //
-// Run (three terminals, from the repo root):
-//   FAUX=$(pwd)/agent-tests/e2e/fixtures/faux-composer-changes.json
-//
-//   # 1. server — isolated DB/artifacts/workspaces dirs, PLUS the Faux flags:
-//   GENERATORAI_TEST_FAUX_HARNESS=true GENERATORAI_TEST_FAUX_SCRIPT="$FAUX" \
-//     DB_PATH=/tmp/gai-e2e/db.sqlite ARTIFACTS_DIR=/tmp/gai-e2e/artifacts \
-//     WORKSPACES_DIR=/tmp/gai-e2e/workspaces GENERATORAI_BIND_HOST=127.0.0.1 \
-//     pnpm --filter @generatorai/server dev
-//
-//   # 2. web
-//   pnpm --filter @generatorai/web dev
-//
-//   # 3. this spec:
-//   cd agent-tests && GENERATORAI_TEST_FAUX_SCRIPT="$FAUX" \
+// Run: the sandbox (scripts/redesign/sandbox.mjs) loads every
+// fixtures/faux-*.json by default (scripts/redesign/lib/sandbox-faux.mjs):
+//   node scripts/redesign/sandbox.mjs --port=3341 --web-port=5341
+//   cd agent-tests && TARGET_URL=http://localhost:5341 API_URL=http://localhost:3341/api \
 //     npx playwright test e2e/changes-dock.spec.ts
+// Any other server needs GENERATORAI_TEST_FAUX_HARNESS=true and
+// GENERATORAI_TEST_FAUX_SCRIPT=<a script with this conversation> in ITS
+// environment — setting it for the test runner does nothing.
 // ────────────────────────────────────────────────────────────────
 
 import { execFileSync } from 'node:child_process';
@@ -56,7 +49,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // agent-tests/e2e/ → repo root → scripts/redesign/make-dummy-repo.mjs
 const MAKE_DUMMY_REPO = join(__dirname, '..', '..', 'scripts', 'redesign', 'make-dummy-repo.mjs');
 
-const FAUX_SCRIPT = process.env.GENERATORAI_TEST_FAUX_SCRIPT;
 const CHAT_NAME = 'E2E Changes Faux';
 
 /** Mirrors subsystems-live.spec.ts's provider-availability check (GET /harness/providers). */
@@ -145,10 +137,6 @@ async function waitForWorkspaceReady(workspaceId: string, timeoutMs = 20_000): P
 test.describe('Changes dock — dummy repo + Faux file_edit (09 §5.3)', () => {
   test('Keep one file, Undo one file, Undo all → clean tree', async ({ page, gotoApp, tracker }) => {
     test.skip(
-      !FAUX_SCRIPT,
-      'Set GENERATORAI_TEST_FAUX_SCRIPT to fixtures/faux-composer-changes.json (same path the server was started with) to run this spec.',
-    );
-    test.skip(
       !(await fauxProviderReady()),
       'The server is not running with GENERATORAI_TEST_FAUX_HARNESS=true — no "faux" provider is ready.',
     );
@@ -187,7 +175,10 @@ test.describe('Changes dock — dummy repo + Faux file_edit (09 §5.3)', () => {
       await changesTab.click();
 
       // Wait for the three Faux-scripted edits to land and be summarised.
-      await expect(page.getByTestId('changes-count')).toHaveText(/3 changes?/, { timeout: 20_000 });
+      await expect(
+        page.getByTestId('changes-count'),
+        `no scripted edits — does the server's GENERATORAI_TEST_FAUX_SCRIPT script "${CHAT_NAME}"? (the sandbox loads fixtures/faux-*.json)`,
+      ).toHaveText(/3 changes?/, { timeout: 20_000 });
 
       // ── Keep one file → the Kept count appears/goes up ──
       await page.getByRole('button', { name: 'Keep src/app.ts' }).click();

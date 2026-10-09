@@ -16,7 +16,8 @@
 //   2. Starts the server on :3197 with a temp DB under
 //      os.tmpdir()/generatorai-sandbox-* (bare env names — D-44), loopback
 //      dev-auth, and (by default) the Faux harness scripted from
-//      agent-tests/vrt/fixtures/sandbox.faux.json.
+//      agent-tests/vrt/fixtures/sandbox.faux.json merged with the e2e
+//      fixtures (agent-tests/e2e/fixtures/faux-*.json — lib/sandbox-faux.mjs).
 //   3. Asserts the startup log's dbPath is the temp one before continuing.
 //   4. Runs agent-tests/vrt/seed.ts against it.
 //   5. Starts Vite on :5197, proxying /api to :3197 (GENERATORAI_DEV_API_TARGET
@@ -42,13 +43,22 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { nodeBinArgs, pnpmCommand } from './lib/spawn-node-bin.mjs';
 import { sandboxOptions, sandboxCorsOrigins } from './lib/sandbox-options.mjs';
+import { prepareSandboxFauxScript } from './lib/sandbox-faux.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
 const SERVER_DIR = path.join(ROOT, 'apps', 'server');
 const WEB_DIR = path.join(ROOT, 'apps', 'web');
-const BUNDLE_ENTRY = path.join(SERVER_DIR, 'dist-bundle', 'server.mjs');
-const FAUX_SCRIPT_FIXTURE = path.join(ROOT, 'agent-tests', 'vrt', 'fixtures', 'sandbox.faux.json');
+// GENERATORAI_SANDBOX_BUNDLE — run another bundle of the server (absolute, or
+// relative to the repo root). Staging the desktop runtime
+// (apps/desktop/scripts/stage-server-runtime.mjs) installs Electron-ABI native
+// addons into dist-bundle/node_modules, which system Node cannot load; a bundle
+// one level under apps/server/ with no node_modules beside it resolves the
+// workspace's Node-ABI copies instead and keeps every path the server derives
+// from its own location (templates/, agent-host, pty-host, web/dist) intact.
+const BUNDLE_ENTRY = process.env.GENERATORAI_SANDBOX_BUNDLE
+  ? path.resolve(ROOT, process.env.GENERATORAI_SANDBOX_BUNDLE)
+  : path.join(SERVER_DIR, 'dist-bundle', 'server.mjs');
 const SEED_SCRIPT = path.join(ROOT, 'agent-tests', 'vrt', 'seed.ts');
 
 // Not `gai-`/`genai-` — those prefixes are what scripts/sweep-temp-workspaces.mjs deletes.
@@ -200,6 +210,17 @@ const extensionsDir = path.join(sandboxDir, 'extensions');
 for (const dir of [artifactsDir, workspacesDir, extensionsDir]) fs.mkdirSync(dir, { recursive: true });
 log(`temp dir: ${sandboxDir}`);
 
+// The Faux script: the sandbox fixture merged with the e2e fixtures, so the
+// whole e2e suite runs on a plain sandbox (lib/sandbox-faux.mjs).
+const fauxScript = realHarness ? null : prepareSandboxFauxScript(ROOT, sandboxDir);
+if (fauxScript) {
+  log(
+    fauxScript.sources.length > 0
+      ? `Faux script: ${fauxScript.sources.map((f) => path.relative(ROOT, f)).join(' + ')}`
+      : `Faux script: ${fauxScript.file}`,
+  );
+}
+
 // ── 3. Start the server ─────────────────────────────────────────
 
 const serverEnv = {
@@ -220,7 +241,7 @@ const serverEnv = {
     ? {}
     : {
         GENERATORAI_TEST_FAUX_HARNESS: 'true',
-        GENERATORAI_TEST_FAUX_SCRIPT: process.env.GENERATORAI_SANDBOX_FAUX_SCRIPT ?? FAUX_SCRIPT_FIXTURE,
+        GENERATORAI_TEST_FAUX_SCRIPT: fauxScript.file,
       }),
 };
 
