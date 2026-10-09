@@ -52,6 +52,7 @@ import {
   type RestorePhase,
 } from './restoreState';
 import { buildEndpointCandidates } from '../transport/endpointPlan';
+import { ENDPOINT_PROBE_TIMEOUT_MS, orderEndpoints, rememberEndpoint, rememberedEndpoint } from '../transport/endpointMemory';
 import { endpointSecurity, InsecureEndpointError, usableEndpoints, type ConnectionProblem, type TrustRecord } from '../transport/trust';
 import { applyTrust, deleteTrust, explainConnectionFailure, installTrust, loadTrust, saveTrust } from './serverTrust';
 import { assertServerWriteAllowed } from '../api/offlinePolicy';
@@ -149,6 +150,11 @@ async function verifyHostIdentity(endpoint: string, signal?: AbortSignal): Promi
   return body.serverId;
 }
 
+/** The server answered with another identity key: the supervisor stopped on it, or the runtime's own probe did. */
+function hostMismatched(supervisor: EndpointSupervisor | null, state: AuthState): boolean {
+  return supervisor?.currentStatus.state === 'host-mismatch' || (state.status === 'error' && /identity at this address changed/i.test(state.message));
+}
+
 interface AuthSnapshot {
   state: AuthState;
   endpoint: string | null;
@@ -187,7 +193,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   const trustReady = useRef(new Map<string, Promise<TrustRecord | null>>());
 
   const keyStore = useMemo(() => serverId ? new MobileDeviceKeyStore(serverId) : null, [serverId]);
-  const sessionStore = useMemo(() => serverId ? new MobileSessionStore(serverId) : null, [serverId]);
+  const sessionStore = useMemo(() => serverId ? new MobileSessionStore(serverId, () => rememberedEndpoint(prefs, serverId)) : null, [serverId]);
   const runtimes = useRef(new Map<string, { runtime: AuthenticatedClientRuntime; supervisor: EndpointSupervisor; keyStore: MobileDeviceKeyStore; state: AuthState }>());
   const supervisorRef = useRef<EndpointSupervisor | null>(null);
   const runtimeRef = useRef<AuthenticatedClientRuntime | null>(null);
@@ -204,15 +210,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       pinnedServerId: string,
       endpoints?: readonly string[],
     ): EndpointSupervisor => {
+      // The address that answered last goes first; the rest keep the offer's order (MD-203).
+      const [first = pairedEndpoint, ...rest] = orderEndpoints([pairedEndpoint, ...(endpoints ?? [])], rememberedEndpoint(prefs, pinnedServerId));
       const supervisor = new EndpointSupervisor({
         pinnedServerId,
         candidates: buildEndpointCandidates({
-          pairedEndpoint,
-          discoveredEndpoints: endpoints?.filter((endpoint) => endpoint !== pairedEndpoint),
+          pairedEndpoint: first,
+          discoveredEndpoints: rest,
           localOnly: prefs.getBoolean(PREF_KEYS.localOnly),
         }),
         verifyHost: verifyHostIdentity,
         onStatusChange: (next) => {
+          if (next.state === 'connected') rememberEndpoint(prefs, pinnedServerId, next.endpoint);
           if (activeServerRef.current !== pinnedServerId) return;
           setTransport(next);
           // The context's endpoint followed every transport change before M10-01 (it was read in the memo).
@@ -228,12 +237,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     const existing = runtimes.current.get(id);
     if (existing) return existing;
     const keys = new MobileDeviceKeyStore(id);
-    const sessions = new MobileSessionStore(id);
+    const sessions = new MobileSessionStore(id, () => rememberedEndpoint(prefs, id));
     const supervisor = buildSupervisor(endpoint, id, endpoints);
     let latest: AuthState = { status: 'unpaired' };
     if (!trustReady.current.has(id)) trustReady.current.set(id, installTrust(id, [endpoint, ...(endpoints ?? [])]).catch(() => null));
     const runtime = new AuthenticatedClientRuntime({
       endpoint, keyStore: keys, sessionStore: sessions,
+      identityProbeTimeoutMs: ENDPOINT_PROBE_TIMEOUT_MS,
       fetchImpl: async (input, init) => {
         await trustReady.current.get(id);
         // The plain-HTTP LAN lane is gone (MD-201): an absolute http:// URL to another device is never requested.
@@ -312,7 +322,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
             if (!cancelled) next = await runtime.retryInitialize();
           }
           if (!cancelled && next.status === 'error') {
-            const problem = await explainConnectionFailure(sessionEndpoints, await trustReady.current.get(session.serverId) ?? null, startedAt);
+            const problem = await explainConnectionFailure(sessionEndpoints, await trustReady.current.get(session.serverId) ?? null, startedAt, hostMismatched(entry.supervisor, next));
             if (!cancelled) setConnectionProblem(problem);
           }
           if (!cancelled) {
@@ -407,16 +417,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       return trust;
     });
     trustReady.current.set(consent.serverId, installed);
+    // A fresh runtime for a re-pair: the old one has the old offer's candidates and its chosen route cached.
+    const stale = runtimes.current.get(consent.serverId);
+    if (stale) runtimes.current.delete(consent.serverId);
     const entry = getRuntime(consent.serverId, primary, endpoints);
     runtimeRef.current = entry.runtime;
     supervisorRef.current = entry.supervisor;
     dispatchAuth(authSnapshot({ status: 'pairing' }, runtimeRef.current));
     try {
       await installed;
-      await entry.runtime.completePairing({ pairingToken: consent.pairingGrant, deviceName, platform: 'mobile', serverId: consent.serverId, endpoint: primary, endpoints });
-      serverRegistry.add({ serverId: consent.serverId, label: consent.serverName, endpoint: primary, endpoints, kind: 'remote', managed: false, lastConnectedAt: Date.now() });
+      // Find the first address that answers (the offer lists ts.net first, which a phone without Tailscale cannot reach)
+      // and pair through it; the rest stay as fallbacks in the offer's order (MD-203).
+      const working = await entry.supervisor.connect(1).then((adapter) => adapter.endpoint, () => null);
+      const ordered = orderEndpoints(endpoints, working);
+      const selected = ordered[0] ?? primary;
+      await entry.runtime.completePairing({ pairingToken: consent.pairingGrant, deviceName, platform: 'mobile', serverId: consent.serverId, endpoint: selected, endpoints: ordered });
+      serverRegistry.add({ serverId: consent.serverId, label: consent.serverName, endpoint: selected, endpoints: ordered, kind: 'remote', managed: false, lastConnectedAt: Date.now() });
       setServers(serverRegistry.read().connections);
       setBackgroundActiveServer(consent.serverId);
+      if (stale) void stale.supervisor.disconnect();
       resetStepUp();
       setKeyBacking(entry.keyStore.backing);
     } catch (error) {
@@ -430,6 +449,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
         return previousTrust;
       })().catch(() => null);
       trustReady.current.set(consent.serverId, restored);
+      void entry.supervisor.disconnect();
+      if (stale) {
+        runtimes.current.set(consent.serverId, stale);
+        registerAuthenticatedFetch(consent.serverId, (path, init) => stale.runtime.fetch(path, init));
+      } else {
+        runtimes.current.delete(consent.serverId);
+        registerAuthenticatedFetch(consent.serverId, null);
+      }
       const problem = await explainConnectionFailure(endpoints, trust, 0).catch(() => null);
       activeServerRef.current = previousId;
       setServerId(previousId);
@@ -439,7 +466,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       dispatchAuth(authSnapshot(previous?.state ?? { status: 'unpaired' }, runtimeRef.current));
       setBackgroundActiveServer(previousId);
       // A refused certificate or a denied Local Network is named, not reported as "can't reach" (MD-202).
-      if (problem === 'certificate-changed' || problem === 'local-network-denied') throw Object.assign(new Error(error instanceof Error ? error.message : String(error)), { problem });
+      if (problem === 'identity-changed' || problem === 'local-network-denied') throw Object.assign(new Error(error instanceof Error ? error.message : String(error)), { problem });
       throw error;
     } finally {
       pairingRef.current = false;
@@ -503,7 +530,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     const server = id ? serverRegistry.read().connections.find((item) => item.serverId === id) : undefined;
     setConnectionProblem(
       next.status === 'error' && id && server
-        ? await explainConnectionFailure([server.endpoint, ...(server.endpoints ?? [])], await trustReady.current.get(id) ?? null, startedAt)
+        ? await explainConnectionFailure([server.endpoint, ...(server.endpoints ?? [])], await trustReady.current.get(id) ?? null, startedAt, hostMismatched(supervisorRef.current, next))
         : null,
     );
     dispatchAuth(authSnapshot(next, runtimeRef.current));

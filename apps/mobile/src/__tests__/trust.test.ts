@@ -35,8 +35,9 @@ describe('endpoint security (MD-201)', () => {
   it('drops plain endpoints and refuses a list with nothing left', () => {
     expect(usableEndpoints(['http://192.168.1.10:3100', 'https://192.168.1.10:3100', 'http://127.0.0.1:3100'])).toEqual([
       'https://192.168.1.10:3100',
-      'http://127.0.0.1:3100',
     ]);
+    // Plain HTTP to this device only when nothing is offered over HTTPS (a simulator paired to a local server).
+    expect(usableEndpoints(['http://127.0.0.1:3100', 'http://192.168.1.10:3100'])).toEqual(['http://127.0.0.1:3100']);
     expect(() => assertSecureEndpoints(['http://192.168.1.10:3100'])).toThrow(InsecureEndpointError);
     expect(() => assertSecureEndpoints(['http://192.168.1.10:3100', 'https://192.168.1.10:3100'])).not.toThrow();
   });
@@ -106,11 +107,15 @@ describe('diagnoseConnection (MD-202)', () => {
     expect(diagnoseConnection({ endpoints: ['http://192.168.1.10:3100'], record: null, since: 0, lastFailure: () => 0 })).toBe('insecure-endpoint');
   });
 
-  it('names a refused certificate only for a failure during this attempt', () => {
+  it('names a refused certificate (identity changed) only for a failure during this attempt', () => {
     const failedAt = (at: number) => (host: string, port: number) => (host === 'studio.local' && port === 3100 ? at : 0);
-    expect(diagnoseConnection({ endpoints, record, since: 1_000, lastFailure: failedAt(1_500) })).toBe('certificate-changed');
+    expect(diagnoseConnection({ endpoints, record, since: 1_000, lastFailure: failedAt(1_500) })).toBe('identity-changed');
     expect(diagnoseConnection({ endpoints, record, since: 2_000, lastFailure: failedAt(1_500) })).toBeNull();
     expect(diagnoseConnection({ endpoints, record, since: 1_000, lastFailure: () => 0 })).toBeNull();
+  });
+
+  it('names a changed identity key the same way (a reinstalled server on loopback or with a custom certificate)', () => {
+    expect(diagnoseConnection({ endpoints, record: null, since: 0, lastFailure: () => 0, hostMismatch: true })).toBe('identity-changed');
   });
 
   it('never blames the certificate of an unpinned server', () => {

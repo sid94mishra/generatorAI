@@ -4,7 +4,7 @@ import { connectionProblemCopy } from '../services/auth/connectionProblem';
 
 describe('connection problem copy (MD-202)', () => {
   it('asks to pair again for a changed certificate and a plain-HTTP pairing', () => {
-    expect(connectionProblemCopy('certificate-changed', 'X')).toMatchObject({ title: 'This server’s identity changed — pair again', action: 'pair' });
+    expect(connectionProblemCopy('identity-changed', 'X')).toMatchObject({ title: 'This server’s identity changed — pair again', action: 'pair' });
     expect(connectionProblemCopy('insecure-endpoint', 'X')).toMatchObject({ action: 'pair' });
   });
 

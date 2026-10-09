@@ -11,13 +11,13 @@ export interface ConnectionProblemCopy {
 /** `localNetworkSetting` is the platform's path to the switch (`nouns().localNetworkSetting`). */
 export function connectionProblemCopy(problem: ConnectionProblem, localNetworkSetting: string): ConnectionProblemCopy {
   switch (problem) {
-    case 'certificate-changed':
+    case 'identity-changed':
       return {
         title: 'This server’s identity changed — pair again',
         body:
-          'Its certificate is not the one this device trusted when it paired, so the connection was refused. That happens when ' +
-          'GeneratorAI was reinstalled on your computer — or when something on this network is impersonating it. Pair again ' +
-          'only if you expected this.',
+          'The server at this address is not the one this device paired with — its certificate or its identity key changed — so ' +
+          'the connection was refused. That happens when GeneratorAI was reinstalled on your computer, or when something on this ' +
+          'network is impersonating it. Pair again only if you expected this.',
         action: 'pair',
       };
     case 'insecure-endpoint':

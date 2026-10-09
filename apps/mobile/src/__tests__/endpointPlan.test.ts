@@ -21,14 +21,21 @@ describe('buildEndpointCandidates', () => {
   );
 
   it('always ranks loopback above LAN regardless of list order', () => {
-    // A simulator pointed at a host on the same machine must not go out to
-    // the LAN interface and back.
     const c = buildEndpointCandidates({
       pairedEndpoint: 'https://192.168.1.10:3100',
-      discoveredEndpoints: ['http://127.0.0.1:3100'],
+      discoveredEndpoints: ['https://127.0.0.1:3100'],
       fetchImpl,
     });
     expect(c.map((x) => x.kind)).toEqual(['loopback', 'lan']);
+  });
+
+  it('skips plain-HTTP loopback when the server offers https:// (MD-201)', () => {
+    const c = buildEndpointCandidates({
+      pairedEndpoint: 'https://studio.tail1234.ts.net',
+      discoveredEndpoints: ['https://192.168.1.10:3100', 'http://127.0.0.1:3100'],
+      fetchImpl,
+    });
+    expect(c.map((x) => x.endpoint)).toEqual(['https://studio.tail1234.ts.net', 'https://192.168.1.10:3100']);
   });
 
   it('keeps discovered endpoints in the order they were given', () => {
@@ -85,7 +92,7 @@ describe('buildEndpointCandidates', () => {
       discoveredEndpoints: ['http://studio.local:3100', 'https://192.168.1.10:3100', 'http://127.0.0.1:3100'],
       fetchImpl,
     });
-    expect(c.map((x) => x.endpoint)).toEqual(['http://127.0.0.1:3100', 'https://192.168.1.10:3100']);
+    expect(c.map((x) => x.endpoint)).toEqual(['https://192.168.1.10:3100']);
   });
 
   it('returns nothing when there is no endpoint at all', () => {

@@ -86,9 +86,16 @@ export function endpointSecurity(origin: string): EndpointSecurity {
   return isLoopbackHost(target.host) ? 'loopback' : 'plain';
 }
 
-/** The endpoints the app may contact, order kept: plain HTTP to another device is dropped (MD-201). */
+/**
+ * The endpoints the app may contact, order kept (MD-201): plain HTTP to another device is dropped, and so is plain
+ * HTTP to this device whenever the server also offers HTTPS — an offer's `http://127.0.0.1` is the phone itself on a
+ * phone, and on a simulator it would skip the pinned TLS the app exists to use.
+ */
 export function usableEndpoints(origins: readonly string[]): string[] {
-  return origins.filter((origin) => endpointSecurity(origin) !== 'plain');
+  const allowed = origins.filter((origin) => endpointSecurity(origin) !== 'plain');
+  return allowed.some((origin) => endpointSecurity(origin) === 'tls')
+    ? allowed.filter((origin) => endpointSecurity(origin) === 'tls')
+    : allowed;
 }
 
 export class InsecureEndpointError extends Error {
@@ -144,7 +151,7 @@ export function anchorTargets(record: TrustRecord | null, origins: readonly stri
 }
 
 /** Why a paired server cannot be used, when the reason is ours to explain (MD-202); null = an ordinary network failure. */
-export type ConnectionProblem = 'insecure-endpoint' | 'certificate-changed' | 'local-network-denied';
+export type ConnectionProblem = 'insecure-endpoint' | 'identity-changed' | 'local-network-denied';
 
 export function diagnoseConnection(input: {
   endpoints: readonly string[];
@@ -153,11 +160,14 @@ export function diagnoseConnection(input: {
   lastFailure: (host: string, port: number) => number;
   /** Only failures at or after this moment count (the attempt that just failed). */
   since: number;
-}): Extract<ConnectionProblem, 'insecure-endpoint' | 'certificate-changed'> | null {
+  /** The server answered with a different identity key (`serverId`) than the one paired with. */
+  hostMismatch?: boolean;
+}): Extract<ConnectionProblem, 'insecure-endpoint' | 'identity-changed'> | null {
   if (input.endpoints.length && usableEndpoints(input.endpoints).length === 0) return 'insecure-endpoint';
+  if (input.hostMismatch) return 'identity-changed';
   for (const key of anchorTargets(input.record, input.endpoints)) {
     const colon = key.lastIndexOf(':');
-    if (input.lastFailure(key.slice(0, colon), Number(key.slice(colon + 1))) >= input.since) return 'certificate-changed';
+    if (input.lastFailure(key.slice(0, colon), Number(key.slice(colon + 1))) >= input.since) return 'identity-changed';
   }
   return null;
 }

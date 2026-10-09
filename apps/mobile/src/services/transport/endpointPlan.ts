@@ -19,7 +19,8 @@
 
 import { DirectTransport, type TransportCandidate } from '@generatorai/client-transport';
 
-import { endpointSecurity } from './trust';
+import { ENDPOINT_PROBE_TIMEOUT_MS } from './endpointMemory';
+import { endpointSecurity, usableEndpoints } from './trust';
 
 export interface EndpointPlanInput {
   /** Endpoint pinned at pairing, e.g. `https://192.168.1.10:3100`. */
@@ -79,13 +80,17 @@ export function buildEndpointCandidates(input: EndpointPlanInput): TransportCand
         new DirectTransport({
           kind,
           endpoint,
+          // A short budget per address so an unreachable one (a ts.net name without Tailscale) falls through fast (MD-203).
+          probeTimeoutMs: ENDPOINT_PROBE_TIMEOUT_MS,
           ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
         }),
     });
   };
 
-  addDirect(input.pairedEndpoint, 10);
-  input.discoveredEndpoints?.forEach((endpoint, i) => addDirect(endpoint, 20 + i));
+  // Loopback http:// only when the server offers no https:// at all (MD-201).
+  const usable = new Set(usableEndpoints([input.pairedEndpoint, ...(input.discoveredEndpoints ?? [])]));
+  if (usable.has(input.pairedEndpoint)) addDirect(input.pairedEndpoint, 10);
+  input.discoveredEndpoints?.forEach((endpoint, i) => usable.has(endpoint) && addDirect(endpoint, 20 + i));
 
   // Local-only mode must never contact the relay. This is a privacy promise,
   // not an optimisation: a user who selects it is stating that their traffic

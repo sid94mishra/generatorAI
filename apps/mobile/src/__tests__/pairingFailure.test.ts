@@ -16,7 +16,7 @@ describe('classifyPairingFailure', () => {
   });
 
   it('names a refused certificate, a denied Local Network and a plain-HTTP offer (MD-202)', () => {
-    expect(classifyPairingFailure(Object.assign(new Error('Could not verify the paired server identity.'), { problem: 'certificate-changed' }))).toEqual({
+    expect(classifyPairingFailure(Object.assign(new Error('Could not verify the paired server identity.'), { problem: 'identity-changed' }))).toEqual({
       kind: 'certificate',
       message: CERTIFICATE_MISMATCH_MESSAGE,
       retryable: false,

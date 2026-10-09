@@ -35,7 +35,7 @@ export function assertDummyRepo(target) {
  * phone on the same Wi-Fi all reach: the first https:// private IPv4 address goes first. There is no plain-HTTP
  * address to rewrite to any more (D-127).
  */
-export function rewritePairUrl(pairingUrl, platform) {
+export function rewritePairUrl(pairingUrl, platform, { keepOrder = false } = {}) {
   if (!['ios', 'android'].includes(platform)) throw new Error('Pairing platform must be ios or android');
   const url = new URL(pairingUrl);
   if (url.protocol !== 'generatorai:' || (url.hostname || url.pathname.replace(/^\//, '')) !== 'pair') {
@@ -50,6 +50,9 @@ export function rewritePairUrl(pairingUrl, platform) {
   }
   const lan = offer.endpoints.find(item => /^https:\/\/(10|192\.168|172\.(1[6-9]|2\d|3[01]))\.[\d.]+:\d+$/.test(item.origin));
   if (!lan) throw new Error('The sandbox offers no https:// LAN address; start it with --lan on a machine that is on a network');
+  // --keep-order: pair through the offer exactly as minted (e.g. an unreachable ts.net address first), so the app's own
+  // fallback picks the route (MD-203).
+  if (keepOrder) return pairingUrl;
   offer.endpoint = lan.origin;
   offer.endpoints = [lan, ...offer.endpoints.filter(item => item !== lan)].map((item, priority) => ({ ...item, priority }));
   url.searchParams.set('code', Buffer.from(JSON.stringify(offer)).toString('base64url'));

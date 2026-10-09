@@ -49,7 +49,7 @@ export function classifyPairingFailure(error: unknown): PairingFailure {
   const text = `${name} ${raw}`;
   // Named by the trust layer (MD-202): the pinned CA refused the handshake, or Local Network access is off.
   const problem = (error as { problem?: unknown } | null)?.problem;
-  if (problem === 'certificate-changed') return { kind: 'certificate', message: CERTIFICATE_MISMATCH_MESSAGE, retryable: false };
+  if (problem === 'identity-changed') return { kind: 'certificate', message: CERTIFICATE_MISMATCH_MESSAGE, retryable: false };
   if (problem === 'local-network-denied') return { kind: 'local-network', message: raw, retryable: true };
   if (name === 'InsecureEndpointError') return { kind: 'insecure', message: raw, retryable: false };
 

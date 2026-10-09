@@ -210,7 +210,14 @@ export class MobileDeviceKeyStore implements DeviceKeyStore {
  */
 export class MobileSessionStore implements SessionStore {
   private readonly keys: ReturnType<typeof serverStorageKeys>;
-  constructor(private readonly serverId: string) { this.keys = serverStorageKeys(serverId); }
+  /**
+   * `preferred`: the address that answered last (MD-203). A loaded session leads with it when the server still lists
+   * it, so the runtime's identity probe tries it first and falls back through the rest in order.
+   */
+  constructor(
+    private readonly serverId: string,
+    private readonly preferred: () => string | null = () => null,
+  ) { this.keys = serverStorageKeys(serverId); }
   async load(): Promise<StoredSession | null> {
     const raw = await SecureStore.getItemAsync(this.keys.session, KEYCHAIN_OPTIONS);
     if (!raw) return null;
@@ -221,7 +228,10 @@ export class MobileSessionStore implements SessionStore {
       if (!parsed.deviceId || !parsed.resumeSecret || !parsed.endpoint || parsed.serverId !== this.serverId) {
         return null;
       }
-      return parsed;
+      const preferred = this.preferred();
+      const listed = [parsed.endpoint, ...(parsed.endpoints ?? [])];
+      if (!preferred || preferred === parsed.endpoint || !listed.includes(preferred)) return parsed;
+      return { ...parsed, endpoint: preferred, endpoints: [...new Set([preferred, ...listed])] };
     } catch {
       return null;
     }

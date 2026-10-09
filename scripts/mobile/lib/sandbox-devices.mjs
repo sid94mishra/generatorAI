@@ -91,9 +91,9 @@ export async function releaseAgent(target) {
   try { await agent(target, ['close']); }
   catch (error) { if (error.code !== 'SESSION_NOT_FOUND') throw error; }
 }
-export async function mintPair(session, target) {
+export async function mintPair(session, target, { keepOrder = false } = {}) {
   const offer = await session.api('/auth/pair', { deviceName: target.name ?? `gai-${target.platform}`, platform: 'mobile', ttlMs: 600000 });
-  return rewritePairUrl(offer.pairingUrl, target.platform);
+  return rewritePairUrl(offer.pairingUrl, target.platform, { keepOrder });
 }
 // The pinned driver's iOS presentation heuristic treats an empty fullscreen
 // toolbar as an overlay. Raw XCTest preserves the native hittability/refs;
@@ -215,7 +215,7 @@ async function scrollAndPress(target, id, next = []) {
   }
   throw lastError;
 }
-export async function pairTarget(session, target, { repair = false, noConfirm = false } = {}) {
+export async function pairTarget(session, target, { repair = false, noConfirm = false, keepOrder = false } = {}) {
   const id = targetId(target);
   const installed = target.platform === 'ios'
     ? await run('xcrun', ['simctl', 'get_app_container', id, APP_ID])
@@ -265,7 +265,7 @@ export async function pairTarget(session, target, { repair = false, noConfirm = 
   }
   const before = new Set(devices.map(device => device.deviceId));
   const started = Date.now();
-  const url = await mintPair(session, target);
+  const url = await mintPair(session, target, { keepOrder });
   if (target.platform === 'ios') await run('xcrun', ['simctl', 'openurl', id, url]);
   else await run(ADB, ['-s', id, 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', url, APP_ID]);
   const linked = await readSnapshot(target);

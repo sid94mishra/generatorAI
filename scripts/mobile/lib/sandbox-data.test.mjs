@@ -24,6 +24,7 @@ test('pair links put the https LAN address first and preserve consent/security f
     ]);
     for (const key of Object.keys(offer).filter(key => !['endpoint', 'endpoints'].includes(key))) assert.deepEqual(actual[key], offer[key]);
   }
+  assert.equal(rewritePairUrl(url, 'ios', { keepOrder: true }), url);
   assert.throws(() => rewritePairUrl('https://example.invalid/pair?code=x', 'ios'));
   assert.throws(() => rewritePairUrl(url, 'web'));
   const plain = { ...offer, endpoint: 'http://10.0.2.2:3297', endpoints: [{ origin: 'http://10.0.2.2:3297', reachability: 'lan', priority: 0 }] };

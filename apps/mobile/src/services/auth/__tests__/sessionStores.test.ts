@@ -16,3 +16,13 @@ it('does not read, overwrite or clear the other server credential', async () => 
   secrets.set('session.a', JSON.stringify(session('b')));
   expect(await a.load()).toBeNull();
 });
+it('leads with the address that answered last when the server still lists it (MD-203)', async () => {
+  let preferred: string | null = 'https://192.168.0.111:3197';
+  const store = new MobileSessionStore('c', () => preferred);
+  await store.save({ ...session('c'), endpoint: 'https://studio.tail1234.ts.net', endpoints: ['https://studio.tail1234.ts.net', 'https://192.168.0.111:3197', 'https://studio.local:3197'] });
+  const loaded = await store.load();
+  expect(loaded?.endpoint).toBe('https://192.168.0.111:3197');
+  expect(loaded?.endpoints).toEqual(['https://192.168.0.111:3197', 'https://studio.tail1234.ts.net', 'https://studio.local:3197']);
+  preferred = 'https://10.0.0.9:3197';
+  expect((await store.load())?.endpoint).toBe('https://studio.tail1234.ts.net');
+});

@@ -56,8 +56,9 @@ export async function explainConnectionFailure(
   endpoints: readonly string[],
   record: TrustRecord | null,
   since: number,
+  hostMismatch = false,
 ): Promise<ConnectionProblem | null> {
-  const known = diagnoseConnection({ endpoints, record, since, lastFailure: (host, port) => NativeTrust.lastFailure(host, port) });
+  const known = diagnoseConnection({ endpoints, record, since, hostMismatch, lastFailure: (host, port) => NativeTrust.lastFailure(host, port) });
   if (known) return known;
   for (const endpoint of endpoints) {
     const target = hostPortOf(endpoint);

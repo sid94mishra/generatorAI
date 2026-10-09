@@ -21,21 +21,10 @@ internal final class TrustInspectException: GenericException<String> {
   }
 }
 
-/** Records the presented chain and cancels: the request itself is never sent. */
-private final class ChainCapture: NSObject, URLSessionDelegate {
-  var chain: [SecCertificate] = []
-
-  func urlSession(
-    _ session: URLSession,
-    didReceive challenge: URLAuthenticationChallenge,
-    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
-  ) {
-    if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-      let trust = challenge.protectionSpace.serverTrust {
-      chain = (SecTrustCopyCertificateChain(trust) as? [SecCertificate]) ?? []
-    }
-    completionHandler(.cancelAuthenticationChallenge, nil)
-  }
+/** The certificates of a `SecTrust`, leaf first (by index: an `as? [SecCertificate]` bridge of a CF array is nil). */
+private func certificates(of trust: SecTrust) -> [SecCertificate] {
+  guard let chain = SecTrustCopyCertificateChain(trust) else { return [] }
+  return (0..<CFArrayGetCount(chain)).map { unsafeBitCast(CFArrayGetValueAtIndex(chain, $0), to: SecCertificate.self) }
 }
 
 private final class Once {
@@ -73,33 +62,51 @@ public final class GeneratorAITrustModule: Module {
     }
 
     AsyncFunction("inspect") { (host: String, port: Int, promise: Promise) in
-      var components = URLComponents()
-      components.scheme = "https"
-      components.host = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
-      components.port = port
-      components.path = "/"
-      guard let url = components.url else {
+      // A bare TLS handshake (Network.framework) whose verify block records the chain and refuses it: no HTTP is sent.
+      guard let nwPort = NWEndpoint.Port(rawValue: UInt16(clamping: port)) else {
         promise.reject(TrustInspectException("\(host):\(port)"))
         return
       }
-      let capture = ChainCapture()
-      let configuration = URLSessionConfiguration.ephemeral
-      configuration.timeoutIntervalForRequest = 6
-      configuration.timeoutIntervalForResource = 8
-      let session = URLSession(configuration: configuration, delegate: capture, delegateQueue: nil)
-      session.dataTask(with: url) { _, _, _ in
-        session.invalidateAndCancel()
-        guard let leaf = capture.chain.first else {
-          promise.reject(TrustInspectException("\(host):\(port)"))
+      let queue = DispatchQueue(label: "dev.generatorai.trust.inspect")
+      var chain: [SecCertificate] = []
+      let tls = NWProtocolTLS.Options()
+      if IPv4Address(host) == nil && IPv6Address(host) == nil {
+        sec_protocol_options_set_tls_server_name(tls.securityProtocolOptions, host)
+      }
+      sec_protocol_options_set_verify_block(tls.securityProtocolOptions, { _, secTrust, complete in
+        chain = certificates(of: sec_trust_copy_ref(secTrust).takeRetainedValue())
+        complete(false)
+      }, queue)
+      let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: NWParameters(tls: tls, tcp: NWProtocolTCP.Options()))
+      let once = Once()
+      var lastError = "timed out"
+      let finish: () -> Void = {
+        guard once.claim() else { return }
+        connection.cancel()
+        guard let leaf = chain.first, let last = chain.last else {
+          promise.reject(TrustInspectException("\(host):\(port) (\(lastError))"))
           return
         }
-        let last = capture.chain.last!
         promise.resolve([
           "leaf": GAITrust.fingerprint(of: leaf),
-          "root": capture.chain.count > 1 && GAITrust.isSelfSigned(last) ? GAITrust.fingerprint(of: last) : NSNull(),
-          "chain": capture.chain.map { GAITrust.fingerprint(of: $0) },
+          "root": chain.count > 1 && GAITrust.isSelfSigned(last) ? GAITrust.fingerprint(of: last) : NSNull(),
+          "chain": chain.map { GAITrust.fingerprint(of: $0) },
         ] as [String: Any])
-      }.resume()
+      }
+      connection.stateUpdateHandler = { state in
+        switch state {
+        case .ready, .cancelled: finish()
+        case .failed(let error):
+          lastError = "\(error)"
+          finish()
+        case .waiting(let error):
+          lastError = "\(error)"
+          if !chain.isEmpty { finish() }
+        default: break
+        }
+      }
+      connection.start(queue: queue)
+      queue.asyncAfter(deadline: .now() + 6) { finish() }
     }
 
     AsyncFunction("localNetwork") { (host: String, port: Int, promise: Promise) in

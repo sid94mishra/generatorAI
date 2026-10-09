@@ -18,7 +18,7 @@ async function main() {
       port: { type: 'string', default: '3197' }, fresh: { type: 'string' },
       repair: { type: 'boolean' }, 'no-seed': { type: 'boolean' }, 'no-confirm': { type: 'boolean' },
       'trust-running': { type: 'boolean' }, 'db-path': { type: 'string' }, help: { type: 'boolean' },
-      verify: { type: 'string' },
+      verify: { type: 'string' }, 'keep-order': { type: 'boolean' },
     },
   });
   if (values.help) {
@@ -26,6 +26,7 @@ async function main() {
   --platform=ios|android --udid=<simulator> --serial=<android>
   --port=3197 --fresh=stream,gate,stop,edits,long --repair --no-seed --no-confirm
   --trust-running --db-path=<verified temporary sandbox.db>
+  --keep-order   pair through the offer's own endpoint order (the app's fallback picks the route)
   maestro --platform=<p> -- test <flow.yaml|directory> [Maestro options]
 Starts an isolated sandbox when needed and stays attached until Ctrl-C.
 status/stop never start a server. Grants are printed only by the explicit mint command.`);
@@ -62,7 +63,7 @@ status/stop never start a server. Grants are printed only by the explicit mint c
     } else if (command === 'pair' || command === 'maestro') {
       const targets = await findTargets(values);
       for (const target of targets) {
-        await pairTarget(session, target, { repair: values.repair, noConfirm: values['no-confirm'] });
+        await pairTarget(session, target, { repair: values.repair, noConfirm: values['no-confirm'], keepOrder: values['keep-order'] });
       }
       if (command === 'maestro') {
         if (targets.length !== 1) throw new Error('Maestro requires exactly one target; pass --udid or --serial');
