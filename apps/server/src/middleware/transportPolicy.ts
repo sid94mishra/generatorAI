@@ -41,7 +41,7 @@ export function classifyTransport(req: OriginRequest, policy?: TrustProxyPolicy)
   if (!origin.forwarded && isLoopbackAddress(req.socket.remoteAddress)) return 'loopback';
   const header = req.headers['origin'];
   const sent = Array.isArray(header) ? header[0] : header;
-  if (sent === undefined || sent === `http://${origin.host}`) return 'native-lan';
+  if (sent === undefined || sent.toLowerCase() === `http://${origin.host}`) return 'native-lan';
   return 'browser-lan';
 }
 

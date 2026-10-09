@@ -1031,6 +1031,13 @@ Audit F-9: the `cors` origin callback threw, so a disallowed origin reached the 
 `{ code: 'ORIGIN_NOT_ALLOWED', message, requestId }`, preflight included, with no CORS headers. The error handler
 never puts `stack` in a response body in any environment; it stays in the server log under the request id.
 
+### D-122 Hosts are compared lower-cased in the DPoP `htu` and the rebuilt request URL; paths stay exact (2026-10-09) — Final
+Audit F-7. `canonicalHtu` lower-cases the host explicitly (the WHATWG parser already does for http(s)) and
+`requestOrigin` lower-cases the `Host` / trusted `X-Forwarded-Host`, so the URL the server rebuilds and the one the
+client signed agree on host case; the native-lane own-origin check compares case-insensitively. The path stays
+byte-exact in `htu`: DPoP binds exactly the path that was signed, and which policy a path spelling falls under is the
+route policy's job (D-115), not DPoP's.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

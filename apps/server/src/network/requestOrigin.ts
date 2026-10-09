@@ -74,7 +74,7 @@ function first(value: string | string[] | undefined): string | undefined {
 
 export interface RequestOrigin {
   scheme: 'http' | 'https';
-  /** `host[:port]` exactly as the client addressed us. */
+  /** `host[:port]` as the client addressed us, lower-cased (hosts are case-insensitive; F-7). */
   host: string;
   /** True when the scheme/host came from a trusted proxy's forwarded headers. */
   forwarded: boolean;
@@ -83,7 +83,7 @@ export interface RequestOrigin {
 export function requestOrigin(req: OriginRequest, policy: TrustProxyPolicy = trustProxyPolicy()): RequestOrigin {
   const direct: RequestOrigin = {
     scheme: req.socket.encrypted ? 'https' : 'http',
-    host: first(req.headers['host']) ?? 'localhost',
+    host: (first(req.headers['host']) ?? 'localhost').toLowerCase(),
     forwarded: false,
   };
   if (!isTrustedProxyPeer(policy, req.socket.remoteAddress)) return direct;
@@ -92,7 +92,7 @@ export function requestOrigin(req: OriginRequest, policy: TrustProxyPolicy = tru
   if (!proto && !host) return direct;
   return {
     scheme: proto === 'https' ? 'https' : proto === 'http' ? 'http' : direct.scheme,
-    host: host ?? direct.host,
+    host: host?.toLowerCase() ?? direct.host,
     forwarded: true,
   };
 }
