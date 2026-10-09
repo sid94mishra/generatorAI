@@ -24,7 +24,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { isPairingCode } from '@generatorai/shared';
+import { endpointTrust, isPairingCode } from '@generatorai/shared';
 import {
   confirmPairing,
   consumePairingCodeFromUrl,
@@ -130,7 +130,10 @@ export function PairingGate({ state, endpoint, reachable }: PairingGateProps) {
   const revoked = state.status === 'revoked';
   // `!== false`: an environment without the property (jsdom) is not a reason to block.
   const secureContext = window.isSecureContext !== false;
-  const remoteHttps = window.location.protocol === 'https:' && !/^(localhost|127\.|\[::1\])/.test(window.location.hostname);
+  // Only an address this server's own CA vouches for can have warned (D-110);
+  // a ts.net or other public name has a trusted certificate (D-125).
+  const remoteHttps =
+    endpointTrust(window.location.origin) === 'install-ca' && !/^(localhost|127\.|\[::1\])/.test(window.location.hostname);
 
   return (
     <Gate

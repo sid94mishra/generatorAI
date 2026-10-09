@@ -1,7 +1,8 @@
 // ────────────────────────────────────────────────────────────────
 // F-settings-14 Security & devices (board SettingsSecurity; D-42). Split from
 // the legacy 1,420-line Security.tsx into one group per concern:
-//   Servers · This server · Network exposure · Pending access requests ·
+//   Servers · This server · Access from other devices (Tailscale; Advanced:
+//   Network exposure, D-123) · Pending access requests ·
 //   Paired devices · Pair a new device
 // Data comes from hooks/securityQueries.ts (polled every 30 s while visible)
 // and hooks/serverQueries.ts. A failed action shows its server message in
@@ -22,7 +23,8 @@ import { Callout } from '@/ui/primitives/Callout/Callout.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { SettingsSection } from '@/ui/patterns/SettingsSection/SettingsSection.js';
 import { ServersGroup } from './ServersGroup.js';
-import { NetworkExposureGroup, ThisServerGroup } from './ServerPosture.js';
+import { ThisServerGroup } from './ServerPosture.js';
+import { AccessGroup } from './AccessGroup.js';
 import { AccessRequestsGroup, PairedDevicesGroup } from './DevicesGroups.js';
 import { PairDeviceGroup } from './PairDeviceGroup.js';
 
@@ -61,7 +63,7 @@ export function SecuritySection() {
       ) : null}
       <ServersGroup />
       <ThisServerGroup posture={posture} network={network.data} onRefresh={refresh} />
-      <NetworkExposureGroup network={network.data} isPending={network.isPending} onError={onError} />
+      <AccessGroup network={network.data} networkPending={network.isPending} onError={onError} />
       <AccessRequestsGroup requests={requests.data ?? []} onError={onError} />
       <PairedDevicesGroup devices={devices.data} isPending={devices.isPending} onError={onError} />
       <PairDeviceGroup posture={posture.data} pending={pending.data ?? []} onError={onError} />

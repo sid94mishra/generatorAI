@@ -15,11 +15,19 @@
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { apiFetch, ApiError } from '../platform/apiFetch.js';
 import { desktopServer } from '../lib/desktop.js';
-import type { NetworkAccess, SecurityPosture, TlsStatus } from '@generatorai/shared';
+import type { NetworkAccess, SecurityPosture, TailscaleAccessStatus, TlsStatus } from '@generatorai/shared';
 
 // The security wire types live in `@generatorai/shared` (D-120): `detail`
 // says whether this device got the admin view or the limited one.
-export type { NetworkAccess, NetworkEndpoint, NetworkTls, SecurityPosture, TlsStatus } from '@generatorai/shared';
+export type {
+  NetworkAccess,
+  NetworkEndpoint,
+  NetworkTls,
+  SecurityPosture,
+  TailscaleAccessStatus,
+  TailscaleState,
+  TlsStatus,
+} from '@generatorai/shared';
 
 /** `GET /api/auth/devices` row. The server omits key material on purpose. */
 export interface DeviceSummary {
@@ -89,6 +97,7 @@ export const securityKeys = {
   all: ['security'] as const,
   posture: ['security', 'posture'] as const,
   network: ['security', 'network'] as const,
+  tailscale: ['security', 'tailscale'] as const,
   devices: ['security', 'devices'] as const,
   pending: ['security', 'pending-pairings'] as const,
   requests: ['security', 'scope-requests'] as const,
@@ -111,6 +120,15 @@ export function useSecurityPosture(): UseQueryResult<SecurityPosture> {
 
 export function useNetworkAccess(): UseQueryResult<NetworkAccess> {
   return useQuery({ queryKey: securityKeys.network, queryFn: () => apiFetch<NetworkAccess>('/api/security/network-access'), ...poll });
+}
+
+/** "Connect with Tailscale" (D-123): what Tailscale on the server's machine reports. */
+export function useTailscaleAccess(): UseQueryResult<TailscaleAccessStatus> {
+  return useQuery({
+    queryKey: securityKeys.tailscale,
+    queryFn: () => apiFetch<TailscaleAccessStatus>('/api/security/tailscale'),
+    ...poll,
+  });
 }
 
 export function useDevices(): UseQueryResult<DeviceSummary[]> {
@@ -158,6 +176,17 @@ export function useSetNetworkAccess() {
     await apiFetch('/api/security/network-access', post({ mode }));
     if (desktopServer.canRestart()) await desktopServer.restart();
   });
+}
+
+/**
+ * Turn Tailscale access on or off. A refusal (Tailscale signed out, HTTPS off
+ * for the tailnet, another app's Serve handler) is a 409 whose reason the
+ * refetched status then shows next to the button, with Tailscale's own link.
+ */
+export function useSetTailscaleAccess() {
+  return useSecurityMutation((input: { enabled: boolean; replace?: boolean }) =>
+    apiFetch<TailscaleAccessStatus>('/api/security/tailscale', post(input)),
+  );
 }
 
 /** Serve an admin-supplied certificate instead of the generated one (D-113). */

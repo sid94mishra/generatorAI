@@ -5,7 +5,7 @@
 // "Awaiting pairing" with Cancel.
 
 import { useEffect, useRef, useState } from 'react';
-import { PAIRING_CODE_LENGTH } from '@generatorai/shared';
+import { PAIRING_CODE_LENGTH, endpointTrust, isTailscaleOrigin } from '@generatorai/shared';
 import {
   useCancelPairing,
   useCreatePairing,
@@ -70,10 +70,12 @@ function ActivePairing({
   const [urlCopied, copyUrl] = useCopied();
   const [codeCopied, copyCode] = useCopied();
   const address = joinAddress(pairing.joinUrl, window.location.origin);
-  // A browser opening an https:// address it does not trust yet is shown a
-  // warning; say what to compare (D-110). The native app's lane is plain HTTP
-  // and shows none (D-112).
-  const certificate = pairing.tls && address.startsWith('https://') ? pairing.tls : null;
+  // A browser opening an address only this server's own CA vouches for is
+  // shown a warning; say what to compare (D-110). A ts.net (or any public)
+  // name has a trusted certificate (D-125), and the native lane is plain HTTP
+  // (D-112): neither shows one.
+  const certificate = pairing.tls && endpointTrust(address) === 'install-ca' ? pairing.tls : null;
+  const tailscale = isTailscaleOrigin(address);
   const code = pairing.shortCode.replace(/[^A-Za-z0-9]/g, '').slice(0, PAIRING_CODE_LENGTH);
 
   useEffect(() => {
@@ -93,6 +95,11 @@ function ActivePairing({
           <IconButton size="sm" icon={urlCopied ? 'check' : 'copy'} label="Copy address" onClick={() => copyUrl(address)} />
         </div>
         {certificate ? <CertificateCheckNote tls={certificate} /> : null}
+        {tailscale ? (
+          <p className="text-small text-fg-3" data-testid="security-pairing-tailscale">
+            Works on any network where your devices are signed in to Tailscale.
+          </p>
+        ) : null}
       </div>
       <div className="flex flex-col gap-1.5">
         <span className="text-small text-fg-2">2 · Enter this code</span>

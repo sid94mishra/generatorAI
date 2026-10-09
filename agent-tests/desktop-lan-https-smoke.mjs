@@ -110,6 +110,11 @@ try {
 
   // ── Turn Network exposure on, like a user ──
   await page.goto(`${origin}/settings/security`);
+  // Network exposure lives under Access from other devices › Advanced (D-123),
+  // closed while the server is loopback-only.
+  const advanced = page.getByRole('button', { name: 'Advanced: Network exposure (LAN)' });
+  await advanced.waitFor({ timeout: 30_000 });
+  if ((await advanced.getAttribute('aria-expanded')) !== 'true') await advanced.click();
   const network = page.getByTestId('security-network');
   await network.waitFor({ timeout: 30_000 });
   await network.getByRole('radio', { name: 'LAN' }).click();

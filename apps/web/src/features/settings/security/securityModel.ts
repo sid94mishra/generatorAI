@@ -9,7 +9,7 @@
 import type { IconConcept } from '@generatorai/design-tokens';
 import { describeScope, isSensitiveScope, SCOPE_PRESETS as SHARED_SCOPE_PRESETS } from '@generatorai/shared/ui-contract';
 import type { BadgeTone } from '@/ui/primitives/Badge/Badge.js';
-import type { NetworkEndpoint } from '@/hooks/securityQueries.js';
+import type { NetworkEndpoint, TailscaleState } from '@/hooks/securityQueries.js';
 
 export const PLATFORM_ICON: Record<string, IconConcept> = {
   web: 'browser',
@@ -201,3 +201,25 @@ export function countdown(expiresAt: number, now: number): string {
   const s = Math.max(0, Math.ceil((expiresAt - now) / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
+
+/** "Connect with Tailscale" (D-123): the badge for each state the server reports. */
+export const TAILSCALE_STATE_BADGE: Record<TailscaleState, { label: string; tone: BadgeTone }> = {
+  on: { label: 'On', tone: 'ok' },
+  ready: { label: 'Ready', tone: 'neutral' },
+  'not-installed': { label: 'Not installed', tone: 'neutral' },
+  'not-running': { label: 'Not running', tone: 'warn' },
+  'needs-login': { label: 'Signed out', tone: 'warn' },
+  'https-disabled': { label: 'HTTPS off', tone: 'warn' },
+  error: { label: 'Error', tone: 'err' },
+};
+
+/** Tailscale's own download pages (the Personal plan is free). */
+export const TAILSCALE_DOWNLOADS: readonly { label: string; href: string }[] = [
+  { label: 'macOS', href: 'https://tailscale.com/download/mac' },
+  { label: 'Windows', href: 'https://tailscale.com/download/windows' },
+  { label: 'Linux', href: 'https://tailscale.com/download/linux' },
+  { label: 'iPhone and iPad', href: 'https://tailscale.com/download/ios' },
+  { label: 'Android', href: 'https://tailscale.com/download/android' },
+];
+
+export const TAILSCALE_HTTPS_HELP = 'https://tailscale.com/docs/how-to/set-up-https-certificates';

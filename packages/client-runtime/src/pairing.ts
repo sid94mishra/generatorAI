@@ -195,3 +195,35 @@ function extractCode(input: string): string {
 export function formatFingerprint(serverId: string): string {
   return (serverId.slice(0, 16).match(/.{1,4}/g) ?? []).join('-').toUpperCase();
 }
+
+/**
+ * Puts `origin` first when the offer lists it — for a page that was loaded
+ * from one of the server's addresses (its CSP allows only its own origin), or
+ * a client that has already found which listed address answers. An origin
+ * the offer does not list changes nothing: an offer is never redirected to
+ * an address its server did not advertise.
+ */
+export function preferEndpoint(consent: PairingConsent, origin: string): PairingConsent {
+  let wanted: string;
+  try {
+    wanted = new URL(origin).origin;
+  } catch {
+    return consent;
+  }
+  const match = consent.endpoints.find((endpoint) => sameOrigin(endpoint.origin, wanted));
+  if (!match || sameOrigin(consent.endpoint, wanted)) return consent;
+  const rest = consent.endpoints.filter((endpoint) => endpoint !== match);
+  return {
+    ...consent,
+    endpoint: match.origin,
+    endpoints: [match, ...rest].map((endpoint, priority) => ({ ...endpoint, priority })),
+  };
+}
+
+function sameOrigin(a: string, b: string): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
+}
