@@ -160,15 +160,14 @@ export function SplitPane({
     else if (!collapsed && isCollapsed) sidePanel.resize(openSize.current);
   }, [collapsed, sidePanel]);
 
-  const onSideResize = (size: PanelSize, _id: string | number | undefined, prev: PanelSize | undefined) => {
+  // `onResize` reports the panel's MEASURED size, which passes through every
+  // in-between width while motion-split eases it. It only decides visibility;
+  // the size to re-open at and the "dragged shut" signal come from the
+  // library's own layout below. (Taking the measured size there re-opened the
+  // dock at a sliver below its minimum after an eased close — so it stayed shut,
+  // e.g. after the window crossed the 1200px sheet breakpoint and back.)
+  const onSideResize = (size: PanelSize) => {
     setSideShut(size.asPercentage === 0);
-    if (size.asPercentage > 0) {
-      openSize.current = `${size.asPercentage}%`;
-      return;
-    }
-    // Open → 0 while the owner still wants it open: the user dragged it shut.
-    // (Not on mount: a saved 0 layout is re-opened by the effect above.)
-    if (prev && prev.asPercentage > 0 && !collapsedRef.current) onCollapsedChangeRef.current?.(true);
   };
 
   return (
@@ -178,8 +177,17 @@ export function SplitPane({
       defaultLayout={initialLayout}
       // A collapsed layout is an open/closed state, not a size: never persist it (the
       // owner persists open state itself), so a reload re-opens at the last real size.
+      onLayoutChange={(layout) => {
+        const side = layout['side'] ?? 0;
+        if (side > 0) openSize.current = `${side}%`;
+      }}
       onLayoutChanged={(layout, meta) => {
-        if ((layout['side'] ?? 0) > 0) onLayoutChanged(layout, meta);
+        if ((layout['side'] ?? 0) > 0) {
+          onLayoutChanged(layout, meta);
+          return;
+        }
+        // Shut to 0 by the person (a separator drag or key) while the owner still wants it open.
+        if (meta.isUserInteraction && !collapsedRef.current) onCollapsedChangeRef.current?.(true);
       }}
       className={cn('flex min-h-0 min-w-0 flex-1', vertical ? 'flex-col' : 'flex-row', eased && 'motion-split', className)}
     >
