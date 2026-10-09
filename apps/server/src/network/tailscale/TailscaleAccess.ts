@@ -190,23 +190,20 @@ export class TailscaleAccess {
       const failure = result.timedOut
         ? { code: 'not-running' as const, message: 'Tailscale did not answer. Open Tailscale and connect, then try again.' }
         : describeCliFailure(`${result.spawnError ?? ''}\n${result.stderr}\n${result.stdout}`);
-      return {
-        ...base,
-        state: failure.code === 'not-running' ? 'not-running' : failure.code === 'needs-login' ? 'needs-login' : 'error',
-        problem: failure.message,
-      };
+      // The card explains not-running / needs-login itself; only an
+      // unreadable answer needs the CLI's words.
+      const state = failure.code === 'not-running' ? 'not-running' : failure.code === 'needs-login' ? 'needs-login' : 'error';
+      return { ...base, state, problem: state === 'error' ? failure.message : null };
     }
     const withTailnet: FullStatus = { ...base, dnsName: parsed.dnsName, tailnet: parsed.tailnet, version: parsed.version };
     if (parsed.backend === 'needs-login') return { ...withTailnet, state: 'needs-login', loginUrl: parsed.loginUrl, problem: null };
-    if (parsed.backend !== 'running') {
-      return { ...withTailnet, state: 'not-running', problem: 'Tailscale is installed but not connected. Open Tailscale and connect.' };
-    }
+    if (parsed.backend !== 'running') return { ...withTailnet, state: 'not-running', problem: null };
     if (!parsed.dnsName || !parsed.magicDnsEnabled) {
       return {
         ...withTailnet,
         state: 'https-disabled',
         enableHttpsUrl: TAILSCALE_DNS_ADMIN_URL,
-        problem: 'Turn on MagicDNS for your tailnet (Tailscale admin console › DNS), then HTTPS Certificates.',
+        problem: this.lastProblem ?? 'Turn on MagicDNS for your tailnet (Tailscale admin console › DNS), then HTTPS Certificates.',
       };
     }
     if (!parsed.httpsEnabled && !(persisted.enabled && persisted.dnsName === parsed.dnsName)) {
@@ -214,7 +211,8 @@ export class TailscaleAccess {
         ...withTailnet,
         state: 'https-disabled',
         enableHttpsUrl: this.lastEnableUrl ?? TAILSCALE_DNS_ADMIN_URL,
-        problem: 'HTTPS certificates are off for your tailnet. Turn them on (one click in the Tailscale admin console), then connect.',
+        // The card already says what to do; a failed Connect adds its reason.
+        problem: this.lastProblem,
       };
     }
 

@@ -158,7 +158,9 @@ export function browserAddressFor(endpointOrigin: string, pageOrigin: string): s
   try {
     const endpoint = new URL(endpointOrigin);
     const here = new URL(pageOrigin);
-    if (endpoint.port === here.port) return endpoint.origin;
+    // An address on the default port is a proxy's — `https://<name>.ts.net`
+    // from Tailscale (D-123), a reverse proxy — never the dev API port.
+    if (endpoint.port === '' || endpoint.port === here.port) return endpoint.origin;
     here.hostname = endpoint.hostname;
     return here.origin;
   } catch {
