@@ -133,7 +133,7 @@ export class PinMismatchError extends Error {
   constructor(readonly url: string) {
     super(
       `${url} now presents a different certificate authority than the one this app trusted for it. ` +
-        'If that server was reset on purpose, forget it under Server › Forget, then add it again.',
+        'If that server was reset on purpose, forget it under Server › Forget Server, then add it again.',
     );
     this.name = 'PinMismatchError';
   }

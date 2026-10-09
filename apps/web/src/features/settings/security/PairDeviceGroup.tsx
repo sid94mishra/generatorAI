@@ -69,6 +69,7 @@ function ActivePairing({
   const [now, setNow] = useState(() => Date.now());
   const [urlCopied, copyUrl] = useCopied();
   const [codeCopied, copyCode] = useCopied();
+  const [linkCopied, copyLink] = useCopied();
   const address = joinAddress(pairing.joinUrl, window.location.origin);
   // A browser opening an address only this server's own CA vouches for is
   // shown a warning; say what to compare (D-110). A ts.net (or any public)
@@ -110,10 +111,16 @@ function ActivePairing({
       </div>
       <div className="flex items-center gap-3">
         <PairingQr text={pairing.pairingUrl} />
-        <p className="text-small text-fg-3">
-          Or scan with the mobile app. The QR carries every address this server listens on, so it also works where the address
-          above is not reachable.
-        </p>
+        <div className="flex min-w-0 flex-col items-start gap-2">
+          <p className="text-small text-fg-3">
+            Or scan with the mobile app. The QR carries every address this server listens on, so it also works where the address
+            above is not reachable.
+          </p>
+          {/* The same offer as text, for another computer's desktop app (Server › Add Server…, D-126). */}
+          <Button size="sm" variant="ghost" icon={linkCopied ? 'check' : 'link'} onClick={() => copyLink(pairing.pairingUrl)}>
+            {linkCopied ? 'Copied' : 'Copy pairing link'}
+          </Button>
+        </div>
       </div>
       <div className="flex items-center gap-3 border-t border-line-soft pt-3">
         <span className="font-mono text-small text-fg-2">Expires in {countdown(pairing.expiresAt, now)}</span>
