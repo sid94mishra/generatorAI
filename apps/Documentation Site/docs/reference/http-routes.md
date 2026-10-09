@@ -51,30 +51,30 @@ Source: `apps/server/src/routes/auth.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `GET` | `/api/auth/server-info` | 129 |
-| `GET` | `/api/auth/tls/ca.crt` | 170 |
-| `POST` | `/api/auth/nonce` | 183 |
-| `POST` | `/api/auth/pair/complete` | 195 |
-| `POST` | `/api/auth/pair/preview` | 278 |
-| `POST` | `/api/auth/token/refresh` | 311 |
-| `POST` | `/api/auth/pair` | 356 |
-| `GET` | `/api/auth/pair/pending` | 481 |
-| `DELETE` | `/api/auth/pair/:grantId` | 500 |
-| `GET` | `/api/auth/devices` | 507 |
-| `GET` | `/api/auth/devices/me` | 519 |
-| `GET` | `/api/auth/devices/:deviceId` | 535 |
-| `PATCH` | `/api/auth/devices/:deviceId` | 546 |
-| `PUT` | `/api/auth/devices/:deviceId/scopes` | 563 |
-| `POST` | `/api/auth/devices/:deviceId/rotate` | 606 |
-| `DELETE` | `/api/auth/devices/:deviceId` | 621 |
-| `POST` | `/api/auth/devices/:deviceId/revoke` | 625 |
-| `PUT` | `/api/auth/push-token` | 634 |
-| `DELETE` | `/api/auth/push-token` | 681 |
-| `PUT` | `/api/auth/push-token/mute` | 690 |
-| `POST` | `/api/auth/approval-nonce` | 710 |
-| `PUT` | `/api/auth/devices/me/approval-key` | 721 |
-| `DELETE` | `/api/auth/devices/me/approval-key` | 759 |
-| `GET` | `/api/auth/audit` | 779 |
+| `GET` | `/api/auth/server-info` | 137 |
+| `GET` | `/api/auth/tls/ca.crt` | 185 |
+| `POST` | `/api/auth/nonce` | 198 |
+| `POST` | `/api/auth/pair/complete` | 210 |
+| `POST` | `/api/auth/pair/preview` | 294 |
+| `POST` | `/api/auth/token/refresh` | 330 |
+| `POST` | `/api/auth/pair` | 375 |
+| `GET` | `/api/auth/pair/pending` | 500 |
+| `DELETE` | `/api/auth/pair/:grantId` | 519 |
+| `GET` | `/api/auth/devices` | 526 |
+| `GET` | `/api/auth/devices/me` | 538 |
+| `GET` | `/api/auth/devices/:deviceId` | 554 |
+| `PATCH` | `/api/auth/devices/:deviceId` | 565 |
+| `PUT` | `/api/auth/devices/:deviceId/scopes` | 582 |
+| `POST` | `/api/auth/devices/:deviceId/rotate` | 625 |
+| `DELETE` | `/api/auth/devices/:deviceId` | 640 |
+| `POST` | `/api/auth/devices/:deviceId/revoke` | 644 |
+| `PUT` | `/api/auth/push-token` | 653 |
+| `DELETE` | `/api/auth/push-token` | 700 |
+| `PUT` | `/api/auth/push-token/mute` | 709 |
+| `POST` | `/api/auth/approval-nonce` | 729 |
+| `PUT` | `/api/auth/devices/me/approval-key` | 740 |
+| `DELETE` | `/api/auth/devices/me/approval-key` | 778 |
+| `GET` | `/api/auth/audit` | 798 |
 
 ## automations
 
@@ -383,11 +383,11 @@ Source: `apps/server/src/routes/security.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `GET` | `/api/security/posture` | 41 |
-| `GET` | `/api/security/network-access` | 92 |
-| `PUT` | `/api/security/tls/certificate` | 136 |
-| `DELETE` | `/api/security/tls/certificate` | 178 |
-| `POST` | `/api/security/network-access` | 210 |
+| `GET` | `/api/security/posture` | 47 |
+| `GET` | `/api/security/network-access` | 111 |
+| `PUT` | `/api/security/tls/certificate` | 164 |
+| `DELETE` | `/api/security/tls/certificate` | 206 |
+| `POST` | `/api/security/network-access` | 238 |
 
 ## sessions
 
@@ -438,11 +438,11 @@ Source: `apps/server/src/routes/stream.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `POST` | `/api/stream/tickets` | 323 |
-| `POST` | `/api/stream/connections` | 406 |
-| `POST` | `/api/stream/connections/:id/subs` | 501 |
-| `GET` | `/api/stream` | 571 |
-| `GET` | `/api/stream/replay` | 1110 |
+| `POST` | `/api/stream/tickets` | 340 |
+| `POST` | `/api/stream/connections` | 423 |
+| `POST` | `/api/stream/connections/:id/subs` | 518 |
+| `GET` | `/api/stream` | 588 |
+| `GET` | `/api/stream/replay` | 1158 |
 
 ## system
 

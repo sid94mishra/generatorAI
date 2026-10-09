@@ -16,6 +16,12 @@ temp DB before any probe (e.g.
 `…/scratchpad/audit/srv-3711-8ufh3C/audit.db`). Ports 3197/5197/8081/9898 and the
 `mobile_redesign` tree were left untouched.
 
+> **Status (2026-10-09, fix pass).** F-1, F-2, F-3, F-5, F-6, F-7, F-9 and the missing Host
+> allow-list (DNS rebinding, research §3.8) are **fixed** on `desktop_redesign` — see
+> [§6 Fixed](#6-fixed-finding--commit--verification). F-4 (Electron fuses / `utilityProcess`), F-8,
+> mobile CA pinning (MV-44), relay E2EE, per-install public certificates and the desktop-remote
+> TOFU are left for the owner's design decisions.
+
 > **Top findings (detail below).** F-1 (**critical**) the route→scope policy is
 > case-sensitive but Express routing is not, so `GET /api/auth/Devices`, `POST /api/auth/Pair`,
 > `DELETE /api/auth/Devices/:id`, `/api/workspaces/x/Terminals`, `/Computer/*` etc. all run with
@@ -61,6 +67,8 @@ Reachability/secure-context columns reflect the implemented transport policy (D-
 ## 2. Findings (sorted by severity)
 
 ### F-1 — CRITICAL — Route→scope policy is case-sensitive; Express routing is not → scope bypass
+
+> **Fixed** — `28e575c2` (D-115). See §6.
 
 **Scenario.** Any authenticated principal (even the lowest-privilege MCP agent device) reaches
 admin-only and high-risk routes by changing the case of a path segment.
@@ -120,6 +128,8 @@ before dispatch.
 
 ### F-2 — HIGH — Device revocation does not terminate live SSE/WebSocket/relay streams
 
+> **Fixed** — `ef7157b7` (D-116). See §6.
+
 **Scenario.** A device is revoked (lost phone, compromised laptop). Its REST calls stop, but a
 stream it already has open keeps delivering events.
 
@@ -154,6 +164,8 @@ device record. A belt-and-braces option: cap stream lifetime and force periodic 
 
 ### F-3 — HIGH — Pairing anti-brute-force is a single global bucket with no owner allowance → LAN DoS on pairing
 
+> **Fixed** — `4844577a` (D-117). See §6.
+
 **Scenario.** A server is exposed to the LAN. An attacker on the same Wi-Fi floods
 `POST /api/auth/pair/preview` (a public route). The legitimate owner can no longer pair a new
 device from anywhere.
@@ -182,6 +194,8 @@ generous budget for `/pair/complete` (which also presents a DPoP proof) vs `/pai
 ---
 
 ### F-4 — MEDIUM — Packaged desktop app: permissive Electron fuses and no ASAR integrity
+
+> **Open** — owner design decision (`utilityProcess` migration, fuses, signing). Not changed in the fix pass.
 
 **Scenario.** Local privilege/escape hardening on the shipped macOS build.
 
@@ -220,6 +234,8 @@ app). Track as a desktop-hardening task alongside the existing packaging work.
 
 ### F-5 — MEDIUM — Joining device self-declares `platform`; MCP forbidden-scope and person/agent rules trust it
 
+> **Fixed** — `29c1c243` (D-118). See §6.
+
 **Scenario.** A pairing grant is minted for `platform: mcp` (agent), but the joining client claims a
 different platform at completion, defeating the "MCP devices never hold terminal/admin" rule and the
 person-vs-agent trigger.
@@ -251,6 +267,8 @@ mismatch.
 
 ### F-6 — MEDIUM — `GET /api/security/network-access` / `server-info` reveal host and address detail pre-auth; posture read bar is low
 
+> **Fixed** — `8cd3151e` (D-120). See §6.
+
 **Scenario.** Information exposure on the public/low-scope surface.
 
 **Evidence.** `/api/auth/server-info` (public) over the native lane returns `serverName`
@@ -273,6 +291,8 @@ offered. Move the sensitive posture fields (secret backend, bind host, legacy-ke
 
 ### F-7 — LOW — DPoP `htu` canonicalization drops the path's trailing-slash only for root; mixed-case host not normalized
 
+> **Fixed** — `61f30128` (D-122). See §6.
+
 **Scenario.** Hardening of the proof-of-possession URI binding.
 
 **Evidence.** `canonicalHtu` (`packages/auth/src/dpop.ts:266`) strips query/fragment and default
@@ -289,6 +309,8 @@ defense-in-depth against F-1.
 ---
 
 ### F-8 — LOW / informational — Vault KEK is visible to any process of the same OS user
+
+> **Open / accepted** — documented single-user threat model. Not changed in the fix pass.
 
 **Scenario.** The embedded/headless server receives the vault KEK via `GENERATORAI_SECRET_KEY` in
 its environment.
@@ -311,6 +333,8 @@ KEK; not required for the stated single-user threat model.
 ---
 
 ### F-9 — LOW — CORS failures surface as 502 with a stack trace in dev; error envelope leaks internal paths in dev
+
+> **Fixed** — `b15f649a` (D-121). See §6.
 
 **Scenario.** A cross-origin or rebinding request is rejected by the `cors` middleware.
 
@@ -439,3 +463,43 @@ instead).
   packaging fuses should be checked on the Windows/Linux builds too.
 - Probes used isolated servers only (dbPath asserted each run); the developer's real DB was never
   opened. Ports 3197/5197/8081/9898 and `mobile_redesign` were left untouched.
+
+---
+
+## 6. Fixed (finding → commit → verification)
+
+Fix pass 2026-10-09 on `desktop_redesign`. Every fix landed with a regression test that fails on the
+pre-fix code and passes after (checked by reverting only the fix and re-running the test), and the
+audit's reproduction was re-run against an **isolated** server (bare `DB_PATH` / `ARTIFACTS_DIR` /
+`WORKSPACES_DIR` / `EXTENSIONS_DIR` in a scratchpad temp dir + `GENERATORAI_BIND_HOST`; the startup
+`dbPath` was asserted to be that temp DB before every probe).
+
+| Finding | Commit | Fix | Regression tests | Before → after (isolated server) |
+|---|---|---|---|---|
+| F-1 critical | `28e575c2` (D-115) | Route policy matches the **canonical** path: lower-cased, unreserved escapes decoded (`%64`→`d`, `%2F` kept), one trailing slash dropped; a path with no canonical form (`.`/`..` incl. escaped, `//`, bad escape) → `DEFAULT_POLICY`, and the `/api` middleware answers 400 `NON_CANONICAL_PATH`. WS upgrades apply the same check and require handler ∪ policy scopes. Express case/strict routing left off (routers do not inherit it; policy now agrees with the router). No `scripts/check-route-scopes.mjs` exists; the policy tests are the route-scope check. | `packages/auth/src/__tests__/routePolicyCanonical.test.ts` (every `ROUTE_POLICIES` entry × UPPER / MiXeD / Capitalised / trailing slash / escaped letters / sub-resource, GET+POST+DELETE — 376 of 438 failed before), `apps/server/src/__tests__/routeCaseBypass.test.ts` (real auth middleware + real `/api/auth` router), `wsAuthCanonical.test.ts`; `agent-tests/security-e2e.mjs` §8b | MCP device: `GET /api/auth/Devices` 200 → **403**; `/Audit` 200 → 403; `POST /Pair` 201 → 403; `DELETE /Devices/:id` 204 → 403; `/workspaces/x/Terminals`, `/Computer/control`, `/Computer/frames` 200 → 403; `/auth/x/../devices`, `/auth//devices` → 400 |
+| F-2 high | `ef7157b7` (D-116) | `DeviceService.onAccessChanged` (revoked / credentials-rotated / scopes-changed with removed scopes) → `streaming/liveConnections.ts` registry of every SSE (single + mux) and WS (terminal, browser, STT, TTS) by device id. Revoke/rotate close all; a scope cut closes the streams that rely on a removed scope. SSE: `access-ended` frame + destroyed socket; WS: close 4401. Relay-bridged streams end with their loopback socket; a revoke drains the relay outbox at once. | `apps/server/src/__tests__/streamRevocation.test.ts` (stream ends < 1.5 s, unsubscribed from the broker, no event after; mux; rotation; selective scope cut; WS 4401), `DeviceService.test.ts` events; security-e2e §12 | Revoked web device's open `global` stream: still open after 5 s, **239 bytes** (`chat.created`, `chat.updated`) after revoke → stream ended **22–42 ms** after revoke, **0 bytes** |
+| F-3 high | `4844577a` (D-117) | Per-source budget (10/min) checked first; server ceiling 600/min counts only source-admitted attempts (≥60 sources to exhaust); a genuinely local request (`isLoopbackRequest`) has its own budget and is exempt from the ceiling (exemption by source, not by looked-up grant, so throttled guesses are never evaluated). 429 `THROTTLED` + `Retry-After`, `retryAfterSeconds`, `limit`, message "Too many pairing attempts from this network address — try again in N s." Preview still burns no attempts; per-grant 5 attempts unchanged. | `packages/auth/src/__tests__/pairingThrottle.test.ts` (70 bogus from A, legit preview+complete from B), `apps/server/src/__tests__/pairingThrottleRoute.test.ts` | LAN-exposed server, 70 bogus previews from `192.168.0.107`: `{400:10, 429:60}` with `Retry-After: 60` and the message; legit preview from another source: 429 → **200** |
+| F-5 medium | `29c1c243` (D-118) | `pairedPlatform(grant, claimed)`: a `mcp` or `mobile` grant can never be completed as anything else (400 `PLATFORM_MISMATCH`, audited critical); general grants may be refined (incl. into mcp/mobile); grant scopes re-checked against the recorded platform before the grant is consumed. | `packages/auth/src/__tests__/pairingPlatform.test.ts` | mcp grant completed as `cli`: stored `cli`, then `exec:terminal`+`admin:settings` granted 204 → **400 PLATFORM_MISMATCH** (audited); mcp-paired device + terminal/admin grant → 403 `SCOPE_ESCALATION` |
+| DNS rebinding (research §3.8) | `6be417e6` (D-119) | No Host validation existed. `middleware/hostAllowlist.ts` first on the app and the widget listener and in `authorizeWebSocketUpgrade`: IP literals, `localhost`/`*.localhost`, hostname / `.local` (and `<host>.<any zone>` when exposed), advertised URLs, served-certificate names, trusted proxies, `GENERATORAI_ALLOWED_HOSTS`; else 421 `HOST_NOT_ALLOWED`. Desktop window, Vite proxy, LAN HTTPS, BYO cert, Docker unaffected. Documented in the docs site (Remote access › Names the server answers to). | `apps/server/src/__tests__/hostAllowlist.test.ts`; security-e2e §8c | `Host: evil.example` → 127.0.0.1: `/api/health` 200, `/server-info` 200, `/pair/preview` 400 (evaluated), WS upgrade 401 (evaluated) → **421** everywhere; `localhost` / `127.0.0.1` unchanged |
+| F-6 medium | `8cd3151e` (D-120) | `server-info`: `serverName` only when `GENERATORAI_SERVER_NAME` is set (never `os.hostname()`), `endpoints` = the endpoint the request used, `tls` = fingerprints + expiry (no names/issuer), no `legacyApiKeyAccepted`. `/security/posture` + `/network-access`: `detail:'limited'` unless `admin:settings` (no bind host, backend, legacy key, warnings, addresses, cert names, proxy trust). Types in `@generatorai/shared` (`SecurityPosture.ts`); web Settings renders the limited view; mobile logged in `docs/redesign/mobile/COORDINATION.md`. | `apps/server/src/__tests__/securityInfoExposure.test.ts`, cli-core probe test | `server-info` contained the hostname + every LAN endpoint + SAN list → hostname absent, one endpoint; web device posture: `bindHost`/`secretStore`/legacy key → `detail:"limited"`; admin still `full` |
+| F-7 low | `61f30128` (D-122) | `canonicalHtu` lower-cases the host explicitly; `requestOrigin` lower-cases `Host` / trusted `X-Forwarded-Host`; native-lane own-origin compare case-insensitive. Path stays byte-exact (route case is D-115's job). | `packages/auth/src/__tests__/dpopHtu.test.ts`, `apps/server/src/__tests__/requestOriginCase.test.ts` | Mixed-case `Host` now rebuilds a lower-case `htu`; a proof for a different path case still fails `HTU_MISMATCH` |
+| F-9 low | `b15f649a` (D-121) | CORS gate answers a disallowed origin itself: 403 `ORIGIN_NOT_ALLOWED` (preflight too, no CORS headers). The error handler never sends `stack` in any environment (logged with the requestId). | `apps/server/__tests__/middleware/corsRejection.test.ts`; security-e2e §8c | `Origin: http://evil.example` → 502 `UNKNOWN_ERROR` + dev stack → **403 `ORIGIN_NOT_ALLOWED`**, no stack |
+| F-4, F-8 | — | Not changed (owner design decisions: fuses / `utilityProcess`, KEK hand-off). Also out of scope: MV-44 CA pinning, relay E2EE, per-install public certificates, desktop-remote TOFU. | — | — |
+
+**Gates run (2026-10-09).** `pnpm typecheck` 51/51. `turbo lint` 27/28 — the one failure is
+pre-existing in `apps/mobile/src/blocks/AssistantText/usePacedText.ts` (not touched here);
+`check:security`, `check:durability`, `check:docs`, `check:tokens`, `check:workflow-invariants`,
+`check:migrations-lock`, `check:db-baseline`, `check:workflow-spec`, `check:templates` pass;
+`check:syncio` passes with `--max-old-space-size=8192` (OOM at the default heap, unrelated);
+`check:no-legacy` (web automations/workflow hits) and `check:workflow-skill` (stale
+`lifecycle.md`) fail on files this pass did not touch. Web `check:design` OK. Tests: auth 518,
+secrets 16, shared 476, client-core 829, client-runtime 49, cli-core 898, core 1836 (+10 skipped),
+server 797 (86 files) — all pass. E2E scripts on isolated servers: `security-e2e` 61/61,
+`lan-pairing-e2e` 23/23, `short-code-pairing-e2e` 22/22, `host-pinning-e2e` 10/10,
+`scope-enforcement-probe` 10/10. Full Playwright e2e on a fresh sandbox (`--port=3341
+--web-port=5341`): 86 passed, 3 skipped, 4 failed on the first run; `subsystems-live` terminal was
+a stale non-executable `node-pty` spawn-helper in the staged bundle (passes once executable);
+`changes-dock` "Keep/Undo" and `composer` "pending-question banner" also fail on a sandbox built
+from the pre-fix commit `8da675ce` (pre-existing); `activity-column` "opens from the sidebar" is
+order-dependent flaky (passed on re-run). Desktop smokes one at a time:
+`desktop-chrome-smoke` 59/59, `right-pane-desktop-smoke` all pass, `desktop-security-smoke` 15/15.

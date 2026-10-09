@@ -707,168 +707,168 @@
       "method": "GET",
       "path": "/api/auth/server-info",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 129,
+      "line": 137,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/auth/tls/ca.crt",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 170,
+      "line": 185,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/auth/nonce",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 183,
+      "line": 198,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/auth/pair/complete",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 195,
+      "line": 210,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/auth/pair/preview",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 278,
+      "line": 294,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/auth/token/refresh",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 311,
+      "line": 330,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/auth/pair",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 356,
+      "line": 375,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/auth/pair/pending",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 481,
+      "line": 500,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/auth/pair/:grantId",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 500,
+      "line": 519,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/auth/devices",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 507,
+      "line": 526,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/auth/devices/me",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 519,
+      "line": 538,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/auth/devices/:deviceId",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 535,
+      "line": 554,
       "mounted": true
     },
     {
       "method": "PATCH",
       "path": "/api/auth/devices/:deviceId",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 546,
+      "line": 565,
       "mounted": true
     },
     {
       "method": "PUT",
       "path": "/api/auth/devices/:deviceId/scopes",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 563,
+      "line": 582,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/auth/devices/:deviceId/rotate",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 606,
+      "line": 625,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/auth/devices/:deviceId",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 621,
+      "line": 640,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/auth/devices/:deviceId/revoke",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 625,
+      "line": 644,
       "mounted": true
     },
     {
       "method": "PUT",
       "path": "/api/auth/push-token",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 634,
+      "line": 653,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/auth/push-token",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 681,
+      "line": 700,
       "mounted": true
     },
     {
       "method": "PUT",
       "path": "/api/auth/push-token/mute",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 690,
+      "line": 709,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/auth/approval-nonce",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 710,
+      "line": 729,
       "mounted": true
     },
     {
       "method": "PUT",
       "path": "/api/auth/devices/me/approval-key",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 721,
+      "line": 740,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/auth/devices/me/approval-key",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 759,
+      "line": 778,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/auth/audit",
       "source": "apps/server/src/routes/auth.ts",
-      "line": 779,
+      "line": 798,
       "mounted": true
     },
     {
@@ -2051,35 +2051,35 @@
       "method": "GET",
       "path": "/api/security/posture",
       "source": "apps/server/src/routes/security.ts",
-      "line": 41,
+      "line": 47,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/security/network-access",
       "source": "apps/server/src/routes/security.ts",
-      "line": 92,
+      "line": 111,
       "mounted": true
     },
     {
       "method": "PUT",
       "path": "/api/security/tls/certificate",
       "source": "apps/server/src/routes/security.ts",
-      "line": 136,
+      "line": 164,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/security/tls/certificate",
       "source": "apps/server/src/routes/security.ts",
-      "line": 178,
+      "line": 206,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/security/network-access",
       "source": "apps/server/src/routes/security.ts",
-      "line": 210,
+      "line": 238,
       "mounted": true
     },
     {
@@ -2191,35 +2191,35 @@
       "method": "POST",
       "path": "/api/stream/tickets",
       "source": "apps/server/src/routes/stream.ts",
-      "line": 323,
+      "line": 340,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/stream/connections",
       "source": "apps/server/src/routes/stream.ts",
-      "line": 406,
+      "line": 423,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/stream/connections/:id/subs",
       "source": "apps/server/src/routes/stream.ts",
-      "line": 501,
+      "line": 518,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/stream",
       "source": "apps/server/src/routes/stream.ts",
-      "line": 571,
+      "line": 588,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/stream/replay",
       "source": "apps/server/src/routes/stream.ts",
-      "line": 1110,
+      "line": 1158,
       "mounted": true
     },
     {
@@ -3269,7 +3269,10 @@
     "EXTENSIONS_DIR",
     "GENERATORAI_ACP_HARNESS_TYPE",
     "GENERATORAI_ACP_MODEL",
+    "GENERATORAI_ADVERTISED_URL",
+    "GENERATORAI_ADVERTISED_URLS",
     "GENERATORAI_AGENT_HOST",
+    "GENERATORAI_ALLOWED_HOSTS",
     "GENERATORAI_ALLOW_AGENT_PUBLISH",
     "GENERATORAI_ALLOW_HOST_SANDBOX",
     "GENERATORAI_ALLOW_SCRIPT_UPLOAD",
@@ -4715,6 +4718,7 @@
     "apps/server/src/middleware/cors.ts",
     "apps/server/src/middleware/csp.ts",
     "apps/server/src/middleware/errorHandler.ts",
+    "apps/server/src/middleware/hostAllowlist.ts",
     "apps/server/src/middleware/rateLimit.ts",
     "apps/server/src/middleware/requestId.ts",
     "apps/server/src/middleware/requestMetrics.ts",
@@ -4791,6 +4795,7 @@
     "apps/server/src/settings/workspaceRetention.ts",
     "apps/server/src/streaming/coalescer.ts",
     "apps/server/src/streaming/ephemeralScopes.ts",
+    "apps/server/src/streaming/liveConnections.ts",
     "apps/server/src/streaming/muxConnection.ts",
     "apps/server/src/streaming/sseConnection.ts",
     "apps/server/src/streaming/streamConnectionRegistry.ts",
@@ -6371,6 +6376,7 @@
     "packages/shared/src/types/Push.ts",
     "packages/shared/src/types/RecentActivity.ts",
     "packages/shared/src/types/RunLifecycle.ts",
+    "packages/shared/src/types/SecurityPosture.ts",
     "packages/shared/src/types/Session.ts",
     "packages/shared/src/types/SourceControl.ts",
     "packages/shared/src/types/StatsSummary.ts",
