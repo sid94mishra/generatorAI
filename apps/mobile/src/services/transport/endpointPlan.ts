@@ -19,8 +19,10 @@
 
 import { DirectTransport, type TransportCandidate } from '@generatorai/client-transport';
 
+import { endpointSecurity } from './trust';
+
 export interface EndpointPlanInput {
-  /** Endpoint pinned at pairing, e.g. `http://192.168.1.10:3100`. */
+  /** Endpoint pinned at pairing, e.g. `https://192.168.1.10:3100`. */
   pairedEndpoint: string;
   /** Extra origins discovered via mDNS or entered by the user. */
   discoveredEndpoints?: string[];
@@ -64,7 +66,8 @@ export function buildEndpointCandidates(input: EndpointPlanInput): TransportCand
 
   const addDirect = (endpoint: string, priority: number): void => {
     const key = canonical(endpoint);
-    if (!key || seen.has(key)) return;
+    // Plain HTTP to another device is never a candidate: the LAN is HTTPS with a pinned CA (MV-44, MD-201).
+    if (!key || seen.has(key) || endpointSecurity(endpoint) === 'plain') return;
     seen.add(key);
     const kind = isLoopback(endpoint) ? 'loopback' : 'lan';
     candidates.push({

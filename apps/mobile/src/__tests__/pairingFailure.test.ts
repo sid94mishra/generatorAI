@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { LOCAL_NETWORK_HINT, classifyPairingFailure, shouldAutoRetryPairing } from '../services/auth/pairingFailure';
+import { CERTIFICATE_MISMATCH_MESSAGE, LOCAL_NETWORK_HINT, classifyPairingFailure, shouldAutoRetryPairing } from '../services/auth/pairingFailure';
 
 describe('classifyPairingFailure', () => {
   it('treats transport failures as retryable with the local-network hint', () => {
@@ -13,6 +13,20 @@ describe('classifyPairingFailure', () => {
       const failure = classifyPairingFailure(error);
       expect(failure).toEqual({ kind: 'network', message: LOCAL_NETWORK_HINT, retryable: true });
     }
+  });
+
+  it('names a refused certificate, a denied Local Network and a plain-HTTP offer (MD-202)', () => {
+    expect(classifyPairingFailure(Object.assign(new Error('Could not verify the paired server identity.'), { problem: 'certificate-changed' }))).toEqual({
+      kind: 'certificate',
+      message: CERTIFICATE_MISMATCH_MESSAGE,
+      retryable: false,
+    });
+    expect(classifyPairingFailure(Object.assign(new Error('Network request failed'), { problem: 'local-network-denied' }))).toMatchObject({
+      kind: 'local-network',
+      retryable: true,
+    });
+    const insecure = Object.assign(new Error('http://192.168.1.2:3100 is not encrypted.'), { name: 'InsecureEndpointError' });
+    expect(classifyPairingFailure(insecure)).toMatchObject({ kind: 'insecure', retryable: false });
   });
 
   it('never retries a server rejection', () => {

@@ -19,7 +19,7 @@ import '../src/theme/prepaint';
 import { installCrypto } from '../src/services/crypto/installCrypto';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View } from 'react-native';
+import { Linking, View } from 'react-native';
 import { Redirect, Stack, SplashScreen, router, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
@@ -35,6 +35,9 @@ import { setHapticsEnabled as setKitHapticsEnabled, setMotionPreference, setTran
 import { useLinkRouting } from '../src/services/navigation/useLinkRouting';
 import { consumeLastRoute, useLastRoute } from '../src/services/prefs/lastRoute';
 import { AuthProvider, useAuth } from '../src/services/auth/AuthProvider';
+import { connectionProblemCopy } from '../src/services/auth/connectionProblem';
+import type { ConnectionProblem } from '../src/services/transport/trust';
+import { nouns } from '../src/ui/platform/nouns';
 import { AppLockGate } from '../src/blocks/shell/AppLockGate';
 import { GestureHandlerRootView } from '../src/ui/lib/styled';
 import { Button } from '../src/ui/primitives/Button';
@@ -182,7 +185,7 @@ function AuthLifecycle({ children }: { children: React.ReactNode }): React.React
  * on native, and prevented incoming pairing links from being handled.
  */
 function AuthGate({ children, routeName }: { children: React.ReactNode; routeName: string }): React.ReactElement {
-  const { state, initializing, storageLocked } = useAuth();
+  const { state, initializing, storageLocked, connectionProblem } = useAuth();
   const isPublic = PUBLIC_ROUTES.has(`/${routeName}`);
 
   // Never route on the first frame: `AuthState` starts at `unpaired`, which is
@@ -210,7 +213,7 @@ function AuthGate({ children, routeName }: { children: React.ReactNode; routeNam
   // A connection failure must not masquerade as an empty account. Public
   // routes still render so the user can re-pair against a different host.
   if (state.status === 'error' && !isPublic) {
-    return <ConnectionError message={state.message} kind={state.kind ?? 'unreachable'} />;
+    return <ConnectionError message={state.message} kind={state.kind ?? 'unreachable'} problem={connectionProblem} />;
   }
 
   return <>{children}</>;
@@ -247,11 +250,34 @@ function StorageLocked(): React.ReactElement {
 function ConnectionError({
   message,
   kind,
+  problem,
 }: {
   message: string;
   kind: 'unreachable' | 'credential';
+  /** A reason the trust layer can name (MV-44, MD-202): a changed certificate, a plain-HTTP pairing, Local Network off. */
+  problem: ConnectionProblem | null;
 }): React.ReactElement {
   const { reconnect } = useAuth();
+  if (problem) {
+    const copy = connectionProblemCopy(problem, nouns().localNetworkSetting);
+    return (
+      <View className="flex-1 items-center justify-center gap-4 bg-surface px-8" testID="connection-error">
+        <ErrorState
+          title={copy.title}
+          error={copy.body}
+          {...(copy.action === 'settings' ? { onRetry: () => void reconnect() } : {})}
+          testID={`connection-problem-${problem}`}
+        />
+        <View className="self-center">
+          {copy.action === 'pair' ? (
+            <Button label="Pair again" size="sm" onPress={() => router.replace('/pair')} testID="connection-pair-again" />
+          ) : (
+            <Button label="Open Settings" variant="ghost" size="sm" onPress={() => void Linking.openSettings()} testID="connection-open-settings" />
+          )}
+        </View>
+      </View>
+    );
+  }
   return (
     <View className="flex-1 items-center justify-center gap-4 bg-surface px-8" testID="connection-error">
       <ErrorState

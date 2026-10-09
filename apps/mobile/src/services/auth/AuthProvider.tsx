@@ -52,6 +52,8 @@ import {
   type RestorePhase,
 } from './restoreState';
 import { buildEndpointCandidates } from '../transport/endpointPlan';
+import { endpointSecurity, InsecureEndpointError, usableEndpoints, type ConnectionProblem, type TrustRecord } from '../transport/trust';
+import { applyTrust, deleteTrust, explainConnectionFailure, installTrust, loadTrust, saveTrust } from './serverTrust';
 import { assertServerWriteAllowed } from '../api/offlinePolicy';
 import { clearServerQueryCache } from '../api/queryPersister';
 import { PREF_KEYS, prefs } from '../storage/prefs';
@@ -103,7 +105,13 @@ export interface AuthContextValue {
   /** Mint a single-use ticket and build an SSE/WS URL. */
   streamUrl(scope: string, id: string | null): Promise<string>;
   socketUrl(path: string, scope: string, id: string | null): Promise<string>;
-  completePairing(consent: PairingConsent, deviceName: string): Promise<void>;
+  /**
+   * Why the active server cannot be used, when the app can say more than "can't reach" (MD-202): its certificate is
+   * not the one paired with, it was paired over plain HTTP, or Local Network access is off. Null otherwise.
+   */
+  connectionProblem: ConnectionProblem | null;
+  /** `trust`: the CA fingerprints the server's LAN addresses are anchored to (from the QR or the confirmed certificate). */
+  completePairing(consent: PairingConsent, deviceName: string, trust: TrustRecord): Promise<void>;
   unpair(serverId?: string): Promise<void>;
   reconnect(): Promise<void>;
   /**
@@ -130,6 +138,7 @@ export function useAuth(): AuthContextValue {
  * purpose of the check.
  */
 async function verifyHostIdentity(endpoint: string, signal?: AbortSignal): Promise<string> {
+  if (endpointSecurity(endpoint) === 'plain') throw new InsecureEndpointError(endpoint);
   const res = await fetch(`${endpoint}/api/auth/server-info`, {
     method: 'GET',
     ...(signal ? { signal } : {}),
@@ -173,6 +182,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   const storageLocked = restorePhase === 'locked';
   const [transport, setTransport] = useState<TransportStatus>({ state: 'idle' });
   const [keyBacking, setKeyBacking] = useState<KeyBacking>('software');
+  const [connectionProblem, setConnectionProblem] = useState<ConnectionProblem | null>(null);
+  // Per server: resolves once its trust anchors are installed natively. Every request waits for it (MV-44).
+  const trustReady = useRef(new Map<string, Promise<TrustRecord | null>>());
 
   const keyStore = useMemo(() => serverId ? new MobileDeviceKeyStore(serverId) : null, [serverId]);
   const sessionStore = useMemo(() => serverId ? new MobileSessionStore(serverId) : null, [serverId]);
@@ -219,9 +231,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     const sessions = new MobileSessionStore(id);
     const supervisor = buildSupervisor(endpoint, id, endpoints);
     let latest: AuthState = { status: 'unpaired' };
+    if (!trustReady.current.has(id)) trustReady.current.set(id, installTrust(id, [endpoint, ...(endpoints ?? [])]).catch(() => null));
     const runtime = new AuthenticatedClientRuntime({
       endpoint, keyStore: keys, sessionStore: sessions,
       fetchImpl: async (input, init) => {
+        await trustReady.current.get(id);
+        // The plain-HTTP LAN lane is gone (MD-201): an absolute http:// URL to another device is never requested.
+        const url = String(input);
+        if (/^http:\/\//i.test(url) && endpointSecurity(url) === 'plain') throw new InsecureEndpointError(new URL(url).origin);
         const adapter = await supervisor.connect(3, init?.signal ?? undefined);
         return adapter.fetch(String(input), init as RequestInit);
       },
@@ -268,11 +285,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
           return;
         }
 
+        const sessionEndpoints = [session.endpoint, ...(session.endpoints ?? [])];
+        if (usableEndpoints(sessionEndpoints).length === 0) {
+          // Paired over the removed plain-HTTP lane (D-112): nothing to try, the person has to pair again (MD-201).
+          setConnectionProblem('insecure-endpoint');
+          dispatchAuth(authSnapshot({ status: 'error', message: new InsecureEndpointError(session.endpoint).message }, runtimeRef.current));
+          return;
+        }
         const entry = getRuntime(session.serverId, session.endpoint, session.endpoints);
         const runtime = entry.runtime;
         runtimeRef.current = runtime;
         supervisorRef.current = entry.supervisor;
         setBackgroundActiveServer(serverId);
+        const startedAt = Date.now();
+        setConnectionProblem(null);
 
         try {
           let next = entry.state.status === 'authenticated' ? entry.state : await runtime.initialize();
@@ -284,6 +310,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
           if (!cancelled && next.status === 'error') {
             await new Promise((resolve) => setTimeout(resolve, 1500));
             if (!cancelled) next = await runtime.retryInitialize();
+          }
+          if (!cancelled && next.status === 'error') {
+            const problem = await explainConnectionFailure(sessionEndpoints, await trustReady.current.get(session.serverId) ?? null, startedAt);
+            if (!cancelled) setConnectionProblem(problem);
           }
           if (!cancelled) {
             dispatchAuth(authSnapshot(next, runtimeRef.current));
@@ -350,6 +380,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     supervisorRef.current = null;
     dispatchAuth(authSnapshot({ status: 'unpaired' }, runtimeRef.current));
     setTransport({ state: 'idle' });
+    setConnectionProblem(null);
     dispatchRestore({ type: 'server-switch' });
     setServerId(id);
     setRestoreAttempt((n) => n + 1);
@@ -358,24 +389,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     await entry.runtime.initialize();
   }, [dispatchRestore, getRuntime]);
 
-  const completePairing = useCallback(async (consent: PairingConsent, deviceName: string) => {
+  const completePairing = useCallback(async (consent: PairingConsent, deviceName: string, trust: TrustRecord) => {
+    const endpoints = usableEndpoints(consent.endpoints.map((endpoint) => endpoint.origin));
+    if (!endpoints.length) throw new InsecureEndpointError(consent.endpoint);
+    const primary = endpoints[0]!;
     const previousId = activeServerRef.current;
     pairingRef.current = true;
     activeServerRef.current = consent.serverId;
     setServerId(consent.serverId);
-    const endpoints = consent.endpoints.map((endpoint) => endpoint.origin);
-    const entry = getRuntime(consent.serverId, consent.endpoint, endpoints);
+    setConnectionProblem(null);
+    // The record is stored before any request so the anchors every request waits for are the new ones; a failed
+    // pairing puts back what this server had (a re-pair of a paired server) or nothing.
+    const previousTrust = await loadTrust(consent.serverId).catch(() => null);
+    const previousEndpoints = serverRegistry.read().connections.find((item) => item.serverId === consent.serverId)?.endpoints ?? [];
+    const installed = saveTrust(consent.serverId, trust).then(() => {
+      applyTrust(consent.serverId, trust, endpoints);
+      return trust;
+    });
+    trustReady.current.set(consent.serverId, installed);
+    const entry = getRuntime(consent.serverId, primary, endpoints);
     runtimeRef.current = entry.runtime;
     supervisorRef.current = entry.supervisor;
     dispatchAuth(authSnapshot({ status: 'pairing' }, runtimeRef.current));
     try {
-      await entry.runtime.completePairing({ pairingToken: consent.pairingGrant, deviceName, platform: 'mobile', serverId: consent.serverId, endpoint: consent.endpoint, endpoints });
-      serverRegistry.add({ serverId: consent.serverId, label: consent.serverName, endpoint: consent.endpoint, endpoints, kind: 'remote', managed: false, lastConnectedAt: Date.now() });
+      await installed;
+      await entry.runtime.completePairing({ pairingToken: consent.pairingGrant, deviceName, platform: 'mobile', serverId: consent.serverId, endpoint: primary, endpoints });
+      serverRegistry.add({ serverId: consent.serverId, label: consent.serverName, endpoint: primary, endpoints, kind: 'remote', managed: false, lastConnectedAt: Date.now() });
       setServers(serverRegistry.read().connections);
       setBackgroundActiveServer(consent.serverId);
       resetStepUp();
       setKeyBacking(entry.keyStore.backing);
     } catch (error) {
+      const restored = (async () => {
+        if (previousTrust) {
+          await saveTrust(consent.serverId, previousTrust);
+          applyTrust(consent.serverId, previousTrust, previousEndpoints);
+        } else {
+          await deleteTrust(consent.serverId);
+        }
+        return previousTrust;
+      })().catch(() => null);
+      trustReady.current.set(consent.serverId, restored);
+      const problem = await explainConnectionFailure(endpoints, trust, 0).catch(() => null);
       activeServerRef.current = previousId;
       setServerId(previousId);
       const previous = previousId ? runtimes.current.get(previousId) : undefined;
@@ -383,6 +438,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       supervisorRef.current = previous?.supervisor ?? null;
       dispatchAuth(authSnapshot(previous?.state ?? { status: 'unpaired' }, runtimeRef.current));
       setBackgroundActiveServer(previousId);
+      // A refused certificate or a denied Local Network is named, not reported as "can't reach" (MD-202).
+      if (problem === 'certificate-changed' || problem === 'local-network-denied') throw Object.assign(new Error(error instanceof Error ? error.message : String(error)), { problem });
       throw error;
     } finally {
       pairingRef.current = false;
@@ -399,6 +456,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     await entry?.supervisor.disconnect();
     await (entry?.keyStore ?? new MobileDeviceKeyStore(id)).clear();
     await new MobileSessionStore(id).clear();
+    await deleteTrust(id);
+    trustReady.current.delete(id);
     await clearServerQueryCache(id);
     prefs.deletePrefix(`srv.${id}.`);
     liveStore.dispatch({ type: 'forgetServer', serverId: id });
@@ -422,10 +481,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   const probePairedServer = useCallback((id: string) => {
     const server = serverRegistry.read().connections.find((item) => item.serverId === id);
     if (!server) return Promise.reject(new Error('Server is not paired'));
+    if (endpointSecurity(server.endpoint) === 'plain') return Promise.reject(new InsecureEndpointError(server.endpoint));
     return probeServer(server.endpoint, { expectedServerId: id, timeoutMs: 4000 });
   }, []);
 
   const reconnect = useCallback(async () => {
+    if (connectionProblem === 'insecure-endpoint') return;
+    const startedAt = Date.now();
     await supervisorRef.current?.invalidate('manual reconnect');
     try {
       await supervisorRef.current?.connect(3);
@@ -435,8 +497,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     // A launch that failed left auth in `error`; reconnecting the transport
     // alone never leaves that screen, so re-run initialisation too.
     const runtime = runtimeRef.current;
-    if (runtime) dispatchAuth(authSnapshot(await runtime.retryInitialize(), runtimeRef.current));
-  }, []);
+    if (!runtime) return;
+    const next = await runtime.retryInitialize();
+    const id = activeServerRef.current;
+    const server = id ? serverRegistry.read().connections.find((item) => item.serverId === id) : undefined;
+    setConnectionProblem(
+      next.status === 'error' && id && server
+        ? await explainConnectionFailure([server.endpoint, ...(server.endpoints ?? [])], await trustReady.current.get(id) ?? null, startedAt)
+        : null,
+    );
+    dispatchAuth(authSnapshot(next, runtimeRef.current));
+  }, [connectionProblem]);
 
   const refreshPermissions = useCallback(async () => {
     const next = await runtimeRef.current?.refreshSession();
@@ -475,6 +546,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       retryRestore,
       transport,
       keyBacking,
+      connectionProblem,
       fetch: authenticatedFetch,
       endpoint,
       streamUrl,
@@ -496,6 +568,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
       retryRestore,
       transport,
       keyBacking,
+      connectionProblem,
       completePairing,
       unpair,
       reconnect,

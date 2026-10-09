@@ -2,7 +2,7 @@ appId: ${APP_ID}
 name: pairing · link pre-fills, Connect shows consent, Pair, success
 tags: [characterization, smoke, pairing]
 # M7-08 (MPairing, MD-34): a `pair` link pre-fills the code and address and never submits; Connect shows the consent
-# step (fingerprint, scopes, name); Pair opens the success step.
+# step (fingerprint, encryption, scopes, name); Pair opens the success step.
 ---
 - launchApp: {clearState: true, clearKeychain: true}
 - runFlow:
@@ -21,6 +21,11 @@ tags: [characterization, smoke, pairing]
 - tapOn: {id: pairing-connect}
 - extendedWaitUntil: {visible: {id: pairing-fingerprint}, timeout: 30000}
 - assertNotVisible: {id: home-new-chat}
+# MV-44 (MD-199): the sandbox offer is https:// with its CA named in the link, so consent says the link is encrypted
+# and checked against the code that was scanned.
+- assertVisible: {id: pairing-encrypted}
+- assertVisible: "Encrypted"
+- assertVisible: ".*checked against the code you scanned.*"
 - scrollUntilVisible:
     element: {id: pairing-name}
     direction: DOWN

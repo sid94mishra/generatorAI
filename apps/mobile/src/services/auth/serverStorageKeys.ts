@@ -6,5 +6,7 @@ export function serverStorageKeys(serverId: string) {
     device: `gai.device.${serverId}`,
     software: `gai.device.${serverId}.software`,
     approval: `gai.approval.${serverId}`,
+    /** The CA fingerprints this server's LAN addresses are anchored to (MV-44, `services/transport/trust.ts`). */
+    trust: `gai.trust.${serverId}`,
   };
 }

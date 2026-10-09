@@ -198,15 +198,14 @@ const config: ExpoConfig = {
       // `faceIDPermission` plugin value below — Apple reviews the one that
       // ends up in Info.plist, and the plugin writes the same key.
       NSFaceIDUsageDescription: FACE_ID_USAGE,
-      // Loopback/LAN endpoints are plain HTTP by design. There is NO
-      // message-level encryption above the transport (relay-protocol's
-      // e2ee.ts is unwired); requests are DPoP-signed, which authenticates
-      // them but does not hide their contents from the local network.
+      // The server is reached over HTTPS with its own CA pinned at runtime (MV-44, modules/generatorai-trust); the
+      // app refuses plain HTTP to anything but this device (MD-201). Local networking stays allowed so ATS leaves
+      // trust for LAN addresses and `.local` names to the pinning hooks, and the dev client can reach Metro.
       NSAppTransportSecurity: {
         NSAllowsLocalNetworking: true,
       },
-      // The app never browses Bonjour; it connects to the address in the
-      // pairing QR. Saying "discover" would promise something it does not do.
+      // The app never browses Bonjour (no NSBonjourServices); it connects to the address in the pairing QR. Saying
+      // "discover" would promise something it does not do. A denial is named on the connection screen (MD-202).
       NSLocalNetworkUsageDescription:
         'Connect to the GeneratorAI server you paired with when it is on the same network as this device.',
       // Only what is used: `remote-notification` for approval pushes.
@@ -235,8 +234,10 @@ const config: ExpoConfig = {
     // IME opens; `pan` (the other option) slides the whole window and hides
     // the transcript instead.
     softwareKeyboardLayoutMode: 'resize',
-    // Cleartext (`http://`) is enabled by `./plugins/withCleartextTraffic`
-    // below — see that file and README "Android cleartext".
+    // No cleartext (MV-44, MD-201): the server is reached over HTTPS with its CA pinned (modules/generatorai-trust),
+    // so a release build keeps Android's default refusal of `http://`. Debug builds still allow it for Metro (the
+    // generated debug manifest). Local network: the app targets SDK 36, so Android 17's ACCESS_LOCAL_NETWORK gate
+    // (target 37) does not apply yet; the trust module already reports a denial for when it does (MD-202).
     // expo-screen-capture (M9-09) declares screenshot-detection permissions the app never uses (it only blocks
     // capture and hides Recents); READ_MEDIA_IMAGES in particular is a Play-policy permission. DETECT_SCREEN_CAPTURE
     // stays (a normal, install-time permission): on Android 14+ the module registers its capture callback when it is
@@ -360,17 +361,6 @@ const config: ExpoConfig = {
       'expo-audio',
       { microphonePermission: MICROPHONE_USAGE, enableBackgroundPlayback: false },
     ],
-    // Android 9+ blocks cleartext (`http://`) by default, and the pairing
-    // offer for a server on the same LAN is `http://<lan-ip>:<port>`. A
-    // release build without this rejects every request after a QR scan that
-    // appeared to succeed. Android's network-security-config cannot express
-    // CIDR ranges (only exact hosts / domain suffixes), so the
-    // loopback/RFC1918/`.local`-only rule is enforced at the application
-    // layer instead: `PairingEndpointSchema` in @generatorai/relay-protocol
-    // refuses an `http:` endpoint that is not private, and every request the
-    // app makes goes to a paired endpoint. SDK 57 dropped the
-    // `android.usesCleartextTraffic` config key, hence a plugin.
-    './plugins/withCleartextTraffic',
     './plugins/withShadowNodeRaceFix',
     // iOS 27 refuses to launch an app without the UIScene life cycle.
     './plugins/withSceneLifecycle',

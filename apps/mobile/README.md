@@ -56,23 +56,21 @@ tokens register against the sandbox gateway and pushes are silently dropped. `ea
 APS_ENVIRONMENT=production npx expo config --type introspect | grep aps-environment
 ```
 
-## Android cleartext (LAN pairing in release builds)
+## LAN HTTPS and certificate pinning (MV-44)
 
-The pairing offer for a server on the same network is `http://<lan-ip>:<port>`. Android 9+
-blocks cleartext by default, so a release build that does not opt in rejects every request after
-a QR scan that looked successful. SDK 57 removed the `android.usesCleartextTraffic` config key, so
-`plugins/withCleartextTraffic.js` sets `android:usesCleartextTraffic="true"` on the generated
-manifest directly (`plugins/androidManifestCleartext.js` is the unit-tested transform).
+The app talks to a server on the same network over `https://`, never plain HTTP (MD-201): the
+server's leaf is issued by its own per-install CA (D-110), and the pairing QR names that CA
+(`certificateFingerprint`, plus `backupCertificateFingerprint`). `modules/generatorai-trust`
+anchors each paired server's LAN `host:port` to that CA alone, natively, for every stack the app
+uses — React Native `fetch` / XHR / images and `WebSocket`, and `expo/fetch` (the stream):
+iOS through `URLSession` challenge hooks and SocketRocket's security policy, Android through one
+`OkHttpClientFactory` with a pinning `X509ExtendedTrustManager`. Public names (a `*.ts.net`
+certificate) keep the system trust. A typed code reads the CA from the handshake and the person
+compares the certificate with the one their computer shows (MD-200). Rules:
+`src/services/transport/trust.ts`; storage: `src/services/auth/serverTrust.ts`; decisions
+MD-199…MD-202; evidence `docs/redesign/mobile/reviews/mv44-pinning.md`.
 
-Android's `network_security_config.xml` can only allow-list exact hosts and domain
-suffixes — not CIDR ranges — so the "loopback / RFC1918 / `.local` only" rule is enforced at
-the **application layer** instead: `PairingEndpointSchema` (`@generatorai/relay-protocol`)
-refuses an `http:` endpoint that is not private, and the app only ever talks to a paired
-endpoint. `src/__tests__/cleartextEndpointPolicy.test.ts` pins that rule; if it ever loosens,
-the cleartext flag loses its justification.
-
-Note: there is **no** message-level encryption above the transport (the relay-protocol
-`e2ee.ts` module is unwired). LAN requests are DPoP-signed — authenticated, not confidential.
+Release builds keep Android's default refusal of cleartext; debug builds allow it for Metro.
 
 ## Notification preferences
 

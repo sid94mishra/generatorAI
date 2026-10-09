@@ -16,7 +16,7 @@
 // Pure: no React Native / Expo imports, unit-tested on node.
 // ────────────────────────────────────────────────────────────────
 
-export type PairingFailureKind = 'network' | 'identity' | 'rejected';
+export type PairingFailureKind = 'network' | 'identity' | 'certificate' | 'local-network' | 'insecure' | 'rejected';
 
 export interface PairingFailure {
   kind: PairingFailureKind;
@@ -40,10 +40,18 @@ const IDENTITY = /identity key changed|identity at this address changed|HostIden
 export const LOCAL_NETWORK_HINT =
   'Couldn’t reach your server. If your phone asked to find devices on your local network, allow it — then try again. Also check that this phone is on the same network as the server.';
 
+export const CERTIFICATE_MISMATCH_MESSAGE =
+  'The server’s certificate is not the one this device was told to trust. Show a new code on your computer and try again — if it keeps happening, something on this network may be impersonating your server.';
+
 export function classifyPairingFailure(error: unknown): PairingFailure {
   const name = error instanceof Error ? error.name : '';
   const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : String(error);
   const text = `${name} ${raw}`;
+  // Named by the trust layer (MD-202): the pinned CA refused the handshake, or Local Network access is off.
+  const problem = (error as { problem?: unknown } | null)?.problem;
+  if (problem === 'certificate-changed') return { kind: 'certificate', message: CERTIFICATE_MISMATCH_MESSAGE, retryable: false };
+  if (problem === 'local-network-denied') return { kind: 'local-network', message: raw, retryable: true };
+  if (name === 'InsecureEndpointError') return { kind: 'insecure', message: raw, retryable: false };
 
   // Identity first: its messages can mention an unreachable endpoint too,
   // and a changed identity must never be silently retried.

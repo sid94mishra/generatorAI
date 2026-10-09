@@ -6,16 +6,20 @@
 // and shows the consent step: server name, address and fingerprint to compare, what this device will be able to do
 // (the invite fixes it; ask for more later), its name, "Pair". Pairing failures keep the form with the reason (code →
 // the code field, address → the address field); a Local Network prompt mid-pair retries once (pairingFailure.ts).
-// Success opens `/paired`.
+// Success opens `/paired`. The consent step says the connection is encrypted and how the server's certificate is
+// checked (MV-44, MD-199/MD-200): against the scanned QR, or — for a typed code — by the person comparing it with
+// the certificate their computer shows. A refused certificate and a denied Local Network are named (MD-202).
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, View } from 'react-native';
+import { AppState, Linking, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { isSensitiveScope, scopeLabel } from '@generatorai/shared/ui-contract';
 
 import { QrScanner } from '../../blocks/QrScanner';
 import { useAuth } from '../../services/auth/AuthProvider';
+import { connectionProblemCopy } from '../../services/auth/connectionProblem';
 import { classifyPairingFailure, shouldAutoRetryPairing, type PairingFailure } from '../../services/auth/pairingFailure';
-import { consentFor, prefillFrom, probeAddress, type PairingConsent, type Reachability } from '../../services/auth/pairingInput';
+import { consentFor, prefillFrom, probeAddress, type PairingConsent, type PairingProposal, type Reachability } from '../../services/auth/pairingInput';
+import { endpointSecurity, shortFingerprint } from '../../services/transport/trust';
 import { markPaired } from '../../services/auth/pairingOutcome';
 import { ListRow } from '../../ui/layout/ListRow';
 import { ListSection } from '../../ui/layout/ListSection';
@@ -38,7 +42,14 @@ type Href = Parameters<typeof router.replace>[0];
 
 function ReachLine({ reach }: { reach: Reachability | null }): React.ReactElement | null {
   if (!reach) return null;
-  const view = reach.kind === 'reachable' ? { health: 'ok' as const, word: 'Reachable' } : reach.kind === 'checking' ? { health: 'idle' as const, word: 'Checking…' } : { health: 'err' as const, word: "Can't reach" };
+  const view =
+    reach.kind === 'reachable'
+      ? { health: 'ok' as const, word: 'Reachable' }
+      : reach.kind === 'checking'
+        ? { health: 'idle' as const, word: 'Checking…' }
+        : reach.kind === 'insecure'
+          ? { health: 'err' as const, word: 'Use https://' }
+          : { health: 'err' as const, word: "Can't reach" };
   return (
     <View accessibilityRole="text" className="flex-row items-center gap-1.5" accessible accessibilityLabel={view.word} testID="pairing-reach">
       <StatusDot health={view.health} size="sm" />
@@ -61,7 +72,8 @@ export default function PairingScreen(): React.ReactElement {
   const [reach, setReach] = useState<Reachability | null>(null);
   const [errors, setErrors] = useState<{ code?: string; address?: string; form?: string }>({});
   const [connecting, setConnecting] = useState(false);
-  const [consent, setConsent] = useState<PairingConsent | null>(null);
+  const [proposal, setProposal] = useState<PairingProposal | null>(null);
+  const consent = proposal?.consent ?? null;
   const [deviceName, setDeviceName] = useState(() => `My ${n.device}`);
   const [pairing, setPairing] = useState(false);
   const [failure, setFailure] = useState<PairingFailure | null>(null);
@@ -120,9 +132,9 @@ export default function PairingScreen(): React.ReactElement {
     if (code.length !== 12) return setErrors({ code: 'Enter all 12 characters of the code.' });
     setConnecting(true);
     void consentFor(code, address, scanned)
-      .then((c) => {
+      .then((p) => {
         setClock(Date.now());
-        setConsent(c);
+        setProposal(p);
         setFailure(null);
       })
       .catch((e: Error & { field?: 'code' | 'address' }) => {
@@ -139,7 +151,7 @@ export default function PairingScreen(): React.ReactElement {
   const lastFailure = useRef<PairingFailure | null>(null);
   const pair = useCallback(
     async (automatic: boolean) => {
-      if (!consent || busy.current) return;
+      if (!proposal || busy.current) return;
       if (!automatic) autoRetried.current = false;
       busy.current = true;
       interrupted.current = AppState.currentState !== 'active';
@@ -147,7 +159,7 @@ export default function PairingScreen(): React.ReactElement {
       setPairing(true);
       setFailure(null);
       try {
-        await completePairing(consent, deviceName.trim() || `My ${n.device}`);
+        await completePairing(proposal.consent, deviceName.trim() || `My ${n.device}`, proposal.trust);
         busy.current = false;
         haptic('success');
         markPaired();
@@ -166,7 +178,7 @@ export default function PairingScreen(): React.ReactElement {
         haptic('error');
       }
     },
-    [consent, deviceName, completePairing, n.device],
+    [proposal, deviceName, completePairing, n.device],
   );
   // An automatic retry is a tick the effect below turns into one more attempt (never a recursive call).
   useEffect(() => {
@@ -190,7 +202,7 @@ export default function PairingScreen(): React.ReactElement {
 
   const back = (): void => {
     if (consent) {
-      setConsent(null);
+      setProposal(null);
       setFailure(null);
       return;
     }
@@ -199,8 +211,27 @@ export default function PairingScreen(): React.ReactElement {
   };
   const header = <Header role="detail" title={consent ? 'Pair with this server?' : ''} {...(consent || adding ? { onBack: back } : {})} />;
 
-  if (consent) {
+  if (proposal && consent) {
     const expired = consent.expiresAt <= clock;
+    const encrypted = endpointSecurity(consent.endpoint) === 'tls';
+    const checkedBy = !encrypted
+      ? 'The server runs on this device.'
+      : !proposal.trust.fingerprints.length
+        ? 'Its certificate is trusted by this device.'
+        : proposal.trust.source === 'qr'
+          ? 'The server’s identity is checked against the code you scanned.'
+          : 'Only the certificate below will be trusted for this server.';
+    const failureTitle =
+      failure?.kind === 'identity'
+        ? 'The server at this address changed'
+        : failure?.kind === 'certificate'
+          ? 'The certificate doesn’t match'
+          : failure?.kind === 'local-network'
+            ? 'Allow Local Network access'
+            : failure?.kind === 'insecure'
+              ? 'Update GeneratorAI on your computer'
+              : "Couldn't pair";
+    const failureBody = failure?.kind === 'local-network' ? connectionProblemCopy('local-network-denied', n.localNetworkSetting).body : failure?.message;
     return (
       <Screen header={header} keyboard="form" testID="pairing-consent">
         <View className="gap-5 px-4 pb-10 pt-2">
@@ -209,7 +240,18 @@ export default function PairingScreen(): React.ReactElement {
           </Text>
           <ListSection>
             <ListRow kind="value" icon="server" title={consent.serverName || 'GeneratorAI'} value={consent.endpoint} mono />
+            <ListRow kind="info" icon="lock" title={encrypted ? 'Encrypted' : 'On this device'} subtitle={checkedBy} testID="pairing-encrypted" />
           </ListSection>
+          {proposal.certificate ? (
+            <View className="gap-1.5" testID="pairing-certificate">
+              <Text role="footnote" tone="fg-2">
+                Check that your computer shows the same certificate (Settings › Security & devices):
+              </Text>
+              <Text role="monoLg" weight={600} selectable accessibilityLabel={`Certificate ${shortFingerprint(proposal.certificate)}`}>
+                {shortFingerprint(proposal.certificate)}
+              </Text>
+            </View>
+          ) : null}
           <View className="gap-1.5" testID="pairing-fingerprint">
             <Text role="footnote" tone="fg-2">
               Check that this matches the fingerprint on your computer:
@@ -225,7 +267,8 @@ export default function PairingScreen(): React.ReactElement {
           </ListSection>
           <Input label="Name" value={deviceName} onChangeText={setDeviceName} placeholder={`My ${n.device}`} presentation="standalone" testID="pairing-name" />
           {expired ? <Callout tone="err" title="That code expired — ask for a new one" /> : null}
-          {failure ? <Callout tone="err" title={failure.kind === 'identity' ? 'The server at this address changed' : "Couldn't pair"} body={failure.message} testID="pairing-error" /> : null}
+          {failure ? <Callout tone="err" title={failureTitle} {...(failureBody ? { body: failureBody } : {})} testID="pairing-error" /> : null}
+          {failure?.kind === 'local-network' ? <Button label="Open Settings" variant="ghost" onPress={() => void Linking.openSettings()} testID="pairing-open-settings" /> : null}
           <Button label="Pair" size="lg" fullWidth loading={pairing} disabled={expired} onPress={() => void pair(false)} testID="pairing-confirm" />
           <Button label="Use a different code" variant="ghost" onPress={back} />
         </View>
@@ -272,7 +315,7 @@ export default function PairingScreen(): React.ReactElement {
               setAddress(v);
               if (!v.trim()) setReach(null);
             }}
-            placeholder="http://192.168.1.24:3100"
+            placeholder="https://192.168.1.24:3100"
             presentation="standalone"
             trailing={<ReachLine reach={address.trim() ? reach : null} />}
             returnKeyType="go"

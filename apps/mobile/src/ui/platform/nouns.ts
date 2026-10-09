@@ -14,6 +14,8 @@ export interface PlatformNouns {
   thisDevice: string;
   liveActivities: string;
   quickControls: string;
+  /** Where the OS lets a person allow LAN access for this app (MD-202). */
+  localNetworkSetting: string;
 }
 
 /** The device noun from the platform and the SCREEN's smaller side (a tablet stays a tablet in a narrow window). */
@@ -24,8 +26,8 @@ export function deviceKindFor(platform: NativePlatform, isPad: boolean, screenSh
 
 export function nounsFor(platform: NativePlatform, device: DeviceKind): PlatformNouns {
   const base = platform === 'ios'
-    ? { biometric: 'Face ID', liveActivities: 'Live Activities', quickControls: 'Control Center' }
-    : { biometric: 'fingerprint', liveActivities: 'Live Updates', quickControls: 'Quick Settings' };
+    ? { biometric: 'Face ID', liveActivities: 'Live Activities', quickControls: 'Control Center', localNetworkSetting: 'Settings › Privacy & Security › Local Network' }
+    : { biometric: 'fingerprint', liveActivities: 'Live Updates', quickControls: 'Quick Settings', localNetworkSetting: 'Settings › Apps › GeneratorAI › Permissions › Nearby devices' };
   return { ...base, device, thisDevice: `This ${device}` };
 }
 
