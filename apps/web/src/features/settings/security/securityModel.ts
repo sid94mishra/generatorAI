@@ -174,10 +174,9 @@ export function usableEndpoints(endpoints: readonly NetworkEndpoint[]): NetworkE
 }
 
 /**
- * The address to read out to the joining device. The server picks it per
- * platform (`https://` for a browser, the native lane for the mobile app,
- * D-112), so it is used as it is unless this page is the dev server, where
- * only its host carries over.
+ * The address to read out to the joining device. Every platform gets the
+ * server's `https://` address (D-127), so it is used as it is unless this page
+ * is the dev server, where only its host carries over.
  */
 export function joinAddress(serverJoinUrl: string, pageOrigin: string): string {
   return browserAddressFor(serverJoinUrl, pageOrigin);

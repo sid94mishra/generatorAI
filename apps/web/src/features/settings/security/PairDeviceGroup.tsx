@@ -73,8 +73,8 @@ function ActivePairing({
   const address = joinAddress(pairing.joinUrl, window.location.origin);
   // A browser opening an address only this server's own CA vouches for is
   // shown a warning; say what to compare (D-110). A ts.net (or any public)
-  // name has a trusted certificate (D-125), and the native lane is plain HTTP
-  // (D-112): neither shows one.
+  // name has a trusted certificate (D-125) and shows none; the mobile app pins
+  // the CA from the offer (D-127), so it never sees a warning either.
   const certificate = pairing.tls && endpointTrust(address) === 'install-ca' ? pairing.tls : null;
   const tailscale = isTailscaleOrigin(address);
   const code = pairing.shortCode.replace(/[^A-Za-z0-9]/g, '').slice(0, PAIRING_CODE_LENGTH);

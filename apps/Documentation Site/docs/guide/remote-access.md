@@ -185,7 +185,7 @@ Any other name gets `421 HOST_NOT_ALLOWED`. To add names, list them in `GENERATO
 
 ## Reference
 
-- `GENERATORAI_LAN_TLS=0`: an exposed server speaks plain HTTP only. Use it only when something else terminates TLS. Browsers on other devices cannot pair without HTTPS.
+- `GENERATORAI_LAN_TLS=0`: an exposed server speaks plain HTTP only. Use it only when something else terminates TLS. Browsers and the mobile app on other devices connect only over HTTPS, so they must reach it through that TLS front end.
 - `GET /api/auth/server-info` and `GET /api/security/network-access` return `tls`: the certificate fingerprint, the CA fingerprint, the covered names and the expiry date.
 - `GET /api/security/tailscale` (read) and `POST /api/security/tailscale` with `{ "enabled": true | false }` (admin) — what the Tailscale card shows and does.
 - `GENERATORAI_TAILSCALE_CLI`: the Tailscale CLI's path, when it is neither on `PATH` nor in its default install location.

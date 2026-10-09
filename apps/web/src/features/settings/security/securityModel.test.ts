@@ -7,10 +7,6 @@ describe('addresses other devices open (D-110)', () => {
     expect(joinAddress('https://192.168.1.20:3100', 'http://127.0.0.1:3100')).toBe('https://192.168.1.20:3100');
   });
 
-  it('keeps the native lane for a mobile grant', () => {
-    expect(joinAddress('http://192.168.1.20:3100', 'http://127.0.0.1:3100')).toBe('http://192.168.1.20:3100');
-  });
-
   it('on the dev server, takes only the host from the endpoint', () => {
     expect(browserAddressFor('https://192.168.1.20:3100', 'https://localhost:5173')).toBe('https://192.168.1.20:5173');
   });

@@ -171,8 +171,8 @@ export function CertificateGroup({ tls, onError }: { tls: NetworkTls; onError: (
 
   if (!tls.enabled) {
     return (
-      <Callout tone="warn" title="Other devices connect over plain HTTP" data-testid="security-certificate">
-        {tls.unavailableReason ?? 'This server is not serving HTTPS.'} Browsers on other devices cannot pair without HTTPS.
+      <Callout tone="warn" title="Other devices can't connect yet" data-testid="security-certificate">
+        {tls.unavailableReason ?? 'This server is not serving HTTPS.'} Browsers and the mobile app on other devices connect only over HTTPS.
       </Callout>
     );
   }
