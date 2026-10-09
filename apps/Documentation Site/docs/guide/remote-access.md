@@ -121,8 +121,19 @@ location / {
 
 Caddy sets the forwarded headers itself. Use `GENERATORAI_TRUST_PROXY=loopback` when the proxy runs on the same machine. When it runs on another machine, use its IP address. A request that arrives through a proxy never counts as local, even when the proxy forwards to loopback.
 
+## Names the server answers to
+
+To stop DNS rebinding, every request must address the server by a name it owns. A web page cannot otherwise reach a local server, but it can point its own DNS name at `127.0.0.1` and send same-origin requests. The server answers to:
+
+- any IP address, `localhost` and `*.localhost`;
+- the computer's hostname and `<hostname>.local`. With Network exposure on, it also answers to the hostname in any zone, such as `<hostname>.lan` or `<hostname>.<tailnet>.ts.net`;
+- the hosts in `GENERATORAI_ADVERTISED_URL(S)` and the DNS names of the certificate it serves;
+- requests from a proxy named in `GENERATORAI_TRUST_PROXY`.
+
+Any other name gets `421 HOST_NOT_ALLOWED`. To add names, list them in `GENERATORAI_ALLOWED_HOSTS`, separated by commas. A leading dot allows every name under a domain, as in `.home.arpa`. `*` turns the check off.
+
 ## Reference
 
 - `GENERATORAI_LAN_TLS=0`: an exposed server speaks plain HTTP only. Use it only when something else terminates TLS. Browsers on other devices cannot pair without HTTPS.
 - `GET /api/auth/server-info` and `GET /api/security/network-access` return `tls`: the certificate fingerprint, the CA fingerprint, the covered names and the expiry date.
-- Decisions: D-110 to D-114 in the redesign decision log.
+- Decisions: D-110 to D-114 and D-119 in the redesign decision log.

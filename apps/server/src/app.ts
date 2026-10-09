@@ -13,6 +13,7 @@ import { createCorsMiddleware } from './middleware/cors.js';
 import { createCspMiddleware } from './middleware/csp.js';
 import { createSecurityHeadersMiddleware } from './middleware/securityHeaders.js';
 import { createTransportPolicyMiddleware } from './middleware/transportPolicy.js';
+import { createHostAllowlistMiddleware, serverHostAllowlist } from './middleware/hostAllowlist.js';
 import { createAuthMiddleware } from './middleware/auth.js';
 import { createRateLimitMiddleware } from './middleware/rateLimit.js';
 import { createErrorMiddleware } from './middleware/errorHandler.js';
@@ -42,6 +43,21 @@ export function createApp(container: Container): Express {
 
   // 1b. Request metrics (OTel) — must be after requestId, before routes
   app.use(requestMetricsMiddleware);
+
+  // 1b'. D-119 — DNS rebinding: every request (public routes, pages, the
+  // internal desktop channel) must address this server by a name it owns,
+  // before CORS, transport policy or auth look at it.
+  app.use(
+    createHostAllowlistMiddleware({
+      allowlist: () => serverHostAllowlist(container),
+      onReject: (host, req) =>
+        container.logger.warn('[Host] Request refused: Host is not one of this server\'s names', {
+          requestId: req.requestId,
+          host: host.slice(0, 200),
+          path: req.path,
+        }),
+    }),
+  );
 
   // 1c. D-111 — once the network-facing listener speaks HTTPS, plain HTTP
   // from another device is redirected (pages) or refused (browser API calls);

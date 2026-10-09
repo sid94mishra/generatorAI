@@ -15,6 +15,7 @@ function setup(url: string, scopes: Scope[]) {
     config: { port: 3100, security: { corsOrigins: [] } },
     security: {
       tls: null,
+      posture: { bindHost: '127.0.0.1' },
       auth: { authenticate: vi.fn(async () => principal) },
       audit: { record: vi.fn() },
     },

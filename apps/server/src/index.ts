@@ -57,6 +57,7 @@ import {
   startChildReaperHeartbeat,
   stopChildReaperHeartbeat,
 } from '@generatorai/agent-harness-providers';
+import { createHostAllowlistMiddleware, serverHostAllowlist } from './middleware/hostAllowlist.js';
 
 // ── Process-level failure policy (P0-40) ────────────────────────────────────
 //
@@ -729,6 +730,8 @@ async function startServer(): Promise<void> {
   //     isolated origin — never the host. NO auth/cookies/SPA here.
   const widgetPort = parseInt(process.env['WIDGET_PORT'] ?? '3101', 10);
   const widgetApp = express();
+  // D-119 — same DNS-rebinding guard as the main app.
+  widgetApp.use(createHostAllowlistMiddleware({ allowlist: () => serverHostAllowlist(container) }));
   widgetApp.use('/api/widget-assets', createWidgetAssetRoutes(container));
   const widgetServer = createServer(widgetApp);
   widgetServer.listen(widgetPort, '127.0.0.1', () => {

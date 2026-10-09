@@ -998,6 +998,19 @@ refined to another label (honest device list) or into `mobile` / `mcp`. The gran
 the recorded platform before the grant is consumed, and every later scope change checks the device's (now pinned)
 platform as before.
 
+### D-119 Every listener refuses a Host that is not one of this server's names (DNS rebinding) (2026-10-09) — Final
+There was no `Host` validation: a page on `evil.example` re-pointed at 127.0.0.1 could read `server-info`, drive
+`/pair/preview` / `/pair/complete` and open upgrades as a same-origin page (and in unauthenticated-loopback dev mode,
+everything). `middleware/hostAllowlist.ts` runs first on the main app and the widget-asset listener, and inside
+`authorizeWebSocketUpgrade` for every WebSocket. Allowed: no Host (not a browser), any IP literal (rebinding needs a
+DNS name), `localhost`/`*.localhost`, the OS hostname, its first label and `<label>.local`; with Network exposure on
+(bind beyond loopback) also any name whose first label is the hostname (`<host>.lan`, `<host>.<tailnet>.ts.net` — the
+D-113 rule); the hosts of `GENERATORAI_ADVERTISED_URL(S)`; the served certificate's DNS names (generated or BYO); a
+request from a trusted proxy (D-114, it does its own host routing); and `GENERATORAI_ALLOWED_HOSTS` (comma list,
+`.suffix`, `*` = off). Anything else: 421 `HOST_NOT_ALLOWED` with a message naming the variable (WS: `421 Misdirected
+Request`). The desktop window (127.0.0.1), the Vite dev proxy (`changeOrigin:false`, Host `localhost:5173` or an IP),
+LAN HTTPS (IPs, `.local`) and Docker (`localhost:3100`) need no configuration.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

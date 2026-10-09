@@ -26,6 +26,7 @@ import type { Container } from '../composition-root.js';
 import { reachableOrigins } from '../network/reachableOrigins.js';
 import { requestAbsoluteUrl, type OriginRequest } from '../network/requestOrigin.js';
 import { classifyTransport } from './transportPolicy.js';
+import { hostCheck, serverHostAllowlist } from './hostAllowlist.js';
 
 export interface UpgradeAuthResult {
   ok: boolean;
@@ -53,6 +54,16 @@ export async function authorizeWebSocketUpgrade(
 ): Promise<UpgradeAuthResult> {
   const { container, req, socket, ticketScope, label } = params;
   const { auth, audit } = container.security;
+
+  // D-119 — a rebinding page reaches the upgrade too; refuse a foreign Host first.
+  const host = hostCheck(req as unknown as Parameters<typeof hostCheck>[0], serverHostAllowlist(container));
+  if (!host.ok) {
+    container.logger.warn(`[${label}] upgrade rejected: Host is not one of this server's names`, {
+      host: host.host.slice(0, 200),
+    });
+    reject(socket, 421, 'Misdirected Request');
+    return { ok: false };
+  }
 
   // D-115 (audit F-1) — the upgrade obeys the same canonical route policy as
   // REST: a non-canonical path is refused, and the stream's own scopes are
