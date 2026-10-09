@@ -15,7 +15,7 @@ import { useActivityStore } from '@/stores/activityStore.js';
 import { PopoverPopup, PopoverRoot } from '@/ui/primitives/Popover/Popover.js';
 import { RailDivider, RailGroup, RailLiveOverflow, RailLiveTile } from '@/ui/shell/Rail/Rail.js';
 import { ActivityDetails } from './ActivityDetails.js';
-import { usePreview } from './ActivityItem.js';
+import { previewKey, usePreview } from './ActivityItem.js';
 import { kindIcon, tileLabel, tileTone } from './activityView.js';
 import { useActivityModel } from './useActivityModel.js';
 
@@ -88,7 +88,7 @@ function RailTile({
   now: number;
   modelLabel: (id: string) => string;
 }) {
-  const preview = usePreview(`rail:${entry.key}`);
+  const preview = usePreview(previewKey(entry, 'rail'));
   const tileRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const titleId = useId();

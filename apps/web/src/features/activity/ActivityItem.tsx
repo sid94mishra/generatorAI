@@ -53,6 +53,16 @@ export interface ActivityItemProps {
   side?: 'right' | 'left';
 }
 
+/**
+ * The popover key of one card or tile. It names the group too: an answered gate moves its entity from Needs you
+ * to Recent (or Running) as a NEW card with the same entity key, and a group-less key opened the popover again on
+ * that card whenever the attention feed beat the answer's response (react-query drops `onSuccess` of an
+ * unmounted card, so nothing closed it) — and Esc then closed that popover instead of the column.
+ */
+export function previewKey(entry: Pick<ActivityEntry, 'group' | 'key'>, surface?: 'rail'): string {
+  return `${surface ? `${surface}:` : ''}${entry.group}:${entry.key}`;
+}
+
 /** The popover's open/close timing, shared by cards and rail tiles. */
 export function usePreview(key: string) {
   const preview = useActivityStore((s) => s.preview);
@@ -62,7 +72,14 @@ export function usePreview(key: string) {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
   };
-  useEffect(() => clear, []);
+  // A card that unmounts with its popover open (it moved group, or left the feed) takes the popover with it.
+  useEffect(
+    () => () => {
+      clear();
+      if (useActivityStore.getState().preview === key) useActivityStore.getState().setPreview(null);
+    },
+    [key],
+  );
   const open = preview === key;
   return {
     open,
@@ -95,7 +112,7 @@ function copyLink(href: string): void {
 
 export function ActivityItem({ entry, now, selected, modelLabel, tabIndex, linkRef, onFocusCard, onNavigate, side = 'right' }: ActivityItemProps) {
   const navigate = useNavigate();
-  const preview = usePreview(entry.key);
+  const preview = usePreview(previewKey(entry));
   const cardRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const localLink = useRef<HTMLAnchorElement | null>(null);
