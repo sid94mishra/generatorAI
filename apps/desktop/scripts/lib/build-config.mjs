@@ -255,6 +255,43 @@ const SHARED_RESOURCE_EXCLUSIONS = ['!**/*.map', '!**/stats.html'];
  * @param {{provider:string,[k:string]:unknown}} [input.publish]  overrides the derived target
  * @param {Record<string,string|undefined>} [input.env]
  */
+/**
+ * Electron fuses for the shipped binary (F-4, D-128). electron-builder flips
+ * them with @electron/fuses right after the afterPack hook and before signing,
+ * which is the one point where it is valid.
+ *
+ *   runAsNode off               the embedded server runs in a utility process
+ *                               (src/main/server-child.ts), so nothing needs
+ *                               ELECTRON_RUN_AS_NODE; with it on, anyone able
+ *                               to set the app's environment runs Node as us.
+ *   nodeOptions / inspect off   NODE_OPTIONS and --inspect/SIGUSR1 are the same
+ *                               code-injection door.
+ *   asar integrity + only asar  the app code is the signed app.asar, checked on
+ *                               load (macOS Info.plist / Windows resource hash
+ *                               written by electron-builder; no-op on Linux).
+ *   cookie encryption on        the cookie store uses the OS key like Chrome's;
+ *                               existing plaintext cookies are re-encrypted on
+ *                               write.
+ *   file-protocol privileges off the splash / error / prompt pages are plain
+ *                               file:// documents with same-directory fonts,
+ *                               which load without the extra privileges.
+ *
+ * Flipping a fuse rewrites the binary, so an unsigned macOS build needs its
+ * ad-hoc signature reset or Apple Silicon refuses to launch it.
+ */
+export function electronFuses({ platform, signed }) {
+  return {
+    runAsNode: false,
+    enableNodeOptionsEnvironmentVariable: false,
+    enableNodeCliInspectArguments: false,
+    enableEmbeddedAsarIntegrityValidation: true,
+    onlyLoadAppFromAsar: true,
+    enableCookieEncryption: true,
+    grantFileProtocolExtraPrivileges: false,
+    resetAdHocDarwinSignature: platform === 'mac' && !signed,
+  };
+}
+
 export function createBuildConfig({ platform, arch, channel, signed, publish, env = {} }) {
   if (!CHANNELS.includes(channel)) {
     throw new Error(`Unknown channel '${channel}' (expected one of ${CHANNELS.join(', ')}).`);
@@ -321,6 +358,7 @@ export function createBuildConfig({ platform, arch, channel, signed, publish, en
     ],
     asarUnpack: ['**/*.node'],
     protocols: [{ name: PRODUCT_NAME, schemes: ['generatorai'] }],
+    electronFuses: electronFuses({ platform, signed }),
   };
 
   if (platform === 'win') config.win = winConfig(arch);

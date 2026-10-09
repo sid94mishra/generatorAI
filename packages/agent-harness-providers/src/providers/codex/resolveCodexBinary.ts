@@ -40,7 +40,7 @@ export interface ResolvedCodexCommand {
   command: string;
   /** Arguments that must precede Codex's own (a script path when run via Node). */
   argsPrefix: string[];
-  /** Extra environment the launch needs (e.g. running Electron's binary as Node). */
+  /** Extra environment the launch needs (what the npm launcher would have set). */
   env: Record<string, string>;
   /** The Codex entry point that was found, for display and diagnostics. */
   path: string;
@@ -113,15 +113,63 @@ async function isExecutableFile(candidate: string, platform: NodeJS.Platform): P
   }
 }
 
-/** Launch through the running Node runtime (Electron's binary when hosted by the desktop app). */
-function viaNode(script: string, source: CodexCommandSource): ResolvedCodexCommand {
-  return {
-    command: process.execPath,
-    argsPrefix: [script],
-    env: process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {},
-    path: script,
-    source,
-  };
+const CODEX_TARGET_TRIPLES: Partial<Record<string, string>> = {
+  'linux-x64': 'x86_64-unknown-linux-musl',
+  'linux-arm64': 'aarch64-unknown-linux-musl',
+  'darwin-x64': 'x86_64-apple-darwin',
+  'darwin-arm64': 'aarch64-apple-darwin',
+  'win32-x64': 'x86_64-pc-windows-msvc',
+  'win32-arm64': 'aarch64-pc-windows-msvc',
+};
+
+/**
+ * The native binary a `@openai/codex` launcher script would exec — the same
+ * lookup `bin/codex.js` does (`@openai/codex-<platform>-<arch>/vendor/<triple>/bin/codex`).
+ */
+export async function nativeCodexForScript(
+  script: string,
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): Promise<{ binary: string; packageRoot: string } | null> {
+  const triple = CODEX_TARGET_TRIPLES[`${platform}-${arch}`];
+  if (!triple) return null;
+  const packageRoot = path.dirname(path.dirname(script));
+  let vendorRoot: string;
+  try {
+    const pkg = createRequire(path.join(packageRoot, 'package.json')).resolve(`@openai/codex-${platform}-${arch}/package.json`);
+    vendorRoot = path.join(path.dirname(pkg), 'vendor');
+  } catch {
+    vendorRoot = path.join(packageRoot, 'vendor');
+  }
+  const binary = path.join(vendorRoot, triple, 'bin', platform === 'win32' ? 'codex.exe' : 'codex');
+  return (await isExecutableFile(binary, platform)) ? { binary, packageRoot } : null;
+}
+
+/**
+ * A launcher script becomes its native binary, run directly — what the
+ * launcher itself would exec, minus a Node hop. The desktop app's server runs
+ * inside Electron with the RunAsNode fuse off (F-4), where `process.execPath`
+ * cannot run a script at all; elsewhere the script runs on the current Node
+ * only when no native binary sits next to it.
+ */
+async function viaScript(
+  script: string,
+  source: CodexCommandSource,
+  platform: NodeJS.Platform,
+): Promise<ResolvedCodexCommand | null> {
+  const native = await nativeCodexForScript(script, platform);
+  if (native) {
+    return {
+      command: native.binary,
+      argsPrefix: [],
+      // What bin/codex.js sets for the binary it launches.
+      env: { CODEX_MANAGED_PACKAGE_ROOT: native.packageRoot, CODEX_MANAGED_BY_NPM: '1' },
+      path: native.binary,
+      source,
+    };
+  }
+  if (process.versions.electron) return null;
+  return { command: process.execPath, argsPrefix: [script], env: {}, path: script, source };
 }
 
 /**
@@ -134,10 +182,10 @@ async function toCommand(
   platform: NodeJS.Platform,
 ): Promise<ResolvedCodexCommand | null> {
   const ext = path.extname(found).toLowerCase();
-  if (ext === '.js' || ext === '.mjs' || ext === '.cjs') return viaNode(found, source);
+  if (ext === '.js' || ext === '.mjs' || ext === '.cjs') return viaScript(found, source, platform);
   if (ext === '.cmd' || ext === '.bat' || ext === '.ps1') {
     const script = path.join(path.dirname(found), 'node_modules', '@openai', 'codex', 'bin', 'codex.js');
-    return (await isExecutableFile(script, 'win32')) ? viaNode(script, source) : null;
+    return (await isExecutableFile(script, 'win32')) ? viaScript(script, source, platform) : null;
   }
   return { command: found, argsPrefix: [], env: {}, path: found, source };
 }
@@ -164,7 +212,10 @@ export async function resolveCodexCommand(
 
   if (options.useBundled !== false) {
     const bundled = await bundledCodexScript(platform);
-    if (bundled) return viaNode(bundled, 'bundled');
+    if (bundled) {
+      const cmd = await viaScript(bundled, 'bundled', platform);
+      if (cmd) return cmd;
+    }
   }
 
   // Loaded on use: this module is exported from the package barrel, and a

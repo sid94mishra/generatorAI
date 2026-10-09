@@ -3,8 +3,10 @@
 //
 // Run from the repo root after `pnpm --filter @generatorai/desktop build`:
 //   node agent-tests/terminal-desktop-smoke.mjs
+// Against the packaged app (node-pty inside the server's utility process, F-4):
+//   GENERATORAI_SMOKE_EXECUTABLE=<…/GeneratorAI.app/Contents/MacOS/GeneratorAI> node agent-tests/terminal-desktop-smoke.mjs
 
-import { _electron as electron } from 'playwright';
+import { launchDesktop } from './helpers/launch-desktop.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DESKTOP_DIR as DESKTOP, REPO_ROOT, isolatedProfile } from './helpers/desktop-profile.mjs';
@@ -25,7 +27,7 @@ const log = (...a) => console.log('[terminal-desktop]', ...a);
 // developer profile, no :3100/:5173 (09 §6.5, agent-tests/helpers/desktop-profile.mjs).
 const profile = isolatedProfile('gai-terminal-smoke-');
 process.on('exit', profile.cleanup);
-const app = await electron.launch({
+const app = await launchDesktop({
   args: [DESKTOP, profile.arg],
   // Faux harness: the chat/run this smoke creates never reaches a real provider.
   env: {

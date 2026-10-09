@@ -83,6 +83,8 @@ export interface SecurityBootstrapOptions {
   logger: ILogger;
   /** Supplied by the Electron desktop shell (safeStorage). */
   osHooks?: OsProtectedKeyHooks | undefined;
+  /** F-8 — the vault key the desktop app handed over its channel (base64/hex, like GENERATORAI_SECRET_KEY). */
+  suppliedSecretKey?: string | undefined;
 }
 
 export interface SecurityContext {
@@ -216,6 +218,7 @@ export async function createSecurityContext(
   const secretStore = createSecretStore({
     dataDir: secretsDir,
     osHooks: options.osHooks,
+    suppliedKey: options.suppliedSecretKey,
     requireSecure: requireSecureSecretStore,
     logger: {
       warn: (m, meta) => logger.warn(m, meta as Record<string, unknown>),

@@ -7,7 +7,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { resolveCodexCommand, CODEX_CLI_PATH_ENV } from '../resolveCodexBinary.js';
@@ -32,7 +32,11 @@ describe('resolveCodexCommand', () => {
     if (!bundled) return; // optional dependency absent on this machine (e.g. an unsupported platform)
     const onPath = makeExecutable(path.join(dir, 'bin', exe));
     const r = await resolveCodexCommand({ env: { PATH: path.join(dir, 'bin'), PATHEXT: '.EXE' }, homeDir: dir });
-    expect(r).toMatchObject({ command: process.execPath, argsPrefix: [bundled], source: 'bundled' });
+    // The launcher's native binary, run directly — no Node (or Electron-as-Node) hop.
+    expect(r).toMatchObject({ argsPrefix: [], source: 'bundled' });
+    expect(r?.command).toMatch(/codex(\.exe)?$/);
+    expect(r?.command).not.toBe(process.execPath);
+    expect(r?.env['CODEX_MANAGED_PACKAGE_ROOT']).toBe(path.dirname(path.dirname(bundled)));
     expect(r?.path).not.toBe(onPath);
     const explicit = makeExecutable(path.join(dir, 'custom', exe));
     const e = await resolveCodexCommand({ configuredPath: explicit, env: { PATH: '' }, homeDir: dir });
@@ -64,7 +68,22 @@ describe('resolveCodexCommand', () => {
     expect(r?.command).toBe(onPath);
   });
 
-  it('runs a JS entry point through the current Node runtime', async () => {
+  it('runs a launcher script as the native binary next to it (the platform package the launcher would exec)', async () => {
+    const triple = ({ 'darwin-arm64': 'aarch64-apple-darwin', 'darwin-x64': 'x86_64-apple-darwin', 'linux-x64': 'x86_64-unknown-linux-musl', 'linux-arm64': 'aarch64-unknown-linux-musl', 'win32-x64': 'x86_64-pc-windows-msvc', 'win32-arm64': 'aarch64-pc-windows-msvc' } as Record<string, string>)[`${process.platform}-${process.arch}`];
+    if (!triple) return;
+    const pkg = path.join(dir, 'node_modules', '@openai', 'codex');
+    const script = makeExecutable(path.join(pkg, 'bin', 'codex.js'));
+    writeFileSync(path.join(pkg, 'package.json'), '{"name":"@openai/codex"}');
+    const platformPkg = path.join(dir, 'node_modules', '@openai', `codex-${process.platform}-${process.arch}`);
+    mkdirSync(platformPkg, { recursive: true });
+    writeFileSync(path.join(platformPkg, 'package.json'), `{"name":"@openai/codex-${process.platform}-${process.arch}"}`);
+    const binary = makeExecutable(path.join(platformPkg, 'vendor', triple, 'bin', exe));
+    const r = await resolveCodexCommand({ useBundled: false, configuredPath: script, env: { PATH: '' }, homeDir: dir });
+    // Module resolution reports the real path (macOS: /var → /private/var).
+    expect(r).toMatchObject({ command: realpathSync(binary), argsPrefix: [], path: realpathSync(binary), source: 'config' });
+  });
+
+  it('runs a JS entry point through the current Node runtime when no native binary sits next to it', async () => {
     const script = makeExecutable(path.join(dir, 'pkg', 'bin', 'codex.js'));
     const r = await resolveCodexCommand({ useBundled: false, configuredPath: script, env: { PATH: '' }, homeDir: dir });
     expect(r).toMatchObject({ command: process.execPath, argsPrefix: [script], path: script });

@@ -10,15 +10,17 @@
 //   • Unpackaged (dev / `pnpm preview`): run apps/server/src/index.ts via
 //     `node --import tsx` using system Node — matches the prebuilt
 //     better-sqlite3 ABI and resolves workspace TS directly.
-//   • Packaged: run the compiled apps/server/dist/index.js via Electron's
-//     bundled Node (ELECTRON_RUN_AS_NODE) with better-sqlite3 rebuilt for
-//     Electron's ABI (see packaging notes / `pnpm rebuild`).
+//   • Packaged: run the bundled server (resources/server/server.mjs) in an
+//     Electron utility process (F-4, D-128) — Electron's Node without
+//     ELECTRON_RUN_AS_NODE, so the binary ships with the RunAsNode fuse off.
+//     Its native modules are staged for Electron's ABI
+//     (scripts/stage-server-runtime.mjs). The vault key goes over the
+//     process's message channel, never its environment (F-8).
 // ────────────────────────────────────────────────────────────────
 
 // No `electron` import: this module owns the server child process and nothing
 // about the application lifecycle. That separation is the fix for the quit
 // deadlock described at the bottom of this file — keep it.
-import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import * as http from 'node:http';
 import * as fs from 'node:fs';
@@ -31,6 +33,25 @@ import { loadSettings, saveSettings } from './config';
 import { loadOrCreateSecretKey } from './secret-protection';
 import type { ServerStatus, ServerState } from '../shared/ipc';
 import { repairProcessPath } from './login-shell-path';
+import { forkUtilityServer, spawnNodeServer, type ServerChild } from './server-child';
+
+/** Mirrors apps/server/src/parentChannel.ts: the server asks for the vault key over its channel (F-8). */
+const SECRET_KEY_HANDOFF_ENV = 'GENERATORAI_SECRET_KEY_HANDOFF';
+
+/**
+ * The server's environment: this process's (the user's PATH, proxies and
+ * provider settings reach the agent CLIs through it — the server's own
+ * child-env allowlist then decides what each child sees), minus
+ * ELECTRON_RUN_AS_NODE, which would turn any Electron binary the server starts
+ * into Node and is meaningless now the packaged app ships with that fuse off.
+ * The vault key is not in here unless the operator put it in our environment
+ * themselves; the shell's own key goes over the channel (F-8).
+ */
+export function inheritedServerEnv(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...source };
+  delete env['ELECTRON_RUN_AS_NODE'];
+  return env;
+}
 
 const HEALTH_TIMEOUT_MS = 60_000;
 const HEALTH_POLL_INTERVAL_MS = 400;
@@ -54,7 +75,9 @@ export const VAULT_UNREADABLE_MESSAGE =
   'credential vault cannot be read.';
 
 export class ServerManager extends EventEmitter {
-  private child: ChildProcess | null = null;
+  private child: ServerChild | null = null;
+  /** F-8 — the vault key this shell hands to the server when it asks over the channel. */
+  private handoffKey: string | null = null;
   private paths: ResolvedPaths;
   private port: number | null = null;
   /** Dedicated loopback port for the isolated widget-asset origin (:3101
@@ -254,41 +277,44 @@ export class ServerManager extends EventEmitter {
     // inherits whatever this process has. See `login-shell-path.ts`.
     await repairProcessPath();
 
-    const { command, args, cwd } = this.resolveLaunch();
+    const launch = this.resolveLaunch();
     const env = this.buildEnv();
 
-    log.info('Starting embedded server', { command, args, port: this.port, cwd });
+    log.info('Starting embedded server', { ...launch, port: this.port });
 
-    const child = spawn(command, args, {
-      cwd,
-      env,
-      // The 'ipc' channel exists solely so the server can be asked to shut down
-      // gracefully on Windows. Node maps `kill('SIGTERM')` to TerminateProcess
-      // there, so a signal can never reach the server's handler; an IPC message
-      // can. Without it the desktop — our primary distribution — was the one
-      // place the server's teardown and child reaping never ran.
-      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-      windowsHide: true,
-    });
+    // Either way the server has a message channel: it is how the server is
+    // asked to shut down gracefully on Windows (Node maps `kill('SIGTERM')` to
+    // TerminateProcess there, so a signal can never reach its handler), how it
+    // asks for the vault key, and how it asks for a browser tab.
+    const child =
+      launch.kind === 'utility'
+        ? forkUtilityServer(launch.modulePath, { cwd: launch.cwd, env, serviceName: 'GeneratorAI Server' })
+        : spawnNodeServer(launch.command, launch.args, { cwd: launch.cwd, env });
     this.child = child;
 
-    // D-105: the server asks for a browser tab for a workspace that has none (an agent's first browser call with
-    // the Browser dock closed). Only this child can send on the channel.
-    child.on('message', (msg: unknown) => {
+    child.onMessage((msg: unknown) => {
       const m = msg as { type?: unknown; workspaceId?: unknown } | null;
-      if (m && m.type === 'browser.ensure-tab' && typeof m.workspaceId === 'string' && /^[\w-]{1,128}$/.test(m.workspaceId)) {
+      if (!m) return;
+      // F-8: answered only to this child, over its own channel.
+      if (m.type === 'secret-key-request') {
+        child.send({ type: 'secret-key', key: this.handoffKey });
+        return;
+      }
+      // D-105: the server asks for a browser tab for a workspace that has none (an agent's first browser call with
+      // the Browser dock closed). Only this child can send on the channel.
+      if (m.type === 'browser.ensure-tab' && typeof m.workspaceId === 'string' && /^[\w-]{1,128}$/.test(m.workspaceId)) {
         this.emit('browser-ensure-tab', m.workspaceId);
       }
     });
     child.stdout?.on('data', (b: Buffer) => this.pipeServerLog('info', b));
     child.stderr?.on('data', (b: Buffer) => this.pipeServerLog('warn', b));
 
-    child.on('error', (err) => {
+    child.onError((err) => {
       log.error('Server process error', err);
       this.lastError = err.message;
     });
 
-    child.on('exit', (code, signal) => {
+    child.onExit((code, signal) => {
       log.warn('Server process exited', { code, signal });
       this.child = null;
       this.port = this.port; // keep last port for status display
@@ -357,7 +383,7 @@ export class ServerManager extends EventEmitter {
     }
   }
 
-  private async performStop(child: ChildProcess, timeoutMs: number): Promise<void> {
+  private async performStop(child: ServerChild, timeoutMs: number): Promise<void> {
     this.intentionalStop = true;
     this.stopping = true;
     log.info('Stopping embedded server', { pid: child.pid });
@@ -373,18 +399,14 @@ export class ServerManager extends EventEmitter {
       const timer = setTimeout(() => {
         log.warn('Server did not exit in time; forcing kill');
         try {
-          if (process.platform === 'win32' && child.pid) {
-            spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true });
-          } else {
-            child.kill('SIGKILL');
-          }
+          child.forceKill();
         } catch {
           /* ignore */
         }
         done();
       }, timeoutMs);
 
-      child.once('exit', done);
+      child.onceExit(done);
       try {
         // Ask first, force later. The server's own shutdown closes the database,
         // flushes queued events and terminates the agent CLIs it spawned; if we
@@ -394,20 +416,10 @@ export class ServerManager extends EventEmitter {
         // On Windows this MUST be the IPC message: Node maps SIGTERM to
         // TerminateProcess, so the graceful handler would never run. POSIX
         // keeps the signal, which the server already handles.
-        let asked = false;
-        if (child.connected) {
-          asked = child.send({ type: 'shutdown' });
-        }
-        if (!asked) {
-          if (process.platform === 'win32' && child.pid) {
-            // No channel to ask over. `taskkill /t` reaps the whole tree, which
-            // at least stops the agent subprocesses from holding the inherited
-            // stdio pipes open and blocking our own exit.
-            spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true });
-          } else {
-            child.kill('SIGTERM');
-          }
-        }
+        // No channel to ask over: SIGTERM on POSIX; on Windows `taskkill /t`
+        // reaps the whole tree, which at least stops the agent subprocesses
+        // from holding the inherited stdio pipes open and blocking our exit.
+        if (!child.send({ type: 'shutdown' })) child.terminate();
       } catch {
         done();
       }
@@ -420,21 +432,23 @@ export class ServerManager extends EventEmitter {
 
   // ── internals ──────────────────────────────────────────────────────────
 
-  private resolveLaunch(): { command: string; args: string[]; cwd: string } {
+  private resolveLaunch():
+    | { kind: 'utility'; modulePath: string; cwd: string }
+    | { kind: 'node'; command: string; args: string[]; cwd: string } {
     const explicitNode = process.env['GENERATORAI_DESKTOP_NODE'];
     if (this.paths.packaged) {
-      // Run the compiled server with Electron's bundled Node.
-      return {
-        command: explicitNode || process.execPath,
-        args: [this.paths.serverEntry],
-        cwd: this.paths.resourcesDir,
-      };
+      // The bundled server in a utility process (Electron's Node, no
+      // ELECTRON_RUN_AS_NODE); an explicit Node binary still runs it as a child.
+      return explicitNode
+        ? { kind: 'node', command: explicitNode, args: [this.paths.serverEntry], cwd: this.paths.resourcesDir }
+        : { kind: 'utility', modulePath: this.paths.serverEntry, cwd: this.paths.resourcesDir };
     }
     // Unpackaged: run the TS source via tsx using system Node.
     if (!fileExists(this.paths.serverSrcEntry)) {
       throw new Error(`Server source not found at ${this.paths.serverSrcEntry}`);
     }
     return {
+      kind: 'node',
       command: explicitNode || 'node',
       args: ['--import', 'tsx', this.paths.serverSrcEntry],
       cwd: this.paths.repoRoot,
@@ -452,8 +466,9 @@ export class ServerManager extends EventEmitter {
     const widgetOrigin = `http://127.0.0.1:${this.widgetPort}`;
     const origins = [...apiOrigins, widgetOrigin].join(',');
 
+    const operatorKey = Boolean(process.env['GENERATORAI_SECRET_KEY'] || process.env['GENERATORAI_SECRET_PASSPHRASE']);
     const env: NodeJS.ProcessEnv = {
-      ...process.env,
+      ...inheritedServerEnv(process.env),
       NODE_ENV: 'production',
       PORT: port,
       WIDGET_PORT: String(this.widgetPort),
@@ -495,12 +510,17 @@ export class ServerManager extends EventEmitter {
 
     // ── Vault key ──────────────────────────────────────────────────
     // The server process cannot call Electron's `safeStorage`, so the shell
-    // unlocks the OS-protected key encryption key here and passes it down.
-    // It lives only in the child's environment, never on disk in plaintext.
-    if (!process.env['GENERATORAI_SECRET_KEY'] && !process.env['GENERATORAI_SECRET_PASSPHRASE']) {
+    // unlocks the OS-protected key encryption key here and hands it over the
+    // child's message channel when the server asks (F-8, D-128): never on disk
+    // in plaintext, and never in the child's environment, where `ps eww` /
+    // `/proc/<pid>/environ` and everything the server spawns could see it.
+    this.handoffKey = null;
+    delete env[SECRET_KEY_HANDOFF_ENV];
+    if (!operatorKey) {
       const protection = loadOrCreateSecretKey();
       if (protection) {
-        env['GENERATORAI_SECRET_KEY'] = protection.key;
+        this.handoffKey = protection.key;
+        env[SECRET_KEY_HANDOFF_ENV] = 'parent';
         this.secretBackend = protection.backend;
       } else {
         // The platform could not protect a key (e.g. Linux without a secret
@@ -537,9 +557,6 @@ export class ServerManager extends EventEmitter {
       env['GENERATORAI_DESKTOP_NATIVE_BROWSER'] = '1';
     }
 
-    if (this.paths.packaged && !process.env['GENERATORAI_DESKTOP_NODE']) {
-      env['ELECTRON_RUN_AS_NODE'] = '1';
-    }
     return env;
   }
 

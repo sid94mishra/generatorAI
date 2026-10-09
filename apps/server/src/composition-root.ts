@@ -14,6 +14,7 @@ import type { ProviderInstanceId } from '@generatorai/core';
 import { readWorkspaceRetentionPreferences } from './settings/workspaceRetention.js';
 import { defaultSttLanguage, readAudioPreferences } from './settings/audio.js';
 import { AgentHostClient, HostSupervisor, resolveWorktreePath, sessionHookBridgeFactory } from '@generatorai/core';
+import { parentChannel } from './parentChannel.js';
 import { applyReachabilityToPermissionDefault, createSecurityContext, type SecurityContext } from './composition/security.js';
 import { TailscaleAccess } from './network/tailscale/TailscaleAccess.js';
 import { describeExposurePreconditions } from './network/exposure.js';
@@ -228,7 +229,12 @@ import type {
 // dependencies are optional at runtime.
 // Legacy streaming imports removed in CLN-12 — unified /api/stream is the only transport.
 
-export async function createContainer(config: AppConfig): Promise<Container> {
+export interface CreateContainerOptions {
+  /** F-8 — the vault key handed over by the desktop app's channel (never via the environment). */
+  secretKey?: string | undefined;
+}
+
+export async function createContainer(config: AppConfig, options: CreateContainerOptions = {}): Promise<Container> {
   const logger: ILogger = createLogger({ level: config.logLevel ?? 'info', service: 'generatorai' });
 
   // ── Infrastructure ──
@@ -257,7 +263,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // listener is created: `createSecurityContext` throws `StartupSecurityError`
   // when the process is configured in a way that would expose an
   // unauthenticated API, and we want that to happen before anything binds.
-  const security = await createSecurityContext({ config, db, logger });
+  const security = await createSecurityContext({ config, db, logger, suppliedSecretKey: options.secretKey });
 
   // "Connect with Tailscale" (D-123). Started by index.ts once the listener
   // has bound its port; the same blockers as Network exposure apply.
@@ -1731,9 +1737,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // `ServerPlaywrightHost` is the fallback used everywhere else and by CI.
   // D-105: under the desktop app (spawned with an IPC channel) a workspace with no Browser dock tab gets a hidden
   // agent tab on the agent's first browser call.
+  const desktopChannel = parentChannel();
   const electronBridgeAdapter = new ElectronBridgeAdapter(logger, {
-    ...(typeof process.send === 'function'
-      ? { requestTab: (workspaceId: string) => { process.send?.({ type: 'browser.ensure-tab', workspaceId }); } }
+    ...(desktopChannel
+      ? { requestTab: (workspaceId: string) => { desktopChannel.send({ type: 'browser.ensure-tab', workspaceId }); } }
       : {}),
   });
   const serverPlaywrightHost = new ServerPlaywrightHost(logger);

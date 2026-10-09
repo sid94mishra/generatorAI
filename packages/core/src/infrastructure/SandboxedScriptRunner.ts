@@ -415,7 +415,9 @@ export class SandboxedScriptRunner implements IScriptRunner {
     }
     if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(binary)) {
       const shim = await parseNodeShim(binary);
-      if (shim) return { name, binary, viaCmdShell: false, shim: { ...shim, node: (await resolveOnPath('node', this.lookupEnv)) ?? process.execPath } };
+      // Inside the desktop app's Electron server (RunAsNode fuse off, F-4) `process.execPath` cannot run a script.
+      const node = (await resolveOnPath('node', this.lookupEnv)) ?? (process.versions.electron ? null : process.execPath);
+      if (shim && node) return { name, binary, viaCmdShell: false, shim: { ...shim, node } };
       return { name, binary, viaCmdShell: false, batch: true };
     }
     return { name, binary, viaCmdShell: false };

@@ -37,6 +37,7 @@ import { StartupSecurityError } from './composition/security.js';
 import { ensureBootstrapPairing } from './composition/bootstrapPairing.js';
 import { RelayStreamBridge } from './relay/RelayStreamBridge.js';
 import { createContainer } from './composition-root.js';
+import { parentChannel, receiveSecretKey, SECRET_KEY_HANDOFF_ENV, watchParentExit } from './parentChannel.js';
 import type { Container } from './composition-root.js';
 import type { WedgeDetector, LoopTurnProber } from '@generatorai/core';
 import { createApp } from './app.js';
@@ -429,7 +430,16 @@ async function startServer(): Promise<void> {
   const config = AppConfigSchema.parse(rawConfig);
 
   // 2. Create DI container
-  const container: Container = await createContainer(config);
+  // F-8 (D-128) — the desktop app hands the vault key over the parent channel
+  // rather than the environment, so it never appears in `ps eww` or in what
+  // this process spawns. A headless server keeps GENERATORAI_SECRET_KEY.
+  let handedSecretKey: string | undefined;
+  if (process.env[SECRET_KEY_HANDOFF_ENV] === 'parent') {
+    const channel = parentChannel();
+    if (!channel) throw new Error(`${SECRET_KEY_HANDOFF_ENV}=parent but this process has no parent channel`);
+    handedSecretKey = (await receiveSecretKey(channel)) ?? undefined;
+  }
+  const container: Container = await createContainer(config, { secretKey: handedSecretKey });
   // From here on a fault exit gets one bounded chance to commit queued writes.
   faultFlush = () => Promise.all([container.eventBus.flush(), container.streamBroker.flushWrites()]);
 
@@ -924,7 +934,10 @@ async function startServer(): Promise<void> {
   // has no way to deliver SIGTERM — Node maps `kill('SIGTERM')` there to
   // TerminateProcess, which no handler can observe. Without this the graceful
   // path never ran on the primary distribution's primary platform.
-  process.on('message', (msg: unknown) => {
+  // The packaged app forks this server as an Electron utility process (F-4),
+  // whose channel is `process.parentPort`; `parentChannel()` speaks either.
+  const channel = parentChannel();
+  channel?.onMessage((msg: unknown) => {
     if (msg && typeof msg === 'object' && (msg as { type?: unknown }).type === 'shutdown') {
       void shutdown('ipc');
     }
@@ -934,8 +947,10 @@ async function startServer(): Promise<void> {
   // a crash, a force-quit, a SIGKILL. Nothing else tells us: we are reparented
   // and would keep running, holding the database and every agent CLI (and
   // their MCP servers) we spawned. Only a process started with an IPC channel
-  // ever sees this event, so a standalone server is unaffected.
+  // ever sees this event, so a standalone server is unaffected. A utility
+  // process gets no such event, so it watches its parent instead.
   process.on('disconnect', () => { void shutdown('parent-disconnect'); });
+  if (channel?.kind === 'utility') watchParentExit(() => { void shutdown('parent-disconnect'); });
 
   // A fatal fault now unwinds through the same path as a signal, so it closes
   // the DB, flushes the event queues and reaps child processes instead of

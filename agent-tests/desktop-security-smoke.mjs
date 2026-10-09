@@ -22,6 +22,8 @@
 
 import { _electron as electron } from '@playwright/test';
 import path from 'node:path';
+import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { DESKTOP_DIR as DESKTOP, isolatedProfile } from './helpers/desktop-profile.mjs';
 
@@ -233,6 +235,30 @@ record(
   keyIsNonExtractable === 'non-extractable',
   keyIsNonExtractable,
 );
+
+// ── 5b. F-8: the vault key is handed over the server's channel, not its environment ──
+// `ps eww` (macOS) and /proc/<pid>/environ (Linux) show the environment a
+// process started with to any process of the same user. Windows has neither
+// tool; the handoff is the same code path there.
+if (process.platform !== 'win32') {
+  let serverPid = null;
+  try {
+    const port = new URL(origin).port;
+    serverPid = execFileSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], { encoding: 'utf8' }).trim().split('\n')[0] || null;
+  } catch {
+    /* lsof missing */
+  }
+  if (serverPid) {
+    const environ =
+      process.platform === 'linux'
+        ? fs.readFileSync(`/proc/${serverPid}/environ`, 'utf8').split('\0').join(' ')
+        : execFileSync('ps', ['eww', '-o', 'command=', '-p', serverPid], { encoding: 'utf8' });
+    record('server environment carries no vault key (F-8)', !/GENERATORAI_SECRET_KEY=\S/.test(environ), `pid=${serverPid}`);
+    record('server was told to ask its channel for the key', /GENERATORAI_SECRET_KEY_HANDOFF=parent/.test(environ));
+  } else {
+    record('server environment carries no vault key (F-8)', false, 'could not find the server pid (lsof)');
+  }
+}
 
 // ── 6. Main-process logs must not carry credentials ──
 const joined = mainLog.join('\n');

@@ -57,7 +57,15 @@ const KEY_BYTES = 32;
 export class EnvKeyProvider implements KeyProvider {
   private cached: Buffer | null = null;
 
-  constructor(private readonly saltPath: string) {}
+  /**
+   * @param suppliedKey the key handed over in memory by the host (F-8: the
+   *   desktop app's channel) — same encoding as GENERATORAI_SECRET_KEY, and it
+   *   takes precedence over the environment.
+   */
+  constructor(
+    private readonly saltPath: string,
+    private readonly suppliedKey?: string,
+  ) {}
 
   static isConfigured(): boolean {
     return Boolean(
@@ -68,7 +76,7 @@ export class EnvKeyProvider implements KeyProvider {
   async getKey(): Promise<Buffer> {
     if (this.cached) return this.cached;
 
-    const raw = process.env['GENERATORAI_SECRET_KEY'];
+    const raw = this.suppliedKey || process.env['GENERATORAI_SECRET_KEY'];
     if (raw) {
       const decoded = decodeKeyMaterial(raw);
       if (decoded.length !== KEY_BYTES) {
@@ -98,7 +106,7 @@ export class EnvKeyProvider implements KeyProvider {
 
   info(): KeyProviderInfo {
     return {
-      kind: process.env['GENERATORAI_SECRET_KEY'] ? 'env-key' : 'env-passphrase',
+      kind: this.suppliedKey || process.env['GENERATORAI_SECRET_KEY'] ? 'env-key' : 'env-passphrase',
       secure: true,
     };
   }
