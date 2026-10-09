@@ -5,6 +5,13 @@
 // does not match falls through to `DEFAULT_POLICY`, which requires admin
 // authority: an un-classified route fails closed rather than open.
 //
+// Matching is done on the CANONICAL path (D-115, audit F-1): Express routes
+// case-insensitively, tolerates a trailing slash and does not decode literal
+// segments, so the policy lower-cases, decodes percent-escaped unreserved
+// characters and compares segment by segment. A path that is ambiguous in a
+// way the router could resolve differently (dot segments, empty interior
+// segments, malformed escapes) has no canonical form and gets DEFAULT_POLICY.
+//
 // `scripts/check-route-scopes.mjs` asserts that every router mounted in
 // `apps/server/src/routes/index.ts` is represented here.
 // ────────────────────────────────────────────────────────────────
@@ -244,16 +251,70 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
 
 const SAFE_METHODS = new Set<string>(['GET', 'HEAD', 'OPTIONS']);
 
+/** RFC 3986 §2.3 unreserved characters — the only escapes that are equivalent to their literal form. */
+const UNRESERVED = /^[A-Za-z0-9\-._~]$/;
+
+/**
+ * The canonical segments of an `/api`-relative path, or `null` when the path
+ * has no single canonical form and must be refused (D-115).
+ *
+ * - Lower-cased, because Express matches routes case-insensitively: the
+ *   policy must see `/auth/Devices` as the `/auth/devices` the router
+ *   dispatches it to (audit F-1).
+ * - Percent-escapes of unreserved characters are decoded (`%64evices` is
+ *   `devices`); every other escape (`%2F`, `%3B` …) stays encoded, because it
+ *   is NOT equivalent to the literal character and may legitimately appear in
+ *   an id segment.
+ * - One trailing slash is tolerated (Express's non-strict routing treats
+ *   `/x/` as `/x`).
+ * - `.`/`..` segments (literal or escaped), empty interior segments (`//`) and
+ *   malformed escapes yield `null`.
+ */
+export function canonicalApiPathSegments(apiPath: string): string[] | null {
+  const path = apiPath.startsWith('/') ? apiPath : `/${apiPath}`;
+  const raw = path.split('/').slice(1);
+  if (raw.length > 0 && raw[raw.length - 1] === '') raw.pop();
+  const out: string[] = [];
+  for (const segment of raw) {
+    if (segment === '') return null;
+    let decoded = '';
+    for (let i = 0; i < segment.length; i += 1) {
+      const ch = segment[i]!;
+      if (ch !== '%') {
+        decoded += ch;
+        continue;
+      }
+      const hex = segment.slice(i + 1, i + 3);
+      if (!/^[0-9A-Fa-f]{2}$/.test(hex)) return null;
+      const literal = String.fromCharCode(parseInt(hex, 16));
+      decoded += UNRESERVED.test(literal) ? literal : `%${hex}`;
+      i += 2;
+    }
+    const lower = decoded.toLowerCase();
+    if (lower === '.' || lower === '..') return null;
+    out.push(lower);
+  }
+  return out;
+}
+
+/** The canonical `/api`-relative path (see {@link canonicalApiPathSegments}), or `null` if it has none. */
+export function canonicalApiPath(apiPath: string): string | null {
+  const segments = canonicalApiPathSegments(apiPath);
+  return segments ? `/${segments.join('/')}` : null;
+}
+
 /**
  * Resolves the policy for an `/api`-relative path, preferring the longest
- * matching prefix so `/workspaces/x/terminals` beats `/workspaces`.
+ * matching prefix so `/workspaces/x/terminals` beats `/workspaces`. A path
+ * with no canonical form resolves to {@link DEFAULT_POLICY} (fail closed).
  */
 export function resolveRoutePolicy(apiPath: string): RoutePolicy {
-  const normalized = apiPath.startsWith('/') ? apiPath : `/${apiPath}`;
+  const segments = canonicalApiPathSegments(apiPath);
+  if (!segments) return DEFAULT_POLICY;
   let best: RoutePolicy | null = null;
   let bestScore = -1;
   for (const policy of ROUTE_POLICIES) {
-    const score = matchScore(normalized, policy.prefix);
+    const score = matchScore(segments, policy.prefix);
     if (score > bestScore) {
       bestScore = score;
       best = policy;
@@ -263,17 +324,16 @@ export function resolveRoutePolicy(apiPath: string): RoutePolicy {
 }
 
 /**
- * Segment-aware prefix match supporting `:param` wildcards.
- * Returns the number of matched segments, or -1 for no match.
+ * Segment-aware prefix match supporting `:param` wildcards, on canonical
+ * (lower-cased) segments. Returns the number of matched segments, or -1.
  */
-function matchScore(path: string, prefix: string): number {
-  const pathSegments = path.split('/').filter(Boolean);
+function matchScore(pathSegments: readonly string[], prefix: string): number {
   const prefixSegments = prefix.split('/').filter(Boolean);
   if (prefixSegments.length > pathSegments.length) return -1;
   for (let i = 0; i < prefixSegments.length; i += 1) {
     const expected = prefixSegments[i]!;
     if (expected.startsWith(':')) continue;
-    if (expected !== pathSegments[i]) return -1;
+    if (expected.toLowerCase() !== pathSegments[i]) return -1;
   }
   return prefixSegments.length;
 }

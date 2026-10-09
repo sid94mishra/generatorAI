@@ -953,6 +953,19 @@ unset / `0` → never; `1` / `true` / `loopback` → a proxy on this machine (Ta
 unauthenticated-loopback check (unchanged). Set `GENERATORAI_ADVERTISED_URL` to the proxy's public origin so pairing
 offers and CORS know it. Documented in the docs site (Guides › Remote access over HTTPS).
 
+### D-115 The route→scope policy matches the canonical path; non-canonical paths are refused (2026-10-09) — Final
+Audit F-1: Express 5 routes case-insensitively and tolerates one trailing slash, but the policy compared segments
+case-sensitively, so `/api/auth/Devices` ran under the weaker `/auth` entry. The policy (`@generatorai/auth`
+`canonicalApiPathSegments`) now lower-cases, decodes only percent-escapes of RFC 3986 unreserved characters (`%64` →
+`d`; `%2F` stays encoded and cannot split a segment), drops one trailing slash, and compares segment by segment. A
+path with no canonical form — a `.`/`..` segment (literal or escaped), an empty interior segment (`//`) or a malformed
+escape — resolves to `DEFAULT_POLICY`, and the `/api` auth middleware refuses it first with 400 `NON_CANONICAL_PATH`.
+WebSocket upgrades apply the same check and require the union of the handler's scopes and the policy entry's. Express
+case-sensitive/strict routing stays OFF: `express.Router()` instances do not inherit the app setting (every router
+would need the option), and with a case-insensitive policy the router and the policy already agree on which entry a
+spelling belongs to. Regression: every `ROUTE_POLICIES` entry is checked under mixed case, trailing slash and escaped
+letters (`routePolicyCanonical.test.ts`), plus an HTTP test on the real auth router.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

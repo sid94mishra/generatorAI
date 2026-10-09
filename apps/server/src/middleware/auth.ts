@@ -16,6 +16,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import {
   AuthError,
   AuditAction,
+  canonicalApiPath,
   DPOP_NONCE_HEADER,
   hasAllScopes,
   isLoopbackAddress,
@@ -79,9 +80,25 @@ export function createAuthMiddleware(options: ApiAuthOptions): RequestHandler {
 
   return (req: Request, res: Response, next: NextFunction): void => {
     // `req.path` is already `/api`-relative because the middleware is mounted
-    // on `/api`, and it is query-string free.
+    // on `/api`, and it is query-string free. Policy is resolved on the
+    // CANONICAL path (D-115, audit F-1): Express dispatches `/auth/Devices`
+    // to `/auth/devices`, so the scope check must see it that way too. A path
+    // with no canonical form (dot segments, `//`, malformed escapes) is
+    // refused before anything else — the router could resolve it in a way the
+    // policy did not.
     const apiPath = req.path;
-    const { policy, scopes } = requiredScopesFor(req.method, apiPath);
+    const canonicalPath = canonicalApiPath(apiPath);
+    if (canonicalPath === null) {
+      res.status(400).json({
+        error: {
+          code: 'NON_CANONICAL_PATH',
+          message: 'The request path is not in canonical form (dot segments, empty segments or malformed escapes).',
+          requestId: req.requestId,
+        },
+      });
+      return;
+    }
+    const { policy, scopes } = requiredScopesFor(req.method, canonicalPath);
 
     if (policy.public) {
       next();
@@ -92,7 +109,7 @@ export function createAuthMiddleware(options: ApiAuthOptions): RequestHandler {
       try {
         // `/api/stream` is the only ticket-redeeming endpoint, and the ticket
         // must match the exact subscription it was minted for.
-        const isStreamSubscription = apiPath === '/stream' || apiPath === '/stream/';
+        const isStreamSubscription = canonicalPath === '/stream';
         // W09-a — `?c=` is the multiplexed form. Its ticket is bound to the
         // CONNECTION, not to a scope: the subscriptions are authorised
         // individually as they are added, so the ticket can never widen access

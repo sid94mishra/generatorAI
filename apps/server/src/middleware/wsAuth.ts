@@ -14,7 +14,9 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import {
   AuthError,
+  canonicalApiPath,
   hasAllScopes,
+  requiredScopesFor,
   isLoopbackAddress,
   missingScopes,
   type Principal,
@@ -49,8 +51,24 @@ export interface AuthorizeUpgradeParams {
 export async function authorizeWebSocketUpgrade(
   params: AuthorizeUpgradeParams,
 ): Promise<UpgradeAuthResult> {
-  const { container, req, socket, requiredScopes, ticketScope, label } = params;
+  const { container, req, socket, ticketScope, label } = params;
   const { auth, audit } = container.security;
+
+  // D-115 (audit F-1) — the upgrade obeys the same canonical route policy as
+  // REST: a non-canonical path is refused, and the stream's own scopes are
+  // widened by whatever the policy table demands for that path, so a stream
+  // handler can never ask for less than its route entry.
+  const pathname = (req.url ?? '/').split('?')[0] ?? '/';
+  const canonical = canonicalApiPath(pathname);
+  if (canonical === null) {
+    container.logger.warn(`[${label}] upgrade rejected: non-canonical path`);
+    reject(socket, 400, 'Bad Request');
+    return { ok: false };
+  }
+  const policyScopes = canonical.startsWith('/api/')
+    ? requiredScopesFor('GET', canonical.slice('/api'.length)).scopes
+    : [];
+  const requiredScopes = [...new Set<Scope>([...params.requiredScopes, ...policyScopes])];
 
   // D-111 — a browser on another device must use https://; only the native
   // app's DPoP-bound lane may upgrade over plain HTTP from the LAN.
