@@ -5,21 +5,29 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { assertSandboxDbPath, assertDummyRepo, findNewPairing, rewritePairUrl, mergedFixture } from './sandbox-data.mjs';
 
-test('pair links change only routing hints and preserve consent/security fields', () => {
+test('pair links put the https LAN address first and preserve consent/security fields', () => {
   const offer = { v: 2, serverId: 'test-server', serverPublicKey: 'test-public-key', pairingGrant: 'test-only-grant',
-    requestedScopes: ['read:chats'], pairingExpiresAt: 123, endpoint: 'http://10.0.2.2:3297',
-    endpoints: [{ origin: 'http://10.0.2.2:3297', reachability: 'private-network', priority: 0 }], serverName: 'Sandbox' };
+    requestedScopes: ['read:chats'], pairingExpiresAt: 123, endpoint: 'https://studio.local:3297',
+    certificateFingerprint: 'ca', backupCertificateFingerprint: 'standby',
+    endpoints: [
+      { origin: 'https://studio.local:3297', reachability: 'lan', priority: 0 },
+      { origin: 'https://192.168.0.107:3297', reachability: 'lan', priority: 1 },
+      { origin: 'http://127.0.0.1:3297', reachability: 'loopback', priority: 2 },
+    ], serverName: 'Sandbox' };
   const url = `generatorai://pair?code=${Buffer.from(JSON.stringify(offer)).toString('base64url')}`;
   for (const platform of ['ios', 'android']) {
-    const rewritten = new URL(rewritePairUrl(url, platform, 3297));
+    const rewritten = new URL(rewritePairUrl(url, platform));
     const actual = JSON.parse(Buffer.from(rewritten.searchParams.get('code'), 'base64url'));
-    assert.equal(actual.endpoint, `http://${platform === 'ios' ? '127.0.0.1' : '10.0.2.2'}:3297`);
-    assert.equal(actual.endpoints[0].origin, actual.endpoint);
-    assert.equal(new Set(actual.endpoints.map(item => item.origin)).size, actual.endpoints.length);
+    assert.equal(actual.endpoint, 'https://192.168.0.107:3297');
+    assert.deepEqual(actual.endpoints.map(item => [item.origin, item.priority]), [
+      ['https://192.168.0.107:3297', 0], ['https://studio.local:3297', 1], ['http://127.0.0.1:3297', 2],
+    ]);
     for (const key of Object.keys(offer).filter(key => !['endpoint', 'endpoints'].includes(key))) assert.deepEqual(actual[key], offer[key]);
   }
   assert.throws(() => rewritePairUrl('https://example.invalid/pair?code=x', 'ios'));
   assert.throws(() => rewritePairUrl(url, 'web'));
+  const plain = { ...offer, endpoint: 'http://10.0.2.2:3297', endpoints: [{ origin: 'http://10.0.2.2:3297', reachability: 'lan', priority: 0 }] };
+  assert.throws(() => rewritePairUrl(`generatorai://pair?code=${Buffer.from(JSON.stringify(plain)).toString('base64url')}`, 'android'), /no https/);
 });
 
 test('sandbox database and dummy repo guards reject checkout paths and symlinks outside their allowed layout', t => {

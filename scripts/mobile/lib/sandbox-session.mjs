@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -31,10 +31,13 @@ export class SandboxSession {
     await fs.writeFile(temporary, `${JSON.stringify(this.state, null, 2)}\n`, { mode: 0o600 });
     await fs.rename(temporary, this.stateFile);
   }
+  /** The LAN sandbox requires auth (MV-44): its admin key, kept in the 0600 state file or passed by the caller. */
+  get apiKey() { return this.state.server?.apiKey ?? process.env.GENERATORAI_SANDBOX_API_KEY ?? null; }
   async api(route, body, method = body === undefined ? 'GET' : 'POST') {
+    const headers = { ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) };
     const response = await fetch(`${this.origin}/api${route}`, {
-      method, signal: AbortSignal.timeout(15000),
-      ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+      method, signal: AbortSignal.timeout(15000), headers,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     if (!response.ok) throw Object.assign(new Error(`Sandbox ${method} ${route} failed (${response.status}): ${(await response.text()).slice(0,500)}`), { status: response.status });
     return response.status === 204 ? null : response.json();
@@ -82,9 +85,10 @@ export class SandboxSession {
     ]);
     const fixture = path.join(STATE_DIR, this.port === 3197 ? 'faux.json' : `faux-${this.port}.json`);
     await fs.writeFile(fixture, JSON.stringify(mergedFixture(JSON.parse(web), JSON.parse(mobile))), { mode: 0o600 });
-    const child = spawn(process.execPath, [path.join(ROOT, 'scripts/redesign/sandbox.mjs'), `--port=${this.port}`], {
-      cwd: ROOT, env: { ...process.env, GENERATORAI_ADVERTISED_URLS: `http://10.0.2.2:${this.port}`,
-        GENERATORAI_SANDBOX_CORS_ORIGINS: `http://10.0.2.2:${this.port}`,
+    // LAN HTTPS (MV-44, D-127): devices reach https://<LAN address>:<port> and pin the sandbox CA from the offer.
+    const apiKey = randomBytes(24).toString('base64url');
+    const child = spawn(process.execPath, [path.join(ROOT, 'scripts/redesign/sandbox.mjs'), `--port=${this.port}`, '--lan'], {
+      cwd: ROOT, env: { ...process.env, GENERATORAI_SANDBOX_API_KEY: apiKey,
         // Native terminal fixtures must not run personal shell startup scripts.
         ...(process.platform === 'win32' ? {} : { SHELL: '/bin/sh' }),
         GENERATORAI_SANDBOX_FAUX_SCRIPT: fixture }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
@@ -130,7 +134,7 @@ export class SandboxSession {
     await new Promise((resolve, reject) => { this.control.once('error', reject); this.control.listen(controlPath, resolve); });
     if (process.platform !== 'win32') await fs.chmod(controlPath, 0o600);
     this.state = { server: { pid: child.pid, supervisorPid: process.pid, serverId: info.serverId,
-      dbPath: verifiedPath, startedAt: new Date().toISOString(), port: this.port, controlPath }, chats: {}, paired: [] };
+      dbPath: verifiedPath, startedAt: new Date().toISOString(), port: this.port, controlPath, apiKey }, chats: {}, paired: [] };
     await this.save();
     return info;
   }

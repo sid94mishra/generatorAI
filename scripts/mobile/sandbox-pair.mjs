@@ -4,6 +4,11 @@ import { SandboxSession } from './lib/sandbox-session.mjs';
 import { seedSandbox } from './lib/sandbox-seed.mjs';
 import { cancelDeviceCommands, findTargets, mintPair, pairTarget } from './lib/sandbox-devices.mjs';
 
+/** The state without the LAN sandbox's admin key. */
+function redacted(state) {
+  return state.server?.apiKey ? { ...state, server: { ...state.server, apiKey: '<redacted>' } } : state;
+}
+
 async function main() {
   const separator = process.argv.indexOf('--');
   const { values, positionals } = parseArgs({
@@ -34,7 +39,7 @@ status/stop never start a server. Grants are printed only by the explicit mint c
   if (command === 'status') {
     await session.load();
     const info = await session.probe();
-    console.log(JSON.stringify({ ...session.state, running: Boolean(info && info.serverId === session.state.server?.serverId) }, null, 2));
+    console.log(JSON.stringify({ ...redacted(session.state), running: Boolean(info && info.serverId === session.state.server?.serverId) }, null, 2));
     return;
   }
   if (command === 'stop') { await session.requestStop(); console.log('sandbox-pair: stopped'); return; }
@@ -48,10 +53,7 @@ status/stop never start a server. Grants are printed only by the explicit mint c
   process.once('SIGINT', onSignal);
   process.once('SIGTERM', onSignal);
   try {
-    const info = await session.ensure({ trustRunning: values['trust-running'], dbPath: values['db-path'] });
-    if (values.platform === 'android' && !info.endpoints.some(endpoint => endpoint.origin === `http://10.0.2.2:${session.port}`)) {
-      throw new Error('Android endpoint is missing; restart the sandbox through sandbox-pair');
-    }
+    await session.ensure({ trustRunning: values['trust-running'], dbPath: values['db-path'] });
     if (!values['no-seed'] && command !== 'mint') await seedSandbox(session, values.fresh?.split(',').filter(Boolean) ?? []);
     if (command === 'mint') {
       if (!values.platform) throw new Error('mint requires --platform');
@@ -60,9 +62,6 @@ status/stop never start a server. Grants are printed only by the explicit mint c
     } else if (command === 'pair' || command === 'maestro') {
       const targets = await findTargets(values);
       for (const target of targets) {
-        if (target.platform === 'android' && !target.physical && !info.endpoints.some(endpoint => endpoint.origin === `http://10.0.2.2:${session.port}`)) {
-          throw new Error('Android endpoint is missing; restart the sandbox through sandbox-pair');
-        }
         await pairTarget(session, target, { repair: values.repair, noConfirm: values['no-confirm'] });
       }
       if (command === 'maestro') {
@@ -74,7 +73,7 @@ status/stop never start a server. Grants are printed only by the explicit mint c
     }
     if (command !== 'mint') {
       console.log('sandbox-pair: ready');
-      console.log(JSON.stringify(session.state, null, 2));
+      console.log(JSON.stringify(redacted(session.state), null, 2));
     }
     if (session.child) {
       console.error('Sandbox remains attached; Ctrl-C or sandbox-pair stop shuts down only this sandbox.');

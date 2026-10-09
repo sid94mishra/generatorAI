@@ -93,7 +93,7 @@ export async function releaseAgent(target) {
 }
 export async function mintPair(session, target) {
   const offer = await session.api('/auth/pair', { deviceName: target.name ?? `gai-${target.platform}`, platform: 'mobile', ttlMs: 600000 });
-  return rewritePairUrl(offer.pairingUrl, target.physical ? 'ios' : target.platform, session.port);
+  return rewritePairUrl(offer.pairingUrl, target.platform);
 }
 // The pinned driver's iOS presentation heuristic treats an empty fullscreen
 // toolbar as an overlay. Raw XCTest preserves the native hittability/refs;
@@ -141,6 +141,12 @@ async function waitForApp(target) {
     const pairAgain = nodes.find(node => node.label === 'Pair with a different host' && (/Button$/.test(node.type ?? '') || node.clickable));
     if (pairAgain?.ref && labels.some(label => label === 'Can’t reach your server' || label === 'Sign-in needs refreshing')) {
       await agent(target, ['press', `@${pairAgain.ref}`, '--settle']);
+      continue;
+    }
+    // A pairing the trust layer refuses (MV-44: a new sandbox CA, or a plain-HTTP pairing) names it and offers "Pair again".
+    const repair = nodes.find(node => node.identifier === 'connection-pair-again');
+    if (repair?.ref) {
+      await agent(target, ['press', `@${repair.ref}`, '--settle']);
       continue;
     }
     // Expo's first-run tutorial covers the app after the initial bundle. Match

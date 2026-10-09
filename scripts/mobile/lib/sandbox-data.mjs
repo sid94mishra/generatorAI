@@ -29,10 +29,14 @@ export function assertDummyRepo(target) {
   return resolved;
 }
 
-/** Change only routing hints; preserve the host identity, grant and scopes. */
-export function rewritePairUrl(pairingUrl, platform, port = 3197) {
+/**
+ * Change only routing hints; preserve the host identity, grant, scopes and CA fingerprints. The LAN sandbox
+ * (`sandbox.mjs --lan`, MV-44) offers https:// LAN addresses, which a simulator, an emulator (NAT to the host) and a
+ * phone on the same Wi-Fi all reach: the first https:// private IPv4 address goes first. There is no plain-HTTP
+ * address to rewrite to any more (D-127).
+ */
+export function rewritePairUrl(pairingUrl, platform) {
   if (!['ios', 'android'].includes(platform)) throw new Error('Pairing platform must be ios or android');
-  if (!Number.isInteger(port) || port < 1 || port > 65534) throw new Error('Invalid sandbox port');
   const url = new URL(pairingUrl);
   if (url.protocol !== 'generatorai:' || (url.hostname || url.pathname.replace(/^\//, '')) !== 'pair') {
     throw new Error('Unexpected pairing URL');
@@ -44,13 +48,10 @@ export function rewritePairUrl(pairingUrl, platform, port = 3197) {
     || typeof offer.pairingGrant !== 'string' || !Array.isArray(offer.endpoints)) {
     throw new Error('Invalid v2 pairing offer');
   }
-  const endpoint = `http://${platform === 'ios' ? '127.0.0.1' : '10.0.2.2'}:${port}`;
-  const first = offer.endpoints.find(item => item.origin === endpoint) ?? {
-    origin: endpoint, reachability: platform === 'ios' ? 'loopback' : 'private-network',
-  };
-  offer.endpoint = endpoint;
-  offer.endpoints = [first, ...offer.endpoints.filter(item => item.origin !== endpoint)]
-    .map((item, priority) => ({ ...item, priority }));
+  const lan = offer.endpoints.find(item => /^https:\/\/(10|192\.168|172\.(1[6-9]|2\d|3[01]))\.[\d.]+:\d+$/.test(item.origin));
+  if (!lan) throw new Error('The sandbox offers no https:// LAN address; start it with --lan on a machine that is on a network');
+  offer.endpoint = lan.origin;
+  offer.endpoints = [lan, ...offer.endpoints.filter(item => item !== lan)].map((item, priority) => ({ ...item, priority }));
   url.searchParams.set('code', Buffer.from(JSON.stringify(offer)).toString('base64url'));
   return url.toString();
 }

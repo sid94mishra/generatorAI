@@ -25,6 +25,7 @@ export function sandboxOptions(args = process.argv.slice(2), env = process.env) 
       'dry-run': { type: 'boolean' },
       clean: { type: 'boolean' },
       'real-harness': { type: 'boolean' },
+      lan: { type: 'boolean' },
     },
   });
   const port = (value, name, maximum = 65535) => {

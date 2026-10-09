@@ -7,6 +7,7 @@
 //   node scripts/redesign/sandbox.mjs                 → Faux harness (default)
 //   node scripts/redesign/sandbox.mjs --port=3297 --web-port=5297 → second isolated sandbox
 //   node scripts/redesign/sandbox.mjs --real-harness   → real provider CLIs
+//   node scripts/redesign/sandbox.mjs --lan            → Network exposure + built-in HTTPS for native devices (MV-44)
 //   node scripts/redesign/sandbox.mjs --clean          → remove old sandbox temp dirs, then exit
 //   node scripts/redesign/sandbox.mjs --help           → resolve and print the commands, start nothing
 //   node scripts/redesign/sandbox.mjs --dry-run         → same as --help (alias)
@@ -36,6 +37,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { spawn, execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -174,6 +176,13 @@ if (process.argv.includes('--clean')) {
 }
 
 const realHarness = process.argv.includes('--real-harness');
+// --lan (mobile MV-44, D-127): bound to 0.0.0.0 with the built-in HTTPS, so a simulator, emulator or phone reaches
+// the sandbox at https://<LAN address>:<port> and pins the CA from the pairing offer. Network exposure forbids
+// unauthenticated loopback, so the server gets a throwaway vault key and an admin API key
+// (GENERATORAI_SANDBOX_API_KEY, else random) that the seed — and the mobile tooling — send as a bearer token.
+// The Vite UI cannot sign in on this sandbox; it is for native devices.
+const lan = process.argv.includes('--lan');
+const lanApiKey = lan ? (process.env.GENERATORAI_SANDBOX_API_KEY || randomBytes(24).toString('base64url')) : null;
 
 // Declared up front (not near the shutdown handlers below) so every exit
 // listener registered on a child — including the ones from an early failure
@@ -233,8 +242,17 @@ const serverEnv = {
   ARTIFACTS_DIR: artifactsDir,
   WORKSPACES_DIR: workspacesDir,
   EXTENSIONS_DIR: extensionsDir,
-  GENERATORAI_BIND_HOST: '127.0.0.1',
-  GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK: '1',
+  ...(lan
+    ? {
+        GENERATORAI_BIND_HOST: '0.0.0.0',
+        GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK: '0',
+        GENERATORAI_SECRETS_DIR: sandboxDir,
+        GENERATORAI_SECRET_KEY: randomBytes(32).toString('base64'),
+        GENERATORAI_API_KEY: lanApiKey,
+        // The seed publishes a workflow; the admin key is not a person (PD-14), so let it publish in this sandbox.
+        GENERATORAI_ALLOW_AGENT_PUBLISH: 'true',
+      }
+    : { GENERATORAI_BIND_HOST: '127.0.0.1', GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK: '1' }),
   NODE_ENV: 'test',
   CORS_ORIGINS,
   ...(realHarness
@@ -309,7 +327,7 @@ try {
   const tsx = nodeBinArgs(SERVER_DIR, 'tsx', 'tsx', [SEED_SCRIPT]);
   execFileSync(tsx.command, tsx.args, {
     cwd: ROOT,
-    env: { ...process.env, API_URL: `http://127.0.0.1:${SERVER_PORT}/api` },
+    env: { ...process.env, API_URL: `http://127.0.0.1:${SERVER_PORT}/api`, ...(lanApiKey ? { API_KEY: lanApiKey } : {}) },
     stdio: 'inherit',
   });
 } catch (err) {
@@ -353,6 +371,7 @@ await waitForHttp(`http://127.0.0.1:${WEB_PORT}/`, START_TIMEOUT_MS);
 console.log('');
 console.log(`  Sandbox ready:  http://localhost:${WEB_PORT}`);
 console.log(`  API:            http://localhost:${SERVER_PORT}/api`);
+if (lan) console.log(`  LAN:            https://<this machine's LAN address>:${SERVER_PORT} (admin: Bearer GENERATORAI_SANDBOX_API_KEY)`);
 console.log(`  DB:             ${dbPath}`);
 console.log('  Ctrl-C to stop both processes cleanly.');
 console.log('');

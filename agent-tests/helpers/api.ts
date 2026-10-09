@@ -22,7 +22,8 @@ export async function apiRequest<T = unknown>(
 ): Promise<ApiResult<T>> {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    // API_KEY: an admin bearer for a sandbox that requires auth (`sandbox.mjs --lan`).
+    headers: { 'Content-Type': 'application/json', ...(process.env.API_KEY ? { Authorization: `Bearer ${process.env.API_KEY}` } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   let data: unknown = null;
