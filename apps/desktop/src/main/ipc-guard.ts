@@ -11,6 +11,14 @@
 //
 // `guardedHandle` is the one place that check lives. Registering a handler
 // any other way in `ipc.ts` is a review error.
+//
+// The main window can also show ANOTHER machine's server (remote mode, D-126).
+// That page passes the checks above — it is the main window's own top frame on
+// the window's current origin — but it is not this computer's server, so it
+// must not drive this computer: local-only channels (every channel not in
+// `ipc-scope.ts`'s remote allowlist — local server control, file system,
+// settings, update install, pairing, the native browser host) additionally
+// require the sending frame to be this shell's own server (`isLocalOrigin`).
 // ────────────────────────────────────────────────────────────────
 
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electron';
@@ -37,6 +45,19 @@ export interface IpcGuardDeps {
   /** Resolves the window owning a webContents — `BrowserWindow.fromWebContents`. */
   fromWebContents?: (wc: WebContents) => BrowserWindow | null;
   log: { warn: (message: string, meta?: unknown) => void };
+  /**
+   * Whether a frame URL is a page of THIS computer's server (not a remote one
+   * shown in the window). Required by `localOnly` channels; absent ⇒ every
+   * `localOnly` call is refused (fail closed).
+   */
+  isLocalOrigin?: (frameUrl: string | undefined) => boolean;
+  /** Channels that are local-only by default (`ipc-scope.ts`); an explicit `options.localOnly` wins. */
+  isLocalOnlyChannel?: (channel: string) => boolean;
+}
+
+export interface GuardOptions {
+  /** Only a page served by this computer's own server may call (see the header). */
+  localOnly?: boolean;
 }
 
 /**
@@ -48,7 +69,7 @@ export interface IpcGuardDeps {
  * skipped when the frame URL is unavailable — Electron omits it in some
  * lifecycle moments — but never when it is present and wrong.
  */
-export function rejectionReason(event: GuardableEvent, deps: IpcGuardDeps): string | null {
+export function rejectionReason(event: GuardableEvent, deps: IpcGuardDeps, options: GuardOptions = {}): string | null {
   const main = deps.getMainWindow();
   if (!main || main.isDestroyed()) return 'no main window';
   if (event.sender.isDestroyed?.()) return 'sender destroyed';
@@ -65,6 +86,9 @@ export function rejectionReason(event: GuardableEvent, deps: IpcGuardDeps): stri
     // The error screen is a file:// page we load ourselves; it has no bridge
     // calls, so refusing it is harmless and keeps the rule simple.
     if (!isAppOrigin(frameUrl, appUrl)) return `frame origin ${safeOrigin(frameUrl)} is not the app`;
+  }
+  if (options.localOnly && !deps.isLocalOrigin?.(frameUrl)) {
+    return `frame origin ${frameUrl ? safeOrigin(frameUrl) : '<unknown>'} is not this computer's server`;
   }
   return null;
 }
@@ -83,11 +107,15 @@ export type GuardedHandler = (event: IpcMainInvokeEvent, ...args: any[]) => unkn
 
 export interface IpcGuard {
   /** `ipcMain.handle` with the sender check in front of `handler`. */
-  guardedHandle: (channel: string, handler: GuardedHandler) => void;
+  guardedHandle: (channel: string, handler: GuardedHandler, options?: GuardOptions) => void;
   /** Throws `UntrustedIpcSenderError` (and logs) when `event` is not trusted. */
-  assertTrusted: (channel: string, event: GuardableEvent) => void;
+  assertTrusted: (channel: string, event: GuardableEvent, options?: GuardOptions) => void;
   /** Channels registered through this guard — lets a test prove coverage. */
   channels: () => readonly string[];
+  /** The subset registered `localOnly`. */
+  localOnlyChannels: () => readonly string[];
+  /** Whether a sender is a page of this computer's own server (for handlers that redact). */
+  isLocalSender: (event: GuardableEvent) => boolean;
 }
 
 export function createIpcGuard(
@@ -96,8 +124,9 @@ export function createIpcGuard(
     ipcMain.handle(channel, listener),
 ): IpcGuard {
   const registered: string[] = [];
-  const assertTrusted = (channel: string, event: GuardableEvent): void => {
-    const reason = rejectionReason(event, deps);
+  const localOnly: string[] = [];
+  const assertTrusted = (channel: string, event: GuardableEvent, options: GuardOptions = {}): void => {
+    const reason = rejectionReason(event, deps, options);
     if (reason === null) return;
     deps.log.warn('[ipc] refused call from untrusted sender', { channel, reason });
     throw new UntrustedIpcSenderError(channel, reason);
@@ -105,10 +134,14 @@ export function createIpcGuard(
   return {
     assertTrusted,
     channels: () => registered,
-    guardedHandle(channel, handler) {
+    localOnlyChannels: () => localOnly,
+    isLocalSender: (event) => deps.isLocalOrigin?.(event.senderFrame?.url) === true,
+    guardedHandle(channel, handler, options = {}) {
       registered.push(channel);
+      const scoped: GuardOptions = { localOnly: options.localOnly ?? deps.isLocalOnlyChannel?.(channel) ?? false };
+      if (scoped.localOnly) localOnly.push(channel);
       register(channel, (event, ...args) => {
-        assertTrusted(channel, event);
+        assertTrusted(channel, event, scoped);
         return handler(event, ...args);
       });
     },

@@ -3,6 +3,7 @@
 // main process. Every channel is explicitly registered and validated.
 // ────────────────────────────────────────────────────────────────
 
+import { isLocalOnlyChannel, isSameOrigin } from './ipc-scope';
 import { findInPageOptions } from './find-options';
 import { app, dialog, shell, nativeTheme, BrowserWindow } from 'electron';
 import * as fs from 'node:fs';
@@ -107,12 +108,7 @@ async function confirmPairingNatively(deviceName: string | undefined): Promise<b
 
 /** True when `frameUrl` is a page of the embedded server at `embeddedUrl`. */
 export function isEmbeddedServerOrigin(frameUrl: string | undefined, embeddedUrl: string | null): boolean {
-  if (!frameUrl || !embeddedUrl) return false;
-  try {
-    return new URL(frameUrl).origin === new URL(embeddedUrl).origin;
-  } catch {
-    return false;
-  }
+  return isSameOrigin(frameUrl, embeddedUrl);
 }
 
 export function registerIpc(mode: 'dev' | 'standalone'): void {
@@ -123,14 +119,22 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
   // Every channel below goes through the sender guard: only the main window's
   // top frame, on the app origin, may call in. Browser-tab WebContentsViews,
   // popups and iframes are refused and logged. See ipc-guard.ts.
-  const { guardedHandle } = createIpcGuard({
+  const { guardedHandle, isLocalSender } = createIpcGuard({
     getMainWindow: () => wm.getMainWindow(),
     getAppUrl: () => wm.getAppUrl(),
     fromWebContents: defaultFromWebContents,
     log,
+    // A remote server's page in the window may not call channels that act on
+    // this computer (ipc-scope.ts). "This computer's server": the embedded one
+    // (or the dev server the shell was started against), while not in remote mode.
+    isLocalOnlyChannel,
+    isLocalOrigin: (frameUrl) =>
+      connectionState().serverMode !== 'remote' && isSameOrigin(frameUrl, mode === 'dev' ? wm.getAppUrl() : sm.url),
   });
 
-  guardedHandle(IPC.getAppInfo, (): AppInfo => {
+  guardedHandle(IPC.getAppInfo, (e): AppInfo => {
+    // A remote server's page learns the app and platform, not this computer's paths or its server.
+    const local = isLocalSender(e);
     return {
       name: app.getName(),
       version: app.getVersion(),
@@ -144,9 +148,9 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
       arch: process.arch,
       isPackaged: app.isPackaged,
       mode,
-      dataDir: paths.dataDir,
-      logFile: log.getLogFilePath() ?? '',
-      serverUrl: sm.url,
+      dataDir: local ? paths.dataDir : '',
+      logFile: local ? (log.getLogFilePath() ?? '') : '',
+      serverUrl: local ? sm.url : null,
     };
   });
 
