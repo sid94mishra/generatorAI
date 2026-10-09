@@ -23,7 +23,7 @@ describe('ReorderList (ML-16)', () => {
       <ReorderList
         data={DATA}
         keyExtractor={(d) => d.id}
-        itemLabel={(d) => `Stage ${d.id}`}
+        itemName={(d) => `Stage ${d.id}`}
         editing
         onMove={onMove}
         renderItem={(d, handle) => (

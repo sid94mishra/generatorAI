@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // WorkflowDetail body cards (board WorkflowDetail; D-42: the graph the server
 // stores is what is shown). Stages — a read-only table of the working graph
-// in place of the legacy read-only DAG canvas: name, key (WF-02), kind, what
+// rather than a read-only DAG canvas: name, key (WF-02), kind, what
 // it runs after (edges, with their `on`/`when`), agent/model and approval;
 // Setup — project, codebases, default session, pre/post-processing, hooks,
 // budget; Variables — what the Run dialog asks for.

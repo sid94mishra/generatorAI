@@ -11,8 +11,8 @@ export interface ReorderListProps<T> {
   /** Fires on drop (and on the Move up / Move down actions). */
   onMove: (key: string, toIndex: number) => void;
   editing: boolean;
-  /** Accessible name of each row's handle: "Reorder <label>". */
-  itemLabel?: (item: T) => string;
+  /** Accessible name of each row's handle: "Reorder <name>". */
+  itemName?: (item: T) => string;
   /** Scrolls with the rows, above them (a banner) and below them (a settings row, the toolbar's space). */
   header?: ReactElement | null;
   footer?: ReactElement | null;

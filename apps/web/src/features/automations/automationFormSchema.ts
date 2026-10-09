@@ -26,7 +26,7 @@ import type {
 } from '@generatorai/shared';
 import { validateCronExpression } from '@generatorai/shared';
 
-export type AutomationInputMode = 'single' | 'each_row' | 'group_by' | 'whole_dataset';
+export type AutomationDatasetMode = 'single' | 'each_row' | 'group_by' | 'whole_dataset';
 
 export interface AutomationFormValues {
   name: string;
@@ -44,7 +44,7 @@ export interface AutomationFormValues {
   onError: AutomationErrorPolicy;
   permissionMode: CreateAutomationParams['permissionMode'];
   variablesText: string;
-  inputMode: AutomationInputMode;
+  inputMode: AutomationDatasetMode;
   dataSchemaText: string;
   groupByFieldsText: string;
   groupVariable: string;
@@ -106,7 +106,7 @@ export function emptyAutomationForm(): AutomationFormValues {
   };
 }
 
-function inputModeOf(automation: Pick<Automation, 'dataSchema' | 'iterationMode'>): AutomationInputMode {
+function inputModeOf(automation: Pick<Automation, 'dataSchema' | 'iterationMode'>): AutomationDatasetMode {
   if (!automation.dataSchema || !automation.iterationMode) return 'single';
   if (automation.iterationMode.kind === 'single') return 'whole_dataset';
   return automation.iterationMode.kind;

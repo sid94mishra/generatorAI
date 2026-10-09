@@ -31,7 +31,7 @@ function Builder(): React.ReactElement {
         <ReorderList
           data={stages}
           keyExtractor={(s) => s.id}
-          itemLabel={(s) => s.name}
+          itemName={(s) => s.name}
           editing={editing}
           canMove={(from, to) => !stages[from]?.locked && !stages[to]?.locked}
           header={<Text role="footnote" tone="fg-3" className="px-4 py-2">Header scrolls with the rows</Text>}

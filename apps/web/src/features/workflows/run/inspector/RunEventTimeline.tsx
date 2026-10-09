@@ -181,5 +181,5 @@ function RunEventTimelineComponent({ className }: { className?: string }) {
   );
 }
 
-/** The run's event timeline (legacy RunTimeline port). */
+/** The run's event timeline. */
 export const RunEventTimeline = memo(RunEventTimelineComponent);

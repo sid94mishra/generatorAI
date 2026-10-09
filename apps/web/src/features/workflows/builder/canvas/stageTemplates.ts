@@ -60,7 +60,7 @@ export function spliceableFragment(fragment: PresetFragment, taken: ReadonlySet<
 }
 
 /** A stage template as the palette uses it (a preset with its default parameters). */
-export interface StageTemplate {
+export interface StagePreset {
   name: string;
   title: string;
   description: string;
@@ -73,10 +73,10 @@ export interface StageTemplate {
  * first top-level stage (`null` when nothing was added; errors are toasted).
  */
 export function useStageTemplates(enabled: boolean): {
-  templates: readonly StageTemplate[] | null;
+  templates: readonly StagePreset[] | null;
   addTemplate: (name: string) => string | null;
 } {
-  const [templates, setTemplates] = useState<readonly StageTemplate[] | null>(null);
+  const [templates, setTemplates] = useState<readonly StagePreset[] | null>(null);
   useEffect(() => {
     if (!enabled || templates) return;
     let alive = true;

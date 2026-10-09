@@ -1,6 +1,6 @@
 // ────────────────────────────────────────────────────────────────
-// useCanvasKeys — the builder canvas's keyboard (window-level, like the
-// legacy canvas): Delete/Backspace removes the selected stage or edge,
+// useCanvasKeys — the builder canvas's keyboard (window-level, so it works
+// wherever focus sits on the page): Delete/Backspace removes the selected stage or edge,
 // Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z redoes, A opens the kind palette.
 // None of them fire while typing (inputs, textareas, selects, comboboxes,
 // contenteditable — CodeMirror editors are contenteditable), inside a

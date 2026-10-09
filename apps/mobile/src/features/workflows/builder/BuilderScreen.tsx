@@ -440,7 +440,7 @@ export default function BuilderScreen(): React.ReactElement {
           <ReorderList
             data={order}
             keyExtractor={(s) => s.key}
-            itemLabel={(s) => s.name}
+            itemName={(s) => s.name}
             editing
             canMove={(from, to) => canMove(order, chains, from, to)}
             onMove={(key, to) => edit((g) => moveStage(g, key, to))}

@@ -39,7 +39,7 @@ function Cell({ children }: { children: React.ReactNode }): React.ReactElement {
   return <View className={cn(active && 'bg-raised shadow-pop')}>{children}</View>;
 }
 
-export function ReorderList<T>({ data, keyExtractor, renderItem, canMove, onMove, editing, itemLabel, header, footer, testID }: ReorderListProps<T>): React.ReactElement {
+export function ReorderList<T>({ data, keyExtractor, renderItem, canMove, onMove, editing, itemName, header, footer, testID }: ReorderListProps<T>): React.ReactElement {
   const reduced = useReduceMotion();
   const move = (from: number, to: number): void => {
     const item = data[from];
@@ -63,7 +63,7 @@ export function ReorderList<T>({ data, keyExtractor, renderItem, canMove, onMove
             item,
             editing ? (
               <DragHandle
-                label={`Reorder ${itemLabel ? itemLabel(item) : keyExtractor(item)}`}
+                label={`Reorder ${itemName ? itemName(item) : keyExtractor(item)}`}
                 actions={moveActions(index, data.length, canMove)}
                 onAction={(name) => move(index, name === 'moveUp' ? index - 1 : index + 1)}
               />

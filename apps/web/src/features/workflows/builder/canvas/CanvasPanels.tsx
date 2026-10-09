@@ -19,7 +19,7 @@ import { Tooltip } from '@/ui/primitives/Tooltip/Tooltip.js';
 import { ADDABLE_KINDS, KIND_META } from '../model/kindMeta.js';
 import { EDGE_DASHES, EDGE_LABELS, EDGE_STROKES, EDGE_TEXT } from '../model/edgeStyles.js';
 import { FIT_OPTIONS } from './canvasTheme.js';
-import type { StageTemplate } from './stageTemplates.js';
+import type { StagePreset } from './stageTemplates.js';
 
 /** A floating card on the canvas. */
 const CARD = 'flex items-center gap-0.5 rounded-card border border-line-soft bg-raised p-0.5';
@@ -40,7 +40,7 @@ export interface AddStageControlProps {
   /** The default kind straight away (the button's main part). */
   onAddDefault: () => void;
   onPick: (pick: StageKindPick<StageKind>) => void;
-  templates: readonly StageTemplate[] | null;
+  templates: readonly StagePreset[] | null;
 }
 
 /** "+ Add stage" (adds an agent stage) and "▾ A", which opens the kind palette. */

@@ -45,7 +45,7 @@ import {
   patchAutomationCodebase,
   validateAutomationForm,
   type AutomationFormValues,
-  type AutomationInputMode,
+  type AutomationDatasetMode,
 } from './automationFormSchema.js';
 import { WebhookCredentialsDialog, type WebhookCredentials } from './WebhookCredentialsDialog.js';
 
@@ -65,7 +65,7 @@ const TRIGGER_OPTIONS = [
   { value: 'webhook', icon: 'webhook' as const, title: 'Webhook', description: 'Runs on an HTTP POST signed with a token you get after saving.' },
 ];
 
-const INPUT_MODE_OPTIONS: { value: AutomationInputMode; title: string; description: string }[] = [
+const INPUT_MODE_OPTIONS: { value: AutomationDatasetMode; title: string; description: string }[] = [
   { value: 'single', title: 'Single run', description: 'Runs once per trigger with the base variables.' },
   { value: 'each_row', title: 'Each row', description: 'Runs once per row of a dataset supplied at trigger time.' },
   { value: 'group_by', title: 'Grouped rows', description: 'Groups rows by one or more fields and runs once per group.' },
@@ -421,7 +421,7 @@ export function CreateAutomationPage() {
                 <FormSection title="Input mode" hint="Without a dataset an automation runs its workflows once with the base variables.">
                   <form.Field name="inputMode">
                     {(field) => (
-                      <ChoiceCardGrid label="Input mode" columns={2} value={field.state.value} onValueChange={(v) => field.handleChange(v as AutomationInputMode)} options={INPUT_MODE_OPTIONS} />
+                      <ChoiceCardGrid label="Input mode" columns={2} value={field.state.value} onValueChange={(v) => field.handleChange(v as AutomationDatasetMode)} options={INPUT_MODE_OPTIONS} />
                     )}
                   </form.Field>
 

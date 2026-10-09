@@ -32,6 +32,7 @@
 //   node scripts/check-no-legacy.mjs [--config <file>] [--json]
 // ────────────────────────────────────────────────────────────────
 
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -56,6 +57,26 @@ export const isExcluded = (f) =>
   // The guard's own config and source name every banned identifier; E2E outputs are git-ignored.
   /^scripts\/(no-legacy\.json|check-no-legacy\.mjs)$/.test(f) ||
   /^scripts\/workflow-e2e\/out\//.test(f);
+
+/**
+ * The files git would commit: tracked plus untracked-but-not-ignored. Build
+ * output that only exists on some machines (apps/desktop/release/, the docs
+ * site's build/ and audit/scope-baseline.json — all git-ignored) is not source
+ * and must not decide the verdict. `null` when git is unavailable (no filter).
+ */
+export function committableFiles(cwd) {
+  try {
+    const out = execFileSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
+      cwd,
+      encoding: 'utf8',
+      maxBuffer: 256 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return new Set(out.split('\0').filter(Boolean));
+  } catch {
+    return null;
+  }
+}
 
 const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
 
@@ -150,7 +171,8 @@ if (isMain) {
   const { banned = [], comments } = config;
   const files = new Set();
   for (const g of SCAN) for (const f of globFiles(g, repoRoot)) files.add(f.replace(/\\/g, '/'));
-  const scanned = [...files].filter((f) => !isExcluded(f)).sort();
+  const committable = committableFiles(repoRoot);
+  const scanned = [...files].filter((f) => !isExcluded(f) && (!committable || committable.has(f))).sort();
   const read = (f) => readFileSync(resolve(repoRoot, f), 'utf8');
 
   const hits = findLegacy(banned, scanned, read);
