@@ -20,8 +20,13 @@ export function usePacedText(text: string, active: boolean): string {
   const [shown, setShown] = useState(() => (startPaced ? 0 : text.length));
   const stateRef = useRef<TextPacerState>(startPaced ? INITIAL_PACER_STATE : flushPacer(text));
   const textRef = useRef(text);
-  textRef.current = text;
-  const revealing = active || (shown < text.length && stateRef.current.shown < text.length);
+  // `shown` mirrors stateRef.current.shown (both are written together), so render reads only state.
+  const revealing = active || shown < text.length;
+
+  // Declared first so the frame loop and the background flush below always read the latest text.
+  useEffect(() => {
+    textRef.current = text;
+  }, [text]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
