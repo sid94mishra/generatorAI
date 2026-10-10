@@ -410,6 +410,7 @@ export default function ChatScreen(): React.ReactElement {
     () => (prep && prep.status !== 'ready' ? { ...prep, onRetry: () => prepareWorkspace.mutate(), retrying: prepareWorkspace.isPending } : null),
     [prep, prepareWorkspace],
   );
+  const modelProvider = findModel(models.data, chat.data?.model ?? null)?.provider ?? null;
   const modelLabel = extras?.summary?.model?.label ?? findModel(models.data, chat.data?.model ?? null)?.name ?? (chat.data?.model && chat.data.model !== 'default' ? chat.data.model : null);
 
   // ── Gate cards (MB-15) ───────────────────────────────────────
@@ -505,6 +506,7 @@ export default function ChatScreen(): React.ReactElement {
     () => ({
       agent: boundAgent,
       model: modelLabel,
+      provider: modelProvider,
       onOpenStep: (callId) => router.push(stepHref(chatId, callId) as never),
       onOpenChat: (next) => router.push(chatHref(next) as never),
       onOpenTasks: () => openTab('tasks'),
@@ -535,7 +537,7 @@ export default function ChatScreen(): React.ReactElement {
         : {}),
       renderGate,
     }),
-    [boundAgent, modelLabel, chatId, workspaceId, openImage, openRewind, runFork, runCopyTranscript, renderGate, openTab, canPublishDrafts, publishDraft],
+    [boundAgent, modelLabel, modelProvider, chatId, workspaceId, openImage, openRewind, runFork, runCopyTranscript, renderGate, openTab, canPublishDrafts, publishDraft],
   );
 
   // ── Pane claim (MB-42) ───────────────────────────────────────

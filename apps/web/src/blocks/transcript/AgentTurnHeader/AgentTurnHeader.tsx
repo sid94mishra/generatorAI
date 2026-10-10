@@ -1,6 +1,7 @@
 // ────────────────────────────────────────────────────────────────
-// B-15 AgentTurnHeader — who answered: Avatar 20 (initials on chat, the bot
-// glyph on workflow surfaces), agent name 500, model fg-3, time mono right.
+// B-15 AgentTurnHeader — who answered: Avatar 20 (the provider's logo when the
+// provider itself answered, initials for a named agent, the bot glyph on
+// workflow surfaces), agent name 500, model fg-3, time mono right.
 // A collapsed turn shows its one-line digest ("6 steps · +14 −6") instead of
 // its body; a finished turn shows its usage chip on hover.
 //
@@ -26,6 +27,8 @@ export interface AgentTurnHeaderProps {
   timestamp?: Date | string | number | undefined;
   /** `bot` on workflow surfaces (agents there draw the glyph, not initials). */
   avatar?: 'initials' | 'bot';
+  /** The provider answered as itself (no named agent): its logo replaces the initials (D-132). */
+  avatarProvider?: string | undefined;
   streaming?: boolean;
   /** The turn is collapsed: show this digest line after the name. */
   digest?: string | undefined;
@@ -43,6 +46,7 @@ export function AgentTurnHeader({
   provider,
   timestamp,
   avatar = 'initials',
+  avatarProvider,
   streaming = false,
   digest,
   usage,
@@ -55,6 +59,10 @@ export function AgentTurnHeader({
       {avatar === 'bot' ? (
         <span className="flex size-5 shrink-0 items-center justify-center rounded-control-sm bg-selected text-fg-2">
           <Icon concept="agents" size={14} />
+        </span>
+      ) : avatarProvider ? (
+        <span className="flex size-5 shrink-0 items-center justify-center rounded-control-sm bg-selected">
+          <ProviderLogo provider={avatarProvider} size={14} />
         </span>
       ) : (
         <Avatar name={agentName} size={20} decorative />

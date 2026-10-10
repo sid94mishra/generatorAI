@@ -466,6 +466,7 @@ export function ChatPage() {
                         view={view}
                         agentName={agentName ?? activeHarnessLabel ?? 'Agent'}
                         harnessLabel={activeHarnessLabel}
+                        harnessProvider={agentName ? undefined : (workspace.harnessProvider ?? undefined)}
                         canRewind={canRewind}
                         loadingFallback={<ChatSkeleton />}
                         renderWidget={renderTranscriptWidget}

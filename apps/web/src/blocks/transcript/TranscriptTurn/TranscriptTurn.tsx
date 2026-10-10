@@ -33,6 +33,7 @@ import { TurnBody } from '../TurnBody/TurnBody.js';
 import { AttachmentList } from '../UserMessage/AttachmentList.js';
 import { UserMessage } from '../UserMessage/UserMessage.js';
 import { useTranscriptActions } from '../transcriptContext.js';
+import { useModelLabel } from '@/blocks/model-picker/useModelLabel.js';
 
 export interface TranscriptTurnProps {
   turn: TurnModel;
@@ -40,6 +41,8 @@ export interface TranscriptTurnProps {
   agentName: string;
   /** Workflow surfaces draw the bot glyph instead of initials. */
   avatar?: 'initials' | 'bot';
+  /** The chat's provider when it answers as itself (no named agent): heads responses with its logo. */
+  harnessProvider?: string | undefined;
   /** Start this turn's finished responses collapsed (the D-33 fallback). */
   defaultCollapsed?: boolean;
   /** Hover actions of a user message (rewind …). */
@@ -68,6 +71,7 @@ function AgentResponse({
   message,
   agentName,
   avatar,
+  harnessProvider,
   defaultCollapsed,
   renderActions,
   startedAt,
@@ -77,6 +81,7 @@ function AgentResponse({
   message: ChatMessage;
   agentName: string;
   avatar: 'initials' | 'bot';
+  harnessProvider: string | undefined;
   defaultCollapsed: boolean;
   renderActions: ((message: ChatMessage, engaged: boolean) => ReactNode) | undefined;
 }) {
@@ -90,6 +95,11 @@ function AgentResponse({
   const blocks = useMemo(() => messageBlocks(message), [message]);
   const segments = useMemo(() => deriveSegments(blocks, { active: false }), [blocks]);
   const isTool = message.role === 'tool';
+  // What the provider's own usage report named for this turn (absent on turns
+  // recorded before it was kept, or when the provider reported no usage).
+  const turnModel = message.metadata?.model;
+  const turnProvider = message.metadata?.provider;
+  const modelName = useModelLabel(turnModel);
   const partial = message.metadata?.partial === true;
   const folded = collapsed && !summary;
   // Counted from the segments already derived for rendering, so a mode switch never re-derives it.
@@ -111,6 +121,9 @@ function AgentResponse({
         <AgentTurnHeader
           agentName={agentName}
           avatar={avatar}
+          avatarProvider={harnessProvider ? (turnProvider ?? harnessProvider) : undefined}
+          model={turnModel ? (modelName ?? turnModel) : undefined}
+          provider={turnProvider}
           timestamp={message.timestamp}
           {...(digestLine ? { digest: digestLine } : {})}
           trailing={
@@ -192,6 +205,7 @@ function renderEntry(entry: TranscriptEntry, props: TranscriptTurnProps, started
           message={entry.message}
           agentName={props.agentName}
           avatar={props.avatar ?? 'initials'}
+          harnessProvider={props.harnessProvider}
           defaultCollapsed={props.defaultCollapsed ?? false}
           renderActions={props.renderResponseActions}
           startedAt={startedAt}

@@ -8,6 +8,7 @@ import * as Clipboard from 'expo-clipboard';
 import { Menu } from '../../../ui/native/Menu';
 import type { MenuEntry } from '../../../ui/native/Menu/Menu.types';
 import { AgentGlyph } from '../../../ui/primitives/AgentGlyph';
+import { ProviderLogo } from '../../../ui/primitives/ProviderLogo';
 import { IconButton } from '../../../ui/primitives/IconButton';
 import { Text } from '../../../ui/primitives/Text';
 import { useTranscriptActions } from '../transcriptContext';
@@ -22,7 +23,7 @@ export interface AgentTurnHeaderProps {
 }
 
 export const AgentTurnHeader = memo(function AgentTurnHeader({ time, turnId, text }: AgentTurnHeaderProps): React.ReactElement {
-  const { agent, model, onCopyTranscript, onForkFrom, onReadAloud } = useTranscriptActions();
+  const { agent, model, provider, onCopyTranscript, onForkFrom, onReadAloud } = useTranscriptActions();
   const items: MenuEntry[] = [
     ...(text ? [{ id: 'copy', label: 'Copy', icon: 'copy' as const }] : []),
     ...(onCopyTranscript ? [{ id: 'copy-transcript', label: 'Copy transcript', icon: 'copy' as const, testID: 'copy-transcript' }] : []),
@@ -37,7 +38,8 @@ export const AgentTurnHeader = memo(function AgentTurnHeader({ time, turnId, tex
   };
   return (
     <View className="flex-row items-center gap-2">
-      <View className="min-w-0 flex-1">
+      <View className="min-w-0 flex-1 flex-row items-center gap-1.5">
+        {provider ? <ProviderLogo provider={provider} size={16} /> : null}
         {agent ? <AgentGlyph kind="agent" name={agent.name} {...(model ? { model } : {})} size={14} /> : model ? <AgentGlyph kind="model" name={model} size={14} /> : null}
       </View>
       {time ? (

@@ -50,6 +50,9 @@ export class TurnRecorder {
   /** Tokens since the last completed message: all a stopped turn has of its answer. */
   private streamed = '';
   private anchor: ChatMessageMetadata['providerAnchor'];
+  /** The model and provider the turn's own usage report named (not a sub-agent's). */
+  private model: string | undefined;
+  private provider: string | undefined;
   private written = false;
 
   constructor(private readonly opts: TurnRecorderOptions = {}) {}
@@ -65,6 +68,8 @@ export class TurnRecorder {
     this.text = '';
     this.streamed = '';
     this.anchor = undefined;
+    this.model = undefined;
+    this.provider = undefined;
     this.written = false;
   }
 
@@ -166,6 +171,11 @@ export class TurnRecorder {
         this.streamed = '';
         break;
       }
+      case 'harness.usage':
+        if (typeof data?.['agentId'] === 'string') break;
+        if (typeof data?.['model'] === 'string' && data['model'] && data['model'] !== 'unknown') this.model = data['model'] as string;
+        if (typeof data?.['provider'] === 'string' && data['provider']) this.provider = data['provider'] as string;
+        break;
       case 'harness.turn_end':
         if (typeof data?.['providerTurnId'] === 'string') {
           this.anchor = { kind: 'turn', id: data['providerTurnId'] as string };
@@ -234,6 +244,8 @@ export class TurnRecorder {
     if (this.agentMode) metadata.agentMode = this.agentMode;
     if (partial) metadata.partial = true;
     if (this.anchor) metadata.providerAnchor = this.anchor;
+    if (this.model) metadata.model = this.model;
+    if (this.provider) metadata.provider = this.provider;
     return { content, metadata, complete: !partial };
   }
 }

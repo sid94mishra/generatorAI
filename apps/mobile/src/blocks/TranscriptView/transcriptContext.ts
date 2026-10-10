@@ -11,6 +11,8 @@ export interface TranscriptActions {
   agent: { name: string; role?: 'agent' | 'orchestrator' } | null;
   /** The chat's model display label (MG-03), shown after the agent or alone. */
   model: string | null;
+  /** The provider the chat runs on (`claude-agent`, `codex` …): its logo leads the header (D-132). */
+  provider?: string | null;
   /** Step detail (MB-14) for a tool call. */
   onOpenStep?: (callId: string) => void;
   /** A worker's own chat (DelegationGroup, MB-17). */

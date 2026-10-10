@@ -82,6 +82,11 @@ export interface ChatMessageMetadata {
    * anchors were captured — those fall back to the synthetic rewind.
    */
   providerAnchor?: { kind: 'message' | 'turn'; id: string };
+  /** Assistant messages: the model id and provider the turn ran on, as the
+   *  provider's own usage report named them. The transcript heads a past turn
+   *  with them; absent when the provider reported no usage. */
+  model?: string;
+  provider?: string;
   /** Widget instance IDs rendered as part of this message.
    *  The client uses these to reconstitute inline widget blocks on
    *  history replay (see chatMessageToBlocks). */

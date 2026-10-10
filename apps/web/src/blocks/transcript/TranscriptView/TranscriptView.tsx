@@ -43,6 +43,8 @@ export interface TranscriptViewProps {
   scrollRef: RefObject<HTMLDivElement | null>;
   agentName: string;
   avatar?: 'initials' | 'bot';
+  /** The chat's provider when it answers as itself (no named agent): heads responses with its logo. */
+  harnessProvider?: string | undefined;
   /** Messages are loading: show `loadingFallback` above the turns. */
   loading?: boolean;
   loadingFallback?: ReactNode;
@@ -72,6 +74,7 @@ export function TranscriptView({
   scrollRef,
   agentName,
   avatar = 'initials',
+  harnessProvider,
   loading = false,
   loadingFallback,
   hasMore = false,
@@ -169,13 +172,14 @@ export function TranscriptView({
         turn={turn}
         agentName={agentName}
         avatar={avatar}
+        harnessProvider={harnessProvider}
         defaultCollapsed={collapseBeyond > 0 && !turn.live && index < turns.length - collapseBeyond}
         renderUserActions={renderUserActions}
         renderResponseActions={renderResponseActions}
         renderLive={turn.live ? renderLive : undefined}
       />
     ),
-    [agentName, avatar, collapseBeyond, turns.length, renderUserActions, renderResponseActions, renderLive],
+    [agentName, avatar, harnessProvider, collapseBeyond, turns.length, renderUserActions, renderResponseActions, renderLive],
   );
 
   return (

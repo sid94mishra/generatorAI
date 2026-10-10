@@ -1223,6 +1223,10 @@ Icons 1.95.1 MIT for Codex since Simple Icons dropped OpenAI); unknown ids get a
 brand has one — Claude's D97757 — else the text colour) and `mono`. This overrides mobile MP-52's "never a brand hex
 in-app" for provider marks only; BrandMark keeps the app and GitHub marks, VendorIcons keeps AppMark/GitHubMark.
 Adding a provider = one registry entry. Kit additions: Badge `size="sm"`, Select item `leading`, ListRow `leading`.
+Transcript (owner report, 2026-10-10): a chat with no named agent heads each response with its provider's logo in
+place of initials; each assistant message stores the `model`/`provider` its usage report named (TurnRecorder →
+`ChatMessageMetadata`), so a past turn shows the logo + model too. Turns saved before this show the chat's provider logo
+and no model. Mobile's reply header leads with the chat's provider logo.
 
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)

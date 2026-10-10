@@ -44,6 +44,8 @@ export interface ChatTranscriptProps {
   agentName: string;
   /** The harness label for the "… is thinking" placeholder; null when unknown. */
   harnessLabel: string | null;
+  /** The chat's provider when it answers as itself (no named agent): its logo heads each response. */
+  harnessProvider?: string | undefined;
   canRewind: boolean;
   /** Skeleton while the message page loads. */
   loadingFallback?: ReactNode;
@@ -60,6 +62,7 @@ const TRANSCRIPT_EXPANDED_TURNS = 20;
 interface LiveTurnProps {
   sessionId: string;
   agentName: string;
+  harnessProvider: string | undefined;
   harnessLabel: string | null;
   prevUsage: UsageInfo | null;
   prevCompletedAt: number | null;
@@ -71,7 +74,7 @@ interface LiveTurnProps {
  * The one place that subscribes to the FULL live stream record (W27): a token
  * re-renders this leaf only.
  */
-const LiveTurn = memo(function LiveTurn({ sessionId, agentName, harnessLabel, prevUsage, prevCompletedAt, thinking }: LiveTurnProps) {
+const LiveTurn = memo(function LiveTurn({ sessionId, agentName, harnessProvider, harnessLabel, prevUsage, prevCompletedAt, thinking }: LiveTurnProps) {
   const current = useStreamStore((state) => state.streams[sessionId]);
   // The transcript swaps a finished live turn for its persisted message in a
   // deferred render (D-88). The stream is cleared as soon as history holds the
@@ -112,6 +115,7 @@ const LiveTurn = memo(function LiveTurn({ sessionId, agentName, harnessLabel, pr
     <div className="flex min-w-0 flex-col gap-2" data-testid="live-turn" data-gai-block="live">
       <AgentTurnHeader
         agentName={agentName}
+        avatarProvider={harnessProvider ? (usage?.provider ?? harnessProvider) : undefined}
         model={usage?.model ? (modelName ?? usage.model) : undefined}
         provider={usage?.provider}
         streaming={active}
@@ -139,6 +143,7 @@ export function ChatTranscript({
   view,
   agentName,
   harnessLabel,
+  harnessProvider,
   canRewind,
   loadingFallback,
   renderWidget,
@@ -178,13 +183,14 @@ export function ChatTranscript({
         <LiveTurn
           sessionId={sessionId}
           agentName={agentName}
+          harnessProvider={harnessProvider}
           harnessLabel={harnessLabel}
           prevUsage={prevUsage?.usage ?? null}
           prevCompletedAt={prevUsage?.completedAt ?? null}
           thinking={thinking}
         />
       ) : null,
-    [sessionId, agentName, harnessLabel, prevUsage, thinking],
+    [sessionId, agentName, harnessProvider, harnessLabel, prevUsage, thinking],
   );
 
   const renderUserActions = useCallback(
@@ -270,6 +276,7 @@ export function ChatTranscript({
         turns={shownTurns}
         scrollRef={scrollRef}
         agentName={agentName}
+        harnessProvider={harnessProvider}
         loading={messagesLoading}
         loadingFallback={loadingFallback}
         hasMore={hasMoreMessages}
