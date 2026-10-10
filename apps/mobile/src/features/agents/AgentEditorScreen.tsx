@@ -128,7 +128,7 @@ export default function AgentEditorScreen(): React.ReactElement {
   const errors = validateDraft(draft, taken);
   const count = seeded ? changeCount(seeded, draft) : 0;
   const dirty = editing ? count > 0 : true;
-  const model = catalog && draft.model ? findPickerModel(catalog, draft.harnessType ?? undefined, draft.model) : null;
+  const model = catalog && draft.model ? findPickerModel(catalog, draft.model, draft.harnessType ?? undefined) : null;
   const efforts = model?.reasoningEfforts ?? Object.keys(EFFORT_LABEL).slice(0, 4);
   const level = instructionsLevel(draft.instructions);
 

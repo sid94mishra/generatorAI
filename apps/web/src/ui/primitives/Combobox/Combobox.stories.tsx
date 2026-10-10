@@ -9,24 +9,22 @@ interface ModelItem extends ComboboxItem {
   output: string;
 }
 
+// Demo groups by provider (D-131: pickers never group models by invented tiers).
 const MODELS: ComboboxGroup<ModelItem>[] = [
   {
-    label: 'Fast',
+    label: 'Claude Code',
     items: [
       { value: 'haiku', label: 'Claude Haiku 4.5', meta: 'Anthropic', context: '200K', output: '64K' },
-      { value: 'gpt-mini', label: 'GPT-5 mini', meta: 'OpenAI', context: '400K', output: '128K' },
+      { value: 'sonnet', label: 'Claude Sonnet 4.5', meta: 'Anthropic', context: '1M', output: '64K', keywords: ['default'] },
+      { value: 'opus', label: 'Claude Opus 4.1', meta: 'Anthropic', context: '200K', output: '32K' },
     ],
   },
   {
-    label: 'Balanced',
+    label: 'Codex',
     items: [
-      { value: 'sonnet', label: 'Claude Sonnet 4.5', meta: 'Anthropic', context: '1M', output: '64K', keywords: ['default'] },
+      { value: 'gpt-mini', label: 'GPT-5 mini', meta: 'OpenAI', context: '400K', output: '128K' },
       { value: 'gpt', label: 'GPT-5', meta: 'OpenAI', context: '400K', output: '128K' },
     ],
-  },
-  {
-    label: 'Powerful',
-    items: [{ value: 'opus', label: 'Claude Opus 4.1', meta: 'Anthropic', context: '200K', output: '32K' }],
   },
 ];
 
@@ -120,7 +118,7 @@ export const Default: Story = {
     const search = await screen.findByRole('combobox', { name: 'Search Model' });
     await expect(document.querySelector('[data-gai-overlay="combobox"]')).not.toBeNull();
     await waitFor(() => expect(screen.getByRole('dialog', { name: 'Model' })).toBeVisible());
-    await waitFor(() => expect(screen.getByText('Balanced')).toBeVisible());
+    await waitFor(() => expect(screen.getByText('Codex')).toBeVisible());
     await userEvent.type(search, 'opus');
     await waitFor(() => expect(screen.getByRole('option', { name: /Claude Opus/ })).toBeVisible());
     await expect(screen.queryByRole('option', { name: /Claude Haiku/ })).toBeNull();

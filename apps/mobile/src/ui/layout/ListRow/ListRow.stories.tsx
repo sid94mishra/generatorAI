@@ -3,6 +3,7 @@ import type { Meta, StoryObj } from '@storybook/react-native';
 
 import { LONG_TEXT, RightToLeft, StoryPage, StorySection, ThemeMatrix, WithFontScale } from '../../storybook/StoryKit';
 import { Badge } from '../../primitives/Badge';
+import { ProviderLogo } from '../../primitives/ProviderLogo';
 import { ListSection } from '../ListSection';
 import { ListRow } from './ListRow';
 
@@ -44,6 +45,10 @@ function Rows(): React.ReactElement {
         <ListRow kind="requires-admin" icon="key" title="Network exposure" onPress={noop} />
         <ListRow kind="destructive" icon="trash" title="Unpair this iPhone" onPress={noop} />
         <ListRow kind="navigation" icon="mcp" title="MCP servers" value="6 of 9" disabled disabledReason="Server offline" onPress={noop} />
+      </ListSection>
+      <ListSection title="Leading glyph (provider logos)">
+        <ListRow kind="navigation" leading={<ProviderLogo provider="claude-agent" />} title="Claude Code" subtitle="Connected" onPress={noop} />
+        <ListRow kind="radio" leading={<ProviderLogo provider="codex" />} title="GPT-6-Luna" badge={<Badge label="default" size="sm" />} selected onPress={noop} />
       </ListSection>
     </>
   );

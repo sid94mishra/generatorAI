@@ -8,12 +8,19 @@
 // "Default" only means which provider handles a request that doesn't name
 // one (D-55, G-09; `buildModelPickerCatalog` never defaults to an unready
 // provider).
+//
+// Experimental providers (D-131): the server hides providers that are not
+// fully tested from every client; the group at the end reveals or hides them
+// (admin:harnesses; an operator's GENERATORAI_EXPERIMENTAL_PROVIDERS reveal is
+// shown and cannot be switched off here).
 // ────────────────────────────────────────────────────────────────
 
 import { useState } from 'react';
-import type { HarnessProviderStatus } from '@generatorai/shared';
+import type { HarnessProviderStatus, HarnessProviderVisibility } from '@generatorai/shared';
 import {
   useHarnessProviders,
+  useHarnessVisibility,
+  useSetHarnessVisibility,
   useSetDefaultProvider,
   useSignInProvider,
   useTestAllProviders,
@@ -21,11 +28,12 @@ import {
   useProviderLogout,
   type ProviderActionResult,
 } from '@/hooks/harnessQueries.js';
-import { ProviderBrandIcon } from '@/ui/icons/vendor/VendorIcons.js';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Callout } from '@/ui/primitives/Callout/Callout.js';
+import { ProviderLogo } from '@/ui/primitives/ProviderLogo/ProviderLogo.js';
 import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
+import { Switch } from '@/ui/primitives/Switch/Switch.js';
 import { SectionHeader } from '@/ui/patterns/SectionHeader/SectionHeader.js';
 import { KeyValueList } from '@/ui/patterns/KeyValueList/KeyValueList.js';
 import { SettingsSection } from '@/ui/patterns/SettingsSection/SettingsSection.js';
@@ -155,7 +163,7 @@ export function ProvidersSection() {
               icon={undefined}
               title={
                 <span className="inline-flex items-center gap-2">
-                  <ProviderBrandIcon provider={p.type} className="size-4 shrink-0" />
+                  <ProviderLogo provider={p.type} size={16} />
                   {p.label}
                 </span>
               }
@@ -185,7 +193,67 @@ export function ProvidersSection() {
       )}
 
       {message ? <Callout tone={message.tone === 'ok' ? 'ok' : 'err'}>{message.text}</Callout> : null}
+
+      <ExperimentalProviders />
     </SettingsSection>
+  );
+}
+
+/**
+ * Providers the server hides until revealed (D-131). Every supported provider
+ * that is not stable is listed with a switch; the server enforces it (hidden =
+ * absent from every provider/model API, cannot run a turn).
+ */
+function ExperimentalProviders() {
+  const { data } = useHarnessVisibility();
+  const setVisibility = useSetHarnessVisibility();
+  const [error, setError] = useState<string | null>(null);
+  const experimental = (data?.providers ?? []).filter((p) => p.stability === 'experimental');
+  if (experimental.length === 0) return null;
+
+  const toggle = async (p: HarnessProviderVisibility, visible: boolean): Promise<void> => {
+    setError(null);
+    try {
+      await setVisibility.mutateAsync({ visible: { [p.type]: visible } });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not change provider visibility.');
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="experimental-providers">
+      <SectionHeader
+        variant="label"
+        title="Experimental providers"
+      />
+      <p className="text-small text-fg-3">
+        Not fully tested, so this server hides them from every app until revealed. Devices with admin:harnesses can change this.
+      </p>
+      <div className="flex flex-col divide-y divide-line-soft rounded-control border border-line">
+        {experimental.map((p) => (
+          <div key={p.type} className="flex items-center gap-3 px-3 py-2">
+            <ProviderLogo provider={p.type} size={16} />
+            <div className="flex min-w-0 flex-1 flex-col">
+              <span className="text-ui text-fg">{p.label}</span>
+              <span className="text-small text-fg-3">
+                {p.source === 'env'
+                  ? 'Revealed by GENERATORAI_EXPERIMENTAL_PROVIDERS on the server.'
+                  : p.visible
+                    ? 'Shown to every app.'
+                    : 'Hidden from every app.'}
+              </span>
+            </div>
+            <Switch
+              aria-label={`Show ${p.label}`}
+              checked={p.visible}
+              disabled={p.source === 'env' || setVisibility.isPending}
+              onCheckedChange={(next) => void toggle(p, next)}
+            />
+          </div>
+        ))}
+      </div>
+      {error ? <Callout tone="err">{error}</Callout> : null}
+    </div>
   );
 }
 
@@ -267,6 +335,7 @@ function ProviderDetails({
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate text-ui font-medium text-fg">{model.name ?? model.id}</span>
+                    {model.isDefault ? <Badge size="sm">default</Badge> : null}
                     <span className="ml-auto shrink-0 font-mono text-micro text-fg-3">{model.id}</span>
                   </div>
                   {model.description ? <p className="mt-0.5 text-small text-fg-3">{model.description}</p> : null}

@@ -5,7 +5,7 @@ import { StoryPage, StoryRow, StorySection, ThemeMatrix } from '../../storybook/
 import { BrandMark } from './BrandMark';
 import type { BrandMarkKind, BrandMarkSize } from './BrandMark.types';
 
-const MARKS: BrandMarkKind[] = ['app', 'github', 'claude-agent', 'codex', 'copilot', 'opencode', 'acp'];
+const MARKS: BrandMarkKind[] = ['app', 'github'];
 const SIZES: BrandMarkSize[] = [16, 20, 22, 26, 36];
 
 function BrandMarkGallery(): React.ReactElement {
@@ -25,12 +25,11 @@ function BrandMarkGallery(): React.ReactElement {
           ))}
         </StoryRow>
       </StorySection>
-      <StorySection title="Theme matrix (accent tile, fg vendor marks)">
+      <StorySection title="Theme matrix (accent tile, fg GitHub mark)">
         <ThemeMatrix>
           <StoryRow>
             <BrandMark mark="app" size={36} />
             <BrandMark mark="github" size={26} />
-            <BrandMark mark="claude-agent" size={26} />
           </StoryRow>
         </ThemeMatrix>
       </StorySection>

@@ -8,6 +8,7 @@ export * from './geometry.js';
 export * from './vocabulary.js';
 export * from './emit/ansi.js';
 export * from './icons.js';
+export * from './provider-logos.js';
 export * from './chrome.js';
 export * from './chrome-colors.js';
 export * from './annotation-palette.js';

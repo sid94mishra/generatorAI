@@ -7,7 +7,7 @@ const meta = {
   component: Badge,
   tags: ['vrt-themes'],
   args: { children: 'Draft' },
-  argTypes: { tone: { control: 'inline-radio', options: TONES } },
+  argTypes: { tone: { control: 'inline-radio', options: TONES }, size: { control: 'inline-radio', options: ['md', 'sm'] } },
 } satisfies Meta<typeof Badge>;
 
 export default meta;
@@ -28,9 +28,22 @@ export const Matrix: Story = {
           <Badge tone={tone} suffix="v7">
             Published
           </Badge>
+          <Badge tone={tone} size="sm">
+            default
+          </Badge>
         </div>
       ))}
     </div>
+  ),
+};
+
+/** `size="sm"` next to a list row's name (the model picker's provider-flagged default). */
+export const SmallInRow: Story = {
+  render: () => (
+    <span className="flex items-center gap-1.5 text-ui text-fg">
+      GPT-6-Luna
+      <Badge size="sm">default</Badge>
+    </span>
   ),
 };
 

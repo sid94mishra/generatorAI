@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
+import { ProviderLogo } from '../ProviderLogo/ProviderLogo.js';
 import { Select, type SelectItem } from './Select.js';
 
 const AGENTS: SelectItem[] = [
@@ -56,4 +57,27 @@ export const Matrix: Story = {
       <Select aria-label="Agent disabled" items={AGENTS} value="reviewer" onValueChange={() => {}} disabled className="w-56" />
     </div>
   ),
+};
+
+/** `leading`: a custom glyph per item — here the provider logos (D-132). */
+export const WithLeadingGlyph: Story = {
+  render: () => (
+    <Select
+      aria-label="Provider"
+      items={[
+        { value: '', label: 'Any provider' },
+        { value: 'claude-agent', label: 'Claude Code', leading: <ProviderLogo provider="claude-agent" /> },
+        { value: 'codex', label: 'Codex', leading: <ProviderLogo provider="codex" /> },
+        { value: 'copilot', label: 'GitHub Copilot', leading: <ProviderLogo provider="copilot" /> },
+      ]}
+      value="codex"
+      onValueChange={() => {}}
+      className="w-56"
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const trigger = within(canvasElement).getByRole('combobox', { name: 'Provider' });
+    await expect(trigger).toHaveTextContent('Codex');
+    await expect(trigger.querySelector('svg[data-provider="codex"]')).not.toBeNull();
+  },
 };

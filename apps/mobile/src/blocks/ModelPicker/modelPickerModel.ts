@@ -1,9 +1,11 @@
-// MB-03 ModelPicker model (pure): the catalogue's models as tier sections (Fast / Balanced / Powerful, MD-49
-// single choice), filtered to one provider and by a search query; "200K · 1M" context labels.
-import { formatTokenLimit, type PickerModel } from '@generatorai/client-core';
-import { MODEL_TIERS, MODEL_TIER_LABELS, type ModelTier } from '@generatorai/shared';
+// MB-03 ModelPicker model (pure): the catalogue's real models as plain lists (D-131 — no tier sections), one
+// section per provider in the catalogue's order (just the one when a provider is chosen), filtered by a search
+// query; "200K · 1M" context labels only when the provider reported them.
+import { formatTokenLimit, type ModelPickerCatalog, type PickerModel } from '@generatorai/client-core';
 
 export interface ModelSection {
+  /** Provider id of the section's models. */
+  provider: string;
   title: string;
   models: PickerModel[];
 }
@@ -13,15 +15,14 @@ export function contextLabel(model: Pick<PickerModel, 'contextTokens' | 'longCon
   return parts.length ? parts.join(' · ') : null;
 }
 
-export function modelSections(models: readonly PickerModel[], options: { provider?: string | null; query?: string } = {}): ModelSection[] {
+export function modelSections(catalog: Pick<ModelPickerCatalog, 'providers'>, options: { provider?: string | null; query?: string } = {}): ModelSection[] {
   const q = options.query?.trim().toLowerCase() ?? '';
-  const list = models.filter((m) => (!options.provider || m.provider === options.provider) && (!q || m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)));
-  const byTier = new Map<ModelTier | 'other', PickerModel[]>();
-  for (const m of list) {
-    const key = m.tier ?? 'other';
-    byTier.set(key, [...(byTier.get(key) ?? []), m]);
-  }
-  const sections: ModelSection[] = MODEL_TIERS.filter((t) => byTier.has(t)).map((t) => ({ title: MODEL_TIER_LABELS[t], models: byTier.get(t)! }));
-  if (byTier.has('other')) sections.push({ title: sections.length ? 'Other' : 'Models', models: byTier.get('other')! });
-  return sections;
+  return catalog.providers
+    .filter((p) => p.availability === 'ready' && (!options.provider || p.type === options.provider))
+    .map((p) => ({
+      provider: p.type,
+      title: p.label,
+      models: p.models.filter((m) => !q || m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)),
+    }))
+    .filter((s) => s.models.length > 0);
 }

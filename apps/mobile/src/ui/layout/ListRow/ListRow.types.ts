@@ -25,6 +25,8 @@ export interface ListRowProps {
   title: string;
   subtitle?: string;
   icon?: MobileIconConcept;
+  /** A custom leading glyph in place of `icon` (a provider logo, D-132). Decorative: `title` names the row. */
+  leading?: ReactElement;
   value?: string;
   mono?: boolean;
   /** radio / check */

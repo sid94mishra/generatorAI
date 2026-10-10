@@ -1,6 +1,7 @@
 // MB-46 CapabilitySummary rules (03 MB-46): what an agent can do once resolved — the runtime line, the tool grid,
 // skills and MCP names, and the warnings in words. Pure, unit-tested.
 import type { AgentToolPolicy, ResolutionWarning, ResolvedAgentProjection } from '@generatorai/shared';
+import { harnessProviderLabel } from '@generatorai/shared';
 
 export const TOOL_LABELS: ReadonlyArray<{ key: keyof AgentToolPolicy; label: string }> = [
   { key: 'fileRead', label: 'Read files' },
@@ -14,11 +15,9 @@ export const TOOL_LABELS: ReadonlyArray<{ key: keyof AgentToolPolicy; label: str
 ];
 
 const EFFORT: Record<string, string> = { low: 'low', medium: 'medium', high: 'high', xhigh: 'extra high', max: 'max', ultra: 'ultra' };
-const HARNESS: Record<string, string> = { 'claude-agent': 'Claude Code', copilot: 'GitHub Copilot', codex: 'Codex', gemini: 'Gemini', opencode: 'OpenCode' };
-
+/** The shared provider name (`harnessProviderLabel`, the server's and the desktop's). */
 export function harnessLabel(type: string | undefined): string | null {
-  if (!type) return null;
-  return HARNESS[type] ?? type;
+  return type ? harnessProviderLabel(type) : null;
 }
 
 /** "Claude Code · claude-sonnet-5" and "effort medium · long context · 40 turns" (only what is set). */

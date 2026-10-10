@@ -13,12 +13,15 @@ import { Avatar } from '@/ui/primitives/Avatar/Avatar.js';
 import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
 import { Icon } from '@/ui/icons/Icon.js';
 import { formatTurnTime } from '../formatTime.js';
+import { ProviderLogo } from '@/ui/primitives/ProviderLogo/ProviderLogo.js';
 
 export interface AgentTurnHeaderProps {
   /** Agent (or harness) name: "Bug Fixer", "Claude". */
   agentName: string;
-  /** Model the turn ran on, when known. */
+  /** Model the turn ran on, when known (its display name). */
   model?: string | undefined;
+  /** The provider that ran it: its logo leads the model name (D-132). */
+  provider?: string | undefined;
   /** When the response was written; omitted while streaming. */
   timestamp?: Date | string | number | undefined;
   /** `bot` on workflow surfaces (agents there draw the glyph, not initials). */
@@ -37,6 +40,7 @@ export interface AgentTurnHeaderProps {
 export function AgentTurnHeader({
   agentName,
   model,
+  provider,
   timestamp,
   avatar = 'initials',
   streaming = false,
@@ -56,7 +60,12 @@ export function AgentTurnHeader({
         <Avatar name={agentName} size={20} decorative />
       )}
       <span className="shrink-0 font-medium text-fg">{agentName}</span>
-      {model ? <span className="min-w-0 truncate text-fg-3">{model}</span> : null}
+      {model ? (
+        <span className="flex min-w-0 items-center gap-1 text-fg-3">
+          {provider ? <ProviderLogo provider={provider} size={12} /> : null}
+          <span className="min-w-0 truncate">{model}</span>
+        </span>
+      ) : null}
       {streaming ? <Spinner size={12} className="shrink-0 text-run" label="Responding" /> : null}
       {digest ? <span className="min-w-0 truncate text-small text-fg-3">· {digest}</span> : null}
       <span className="ml-auto flex shrink-0 items-center gap-2">

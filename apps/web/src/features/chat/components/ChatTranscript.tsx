@@ -33,6 +33,7 @@ import {
   type TranscriptActions,
 } from '@/blocks/transcript/index.js';
 import { EmptyState } from '@/ui/primitives/EmptyState/EmptyState.js';
+import { useModelLabel } from '@/blocks/model-picker/useModelLabel.js';
 import type { ChatView } from '../hooks/useChatView.js';
 import { MessageActions } from './MessageActions.js';
 import { RewindMenu } from './RewindMenu.js';
@@ -103,13 +104,16 @@ const LiveTurn = memo(function LiveTurn({ sessionId, agentName, harnessLabel, pr
     };
   }, [stream?.usage, status]);
 
+  const modelName = useModelLabel(usage?.model);
+
   if (!hasContent && !active && !stopped && !thinking) return null;
 
   return (
     <div className="flex min-w-0 flex-col gap-2" data-testid="live-turn" data-gai-block="live">
       <AgentTurnHeader
         agentName={agentName}
-        model={usage?.model}
+        model={usage?.model ? (modelName ?? usage.model) : undefined}
+        provider={usage?.provider}
         streaming={active}
         usage={usage ? <UsageChip usage={usage} prevUsage={prevUsage} prevCompletedAt={prevCompletedAt} scopeId={sessionId} /> : undefined}
       />

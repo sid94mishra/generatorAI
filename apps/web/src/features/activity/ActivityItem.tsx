@@ -32,6 +32,7 @@ import { PopoverPopup, PopoverRoot } from '@/ui/primitives/Popover/Popover.js';
 import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 import { ActivityDetails } from './ActivityDetails.js';
 import { cardLine, cardMeta, cardStages, cardTone, kindIcon, kindLabel, stopLabel, stopTarget } from './activityView.js';
+import { ModelLabel } from '@/blocks/model-picker/ModelLabel.js';
 
 /** Hover / focus delay before the popover opens (board: 300 ms). */
 export const PREVIEW_OPEN_MS = 300;
@@ -248,7 +249,7 @@ export function ActivityItem({ entry, now, selected, modelLabel, tabIndex, linkR
                 // The workers ease open under the card (D-109); the gap rides inside the panel.
                 <Reveal open={expanded}>
                   <div className="pt-1.5">
-                    <InlineWorkers entry={entry} modelLabel={modelLabel} />
+                    <InlineWorkers entry={entry} />
                   </div>
                 </Reveal>
               ) : null}
@@ -276,7 +277,6 @@ export function ActivityItem({ entry, now, selected, modelLabel, tabIndex, linkR
             <ActivityDetails
               entry={entry}
               now={now}
-              modelLabel={modelLabel}
               titleId={titleId}
               onDone={preview.close}
               {...(onNavigate ? { onNavigate } : {})}
@@ -332,7 +332,7 @@ function PinItem({ chatId }: { chatId: string }) {
 }
 
 /** An orchestrator's workers, expanded inside its card (EnhSidebarHidden). */
-function InlineWorkers({ entry, modelLabel }: { entry: ActivityEntry; modelLabel: (id: string) => string }) {
+function InlineWorkers({ entry }: { entry: ActivityEntry }) {
   const tasks = useBackgroundTasks(entry.entityId, true, { poll: false });
   const tally = JSON.stringify(entry.meta?.workers);
   const { refetch } = tasks;
@@ -353,7 +353,7 @@ function InlineWorkers({ entry, modelLabel }: { entry: ActivityEntry; modelLabel
             tone={state === 'running' ? 'run' : state === 'succeeded' ? 'ok' : state === 'needs_you' ? 'warn' : state === 'failed' ? 'err' : 'muted'}
             spin={state === 'running'}
             name={task.taskName}
-            detail={task.model ? modelLabel(task.model) : undefined}
+            detail={task.model ? <ModelLabel modelId={task.model} /> : undefined}
             end={asking ? 'needs you' : (status?.label ?? task.status).toLowerCase()}
             endTone={asking}
           />

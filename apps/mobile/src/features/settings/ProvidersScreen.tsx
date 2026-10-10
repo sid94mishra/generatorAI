@@ -3,6 +3,8 @@
 // dot + word, description; open: Test connection, Sign in (the provider's browser flow in an auth session, then
 // re-probe until signed in) / Sign out, Make default, the readiness facts, the error and the model catalog or the
 // hint. Sign in / out and Make default need `admin:harnesses` (else the requires-admin row, MD-30) and a step-up.
+// Each provider shows its logo (the shared registry, D-132). "Experimental providers" (D-131, admin:harnesses) reveals
+// or hides the providers the server keeps from every app until they are fully tested — the desktop's same group.
 import React, { useState } from 'react';
 import { View } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
@@ -19,12 +21,22 @@ import { Callout } from '../../ui/primitives/Callout';
 import { Card } from '../../ui/primitives/Card';
 import { Collapsible } from '../../ui/primitives/Collapsible';
 import { Icon } from '../../ui/primitives/Icon';
+import { ProviderLogo } from '../../ui/primitives/ProviderLogo';
 import { Skeleton } from '../../ui/primitives/Skeleton';
 import { StatusDot } from '../../ui/primitives/StatusDot';
 import { Text } from '../../ui/primitives/Text';
 import { SettingsPage } from './components/SettingsPage';
 import { providerActions, providerDescription, providerHint, providerStatus } from './model/providerView';
-import { useDefaultProvider, useProviderSignIn, useProviderSignOut, useProvidersLive, useTestProviders, type ProviderOutcome } from './queries';
+import {
+  useDefaultProvider,
+  useHarnessVisibility,
+  useProviderSignIn,
+  useProviderSignOut,
+  useProvidersLive,
+  useSetHarnessVisibility,
+  useTestProviders,
+  type ProviderOutcome,
+} from './queries';
 import { adminWrite, useScopeAccess } from './useSettingsAccess';
 
 const openAuth = async (url: string): Promise<void> => {
@@ -54,7 +66,7 @@ function ProviderCard({
   const header = (
     <View className="flex-row items-start gap-3">
       <View className="size-10 items-center justify-center rounded-card bg-selected">
-        <Icon concept="model" size={20} tone="fg-2" />
+        <ProviderLogo provider={provider.type} size={24} />
       </View>
       <View className="min-w-0 flex-1 gap-0.5">
         <View className="flex-row flex-wrap items-center gap-1.5">
@@ -103,10 +115,10 @@ function ProviderCard({
               <SectionHeader title="Available models" variant="label" count={provider.models.length} />
               {provider.models.map((m) => (
                 <View accessibilityRole="text" key={m.id} className="min-h-item flex-row items-center gap-2" accessible accessibilityLabel={`${m.name ?? m.id}, ${m.id}`}>
-                  <Icon concept="model" size={14} tone="fg-3" />
                   <Text role="subhead" numberOfLines={1} className="flex-1">
                     {m.name ?? m.id}
                   </Text>
+                  {m.isDefault ? <Badge label="default" size="sm" /> : null}
                   <Text role="monoSm" tone="fg-3" numberOfLines={1} className="shrink">
                     {m.id}
                   </Text>
@@ -205,6 +217,52 @@ export default function ProvidersScreen(): React.ReactElement {
           />
         ))}
       </View>
+      <ExperimentalProviders canWrite={access.granted} />
     </SettingsPage>
+  );
+}
+
+/** Providers the server hides until revealed (D-131); the server enforces it for every app. */
+function ExperimentalProviders({ canWrite }: { canWrite: boolean }): React.ReactElement | null {
+  const visibility = useHarnessVisibility();
+  const setVisibility = useSetHarnessVisibility();
+  const [error, setError] = useState<string | null>(null);
+  const experimental = (visibility.data?.providers ?? []).filter((p) => p.stability === 'experimental');
+  if (experimental.length === 0) return null;
+  const toggle = (type: string, label: string, visible: boolean): void => {
+    setError(null);
+    adminWrite(`${visible ? 'Show' : 'Hide'} ${label}`, () => setVisibility.mutateAsync({ visible: { [type]: visible } })).then(
+      () => haptic('success'),
+      (e: unknown) => setError(e instanceof Error ? e.message : "Couldn't change provider visibility."),
+    );
+  };
+  return (
+    <>
+      <ListSection
+        title="Experimental providers"
+        footer="Not fully tested, so this server hides them from every app until revealed. Changing this needs admin access."
+        testID="experimental-providers"
+      >
+        {experimental.map((p) => (
+          <ListRow
+            key={p.type}
+            kind="toggle"
+            leading={<ProviderLogo provider={p.type} />}
+            title={p.label}
+            subtitle={p.source === 'env' ? 'Revealed by the server environment' : p.visible ? 'Shown to every app' : 'Hidden from every app'}
+            switchValue={p.visible}
+            onValueChange={(v) => toggle(p.type, p.label, v)}
+            disabled={!canWrite || p.source === 'env' || setVisibility.isPending}
+            {...(!canWrite ? { disabledReason: 'Needs admin access' } : {})}
+            testID={`experimental-provider-${p.type}`}
+          />
+        ))}
+      </ListSection>
+      {error ? (
+        <View className="px-4">
+          <Callout tone="err" title={error} />
+        </View>
+      ) : null}
+    </>
   );
 }

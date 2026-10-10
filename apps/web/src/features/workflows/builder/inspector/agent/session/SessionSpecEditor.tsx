@@ -17,7 +17,6 @@
 import { useMemo } from 'react';
 import {
   AGENT_MODES,
-  HARNESS_PROVIDER_IDS,
   REASONING_EFFORTS,
   RUN_PERMISSION_MODES,
   type SessionSpec,
@@ -25,7 +24,7 @@ import {
 import { sessionCapabilityWarnings, type Agent } from '@generatorai/shared';
 import { reasoningEffortLabel } from '@generatorai/shared/ui-contract';
 import { useModels } from '@/hooks/harnessQueries.js';
-import { PROVIDER_LABELS } from '@/lib/agentCopy.js';
+import { ProviderSelect } from '@/blocks/provider-select/index.js';
 import { ModelPicker } from '@/blocks/model-picker/ModelPicker.js';
 import { cn } from '@/ui/lib/cn.js';
 import { Callout } from '@/ui/primitives/Callout/Callout.js';
@@ -165,15 +164,12 @@ export function SessionSpecEditor({
               />
             </Row>
             <Row label="Provider">
-              <Select
+              <ProviderSelect
                 size="sm"
                 aria-label={`${scope} provider`}
+                emptyLabel={scope === 'stage' ? 'Workflow default' : 'Route by model'}
                 value={session.harnessType ?? ''}
-                onValueChange={(v) => onChange({ harnessType: (v || undefined) as SessionSpec['harnessType'] })}
-                items={[
-                  { value: '', label: scope === 'stage' ? 'Workflow default' : 'Route by model' },
-                  ...HARNESS_PROVIDER_IDS.map((id) => ({ value: id, label: PROVIDER_LABELS[id] })),
-                ]}
+                onChange={(v) => onChange({ harnessType: (v || undefined) as SessionSpec['harnessType'] })}
               />
             </Row>
             <Row label="Max turns" hint="Turn cap per prompt; empty inherits.">

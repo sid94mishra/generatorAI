@@ -36,7 +36,8 @@ import {
   useAgentCatalog,
 } from '@/hooks/agentQueries.js';
 import { useProjects } from '@/hooks/projectQueries.js';
-import { PROVIDER_LABELS, SCOPE_LABELS, TOOL_GROUP_LABELS, warningText } from '@/lib/agentCopy.js';
+import { SCOPE_LABELS, TOOL_GROUP_LABELS, warningText } from '@/lib/agentCopy.js';
+import { ProviderSelect } from '@/blocks/provider-select/index.js';
 import { CapabilityToggleList, ToolPolicyTriState } from '@/blocks/capabilities/CapabilityToggleList.js';
 import { EffectiveCapabilities } from '@/blocks/capabilities/EffectiveCapabilities.js';
 import { ModelPicker } from '@/blocks/model-picker/ModelPicker.js';
@@ -49,7 +50,7 @@ import { EmptyState } from '@/ui/primitives/EmptyState/EmptyState.js';
 import { Field } from '@/ui/primitives/Field/Field.js';
 import { Input } from '@/ui/primitives/Input/Input.js';
 import { NumberField } from '@/ui/primitives/NumberField/NumberField.js';
-import { Select, type SelectItem } from '@/ui/primitives/Select/Select.js';
+import { Select } from '@/ui/primitives/Select/Select.js';
 import { SegmentedControl, type SegmentedItem } from '@/ui/primitives/SegmentedControl/SegmentedControl.js';
 import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
 import { Switch } from '@/ui/primitives/Switch/Switch.js';
@@ -289,10 +290,6 @@ export function AgentEditorPage() {
     );
   }
 
-  const providerItems: readonly SelectItem[] = [
-    { value: '', label: 'Any provider' },
-    ...Object.entries(PROVIDER_LABELS).map(([value, label]) => ({ value, label })),
-  ];
   const teamCandidates = (selectableAgents ?? []).filter(
     (a) => a.role === 'agent' && a.enabled && a.ref !== `${values.scope}:${slug}`,
   );
@@ -649,12 +646,12 @@ export function AgentEditorPage() {
                 return (
                   <div className="grid grid-cols-2 gap-4">
                     <Field label="Provider">
-                      <Select
+                      <ProviderSelect
                         aria-label="Provider"
+                        emptyLabel="Any provider"
                         value={runtime.harnessType ?? ''}
                         disabled={readOnly}
-                        onValueChange={(v) => patchRuntime({ harnessType: (v || undefined) as AgentRuntimePolicy['harnessType'] })}
-                        items={providerItems}
+                        onChange={(v) => patchRuntime({ harnessType: (v || undefined) as AgentRuntimePolicy['harnessType'] })}
                       />
                     </Field>
                     <Field label="Model">

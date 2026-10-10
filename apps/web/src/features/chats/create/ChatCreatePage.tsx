@@ -26,7 +26,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNod
 import { useLocation, useNavigate, Link as RouterLink } from 'react-router';
 import { useForm, useStore } from '@tanstack/react-form';
 import { z } from 'zod';
-import { MODEL_TIER_LABELS, type Agent, type HarnessCatalogModel, type ModelTier } from '@generatorai/shared';
+import type { Agent, HarnessCatalogModel } from '@generatorai/shared';
 import { EMPTY_CREATE_CHAT_DRAFT, reasoningEffortLabel, type ChatCreateWho, type CreateChatDraft } from '@generatorai/shared/ui-contract';
 import { AgentPicker } from '@/blocks/agent-picker/index.js';
 import { ModelPicker } from '@/blocks/model-picker/index.js';
@@ -47,6 +47,7 @@ import { PageHeader } from '@/ui/patterns/PageHeader/PageHeader.js';
 import { SummaryAside, type SummaryAsideSection } from '@/ui/patterns/SummaryAside/SummaryAside.js';
 import { FormWithAside } from '@/ui/templates/FormWithAside/FormWithAside.js';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
+import { ProviderLogo } from '@/ui/primitives/ProviderLogo/ProviderLogo.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Callout } from '@/ui/primitives/Callout/Callout.js';
 import { Chip } from '@/ui/primitives/Chip/Chip.js';
@@ -112,9 +113,9 @@ function formatTokens(tokens: number): string {
   return `${String(Math.round(tokens / 1000))}K`;
 }
 
-function tierLabel(category: string | undefined): string | undefined {
-  if (!category) return undefined;
-  return (MODEL_TIER_LABELS as Record<string, string | undefined>)[category as ModelTier] ?? titleCase(category);
+/** The provider's own picker category (Copilot sends one; D-131: nothing is inferred), readable. */
+function categoryLabel(category: string | undefined): string | undefined {
+  return category ? titleCase(category) : undefined;
 }
 
 function plural(n: number, one: string, many: string): string {
@@ -379,6 +380,7 @@ export function ChatCreatePage() {
   );
 
   // Whoever orchestrates — a model in orchestrate mode or an orchestrator agent — runs on this model.
+  // Only when the provider itself labels the model (Copilot's picker category).
   const showPowerfulNudge =
     draft.orchestratorMode &&
     activeModel?.category != null &&
@@ -446,7 +448,7 @@ export function ChatCreatePage() {
       </div>
       {showPowerfulNudge ? (
         <Callout tone="warn" title="Pick a powerful model">
-          {activeModel.name} is {tierLabel(activeModel.category)?.toLowerCase()}. Orchestrating works best on a powerful
+          {activeModel.name} is {categoryLabel(activeModel.category)?.toLowerCase()}. Orchestrating works best on a powerful
           model.
         </Callout>
       ) : null}
@@ -595,7 +597,7 @@ export function ChatCreatePage() {
   }
 
   const modelMeta = [
-    tierLabel(activeModel?.category),
+    categoryLabel(activeModel?.category),
     draft.reasoningEffort ? `effort ${reasoningEffortLabel(draft.reasoningEffort)}` : null,
     providerLabel,
   ].filter(Boolean);
@@ -627,6 +629,7 @@ export function ChatCreatePage() {
       content: (
         <div className="flex flex-col gap-0.5">
           <span className="flex items-center gap-2">
+            {activeModel?.provider ? <ProviderLogo provider={activeModel.provider} size={14} /> : null}
             {activeModel?.name ?? (values.model || 'Server default')}
             {selectedTokens ? <span className="font-mono text-small text-fg-3">{formatTokens(selectedTokens)}</span> : null}
           </span>

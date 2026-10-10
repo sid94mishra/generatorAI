@@ -49,6 +49,7 @@ import {
   type SegmentTone,
   type TaskFilter,
 } from './backgroundTasksModel.js';
+import { ModelLabel } from '@/blocks/model-picker/ModelLabel.js';
 
 const SEGMENT_CLASS: Record<SegmentTone, string> = {
   warn: 'border-warn',
@@ -125,7 +126,7 @@ function TaskMeta({ task, showModel = true }: { task: BackgroundTaskListItem; sh
   return (
     <div className="flex min-w-0 items-center gap-1.5 text-small text-fg-3">
       {agent ? <span className="shrink-0 text-fg-2">{agent}</span> : null}
-      {model ? <span className="truncate font-mono">{model}</span> : null}
+      {model ? <ModelLabel modelId={model} className="truncate" /> : null}
       {parts.map((p, i) => (
         <span key={p} className="shrink-0">
           {model || agent || i > 0 ? '· ' : ''}
@@ -327,7 +328,7 @@ function TaskDetail({
           <div className="flex flex-wrap items-center gap-2 pl-8">
             <TaskStatus status={task.status} />
             {task.agentName ? <span className="text-small text-fg-2">{task.agentName}</span> : null}
-            {task.model ? <span className="font-mono text-small text-fg-3">{task.model}</span> : null}
+            {task.model ? <ModelLabel modelId={task.model} className="text-small text-fg-3" /> : null}
             {elapsed ? <Count>{elapsed}</Count> : null}
           </div>
           <div className="pl-8">

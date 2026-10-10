@@ -48,11 +48,11 @@ import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { StatusBadge } from '@/ui/primitives/StatusBadge/StatusBadge.js';
 import { askAnswers, kindIcon, kindLabel, openLabel, stopLabel, stopTarget } from './activityView.js';
+import { ModelLabel } from '@/blocks/model-picker/ModelLabel.js';
 
 export interface ActivityDetailsProps {
   entry: ActivityEntry;
   now: number;
-  modelLabel: (id: string) => string;
   /** Close the popover (after an inline action, or on Open). */
   onDone: () => void;
   /** After Open navigated (the overlay column closes itself). */
@@ -104,7 +104,7 @@ function stageGlyph(stage: Pick<StageRun, 'status'>): { icon: IconConcept; tone:
   return { icon: `status-${state === 'needs_you' ? 'needs-you' : state}` as IconConcept, tone, spin: state === 'running', word: (status?.label ?? stage.status).toLowerCase(), state };
 }
 
-export function ActivityDetails({ entry, now, modelLabel, onDone, onNavigate, titleId }: ActivityDetailsProps) {
+export function ActivityDetails({ entry, now, onDone, onNavigate, titleId }: ActivityDetailsProps) {
   const navigate = useNavigate();
   const act = useAttentionAction();
   const retry = useRetryActivity();
@@ -275,7 +275,7 @@ export function ActivityDetails({ entry, now, modelLabel, onDone, onNavigate, ti
     const model = entry.meta?.model ?? chat.data?.model;
     const effort = chat.data?.harnessConfig?.reasoningEffort;
     if (agent) details.push({ label: 'Agent', value: agent });
-    if (model) details.push({ label: 'Model', value: modelLabel(model) });
+    if (model) details.push({ label: 'Model', value: <ModelLabel modelId={model} /> });
     if (typeof effort === 'string' && effort) details.push({ label: 'Effort', value: effort.charAt(0).toUpperCase() + effort.slice(1) });
     const primary = [...(workspace.data?.mounts ?? [])].filter((m) => m.status !== 'removed').sort((a, b) => a.position - b.position)[0];
     if (primary?.git?.branch) details.push({ label: 'Workspace', value: primary.git.branch, mono: true, meta: primary.mode === 'worktree' ? 'worktree' : undefined });
@@ -319,7 +319,7 @@ export function ActivityDetails({ entry, now, modelLabel, onDone, onNavigate, ti
               tone={state === 'running' ? 'run' : state === 'succeeded' ? 'ok' : state === 'needs_you' ? 'warn' : state === 'failed' ? 'err' : 'muted'}
               spin={state === 'running'}
               name={task.taskName}
-              detail={task.model ? modelLabel(task.model) : undefined}
+              detail={task.model ? <ModelLabel modelId={task.model} /> : undefined}
               end={asking ? 'needs you' : (status?.label ?? task.status).toLowerCase()}
               endTone={asking || state === 'failed'}
             />

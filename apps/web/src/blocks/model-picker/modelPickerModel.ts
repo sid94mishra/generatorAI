@@ -1,7 +1,8 @@
 // ────────────────────────────────────────────────────────────────
 // B-01 ModelPicker — pure helpers over client-core's picker read model
-// (`buildModelPickerCatalog`): which provider to open on, tier groups,
-// search, the row's context text and the provider-readiness copy.
+// (`buildModelPickerCatalog`): which provider to open on, search, the row's
+// context text and the provider-readiness copy. Models are one plain list in
+// the provider's own order (D-131: no tier groups).
 // React-free so the view, the connected block and the tests share them.
 // ────────────────────────────────────────────────────────────────
 
@@ -13,7 +14,6 @@ import {
   type PickerProvider,
   type ProviderAvailability,
 } from '@generatorai/client-core';
-import { MODEL_TIERS, MODEL_TIER_LABELS } from '@generatorai/shared';
 
 /** Short status under a provider's name in the provider column. */
 export const AVAILABILITY_LABEL: Record<ProviderAvailability, string> = {
@@ -38,25 +38,6 @@ export const AVAILABILITY_HINT: Record<Exclude<ProviderAvailability, 'ready'>, s
 export function initialProvider(catalog: ModelPickerCatalog | undefined, value: string): string | null {
   if (!catalog) return null;
   return findPickerModel(catalog, value)?.provider ?? catalog.defaultProvider ?? catalog.providers[0]?.type ?? null;
-}
-
-export interface ModelGroup {
-  key: string;
-  /** Null for the single ungrouped list (no model of the provider carries a tier). */
-  label: string | null;
-  models: PickerModel[];
-}
-
-/** Fast / Balanced / Powerful when the provider gives tiers; otherwise one ungrouped list. */
-export function groupModels(models: readonly PickerModel[]): ModelGroup[] {
-  if (!models.some((m) => m.tier)) return models.length ? [{ key: 'all', label: null, models: [...models] }] : [];
-  const groups: ModelGroup[] = MODEL_TIERS.map((tier) => ({
-    key: tier,
-    label: MODEL_TIER_LABELS[tier],
-    models: models.filter((m) => m.tier === tier),
-  }));
-  groups.push({ key: 'other', label: 'Other', models: models.filter((m) => !m.tier) });
-  return groups.filter((g) => g.models.length > 0);
 }
 
 /** Case-insensitive match on the model's name or id. */
@@ -86,13 +67,9 @@ export function contextSummary(model: PickerModel): string | null {
   return parts.length ? parts.map(formatTokenLimit).join(' · ') : null;
 }
 
-/** The field trigger's secondary text: "Balanced · 200K · Claude Code". */
+/** The field trigger's secondary text: "200K · Claude Code" (context only when the provider reported one). */
 export function modelMeta(model: PickerModel, provider: PickerProvider | undefined): string {
-  return [
-    model.tier ? MODEL_TIER_LABELS[model.tier] : null,
-    model.contextTokens != null ? formatTokenLimit(model.contextTokens) : null,
-    provider?.label ?? model.provider,
-  ]
+  return [model.contextTokens != null ? formatTokenLimit(model.contextTokens) : null, provider?.label ?? model.provider]
     .filter(Boolean)
     .join(' · ');
 }

@@ -26,6 +26,8 @@ export interface SelectItem {
   /** Trailing mono context text (a provider, a unit). */
   meta?: ReactNode;
   icon?: IconConcept;
+  /** A custom leading glyph in place of `icon` (a provider logo, D-132). Decorative: `label` names the item. */
+  leading?: ReactNode;
   disabled?: boolean;
 }
 
@@ -81,7 +83,7 @@ export function Select({
             if (!item) return <span className="text-fg-3">{placeholder}</span>;
             return (
               <span className="flex min-w-0 items-center gap-2">
-                {item.icon ? <Icon concept={item.icon} size={16} className="shrink-0 text-fg-3" /> : null}
+                {item.leading ?? (item.icon ? <Icon concept={item.icon} size={16} className="shrink-0 text-fg-3" /> : null)}
                 <span className="min-w-0 truncate">{item.label}</span>
                 {item.meta != null ? <span className="shrink-0 truncate font-mono text-micro text-fg-3">{item.meta}</span> : null}
               </span>
@@ -104,7 +106,7 @@ export function Select({
                     'data-highlighted:bg-selected data-disabled:cursor-not-allowed data-disabled:text-fg-3',
                   )}
                 >
-                  {item.icon ? <Icon concept={item.icon} size={16} className="shrink-0 text-fg-3" /> : null}
+                  {item.leading ?? (item.icon ? <Icon concept={item.icon} size={16} className="shrink-0 text-fg-3" /> : null)}
                   <BaseSelect.ItemText className="min-w-0 flex-1 truncate">{item.label}</BaseSelect.ItemText>
                   {item.meta != null ? <span className="shrink-0 truncate font-mono text-micro text-fg-3">{item.meta}</span> : null}
                   <BaseSelect.ItemIndicator className="flex shrink-0 text-fg">

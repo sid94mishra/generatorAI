@@ -25,7 +25,7 @@ import { listRowColumns, listRowLabel, listRowPress, listRowRole } from './listR
 export type { ListRowKind, ListRowProps } from './ListRow.types';
 
 export function ListRow(props: ListRowProps): React.ReactElement {
-  const { kind, title, subtitle, icon, value, mono = false, selected = false, switchValue = false, provenance, badge, disabled = false, disabledReason, position, copyable = false, testID } = props;
+  const { kind, title, subtitle, icon, leading: customGlyph, value, mono = false, selected = false, switchValue = false, provenance, badge, disabled = false, disabledReason, position, copyable = false, testID } = props;
   const android = nativePlatform === 'android';
   const surface = position ? IOS_GROUP_CORNERS[position] : undefined;
 
@@ -37,7 +37,7 @@ export function ListRow(props: ListRowProps): React.ReactElement {
     );
   }
 
-  const glyph = icon ? <Icon concept={icon} size={android ? 24 : 20} tone={kind === 'destructive' ? 'err' : 'fg-2'} /> : null;
+  const glyph = customGlyph ?? (icon ? <Icon concept={icon} size={android ? 24 : 20} tone={kind === 'destructive' ? 'err' : 'fg-2'} /> : null);
   // A disabled row stays a (disabled) control so its role and reason are announced.
   const press = listRowPress(props);
   const copy = copyable && value ? () => void Clipboard.setStringAsync(value) : undefined;

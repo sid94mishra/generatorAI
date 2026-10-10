@@ -38,7 +38,7 @@ export function railTileCapacity(heightPx: number, items: number): number {
  * tiles as fit it — the rest are "+N", which opens the column.
  */
 export function RailActivity() {
-  const { model, modelLabel } = useActivityModel({ kind: 'all' });
+  const { model } = useActivityModel({ kind: 'all' });
   const now = useNow(Boolean(model && (model.header.running > 0 || model.header.needsYou > 0)), 1000);
   const open = useActivityStore((s) => s.setOpen);
   const [height, setHeight] = useState(0);
@@ -66,7 +66,7 @@ export function RailActivity() {
           <RailGroup role="list" aria-label="Live activity" data-testid="rail-activity">
             {shown.map((entry) => (
               <div role="listitem" key={entry.key}>
-                <RailTile entry={entry} now={now} modelLabel={modelLabel} />
+                <RailTile entry={entry} now={now} />
               </div>
             ))}
             {overflow > 0 ? (
@@ -79,15 +79,7 @@ export function RailActivity() {
   );
 }
 
-function RailTile({
-  entry,
-  now,
-  modelLabel,
-}: {
-  entry: ActivityEntry;
-  now: number;
-  modelLabel: (id: string) => string;
-}) {
+function RailTile({ entry, now }: { entry: ActivityEntry; now: number }) {
   const preview = usePreview(previewKey(entry, 'rail'));
   const tileRef = useRef<HTMLButtonElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
@@ -166,7 +158,7 @@ function RailTile({
             }
           }}
         >
-          <ActivityDetails entry={entry} now={now} modelLabel={modelLabel} titleId={titleId} onDone={preview.close} />
+          <ActivityDetails entry={entry} now={now} titleId={titleId} onDone={preview.close} />
         </PopoverPopup>
       ) : null}
     </PopoverRoot>

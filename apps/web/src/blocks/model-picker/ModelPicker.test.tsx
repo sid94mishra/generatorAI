@@ -25,9 +25,9 @@ const providers: HarnessProvidersResponse = {
       type: 'claude-agent', label: 'Claude Code', installed: true, connected: true, authenticated: true, ready: true,
       modelCount: 3, supportsLogin: false,
       models: [
-        { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', category: 'lightweight', promptTokenLimit: 200_000 },
-        { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', category: 'versatile', promptTokenLimit: 200_000, longContext: { promptTokenLimit: 1_000_000 } },
-        { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', category: 'powerful', promptTokenLimit: 200_000 },
+        { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', promptTokenLimit: 200_000 },
+        { id: 'claude-sonnet-5', name: 'Claude Sonnet 5', promptTokenLimit: 200_000, longContext: { promptTokenLimit: 1_000_000 } },
+        { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', promptTokenLimit: 200_000, isDefault: true, description: 'For complex work' },
       ],
     },
     {
@@ -62,7 +62,28 @@ describe('ModelPicker', () => {
     expect(rows.map((b) => b.getAttribute('data-availability'))).toEqual(['ready', 'signed_out', 'not_installed']);
     expect(rows[0]).toHaveTextContent('Claude Code');
     expect(rows[0]).toHaveAttribute('aria-pressed', 'true');
-    expect(within(popup).getByRole('group', { name: 'Balanced' })).toBeInTheDocument();
+    // One plain list in the provider's order — no tier groups (D-131).
+    expect(within(popup).queryAllByRole('group')).toHaveLength(0);
+    expect(within(popup).getAllByRole('option').map((o) => o.textContent)).toEqual([
+      expect.stringContaining('Claude Haiku 4.5'),
+      expect.stringContaining('Claude Sonnet 5'),
+      expect.stringContaining('Claude Opus 5.5'),
+    ]);
+  });
+
+  it('marks only the provider-flagged default and shows only returned details', async () => {
+    const { user } = setup('claude-sonnet-5');
+    const popup = await openPicker(user);
+    const opus = await within(popup).findByRole('option', { name: /Claude Opus 5\.5/ });
+    expect(opus).toHaveTextContent('default');
+    expect(within(popup).getByRole('option', { name: /Claude Haiku/ })).not.toHaveTextContent('default');
+    const detail = within(popup).getByTestId('model-picker-detail');
+    // Sonnet: the provider sent context limits and nothing about vision/reasoning.
+    expect(within(detail).getByText('Long context (prompt)')).toBeInTheDocument();
+    expect(within(detail).queryByText('Vision')).toBeNull();
+    expect(within(detail).queryByText('Reasoning')).toBeNull();
+    await user.hover(opus);
+    expect(within(detail).getByText('For complex work')).toBeInTheDocument();
   });
 
   it('shows why an unready provider is unusable and lists none of its models', async () => {
@@ -111,7 +132,7 @@ describe('ModelPicker', () => {
       providers: providers.providers.map((p) =>
         p.type === 'codex'
           ? { ...p, installed: true, connected: true, authenticated: true, ready: true, modelCount: 1,
-              models: [{ id: 'gpt-5.6-terra', name: 'GPT-5.6-Terra', category: 'versatile', promptTokenLimit: 272_000 }] }
+              models: [{ id: 'gpt-5.6-terra', name: 'GPT-5.6-Terra' }] }
           : p,
       ),
     };

@@ -11,7 +11,6 @@ import type {
   AgentToolPolicy,
   AgentScope,
   AgentRole,
-  HarnessProviderId,
 } from '@generatorai/shared';
 
 const COPY: Record<ResolutionWarning['code'], (p: Record<string, string | number>) => string> = {
@@ -88,11 +87,3 @@ export function scopeTone(scope: AgentScope): 'neutral' | 'info' | 'success' {
   return 'info';
 }
 
-/** Labels matching the server's `harnessTypeLabel`, so a provider reads the same everywhere. */
-export const PROVIDER_LABELS: Record<HarnessProviderId, string> = {
-  copilot: 'GitHub Copilot',
-  'claude-agent': 'Claude Code',
-  codex: 'Codex',
-  opencode: 'OpenCode',
-  acp: 'ACP Agent',
-};

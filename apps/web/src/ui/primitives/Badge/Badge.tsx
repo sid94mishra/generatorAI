@@ -3,7 +3,8 @@
 // (03 §2 P-05; Rosetta `.bdg.s-idle` / `.bdg.s-warn` …).
 //
 // 20h, pad 0 6, badge radius, small 500, optional 12px icon and a mono
-// `suffix`. Tones neutral (`bg-selected text-fg-2`) | run | ok | warn | err
+// `suffix`. `size="sm"`: micro line height, pad 0 4 — an inline tag next to a list
+// row's name (the model picker's "default", D-131). Tones neutral (`bg-selected text-fg-2`) | run | ok | warn | err
 // (`bg-<tone>-bg text-<tone>`, the AA-safe status text colour, D-12).
 // Run states use StatusBadge (P-06), never a hand-picked Badge tone.
 // ────────────────────────────────────────────────────────────────
@@ -15,9 +16,13 @@ import { cn } from '../../lib/cn.js';
 import { Icon } from '../../icons/Icon.js';
 
 export const badgeVariants = cva(
-  'inline-flex h-badge shrink-0 items-center gap-1 rounded-badge px-1.5 text-small font-medium whitespace-nowrap',
+  'inline-flex shrink-0 items-center gap-1 rounded-badge font-medium whitespace-nowrap',
   {
     variants: {
+      size: {
+        md: 'h-badge px-1.5 text-small',
+        sm: 'px-1 text-micro',
+      },
       tone: {
         neutral: 'bg-selected text-fg-2',
         run: 'bg-run-bg text-run',
@@ -26,14 +31,16 @@ export const badgeVariants = cva(
         err: 'bg-err-bg text-err',
       },
     },
-    defaultVariants: { tone: 'neutral' },
+    defaultVariants: { tone: 'neutral', size: 'md' },
   },
 );
 
 export type BadgeTone = NonNullable<VariantProps<typeof badgeVariants>['tone']>;
+export type BadgeSize = NonNullable<VariantProps<typeof badgeVariants>['size']>;
 
 export interface BadgeProps extends ComponentProps<'span'> {
   tone?: BadgeTone;
+  size?: BadgeSize;
   /** Leading 12px glyph. */
   icon?: IconConcept;
   /** Trailing mono part ("v7"). */
@@ -41,9 +48,9 @@ export interface BadgeProps extends ComponentProps<'span'> {
 }
 
 /** A small tinted label for non-status metadata. */
-export function Badge({ tone = 'neutral', icon, suffix, className, children, ...rest }: BadgeProps) {
+export function Badge({ tone = 'neutral', size = 'md', icon, suffix, className, children, ...rest }: BadgeProps) {
   return (
-    <span className={cn(badgeVariants({ tone }), className)} {...rest}>
+    <span className={cn(badgeVariants({ tone, size }), className)} {...rest}>
       {icon ? <Icon concept={icon} size={12} /> : null}
       {children}
       {suffix != null ? <span className="font-mono text-micro">{suffix}</span> : null}

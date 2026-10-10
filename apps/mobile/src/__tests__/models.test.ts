@@ -18,12 +18,6 @@ describe('reasoningEfforts', () => {
     ).toEqual(['low', 'medium', 'high']);
   });
 
-  it('still accepts a space-separated string', () => {
-    expect(
-      reasoningEfforts(model({ supportsReasoning: true, reasoningEfforts: 'low  high' })),
-    ).toEqual(['low', 'high']);
-  });
-
   it('offers nothing when the model does not reason', () => {
     expect(
       reasoningEfforts(model({ supportsReasoning: false, reasoningEfforts: ['low'] })),

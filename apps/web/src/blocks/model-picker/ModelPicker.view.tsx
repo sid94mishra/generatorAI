@@ -1,42 +1,45 @@
 // ────────────────────────────────────────────────────────────────
-// B-01 ModelPicker — the pure view (03 §2.1; board ComposerModelPicker).
+// B-01 ModelPicker — the pure view (03 §2.1; board ComposerModelPicker; D-131).
 //
-// Popover 620×384: provider column 150 (ready providers first; the others
-// dimmed with why — "Not signed in" / "Not installed" / "Unavailable" — and
-// what to do about it) · model list 272 (SearchInput "Search models" +
-// refresh; groups Fast / Balanced / Powerful when the catalog gives tiers,
-// otherwise one list; rows name + mono id + context "200K · 1M" + check)
-// · detail pane (title, tier, description, Provider / Context (prompt) /
-// Long context / Long context (prompt) / Max output / Reasoning / Vision,
-// footnote) · 32h footer "↑↓ Navigate · ↵ Select · Esc Close" under the model list
-// (board: the provider column and the detail pane keep the full height).
+// Popover 620×384: provider column 150 (each provider's logo, D-132; ready
+// providers first; the others dimmed with why — "Not signed in" / "Not
+// installed" / "Unavailable" — and what to do about it) · model list 272
+// (SearchInput "Search models" + refresh; ONE plain list of the provider's
+// real models in the provider's order — rows name + mono id + context when
+// reported + a "default" badge only when the provider flags the model + check)
+// · detail pane (name, description, then only the facts the provider returned:
+// client-core's `modelDetails`) · 32h footer "↑↓ Navigate · ↵ Select · Esc
+// Close" under the model list. Owner deviation from the board (D-131): no
+// Fast / Balanced / Powerful groups, no "Recommended"/"Default" pseudo-rows,
+// no detail rows the provider did not send.
 //
 // Keyboard: focus lands in the search field; typing filters, ↑/↓ move the
-// highlight through the visible models (aria-activedescendant), Enter picks,
-// Escape clears the query and then closes (the Popover's own dismissal).
+// highlight through the visible models (aria-activedescendant) and the detail
+// pane follows it — as it follows the pointer — Enter picks, Escape clears
+// the query and then closes (the Popover's own dismissal).
 //
 // Props only: the catalog is client-core's `ModelPickerCatalog`
 // (`buildModelPickerCatalog`); `ModelPicker.tsx` connects it to the queries.
 // ────────────────────────────────────────────────────────────────
 
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   findPickerModel,
-  formatTokenLimit,
+  modelDetails,
   type ModelPickerCatalog,
   type PickerModel,
   type PickerProvider,
 } from '@generatorai/client-core';
-import { MODEL_TIER_LABELS } from '@generatorai/shared';
 import { Icon } from '@/ui/icons/Icon.js';
 import { cn } from '@/ui/lib/cn.js';
 import { modelPickerBox } from '@/ui/lib/popup.js';
 import { KbdHintRow, KbdHintStatus } from '@/ui/patterns/KbdHintRow/KbdHintRow.js';
 import { optionSecondaryText } from '@/ui/primitives/Autocomplete/Autocomplete.js';
-import { Avatar } from '@/ui/primitives/Avatar/Avatar.js';
+import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { PopoverPopup, PopoverRoot, PopoverTitle, PopoverTrigger } from '@/ui/primitives/Popover/Popover.js';
+import { ProviderLogo } from '@/ui/primitives/ProviderLogo/ProviderLogo.js';
 import { SearchInput } from '@/ui/primitives/SearchInput/SearchInput.js';
 import { Skeleton } from '@/ui/primitives/Skeleton/Skeleton.js';
 import { StatusDot } from '@/ui/primitives/StatusDot/StatusDot.js';
@@ -45,7 +48,6 @@ import {
   AVAILABILITY_LABEL,
   contextSummary,
   filterModels,
-  groupModels,
   initialProvider,
   searchProvider,
   modelMeta,
@@ -147,7 +149,14 @@ export function ModelPickerView({
         id={id}
         className={cn('max-w-40 data-popup-open:bg-selected data-popup-open:text-fg', unavailable && 'text-warn', className)}
       >
-        {label}
+        {selected ? (
+          <span className="flex min-w-0 items-center gap-1.5">
+            <ProviderLogo provider={selected.provider} size={14} />
+            <span className="truncate">{label}</span>
+          </span>
+        ) : (
+          label
+        )}
       </Button>
     ) : (
       <Button
@@ -167,6 +176,7 @@ export function ModelPickerView({
       >
         <span className="flex min-w-0 items-center gap-2">
           {unavailable ? <Icon concept="warning" size={14} className="shrink-0 text-warn" /> : null}
+          {selected ? <ProviderLogo provider={selected.provider} size={14} /> : null}
           <span className={cn('truncate', !value && 'text-fg-3')}>{label}</span>
           {selected ? <span className="truncate text-small text-fg-3">{modelMeta(selected, selectedProvider)}</span> : null}
         </span>
@@ -222,8 +232,7 @@ function ModelPickerPanel({ value, catalog, loading, refreshing, onRefresh, onOp
 
   const providerType = searchProvider(catalog, browse ?? initialProvider(catalog, value), query);
   const provider = catalog?.providers.find((p) => p.type === providerType);
-  const groups = useMemo(() => groupModels(filterModels(provider?.models ?? [], query)), [provider, query]);
-  const visible = useMemo(() => groups.flatMap((g) => g.models), [groups]);
+  const visible = useMemo(() => filterModels(provider?.models ?? [], query), [provider, query]);
 
   const highlighted =
     visible.find((m) => m.id === highlightedId) ?? visible.find((m) => m.id === value) ?? visible[0];
@@ -317,20 +326,16 @@ function ModelPickerPanel({ value, catalog, loading, refreshing, onRefresh, onOp
               </p>
             ) : (
               <div id={listId} role="listbox" aria-label={`${provider.label} models`}>
-                {groups.map((group) => (
-                  <ModelGroupBlock key={group.key} label={group.label}>
-                    {group.models.map((model) => (
-                      <ModelRow
-                        key={model.id}
-                        id={optionId(model)}
-                        model={model}
-                        selected={model.id === value}
-                        highlighted={model === highlighted}
-                        onHover={() => setHighlightedId(model.id)}
-                        onPick={() => onSelect(model.id)}
-                      />
-                    ))}
-                  </ModelGroupBlock>
+                {visible.map((model) => (
+                  <ModelRow
+                    key={model.id}
+                    id={optionId(model)}
+                    model={model}
+                    selected={model.id === value}
+                    highlighted={model === highlighted}
+                    onHover={() => setHighlightedId(model.id)}
+                    onPick={() => onSelect(model.id)}
+                  />
                 ))}
               </div>
             )}
@@ -402,7 +407,9 @@ function ProviderRow({ provider, active, onPick }: { provider: PickerProvider; a
       className={cn('group/provider h-auto min-h-10 w-full justify-start px-1.5 py-1 text-left', !ready && 'text-fg-3')}
     >
       <span className="flex min-w-0 items-center gap-2">
-        <Avatar name={provider.label} decorative className="group-aria-pressed/provider:text-fg" />
+        <span className="flex size-6 shrink-0 items-center justify-center">
+          <ProviderLogo provider={provider.type} size={20} />
+        </span>
         <span className="flex min-w-0 flex-col">
           <span className={cn('truncate text-ui', ready ? 'text-fg' : pressedMeta)}>{provider.label}</span>
           <span className={cn('flex min-w-0 items-center gap-1 text-micro font-normal', pressedMeta)}>
@@ -436,19 +443,6 @@ function NotReady({ provider }: { provider: PickerProvider }) {
       </p>
       {provider.error ? <p className="text-fg-3">{provider.error}</p> : null}
       <p className="text-fg-3">{AVAILABILITY_HINT[provider.availability]}</p>
-    </div>
-  );
-}
-
-function ModelGroupBlock({ label, children }: { label: string | null; children: ReactNode }) {
-  const labelId = useId();
-  if (label === null) return <>{children}</>;
-  return (
-    <div role="group" aria-labelledby={labelId} className="pb-1 last:pb-0">
-      <div id={labelId} className="flex h-step items-center px-2 text-small text-fg-3 select-none">
-        {label}
-      </div>
-      {children}
     </div>
   );
 }
@@ -488,7 +482,10 @@ function ModelRow({
         {selected ? <Icon concept="check" size={14} /> : null}
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className={cn('truncate text-ui', selected && 'text-fg')}>{model.name}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className={cn('truncate text-ui', selected && 'text-fg')}>{model.name}</span>
+          {model.isDefault ? <Badge size="sm">default</Badge> : null}
+        </span>
         {model.name !== model.id ? <span className={cn('truncate font-mono text-micro', optionSecondaryText)}>{model.id}</span> : null}
       </span>
       {context ? <span className={cn('shrink-0 font-mono text-micro', optionSecondaryText)}>{context}</span> : null}
@@ -497,33 +494,29 @@ function ModelRow({
 }
 
 function ModelDetail({ model, provider }: { model: PickerModel | undefined; provider: PickerProvider | undefined }) {
-  const rows: Array<[string, string]> = [];
-  if (model) {
-    rows.push(['Provider', provider?.label ?? model.provider]);
-    if (model.contextTokens != null) rows.push(['Context (prompt)', formatTokenLimit(model.contextTokens)]);
-    rows.push(['Long context', model.longContextTokens != null ? 'Yes' : 'No']);
-    if (model.longContextTokens != null) rows.push(['Long context (prompt)', formatTokenLimit(model.longContextTokens)]);
-    if (model.maxOutputTokens != null) rows.push(['Max output', formatTokenLimit(model.maxOutputTokens)]);
-    if (model.reasoningEfforts.length > 0) {
-      const n = model.reasoningEfforts.length;
-      rows.push(['Reasoning', `${n} ${n === 1 ? 'level' : 'levels'}`]);
-    }
-    rows.push(['Vision', model.vision ? 'Supported' : 'Not supported']);
-  }
+  const rows = model ? modelDetails(model) : [];
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-y-auto p-3" data-testid="model-picker-detail">
+    <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-y-auto p-3" data-testid="model-picker-detail" aria-live="polite">
       {model ? (
         <>
-          <div className="flex items-baseline justify-between gap-2">
+          <div className="flex items-center justify-between gap-2">
             <span className="truncate text-ui font-semibold text-fg">{model.name}</span>
-            {model.tier ? <span className="shrink-0 text-micro text-fg-3">{MODEL_TIER_LABELS[model.tier]}</span> : null}
+            {model.isDefault ? <Badge size="sm">default</Badge> : null}
           </div>
+          {model.name !== model.id ? <p className="truncate font-mono text-micro text-fg-3">{model.id}</p> : null}
           {model.description ? <p className="text-small text-fg-2">{model.description}</p> : null}
           <dl className="flex flex-col gap-0.5 text-small">
-            {rows.map(([key, val]) => (
-              <div key={key} className="flex min-h-5 items-center justify-between gap-2">
-                <dt className="truncate text-fg-3">{key}</dt>
-                <dd className="shrink-0 text-fg">{val}</dd>
+            <div className="flex min-h-5 items-center justify-between gap-2">
+              <dt className="truncate text-fg-3">Provider</dt>
+              <dd className="flex min-w-0 items-center gap-1.5 text-fg">
+                <ProviderLogo provider={model.provider} size={12} />
+                <span className="truncate">{provider?.label ?? model.provider}</span>
+              </dd>
+            </div>
+            {rows.map((row) => (
+              <div key={row.label} className="flex min-h-5 items-start justify-between gap-2">
+                <dt className="shrink-0 text-fg-3">{row.label}</dt>
+                <dd className={cn('min-w-0 text-right text-fg', row.mono && 'font-mono text-micro leading-5')}>{row.value}</dd>
               </div>
             ))}
           </dl>
