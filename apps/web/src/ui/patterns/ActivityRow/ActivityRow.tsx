@@ -6,7 +6,8 @@
 // `line-soft`: the state glyph (D-18 shared map, 16px) · `title` (500, grows
 // or a fixed column) · `context` (`font-mono text-micro text-fg-3`) · `detail`
 // (`text-small text-fg-2`, grows; may hold InlineCode/DiffStat) · `time`
-// (`font-mono text-micro text-fg-3`, right) · one ib-sm `actions` node,
+// (`font-mono text-micro text-fg-3`, right, min 40 and never wrapped — a
+// 12-hour "08:53 PM" grows the column) · one ib-sm `actions` node,
 // revealed on hover/focus unless `persistentActions` (Home "Needs you", whose
 // Review / Approve buttons are the point of the row).
 // ────────────────────────────────────────────────────────────────
@@ -65,7 +66,7 @@ export function ActivityRow({
       </div>
       {context != null ? <div className="w-29 shrink-0 truncate font-mono text-micro text-fg-3">{context}</div> : null}
       {!twoLine && detail != null ? <div className="min-w-0 flex-1 truncate text-small text-fg-2">{detail}</div> : null}
-      {time != null ? <div className="w-10 shrink-0 text-right font-mono text-micro text-fg-3">{time}</div> : null}
+      {time != null ? <div className="min-w-10 shrink-0 text-right font-mono text-micro whitespace-nowrap text-fg-3">{time}</div> : null}
       {actions != null ? (
         <div
           className={cn(
