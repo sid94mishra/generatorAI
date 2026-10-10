@@ -227,6 +227,7 @@ export class WorkspacedCopilotPool implements IAgentHarness {
     for (const entry of this.workspaces.values()) {
       if (entry.initialized) {
         const models = await entry.provider.getModels();
+        this.lastModelProbeError = entry.provider.getLastModelProbeError();
         if (models.length > 0) return models;
       }
     }
@@ -234,7 +235,20 @@ export class WorkspacedCopilotPool implements IAgentHarness {
     const defaultKey = this.baseOptions.defaultCwd ?? '';
     const entry = await this.ensureWorkspace(defaultKey);
     await this.waitForInit(entry);
-    return entry.provider.getModels();
+    const models = await entry.provider.getModels();
+    this.lastModelProbeError = entry.provider.getLastModelProbeError();
+    return models;
+  }
+
+  private lastModelProbeError: string | undefined;
+
+  /**
+   * W41 — why the last `getModels()` returned `[]` (e.g. "Not authenticated"),
+   * forwarded from the workspace provider that answered, so the registry can
+   * say why Copilot has no catalog instead of an empty, reasonless status.
+   */
+  getLastModelProbeError(): string | undefined {
+    return this.lastModelProbeError;
   }
 
   // ── Conversation lifecycle ────────────────────────────────────────
