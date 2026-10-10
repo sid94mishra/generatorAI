@@ -26,6 +26,14 @@
  *                              import that degrades to "voice input
  *                              unavailable". Optional by design.
  *
+ *   kokoro-js                 The text-to-speech engine. It imports
+ *                              @huggingface/transformers statically, and
+ *                              esbuild hoists that import to the top of the
+ *                              bundle when kokoro-js is inlined — so the whole
+ *                              server failed to start without transformers.
+ *                              Kept external, it stays behind the engine's
+ *                              guarded dynamic import. Optional, not staged.
+ *
  *   @trycua/cua-driver        Finds its native library through
  *                              `createRequire(callerUrl).resolve()` against a
  *                              sibling platform package. Inlined, `callerUrl`
@@ -39,6 +47,7 @@ export const BUNDLE_EXTERNALS = [
   'playwright',
   'playwright-core',
   '@huggingface/transformers',
+  'kokoro-js',
   '@trycua/cua-driver',
 ];
 
