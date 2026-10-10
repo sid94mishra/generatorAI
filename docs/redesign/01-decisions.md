@@ -1240,6 +1240,13 @@ reason. The start rule is `chatCreateBlockingReason`: a name, or a first message
 longer required, overriding F-create-01/02's "gated on the Task". With no first message the chat opens empty for the user
 to type or dictate; Plan first then has nothing to apply to and is disabled with a pointer to the composer's Plan mode.
 
+### D-134 Home starts work from quick-action tiles, not a chat box (2026-10-10) — Final
+Owner review: the Home quick composer (F-home-02) and the header's Run workflow / New workflow buttons are replaced by
+one "Start" row — C-40 `QuickActions`, a 2-column grid of P-55 `ActionTile`s: New chat (opens the New chat dialog, D-133),
+Run workflow (→ /workflows, where each workflow runs), New workflow, New agent. Each tile is a card-sized button (icon
+well · title · one-line description · the command's own chord from `shortcutFor`, D-24). The Dashboard template's
+`composer` slot is renamed `start`. Writing the first message now happens in the dialog or the chat itself.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

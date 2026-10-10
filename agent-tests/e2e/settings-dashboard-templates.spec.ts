@@ -232,17 +232,19 @@ test.describe('Home', () => {
   // only the always-present parts are asserted here.
   const HOME_HEADING = /^(Nothing needs you|\d+ needs? you)( · \d+ running)?$/;
 
-  test('renders the headline, quick composer, header actions and the aside cards', async ({ page, gotoApp }) => {
+  test('renders the headline, the quick-start row and the aside cards', async ({ page, gotoApp }) => {
     await gotoApp('/');
     const main = page.getByRole('main');
     await expect(main.getByRole('heading', { name: HOME_HEADING, level: 1 })).toBeVisible();
 
-    await expect(main.getByRole('button', { name: 'Run workflow', exact: true })).toBeVisible();
-    await expect(main.getByRole('button', { name: 'New workflow', exact: true })).toBeVisible();
-
-    await expect(main.getByRole('textbox', { name: 'New chat task' })).toBeVisible();
-    await expect(main.getByRole('button', { name: 'Start chat' })).toBeDisabled();
-    await expect(main.getByRole('button', { name: 'More options', exact: true })).toBeVisible();
+    // D-134: the quick-start row replaced the quick composer and the header buttons.
+    const start = main.getByRole('group', { name: 'Start' });
+    for (const name of [/New chat/, /Run workflow/, /New workflow/, /New agent/]) {
+      await expect(start.getByRole('button', { name })).toBeVisible();
+    }
+    await start.getByRole('button', { name: /New chat/ }).click();
+    await expect(page.getByRole('dialog', { name: 'New chat' })).toBeVisible();
+    await page.keyboard.press('Escape');
 
     const system = page.getByTestId('home-system');
     await expect(system.getByText('System', { exact: true })).toBeVisible();

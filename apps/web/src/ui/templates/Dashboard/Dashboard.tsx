@@ -5,7 +5,7 @@
 //   header    a plain title + actions
 //   dateLine? mono 12 date ("Thursday, 26 September")
 //   greeting  the display title (`text-display` already carries 28/600/-0.02em)
-//   composer? the quick-start composer block
+//   start?    the quick-start row (C-40 QuickActions on Home, D-134)
 //   sections? "Needs you" / "Running" / "Recently finished" — each the
 //             caller's own C-12 SectionHeader + a bordered list of C-08
 //             ActivityRow, stacked with a 20px gap; a section that has no
@@ -26,7 +26,7 @@ export interface DashboardProps extends Omit<ComponentProps<'div'>, 'children'> 
   header: ReactNode;
   dateLine?: ReactNode;
   greeting: ReactNode;
-  composer?: ReactNode;
+  start?: ReactNode;
   sections?: ReactNode;
   aside?: ReactNode;
   /** Set by the caller under ~900px card width: stacks `aside` under the left column. */
@@ -34,7 +34,7 @@ export interface DashboardProps extends Omit<ComponentProps<'div'>, 'children'> 
 }
 
 /** Page layout for Home: a greeting + activity sections beside a stats/system column. */
-export function Dashboard({ header, dateLine, greeting, composer, sections, aside, asideStacked = false, className, ...rest }: DashboardProps) {
+export function Dashboard({ header, dateLine, greeting, start, sections, aside, asideStacked = false, className, ...rest }: DashboardProps) {
   return (
     <div className={cn('flex h-full min-h-0 min-w-0 flex-col bg-surface text-fg', className)} {...rest}>
       {header}
@@ -45,7 +45,7 @@ export function Dashboard({ header, dateLine, greeting, composer, sections, asid
               {dateLine != null ? <div className="font-mono text-small text-fg-3">{dateLine}</div> : null}
               <div className="text-display text-fg">{greeting}</div>
             </div>
-            {composer}
+            {start}
             {sections}
           </div>
           {aside != null ? <div className={cn('flex flex-col gap-4', !asideStacked && 'w-75 shrink-0 pt-1.5')}>{aside}</div> : null}
