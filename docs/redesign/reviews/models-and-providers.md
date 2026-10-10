@@ -91,3 +91,46 @@ context: No" / "Vision: Not supported" rows for fields no provider sent). After:
   refetches it).
 - Mobile Turn sheet / Default model provider pickers are native segmented controls (text only); the model rows and
   Settings carry the logos.
+
+## 8. Surface sweep (coordinator request, 2026-10-10 17:00)
+
+The owner's "old selector" report: their /Applications build is from 14:42, before these commits. Every surface that
+shows or picks a model or provider was then checked. ✓ = shared ModelPicker / ProviderLogo / ModelLabel on the
+client-core picker catalog, no tiers or pseudo-rows, details only from provider data.
+
+| Surface | Status |
+|---|---|
+| Chat composer chip, picker, hover/keyboard details | ✓ (ModelPicker chip with logo; `modelDetails`) |
+| Chat header / live agent turn header | ✓ logo + catalog display name (persisted turns show no model) |
+| Home QuickComposer | ✓ ModelPicker chip |
+| NewChatDialog, ChatCreatePage | ✓ ModelPicker field; summary row logo; "powerful" nudge only from Copilot's own category |
+| Agent editor | ✓ ProviderSelect (served providers) + ModelPicker; **fixed**: context tier was hardcoded "200K / 1M", effort offered every level |
+| Workflow builder SessionSpecEditor | ✓ ModelPicker + ProviderSelect; **fixed**: effort levels from the chosen model |
+| Workflow builder PolicyTab (allowed models) | **fixed**: free-text ids (placeholder `claude-sonnet-5`) → ModelLabel chips + ModelPicker |
+| Workflow builder OutputTab (llm judge model) | **fixed**: free-text id → ModelPicker |
+| RunDialog | ✓ ModelPicker; **fixed**: effort levels from the chosen model |
+| Workflow run StageComposer | ✓ no model selector by design (a stage runs its own session model) |
+| Run inspector, definition cards, builder session summary | **fixed**: raw ids → ModelLabel / catalog name |
+| Settings › General default model | ✓ ModelPicker |
+| Settings › Source control (PR/commit text model) | ✓ ModelPicker |
+| Settings › Workflow engine | **fixed**: summary model and `model:<id>` keys were free text (placeholder `claude-sonnet-4-5`) → ModelPicker; provider keys → ProviderSelect |
+| Settings › Model providers | ✓ logos, default badge, experimental switches |
+| Activity cards/details/workers, background tasks | ✓ ModelLabel |
+| PullRequestPage (review model) | ✓ ModelPicker |
+| Mobile Turn sheet, New chat, Default model, Agent editor | ✓ MB-03 ModelPicker (plain list, badge, logos when unfiltered); **fixed**: names were vendor-trimmed ("Claude Sonnet 5" → "Sonnet 5"), agent effort fallback was the first four levels |
+| Mobile workflow New / Settings / Stage session / Run sheet | ✓ catalog-built pickers; **fixed**: provider labels, effort levels from the chosen model, stage provider list was a static list including hidden providers |
+| Mobile Settings › Model providers | ✓ logos + experimental switches |
+
+Also removed: shared `DEFAULT_MODEL = 'claude-sonnet-4.6'` (unused) and the static `ui-contract` provider list.
+Grep proof (UI and client code: web, mobile, client-core, shared, design-tokens, CLI; comments, tests, stories and
+fixtures excluded) for model ids (`claude-*`, `gpt-*`, `gemini-*`, sonnet/opus/haiku/fable literals), tier constants
+and "Recommended" copy returns only non-model copy (audio engine "(recommended)", device scope preset, prompt
+mode). Inside the provider package only routing/telemetry defaults remain (Copilot's documented `claude-sonnet-4.6`
+backstop when no default is configured, context-ledger token budgets, a span attribute); the server's Claude
+default alias `sonnet`; voice formatter's own model.
+
+Verified on an isolated real-provider server (temp dirs, dbPath asserted) + Electron dev with a temp profile, a chat
+and a workflow created through the API (no turns): `shots/models-and-providers/sweep/` — Home, chat page, chat
+picker hover (Codex, Claude), new-chat dialog, chat create with a model, agent editor with Haiku 4.5 (no effort
+levels: Claude sends none for it), workflow builder + stage session + stage model picker; light and dark, no console
+errors.

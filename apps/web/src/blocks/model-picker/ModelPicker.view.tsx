@@ -516,7 +516,12 @@ function ModelDetail({ model, provider }: { model: PickerModel | undefined; prov
             {rows.map((row) => (
               <div key={row.label} className="flex min-h-5 items-start justify-between gap-2">
                 <dt className="shrink-0 text-fg-3">{row.label}</dt>
-                <dd className={cn('min-w-0 text-right text-fg', row.mono && 'font-mono text-micro leading-5')}>{row.value}</dd>
+                <dd
+                  className={cn('min-w-0 text-right text-fg', row.mono && 'truncate font-mono text-micro leading-5')}
+                  title={row.mono ? row.value : undefined}
+                >
+                  {row.value}
+                </dd>
               </div>
             ))}
           </dl>
