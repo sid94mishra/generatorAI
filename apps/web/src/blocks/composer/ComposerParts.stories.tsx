@@ -200,9 +200,51 @@ export const GaugePopover: Story = {
 };
 
 const mounts = [
-  { id: 'm1', alias: 'payments-api', mode: 'worktree', path: '/Users/sid/.generatorai/worktrees/payments-api-7f3c', git: { isRepo: true, branch: 'fix/checkout-flake' } },
-  { id: 'm2', alias: 'checkout-web', mode: 'in-place', path: '/src/acme/checkout-web', git: { isRepo: true, branch: 'main' } },
+  {
+    id: 'm1',
+    alias: 'payments-api',
+    mode: 'worktree',
+    originKind: 'folder',
+    originPath: '/src/acme/payments-api',
+    path: '/Users/sid/Library/Application Support/GeneratorAI/workspaces/executions/c1/source/payments-api',
+    git: { isRepo: true, branch: 'fix/checkout-flake' },
+  },
+  { id: 'm2', alias: 'checkout-web', mode: 'in-place', originKind: 'folder', path: '/src/acme/checkout-web', git: { isRepo: true, branch: 'main' } },
+  { id: 'm3', alias: 'notes', mode: 'in-place', originKind: 'folder', path: '/src/acme/notes', git: { isRepo: false } },
 ] as unknown as WorkspaceMount[];
+
+/** A chat with no sources: the server's managed `main` mount (`git init -b main`). */
+const emptyMount = [
+  {
+    id: 'g1',
+    alias: 'main',
+    mode: 'generated',
+    originKind: 'generated',
+    path: '/Users/sid/Library/Application Support/GeneratorAI/workspaces/executions/c2/source/main',
+    git: { isRepo: true, branch: 'main' },
+  },
+] as unknown as WorkspaceMount[];
+
+/** D-135: no "main" chip, no branch, no app-data path. */
+export const SourcesEmptyWorkspace: Story = {
+  render: () => (
+    <div className="mt-60 flex items-center gap-2">
+      <SourcesChipView
+        mounts={emptyMount}
+        fallback={{ projectLinked: false, codebases: [], codebasesLoading: false, folders: [], count: 0 }}
+        onEditSources={fn()}
+        onCopyPath={fn()}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole('button', { name: /Empty workspace/ }));
+    const body = within(canvasElement.ownerDocument.body);
+    await body.findByText(/the agent works in an empty folder this chat owns/);
+    await expect(body.queryByText(/source\/main/)).toBeNull();
+  },
+};
 
 export const SourcesAndSkills: Story = {
   render: () => (

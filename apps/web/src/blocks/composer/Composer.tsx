@@ -309,9 +309,10 @@ export function Composer({
         .map((cb) => ({ id: cb.id, alias: cb.alias, kind: cb.type === 'local-dir' ? ('folder' as const) : ('git' as const) })),
       codebasesLoading,
       folders,
-      count: (codebaseIds?.length ?? 0) + folders.length,
+      // `chat.sources` is the authority; the legacy fields cover chats created before it.
+      count: chat?.sources ? chat.sources.length : (codebaseIds?.length ?? 0) + folders.length,
     };
-  }, [gitRepositories, projectId, projectCodebases, codebaseIds, codebasesLoading]);
+  }, [gitRepositories, projectId, projectCodebases, codebaseIds, codebasesLoading, chat?.sources]);
 
   // ── Tool toggles (registry; hidden while nothing is registered) ──
   const { tools, setTool } = useComposerTools(chat);

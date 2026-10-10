@@ -376,7 +376,7 @@ describe('ChatInput — codebase row', () => {
       codebaseIds: ['cb1'],
       gitRepositories: [{ url: '/repo/a', branch: 'main', alias: 'a' }, { url: ' ', branch: '', alias: '' }],
     });
-    const toggle = screen.getByRole('button', { name: /2 Codebases/ });
+    const toggle = screen.getByRole('button', { name: /2 sources/ });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');

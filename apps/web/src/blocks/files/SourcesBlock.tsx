@@ -14,6 +14,7 @@
 
 import { useState } from 'react';
 import type { WorkspaceMount } from '@generatorai/shared';
+import { describeMount, pathTail } from '@generatorai/client-core';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
@@ -23,12 +24,6 @@ import { Tooltip } from '@/ui/primitives/Tooltip/Tooltip.js';
 import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import { cn } from '@/ui/lib/cn.js';
 import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
-
-const MODE_LABEL: Record<string, string> = {
-  'in-place': 'In place',
-  worktree: 'Worktree',
-  generated: 'Generated',
-};
 
 export interface SourcesBlockProps {
   workspaceId: string | undefined;
@@ -101,9 +96,13 @@ export function SourcesBlock({ workspaceId, onEditSources, embedded = false, cla
 }
 
 function MountRow({ mount, primary }: { mount: WorkspaceMount; primary: boolean }) {
+  // D-135: the empty workspace is not a repo, and a managed path is never shown as the user's folder.
+  const display = describeMount(mount);
+  const shownPath = display.userPath;
   const [copied, setCopied] = useState(false);
   const copy = () => {
-    void navigator.clipboard?.writeText(mount.path).then(
+    if (!shownPath) return;
+    void navigator.clipboard?.writeText(shownPath).then(
       () => {
         setCopied(true);
         setTimeout(() => setCopied(false), 1200);
@@ -113,10 +112,10 @@ function MountRow({ mount, primary }: { mount: WorkspaceMount; primary: boolean 
   };
 
   return (
-    <div className="rounded-control border border-line-soft px-2 py-1.5">
+    <div className="rounded-control border border-line px-2 py-1.5">
       <div className="flex items-center gap-1.5">
-        <span className="truncate font-medium text-fg" title={mount.alias}>
-          {mount.alias}
+        <span className={cn('truncate font-medium', display.kind === 'empty' ? 'text-fg-2' : 'text-fg')} title={display.label}>
+          {display.label}
         </span>
         {primary && (
           <Tooltip content="The agent's working directory">
@@ -125,17 +124,17 @@ function MountRow({ mount, primary }: { mount: WorkspaceMount; primary: boolean 
             </span>
           </Tooltip>
         )}
-        <Badge tone="neutral">{MODE_LABEL[mount.mode] ?? mount.mode}</Badge>
-        {mount.git?.branch && (
+        {display.modeLabel ? <Badge tone="neutral">{display.modeLabel}</Badge> : null}
+        {display.branch && (
           <span
             className="inline-flex min-w-0 items-center gap-1 text-micro text-fg-3"
-            title={mount.git.baseRef ? `${mount.git.branch} (from ${mount.git.baseRef})` : mount.git.branch}
+            title={mount.git?.baseRef ? `${display.branch} (from ${mount.git.baseRef})` : display.branch}
           >
             <Icon concept="branch" size={12} className="shrink-0" />
-            <span className="truncate">{mount.git.branch}</span>
+            <span className="truncate">{display.branch}</span>
           </span>
         )}
-        {mount.hasUncommittedChanges && (
+        {mount.hasUncommittedChanges && display.kind !== 'empty' && (
           <Tooltip content="Uncommitted changes in this mount">
             <span
               className="size-1.5 shrink-0 rounded-full bg-warn"
@@ -147,18 +146,23 @@ function MountRow({ mount, primary }: { mount: WorkspaceMount; primary: boolean 
         <StatusChip status={mount.status} error={mount.error} />
       </div>
 
-      <div className="mt-1 flex items-center gap-1">
-        <span className="min-w-0 flex-1 truncate font-mono text-micro text-fg-3" title={mount.path}>
-          {mount.path}
-        </span>
-        <IconButton
-          icon={copied ? 'check' : 'copy'}
-          label={`Copy path of ${mount.alias}`}
-          size="sm"
-          tooltip="Copy path"
-          onClick={copy}
-        />
-      </div>
+      {shownPath ? (
+        <div className="mt-1 flex items-center gap-1">
+          {display.kind === 'worktree' ? <span className="shrink-0 text-micro text-fg-3">from</span> : null}
+          <span className="min-w-0 flex-1 truncate font-mono text-micro text-fg-3" title={shownPath}>
+            {pathTail(shownPath)}
+          </span>
+          <IconButton
+            icon={copied ? 'check' : 'copy'}
+            label={`Copy path of ${display.label}`}
+            size="sm"
+            tooltip="Copy path"
+            onClick={copy}
+          />
+        </div>
+      ) : (
+        <p className="mt-1 text-micro text-fg-3">{display.detail}</p>
+      )}
 
       {mount.status === 'error' && mount.error && (
         <p className="mt-1 flex items-start gap-1 text-micro text-err">

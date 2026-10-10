@@ -5,7 +5,7 @@
 // `pressed` or `render`). md 24h / sm 20h (compact: −4 on md); interactive
 // chips keep a 24px hit area (`hitSlop`). Variants outline (default) | ghost; `mono` for
 // paths and ids. `dropdown` adds the trailing chevron + `aria-haspopup`
-// (render it as a Menu trigger). `onRemove` adds an 18px remove button.
+// (render it as a Menu or Popover trigger). `onRemove` adds an 18px remove button.
 // `pressed` is the toggle chip (SettingsSecurity scopes) with its 12px check box.
 // Truncation always shows "+N" (ChipList), never silently.
 // ────────────────────────────────────────────────────────────────
@@ -97,7 +97,8 @@ export function Chip({
     className: cn(chipVariants({ variant, size, mono, interactive }), className),
     ...(interactive && !render ? { type: 'button' } : {}),
     ...(interactive ? HIT_ATTRS : {}),
-    ...(dropdown ? { 'aria-haspopup': 'menu' as const } : {}),
+    // A Popover trigger passes its own `aria-haspopup="dialog"`; a menu is the default.
+    ...(dropdown ? { 'aria-haspopup': rest['aria-haspopup'] ?? ('menu' as const) } : {}),
     ...(pressed !== undefined ? { 'aria-pressed': pressed } : {}),
     onClick,
     children: label,

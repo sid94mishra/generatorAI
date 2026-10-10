@@ -20,6 +20,7 @@ import { useState, type FormEvent } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router';
 import { chatActivity, resolveMapping, type Chat, type StreamStatus } from '@generatorai/shared';
 import { displayChatTitle } from '@generatorai/shared/ui-contract';
+import { describeMount } from '@generatorai/client-core';
 import { useArchiveChat, useChat, useRenameChat } from '@/hooks/queries.js';
 import { useProject } from '@/hooks/projectQueries.js';
 import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
@@ -130,7 +131,8 @@ export function ChatHeader({ chat, streamStatus, awaitingUser, dockOpen, onToggl
   const primaryMount = [...(workspaceInfo?.mounts ?? [])]
     .filter((m) => m.status !== 'removed')
     .sort((a, b) => a.position - b.position)[0];
-  const branch = primaryMount?.git?.branch;
+  // The empty workspace's `git init` branch is not a repository the user linked (D-135).
+  const branch = primaryMount ? describeMount(primaryMount).branch : undefined;
 
   // A worker chat (orchestrator task) is reached from its orchestrator's Tasks
   // dock and leads back there; its name drops the server's "⚙ " marker.

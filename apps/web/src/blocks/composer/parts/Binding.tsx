@@ -15,6 +15,7 @@
 
 import { Avatar } from '@/ui/primitives/Avatar/Avatar.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
+import { Chip } from '@/ui/primitives/Chip/Chip.js';
 import { Icon } from '@/ui/icons/Icon.js';
 import { PopoverPopup, PopoverRoot, PopoverTitle, PopoverTrigger } from '@/ui/primitives/Popover/Popover.js';
 
@@ -98,11 +99,11 @@ export function SkillsMcpChip({ skills, mcpServers }: { skills: string[]; mcpSer
     <PopoverRoot>
       <PopoverTrigger
         render={
-          <Button variant="ghost" size="sm" icon="skills" className="gap-1.5 border-line px-2 text-small data-popup-open:bg-selected" />
+          <Chip icon="skills" title="Skills and MCP servers for this chat">
+            {label}
+          </Chip>
         }
-      >
-        {label}
-      </PopoverTrigger>
+      />
       <PopoverPopup side="top" align="start" className="flex w-72 flex-col gap-2 p-3">
         <PopoverTitle className="text-ui font-medium text-fg">Skills and MCP servers</PopoverTitle>
         <List title="Skills" icon="skills" items={skills} empty="No skills" />
