@@ -12,15 +12,18 @@
 // unless another is made primary — that ordering IS the contract with the
 // server, so the up/down controls are functional, not decoration.
 //
-// Layouts:
-//   full    — project Select + codebase checklist, "Add local folder", then one
-//             card per source: alias rename, reorder / copy / remove, Mode and
-//             Branch segmented controls, "Make working directory".
-//   compact — the NewChat dialog: a "Project" field (label above, D-133) and
-//             ONE bordered list on the same left edge. Included sources expand in place (checkbox, mono
-//             name, "Working directory" badge, Mode, then the branch line);
-//             project codebases that are not ticked collapse to a single
-//             "Not included" row; "Add local folder" sits in the list footer.
+// Layouts (both D-133/D-136: labels above controls on one left edge, ONE
+// bordered list using `line` so it holds on a dialog's `overlay` surface):
+//   compact — the NewChat dialog: a "Project" field and the list. Included
+//             sources expand in place (checkbox, mono name, "Working
+//             directory" badge, Mode, then the branch line); project codebases
+//             that are not ticked collapse to a single "Not included" row;
+//             "Add local folder" sits in the list footer.
+//   full    — the ChatCreate page and "Edit sources…": the same list, each
+//             source row adding rename, reorder / remove, the user's folder +
+//             copy, and "Make working directory".
+// "Add local folder" opens the OS folder dialog in the desktop app on its own
+// server, else the server-side browser (`useFolderPicker`, D-136).
 //
 // Kit rebuild of `components/chat/sources/SourcePicker.tsx` (P5-09).
 // ────────────────────────────────────────────────────────────────
@@ -41,7 +44,8 @@ import { Icon } from '../../ui/icons/Icon.js';
 import { cn } from '../../ui/lib/cn.js';
 import { useProjects, useProjectCodebases, useCodebaseBranches } from '../../hooks/projectQueries.js';
 import { useFsGitInfo, useReadFsGitInfo } from '../../hooks/sourceQueries.js';
-import { DirectoryBrowser } from '../directory-browser/DirectoryBrowser.js';
+import { pathTail } from '@generatorai/client-core';
+import { useFolderPicker } from '../directory-browser/useFolderPicker.js';
 import {
   defaultNewBranch,
   draftFromCodebase,
@@ -82,7 +86,7 @@ const NO_PROJECT = '__no-project__';
 const CURRENT_HEAD = '__current-head__';
 
 const EMPTY_HINT =
-  'No sources yet. The agent works in an empty managed workspace — add a codebase or folder to use existing code.';
+  'No sources: the agent works in an empty folder this chat owns (Empty workspace). Add a folder or codebase to work on existing code.';
 
 /** The project codebase row shape this picker reads (from `useProjectCodebases`). */
 interface ProjectCodebase {
@@ -122,7 +126,6 @@ export function SourcePicker({
   const readGitInfo = useReadFsGitInfo();
   const { data: projects } = useProjects();
   const { data: codebases, isLoading: codebasesLoading } = useProjectCodebases(projectId || undefined);
-  const [browserOpen, setBrowserOpen] = useState(false);
 
   const takenAliases = useMemo(() => drafts.map((d) => d.alias), [drafts]);
   const effectivePrimary = primaryAlias ?? drafts[0]?.alias;
@@ -221,6 +224,11 @@ export function SourcePicker({
     [atLimit, readGitInfo, takenAliases, drafts, onChange, onPrimaryChange],
   );
 
+  const folderPicker = useFolderPicker({
+    onPick: (p) => void addFolder(p),
+    description: 'The agent will work in the folder you pick.',
+  });
+
   const selectedCodebaseIds = useMemo(
     () => new Set(drafts.filter((d) => d.kind === 'codebase').map((d) => d.codebaseId)),
     [drafts],
@@ -253,7 +261,7 @@ export function SourcePicker({
       size="sm"
       icon="plus"
       disabled={disabled || atLimit}
-      onClick={() => setBrowserOpen(true)}
+      onClick={() => void folderPicker.open()}
       data-testid="add-local-folder"
     >
       Add local folder
@@ -300,95 +308,43 @@ export function SourcePicker({
           {error}
         </Callout>
       )}
-      <DirectoryBrowser
-        open={browserOpen}
-        onClose={() => setBrowserOpen(false)}
-        onPick={(p) => void addFolder(p)}
-        description="The agent will work in the folder you pick."
-      />
+      {folderPicker.dialog}
     </>
   );
 
-  // ── Compact (NewChat dialog) ──────────────────────────────────
-  if (compact) {
-    const notIncluded = (codebases ?? []).filter((cb) => !selectedCodebaseIds.has(cb.id));
-    return (
-      <div className="flex flex-col gap-4">
-        <Field label="Project">{projectSelect}</Field>
-        <div className="flex flex-col gap-2">
-          {codebaseStatus}
-          <ul className="overflow-hidden rounded-card border border-line" data-testid="source-list">
-            {drafts.map((draft, index) => (
-              <li key={draft.key} className="border-b border-line">
-                <CompactSourceRow {...rowProps(draft, index)} />
-              </li>
-            ))}
-            {notIncluded.map((cb) => (
-              <li key={cb.id} className="border-b border-line">
-                <CodebaseOption
-                  cb={cb}
-                  checked={false}
-                  disabled={disabled || atLimit || cb.status !== 'ready'}
-                  onToggle={() => toggleCodebase(toCodebaseLike(cb))}
-                />
-              </li>
-            ))}
-            {drafts.length === 0 && (
-              <li className="border-b border-line px-3 py-2.5 text-small text-fg-3">{EMPTY_HINT}</li>
-            )}
-            <li className="flex items-center gap-2 px-1.5 py-1.5">
-              {addFolderButton}
-              {limitNote}
-            </li>
-          </ul>
-          {footer}
-        </div>
-      </div>
-    );
-  }
-
-  // ── Full (ChatCreate page, Edit sources…) ─────────────────────
+  const notIncluded = (codebases ?? []).filter((cb) => !selectedCodebaseIds.has(cb.id));
+  const Row = compact ? CompactSourceRow : SourceRow;
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
+      <Field label="Project">{projectSelect}</Field>
       <div className="flex flex-col gap-2">
-        <Field label="Project">{projectSelect}</Field>
         {codebaseStatus}
-        {codebases && codebases.length > 0 && (
-          <ul className="overflow-hidden rounded-card border border-line-soft">
-            {codebases.map((cb) => {
-              const checked = selectedCodebaseIds.has(cb.id);
-              return (
-                <li key={cb.id} className="border-b border-line-soft last:border-b-0">
-                  <CodebaseOption
-                    cb={cb}
-                    checked={checked}
-                    disabled={disabled || (!checked && atLimit) || cb.status !== 'ready'}
-                    onToggle={() => toggleCodebase(toCodebaseLike(cb))}
-                  />
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        <div className="flex items-center gap-2">
-          {addFolderButton}
-          {limitNote}
-        </div>
-      </div>
-
-      {drafts.length === 0 ? (
-        <p className="rounded-card border border-dashed border-line px-3 py-3 text-small text-fg-3">{EMPTY_HINT}</p>
-      ) : (
-        <ul className="flex flex-col gap-2" data-testid="source-list">
+        <ul className="overflow-hidden rounded-card border border-line" data-testid="source-list">
           {drafts.map((draft, index) => (
-            <li key={draft.key}>
-              <SourceRow {...rowProps(draft, index)} />
+            <li key={draft.key} className="border-b border-line">
+              <Row {...rowProps(draft, index)} />
             </li>
           ))}
+          {notIncluded.map((cb) => (
+            <li key={cb.id} className="border-b border-line">
+              <CodebaseOption
+                cb={cb}
+                checked={false}
+                disabled={disabled || atLimit || cb.status !== 'ready'}
+                onToggle={() => toggleCodebase(toCodebaseLike(cb))}
+              />
+            </li>
+          ))}
+          {drafts.length === 0 && (
+            <li className="border-b border-line px-3 py-2.5 text-small text-fg-3">{EMPTY_HINT}</li>
+          )}
+          <li className="flex items-center gap-2 px-1.5 py-1.5">
+            {addFolderButton}
+            {limitNote}
+          </li>
         </ul>
-      )}
-
-      {footer}
+        {footer}
+      </div>
     </div>
   );
 }
@@ -656,9 +612,12 @@ function CompactSourceRow(props: SourceRowProps) {
         <span className="flex-1" />
         <ModeControl {...props} />
       </div>
-      <div className="flex flex-wrap items-center gap-2 pl-6">
-        <BranchControls {...props} facts={facts} />
-      </div>
+      {/* A plain folder has no branches to choose (the server refuses them). */}
+      {draft.meta.isGit ? (
+        <div className="flex flex-wrap items-center gap-2 pl-6">
+          <BranchControls {...props} facts={facts} />
+        </div>
+      ) : null}
       <RowNotes draft={draft} facts={facts} className="pl-6" />
     </div>
   );
@@ -688,10 +647,10 @@ function SourceRow(props: SourceRowProps) {
   }, [origin]);
 
   return (
-    <div className={cn('flex flex-col gap-2 rounded-card border p-2.5', isPrimary ? 'border-line bg-raised' : 'border-line-soft')}>
-      {/* Identity line */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Icon concept={draft.kind === 'codebase' ? 'branch' : 'folder-open'} size={14} className="shrink-0 text-fg-3" />
+    <div className="flex flex-col gap-1.5 py-2.5 pr-2.5 pl-3">
+      {/* Identity: icon · name (renamable) · working directory · git facts · order / remove */}
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+        <Icon concept={draft.meta.isGit ? 'branch' : 'folder-open'} size={14} className="shrink-0 text-fg-3" />
         <Input
           size="sm"
           mono
@@ -699,15 +658,23 @@ function SourceRow(props: SourceRowProps) {
           disabled={disabled}
           onChange={(e) => onChange({ ...draft, alias: e.target.value })}
           aria-label={`Name for ${draft.meta.label}`}
-          className="w-40"
+          className="w-44"
         />
-        {draft.meta.isGit ? (
-          <Badge icon="branch" title={currentBranch ?? 'git repository'} className="font-mono">
-            {currentBranch ?? 'git'}
-          </Badge>
+        {isPrimary ? (
+          <WorkingDirectoryBadge />
         ) : (
-          <Badge>plain folder</Badge>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="home"
+            disabled={disabled}
+            onClick={onMakePrimary}
+            title="The agent's working directory"
+          >
+            Make working directory
+          </Button>
         )}
+        {draft.meta.isGit ? null : <Badge>plain folder</Badge>}
         <DirtyMark dirty={facts.dirty} />
         {nested.length > 0 && (
           <Tooltip content={`Nested repositories: ${nested.join(', ')}`}>
@@ -716,7 +683,6 @@ function SourceRow(props: SourceRowProps) {
             </span>
           </Tooltip>
         )}
-
         <div className="ml-auto flex shrink-0 items-center gap-0.5">
           <IconButton
             icon="chevron-up"
@@ -745,11 +711,17 @@ function SourceRow(props: SourceRowProps) {
         </div>
       </div>
 
-      {/* Origin */}
+      {/* The user's folder or repository (current branch when it is one) */}
       {origin && (
-        <div className="flex items-center gap-1">
+        <div className="flex min-w-0 items-center gap-1.5 pl-6">
+          {draft.meta.isGit && currentBranch ? (
+            <span className="flex shrink-0 items-center gap-1 font-mono text-micro text-fg-2" title="Current branch">
+              <Icon concept="branch" size={12} />
+              {currentBranch}
+            </span>
+          ) : null}
           <span className="min-w-0 flex-1 truncate font-mono text-micro text-fg-3" title={origin}>
-            {origin}
+            {pathTail(origin, 64)}
           </span>
           <IconButton
             icon={copied ? 'check' : 'copy'}
@@ -761,29 +733,13 @@ function SourceRow(props: SourceRowProps) {
         </div>
       )}
 
-      {/* Controls */}
-      <div className="flex flex-wrap items-center gap-1.5">
+      {/* How the agent gets it: mode, then the branch it works on */}
+      <div className="flex flex-wrap items-center gap-2 pl-6">
         <ModeControl {...props} />
-        <BranchControls {...props} facts={facts} />
-        <span className="ml-auto">
-          {isPrimary ? (
-            <WorkingDirectoryBadge />
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              icon="home"
-              disabled={disabled}
-              onClick={onMakePrimary}
-              title="The agent's working directory"
-            >
-              Make working directory
-            </Button>
-          )}
-        </span>
+        {draft.meta.isGit ? <BranchControls {...props} facts={facts} /> : null}
       </div>
 
-      <RowNotes draft={draft} facts={facts} />
+      <RowNotes draft={draft} facts={facts} className="pl-6" />
     </div>
   );
 }

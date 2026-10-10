@@ -86,6 +86,8 @@ const refused = [
   ['getSetting', "window.generatoraiDesktop.getSetting('serverPort')"],
   ['setSetting', "window.generatoraiDesktop.setSetting('serverPort', 4000)"],
   ['showItemInFolder', "window.generatoraiDesktop.showItemInFolder('/')"],
+  // D-136: the OS folder picker names a folder on THIS machine — never for a remote page.
+  ['selectDirectory', 'window.generatoraiDesktop.selectDirectory()'],
   ['requestPairingCode', "window.generatoraiDesktop.requestPairingCode('x')"],
   ['updates.install', 'window.generatoraiDesktop.updates.install()'],
   ['browser.navigate', "window.generatoraiDesktop.browser.navigate('t1', 'https://example.com')"],
@@ -97,6 +99,7 @@ for (const [name, expr] of refused) {
 
 const info = await call('window.generatoraiDesktop.getAppInfo()');
 record('getAppInfo answers without local paths or server URL', info.ok && info.value.dataDir === '' && info.value.logFile === '' && info.value.serverUrl === null, JSON.stringify(info.value ?? info.error).slice(0, 160));
+record('getAppInfo reports localServer: false (the SPA falls back to the server-side browser)', info.ok && info.value.localServer === false);
 record('find in page still works', (await call("window.generatoraiDesktop.findInPage('another')")).ok);
 record('window chrome still works', (await call('window.generatoraiDesktop.window.isMaximized()')).ok);
 record('native browser reported unavailable', (await call('window.generatoraiDesktop.browser.available()')).value === false);

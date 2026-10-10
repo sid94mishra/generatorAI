@@ -394,20 +394,9 @@ export class WindowManager {
       this.showError(`${errorDescription} (${errorCode})`);
     });
 
-    // Install the native directory-picker shim into the page (main world),
-    // then hand the page any route that arrived while it was loading.
+    // Hand the page any route that arrived while it was loading.
     win.webContents.on('did-finish-load', () => {
       this.appPageLoaded = isAppOrigin(win.webContents.getURL(), this.appUrl);
-      win.webContents
-        .executeJavaScript(
-          `(() => { try {
-             const np = window.__generatoraiNativePickers;
-             if (np && typeof np.showDirectoryPicker === 'function') {
-               window.showDirectoryPicker = np.showDirectoryPicker;
-             }
-           } catch (e) { /* ignore */ } })();`,
-        )
-        .catch(() => undefined);
       // A fresh document's preload was not listening yet on `did-navigate`;
       // it is now, and it keeps the value for later subscribers.
       this.emitNavHistory(win);

@@ -268,6 +268,9 @@ export interface FsDirListing {
   parent: string | null;
   entries: { name: string; path: string; isGit: boolean }[];
   roots?: string[];
+  /** Empty-path listing only: the server user's home and the common folders under it that exist. */
+  home?: string;
+  places?: { name: string; path: string }[];
   isGit?: boolean;
 }
 

@@ -6,9 +6,8 @@
 // Codebases tab's AddCodebaseCard and CreateProjectPage's repository rows.
 // ────────────────────────────────────────────────────────────────
 
-import { useState } from 'react';
 import type { CodebaseType } from '@generatorai/shared';
-import { DirectoryBrowser } from '@/blocks/directory-browser/DirectoryBrowser.js';
+import { useFolderPicker } from '@/blocks/directory-browser/useFolderPicker.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Field } from '@/ui/primitives/Field/Field.js';
 import { Input } from '@/ui/primitives/Input/Input.js';
@@ -58,7 +57,10 @@ export interface CodebaseDraftFieldsProps {
 
 /** The field grid for one codebase draft. */
 export function CodebaseDraftFields({ draft, onChange, label = 'Source' }: CodebaseDraftFieldsProps) {
-  const [browsing, setBrowsing] = useState(false);
+  const folderPicker = useFolderPicker({
+    onPick: (picked) => onChange({ localPath: picked }),
+    initialPath: draft.localPath || undefined,
+  });
   const remote = draft.type === 'git-remote';
   return (
     <div className="grid grid-cols-2 gap-3">
@@ -98,7 +100,7 @@ export function CodebaseDraftFields({ draft, onChange, label = 'Source' }: Codeb
               onChange={(e) => onChange({ localPath: e.target.value })}
               placeholder="/path/to/repo"
             />
-            <Button icon="folder-open" onClick={() => setBrowsing(true)}>
+            <Button icon="folder-open" onClick={() => void folderPicker.open()}>
               Browse
             </Button>
           </div>
@@ -112,12 +114,7 @@ export function CodebaseDraftFields({ draft, onChange, label = 'Source' }: Codeb
           placeholder="services/ledger"
         />
       </Field>
-      <DirectoryBrowser
-        open={browsing}
-        onClose={() => setBrowsing(false)}
-        onPick={(picked) => onChange({ localPath: picked })}
-        initialPath={draft.localPath || undefined}
-      />
+      {folderPicker.dialog}
     </div>
   );
 }

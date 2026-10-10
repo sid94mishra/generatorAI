@@ -1,6 +1,11 @@
 // ────────────────────────────────────────────────────────────────
 // EditSourcesDialog — change what a live chat works on (P7-01: on the kit
 // Dialog; was components/chat/sources). Mounted by app/shell/EditSourcesHost.
+//
+// Layout (D-136, the New chat dialog's D-133 structure): ModalForm sections
+// split by `line` rules — Where (the full B-04 SourcePicker: Project, then one
+// source list) and Source control (label + hint + switch rows). Labels sit
+// above controls on one left edge.
 // ────────────────────────────────────────────────────────────────
 //
 // The same B-04 SourcePicker the create flows use, pre-filled from
@@ -21,6 +26,7 @@ import { useUpdateChatSourceControl } from '@/hooks/queries.js';
 import { SourcePicker, draftsFromSpecs, draftsToSources, validateDrafts, type DraftSource } from '@/blocks/sources/index.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Dialog, DialogBody, DialogFooter } from '@/ui/primitives/Dialog/Dialog.js';
+import { ModalForm } from '@/ui/patterns/ModalForm/ModalForm.js';
 import { DEFAULT_SOURCE_CONTROL_OPTIONS, SourceControlOptionsFields } from './SourceControlOptionsFields.js';
 
 export interface EditSourcesDialogProps {
@@ -105,28 +111,35 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
       size="lg"
     >
       <DialogBody>
-        <p className="text-small text-fg-2">
-          What this chat works on. Changes apply to the next turn; existing mounts keep their history.
-        </p>
-        <SourcePicker
-          chatName={chat.name}
-          projectId={projectId}
-          onProjectIdChange={setProjectId}
-          drafts={drafts}
-          onChange={setDrafts}
-          primaryAlias={primary}
-          onPrimaryChange={setPrimary}
-          error={error}
-          disabled={busy}
-        />
-        <SourceControlOptionsFields value={sourceControl} onChange={setSourceControl} disabled={busy} />
+        <ModalForm>
+          <ModalForm.Section
+            first
+            title="Where"
+            hint="What this chat works on. The agent starts in the working directory; changes apply to the next turn and existing mounts keep their history."
+          >
+            <SourcePicker
+              chatName={chat.name}
+              projectId={projectId}
+              onProjectIdChange={setProjectId}
+              drafts={drafts}
+              onChange={setDrafts}
+              primaryAlias={primary}
+              onPrimaryChange={setPrimary}
+              error={error}
+              disabled={busy}
+            />
+          </ModalForm.Section>
+          <ModalForm.Section title="Source control" hint="What the agent does with git after each turn.">
+            <SourceControlOptionsFields value={sourceControl} onChange={setSourceControl} disabled={busy} />
+          </ModalForm.Section>
+        </ModalForm>
       </DialogBody>
       <DialogFooter>
         <Button onClick={onClose} disabled={busy}>
           Cancel
         </Button>
         <Button variant="primary" icon="save" onClick={() => void save()} loading={busy}>
-          Save {count} {count === 1 ? 'source' : 'sources'}
+          {count === 0 ? 'Save' : `Save ${count} ${count === 1 ? 'source' : 'sources'}`}
         </Button>
       </DialogFooter>
     </Dialog>

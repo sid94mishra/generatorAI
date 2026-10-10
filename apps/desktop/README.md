@@ -102,7 +102,7 @@ The embedded server is launched with `HARNESS_TYPE` (default `copilot`) from set
 - **System tray** — open, quick navigation, live server state, restart, quit.
 - **Deep links** — `generatorai://chats/<id>`, `generatorai://workflows`, etc.
 - **Native downloads** — in‑app downloads route through a native Save‑As dialog (asynchronous: a dialog must never block the main process) and reveal in the file manager.
-- **Native folder picker** — the web's `showDirectoryPicker` is transparently backed by the OS dialog. Paths that belong to the *server* (project repositories) use the in‑app directory browser instead, because in remote mode the two machines differ.
+- **Native folder picker** — "Add local folder" and a codebase's Browse open the OS folder dialog (`dialog.showOpenDialog`, `openDirectory`) when the window shows this computer's own server (`getAppInfo().localServer`). The channel is local-only (`ipc-scope.ts`): a remote server's page cannot call it and gets the in‑app server-side directory browser instead, because a path picked here names a folder on the wrong machine (D-136).
 - **Find in page** — `Edit ▸ Find…` (`Cmd/Ctrl+F`), Find Next/Previous, Esc to dismiss. Chromium performs the search (`webContents.findInPage`), so it matches text the DOM cannot be walked for, such as the canvas‑rendered terminal.
 - **Text prompts** — Electron does not implement `window.prompt`, so "Add Server…" opens a small modal window of the shell's own (`prompt-window.ts`).
 - **OS theme sync** — follows the system light/dark setting (`nativeTheme`); `View ▸ Appearance` sets the app's own light/dark/system preference, and the in‑app Settings → Appearance toggle stays in sync with it.

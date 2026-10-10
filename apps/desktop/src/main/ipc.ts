@@ -7,6 +7,7 @@ import { isLocalOnlyChannel, isSameOrigin } from './ipc-scope';
 import { findInPageOptions } from './find-options';
 import { app, dialog, shell, nativeTheme, BrowserWindow } from 'electron';
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {
   IPC,
   IPC_EVENT,
@@ -151,6 +152,7 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
       dataDir: local ? paths.dataDir : '',
       logFile: local ? (log.getLogFilePath() ?? '') : '',
       serverUrl: local ? sm.url : null,
+      localServer: local,
     };
   });
 
@@ -161,9 +163,18 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
     await sm.restart();
   });
 
-  guardedHandle(IPC.selectDirectory, async (): Promise<string | null> => {
+  // The OS folder picker (D-136). Local-only (ipc-scope.ts): a path picked here
+  // names a folder on THIS computer, which only this computer's server can use.
+  guardedHandle(IPC.selectDirectory, async (_e, opts?: { defaultPath?: unknown }): Promise<string | null> => {
     const win = BrowserWindow.getFocusedWindow() ?? wm.getMainWindow() ?? undefined;
-    const res = await dialog.showOpenDialog(win!, { properties: ['openDirectory', 'createDirectory'] });
+    // Only an absolute path is a usable start; anything else opens the OS default.
+    const defaultPath =
+      typeof opts?.defaultPath === 'string' && path.isAbsolute(opts.defaultPath) ? opts.defaultPath : undefined;
+    // `createDirectory` is macOS-only; Windows and Linux dialogs offer "New folder" themselves.
+    const res = await dialog.showOpenDialog(win!, {
+      properties: ['openDirectory', 'createDirectory'],
+      ...(defaultPath ? { defaultPath } : {}),
+    });
     if (res.canceled || res.filePaths.length === 0) return null;
     return res.filePaths[0] ?? null;
   });

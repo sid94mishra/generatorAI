@@ -1247,6 +1247,55 @@ Run workflow (→ /workflows, where each workflow runs), New workflow, New agent
 well · title · one-line description · the command's own chord from `shortcutFor`, D-24). The Dashboard template's
 `composer` slot is renamed `start`. Writing the first message now happens in the dialog or the chat itself.
 
+### D-135 A mount reads as what the agent works in; no-source chats say "Empty workspace" (2026-10-10) — Final
+Owner report: a chat with no sources showed a "main" chip and an app-data path
+(`…/workspaces/executions/<id>/source/main`). Root cause: with no sources `MountService.plan` creates a `generated`
+mount aliased `GENERATED_MOUNT_ALIAS = 'main'` under the managed workspace and `prepareMount` runs `git init -b main`
+there, so the chip named the alias "main" (and, once a re-prepare records the branch, "main main") and the popover printed the managed
+path. The server stays as it is (the managed folder is a real git repo so checkpoints and Changes work); every surface
+reads a mount through client-core `describeMount` instead: `empty` (generated) → "Empty workspace", no branch, no path;
+`folder` (in place, not git) → its name, no branch, its path; `repo` (in place, git) → name + branch + path; `worktree`
+→ name + the worktree's branch + "from <the user's repo>" (no path for a project codebase, whose origin may be the app's
+clone). A managed directory is never shown as the user's folder — this overrides ComposerStates' sample worktree path
+under `.generatorai/worktrees`. The chip stays visible when empty (it is the composer's way into Edit sources), in
+`fg-2`; hiding it would remove that entry point. Consumers: composer SourcesChip + popover, ChatHeader's branch chip,
+the Files dock SourcesBlock (mobile can adopt the same helper). `pathTail` shortens a path from the left, keeping the
+server's own separator (Windows backslashes stay). Chrome: the Sources and Skills · MCP chips are P-09 `Chip` (Rosetta
+`.chip`; `dropdown` keeps a Popover trigger's `aria-haspopup="dialog"`), mount cards use `line` (not `line-soft`, which
+vanishes on the popover's `overlay`), and "Edit sources…" closes the popover as the dialog opens.
+
+### D-136 "Add local folder" opens the OS folder dialog in the desktop app; web keeps a streamlined server-side browser (2026-10-10) — Final
+In the desktop app showing this computer's own server, "Add local folder" (SourcePicker) and a codebase's Browse
+(`CodebaseDraftFields`) call `useFolderPicker`, which opens Electron `dialog.showOpenDialog({ properties:
+['openDirectory', 'createDirectory'] })` (macOS, Windows and Linux; `createDirectory` is macOS-only and ignored
+elsewhere) and adds the absolute path directly — no in-app modal. Path: `lib/desktop.ts` `desktopFolders`
+(`canPickNatively()` = bridge has `selectDirectory` + `getAppInfo().localServer`, cached per page load since a server
+switch reloads the window; `pick(defaultPath?)`) → preload `selectDirectory(opts)` → the existing `desktop:selectDirectory`
+channel, which stays local-only (not in `ipc-scope.ts`'s remote allowlist, D-130): a remote server's page is refused by
+the guard and its `getAppInfo()` now answers `localServer: false`. `defaultPath` is honoured only when absolute. The old
+`__generatoraiNativePickers` / `window.showDirectoryPicker` shim (injected by `executeJavaScript`, unused) and the dead
+`IPlatformClient.selectDirectory` are deleted. Fallback — the server-side `DirectoryBrowser` — when the native picker
+cannot apply: a plain browser has no absolute paths (the File System Access API yields a name only), and the desktop
+app showing a remote server would pick a path on the wrong machine. It opens at the server user's home with shortcuts
+(`GET /api/fs/dirs` with an empty path now adds `home` and `places`: Desktop, Documents, Downloads, Projects… matched
+case-insensitively against what exists, then the drives); clicking a folder opens it, its "Use" button picks it
+without opening, "Use this folder" picks the one on screen, a pasted path still works. Verified by
+`agent-tests/desktop-folder-picker-smoke.mjs` (main-process `dialog` stub, no production hook) and the remote case in
+`desktop-remote-ipc-smoke.mjs`. Edit sources follows D-133: ModalForm sections Where (full SourcePicker) and Source
+control (label + hint + switch rows); the full SourcePicker uses the compact layout's single `line` list, each row
+adding rename, reorder/remove, the user's folder + copy and "Make working directory"; a plain folder shows no branch
+controls (the server refuses branches on it).
+
+### D-137 A live conversation follows Edit sources (2026-10-10) — Final
+Found while verifying D-135/D-136 with the Faux harness: after "Edit sources" the next turn still ran in the OLD
+folder. `updateChatSources` drops the conversation binding so the next turn calls `resumeConversation(id, cfg)` with
+the new roots, but every provider returned early for a live conversation (Claude unless the model changed; Codex,
+Faux, OpenCode, ACP always). Now: Claude rebinds when cwd or extra directories differ (`sameRoots`; the rebuilt config
+changes `sessionFingerprint`, so the CLI session is rebuilt with `resume`, history kept); Codex adopts the new roots
+on the live conversation and sends `cwd` with every `turn/start` ("this turn and subsequent turns") next to the
+writable-roots sandbox policy; Faux adopts them too. Copilot (a CLI client per cwd) and the experimental OpenCode/ACP
+are not changed yet — open item in `reviews/chat-sources.md`.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

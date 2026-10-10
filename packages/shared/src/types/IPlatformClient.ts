@@ -111,12 +111,6 @@ export interface IPlatformClient {
     options?: EventSubscriptionOptions,
   ): () => void;
 
-  // ── Platform-specific ──
-  /**
-   * Open a directory picker (CLI: returns cwd, Web: no-op, Desktop: native dialog)
-   */
-  selectDirectory(): Promise<string | null>;
-
   // ── v2: Chat Operations ──
   createChat(params: CreateChatParams): Promise<Chat>;
   /** One page of chats with row summaries (chat list v2, G-02). Pass `nextCursor` back as `cursor`. */

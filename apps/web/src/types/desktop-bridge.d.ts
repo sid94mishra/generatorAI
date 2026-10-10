@@ -140,6 +140,17 @@ interface GeneratorAIDesktopBridge {
   /** Mirror the applied appearance into the shell (background, caption glyphs, themeSource). */
   setAppearance?: (appearance: GeneratorAIDesktopAppearancePush) => Promise<void>;
 
+  /**
+   * App facts. `localServer` is true when this page is the shell's own server
+   * (embedded / local dev) and false for a remote server's page (D-126).
+   * Only the members the SPA reads are declared.
+   */
+  getAppInfo?: () => Promise<{ localServer: boolean; platform: string }>;
+
+  // ── OS dialogs (local-only channels; a remote server's page is refused) ──
+  /** The OS folder picker; the chosen absolute path, or null when cancelled (D-136). */
+  selectDirectory?: (opts?: { defaultPath?: string }) => Promise<string | null>;
+
   // ── OS file manager ──
   /** Reveals a path in Finder / File Explorer. False when it is not on this machine. */
   showItemInFolder?: (fullPath: string) => Promise<boolean>;
@@ -151,9 +162,6 @@ interface GeneratorAIDesktopBridge {
     cb: (result: GeneratorAIDesktopFindInPageResult) => void,
   ) => () => void;
 
-  // Additional bridge methods (getAppInfo, selectDirectory, …) exist at
-  // runtime but are not surfaced here because the SPA already accesses
-  // them via loose optional-chain access.
 }
 
 interface Window {

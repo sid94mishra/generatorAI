@@ -3,16 +3,21 @@
 // (P5-03; the chat SourcePicker and the Projects forms share it, so it is a
 // block) on the kit Dialog.
 //
+// The fallback of `useFolderPicker` (D-136): the desktop app on its own
+// server opens the OS folder dialog instead. This one is for a plain browser
+// (no absolute paths) and for the desktop app showing a remote server (the OS
+// dialog would browse the wrong machine).
+//
+// Few clicks: it opens at the server user's home with shortcuts beside the
+// list (Desktop, Documents, Projects… whichever exist, then the drives).
+// Clicking a folder opens it; its "Use" button picks it without opening;
+// "Use this folder" picks the folder on screen. A pasted path still works.
+//
 // Backed by `GET /api/fs/dirs`, which lists directories only (never file
-// contents) and is gated to local / administrative sessions server-side. A
-// pasted path still works — it is often the fastest way in, and the only one
-// for a folder the listing refuses to walk (permissions, a slow share).
-// Browsing, not the OS picker: the path must mean something on the server,
-// which the browser's own file dialog answers for the wrong machine whenever
-// the two differ.
+// contents) and is gated to local / administrative sessions server-side.
 // ────────────────────────────────────────────────────────────────
 
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useFsDirs } from '@/hooks/sourceQueries.js';
 import type { IconConcept } from '@/ui/icons/index.js';
 import { Icon } from '@/ui/icons/Icon.js';
@@ -22,32 +27,54 @@ import { Dialog, DialogBody, DialogFooter } from '@/ui/primitives/Dialog/Dialog.
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { Input } from '@/ui/primitives/Input/Input.js';
 import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
+import { cn } from '@/ui/lib/cn.js';
 
 export interface DirectoryBrowserProps {
   open: boolean;
   onClose: () => void;
   /** Fires with an absolute path when the user commits to a folder. */
   onPick: (path: string) => void;
-  /** Where to open. Defaults to the roots listing. */
-  initialPath?: string;
+  /** Where to open. Defaults to the server user's home. */
+  initialPath?: string | undefined;
   /** One sentence under the title. */
-  description?: string;
+  description?: string | undefined;
+}
+
+const PLACE_ICON: Record<string, IconConcept> = {
+  desktop: 'computer',
+  documents: 'file-text',
+  downloads: 'download',
+};
+
+/** The last segment of a server path, on either separator. */
+function baseName(p: string): string {
+  const trimmed = p.replace(/[\\/]+$/, '');
+  return trimmed.slice(Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\')) + 1) || p;
 }
 
 /** A dialog that walks the server's directories and returns the chosen absolute path. */
 export function DirectoryBrowser({ open, onClose, onPick, initialPath, description }: DirectoryBrowserProps) {
-  /** `''` is a real value — the roots listing — so "closed" is `null`. */
+  /** The folder on screen; `null` = not chosen yet (home, once the root listing names it). */
   const [path, setPath] = useState<string | null>(null);
   const [typed, setTyped] = useState('');
 
+  // The root listing: home, its common folders and the drives (cached; cheap).
+  const root = useFsDirs(open ? '' : null);
+  const home = root.data?.home ?? root.data?.roots?.[0] ?? '';
+
   useEffect(() => {
     if (!open) return;
-    setPath(initialPath ?? '');
+    setPath(initialPath ?? null);
     setTyped(initialPath ?? '');
   }, [open, initialPath]);
 
-  const listing = useFsDirs(open ? path : null);
+  const current = path ?? (root.data ? home : null);
+  const listing = useFsDirs(open && current ? current : null);
   const data = listing.data;
+
+  useEffect(() => {
+    if (path === null && current) setTyped(current);
+  }, [path, current]);
 
   const goto = useCallback((next: string) => {
     setPath(next);
@@ -63,12 +90,31 @@ export function DirectoryBrowser({ open, onClose, onPick, initialPath, descripti
     [onPick, onClose],
   );
 
-  const errorMessage =
-    listing.error instanceof Error ? listing.error.message : listing.error ? String(listing.error) : null;
+  const error = listing.error ?? root.error;
+  const errorMessage = error instanceof Error ? error.message : error ? String(error) : null;
   const entries = data?.entries ?? [];
-  const roots = data?.roots ?? [];
-  // The example follows the SERVER's file system (its roots), not the viewer's OS.
-  const windowsServer = [...roots, path ?? '', ...entries.map((e) => e.path)].some((p) => /^[A-Za-z]:([\\/]|$)/.test(p));
+  const places = root.data?.places ?? [];
+  const drives = (root.data?.roots ?? []).filter((r) => r !== home);
+  // The example follows the SERVER's file system, not the viewer's OS.
+  const windowsServer = /^[A-Za-z]:([\\/]|$)/.test(home);
+  const loading = listing.isLoading || (current === null && root.isLoading);
+  const shown = data?.path ?? current ?? '';
+
+  const shortcut = (target: string, label: string, icon: IconConcept, mono = false) => (
+    <Button
+      key={target}
+      variant="ghost"
+      size="sm"
+      fullWidth
+      icon={icon}
+      pressed={shown === target}
+      onClick={() => goto(target)}
+      className={cn('justify-start', mono && 'font-mono')}
+      title={target}
+    >
+      <span className="min-w-0 truncate">{label}</span>
+    </Button>
+  );
 
   return (
     <Dialog
@@ -91,7 +137,7 @@ export function DirectoryBrowser({ open, onClose, onPick, initialPath, descripti
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
-                goto(typed.trim());
+                if (typed.trim()) goto(typed.trim());
               }
             }}
             placeholder={windowsServer ? 'Paste a path, e.g. C:\\src\\my-app' : 'Paste a path, e.g. /path/to/my-app'}
@@ -102,102 +148,88 @@ export function DirectoryBrowser({ open, onClose, onPick, initialPath, descripti
           </Button>
         </div>
 
-        <div className="flex min-w-0 items-center gap-1.5">
-          <IconButton size="sm" icon="home" label="Go to drives and home" onClick={() => goto('')} />
-          <IconButton
-            size="sm"
-            icon="chevron-up"
-            label="Go to parent folder"
-            onClick={() => goto(data?.parent ?? '')}
-            disabled={!data?.parent}
-          />
-          <span className="min-w-0 flex-1 truncate font-mono text-small text-fg-2" title={data?.path || 'Drives and home'}>
-            {data?.path || 'Drives and home'}
-          </span>
-          {data?.isGit ? (
-            <Badge tone="run" icon="branch">
-              git
-            </Badge>
-          ) : null}
-        </div>
+        <div className="flex min-h-0 gap-3">
+          <nav aria-label="Places" className="flex max-h-96 w-40 shrink-0 flex-col gap-0.5 overflow-auto">
+            {home ? shortcut(home, 'Home', 'home') : null}
+            {places.map((p) => shortcut(p.path, p.name, PLACE_ICON[p.name.toLowerCase()] ?? 'folder-open'))}
+            {drives.length > 0 ? <div className="my-1 border-t border-line" /> : null}
+            {drives.map((d) => shortcut(d, d, 'device', true))}
+          </nav>
 
-        <div className="min-h-0 flex-1 overflow-auto rounded-card border border-line-soft">
-          {listing.isLoading ? (
-            <div className="flex items-center justify-center gap-2 p-6 text-small text-fg-3">
-              <Spinner size={14} /> Reading folder…
-            </div>
-          ) : errorMessage ? (
-            <p role="alert" className="p-4 font-mono text-small text-err">
-              {errorMessage}
-            </p>
-          ) : (
-            <ul className="flex flex-col">
-              {roots.map((root) => (
-                <li key={`root:${root}`} className="border-b border-line-soft last:border-b-0">
-                  <FolderRow icon="device" onClick={() => goto(root)}>
-                    <span className="truncate font-mono">{root}</span>
-                  </FolderRow>
-                </li>
-              ))}
-              {entries.map((entry) => (
-                <li key={entry.path} className="border-b border-line-soft last:border-b-0">
-                  <FolderRow
-                    icon={entry.isGit ? 'branch' : 'folder-open'}
-                    onClick={() => goto(entry.path)}
-                    onDoubleClick={() => pick(entry.path)}
-                  >
-                    <span className="min-w-0 flex-1 truncate text-left">{entry.name}</span>
-                    {entry.isGit ? <Badge tone="run">repo</Badge> : null}
-                  </FolderRow>
-                </li>
-              ))}
-              {entries.length === 0 && roots.length === 0 ? (
-                <li className="p-4 text-center text-small text-fg-3">
-                  No sub-folders here — “Use this folder” picks the one above.
-                </li>
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <IconButton
+                size="sm"
+                icon="chevron-up"
+                label="Go to parent folder"
+                onClick={() => data?.parent && goto(data.parent)}
+                disabled={!data?.parent}
+              />
+              <span className="min-w-0 flex-1 truncate font-mono text-small text-fg-2" title={shown}>
+                {shown}
+              </span>
+              {data?.isGit ? (
+                <Badge tone="run" icon="branch">
+                  git
+                </Badge>
               ) : null}
-            </ul>
-          )}
+            </div>
+
+            <div className="max-h-96 min-h-72 overflow-auto rounded-card border border-line">
+              {loading ? (
+                <div className="flex items-center justify-center gap-2 p-6 text-small text-fg-3">
+                  <Spinner size={14} /> Reading folder…
+                </div>
+              ) : errorMessage ? (
+                <p role="alert" className="p-4 font-mono text-small text-err">
+                  {errorMessage}
+                </p>
+              ) : entries.length === 0 ? (
+                <p className="p-4 text-center text-small text-fg-3">No sub-folders here. “Use this folder” picks this one.</p>
+              ) : (
+                <ul className="flex flex-col" aria-label={`Folders in ${baseName(shown)}`}>
+                  {entries.map((entry) => (
+                    <li key={entry.path} className="group flex items-center border-b border-line last:border-b-0">
+                      <Button
+                        variant="ghost"
+                        onClick={() => goto(entry.path)}
+                        className="min-w-0 flex-1 justify-start rounded-none text-fg"
+                        aria-label={`Open ${entry.name}`}
+                      >
+                        <span className="flex min-w-0 flex-1 items-center gap-2">
+                          <Icon concept={entry.isGit ? 'branch' : 'folder-open'} size={14} className="shrink-0 text-fg-3" />
+                          <span className="min-w-0 truncate text-left">{entry.name}</span>
+                          {entry.isGit ? <Badge tone="run" size="sm">repo</Badge> : null}
+                        </span>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => pick(entry.path)}
+                        className="mr-1 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                        aria-label={`Use ${entry.name}`}
+                      >
+                        Use
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
         </div>
       </DialogBody>
-      <DialogFooter hint="Directories only. Double-click a folder to pick it.">
+      <DialogFooter hint="Folders on the server's computer.">
         <Button onClick={onClose}>Cancel</Button>
         <Button
           variant="primary"
           icon="folder-open"
-          onClick={() => pick((typed.trim() || data?.path || '').trim())}
-          disabled={!typed.trim() && !data?.path}
+          onClick={() => pick(typed.trim() || data?.path || '')}
+          disabled={!data?.path && !typed.trim()}
         >
           Use this folder
         </Button>
       </DialogFooter>
     </Dialog>
-  );
-}
-
-function FolderRow({
-  icon,
-  onClick,
-  onDoubleClick,
-  children,
-}: {
-  icon: IconConcept;
-  onClick: () => void;
-  onDoubleClick?: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <Button
-      variant="ghost"
-      fullWidth
-      onClick={onClick}
-      onDoubleClick={onDoubleClick}
-      className="justify-start rounded-none text-fg"
-    >
-      <span className="flex min-w-0 flex-1 items-center gap-2">
-        <Icon concept={icon} size={14} className="shrink-0 text-fg-3" />
-        {children}
-      </span>
-    </Button>
   );
 }

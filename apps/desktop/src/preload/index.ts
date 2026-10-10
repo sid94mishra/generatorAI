@@ -1,8 +1,8 @@
 // ────────────────────────────────────────────────────────────────
 // Preload — runs in the renderer (the GeneratorAI web app) before page
 // scripts. Exposes a minimal, safe `window.generatoraiDesktop` bridge via
-// contextBridge and shims a couple of browser APIs so the *unmodified* web
-// app transparently uses native dialogs when running inside the desktop shell.
+// contextBridge. The SPA reaches it only through apps/web/src/lib/desktop.ts
+// (the native folder picker: `getAppInfo().localServer` + `selectDirectory`, D-136).
 // ────────────────────────────────────────────────────────────────
 
 import { contextBridge, ipcRenderer } from 'electron';
@@ -63,7 +63,8 @@ const api = {
   requestPairingCode: (deviceName?: string): Promise<DesktopPairingCode | null> =>
     ipcRenderer.invoke(IPC.requestPairingCode, deviceName),
 
-  selectDirectory: (): Promise<string | null> => ipcRenderer.invoke(IPC.selectDirectory),
+  selectDirectory: (opts?: { defaultPath?: string }): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.selectDirectory, opts),
   selectFile: (filters?: { name: string; extensions: string[] }[]): Promise<string | null> =>
     ipcRenderer.invoke(IPC.selectFile, filters),
   saveFile: (opts: SaveFileOptions): Promise<string | null> =>
@@ -283,20 +284,3 @@ const api = {
 };
 
 contextBridge.exposeInMainWorld('generatoraiDesktop', api);
-
-// ── Native dialog shims ─────────────────────────────────────────────────────
-// The web app already feature-detects `window.showDirectoryPicker`. We expose a
-// shim that resolves to a minimal FileSystemDirectoryHandle-like object whose
-// `name` carries the chosen absolute path — which is exactly what the web's
-// `HttpPlatformClient.selectDirectory()` consumes. This means the existing web
-// code uses the OS-native folder picker with no changes.
-contextBridge.exposeInMainWorld('__generatoraiNativePickers', {
-  showDirectoryPicker: async () => {
-    const dir = await ipcRenderer.invoke(IPC.selectDirectory);
-    if (!dir) {
-      // Match the browser's behaviour: an AbortError when the user cancels.
-      throw new DOMException('The user aborted a request.', 'AbortError');
-    }
-    return { name: dir, kind: 'directory' as const };
-  },
-});

@@ -53,6 +53,13 @@ export interface AppInfo {
   dataDir: string;
   logFile: string;
   serverUrl: string | null;
+  /**
+   * True when the asking page is this computer's own server (embedded, or the
+   * dev server the shell was started against) — the case where a path picked
+   * in a native dialog means something to the server. False for a remote
+   * server's page (D-126/D-130), which also cannot call the local-only dialogs.
+   */
+  localServer: boolean;
 }
 
 export interface SaveFileOptions {

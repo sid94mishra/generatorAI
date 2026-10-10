@@ -193,6 +193,10 @@ export interface FsDirListing {
   entries: FsDirEntry[];
   /** Only for the empty-path listing: home + drive roots. */
   roots?: string[];
+  /** Only for the empty-path listing: the server user's home directory. */
+  home?: string;
+  /** Only for the empty-path listing: common folders under home that exist (Desktop, Documents, Projects…). */
+  places?: Array<{ name: string; path: string }>;
   /** Whether `path` itself is a repository. */
   isGit?: boolean;
 }
@@ -696,45 +700,6 @@ export class HttpPlatformClient implements IPlatformClient {
     return () => {
       handle.close();
     };
-  }
-
-  // ── Platform-specific ──
-
-  /**
-   * CLN-05 — Previously returned `null` silently, which callers could not
-   * distinguish from "user cancelled the picker". Now:
-   *
-   *   - If the browser supports the File System Access API
-   *     (`window.showDirectoryPicker`), open the native picker and return
-   *     the chosen directory name. Returns `null` ONLY when the user
-   *     explicitly cancels the picker.
-   *   - Otherwise throws `NotSupportedError` so the UI can show a clear
-   *     "paste a path instead" fallback rather than silently misbehaving.
-   *
-   * Note: the File System Access API only exposes the directory's *name*
-   * (not its absolute path) due to browser sandboxing — server-side APIs
-   * that need a real filesystem path must still accept user-typed input.
-   */
-  async selectDirectory(): Promise<string | null> {
-    const picker = (window as unknown as {
-      showDirectoryPicker?: (opts?: { mode?: 'read' | 'readwrite' }) => Promise<{ name: string }>;
-    }).showDirectoryPicker;
-    if (typeof picker !== 'function') {
-      const err = new Error(
-        'Directory picker is not supported in this browser. Type the path manually or use a Chromium-based browser.',
-      );
-      err.name = 'NotSupportedError';
-      throw err;
-    }
-    try {
-      const handle = await picker({ mode: 'read' });
-      return handle.name;
-    } catch (e) {
-      // User-cancelled pickers reject with AbortError in all browsers that
-      // implement the spec. Treat as "no selection" (null); re-throw anything else.
-      if (e instanceof DOMException && e.name === 'AbortError') return null;
-      throw e;
-    }
   }
 
   /**

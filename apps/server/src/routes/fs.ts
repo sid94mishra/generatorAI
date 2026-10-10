@@ -24,6 +24,31 @@ function allowed(req: { principal?: { scopes?: readonly string[] }; socket: { re
   return isLoopbackRequest(req as never);
 }
 
+/**
+ * Folders under home a person usually picks from, matched case-insensitively
+ * against what really exists (macOS and Windows file systems are
+ * case-insensitive, so probing both "Projects" and "projects" would list one
+ * folder twice). The picker's shortcuts (D-136); order is display order.
+ */
+const PLACE_NAMES = ['Desktop', 'Documents', 'Downloads', 'Projects', 'Developer', 'src', 'code', 'dev', 'repos', 'git', 'workspace'];
+
+async function homePlaces(home: string): Promise<Array<{ name: string; path: string }>> {
+  const dirents = await fs.readdir(home, { withFileTypes: true }).catch(() => []);
+  const byLower = new Map<string, string>();
+  for (const d of dirents) {
+    if (d.isDirectory() || d.isSymbolicLink()) byLower.set(d.name.toLowerCase(), d.name);
+  }
+  const places: Array<{ name: string; path: string }> = [];
+  for (const wanted of PLACE_NAMES) {
+    const actual = byLower.get(wanted.toLowerCase());
+    if (!actual) continue;
+    const full = path.join(home, actual);
+    const stat = await fs.stat(full).catch(() => null);
+    if (stat?.isDirectory()) places.push({ name: actual, path: full });
+  }
+  return places;
+}
+
 async function windowsDrives(): Promise<string[]> {
   const out: string[] = [];
   for (const letter of 'CDEFGHIJKLMNOPQRSTUVWXYZ') {
@@ -42,7 +67,7 @@ export function createFsRoutes(container: Container): Router {
   const router = Router();
   const { gitManager } = container;
 
-  // GET /fs/dirs?path=<abs> — child directories (empty path → roots)
+  // GET /fs/dirs?path=<abs> — child directories (empty path → roots, home and its common folders)
   router.get('/dirs', async (req, res, next) => {
     try {
       if (!allowed(req as never)) {
@@ -53,7 +78,14 @@ export function createFsRoutes(container: Container): Router {
       if (!raw) {
         const roots = process.platform === 'win32' ? await windowsDrives() : ['/'];
         const home = os.homedir();
-        res.json({ path: '', parent: null, roots: [home, ...roots.filter((r) => r !== home)], entries: [] });
+        res.json({
+          path: '',
+          parent: null,
+          roots: [home, ...roots.filter((r) => r !== home)],
+          entries: [],
+          home,
+          places: await homePlaces(home),
+        });
         return;
       }
       if (!path.isAbsolute(raw)) {

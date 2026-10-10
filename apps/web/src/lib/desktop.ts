@@ -210,6 +210,37 @@ export const desktopServer = {
   },
 };
 
+let nativeFolderPicker: Promise<boolean> | undefined;
+
+/**
+ * The OS folder picker (D-136). Usable only in the desktop app while it shows
+ * this computer's own server: the dialog browses THIS machine, so its path
+ * means nothing to a remote server — and main refuses the channel to a remote
+ * page anyway (ipc-scope.ts). A plain browser has no absolute paths at all.
+ * Callers fall back to the server-side DirectoryBrowser when it is unavailable.
+ */
+export const desktopFolders = {
+  /** Resolved once per page load: switching servers reloads the window. */
+  canPickNatively: (): Promise<boolean> => {
+    nativeFolderPicker ??= (async () => {
+      const api = bridge();
+      if (!api?.selectDirectory || !api.getAppInfo) return false;
+      try {
+        return (await api.getAppInfo()).localServer === true;
+      } catch {
+        return false;
+      }
+    })();
+    return nativeFolderPicker;
+  },
+  /** The chosen absolute path, or null when the user cancels. Rejects when there is no picker. */
+  pick: async (defaultPath?: string): Promise<string | null> => {
+    const api = bridge()?.selectDirectory;
+    if (!api) throw new Error('The native folder picker is only available in the desktop app.');
+    return api(defaultPath ? { defaultPath } : undefined);
+  },
+};
+
 export const desktopWindow = {
   /** Zoom/restore, for the native double-click-the-title-bar gesture. */
   toggleMaximize: () => void bridge()?.window?.toggleMaximize().catch(() => undefined),

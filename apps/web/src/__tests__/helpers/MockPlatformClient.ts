@@ -153,8 +153,6 @@ export class MockPlatformClient implements IPlatformClient {
     },
   );
 
-  selectDirectory = vi.fn(async () => null);
-
   // ── v2: Chat Operations ──
 
   createChat = vi.fn(async (_params: CreateChatParams): Promise<Chat> => {
