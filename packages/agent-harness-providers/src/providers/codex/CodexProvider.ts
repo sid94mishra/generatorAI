@@ -1415,10 +1415,24 @@ export class CodexProvider implements IAgentHarness {
   }
 
   async resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void> {
-    if (!this.conversations.has(conversationId) && params) {
-      await this.createConversation(params);
+    const live = this.conversations.get(conversationId);
+    if (!live) {
+      if (params) await this.createConversation(params);
+      return;
     }
-    // Codex threads are server-side and stateful; a live one needs no resume.
+    // Codex threads are server-side and stateful; a live one needs no resume —
+    // but "Edit sources" may have moved its roots (D-137). `turn/start` takes
+    // the cwd and the writable roots per turn, so adopting them here is enough
+    // for the next turn to run in the new folder.
+    if (params) {
+      live.params = {
+        ...live.params,
+        workingDirectory: params.workingDirectory,
+        additionalDirectories: params.additionalDirectories,
+      };
+      const { sandboxPolicy } = this.buildSandboxPolicy(live.params, live.warnings);
+      live.sandboxPolicy = sandboxPolicy;
+    }
   }
 
   hasLiveConversation(conversationId: string): boolean {
@@ -1702,6 +1716,9 @@ export class CodexProvider implements IAgentHarness {
     const turnParams: V2TurnStartParams = {
       threadId: conv.threadId,
       input: this.buildInput(prompt, attachments),
+      // The chat's primary mount, re-sent every turn so a source change between
+      // turns (D-137) moves the agent; the thread's own cwd is the start value.
+      cwd: conv.params.workingDirectory ?? this.opts.defaultCwd,
       // `SendPromptOptions` carries only `agentMode` / `permissionMode`. Codex
       // has no per-turn agent mode, and its per-turn approval policy is the
       // nearest analogue of a permission mode: a caller asking for `plan` or

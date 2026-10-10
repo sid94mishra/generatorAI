@@ -22,6 +22,7 @@ import * as path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ClaudeAgentProvider,
+  sameRoots,
   sessionFingerprint,
 } from '../src/providers/claude-agent/ClaudeAgentProvider.js';
 import { buildHarnessEnv, filterDelegatedHarnessEnv } from '../src/childEnv.js';
@@ -144,6 +145,33 @@ describe('ClaudeAgentProvider — workspace mounts reach the SDK', () => {
     } as CreateConversationParams);
 
     expect(sessionFingerprint(before as never)).not.toBe(sessionFingerprint(after as never));
+  });
+
+  it('a resume with new roots rebinds a LIVE conversation (Edit sources, D-137)', async () => {
+    // The resume used to return early whenever the model was unchanged, so the
+    // config — and with it the fingerprint — kept the old cwd and the agent
+    // went on working in the folder the chat no longer pointed at.
+    const provider = makeProvider();
+    await provider.createConversation({ conversationId: 'c8', workingDirectory: PRIMARY } as CreateConversationParams);
+    await provider.resumeConversation('c8', {
+      conversationId: 'c8',
+      workingDirectory: OTHER_MOUNT,
+      additionalDirectories: [SCRATCH],
+    } as CreateConversationParams);
+    const internals = provider as unknown as Internals;
+    const options = internals.buildQueryOptions(internals.conversations.get('c8'));
+    expect(options['cwd']).toBe(OTHER_MOUNT);
+    expect(options['additionalDirectories']).toEqual([SCRATCH]);
+  });
+
+  it('sameRoots: an unchanged resume keeps the live conversation', () => {
+    expect(sameRoots({ workingDirectory: PRIMARY }, { workingDirectory: PRIMARY }, '/server/cwd')).toBe(true);
+    expect(sameRoots({ workingDirectory: '/server/cwd' }, {}, '/server/cwd')).toBe(true);
+    expect(sameRoots({ workingDirectory: PRIMARY }, { workingDirectory: OTHER_MOUNT }, undefined)).toBe(false);
+    expect(
+      sameRoots({ workingDirectory: PRIMARY, additionalDirectories: [SCRATCH] }, { workingDirectory: PRIMARY, additionalDirectories: [SCRATCH, SCRATCH] }, undefined),
+    ).toBe(true);
+    expect(sameRoots({ workingDirectory: PRIMARY }, { workingDirectory: PRIMARY, additionalDirectories: [SCRATCH] }, undefined)).toBe(false);
   });
 
   it('declares plugin skills and warns on skill directories, because the SDK has no such option', async () => {

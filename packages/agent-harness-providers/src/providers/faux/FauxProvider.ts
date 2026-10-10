@@ -438,8 +438,15 @@ export class FauxProvider implements IAgentHarness {
   }
 
   async resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void> {
-    if (!this.conversations.has(conversationId) && params) {
-      await this.createConversation(params);
+    const live = this.conversations.get(conversationId);
+    if (!live) {
+      if (params) await this.createConversation(params);
+      return;
+    }
+    // Like the real providers (D-137): a rebind after "Edit sources" moves the
+    // roots `file_edit` writes under; the script position is kept.
+    if (params) {
+      live.params = { ...live.params, workingDirectory: params.workingDirectory, additionalDirectories: params.additionalDirectories };
     }
   }
 

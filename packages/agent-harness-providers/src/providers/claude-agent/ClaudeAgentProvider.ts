@@ -351,6 +351,22 @@ const PING_UNHEALTHY_AFTER_FAILURES = 3;
  * reused or must be torn down and rebuilt, so "is this field in it?" is a
  * behavioural question, not an implementation detail.
  */
+/**
+ * Whether a live conversation already runs in the roots `params` asks for
+ * (cwd + extra directories, as `createConversation` would store them).
+ * Exported for tests.
+ */
+export function sameRoots(
+  existing: { workingDirectory?: string | undefined; additionalDirectories?: string[] | undefined },
+  params: Pick<CreateConversationParams, 'workingDirectory' | 'additionalDirectories'>,
+  defaultCwd: string | undefined,
+): boolean {
+  const cwd = params.workingDirectory ?? defaultCwd;
+  const dirs = [...new Set(params.additionalDirectories ?? [])];
+  const had = existing.additionalDirectories ?? [];
+  return cwd === existing.workingDirectory && dirs.length === had.length && dirs.every((d, i) => d === had[i]);
+}
+
 export function sessionFingerprint(options: ClaudeOptions): string {
   const o = options as unknown as Record<string, unknown>;
   const hooks = (o['hooks'] as Record<string, unknown[] | undefined> | undefined) ?? {};
@@ -1467,15 +1483,23 @@ export class ClaudeAgentProvider implements IAgentHarness {
     // DIFFERENT model must fall through and rebuild it. Without this the user
     // changes the model in the composer and every later turn silently keeps
     // running the original one.
+    //
+    // The same holds for the roots (D-137): "Edit sources" on a live chat moves
+    // its cwd and extra directories, and a skipped resume kept the agent in the
+    // old folder. The rebuilt config changes `sessionFingerprint`, so the next
+    // turn rebuilds the CLI session with `resume` (history kept).
     const existing = this.conversations.get(conversationId);
     if (existing) {
       const requestedModel = params?.model ?? this.options.defaultModel;
-      if (!params || requestedModel === existing.model) {
+      const rootsChanged = !!params && !sameRoots(existing, params, this.options.defaultCwd);
+      if (!params || (requestedModel === existing.model && !rootsChanged)) {
         if (this.verbose) console.log(`[ClaudeAgentAdapter] Conversation ${conversationId} already in memory, skipping resume`);
         return;
       }
       if (this.verbose) {
-        console.log(`[ClaudeAgentAdapter] Conversation ${conversationId} model ${existing.model ?? '(default)'} → ${requestedModel ?? '(default)'}; rebinding`);
+        console.log(
+          `[ClaudeAgentAdapter] Conversation ${conversationId} ${rootsChanged ? `cwd ${existing.workingDirectory ?? '(default)'} → ${params.workingDirectory ?? '(default)'}` : `model ${existing.model ?? '(default)'} → ${requestedModel ?? '(default)'}`}; rebinding`,
+        );
       }
     }
 

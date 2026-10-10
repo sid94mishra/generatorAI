@@ -565,6 +565,21 @@ describe('CodexProvider — per-conversation workspace', () => {
     });
   }, 20_000);
 
+  it('moves a live conversation to new roots on resume (Edit sources, D-137)', async () => {
+    const p = await started({ defaultCwd: SERVER_CWD, sandboxMode: 'workspace-write' });
+    await p.createConversation({ conversationId: 'c-move', workingDirectory: '/work/old' } as CreateConversationParams);
+    expect((await echo(p, 'c-move')).turn['cwd']).toBe('/work/old');
+
+    await p.resumeConversation('c-move', {
+      conversationId: 'c-move',
+      workingDirectory: '/work/new',
+      additionalDirectories: ['/work/extra'],
+    } as CreateConversationParams);
+    const turn = (await echo(p, 'c-move')).turn;
+    expect(turn['cwd']).toBe('/work/new');
+    expect(turn['sandboxPolicy']).toMatchObject({ type: 'workspaceWrite', writableRoots: ['/work/extra'] });
+  }, 20_000);
+
   it('networkAccess: false keeps the sandbox off the network, at thread start and on every turn', async () => {
     const p = await started({ defaultCwd: SERVER_CWD, sandboxMode: 'workspace-write', networkAccess: false });
     await p.createConversation({
