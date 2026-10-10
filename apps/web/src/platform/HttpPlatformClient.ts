@@ -69,6 +69,8 @@ import {
   type HarnessLoginResult,
   type HarnessProvidersResponse,
   type HarnessSetDefaultResult,
+  type HarnessVisibilityResponse,
+  type HarnessVisibilityUpdate,
 } from '@generatorai/shared';
 // AGT-01 — first-class agents
 import type {
@@ -2849,6 +2851,19 @@ export class HttpPlatformClient implements IPlatformClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type }),
+    });
+  }
+
+  // D-131: which providers this server serves (Settings › Model providers).
+  async getHarnessVisibility(): Promise<HarnessVisibilityResponse> {
+    return apiFetch<HarnessVisibilityResponse>(`${this.baseUrl}/api/harness/visibility`);
+  }
+
+  async setHarnessVisibility(update: HarnessVisibilityUpdate): Promise<HarnessVisibilityResponse> {
+    return apiFetch<HarnessVisibilityResponse>(`${this.baseUrl}/api/harness/visibility`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(update),
     });
   }
 

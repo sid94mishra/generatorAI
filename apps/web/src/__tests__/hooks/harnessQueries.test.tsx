@@ -35,7 +35,7 @@ function provider(type: string, ready: boolean): HarnessProviderStatus {
     authenticated: ready,
     ready,
     modelCount: ready ? 1 : 0,
-    models: ready ? [{ id: `${type}-m`, name: `${type} model`, category: 'versatile' }] : [],
+    models: ready ? [{ id: `${type}-m`, name: `${type} model`, isDefault: true }] : [],
     supportsLogin: !ready,
   };
 }
@@ -82,7 +82,7 @@ describe('provider queries', () => {
       ['claude-agent', 'ready'],
       ['copilot', 'signed_out'],
     ]);
-    expect(catalog.models[0]).toMatchObject({ id: 'claude-agent-m', tier: 'versatile' });
+    expect(catalog.models[0]).toMatchObject({ id: 'claude-agent-m', isDefault: true });
   });
 
   it('keeps polling while the server says its answer is stale', async () => {

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys, scmKeys, type AgentSummary, type ApiClient, type AdminApi } from '@generatorai/client-core';
-import type { AudioModelStatus, AudioSettingsUpdate, HarnessProviderStatus, HarnessProvidersResponse, McpServerBody, SystemMcpPrefsBody } from '@generatorai/shared';
+import type { AudioModelStatus, AudioSettingsUpdate, HarnessProviderStatus, HarnessProvidersResponse, HarnessVisibilityUpdate, McpServerBody, SystemMcpPrefsBody } from '@generatorai/shared';
 import { useApi } from '../../services/api/useApi';
 import { useAdminApi } from '../../services/api/useAdminApi';
 import { useAuth } from '../../services/auth/AuthProvider';
@@ -190,6 +190,26 @@ export function useProvidersLive() {
     queryKey: queryKeys.providers(),
     queryFn: () => api.harness.providers(),
     refetchInterval: (q) => ((q.state.data as HarnessProvidersResponse | undefined)?.stale ? 3_000 : false),
+  });
+}
+
+/** Which providers this server serves (D-131): Settings › Model providers › Experimental providers. */
+export function useHarnessVisibility() {
+  const api = useApi();
+  return useQuery({ queryKey: queryKeys.harnessVisibility(), queryFn: () => api.harness.visibility() });
+}
+
+/** Reveal or hide providers (admin:harnesses); the provider list is refetched so every picker follows. */
+export function useSetHarnessVisibility() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (update: HarnessVisibilityUpdate) => api.harness.setVisibility(update),
+    onSuccess: (data) => {
+      client.setQueryData(queryKeys.harnessVisibility(), data);
+      void client.invalidateQueries({ queryKey: queryKeys.providers() });
+      void client.invalidateQueries({ queryKey: queryKeys.models() });
+    },
   });
 }
 

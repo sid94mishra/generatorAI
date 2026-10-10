@@ -1239,13 +1239,19 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       },
       HarnessCatalogModel: {
         type: 'object',
-        description: 'One model a provider serves for the signed-in account (G-09).',
+        description:
+          'One model a provider serves for the signed-in account (G-09). Every field is what the provider\'s own ' +
+          'listing returned (D-131); an absent field was not returned.',
         properties: {
           id: { type: 'string' },
           name: { type: 'string' },
           provider: { type: 'string' },
           description: { type: 'string' },
-          category: { type: 'string', description: 'Tier: lightweight | versatile | powerful' },
+          isDefault: { type: 'boolean', description: 'The provider flags this model as the account default' },
+          resolvedModel: { type: 'string', description: 'Canonical id an alias resolves to (Claude)' },
+          inputModalities: { type: 'array', items: { type: 'string' } },
+          features: { type: 'array', items: { type: 'string' }, description: 'Provider-reported capability flags' },
+          category: { type: 'string', description: "The provider's own picker category, when it sends one (Copilot)" },
           promptTokenLimit: { type: 'integer', description: 'Prompt tokens of the default tier (context gauge)' },
           totalContextWindow: { type: 'integer' },
           longContext: {
@@ -1260,6 +1266,26 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           supportsLongContext: { type: 'boolean' },
         },
         required: ['id', 'name'],
+      },
+      HarnessVisibilityResponse: {
+        type: 'object',
+        properties: {
+          providers: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                type: { type: 'string' },
+                label: { type: 'string' },
+                stability: { type: 'string', enum: ['stable', 'experimental'] },
+                visible: { type: 'boolean' },
+                source: { type: 'string', enum: ['default', 'setting', 'env'] },
+              },
+              required: ['type', 'label', 'stability', 'visible', 'source'],
+            },
+          },
+        },
+        required: ['providers'],
       },
       HarnessProviderStatus: {
         type: 'object',
@@ -3707,6 +3733,47 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
             description: 'Providers',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/HarnessProvidersResponse' } } },
           },
+        },
+      },
+    },
+
+    '/api/harness/visibility': {
+      get: {
+        tags: ['Harness'],
+        summary: 'Which agent providers this server serves (D-131)',
+        description:
+          'Every supported provider with its stability and whether it is served. A hidden provider is absent from every ' +
+          'provider/model route and cannot run a turn. `source`: default (stability), setting (an admin), env ' +
+          '(`GENERATORAI_EXPERIMENTAL_PROVIDERS`).',
+        responses: {
+          '200': {
+            description: 'Visibility',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/HarnessVisibilityResponse' } } },
+          },
+        },
+      },
+      put: {
+        tags: ['Harness'],
+        summary: 'Reveal or hide providers (admin:harnesses, D-131)',
+        description: 'Body `{visible: {<provider>: true | false | null}}`; null returns a provider to its default. Applied at once.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: { visible: { type: 'object', additionalProperties: { type: 'boolean', nullable: true } } },
+                required: ['visible'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Visibility after the change',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/HarnessVisibilityResponse' } } },
+          },
+          '400': { description: 'Unknown provider or malformed body', content: errorContent },
         },
       },
     },

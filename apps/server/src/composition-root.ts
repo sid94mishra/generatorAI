@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import { WorkflowEngineSettingsStore } from './settings/workflowEngine.js';
+import { ProviderVisibilityStore } from './settings/providerVisibility.js';
 import * as path from 'node:path';
 import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider, resolveCodexCommand, harnessErrorOf } from '@generatorai/agent-harness-providers';
 import type { ProviderInstanceId } from '@generatorai/core';
@@ -492,6 +493,11 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     // /harness/providers and /harness/models see it too (P0 review R15).
     testFauxHarness,
   });
+  // D-131 — which providers this server serves. Applied before anything can
+  // probe or list a provider, so a hidden one never spawns its CLI.
+  const providerVisibility = await ProviderVisibilityStore.load(dirname(resolve(config.dbPath)), process.env, (hidden) =>
+    harnessRegistry.setHiddenTypes(hidden),
+  );
   // W41-N2 — disk cache is awaited in initialize() so the seed is guaranteed
   // to complete before any getAllModels() call. Do NOT call it here (construction
   // time) — the fire-and-forget races the first user-facing query.
@@ -2477,6 +2483,7 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     hostSupervisor,
     admissionController,
     workflowEngineSettings,
+    providerVisibility,
     streamBroker,
     customToolRegistry,
     mcpHub,
@@ -2996,6 +3003,8 @@ export interface Container {
   admissionController: AdmissionController;
   /** Flow key limits, the summary model and the trigger debounce (Settings → Workflow engine, P07). */
   workflowEngineSettings: WorkflowEngineSettingsStore;
+  /** D-131 — which agent providers this server serves (Settings › Model providers, admin). */
+  providerVisibility: ProviderVisibilityStore;
   streamBroker: StreamBroker;
   /** TOL-01 — harness-agnostic custom tool catalog. Empty by default. */
   customToolRegistry: CustomToolRegistry;

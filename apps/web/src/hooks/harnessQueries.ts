@@ -17,10 +17,16 @@
 import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { buildModelPickerCatalog, readyCatalogModels, type ModelPickerCatalog } from '@generatorai/client-core';
-import type { HarnessProvidersResponse, HarnessProviderStatus } from '@generatorai/shared';
+import type {
+  HarnessProvidersResponse,
+  HarnessProviderStatus,
+  HarnessVisibilityResponse,
+  HarnessVisibilityUpdate,
+} from '@generatorai/shared';
 import { usePlatform } from '../providers/PlatformProvider.js';
 
 export const HARNESS_PROVIDERS_KEY = ['harness-providers'] as const;
+export const HARNESS_VISIBILITY_KEY = ['harness-visibility'] as const;
 
 const HARNESS_PROVIDERS_STALE_POLL_MS = 3_000;
 const HARNESS_PROVIDERS_STALE_TIME_MS = 5 * 60_000;
@@ -184,6 +190,33 @@ export function useSignInProvider() {
       return body.authUrl
         ? { ok: false, message: `${provider.label} did not report a completed sign-in. Finish the browser flow and press Test connection.` }
         : { ok: false, message: `${provider.label} could not be signed in.` };
+    },
+  });
+}
+
+/** Which providers this server serves (D-131) — Settings › Model providers › Experimental providers. */
+export function useHarnessVisibility() {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: HARNESS_VISIBILITY_KEY,
+    queryFn: () => platform.getHarnessVisibility(),
+    refetchOnWindowFocus: false,
+  });
+}
+
+/**
+ * Reveal or hide providers (admin:harnesses). The server applies it at once and
+ * re-probes, so the provider list is refetched: a revealed provider appears in
+ * every picker, a hidden one disappears.
+ */
+export function useSetHarnessVisibility() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (update: HarnessVisibilityUpdate) => platform.setHarnessVisibility(update),
+    onSuccess: (data: HarnessVisibilityResponse) => {
+      queryClient.setQueryData(HARNESS_VISIBILITY_KEY, data);
+      void queryClient.invalidateQueries({ queryKey: HARNESS_PROVIDERS_KEY });
     },
   });
 }

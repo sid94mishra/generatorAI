@@ -8,23 +8,76 @@
 // The UI uses that to show real models and lock providers that aren't usable.
 // ────────────────────────────────────────────────────────────────
 
-import { Router } from 'express';
+import { Router, type Response } from 'express';
+import { z } from 'zod';
 import type { Container } from '../composition-root.js';
 import { ALL_HARNESS_TYPES, type HarnessType } from '@generatorai/agent-harness-providers';
-import type { HarnessLoginResult, HarnessProvidersResponse } from '@generatorai/shared';
+import type { HarnessLoginResult, HarnessProvidersResponse, HarnessVisibilityResponse } from '@generatorai/shared';
+import { isHarnessProviderId } from '../settings/providerVisibility.js';
+
+const VisibilityBody = z
+  .object({
+    visible: z
+      .record(z.boolean().nullable())
+      .refine((r) => Object.keys(r).every(isHarnessProviderId), { message: `Providers are ${ALL_HARNESS_TYPES.join(', ')}` })
+      .describe('Providers whose visibility changes; null returns one to its default'),
+  })
+  .strict();
 
 export function createHarnessRoutes(container: Container): Router {
   const router = Router();
-  const { harnessRegistry, logger } = container;
+  const { harnessRegistry, providerVisibility, logger } = container;
 
-  // GET /harness — primary provider + which types this build knows about.
+  /**
+   * D-131 — a provider id a client may act on: known AND served. A hidden
+   * provider answers exactly like an unknown one, so no client can tell it
+   * apart from a provider this build does not have.
+   */
+  const servedType = (raw: unknown, res: Response): HarnessType | null => {
+    const type = String(raw) as HarnessType;
+    if (!ALL_HARNESS_TYPES.includes(type) || harnessRegistry.isHidden(type)) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: `Unknown provider "${type}"` } });
+      return null;
+    }
+    return type;
+  };
+
+  // GET /harness — primary provider + which types this server serves.
   router.get('/', async (_req, res) => {
     const statuses = harnessRegistry.getStatuses();
     res.json({
       type: harnessRegistry.primary,
       availableTypes: statuses.filter((s) => s.ready).map((s) => s.type),
-      knownTypes: [...ALL_HARNESS_TYPES],
+      knownTypes: ALL_HARNESS_TYPES.filter((t) => !harnessRegistry.isHidden(t)),
     });
+  });
+
+  // GET /harness/visibility — every supported provider, whether this server
+  // serves it and why (D-131). PUT (admin:harnesses) changes it at once.
+  router.get('/visibility', (_req, res) => {
+    const body: HarnessVisibilityResponse = { providers: providerVisibility.list() };
+    res.json(body);
+  });
+
+  router.put('/visibility', async (req, res, next) => {
+    const parsed = VisibilityBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: { code: 'INVALID_BODY', message: parsed.error.message } });
+      return;
+    }
+    try {
+      const providers = await providerVisibility.update(parsed.data.visible);
+      logger.info('[HarnessRoutes] provider visibility changed', {
+        requestId: req.requestId,
+        hidden: providers.filter((p) => !p.visible).map((p) => p.type),
+      });
+      // A revealed provider is probed now, so the next list already has it.
+      harnessRegistry.requestRefresh();
+      const body: HarnessVisibilityResponse = { providers };
+      res.json(body);
+    } catch (err) {
+      next(err);
+    }
   });
 
   // GET /harness/providers — live readiness + model catalog per provider.
@@ -99,11 +152,8 @@ export function createHarnessRoutes(container: Container): Router {
   // re-probes until the provider reports authenticated.
   router.post('/providers/:type/login', async (req, res, next) => {
     try {
-      const type = String(req.params['type']) as HarnessType;
-      if (!ALL_HARNESS_TYPES.includes(type)) {
-        res.status(404).json({ error: { code: 'NOT_FOUND', message: `Unknown provider "${type}"` } });
-        return;
-      }
+      const type = servedType(req.params['type'], res);
+      if (!type) return;
       const adapter = await harnessRegistry.get(type);
       if (typeof adapter.startLogin !== 'function') {
         res.status(409).json({ error: { code: 'UNSUPPORTED', message: `${type} has no in-app sign-in; use its own CLI to sign in.` } });
@@ -111,7 +161,11 @@ export function createHarnessRoutes(container: Container): Router {
       }
       const result: HarnessLoginResult = await adapter.startLogin();
       logger.info(`[HarnessRoutes] ${type} sign-in started`, { requestId: req.requestId, browser: !!result.authUrl });
-      if (result.completed) harnessRegistry.requestRefresh();
+      if (result.completed) {
+        // A new account: drop the previous one's catalog before re-probing.
+        harnessRegistry.invalidate(type);
+        harnessRegistry.requestRefresh();
+      }
       res.json(result);
     } catch (err) {
       next(err);
@@ -121,17 +175,15 @@ export function createHarnessRoutes(container: Container): Router {
   // POST /harness/providers/:type/logout — sign the provider's account out.
   router.post('/providers/:type/logout', async (req, res, next) => {
     try {
-      const type = String(req.params['type']) as HarnessType;
-      if (!ALL_HARNESS_TYPES.includes(type)) {
-        res.status(404).json({ error: { code: 'NOT_FOUND', message: `Unknown provider "${type}"` } });
-        return;
-      }
+      const type = servedType(req.params['type'], res);
+      if (!type) return;
       const adapter = harnessRegistry.peek(type);
       if (!adapter || typeof adapter.logout !== 'function') {
         res.status(409).json({ error: { code: 'UNSUPPORTED', message: `${type} has no in-app sign-out.` } });
         return;
       }
       await adapter.logout();
+      harnessRegistry.invalidate(type);
       harnessRegistry.requestRefresh();
       logger.info(`[HarnessRoutes] ${type} signed out`, { requestId: req.requestId });
       res.json({ ok: true });
@@ -172,11 +224,11 @@ export function createHarnessRoutes(container: Container): Router {
   router.post('/switch', async (req, res, next) => {
     try {
       const { type } = req.body as { type?: string };
-      if (!type || !ALL_HARNESS_TYPES.includes(type as HarnessType)) {
+      if (!type || !ALL_HARNESS_TYPES.includes(type as HarnessType) || harnessRegistry.isHidden(type as HarnessType)) {
         res.status(400).json({
           error: {
             code: 'INVALID_HARNESS_TYPE',
-            message: `Invalid harness type '${type ?? ''}'. Valid types: ${ALL_HARNESS_TYPES.join(', ')}`,
+            message: `Invalid harness type '${type ?? ''}'. Valid types: ${ALL_HARNESS_TYPES.filter((t) => !harnessRegistry.isHidden(t)).join(', ')}`,
           },
         });
         return;

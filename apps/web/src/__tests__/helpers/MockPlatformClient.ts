@@ -33,6 +33,8 @@ import type {
   HarnessLoginResult,
   HarnessProvidersResponse,
   HarnessSetDefaultResult,
+  HarnessVisibilityResponse,
+  HarnessVisibilityUpdate,
 } from '@generatorai/shared';
 import type {
   InvocationPlan,
@@ -284,6 +286,10 @@ export class MockPlatformClient implements IPlatformClient {
   setDefaultProvider = vi.fn(
     async (type: string): Promise<HarnessSetDefaultResult> => ({ message: `Switched to '${type}'`, type, switched: true }),
   );
+
+  getHarnessVisibility = vi.fn(async (): Promise<HarnessVisibilityResponse> => ({ providers: [] }));
+
+  setHarnessVisibility = vi.fn(async (_update: HarnessVisibilityUpdate): Promise<HarnessVisibilityResponse> => ({ providers: [] }));
 
   getComputerConsent = vi.fn(async (_workspaceId: string): Promise<ComputerPendingConsent[]> => []);
 
