@@ -16,17 +16,35 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
   render: () => (
     <ModalForm className="w-120">
-      <Field label="Task">
-        <Textarea aria-label="Task" variant="prose" placeholder="What should the agent do?" />
-      </Field>
-      <ModalForm.Section title="Details" hint="Optional">
-        <Field label="Agent" orientation="horizontal" labelWidth={64}>
-          <Input aria-label="Agent" placeholder="reviewer-01" />
+      <ModalForm.Section first>
+        <Field label="Name">
+          <Input placeholder="e.g. Fix the login redirect" />
+        </Field>
+        <Field label="First message" optional hint="Sent when the chat opens.">
+          <Textarea variant="prose" placeholder="What should the agent do?" />
+        </Field>
+      </ModalForm.Section>
+      <ModalForm.Section title="Who" hint="The agent brings its own instructions, skills and MCP servers.">
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Agent">
+            <Input placeholder="No agent" />
+          </Field>
+          <Field label="Model">
+            <Input placeholder="Opus 5.5" />
+          </Field>
+        </div>
+      </ModalForm.Section>
+      <ModalForm.Section title="Where" hint="What the agent works on.">
+        <Field label="Project">
+          <Input placeholder="No project" />
         </Field>
       </ModalForm.Section>
     </ModalForm>
   ),
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('Details')).toBeInTheDocument();
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole('heading', { name: 'Who' })).toBeInTheDocument();
+    await expect(canvas.getByRole('textbox', { name: 'Name' })).toBeInTheDocument();
+    await expect(canvas.getByRole('textbox', { name: /First message/ })).toBeInTheDocument();
   },
 };

@@ -4,9 +4,11 @@
 // `/chats/new`). Mounted ONCE by app/ShellRoute inside the shell's
 // overlays; opened from anywhere via `useNewChatStore` (04 §0).
 //
-// Replaces `components/chat/CreateChatDialog.tsx`. Unlike the legacy
-// dialog (gated on Name), this one is gated on the Task — the chat's name
-// defaults to the task when left blank (ChatCreateModel board).
+// Layout (D-133): ModalForm sections split by rules — the chat (Name, an
+// optional First message), Who (Agent · Model, then Effort), Where, and a
+// collapsed Options section (toggle rows, description, tags, browser). Labels
+// sit above every control on one left edge. A name is all a chat needs; with
+// no first message the chat opens empty for the user to type or dictate.
 // ────────────────────────────────────────────────────────────────
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -25,16 +27,17 @@ import { Chip } from '@/ui/primitives/Chip/Chip.js';
 import { Collapsible } from '@/ui/primitives/Collapsible/Collapsible.js';
 import { Dialog, DialogBody, DialogClose, DialogFooter } from '@/ui/primitives/Dialog/Dialog.js';
 import { Field } from '@/ui/primitives/Field/Field.js';
-import { Icon } from '@/ui/icons/Icon.js';
 import { Input } from '@/ui/primitives/Input/Input.js';
 import { SegmentedControl } from '@/ui/primitives/SegmentedControl/SegmentedControl.js';
 import { Switch } from '@/ui/primitives/Switch/Switch.js';
 import { Textarea } from '@/ui/primitives/Textarea/Textarea.js';
 import { KbdHintRow } from '@/ui/patterns/KbdHintRow/KbdHintRow.js';
+import { ModalForm } from '@/ui/patterns/ModalForm/ModalForm.js';
+import { SettingRow } from '@/ui/patterns/SettingsSection/SettingsSection.js';
 import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { BrowserVisibilityField, DEFAULT_BROWSER_SETTINGS } from './BrowserVisibilityField.js';
 import { agentRuntimeSelection, defaultReasoningEffortFor, reasoningLevelsFor } from './modelControls.js';
-import { buildCreateChatParams, chatCreateBlockingReason, chatCreateDisplayName } from './mapDraftToParams.js';
+import { buildCreateChatParams, chatCreateBlockingReason, chatCreateDisplayName, chatCreateFirstMessage } from './mapDraftToParams.js';
 import { modChord } from '@/lib/shortcuts.js';
 
 
@@ -107,7 +110,7 @@ export function NewChatDialog() {
       who: agentRef ? (selectedAgent?.role === 'orchestrator' ? 'orchestrator' : 'agent') : 'model',
       agentRef,
       orchestratorMode: selectedAgent?.role === 'orchestrator' ? true : orchestratorMode,
-      planFirst,
+      planFirst: planFirst && chatCreateFirstMessage({ prompt: task }) !== undefined,
       model,
       reasoningEffort: effectiveEffort,
       projectId: projectId || undefined,
@@ -127,7 +130,8 @@ export function NewChatDialog() {
       const chat = await createChat.mutateAsync(params);
       // Fire-and-forget: the server returns before persisting the user
       // message (useSendChatPromptTo's own doc comment); SSE handles the rest.
-      sendFirstPrompt.mutate({ chatId: chat.id, prompt: task, ...(planFirst ? { mode: 'plan' as const } : {}) });
+      const firstMessage = chatCreateFirstMessage({ prompt: task });
+      if (firstMessage) sendFirstPrompt.mutate({ chatId: chat.id, prompt: firstMessage, ...(planFirst ? { mode: 'plan' as const } : {}) });
       close();
       reset();
       navigate(`/chats/${chat.id}`);
@@ -183,14 +187,17 @@ export function NewChatDialog() {
 
   const capabilitySummary = selectedAgent
     ? `${selectedAgent.skillIds.length} skill${selectedAgent.skillIds.length === 1 ? '' : 's'} · ${selectedAgent.mcpServerIds.length} MCP server${selectedAgent.mcpServerIds.length === 1 ? '' : 's'} · from ${selectedAgent.name}`
-    : '0 skills · 0 MCP servers · platform default';
+    : 'Platform defaults · no extra skills or MCP servers';
 
+  const hasFirstMessage = chatCreateFirstMessage({ prompt: task }) !== undefined;
+  const orchestrateOn = selectedAgent?.role === 'orchestrator' || orchestratorMode;
+  // Only what differs from the defaults, so the collapsed row says what is set.
   const optionsSummary = [
+    orchestrateOn ? 'Orchestrate mode' : null,
+    planFirst && hasFirstMessage ? 'Plan first' : null,
     description.trim() ? 'Description' : null,
-    tags.length > 0 ? `${tags.length} tag${tags.length === 1 ? '' : 's'}` : 'tags',
-    `orchestrate mode ${orchestratorMode ? 'on' : 'off'}`,
-    planFirst ? 'plan first' : null,
-    `browser ${browser.visibility}`,
+    tags.length > 0 ? `${tags.length} tag${tags.length === 1 ? '' : 's'}` : null,
+    browser.visibility !== 'headless' ? `Browser ${browser.visibility}` : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -208,138 +215,163 @@ export function NewChatDialog() {
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange} size="md" title="New chat">
       <DialogBody>
-        {/* ── Task ── */}
-        <div className="flex flex-col gap-2.5">
-          <Textarea
-            aria-label="Task"
-            placeholder="Describe the task — what should the agent do, and how will you know it is done?"
-            value={task}
-            onChange={(e) => setTask(e.target.value)}
-            autosize={{ minRows: 4, maxRows: 8 }}
-          />
-          <Field label="Name" orientation="horizontal" labelWidth={64}>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={chatCreateDisplayName({ name: '', prompt: task }) || 'Named from the task if left empty'}
-            />
-          </Field>
-        </div>
-
-        {/* ── Where ── */}
-        <section className="flex flex-col gap-2.5">
-          <div className="flex items-baseline gap-2">
-            <h3 className="text-ui font-semibold text-fg">Where</h3>
-            <span className="text-small text-fg-3">What the agent works on. The first source is its working directory.</span>
-          </div>
-          <SourcePicker
-            chatName={chatCreateDisplayName({ name, prompt: task }) || 'chat'}
-            compact
-            projectId={projectId}
-            onProjectIdChange={setProjectId}
-            drafts={sourceDrafts}
-            onChange={setSourceDrafts}
-            primaryAlias={primaryAlias}
-            onPrimaryChange={setPrimaryAlias}
-            maxSources={8}
-          />
-        </section>
-
-        {/* ── Who ── */}
-        <section className="flex flex-col gap-2.5">
-          <div className="flex items-baseline gap-2">
-            <h3 className="text-ui font-semibold text-fg">Who</h3>
-            <span className="text-small text-fg-3">The agent brings its own instructions, skills and MCP servers.</span>
-          </div>
-          {/* Column labels (board NewChat); each control keeps its own accessible name. Effort gets its own row:
-              a model with five or six levels truncated every label in a third of the dialog. */}
-          <div className="grid grid-cols-2 items-end gap-x-3 gap-y-1.5">
-            <span className="text-small text-fg-2">Agent</span>
-            <span className="text-small text-fg-2">Model</span>
-            <AgentPicker
-              value={agentRef}
-              onChange={(ref, agent) => {
-                setAgentRef(ref);
-                setSelectedAgent(agent);
-                if (agent?.role === 'orchestrator') setOrchestratorMode(true);
-                const runtime = agentRuntimeSelection(agent);
-                if (runtime.model) setModel(runtime.model);
-                if (runtime.reasoningEffort) setReasoningEffort(runtime.reasoningEffort);
-              }}
-              projectId={projectId || undefined}
-              placeholder="No agent"
-              showSummary={false}
-            />
-            <ModelPicker value={model} onChange={setModel} variant="field" ariaLabel="Model" />
-          </div>
-          {reasoningLevels.length > 0 ? (
-            <div className="flex items-center gap-3">
-              <span className="text-small text-fg-2">Effort</span>
-              <SegmentedControl
-                label="Reasoning effort"
-                value={effectiveEffort ?? reasoningLevels[0] ?? 'medium'}
-                onValueChange={setReasoningEffort}
-                items={reasoningLevels.map((level) => ({ value: level, label: reasoningEffortLabel(level) }))}
+        <ModalForm>
+          {/* ── The chat: a name is all it needs; the first message is optional (D-133). ── */}
+          <ModalForm.Section first>
+            <Field label="Name">
+              <Input
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={chatCreateDisplayName({ name: '', prompt: task }) || 'e.g. Fix the login redirect'}
+                data-testid="new-chat-name"
               />
-            </div>
-          ) : null}
-          <div className="flex items-center gap-2 text-small text-fg-3">
-            <Icon concept="skills" size={14} />
-            {capabilitySummary}
-          </div>
-        </section>
+            </Field>
+            <Field
+              label="First message"
+              optional
+              hint="Sent when the chat opens. Leave it empty to type or dictate it in the chat."
+            >
+              <Textarea
+                placeholder="What should the agent do, and how will you know it is done?"
+                value={task}
+                onChange={(e) => setTask(e.target.value)}
+                autosize={{ minRows: 3, maxRows: 8 }}
+                data-testid="new-chat-first-message"
+              />
+            </Field>
+          </ModalForm.Section>
 
-        {/* ── Options ── */}
-        <div className="flex items-center gap-2">
-          <Collapsible
-            trigger={
-              <span className="flex items-center gap-1.5">
-                Options
-                <span className="truncate text-small text-fg-3">{optionsSummary}</span>
-              </span>
-            }
-            variant="attached"
-            className="flex-1"
-          >
-            <div className="flex flex-col gap-3">
-              <Field label="Description" optional>
-                <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Shown in the chat list" />
+          {/* ── Who ── */}
+          <ModalForm.Section title="Who" hint="The agent brings its own instructions, skills and MCP servers.">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Agent" hint={capabilitySummary}>
+                <AgentPicker
+                  value={agentRef}
+                  onChange={(ref, agent) => {
+                    setAgentRef(ref);
+                    setSelectedAgent(agent);
+                    if (agent?.role === 'orchestrator') setOrchestratorMode(true);
+                    const runtime = agentRuntimeSelection(agent);
+                    if (runtime.model) setModel(runtime.model);
+                    if (runtime.reasoningEffort) setReasoningEffort(runtime.reasoningEffort);
+                  }}
+                  projectId={projectId || undefined}
+                  placeholder="No agent"
+                  showSummary={false}
+                />
               </Field>
-              <Field label="Tags" optional hint="↵ to add · up to 20">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {tags.map((tag) => (
-                    <Chip key={tag} onRemove={() => setTags(tags.filter((t) => t !== tag))}>
-                      {tag}
-                    </Chip>
-                  ))}
-                  <Input
-                    value={tagInput}
-                    onChange={(e) => setTagInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        addTag();
-                      }
-                    }}
-                    placeholder="Add tag"
-                    className="max-w-32"
+              <Field label="Model">
+                <ModelPicker value={model} onChange={setModel} variant="field" ariaLabel="Model" />
+              </Field>
+            </div>
+            {reasoningLevels.length > 0 ? (
+              <Field label="Reasoning effort">
+                <SegmentedControl
+                  label="Reasoning effort"
+                  value={effectiveEffort ?? reasoningLevels[0] ?? 'medium'}
+                  onValueChange={setReasoningEffort}
+                  items={reasoningLevels.map((level) => ({ value: level, label: reasoningEffortLabel(level) }))}
+                />
+              </Field>
+            ) : null}
+          </ModalForm.Section>
+
+          {/* ── Where ── */}
+          <ModalForm.Section title="Where" hint="What the agent works on. The first source is its working directory.">
+            <SourcePicker
+              chatName={chatCreateDisplayName({ name, prompt: task }) || 'chat'}
+              compact
+              projectId={projectId}
+              onProjectIdChange={setProjectId}
+              drafts={sourceDrafts}
+              onChange={setSourceDrafts}
+              primaryAlias={primaryAlias}
+              onPrimaryChange={setPrimaryAlias}
+              maxSources={8}
+            />
+          </ModalForm.Section>
+
+          {/* ── Options ── */}
+          <ModalForm.Section>
+            <Collapsible
+              variant="section"
+              trigger={
+                <span className="flex min-w-0 items-baseline gap-2">
+                  Options
+                  <span className="truncate text-small font-normal text-fg-3">
+                    {optionsSummary || 'Orchestration, plan first, tags, browser'}
+                  </span>
+                </span>
+              }
+            >
+              <div className="flex flex-col gap-4 pt-2">
+                <div className="flex flex-col">
+                  <SettingRow
+                    className="border-line"
+                    label="Orchestrate mode"
+                    hint="Splits the task across background agents, then consolidates."
+                    control={
+                      <Switch
+                        aria-label="Orchestrate mode"
+                        checked={orchestrateOn}
+                        disabled={selectedAgent?.role === 'orchestrator'}
+                        onCheckedChange={setOrchestratorMode}
+                      />
+                    }
+                  />
+                  <SettingRow
+                    label="Plan first"
+                    hint={
+                      hasFirstMessage
+                        ? 'The first message runs in plan mode: review a plan before anything changes.'
+                        : 'Applies to a first message — or pick Plan in the chat composer.'
+                    }
+                    control={
+                      <Switch
+                        aria-label="Plan first"
+                        checked={planFirst && hasFirstMessage}
+                        disabled={!hasFirstMessage}
+                        onCheckedChange={setPlanFirst}
+                      />
+                    }
                   />
                 </div>
-              </Field>
-              <Switch
-                checked={orchestratorMode}
-                disabled={selectedAgent?.role === 'orchestrator'}
-                onCheckedChange={setOrchestratorMode}
-                label="Orchestrate mode"
-              />
-              <Switch checked={planFirst} onCheckedChange={setPlanFirst} label="Plan first — review a plan before anything changes" />
-              <BrowserVisibilityField value={browser} onChange={setBrowser} compact />
-              <Button variant="ghost" size="sm" onClick={openFullPage} className="self-start">
-                More options — open the full page
-              </Button>
-            </div>
-          </Collapsible>
-        </div>
+                <Field label="Description" optional>
+                  <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Shown in the chat list" />
+                </Field>
+                <Field label="Tags" optional hint="↵ to add · up to 20">
+                  <div className="flex flex-col gap-2">
+                    {tags.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {tags.map((tag) => (
+                          <Chip key={tag} icon="tag" onRemove={() => setTags(tags.filter((t) => t !== tag))} removeLabel={`Remove tag ${tag}`}>
+                            {tag}
+                          </Chip>
+                        ))}
+                      </div>
+                    ) : null}
+                    <Input
+                      value={tagInput}
+                      onChange={(e) => setTagInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+                          e.preventDefault();
+                          addTag();
+                        }
+                      }}
+                      placeholder="Add tag"
+                    />
+                  </div>
+                </Field>
+                <BrowserVisibilityField value={browser} onChange={setBrowser} compact />
+                <Button variant="ghost" size="sm" icon="external-link" onClick={openFullPage} className="self-start">
+                  Open the full form
+                </Button>
+              </div>
+            </Collapsible>
+          </ModalForm.Section>
+        </ModalForm>
       </DialogBody>
       <DialogFooter hint={<KbdHintRow hints={[{ keys: 'Esc', label: 'to close' }]} />}>
         <DialogClose render={<Button variant="secondary" />}>Cancel</DialogClose>

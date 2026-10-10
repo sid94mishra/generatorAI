@@ -16,8 +16,8 @@
 //   full    — project Select + codebase checklist, "Add local folder", then one
 //             card per source: alias rename, reorder / copy / remove, Mode and
 //             Branch segmented controls, "Make working directory".
-//   compact — the NewChat 640 board: a horizontal "Project" field and ONE
-//             bordered list. Included sources expand in place (checkbox, mono
+//   compact — the NewChat dialog: a "Project" field (label above, D-133) and
+//             ONE bordered list on the same left edge. Included sources expand in place (checkbox, mono
 //             name, "Working directory" badge, Mode, then the branch line);
 //             project codebases that are not ticked collapse to a single
 //             "Not included" row; "Add local folder" sits in the list footer.
@@ -313,20 +313,18 @@ export function SourcePicker({
   if (compact) {
     const notIncluded = (codebases ?? []).filter((cb) => !selectedCodebaseIds.has(cb.id));
     return (
-      <div className="flex flex-col gap-2.5">
-        <Field label="Project" orientation="horizontal" labelWidth={64}>
-          {projectSelect}
-        </Field>
-        <div className="ml-19 flex flex-col gap-2">
+      <div className="flex flex-col gap-4">
+        <Field label="Project">{projectSelect}</Field>
+        <div className="flex flex-col gap-2">
           {codebaseStatus}
-          <ul className="overflow-hidden rounded-card border border-line-soft" data-testid="source-list">
+          <ul className="overflow-hidden rounded-card border border-line" data-testid="source-list">
             {drafts.map((draft, index) => (
-              <li key={draft.key} className="border-b border-line-soft">
+              <li key={draft.key} className="border-b border-line">
                 <CompactSourceRow {...rowProps(draft, index)} />
               </li>
             ))}
             {notIncluded.map((cb) => (
-              <li key={cb.id} className="border-b border-line-soft">
+              <li key={cb.id} className="border-b border-line">
                 <CodebaseOption
                   cb={cb}
                   checked={false}
@@ -336,7 +334,7 @@ export function SourcePicker({
               </li>
             ))}
             {drafts.length === 0 && (
-              <li className="border-b border-line-soft px-3 py-2.5 text-small text-fg-3">{EMPTY_HINT}</li>
+              <li className="border-b border-line px-3 py-2.5 text-small text-fg-3">{EMPTY_HINT}</li>
             )}
             <li className="flex items-center gap-2 px-1.5 py-1.5">
               {addFolderButton}

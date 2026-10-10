@@ -24,16 +24,22 @@ export interface ChatCreateFormInput {
 
 /**
  * Why the primary button is disabled, or `null` when the draft is ready to
- * submit. Task is the one required field (D-36/R-1: the old dialog required
- * `name`; the redesign names the chat from the task instead — 03-domain
- * F-create-01/02, ChatCreateModel board). Source errors (bad alias, a mode a
- * source cannot support…) reuse `validateDrafts`'s own sentences.
+ * submit. A chat needs a name; the first message is optional (D-133 — the user
+ * may think, type or dictate it in the chat itself), and a blank name falls
+ * back to one derived from the first message when there is one. Source errors
+ * (bad alias, a mode a source cannot support…) reuse `validateDrafts`'s own
+ * sentences.
  */
 export function chatCreateBlockingReason(input: ChatCreateFormInput, action: ChatCreateAction): string | null {
-  if (!input.draft.prompt.trim()) {
-    return `Describe the task to ${action} the chat`;
+  if (!chatCreateDisplayName(input.draft)) {
+    return `Name the chat to ${action} it`;
   }
   return validateDrafts([...input.sourceDrafts]);
+}
+
+/** The first message to send once the chat exists, or `undefined` when the user left it for the chat. */
+export function chatCreateFirstMessage(draft: Pick<CreateChatDraft, 'prompt'>): string | undefined {
+  return draft.prompt.trim() ? draft.prompt : undefined;
 }
 
 /** `''` (empty draft) → `undefined`; server default headless with no extras → `undefined` (D-36: never send a no-op config). */
@@ -53,7 +59,7 @@ export function browserSettingsToConfig(settings: ChatCreateBrowserSettings | un
   };
 }
 
-/** The name shown while the task box is still empty, and what a blank Name field resolves to on submit. */
+/** The chat's name: the Name field, else one derived from the first message, else `''`. */
 export function chatCreateDisplayName(draft: Pick<CreateChatDraft, 'name' | 'prompt'>): string {
   return draft.name.trim() || chatNameFromPrompt(draft.prompt);
 }

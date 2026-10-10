@@ -1228,6 +1228,18 @@ place of initials; each assistant message stores the `model`/`provider` its usag
 `ChatMessageMetadata`), so a past turn shows the logo + model too. Turns saved before this show the chat's provider logo
 and no model. Mobile's reply header leads with the chat's provider logo.
 
+### D-133 New chat: one form structure, and a name is all a chat needs (2026-10-10) — Final
+Owner review of the New chat dialog and `/chats/new`. Both now share one structure: the chat (Name, an optional **First
+message**; the page adds Description), Who (agent, then Model · Reasoning effort · Context), Where, Behaviour (Orchestrate
+mode, Plan first as label + hint + switch rows), More (tags, browser) — the dialog folds Behaviour and More into a
+collapsed Options section whose summary lists only non-default values. Labels sit above every control (vertical `Field`)
+on one left edge; the dialog's horizontal 64px label column is gone, and so is the compact SourcePicker's indent.
+Sections are rule-separated: `ModalForm.Section` (C-35) gains `first` and draws a `line` rule — not `line-soft`, which
+equals the dialog's `overlay` surface and vanishes; the compact source list inside the dialog uses `line` for the same
+reason. The start rule is `chatCreateBlockingReason`: a name, or a first message to derive one from — the task is no
+longer required, overriding F-create-01/02's "gated on the Task". With no first message the chat opens empty for the user
+to type or dictate; Plan first then has nothing to apply to and is disabled with a pointer to the composer's Plan mode.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

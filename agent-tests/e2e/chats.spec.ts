@@ -107,12 +107,11 @@ test.describe('Chats list', () => {
   });
 });
 
-// P5-09 (redesign): the legacy `CreateChatDialog` (gated on the "Chat Name"
-// field, "Create Chat" button) is replaced by `NewChatDialog` — gated on the
-// "Task" field instead (the name is now derived from the task when left
-// blank), primary action "Start chat" (04-screen-map.md NewChat row, R-1).
+// D-133: both create surfaces need only a name — the first message is optional
+// (the user can type or dictate it in the chat). A first message alone still
+// names the chat. Dialog primary action "Start chat", page "Create chat".
 test.describe('New chat dialog', () => {
-  test('Start chat is gated on the task, then creates and navigates', async ({ page, gotoApp, tracker }) => {
+  test('a name alone starts the chat, which opens empty', async ({ page, gotoApp, tracker }) => {
     await gotoApp('/chats');
     await page.getByRole('button', { name: 'New chat', exact: true }).first().click();
 
@@ -120,10 +119,21 @@ test.describe('New chat dialog', () => {
     await expect(start).toBeDisabled();
 
     const name = `W2 Dialog ${Date.now()}`;
-    await page.getByRole('textbox', { name: 'Task' }).fill(`Fix ${name}`);
+    await page.getByRole('textbox', { name: 'Name' }).fill(name);
     await expect(start).toBeEnabled();
     await start.click();
 
+    await expect(page).toHaveURL(/\/chats\/[0-9a-f-]{36}/, { timeout: 15_000 });
+    const id = page.url().split('/chats/')[1];
+    if (id) tracker.track('chat', id);
+    await expect(page.getByTestId('agent-turn-header')).toHaveCount(0);
+  });
+
+  test('a first message alone also starts the chat', async ({ page, gotoApp, tracker }) => {
+    await gotoApp('/chats');
+    await page.getByRole('button', { name: 'New chat', exact: true }).first().click();
+    await page.getByRole('textbox', { name: /First message/ }).fill(`Fix W2 Dialog ${Date.now()}`);
+    await page.getByRole('button', { name: /Start chat/i }).click();
     await expect(page).toHaveURL(/\/chats\/[0-9a-f-]{36}/, { timeout: 15_000 });
     const id = page.url().split('/chats/')[1];
     if (id) tracker.track('chat', id);
@@ -131,7 +141,7 @@ test.describe('New chat dialog', () => {
 });
 
 test.describe('ChatCreatePage (/chats/new)', () => {
-  test('Create chat is gated on the task, then creates and navigates', async ({ page, gotoApp, tracker }) => {
+  test('Create chat needs only a name, then creates and navigates', async ({ page, gotoApp, tracker }) => {
     await gotoApp('/chats/new');
     await expect(page.getByRole('heading', { name: 'New chat' })).toBeVisible();
 
@@ -139,7 +149,7 @@ test.describe('ChatCreatePage (/chats/new)', () => {
     await expect(create).toBeDisabled();
 
     const name = `W2 Page ${Date.now()}`;
-    await page.getByRole('textbox', { name: 'What should the agent do?' }).fill(`Fix ${name}`);
+    await page.getByRole('textbox', { name: 'Name' }).fill(name);
     await expect(create).toBeEnabled();
     await create.click();
 

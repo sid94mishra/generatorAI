@@ -6,6 +6,7 @@ import {
   buildCreateChatParams,
   chatCreateBlockingReason,
   chatCreateDisplayName,
+  chatCreateFirstMessage,
 } from '../mapDraftToParams.js';
 
 function draft(overrides: Partial<CreateChatDraft> = {}): CreateChatDraft {
@@ -18,19 +19,23 @@ function codebaseSource(overrides: Partial<DraftSource> = {}): DraftSource {
 }
 
 describe('chatCreateBlockingReason', () => {
-  it('blocks on an empty task, worded for the caller', () => {
-    expect(chatCreateBlockingReason({ draft: draft(), sourceDrafts: [] }, 'start')).toBe(
-      'Describe the task to start the chat',
-    );
-    expect(chatCreateBlockingReason({ draft: draft(), sourceDrafts: [] }, 'create')).toBe(
-      'Describe the task to create the chat',
+  it('blocks a chat with neither a name nor a first message, worded for the caller', () => {
+    expect(chatCreateBlockingReason({ draft: draft(), sourceDrafts: [] }, 'start')).toBe('Name the chat to start it');
+    expect(chatCreateBlockingReason({ draft: draft({ name: '   ' }), sourceDrafts: [] }, 'create')).toBe(
+      'Name the chat to create it',
     );
   });
 
-  it('is ready once the task is non-empty and sources are valid', () => {
+  it('a name alone is enough — the first message is optional', () => {
+    expect(chatCreateBlockingReason({ draft: draft({ name: 'Login bug' }), sourceDrafts: [] }, 'start')).toBeNull();
+    expect(chatCreateFirstMessage(draft({ name: 'Login bug', prompt: '  ' }))).toBeUndefined();
+  });
+
+  it('a first message alone also names the chat', () => {
     expect(
       chatCreateBlockingReason({ draft: draft({ prompt: 'Fix the flaky test' }), sourceDrafts: [] }, 'start'),
     ).toBeNull();
+    expect(chatCreateFirstMessage(draft({ prompt: 'Fix the flaky test' }))).toBe('Fix the flaky test');
   });
 
   it('surfaces a source-list error even with a task filled in', () => {

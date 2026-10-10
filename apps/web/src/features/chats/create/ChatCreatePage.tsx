@@ -14,6 +14,10 @@
 //     facts per row) as plain `useState`.
 // Both meet only at submit, through `buildCreateChatParams`.
 //
+// Sections (D-133), shared with the dialog: Chat (Name · Description, an
+// optional First message — a name is all a chat needs), Who works on this
+// (cards, agent, model · effort), Where, Behaviour (toggle rows), More.
+//
 // The NewChatDialog's "Open full form" hands its draft over in router state
 // (`{ draft: Partial<CreateChatDraft> }`); its scalar fields prefill this
 // page.
@@ -44,6 +48,7 @@ import { ChoiceCardGrid, type ChoiceCardOption } from '@/ui/patterns/ChoiceCardG
 import { FormSection } from '@/ui/patterns/FormSection/FormSection.js';
 import { KbdHintRow } from '@/ui/patterns/KbdHintRow/KbdHintRow.js';
 import { PageHeader } from '@/ui/patterns/PageHeader/PageHeader.js';
+import { SettingRow } from '@/ui/patterns/SettingsSection/SettingsSection.js';
 import { SummaryAside, type SummaryAsideSection } from '@/ui/patterns/SummaryAside/SummaryAside.js';
 import { FormWithAside } from '@/ui/templates/FormWithAside/FormWithAside.js';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
@@ -59,18 +64,16 @@ import { Textarea } from '@/ui/primitives/Textarea/Textarea.js';
 import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { cn } from '@/ui/lib/cn.js';
 import { BrowserVisibilityField, DEFAULT_BROWSER_SETTINGS } from './BrowserVisibilityField.js';
-import { buildCreateChatParams, chatCreateBlockingReason, chatCreateDisplayName } from './mapDraftToParams.js';
+import { buildCreateChatParams, chatCreateBlockingReason, chatCreateDisplayName, chatCreateFirstMessage } from './mapDraftToParams.js';
 import { agentRuntimeSelection, contextTiersFor, defaultReasoningEffortFor, reasoningLevelsFor, type ContextTier } from './modelControls.js';
 import { modChord } from '@/lib/shortcuts.js';
 
 // ── Constants ───────────────────────────────────────────────────
 
-const TASK_REQUIRED = 'Describe the task to start the chat';
 const MAX_TAGS = 20;
 const MAX_TAG_LENGTH = 50;
 
 /** Per-field shape rules, mirroring the server's `ChatSchemas.ts` caps. */
-const taskSchema = z.string().refine((s) => s.trim().length > 0, TASK_REQUIRED);
 const nameSchema = z.string().max(200, 'Keep the name under 200 characters');
 const descriptionSchema = z.string().max(2000, 'Keep the description under 2000 characters');
 
@@ -192,7 +195,10 @@ export function ChatCreatePage() {
         const chat = await createChat.mutateAsync(buildCreateChatParams({ draft, sourceDrafts }));
         // Fire-and-forget: the server answers before it persists the user
         // message (useSendChatPromptTo's own note); SSE carries the rest.
-        sendFirstPrompt.mutate({ chatId: chat.id, prompt: draft.prompt, ...(draft.planFirst ? { mode: 'plan' as const } : {}) });
+        const firstMessage = chatCreateFirstMessage(draft);
+        if (firstMessage) {
+          sendFirstPrompt.mutate({ chatId: chat.id, prompt: firstMessage, ...(draft.planFirst ? { mode: 'plan' as const } : {}) });
+        }
         navigate(`/chats/${chat.id}`);
       } catch (err) {
         toast.error("Couldn't create the chat", { description: err instanceof Error ? err.message : String(err) });
@@ -202,7 +208,6 @@ export function ChatCreatePage() {
 
   const values = useStore(form.store, (s) => s.values);
   const isSubmitting = useStore(form.store, (s) => s.isSubmitting);
-  const submissionAttempts = useStore(form.store, (s) => s.submissionAttempts);
 
   // ── Live data the draft refers to ─────────────────────────────
   const { data: models } = useModels();
@@ -232,6 +237,8 @@ export function ChatCreatePage() {
     const tier = contextTiers.some((t) => t.tier === v.contextTier) ? v.contextTier : undefined;
     return {
       ...v,
+      // Plan first applies to a first message; with none there is nothing to plan yet.
+      planFirst: (v.planFirst ?? false) && chatCreateFirstMessage(v) !== undefined,
       orchestratorMode: orchestratorForced || v.orchestratorMode,
       reasoningEffort: effort,
       contextTier: tier,
@@ -318,42 +325,19 @@ export function ChatCreatePage() {
     contextTiers.find((t) => t.tier === draft.contextTier)?.tokens ?? activeModel?.promptTokenLimit;
 
   // ── Sections ──────────────────────────────────────────────────
-  const taskSection = (
-    <FormSection title="Task" hint="Sent as the first message when the chat opens." first>
-      <form.Field name="prompt" validators={{ onChange: taskSchema, onBlur: taskSchema }}>
-        {(field) => {
-          const error =
-            field.state.meta.isBlurred || submissionAttempts > 0 ? firstError(field.state.meta.errors) : undefined;
-          return (
-            <div className="flex flex-col gap-1.5">
-              <Textarea
-                aria-label="What should the agent do?"
-                placeholder="What should the agent do?"
-                variant="prose"
-                autosize={{ minRows: 3, maxRows: 12 }}
-                value={field.state.value}
-                onChange={(e) => field.handleChange(e.target.value)}
-                onBlur={field.handleBlur}
-                invalid={error != null}
-                aria-invalid={error != null}
-                data-testid="chat-create-task"
-              />
-              {error != null ? (
-                <span role="alert" className="flex items-center gap-1 text-small text-err">
-                  <Icon concept="status-failed" size={12} />
-                  {error}
-                </span>
-              ) : null}
-            </div>
-          );
-        }}
-      </form.Field>
+  // One structure for the dialog and this page (D-133): the chat, Who, Where,
+  // Behaviour, More — labels above controls, a rule between sections.
+  const hasFirstMessage = chatCreateFirstMessage(values) !== undefined;
+
+  const chatSection = (
+    <FormSection title="Chat" hint="A name is all it needs; you can write the first message in the chat." first>
       <div className="grid grid-cols-2 gap-4">
         <form.Field name="name" validators={{ onChange: nameSchema }}>
           {(field) => (
             <Field label="Name" error={firstError(field.state.meta.errors)}>
               <Input
-                placeholder="Named from the task if left empty"
+                autoFocus
+                placeholder={chatCreateDisplayName({ name: '', prompt: values.prompt }) || 'e.g. Fix the login redirect'}
                 value={field.state.value}
                 onChange={(e) => field.handleChange(e.target.value)}
                 onBlur={field.handleBlur}
@@ -376,6 +360,25 @@ export function ChatCreatePage() {
           )}
         </form.Field>
       </div>
+      <form.Field name="prompt">
+        {(field) => (
+          <Field
+            label="First message"
+            optional
+            hint="Sent when the chat opens. Leave it empty to type or dictate it in the chat."
+          >
+            <Textarea
+              placeholder="What should the agent do, and how will you know it is done?"
+              variant="prose"
+              autosize={{ minRows: 3, maxRows: 12 }}
+              value={field.state.value}
+              onChange={(e) => field.handleChange(e.target.value)}
+              onBlur={field.handleBlur}
+              data-testid="chat-create-task"
+            />
+          </Field>
+        )}
+      </form.Field>
     </FormSection>
   );
 
@@ -395,16 +398,15 @@ export function ChatCreatePage() {
         onValueChange={(v) => setWho(v as ChatCreateWho)}
         options={WHO_OPTIONS}
       />
-      {values.who === 'model' ? (
-        <div className="flex items-center gap-2 text-small text-fg-3">
-          <Icon concept="info" size={14} />
-          No agent — platform default instructions. Skills, MCP servers and tool groups come from Capabilities below.
-        </div>
-      ) : (
-        <div className="flex flex-col gap-1.5">
-          <span className="text-small font-medium text-fg-2">
-            {values.who === 'orchestrator' ? 'Orchestrator' : 'Agent'}
-          </span>
+      {values.who === 'model' ? null : (
+        <Field
+          label={values.who === 'orchestrator' ? 'Orchestrator' : 'Agent'}
+          hint={
+            boundAgent
+              ? `${capabilities} · added to ${boundAgent.name}'s own, never a replacement`
+              : 'Brings its own instructions, skills and MCP servers.'
+          }
+        >
           <AgentPicker
             value={values.agentRef}
             onChange={setAgent}
@@ -412,39 +414,40 @@ export function ChatCreatePage() {
             role={values.who === 'orchestrator' ? 'orchestrator' : 'agent'}
             data-testid="chat-create-agent"
           />
-        </div>
+        </Field>
       )}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="flex items-center gap-2 text-ui text-fg">
-            Orchestrate mode
-            {orchestratorForced ? <Badge>Set by Orchestrator</Badge> : null}
-          </span>
-          <span className="text-small text-fg-3">
-            Splits the task across background agents on models it picks, then consolidates. Forced on for orchestrators.
-          </span>
-        </div>
-        <Switch
-          aria-label="Orchestrate mode"
-          checked={draft.orchestratorMode}
-          disabled={orchestratorForced}
-          onCheckedChange={(next) => form.setFieldValue('orchestratorMode', next)}
-          data-testid="chat-create-orchestrate"
-        />
-      </div>
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="text-ui text-fg">Plan first</span>
-          <span className="text-small text-fg-3">
-            The first message runs in plan mode: the agent proposes a plan and waits for your review before it changes
-            anything.
-          </span>
-        </div>
-        <Switch
-          aria-label="Plan first"
-          checked={draft.planFirst ?? false}
-          onCheckedChange={(next) => form.setFieldValue('planFirst', next)}
-        />
+      <div className="grid grid-cols-2 items-start gap-4">
+        <Field
+          label="Model"
+          hint={values.who === 'model' ? 'Platform default instructions; change the model any time in the composer.' : undefined}
+        >
+          <ModelPicker
+            variant="field"
+            value={values.model}
+            onChange={(id) => form.setFieldValue('model', id)}
+            ariaLabel="Model"
+          />
+        </Field>
+        {effortLevels.length > 0 ? (
+          <Field label="Reasoning effort">
+            <SegmentedControl
+              label="Reasoning effort"
+              value={draft.reasoningEffort ?? ''}
+              onValueChange={(v) => form.setFieldValue('reasoningEffort', v)}
+              items={effortLevels.map((level) => ({ value: level, label: reasoningEffortLabel(level) }))}
+            />
+          </Field>
+        ) : null}
+        {contextTiers.length > 0 ? (
+          <Field label="Context window">
+            <SegmentedControl<ContextTier>
+              label="Context window"
+              value={(draft.contextTier as ContextTier | undefined) ?? 'default'}
+              onValueChange={(v) => form.setFieldValue('contextTier', v)}
+              items={contextTiers.map((t) => ({ value: t.tier, label: formatTokens(t.tokens) }))}
+            />
+          </Field>
+        ) : null}
       </div>
       {showPowerfulNudge ? (
         <Callout tone="warn" title="Pick a powerful model">
@@ -452,48 +455,6 @@ export function ChatCreatePage() {
           model.
         </Callout>
       ) : null}
-    </FormSection>
-  );
-
-  const modelSection = (
-    <FormSection
-      title="Model"
-      hint="Your default from Settings. Effort applies from the first turn; change it any time in the composer."
-      columns={2}
-    >
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <span className="text-small font-medium text-fg-2">Model</span>
-        <ModelPicker
-          variant="field"
-          value={values.model}
-          onChange={(id) => form.setFieldValue('model', id)}
-          ariaLabel="Model"
-        />
-      </div>
-      <div className="flex flex-wrap items-end gap-4">
-        {effortLevels.length > 0 ? (
-          <div className="flex flex-col gap-1.5">
-            <span className="text-small font-medium text-fg-2">Effort</span>
-            <SegmentedControl
-              label="Reasoning effort"
-              value={draft.reasoningEffort ?? ''}
-              onValueChange={(v) => form.setFieldValue('reasoningEffort', v)}
-              items={effortLevels.map((level) => ({ value: level, label: reasoningEffortLabel(level) }))}
-            />
-          </div>
-        ) : null}
-        {contextTiers.length > 0 ? (
-          <div className="flex flex-col gap-1.5">
-            <span className="text-small font-medium text-fg-2">Context</span>
-            <SegmentedControl<ContextTier>
-              label="Context window"
-              value={(draft.contextTier as ContextTier | undefined) ?? 'default'}
-              onValueChange={(v) => form.setFieldValue('contextTier', v)}
-              items={contextTiers.map((t) => ({ value: t.tier, label: formatTokens(t.tokens) }))}
-            />
-          </div>
-        ) : null}
-      </div>
     </FormSection>
   );
 
@@ -514,24 +475,49 @@ export function ChatCreatePage() {
     </FormSection>
   );
 
-  const capabilitiesSection = (
-    <FormSection
-      title="Capabilities"
-      hint={
-        boundAgent
-          ? `Added to ${boundAgent.name}'s own, never a replacement. Removals always win.`
-          : 'Inherited unless pinned here.'
-      }
-    >
-      <div className="flex items-center gap-2 text-ui text-fg-2">
-        <Icon concept="skills" size={14} className="text-fg-3" />
-        {capabilities}
+  const behaviourSection = (
+    <FormSection title="Behaviour" hint="How the chat works once it starts.">
+      <div className="flex flex-col">
+        <SettingRow
+          label={
+            <span className="flex items-center gap-2">
+              Orchestrate mode
+              {orchestratorForced ? <Badge>Set by Orchestrator</Badge> : null}
+            </span>
+          }
+          hint="Splits the task across background agents on models it picks, then consolidates."
+          control={
+            <Switch
+              aria-label="Orchestrate mode"
+              checked={draft.orchestratorMode}
+              disabled={orchestratorForced}
+              onCheckedChange={(next) => form.setFieldValue('orchestratorMode', next)}
+              data-testid="chat-create-orchestrate"
+            />
+          }
+        />
+        <SettingRow
+          label="Plan first"
+          hint={
+            hasFirstMessage
+              ? 'The first message runs in plan mode: the agent proposes a plan and waits for your review.'
+              : 'Applies to a first message — or pick Plan in the chat composer.'
+          }
+          control={
+            <Switch
+              aria-label="Plan first"
+              checked={draft.planFirst ?? false}
+              disabled={!hasFirstMessage}
+              onCheckedChange={(next) => form.setFieldValue('planFirst', next)}
+            />
+          }
+        />
       </div>
     </FormSection>
   );
 
   const moreSection = (
-    <FormSection title="More" hint="Optional." columns={2}>
+    <FormSection title="More" hint="Optional.">
       <Field label="Tags" hint={`↵ to add · up to ${String(MAX_TAGS)}`}>
         <div className="flex flex-col gap-2">
           {values.tags.length > 0 ? (
@@ -573,7 +559,7 @@ export function ChatCreatePage() {
 
   // ── Summary aside ─────────────────────────────────────────────
   const chatHint = [
-    values.name.trim() ? null : displayName ? 'Named from the task' : null,
+    values.name.trim() ? null : displayName ? 'Named from the first message' : null,
     values.tags.length > 0 ? plural(values.tags.length, 'tag', 'tags') : null,
   ].filter(Boolean);
 
@@ -611,7 +597,7 @@ export function ChatCreatePage() {
     setupLines.push(`${createParts.join(' and ')} will be created`);
   }
   if (draft.orchestratorMode) setupLines.push('Background agents are created as the work splits');
-  setupLines.push('Opens the chat and sends your task');
+  setupLines.push(hasFirstMessage ? 'Opens the chat and sends your first message' : 'Opens the chat — write the first message there');
 
   const asideSections: SummaryAsideSection[] = [
     {
@@ -685,11 +671,10 @@ export function ChatCreatePage() {
         }
         form={
           <>
-            {taskSection}
+            {chatSection}
             {whoSection}
-            {modelSection}
             {whereSection}
-            {capabilitiesSection}
+            {behaviourSection}
             {moreSection}
           </>
         }
