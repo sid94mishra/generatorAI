@@ -16,8 +16,8 @@ import * as path from 'node:path';
 import { PROMPT_IPC } from '../shared/ipc';
 import { appearanceMirror } from './appearance';
 import { log } from './logger';
+import { localPageUrl } from './local-pages';
 
-const RESOURCES = path.join(__dirname, '..', '..', 'resources');
 const PRELOAD = path.join(__dirname, '..', 'preload', 'prompt.js');
 
 export interface PromptOptions {
@@ -81,7 +81,7 @@ export function showPrompt(options: PromptOptions): Promise<string | null> {
     // Closing the window with the titlebar or Cmd+W is a cancel.
     win.on('closed', () => finish(null));
     win.once('ready-to-show', () => win.show());
-    win.loadFile(path.join(RESOURCES, 'prompt.html'), { search: query.toString() }).catch((err: unknown) => {
+    win.loadURL(localPageUrl('prompt.html', query)).catch((err: unknown) => {
       log.error('Could not open the prompt window', err);
       finish(null);
     });

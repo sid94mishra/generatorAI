@@ -213,6 +213,6 @@ describe('local-only channels refuse a remote server page', () => {
     // The remote allowlist names real channels only, and nothing sensitive.
     const all = new Set<string>([...Object.values(IPC), ...Object.values(BROWSER_IPC)]);
     for (const channel of REMOTE_ALLOWED_CHANNELS) expect(all.has(channel), channel).toBe(true);
-    expect([...REMOTE_ALLOWED_CHANNELS].filter((c) => localOnly.includes(c))).toEqual([]);
+    expect([...REMOTE_ALLOWED_CHANNELS].filter((c) => (localOnly as readonly string[]).includes(c))).toEqual([]);
   });
 });

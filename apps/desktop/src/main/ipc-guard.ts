@@ -83,7 +83,7 @@ export function rejectionReason(event: GuardableEvent, deps: IpcGuardDeps, optio
   const frameUrl = frame?.url;
   if (frameUrl) {
     const appUrl = deps.getAppUrl();
-    // The error screen is a file:// page we load ourselves; it has no bridge
+    // The error screen is a local page (gai-local://) we load ourselves; it has no bridge
     // calls, so refusing it is harmless and keeps the rule simple.
     if (!isAppOrigin(frameUrl, appUrl)) return `frame origin ${safeOrigin(frameUrl)} is not the app`;
   }

@@ -28,6 +28,7 @@ import { windowChromeArg } from '../shared/window-chrome-arg';
 import { appearanceMirror } from './appearance';
 import { appRouteOf, isAppOrigin, isExternalUrlAllowed } from './navigation-guard';
 import { hasUnsavedWork } from './unsaved-work';
+import { localPageUrl } from './local-pages';
 import { appWindowPermissionPolicy, installCspFloor, installPermissionPolicy } from './session-hardening';
 
 const RESOURCES = path.join(__dirname, '..', '..', 'resources');
@@ -184,7 +185,7 @@ export class WindowManager {
       backgroundColor: this.backgroundColor(),
       webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
     });
-    this.splashWindow.loadFile(path.join(RESOURCES, 'splash.html')).catch((e) => {
+    this.splashWindow.loadURL(localPageUrl('splash.html')).catch((e) => {
       log.warn('Failed to load splash', e);
     });
     this.splashWindow.on('closed', () => {
@@ -494,7 +495,7 @@ export class WindowManager {
     }
     this.closeSplash();
     const target = this.mainWindow ?? this.createBareWindow();
-    const url = `file://${path.join(RESOURCES, 'error.html')}?message=${encodeURIComponent(message)}`;
+    const url = localPageUrl('error.html', new URLSearchParams({ message }));
     target.loadURL(url).catch((e) => log.error('Failed to load error page', e));
     if (!target.isVisible()) target.show();
   }

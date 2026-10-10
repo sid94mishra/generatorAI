@@ -37,6 +37,7 @@ import {
 } from './updater';
 import { repointTarget } from './repoint';
 import { isQuitting, quitApp } from './quit-coordinator';
+import { handleLocalPages, registerLocalPagesScheme } from './local-pages';
 
 const DEV_SERVER_URL = process.env['DESKTOP_DEV_SERVER_URL'] || null;
 const mode: 'dev' | 'standalone' = DEV_SERVER_URL ? 'dev' : 'standalone';
@@ -53,6 +54,9 @@ let appUrl: string | null = null;
 let ipcToken: string | null = null;
 
 // Single-instance lock — focus the existing window instead of opening a 2nd.
+// Before ready: the shell's splash/error/prompt pages come from a custom scheme (local-pages.ts).
+registerLocalPagesScheme();
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -121,6 +125,7 @@ async function onReady(): Promise<void> {
   // (agent-tests/mock-update-server.mjs verify-log) reads it to confirm the
   // app came back on the new version.
   log.info('GeneratorAI starting', { version: app.getVersion(), platform: process.platform, packaged: app.isPackaged });
+  handleLocalPages();
   const settings = loadSettings();
   // Mirror the renderer's last mode (D-25) before any window exists, so
   // prefers-color-scheme and the native chrome agree from the first frame.
