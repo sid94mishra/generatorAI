@@ -1185,6 +1185,45 @@ and a redacted `getAppInfo` (no data dir, log file or server URL). Local-only: s
 dialogs, save-to-disk, reveal-in-folder, desktop settings, update install, pairing, every native-browser tab operation.
 Evidence: `agent-tests/desktop-remote-ipc-smoke.mjs` (14/14; 9 of its checks failed before), `ipc-guard.test.ts`.
 
+### D-131 Model lists come only from each provider's own API; experimental providers are hidden by the server (2026-10-10) — Final
+Owner override of the ComposerModelPicker / ChatCreateModel boards (no tier groups, no "Recommended"/"Default" rows).
+- **Source.** Claude Code: `query().supportedModels()` (SDK 0.3.220, CLI 2.1.291); Codex: app-server `model/list`
+  (paginated, rows flagged `hidden` left out exactly as Codex's own picker does); Copilot: `CopilotClient.listModels()`;
+  OpenCode: `GET /config/providers`; ACP has no listing call outside a session (empty, never faked). An adapter copies
+  only returned fields (`HarnessModel`: description, `isDefault`, `resolvedModel`, `inputModalities`, `features`,
+  efforts, limits, Copilot's own `category`/billing). Nothing is inferred: Claude's invented tier and 200K/1M context
+  windows are gone (real limits arrive from a turn's `modelUsage`); its `default` alias is folded into the row it
+  resolves to, which is flagged `isDefault`. One exception, kept because it is what runs: a model's
+  `defaultReasoningEffort` for Claude is the server's runtime default (Codex returns its own). The orchestrator keeps a
+  routing-only Claude family cost hint (opus/fable high, haiku low) that is never displayed.
+- **The "two Codex models".** The backend filters `model/list` by plan AND client version: the pinned codex 0.154.0
+  got GPT-5.6-Terra/Luna only; 0.160.1+ gets GPT-6-Luna too (same free ChatGPT account). `@openai/codex` is pinned to
+  0.162.1 (schema re-captured; `thread/rollback` is gone, so a count-only rewind looks the turn up with
+  `thread/turns/list`). Models beyond that (Sol, Astra …) are plan-gated: this account's plan is `free`.
+- **Cache.** Registry snapshot TTL 5 min + disk cache; `?refresh=1` / Refresh models forces a probe and drops a
+  provider's own cache (Claude's 5-min catalog); sign-in / sign-out `invalidate(type)` first. A failed listing shows
+  the provider's reason (e.g. Copilot "Not authenticated") and no models.
+- **Picker.** One plain list per provider in the provider's order; a small "default" badge only when the provider
+  flags it; hover / keyboard highlight shows client-core `modelDetails()` — only fields present.
+- **Visibility.** `HARNESS_PROVIDER_STABILITY` (shared): claude-agent, codex, copilot `stable` (dedicated adapter
+  suites — claude-*, CodexProvider*, copilot-* — plus the conformance test; Claude and Codex verified live on the
+  owner's logins; Copilot is the historical primary); opencode, acp `experimental` (fake-server tests only, never
+  configured by the server, no e2e). Hidden by default; `GET/PUT /api/harness/visibility` (PUT: admin:harnesses,
+  persisted to `<dataDir>/provider-visibility.json`) and `GENERATORAI_EXPERIMENTAL_PROVIDERS=opencode,acp|all` reveal
+  them. Enforced in `HarnessRegistry.setHiddenTypes`: a hidden provider is absent from every status/model API, never
+  probed, cannot be brought up (`ProviderHiddenError`), and its sign-in/out/switch answer like an unknown provider.
+Evidence: docs/redesign/reviews/models-and-providers.md; `HarnessRegistry.visibility.test.ts`,
+`providerVisibility.test.ts`, `claude-model-catalog.test.ts`, `modelPickerCatalog.test.ts`.
+
+### D-132 Provider logos come from one registry (2026-10-10) — Final
+`PROVIDER_LOGOS` (packages/design-tokens/src/provider-logos.ts) holds each provider's mark as 24×24 path data with its
+source and licence (Simple Icons 16.34.0 CC0 for Claude and OpenCode, Simple Icons/Primer MIT for GitHub Copilot, Lobe
+Icons 1.95.1 MIT for Codex since Simple Icons dropped OpenAI); unknown ids get a neutral mark. Web
+`ui/primitives/ProviderLogo` and mobile `ui/primitives/ProviderLogo` draw it: sizes, `color` (brand colour where the
+brand has one — Claude's D97757 — else the text colour) and `mono`. This overrides mobile MP-52's "never a brand hex
+in-app" for provider marks only; BrandMark keeps the app and GitHub marks, VendorIcons keeps AppMark/GitHubMark.
+Adding a provider = one registry entry. Kit additions: Badge `size="sm"`, Select item `leading`, ListRow `leading`.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
