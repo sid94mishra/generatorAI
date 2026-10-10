@@ -1,12 +1,14 @@
-// G-09 — the model picker's read model. Pinned: ready providers first (the
-// configured default first among them), never a default that is not ready,
-// per-model details from the wire fields, and a flat ready-only list.
+// G-09 / D-131 — the model picker's read model. Pinned: ready providers first
+// (the configured default first among them), never a default that is not
+// ready, a plain model list, detail rows built only from fields the provider
+// returned, and a flat ready-only list.
 
 import { describe, expect, it } from 'vitest';
 import type { HarnessProviderStatus, HarnessProvidersResponse } from '@generatorai/shared';
 import {
   buildModelPickerCatalog,
   findPickerModel,
+  modelDetails,
   modelReasoningEfforts,
   providerAvailability,
   readyCatalogModels,
@@ -89,19 +91,18 @@ describe('buildModelPickerCatalog', () => {
   });
 });
 
-describe('toPickerModel (detail pane)', () => {
-  it('maps tier, description, context, long context, max output, efforts, vision', () => {
+describe('toPickerModel', () => {
+  it('maps the wire fields, keeping the provider default flag', () => {
     const m = toPickerModel(
       {
         id: 'opus',
-        name: 'Opus',
-        category: 'powerful',
-        description: '  Deep reasoning  ',
+        name: 'Opus 5.5',
+        description: '  For complex work  ',
+        isDefault: true,
         promptTokenLimit: 200_000,
         supportsLongContext: true,
         longContext: { promptTokenLimit: 1_000_000 },
         maxOutputTokens: 64_000,
-        supportsVision: true,
         supportsReasoning: true,
         reasoningEfforts: ['low', 'medium', 'high'],
         defaultReasoningEffort: 'medium',
@@ -110,27 +111,25 @@ describe('toPickerModel (detail pane)', () => {
     );
     expect(m).toMatchObject({
       provider: 'claude-agent',
-      tier: 'powerful',
-      description: 'Deep reasoning',
+      description: 'For complex work',
+      isDefault: true,
       contextTokens: 200_000,
       longContextTokens: 1_000_000,
       maxOutputTokens: 64_000,
-      vision: true,
       reasoningEfforts: ['low', 'medium', 'high'],
       defaultReasoningEffort: 'medium',
     });
   });
 
   it('leaves unknowns empty instead of inventing values', () => {
-    const m = toPickerModel({ id: 'x', name: '', category: 'turbo', description: ' ', maxOutputTokens: 0 }, 'p');
+    const m = toPickerModel({ id: 'x', name: '', description: ' ', maxOutputTokens: 0 }, 'p');
     expect(m).toMatchObject({
       name: 'x',
-      tier: null,
       description: null,
+      isDefault: false,
       contextTokens: null,
       longContextTokens: null,
       maxOutputTokens: null,
-      vision: false,
       reasoningEfforts: [],
       defaultReasoningEffort: null,
     });
@@ -143,6 +142,80 @@ describe('toPickerModel (detail pane)', () => {
     );
     expect(m.contextTokens).toBe(128_000);
     expect(m.defaultReasoningEffort).toBeNull();
+  });
+});
+
+describe('modelDetails (only what the provider returned)', () => {
+  it('Codex model/list row: efforts, default effort, input modalities — and nothing about context', () => {
+    const m = toPickerModel(
+      {
+        id: 'gpt-6-luna',
+        name: 'GPT-6-Luna',
+        provider: 'codex',
+        description: 'Fast and affordable model for easier tasks.',
+        isDefault: true,
+        supportsReasoning: true,
+        reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+        defaultReasoningEffort: 'medium',
+        inputModalities: ['text', 'image'],
+        supportsVision: true,
+      },
+      'codex',
+    );
+    expect(modelDetails(m)).toEqual([
+      { label: 'Reasoning', value: 'low, medium, high, xhigh, max' },
+      { label: 'Default effort', value: 'medium' },
+      { label: 'Input', value: 'text, image' },
+    ]);
+  });
+
+  it('Claude supportedModels row: resolved id and capability flags', () => {
+    const m = toPickerModel(
+      {
+        id: 'opus',
+        name: 'Opus 5.5',
+        resolvedModel: 'claude-opus-5-5',
+        features: ['Adaptive thinking', 'Fast mode'],
+        supportsReasoning: true,
+        reasoningEfforts: ['low', 'max'],
+      },
+      'claude-agent',
+    );
+    expect(modelDetails(m)).toEqual([
+      { label: 'Resolves to', value: 'claude-opus-5-5', mono: true },
+      { label: 'Reasoning', value: 'low, max' },
+      { label: 'Features', value: 'Adaptive thinking, Fast mode' },
+    ]);
+  });
+
+  it('Copilot listModels row: limits, vision, picker category, billing', () => {
+    const m = toPickerModel(
+      {
+        id: 'gpt-x',
+        name: 'GPT X',
+        promptTokenLimit: 128_000,
+        totalContextWindow: 192_000,
+        maxOutputTokens: 64_000,
+        supportsVision: false,
+        category: 'versatile',
+        billingMultiplier: 1,
+        pricing: { input: 1, output: 4, batchSize: 1_000_000 },
+      },
+      'copilot',
+    );
+    expect(modelDetails(m)).toEqual([
+      { label: 'Context (prompt)', value: '128K', mono: true },
+      { label: 'Context (total)', value: '192K', mono: true },
+      { label: 'Max output', value: '64K', mono: true },
+      { label: 'Vision', value: 'Not supported' },
+      { label: 'Category', value: 'versatile' },
+      { label: 'Billing', value: '1×', mono: true },
+      { label: 'AI credits', value: 'in 1 · out 4 per 1M tokens', mono: true },
+    ]);
+  });
+
+  it('a model with nothing but a name has no detail rows', () => {
+    expect(modelDetails(toPickerModel({ id: 'bare', name: 'Bare' }, 'p'))).toEqual([]);
   });
 });
 

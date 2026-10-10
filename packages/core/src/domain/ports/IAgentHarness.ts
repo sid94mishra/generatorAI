@@ -36,13 +36,30 @@ export interface HarnessClientEvent {
   data?: { message?: string };
 }
 
+/**
+ * One model as the PROVIDER reports it for the signed-in account (D-131).
+ *
+ * Every field comes from the provider's own listing call (Claude Agent SDK
+ * `supportedModels()`, Codex `model/list`, Copilot `listModels()`, OpenCode
+ * `/config/providers`, ACP `session/new`) or from limits the provider reported
+ * at runtime. An adapter never fills a field the provider did not return —
+ * no inferred tiers, no assumed context windows.
+ */
 export interface HarnessModel {
   id: string;
   name: string;
   provider?: string;
-  /** Provider-supplied blurb describing the model's strengths. */
+  /** The provider's own blurb. */
   description?: string;
-  /** Capability grouping for the model picker: 'lightweight' | 'versatile' | 'powerful'. */
+  /** The provider marks this model as the account's default (Codex `isDefault`, Claude's `default` alias target). */
+  isDefault?: boolean;
+  /** Canonical wire id an alias resolves to (Claude: `opus` → `claude-opus-5-5`). */
+  resolvedModel?: string;
+  /** Input kinds the model accepts, as the provider names them (Codex `inputModalities`). */
+  inputModalities?: string[];
+  /** Provider-reported capability flags, named for display ("Fast mode", "Adaptive thinking"). */
+  features?: string[];
+  /** The provider's own picker category label, when it sends one (Copilot `modelPickerCategory`). */
   category?: string;
   /**
    * Maximum PROMPT tokens for the default tier — the number the context gauge

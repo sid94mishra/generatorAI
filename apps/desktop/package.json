@@ -47,7 +47,7 @@
     "yaml": "^2.8.3"
   },
   "optionalDependencies": {
-    "@openai/codex": "0.154.0",
+    "@openai/codex": "0.162.1",
     "@trycua/cua-driver": "0.19.3"
   }
 }

@@ -381,13 +381,15 @@ export class MultiHarness implements IAgentHarness {
     // every provider looks unready, and demoting `primary` there would route
     // the first conversation somewhere the user never asked for. Trust the
     // configured provider until a probe actually contradicts it.
-    if (primaryStatus?.ready || primaryStatus?.checkedAt == null) return primary;
+    // D-131 — a hidden primary is never routed to, probed or not.
+    const primaryHidden = this.registry.isHidden?.(primary) === true;
+    if (!primaryHidden && (primaryStatus?.ready || primaryStatus?.checkedAt == null)) return primary;
 
     const [fallback] = this.registry.readyTypes ?? [];
     if (fallback) {
       this.logger?.warn(
         `[MultiHarness] primary provider '${primary}' is not ready` +
-          `${primaryStatus.error ? ` (${primaryStatus.error})` : ''} — routing to '${fallback}' instead. ` +
+          `${primaryStatus?.error ? ` (${primaryStatus.error})` : ''} — routing to '${fallback}' instead. ` +
           `Sign in to '${primary}' or set a default model to silence this.`,
       );
       return fallback;

@@ -1,6 +1,12 @@
 // Shared types barrel
-export { HARNESS_PROVIDER_IDS, REASONING_EFFORTS } from './ProviderConfig.js';
-export type { HarnessProviderId, ReasoningEffort } from './ProviderConfig.js';
+export {
+  HARNESS_PROVIDER_IDS,
+  HARNESS_PROVIDER_LABELS,
+  HARNESS_PROVIDER_STABILITY,
+  harnessProviderLabel,
+  REASONING_EFFORTS,
+} from './ProviderConfig.js';
+export type { HarnessProviderId, HarnessProviderStability, ReasoningEffort } from './ProviderConfig.js';
 export type {
   AgentEvent,
   AgentEventKind,
@@ -532,14 +538,16 @@ export {
 
 // ── Agent-provider catalog (G-09) ──
 export type {
-  ModelTier,
   HarnessCatalogModel,
   HarnessProviderStatus,
   HarnessProvidersResponse,
   HarnessLoginResult,
   HarnessSetDefaultResult,
+  HarnessProviderVisibility,
+  HarnessProviderVisibilitySource,
+  HarnessVisibilityResponse,
+  HarnessVisibilityUpdate,
 } from './HarnessCatalog.js';
-export { MODEL_TIERS, MODEL_TIER_LABELS } from './HarnessCatalog.js';
 
 // ── System info (G-12) ──
 export type { SystemInfo } from './SystemInfo.js';

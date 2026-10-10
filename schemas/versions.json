@@ -16,7 +16,7 @@
     "codex": {
       "status": "generated",
       "artifactPath": "schemas/codex/codex_app_server_protocol.schemas.json",
-      "version": "0.154.0",
+      "version": "0.162.1",
       "capturedBy": "node packages/agent-harness-providers/node_modules/@openai/codex/bin/codex.js app-server generate-json-schema --out <dir>  →  codex_app_server_protocol.schemas.json (the @openai/codex optionalDependency pinned in packages/agent-harness-providers/package.json)",
       "namespaces": ["v2"],
       "methodTable": "jsonrpc",

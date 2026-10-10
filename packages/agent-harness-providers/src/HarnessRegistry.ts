@@ -33,6 +33,7 @@ import { createHarnessProvider } from './HarnessFactory.js';
 import type { HarnessType, HarnessProviderConfig } from './types.js';
 import { readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { FAUX_MODELS } from './providers/faux/FauxProvider.js';
+import { harnessProviderLabel } from '@generatorai/shared';
 
 /**
  * Optional credential probe. Providers that can distinguish "installed" from
@@ -156,20 +157,31 @@ const UNMODELED_CAPABILITIES: Partial<Record<HarnessType, readonly string[]>> = 
   acp: ['hooks'],
 };
 
-/** Human label for a provider type. */
+/** Human label for a provider type (the shared names every client uses). */
 export function harnessTypeLabel(type: HarnessType): string {
-  switch (type) {
-    case 'copilot': return 'GitHub Copilot';
-    // The provider is the Claude Agent SDK (Claude Code), not the raw
-    // Anthropic API — label and brand it accordingly.
-    case 'claude-agent': return 'Claude Code';
-    case 'codex': return 'Codex';
-    case 'opencode': return 'OpenCode';
-    case 'acp': return 'ACP Agent';
-    // P2-00 — the synthetic test-harness status; see HarnessType.
-    case 'faux': return 'Faux (test)';
-    default: return type;
+  return harnessProviderLabel(type);
+}
+
+/**
+ * Thrown by `get()` / `getInstance()` for a provider the server hides (D-131).
+ * Hidden providers are not probed, not listed and cannot run a turn — the
+ * enforcement is here, below every route and every client.
+ */
+export class ProviderHiddenError extends Error {
+  readonly code = 'PROVIDER_HIDDEN';
+  constructor(readonly type: HarnessType) {
+    super(`Provider '${type}' is hidden on this server (experimental). An admin can enable it in Settings › Model providers.`);
+    this.name = 'ProviderHiddenError';
   }
+}
+
+/** Optional: providers that cache their catalog drop it on demand (explicit refresh, sign-in/out). */
+interface ModelCacheAware {
+  invalidateModelCache(): void;
+}
+
+function isModelCacheAware(a: unknown): a is ModelCacheAware {
+  return typeof (a as ModelCacheAware)?.invalidateModelCache === 'function';
 }
 
 /** Live readiness + catalog for one provider. */
@@ -310,6 +322,8 @@ export class HarnessRegistry {
   /** P2-00 — the synthetic 'faux' status, set once at construction when `opts.testFauxHarness`. */
   private readonly fauxStatus: HarnessProviderStatus | undefined;
   private _primary: HarnessType;
+  /** D-131 — providers the server hides from every client (experimental, not revealed). */
+  readonly #hidden = new Set<HarnessType>();
   private refreshInFlight: Promise<HarnessProviderStatus[]> | null = null;
   /** W41 — semaphore flag for fire-and-forget background refresh. */
   #refreshing = false;
@@ -539,9 +553,68 @@ export class HarnessRegistry {
   get statusSnapshot(): Readonly<Record<HarnessType, HarnessProviderStatus>> {
     const result = {} as Record<HarnessType, HarnessProviderStatus>;
     for (const type of ALL_HARNESS_TYPES) {
-      result[type] = { ...this.entries.get(type)!.status };
+      const status = this.entries.get(type)!.status;
+      // D-131 — a hidden provider reads as unusable with no catalog to every caller.
+      result[type] = this.#hidden.has(type)
+        ? { ...status, ready: false, authenticated: false, models: [], error: new ProviderHiddenError(type).message }
+        : { ...status };
     }
     return result;
+  }
+
+  // ── D-131 — server-level provider visibility ────────────────────────────
+
+  /**
+   * Replace the set of hidden providers. A provider that becomes hidden is
+   * shut down (its CLI stops; a chat bound to it fails its next turn with
+   * {@link ProviderHiddenError}); one that becomes visible is probed on the
+   * next refresh. Watchers hear the change at once.
+   */
+  setHiddenTypes(types: Iterable<HarnessType>): void {
+    const next = new Set(types);
+    const newlyHidden = [...next].filter((t) => !this.#hidden.has(t));
+    const newlyShown = [...this.#hidden].filter((t) => !next.has(t));
+    if (newlyHidden.length === 0 && newlyShown.length === 0) return;
+    this.#hidden.clear();
+    for (const t of next) this.#hidden.add(t);
+    for (const type of newlyHidden) {
+      const entry = this.entries.get(type);
+      if (entry?.adapter) {
+        const adapter = entry.adapter;
+        entry.adapter = null;
+        entry.status = { ...entry.status, connected: false, ready: false };
+        void adapter.shutdown().catch(() => { /* best effort */ });
+      }
+      for (const [id, inst] of this.instanceEntries) {
+        if (inst.driverType === type) void this.shutdownInstance(id);
+      }
+    }
+    // A revealed provider has never been probed in this process (or was probed
+    // before it was hidden): make it stale so the next refresh asks it.
+    for (const type of newlyShown) this.invalidate(type);
+    this.opts.logger?.info(`[HarnessRegistry] hidden providers: ${[...this.#hidden].join(', ') || 'none'}`);
+    this.#notifyWatchers();
+  }
+
+  /** Whether the server hides `type` from every client (D-131). */
+  isHidden(type: HarnessType): boolean {
+    return this.#hidden.has(type);
+  }
+
+  /**
+   * Forget what is known about a provider's catalog (all providers when no
+   * type is given): its status goes stale and a provider-side catalog cache is
+   * dropped, so the next refresh asks the provider again. Called after a
+   * sign-in / sign-out and when a provider is revealed.
+   */
+  invalidate(type?: HarnessType): void {
+    const types = type ? [type] : [...ALL_HARNESS_TYPES];
+    for (const t of types) {
+      const entry = this.entries.get(t);
+      if (!entry) continue;
+      delete entry.status.checkedAt;
+      if (isModelCacheAware(entry.adapter)) entry.adapter.invalidateModelCache();
+    }
   }
 
   /**
@@ -648,7 +721,9 @@ export class HarnessRegistry {
 
   /** Types that currently pass the full readiness check. */
   get readyTypes(): HarnessType[] {
-    const base = [...this.entries.values()].filter((e) => e.status.ready).map((e) => e.status.type);
+    const base = [...this.entries.values()]
+      .filter((e) => e.status.ready && !this.#hidden.has(e.status.type))
+      .map((e) => e.status.type);
     return this.fauxStatus ? [...base, this.fauxStatus.type] : base; // P2-00
   }
 
@@ -662,6 +737,7 @@ export class HarnessRegistry {
    * construct an adapter with no connection info and fail the first turn.
    */
   isConfigurable(type: HarnessType): boolean {
+    if (this.#hidden.has(type)) return false; // D-131
     if (AUTO_PROBE_TYPES.includes(type)) return true;
     const key = CONFIG_KEY_FOR_TYPE[type];
     if (!key) return false;
@@ -723,6 +799,7 @@ export class HarnessRegistry {
   async get(type: HarnessType): Promise<IAgentHarness> {
     const entry = this.entries.get(type);
     if (!entry) throw new Error(`Unknown harness type: "${type}"`);
+    if (this.#hidden.has(type)) throw new ProviderHiddenError(type); // D-131
     if (entry.adapter) return entry.adapter;
     if (entry.initializing) return entry.initializing;
 
@@ -834,6 +911,7 @@ export class HarnessRegistry {
   async getInstance(instanceId: ProviderInstanceId): Promise<IAgentHarness> {
     const entry = this.instanceEntries.get(instanceId);
     if (!entry) throw new Error(`[HarnessRegistry] Unknown provider instance: "${instanceId}" (was it registered?)`);
+    if (this.#hidden.has(entry.driverType)) throw new ProviderHiddenError(entry.driverType); // D-131
     if (entry.adapter) return entry.adapter;
     if (entry.initializing) return entry.initializing;
 
@@ -876,7 +954,8 @@ export class HarnessRegistry {
 
   /** Last known status for every provider (may be stale — see `refresh`). */
   getStatuses(): HarnessProviderStatus[] {
-    const base = ALL_HARNESS_TYPES.map((t) => ({ ...this.entries.get(t)!.status }));
+    // D-131 — hidden providers are not part of any status list.
+    const base = ALL_HARNESS_TYPES.filter((t) => !this.#hidden.has(t)).map((t) => ({ ...this.entries.get(t)!.status }));
     // P2-00 — every reader of getStatuses() (the `/`, `/providers`,
     // `/models` routes, getAllModels(), resolveProviderForModel()) picks up
     // the synthetic 'faux' entry from this single spot.
@@ -974,6 +1053,8 @@ export class HarnessRegistry {
           if (fresh(entry)) return;
           try {
             const adapter = await this.get(type);
+            // An explicit refresh asks the provider, not its own catalog cache.
+            if (force && isModelCacheAware(adapter)) adapter.invalidateModelCache();
             const models = await adapter.getModels();
 
             // A catalog alone doesn't prove the account can run a turn — the

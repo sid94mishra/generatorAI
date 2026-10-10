@@ -31,6 +31,9 @@ import {
   type HarnessLoginResult,
   type HarnessProvidersResponse,
   type HarnessSetDefaultResult,
+  type HarnessVisibilityResponse,
+  type HarnessVisibilityUpdate,
+  type HarnessCatalogModel,
   type RunStatus,
   type StageRunStatus,
   type SystemInfo,
@@ -433,35 +436,12 @@ export interface ForkChatResponse {
 }
 
 
-export interface ModelInfo {
-  id: string;
-  name: string;
-  provider?: string;
-  description?: string;
-  category?: string;
-  contextWindow?: number;
-  /** The context-gauge denominator. Prefer this over `contextWindow`. */
-  promptTokenLimit?: number;
-  totalContextWindow?: number;
-  maxOutputTokens?: number;
-  supportsReasoning?: boolean;
-  /**
-   * The effort levels this model accepts.
-   *
-   * An ARRAY (`["low","medium","high","xhigh","max"]`) — verified against a
-   * live `/api/harness/models`. This was declared as a space-separated
-   * string, so calling `.trim()` on it threw and took the entire app down
-   * the moment a reasoning-capable model was selected. The union keeps the
-   * older shape parseable rather than trading one hard assumption for
-   * another.
-   */
-  reasoningEfforts?: string[] | string;
-  defaultReasoningEffort?: string;
-  /** Present when the model offers a long-context tier. */
-  supportsLongContext?: boolean;
-  standardContextWindow?: number;
-  longContext?: { promptTokenLimit?: number; totalContextWindow?: number };
-}
+/**
+ * One model of `/api/harness/models` — the shared wire shape (`HarnessCatalogModel`):
+ * only what the provider's own listing returned (D-131). `reasoningEfforts` is an
+ * array; read it through `modelReasoningEfforts`.
+ */
+export type ModelInfo = HarnessCatalogModel;
 
 /** Per-turn agent mode. Mirrors `AGENT_MODES` in @generatorai/shared. */
 export type AgentMode = 'auto' | 'plan';
@@ -1009,6 +989,7 @@ export const queryKeys = {
   chatWorkflowRuns: (id: string) => ['chats', id, 'workflow-runs'] as const,
   models: () => ['models'] as const,
   providers: () => ['harness', 'providers'] as const,
+  harnessVisibility: () => ['harness', 'visibility'] as const,
   health: () => ['health'] as const,
   devices: () => ['auth', 'devices'] as const,
   /** This device's own scope requests. */
@@ -1123,6 +1104,13 @@ export function createApiClient(fetchImpl: ApiFetch) {
       /** Change the DEFAULT provider (must be ready). Existing chats keep their own. */
       setDefault: (type: string) =>
         request<HarnessSetDefaultResult>(fetchImpl, '/api/harness/switch', json({ type })),
+
+      /** Which providers this server serves (D-131). */
+      visibility: () => request<HarnessVisibilityResponse>(fetchImpl, '/api/harness/visibility'),
+
+      /** Reveal or hide providers (admin:harnesses); `null` returns one to its default. */
+      setVisibility: (update: HarnessVisibilityUpdate) =>
+        request<HarnessVisibilityResponse>(fetchImpl, '/api/harness/visibility', { ...json(update), method: 'PUT' }),
     },
 
     chats: {

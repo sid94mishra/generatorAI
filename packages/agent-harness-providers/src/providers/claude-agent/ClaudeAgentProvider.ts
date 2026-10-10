@@ -467,49 +467,19 @@ export interface ClaudeAccountInfo {
   apiProvider?: string;
 }
 
-/** The subset of the SDK's `ModelInfo` we consume (kept local to avoid a hard type dep). */
+/** The SDK's `ModelInfo` (0.3.x `supportedModels()`), kept local to avoid a hard type dep. */
 interface ClaudeModelInfo {
   value: string;
+  resolvedModel?: string;
   displayName?: string;
   description?: string;
   supportsEffort?: boolean;
   supportedEffortLevels?: string[];
+  supportsAdaptiveThinking?: boolean;
+  supportsFastMode?: boolean;
+  supportsAutoMode?: boolean;
 }
 
-/**
- * Fold the concrete model version into the display name.
- *
- * The CLI's `value` is an *alias* (`opus[1m]`, `sonnet`) and `displayName` is
- * just the family ("Opus", "Sonnet"), so on their own they never tell you
- * whether you're getting Opus 4.8 or Opus 5. The real version only appears in
- * the prose `description` ("Opus 4.8 with 1M context · …"), so we lift it out
- * and splice it in:
- *
- *   "Opus"               + "Opus 4.8 with 1M context…"  → "Opus 4.8"
- *   "Sonnet (1M context)"+ "Sonnet 4.6 for long…"       → "Sonnet 4.6 (1M context)"
- *
- * Aliases whose family doesn't appear in their own description (notably
- * `default`, described as "…currently Opus 4.8…") are left alone, because the
- * version there belongs to whatever the alias resolves to today.
- */
-function versionedModelName(displayName: string, description?: string): string {
-  if (!description) return displayName;
-  const base = displayName.split(/[\s(]/)[0];
-  if (!base) return displayName;
-  const match = new RegExp(`\\b${base}\\s+(\\d+(?:\\.\\d+)?)\\b`, 'i').exec(description);
-  const version = match?.[1];
-  if (!version || displayName.includes(version)) return displayName;
-  return displayName.replace(new RegExp(`^${base}`, 'i'), `${base} ${version}`);
-}
-
-/**
- * Map the CLI's live `ModelInfo` onto our provider-neutral `HarnessModel`.
- *
- * The CLI reports capability flags and a prose description but no structured
- * context/pricing numbers, so we infer the context window from the tier
- * encoded in the alias (`sonnet[1m]` → 1M) and leave anything we can't know
- * undefined rather than inventing values.
- */
 /**
  * The reasoning effort of a chat that never chose one. One constant, used for
  * what runs AND for what the model list advertises as the default, so the two
@@ -518,61 +488,42 @@ function versionedModelName(displayName: string, description?: string): string {
  */
 const DEFAULT_EFFORT = 'medium';
 
+/** The CLI's alias for "whatever Anthropic recommends for this account". */
+const DEFAULT_ALIAS = 'default';
+
+/**
+ * Map one row of the CLI's `supportedModels()` onto the provider-neutral
+ * `HarnessModel` (D-131). Only what the CLI returned: the display name as
+ * given (the CLI already names the version, "Opus 5.5"), its description,
+ * the canonical id the alias resolves to, the effort levels and its
+ * capability flags. The CLI reports no context window, output limit or tier,
+ * so none is set here; real limits arrive with the first turn's `modelUsage`
+ * (see `applyObservedLimits`).
+ */
 export function mapClaudeModelInfo(m: ClaudeModelInfo, runtimeDefaultEffort?: string): HarnessModel {
-  const id = m.value;
-  const longContext = /\[1m\]/i.test(id);
   const model: HarnessModel = {
-    id,
-    name: versionedModelName(m.displayName || id, m.description),
+    id: m.value,
+    name: m.displayName || m.value,
     provider: 'claude-agent',
   };
   if (m.description) model.description = m.description;
-  // The `default` alias is whichever model Anthropic recommends ("Opus 5.5 · Best for everyday, complex tasks"):
-  // its tier is that model's. Read from the id alone it was Balanced, and an orchestrator routing workers to the
-  // cheapest medium-tier model picked it — Opus — for a README.
-  const tierSource = id === 'default' ? `${m.description ?? ''} ${m.displayName ?? ''}` : id;
-  if (/opus|fable/i.test(tierSource)) model.category = 'powerful';
-  else if (/haiku/i.test(tierSource)) model.category = 'lightweight';
-  else model.category = 'versatile';
-
-  if (longContext) {
-    // Anthropic's advertised window covers prompt + completion. Until a real
-    // turn tells us the account's actual output reserve we treat the whole
-    // window as the prompt budget rather than inventing a reserve.
-    model.totalContextWindow = 1_000_000;
-    model.promptTokenLimit = 1_000_000;
-    model.contextWindow = 1_000_000;
-    model.standardContextWindow = 200_000;
-    model.supportsLongContext = true;
-    model.longContext = { promptTokenLimit: 1_000_000, totalContextWindow: 1_000_000 };
-  } else if (id !== 'default') {
-    model.totalContextWindow = 200_000;
-    model.promptTokenLimit = 200_000;
-    model.contextWindow = 200_000;
-  } else {
-    // The `default` alias resolves to whichever model Anthropic currently
-    // recommends. Every first-party Claude model ships a 200K standard window,
-    // so seed that instead of leaving it blank (which used to drop the gauge
-    // onto a 128K hardcoded guess). Corrected from `modelUsage` after one turn.
-    model.totalContextWindow = 200_000;
-    model.promptTokenLimit = 200_000;
-    model.contextWindow = 200_000;
-  }
+  if (m.resolvedModel && m.resolvedModel !== m.value) model.resolvedModel = m.resolvedModel;
+  const features: string[] = [];
+  if (m.supportsAdaptiveThinking) features.push('Adaptive thinking');
+  if (m.supportsFastMode) features.push('Fast mode');
+  if (m.supportsAutoMode) features.push('Auto mode');
+  if (features.length) model.features = features;
 
   if (m.supportsEffort) {
     model.supportsReasoning = true;
     if (m.supportedEffortLevels?.length) {
       model.reasoningEfforts = [...m.supportedEffortLevels];
-      // Prefer a mid level so we never default a model to its most expensive tier.
-      //
-      // This is what the composer DISPLAYS for a chat that has never touched
-      // the control, so it has to be the level such a chat actually runs at.
-      // It was not: the list advertised "medium" while the runtime fell back
-      // to "high", and every chat showing "Medium" was billed and paced as
-      // High. The runtime default comes first; "medium" is only the answer
-      // when the model cannot do that level.
+      // What a chat that never touched the control actually runs at: the
+      // runtime default when the model accepts it, else "medium", else the
+      // model's first level. (The list once said "medium" while the runtime
+      // ran "high".)
       model.defaultReasoningEffort =
-        runtimeDefaultEffort && m.supportedEffortLevels.includes(runtimeDefaultEffort as never)
+        runtimeDefaultEffort && m.supportedEffortLevels.includes(runtimeDefaultEffort)
           ? runtimeDefaultEffort
           : m.supportedEffortLevels.includes('medium')
             ? 'medium'
@@ -580,6 +531,26 @@ export function mapClaudeModelInfo(m: ClaudeModelInfo, runtimeDefaultEffort?: st
     }
   }
   return model;
+}
+
+/**
+ * The CLI's catalog as the picker lists it: the `default` alias is not a
+ * model of its own but a pointer, so it is folded into the row it resolves to
+ * — that row is flagged `isDefault`. When no other row resolves to the same
+ * model (an organization whose default is not otherwise listed) the alias row
+ * stays, flagged as the default.
+ */
+export function claudeCatalog<R extends { info: ClaudeModelInfo; model: HarnessModel }>(rows: readonly R[]): R[] {
+  const alias = rows.find((r) => r.info.value === DEFAULT_ALIAS);
+  if (!alias) return [...rows];
+  const target = alias.info.resolvedModel;
+  const owner = target
+    ? rows.find((r) => r !== alias && (r.info.resolvedModel ?? r.info.value) === target)
+    : undefined;
+  if (!owner) return rows.map((r) => (r === alias ? { ...r, model: { ...r.model, isDefault: true } } : r));
+  return rows
+    .filter((r) => r !== alias)
+    .map((r) => (r === owner ? { ...r, model: { ...r.model, isDefault: true } } : r));
 }
 
 // ── OTel Metrics ──
@@ -1192,6 +1163,15 @@ export class ClaudeAgentProvider implements IAgentHarness {
     }
   }
 
+  /**
+   * Drop the cached catalog so the next `getModels()` asks the CLI again. The
+   * registry calls this on an explicit refresh and after a sign-in / sign-out,
+   * so a changed account is never answered from the previous one's list.
+   */
+  invalidateModelCache(): void {
+    this.modelCache = null;
+  }
+
   /** The real probe. May throw; only {@link getModels} calls it. */
   private async probeModels(): Promise<HarnessModel[]> {
     // The cache holds the CLI's catalog as probed; observed limits are laid
@@ -1209,11 +1189,12 @@ export class ClaudeAgentProvider implements IAgentHarness {
     if (this.modelProbeInFlight) return this.modelProbeInFlight;
 
     this.modelProbeInFlight = this.withControlSession(async (q) => {
-      const sdkModels = await q.supportedModels();
-      return sdkModels.map((m) => ({
-        model: mapClaudeModelInfo(m, this.options.defaultEffort ?? DEFAULT_EFFORT),
-        resolvedModel: (m as unknown as { resolvedModel?: string }).resolvedModel,
+      const sdkModels = (await q.supportedModels()) as ClaudeModelInfo[];
+      const rows = sdkModels.map((info) => ({
+        info,
+        model: mapClaudeModelInfo(info, this.options.defaultEffort ?? DEFAULT_EFFORT),
       }));
+      return claudeCatalog(rows).map(({ info, model }) => ({ model, resolvedModel: info.resolvedModel }));
     })
       .then((rows) => {
         this.modelCache = { rows, at: Date.now() };

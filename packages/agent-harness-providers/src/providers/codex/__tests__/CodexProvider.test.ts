@@ -89,7 +89,8 @@ describe('CodexProvider — lifecycle over a real JSON-RPC child process', () =>
         name: 'GPT-5 Codex',
         provider: 'codex',
         description: 'Fixture model',
-        supportsReasoning: false,
+        isDefault: true,
+        inputModalities: ['text'],
         supportsVision: false,
       },
     ]);

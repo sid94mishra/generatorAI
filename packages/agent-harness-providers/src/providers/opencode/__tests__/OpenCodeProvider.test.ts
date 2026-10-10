@@ -324,16 +324,19 @@ describe('OpenCodeProvider — the requested model actually reaches the server',
 // ── Defect: getModels() / listAgents() called routes that do not exist ──
 
 describe('OpenCodeProvider — discovery uses the real routes', () => {
-  it('lists models from /config/providers, qualified and with context limits', async () => {
+  it('lists models from /config/providers, qualified, with the fields OpenCode returned', async () => {
     const p = await startedAgainstFixture();
     await expect(p.getModels()).resolves.toEqual([
       {
         id: 'opencode/big',
         name: 'Big Model',
         provider: 'opencode',
+        isDefault: true,
         supportsReasoning: true,
+        supportsVision: true,
         promptTokenLimit: 200000,
         totalContextWindow: 208192,
+        maxOutputTokens: 8192,
       },
     ]);
   }, 30_000);

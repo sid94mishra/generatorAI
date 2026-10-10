@@ -3,8 +3,10 @@
 //
 // Turns `GET /api/harness/providers` into what a model picker draws: the
 // provider column (ready providers first, each with why it is not usable
-// otherwise), and per model the detail pane's facts (tier, description,
-// context, long context, max output, reasoning levels, vision).
+// otherwise), a plain list of each provider's models in the provider's own
+// order, and per model the detail rows (`modelDetails`) — built ONLY from
+// fields the provider returned (D-131). A field the provider did not send is
+// not shown; there are no tiers, no "recommended" entries, no assumed limits.
 //
 // The one rule every picker must follow: never land on a provider that is
 // not ready. The server's `primary` is its *configured* preference and is
@@ -16,13 +18,8 @@
 // React-free: web wraps it in a hook, mobile and the CLI call it directly.
 // ────────────────────────────────────────────────────────────────
 
-import {
-  MODEL_TIERS,
-  type HarnessCatalogModel,
-  type HarnessProviderStatus,
-  type HarnessProvidersResponse,
-  type ModelTier,
-} from '@generatorai/shared';
+import type { HarnessCatalogModel, HarnessProviderStatus, HarnessProvidersResponse } from '@generatorai/shared';
+import { formatTokenLimit } from './formatTokenLimit.js';
 
 /** Why a provider can or cannot be used right now. */
 export type ProviderAvailability = 'ready' | 'not_installed' | 'signed_out' | 'unavailable';
@@ -32,20 +29,27 @@ export interface PickerModel {
   id: string;
   name: string;
   provider: string;
-  /** `lightweight | versatile | powerful`, or null when the provider gives none. */
-  tier: ModelTier | null;
   description: string | null;
-  /** Prompt-token limit of the default tier (the context gauge's denominator). */
+  /** The provider flags this model as the account default (the row's "default" badge). */
+  isDefault: boolean;
+  /** Prompt-token limit of the default tier (the context gauge's denominator), when the provider reported one. */
   contextTokens: number | null;
   /** Prompt-token limit of the long-context tier, when the model has one. */
   longContextTokens: number | null;
   maxOutputTokens: number | null;
-  vision: boolean;
   /** Levels the model accepts, in the provider's order; empty = no effort selector. */
   reasoningEfforts: string[];
   defaultReasoningEffort: string | null;
   /** The wire entry, for callers that need a field the picker does not. */
   source: HarnessCatalogModel;
+}
+
+/** One fact of a model's detail pane / sheet. */
+export interface ModelDetail {
+  label: string;
+  value: string;
+  /** Render in the mono face (ids, token counts). */
+  mono?: boolean;
 }
 
 /** One entry of the provider column. */
@@ -96,25 +100,60 @@ export function modelReasoningEfforts(model: Pick<HarnessCatalogModel, 'supports
 
 export function toPickerModel(model: HarnessCatalogModel, provider: string): PickerModel {
   const efforts = modelReasoningEfforts(model);
-  const tier = (MODEL_TIERS as readonly string[]).includes(model.category ?? '')
-    ? (model.category as ModelTier)
-    : null;
   const defaultEffort =
     model.defaultReasoningEffort && efforts.includes(model.defaultReasoningEffort) ? model.defaultReasoningEffort : null;
   return {
     id: model.id,
     name: model.name || model.id,
     provider: model.provider ?? provider,
-    tier,
     description: model.description?.trim() ? model.description.trim() : null,
+    isDefault: model.isDefault === true,
     contextTokens: positive(model.promptTokenLimit ?? model.standardContextWindow ?? model.contextWindow),
     longContextTokens: model.supportsLongContext === false ? null : positive(model.longContext?.promptTokenLimit),
     maxOutputTokens: positive(model.maxOutputTokens),
-    vision: model.supportsVision === true,
     reasoningEfforts: efforts,
     defaultReasoningEffort: defaultEffort,
     source: model,
   };
+}
+
+const list = (items: readonly string[]): string => items.join(', ');
+
+/**
+ * The detail rows of a model — hover / focus in the web picker, the info row
+ * on mobile. Every row is a field the provider returned; nothing else.
+ */
+export function modelDetails(model: PickerModel): ModelDetail[] {
+  const src = model.source;
+  const rows: ModelDetail[] = [];
+  if (src.resolvedModel) rows.push({ label: 'Resolves to', value: src.resolvedModel, mono: true });
+  if (model.contextTokens != null) rows.push({ label: 'Context (prompt)', value: formatTokenLimit(model.contextTokens), mono: true });
+  const total = positive(src.totalContextWindow);
+  if (total != null && total !== model.contextTokens) rows.push({ label: 'Context (total)', value: formatTokenLimit(total), mono: true });
+  if (model.longContextTokens != null) {
+    rows.push({ label: 'Long context (prompt)', value: formatTokenLimit(model.longContextTokens), mono: true });
+  }
+  if (model.maxOutputTokens != null) rows.push({ label: 'Max output', value: formatTokenLimit(model.maxOutputTokens), mono: true });
+  if (model.reasoningEfforts.length > 0) rows.push({ label: 'Reasoning', value: list(model.reasoningEfforts) });
+  if (model.defaultReasoningEffort) rows.push({ label: 'Default effort', value: model.defaultReasoningEffort });
+  if (src.inputModalities?.length) rows.push({ label: 'Input', value: list(src.inputModalities) });
+  else if (typeof src.supportsVision === 'boolean') rows.push({ label: 'Vision', value: src.supportsVision ? 'Supported' : 'Not supported' });
+  if (src.features?.length) rows.push({ label: 'Features', value: list(src.features) });
+  if (src.category) rows.push({ label: 'Category', value: src.category });
+  if (src.priceCategory) rows.push({ label: 'Price tier', value: src.priceCategory });
+  if (typeof src.billingMultiplier === 'number') rows.push({ label: 'Billing', value: `${src.billingMultiplier}×`, mono: true });
+  const pricing = src.pricing;
+  if (pricing && (pricing.input != null || pricing.output != null)) {
+    const per = pricing.batchSize ? ` per ${formatTokenLimit(pricing.batchSize)} tokens` : '';
+    const parts = [
+      pricing.input != null ? `in ${pricing.input}` : null,
+      pricing.output != null ? `out ${pricing.output}` : null,
+      pricing.cached != null ? `cached ${pricing.cached}` : null,
+    ].filter(Boolean);
+    // Copilot: AI Credits per billing batch of tokens.
+    rows.push({ label: 'AI credits', value: `${parts.join(' · ')}${per}`, mono: true });
+  }
+  return rows;
 }
 
 /** The picker's view of the provider catalog. */

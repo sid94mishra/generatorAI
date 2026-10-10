@@ -122,7 +122,8 @@ import type {
   V2ThreadForkParams,
   V2ThreadForkResponse,
   V2ThreadRevertParams,
-  V2ThreadRollbackParams,
+  V2ThreadTurnsListParams,
+  V2ThreadTurnsListResponse,
   V2ThreadStartParams,
   V2ThreadStartResponse,
   V2ThreadItem,
@@ -1008,7 +1009,7 @@ export class CodexProvider implements IAgentHarness {
       // Threads are persisted server-side and rejoinable via `thread/resume`.
       sessionPersistence: true,
       // `thread/fork { lastTurnId }` and `thread/revert { beforeTurnId }` are
-      // in the protocol (0.154); `thread/rollback` is the deprecated fallback.
+      // in the protocol (0.162; `thread/rollback` is gone).
       conversationFork: true,
       conversationRewind: true,
       // `account/login/start` (ChatGPT browser flow) + `account/logout`.
@@ -1020,12 +1021,18 @@ export class CodexProvider implements IAgentHarness {
 
   // ── Model discovery ───────────────────────────────────────────────
 
+  /**
+   * The account's models, from Codex's own `model/list` (paginated). The list
+   * is the one Codex's own picker shows: the backend filters it by plan and by
+   * CLIENT VERSION (an older pinned binary is offered an older catalog — the
+   * "only two models" report, D-131), and rows flagged `hidden` (internal or
+   * retired models such as `codex-auto-review`) are left out exactly as Codex
+   * leaves them out. Each field below is copied from the response; nothing is
+   * inferred.
+   */
   async getModels(): Promise<HarnessModel[]> {
     const models: HarnessModel[] = [];
     try {
-      // `model/list` is paginated. The previous version read a single
-      // unpaginated `models` array that the protocol does not have, so it
-      // always returned nothing.
       let cursor: string | undefined;
       do {
         const page = await this.rpc<V2ModelListResponse>('model/list', {
@@ -1039,24 +1046,42 @@ export class CodexProvider implements IAgentHarness {
         }
         cursor = page.nextCursor ?? undefined;
       } while (cursor);
-    } catch {
+      this.lastModelProbeError = undefined;
+    } catch (err) {
       // Binary not running or not authenticated — an empty list is the
-      // contract here (W41: getModels never throws).
-      return models;
+      // contract here (W41: getModels never throws); the reason is kept.
+      this.lastModelProbeError = err instanceof Error ? err.message : String(err);
+      return [];
     }
     return models;
   }
 
+  private lastModelProbeError: string | undefined;
+
+  /** W41 — why the last `getModels()` returned `[]`, if it did. */
+  getLastModelProbeError(): string | undefined {
+    return this.lastModelProbeError;
+  }
+
   private toHarnessModel(m: V2Model): HarnessModel {
     const efforts = (m.supportedReasoningEfforts ?? []).map((e) => e.reasoningEffort).filter(Boolean);
+    const features: string[] = [];
+    if (m.supportsPersonality) features.push('Personality');
+    for (const tier of m.serviceTiers ?? []) if (tier.name) features.push(`${tier.name} tier`);
     return {
       id: m.id,
       name: m.displayName || m.model || m.id,
       provider: 'codex',
-      description: m.description || undefined,
-      supportsReasoning: efforts.length > 0,
-      ...(efforts.length ? { reasoningEfforts: efforts, defaultReasoningEffort: m.defaultReasoningEffort } : {}),
-      ...(m.inputModalities ? { supportsVision: m.inputModalities.includes('image') } : {}),
+      ...(m.description ? { description: m.description } : {}),
+      ...(m.isDefault ? { isDefault: true } : {}),
+      ...(m.model && m.model !== m.id ? { resolvedModel: m.model } : {}),
+      ...(efforts.length
+        ? { supportsReasoning: true, reasoningEfforts: efforts, defaultReasoningEffort: m.defaultReasoningEffort }
+        : {}),
+      ...(m.inputModalities?.length
+        ? { inputModalities: [...m.inputModalities], supportsVision: m.inputModalities.includes('image') }
+        : {}),
+      ...(features.length ? { features } : {}),
     };
   }
 
@@ -1457,10 +1482,13 @@ export class CodexProvider implements IAgentHarness {
   }
 
   /**
-   * Drop the tail of a thread's history in place. `thread/revert` needs the
-   * first DROPPED turn; when the caller could not name it (a turn recorded
-   * before anchors were captured) the deprecated `thread/rollback` drops by
-   * count instead. Rewinding to before the first turn starts a fresh thread.
+   * Drop the tail of a thread's history in place with `thread/revert`, which
+   * takes the first DROPPED turn. When the caller could not name it (a turn
+   * recorded before anchors were captured) it is looked up by count with
+   * `thread/turns/list` (newest first). Codex 0.162 removed the old
+   * `thread/rollback { numTurns }`, so there is no count-based fallback left:
+   * a revert the server refuses is an error. Rewinding to before the first
+   * turn starts a fresh thread.
    */
   async rewindConversation(
     conversationId: string,
@@ -1484,7 +1512,7 @@ export class CodexProvider implements IAgentHarness {
       throw new HarnessSessionError(`Conversation ${conversationId} has no Codex thread to rewind`);
     }
     if (!conv) {
-      // Load the thread first: revert/rollback act on a loaded thread.
+      // Load the thread first: revert acts on a loaded thread.
       await this.createConversation({
         ...options.params,
         conversationId,
@@ -1492,22 +1520,21 @@ export class CodexProvider implements IAgentHarness {
       });
       conv = this.conversations.get(conversationId);
     }
-    const dropFrom = options.dropFrom;
-    let reverted = false;
-    if (dropFrom?.kind === 'turn') {
-      try {
-        await this.rpc('thread/revert', { threadId, beforeTurnId: dropFrom.id } satisfies V2ThreadRevertParams);
-        reverted = true;
-      } catch (err) {
-        this.opts.logger?.warn?.(
-          `[CodexProvider] thread/revert failed, falling back to thread/rollback: ${err instanceof Error ? err.message : String(err)}`,
-        );
+    let beforeTurnId = options.dropFrom?.kind === 'turn' ? options.dropFrom.id : undefined;
+    if (!beforeTurnId) {
+      if (options.droppedTurns < 1) return { providerSessionId: threadId };
+      const page = await this.rpc<V2ThreadTurnsListResponse>('thread/turns/list', {
+        threadId,
+        sortDirection: 'desc',
+        limit: options.droppedTurns,
+      } satisfies V2ThreadTurnsListParams);
+      // Newest first: the last of the `droppedTurns` newest is the first one dropped.
+      beforeTurnId = page.data?.[Math.min(options.droppedTurns, page.data.length) - 1]?.id;
+      if (!beforeTurnId) {
+        throw new HarnessSessionError(`Codex thread ${threadId} has no turn to rewind`);
       }
     }
-    if (!reverted) {
-      if (options.droppedTurns < 1) return { providerSessionId: threadId };
-      await this.rpc('thread/rollback', { threadId, numTurns: options.droppedTurns } satisfies V2ThreadRollbackParams);
-    }
+    await this.rpc('thread/revert', { threadId, beforeTurnId } satisfies V2ThreadRevertParams);
     return { providerSessionId: threadId };
   }
 

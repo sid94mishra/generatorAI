@@ -102,12 +102,20 @@ describe('resolveCodexCommand', () => {
     expect(r).toBeNull();
   });
 
-  it('finds the CLI bundled with the ChatGPT desktop app on macOS', async () => {
-    const bundled = makeExecutable(path.join(dir, 'Applications', 'ChatGPT.app', 'Contents', 'Resources', 'codex'));
-    const r = await resolveCodexCommand({ useBundled: false, env: { PATH: '' }, platform: 'darwin', homeDir: dir });
-    // `/Applications` is checked first; this machine may genuinely have one.
-    expect(r?.source).toBe('app-bundle');
-    expect([bundled, '/Applications/ChatGPT.app/Contents/Resources/codex']).toContain(r?.path);
+  it('finds the CLI bundled with the ChatGPT desktop app on macOS (current codex-cli/ layout and the older one)', async () => {
+    const real = [
+      '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
+      '/Applications/ChatGPT.app/Contents/Resources/codex',
+    ];
+    for (const rel of [['codex-cli', 'bin', 'codex'], ['codex']]) {
+      const home = mkdtempSync(path.join(tmpdir(), 'codex-app-'));
+      const bundled = makeExecutable(path.join(home, 'Applications', 'ChatGPT.app', 'Contents', 'Resources', ...rel));
+      const r = await resolveCodexCommand({ useBundled: false, env: { PATH: '' }, platform: 'darwin', homeDir: home });
+      // `/Applications` is checked first; this machine may genuinely have one.
+      expect(r?.source).toBe('app-bundle');
+      expect([bundled, ...real]).toContain(r?.path);
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('returns null when Codex is nowhere to be found', async () => {

@@ -1692,6 +1692,13 @@ export class OrchestratorService {
     }
     if (m.category === 'lightweight') return 'low';
     if (m.category === 'powerful') return 'high';
+    // Claude Code reports no cost data at all (D-131: the catalog no longer
+    // carries an invented tier). For ROUTING only — never shown — read the
+    // model family from the canonical id: an Opus/Fable worker for a README is
+    // the expensive mistake this hint exists to avoid.
+    const family = `${m.resolvedModel ?? ''} ${m.id}`.toLowerCase();
+    if (/\b(?:opus|fable)\b/.test(family)) return 'high';
+    if (/\bhaiku\b/.test(family)) return 'low';
     return 'medium';
   }
 

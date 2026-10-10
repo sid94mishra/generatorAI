@@ -18,6 +18,7 @@ export {
   HarnessRegistry,
   ALL_HARNESS_TYPES,
   harnessTypeLabel,
+  ProviderHiddenError,
   type HarnessProviderStatus,
   type HarnessRegistryOptions,
 } from './HarnessRegistry.js';

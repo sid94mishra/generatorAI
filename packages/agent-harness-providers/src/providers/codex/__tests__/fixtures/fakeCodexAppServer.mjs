@@ -101,11 +101,11 @@
 import { createInterface } from 'node:readline';
 
 const THREAD_ERROR = process.env['FAKE_CODEX_THREAD_ERROR'] === '1';
-/** Set to make `thread/revert` answer "method not found" so the rollback fallback is exercised. */
+/** Set to make `thread/revert` answer "method not found" (the rewind then fails; there is no fallback). */
 const REVERT_UNSUPPORTED = process.env['FAKE_CODEX_REVERT_UNSUPPORTED'] === '1';
 const forkCalls = [];
 const revertCalls = [];
-const rollbackCalls = [];
+const turnsListCalls = [];
 const ACCOUNT = process.env['FAKE_CODEX_ACCOUNT'] ?? 'chatgpt';
 let skillRoots = null;
 const RATE_LIMIT_TURNS = Number(process.env['FAKE_CODEX_TURN_RATE_LIMIT'] ?? '0');
@@ -667,14 +667,16 @@ rl.on('line', (line) => {
       return;
     }
 
-    case 'thread/rollback': {
-      rollbackCalls.push(params ?? null);
-      respond(id, { thread: { id: params?.threadId, sessionId: params?.threadId, status: { type: 'idle' }, turns: [] } });
+    case 'thread/turns/list': {
+      turnsListCalls.push(params ?? null);
+      // Newest first, like the real server's default.
+      const all = ['turn_3', 'turn_2', 'turn_1'].map((tid) => ({ id: tid, items: [], status: 'completed' }));
+      respond(id, { data: all.slice(0, params?.limit ?? all.length), nextCursor: null, backwardsCursor: null });
       return;
     }
 
     case '__test/branching': {
-      respond(id, { forkCalls, revertCalls, rollbackCalls });
+      respond(id, { forkCalls, revertCalls, turnsListCalls });
       return;
     }
 

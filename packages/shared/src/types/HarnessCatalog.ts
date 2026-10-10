@@ -9,26 +9,26 @@
 // (`buildModelPickerCatalog`).
 // ────────────────────────────────────────────────────────────────
 
-/** Capability tier the picker shows next to a model (`HarnessModel.category`). */
-export const MODEL_TIERS = ['lightweight', 'versatile', 'powerful'] as const;
-export type ModelTier = (typeof MODEL_TIERS)[number];
-
-/** What every picker (web, mobile) calls each tier. */
-export const MODEL_TIER_LABELS: Record<ModelTier, string> = {
-  lightweight: 'Fast',
-  versatile: 'Balanced',
-  powerful: 'Powerful',
-};
-
-/** One model a provider serves for the signed-in account. */
+/**
+ * One model a provider serves for the signed-in account. Every field is what the
+ * provider's own listing returned (D-131); an absent field was not returned.
+ */
 export interface HarnessCatalogModel {
   id: string;
   name: string;
   /** Owning provider (`copilot`, `claude-agent`, …); set on every catalog entry. */
   provider?: string;
-  /** Provider blurb — for Claude Code this carries the concrete version and pricing. */
+  /** The provider's own blurb. */
   description?: string;
-  /** Capability tier; see `MODEL_TIERS` (other values are passed through untyped). */
+  /** The provider marks this model as the account's default. */
+  isDefault?: boolean;
+  /** Canonical wire id an alias resolves to (Claude `opus` → `claude-opus-5-5`). */
+  resolvedModel?: string;
+  /** Input kinds the model accepts, as the provider names them. */
+  inputModalities?: string[];
+  /** Provider-reported capability flags, named for display. */
+  features?: string[];
+  /** The provider's own picker category label, when it sends one (Copilot). */
   category?: string;
   /** Maximum PROMPT tokens (default tier) — the context-gauge denominator. */
   promptTokenLimit?: number;
@@ -94,4 +94,27 @@ export interface HarnessSetDefaultResult {
   message: string;
   type: string;
   switched: boolean;
+}
+
+/** Why a provider is or is not served (D-131): its stability default, an admin's setting, or the env reveal list. */
+export type HarnessProviderVisibilitySource = 'default' | 'setting' | 'env';
+
+/** One supported provider in the server's visibility list. */
+export interface HarnessProviderVisibility {
+  type: string;
+  label: string;
+  stability: 'stable' | 'experimental';
+  /** Served to clients. A hidden provider is absent from every provider/model API and cannot run a turn. */
+  visible: boolean;
+  source: HarnessProviderVisibilitySource;
+}
+
+/** `GET /api/harness/visibility` and the answer of `PUT /api/harness/visibility` (admin:harnesses). */
+export interface HarnessVisibilityResponse {
+  providers: HarnessProviderVisibility[];
+}
+
+/** `PUT /api/harness/visibility` body: the providers whose setting changes; `null` returns one to its default. */
+export interface HarnessVisibilityUpdate {
+  visible: Record<string, boolean | null>;
 }

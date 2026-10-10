@@ -801,7 +801,7 @@ export class CopilotProvider implements IAgentHarness {
       const model: HarnessModel = {
         id: m.id,
         name: m.name,
-        provider: undefined,
+        provider: 'copilot',
       };
       if (raw.modelPickerCategory) model.category = raw.modelPickerCategory;
       if (raw.modelPickerPriceCategory) model.priceCategory = raw.modelPickerPriceCategory;

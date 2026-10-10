@@ -17,7 +17,13 @@ import type { InvocationPlan, InvocationRequest, InvocationResult, RunCommand } 
 import type { LoopIteration, PendingDecisionView, WorkflowRun, WorkflowRunWithStages } from './WorkflowRun.js';
 import type { AttentionFilter, AttentionSnapshot } from './Attention.js';
 import type { ChatBulkResult, ChatListPage, ChatListQuery } from './ChatList.js';
-import type { HarnessLoginResult, HarnessProvidersResponse, HarnessSetDefaultResult } from './HarnessCatalog.js';
+import type {
+  HarnessLoginResult,
+  HarnessProvidersResponse,
+  HarnessSetDefaultResult,
+  HarnessVisibilityResponse,
+  HarnessVisibilityUpdate,
+} from './HarnessCatalog.js';
 import type {
   ComputerConsentAnswer,
   ComputerConsentAnswerResult,
@@ -207,6 +213,10 @@ export interface IPlatformClient {
   logoutProvider(type: string): Promise<void>;
   /** Make a READY provider the default for requests that name none (409 otherwise). */
   setDefaultProvider(type: string): Promise<HarnessSetDefaultResult>;
+  /** Which providers this server serves (`GET /api/harness/visibility`, D-131). */
+  getHarnessVisibility(): Promise<HarnessVisibilityResponse>;
+  /** Reveal or hide providers (`PUT /api/harness/visibility`, admin:harnesses); `null` = back to the default. */
+  setHarnessVisibility(update: HarnessVisibilityUpdate): Promise<HarnessVisibilityResponse>;
 
   // ── Computer consent, grants and control (G-07) ──
   /** Prompts still awaiting an answer on a workspace (with `plan` for a batched request). */

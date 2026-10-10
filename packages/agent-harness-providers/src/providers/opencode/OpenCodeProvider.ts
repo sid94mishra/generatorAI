@@ -444,14 +444,15 @@ export class OpenCodeProvider implements IAgentHarness {
       const out: HarnessModel[] = [];
       for (const provider of body.providers ?? []) {
         for (const model of Object.values(provider.models ?? {})) {
-          out.push(this.toHarnessModel(provider, model as OpenCodeModel));
+          out.push(this.toHarnessModel(provider, model as OpenCodeModel, body.default?.[provider.id]));
         }
       }
       return out;
     } catch { return []; }
   }
 
-  private toHarnessModel(provider: OpenCodeProviderInfo, model: OpenCodeModel): HarnessModel {
+  /** One `/config/providers` model, copying only the fields OpenCode returned (D-131). */
+  private toHarnessModel(provider: OpenCodeProviderInfo, model: OpenCodeModel, providerDefault?: string): HarnessModel {
     const limit = model.limit as { context?: number; output?: number } | undefined;
     const capabilities = model.capabilities as
       | { reasoning?: boolean; input?: { image?: boolean } }
@@ -462,11 +463,14 @@ export class OpenCodeProvider implements IAgentHarness {
       id: `${provider.id}/${model.id}`,
       name: model.name ?? model.id,
       provider: 'opencode',
-      supportsReasoning: capabilities?.reasoning ?? false,
+      ...(providerDefault === model.id ? { isDefault: true } : {}),
+      ...(typeof capabilities?.reasoning === 'boolean' ? { supportsReasoning: capabilities.reasoning } : {}),
+      ...(typeof capabilities?.input?.image === 'boolean' ? { supportsVision: capabilities.input.image } : {}),
       ...(limit?.context ? { promptTokenLimit: limit.context } : {}),
       ...(limit?.context && limit?.output
         ? { totalContextWindow: limit.context + limit.output }
         : {}),
+      ...(limit?.output ? { maxOutputTokens: limit.output } : {}),
     };
   }
 

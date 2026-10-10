@@ -96,8 +96,14 @@ export const CODEX_CLI_PATH_ENV = 'CODEX_CLI_PATH';
  */
 function appBundleCandidates(platform: NodeJS.Platform, home: string): string[] {
   if (platform === 'darwin') {
-    const rel = path.join('ChatGPT.app', 'Contents', 'Resources', 'codex');
-    return [path.join('/Applications', rel), path.join(home, 'Applications', rel)];
+    // ChatGPT 2026-10 ships the CLI as a package under `codex-cli/` (verified:
+    // ChatGPT.app → Contents/Resources/codex-cli/bin/codex, codex-cli 0.160.1);
+    // earlier builds put a single `codex` binary in Resources.
+    const rels = [
+      path.join('ChatGPT.app', 'Contents', 'Resources', 'codex-cli', 'bin', 'codex'),
+      path.join('ChatGPT.app', 'Contents', 'Resources', 'codex'),
+    ];
+    return rels.flatMap((rel) => [path.join('/Applications', rel), path.join(home, 'Applications', rel)]);
   }
   return [];
 }
