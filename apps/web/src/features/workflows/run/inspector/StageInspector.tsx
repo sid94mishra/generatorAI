@@ -28,6 +28,7 @@ import { compactCount, formatMs, formatUsd } from '../model/format.js';
 import type { FileChange, HookInvocation, StageView } from '../model/types.js';
 import { StageEventsTab } from './StageEventsTab.js';
 import { StageHistoryTab } from './StageHistoryTab.js';
+import { ModelLabel } from '@/blocks/model-picker/ModelLabel.js';
 
 type Tab = 'output' | 'files' | 'tools' | 'hooks' | 'events' | 'history';
 
@@ -257,7 +258,7 @@ function stageFacts(stage: StageView): KeyValueItem[] {
     const parts = [`${compactCount(tokens)} tokens`];
     if (u.costUsd !== undefined) parts.push(formatUsd(u.costUsd));
     out.push({ label: 'Stage usage', value: parts.join(' · '), mono: true });
-    if (u.model) out.push({ label: 'Model', value: u.model, mono: true });
+    if (u.model) out.push({ label: 'Model', value: <ModelLabel modelId={u.model} provider={u.provider} /> });
   }
   if (stage.durationMs !== undefined) out.push({ label: 'Duration', value: formatMs(stage.durationMs), mono: true });
   if (stage.instancePath && stage.instancePath !== stage.stageKey) {

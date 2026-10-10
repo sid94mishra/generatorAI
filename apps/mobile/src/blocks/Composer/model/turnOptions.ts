@@ -109,19 +109,13 @@ export function turnChipLabel(input: {
 }
 
 /**
- * "Claude Sonnet 5" → "Sonnet 5". The vendor prefix is the same on every
- * model in the list, so it is the half that carries no information in a
- * 150pt chip.
+ * The model's display name exactly as the provider returned it (D-131: no
+ * vendor-prefix trimming — "GPT-6-Luna", "Opus 5.5").
  */
 export function shortModelName(model: ModelInfo | undefined): string {
   // No explicit model means the chat follows the provider's default, which is
   // a real, nameable state — "Model" read like a control that had not loaded.
-  if (!model) return 'Default model';
-  const rest = model.name.replace(/^(claude|gpt|gemini|openai|anthropic|google)[\s-]*/i, '').trim();
-  // "Claude Sonnet 5" → "Sonnet 5", but "GPT-6-Astra" must not become
-  // "6-Astra": when only a version number would lead, the vendor word IS the
-  // model's name.
-  return rest && !/^\d/.test(rest) ? rest : model.name;
+  return model ? model.name || model.id : 'Default model';
 }
 
 /**

@@ -81,14 +81,14 @@ describe('isModeOverride', () => {
 });
 
 describe('turnChipParts', () => {
-  const base = { model: model({ name: 'Claude Sonnet 5', defaultReasoningEffort: 'medium' }), mode: 'auto' as const, effort: null, permissionMode: 'default', contextTier: 'default' as const };
+  const base = { model: model({ name: 'Sonnet 5.5', defaultReasoningEffort: 'medium' }), mode: 'auto' as const, effort: null, permissionMode: 'default', contextTier: 'default' as const };
   it('is just the short model name when nothing is overridden', () => {
-    expect(turnChipParts(base)).toEqual({ model: 'Sonnet 5', plan: false, permission: null, effortOverride: null, longContext: false });
+    expect(turnChipParts(base)).toEqual({ model: 'Sonnet 5.5', plan: false, permission: null, effortOverride: null, longContext: false });
   });
   it('flags each non-default setting, and ignores effort equal to the model default', () => {
     expect(turnChipParts({ ...base, effort: 'medium' }).effortOverride).toBeNull();
     const parts = turnChipParts({ ...base, mode: 'plan', effort: 'high', permissionMode: 'bypassPermissions', contextTier: 'long_context' });
-    expect(parts).toEqual({ model: 'Sonnet 5', plan: true, permission: 'bypassPermissions', effortOverride: 'high', longContext: true });
+    expect(parts).toEqual({ model: 'Sonnet 5.5', plan: true, permission: 'bypassPermissions', effortOverride: 'high', longContext: true });
     expect(turnChipParts({ ...base, permissionMode: 'weird' }).permission).toBeNull();
   });
   it('keeps the full sentence available for the accessibility label', () => {

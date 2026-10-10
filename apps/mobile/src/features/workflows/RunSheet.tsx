@@ -12,7 +12,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { blankStageOverrides, codebaseDrafts, type CodebaseDraft, type StageOverrideDraft } from '@generatorai/client-core';
-import { REASONING_EFFORTS, type InvocationPlan } from '@generatorai/workflow-spec';
+import type { InvocationPlan } from '@generatorai/workflow-spec';
 
 import { PERMISSION_MODE_LABEL, PermissionModePicker, canBypass, type RunPermissionMode } from '../../blocks/PermissionModePicker';
 import { stageNeedsApproval } from '../../blocks/RunGraph';
@@ -42,6 +42,7 @@ import { EMPTY_OPTIONS, invocationBody, issueLines, planCodebases, planHeadline,
 import { formatStageVariables, parseStageVariables } from './model/stageOverrideModel';
 import { postProcessingLine, versionChip } from './model/workflowsModel';
 import { useCodebaseBranches, useDefinitionVersions, useInvokeWorkflow, usePlanInvocation, useProjectCodebases, useWorkflow } from './queries';
+import { effortChoices } from '@generatorai/client-core';
 
 type Href = Parameters<typeof router.replace>[0];
 type Page = { kind: 'options' } | { kind: 'stage'; key: string } | { kind: 'plan' };
@@ -329,7 +330,7 @@ export default function RunSheet(): React.ReactElement {
             ) : null}
             <ListSection title="Advanced" footer="Run options; empty fields keep the workflow's.">
               <ListRow kind="picker" title="Model" icon="model" picker={{ value: opts.model, options: modelOptions('Workflow default'), onValueChange: (model) => setOpts({ model }), searchable: (catalog.catalog?.models.length ?? 0) > 12, testID: 'run-model' }} />
-              <ListRow kind="picker" title="Effort" icon="think" picker={{ value: opts.effort, options: [{ value: DEFAULT, label: 'Default' }, ...REASONING_EFFORTS.map((e) => ({ value: e, label: e.charAt(0).toUpperCase() + e.slice(1) }))], onValueChange: (effort) => setOpts({ effort }), testID: 'run-effort' }} />
+              <ListRow kind="picker" title="Effort" icon="think" picker={{ value: opts.effort, options: [{ value: DEFAULT, label: 'Default' }, ...effortChoices(opts.model ? catalog.catalog?.models.find((m) => m.id === opts.model)?.source : undefined).map((e) => ({ value: e, label: e.charAt(0).toUpperCase() + e.slice(1) }))], onValueChange: (effort) => setOpts({ effort }), testID: 'run-effort' }} />
               <Input label="Run name" value={opts.name} onChangeText={(name) => setOpts({ name })} placeholder={graph.workflow.name} maxLength={200} testID="run-name" />
               <ListRow kind="stepper" title="Stop after (min)" subtitle={opts.stopAfterMinutes ? 'The run is cancelled after this' : 'No time limit'} stepper={{ value: opts.stopAfterMinutes, onValueChange: (stopAfterMinutes) => setOpts({ stopAfterMinutes }), min: 0, max: 1440, step: 5, format: (v) => (v ? `${v} min` : 'Off'), testID: 'run-stop-after' }} />
             </ListSection>

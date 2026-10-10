@@ -32,6 +32,7 @@ import { useProjectCodebases, useProjectsList, useSelectableAgents } from '../qu
 import { DesktopOnlyRow, DurationInput, OptionalNumberInput } from '../stageEditor/fields';
 import { phaseLabel } from '../stageEditor/HooksTab';
 import { RESERVED_LINE, SECTION_LABEL, SETTINGS_SECTIONS, TYPE_LABEL, defaultPreview, defaultText, parseDefault, parseSettingsSection, retype, variableNameProblem, variableSummary, type SettingsSection } from './workflowSettingsModel';
+import { harnessProviderLabel } from '@generatorai/shared';
 
 type Href = Parameters<typeof router.push>[0];
 type EditWorkflow = (patch: Partial<WorkflowSpec>, mergeKey?: string) => void;
@@ -75,7 +76,7 @@ function General({ graph, edit }: { graph: WorkflowGraph; edit: EditWorkflow }):
       </ListSection>
       <ListSection title="Default session" footer="Stages inherit it unless they set their own.">
         <ListRow kind="picker" title="Agent" icon="agents" picker={{ value: wf.session.agentRef ?? INHERIT, options: [{ value: INHERIT, label: 'None' }, ...(agents.data ?? []).map((a) => ({ value: (a as { ref?: string }).ref ?? a.id, label: a.name }))], onValueChange: (agentRef) => setSession({ agentRef: agentRef || undefined }), searchable: (agents.data?.length ?? 0) > 12 }} />
-        <ListRow kind="picker" title="Model" icon="model" picker={{ value: wf.session.model ?? INHERIT, options: [{ value: INHERIT, label: 'Server default' }, ...models.map((m) => ({ value: m.id, label: m.name, description: m.provider }))], onValueChange: (model) => setSession({ model: model || undefined }), searchable: models.length > 12 }} />
+        <ListRow kind="picker" title="Model" icon="model" picker={{ value: wf.session.model ?? INHERIT, options: [{ value: INHERIT, label: 'Server default' }, ...models.map((m) => ({ value: m.id, label: m.name, description: harnessProviderLabel(m.provider) }))], onValueChange: (model) => setSession({ model: model || undefined }), searchable: models.length > 12 }} />
         <ListRow kind="picker" title="Permission" icon="shield" picker={{ value: wf.session.permissionMode ?? INHERIT, options: [{ value: INHERIT, label: 'Server default' }, ...PERMISSION_MODES.map((m) => ({ value: m, label: PERMISSION_LABEL[m] }))], onValueChange: (m) => setSession({ permissionMode: (m || undefined) as PermissionMode | undefined }) }} />
       </ListSection>
       <ListSection>

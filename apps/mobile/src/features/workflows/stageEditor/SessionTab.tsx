@@ -4,8 +4,7 @@
 // default inherits (the stage's `session` is a partial merged over the workflow's).
 import React from 'react';
 import { View } from 'react-native';
-import { HARNESS_PROVIDERS } from '@generatorai/shared/ui-contract';
-import { PERMISSION_MODES, REASONING_EFFORTS, type PermissionMode, type SessionSpec } from '@generatorai/workflow-spec';
+import { PERMISSION_MODES, type PermissionMode, type SessionSpec } from '@generatorai/workflow-spec';
 
 import { useModelPickerCatalog } from '../../../blocks/TurnSheet';
 import { ListRow } from '../../../ui/layout/ListRow';
@@ -14,6 +13,8 @@ import { Callout } from '../../../ui/primitives/Callout';
 import { Input } from '../../../ui/primitives/Input';
 import { useSelectableAgents } from '../queries';
 import type { TabProps } from './fields';
+import { harnessProviderLabel } from '@generatorai/shared';
+import { effortChoices } from '@generatorai/client-core';
 
 const INHERIT = '';
 const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
@@ -51,9 +52,9 @@ export function SessionTab({ stage, set, graph, isAdmin, onCapabilities }: TabPr
         <ListRow kind="navigation" title="Customize capabilities" icon="tool" value={capCount ? `${capCount} added` : agent ? 'From agent' : undefined} onPress={onCapabilities} testID="stage-capabilities" />
       </ListSection>
       <ListSection>
-        <ListRow kind="picker" title={`Model · ${modelFrom}`} icon="model" picker={{ value: s.model ?? INHERIT, options: [{ value: INHERIT, label: cap(modelFrom) }, ...models.map((m) => ({ value: m.id, label: m.name, description: m.provider }))], onValueChange: (model) => setSession({ model: model || undefined }), searchable: models.length > 12, testID: 'stage-model' }} />
-        <ListRow kind="picker" title="Provider" picker={{ value: s.harnessType ?? INHERIT, options: [{ value: INHERIT, label: 'By model' }, ...HARNESS_PROVIDERS.map((p) => ({ value: p.id, label: p.label }))], onValueChange: (h) => setSession({ harnessType: (h || undefined) as SessionSpec['harnessType'] }), testID: 'stage-provider' }} />
-        <ListRow kind="picker" title="Reasoning effort" icon="think" picker={{ value: s.reasoningEffort ?? INHERIT, options: [{ value: INHERIT, label: 'Default' }, ...REASONING_EFFORTS.map((e) => ({ value: e, label: EFFORT_LABEL[e] ?? cap(e) }))], onValueChange: (e) => setSession({ reasoningEffort: (e || undefined) as SessionSpec['reasoningEffort'] }), testID: 'stage-effort' }} />
+        <ListRow kind="picker" title={`Model · ${modelFrom}`} icon="model" picker={{ value: s.model ?? INHERIT, options: [{ value: INHERIT, label: cap(modelFrom) }, ...models.map((m) => ({ value: m.id, label: m.name, description: harnessProviderLabel(m.provider) }))], onValueChange: (model) => setSession({ model: model || undefined }), searchable: models.length > 12, testID: 'stage-model' }} />
+        <ListRow kind="picker" title="Provider" picker={{ value: s.harnessType ?? INHERIT, options: [{ value: INHERIT, label: 'By model' }, ...(catalog.catalog?.providers ?? []).map((p) => ({ value: p.type, label: p.label }))], onValueChange: (h) => setSession({ harnessType: (h || undefined) as SessionSpec['harnessType'] }), testID: 'stage-provider' }} />
+        <ListRow kind="picker" title="Reasoning effort" icon="think" picker={{ value: s.reasoningEffort ?? INHERIT, options: [{ value: INHERIT, label: 'Default' }, ...effortChoices(s.model ? models.find((m) => m.id === s.model)?.source : undefined).map((e) => ({ value: e, label: EFFORT_LABEL[e] ?? cap(e) }))], onValueChange: (e) => setSession({ reasoningEffort: (e || undefined) as SessionSpec['reasoningEffort'] }), testID: 'stage-effort' }} />
         <ListRow kind="segmented" title="Context window" segmented={{ value: s.contextTier ?? 'default', onValueChange: (t) => setSession({ contextTier: t === 'default' ? undefined : (t as SessionSpec['contextTier']) }), segments: [{ value: 'default', label: 'Standard' }, { value: 'long_context', label: 'Long' }] }} />
       </ListSection>
       <ListSection>

@@ -20,11 +20,13 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useForm, useStore } from '@tanstack/react-form';
 import {
-  REASONING_EFFORTS,
   slugifyAgentName,
   type AgentRuntimePolicy,
   type ResolvedAgentProjection,
 } from '@generatorai/shared';
+import type { HarnessCatalogModel, ReasoningEffort } from '@generatorai/shared';
+import { effortChoices, formatTokenLimit } from '@generatorai/client-core';
+import { useModels } from '@/hooks/harnessQueries.js';
 import { reasoningEffortLabel } from '@generatorai/shared/ui-contract';
 import {
   useAgent,
@@ -84,21 +86,30 @@ const ROLE_ITEMS: readonly SegmentedItem<'agent' | 'orchestrator'>[] = [
   { value: 'orchestrator', label: ROLE_LABEL.orchestrator },
 ];
 
-type EffortValue = '' | (typeof REASONING_EFFORTS)[number];
-const EFFORT_ITEMS: readonly SegmentedItem<EffortValue>[] = [
-  { value: '', label: 'Inherit' },
-  ...REASONING_EFFORTS.map((value) => ({
-    value,
-    label: reasoningEffortLabel(value),
-  })),
-];
+type EffortValue = '' | ReasoningEffort;
+/** Inherit + the chosen model's own effort levels (every level while the model is inherited). */
+function effortItems(model: HarnessCatalogModel | undefined): SegmentedItem<EffortValue>[] {
+  return [
+    { value: '', label: 'Inherit' },
+    ...effortChoices(model).map((value) => ({ value: value as EffortValue, label: reasoningEffortLabel(value) })),
+  ];
+}
 
 type ContextTierValue = '' | 'default' | 'long_context';
-const CONTEXT_TIER_ITEMS: readonly SegmentedItem<ContextTierValue>[] = [
-  { value: '', label: 'Inherit' },
-  { value: 'default', label: '200K' },
-  { value: 'long_context', label: '1M' },
-];
+/**
+ * Context tier choices. A size is shown only when the chosen model's provider
+ * reported it (D-131): "Standard 128K" / "Long 1M" for such a model, plain
+ * "Standard" / "Long" otherwise.
+ */
+function contextTierItems(model: HarnessCatalogModel | undefined): SegmentedItem<ContextTierValue>[] {
+  const standard = model?.promptTokenLimit;
+  const long = model?.longContext?.promptTokenLimit;
+  return [
+    { value: '', label: 'Inherit' },
+    { value: 'default', label: standard ? `Standard ${formatTokenLimit(standard)}` : 'Standard' },
+    { value: 'long_context', label: long ? `Long ${formatTokenLimit(long)}` : 'Long' },
+  ];
+}
 
 export function AgentEditorPage() {
   const navigate = useNavigate();
@@ -120,6 +131,7 @@ export function AgentEditorPage() {
   }));
   // Once the author edits the slug by hand, stop deriving it from the name —
   // otherwise renaming a saved agent would silently repoint every binding.
+  const { data: models } = useModels();
   const [slugTouched, setSlugTouched] = useState(false);
   const [tagInput, setTagInput] = useState('');
   const [projectionResult, setProjectionResult] = useState<ResolvedAgentProjection | undefined>();
@@ -676,7 +688,7 @@ export function AgentEditorPage() {
                       <SegmentedControl<EffortValue>
                         value={(runtime.reasoningEffort ?? '') as EffortValue}
                         onValueChange={(v) => patchRuntime({ reasoningEffort: (v || undefined) as AgentRuntimePolicy['reasoningEffort'] })}
-                        items={EFFORT_ITEMS.map((item) => ({ ...item, disabled: readOnly }))}
+                        items={effortItems(models?.find((m) => m.id === runtime.model && (!runtime.harnessType || m.provider === runtime.harnessType))).map((item) => ({ ...item, disabled: readOnly }))}
                         label="Reasoning effort"
                       />
                     </div>
@@ -685,7 +697,7 @@ export function AgentEditorPage() {
                       <SegmentedControl<ContextTierValue>
                         value={(runtime.contextTier ?? '') as ContextTierValue}
                         onValueChange={(v) => patchRuntime({ contextTier: (v || undefined) as AgentRuntimePolicy['contextTier'] })}
-                        items={CONTEXT_TIER_ITEMS.map((item) => ({ ...item, disabled: readOnly }))}
+                        items={contextTierItems(models?.find((m) => m.id === runtime.model && (!runtime.harnessType || m.provider === runtime.harnessType))).map((item) => ({ ...item, disabled: readOnly }))}
                         label="Context tier"
                       />
                     </div>

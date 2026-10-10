@@ -25,6 +25,7 @@ import { ArgsEditor, JsonObjectEditor, num } from '../../../fields/stageFields.j
 import type { AgentStageSpec } from '../../types.js';
 import { Row } from '../Row.js';
 import type { AgentTabProps } from './tabProps.js';
+import { ModelPicker } from '@/blocks/model-picker/index.js';
 
 type Output = AgentStageSpec['output'];
 type RuleType = ResultValidationRule['type'];
@@ -170,15 +171,20 @@ function RuleFields({ rule, n, onChange }: { rule: ResultValidationRule; n: numb
               />
             </Row>
             <Row label="Model" stacked optional>
-              <Input
-                mono
-                size="sm"
-                value={rule.model ?? ''}
-                onChange={(e) => onChange({ ...rule, model: e.target.value || undefined })}
-                placeholder="the stage’s model"
-                aria-label={`Rule ${n} judge model`}
-                spellCheck={false}
-              />
+              <div className="flex min-w-0 items-center gap-1">
+                <div className="min-w-0 flex-1">
+                  <ModelPicker
+                    variant="field"
+                    value={rule.model ?? ''}
+                    onChange={(m) => onChange({ ...rule, model: m || undefined })}
+                    placeholder="the stage’s model"
+                    ariaLabel={`Rule ${n} judge model`}
+                  />
+                </div>
+                {rule.model ? (
+                  <IconButton icon="x" size="sm" label={`Use the stage's model for rule ${n}`} onClick={() => onChange({ ...rule, model: undefined })} />
+                ) : null}
+              </div>
             </Row>
           </div>
           <Checkbox

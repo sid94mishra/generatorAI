@@ -17,6 +17,8 @@ import { ArgsEditor, BudgetFields, CompensationEditor, JoinFields, num } from '.
 import type { AgentStageSpec } from '../../types.js';
 import { Row } from '../Row.js';
 import type { AgentTabProps } from './tabProps.js';
+import { ModelLabel, ModelPicker } from '@/blocks/model-picker/index.js';
+import { Chip, ChipList } from '@/ui/primitives/Chip/Chip.js';
 
 type Timeouts = NonNullable<AgentStageSpec['timeouts']>;
 type Retry = NonNullable<AgentStageSpec['retry']>;
@@ -135,13 +137,33 @@ function ExpansionSection({ stage, onUpdate, issues }: AgentTabProps) {
               placeholder="global:bug-fixer"
             />
           </Row>
-          <Row label="Models" hint="Models a planned stage may use, one id per line (empty: the default model only).">
-            <ArgsEditor
-              args={expands.allowedModels}
-              onChange={(allowedModels) => onUpdate({ expands: { ...expands, allowedModels } })}
-              ariaLabel="Allowed models"
-              placeholder="claude-sonnet-5"
-            />
+          <Row label="Models" hint="Models a planned stage may use (empty: the default model only).">
+            <div className="flex min-w-0 flex-col gap-1.5" aria-label="Allowed models" role="group">
+              {(expands.allowedModels ?? []).length > 0 ? (
+                <ChipList>
+                  {(expands.allowedModels ?? []).map((id) => (
+                    <Chip
+                      key={id}
+                      size="sm"
+                      removeLabel={`Remove ${id}`}
+                      onRemove={() => onUpdate({ expands: { ...expands, allowedModels: (expands.allowedModels ?? []).filter((m) => m !== id) } })}
+                    >
+                      <ModelLabel modelId={id} />
+                    </Chip>
+                  ))}
+                </ChipList>
+              ) : null}
+              <ModelPicker
+                variant="field"
+                value=""
+                placeholder="Add a model…"
+                ariaLabel="Add an allowed model"
+                onChange={(id) => {
+                  const current = expands.allowedModels ?? [];
+                  if (id && !current.includes(id)) onUpdate({ expands: { ...expands, allowedModels: [...current, id] } });
+                }}
+              />
+            </div>
           </Row>
         </>
       ) : null}

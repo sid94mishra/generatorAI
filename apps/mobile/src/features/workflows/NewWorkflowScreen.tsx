@@ -8,7 +8,7 @@ import React, { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { PERMISSION_MODES, REASONING_EFFORTS } from '@generatorai/workflow-spec';
+import { PERMISSION_MODES } from '@generatorai/workflow-spec';
 
 import { WORKFLOWS_HREF, builderHref, workflowHref } from '../../blocks/shell/hrefs';
 import { useModelPickerCatalog } from '../../blocks/TurnSheet';
@@ -46,6 +46,8 @@ import {
 } from './model/newWorkflowModel';
 import { PERMISSION_WORD } from './model/workflowsModel';
 import { useProjectCodebases, useProjectsList, useSelectableAgents, useTemplates, useWorkflowWrites, useWorkflows } from './queries';
+import { harnessProviderLabel } from '@generatorai/shared';
+import { effortChoices } from '@generatorai/client-core';
 
 type Href = Parameters<typeof router.replace>[0];
 const MAX_CODEBASES = 5;
@@ -116,7 +118,7 @@ export default function NewWorkflowScreen(): React.ReactElement {
       });
   };
 
-  const modelOptions = [{ value: DEFAULT, label: 'Server default' }, ...(catalog.catalog?.models ?? []).map((m) => ({ value: m.id, label: m.name, description: m.provider }))];
+  const modelOptions = [{ value: DEFAULT, label: 'Server default' }, ...(catalog.catalog?.models ?? []).map((m) => ({ value: m.id, label: m.name, description: harnessProviderLabel(m.provider) }))];
   const agentOptions = [{ value: DEFAULT, label: 'None', description: 'optional' }, ...(agents.data ?? []).map((a) => ({ value: (a as { ref?: string }).ref ?? a.id, label: a.name }))];
   const source = start === 'template' && selected ? ` from ${selected.name}` : start === 'import' ? ' from JSON' : '';
 
@@ -296,7 +298,7 @@ export default function NewWorkflowScreen(): React.ReactElement {
       <ListSection title="Default session" footer="Stages inherit it unless they set their own.">
         <ListRow kind="picker" title="Agent" icon="agents" picker={{ value: basics.session.agentRef ?? DEFAULT, options: agentOptions, onValueChange: (agentRef) => setSession({ agentRef: agentRef || undefined }), searchable: agentOptions.length > 12, testID: 'workflow-new-agent' }} />
         <ListRow kind="picker" title="Model" icon="model" picker={{ value: basics.session.model ?? DEFAULT, options: modelOptions, onValueChange: (model) => setSession({ model: model || undefined }), searchable: modelOptions.length > 12, testID: 'workflow-new-model' }} />
-        <ListRow kind="picker" title="Effort" icon="think" picker={{ value: basics.session.reasoningEffort ?? DEFAULT, options: [{ value: DEFAULT, label: 'Default' }, ...REASONING_EFFORTS.map((e) => ({ value: e, label: e.charAt(0).toUpperCase() + e.slice(1) }))], onValueChange: (reasoningEffort) => setSession({ reasoningEffort: reasoningEffort || undefined }), testID: 'workflow-new-effort' }} />
+        <ListRow kind="picker" title="Effort" icon="think" picker={{ value: basics.session.reasoningEffort ?? DEFAULT, options: [{ value: DEFAULT, label: 'Default' }, ...effortChoices(basics.session.model ? catalog.catalog?.models.find((m) => m.id === basics.session.model)?.source : undefined).map((e) => ({ value: e, label: e.charAt(0).toUpperCase() + e.slice(1) }))], onValueChange: (reasoningEffort) => setSession({ reasoningEffort: reasoningEffort || undefined }), testID: 'workflow-new-effort' }} />
         <ListRow
           kind="picker"
           title="Permission"

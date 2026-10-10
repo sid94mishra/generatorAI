@@ -12,9 +12,6 @@ export {
   SELF_EXECUTABLES,
 } from './computerUseBlocklist.js';
 
-/** Default harness model identifier */
-export const DEFAULT_MODEL = 'claude-sonnet-4.6';
-
 /** Default server port */
 export const DEFAULT_PORT = 3100;
 

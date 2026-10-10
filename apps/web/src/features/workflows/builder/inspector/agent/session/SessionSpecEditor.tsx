@@ -17,7 +17,6 @@
 import { useMemo } from 'react';
 import {
   AGENT_MODES,
-  REASONING_EFFORTS,
   RUN_PERMISSION_MODES,
   type SessionSpec,
 } from '@generatorai/workflow-spec';
@@ -45,6 +44,7 @@ import {
   type SessionScope,
   type SessionSpecSection,
 } from './sessionModel.js';
+import { effortChoices } from '@generatorai/client-core';
 
 export interface SessionSpecEditorProps {
   /** The (partial) session being edited. */
@@ -148,7 +148,7 @@ export function SessionSpecEditor({
                 aria-label={`${scope} reasoning effort`}
                 value={session.reasoningEffort ?? ''}
                 onValueChange={(v) => onChange({ reasoningEffort: (v || undefined) as SessionSpec['reasoningEffort'] })}
-                items={[{ value: '', label: inherits }, ...REASONING_EFFORTS.map((e) => ({ value: e, label: reasoningEffortLabel(e) }))]}
+                items={[{ value: '', label: inherits }, ...effortChoices(session.model ? models?.find((m) => m.id === session.model) : undefined).map((e) => ({ value: e, label: reasoningEffortLabel(e) }))]}
               />
             </Row>
             <Row label="Context window">

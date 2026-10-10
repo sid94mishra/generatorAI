@@ -1,5 +1,5 @@
 // Settings › Model providers (MSetProviders, MD-35, MDF-108; `/settings/providers`): "n of m connected" + Test all;
-// one collapsible card per provider the server reports (HARNESS_PROVIDERS, 5): name, neutral "Default" badge, status
+// one collapsible card per provider the server serves (D-131): name, neutral "Default" badge, status
 // dot + word, description; open: Test connection, Sign in (the provider's browser flow in an auth session, then
 // re-probe until signed in) / Sign out, Make default, the readiness facts, the error and the model catalog or the
 // hint. Sign in / out and Make default need `admin:harnesses` (else the requires-admin row, MD-30) and a step-up.

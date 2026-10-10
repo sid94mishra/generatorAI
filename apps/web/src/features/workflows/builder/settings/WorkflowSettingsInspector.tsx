@@ -29,6 +29,7 @@ import { HooksTab } from './HooksTab.js';
 import { ProjectTab } from './ProjectTab.js';
 import { TagsTab } from './TagsTab.js';
 import { VariablesTab } from './VariablesTab.js';
+import { useModelLabel } from '@/blocks/model-picker/useModelLabel.js';
 
 export interface WorkflowSettingsInspectorProps {
   tab: SettingsTab;
@@ -88,7 +89,8 @@ export function WorkflowSettingsInspector({ tab, onTabChange }: WorkflowSettings
     { value: 'budget', label: 'Budget', count: tabCount(undefined, tabHasError(issues, 'budget')) },
   ];
 
-  const sessionSummary = [session.model ?? 'Default model', session.permissionMode ? PERMISSION_SHORT[session.permissionMode] : undefined]
+  const sessionModelName = useModelLabel(session.model);
+  const sessionSummary = [session.model ? (sessionModelName ?? session.model) : 'Default model', session.permissionMode ? PERMISSION_SHORT[session.permissionMode] : undefined]
     .filter(Boolean)
     .join(' · ');
 

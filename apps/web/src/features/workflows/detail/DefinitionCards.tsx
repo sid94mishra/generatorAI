@@ -20,6 +20,7 @@ import { Icon } from '@/ui/icons/index.js';
 import { Link } from '@/ui/primitives/Link/Link.js';
 import { Table, TableBody, TableCell, TableHeadCell, TableHeader, TableRow } from '@/ui/primitives/Table/Table.js';
 import { formatDuration, plural } from '../workflowFormat.js';
+import { ModelLabel } from '@/blocks/model-picker/ModelLabel.js';
 
 type Stage = WorkflowGraph['stages'][number];
 type Edge = WorkflowGraph['edges'][number];
@@ -108,8 +109,11 @@ export function StagesCard({ graph }: { graph: WorkflowGraph }) {
                     )}
                   </TableCell>
                   <TableCell>
-                    <span className="truncate text-small text-fg-2">
-                      {[session?.agentRef, session?.model].filter(Boolean).join(' · ') || <span className="text-fg-3">default</span>}
+                    <span className="flex min-w-0 items-center gap-1.5 truncate text-small text-fg-2">
+                      {session?.agentRef ? <span className="truncate">{session.agentRef}</span> : null}
+                      {session?.agentRef && session?.model ? <span aria-hidden>·</span> : null}
+                      {session?.model ? <ModelLabel modelId={session.model} /> : null}
+                      {!session?.agentRef && !session?.model ? <span className="text-fg-3">default</span> : null}
                     </span>
                   </TableCell>
                 </TableRow>
@@ -176,9 +180,19 @@ export function SetupCard({ graph, projectName }: { graph: WorkflowGraph; projec
     },
     {
       label: 'Default session',
-      value: [session.agentRef, session.model, session.reasoningEffort, session.permissionMode ? PERMISSION_WORD[session.permissionMode] : null]
-        .filter(Boolean)
-        .join(' · ') || <span className="text-fg-3">Deployment defaults</span>,
+      value:
+        session.agentRef || session.model || session.reasoningEffort || session.permissionMode ? (
+          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+            {session.model ? <ModelLabel modelId={session.model} /> : null}
+            {[session.agentRef, session.reasoningEffort, session.permissionMode ? PERMISSION_WORD[session.permissionMode] : null]
+              .filter(Boolean)
+              .map((part) => (
+                <span key={String(part)}>· {part}</span>
+              ))}
+          </span>
+        ) : (
+          <span className="text-fg-3">Deployment defaults</span>
+        ),
     },
     ...(lc.preprocessingSteps.length > 0
       ? [{ label: 'Before stages', value: lc.preprocessingSteps.map((s) => s.name).join(' → ') }]

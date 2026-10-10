@@ -53,6 +53,7 @@ import {
   type TriState,
 } from './model/agentsModel';
 import { useAgent, useAgentCatalogs, useAgentWrites, useAgents, useProjectsForAgents } from './queries';
+import { effortChoices } from '@generatorai/client-core';
 
 type Href = Parameters<typeof router.replace>[0];
 
@@ -129,7 +130,7 @@ export default function AgentEditorScreen(): React.ReactElement {
   const count = seeded ? changeCount(seeded, draft) : 0;
   const dirty = editing ? count > 0 : true;
   const model = catalog && draft.model ? findPickerModel(catalog, draft.model, draft.harnessType ?? undefined) : null;
-  const efforts = model?.reasoningEfforts ?? Object.keys(EFFORT_LABEL).slice(0, 4);
+  const efforts = effortChoices(model?.source);
   const level = instructionsLevel(draft.instructions);
 
   const save = (): void => {

@@ -32,6 +32,8 @@ import {
   SettingsTable,
   type SettingsTableColumn,
 } from '@/ui/patterns/SettingsSection/SettingsSection.js';
+import { ModelPicker } from '@/blocks/model-picker/index.js';
+import { ProviderSelect } from '@/blocks/provider-select/index.js';
 
 const LIMIT_MIN = 1;
 const LIMIT_MAX = 64;
@@ -202,17 +204,24 @@ export function WorkflowEngineSection() {
               label="Summary model"
               hint="The model that writes llm stage summaries for successors that read a summary. Empty: the stage's own model."
               control={
-                <TextSetting
-                  key={`summary:${data.settings.summaryModel ?? ''}`}
-                  initial={data.settings.summaryModel ?? ''}
-                  placeholder="The stage's own model"
-                  ariaLabel="Summary model"
-                  busy={save.isPending}
-                  onCommit={(text) => {
-                    const next = text.trim() || null;
-                    if (next !== data.settings.summaryModel) save.mutate({ summaryModel: next });
-                  }}
-                />
+                <div className="flex w-72 min-w-0 items-center gap-1">
+                  <div className="min-w-0 flex-1">
+                    <ModelPicker
+                      variant="field"
+                      value={data.settings.summaryModel ?? ''}
+                      placeholder="The stage's own model"
+                      ariaLabel="Summary model"
+                      disabled={save.isPending}
+                      onChange={(m) => {
+                        const next = m || null;
+                        if (next !== data.settings.summaryModel) save.mutate({ summaryModel: next });
+                      }}
+                    />
+                  </div>
+                  {data.settings.summaryModel ? (
+                    <IconButton icon="x" size="sm" label="Use the stage's own model" onClick={() => save.mutate({ summaryModel: null })} />
+                  ) : null}
+                </div>
               }
             />
             <SettingRow
@@ -343,24 +352,21 @@ function AddFlowKey({
           aria-label="Key kind"
           value={kind}
           onValueChange={(v) => {
-            if (v === 'provider' || v === 'model') setKind(v);
+            if (v === 'provider' || v === 'model') {
+              setKind(v);
+              setId('');
+            }
           }}
           items={NEW_KEY_KINDS}
           className="w-32"
         />
-        <Input
-          size="sm"
-          mono
-          value={id}
-          onChange={(e) => setId(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') add();
-          }}
-          placeholder={kind === 'provider' ? 'claude-agent' : 'claude-sonnet-4-5'}
-          aria-label="Provider or model id"
-          invalid={problem !== null}
-          className="w-48"
-        />
+        {kind === 'provider' ? (
+          <ProviderSelect size="sm" aria-label="Provider of the new key" emptyLabel="Choose a provider" value={id} onChange={setId} className="w-48" />
+        ) : (
+          <div className="w-56 min-w-0">
+            <ModelPicker variant="field" value={id} onChange={setId} placeholder="Choose a model…" ariaLabel="Model of the new key" />
+          </div>
+        )}
         <Input
           size="sm"
           type="number"

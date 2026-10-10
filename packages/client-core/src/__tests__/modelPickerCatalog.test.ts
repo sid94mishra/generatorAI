@@ -8,6 +8,7 @@ import type { HarnessProviderStatus, HarnessProvidersResponse } from '@generator
 import {
   buildModelPickerCatalog,
   findPickerModel,
+  effortChoices,
   modelDetails,
   modelReasoningEfforts,
   providerAvailability,
@@ -220,6 +221,12 @@ describe('modelDetails (only what the provider returned)', () => {
 });
 
 describe('helpers', () => {
+  it("effortChoices: the chosen model's own levels, every level when none is chosen", () => {
+    expect(effortChoices({ id: 'm', name: 'M', supportsReasoning: true, reasoningEfforts: ['low', 'max'] })).toEqual(['low', 'max']);
+    expect(effortChoices({ id: 'h', name: 'H' })).toEqual([]);
+    expect(effortChoices(undefined)).toContain('medium');
+  });
+
   it('modelReasoningEfforts: only for reasoning models; accepts the older string shape', () => {
     expect(modelReasoningEfforts({ supportsReasoning: false, reasoningEfforts: ['low'] })).toEqual([]);
     expect(modelReasoningEfforts({ supportsReasoning: true, reasoningEfforts: 'low  high' })).toEqual(['low', 'high']);

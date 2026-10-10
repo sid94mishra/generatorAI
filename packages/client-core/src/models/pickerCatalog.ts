@@ -18,7 +18,7 @@
 // React-free: web wraps it in a hook, mobile and the CLI call it directly.
 // ────────────────────────────────────────────────────────────────
 
-import type { HarnessCatalogModel, HarnessProviderStatus, HarnessProvidersResponse } from '@generatorai/shared';
+import { REASONING_EFFORTS, type HarnessCatalogModel, type HarnessProviderStatus, type HarnessProvidersResponse } from '@generatorai/shared';
 import { formatTokenLimit } from './formatTokenLimit.js';
 
 /** Why a provider can or cannot be used right now. */
@@ -96,6 +96,15 @@ export function modelReasoningEfforts(model: Pick<HarnessCatalogModel, 'supports
   if (Array.isArray(raw)) return raw.filter((v) => typeof v === 'string' && v.length > 0);
   if (typeof raw === 'string') return raw.trim().split(/\s+/).filter(Boolean);
   return [];
+}
+
+/**
+ * The effort levels an effort selector offers: the chosen model's own levels
+ * (the provider's list — empty when it has none), or every level when no
+ * model is chosen yet and the effort is inherited from elsewhere.
+ */
+export function effortChoices(model: HarnessCatalogModel | undefined): string[] {
+  return model ? modelReasoningEfforts(model) : [...REASONING_EFFORTS];
 }
 
 export function toPickerModel(model: HarnessCatalogModel, provider: string): PickerModel {

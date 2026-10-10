@@ -15,7 +15,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import {
-  REASONING_EFFORTS,
   RUN_PERMISSION_MODES,
   type InvocationPlan,
   type InvocationResult,
@@ -63,6 +62,8 @@ import {
 } from './runDialogModel.js';
 import { modChord } from '@/lib/shortcuts.js';
 import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
+import { effortChoices } from '@generatorai/client-core';
+import { useModels } from '@/hooks/harnessQueries.js';
 
 interface UploadSet {
   prompts: File[];
@@ -176,6 +177,7 @@ function RunDialogBody({
   const [stageVarText, setStageVarText] = useState<Record<string, string>>({});
   const [openStageVars, setOpenStageVars] = useState<Set<string>>(new Set());
   const [options, setOptions] = useState<RunOptions>(EMPTY_RUN_OPTIONS);
+  const { data: models } = useModels();
   const [uploadCategory, setUploadCategory] = useState<UploadCategory>('prompts');
   const [uploads, setUploads] = useState<UploadSet>(EMPTY_UPLOADS);
   const uploadCount = uploads.prompts.length + uploads.skills.length + uploads.agents.length;
@@ -392,7 +394,7 @@ function RunDialogBody({
             <Select
               value={options.effort}
               onValueChange={(v) => setOption('effort', v ?? '')}
-              items={[{ value: '', label: 'Default' }, ...REASONING_EFFORTS.map((e) => ({ value: e, label: effortLabel(e) }))]}
+              items={[{ value: '', label: 'Default' }, ...effortChoices(options.model ? models?.find((m) => m.id === options.model) : undefined).map((e) => ({ value: e, label: effortLabel(e) }))]}
             />
           </Field>
           <Field
