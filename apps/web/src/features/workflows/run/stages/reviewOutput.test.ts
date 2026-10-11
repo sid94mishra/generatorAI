@@ -18,3 +18,11 @@ describe('reviewOutputMarkdown (U-19)', () => {
     expect(reviewOutputMarkdown('{"body":"cut…')).toBe('```json\n{"body":"cut…\n```');
   });
 });
+
+describe('readableAnswer (U-21)', () => {
+  it('renders a JSON answer and leaves prose alone', async () => {
+    const { readableAnswer } = await import('./reviewOutput.js');
+    expect(readableAnswer('{"verdict":"approve","summary":"Looks good"}')).toBe('**Verdict:** approve\n\n**Summary:** Looks good');
+    expect(readableAnswer('Done. {not json}')).toBe('Done. {not json}');
+  });
+});

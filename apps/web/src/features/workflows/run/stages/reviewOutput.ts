@@ -33,3 +33,16 @@ export function reviewOutputMarkdown(output: string): string {
   const ordered = [...entries.filter(([, v]) => !isLongText(v)), ...entries.filter(([, v]) => isLongText(v))];
   return ordered.map(([k, v]) => field(k, v)).join('\n\n');
 }
+
+/** A finished JSON-contract stage's answer (U-21): its JSON as readable Markdown; any other text unchanged. */
+export function readableAnswer(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return text;
+  try {
+    JSON.parse(trimmed);
+  } catch {
+    return text;
+  }
+  return reviewOutputMarkdown(trimmed);
+}
+
