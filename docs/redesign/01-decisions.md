@@ -1293,8 +1293,14 @@ the new roots, but every provider returned early for a live conversation (Claude
 Faux, OpenCode, ACP always). Now: Claude rebinds when cwd or extra directories differ (`sameRoots`; the rebuilt config
 changes `sessionFingerprint`, so the CLI session is rebuilt with `resume`, history kept); Codex adopts the new roots
 on the live conversation and sends `cwd` with every `turn/start` ("this turn and subsequent turns") next to the
-writable-roots sandbox policy; Faux adopts them too. Copilot (a CLI client per cwd) and the experimental OpenCode/ACP
-are not changed yet — open item in `reviews/chat-sources.md`.
+writable-roots sandbox policy; Faux adopts them too. Copilot (2026-10-11): `WorkspacedCopilotPool` keeps one CLI per cwd,
+so a changed cwd moves the conversation — the target CLI starts first, the old one only disconnects its handle
+(`destroyConversation` keeps the persisted session) and the new one `resumeSession`s it by id with the new
+`workingDirectory`, system message (`[Workspace]` block) and tools, history kept; an extra-directories-only change
+rebinds in the same CLI (`CopilotProvider` compares `sameRoots`, shared in `conversationRoots.ts`); a failed resume
+falls back to a fresh session in the new cwd so the turn never errors. The experimental OpenCode (a server session has
+exactly one project `directory`) and ACP (`cwd` fixed at `session/new`) are not changed: following would mean a new
+provider session — open item in `reviews/chat-sources.md`.
 
 ### D-138 Form-dialog section hints sit behind an info icon; the Sources popover is one surface (2026-10-11) — Final
 Owner feedback: a grey sentence under every dialog section heading ("Where — What this chat works on…") read as noise,

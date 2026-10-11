@@ -22,9 +22,9 @@ import * as path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ClaudeAgentProvider,
-  sameRoots,
   sessionFingerprint,
 } from '../src/providers/claude-agent/ClaudeAgentProvider.js';
+import { sameRoots } from '../src/conversationRoots.js';
 import { buildHarnessEnv, filterDelegatedHarnessEnv } from '../src/childEnv.js';
 import type { CreateConversationParams } from '@generatorai/core';
 

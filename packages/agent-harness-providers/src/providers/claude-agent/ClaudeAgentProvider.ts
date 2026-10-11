@@ -99,6 +99,7 @@ import {
   normaliseClaudeQuestions,
 } from './plan-gate.js';
 import { buildHarnessEnv, filterDelegatedHarnessEnv } from '../../childEnv.js';
+import { sameRoots } from '../../conversationRoots.js';
 import { toHarnessError } from '../../errors.js';
 
 // ── W41 — lazy SDK module singleton ──────────────────────────────
@@ -351,22 +352,6 @@ const PING_UNHEALTHY_AFTER_FAILURES = 3;
  * reused or must be torn down and rebuilt, so "is this field in it?" is a
  * behavioural question, not an implementation detail.
  */
-/**
- * Whether a live conversation already runs in the roots `params` asks for
- * (cwd + extra directories, as `createConversation` would store them).
- * Exported for tests.
- */
-export function sameRoots(
-  existing: { workingDirectory?: string | undefined; additionalDirectories?: string[] | undefined },
-  params: Pick<CreateConversationParams, 'workingDirectory' | 'additionalDirectories'>,
-  defaultCwd: string | undefined,
-): boolean {
-  const cwd = params.workingDirectory ?? defaultCwd;
-  const dirs = [...new Set(params.additionalDirectories ?? [])];
-  const had = existing.additionalDirectories ?? [];
-  return cwd === existing.workingDirectory && dirs.length === had.length && dirs.every((d, i) => d === had[i]);
-}
-
 export function sessionFingerprint(options: ClaudeOptions): string {
   const o = options as unknown as Record<string, unknown>;
   const hooks = (o['hooks'] as Record<string, unknown[] | undefined> | undefined) ?? {};

@@ -43,6 +43,7 @@ import { mapSdkEventToAgentEvent } from './event-mapper.js';
 // dynamically at its two call sites (createConversation / resumeConversation).
 import { mapPermissionKind } from './permissionMap.js';
 import { buildHarnessEnv } from '../../childEnv.js';
+import { rootsOf, sameRoots, type ConversationRoots } from '../../conversationRoots.js';
 import { ToolSemaphore, MAX_PARALLEL_TOOLS } from '../../toolSemaphore.js';
 import {
   flattenAnswer,
@@ -306,6 +307,12 @@ export class CopilotProvider implements IAgentHarness {
    * and must rebuild the session instead of short-circuiting.
    */
   private conversationModels = new Map<string, string>();
+  /**
+   * Roots (cwd + extra directories) each live session was last bound with, so
+   * `resumeConversation` sees "Edit sources" on a live chat (D-137) and moves
+   * the session instead of short-circuiting.
+   */
+  private conversationRoots = new Map<string, ConversationRoots>();
   /** P07 WP-7.4 — a `chat <model>` span per turn (GenAI conventions). */
   private readonly genai = new GenAiTurnSpans('copilot-bridge', 'copilot');
   private clientEventHandlers = new Set<(event: HarnessClientEvent) => void>();
@@ -637,6 +644,39 @@ export class CopilotProvider implements IAgentHarness {
     }
   }
 
+  /**
+   * W36 — The client to resume `conversationId` on. A conversation that has no
+   * owning client yet (cold resume, or a rebind after its roots moved) is bound
+   * to the client for `params.workingDirectory`, exactly as
+   * {@link createConversation} binds a new one.
+   */
+  private async bindResumeClient(
+    conversationId: string,
+    params: CreateConversationParams | undefined,
+  ): Promise<CopilotClient> {
+    if (!params || this.conversationClientKey.has(conversationId)) return this.clientForConversation(conversationId);
+    const entry = await this.getOrCreateWorkspaceEntry(params.workingDirectory);
+    this.conversationClientKey.set(conversationId, entry && params.workingDirectory ? params.workingDirectory : '__default__');
+    if (!entry) return this.ensureClient(); /* W41 */
+    entry.refCount++;
+    entry.lastUsedAt = Date.now();
+    return entry.client;
+  }
+
+  /**
+   * Disconnect a live SDK session handle and forget it. The SDK keeps the
+   * persisted session, so a later `resumeSession` by id restores its history.
+   */
+  private async dropLiveSession(conversationId: string, session: CopilotSession): Promise<void> {
+    try {
+      await session.disconnect();
+    } catch {
+      // Already gone — a resume still rebuilds it.
+    }
+    this.conversations.delete(conversationId);
+    activeSessions.add(-1);
+  }
+
   // ── Client Lifecycle ──
 
   async initialize(): Promise<void> {
@@ -703,6 +743,7 @@ export class CopilotProvider implements IAgentHarness {
     this.conversationListenerCleanups.clear();
     this.conversationLeakWarned.clear();
     this.conversations.clear();
+    this.conversationRoots.clear();
     this.conversationClientKey.clear(); /* W36 */
   }
 
@@ -1273,6 +1314,7 @@ export class CopilotProvider implements IAgentHarness {
     this.attachTurnTextTracker(params.conversationId, session);
     this.conversations.set(params.conversationId, session);
     this.conversationModels.set(params.conversationId, resolvedModel);
+    this.conversationRoots.set(params.conversationId, rootsOf(params, this.options.defaultCwd));
     this.conversationWarnings.set(params.conversationId, warnings);
     this.conversationAgents.set(params.conversationId, registeredAgents);
     activeSessions.add(1);
@@ -1303,13 +1345,32 @@ export class CopilotProvider implements IAgentHarness {
     const liveSession = this.conversations.get(conversationId);
     const currentModel = this.conversationModels.get(conversationId);
     const modelChanged = !!params?.model && !!currentModel && params.model !== currentModel;
+    // "Edit sources" on a live chat (D-137) moves its cwd and extra directories.
+    // A session's cwd is fixed by create/resume, and the extra directories
+    // reach the model only through the `[Workspace]` block in the system
+    // message, so both need the session rebound.
+    const recordedRoots = this.conversationRoots.get(conversationId);
+    const rootsChanged =
+      !!liveSession && !!params && !!recordedRoots && !sameRoots(recordedRoots, params, this.options.defaultCwd);
 
-    if (liveSession && !modelChanged) {
+    if (liveSession && !modelChanged && !rootsChanged) {
       if (this.verbose) console.log(`[CopilotAdapter] Session ${conversationId} already in memory, skipping resume`);
       return;
     }
 
-    if (liveSession && modelChanged) {
+    if (liveSession && rootsChanged) {
+      // Disconnect the handle (the SDK keeps the persisted session) and resume
+      // it below by id with the new `workingDirectory`, system message and
+      // tools — on the client for the new cwd. The history is kept, and the
+      // resume config carries a changed model too (re-asserted via setModel).
+      if (this.verbose) {
+        console.log(
+          `[CopilotAdapter] Session ${conversationId} cwd ${recordedRoots?.workingDirectory ?? '(default)'} → ${params!.workingDirectory ?? '(default)'}; rebinding`,
+        );
+      }
+      await this.dropLiveSession(conversationId, liveSession);
+      this.releaseWorkspaceRef(conversationId);
+    } else if (liveSession && modelChanged) {
       // Switch the model IN PLACE via the SDK's dedicated `setModel`.
       //
       // Do NOT try to do this by disconnecting and calling `resumeSession`
@@ -1338,13 +1399,7 @@ export class CopilotProvider implements IAgentHarness {
           `[CopilotAdapter] setModel(${params!.model}) failed for ${conversationId}; falling back to session rebuild:`,
           err,
         );
-        try {
-          await liveSession.disconnect();
-        } catch {
-          // Already gone — the resume below still rebuilds it.
-        }
-        this.conversations.delete(conversationId);
-        activeSessions.add(-1);
+        await this.dropLiveSession(conversationId, liveSession);
       }
     }
 
@@ -1401,11 +1456,28 @@ export class CopilotProvider implements IAgentHarness {
     }
     // PLN-01 — reinstall the plan-mode gates on resume (see installPlanGates).
     if (params) this.installPlanGates(resumeConfig, params);
-    // W36 — resume on the same workspace client that owns this conversation
-    const resumeClient = await this.clientForConversation(conversationId); /* W36 */
-    const session = await resumeClient.resumeSession(conversationId, resumeConfig);
+    // W36 — resume on the workspace client that owns this conversation (bound
+    // to the cwd in `params` when it has none yet, e.g. after a rebind).
+    const resumeClient = await this.bindResumeClient(conversationId, params); /* W36 */
+    let session: CopilotSession;
+    try {
+      session = await resumeClient.resumeSession(conversationId, resumeConfig);
+    } catch (err) {
+      if (!rootsChanged || !params) throw err;
+      // The live session was already disconnected for the move; never leave
+      // the chat with no session. A fresh one in the new roots keeps the turn
+      // going — only the SDK-side context restarts, our history is in the DB.
+      console.warn(
+        `[CopilotAdapter] resume of ${conversationId} in ${params.workingDirectory ?? '(default)'} failed; starting a fresh session:`,
+        err,
+      );
+      this.releaseWorkspaceRef(conversationId);
+      await this.createConversation(params);
+      return;
+    }
     this.attachTurnTextTracker(conversationId, session);
     this.conversations.set(conversationId, session);
+    if (params) this.conversationRoots.set(conversationId, rootsOf(params, this.options.defaultCwd));
     if (params?.model) {
       // `resumeSession` rehydrates the session from the SDK's persistent
       // store, which carries the model the session was CREATED with — the
@@ -1695,6 +1767,7 @@ export class CopilotProvider implements IAgentHarness {
     this.turnTextTrackers.delete(conversationId);
     this.turnText.delete(conversationId);
     this.sessionModes.delete(conversationId);
+    this.conversationRoots.delete(conversationId);
     const session = this.conversations.get(conversationId);
     if (session) {
       await session.disconnect();
@@ -1718,6 +1791,7 @@ export class CopilotProvider implements IAgentHarness {
     this.sessionModes.delete(conversationId);
     this.conversationWarnings.delete(conversationId);
     this.conversationAgents.delete(conversationId);
+    this.conversationRoots.delete(conversationId);
     const session = this.conversations.get(conversationId);
     if (session) {
       await session.disconnect();

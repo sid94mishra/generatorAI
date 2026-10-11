@@ -58,8 +58,10 @@ for the mode, branch in `fg-2`. "Edit sources…" now closes the popover (it use
 
 After Edit sources on a live chat, the next turn still wrote into the old folder: every provider's
 `resumeConversation` skipped a live conversation. Fixed for Claude (rebind when roots change), Codex (adopt roots, send
-`cwd` each turn) and Faux. **Open:** Copilot (one CLI client per cwd; needs a live sign-in to verify a rebuild) and the
-experimental OpenCode/ACP still keep the old cwd until the conversation is rebuilt (server restart / eviction).
+`cwd` each turn) and Faux; Copilot since 2026-10-11 (the pool moves the conversation to the CLI for the new cwd and
+resumes the SDK session by id; unit-tested with a fake SDK in `copilot-edit-sources.test.ts`, not yet verified with a
+live Copilot sign-in). **Open:** the experimental OpenCode/ACP still keep the old cwd until the conversation is rebuilt
+(server restart / eviction); following needs a new provider session there.
 
 ## 6. Test evidence
 
@@ -95,7 +97,7 @@ touched files (715) and ComposerParts / Chip stories (new `SourcesEmptyWorkspace
 
 - Click the **real** native folder dialog in the installed app (automation can only stub it), on macOS and, when
   available, Windows/Linux (D-136 is Electron's cross-platform dialog; `createDirectory` is macOS-only).
-- Copilot / OpenCode / ACP after Edit sources (D-137 open item).
+- Copilot after Edit sources with a live sign-in (unit-tested only); OpenCode / ACP still open (D-137).
 - The desktop app connected to a remote server, end to end in the real SPA (the smoke uses a stand-in page; a sandbox
   shown as "remote" stops at pairing).
 
@@ -111,4 +113,5 @@ Installed `/Applications/GeneratorAI.app`, isolated profile (`--user-data-dir`),
 - Fixed: plain folder showed "1 file changed · Undo all" before any turn (Undo would have deleted user files); a re-added
   `main` could never checkpoint again; the popover did not name the project.
 - Open: removing the Empty workspace (adding a folder via Edit sources) deletes what the agent built there, silently;
-  Changes footer shows "detached HEAD · Nothing to commit" for an empty workspace with new files; Copilot rebinding (D-137).
+  Changes footer shows "detached HEAD · Nothing to commit" for an empty workspace with new files; Copilot rebinding live
+  check (fixed 2026-10-11, D-137).
