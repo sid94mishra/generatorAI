@@ -1373,6 +1373,27 @@ server bound to loopback (the desktop app's own) now passes `allowLoopback` to `
 decides, and a network-exposed server keeps blocking loopback (there it is the server's network, not the user's).
 `browser.error` events now reach the panel's error callout.
 
+### D-144 Device mode works like a real browser's device toolbar (2026-10-11) — Final
+Owner: the responsive icon did not move the page to a mobile layout. It started on the "Responsive" preset, for which
+`emulationParams` returned null — nothing was emulated — and Electron's `enableDeviceEmulation` never changed the user
+agent or touch. Now the first switch-on is a real phone (iPhone, 390×844 @3×, mobile); the page sits in a device-sized
+frame centred on a sunken backdrop, **Fit** (the default zoom) scales it to the panel; main applies it through CDP
+under a debugger lease (`Emulation.setDeviceMetricsOverride` with `scale`, touch emulation, a mobile user agent),
+so media queries, `vw` and UA checks follow the device, and off restores the tab. Responsive keeps the width/height
+fields editable; editing a preset's size makes it Custom. The full-page capture also takes the lease instead of a bare
+attach/detach that could cut the agent's CDP proxy off.
+
+### D-145 Browser comments: select in the page, write in the app with the Changes review form (2026-10-11) — Final
+Supersedes D-140's in-page card (the owner could select but not type: a text field inside a third-party page fights
+it for focus and keys). The page only SELECTS: the toolbar's **↖** (cursor arrow, a pressed toggle) outlines what is
+under the pointer, a click selects an element, a drag an area — a dashed draft pin. The selection opens the **Comments**
+panel (a drawer under the page, toggled by **Comments n** in the toolbar) with `ReviewCommentForm`, extracted from the
+diff's `ReviewComposerPopover` so both use one component: intent chips (Fix · Question · Refactor · Test · Note),
+the comment, **Add comment** / **Add & send**; keyboard focus moves to the app on a pick. Saved comments are numbered
+pins; each row has Edit (the same form, **Update comment**), Attach to the message, Send, Delete, and shows its element
+on the page; the header has **Attach all** / **Send all**. The intent leads each comment in the sent Markdown. The ⋯
+menu is just **Open DevTools** (Network / Console / Inspect elements opened the same window).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

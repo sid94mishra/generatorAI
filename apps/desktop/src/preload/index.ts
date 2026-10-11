@@ -245,6 +245,10 @@ const api = {
       ipcRenderer.invoke(BROWSER_IPC.annotateSend, tabId, keys),
     annotateOpen: (tabId: string, key: string): Promise<void> =>
       ipcRenderer.invoke(BROWSER_IPC.annotateOpen, tabId, key),
+    annotateSave: (tabId: string, key: string, comment: string, intent: string): Promise<boolean> =>
+      ipcRenderer.invoke(BROWSER_IPC.annotateSave, tabId, key, comment, intent),
+    annotateCancel: (tabId: string, key: string): Promise<void> =>
+      ipcRenderer.invoke(BROWSER_IPC.annotateCancel, tabId, key),
     annotateRemove: (tabId: string, key: string): Promise<void> =>
       ipcRenderer.invoke(BROWSER_IPC.annotateRemove, tabId, key),
     annotateClear: (tabId: string): Promise<void> =>

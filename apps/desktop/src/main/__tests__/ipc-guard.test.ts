@@ -137,7 +137,9 @@ describe('ipc.ts registers every channel through the guard', () => {
     // G-03's getServers/switchServer/addServer, G-04's
     // getUpdateState/installUpdate (P2-03) and watchUpdates (P1-review P2-R3),
     // minus getWindowChrome (P3-04: a preload launch argument now, 06 §3.6).
-    expect(guarded.length).toBe(49);
+    // D-140/D-145: browser comments drop pickElement + annotateRegion and add
+    // capture, annotateOpen, annotateSave, annotateCancel (net +2).
+    expect(guarded.length).toBe(51);
   });
 });
 

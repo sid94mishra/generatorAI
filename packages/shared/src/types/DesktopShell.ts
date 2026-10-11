@@ -196,8 +196,14 @@ export interface BrowserEmulationParams {
   height: number;
   /** Device pixel ratio (deviceScaleFactor). Default 1. */
   deviceScaleFactor?: number;
-  /** Emulate a touch/mobile device (screenPosition='mobile'). Default false. */
+  /** Emulate a touch/mobile device: mobile viewport, touch events, a mobile user agent. Default false. */
   mobile?: boolean;
+  /**
+   * How much the page is scaled to fit its device frame in the panel (D-144):
+   * it lays out at `width`×`height` CSS px and paints at `scale` of that, so a
+   * 390-wide phone shows whole in a narrow dock. Default 1.
+   */
+  scale?: number;
 }
 
 /** One tab of the native desktop browser host (Phase 2 of the browser integration). */
@@ -263,6 +269,8 @@ export interface BrowserPickResult {
   /** PNG data URL of the element/area in context, or null. */
   screenshot?: string | null;
   comment?: string;
+  /** The review intent picked in the comment form: fix · question · refactor · test · note. */
+  intent?: string;
 }
 
 /** A comment as the tray lists it. */
@@ -272,20 +280,22 @@ export interface BrowserAnnotationSummary {
   label: string;
   tag: string;
   comment: string;
+  /** The review intent: fix · question · refactor · test · note. */
+  intent: string;
   /** A dragged area rather than an element. */
   region: boolean;
   /** The element's visible text (empty for an area). */
   text: string;
 }
 
-/** What the overlay reports on each poll. */
+/** What the overlay reports on each poll (D-145). */
 export interface BrowserAnnotatePollResult {
-  /** Saved comments, in pin order (drafts excluded). */
+  /** Saved comments, in pin order. */
   items: BrowserAnnotationSummary[];
-  /** The user pressed Esc with no card open: leave Annotate mode. */
+  /** The element or area just selected and not yet commented (`n` is 0), or null. */
+  pending: BrowserAnnotationSummary | null;
+  /** The user pressed Esc in the page with nothing selected: leave select mode. */
   exit: boolean;
-  /** The user pressed ⌘/Ctrl↵ in a card: send every comment now. */
-  sendAll: boolean;
 }
 
 /** A user screenshot of the page (`capture`). */

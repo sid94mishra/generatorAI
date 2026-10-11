@@ -34,8 +34,12 @@ interface GeneratorAIDesktopBrowserApi {
   annotateStop: (tabId: string) => Promise<void>;
   annotatePoll: (tabId: string) => Promise<GeneratorAIDesktopBrowserAnnotatePollResult>;
   annotateSend: (tabId: string, keys?: string[]) => Promise<GeneratorAIDesktopBrowserPickResult[]>;
-  /** Scroll a comment into view and open its card in the page. */
+  /** Scroll a comment's element into view and flash its outline. */
   annotateOpen: (tabId: string, key: string) => Promise<void>;
+  /** Save (or update) the comment on a selection; false when the key is gone. */
+  annotateSave: (tabId: string, key: string, comment: string, intent: string) => Promise<boolean>;
+  /** Drop the pending selection. */
+  annotateCancel: (tabId: string, key: string) => Promise<void>;
   annotateRemove: (tabId: string, key: string) => Promise<void>;
   annotateClear: (tabId: string) => Promise<void>;
   onDidNavigate: (cb: (evt: GeneratorAIDesktopNativeBrowserEvent) => void) => () => void;

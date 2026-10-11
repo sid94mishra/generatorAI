@@ -39,7 +39,7 @@ import { BrowserToolbar } from './BrowserToolbar.js';
 import { DeviceEmulationBar } from './DeviceEmulationBar.js';
 import { useNativeBrowserAvailable } from './nativeBrowserBridge.js';
 import { NativeBrowserView } from './NativeBrowserView.js';
-import { CommentTray } from './CommentTray.js';
+import { BrowserCommentsPanel } from './BrowserCommentsPanel.js';
 import { useBrowserAnnotations, type BrowserCaptureHandler, type BrowserSendHandler } from './useBrowserAnnotations.js';
 import { useBrowserCapture } from './useBrowserCapture.js';
 import { useBrowserDescriptor } from './useBrowserDescriptor.js';
@@ -49,7 +49,7 @@ import { useBrowserLiveStream, type BrowserStreamState } from './useBrowserLiveS
 import { useBrowserNavigation } from './useBrowserNavigation.js';
 import { useBrowserTabState, type BrowserTabState } from './useBrowserTabState.js';
 import { useBrowserScrollState, useBrowserViewportResize } from './useBrowserViewport.js';
-import { useDeviceEmulation } from './useDeviceEmulation.js';
+import { useDeviceEmulation, useDeviceFrame } from './useDeviceEmulation.js';
 
 export type { BrowserTabState };
 
@@ -176,8 +176,8 @@ export function BrowserPanel({
 
   const {
     inspectorOn, setInspectorOn, captureMode, setCaptureMode,
-    annotateOn, items: comments, sending, notice,
-    toggleAnnotate, send: sendComments, openComment, removeComment, clearComments, screenshot,
+    annotateOn, items: comments, pending, sending, notice, panelOpen, setPanelOpen,
+    toggleAnnotate, send: sendComments, saveComment, cancelPending, showComment, removeComment, screenshot,
   } = useBrowserAnnotations({ open, workspaceId, nativeTabId, nativeAvailable, palette: overlayPalette, onCapture, onSend, setError });
 
   // Inspector selection → the chat composer via `onCapture`. One-shot:
@@ -210,10 +210,12 @@ export function BrowserPanel({
     urlScopeKey, nativeTabId, onTabStateChange,
   });
 
+  const emulation = useDeviceEmulation({ nativeAvailable, nativeTabId });
   const {
     emulationOn, emuPreset, emuWidth, emuHeight, emuDpr, emuMobile, emuZoom,
     handleToggleEmulation, handlePickPreset, handleEmuDimChange, handleEmuRotate, handleEmuZoom, handleEmuDpr, handleEmuMobile,
-  } = useDeviceEmulation({ nativeAvailable, nativeTabId });
+  } = emulation;
+  const { areaRef: deviceAreaRef, frame: deviceFrameSize } = useDeviceFrame(emulation);
 
   const {
     handleLiveClick, handleLiveWheel, handleLiveMouseMove, handleLiveKeyDown, scrollBarRef, handleScrollThumbDown,
@@ -254,8 +256,10 @@ export function BrowserPanel({
         onToggleShare={() => { void handleToggleShare(); }}
         canComment={!!(onCapture || onSend)}
         annotateOn={inspectorOn || annotateOn}
-        commentCount={comments.length}
         onToggleAnnotate={() => { void toggleAnnotate(); }}
+        commentCount={comments.length}
+        commentsOpen={panelOpen}
+        onToggleComments={() => setPanelOpen(!panelOpen)}
         captureMode={captureMode}
         onScreenshot={(kind) => { void screenshot(kind); }}
         emulationOn={emulationOn}
@@ -294,16 +298,27 @@ export function BrowserPanel({
 
       {/* Live view ─────────────────────────────────────── */}
       {nativeView ? (
-        <NativeBrowserView
-          tabId={nativeTabId}
-          workspaceId={workspaceId}
-          restoreUrl={restoreUrl}
-          onUrlChange={onNativeUrlChange}
-          onTitleChange={onNativeTitleChange}
-          onLoadingChange={onNativeLoadingChange}
-          onFaviconChange={onNativeFaviconChange}
-          onError={(msg) => setError(msg)}
-        />
+        // Device mode (D-144): the page sits in a device-sized frame, centred
+        // on a sunken backdrop, like a real browser's device toolbar.
+        <div
+          ref={deviceAreaRef}
+          data-testid={emulationOn ? 'browser-device-frame' : undefined}
+          className={cn('relative flex min-h-0 flex-1', emulationOn && 'items-center justify-center overflow-hidden bg-sunken')}
+        >
+          {emulationOn && !deviceFrameSize ? null : (
+            <NativeBrowserView
+              tabId={nativeTabId}
+              workspaceId={workspaceId}
+              restoreUrl={restoreUrl}
+              onUrlChange={onNativeUrlChange}
+              onTitleChange={onNativeTitleChange}
+              onLoadingChange={onNativeLoadingChange}
+              onFaviconChange={onNativeFaviconChange}
+              onError={(msg) => setError(msg)}
+              frame={emulationOn ? deviceFrameSize : null}
+            />
+          )}
+        </div>
       ) : (
         <div ref={liveContainerRef} data-testid="browser-live-view" className="relative flex min-h-0 flex-1 items-center justify-center bg-sunken">
           {/* Mounted for the whole time the browser is on: the decoder needs
@@ -354,19 +369,22 @@ export function BrowserPanel({
         </div>
       )}
 
-      {nativeAvailable && isOn && (onCapture || onSend) && (
-        <CommentTray
+      {nativeAvailable && isOn && (onCapture || onSend) && (panelOpen || pending || notice) && (
+        <BrowserCommentsPanel
           items={comments}
-          annotating={annotateOn}
+          pending={pending}
+          selecting={annotateOn}
           sending={sending}
           notice={notice}
-          canSendNow={!!onSend}
-          canAddToMessage={!!onCapture}
-          onSendNow={() => { void sendComments('now'); }}
-          onAddToMessage={() => { void sendComments('message'); }}
-          onOpen={(key) => { void openComment(key); }}
+          canSend={!!onSend}
+          canAttach={!!onCapture}
+          onSave={(key, body, intent, sendNow) => { void saveComment(key, body, intent, sendNow); }}
+          onCancelPending={() => { void cancelPending(); }}
+          onSend={(keys) => { void sendComments('now', keys); }}
+          onAttach={(keys) => { void sendComments('message', keys); }}
+          onShow={(key) => { void showComment(key); }}
           onRemove={(key) => { void removeComment(key); }}
-          onClear={() => { void clearComments(); }}
+          onClose={() => { setPanelOpen(false); if (pending) void cancelPending(); }}
         />
       )}
 

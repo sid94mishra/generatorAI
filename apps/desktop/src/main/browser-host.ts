@@ -27,6 +27,11 @@ import { getServerManager } from './server-manager';
 import { hardenBrowserTabSession } from './session-hardening';
 import { DEFAULT_ANNOTATION_PALETTE, type AnnotationPalette } from './annotation-palette';
 import { annotateOverlayScript } from './annotate-overlay';
+import { acquireElectronDebugger, type ElectronDebuggerLease } from './cdp/electron-debugger-lease';
+
+/** What a mobile device reports in device mode (D-144): current iOS Safari. */
+const MOBILE_USER_AGENT =
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
 import type {
   BrowserBounds,
   BrowserEmulationParams,
@@ -174,6 +179,8 @@ export class NativeBrowserHost extends EventEmitter {
    * 0×0 — no layout, empty screenshots — while a hidden window that paints keeps a real viewport.
    */
   private agentWindow: BrowserWindow | null = null;
+  /** Tabs in device mode (D-144): the debugger lease it holds and the tab's own user agent. */
+  private emulations = new Map<string, { lease: ElectronDebuggerLease; userAgent: string }>();
 
   isEnabled(): boolean {
     return nativeBrowserEnabled();
@@ -586,6 +593,8 @@ export class NativeBrowserHost extends EventEmitter {
   destroy(tabId: string): void {
     const sess = this.sessions.get(tabId);
     if (!sess) return;
+    this.emulations.get(tabId)?.lease.release();
+    this.emulations.delete(tabId);
     const proxy = this.cdpProxies.get(tabId);
     if (proxy) {
       this.cdpProxies.delete(tabId);
@@ -728,27 +737,56 @@ export class NativeBrowserHost extends EventEmitter {
    * resizing the actual native view rectangle.
    */
   setEmulation(tabId: string, params: BrowserEmulationParams | null): void {
+    void this.applyEmulation(tabId, params).catch((err) => log.warn('[NativeBrowserHost] setEmulation failed', err));
+  }
+
+  /**
+   * Device mode the way a real browser's DevTools does it (D-144): the page
+   * lays out at the device's CSS size with its pixel ratio and the mobile
+   * viewport (so media queries and `vw` follow the device), paints scaled to
+   * fit the frame the renderer sized the view to, and — for a mobile device —
+   * gets touch events and a mobile user agent. Held through a debugger lease
+   * so it coexists with the agent's CDP connection; `null` restores the tab.
+   */
+  private async applyEmulation(tabId: string, params: BrowserEmulationParams | null): Promise<void> {
     const sess = this.sessions.get(tabId);
     if (!sess) return;
     const wc = sess.view.webContents;
-    try {
-      if (!params) {
-        wc.disableDeviceEmulation();
-        return;
+    let emu = this.emulations.get(tabId);
+    if (!params) {
+      if (!emu) return;
+      this.emulations.delete(tabId);
+      try {
+        await wc.debugger.sendCommand('Emulation.clearDeviceMetricsOverride');
+        await wc.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: false });
+        await wc.debugger.sendCommand('Emulation.setEmitTouchEventsForMouse', { enabled: false });
+        await wc.debugger.sendCommand('Emulation.setUserAgentOverride', { userAgent: emu.userAgent });
+      } finally {
+        emu.lease.release();
       }
-      const width = Math.max(1, Math.round(params.width));
-      const height = Math.max(1, Math.round(params.height));
-      wc.enableDeviceEmulation({
-        screenPosition: params.mobile ? 'mobile' : 'desktop',
-        screenSize: { width, height },
-        viewPosition: { x: 0, y: 0 },
-        deviceScaleFactor: params.deviceScaleFactor && params.deviceScaleFactor > 0 ? params.deviceScaleFactor : 0,
-        viewSize: { width, height },
-        scale: 1,
-      });
-    } catch (err) {
-      log.warn('[NativeBrowserHost] setEmulation failed', err);
+      return;
     }
+    if (!emu) {
+      emu = { lease: acquireElectronDebugger(wc), userAgent: wc.getUserAgent() };
+      this.emulations.set(tabId, emu);
+    }
+    const width = Math.max(1, Math.round(params.width));
+    const height = Math.max(1, Math.round(params.height));
+    const mobile = params.mobile === true;
+    const dpr = params.deviceScaleFactor && params.deviceScaleFactor > 0 ? params.deviceScaleFactor : mobile ? 3 : 1;
+    await wc.debugger.sendCommand('Emulation.setDeviceMetricsOverride', {
+      width,
+      height,
+      deviceScaleFactor: dpr,
+      mobile,
+      scale: params.scale && params.scale > 0 ? params.scale : 1,
+      screenWidth: width,
+      screenHeight: height,
+      screenOrientation: width > height ? { type: 'landscapePrimary', angle: 90 } : { type: 'portraitPrimary', angle: 0 },
+    });
+    await wc.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: mobile, maxTouchPoints: mobile ? 5 : 1 });
+    await wc.debugger.sendCommand('Emulation.setEmitTouchEventsForMouse', { enabled: mobile, configuration: 'mobile' });
+    await wc.debugger.sendCommand('Emulation.setUserAgentOverride', { userAgent: mobile ? MOBILE_USER_AGENT : emu.userAgent });
   }
 
   /** Set the page zoom factor (1 = 100%). */
@@ -812,9 +850,10 @@ export class NativeBrowserHost extends EventEmitter {
 
   // ── Annotate overlay (D-140) ───────────────────────────────────
   //
-  // The overlay (`annotate-overlay.ts`) lives inside the page; React owns the
-  // comment tray under the view. `annotatePoll` lists saved comments and
-  // relays the overlay's two requests (Esc → leave the mode, ⌘↵ → send all).
+  // The overlay (`annotate-overlay.ts`) only selects and pins inside the page;
+  // the comment form and list are React, in the Comments panel under the view
+  // (D-145). `annotatePoll` reports saved comments, the pending selection and
+  // Esc-to-leave; `annotateSave` / `annotateCancel` settle the selection.
   // `annotateSend` captures each comment IN CONTEXT — scrolled into view,
   // padded, only its own pin and outline showing — then removes the sent
   // comments from the page so none can be sent twice.
@@ -831,7 +870,7 @@ export class NativeBrowserHost extends EventEmitter {
     await sess.view.webContents
       .executeJavaScript(`window.__GAI_ANNO&&window.__GAI_ANNO.start(${JSON.stringify(palette)})`, true)
       .catch(() => undefined);
-    // Typing a comment needs keyboard focus inside the page.
+    // Hover and Esc need the page to have the pointer's attention.
     try { sess.view.webContents.focus(); } catch { /* view gone */ }
   }
 
@@ -848,7 +887,6 @@ export class NativeBrowserHost extends EventEmitter {
     await sess.view.webContents
       .executeJavaScript(`window.__GAI_ANNO&&window.__GAI_ANNO.open(${JSON.stringify(key)})`, true)
       .catch(() => undefined);
-    try { sess.view.webContents.focus(); } catch { /* view gone */ }
   }
 
   async annotateRemove(tabId: string, key: string): Promise<void> {
@@ -866,7 +904,7 @@ export class NativeBrowserHost extends EventEmitter {
   }
 
   async annotatePoll(tabId: string): Promise<BrowserAnnotatePollResult> {
-    const empty: BrowserAnnotatePollResult = { items: [], exit: false, sendAll: false };
+    const empty: BrowserAnnotatePollResult = { items: [], pending: null, exit: false };
     const sess = this.sessions.get(tabId);
     if (!sess) return empty;
     const wc = sess.view.webContents;
@@ -879,12 +917,39 @@ export class NativeBrowserHost extends EventEmitter {
           await wc.executeJavaScript(`window.__GAI_ANNO&&window.__GAI_ANNO.start()`, true);
         }
       }
-      const raw = (await wc.executeJavaScript('window.__GAI_ANNO?window.__GAI_ANNO.poll():null', true)) as BrowserAnnotatePollResult | null;
+      const raw = (await wc.executeJavaScript('window.__GAI_ANNO?window.__GAI_ANNO.poll():null', true)) as
+        | (BrowserAnnotatePollResult & { picked?: boolean })
+        | null;
       if (!raw) return empty;
-      return { items: Array.isArray(raw.items) ? raw.items : [], exit: raw.exit === true, sendAll: raw.sendAll === true };
+      // Something was just selected: the comment form is in the app, so the
+      // keyboard has to go back there from the page the user clicked in.
+      if (raw.picked) {
+        try { this.ownerWindow?.webContents.focus(); } catch { /* window gone */ }
+      }
+      return { items: Array.isArray(raw.items) ? raw.items : [], pending: raw.pending ?? null, exit: raw.exit === true };
     } catch {
       return empty;
     }
+  }
+
+  async annotateSave(tabId: string, key: string, comment: string, intent: string): Promise<boolean> {
+    const sess = this.sessions.get(tabId);
+    if (!sess || typeof key !== 'string' || typeof comment !== 'string' || !comment.trim()) return false;
+    const ok = await sess.view.webContents
+      .executeJavaScript(
+        `window.__GAI_ANNO?window.__GAI_ANNO.save(${JSON.stringify(key)},${JSON.stringify(comment.trim())},${JSON.stringify(String(intent || 'fix'))}):false`,
+        true,
+      )
+      .catch(() => false);
+    return ok === true;
+  }
+
+  async annotateCancel(tabId: string, key: string): Promise<void> {
+    const sess = this.sessions.get(tabId);
+    if (!sess || typeof key !== 'string') return;
+    await sess.view.webContents
+      .executeJavaScript(`window.__GAI_ANNO&&window.__GAI_ANNO.cancel(${JSON.stringify(key)})`, true)
+      .catch(() => undefined);
   }
 
   async annotateSend(tabId: string, keys?: string[]): Promise<BrowserPickResult[]> {
@@ -959,9 +1024,13 @@ export class NativeBrowserHost extends EventEmitter {
 
   private async captureFullPage(wc: WebContentsView['webContents']): Promise<string | null> {
     const dbg = wc.debugger;
-    const attachedHere = !dbg.isAttached();
-    if (attachedHere) {
-      try { dbg.attach('1.3'); } catch { return null; }
+    let lease: ElectronDebuggerLease;
+    try {
+      // A lease, never a bare attach/detach: the agent's CDP proxy may hold
+      // the same debugger, and detaching it here would cut the agent off.
+      lease = acquireElectronDebugger(wc);
+    } catch {
+      return null;
     }
     const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
       Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))]);
@@ -987,9 +1056,7 @@ export class NativeBrowserHost extends EventEmitter {
       log.warn('[NativeBrowserHost] full-page capture fell back to the viewport', err);
       return null;
     } finally {
-      if (attachedHere) {
-        try { dbg.detach(); } catch { /* already detached */ }
-      }
+      lease.release();
     }
   }
 

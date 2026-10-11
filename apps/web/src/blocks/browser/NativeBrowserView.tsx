@@ -13,20 +13,30 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useNativeBrowserView, type NativeBrowserViewOptions } from './useNativeBrowserView.js';
+import { cn } from '@/ui/lib/cn.js';
 
-export type NativeBrowserViewProps = NativeBrowserViewOptions;
+export type NativeBrowserViewProps = NativeBrowserViewOptions & {
+  /** A fixed frame (device mode, D-144) instead of filling the panel. */
+  frame?: { width: number; height: number } | null;
+};
 
-export function NativeBrowserView(props: NativeBrowserViewProps): React.JSX.Element {
+export function NativeBrowserView({ frame, ...props }: NativeBrowserViewProps): React.JSX.Element {
   const { containerRef, placeholderBg, obscured } = useNativeBrowserView(props);
 
   return (
     <div
       ref={containerRef}
       data-testid="browser-live-view"
-      className="relative min-h-0 flex-1 bg-ground bg-contain bg-center bg-no-repeat"
-      // The last-frame screenshot shown while the native view is hidden: a
-      // computed data URL, so it is inline geometry, not a literal style.
-      style={placeholderBg ? { backgroundImage: `url(${placeholderBg})` } : undefined}
+      className={cn(
+        'relative min-h-0 bg-ground bg-contain bg-center bg-no-repeat',
+        frame ? 'flex-none rounded-control shadow-pop ring-1 ring-line' : 'flex-1',
+      )}
+      // The last-frame screenshot shown while the native view is hidden (a
+      // computed data URL) and the device frame's size: computed geometry.
+      style={{
+        ...(placeholderBg ? { backgroundImage: `url(${placeholderBg})` } : {}),
+        ...(frame ? { width: frame.width, height: frame.height } : {}),
+      }}
       aria-label="Native browser view"
     >
       {obscured && (

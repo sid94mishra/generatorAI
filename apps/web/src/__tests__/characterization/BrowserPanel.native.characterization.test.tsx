@@ -77,11 +77,14 @@ const urlBox = (): HTMLInputElement => screen.getByRole('textbox') as HTMLInputE
 const annotateButton = (): HTMLElement => screen.getByTestId('browser-annotate');
 
 function annotation(key: string, n: number, comment: string) {
-  return { key, n, label: `div.item-${n}`, tag: 'div', comment, region: false, text: '' };
+  return { key, n, label: `div.item-${n}`, tag: 'div', comment, intent: 'fix', region: false, text: '' };
 }
 
-function polled(items: ReturnType<typeof annotation>[], flags: Partial<{ exit: boolean; sendAll: boolean }> = {}) {
-  return { items, exit: false, sendAll: false, ...flags };
+function polled(
+  items: ReturnType<typeof annotation>[],
+  flags: Partial<{ exit: boolean; pending: ReturnType<typeof annotation> | null }> = {},
+) {
+  return { items, pending: null, exit: false, ...flags };
 }
 
 function pick(overrides: Partial<{ id: string | null; screenshot: string | null; comment: string }> = {}) {
@@ -231,26 +234,24 @@ describe('BrowserPanel native — URL bar and tab label', () => {
 
 // ── Annotate (D-140) ─────────────────────────────────────────
 
-describe('BrowserPanel native — Annotate, the comment tray and screenshots', () => {
+describe('BrowserPanel native — select element, the Comments panel and screenshots (D-145)', () => {
   type SendResult = 'sent' | 'attached';
   const sendTo = { onCapture: vi.fn(), onSend: vi.fn(async (): Promise<SendResult> => 'sent') };
   beforeEach(() => {
     sendTo.onCapture = vi.fn();
     sendTo.onSend = vi.fn(async (): Promise<SendResult> => 'sent');
   });
+  const pendingOn = (key: string, label: string) => ({ ...annotation(key, 0, ''), label, text: 'Get startd' });
 
-  it('Annotate starts the in-page overlay (palette passed), polls every 400 ms, shows the hint, and stops on the second click', async () => {
+  it('↖ starts select mode in the page (palette passed), opens the Comments panel with the hint, and stops on the second click', async () => {
     await mount(sendTo);
     fireEvent.click(annotateButton());
     await flush();
-    expect(bridge.api.annotateStart).toHaveBeenCalledWith(
-      'tab-1',
-      expect.objectContaining({ accent: expect.stringMatching(/^#[0-9a-f]{6}$/i) }),
-    );
-    expect(fetchStub.count('actions')).toBe(0); // no server inspector in native mode
+    expect(bridge.api.annotateStart).toHaveBeenCalledWith('tab-1', expect.objectContaining({ accent: expect.stringMatching(/^#[0-9a-f]{6}$/i) }));
+    expect(fetchStub.count('actions')).toBe(0);
     expect(annotateButton()).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByText('Click an element or drag across an area to comment.')).toBeInTheDocument();
-
+    expect(screen.getByTestId('browser-comments-panel')).toBeInTheDocument();
+    expect(screen.getByText(/Hover the page and click an element/)).toBeInTheDocument();
     expect(bridge.api.annotatePoll).toHaveBeenCalledTimes(1);
     await advance(400);
     expect(bridge.api.annotatePoll).toHaveBeenCalledTimes(2);
@@ -259,104 +260,126 @@ describe('BrowserPanel native — Annotate, the comment tray and screenshots', (
     await flush();
     expect(bridge.api.annotateStop).toHaveBeenCalledWith('tab-1');
     expect(annotateButton()).toHaveAttribute('aria-pressed', 'false');
-    // No comments and the mode off: nothing left to track, and the tray is gone.
-    expect(screen.queryByTestId('browser-comment-tray')).toBeNull();
     const polls = bridge.api.annotatePoll.mock.calls.length;
     await advance(2000);
     expect(bridge.api.annotatePoll).toHaveBeenCalledTimes(polls);
   });
 
-  it('the tray lists saved comments; the count rides on the Annotate button', async () => {
-    bridge.api.annotatePoll.mockResolvedValue(polled([annotation('a', 1, 'Make it bigger'), annotation('b', 2, 'Fix the spacing')]));
+  it('a selection opens the Changes review form; Add comment saves it with its intent', async () => {
+    bridge.api.annotatePoll.mockResolvedValue(polled([], { pending: pendingOn('d1', 'a#start.cta') }));
     await mount(sendTo);
     fireEvent.click(annotateButton());
     await flush();
-    const tray = screen.getByTestId('browser-comment-tray');
-    expect(within(tray).getByText('Make it bigger')).toBeInTheDocument();
-    expect(within(tray).getByText('Fix the spacing')).toBeInTheDocument();
-    expect(within(annotateButton()).getByText('2')).toBeInTheDocument();
+    const form = screen.getByTestId('browser-comment-composer');
+    expect(within(form).getByText(/New comment · a#start\.cta/)).toBeInTheDocument();
+    for (const intent of ['Fix', 'Question', 'Refactor', 'Test', 'Note']) {
+      expect(within(form).getByRole('button', { name: intent })).toBeInTheDocument();
+    }
+    fireEvent.click(within(form).getByRole('button', { name: 'Question' }));
+    fireEvent.change(within(form).getByRole('textbox', { name: 'Comment on the page' }), { target: { value: 'Why is this grey?' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Add comment' }));
+    await flush();
+    expect(bridge.api.annotateSave).toHaveBeenCalledWith('tab-1', 'd1', 'Why is this grey?', 'question');
+    expect(sendTo.onSend).not.toHaveBeenCalled();
   });
 
-  it('"Send to agent" sends one Markdown file + a PNG per comment as a message, says so, and leaves the mode', async () => {
-    bridge.api.annotatePoll.mockResolvedValue(polled([annotation('k1', 1, 'make it blue')]));
+  it('Add & send saves and sends just that comment; Cancel drops the selection', async () => {
+    bridge.api.annotatePoll.mockResolvedValue(polled([], { pending: pendingOn('d1', 'a#start.cta') }));
     bridge.api.annotateSend.mockResolvedValueOnce([pick({ screenshot: 'data:image/png;base64,iVBORw0KGgo=' })]);
     await mount(sendTo);
     fireEvent.click(annotateButton());
     await flush();
-    fireEvent.click(screen.getByTestId('browser-comments-send'));
+    const form = screen.getByTestId('browser-comment-composer');
+    fireEvent.change(within(form).getByRole('textbox', { name: 'Comment on the page' }), { target: { value: 'Make it blue' } });
+    fireEvent.click(within(form).getByRole('button', { name: /Add & send/ }));
     await flush();
-    expect(bridge.api.annotateSend).toHaveBeenCalledWith('tab-1', undefined);
+    await flush();
+    expect(bridge.api.annotateSend).toHaveBeenCalledWith('tab-1', ['d1']);
     expect(sendTo.onSend).toHaveBeenCalledTimes(1);
     const files = (sendTo.onSend.mock.calls[0] as unknown as [File[]])[0];
     expect(files.map((f) => f.name)).toEqual([
       expect.stringMatching(/^browser-comments-\d{8}-\d{6}\.md$/),
       expect.stringMatching(/^browser-comments-\d{8}-\d{6}-1\.png$/),
     ]);
-    expect(await files[0]!.text()).toContain('## 1. make it blue');
-    expect(sendTo.onCapture).not.toHaveBeenCalled();
     expect(screen.getByTestId('browser-comment-notice')).toHaveTextContent('Sent 1 comment to the agent');
-    expect(bridge.api.annotateStop).toHaveBeenCalledWith('tab-1');
+
+    fireEvent.click(within(screen.getByTestId('browser-comment-composer')).getByRole('button', { name: 'Cancel' }));
+    await flush();
+    expect(bridge.api.annotateCancel).toHaveBeenCalledWith('tab-1', 'd1');
   });
 
-  it('"Add to message" puts the files in the composer instead', async () => {
-    bridge.api.annotatePoll.mockResolvedValue(polled([annotation('k1', 1, 'make it blue')]));
-    bridge.api.annotateSend.mockResolvedValueOnce([pick({ screenshot: 'data:image/png;base64,iVBORw0KGgo=' })]);
+  it('the list: the count on the Comments button; Edit is the same form with Update comment', async () => {
+    bridge.api.annotatePoll.mockResolvedValue(polled([{ ...annotation('k1', 1, 'Make it bigger'), intent: 'refactor' }, annotation('k2', 2, 'Fix the spacing')]));
     await mount(sendTo);
     fireEvent.click(annotateButton());
     await flush();
-    fireEvent.click(screen.getByTestId('browser-comments-add'));
+    expect(screen.getByTestId('browser-comments-toggle')).toHaveAccessibleName('Comments (2)');
+    const rows = screen.getAllByTestId('browser-comment-row');
+    expect(within(rows[0]!).getByText('Refactor')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit comment 1' }));
     await flush();
-    expect(sendTo.onSend).not.toHaveBeenCalled();
+    const edit = screen.getByRole('group', { name: 'Edit comment 1' });
+    const box = within(edit).getByRole('textbox', { name: 'Edit comment 1' });
+    expect(box).toHaveValue('Make it bigger');
+    expect(within(edit).getByRole('button', { name: 'Refactor' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.change(box, { target: { value: 'Make it much bigger' } });
+    fireEvent.click(within(edit).getByRole('button', { name: 'Update comment' }));
+    await flush();
+    expect(bridge.api.annotateSave).toHaveBeenCalledWith('tab-1', 'k1', 'Make it much bigger', 'refactor');
+  });
+
+  it('one comment or all: Attach puts files in the composer, Send sends a message; a row shows its element; delete', async () => {
+    bridge.api.annotatePoll.mockResolvedValue(polled([annotation('k1', 1, 'one'), annotation('k2', 2, 'two')]));
+    bridge.api.annotateSend.mockResolvedValue([pick({ screenshot: 'data:image/png;base64,iVBORw0KGgo=' })]);
+    await mount(sendTo);
+    fireEvent.click(annotateButton());
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Attach comment 2 to the message' }));
+    await flush();
+    expect(bridge.api.annotateSend).toHaveBeenLastCalledWith('tab-1', ['k2']);
     expect(sendTo.onCapture.mock.calls.map(([f, kind]) => [(f as File).type, kind])).toEqual([
       ['text/markdown', 'selection'],
       ['image/png', 'screenshot'],
     ]);
-    expect(screen.getByTestId('browser-comment-notice')).toHaveTextContent('Added 1 comment to your message');
+    fireEvent.click(screen.getByRole('button', { name: 'Send comment 1 to the agent' }));
+    await flush();
+    expect(bridge.api.annotateSend).toHaveBeenLastCalledWith('tab-1', ['k1']);
+    expect(sendTo.onSend).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId('browser-comments-send-all'));
+    await flush();
+    expect(bridge.api.annotateSend).toHaveBeenLastCalledWith('tab-1', undefined);
+    fireEvent.click(screen.getByTestId('browser-comments-attach-all'));
+    await flush();
+    expect(bridge.api.annotateSend).toHaveBeenLastCalledWith('tab-1', undefined);
+
+    fireEvent.click(screen.getAllByRole('button', { name: /Show on the page/ })[0]!);
+    await flush();
+    expect(bridge.api.annotateOpen).toHaveBeenCalledWith('tab-1', 'k1');
+    fireEvent.click(screen.getByRole('button', { name: 'Delete comment 2' }));
+    await flush();
+    expect(bridge.api.annotateRemove).toHaveBeenCalledWith('tab-1', 'k2');
   });
 
-  it('a busy chat keeps the comments for the next message, and the tray says so', async () => {
+  it('a busy chat keeps sent comments for the next message, and says so', async () => {
     sendTo.onSend = vi.fn(async (): Promise<SendResult> => 'attached');
-    bridge.api.annotatePoll.mockResolvedValue(polled([annotation('k1', 1, 'make it blue')]));
+    bridge.api.annotatePoll.mockResolvedValue(polled([annotation('k1', 1, 'note')]));
     bridge.api.annotateSend.mockResolvedValueOnce([pick()]);
     await mount(sendTo);
     fireEvent.click(annotateButton());
     await flush();
-    fireEvent.click(screen.getByTestId('browser-comments-send'));
+    fireEvent.click(screen.getByTestId('browser-comments-send-all'));
     await flush();
     expect(screen.getByTestId('browser-comment-notice')).toHaveTextContent('The agent is busy — 1 comment added to your next message');
   });
 
-  it('acts on the page: ⌘↵ in a card sends everything; Esc with no card leaves the mode', async () => {
-    bridge.api.annotatePoll.mockResolvedValueOnce(polled([annotation('k1', 1, 'note')], { sendAll: true }));
-    bridge.api.annotateSend.mockResolvedValueOnce([pick()]);
+  it('Esc in the page with nothing selected leaves select mode', async () => {
     await mount(sendTo);
     fireEvent.click(annotateButton());
     await flush();
-    await flush();
-    expect(bridge.api.annotateSend).toHaveBeenCalledWith('tab-1', undefined);
-    expect(sendTo.onSend).toHaveBeenCalledTimes(1);
-
     bridge.api.annotatePoll.mockResolvedValue(polled([], { exit: true }));
-    fireEvent.click(annotateButton());
-    await flush();
     await advance(400);
+    await flush();
     expect(annotateButton()).toHaveAttribute('aria-pressed', 'false');
-  });
-
-  it('a row opens its comment in the page; delete and Clear go to the page too', async () => {
-    bridge.api.annotatePoll.mockResolvedValue(polled([annotation('k1', 1, 'note')]));
-    await mount(sendTo);
-    fireEvent.click(annotateButton());
-    await flush();
-    fireEvent.click(screen.getByTestId('browser-comment-row'));
-    await flush();
-    expect(bridge.api.annotateOpen).toHaveBeenCalledWith('tab-1', 'k1');
-    fireEvent.click(screen.getByRole('button', { name: 'Delete comment 1' }));
-    await flush();
-    expect(bridge.api.annotateRemove).toHaveBeenCalledWith('tab-1', 'k1');
-    fireEvent.click(within(screen.getByTestId('browser-comment-tray')).getByRole('button', { name: 'Clear' }));
-    await flush();
-    expect(bridge.api.annotateClear).toHaveBeenCalledWith('tab-1');
   });
 
   it('Screenshot adds the visible area, the full page (or says it fell back), or a dragged area to the message', async () => {
@@ -371,161 +394,112 @@ describe('BrowserPanel native — Annotate, the comment tray and screenshots', (
     await choose('Visible area');
     expect(bridge.api.capture).toHaveBeenLastCalledWith('tab-1', 'visible');
     expect((sendTo.onCapture.mock.calls[0]![0] as File).name).toMatch(/^screenshot-visible-\d{8}-\d{6}\.png$/);
-
     bridge.api.capture.mockResolvedValueOnce({ dataUrl: 'data:image/png;base64,iVBORw0KGgo=', mode: 'visible' });
     await choose('Full page');
     expect(bridge.api.capture).toHaveBeenLastCalledWith('tab-1', 'full');
     expect(screen.getByTestId('browser-comment-notice')).toHaveTextContent('Full page was unavailable — added the visible area instead');
-
     bridge.api.captureRegion.mockResolvedValueOnce('data:image/png;base64,iVBORw0KGgo=');
     await choose('Select an area…');
     expect(bridge.api.captureRegion).toHaveBeenCalledWith('tab-1', expect.objectContaining({ accent: expect.any(String) }));
     expect((sendTo.onCapture.mock.calls[2]![0] as File).name).toMatch(/^screenshot-area-/);
-    expect(fetchStub.count('capture')).toBe(0);
   });
 
-  it('without a chat to send to there is no Annotate or Screenshot', async () => {
+  it('the ⋯ menu is just Open DevTools', async () => {
+    await mount(sendTo);
+    fireEvent.click(screen.getByRole('button', { name: 'Browser options' }));
+    await flush();
+    expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).toEqual(['Open DevTools']);
+  });
+
+  it('without a chat to send to there is no select or Screenshot', async () => {
     await mount();
     expect(screen.queryByTestId('browser-annotate')).toBeNull();
     expect(screen.queryByTestId('browser-screenshot')).toBeNull();
   });
 
-  it('closing the panel leaves Annotate mode', async () => {
+  it('closing the panel leaves select mode', async () => {
     const view = await mount(sendTo);
     fireEvent.click(annotateButton());
     await flush();
     view.update({ open: false });
     await flush();
     expect(bridge.api.annotateStop).toHaveBeenCalledWith('tab-1');
-    view.update({ open: true });
-    await flush();
-    await flush();
-    expect(annotateButton()).toHaveAttribute('aria-pressed', 'false');
   });
 });
 
-// ── Device emulation ─────────────────────────────────────────
-
-describe('BrowserPanel native — device emulation (BrowserPanel.tsx:851-898, 1857-1948)', () => {
+describe('BrowserPanel native — device mode (D-144)', () => {
   const toolbarToggle = (): HTMLElement => screen.getByRole('button', { name: /^Toggle device toolbar/ });
-  // P4-10: the native <select>s became kit Menus (menu-button triggers named as
-  // the old selects, radio items as the options); "pick" = open + click the item.
   const openMenu = async (name: string): Promise<HTMLElement> => {
     fireEvent.click(screen.getByRole('button', { name }));
     await flush();
     return screen.getByRole('menu');
   };
-  const itemTexts = (menu: HTMLElement): (string | null)[] =>
-    within(menu).getAllByRole('menuitemradio').map((o) => o.textContent);
-  // Base UI unmounts a closed menu on the next animation frame (real time, not
-  // the manual clock) and guards the trigger for a moment after closing.
   const settle = async (): Promise<void> => {
     await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
     await advance(500);
-  };
-  const closeMenu = async (): Promise<void> => {
-    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
-    await settle();
   };
   const pick = async (menuName: string, item: string): Promise<void> => {
     const menu = await openMenu(menuName);
     fireEvent.click(within(menu).getByRole('menuitemradio', { name: item }));
     await settle();
   };
+  // The panel's free space for the device frame (jsdom lays nothing out).
+  let rect: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, top: 0, left: 0, right: 500, bottom: 448, width: 500, height: 448, toJSON: () => ({}),
+    } as DOMRect);
+  });
+  afterEach(() => rect.mockRestore());
 
-  it('the toggle turns the device bar on (responsive = no emulation, zoom 1) and off again', async () => {
+  it('the first switch-on is a real phone, laid out at 390×844 @3× and scaled to fit the panel; off restores the tab', async () => {
     await mount();
     fireEvent.click(toolbarToggle());
+    await flush();
     expect(toolbarToggle()).toHaveAttribute('aria-pressed', 'true');
-    expect(bridge.api.setEmulation).toHaveBeenLastCalledWith('tab-1', null);
+    expect(screen.getByTestId('browser-device-frame')).toBeInTheDocument();
+    const [tab, params] = bridge.api.setEmulation.mock.calls.at(-1)!;
+    expect(tab).toBe('tab-1');
+    expect(params).toMatchObject({ width: 390, height: 844, deviceScaleFactor: 3, mobile: true });
+    expect(params!.scale).toBeCloseTo(424 / 844);
     expect(bridge.api.setZoom).toHaveBeenLastCalledWith('tab-1', 1);
-    expect(screen.getByRole('spinbutton', { name: 'Width (px)' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Rotate viewport' })).toBeDisabled();
 
     fireEvent.click(toolbarToggle());
+    await flush();
     expect(bridge.api.setEmulation).toHaveBeenLastCalledWith('tab-1', null);
-    expect(bridge.api.setZoom).toHaveBeenLastCalledWith('tab-1', 1);
-    expect(screen.queryByRole('button', { name: 'Device preset' })).toBeNull();
+    expect(screen.queryByTestId('browser-device-frame')).toBeNull();
   });
 
-  it('offers the nine presets and the zoom levels 50 % … 200 %', async () => {
+  it('a preset sets its size and mobile flag; rotate swaps; a fixed zoom replaces Fit', async () => {
     await mount();
     fireEvent.click(toolbarToggle());
-    expect(itemTexts(await openMenu('Device preset'))).toEqual([
-      'Responsive',
-      'Mobile S — 360×640',
-      'iPhone 12/13 — 390×844',
-      'Mobile L — 414×896',
-      'Pixel 7 — 412×915',
-      'Tablet — 768×1024',
-      'iPad Pro — 1024×1366',
-      'Laptop — 1366×768',
-      'Desktop — 1920×1080',
-    ]);
-    await closeMenu();
-
-    const zoomTexts = ['50%', '67%', '75%', '90%', '100%', '110%', '125%', '150%', '200%'];
-    const zoomValues = [0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 2];
-    expect(itemTexts(await openMenu('Page zoom'))).toEqual(zoomTexts);
-    await closeMenu();
-    // Each zoom item applies its level.
-    for (const [i, text] of zoomTexts.entries()) {
-      await pick('Page zoom', text);
-      expect(bridge.api.setZoom).toHaveBeenLastCalledWith('tab-1', zoomValues[i]);
-    }
-
-    // DPR is disabled under Responsive; pick a device to enable it.
+    await flush();
     await pick('Device preset', 'Laptop — 1366×768');
-    expect(itemTexts(await openMenu('Device pixel ratio'))).toEqual(['1×', '1.5×', '2×', '3×']);
-    await closeMenu();
-    for (const dpr of [1.5, 2, 3, 1]) {
-      await pick('Device pixel ratio', `${dpr}×`);
-      expect(bridge.api.setEmulation).toHaveBeenLastCalledWith('tab-1', { width: 1366, height: 768, deviceScaleFactor: dpr, mobile: false });
-    }
-    // ~20 menu round trips, each waiting a real animation frame: slow under a
-    // loaded parallel run, so it gets more than the default 5 s.
-  }, 20_000);
-
-  it('a preset emulates its size + mobile flag; rotate swaps; zoom and DPR re-apply', async () => {
-    await mount();
-    fireEvent.click(toolbarToggle());
-    await pick('Device preset', 'iPhone 12/13 — 390×844');
-    expect(bridge.api.setEmulation).toHaveBeenLastCalledWith('tab-1', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
-    expect(bridge.api.setZoom).toHaveBeenLastCalledWith('tab-1', 1);
-    expect(screen.getByRole('spinbutton', { name: 'Width (px)' })).toHaveValue(390);
-
+    expect(bridge.api.setEmulation.mock.calls.at(-1)![1]).toMatchObject({ width: 1366, height: 768, deviceScaleFactor: 1, mobile: false });
     fireEvent.click(screen.getByRole('button', { name: 'Rotate viewport' }));
-    expect(bridge.api.setEmulation).toHaveBeenLastCalledWith('tab-1', { width: 844, height: 390, deviceScaleFactor: 1, mobile: true });
-
-    await pick('Page zoom', '150%');
-    expect(bridge.api.setZoom).toHaveBeenLastCalledWith('tab-1', 1.5);
-
-    await pick('Device pixel ratio', '2×');
-    expect(bridge.api.setEmulation).toHaveBeenLastCalledWith('tab-1', { width: 844, height: 390, deviceScaleFactor: 2, mobile: true });
+    await flush();
+    expect(bridge.api.setEmulation.mock.calls.at(-1)![1]).toMatchObject({ width: 768, height: 1366 });
+    await pick('Zoom', '50%');
+    expect(bridge.api.setEmulation.mock.calls.at(-1)![1]).toMatchObject({ scale: 0.5 });
   });
 
-  it('editing a dimension switches to a "Custom" preset (minimum 100 px)', async () => {
+  it('Responsive uses the width and height fields; editing a preset size makes it Custom', async () => {
     await mount();
     fireEvent.click(toolbarToggle());
-    await pick('Device preset', 'Laptop — 1366×768');
-    fireEvent.change(screen.getByRole('spinbutton', { name: 'Width (px)' }), { target: { value: '40' } });
-    expect(bridge.api.setEmulation).toHaveBeenLastCalledWith('tab-1', { width: 100, height: 768, deviceScaleFactor: 1, mobile: false });
+    await flush();
+    await pick('Device preset', 'Responsive');
+    const width = screen.getByRole('spinbutton', { name: 'Width (px)' });
+    expect(width).toBeEnabled();
+    fireEvent.change(width, { target: { value: '600' } });
+    await flush();
+    expect(bridge.api.setEmulation.mock.calls.at(-1)![1]).toMatchObject({ width: 600, height: 844, mobile: false });
+    await pick('Device preset', 'Pixel 7 — 412×915');
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Height (px)' }), { target: { value: '50' } });
+    await flush();
+    expect(bridge.api.setEmulation.mock.calls.at(-1)![1]).toMatchObject({ width: 412, height: 100 });
     expect(screen.getByRole('button', { name: 'Device preset' })).toHaveTextContent('Custom');
-    expect(within(await openMenu('Device preset')).getByRole('menuitemradio', { name: 'Custom' })).toHaveAttribute('aria-checked', 'true');
-  });
-
-  it('turning the device bar off after emulating resets to no emulation and zoom 1', async () => {
-    await mount();
-    fireEvent.click(toolbarToggle());
-    await pick('Device preset', 'Tablet — 768×1024');
-    await pick('Page zoom', '200%');
-    fireEvent.click(toolbarToggle());
-    expect(bridge.api.setEmulation).toHaveBeenLastCalledWith('tab-1', null);
-    expect(bridge.api.setZoom).toHaveBeenLastCalledWith('tab-1', 1);
   });
 });
-
-// ── Share while busy ─────────────────────────────────────────
 
 describe('BrowserPanel native — share toggle', () => {
   it('is disabled while agentBusy', async () => {

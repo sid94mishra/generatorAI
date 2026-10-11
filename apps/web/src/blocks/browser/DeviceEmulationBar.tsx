@@ -4,7 +4,7 @@
 // A thin view over useDeviceEmulation; "Responsive" disables the size fields.
 // ────────────────────────────────────────────────────────────────
 
-import { DEVICE_PRESETS, ZOOM_LEVELS, findDevicePreset } from './deviceEmulation.js';
+import { DEVICE_PRESETS, ZOOM_LEVELS, findDevicePreset, zoomLabel } from './deviceEmulation.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Checkbox } from '@/ui/primitives/Checkbox/Checkbox.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
@@ -30,14 +30,12 @@ export interface DeviceEmulationBarProps {
   onZoom: (zoom: number) => void;
 }
 
-const zoomLabel = (z: number): string => `${Math.round(z * 100)}%`;
 const dimension = (raw: string): number => Math.max(100, Number(raw) || 0);
 
 export function DeviceEmulationBar({
   preset, width, height, dpr, mobile, zoom,
   onPickPreset, onDimChange, onRotate, onDpr, onMobile, onZoom,
 }: DeviceEmulationBarProps): React.JSX.Element {
-  const responsive = preset === 'responsive';
   const presetName = preset === 'custom' ? 'Custom' : (findDevicePreset(preset).label.split(' — ')[0] ?? '');
 
   return (
@@ -75,7 +73,6 @@ export function DeviceEmulationBar({
           max={4096}
           value={width}
           onChange={(e) => onDimChange(dimension(e.target.value), height)}
-          disabled={responsive}
           className="w-20"
           title="Width (px)"
           aria-label="Width (px)"
@@ -89,17 +86,15 @@ export function DeviceEmulationBar({
           max={4096}
           value={height}
           onChange={(e) => onDimChange(width, dimension(e.target.value))}
-          disabled={responsive}
           className="w-20"
           title="Height (px)"
           aria-label="Height (px)"
         />
-        <IconButton size="sm" icon="undo" label="Rotate viewport" tooltip="Rotate (swap width/height)" onClick={onRotate} disabled={responsive} />
+        <IconButton size="sm" icon="undo" label="Rotate viewport" tooltip="Rotate (swap width/height)" onClick={onRotate} />
       </div>
 
       <MenuRoot>
         <MenuTrigger
-          disabled={responsive}
           render={
             <Button variant="ghost" size="sm" trailingIcon="chevron-down" title="Device pixel ratio" aria-label="Device pixel ratio">
               {dpr}×
@@ -119,7 +114,6 @@ export function DeviceEmulationBar({
         size="sm"
         label="Mobile"
         checked={mobile}
-        disabled={responsive}
         onCheckedChange={onMobile}
         title="Emulate touch / mobile user-agent metrics"
       />
@@ -127,7 +121,7 @@ export function DeviceEmulationBar({
       <MenuRoot>
         <MenuTrigger
           render={
-            <Button variant="ghost" size="sm" trailingIcon="chevron-down" title="Page zoom" aria-label="Page zoom">
+            <Button variant="ghost" size="sm" trailingIcon="chevron-down" title="Zoom — Fit scales the device to the panel" aria-label="Zoom">
               {zoomLabel(zoom)}
             </Button>
           }

@@ -520,7 +520,7 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
       if (typeof tabId === 'string' && tabId) await host.annotateStop(tabId);
     });
     guardedHandle(BROWSER_IPC.annotatePoll, async (_e, tabId: string) => {
-      if (typeof tabId !== 'string' || !tabId) return { items: [], exit: false, sendAll: false };
+      if (typeof tabId !== 'string' || !tabId) return { items: [], pending: null, exit: false };
       return host.annotatePoll(tabId);
     });
     guardedHandle(BROWSER_IPC.annotateSend, async (_e, tabId: string, keys?: unknown) => {
@@ -530,6 +530,13 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
     });
     guardedHandle(BROWSER_IPC.annotateOpen, async (_e, tabId: string, key: string) => {
       if (typeof tabId === 'string' && tabId && typeof key === 'string') await host.annotateOpen(tabId, key);
+    });
+    guardedHandle(BROWSER_IPC.annotateSave, async (_e, tabId: string, key: unknown, comment: unknown, intent: unknown) => {
+      if (typeof tabId !== 'string' || !tabId || typeof key !== 'string' || typeof comment !== 'string') return false;
+      return host.annotateSave(tabId, key, comment, typeof intent === 'string' ? intent : 'fix');
+    });
+    guardedHandle(BROWSER_IPC.annotateCancel, async (_e, tabId: string, key: unknown) => {
+      if (typeof tabId === 'string' && tabId && typeof key === 'string') await host.annotateCancel(tabId, key);
     });
     guardedHandle(BROWSER_IPC.annotateRemove, async (_e, tabId: string, key: string) => {
       if (typeof tabId === 'string' && tabId && typeof key === 'string') await host.annotateRemove(tabId, key);

@@ -1,16 +1,17 @@
 // ────────────────────────────────────────────────────────────────
-// Annotate mode, comments and screenshots (D-140).
+// Browser comments and screenshots (D-140, D-145).
 //
-// Native desktop: Annotate injects the in-page overlay (hover, click an
-// element or drag an area, comment in an anchored card). The saved comments
-// are listed in the dock's tray, polled from the page; the tray sends them —
-// "Send to agent" (one message, now) or "Add to message" (into the composer).
-// Leaving the mode keeps the comments: the pins hide, the tray stays.
+// Native desktop: the toolbar's ↖ turns on select mode — the page outlines
+// what is under the pointer; a click selects an element, a drag an area. The
+// selection comes back as `pending`, the Comments panel opens with the same
+// form as a Changes review comment, and saving pins it numbered on the page.
+// Comments are listed in the panel: edit, attach to the message or send one;
+// attach or send all. Leaving select mode keeps the comments.
 // Screenshot: the visible area, the full page, or a dragged area, attached to
 // the message.
 //
-// Web (screencast): Annotate is the server-driven inspector (one pick becomes
-// an element reference); Screenshot offers the dragged area on the live view
+// Web (screencast): ↖ is the server-driven inspector (one pick becomes an
+// element reference); Screenshot offers the dragged area on the live view
 // (useBrowserCapture).
 // ────────────────────────────────────────────────────────────────
 
@@ -51,6 +52,8 @@ export function useBrowserAnnotations({
   const [captureMode, setCaptureMode] = useState(false);
   const [annotateOn, setAnnotateOn] = useState(false);
   const [items, setItems] = useState<AnnotationSummary[]>([]);
+  const [pending, setPending] = useState<AnnotationSummary | null>(null);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -67,13 +70,14 @@ export function useBrowserAnnotations({
     const nb = nativeBrowserBridge();
     if (!native || !nb?.annotatePoll) return;
     const res = await nb.annotatePoll(nativeTabId!).catch(() => null);
-    if (res) setItems(res.items);
+    if (res) { setItems(res.items); setPending(res.pending); }
   }, [native, nativeTabId]);
 
   const stopAnnotate = useCallback(async () => {
     const nb = nativeBrowserBridge();
     if (native && nb?.annotateStop) await nb.annotateStop(nativeTabId!).catch(() => undefined);
     setAnnotateOn(false);
+    setPending(null);
   }, [native, nativeTabId]);
 
   /** Send comments (all, or `keys`): now as a message, or into the composer. */
@@ -94,14 +98,30 @@ export function useBrowserAnnotations({
         for (const f of files) onCapture?.(f, f.type === 'image/png' ? 'screenshot' : 'selection');
         flash(`Added ${what} to your message`);
       }
-      await stopAnnotate();
       await refresh();
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setSending(false);
     }
-  }, [native, nativeTabId, sending, onSend, onCapture, flash, stopAnnotate, refresh, setError]);
+  }, [native, nativeTabId, sending, onSend, onCapture, flash, refresh, setError]);
+
+  /** Save the comment on a selection (new or edited); `sendNow` sends just that one at once. */
+  const saveComment = useCallback(async (key: string, body: string, intent: string, sendNow = false) => {
+    const nb = nativeBrowserBridge();
+    if (!native || !nb?.annotateSave) return;
+    const ok = await nb.annotateSave(nativeTabId!, key, body, intent).catch(() => false);
+    if (!ok) { setError('That selection is gone — the page may have changed. Select it again.'); return; }
+    setPending(null);
+    await refresh();
+    if (sendNow) await send('now', [key]);
+  }, [native, nativeTabId, refresh, send, setError]);
+
+  const cancelPending = useCallback(async () => {
+    const nb = nativeBrowserBridge();
+    if (pending && native && nb?.annotateCancel) await nb.annotateCancel(nativeTabId!, pending.key).catch(() => undefined);
+    setPending(null);
+  }, [pending, native, nativeTabId]);
 
   const toggleAnnotate = useCallback(async () => {
     if (!workspaceId) return;
@@ -114,6 +134,7 @@ export function useBrowserAnnotations({
           setCaptureMode(false);
           await nb.annotateStart(nativeTabId!, palette);
           setAnnotateOn(true);
+          setPanelOpen(true);
         }
       } catch (err) { setError((err as Error).message); }
       return;
@@ -127,11 +148,9 @@ export function useBrowserAnnotations({
     } catch (err) { setError((err as Error).message); }
   }, [workspaceId, native, annotateOn, nativeTabId, palette, inspectorOn, stopAnnotate, setError]);
 
-  // Keep the tray in step with the page while the mode is on or comments
-  // exist, and act on the overlay's requests (Esc → leave, ⌘↵ → send all).
+  // Keep the panel in step with the page while select mode is on or comments
+  // exist; a new selection opens the panel; Esc in the page leaves the mode.
   const tracking = native && open && (annotateOn || items.length > 0);
-  const sendRef = useRef(send);
-  useEffect(() => { sendRef.current = send; }, [send]);
   useEffect(() => {
     if (!tracking) return;
     const nb = nativeBrowserBridge();
@@ -143,8 +162,9 @@ export function useBrowserAnnotations({
       if (cancelled) return;
       if (res) {
         setItems(res.items);
-        if (res.sendAll && res.items.length > 0) void sendRef.current('now');
-        else if (res.exit) void stopAnnotate();
+        setPending((prev) => (prev?.key === res.pending?.key && prev?.label === res.pending?.label ? prev : res.pending));
+        if (res.pending) setPanelOpen(true);
+        if (res.exit) void stopAnnotate();
       }
       timer = setTimeout(() => void tick(), ANNOTATE_POLL_MS);
     };
@@ -152,15 +172,12 @@ export function useBrowserAnnotations({
     return () => { cancelled = true; clearTimeout(timer); };
   }, [tracking, nativeTabId, stopAnnotate]);
 
-  const openComment = useCallback(async (key: string) => {
+  /** Show a comment's element on the page (scrolled into view, outline flashed). */
+  const showComment = useCallback(async (key: string) => {
     const nb = nativeBrowserBridge();
     if (!native || !nb?.annotateOpen) return;
-    if (!annotateOn && nb.annotateStart) {
-      await nb.annotateStart(nativeTabId!, palette).catch(() => undefined);
-      setAnnotateOn(true);
-    }
     await nb.annotateOpen(nativeTabId!, key).catch(() => undefined);
-  }, [native, nativeTabId, annotateOn, palette]);
+  }, [native, nativeTabId]);
 
   const removeComment = useCallback(async (key: string) => {
     const nb = nativeBrowserBridge();
@@ -174,6 +191,7 @@ export function useBrowserAnnotations({
     if (!native || !nb?.annotateClear) return;
     await nb.annotateClear(nativeTabId!).catch(() => undefined);
     setItems([]);
+    setPending(null);
   }, [native, nativeTabId]);
 
   /** A screenshot into the message: the viewport, the whole page, or a dragged area. */
@@ -222,7 +240,7 @@ export function useBrowserAnnotations({
   return {
     inspectorOn, setInspectorOn,
     captureMode, setCaptureMode,
-    annotateOn, items, sending, notice,
-    toggleAnnotate, send, openComment, removeComment, clearComments, screenshot,
+    annotateOn, items, pending, sending, notice, panelOpen, setPanelOpen,
+    toggleAnnotate, send, saveComment, cancelPending, showComment, removeComment, clearComments, screenshot,
   };
 }

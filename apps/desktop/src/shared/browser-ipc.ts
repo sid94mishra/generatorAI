@@ -61,6 +61,8 @@ export const BROWSER_IPC = {
   annotatePoll: 'desktop:browser:annotatePoll',
   annotateSend: 'desktop:browser:annotateSend',
   annotateOpen: 'desktop:browser:annotateOpen',
+  annotateSave: 'desktop:browser:annotateSave',
+  annotateCancel: 'desktop:browser:annotateCancel',
   annotateRemove: 'desktop:browser:annotateRemove',
   annotateClear: 'desktop:browser:annotateClear',
 } as const;

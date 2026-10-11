@@ -7,7 +7,7 @@
 // the composer shows N+1 chips instead of 2N.
 // ────────────────────────────────────────────────────────────────
 
-import type { BrowserAnnotationSummary, BrowserPickResult } from '@generatorai/shared';
+import { REVIEW_INTENT_LABELS, type BrowserAnnotationSummary, type BrowserPickResult, type ReviewIntent } from '@generatorai/shared';
 
 /** A sent comment, as the page serialised it. */
 export type PickedElement = BrowserPickResult;
@@ -32,8 +32,9 @@ function one(p: PickedElement, index: number, stem: string): string {
   const css = p.computedStyle
     ? Object.entries(p.computedStyle).map(([k, v]) => `  ${k}: ${v};`).join('\n')
     : '';
+  const intent = p.intent && p.intent in REVIEW_INTENT_LABELS ? REVIEW_INTENT_LABELS[p.intent as ReviewIntent] : null;
   const lines = [
-    `## ${n}. ${(p.comment ?? '').trim() || '_(no comment)_'}`,
+    `## ${n}. ${intent ? `[${intent}] ` : ''}${(p.comment ?? '').trim() || '_(no comment)_'}`,
     '',
     area
       ? `- **Area:** ${Math.round(box.width)}×${Math.round(box.height)} at (${Math.round(box.x)}, ${Math.round(box.y)}) in a ${p.viewport ? `${p.viewport.width}×${p.viewport.height}` : ''} viewport`

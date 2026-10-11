@@ -13,4 +13,5 @@ export { DIFF_THEMES, DIFF_UNSAFE_CSS, diffHostStyle, treeHostStyleFor } from '.
 export { useDocumentAppearance, type ResolvedAppearance } from './useDocumentAppearance.js';
 export { FloatingCard, type FloatingCardProps } from './review/FloatingCard.js';
 export { ReviewComposerPopover, type ReviewComposerPopoverProps } from './review/ReviewComposerPopover.js';
+export { ReviewCommentForm, type ReviewCommentFormProps } from './review/ReviewCommentForm.js';
 export { ReviewThreadCard, type ReviewThreadCardProps } from './review/ReviewThreadCard.js';

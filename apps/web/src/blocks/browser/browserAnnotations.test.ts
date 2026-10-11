@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { BROWSER_COMMENT_FILE, commentFiles, commentsMarkdown, fileStamp, type PickedElement } from './browserAnnotations.js';
-import { DEVICE_PRESETS, emulationParams, emulationZoom, findDevicePreset, ZOOM_LEVELS } from './deviceEmulation.js';
+import { DEVICE_PRESETS, deviceFrame, emulationParams, findDevicePreset, ZOOM_LEVELS } from './deviceEmulation.js';
 
 const png = `data:image/png;base64,${btoa('abc')}`;
 const button: PickedElement = {
@@ -76,22 +76,27 @@ describe('commentFiles', () => {
   });
 });
 
-describe('device emulation', () => {
-  it('has the presets and zoom levels of the toolbar', () => {
+describe('device mode (D-144)', () => {
+  it('has the presets and zoom levels of the toolbar, Fit first', () => {
     expect(DEVICE_PRESETS[0]).toEqual({ id: 'responsive', label: 'Responsive', width: 0, height: 0, mobile: false });
-    expect(ZOOM_LEVELS[0]).toBe(0.5);
-    expect(ZOOM_LEVELS[ZOOM_LEVELS.length - 1]).toBe(2);
+    expect(ZOOM_LEVELS[0]).toBe(0);
     expect(findDevicePreset('iphone')).toMatchObject({ width: 390, height: 844, mobile: true });
     expect(findDevicePreset('nope').id).toBe('responsive');
   });
 
-  it('turns emulation off when disabled, responsive or unsized', () => {
-    const base = { on: true, preset: 'iphone', width: 390, height: 844, dpr: 2, mobile: true, zoom: 1.25 };
-    expect(emulationParams(base)).toEqual({ width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  it('emulates whenever device mode is on — Responsive uses the width and height fields', () => {
+    const base = { on: true, preset: 'iphone', width: 390, height: 844, dpr: 3, mobile: true, zoom: 0 };
+    expect(emulationParams(base, 0.8)).toEqual({ width: 390, height: 844, deviceScaleFactor: 3, mobile: true, scale: 0.8 });
+    expect(emulationParams({ ...base, preset: 'responsive', width: 600, height: 900, mobile: false })).toMatchObject({ width: 600, height: 900, mobile: false, scale: 1 });
     expect(emulationParams({ ...base, on: false })).toBeNull();
-    expect(emulationParams({ ...base, preset: 'responsive' })).toBeNull();
     expect(emulationParams({ ...base, width: 0 })).toBeNull();
-    expect(emulationZoom(base)).toBe(1.25);
-    expect(emulationZoom({ ...base, on: false })).toBe(1);
+  });
+
+  it('fits the frame to the panel (never enlarging), or uses the chosen zoom', () => {
+    const fit = deviceFrame({ width: 390, height: 844 }, { width: 500, height: 448 }, 0);
+    expect(fit.scale).toBeCloseTo(424 / 844);
+    expect(fit.height).toBe(424);
+    expect(deviceFrame({ width: 390, height: 844 }, { width: 2000, height: 2000 }, 0).scale).toBe(1);
+    expect(deviceFrame({ width: 390, height: 844 }, { width: 500, height: 448 }, 0.5)).toEqual({ width: 195, height: 422, scale: 0.5 });
   });
 });

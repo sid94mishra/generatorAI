@@ -6,7 +6,7 @@
 export interface DevicePreset {
   id: string;
   label: string;
-  /** 0×0 = Responsive (emulation off, view follows the panel size). */
+  /** 0×0 = Responsive: the width and height fields decide. */
   width: number;
   height: number;
   mobile: boolean;
@@ -24,7 +24,9 @@ export const DEVICE_PRESETS: readonly DevicePreset[] = [
   { id: 'desktop', label: 'Desktop — 1920×1080', width: 1920, height: 1080, mobile: false },
 ];
 
-export const ZOOM_LEVELS: readonly number[] = [0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 2];
+/** 0 = Fit: the device frame is scaled down to fit the panel (the default). */
+export const ZOOM_FIT = 0;
+export const ZOOM_LEVELS: readonly number[] = [ZOOM_FIT, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 2];
 
 export interface EmulationSettings {
   on: boolean;
@@ -40,13 +42,32 @@ export function findDevicePreset(id: string): DevicePreset {
   return DEVICE_PRESETS.find((p) => p.id === id) ?? DEVICE_PRESETS[0]!;
 }
 
-/** The bridge's emulation params: null = responsive (emulation off). */
-export function emulationParams(s: EmulationSettings): { width: number; height: number; deviceScaleFactor: number; mobile: boolean } | null {
-  const responsive = !s.on || s.preset === 'responsive' || s.width <= 0 || s.height <= 0;
-  return responsive ? null : { width: s.width, height: s.height, deviceScaleFactor: s.dpr, mobile: s.mobile };
+/**
+ * The bridge's emulation params while device mode is on (D-144): the page
+ * lays out at width×height CSS px, paints at `scale` to fit its frame. Off,
+ * or with no usable size, it is null (the tab is restored).
+ */
+export function emulationParams(
+  s: EmulationSettings,
+  scale = 1,
+): { width: number; height: number; deviceScaleFactor: number; mobile: boolean; scale: number } | null {
+  if (!s.on || s.width <= 0 || s.height <= 0) return null;
+  return { width: s.width, height: s.height, deviceScaleFactor: s.dpr, mobile: s.mobile, scale };
 }
 
-/** Page zoom applies only while the device toolbar is on. */
-export function emulationZoom(s: EmulationSettings): number {
-  return s.on ? s.zoom : 1;
+/**
+ * The device frame in the panel: the device's CSS size at `zoom`, or — Fit —
+ * scaled down (never up) to the space available, keeping its aspect ratio.
+ */
+export function deviceFrame(
+  device: { width: number; height: number },
+  avail: { width: number; height: number },
+  zoom: number,
+): { width: number; height: number; scale: number } {
+  const pad = 24;
+  const fit = Math.min(1, Math.max(0.1, (avail.width - pad) / device.width), Math.max(0.1, (avail.height - pad) / device.height));
+  const scale = zoom > 0 ? zoom : fit;
+  return { width: Math.round(device.width * scale), height: Math.round(device.height * scale), scale };
 }
+
+export const zoomLabel = (z: number): string => (z === ZOOM_FIT ? 'Fit' : `${Math.round(z * 100)}%`);
