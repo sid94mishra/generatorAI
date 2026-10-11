@@ -36,6 +36,14 @@ describe('wire transcript input', () => {
     const [block] = wireChatMessageToBlocks({content:'',metadata:{permissionCards:[{interactionId:'g',status:'allowed',risk:'risky'}]}});
     expect(block).toMatchObject({type:'permission',status:'allowed',risk:'risky'});
   });
+  it('keeps what "Allow for this chat" remembered, and turns a rule-allowed request into a note (U-16)', () => {
+    const blocks = wireChatMessageToBlocks({content:'',metadata:{permissionCards:[
+      {interactionId:'g',status:'allowed',sequence:1,remembered:[{kind:'command',match:'pnpm lint'},{kind:'bad'}]},
+      {interactionId:'n',toolName:'Bash',status:'allowed',sequence:2,autoAllowed:true,remembered:[{kind:'command',match:'pnpm lint'}]},
+    ]}});
+    expect(blocks[0]).toMatchObject({type:'permission',status:'allowed',remembered:[{kind:'command',match:'pnpm lint'}]});
+    expect(blocks[1]).toMatchObject({type:'system',category:'permission',message:'Allowed by a rule for this chat: pnpm lint'});
+  });
   it('preserves optional attachment metadata and stopped turns', () => {
     expect(messageAttachments({attachments:[{}, {name:'image',path:'a.png',artifactId:'a'}]})).toEqual([{name:'image',path:'a.png',artifactId:'a'}]);
     expect(messageWasStopped({metadata:{partial:true}})).toBe(true);

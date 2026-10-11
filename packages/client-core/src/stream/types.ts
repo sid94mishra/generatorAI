@@ -90,7 +90,8 @@ export interface ToolCallBlock {
  * conversation API); the message is the text they sent. Renderers show it
  * as the user's bubble inside the stage transcript.
  */
-export type SystemCategory = 'system' | 'subagent' | 'error' | 'warning' | 'plan' | 'operator';
+/** `permission` (U-16): a request a remembered "Allow for this chat / run" rule allowed without asking. */
+export type SystemCategory = 'system' | 'subagent' | 'error' | 'warning' | 'plan' | 'operator' | 'permission';
 
 export interface SystemBlock {
   type: 'system';
@@ -214,6 +215,14 @@ export interface PermissionBlock {
   /** D-107 — the card's question and kind label in words (`permissionWording`); absent on hand-built blocks. */
   title?: string;
   kindLabel?: string;
+  /**
+   * U-16 (D-147) — what "Allow for this chat / run" would remember (from the gate payload). Empty or absent: the
+   * gate cannot be remembered, and `rememberRefusal` says why.
+   */
+  rememberRules?: Array<{ kind: 'command' | 'tool'; match: string }>;
+  rememberRefusal?: string;
+  /** U-16 — the rules the answer remembered (a settled "Allow for this chat / run"). */
+  remembered?: Array<{ kind: 'command' | 'tool'; match: string }>;
   /** See {@link PlanBlock.openedAt}. */
   openedAt?: number;
 }

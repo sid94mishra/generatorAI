@@ -13,6 +13,7 @@ import { createScmMethods } from './scm.js';
 import {
   type ApprovalKeyRegistration,
   type ApprovalProof,
+  type PermissionRule,
   type Agent,
   type RepoReadiness,
   chatListSearchParams,
@@ -223,6 +224,12 @@ function summariseIssues(issues: unknown[]): string {
       return `${where}${i.message ?? 'invalid'}`;
     })
     .join('; ');
+}
+
+/** A remembered permission rule as the rules endpoints return it (U-16, D-147). */
+export interface StoredPermissionRuleView extends PermissionRule {
+  id: string;
+  createdAt: string;
 }
 
 export const json = (body: unknown): RequestInit => ({
@@ -1409,8 +1416,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
       respondPermission: (
         id: string,
         interactionId: string,
-        /** `approvalProof` (MG-05) is required for a risky gate answered from a phone. */
-        response: { behavior: 'allow' | 'deny'; message?: string; approvalProof?: ApprovalProof },
+        /** `approvalProof` (MG-05) is required for a risky gate answered from a phone; `remember` = "Allow for this chat" (U-16). */
+        response: { behavior: 'allow' | 'deny'; message?: string; approvalProof?: ApprovalProof; remember?: boolean },
       ) =>
         request<void>(
           fetchImpl,
@@ -1443,6 +1450,13 @@ export function createApiClient(fetchImpl: ApiFetch) {
           // `SetChatPermissionModeSchema` names this `mode`.
           body: JSON.stringify({ mode }),
         }),
+
+      /** U-16 (D-147): the permission rules this chat remembered ("Allow for this chat"). */
+      permissionRules: (id: string) => request<{ rules: StoredPermissionRuleView[] }>(fetchImpl, `/api/chats/${id}/permission-rules`),
+      clearPermissionRules: (id: string) =>
+        request<{ removed: number }>(fetchImpl, `/api/chats/${id}/permission-rules`, { method: 'DELETE' }),
+      revokePermissionRule: (id: string, ruleId: string) =>
+        request<void>(fetchImpl, `/api/chats/${id}/permission-rules/${ruleId}`, { method: 'DELETE' }),
     },
 
     models: () => request<ModelInfo[]>(fetchImpl, '/api/harness/models'),
@@ -1553,6 +1567,13 @@ export function createApiClient(fetchImpl: ApiFetch) {
       },
 
       /** Stop the stage's turn in flight; the stage continues (a stage cancel is the `cancel` command). */
+      /** U-16 (D-147): the permission rules this run remembered ("Allow for this run"), shared by all its stages. */
+      permissionRules: (runId: string) => request<{ rules: StoredPermissionRuleView[] }>(fetchImpl, `/api/workflow-runs/${runId}/permission-rules`),
+      clearPermissionRules: (runId: string) =>
+        request<{ removed: number }>(fetchImpl, `/api/workflow-runs/${runId}/permission-rules`, { method: 'DELETE' }),
+      revokePermissionRule: (runId: string, ruleId: string) =>
+        request<void>(fetchImpl, `/api/workflow-runs/${runId}/permission-rules/${ruleId}`, { method: 'DELETE' }),
+
       cancelStageTurn: (runId: string, instanceId: string, options?: { force?: boolean }) =>
         request<{ status: string; force: boolean }>(
           fetchImpl,
@@ -1561,7 +1582,13 @@ export function createApiClient(fetchImpl: ApiFetch) {
         ),
 
       /** Answer a stage's tool-permission gate (the chat's body shape; `approvalProof` for a risky gate from a phone, MG-05). */
-      stagePermission: (runId: string, instanceId: string, interactionId: string, response: { behavior: 'allow' | 'deny'; message?: string; approvalProof?: ApprovalProof }) =>
+      stagePermission: (
+        runId: string,
+        instanceId: string,
+        interactionId: string,
+        /** `remember` = "Allow for this run" (U-16): the gate's rules then cover every stage of the run. */
+        response: { behavior: 'allow' | 'deny'; message?: string; approvalProof?: ApprovalProof; remember?: boolean },
+      ) =>
         request<void>(
           fetchImpl,
           `/api/workflow-runs/${runId}/instances/${instanceId}/interactions/${interactionId}/permission`,

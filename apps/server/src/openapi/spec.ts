@@ -2843,14 +2843,39 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
     '/api/workflow-runs/{runId}/instances/{instanceId}/interactions/{interactionId}/permission': {
       post: {
         tags: ['Runs', 'HITL'],
-        summary: "Answer a stage's tool-permission gate ({behavior: allow|deny, message?})",
-        description: 'A risky gate (the MG-04 verdict on the parked interaction) answered by a mobile device carries `approvalProof` (gate {kind: tool_permission, id: interactionId, entityId: runId}, decision = behavior).',
+        summary: "Answer a stage's tool-permission gate ({behavior: allow|deny, message?, remember?})",
+        description:
+          'A risky gate (the MG-04 verdict on the parked interaction) answered by a mobile device carries `approvalProof` (gate {kind: tool_permission, id: interactionId, entityId: runId}, decision = behavior). ' +
+          '`remember: true` with `allow` ("Allow for this run", U-16) also stores the gate\'s `rememberRules` for the run: every stage then allows a request they cover without asking.',
         parameters: [runIdParam, instanceIdParam, interactionIdParam],
         responses: {
           '202': { description: 'Answered' },
           '403': { description: 'APPROVAL_KEY_MISSING, APPROVAL_PROOF_REQUIRED or APPROVAL_PROOF_INVALID (a risky gate answered by a mobile device)' },
           '409': { description: 'INTERACTION_STALE' },
+          '422': { description: 'NOT_REMEMBERABLE — the gate always asks (risky, an always-ask tool, or a never-listed command)' },
         },
+      },
+    },
+    '/api/workflow-runs/{runId}/permission-rules': {
+      get: {
+        tags: ['Runs', 'HITL'],
+        summary: 'The permission rules this run remembered ("Allow for this run", U-16): {rules: [{id, kind: command|tool, match, createdAt}]}',
+        parameters: [runIdParam],
+        responses: { '200': { description: 'Rules, oldest first' }, '404': { description: 'Unknown run' } },
+      },
+      delete: {
+        tags: ['Runs', 'HITL'],
+        summary: 'Clear the run\'s remembered permission rules: {removed}',
+        parameters: [runIdParam],
+        responses: { '200': { description: 'Cleared' }, '404': { description: 'Unknown run' } },
+      },
+    },
+    '/api/workflow-runs/{runId}/permission-rules/{ruleId}': {
+      delete: {
+        tags: ['Runs', 'HITL'],
+        summary: 'Revoke one remembered permission rule',
+        parameters: [runIdParam, { name: 'ruleId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '204': { description: 'Revoked' }, '404': { description: 'No such rule on this run' } },
       },
     },
     '/api/workflow-runs/{runId}/instances/{instanceId}/interactions/{interactionId}/answer': {

@@ -19,7 +19,7 @@ import { useNavigate, useParams } from 'react-router';
 import { awaitsUserDecision, type ScmResultBlock, type WidgetBlock } from '@generatorai/client-core';
 import { composerPromptPlaceholder, harnessProviderLabel, type ApprovalMode } from '@generatorai/shared/ui-contract';
 import { useMarkChatRead } from '@/hooks/chatListQueries.js';
-import { useSetChatPermissionMode } from '@/hooks/queries.js';
+import { useChatPermissionRules, useClearChatPermissionRules, useSetChatPermissionMode } from '@/hooks/queries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useEditSourcesStore } from '@/stores/editSourcesStore.js';
 import { parseWidgetTabId } from '@/lib/widgetTabId.js';
@@ -88,6 +88,9 @@ export function ChatPage() {
   const view = useChatView({ chatId, dockOpen, setDockOpen, toggleDock });
   // MG-02 / MD-112: the chat is read while it is open (D-83).
   const setPermissionMode = useSetChatPermissionMode(chatId ?? '');
+  // U-16 (D-147): what "Allow for this chat" remembered (the Approvals menu's "N rules · Clear").
+  const permissionRules = useChatPermissionRules(chatId);
+  const clearPermissionRules = useClearChatPermissionRules(chatId ?? '');
   const { chat, sessionId, workspace, stream, transcript, gates, stopRewind, dock } = view;
   const { isWorking } = stream;
   useMarkChatRead(chatId, isWorking);
@@ -423,7 +426,12 @@ export function ChatPage() {
         }}
         showAgentModePicker={!chat.parentChatId}
         {...(!chat.parentChatId
-          ? { approvalMode: chat.permissionMode, onApprovalModeChange: (mode: ApprovalMode) => setPermissionMode.mutate(mode) }
+          ? {
+              approvalMode: chat.permissionMode,
+              onApprovalModeChange: (mode: ApprovalMode) => setPermissionMode.mutate(mode),
+              // U-16: what "Allow for this chat" remembered, with Clear.
+              rememberedRules: { matches: (permissionRules.data ?? []).map((r) => r.match), onClear: () => clearPermissionRules.mutate() },
+            }
           : {})}
         {...(agentName ? { agentName } : {})}
         pendingInteractionLabel={gates.pendingInteractionLabel}

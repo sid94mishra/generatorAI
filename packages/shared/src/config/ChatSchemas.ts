@@ -223,13 +223,24 @@ export const SetChatPermissionModeSchema = z.object({
  * tool-permission prompt raised while the chat runs in `default` /
  * `acceptEdits` mode.
  */
-export const ResolveToolPermissionSchema = z.object({
-  behavior: z.enum(['allow', 'deny']),
-  /** Relayed to the agent as the denial reason. */
-  message: z.string().max(2000).optional(),
-  /** MG-05 — signed answer from a phone; required for a risky gate answered by a mobile device. */
-  approvalProof: z.unknown().optional(),
-});
+export const ResolveToolPermissionSchema = z
+  .object({
+    behavior: z.enum(['allow', 'deny']),
+    /** Relayed to the agent as the denial reason. */
+    message: z.string().max(2000).optional(),
+    /** MG-05 — signed answer from a phone; required for a risky gate answered by a mobile device. */
+    approvalProof: z.unknown().optional(),
+    /**
+     * U-16 (D-147) — "Allow for this chat / for this run": allow, and remember the gate's rules
+     * (`payload.rememberRules`) for its owner, so a later request they cover is allowed without asking.
+     * Only with `behavior: 'allow'`; refused (422) for a gate that cannot be remembered.
+     */
+    remember: z.boolean().optional(),
+  })
+  .refine((b) => !(b.remember && b.behavior !== 'allow'), {
+    message: 'remember is only valid with behavior "allow"',
+    path: ['remember'],
+  });
 
 /**
  * PATCH /api/chats/:id — every field optional, every field validated.

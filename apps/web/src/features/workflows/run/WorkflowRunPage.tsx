@@ -35,6 +35,8 @@ import {
   useLoopEventRefetch,
   usePendingDecisions,
   useResolveStageInteraction,
+  useRunPermissionRules,
+  useClearRunPermissionRules,
   useRunCommand,
   useRunWorkspace,
   useSetRunPermissionMode,
@@ -163,6 +165,9 @@ export function WorkflowRunPage() {
   const runCommand = useRunCommand();
   const invokeWorkflow = useInvokeWorkflow({ errorTitle: 'Could not re-run' });
   const resolveGate = useResolveStageInteraction();
+  // U-16 (D-147): what "Allow for this run" remembered (the header's "N rules · Clear").
+  const runPermissionRules = useRunPermissionRules(runId);
+  const clearRunPermissionRules = useClearRunPermissionRules();
   const setRunPermissionMode = useSetRunPermissionMode();
   const confirmer = useConfirm();
   const confirmAction = confirmer.confirm;
@@ -784,6 +789,13 @@ export function WorkflowRunPage() {
                     onRaiseBudget={handleRaiseBudget}
                     onPermissionModeChange={handlePermissionModeChange}
                     permissionBusy={setRunPermissionMode.isPending}
+                    permissionRules={{
+                      matches: (runPermissionRules.data ?? []).map((r) => r.match),
+                      onClear: () => {
+                        if (runId) clearRunPermissionRules.mutate(runId);
+                      },
+                      busy: clearRunPermissionRules.isPending,
+                    }}
                     graphOpen={graphOpen}
                     onToggleGraph={() => setGraphOpen((v) => !v)}
                     onOpenTimeline={() => setTimelineOpen(true)}

@@ -7,7 +7,7 @@
 // to the model and when (the chat turn loop, the stage script).
 // ────────────────────────────────────────────────────────────────
 
-import type { AgentMode, AgentToolPolicy } from '@generatorai/shared';
+import type { AgentMode, AgentToolPolicy, PermissionCardSummary } from '@generatorai/shared';
 import type { HookBridge } from '../../domain/ports/IHookBridge.js';
 import type { HarnessPermissionMode } from '../../domain/ports/IAgentHarness.js';
 import type { CustomToolRegistry } from '../../tools/CustomToolRegistry.js';
@@ -25,6 +25,7 @@ import type { AgentInteractionService } from '../AgentInteractionService.js';
 import type { PlanService } from '../PlanService.js';
 import type { WorkflowToolHost } from '../../tools/workflows/WorkflowToolHost.js';
 import type { GitHubToolHost } from '../../tools/github/GitHubToolHost.js';
+import type { PermissionRuleService } from '../PermissionRuleService.js';
 
 /** Who a session belongs to. */
 export type SessionOwner =
@@ -92,6 +93,8 @@ export interface SessionComposerDeps {
   workflowTools?: WorkflowToolHost;
   /** The GitHub issue + merge tools (D-146): bound into project sessions whose project has a connected GitHub remote. */
   githubTools?: GitHubToolHost;
+  /** U-16 (D-147): remembered permission rules — a chat's and a run's gates allow what they cover without asking. */
+  permissionRules?: PermissionRuleService;
 }
 
 /**
@@ -168,6 +171,8 @@ export interface TurnContext {
   cardSequence: Map<string, number>;
   /** The owner's tool policy; absent means the compose-time binding decides. */
   policy?: TurnPolicy | undefined;
+  /** U-16 (D-147): requests remembered rules allowed without asking this turn (kept in the transcript as notes). */
+  autoAllowedPermissions?: PermissionCardSummary[] | undefined;
   /** Files the person attached to this turn: reading them never asks (they are stored outside the workspace). */
   attachedPaths?: string[] | undefined;
   /**

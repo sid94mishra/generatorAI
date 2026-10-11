@@ -27,7 +27,7 @@ import { MenuButton, type MenuButtonItem } from '@/ui/patterns/MenuButton/MenuBu
 import { StatusBadge } from '@/ui/primitives/StatusBadge/StatusBadge.js';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
-import { APPROVAL_MODE_LABELS } from '@generatorai/shared/ui-contract';
+import { APPROVAL_MODE_LABELS, PERMISSION_GATE_COPY } from '@generatorai/shared/ui-contract';
 import { Chip } from '@/ui/primitives/Chip/Chip.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { Select } from '@/ui/primitives/Select/Select.js';
@@ -68,6 +68,8 @@ export interface RunHeaderProps {
   onRaiseBudget: () => void;
   onPermissionModeChange: (mode: WorkflowRunPermissionMode) => void;
   permissionBusy: boolean;
+  /** U-16 (D-147): what "Allow for this run" remembered, and how to forget it ("N rules · Clear"). */
+  permissionRules?: { matches: readonly string[]; onClear: () => void; busy: boolean } | undefined;
   graphOpen: boolean;
   onToggleGraph: () => void;
   onOpenTimeline: () => void;
@@ -111,6 +113,7 @@ export const RunHeader = memo(function RunHeader({
   onRaiseBudget,
   onPermissionModeChange,
   permissionBusy,
+  permissionRules,
   graphOpen,
   onToggleGraph,
   onOpenTimeline,
@@ -254,6 +257,19 @@ export const RunHeader = memo(function RunHeader({
               }}
               items={PERMISSION_OPTIONS}
             />
+            {permissionRules && permissionRules.matches.length > 0 ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                title={`Allowed without asking in this run: ${permissionRules.matches.join(', ')}. Clear to ask again.`}
+                aria-label={`Clear ${PERMISSION_GATE_COPY.rulesCount(permissionRules.matches.length)} remembered for this run: ${permissionRules.matches.join(', ')}`}
+                disabled={permissionRules.busy}
+                onClick={permissionRules.onClear}
+                data-testid="run-permission-rules"
+              >
+                {PERMISSION_GATE_COPY.rulesCount(permissionRules.matches.length)} · {PERMISSION_GATE_COPY.clearRules}
+              </Button>
+            ) : null}
           </span>
           <span aria-hidden className="h-control-sm w-px shrink-0 bg-line-soft" />
           <BudgetMeter usage={usage} budget={budget} elapsedMs={elapsedMs} active={isRunning || isPaused} />

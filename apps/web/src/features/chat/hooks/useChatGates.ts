@@ -91,14 +91,17 @@ export function useChatGates({
   );
 
   const answerPermissionGate = useCallback(
-    (interactionId: string, behavior: 'allow' | 'deny', message?: string) => {
-      if (sessionId) {
+    (interactionId: string, behavior: 'allow' | 'deny', message?: string, options?: { remember?: boolean }) => {
+      // A remembered answer settles from the server's `chat.permission.resolved` (it names the rules it stored, and
+      // a gate that cannot be remembered is refused with 422 — the card must stay answerable then).
+      if (sessionId && !options?.remember) {
         useStreamStore.getState().resolvePermission(sessionId, interactionId, behavior, message);
       }
       answerPermission.mutate({
         interactionId,
         behavior,
         ...(message ? { message } : {}),
+        ...(options?.remember ? { remember: true } : {}),
       });
     },
     [answerPermission, sessionId],

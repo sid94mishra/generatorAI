@@ -591,6 +591,21 @@ export function deriveTimeline(
           steps.push(warnStep);
           break;
         }
+        if (b.category === 'permission') {
+          // U-16 (D-147): a request a remembered "Allow for this chat / run" rule allowed. No card asked, so the
+          // row is the audit trail: "Allowed · by a rule for this run: pnpm lint".
+          const ruleStep: TimelineStep = {
+            id: `rule-${b.blockId}`,
+            kind: 'note',
+            verb: 'Allowed',
+            target: b.message.replace(/^\s*Allowed\s+/i, ''),
+            mono: false,
+            status: 'done',
+          };
+          anchors.set(ruleStep, { anchor: b, key: 'permission' });
+          steps.push(ruleStep);
+          break;
+        }
         if (b.category === 'error') {
           const errStep: TimelineStep = {
             id: `err-${b.blockId}`,

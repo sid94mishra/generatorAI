@@ -109,7 +109,7 @@ export function applyStreamEffect(streams: StreamsRecord, effect: StreamEffect):
     case 'upsertPermission':
       return r.upsertPermission(streams, effect.key, effect.permission);
     case 'resolvePermission':
-      return r.resolvePermission(streams, effect.key, effect.interactionId, effect.behavior, effect.message);
+      return r.resolvePermission(streams, effect.key, effect.interactionId, effect.behavior, effect.message, effect.remembered);
     case 'expirePermission':
       return r.expirePermission(streams, effect.key, effect.interactionId);
     case 'addWidget':

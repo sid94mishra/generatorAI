@@ -11,7 +11,7 @@
 
 import { createContext, useContext, type ReactNode } from 'react';
 import type { ScmResultBlock, WidgetBlock } from '@generatorai/client-core';
-import type { TranscriptViewMode } from '@generatorai/shared/ui-contract';
+import type { PermissionRuleScope, TranscriptViewMode } from '@generatorai/shared/ui-contract';
 
 export type PlanApproval = 'implement_interactive' | 'implement_autopilot';
 
@@ -29,7 +29,9 @@ export interface TranscriptActions {
   onApprovePlan?: (planId: string, action: PlanApproval) => void;
   onRequestPlanChanges?: (planId: string, feedback: string) => void;
   onAnswerQuestion?: (interactionId: string, answers: Record<string, string[]>, freeformResponse?: string) => void;
-  onAnswerPermission?: (interactionId: string, behavior: 'allow' | 'deny', message?: string) => void;
+  onAnswerPermission?: (interactionId: string, behavior: 'allow' | 'deny', message?: string, options?: { remember?: boolean }) => void;
+  /** U-16: whose rules a permission card's "Allow for this …" remembers (a chat, a workflow run). Absent → Allow once only. */
+  permissionScope?: PermissionRuleScope;
   /** A gate decision is in flight. */
   gateBusy?: boolean;
   /** Workspace behind the transcript — resolves agent screenshots. */

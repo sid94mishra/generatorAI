@@ -22,7 +22,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ScmFlowResult, TransportCapabilitySet } from '@generatorai/shared';
-import { isSpawnWorkerTool, permissionWording } from '@generatorai/shared/ui-contract';
+import { isSpawnWorkerTool, permissionWording, PERMISSION_GATE_COPY } from '@generatorai/shared/ui-contract';
 import type { WorkflowRunCardEvent } from './workflowRuns.js';
 
 import type {
@@ -182,6 +182,8 @@ export type StreamEffect =
       interactionId: string;
       behavior: 'allow' | 'deny';
       message?: string;
+      /** U-16: the rules an "Allow for this chat / run" answer remembered. */
+      remembered?: PermissionRuleView[];
     }
   | { op: 'expirePermission'; key: string; interactionId: string; reason?: string }
   | {
@@ -1073,23 +1075,46 @@ export class StreamEventRouter {
             status: 'pending',
             ...(data['risk'] === 'risky' || data['risk'] === 'standard' ? { risk: data['risk'] } : {}),
             ...wordingOf(data),
+            // U-16 (D-147): what "Allow for this chat / run" would remember, or why it never may.
+            rememberRules: rulesOf(data['rememberRules']),
+            ...(optStr(data['rememberRefusal']) ? { rememberRefusal: str(data['rememberRefusal']) } : {}),
           },
         });
         out.push({ op: 'invalidate', resource: 'interactions', ...chatId() });
         break;
 
       case 'chat.permission.resolved':
-      case 'stage.permission.resolved':
+      case 'stage.permission.resolved': {
         this.flushKey(key, out);
+        const remembered = rulesOf(data['remembered']);
         out.push({
           op: 'resolvePermission',
           key,
           interactionId: str(data['interactionId']),
           behavior: data['behavior'] === 'deny' ? 'deny' : 'allow',
           ...(optStr(data['message']) ? { message: str(data['message']) } : {}),
+          ...(remembered.length > 0 ? { remembered } : {}),
         });
         out.push({ op: 'invalidate', resource: 'interactions', ...chatId() });
         break;
+      }
+
+      // U-16 (D-147): a request a remembered rule allowed — no card, a transcript note that says so.
+      case 'chat.permission.auto_allowed':
+      case 'stage.permission.auto_allowed': {
+        this.flushKey(key, out);
+        const rules = rulesOf(data['rules']);
+        out.push({
+          op: 'addSystemMessage',
+          key,
+          message: PERMISSION_GATE_COPY.autoAllowed(
+            rules.map((r) => r.match).join(', ') || str(data['toolName']),
+            kind === 'stage.permission.auto_allowed' ? 'run' : 'chat',
+          ),
+          category: 'permission',
+        });
+        break;
+      }
 
       case 'chat.permission.expired':
       case 'stage.permission.expired':
@@ -1835,6 +1860,18 @@ export class StreamEventRouter {
 }
 
 /** D-107: the server-stamped question and kind label, worded here for gates raised before they existed. */
+/** A remembered-rule list of an event (U-16), keeping only well-formed rules. */
+type PermissionRuleView = { kind: 'command' | 'tool'; match: string };
+function rulesOf(value: unknown): PermissionRuleView[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((r): PermissionRuleView[] => {
+    const rule = (r ?? {}) as { kind?: unknown; match?: unknown };
+    return (rule.kind === 'command' || rule.kind === 'tool') && typeof rule.match === 'string' && rule.match
+      ? [{ kind: rule.kind, match: rule.match }]
+      : [];
+  });
+}
+
 function wordingOf(data: Record<string, unknown>): { title: string; kindLabel: string } {
   const text = (v: unknown) => (typeof v === 'string' ? v : '');
   const fallback = permissionWording(text(data['toolName']), text(data['type']));

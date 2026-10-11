@@ -35,6 +35,8 @@ export * from './status/index.js';
 export * from './review.js';
 // Mobile MG-04 — gate risk verdict
 export * from './security/gateRisk.js';
+// U-16 (D-147) — remembered permission rules
+export * from './security/permissionRules.js';
 export * from './security/approvalProof.js';
 export * from './security/endpointTrust.js';
 

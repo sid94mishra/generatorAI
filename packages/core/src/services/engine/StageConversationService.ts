@@ -27,12 +27,13 @@
 // feedback path besides this API; there is no approve-with-follow-up).
 // ────────────────────────────────────────────────────────────────
 
-import type { AgentMode, ILogger } from '@generatorai/shared';
+import type { AgentMode, ILogger, PermissionRule } from '@generatorai/shared';
 import type { RunCommand } from '@generatorai/workflow-spec';
 import type { IStageRunRepository } from '../../domain/ports/IStageRunRepository.js';
 import type { OperatorTurn } from '../../domain/scheduler/types.js';
 import type { CommandResult, RunSupervisor } from './RunSupervisor.js';
 import { StageConversationError } from './StageConversationError.js';
+import { rememberRefusalOf, rememberRulesOf, type PermissionRuleService } from '../PermissionRuleService.js';
 
 /** An operator message to a stage. */
 export interface StageMessage {
@@ -48,7 +49,7 @@ export type StageSendOutcome = 'queued' | 'amending' | 'retrying';
 
 /** A gate answer, in the chat's shapes (ResolveToolPermissionSchema, AnswerQuestionSchema, PlanDecisionSchema). */
 export type StageGateAnswer =
-  | { kind: 'permission'; behavior: 'allow' | 'deny'; message?: string }
+  | { kind: 'permission'; behavior: 'allow' | 'deny'; message?: string; remember?: boolean }
   | { kind: 'answer'; answers: Record<string, string[]>; freeformResponse?: string }
   | { kind: 'plan'; approved: boolean; action?: 'exit_only' | 'implement_interactive' | 'implement_autopilot'; feedback?: string };
 
@@ -63,6 +64,8 @@ export interface StageConversationServiceDeps {
   engine: RunSupervisor;
   stageRuns: IStageRunRepository;
   logger?: ILogger | undefined;
+  /** U-16 (D-147): where "Allow for this run" remembers a gate's rules (read at call time: wired late). */
+  permissionRules?: (() => PermissionRuleService | undefined) | undefined;
 }
 
 export class StageConversationService {
@@ -201,8 +204,20 @@ export class StageConversationService {
     if (pending.kind !== GATE_KIND[answer.kind]) {
       throw new StageConversationError('VALIDATION_ERROR', `Interaction ${interactionId} is a ${pending.kind ?? 'different'} gate, not a ${GATE_KIND[answer.kind]}`);
     }
+    // U-16 (D-147): "Allow for this run" — the rules the gate derived when it parked, stored for the RUN (every
+    // stage shares them) before the answer is delivered, so the agent's next matching call already finds them.
+    let remembered: PermissionRule[] | undefined;
+    if (answer.kind === 'permission' && answer.remember && answer.behavior === 'allow') {
+      const rules = rememberRulesOf(stage.interruptData);
+      const store = this.deps.permissionRules?.();
+      if (rules.length === 0 || !store) {
+        throw new StageConversationError('NOT_REMEMBERABLE', store ? rememberRefusalOf(stage.interruptData) : 'Remembered permissions are not enabled');
+      }
+      await store.remember({ kind: 'run', id: runId }, rules);
+      remembered = rules;
+    }
     // Bound to the instance version the check above read: the answer never reaches a later gate (ENGINE-R11).
-    const r = await this.engine.command(runId, { ...approveCommand(instanceId, interactionId, answer), expectedVersion: stage.version } as RunCommand);
+    const r = await this.engine.command(runId, { ...approveCommand(instanceId, interactionId, answer, remembered), expectedVersion: stage.version } as RunCommand);
     if (!r.ok) throw refused(r);
   }
 
@@ -222,14 +237,14 @@ export class StageConversationService {
  * plan is `changes_requested` — the turn carries on with the refusal —
  * never `rejected`, which fails the stage.
  */
-function approveCommand(instanceId: string, interactionId: string, answer: StageGateAnswer): RunCommand {
+function approveCommand(instanceId: string, interactionId: string, answer: StageGateAnswer, remembered?: PermissionRule[]): RunCommand {
   switch (answer.kind) {
     case 'permission':
       return {
         command: 'approve',
         instanceId,
         outcome: answer.behavior === 'allow' ? 'approved' : 'changes_requested',
-        data: { interactionId, ...(answer.message ? { message: answer.message } : {}) },
+        data: { interactionId, ...(answer.message ? { message: answer.message } : {}), ...(remembered ? { remembered } : {}) },
         ...(answer.message ? { feedback: answer.message } : {}),
       };
     case 'answer':

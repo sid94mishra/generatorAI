@@ -278,3 +278,8 @@ export type {
   ChatWorkflowRunLink,
   IChatWorkflowRunRepository,
 } from './IInvocationStores.js';
+export type {
+  IPermissionRuleRepository,
+  PermissionRuleOwner,
+  StoredPermissionRule,
+} from './IPermissionRuleRepository.js';

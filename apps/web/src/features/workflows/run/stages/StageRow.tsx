@@ -34,7 +34,7 @@ import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 
 /** An answer to one of a stage's in-turn gates, in the chat's shapes (the stage conversation API). */
 export type StageGateResolution =
-  | { kind: 'permission'; interactionId: string; behavior: 'allow' | 'deny'; message?: string }
+  | { kind: 'permission'; interactionId: string; behavior: 'allow' | 'deny'; message?: string; remember?: boolean }
   | { kind: 'answer'; interactionId: string; answers: Record<string, string[]>; freeformResponse?: string }
   | { kind: 'plan'; interactionId: string; approved: boolean; action?: 'implement_interactive' | 'implement_autopilot'; feedback?: string };
 
@@ -312,8 +312,16 @@ export const StageRow = memo(function StageRow({
                 gateBusy,
                 ...(onResolveGate
                   ? {
-                      onAnswerPermission: (interactionId: string, behavior: 'allow' | 'deny', message?: string) =>
-                        onResolveGate(stage.id, { kind: 'permission', interactionId, behavior, ...(message ? { message } : {}) }),
+                      // U-16: "Allow for this run" remembers the gate's rules for every stage of the run.
+                      permissionScope: 'run' as const,
+                      onAnswerPermission: (interactionId: string, behavior: 'allow' | 'deny', message?: string, options?: { remember?: boolean }) =>
+                        onResolveGate(stage.id, {
+                          kind: 'permission',
+                          interactionId,
+                          behavior,
+                          ...(message ? { message } : {}),
+                          ...(options?.remember ? { remember: true } : {}),
+                        }),
                       onAnswerQuestion: (interactionId: string, answers: Record<string, string[]>, freeformResponse?: string) =>
                         onResolveGate(stage.id, { kind: 'answer', interactionId, answers, ...(freeformResponse ? { freeformResponse } : {}) }),
                       onApprovePlan: (planId: string, action: 'implement_interactive' | 'implement_autopilot') => {

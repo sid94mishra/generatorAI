@@ -1415,6 +1415,48 @@ box, Close as completed / not planned, and **Fix in chat**, which opens the New 
 "Fix #N: title\n\nbody\n\nOpen a PR that closes #N." — the existing dialog, not a server-side chat, so the user picks
 agent, model and sources). New icon concepts `merge` and `issue` (lucide-only). Mobile parity is follow-up work.
 
+### D-147 "Allow for this chat / for this run": remembered permission rules (U-16) (2026-10-11) — Final
+In "Accept edits, ask for the rest" every shell command parked a gate with only Deny / Allow once; a 14-stage run asked
+dozens of times for `pnpm lint`, `git status`, `ls`, and the only way out was Full access. Gates now offer a scoped,
+provider-independent remember. **Contract** (`packages/shared`): `ResolveToolPermissionSchema` gains
+`remember?: boolean` (only with `behavior: 'allow'`; the owner is implied by the route — the chat, or the whole run —
+so a body cannot name the wrong one). `security/permissionRules.ts` (pure, client-safe): `PermissionRule =
+{kind: 'command' | 'tool', match}`; `rememberablePermission(subject) → {rules, refusal?}`, `permissionRulesFor`,
+`rulesCover(rules, subject)`, `ruleMatches(rule, subject)`. A shell line is split quote-aware on `;` `|` `&&` `||` `&`
+and newlines (`2>&1`, `&>`, `>&2` are redirects; `$(…)`, backticks, `<(…)` and subshells are commands of their own);
+each command yields its program, plus the first non-flag subcommand for multi-command tools (git, pnpm, npm, yarn, bun,
+npx, docker, cargo, go, make, kubectl, gh, uv, pip, poetry, dotnet, brew, turbo, nx — flags that take a value are
+skipped: `pnpm --filter x lint` → `pnpm lint`), plus what actually runs for run/exec subcommands (`pnpm exec vitest`)
+and the verb for two-level tools (`gh pr view`); interpreters name their script (`node scripts/x.mjs`). A request is
+covered when it derives a non-empty rule set and EVERY rule is stored — rules are exact keys, so coverage is set
+inclusion. Never remembered and never auto-allowed: a risky gate (the MG-04 verdict, recomputed on the FULL command so a
+summary cut at 600 chars cannot hide a tail), `alwaysAsk` tools (`github_merge_pull_request` — `askBeforeActing` now
+stamps it), `computer_*`, and the never-list (sudo/doas/su, every shell and evaluator — sh, bash, pwsh, cmd, eval,
+exec, source, xargs, env, nohup, timeout —, ssh/scp, osascript, security, launchctl, crontab, dd, mkfs, diskutil,
+`rm`/`rmdir` of an absolute, home, drive or `..` path or a `$VAR`, `chmod/chown -R`, `find -exec/-delete`, `git push`,
+`git -c`, `gh api`, `docker run/exec`, `kubectl exec`, inline interpreter code, PATH/LD_*/NODE_OPTIONS assignments,
+here-documents, control flow, computed command names). Non-shell gates remember the tool name. **Server/core**: the
+rules ride on the gate (`ToolPermissionRequestPayload.rememberRules` / `rememberRefusal`, derived in
+`buildToolPermissionPayload` from the provider's full command — Claude `input.command`, Codex `command`, Copilot
+`fullCommandText`, ACP `rawInput.command`); answering with `remember` stores exactly those rules BEFORE the answer is
+delivered (no re-derivation from client input; 422 `NOT_REMEMBERABLE` when there are none). Storage: table
+`permission_rules` (v67; one of `chat_id` / `run_id`, both `ON DELETE CASCADE`, unique per owner + kind + match) behind
+`IPermissionRuleRepository` / `PermissionRuleService`, so run rules survive a restart and are shared by every stage and
+instance. `ChatManagementService.chatPermission` and `StageGatePort.permission` check `covering()` before parking; a
+covered request is allowed and recorded as `chat|stage.permission.auto_allowed {rules}` (a transcript row "Allowed · by
+a rule for this run: pnpm lint"); `…permission.resolved` carries `remembered`. A chat turn persists both in its
+`permissionCards` (`remembered`, and `autoAllowed` entries that render as notes), so they survive a reload; a stage's
+come back through event replay. A file write in plan mode is never
+auto-allowed; "Ask before tools run" may still remember (the person chose it). MG-05: the proof check is unchanged and
+runs before the answer; risky gates — the only ones that need a proof — can never be remembered. **API**:
+`GET|DELETE /api/chats/:id/permission-rules`, `DELETE …/permission-rules/:ruleId`, and the same under
+`/api/workflow-runs/:id` (route policy as their prefixes). **Web**: PermissionCard adds a secondary
+`Allow <rule> for this chat|run` (`permission-allow-scope`; the accessible name lists every rule) between Deny and
+Allow once, which keeps ↵; a gate that cannot be remembered shows why; a settled remembered card reads "Allowed for
+this chat: …". The composer's Approvals group and the run header show "N rules · Clear". **Follow-up**: mobile and
+the Activity page's quick answers keep Allow once (the contract is shared; their UI is not built yet); the CLI's
+run timeline does not render `auto_allowed` yet.
+
 ### D-142 (withdrawn 2026-10-11) Local self-signed signing does not stop the Keychain prompt
 Tried and reverted: signing local builds with a self-signed "GeneratorAI Local Signing" identity kept the code signature
 stable, but macOS still asked for the "GeneratorAI Safe Storage" key after the next rebuild — Keychain access for

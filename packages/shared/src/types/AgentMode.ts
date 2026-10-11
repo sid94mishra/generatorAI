@@ -22,6 +22,7 @@
  */
 
 import type { GateRisk } from '../security/gateRisk.js';
+import type { PermissionRule } from '../security/permissionRules.js';
 
 // ────────────────────────────────────────────────────────────────
 // Agent mode
@@ -377,6 +378,12 @@ export interface ToolPermissionRequestPayload {
   title?: string;
   /** D-107: the kind of access for the card's corner ("Shell command", "Browser", "MCP · github"). */
   kindLabel?: string;
+  /**
+   * U-16 (D-147): the rules "Allow for this chat / run" adds — derived on the server from the FULL request
+   * (`rememberablePermission`). Absent or empty: the gate cannot be remembered (`rememberRefusal` says why).
+   */
+  rememberRules?: PermissionRule[];
+  rememberRefusal?: string;
 }
 
 /** What the user posts back to `POST /chats/:id/interactions/:interactionId/permission`. */
@@ -384,6 +391,8 @@ export interface ToolPermissionResolution {
   behavior: 'allow' | 'deny';
   /** Optional reason relayed to the agent when denying. */
   message?: string;
+  /** U-16 (D-147): allow, and remember the gate's rules for its owner (the chat, or the whole run). */
+  remember?: boolean;
 }
 
 /** Compact projection embedded in the chat transcript. */
@@ -400,6 +409,10 @@ export interface PermissionCardSummary {
   /** MG-04 — copied from the gate's payload. */
   risk?: GateRisk;
   riskReasons?: string[];
+  /** U-16 (D-147): the rules "Allow for this chat" remembered with this answer — or, with `autoAllowed`, the rules that allowed it. */
+  remembered?: PermissionRule[];
+  /** U-16: allowed by remembered rules without asking (no gate was shown); the transcript shows a note, not a card. */
+  autoAllowed?: boolean;
 }
 
 /** Resolution the UI posts back for a plan review gate. */

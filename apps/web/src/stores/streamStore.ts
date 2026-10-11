@@ -141,12 +141,13 @@ interface StreamStore {
     permission: Omit<PermissionBlock, 'type' | 'blockId'>,
   ) => void;
 
-  /** Record the user's allow/deny decision on a permission card. */
+  /** Record the user's allow/deny decision on a permission card (`remembered`: "Allow for this chat / run", U-16). */
   resolvePermission: (
     sessionId: string,
     interactionId: string,
     behavior: 'allow' | 'deny',
     message?: string,
+    remembered?: PermissionBlock['remembered'],
   ) => void;
 
   /** Mark a permission card expired (the turn ended before it was answered). */

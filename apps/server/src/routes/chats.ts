@@ -1535,7 +1535,7 @@ export function createChatApiRoutes(container: Container): Router {
       try {
         const chatId = String(req.params['id']);
         const interactionId = String(req.params['interactionId']);
-        const { behavior, message } = req.body as { behavior: 'allow' | 'deny'; message?: string };
+        const { behavior, message, remember } = req.body as { behavior: 'allow' | 'deny'; message?: string; remember?: boolean };
         // MG-05: a risky gate answered from a phone must be signed there.
         const interaction = await container.agentInteractionService?.findById(interactionId);
         if (interaction && interaction.kind === 'tool_permission') {
@@ -1555,9 +1555,15 @@ export function createChatApiRoutes(container: Container): Router {
         const result = await chatManagementService.resolveToolPermission(chatId, interactionId, {
           behavior,
           ...(message !== undefined ? { message } : {}),
+          ...(remember ? { remember: true } : {}),
         });
         if (!result.ok) {
           const reason = result.reason ?? 'Already resolved';
+          // U-16 (D-147): "Allow for this chat" on a gate that always asks (risky, never-list, always-ask tool).
+          if (result.code === 'NOT_REMEMBERABLE') {
+            res.status(422).json({ error: { code: 'NOT_REMEMBERABLE', message: reason } });
+            return;
+          }
           if (/not enabled/i.test(reason)) {
             res.status(503).json({ error: { code: 'UNAVAILABLE', message: reason } });
             return;
@@ -1574,6 +1580,40 @@ export function createChatApiRoutes(container: Container): Router {
       }
     },
   );
+
+  // U-16 (D-147) — the chat's remembered permission rules ("Allow for this chat"): list, revoke one, clear.
+  const chatRuleOwner = async (chatId: string) => {
+    await container.chatEntityRepo.getById(chatId); // 404 for an unknown chat
+    return { kind: 'chat' as const, id: chatId };
+  };
+  router.get('/:id/permission-rules', async (req, res, next) => {
+    try {
+      const owner = await chatRuleOwner(String(req.params['id']));
+      res.json({ rules: (await container.permissionRuleService?.list(owner)) ?? [] });
+    } catch (err) {
+      next(err);
+    }
+  });
+  router.delete('/:id/permission-rules', async (req, res, next) => {
+    try {
+      const owner = await chatRuleOwner(String(req.params['id']));
+      res.json({ removed: (await container.permissionRuleService?.clear(owner)) ?? 0 });
+    } catch (err) {
+      next(err);
+    }
+  });
+  router.delete('/:id/permission-rules/:ruleId', async (req, res, next) => {
+    try {
+      const owner = await chatRuleOwner(String(req.params['id']));
+      if (!(await container.permissionRuleService?.revoke(owner, String(req.params['ruleId'])))) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such rule on this chat' } });
+        return;
+      }
+      res.status(204).end();
+    } catch (err) {
+      next(err);
+    }
+  });
 
   // PATCH /chats/:id/permission-mode — change the chat's permission policy.
   router.patch('/:id/permission-mode', validate(SetChatPermissionModeSchema), async (req, res, next) => {

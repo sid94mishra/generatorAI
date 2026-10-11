@@ -1089,7 +1089,8 @@ export class HttpPlatformClient implements IPlatformClient {
   async respondToChatPermission(
     chatId: string,
     interactionId: string,
-    response: { behavior: 'allow' | 'deny'; message?: string },
+    /** `remember` = "Allow for this chat" (U-16, D-147). */
+    response: { behavior: 'allow' | 'deny'; message?: string; remember?: boolean },
   ): Promise<void> {
     await apiFetch(`${this.baseUrl}/api/chats/${chatId}/interactions/${interactionId}/permission`, {
       method: 'POST',
@@ -1306,7 +1307,7 @@ export class HttpPlatformClient implements IPlatformClient {
     instanceId: string,
     interactionId: string,
     answer:
-      | { kind: 'permission'; behavior: 'allow' | 'deny'; message?: string }
+      | { kind: 'permission'; behavior: 'allow' | 'deny'; message?: string; remember?: boolean }
       | { kind: 'answer'; answers: Record<string, string[]>; freeformResponse?: string }
       | { kind: 'plan'; approved: boolean; action?: 'exit_only' | 'implement_interactive' | 'implement_autopilot'; feedback?: string },
   ): Promise<void> {
@@ -1316,6 +1317,16 @@ export class HttpPlatformClient implements IPlatformClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+  }
+
+  // ── U-16 (D-147) — remembered permission rules ("Allow for this chat / run") ──
+
+  async listPermissionRules(owner: { kind: 'chat' | 'run'; id: string }): Promise<{ rules: StoredPermissionRuleView[] }> {
+    return apiFetch(`${this.baseUrl}${permissionRulesPath(owner)}`);
+  }
+
+  async clearPermissionRules(owner: { kind: 'chat' | 'run'; id: string }): Promise<{ removed: number }> {
+    return apiFetch(`${this.baseUrl}${permissionRulesPath(owner)}`, { method: 'DELETE' });
   }
 
   async deleteRun(id: string): Promise<void> {
@@ -2952,4 +2963,19 @@ export class HttpPlatformClient implements IPlatformClient {
     if (query.limit !== undefined) q.set('limit', String(query.limit));
     return apiFetch<SearchResponse>(`${this.baseUrl}/api/search?${q}`, { cache: 'no-store' });
   }
+}
+
+/** A remembered permission rule as the rules endpoints return it (U-16, D-147). */
+export interface StoredPermissionRuleView {
+  id: string;
+  kind: 'command' | 'tool';
+  match: string;
+  createdAt: string;
+}
+
+/** The rules resource of a chat or a run. */
+function permissionRulesPath(owner: { kind: 'chat' | 'run'; id: string }): string {
+  return owner.kind === 'chat'
+    ? `/api/chats/${encodeURIComponent(owner.id)}/permission-rules`
+    : `/api/workflow-runs/${encodeURIComponent(owner.id)}/permission-rules`;
 }

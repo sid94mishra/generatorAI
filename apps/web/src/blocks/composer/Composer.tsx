@@ -31,6 +31,7 @@ import {
 } from '@generatorai/shared';
 import {
   APPROVAL_MODE_LABELS,
+  PERMISSION_GATE_COPY,
   CHAT_APPROVAL_MODES,
   reasoningEffortLabel,
   type ApprovalMode,
@@ -131,6 +132,11 @@ export interface ComposerProps {
    */
   approvalMode?: ApprovalMode | undefined;
   onApprovalModeChange?: ((mode: ApprovalMode) => void) | undefined;
+  /**
+   * U-16 (D-147): what "Allow for this chat" remembered (`pnpm lint`, a tool name) and how to forget it. Shown in
+   * the Approvals group as "N rules · Clear" while there are any.
+   */
+  rememberedRules?: { matches: readonly string[]; onClear: () => void } | undefined;
   /** Hidden in background-worker chats. */
   showAgentModePicker?: boolean;
   /** Set while a gate is open; the server refuses prompts until it closes. */
@@ -214,6 +220,7 @@ export function Composer({
   onAgentModeChange,
   approvalMode,
   onApprovalModeChange,
+  rememberedRules,
   showAgentModePicker = true,
   pendingInteractionLabel,
   onCancelPendingInteraction,
@@ -657,6 +664,19 @@ export function Composer({
                                 {APPROVAL_MODE_LABELS[mode].label}
                               </ToolbarOption>
                             ))}
+                            {rememberedRules && rememberedRules.matches.length > 0 ? (
+                              <ToolbarOption
+                                selected={false}
+                                description={rememberedRules.matches.join(', ')}
+                                data-testid="composer-permission-rules"
+                                onClick={() => {
+                                  rememberedRules.onClear();
+                                  setOpenMenu(null);
+                                }}
+                              >
+                                {PERMISSION_GATE_COPY.rulesCount(rememberedRules.matches.length)} · {PERMISSION_GATE_COPY.clearRules}
+                              </ToolbarOption>
+                            ) : null}
                           </div>
                         ) : null}
                       </ToolbarPopup>

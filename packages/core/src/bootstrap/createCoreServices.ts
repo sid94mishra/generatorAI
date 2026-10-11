@@ -83,6 +83,8 @@ import type { AgentStagingService } from '../services/AgentStagingService.js';
 import type { IPlanRepository, IAgentInteractionRepository } from '../domain/ports/IPlanRepository.js';
 import type { GitManager } from '../infrastructure/GitManager.js';
 import type { IChatWorkflowRunRepository } from '../domain/ports/IInvocationStores.js';
+import type { IPermissionRuleRepository } from '../domain/ports/IPermissionRuleRepository.js';
+import { PermissionRuleService } from '../services/PermissionRuleService.js';
 import { WorkflowAuthoringService } from '../services/WorkflowAuthoringService.js';
 import { ChatWorkflowRunBridge } from '../services/workflow-invocation/ChatWorkflowRunBridge.js';
 import { DEFAULT_WORKFLOW_TOOL_LIMITS, WorkflowToolHost } from '../tools/workflows/WorkflowToolHost.js';
@@ -126,6 +128,8 @@ export interface CoreServicesInputs {
   projectCodebaseRepo?: IProjectCodebaseRepository;
   /** The runs chats started through their workflow tools (v60; P06). Without it chats get no run cards or nudges. */
   chatWorkflowRunRepo?: IChatWorkflowRunRepository;
+  /** U-16 (D-147): remembered permission rules ("Allow for this chat / run"). Without it gates offer allow once only. */
+  permissionRuleRepo?: IPermissionRuleRepository;
   /** The generated `generatorai-workflow-author` skill bundle (the authoring guide, the schema hash). */
   workflowSkillDir?: string;
   /** PD-14 — the operator lets agents publish workflows (default off). */
@@ -278,6 +282,8 @@ export interface CoreServices {
   /** PLN-01 — present only when the plan repositories were supplied. */
   planService?: PlanService;
   agentInteractionService?: AgentInteractionService;
+  /** U-16 (D-147): remembered permission rules, when `permissionRuleRepo` was given. */
+  permissionRuleService?: PermissionRuleService;
   /** AGT-01 — present only when the caller supplied them. */
   agentService?: AgentService;
   agentResolver?: AgentResolver;
@@ -331,6 +337,9 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   // shared by reference: composition roots wire several services into it
   // after the graph is built, and both owners see them.
   const sessionExtensions: ChatManagementServiceExtensions = inputs.chatExtensions ?? {};
+  // U-16 (D-147): one rule store for chats and runs, shared by reference like the other extensions.
+  const permissionRuleService = inputs.permissionRuleRepo ? new PermissionRuleService(inputs.permissionRuleRepo) : undefined;
+  if (permissionRuleService) sessionExtensions.permissionRules = permissionRuleService;
   const sessionComposer = new SessionComposer(sessionExtensions, harness, new TurnContextRegistry());
   const chatManagementService = new ChatManagementService(
     chatEntityRepo,
@@ -508,7 +517,12 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     logger,
   );
   // A stage is a compact chat (P03b): send, stop, amend, answer its gates.
-  const stageConversationService = new StageConversationService({ engine, stageRuns: stageRunRepo, logger });
+  const stageConversationService = new StageConversationService({
+    engine,
+    stageRuns: stageRunRepo,
+    logger,
+    permissionRules: () => sessionExtensions.permissionRules,
+  });
 
   // PD-17 — which provider a stage would run on, for the run-start and
   // mode-change checks: the bound agent's runtime (read through the same
@@ -688,6 +702,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     lifecycleSteps,
     ...(planService ? { planService } : {}),
     ...(agentInteractionService ? { agentInteractionService } : {}),
+    ...(permissionRuleService ? { permissionRuleService } : {}),
     ...(inputs.agentService ? { agentService: inputs.agentService } : {}),
     ...(inputs.agentResolver ? { agentResolver: inputs.agentResolver } : {}),
     ...(inputs.agentStaging ? { agentStaging: inputs.agentStaging } : {}),

@@ -190,7 +190,12 @@ export function askBeforeActing(
           throw new Error(`${tool.name} needs a person to approve it, and this session has no one to ask.`);
         }
         const answer = await opts.port.permission(
-          { type: 'other', description: toolSummary(tool), details: { toolName: tool.name, input: args, provider: 'platform' } },
+          {
+            type: 'other',
+            description: toolSummary(tool),
+            // An `always` tool is never remembered nor allowed by a remembered rule (U-16, D-147).
+            details: { toolName: tool.name, input: args, provider: 'platform', ...(always ? { alwaysAsk: true } : {}) },
+          },
           turn,
         );
         if (!answer.granted) throw new Error(answer.reason ?? `Using ${tool.name} was not allowed.`);

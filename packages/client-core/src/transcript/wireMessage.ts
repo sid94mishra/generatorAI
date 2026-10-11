@@ -72,6 +72,15 @@ export function transcriptMessageInput(message: { content: string; metadata?: un
     inputSummary: str(card['inputSummary']) ?? '', status: (str(card['status']) ?? 'expired') as PermissionCardSummary['status'],
     sequence: num(card['sequence']), ...(str(card['message']) ? { message: str(card['message'])! } : {}),
     ...(card['risk'] === 'risky' || card['risk'] === 'standard' ? { risk: card['risk'] } : {}),
+    // U-16 (D-147): what "Allow for this chat" remembered, or the rules that allowed a request unasked.
+    ...(Array.isArray(card['remembered'])
+      ? {
+          remembered: records(card['remembered']).flatMap((r) =>
+            (r['kind'] === 'command' || r['kind'] === 'tool') && str(r['match']) ? [{ kind: r['kind'] as 'command' | 'tool', match: str(r['match'])! }] : [],
+          ),
+        }
+      : {}),
+    ...(card['autoAllowed'] === true ? { autoAllowed: true } : {}),
   }));
   return { content: message.content, metadata };
 }

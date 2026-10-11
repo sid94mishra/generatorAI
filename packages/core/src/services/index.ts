@@ -123,6 +123,8 @@ export type {
   InteractionLogger,
 } from './AgentInteractionService.js';
 export { PlanService, PLAN_DIR, buildPlanFileName } from './PlanService.js';
+// U-16 (D-147) — remembered permission rules ("Allow for this chat / run").
+export { PermissionRuleService, rememberRulesOf, rememberRefusalOf } from './PermissionRuleService.js';
 export type { CreatePlanFromGateParams, PlanServiceLogger } from './PlanService.js';
 
 // Project & Codebase Management services

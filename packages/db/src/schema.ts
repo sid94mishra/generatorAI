@@ -658,6 +658,25 @@ export const chatWorkflowRuns = sqliteTable(
   }),
 );
 
+// ── Remembered permission rules (v67, U-16 / D-147): "Allow for this chat / run" ──
+
+export const permissionRules = sqliteTable(
+  'permission_rules',
+  {
+    id: text('id').primaryKey(),
+    chatId: text('chat_id').references(() => chats.id, { onDelete: 'cascade' }),
+    runId: text('run_id').references(() => workflowRuns.id, { onDelete: 'cascade' }),
+    /** `command` (`pnpm lint`) or `tool` (a tool name). */
+    kind: text('kind').$type<'command' | 'tool'>().notNull(),
+    match: text('match').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => ({
+    chatIdx: uniqueIndex('idx_permission_rules_chat').on(table.chatId, table.kind, table.match).where(sql`chat_id IS NOT NULL`),
+    runIdx: uniqueIndex('idx_permission_rules_run').on(table.runId, table.kind, table.match).where(sql`run_id IS NOT NULL`),
+  }),
+);
+
 // ── Run events (v59, P05 §4.3): what `wait` stages consume ──
 
 export const workflowRunEvents = sqliteTable(

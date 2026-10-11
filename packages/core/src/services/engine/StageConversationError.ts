@@ -23,6 +23,8 @@ export type StageConversationErrorCode =
   | 'INTERACTION_STALE'
   | 'NOT_FOUND'
   | 'VALIDATION_ERROR'
+  /** U-16 (D-147): "Allow for this run" on a gate that cannot be remembered (risky, always asks, never-list). */
+  | 'NOT_REMEMBERABLE'
   /** No engine in this process (another process owns the database). */
   | 'ENGINE_UNAVAILABLE';
 
@@ -35,6 +37,7 @@ const HTTP_STATUS: Record<StageConversationErrorCode, number> = {
   INTERACTION_STALE: 409,
   NOT_FOUND: 404,
   VALIDATION_ERROR: 400,
+  NOT_REMEMBERABLE: 422,
   ENGINE_UNAVAILABLE: 503,
 };
 

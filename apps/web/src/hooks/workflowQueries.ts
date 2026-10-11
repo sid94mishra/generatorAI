@@ -25,6 +25,8 @@ export const workflowKeys = {
   /** One stage's executions across the definition's runs. */
   stageHistory: (definitionId: string, stageKey: string, limit: number) => ['stage-history', definitionId, stageKey, limit] as const,
   run: (id: string) => ['workflow-run', id] as const,
+  /** U-16: the run's remembered permission rules. */
+  runPermissionRules: (id: string) => ['workflow-run', id, 'permission-rules'] as const,
   runWorkspace: (runId: string) => ['run-workspace', runId] as const,
   /** Every loop's finished iterations of a run (the prefix the loop events invalidate). */
   loopIterationsOfRun: (runId: string) => ['loop-iterations', runId] as const,
@@ -423,8 +425,33 @@ export function useResolveStageInteraction() {
     mutationFn: (p: { runId: string; instanceId: string; interactionId: string; answer: Parameters<HttpPlatformClient['resolveStageInteraction']>[3] }) =>
       platform.resolveStageInteraction(p.runId, p.instanceId, p.interactionId, p.answer),
     meta: { errorTitle: 'Answer not sent' },
-    onSettled: (_data, _err, { runId }) => {
+    onSettled: (_data, _err, { runId, answer }) => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
+      if (answer.kind === 'permission' && answer.remember) queryClient.invalidateQueries({ queryKey: workflowKeys.runPermissionRules(runId) });
+    },
+  });
+}
+
+/** U-16 (D-147): the permission rules this run remembered ("Allow for this run"), shared by all of its stages. */
+export function useRunPermissionRules(runId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: workflowKeys.runPermissionRules(runId ?? ''),
+    queryFn: () => platform.listPermissionRules({ kind: 'run', id: runId! }),
+    enabled: !!runId,
+    select: (r) => r.rules,
+  });
+}
+
+/** Forget every rule this run remembered: its stages ask again. */
+export function useClearRunPermissionRules() {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (runId: string) => platform.clearPermissionRules({ kind: 'run', id: runId }),
+    meta: { errorTitle: 'Rules not cleared' },
+    onSettled: (_data, _err, runId) => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.runPermissionRules(runId) });
     },
   });
 }

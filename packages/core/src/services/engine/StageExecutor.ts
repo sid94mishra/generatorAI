@@ -924,6 +924,7 @@ export class StageExecutor {
         workspaceRoot: ctx.workspace.rootPath,
         harnessTypeOf: () => spec.harnessType ?? 'unknown',
         readPermissionMode: () => ctx.permissionSource.read(),
+        permissionRules: () => composer.permissionRules,
       }),
       permission: { source: ctx.permissionSource },
       platform: {

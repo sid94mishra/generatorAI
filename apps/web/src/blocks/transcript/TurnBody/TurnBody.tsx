@@ -160,6 +160,7 @@ function TurnBodyImpl({
                 key={seg.id}
                 permission={seg.permission}
                 onAnswer={ctx.onAnswerPermission}
+                rememberScope={ctx.permissionScope}
                 busy={ctx.gateBusy ?? false}
               />
             );

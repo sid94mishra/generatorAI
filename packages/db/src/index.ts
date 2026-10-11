@@ -81,6 +81,7 @@ export { DrizzleIdempotencyKeyRepository } from './repositories/IdempotencyKeyRe
 export type { IdempotencyKeyRecord } from './repositories/IdempotencyKeyRepository.js';
 export { DrizzleInvocationUploadRepository } from './repositories/InvocationUploadRepository.js';
 export { DrizzleChatWorkflowRunRepository } from './repositories/ChatWorkflowRunRepository.js';
+export { DrizzlePermissionRuleRepository } from './repositories/PermissionRuleRepository.js';
 
 // Security / auth repositories (migration v24)
 export {
@@ -352,6 +353,7 @@ import { DrizzleAutomationExecutionRepository } from './repositories/AutomationE
 import { DrizzleIdempotencyKeyRepository } from './repositories/IdempotencyKeyRepository.js';
 import { DrizzleInvocationUploadRepository } from './repositories/InvocationUploadRepository.js';
 import { DrizzleChatWorkflowRunRepository } from './repositories/ChatWorkflowRunRepository.js';
+import { DrizzlePermissionRuleRepository } from './repositories/PermissionRuleRepository.js';
 import { DrizzleProjectRepository } from './repositories/ProjectRepository.js';
 import { DrizzleProjectCodebaseRepository } from './repositories/ProjectCodebaseRepository.js';
 import { DrizzleProjectConfigRepository } from './repositories/ProjectConfigRepository.js';
@@ -383,6 +385,7 @@ export function createAllRepositories(db: AppDatabase) {
     idempotencyKeyRepo: new DrizzleIdempotencyKeyRepository(db),
     invocationUploadRepo: new DrizzleInvocationUploadRepository(db),
     chatWorkflowRunRepo: new DrizzleChatWorkflowRunRepository(db),
+    permissionRuleRepo: new DrizzlePermissionRuleRepository(db),
     projectRepo: new DrizzleProjectRepository(db),
     projectCodebaseRepo: new DrizzleProjectCodebaseRepository(db),
     projectConfigRepo: new DrizzleProjectConfigRepository(db),

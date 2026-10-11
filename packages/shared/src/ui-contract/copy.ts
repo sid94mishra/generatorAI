@@ -37,7 +37,20 @@ export const PERMISSION_GATE_COPY = {
   outcomeAllowed: 'Allowed',
   outcomeDenied: 'Denied',
   expired: 'This request is no longer answerable — the agent’s turn ended.',
+  /** U-16 (D-147): the secondary action that remembers the gate's rules for its owner. */
+  allowForOwner: (summary: string, scope: PermissionRuleScope): string => `Allow ${summary} for this ${scope}`,
+  allowForOwnerLabel: (rules: string, scope: PermissionRuleScope): string => `Always allow ${rules} in this ${scope}`,
+  /** The settled card of a remembered answer. */
+  outcomeRemembered: (rules: string, scope: PermissionRuleScope): string => `Allowed for this ${scope}: ${rules}`,
+  /** The transcript note of a request a remembered rule allowed. */
+  autoAllowed: (rules: string, scope: PermissionRuleScope): string => `Allowed by a rule for this ${scope}: ${rules}`,
+  /** The menus that list an owner's rules. */
+  rulesCount: (n: number): string => (n === 1 ? '1 rule' : `${n} rules`),
+  clearRules: 'Clear',
 } as const;
+
+/** Who remembered permission rules belong to (U-16): a chat for its lifetime, a workflow run for all its stages. */
+export type PermissionRuleScope = 'chat' | 'run';
 
 /** Words of the clarifying-question gate (B-20 QuestionCard). */
 export const QUESTION_GATE_COPY = {

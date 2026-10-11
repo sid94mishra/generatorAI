@@ -30,6 +30,7 @@ import {
   resolveTurnPermissionMode,
 } from '../agentModePolicy.js';
 import type { PlanService } from '../PlanService.js';
+import { rememberRulesOf, type PermissionRuleService } from '../PermissionRuleService.js';
 import { stampCardSequence, type GatePort } from './gates.js';
 import type { TurnContext } from './types.js';
 
@@ -55,6 +56,8 @@ export interface StageGatePortDeps {
   harnessTypeOf: (conversationId: string | undefined) => string;
   /** The run's permission policy, re-read after an approved plan hands the turn back to auto. */
   readPermissionMode: () => Promise<string | undefined>;
+  /** U-16 (D-147): the run's remembered permission rules (shared by all of its stages), read at call time. */
+  permissionRules?: (() => PermissionRuleService | undefined) | undefined;
 }
 
 function stageIds(turn: TurnContext): { stageRunId: string; workflowRunId: string } {
@@ -86,6 +89,22 @@ export class StageGatePort implements GatePort {
     if (verdict === 'deny') return { granted: false, reason: `Blocked by the run's ${mode} permission mode.` };
 
     const payload = buildToolPermissionPayload(req, mode);
+    // U-16 (D-147): "Allow for this run" rules cover this request — allow it without parking, and say so.
+    const covered = await this.deps
+      .permissionRules?.()
+      ?.covering({ kind: 'run', id: ids.workflowRunId }, payload, mode)
+      .catch(() => null);
+    if (covered) {
+      await this.emit(turn.sessionId, 'stage.permission.auto_allowed', {
+        ...ids,
+        turnId: turn.turnId,
+        toolName: payload.toolName,
+        type: payload.type,
+        description: payload.description,
+        rules: covered,
+      });
+      return { granted: true };
+    }
     const interactionId = generateId();
     turn.interactionIds.push(interactionId);
     stampCardSequence(turn, interactionId);
@@ -104,11 +123,14 @@ export class StageGatePort implements GatePort {
     if (isExpiry(r)) {
       await this.emit(turn.sessionId, 'stage.permission.expired', { ...ids, interactionId, reason: r.reason ?? 'expired' });
     } else {
+      // The answer carries the rules it remembered for the run (`StageConversationService.resolveInteraction`).
+      const remembered = granted ? rememberRulesOf({ rememberRules: (r.value as { remembered?: unknown } | undefined)?.remembered }) : [];
       await this.emit(turn.sessionId, 'stage.permission.resolved', {
         ...ids,
         interactionId,
         behavior: granted ? 'allow' : 'deny',
         ...(r.reason ? { message: r.reason } : {}),
+        ...(remembered.length > 0 ? { remembered } : {}),
       });
     }
     return { granted, ...(r.reason ? { reason: r.reason } : {}) };

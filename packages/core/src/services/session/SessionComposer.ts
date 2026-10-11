@@ -138,6 +138,11 @@ export class SessionComposer {
     this.binder = new PlatformToolBinder(deps);
   }
 
+  /** U-16 (D-147): the remembered permission rules, read at call time (the composition root wires them late). */
+  get permissionRules(): SessionComposerDeps['permissionRules'] {
+    return this.deps.permissionRules;
+  }
+
   async compose(i: ComposeInput): Promise<ComposeResult> {
     const warnings: ComposeWarning[] = [];
     const binding = i.bindingSpec ?? i.spec;

@@ -8,6 +8,7 @@ import { useStreamStore } from '../stores/streamStore.js';
 import type { PersistedEvent, ScmFlowResult } from '@generatorai/shared';
 import type { SystemCategory, QuestionBlock } from '../stores/streamStore.js';
 import { StreamEventRouter, partitionEffects } from '@generatorai/client-core';
+import { PERMISSION_GATE_COPY } from '@generatorai/shared/ui-contract';
 import type { ContextUsageSnapshot, StreamEffect, ToolFileOp } from '@generatorai/client-core';
 
 /**
@@ -26,6 +27,7 @@ const STAGE_ROUTED_KINDS: ReadonlySet<string> = new Set([
   'stage.permission.requested',
   'stage.permission.resolved',
   'stage.permission.expired',
+  'stage.permission.auto_allowed',
   'stage_run.operator_message',
   'stage_run.operator_message_dropped',
   'stage_run.turn_cancelled',
@@ -50,6 +52,17 @@ const STAGE_GATE_ENDING_KINDS: ReadonlySet<string> = new Set([
   'stage_run.skipped',
   'stage_run.turn_cancelled',
 ]);
+
+/** The well-formed remembered-permission rules of a persisted event (U-16). */
+function replayRules(value: unknown): Array<{ kind: 'command' | 'tool'; match: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((r) => {
+    const rule = (r ?? {}) as { kind?: unknown; match?: unknown };
+    return (rule.kind === 'command' || rule.kind === 'tool') && typeof rule.match === 'string' && rule.match
+      ? [{ kind: rule.kind, match: rule.match }]
+      : [];
+  });
+}
 
 /** Apply a persisted `harness.context_usage` payload to the stream store. */
 function applyContextUsage(
@@ -734,6 +747,9 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
           status: 'pending',
           // MG-04 — the Risky badge survives a reload (same rule as the live router).
           ...(data['risk'] === 'risky' || data['risk'] === 'standard' ? { risk: data['risk'] } : {}),
+          // U-16 — what "Allow for this chat" would remember, or why it never may.
+          rememberRules: replayRules(data['rememberRules']),
+          ...(typeof data['rememberRefusal'] === 'string' && data['rememberRefusal'] ? { rememberRefusal: data['rememberRefusal'] } : {}),
         });
         break;
       case 'chat.permission.resolved':
@@ -743,8 +759,20 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
           String(data['interactionId'] ?? ''),
           data['behavior'] === 'deny' ? 'deny' : 'allow',
           typeof data['message'] === 'string' ? data['message'] : undefined,
+          replayRules(data['remembered']),
         );
         break;
+      case 'chat.permission.auto_allowed': {
+        // U-16 (D-147): the transcript note a rule-allowed request leaves (same words as the live router).
+        flushAll();
+        const rules = replayRules(data['rules']);
+        store.addSystemMessage(
+          streamKey,
+          PERMISSION_GATE_COPY.autoAllowed(rules.map((r) => r.match).join(', ') || String(data['toolName'] ?? ''), 'chat'),
+          'permission',
+        );
+        break;
+      }
       case 'chat.permission.expired':
         flushAll();
         store.expirePermission(streamKey, String(data['interactionId'] ?? ''));

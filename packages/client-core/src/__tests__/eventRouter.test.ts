@@ -366,3 +366,24 @@ describe('StreamEventRouter — session_info notices', () => {
     expect(systemMessages(effects)).toEqual([]);
   });
 });
+
+describe('StreamEventRouter — remembered permission rules (U-16)', () => {
+  it('carries the rules a gate offers, the rules an answer remembered, and notes a rule-allowed request', () => {
+    const effects = run([
+      {
+        kind: 'stage.permission.requested',
+        data: { stageRunId: 'st1', interactionId: 'i1', toolName: 'Bash', type: 'shell_exec', rememberRules: [{ kind: 'command', match: 'pnpm lint' }, { kind: 'bogus', match: 'x' }] },
+      },
+      { kind: 'stage.permission.resolved', data: { stageRunId: 'st1', interactionId: 'i1', behavior: 'allow', remembered: [{ kind: 'command', match: 'pnpm lint' }] } },
+      { kind: 'stage.permission.auto_allowed', data: { stageRunId: 'st1', toolName: 'Bash', rules: [{ kind: 'command', match: 'pnpm lint' }] } },
+    ]).concat(run([{ kind: 'chat.permission.auto_allowed', data: { chatId: 'c1', toolName: 'Edit', rules: [{ kind: 'tool', match: 'Edit' }] } }]));
+    const upsert = effects.find((e) => e.op === 'upsertPermission') as Extract<StreamEffect, { op: 'upsertPermission' }>;
+    expect(upsert.permission.rememberRules).toEqual([{ kind: 'command', match: 'pnpm lint' }]);
+    expect(effects.find((e) => e.op === 'resolvePermission')).toMatchObject({ remembered: [{ kind: 'command', match: 'pnpm lint' }] });
+    const notes = effects.filter((e) => e.op === 'addSystemMessage') as Array<Extract<StreamEffect, { op: 'addSystemMessage' }>>;
+    expect(notes.map((n) => [n.key, n.message, n.category])).toEqual([
+      ['stageRun:st1', 'Allowed by a rule for this run: pnpm lint', 'permission'],
+      [SID, 'Allowed by a rule for this chat: Edit', 'permission'],
+    ]);
+  });
+});

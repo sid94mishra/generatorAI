@@ -20,6 +20,7 @@ import type {
   PlanDecision,
   QuestionCardSummary,
   ToolPermissionRequestPayload,
+  PermissionRule,
 } from '@generatorai/shared';
 import { generateId, DEFAULT_AGENT_MODE, ValidationError, chatSourceAlias, isMountableSource } from '@generatorai/shared';
 import * as path from 'node:path';
@@ -46,6 +47,7 @@ import {
   buildToolPermissionPayload,
 } from './agentModePolicy.js';
 import type { EventBus } from '../events/EventBus.js';
+import { rememberRefusalOf, rememberRulesOf } from './PermissionRuleService.js';
 import { StreamingChatRegistry, type StreamingChangeListener } from './StreamingChatRegistry.js';
 import type { RecordPlanArgs, RecordPlanResult } from '../tools/recordPlanTool.js';
 import type { WorktreeService } from './WorktreeService.js';
@@ -539,6 +541,29 @@ export class ChatManagementService {
 
     const payload = buildToolPermissionPayload(request, mode);
 
+    // U-16 (D-147): "Allow for this chat" rules cover this request — allow it without a card, and say so.
+    const covered = await this.extensions.permissionRules?.covering({ kind: 'chat', id: chatId }, payload, mode).catch(() => null);
+    if (covered) {
+      // Kept in the turn's transcript (a completed chat skips event replay) and announced live.
+      const noteId = generateId();
+      this.stampCardSequence(ctx, noteId);
+      (ctx.autoAllowedPermissions ??= []).push({
+        interactionId: noteId,
+        toolName: payload.toolName,
+        type: payload.type,
+        description: payload.description,
+        inputSummary: payload.inputSummary,
+        status: 'allowed',
+        autoAllowed: true,
+        remembered: covered,
+      });
+      await this.eventBus.emit(ctx.sessionId, {
+        kind: 'chat.permission.auto_allowed',
+        data: { chatId, turnId: ctx.turnId, toolName: payload.toolName, type: payload.type, description: payload.description, rules: covered },
+      } as AgentEvent);
+      return { granted: true };
+    }
+
     // `open` blocks until the user answers, so the card is announced from a
     // microtask that runs once the row exists — the same approach the
     // question gate uses to learn the id without threading it out of the
@@ -572,7 +597,8 @@ export class ChatManagementService {
     await announce.catch(() => undefined);
 
     if (outcome.status === 'answered' && outcome.value) {
-      return outcome.value;
+      // The stored resolution may also carry the rules it remembered (U-16); the harness gets the decision only.
+      return { granted: outcome.value.granted, ...(outcome.value.reason ? { reason: outcome.value.reason } : {}) };
     }
     // Cancelled, expired, or the turn was stopped. Deny — an unanswered
     // approval is not an approval.
@@ -591,8 +617,8 @@ export class ChatManagementService {
   async resolveToolPermission(
     chatId: string,
     interactionId: string,
-    decision: { behavior: 'allow' | 'deny'; message?: string },
-  ): Promise<{ ok: boolean; reason?: string }> {
+    decision: { behavior: 'allow' | 'deny'; message?: string; remember?: boolean },
+  ): Promise<{ ok: boolean; reason?: string; code?: 'NOT_REMEMBERABLE' }> {
     const interactions = this.extensions.agentInteractionService;
     if (!interactions) return { ok: false, reason: 'Approvals are not enabled' };
 
@@ -604,9 +630,24 @@ export class ChatManagementService {
       return { ok: false, reason: 'Interaction is not a permission request' };
     }
 
-    const response: PermissionResponse = {
+    // U-16 (D-147): "Allow for this chat" — the rules the server derived when the gate opened, stored BEFORE the
+    // answer goes back, so the agent's very next matching call already finds them.
+    let remembered: PermissionRule[] | undefined;
+    if (decision.remember && decision.behavior === 'allow') {
+      const rules = rememberRulesOf(record.payload);
+      const store = this.extensions.permissionRules;
+      if (rules.length === 0 || !store) {
+        return { ok: false, code: 'NOT_REMEMBERABLE', reason: store ? rememberRefusalOf(record.payload) : 'Remembered permissions are not enabled' };
+      }
+      if (record.status !== 'pending') return { ok: false, reason: 'Already resolved' };
+      await store.remember({ kind: 'chat', id: chatId }, rules);
+      remembered = rules;
+    }
+
+    const response: PermissionResponse & { remembered?: PermissionRule[] } = {
       granted: decision.behavior === 'allow',
       ...(decision.message ? { reason: decision.message } : {}),
+      ...(remembered ? { remembered } : {}),
     };
     const result = await interactions.resolve(interactionId, 'answered', response);
     if (!result.ok) return result;
@@ -620,6 +661,7 @@ export class ChatManagementService {
           interactionId,
           behavior: decision.behavior,
           ...(decision.message ? { message: decision.message } : {}),
+          ...(remembered ? { remembered } : {}),
         },
       } as AgentEvent);
     }
@@ -936,6 +978,12 @@ export class ChatManagementService {
           ...(sequence === undefined ? {} : { sequence }),
         });
       }
+    }
+
+    // U-16: requests remembered rules allowed without a gate — notes in the transcript, in turn order.
+    for (const card of ctx.autoAllowedPermissions ?? []) {
+      const sequence = ctx.cardSequence.get(card.interactionId);
+      permissionCards.push({ ...card, ...(sequence === undefined ? {} : { sequence }) });
     }
 
     return { planCards, questionCards, permissionCards };
@@ -3158,7 +3206,8 @@ function chatOf(turn: TurnContext): string {
 /** A settled (or still open) tool-permission interaction as its transcript card. */
 export function permissionCardOf(record: AgentInteraction, sequence: number | undefined): PermissionCardSummary {
   const payload = (record.payload ?? {}) as Partial<ToolPermissionRequestPayload>;
-  const response = (record.resolution ?? undefined) as { granted?: boolean; reason?: string } | undefined;
+  const response = (record.resolution ?? undefined) as { granted?: boolean; reason?: string; remembered?: unknown } | undefined;
+  const remembered = rememberRulesOf({ rememberRules: response?.remembered });
   const status: PermissionCardSummary['status'] =
     record.status === 'answered' ? (response?.granted ? 'allowed' : 'denied') : record.status === 'pending' ? 'pending' : 'expired';
   return {
@@ -3172,5 +3221,6 @@ export function permissionCardOf(record: AgentInteraction, sequence: number | un
     ...(sequence === undefined ? {} : { sequence }),
     ...(payload.risk ? { risk: payload.risk } : {}),
     ...(payload.riskReasons?.length ? { riskReasons: payload.riskReasons } : {}),
+    ...(remembered.length > 0 ? { remembered } : {}),
   };
 }

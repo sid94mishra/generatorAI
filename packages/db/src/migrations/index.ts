@@ -2837,6 +2837,26 @@ export const MIGRATIONS: readonly Migration[] = [
       name: 'automation_codebases',
       sql: [`ALTER TABLE automations ADD COLUMN codebases TEXT;`],
     },
+    // U-16 (D-147): "Allow for this chat / for this run" — the permission rules a chat or a workflow run
+    // remembered (`command` = `pnpm lint`, `tool` = a tool name). Exactly one owner per row; the rows go
+    // with their owner.
+    {
+      version: 67,
+      name: 'permission_rules',
+      sql: [
+        `CREATE TABLE permission_rules (
+           id TEXT PRIMARY KEY,
+           chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE,
+           run_id TEXT REFERENCES workflow_runs(id) ON DELETE CASCADE,
+           kind TEXT NOT NULL CHECK (kind IN ('command', 'tool')),
+           match TEXT NOT NULL,
+           created_at INTEGER NOT NULL,
+           CHECK ((chat_id IS NULL) <> (run_id IS NULL))
+         );`,
+        `CREATE UNIQUE INDEX idx_permission_rules_chat ON permission_rules(chat_id, kind, match) WHERE chat_id IS NOT NULL;`,
+        `CREATE UNIQUE INDEX idx_permission_rules_run ON permission_rules(run_id, kind, match) WHERE run_id IS NOT NULL;`,
+      ],
+    },
   ];
 
 

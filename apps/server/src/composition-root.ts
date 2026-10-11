@@ -61,6 +61,7 @@ import {
   DrizzleIdempotencyKeyRepository,
   DrizzleInvocationUploadRepository,
   DrizzleChatWorkflowRunRepository,
+  DrizzlePermissionRuleRepository,
   // Project & Codebase Management repositories
   DrizzleProjectRepository,
   DrizzleProjectCodebaseRepository,
@@ -224,6 +225,7 @@ import type {
   // Track A1 — boot reconciler + idempotency sweeper
   AutomationRecoveryService,
   AgentInteractionService,
+  PermissionRuleService,
   PlanService,
   ChatManagementServiceExtensions,
 } from '@generatorai/core';
@@ -934,6 +936,8 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     // P06 — the runs chats start through their workflow tools, the generated
     // authoring skill (guide, schema hash) and the operator's publish switch.
     chatWorkflowRunRepo: new DrizzleChatWorkflowRunRepository(db),
+    // U-16 (D-147) — "Allow for this chat / for this run": remembered permission rules.
+    permissionRuleRepo: new DrizzlePermissionRuleRepository(db),
     workflowSkillDir: resolve(config.templatesDir, 'system', 'skills', 'generatorai-workflow-author'),
     allowAgentPublish: config.workflows?.allowAgentPublish === true,
     // W22 / W47 — durable execution engine storage.
@@ -989,6 +993,7 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     automationRecoveryService,
     planService,
     agentInteractionService,
+    permissionRuleService,
     workflowInvocationService,
     workflowApprovalService,
     workflowCallbacks,
@@ -2413,6 +2418,8 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     // PLN-01 — plan mode
     planService,
     agentInteractionService,
+    // U-16 (D-147) — remembered permission rules
+    permissionRuleService,
 
     // Project & Codebase Management
     projectService,
@@ -2913,6 +2920,8 @@ export interface Container {
   /** PLN-01 — plan mode. Undefined only if the plan repos were not supplied. */
   planService: PlanService | undefined;
   agentInteractionService: AgentInteractionService | undefined;
+  /** U-16 (D-147) — "Allow for this chat / run" rules. */
+  permissionRuleService: PermissionRuleService | undefined;
 
   // Project & Codebase Management
   projectService: ProjectService;

@@ -1168,6 +1168,8 @@ export function resolvePermission(
   interactionId: string,
   behavior: 'allow' | 'deny',
   message?: string,
+  /** U-16: the rules an "Allow for this chat / run" answer remembered. */
+  remembered?: PermissionBlock['remembered'],
 ): StreamsRecord {
   return replaceBlock(
     streams,
@@ -1177,6 +1179,7 @@ export function resolvePermission(
       ...(b as PermissionBlock),
       status: behavior === 'allow' ? 'allowed' : 'denied',
       ...(message ? { message } : {}),
+      ...(remembered?.length ? { remembered } : {}),
     }),
   );
 }

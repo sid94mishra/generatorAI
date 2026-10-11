@@ -22,6 +22,7 @@ import type { AttentionCountsEventData, AttentionRemoveEventData, AttentionUpser
 import type { ChatUpdatedEventData } from './ChatList.js';
 import type { BackgroundTaskCancelledBy } from './Chat.js';
 import type { CodebaseStatus } from './Project.js';
+import type { PermissionRule } from '../security/permissionRules.js';
 
 /**
  * Per-operation file-change stats, derived from the provider's structured
@@ -301,11 +302,14 @@ export type AgentEvent =
   | { kind: 'chat.question.expired'; data: { chatId: string; interactionId: string; reason: string } }
   // chat.permission — a tool call is waiting on the user's allow/deny (chat permission modes `default` / `acceptEdits`).
   | { kind: 'chat.permission.requested'; data: { chatId: string; interactionId: string; turnId?: string; toolName: string; type: string; description: string; inputSummary: string; permissionMode: string } }
-  | { kind: 'chat.permission.resolved'; data: { chatId: string; interactionId: string; behavior: 'allow' | 'deny'; message?: string } }
+  | { kind: 'chat.permission.resolved'; data: { chatId: string; interactionId: string; behavior: 'allow' | 'deny'; message?: string; remembered?: PermissionRule[] } }
+  // U-16 (D-147): a request the chat's remembered rules covered — allowed without a card, recorded for the transcript.
+  | { kind: 'chat.permission.auto_allowed'; data: { chatId: string; turnId?: string; toolName: string; type: string; description: string; rules: PermissionRule[] } }
   | { kind: 'chat.permission.expired'; data: { chatId: string; interactionId: string; reason: string } }
   // ── Stage gates (P02): the chat gate shapes, keyed by the stage run ──
   | { kind: 'stage.permission.requested'; data: { stageRunId: string; workflowRunId: string; interactionId: string; turnId?: string; toolName: string; type: string; description: string; inputSummary: string; permissionMode: string } }
-  | { kind: 'stage.permission.resolved'; data: { stageRunId: string; workflowRunId: string; interactionId: string; behavior: 'allow' | 'deny'; message?: string } }
+  | { kind: 'stage.permission.resolved'; data: { stageRunId: string; workflowRunId: string; interactionId: string; behavior: 'allow' | 'deny'; message?: string; remembered?: PermissionRule[] } }
+  | { kind: 'stage.permission.auto_allowed'; data: { stageRunId: string; workflowRunId: string; turnId?: string; toolName: string; type: string; description: string; rules: PermissionRule[] } }
   | { kind: 'stage.permission.expired'; data: { stageRunId: string; workflowRunId: string; interactionId: string; reason: string } }
   | { kind: 'stage.question.asked'; data: { stageRunId: string; workflowRunId: string; interactionId: string; turnId?: string; questions: unknown[] } }
   | { kind: 'stage.question.answered'; data: { stageRunId: string; workflowRunId: string; interactionId: string; answers: Record<string, string[]>; freeformResponse?: string } }

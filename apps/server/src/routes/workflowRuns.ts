@@ -478,7 +478,47 @@ export function createWorkflowRunRoutes(container: Container): Router {
         next(err);
       }
     });
-  gateRoute('permission', ResolveToolPermissionSchema, (b) => ({ kind: 'permission', behavior: b.behavior, ...(b.message ? { message: b.message } : {}) }));
+  gateRoute('permission', ResolveToolPermissionSchema, (b) => ({
+    kind: 'permission',
+    behavior: b.behavior,
+    ...(b.message ? { message: b.message } : {}),
+    // U-16 (D-147): "Allow for this run" — the rules are stored for the run, shared by every stage.
+    ...(b.remember ? { remember: true } : {}),
+  }));
+
+  // U-16 (D-147) — the run's remembered permission rules: list, revoke one, clear.
+  const runRuleOwner = async (runId: string) => {
+    await workflowRunRepo.getById(runId); // 404 for an unknown run
+    return { kind: 'run' as const, id: runId };
+  };
+  router.get('/:id/permission-rules', async (req, res, next) => {
+    try {
+      const owner = await runRuleOwner(String(req.params['id']));
+      res.json({ rules: (await container.permissionRuleService?.list(owner)) ?? [] });
+    } catch (err) {
+      next(err);
+    }
+  });
+  router.delete('/:id/permission-rules', async (req, res, next) => {
+    try {
+      const owner = await runRuleOwner(String(req.params['id']));
+      res.json({ removed: (await container.permissionRuleService?.clear(owner)) ?? 0 });
+    } catch (err) {
+      next(err);
+    }
+  });
+  router.delete('/:id/permission-rules/:ruleId', async (req, res, next) => {
+    try {
+      const owner = await runRuleOwner(String(req.params['id']));
+      if (!(await container.permissionRuleService?.revoke(owner, String(req.params['ruleId'])))) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such rule on this run' } });
+        return;
+      }
+      res.status(204).end();
+    } catch (err) {
+      next(err);
+    }
+  });
   gateRoute('answer', AnswerQuestionSchema, (b) => ({
     kind: 'answer',
     answers: b.answers,

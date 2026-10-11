@@ -985,13 +985,42 @@ export function useAnswerPermission(chatId: string) {
       interactionId: string;
       behavior: 'allow' | 'deny';
       message?: string;
+      /** "Allow for this chat" (U-16, D-147). */
+      remember?: boolean;
     }) => {
       const { interactionId, ...response } = params;
       return platform.respondToChatPermission(chatId, interactionId, response);
     },
-    onSuccess: () => {
+    meta: { errorTitle: 'Answer not sent' },
+    onSuccess: (_data, params) => {
       void queryClient.invalidateQueries({ queryKey: ['chat', chatId, 'interactions'] });
+      if (params.remember) void queryClient.invalidateQueries({ queryKey: chatPermissionRulesKey(chatId) });
     },
+  });
+}
+
+/** U-16 (D-147): the query key of a chat's remembered permission rules. */
+export const chatPermissionRulesKey = (chatId: string) => ['chat', chatId, 'permission-rules'] as const;
+
+/** The permission rules this chat remembered ("Allow for this chat"). */
+export function useChatPermissionRules(chatId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: chatPermissionRulesKey(chatId ?? ''),
+    queryFn: () => platform.listPermissionRules({ kind: 'chat', id: chatId! }),
+    enabled: !!chatId,
+    select: (r) => r.rules,
+  });
+}
+
+/** Forget every rule this chat remembered: its gates ask again. */
+export function useClearChatPermissionRules(chatId: string) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => platform.clearPermissionRules({ kind: 'chat', id: chatId }),
+    meta: { errorTitle: 'Rules not cleared' },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: chatPermissionRulesKey(chatId) }),
   });
 }
 

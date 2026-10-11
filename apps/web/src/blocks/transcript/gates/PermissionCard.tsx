@@ -8,9 +8,12 @@
 // read-only. `inputSummary` arrives bounded and secret-redacted from the
 // server and is shown verbatim.
 //
-// The board's "Always in this chat" needs a server-side standing grant the
-// permission API does not have (it answers allow | deny per request); it is
-// not rendered (D-36).
+// U-16 (D-147): "Allow <rule> for this chat / run" remembers the gate as the
+// rules the server derived from the full request (`rememberRules`: `pnpm lint`,
+// `ls`, or the tool's name); later requests they cover are allowed without a
+// card. A gate that cannot be remembered (risky, an always-ask tool, a
+// never-listed command) shows why instead of the action. The host says whose
+// rules they are (`rememberScope`); without one only Allow once is offered.
 //
 // A gate the server marked risky (mobile MG-04) carries a neutral "Risky"
 // badge; on web and desktop the answer stays a click (signing is phone-only).
@@ -18,7 +21,7 @@
 
 import { useState } from 'react';
 import type { PermissionBlock } from '@generatorai/client-core';
-import { PERMISSION_GATE_COPY as COPY, permissionWording } from '@generatorai/shared/ui-contract';
+import { PERMISSION_GATE_COPY as COPY, permissionWording, type PermissionRuleScope } from '@generatorai/shared/ui-contract';
 import { GateCardFrame, type GateAction, type GateTone } from '@/ui/patterns/GateCardFrame/GateCardFrame.js';
 import { CodeBlock } from '@/ui/patterns/CodeBlock/CodeBlock.js';
 import { gateInputText } from './gateInput.js';
@@ -28,20 +31,36 @@ import { InlineCode } from '@/ui/primitives/InlineCode/InlineCode.js';
 import { Input } from '@/ui/primitives/Input/Input.js';
 import { gateKeyChips, gateKeyDown } from './gateKeys.js';
 
+/** How an answer is given: `remember` = "Allow for this chat / run" (U-16). */
+export interface PermissionAnswerOptions {
+  remember?: boolean;
+}
+
 export interface PermissionCardProps {
   permission: PermissionBlock;
   /** Submits the decision. Omitted for replayed history → read-only. */
-  onAnswer?: ((interactionId: string, behavior: 'allow' | 'deny', message?: string) => void) | undefined;
+  onAnswer?: ((interactionId: string, behavior: 'allow' | 'deny', message?: string, options?: PermissionAnswerOptions) => void) | undefined;
+  /** Whose rules "Allow for this …" remembers (a chat, a workflow run). Omitted → Allow once only. */
+  rememberScope?: PermissionRuleScope | undefined;
   busy?: boolean;
 }
 
-export function PermissionCard({ permission, onAnswer, busy = false }: PermissionCardProps) {
+/** One rule for a button label: a long command is cut, the rest counted ("pnpm lint +2"). */
+function shortRules(matches: readonly string[]): string {
+  const first = matches[0] ?? '';
+  const cut = first.length > 32 ? `${first.slice(0, 31)}…` : first;
+  return matches.length > 1 ? `${cut} +${matches.length - 1}` : cut;
+}
+
+export function PermissionCard({ permission, onAnswer, rememberScope, busy = false }: PermissionCardProps) {
   const [denying, setDenying] = useState(false);
   const [reason, setReason] = useState('');
   const { status, toolName } = permission;
   const answerable = status === 'pending' && !!onAnswer;
+  const ruleMatches = (permission.rememberRules ?? []).map((r) => r.match);
 
   const allow = () => onAnswer?.(permission.interactionId, 'allow');
+  const allowForOwner = () => onAnswer?.(permission.interactionId, 'allow', undefined, { remember: true });
   const confirmDeny = () => {
     onAnswer?.(permission.interactionId, 'deny', reason.trim() || undefined);
     setDenying(false);
@@ -74,6 +93,17 @@ export function PermissionCard({ permission, onAnswer, busy = false }: Permissio
         onClick: () => setDenying(true),
         disabled: busy,
       },
+      ...(rememberScope && ruleMatches.length > 0
+        ? [
+            {
+              label: COPY.allowForOwner(shortRules(ruleMatches), rememberScope),
+              ariaLabel: COPY.allowForOwnerLabel(ruleMatches.join(', '), rememberScope),
+              onClick: allowForOwner,
+              disabled: busy,
+              'data-testid': 'permission-allow-scope',
+            } satisfies GateAction,
+          ]
+        : []),
       {
         label: COPY.actions.allow_once,
         // WCAG 2.5.3 (label in name): the visible "Allow once" must be in the name
@@ -138,13 +168,22 @@ export function PermissionCard({ permission, onAnswer, busy = false }: Permissio
           />
         </label>
       ) : null}
+      {answerable && rememberScope && ruleMatches.length === 0 && permission.rememberRefusal ? (
+        <p className="text-small text-fg-3" data-testid="permission-remember-refusal">
+          {permission.rememberRefusal}
+        </p>
+      ) : null}
       {status === 'allowed' || status === 'denied' ? (
         <p
           data-testid="permission-outcome"
           className={status === 'allowed' ? 'flex items-center gap-1.5 text-small text-ok' : 'flex items-center gap-1.5 text-small text-err'}
         >
           <Icon concept={status === 'allowed' ? 'status-succeeded' : 'status-failed'} size={14} />
-          {status === 'allowed' ? COPY.outcomeAllowed : COPY.outcomeDenied}
+          {status === 'allowed' && permission.remembered?.length
+            ? COPY.outcomeRemembered(permission.remembered.map((r) => r.match).join(', '), rememberScope ?? 'chat')
+            : status === 'allowed'
+              ? COPY.outcomeAllowed
+              : COPY.outcomeDenied}
           {permission.message ? `: ${permission.message}` : ''}
         </p>
       ) : null}

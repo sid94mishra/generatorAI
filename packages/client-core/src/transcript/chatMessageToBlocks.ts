@@ -23,7 +23,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ChatMessage } from '@generatorai/shared';
-import { permissionWording } from '@generatorai/shared/ui-contract';
+import { PERMISSION_GATE_COPY, permissionWording } from '@generatorai/shared/ui-contract';
 import type { TranscriptMessageInput } from './messageInput.js';
 import type { StreamBlock } from '../stream/types.js';
 import { parseInlineToolCalls } from '../stream/parseInlineToolCalls.js';
@@ -145,6 +145,19 @@ export function chatMessageToBlocks(message: TranscriptMessageInput): StreamBloc
   // settle), so it renders as expired rather than a clickable-looking dead
   // end.
   for (const card of metadata?.permissionCards ?? []) {
+    // U-16 (D-147): a request remembered rules allowed without asking is a note, not a card.
+    if (card.autoAllowed) {
+      ordered.push({
+        sequence: card.sequence,
+        make: (blockId) => ({
+          type: 'system',
+          blockId,
+          message: PERMISSION_GATE_COPY.autoAllowed((card.remembered ?? []).map((r) => r.match).join(', ') || card.toolName, 'chat'),
+          category: 'permission',
+        }),
+      });
+      continue;
+    }
     ordered.push({
       sequence: card.sequence,
       make: (blockId) => ({
@@ -159,6 +172,7 @@ export function chatMessageToBlocks(message: TranscriptMessageInput): StreamBloc
         status: card.status === 'pending' ? 'expired' : card.status,
         ...(card.message ? { message: card.message } : {}),
         ...(card.risk ? { risk: card.risk } : {}),
+        ...(card.remembered?.length ? { remembered: card.remembered } : {}),
         ...permissionWording(card.toolName, card.type),
       }),
     });

@@ -141,12 +141,14 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'chat.permission.requested': 'item',
   'chat.permission.resolved': 'item',
   'chat.permission.expired': 'item',
+  'chat.permission.auto_allowed': 'item',
 
   // stage.* gates — the chat gate shapes for a stage run (P02); the same
   // "losing one strands the run" reasoning.
   'stage.permission.requested': 'item',
   'stage.permission.resolved': 'item',
   'stage.permission.expired': 'item',
+  'stage.permission.auto_allowed': 'item',
   'stage.question.asked': 'item',
   'stage.question.answered': 'item',
   'stage.question.expired': 'item',

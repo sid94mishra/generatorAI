@@ -18,7 +18,7 @@ import type {
   HarnessPermissionMode,
   PermissionRequest,
 } from '../domain/ports/IAgentHarness.js';
-import { classifyPermissionRisk, type ToolPermissionRequestPayload } from '@generatorai/shared';
+import { classifyPermissionRisk, rememberablePermission, type ToolPermissionRequestPayload } from '@generatorai/shared';
 import { permissionWording } from '@generatorai/shared/ui-contract';
 
 /** The behavioural contract for a mode. Re-exported so callers need one import. */
@@ -141,7 +141,7 @@ const INPUT_SUMMARY_MAX_CHARS = 600;
 const SECRET_KEY_PATTERN = /token|secret|password|passwd|api[_-]?key|authorization|cookie/i;
 
 /** Redacts secret-looking keys and bounds the rendering so a card never ships a raw env dump. */
-function summariseToolInput(input: unknown): string {
+function summariseToolInput(input: unknown, maxChars: number = INPUT_SUMMARY_MAX_CHARS): string {
   const redact = (value: unknown, depth: number): unknown => {
     if (depth > 4) return '…';
     if (Array.isArray(value)) return value.slice(0, 50).map((v) => redact(v, depth + 1));
@@ -164,11 +164,28 @@ function summariseToolInput(input: unknown): string {
       text = String(input);
     }
   }
-  return text.length > INPUT_SUMMARY_MAX_CHARS ? `${text.slice(0, INPUT_SUMMARY_MAX_CHARS)}…` : text;
+  return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+}
+
+/**
+ * The full command line of a shell request, from whichever field its provider uses: Claude `input.command`,
+ * Codex `command`, Copilot `fullCommandText`, ACP `rawInput.command` (an argv array is joined). Never the display
+ * summary — that one is cut at its length cap, and a cut command must not be judged by its head (U-16).
+ */
+export function fullShellCommand(input: unknown, depth = 0): string | undefined {
+  if (typeof input === 'string') return input.trim() ? input : undefined;
+  if (!input || typeof input !== 'object' || depth > 2) return undefined;
+  const o = input as Record<string, unknown>;
+  for (const key of ['command', 'cmd', 'fullCommandText']) {
+    const v = o[key];
+    if (typeof v === 'string' && v.trim()) return v;
+    if (Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === 'string')) return (v as string[]).join(' ');
+  }
+  return fullShellCommand(o['rawInput'], depth + 1);
 }
 
 /** Keys the adapters add to `details` that describe the request, not the tool's input. */
-const DETAIL_META_KEYS = new Set(['toolName', 'input', 'toolUseID', 'blockedPath', 'decisionReason', 'kind']);
+const DETAIL_META_KEYS = new Set(['toolName', 'input', 'toolUseID', 'blockedPath', 'decisionReason', 'kind', 'alwaysAsk']);
 
 /**
  * Builds the durable, display-safe payload for a `tool_permission` gate.
@@ -203,6 +220,14 @@ export function buildToolPermissionPayload(
   const { risk, reasons } = classifyPermissionRisk({ type: request.type, toolName, inputSummary });
   // D-107: what the card asks, in words, for every client (the push and the attention ask too).
   const { title, kindLabel } = permissionWording(toolName, request.type);
+  // U-16 (D-147): what "Allow for this chat / run" would remember, judged on the FULL request.
+  const remember = rememberablePermission({
+    type: request.type,
+    toolName,
+    command: request.type === 'shell_exec' ? fullShellCommand(input) : undefined,
+    inputSummary: summariseToolInput(input, Number.POSITIVE_INFINITY),
+    alwaysAsk: details['alwaysAsk'] === true,
+  });
   return {
     title,
     kindLabel,
@@ -213,6 +238,8 @@ export function buildToolPermissionPayload(
     permissionMode: permissionMode as ToolPermissionRequestPayload['permissionMode'],
     risk,
     ...(reasons.length > 0 ? { riskReasons: reasons } : {}),
+    rememberRules: remember.rules,
+    ...(remember.refusal ? { rememberRefusal: remember.refusal } : {}),
   };
 }
 
