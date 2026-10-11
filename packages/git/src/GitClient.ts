@@ -698,8 +698,48 @@ export class GitClient implements IGitClient {
       throw new GitError(`Failed to bare clone ${repoUrl}: ${result.stderr}`);
     }
 
+    // A bare clone has no fetch refspec: later fetches would update nothing
+    // and `origin/<branch>` would never exist (U-6/U-7). Track the remote's
+    // branches the way a normal clone does.
+    await this.ensureTrackingRefspec(targetDir);
+    await this.runner.run('git', ['fetch', '--prune', 'origin'], { cwd: targetDir, timeout: this.timeout });
+
     this.logger.info(`[Git] Bare cloned ${repoUrl} to ${targetDir}`);
     return targetDir;
+  }
+
+  /**
+   * Give `origin` the standard `+refs/heads/*:refs/remotes/origin/*` refspec
+   * when it has none (every `git clone --bare`), so a fetch keeps
+   * `origin/<branch>` current. Idempotent; never touches a configured one.
+   */
+  async ensureTrackingRefspec(repoPath: string, remote = 'origin'): Promise<void> {
+    const current = await this.runner.run('git', ['config', '--get-all', `remote.${remote}.fetch`], { cwd: repoPath, timeout: 5_000 });
+    if (current.exitCode === 0 && current.stdout.trim()) return;
+    const hasRemote = await this.runner.run('git', ['config', '--get', `remote.${remote}.url`], { cwd: repoPath, timeout: 5_000 });
+    if (hasRemote.exitCode !== 0) return;
+    await this.runner.run('git', ['config', '--add', `remote.${remote}.fetch`, `+refs/heads/*:refs/remotes/${remote}/*`], {
+      cwd: repoPath,
+      timeout: 5_000,
+    });
+  }
+
+  /**
+   * Fetch one branch into its remote-tracking ref (`origin/<branch>`) with an
+   * explicit refspec — works whatever the repository's own fetch config is
+   * (a bare clone's worktree has none).
+   */
+  async fetchBranch(repoDir: string, remote: string, branch: string): Promise<void> {
+    const args = [
+      ...(await this.remoteUrlArgs(repoDir, remote)),
+      'fetch',
+      remote,
+      `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`,
+    ];
+    const result = await this.runner.run('git', args, { cwd: repoDir, timeout: this.timeout });
+    if (result.exitCode !== 0) {
+      throw new GitError(`Failed to fetch ${remote} ${branch}: ${result.stderr}`);
+    }
   }
 
   /** Create a git worktree from a bare (or regular) repo. */
@@ -768,6 +808,9 @@ export class GitClient implements IGitClient {
 
   /** Fetch all remotes and prune stale tracking branches. */
   async fetchAll(repoPath: string, options?: GitStreamOptions): Promise<void> {
+    // Older bare clones were made without a refspec (U-7): add it, or this
+    // fetch updates nothing and the base branch goes stale.
+    await this.ensureTrackingRefspec(repoPath);
     const result = await this.runner.run('git', ['fetch', '--all', '--prune', '--progress'], {
       cwd: repoPath,
       timeout: this.timeout,

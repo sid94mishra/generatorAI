@@ -336,6 +336,10 @@ export interface IGitClient {
 
   /** `git fetch <remote> [<ref>]`. Throws GitError on failure. */
   fetch(repoDir: string, remote?: string, ref?: string): Promise<void>;
+  /** Fetch one branch into `<remote>/<branch>` with an explicit refspec (works in a bare clone's worktree). */
+  fetchBranch(repoDir: string, remote: string, branch: string): Promise<void>;
+  /** Give `<remote>` the standard tracking refspec when it has none (bare clones). */
+  ensureTrackingRefspec(repoPath: string, remote?: string): Promise<void>;
   /**
    * Default branch of `origin`, e.g. `main`. Tries, in order:
    *   git symbolic-ref --short refs/remotes/origin/HEAD   (strip the `origin/` prefix)

@@ -365,7 +365,7 @@ export class SourceControlFlowService {
       return { base, head, files: await git.unmergedFiles(repoDir), mergeStarted: true };
     }
 
-    await git.fetch(repoDir, REMOTE, base);
+    await git.fetchBranch(repoDir, REMOTE, base);
     await git.merge(repoDir, `${REMOTE}/${base}`, { noCommit: true });
     const files = await git.unmergedFiles(repoDir);
     if (files.length === 0) {
@@ -459,7 +459,7 @@ export class SourceControlFlowService {
   ): Promise<ScmConflictReport | null> {
     const git = this.deps.git;
     const ref = `${REMOTE}/${base}`;
-    await git.fetch(repoDir, REMOTE, base);
+    await git.fetchBranch(repoDir, REMOTE, base);
 
     // Preferred: ask git without touching the working tree (git >= 2.38).
     const probe = await git.mergeTreeConflicts(repoDir, 'HEAD', ref);

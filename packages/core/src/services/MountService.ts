@@ -602,10 +602,18 @@ export class MountService {
           // check it out rather than failing on "already exists".
           await git.addWorktree(origin, mount.path, { branch: intent.newBranch });
         } else {
+          // A project codebase cloned from a remote starts from the remote's
+          // CURRENT base (U-7): fetch it, and cut from `origin/<base>` — the
+          // clone's own `refs/heads/<base>` is only as fresh as the clone.
+          let base = intent.baseRef;
+          if (base && intent.codebaseType === 'git-remote' && !/^[0-9a-f]{7,40}$/i.test(base)) {
+            await git.fetchBranch(origin, 'origin', base).catch(() => undefined);
+            if (await git.revParse(origin, `refs/remotes/origin/${base}`)) base = `origin/${base}`;
+          }
           await git.addWorktree(origin, mount.path, {
             ...(intent.newBranch ? { newBranch: intent.newBranch } : {}),
             ...(intent.branch ? { branch: intent.branch } : {}),
-            ...(intent.baseRef ? { base: intent.baseRef } : {}),
+            ...(base ? { base } : {}),
           });
         }
         await this.copyIncludes(origin, mount.path, intent.include, mount.codebaseId);

@@ -737,3 +737,58 @@ describe('snapshots that share an index file', () => {
     expect(new Set(trees).size).toBe(1);
   });
 });
+
+// ── Bare clones track their remote (U-6 / U-7) ───────────────────
+
+describe('bare clone of a remote codebase', () => {
+  let root: string;
+  let upstream: string;
+  let client: GitClient;
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'generatorai-bare-'));
+    upstream = path.join(root, 'upstream');
+    await fs.mkdir(upstream);
+    await runGit(upstream, ['init', '-q', '-b', 'develop']);
+    await writeFile(upstream, 'README.md', 'v1\n');
+    await runGit(upstream, ['add', '.']);
+    await runGit(upstream, ['commit', '-q', '-m', 'v1']);
+    client = makeClient(root);
+  });
+  afterEach(async () => removeDirWithRetry(root));
+
+  it('gets the tracking refspec, so origin/<branch> exists and later fetches update it', async () => {
+    const bare = path.join(root, 'cache.git');
+    await client.bareClone(upstream, bare);
+    expect((await runGit(bare, ['config', '--get-all', 'remote.origin.fetch'])).trim()).toBe('+refs/heads/*:refs/remotes/origin/*');
+    const v1 = (await runGit(bare, ['rev-parse', 'refs/remotes/origin/develop'])).trim();
+
+    await writeFile(upstream, 'README.md', 'v2\n');
+    await runGit(upstream, ['commit', '-q', '-am', 'v2']);
+    await client.fetchAll(bare);
+    const v2 = (await runGit(bare, ['rev-parse', 'refs/remotes/origin/develop'])).trim();
+    expect(v2).not.toBe(v1);
+    expect(v2).toBe((await runGit(upstream, ['rev-parse', 'HEAD'])).trim());
+  });
+
+  it('fetchAll repairs an older bare clone made without a refspec', async () => {
+    const bare = path.join(root, 'old.git');
+    await runGit(root, ['clone', '-q', '--bare', upstream, bare]);
+    await expect(runGit(bare, ['config', '--get-all', 'remote.origin.fetch'])).rejects.toThrow();
+    await client.fetchAll(bare);
+    expect((await runGit(bare, ['rev-parse', 'refs/remotes/origin/develop'])).trim()).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it('fetchBranch works inside a worktree of the bare clone (the sync step)', async () => {
+    const bare = path.join(root, 'old.git');
+    await runGit(root, ['clone', '-q', '--bare', upstream, bare]);
+    const wt = path.join(root, 'wt');
+    await client.addWorktree(bare, wt, { newBranch: 'feature', base: 'develop' });
+    await writeFile(upstream, 'NEW.md', 'new\n');
+    await runGit(upstream, ['add', '.']);
+    await runGit(upstream, ['commit', '-q', '-m', 'upstream moved']);
+    await client.fetchBranch(wt, 'origin', 'develop');
+    await client.merge(wt, 'origin/develop', { noCommit: true });
+    await expect(fs.readFile(path.join(wt, 'NEW.md'), 'utf-8')).resolves.toBe('new\n');
+  });
+});
