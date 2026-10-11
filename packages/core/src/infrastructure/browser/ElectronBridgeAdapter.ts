@@ -37,6 +37,7 @@ import type {
   Page,
 } from 'playwright';
 import { chromium } from 'playwright';
+import { reloadFresh } from './reloadFresh.js';
 import type { ILogger } from '@generatorai/shared';
 import type { ImportedCookie } from '@generatorai/shared';
 import { matchesAnyHostPattern } from '@generatorai/shared';
@@ -295,7 +296,7 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
   async reload(handle: BrowserHandle): Promise<PageOutcome> {
     const entry = await this.entryFor(handle);
     try {
-      await entry.page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await reloadFresh(entry.page);
       return { ok: true, url: entry.page.url() };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
