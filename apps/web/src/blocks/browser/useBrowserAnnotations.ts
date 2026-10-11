@@ -208,7 +208,13 @@ export function useBrowserAnnotations({
           flash('Added the area screenshot to your message');
           return;
         }
-        const shot = await nb.capture(nativeTabId!, kind);
+        // The menu that asked for this is an overlay, and an overlay hides
+        // the native view (D-19); the capture waits for the page to be back.
+        let shot = null;
+        for (let attempt = 0; attempt < 6 && !shot; attempt++) {
+          await new Promise((r) => setTimeout(r, attempt === 0 ? 150 : 250));
+          shot = await nb.capture(nativeTabId!, kind);
+        }
         if (!shot) { setError('Could not capture the page. Make sure the browser tab is visible.'); return; }
         onCapture?.(dataUrlFile(shot.dataUrl, `screenshot-${shot.mode === 'full' ? 'full-page' : 'visible'}-${stamp}.png`), 'screenshot');
         flash(kind === 'full' && shot.mode !== 'full'

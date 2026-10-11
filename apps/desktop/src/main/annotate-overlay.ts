@@ -66,7 +66,8 @@ export function annotateOverlayScript(defaults: Readonly<AnnotationPalette>): st
   function paintPin(it){if(!it.pin)return;var draft=!it.saved;it.pin.textContent=draft?'+':String(it.n);it.pin.style.background=draft?C.bg:C.accent;it.pin.style.color=draft?C.accent:C.onAccent;it.pin.style.border=draft?('2px dashed '+C.accent):'0';
     if(it.box){it.box.style.border=(draft?'2px dashed ':'2px solid ')+C.accent;it.box.style.background=rgba(C.accent,draft?0.10:0.06);}}
   function boxShown(it){return !it.saved||it.region||S.focused===it||(S.flash===it&&Date.now()<S.flashUntil);}
-  function placePin(it){var p=rectOf(it);var hidden=S.focused&&S.focused!==it;if(it.pin){it.pin.style.display=hidden?'none':'block';it.pin.style.left=Math.max(2,Math.min(window.innerWidth-26,p.x-4))+'px';it.pin.style.top=Math.max(2,p.y-14)+'px';}
+  function offscreen(p){return p.y+p.h<0||p.y>window.innerHeight||p.x+p.w<0||p.x>window.innerWidth;}
+  function placePin(it){var p=rectOf(it);var hidden=(S.focused&&S.focused!==it)||offscreen(p);if(it.pin){it.pin.style.display=hidden?'none':'block';it.pin.style.left=Math.max(2,Math.min(window.innerWidth-26,p.x-4))+'px';it.pin.style.top=Math.max(2,p.y-14)+'px';}
     if(it.box){it.box.style.display=(!hidden&&boxShown(it))?'block':'none';it.box.style.left=p.x+'px';it.box.style.top=p.y+'px';it.box.style.width=p.w+'px';it.box.style.height=p.h+'px';}}
   function saved(){return S.items.filter(function(it){return it.saved;});}
   function renumber(){saved().forEach(function(it,i){it.n=i+1;paintPin(it);});}

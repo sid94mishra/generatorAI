@@ -146,8 +146,10 @@ export function BrowserToolbar(p: BrowserToolbarProps): React.JSX.Element {
               aria-label={`Comments (${p.commentCount})`}
               data-testid="browser-comments-toggle"
             >
-              <span className="hidden @md:inline">Comments</span>
-              {p.commentCount > 0 ? <span className="font-mono text-micro text-run tabular-nums">{p.commentCount}</span> : null}
+              <span className="inline-flex items-center gap-1.5">
+                <span className="hidden @md:inline">Comments</span>
+                {p.commentCount > 0 ? <span className="font-mono text-micro text-run tabular-nums">{p.commentCount}</span> : null}
+              </span>
             </Button>
           )}
           {!p.canComment ? null : canDrive && nativeAvailable ? (

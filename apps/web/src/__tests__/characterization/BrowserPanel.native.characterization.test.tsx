@@ -389,7 +389,12 @@ describe('BrowserPanel native — select element, the Comments panel and screens
       await flush();
       fireEvent.click(screen.getByRole('menuitem', { name }));
       await flush();
+      // The capture waits for the menu (an overlay) to stop hiding the page.
+      await advance(400);
+      await flush();
     };
+    // While the menu still hides the page the first try finds nothing; the retry captures.
+    bridge.api.capture.mockResolvedValueOnce(null);
     bridge.api.capture.mockResolvedValueOnce({ dataUrl: 'data:image/png;base64,iVBORw0KGgo=', mode: 'visible' });
     await choose('Visible area');
     expect(bridge.api.capture).toHaveBeenLastCalledWith('tab-1', 'visible');
