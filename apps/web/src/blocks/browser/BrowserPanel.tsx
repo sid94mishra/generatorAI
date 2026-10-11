@@ -305,19 +305,19 @@ export function BrowserPanel({
           data-testid={emulationOn ? 'browser-device-frame' : undefined}
           className={cn('relative flex min-h-0 flex-1', emulationOn && 'items-center justify-center overflow-hidden bg-sunken')}
         >
-          {emulationOn && !deviceFrameSize ? null : (
-            <NativeBrowserView
-              tabId={nativeTabId}
-              workspaceId={workspaceId}
-              restoreUrl={restoreUrl}
-              onUrlChange={onNativeUrlChange}
-              onTitleChange={onNativeTitleChange}
-              onLoadingChange={onNativeLoadingChange}
-              onFaviconChange={onNativeFaviconChange}
-              onError={(msg) => setError(msg)}
-              frame={emulationOn ? deviceFrameSize : null}
-            />
-          )}
+          {/* Always mounted: unmounting the view destroys the tab (its page,
+              history and comments). Device mode only resizes it. */}
+          <NativeBrowserView
+            tabId={nativeTabId}
+            workspaceId={workspaceId}
+            restoreUrl={restoreUrl}
+            onUrlChange={onNativeUrlChange}
+            onTitleChange={onNativeTitleChange}
+            onLoadingChange={onNativeLoadingChange}
+            onFaviconChange={onNativeFaviconChange}
+            onError={(msg) => setError(msg)}
+            frame={emulationOn ? deviceFrameSize : null}
+          />
         </div>
       ) : (
         <div ref={liveContainerRef} data-testid="browser-live-view" className="relative flex min-h-0 flex-1 items-center justify-center bg-sunken">

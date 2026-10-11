@@ -463,10 +463,13 @@ describe('BrowserPanel native — device mode (D-144)', () => {
     expect(params).toMatchObject({ width: 390, height: 844, deviceScaleFactor: 3, mobile: true });
     expect(params!.scale).toBeCloseTo(424 / 844);
     expect(bridge.api.setZoom).toHaveBeenLastCalledWith('tab-1', 1);
+    // The tab survives device mode: it is resized, never destroyed and recreated.
+    expect(bridge.api.destroy).not.toHaveBeenCalled();
 
     fireEvent.click(toolbarToggle());
     await flush();
     expect(bridge.api.setEmulation).toHaveBeenLastCalledWith('tab-1', null);
+    expect(bridge.api.destroy).not.toHaveBeenCalled();
     expect(screen.queryByTestId('browser-device-frame')).toBeNull();
   });
 
