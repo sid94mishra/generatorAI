@@ -768,6 +768,16 @@ export class ChangeSummaryService {
     if (repo.baseCommit) {
       return { kind: 'baseline', treeish: repo.baseCommit, label: 'Branch base', normalized: true };
     }
+    // A user's folder tracked through a private shadow store (a plain folder
+    // edited in place) has no commit to anchor on. Until its baseline lands
+    // — the mount is still being prepared — nothing in it is the agent's, so
+    // the anchor is the working tree itself: no changes, and "Undo all"
+    // restores nothing. Falling through to the empty tree read every file the
+    // user already had as added by the agent, and Undo all deleted them.
+    if (repo.kind === 'mount' && repo.gitDir) {
+      const working = await this.materializeWorkingTree(repo.repoDir);
+      if (working) return { kind: 'baseline', treeish: working, label: 'Session start' };
+    }
     if (repo.kind === 'linked' || repo.kind === 'mount' || repo.kind === 'nested') {
       const head = await this.gitAt(repo.repoDir).revParse(repo.repoDir, 'HEAD');
       if (head) {

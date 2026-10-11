@@ -42,7 +42,7 @@ import {
   type SlashCommand,
   type SlashCommandGroup,
 } from '@generatorai/client-core';
-import { useProjectCodebases } from '@/hooks/projectQueries.js';
+import { useProject, useProjectCodebases } from '@/hooks/projectQueries.js';
 import { useBackgroundTasks } from '@/hooks/queries.js';
 import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import { ModelPicker } from '@/blocks/model-picker/index.js';
@@ -300,6 +300,8 @@ export function Composer({
   // ── Sources (mounts, or what the chat was created with) ──
   const { data: workspaceInfo } = useWorkspaceInfo(workspaceId, !compact);
   const { data: projectCodebases, isLoading: codebasesLoading } = useProjectCodebases(projectId);
+  // The popover header names the project the chat's codebases come from.
+  const projectName = useProject(projectId).data?.name;
   const sourceFallback = useMemo<SourceFallback>(() => {
     const folders = gitRepositories.map((r) => r.url).filter((u) => u.trim());
     return {
@@ -423,13 +425,14 @@ export function Composer({
       compact ? null : (
         <SourcesChipView
           mounts={workspaceInfo?.mounts}
+          projectName={projectName}
           fallback={sourceFallback}
           onEditSources={onEditSources}
           onCopyPath={copyPath}
           disabled={disabled}
         />
       ),
-    [compact, workspaceInfo?.mounts, sourceFallback, onEditSources, disabled],
+    [compact, workspaceInfo?.mounts, projectName, sourceFallback, onEditSources, disabled],
   );
 
   // Hold the composer back until the model catalog resolves: model-derived

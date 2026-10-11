@@ -474,6 +474,19 @@ export class CheckpointService {
     await this.repository.deleteByWorkspace(workspaceId);
   }
 
+  /**
+   * Drop every checkpoint row of one repo alias — called when its store is
+   * deleted (a mount removed by Edit sources). The rows point at objects
+   * that no longer exist: a mount coming back under the same alias would
+   * chain its next snapshot onto a parent commit git cannot find (every
+   * capture failed) and diff against a baseline tree that is gone.
+   */
+  async forgetRepo(workspaceId: string, repoAlias: string): Promise<number> {
+    const rows = await this.repository.list({ workspaceId, repoAlias, excludeLive: false, limit: 10_000 });
+    for (const row of rows) await this.repository.delete(row.id);
+    return rows.length;
+  }
+
   // ── Internals ───────────────────────────────────────────────
 
   private async aggregateStats(

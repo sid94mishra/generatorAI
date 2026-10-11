@@ -284,6 +284,47 @@ describe('MountService.plan validation', () => {
   });
 });
 
+// ── remove() ─────────────────────────────────────────────────────
+
+describe('MountService.remove', () => {
+  it('forgets the checkpoints of every alias whose shadow store it deletes', async () => {
+    // Edit sources: Empty workspace → a folder → Empty workspace again. The
+    // re-added "main" used to inherit checkpoint rows whose commits lived in
+    // the deleted store, so every later capture failed.
+    const workspacesDir = await tmpDir();
+    const root = path.join(workspacesDir, 'executions', 'chat-1');
+    const mount = {
+      id: 'm1',
+      workspaceId: 'ws-1',
+      alias: 'notes',
+      mode: 'in-place',
+      originKind: 'folder',
+      path: path.join(workspacesDir, 'notes'),
+      git: { isRepo: false, nested: ['lib'] },
+    } as unknown as WorkspaceMount;
+    const mounts = mountRepo();
+    vi.mocked(mounts.findById).mockResolvedValue(mount);
+    const workspaces = workspaceRepo();
+    vi.mocked(workspaces.findById).mockResolvedValue({ id: 'ws-1', rootPath: root } as ExecutionWorkspace);
+    const service = new MountService({
+      mountRepo: mounts,
+      workspaceRepo: workspaces,
+      git: makeGit() as unknown as IGitClient,
+      logger: makeLogger(),
+      workspacesDir,
+    });
+    const forgotten: string[] = [];
+    service.setStoreForgotten(async (workspaceId, alias) => {
+      forgotten.push(`${workspaceId}:${alias}`);
+    });
+
+    await service.remove('m1');
+
+    expect(forgotten).toEqual(['ws-1:notes', 'ws-1:notes/lib']);
+    expect(mounts.delete).toHaveBeenCalledWith('m1');
+  });
+});
+
 // ── buildExposure ────────────────────────────────────────────────
 
 describe('buildExposure', () => {

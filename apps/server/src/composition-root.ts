@@ -1361,6 +1361,7 @@ export async function createContainer(config: AppConfig, options: CreateContaine
   mountService.setBaselineCapture((workspaceId) =>
     workspaceCheckpointService.capture({ workspaceId, kind: 'baseline' }),
   );
+  mountService.setStoreForgotten((workspaceId, alias) => workspaceCheckpointService.forgetRepo(workspaceId, alias));
   // Archived chats: reclaim worktree directories after the project's
   // retention (default 24h), keeping branches so the work is recoverable.
   worktreeCleanupService.setArchivedReleaser(async () => {

@@ -498,6 +498,15 @@ export class WorkspaceCheckpointService {
     }
   }
 
+  /** Drop the checkpoint rows of one mount whose store was deleted (Edit sources removed it). */
+  async forgetRepo(workspaceId: string, repoAlias: string): Promise<void> {
+    try {
+      await this.checkpoints.forgetRepo(workspaceId, repoAlias);
+    } catch (err) {
+      this.logger.warn(`[WorkspaceCheckpoints] forget ${repoAlias} failed for ${workspaceId}: ${err}`);
+    }
+  }
+
   /** Drop all checkpoint rows for a workspace (called on deletion). */
   async forget(workspaceId: string): Promise<void> {
     this.cancelLiveCapture(workspaceId);

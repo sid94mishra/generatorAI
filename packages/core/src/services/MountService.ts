@@ -154,11 +154,17 @@ export class MountService {
   private readonly inflight = new Map<string, Promise<void>>();
   /** Late-wired: capture a baseline once every mount is ready. */
   private baselineCapture?: (workspaceId: string) => Promise<unknown>;
+  /** Late-wired: forget the checkpoints of a mount whose shadow store was deleted. */
+  private storeForgotten?: (workspaceId: string, alias: string) => Promise<unknown>;
 
   constructor(private readonly deps: MountServiceDeps) {}
 
   setBaselineCapture(fn: (workspaceId: string) => Promise<unknown>): void {
     this.baselineCapture = fn;
+  }
+
+  setStoreForgotten(fn: (workspaceId: string, alias: string) => Promise<unknown>): void {
+    this.storeForgotten = fn;
   }
 
   /** The git client the mounts are managed with (map snapshots and merges use the same one). */
@@ -1006,11 +1012,14 @@ export class MountService {
     }
 
     if (workspace) {
-      await fs.rm(shadowGitDirFor(workspace.rootPath, mount.alias), { recursive: true, force: true }).catch(() => undefined);
-      for (const sub of mount.git?.nested ?? []) {
-        await fs
-          .rm(shadowGitDirFor(workspace.rootPath, `${mount.alias}/${sub}`), { recursive: true, force: true })
-          .catch(() => undefined);
+      // The store and its checkpoint rows go together: rows left behind point
+      // at objects that are gone, and a mount re-added under the same alias
+      // (Empty workspace → a folder → Empty workspace again) could then never
+      // capture another checkpoint.
+      const aliases = [mount.alias, ...(mount.git?.nested ?? []).map((sub) => `${mount.alias}/${sub}`)];
+      for (const alias of aliases) {
+        await fs.rm(shadowGitDirFor(workspace.rootPath, alias), { recursive: true, force: true }).catch(() => undefined);
+        await this.storeForgotten?.(workspace.id, alias)?.catch(() => undefined);
       }
     }
     if (mount.mode === 'worktree') await this.forgetWorktree(mountId);

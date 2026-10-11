@@ -456,6 +456,28 @@ describe('ChangeSummaryService (real git)', () => {
     for (const repo of summary.repos) expect(repo.head.kind).toBe('working');
   });
 
+  it('a plain folder with no baseline yet reports none of the user\'s files as changed', async () => {
+    // A plain (non-git) folder linked in place is tracked through a shadow
+    // store. Before its baseline checkpoint lands (the mount is still being
+    // prepared) the summary used to diff against the empty tree: the user's
+    // own files read as "added by the agent", and Undo all deleted them.
+    const folder = path.join(tmpRoot, 'notes');
+    const shadow = path.join(tmpRoot, 'shadow', 'notes');
+    await fs.mkdir(folder, { recursive: true });
+    await fs.writeFile(path.join(folder, 'existing.txt'), 'mine\n');
+    expect(await git.initShadowRepo(shadow, folder)).toBe(true);
+
+    const summary = await service.getSummary({
+      ...params(),
+      mounts: [{ alias: 'notes', path: folder, gitDir: shadow }],
+    });
+
+    const repo = summary.repos.find((r) => r.alias === 'notes')!;
+    expect(repo.files).toEqual([]);
+    expect(repo.base.label).toBe('Session start');
+    expect(repo.base.treeish).toBeDefined();
+  });
+
   it('marks the first-commit fallback normalized, so a CRLF checkout is not all-changed', async () => {
     const g = (...args: string[]) =>
       realRunner.run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: repoDir, timeout: 15_000 });

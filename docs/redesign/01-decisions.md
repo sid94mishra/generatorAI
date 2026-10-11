@@ -1307,6 +1307,17 @@ divided source rows and footer split by `line` rules. A folder that is not a git
 branch controls (it can only be edited in place). Page forms (`FormSection` on ChatCreate) keep visible hints: a page
 has the room and no hover-only text.
 
+### D-139 A removed mount takes its checkpoints with it; a plain folder reads unchanged until its baseline lands (2026-10-11) — Final
+Found by the real-user pass on the installed app. (1) A plain folder linked in place showed "1 file changed · Undo all"
+on a brand-new chat: the tray read the summary while the mount was still being prepared, before its baseline existed,
+and `resolveBaseline` fell through to the empty tree — every file the user already had read as added by the agent, and
+Undo all would have deleted them. A shadow-tracked mount with no baseline and no base commit now anchors on its own
+working tree (no changes). (2) Edit sources Empty workspace → folder → Empty workspace: `MountService.remove` deleted the
+shadow store but left its checkpoint rows, so the re-added `main` chained every capture onto a commit git could not find
+and never checkpointed again. `remove` now forgets the rows of each alias whose store it deletes
+(`CheckpointService.forgetRepo`, late-wired like the baseline capture). Also: the Sources popover header names the
+chat's project.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
