@@ -173,6 +173,9 @@ export function CommitBarView({
         </Callout>
       ) : mergeInProgress ? null : (
         <div className="flex min-w-0 flex-col gap-2">
+          {/* A clean tree has nothing to describe: no message box, and the
+              action is just Push / Open pull request (U-5). */}
+          {selected.dirty ? (
           <Textarea
             value={message}
             onChange={(e) => onMessageChange(e.target.value)}
@@ -199,6 +202,7 @@ export function CommitBarView({
               </>
             }
           />
+          ) : null}
 
           <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5">
             <Checkbox
@@ -297,7 +301,9 @@ export function CommitBarView({
               onClick={onRun}
               data-testid="scm-run-flow"
             >
-              {prOn ? 'Commit & open pull request' : pushOn ? 'Commit & push' : 'Commit'}
+              {selected.dirty
+                ? prOn ? 'Commit & open pull request' : pushOn ? 'Commit & push' : 'Commit'
+                : prOn ? 'Open pull request' : pushOn ? 'Push' : 'Nothing to commit'}
             </Button>
           </div>
         </div>
