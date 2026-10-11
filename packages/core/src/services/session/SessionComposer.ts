@@ -127,6 +127,13 @@ export interface ComposeResult {
   turnPolicy: TurnPolicy;
 }
 
+/** Appended in "Accept edits" (U-27): edit files with the edit tools; shell writes wait for a person. */
+export const ACCEPT_EDITS_HINT =
+  `\n\n[Permissions: Accept edits]\n` +
+  `Create and change files with your file edit/write tools — they run without asking. Every shell command waits for a person ` +
+  `to approve it, so do not write files through the shell (no heredocs, sed -i, perl -i or scripts that rewrite files), and ` +
+  `batch the read-only and test commands you need into as few shell calls as you can.`;
+
 export class SessionComposer {
   readonly binder: PlatformToolBinder;
 
@@ -322,6 +329,10 @@ export class SessionComposer {
         },
       });
     }
+    // U-27 — in "Accept edits" a per-call provider runs file edits through its edit tools unasked, but
+    // every shell command (a heredoc, a sed/perl/python rewrite) parks a gate for a person. Agents that
+    // edit through the shell stall unattended runs; say so once.
+    if (mode === 'acceptEdits' && levels?.approvalGating === 'per_call' && !isWorker) appendSystemBlock(cfg, ACCEPT_EDITS_HINT);
     // D-146 — the GitHub issue + merge tools, after the workflow tools (R-10). Workers never.
     await this.binder.github(cfg, target, {
       projectId: i.projectId,
