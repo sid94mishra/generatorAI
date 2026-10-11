@@ -791,4 +791,37 @@ describe('bare clone of a remote codebase', () => {
     await client.merge(wt, 'origin/develop', { noCommit: true });
     await expect(fs.readFile(path.join(wt, 'NEW.md'), 'utf-8')).resolves.toBe('new\n');
   });
+
+  it('fetchBranch fast-forwards the local base branch, so `git diff develop` sees the real base (U-28)', async () => {
+    const bare = path.join(root, 'ff.git');
+    await client.bareClone(upstream, bare);
+    const wt = path.join(root, 'wt-ff');
+    await client.addWorktree(bare, wt, { newBranch: 'feature', base: 'develop' });
+    await writeFile(upstream, 'NEW.md', 'new\n');
+    await runGit(upstream, ['add', '.']);
+    await runGit(upstream, ['commit', '-q', '-m', 'upstream moved']);
+    await client.fetchBranch(wt, 'origin', 'develop');
+    const head = (await runGit(upstream, ['rev-parse', 'HEAD'])).trim();
+    expect((await runGit(bare, ['rev-parse', 'refs/heads/develop'])).trim()).toBe(head);
+  });
+
+  it('fetchBranch leaves a diverged local branch alone', async () => {
+    const bare = path.join(root, 'div.git');
+    await client.bareClone(upstream, bare);
+    const wt = path.join(root, 'wt-div');
+    await client.addWorktree(bare, wt, { newBranch: 'feature', base: 'develop' });
+    // A local-only commit on develop (via a second worktree), then upstream moves too.
+    const wt2 = path.join(root, 'wt-dev');
+    await runGit(bare, ['worktree', 'add', '-q', wt2, 'develop']);
+    await writeFile(wt2, 'LOCAL.md', 'local\n');
+    await runGit(wt2, ['add', '.']);
+    await runGit(wt2, ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'local']);
+    const localSha = (await runGit(bare, ['rev-parse', 'refs/heads/develop'])).trim();
+    await runGit(bare, ['worktree', 'remove', '--force', wt2]);
+    await writeFile(upstream, 'NEW.md', 'new\n');
+    await runGit(upstream, ['add', '.']);
+    await runGit(upstream, ['commit', '-q', '-m', 'upstream moved']);
+    await client.fetchBranch(wt, 'origin', 'develop');
+    expect((await runGit(bare, ['rev-parse', 'refs/heads/develop'])).trim()).toBe(localSha);
+  });
 });

@@ -740,6 +740,31 @@ export class GitClient implements IGitClient {
     if (result.exitCode !== 0) {
       throw new GitError(`Failed to fetch ${remote} ${branch}: ${result.stderr}`);
     }
+    await this.fastForwardLocalBranch(repoDir, remote, branch);
+  }
+
+  /**
+   * U-28: keep the local `<branch>` in step with `<remote>/<branch>` after a fetch, so an agent in a
+   * worktree that runs `git diff develop` compares against the real base, not the clone-time one.
+   * Best-effort and safe: only a fast-forward (or creating a missing branch), never a branch that a
+   * worktree has checked out.
+   */
+  private async fastForwardLocalBranch(repoDir: string, remote: string, branch: string): Promise<void> {
+    const git = (args: string[]) => this.runner.run('git', args, { cwd: repoDir, timeout: this.timeout });
+    const remoteSha = (await git(['rev-parse', '--verify', '--quiet', `refs/remotes/${remote}/${branch}`])).stdout.trim();
+    if (!remoteSha) return;
+    const local = await git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]);
+    const localSha = local.exitCode === 0 ? local.stdout.trim() : '';
+    if (localSha === remoteSha) return;
+    const worktrees = (await git(['worktree', 'list', '--porcelain'])).stdout;
+    if (worktrees.split('\n').some((line) => line.trim() === `branch refs/heads/${branch}`)) return;
+    if (localSha) {
+      const ancestor = await git(['merge-base', '--is-ancestor', localSha, remoteSha]);
+      if (ancestor.exitCode !== 0) return; // diverged: leave the local branch alone
+      await git(['update-ref', `refs/heads/${branch}`, remoteSha, localSha]);
+    } else {
+      await git(['update-ref', `refs/heads/${branch}`, remoteSha, '']);
+    }
   }
 
   /** Create a git worktree from a bare (or regular) repo. */
