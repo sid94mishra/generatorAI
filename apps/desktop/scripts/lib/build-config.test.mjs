@@ -318,16 +318,6 @@ describe('createBuildConfig', () => {
     expect(createBuildConfig({ ...base, platform: 'mac', signed: false }).mac.identity).toBeNull();
   });
 
-  it('uses the developer\'s local identity on an unsigned build only when given one (D-142)', () => {
-    expect(
-      createBuildConfig({ ...base, platform: 'mac', signed: false, localIdentity: 'GeneratorAI Local Signing' }).mac.identity,
-    ).toBe('GeneratorAI Local Signing');
-    // Release credentials always win over the local identity.
-    expect(
-      createBuildConfig({ ...base, platform: 'mac', signed: true, localIdentity: 'GeneratorAI Local Signing' }).mac.identity,
-    ).toBeUndefined();
-  });
-
   it('leaves identity discovery alone when signing is configured', () => {
     expect(
       createBuildConfig({ ...base, platform: 'mac', signed: true }).mac.identity,

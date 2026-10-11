@@ -1354,16 +1354,6 @@ directory; removing it shows "Saving deletes the chat folder and the N files…"
 server is the guarantee for every client: a chat folder with files that an update leaves out is appended back unless
 `discardChatFolder` is set; with it, the mount is removed first so an empty plan starts a fresh folder.
 
-### D-142 Local macOS builds are signed with the developer's own identity (2026-10-11) — Final
-Every unsigned (ad-hoc) rebuild had a new code identity, so the Keychain treated it as a different app and asked for
-the "GeneratorAI Safe Storage" key again, blocking launch until someone clicked Always Allow. `node
-scripts/desktop/setup-local-signing.mjs` (macOS, once) creates a self-signed code-signing certificate "GeneratorAI
-Local Signing" in the login keychain and trusts it for code signing for that user. `electron-builder.mjs` signs a
-build with it when there are no release credentials, it is not CI, and `GENERATORAI_LOCAL_SIGNING` is not `0`. The
-designated requirement then stays the same across rebuilds, so one Always Allow sticks. It is not a release
-signature: the build still counts as unsigned for publishing and self-update (`signing.signed` is unchanged).
-Release signing and notarization stay on the backlog.
-
 ### D-143 The in-app browser opens localhost when the server runs on the user's machine (2026-10-11) — Final
 Found in the real-user pass: typing `http://127.0.0.1:4791/` did nothing — the address bar cleared and the view stayed
 blank, because navigation to loopback hosts is blocked by default (SSRF hardening for the agent) and the
@@ -1393,6 +1383,13 @@ the comment, **Add comment** / **Add & send**; keyboard focus moves to the app o
 pins; each row has Edit (the same form, **Update comment**), Attach to the message, Send, Delete, and shows its element
 on the page; the header has **Attach all** / **Send all**. The intent leads each comment in the sent Markdown. The ⋯
 menu is just **Open DevTools** (Network / Console / Inspect elements opened the same window).
+
+### D-142 (withdrawn 2026-10-11) Local self-signed signing does not stop the Keychain prompt
+Tried and reverted: signing local builds with a self-signed "GeneratorAI Local Signing" identity kept the code signature
+stable, but macOS still asked for the "GeneratorAI Safe Storage" key after the next rebuild — Keychain access for
+non-Apple-issued signatures is not carried across builds the way a Developer ID team signature is. The fix is real
+release signing (Developer ID + notarization), which stays on the backlog; until then each local rebuild needs one
+"Always Allow".
 
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)

@@ -25,7 +25,6 @@ import { fileURLToPath } from 'node:url';
 import {
   assertPublishAllowed,
   createBuildConfig,
-  LOCAL_SIGNING_IDENTITY,
   resolveChannel,
   resolveSigning,
   unpublishableManifests,
@@ -139,24 +138,11 @@ if (!signing.signed && env.ALLOW_UNSIGNED_RELEASE === '1') {
   console.warn('[electron-builder] ALLOW_UNSIGNED_RELEASE=1 — publishing an unsigned build on request.');
 }
 
-// D-142: on a developer's Mac without release credentials, sign with their
-// local identity when it exists (`node scripts/desktop/setup-local-signing.mjs`),
-// so the Keychain stops asking for the Safe Storage key after every rebuild.
-// GENERATORAI_LOCAL_SIGNING=0 opts out.
-function localSigningIdentity() {
-  if (platform !== 'mac' || signing.signed || env.CI || env.GENERATORAI_LOCAL_SIGNING === '0') return null;
-  const found = spawnSync('security', ['find-identity', '-v', '-p', 'codesigning'], { encoding: 'utf8' });
-  return found.status === 0 && found.stdout.includes(`"${LOCAL_SIGNING_IDENTITY}"`) ? LOCAL_SIGNING_IDENTITY : null;
-}
-const localIdentity = localSigningIdentity();
-if (localIdentity) console.log(`[electron-builder] signing with the local identity "${localIdentity}" (not a release signature)`);
-
 const config = createBuildConfig({
   platform,
   arch: stage.arch,
   channel,
   signed: signing.signed,
-  localIdentity,
   env,
   // Repoints the build at agent-tests/mock-update-server.mjs so the auto-update
   // path can be exercised before a real release depends on it.
@@ -181,7 +167,7 @@ console.log(
 const configPath = path.join(desktopRoot, '.electron-builder.generated.json');
 writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
 
-if (!signing.signed && !localIdentity) env.CSC_IDENTITY_AUTO_DISCOVERY = 'false';
+if (!signing.signed) env.CSC_IDENTITY_AUTO_DISCOVERY = 'false';
 
 // Go through the declared bin rather than an `out/` path, which is internal
 // and has moved between major versions.
