@@ -112,7 +112,10 @@ export async function runCheck(input: CheckRunInput): Promise<AttemptOutcome> {
     return r.ok ? r : { ok: false, error: r.error.message };
   });
   if (!resolved.ok) return fail('check_launch_failed', resolved.error);
-  const env: Record<string, string> = { NO_COLOR: '1', FORCE_COLOR: '0', ...resolved.values };
+  // A check never has a TTY: CI=1 makes tools take their non-interactive path instead of
+  // aborting on a prompt (pnpm's "Aborted removal of modules directory due to no TTY", U-17).
+  // The check's own env wins.
+  const env: Record<string, string> = { CI: 'true', NO_COLOR: '1', FORCE_COLOR: '0', ...resolved.values };
   const redact = (text: string) => redactSecrets(text, resolved.secrets);
 
   let result;

@@ -475,6 +475,7 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
           'The stage is waiting for your approval.',
         tool: typeof r.tool === 'string' ? r.tool : (typeof r.toolName === 'string' ? r.toolName : undefined),
         args: (typeof r.args === 'object' && r.args !== null) ? (r.args as Record<string, unknown>) : undefined,
+        ...(typeof r.output === 'string' && r.output.trim() ? { output: r.output } : {}),
       };
     } else {
       interrupt = {

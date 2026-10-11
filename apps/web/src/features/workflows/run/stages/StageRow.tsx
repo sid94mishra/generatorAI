@@ -129,6 +129,13 @@ function stageMenuItems(stage: StageView, menu: StageMenuActions, onOpenInspecto
   return items;
 }
 
+/** "Check failed · exit 1" / "Check timed out" for a completed check whose output says it did not pass. */
+export function checkFailureWord(output: Record<string, unknown> | undefined): string | null {
+  if (!output || output['passed'] !== false) return null;
+  if (output['timedOut'] === true) return 'Check timed out';
+  return typeof output['exitCode'] === 'number' ? `Check failed · exit ${output['exitCode']}` : 'Check failed';
+}
+
 export const StageRow = memo(function StageRow({
   stage,
   focused,
@@ -178,10 +185,13 @@ export const StageRow = memo(function StageRow({
   };
 
   const status = resolveStatus('stageRun', stage.rawStatus) ?? resolveMapping({ state: 'queued' }, 'stageRun');
-  const def = STATUS_STATE_DEFS[status.state];
+  // U-18: a check that ran to the end but did not pass completes (it never fails the run on its own),
+  // yet it must not read "Succeeded".
+  const checkFailure = stage.kind === 'check' && stage.status === 'completed' ? checkFailureWord(stage.outputData) : null;
+  const def = STATUS_STATE_DEFS[checkFailure ? 'failed' : status.state];
   const word = stage.admission
     ? `Waiting for ${stage.admission.label} (${stage.admission.limit !== null ? `${stage.admission.running}/${stage.admission.limit}` : `${stage.admission.running} running`})`
-    : status.label;
+    : (checkFailure ?? status.label);
   const dur = formatStageDuration(stage.durationMs);
   const fileCount = stage.files?.length ?? 0;
   const parallel = stage.parallelWith?.length ?? 0;
@@ -363,6 +373,7 @@ export const StageRow = memo(function StageRow({
               reason={stage.interrupt.reason}
               tool={stage.interrupt.tool}
               args={stage.interrupt.args}
+              output={stage.interrupt.output}
               approveStarts={approveStarts}
               busy={gateBusy}
               onApprove={() => onApproveHitl?.(stage.id)}

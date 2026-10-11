@@ -96,6 +96,8 @@ export interface LifecycleStepContext {
   variables: Record<string, unknown>;
   /** `run.codebases`; `clone_repo` adds its checkout here. */
   codebases: Record<string, RunCodebase>;
+  /** `stages.<key>.{status, output, summary}` — post-processing only (the stages have run). */
+  stages?: Record<string, unknown>;
 }
 
 /** Max bytes per `GEN_VAR_*` env var value — prevents blowing past ARG_MAX. */
@@ -199,6 +201,7 @@ export class LifecycleSteps {
     const result = renderTemplate(text, {
       variables: ctx.variables,
       run: { id: ctx.runId, name: ctx.runName ?? ctx.workflowName ?? '', codebases },
+      ...(ctx.stages ? { stages: ctx.stages } : {}),
     });
     if (!result.ok) throw new Error(`Template error (${result.error.code}): ${result.error.message}`);
     return result.text;

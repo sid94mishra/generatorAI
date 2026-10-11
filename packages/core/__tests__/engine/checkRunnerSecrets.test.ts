@@ -55,4 +55,12 @@ describe('check env secrets', () => {
     }
     expect(seen).toEqual([]);
   });
+
+  it('runs non-interactively: CI=true by default, the check env can override it (U-17)', async () => {
+    const seen: ScriptRunOptions[] = [];
+    await check({}, seen);
+    expect(seen[0]?.env?.['CI']).toBe('true');
+    await check({ CI: 'false' }, seen);
+    expect(seen[1]?.env?.['CI']).toBe('false');
+  });
 });

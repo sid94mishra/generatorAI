@@ -60,6 +60,7 @@ import { BrowserDockPanel, BrowserDockProvider, browserDockTabLabel, type Browse
 import type { BrowserTabState } from '@/blocks/browser/useBrowserTabState.js';
 import { Workspace } from '@/ui/templates/Workspace/Workspace.js';
 import { Banner } from '@/ui/patterns/Banner/Banner.js';
+import { RunPullRequestBanner } from './RunPullRequestBanner.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Dialog, DialogBody } from '@/ui/primitives/Dialog/Dialog.js';
 import { EmptyState } from '@/ui/primitives/EmptyState/EmptyState.js';
@@ -710,6 +711,7 @@ export function WorkflowRunPage() {
             />
           ) : null}
           {runView.error ? <Banner tone="err" lead="Error" detail={runView.error} /> : null}
+          <RunPullRequestBanner projectId={runData?.projectId} systemVars={runData?.systemVars} />
           <RunDecisionsContext.Provider value={decisionsValue}>
             {runId ? <NeedsDecisionPanel decisions={pendingDecisions ?? []} runId={runId} onFocus={focusStage} /> : null}
             <section aria-label="Stages" className="overflow-hidden rounded-panel border border-line bg-surface">

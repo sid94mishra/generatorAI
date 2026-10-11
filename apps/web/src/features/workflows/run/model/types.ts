@@ -106,6 +106,8 @@ export interface StageView {
     reason: string;
     tool?: string;
     args?: Record<string, unknown>;
+    /** A completion review: the stage output being approved (U-19). */
+    output?: string;
   };
   /** Error message when status = failed. */
   error?: string;

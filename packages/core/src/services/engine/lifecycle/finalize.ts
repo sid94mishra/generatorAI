@@ -26,6 +26,7 @@
 import type { HookPhaseResult, WorkflowRun } from '@generatorai/shared';
 import type { FinalizePhase, Lifecycle, PostProcessingStep, WorkflowGraph, WorkflowHookDefinition } from '@generatorai/workflow-spec';
 import type { RunOutcome } from '../../../domain/scheduler/types.js';
+import { runEndStages } from '../../../domain/scheduler/scope.js';
 import { mapItemPlacement, releaseRunMapItems } from '../MapEffects.js';
 import { PhaseFailure, type PhaseResult, type RunLifecycleDeps } from '../RunLifecycle.js';
 import { runAction } from './hooks.js';
@@ -128,6 +129,11 @@ export function buildPostProcessingSteps(lifecycle: Lifecycle, hasCodebases: boo
   return steps;
 }
 
+function runEndStagesOf(deps: RunLifecycleDeps, runId: string): Record<string, unknown> {
+  const state = deps.stores.runStore.loadRunState(runId);
+  return state ? runEndStages(state) : {};
+}
+
 const postProcess: Phase = async (ctx, run) => {
   const { deps, graph, outcome } = ctx;
   if (outcome !== 'completed') return { detail: `skipped (${outcome})` };
@@ -147,6 +153,8 @@ const postProcess: Phase = async (ctx, run) => {
     workDir: run.systemVars?.workingDirectory ?? '',
     variables: { ...run.variables },
     codebases: { ...codebases },
+    // The templates were validated against the full scope (stages included): give them the stage outputs (U-20).
+    stages: runEndStagesOf(deps, run.id),
   });
   await ctx.hooks('post_commit', run);
   const pr = steps.find((s) => s.config.type === 'create_pr');

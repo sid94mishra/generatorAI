@@ -340,3 +340,12 @@ export function templateScope(
 ): Record<string, unknown> {
   return instanceScope(new StateIndex(state.run, state.instances, state.iterations ?? []), instance, { variables });
 }
+
+/**
+ * `stages` at the end of the run — the top level (plus expansion views), as the
+ * finalize phase's templates (commit message, PR title/body) read them (U-20).
+ */
+export function runEndStages(state: RunState): Record<string, unknown> {
+  return stagesFor(new StateIndex(state.run, state.instances, state.iterations ?? []), []);
+}
+

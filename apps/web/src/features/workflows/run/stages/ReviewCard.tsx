@@ -21,6 +21,8 @@ import { GateCardFrame } from '@/ui/patterns/GateCardFrame/GateCardFrame.js';
 import { Textarea } from '@/ui/primitives/Textarea/Textarea.js';
 import { InlineCode } from '@/ui/primitives/InlineCode/InlineCode.js';
 import { useConfirm } from '@/ui/primitives/AlertDialog/AlertDialog.js';
+import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
+import { reviewOutputMarkdown } from './reviewOutput.js';
 
 export interface ReviewCardProps {
   stageName: string;
@@ -30,6 +32,8 @@ export interface ReviewCardProps {
   args?: Record<string, unknown> | undefined;
   /** Who reads the feedback ("Bug Fixer"); the placeholder names them. */
   agentName?: string | undefined;
+  /** The stage output being approved, shown in full (U-19). */
+  output?: string | undefined;
   /** What approving starts ("run_tests"), when the stage has successors. */
   approveStarts?: string | undefined;
   onApprove: () => void;
@@ -46,6 +50,7 @@ export function ReviewCard({
   tool,
   args,
   agentName,
+  output,
   approveStarts,
   onApprove,
   onRequestChanges,
@@ -112,6 +117,11 @@ export function ReviewCard({
           <pre className="max-h-32 overflow-auto rounded-card border border-line-soft bg-sunken px-3 py-2 font-mono text-small text-fg-2">
             {JSON.stringify(args, null, 2)}
           </pre>
+        ) : null}
+        {output ? (
+          <section aria-label="Output to approve" className="max-h-96 overflow-auto rounded-card border border-line-soft bg-sunken px-3 py-2" data-testid="stage-review-output">
+            <Markdown>{reviewOutputMarkdown(output)}</Markdown>
+          </section>
         ) : null}
         <Textarea
           value={feedback}
