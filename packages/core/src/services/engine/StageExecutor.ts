@@ -338,6 +338,16 @@ export function journalEpoch(attempts: ReadonlyArray<{ attemptNo: number; mode: 
 /** What a completion review shows the reviewer (U-19): the whole output, bounded only against runaway sizes. */
 const REVIEW_OUTPUT_MAX = 64_000;
 
+/**
+ * What the reviewer approves (U-29): the structured output when the stage produced one — that is what
+ * successors and post-processing use (e.g. the PR body) — else the output text. The final message of a
+ * contract stage is often a closing sentence, not the data.
+ */
+export function reviewOutputOf(outputText: string, data: unknown): string {
+  const shown = data !== undefined && data !== null && typeof data === 'object' ? JSON.stringify(data, null, 2) : outputText;
+  return shown.length > REVIEW_OUTPUT_MAX ? `${shown.slice(0, REVIEW_OUTPUT_MAX)}…` : shown;
+}
+
 export class StageExecutor {
   private readonly frames = new Map<string, Frame>();
   private readonly timing: ExecutorTiming;
@@ -1810,7 +1820,7 @@ export class StageExecutor {
                   : `Stage "${ctx.stage.name}" completed. Approve to advance, or request changes.`
                 : `Stage "${ctx.stage.name}" updated after feedback (round ${round}). Approve or request more changes.`,
             summary: summary ?? null,
-            output: ctx.outputText.length > REVIEW_OUTPUT_MAX ? `${ctx.outputText.slice(0, REVIEW_OUTPUT_MAX)}…` : ctx.outputText,
+            output: reviewOutputOf(ctx.outputText, checked.data),
             // The full output this gate shows: a verdict given while no frame was alive answers only this output.
             outputHash: digest(ctx.outputText),
             reviewRound: round,
