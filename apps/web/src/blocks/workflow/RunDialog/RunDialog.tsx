@@ -312,7 +312,7 @@ function RunDialogBody({
             ? undefined
             : skipped > 0
               ? `${skipped} skipped · model and variable overrides by key, for this run only`
-              : 'skip, model and variable overrides by key, for this run only'
+              : 'turn a stage off to skip it; model and variable overrides are for this run only'
         }
       >
         {stageOverrides.length === 0 ? (
@@ -326,7 +326,7 @@ function RunDialogBody({
               return (
                 <div key={o.stageKey} role="listitem" className="flex flex-col gap-2 border-b border-line-soft py-2 last:border-b-0">
                   <div className="flex items-center gap-3">
-                    <Switch checked={o.skip} onCheckedChange={(skip) => patchStage(index, { skip })} aria-label={`Skip ${o.stageName}`} />
+                    <Switch checked={!o.skip} onCheckedChange={(run) => patchStage(index, { skip: !run })} aria-label={`Run ${o.stageName}`} />
                     <span className={o.skip ? 'min-w-0 flex-1 truncate text-ui text-fg-3 line-through' : 'min-w-0 flex-1 truncate text-ui text-fg'}>
                       {o.stageName} <KeyChip stageKey={o.stageKey} />
                     </span>
