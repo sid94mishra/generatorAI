@@ -8,6 +8,7 @@
 // Settings → Templates too.
 // ────────────────────────────────────────────────────────────────
 
+import { useNewChatStore } from '@/stores/newChatStore.js';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router';
 import type { WorkflowTemplate } from '@generatorai/workflow-spec';
@@ -173,10 +174,28 @@ export function WorkflowNewPage() {
     <FormSection title="Start from" first>
       <ChoiceCardGrid
         label="Start point"
-        columns={3}
+        columns={2}
         value={start}
-        onValueChange={(v) => setStart(v as StartPoint)}
+        onValueChange={(v) => {
+          // U-11: describing it opens a chat with the built-in Workflow Author,
+          // which drafts the workflow for review here — not a form mode.
+          if (v === 'describe') {
+            useNewChatStore.getState().open({
+              name: 'New workflow',
+              agentRef: 'system:workflow-author',
+              prompt: 'Create a workflow that ',
+            });
+            return;
+          }
+          setStart(v as StartPoint);
+        }}
         options={[
+          {
+            value: 'describe',
+            icon: 'chats',
+            title: 'Describe it',
+            description: 'Tell the Workflow Author what should happen; it drafts the workflow for you to review and publish.',
+          },
           { value: 'blank', icon: 'plus', title: 'Blank canvas', description: 'Add stages yourself.' },
           {
             value: 'template',
