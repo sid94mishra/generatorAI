@@ -1354,6 +1354,16 @@ directory; removing it shows "Saving deletes the chat folder and the N files…"
 server is the guarantee for every client: a chat folder with files that an update leaves out is appended back unless
 `discardChatFolder` is set; with it, the mount is removed first so an empty plan starts a fresh folder.
 
+### D-142 Local macOS builds are signed with the developer's own identity (2026-10-11) — Final
+Every unsigned (ad-hoc) rebuild had a new code identity, so the Keychain treated it as a different app and asked for
+the "GeneratorAI Safe Storage" key again, blocking launch until someone clicked Always Allow. `node
+scripts/desktop/setup-local-signing.mjs` (macOS, once) creates a self-signed code-signing certificate "GeneratorAI
+Local Signing" in the login keychain and trusts it for code signing for that user. `electron-builder.mjs` signs a
+build with it when there are no release credentials, it is not CI, and `GENERATORAI_LOCAL_SIGNING` is not `0`. The
+designated requirement then stays the same across rebuilds, so one Always Allow sticks. It is not a release
+signature: the build still counts as unsigned for publishing and self-update (`signing.signed` is unchanged).
+Release signing and notarization stay on the backlog.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

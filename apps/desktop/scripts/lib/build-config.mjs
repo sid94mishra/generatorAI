@@ -292,7 +292,17 @@ export function electronFuses({ platform, signed }) {
   };
 }
 
-export function createBuildConfig({ platform, arch, channel, signed, publish, env = {} }) {
+/**
+ * The developer's own code-signing identity for local macOS builds (D-142),
+ * created by `scripts/desktop/setup-local-signing.mjs`. Signing every local
+ * build with the SAME identity keeps the app's designated requirement stable,
+ * so the Keychain's "Always Allow" for its Safe Storage key survives rebuilds.
+ * It is not a release signature: such a build still counts as unsigned for
+ * publishing and self-update.
+ */
+export const LOCAL_SIGNING_IDENTITY = 'GeneratorAI Local Signing';
+
+export function createBuildConfig({ platform, arch, channel, signed, publish, env = {}, localIdentity = null }) {
   if (!CHANNELS.includes(channel)) {
     throw new Error(`Unknown channel '${channel}' (expected one of ${CHANNELS.join(', ')}).`);
   }
@@ -362,7 +372,7 @@ export function createBuildConfig({ platform, arch, channel, signed, publish, en
   };
 
   if (platform === 'win') config.win = winConfig(arch);
-  if (platform === 'mac') Object.assign(config, macConfig(arch, signed));
+  if (platform === 'mac') Object.assign(config, macConfig(arch, signed, localIdentity));
   if (platform === 'linux') {
     const { homepage, maintainer } = resolveLinuxMetadata({ env, publishTarget });
     // `homepage` is package.json metadata, not a config key — fpm reads it from
@@ -411,7 +421,7 @@ function winConfig(arch) {
   };
 }
 
-function macConfig(arch, signed) {
+function macConfig(arch, signed, localIdentity) {
   return {
     mac: {
       // Follows the staged architecture rather than always building
@@ -434,8 +444,9 @@ function macConfig(arch, signed) {
       entitlementsInherit: 'build/entitlements.mac.plist',
       // Without credentials electron-builder will happily sign with any
       // identity it finds in the runner's keychain, producing a build signed
-      // by something nobody can verify.
-      identity: signed ? undefined : null,
+      // by something nobody can verify — so only the developer's own local
+      // identity is used, and only when it was asked for (D-142).
+      identity: signed ? undefined : (localIdentity ?? null),
       extendInfo: {
         NSMicrophoneUsageDescription: 'GeneratorAI needs microphone access for voice input in chats.',
         NSCameraUsageDescription:
