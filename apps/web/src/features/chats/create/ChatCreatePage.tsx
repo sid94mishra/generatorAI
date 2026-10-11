@@ -258,6 +258,10 @@ export function ChatCreatePage() {
 
   function setAgent(ref: string | undefined, agent: Agent | undefined) {
     form.setFieldValue('agentRef', ref);
+    // A project's own agent works in that project (U-3).
+    if (agent?.scope === 'project' && agent.projectId && agent.projectId !== form.state.values.projectId) {
+      form.setFieldValue('projectId', agent.projectId);
+    }
     if (agent?.role === 'orchestrator') form.setFieldValue('orchestratorMode', true);
     const runtime = agentRuntimeSelection(agent);
     if (runtime.model) form.setFieldValue('model', runtime.model);

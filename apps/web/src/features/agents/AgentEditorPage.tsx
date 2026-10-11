@@ -663,7 +663,12 @@ export function AgentEditorPage() {
                         emptyLabel="Any provider"
                         value={runtime.harnessType ?? ''}
                         disabled={readOnly}
-                        onChange={(v) => patchRuntime({ harnessType: (v || undefined) as AgentRuntimePolicy['harnessType'] })}
+                        onChange={(v) => {
+                          const harnessType = (v || undefined) as AgentRuntimePolicy['harnessType'];
+                          // A model of another provider no longer applies (U-2): clear it.
+                          const keepModel = !harnessType || !runtime.model || models?.some((m) => m.id === runtime.model && m.provider === harnessType);
+                          patchRuntime({ harnessType, ...(keepModel ? {} : { model: undefined }) });
+                        }}
                       />
                     </Field>
                     <Field label="Model">
@@ -672,6 +677,7 @@ export function AgentEditorPage() {
                         ariaLabel="Model"
                         placeholder="Inherit from the binding site"
                         disabled={readOnly}
+                        preferredProvider={runtime.harnessType}
                         value={runtime.model ?? ''}
                         onChange={(v) => patchRuntime({ model: v || undefined })}
                       />

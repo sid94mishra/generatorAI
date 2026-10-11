@@ -6,9 +6,10 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import type { Agent } from '@generatorai/shared';
 
-const state = vi.hoisted(() => ({ agents: [] as unknown[], isLoading: false }));
+const state = vi.hoisted(() => ({ agents: [] as unknown[], projectAgents: [] as unknown[], isLoading: false }));
 vi.mock('@/hooks/agentQueries.js', () => ({
   useSelectableAgents: () => ({ data: state.agents, isLoading: state.isLoading }),
+  useAgents: () => ({ data: state.projectAgents }),
 }));
 
 import { AgentPicker } from './AgentPicker.js';
@@ -42,6 +43,7 @@ const disabled = agent({ slug: 'off', name: 'Switched Off', scope: 'global', ena
 
 beforeEach(() => {
   state.agents = [orchestrator, fixer, reviewer, disabled];
+  state.projectAgents = [];
   state.isLoading = false;
 });
 afterEach(cleanup);
@@ -109,5 +111,21 @@ describe('AgentPicker', () => {
     expect(within(popup).getAllByRole('option')).toHaveLength(2);
     await user.keyboard('{ArrowDown}{Enter}');
     expect(onChange).toHaveBeenCalledWith('system:reviewer', reviewer);
+  });
+
+  it('lists a project\'s own agents before a project is chosen, and reports the agent so the host can pick its project (U-3)', async () => {
+    const lead = agent({ slug: 'pulse-tech-lead', name: 'Pulse Tech Lead', scope: 'project', projectId: 'p-1', role: 'orchestrator' });
+    state.projectAgents = [lead];
+    const { user, onChange } = setup();
+    const popup = await open(user);
+    await user.click(within(popup).getByRole('option', { name: /Pulse Tech Lead/ }));
+    expect(onChange).toHaveBeenCalledWith('project:pulse-tech-lead', expect.objectContaining({ projectId: 'p-1' }));
+  });
+
+  it('with a project chosen, lists only what that project can use', async () => {
+    state.projectAgents = [agent({ slug: 'other', name: 'Other Project Agent', scope: 'project', projectId: 'p-2' })];
+    const { user } = setup({ projectId: 'p-1' });
+    const popup = await open(user);
+    expect(within(popup).queryByRole('option', { name: /Other Project Agent/ })).toBeNull();
   });
 });

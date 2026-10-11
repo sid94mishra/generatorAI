@@ -254,6 +254,8 @@ export function NewChatDialog() {
                   onChange={(ref, agent) => {
                     setAgentRef(ref);
                     setSelectedAgent(agent);
+                    // A project's own agent works in that project (U-3).
+                    if (agent?.scope === 'project' && agent.projectId && agent.projectId !== projectId) setProjectId(agent.projectId);
                     if (agent?.role === 'orchestrator') setOrchestratorMode(true);
                     const runtime = agentRuntimeSelection(agent);
                     if (runtime.model) setModel(runtime.model);

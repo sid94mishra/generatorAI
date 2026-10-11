@@ -184,8 +184,9 @@ export function ProjectDetailPage() {
             variant="detail"
             title={project.name}
             description={project.description}
+            // The internal root path lives in Settings (with Copy) — not in the
+            // header, where it read as app-data noise (U-1).
             meta={[
-              project.rootPath,
               `created ${formatShortDate(project.createdAt)}`,
               `worktree retention ${retentionLabel(project.settings?.worktreeRetention)}`,
               `max ${plural(project.settings?.maxCodebases ?? 10, 'codebase')}`,

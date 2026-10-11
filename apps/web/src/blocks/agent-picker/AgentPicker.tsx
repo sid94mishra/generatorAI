@@ -12,7 +12,7 @@
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import type { Agent, AgentRole } from '@generatorai/shared';
-import { useSelectableAgents } from '@/hooks/agentQueries.js';
+import { useAgents, useSelectableAgents } from '@/hooks/agentQueries.js';
 import { AgentPickerView } from './AgentPicker.view.js';
 
 export interface AgentPickerProps {
@@ -45,9 +45,18 @@ export function AgentPicker({
   'data-testid': testId,
 }: AgentPickerProps) {
   const { data: agents, isLoading } = useSelectableAgents(projectId);
+  // U-3: before a project is chosen, a project's own agents are listed too —
+  // a user looking for "Pulse Tech Lead" must find it; choosing one tells the
+  // host (`onChange`'s agent carries its projectId) to pick that project.
+  const { data: projectAgents } = useAgents({ scope: 'project', enabledOnly: true });
   const navigate = useNavigate();
 
-  const enabled = useMemo(() => (agents ?? []).filter((a) => a.enabled), [agents]);
+  const enabled = useMemo(() => {
+    const own = (agents ?? []).filter((a) => a.enabled);
+    if (projectId) return own;
+    const seen = new Set(own.map((a) => a.ref + a.projectId));
+    return [...own, ...(projectAgents ?? []).filter((a) => a.enabled && !seen.has(a.ref + a.projectId))];
+  }, [agents, projectAgents, projectId]);
   const candidates = useMemo(() => {
     const excluded = new Set(excludeRefs ?? []);
     return enabled.filter((a) => !excluded.has(a.ref) && (!role || a.role === role));

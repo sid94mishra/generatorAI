@@ -78,6 +78,8 @@ export interface ModelPickerViewProps {
   /** Trigger text when nothing is selected. */
   placeholder?: string;
   disabled?: boolean;
+  /** Open on this provider's models (a Provider chosen beside the picker). */
+  preferredProvider?: string | undefined;
   /** Uncontrolled initial state (stories). */
   defaultOpen?: boolean;
   open?: boolean;
@@ -99,6 +101,7 @@ const HINTS = [
 /** A provider + model picker: trigger (chip or field) and the three-pane popover. */
 export function ModelPickerView({
   value,
+  preferredProvider,
   onSelect,
   catalog,
   loading = false,
@@ -197,6 +200,7 @@ export function ModelPickerView({
       >
         <PopoverTitle className="sr-only">{ariaLabel}</PopoverTitle>
         <ModelPickerPanel
+          preferredProvider={preferredProvider}
           value={value}
           catalog={catalog}
           loading={loading}
@@ -215,6 +219,7 @@ export function ModelPickerView({
 
 interface PanelProps {
   value: string;
+  preferredProvider?: string | undefined;
   catalog: ModelPickerCatalog | undefined;
   loading: boolean;
   refreshing: boolean;
@@ -224,13 +229,13 @@ interface PanelProps {
 }
 
 /** The popover body. Base UI mounts it only while open, so its browse state starts fresh each time. */
-function ModelPickerPanel({ value, catalog, loading, refreshing, onRefresh, onOpenProviderSettings, onSelect }: PanelProps) {
+function ModelPickerPanel({ value, preferredProvider, catalog, loading, refreshing, onRefresh, onOpenProviderSettings, onSelect }: PanelProps) {
   const [browse, setBrowse] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const listId = useId();
 
-  const providerType = searchProvider(catalog, browse ?? initialProvider(catalog, value), query);
+  const providerType = searchProvider(catalog, browse ?? initialProvider(catalog, value, preferredProvider), query);
   const provider = catalog?.providers.find((p) => p.type === providerType);
   const visible = useMemo(() => filterModels(provider?.models ?? [], query), [provider, query]);
 

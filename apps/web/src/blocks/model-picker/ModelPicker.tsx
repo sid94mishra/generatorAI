@@ -30,10 +30,12 @@ export interface ModelPickerProps {
   /** Trigger text when nothing is selected. Default "Select a model…". */
   placeholder?: string;
   disabled?: boolean;
+  /** Open on this provider's models — set where a Provider is chosen beside the picker. */
+  preferredProvider?: string | undefined;
 }
 
 /** Provider + model picker bound to the live provider catalog. */
-export function ModelPicker({ value, onChange, variant = 'chip', side, align, ariaLabel, placeholder, disabled }: ModelPickerProps) {
+export function ModelPicker({ value, onChange, variant = 'chip', side, align, ariaLabel, placeholder, disabled, preferredProvider }: ModelPickerProps) {
   const providers = useHarnessProviders();
   const refresh = useRefreshHarnessProviders();
   const openSettings = useSettingsUiStore((s) => s.openSettings);
@@ -42,6 +44,7 @@ export function ModelPicker({ value, onChange, variant = 'chip', side, align, ar
   return (
     <ModelPickerView
       value={value}
+      preferredProvider={preferredProvider}
       onSelect={onChange}
       catalog={catalog}
       loading={providers.isLoading}

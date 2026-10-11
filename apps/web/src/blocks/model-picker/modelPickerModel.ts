@@ -35,8 +35,11 @@ export const AVAILABILITY_HINT: Record<Exclude<ProviderAvailability, 'ready'>, s
  * catalog's `defaultProvider` (never one that is not ready), else the first
  * provider so its reason is on screen. Null when the catalog has none.
  */
-export function initialProvider(catalog: ModelPickerCatalog | undefined, value: string): string | null {
+export function initialProvider(catalog: ModelPickerCatalog | undefined, value: string, preferred?: string): string | null {
   if (!catalog) return null;
+  // A provider chosen next to the picker (an agent's Provider field) decides
+  // which list opens: its models are the only ones that make sense there.
+  if (preferred && catalog.providers.some((p) => p.type === preferred)) return preferred;
   return findPickerModel(catalog, value)?.provider ?? catalog.defaultProvider ?? catalog.providers[0]?.type ?? null;
 }
 
