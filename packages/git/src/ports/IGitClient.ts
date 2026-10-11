@@ -352,7 +352,9 @@ export interface IGitClient {
   aheadBehind(repoDir: string, ref: string, upstream: string): Promise<GitAheadBehind | null>;
   /** `git rev-parse --abbrev-ref <branch>@{upstream}` → e.g. `origin/main`, or null. */
   upstreamOf(repoDir: string, branch: string): Promise<string | null>;
-  /** `git rev-parse --symbolic-full-name HEAD` === 'HEAD' (detached). */
+  /** True when HEAD names a branch with no commits yet (fresh `git init`). */
+  isUnborn(repoDir: string): Promise<boolean>;
+  /** HEAD is not a symbolic ref (`git symbolic-ref -q HEAD` exits 1). An unborn branch is not detached. */
   isDetached(repoDir: string): Promise<boolean>;
   /** True when `<gitdir>/MERGE_HEAD` exists (use `absoluteGitDir`, fall back to `<repoDir>/.git`). */
   mergeInProgress(repoDir: string): Promise<boolean>;

@@ -419,6 +419,8 @@ function invalidateResource(
         // per-mount status — which every surface below renders from.
         'workspace-info',
         'workspace-change-summary',
+        // Dirty / branch / can-commit: the Changes footer's "Nothing to commit" must not outlive a new file.
+        'scm-readiness',
         'workspace-change-file',
         'workspace-change-patch',
         'workspace-files',

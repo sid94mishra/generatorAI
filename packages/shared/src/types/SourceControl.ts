@@ -169,6 +169,8 @@ export interface RepoReadiness {
   connected: boolean;
   branch: string | null;
   detached: boolean;
+  /** The branch exists by name but has no commits yet (a fresh `git init`). */
+  unborn?: boolean;
   defaultBranch: string | null;
   onDefaultBranch: boolean;
   dirty: boolean;

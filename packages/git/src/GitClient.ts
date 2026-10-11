@@ -644,19 +644,30 @@ export class GitClient implements IGitClient {
     }
   }
 
-  /** Return the current branch name, or null (detached HEAD / no commits). */
+  /**
+   * Return the current branch name, or null when HEAD is detached.
+   *
+   * An unborn branch (`git init`, no commits yet) is still a branch: `rev-parse
+   * --abbrev-ref HEAD` fails there, so HEAD's symbolic ref is read instead.
+   */
   async currentBranch(repoDir: string): Promise<string | null> {
     try {
-      const result = await this.runner.run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      const result = await this.runner.run('git', ['symbolic-ref', '--short', '-q', 'HEAD'], {
         cwd: repoDir,
         timeout: 5_000,
       });
       if (result.exitCode !== 0) return null;
       const branch = result.stdout.trim();
-      return branch && branch !== 'HEAD' ? branch : null;
+      return branch.length > 0 ? branch : null;
     } catch {
       return null;
     }
+  }
+
+  /** True when HEAD names a branch that has no commits yet (a fresh `git init`). */
+  async isUnborn(repoDir: string): Promise<boolean> {
+    if ((await this.currentBranch(repoDir)) === null) return false;
+    return (await this.revParse(repoDir, 'HEAD')) === null;
   }
 
   /** Clean up a cloned/working directory (recursive rm). */
@@ -1558,12 +1569,13 @@ export class GitClient implements IGitClient {
 
   async isDetached(repoDir: string): Promise<boolean> {
     try {
-      const result = await this.runner.run('git', ['rev-parse', '--symbolic-full-name', 'HEAD'], {
+      // `symbolic-ref -q HEAD` exits 1 only when HEAD is not a symbolic ref; an
+      // unborn branch still resolves (rev-parse fails there, so it cannot be used).
+      const result = await this.runner.run('git', ['symbolic-ref', '-q', 'HEAD'], {
         cwd: repoDir,
         timeout: 5_000,
       });
-      if (result.exitCode !== 0) return false;
-      return result.stdout.trim() === 'HEAD';
+      return result.exitCode === 1;
     } catch {
       return false;
     }

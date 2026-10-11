@@ -81,6 +81,7 @@ export class RepoReadinessService {
 
     const branch = await this.safe(() => git.currentBranch(repoDir), null);
     const detached = await this.safe(() => git.isDetached(repoDir), false);
+    const unborn = await this.safe(() => git.isUnborn(repoDir), false);
     const settingsBase = this.deps.settings().defaultBase;
     const defaultBranch =
       (await this.safe(() => git.defaultBranch(repoDir), null)) ?? settingsBase ?? null;
@@ -186,6 +187,7 @@ export class RepoReadinessService {
       connected,
       branch,
       detached,
+      ...(unborn ? { unborn } : {}),
       defaultBranch,
       onDefaultBranch,
       dirty,

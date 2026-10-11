@@ -443,6 +443,48 @@ describe('GitClient.aheadBehind / upstreamOf / isDetached', () => {
   });
 });
 
+describe('GitClient on an unborn branch (no commits yet)', () => {
+  async function makeUnborn(name: string): Promise<string> {
+    const dir = path.join(tmpRoot, name);
+    await fs.mkdir(dir, { recursive: true });
+    await runGit(dir, ['init', '-b', 'main']);
+    return dir;
+  }
+
+  it('names the branch, flags it unborn, and is not detached', async () => {
+    const dir = await makeUnborn('unborn-name');
+    expect(await git.currentBranch(dir)).toBe('main');
+    expect(await git.isUnborn(dir)).toBe(true);
+    expect(await git.isDetached(dir)).toBe(false);
+  });
+
+  it('counts an untracked file as a committable change', async () => {
+    const dir = await makeUnborn('unborn-changes');
+    expect(await git.changedFilesSummary(dir)).toEqual([]);
+    await writeFile(dir, 'b.txt', 'hi\n');
+    expect(await git.changedFilesSummary(dir)).toEqual([{ code: 'A', path: 'b.txt' }]);
+  });
+
+  it('the first commit lands on main and ends the unborn state', async () => {
+    const dir = await makeUnborn('unborn-commit');
+    await writeFile(dir, 'b.txt', 'hi\n');
+    const result = await git.commitWithSha(dir, 'first');
+    expect(result?.sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(await git.currentBranch(dir)).toBe('main');
+    expect(await git.isUnborn(dir)).toBe(false);
+  });
+
+  it('a detached HEAD still has no branch name', async () => {
+    const dir = await makeUnborn('detached-still');
+    await writeFile(dir, 'a.txt', 'a\n');
+    await git.commit(dir, 'init');
+    await runGit(dir, ['checkout', '--detach', (await git.revParse(dir, 'HEAD'))!]);
+    expect(await git.currentBranch(dir)).toBeNull();
+    expect(await git.isDetached(dir)).toBe(true);
+    expect(await git.isUnborn(dir)).toBe(false);
+  });
+});
+
 describe('GitClient.commitWithSha / addAll', () => {
   it('returns the new sha, then null when there is nothing to commit', async () => {
     const dir = path.join(tmpRoot, 'commits');

@@ -117,6 +117,30 @@ describe('CommitBar', () => {
     expect(line).toHaveTextContent('2 ahead · 0 behind');
   });
 
+  it('names an unborn branch, says it has no commits, and offers the commit', async () => {
+    renderPanel(
+      makePlatform([
+        repo({
+          alias: 'main',
+          branch: 'main',
+          unborn: true,
+          hasRemote: false,
+          connected: false,
+          hasUpstream: false,
+          onDefaultBranch: true,
+          can: { commit: true, push: false, pullRequest: false },
+          reasons: { push: 'No remote configured', pullRequest: 'No remote' },
+        }),
+      ]),
+    );
+    const line = await screen.findByTestId('scm-status-line');
+    expect(line).toHaveTextContent('main');
+    expect(line).not.toHaveTextContent('detached');
+    expect(screen.getByTestId('scm-no-commits')).toHaveTextContent('No commits yet');
+    expect(screen.queryByText('Nothing to commit')).toBeNull();
+    expect(screen.getByTestId('scm-run-flow')).toBeEnabled();
+  });
+
   it('links an already-open pull request', async () => {
     renderPanel(
       makePlatform([

@@ -140,6 +140,11 @@ export function CommitBarView({
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-small" data-testid="scm-status-line">
         <Icon concept="branch" size={12} className="text-fg-3" />
         <span className="min-w-0 truncate font-mono text-fg">{selected.branch ?? 'detached HEAD'}</span>
+        {selected.unborn ? (
+          <span className="text-fg-3" data-testid="scm-no-commits">
+            No commits yet
+          </span>
+        ) : null}
         {selected.hasUpstream ? (
           <span className="text-fg-3">
             {selected.ahead ?? 0} ahead · {selected.behind ?? 0} behind
