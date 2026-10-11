@@ -1364,6 +1364,15 @@ designated requirement then stays the same across rebuilds, so one Always Allow 
 signature: the build still counts as unsigned for publishing and self-update (`signing.signed` is unchanged).
 Release signing and notarization stay on the backlog.
 
+### D-143 The in-app browser opens localhost when the server runs on the user's machine (2026-10-11) — Final
+Found in the real-user pass: typing `http://127.0.0.1:4791/` did nothing — the address bar cleared and the view stayed
+blank, because navigation to loopback hosts is blocked by default (SSRF hardening for the agent) and the
+`browser.error` it raised was never shown. Reviewing one's own dev server is the main use of the in-app browser. A
+server bound to loopback (the desktop app's own) now passes `allowLoopback` to `isNavigationAllowed`, so `localhost`,
+`127.0.0.0/8` and `::1` load; link-local and cloud-metadata hosts stay blocked, an explicit `allowedHosts` still
+decides, and a network-exposed server keeps blocking loopback (there it is the server's network, not the user's).
+`browser.error` events now reach the panel's error callout.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchesHostPattern, matchesAnyHostPattern, isLoopbackHost } from '../hostMatcher.js';
+import { matchesHostPattern, matchesAnyHostPattern, isLoopbackHost, isNavigationAllowed } from '../hostMatcher.js';
 
 describe('matchesHostPattern', () => {
   it('matches an exact host', () => {
@@ -88,5 +88,23 @@ describe('isLoopbackHost', () => {
     expect(isLoopbackHost('127.0.0.1.evil.com')).toBe(false);
     expect(isLoopbackHost('0.0.0.0')).toBe(false);
     expect(isLoopbackHost('')).toBe(false);
+  });
+});
+
+describe('isNavigationAllowed — a server on the user\'s machine (D-143)', () => {
+  it('lets localhost dev servers load when the server is loopback-bound', () => {
+    expect(isNavigationAllowed('http://127.0.0.1:4791/', undefined, { allowLoopback: true }).ok).toBe(true);
+    expect(isNavigationAllowed('http://localhost:3000/', undefined, { allowLoopback: true }).ok).toBe(true);
+    expect(isNavigationAllowed('http://[::1]:5173/', undefined, { allowLoopback: true }).ok).toBe(true);
+  });
+
+  it('still blocks loopback on a network-exposed server, and link-local / metadata everywhere', () => {
+    expect(isNavigationAllowed('http://127.0.0.1:4791/', undefined).ok).toBe(false);
+    expect(isNavigationAllowed('http://169.254.169.254/latest/meta-data', undefined, { allowLoopback: true }).ok).toBe(false);
+    expect(isNavigationAllowed('file:///etc/passwd', undefined, { allowLoopback: true }).ok).toBe(false);
+  });
+
+  it('an explicit allow-list still decides', () => {
+    expect(isNavigationAllowed('http://localhost:3000/', ['example.com'], { allowLoopback: true }).ok).toBe(false);
   });
 });

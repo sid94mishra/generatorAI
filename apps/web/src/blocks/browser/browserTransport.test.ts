@@ -17,7 +17,14 @@ describe('parseBrowserStreamMessage', () => {
     expect(msg).toEqual({
       refreshDescriptor: false,
       selection: { url: 'https://example.com/', cssSelector: '#a', xpath: '/a', artifactId: 'art-9' },
+      error: null,
     });
+  });
+
+  it('hands a browser.error message to the panel (a blocked page is never silent)', () => {
+    const msg = parseBrowserStreamMessage(JSON.stringify({ kind: 'browser.error', payload: { kind: 'blocked', error: 'Navigation blocked: host "10.0.0.1"' } }));
+    expect(msg?.error).toBe('Navigation blocked: host "10.0.0.1"');
+    expect(parseBrowserStreamMessage(JSON.stringify({ kind: 'browser.navigation', payload: { error: 'x' } }))?.error).toBeNull();
   });
 
   it('also reads the AgentEvent shape ({kind, data})', () => {
@@ -41,7 +48,7 @@ describe('parseBrowserStreamMessage', () => {
 
   it('returns null for non-JSON and survives a JSON null', () => {
     expect(parseBrowserStreamMessage('not json')).toBeNull();
-    expect(parseBrowserStreamMessage('null')).toEqual({ refreshDescriptor: false, selection: null });
+    expect(parseBrowserStreamMessage('null')).toEqual({ refreshDescriptor: false, selection: null, error: null });
   });
 });
 

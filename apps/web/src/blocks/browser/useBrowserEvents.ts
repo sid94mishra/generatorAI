@@ -12,11 +12,13 @@ import { openMultiplexedStream } from '@/platform/muxStream.js';
 import { fetchBrowserDescriptor, type BrowserDescriptor } from './browserApi.js';
 import { parseBrowserStreamMessage, type BrowserSelection } from './browserEvents.js';
 
-export function useBrowserEvents({ open, workspaceId, onDescriptor, onSelection }: {
+export function useBrowserEvents({ open, workspaceId, onDescriptor, onSelection, onError }: {
   open: boolean;
   workspaceId: string | undefined;
   onDescriptor: (d: BrowserDescriptor) => void;
   onSelection: (sel: BrowserSelection) => void;
+  /** A page was blocked or the browser failed: show it, never fail silently. */
+  onError?: (message: string) => void;
 }): void {
   // The callbacks are read through refs so the subscription does not depend
   // on them. Otherwise a parent passing an inline callback re-runs the
@@ -25,10 +27,12 @@ export function useBrowserEvents({ open, workspaceId, onDescriptor, onSelection 
   // attached, silently losing the attachment.
   const onDescriptorRef = useRef(onDescriptor);
   const onSelectionRef = useRef(onSelection);
+  const onErrorRef = useRef(onError);
   useEffect(() => {
     onDescriptorRef.current = onDescriptor;
     onSelectionRef.current = onSelection;
-  }, [onDescriptor, onSelection]);
+    onErrorRef.current = onError;
+  }, [onDescriptor, onSelection, onError]);
 
   useEffect(() => {
     if (!open || !workspaceId) return;
@@ -44,6 +48,7 @@ export function useBrowserEvents({ open, workspaceId, onDescriptor, onSelection 
               void fetchBrowserDescriptor(workspaceId).then((d) => onDescriptorRef.current(d)).catch(() => undefined);
             }
             if (msg.selection) onSelectionRef.current(msg.selection);
+            if (msg.error) onErrorRef.current?.(msg.error);
           } catch { /* ignore */ }
         },
       },

@@ -31,9 +31,11 @@ export interface BrowserStreamMessage {
   refreshDescriptor: boolean;
   /** Set for a `browser.selection` that names its artifact. */
   selection: BrowserSelection | null;
+  /** A `browser.error` the user should see (a blocked page, a crash). */
+  error: string | null;
 }
 
-interface SelectionData { artifactId?: string; url?: string; cssSelector?: string; xpath?: string }
+interface SelectionData { artifactId?: string; url?: string; cssSelector?: string; xpath?: string; error?: string }
 
 /** Parse one stream message; null when it is not JSON. */
 export function parseBrowserStreamMessage(raw: string): BrowserStreamMessage | null {
@@ -48,7 +50,8 @@ export function parseBrowserStreamMessage(raw: string): BrowserStreamMessage | n
   const selection = kind === 'browser.selection' && body?.artifactId
     ? { url: body.url ?? '', cssSelector: body.cssSelector ?? '', xpath: body.xpath ?? '', artifactId: body.artifactId }
     : null;
-  return { refreshDescriptor: typeof kind === 'string' && DESCRIPTOR_EVENTS.has(kind), selection };
+  const error = kind === 'browser.error' && typeof body?.error === 'string' && body.error ? body.error : null;
+  return { refreshDescriptor: typeof kind === 'string' && DESCRIPTOR_EVENTS.has(kind), selection, error };
 }
 
 /** The chat attachment for an inspector pick: `element-<ts>.json`. */

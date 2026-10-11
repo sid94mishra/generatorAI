@@ -187,7 +187,7 @@ export function BrowserPanel({
     onCapture(selectionAttachment(sel), 'selection');
     setInspectorOn(false);
   };
-  useBrowserEvents({ open, workspaceId, onDescriptor: setDescriptor, onSelection });
+  useBrowserEvents({ open, workspaceId, onDescriptor: setDescriptor, onSelection, onError: setError });
 
   const liveContainerRef = useBrowserViewportResize({ open, workspaceId, ready: descriptor?.ready });
   const { scrollState, setScrollState } = useBrowserScrollState({ open, workspaceId, ready: descriptor?.ready, mode: descriptor?.mode });

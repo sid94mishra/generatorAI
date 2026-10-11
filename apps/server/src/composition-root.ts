@@ -3,7 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { AppConfig, ILogger, PersistedEvent } from '@generatorai/shared';
-import { createLogger, getMeter, readBoundedInt } from '@generatorai/shared';
+import { createLogger, getMeter, isLoopbackHost, readBoundedInt } from '@generatorai/shared';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
@@ -1758,6 +1758,9 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     logger,
     [electronBridgeAdapter, serverPlaywrightHost],
     {
+      // D-143: on a loopback-bound server (the desktop app's own), localhost
+      // is the user's dev server — the in-app browser's main use.
+      allowLoopback: isLoopbackHost(config.security.bindHost ?? '127.0.0.1'),
       // §1.P lists this variable as a documented cap the code did not honour.
       // Read it the same bounded way `ServerPlaywrightHost` does, so the two
       // readers of the same variable cannot disagree.
