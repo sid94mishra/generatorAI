@@ -4,8 +4,8 @@
 //
 // PageHeader (Projects / project / codebase / #n · state · Open on GitHub),
 // PageTitle (title; author · head → base · ± · files · commits), a status
-// card (mergeability, checks), tabs Files / Comments, and a rail with
-// "Review in chat" (the reason this page exists rather than a link to
+// card (mergeability, checks), tabs Files / Comments, and a rail with the
+// Merge control (D-146), "Review in chat" (the reason this page exists rather than a link to
 // GitHub: a chat on the PR's head branch seeded with the review prompt) and
 // the description. A file's diff is parsed and rendered only once it is
 // expanded — a PR with 200 files should not parse 200 patches to list names.
@@ -44,6 +44,7 @@ import { Textarea } from '@/ui/primitives/Textarea/Textarea.js';
 import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { DetailPage } from '@/ui/templates/DetailPage/DetailPage.js';
 import { PR_STATE_TONE } from './detail/PullRequestsTab.js';
+import { MergePullRequestCard } from './MergePullRequestCard.js';
 import { useNarrow } from '@/lib/useNarrow.js';
 import { formatWhen } from '@/lib/formatWhen.js';
 import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
@@ -291,7 +292,16 @@ export function PullRequestPage() {
       banner={
         <Card className="flex flex-wrap items-center gap-3 px-3.5 py-2.5 text-small">
           <span data-testid="pr-mergeable">
-            {data.mergeable === null ? (
+            {/* GitHub reports a merged or closed PR as "not mergeable": say what happened instead (D-146). */}
+            {data.state === 'merged' ? (
+              <span className="inline-flex items-center gap-1.5 text-run">
+                <Icon concept="merge" size={14} /> Merged into <span className="font-mono">{data.base}</span>
+              </span>
+            ) : data.state === 'closed' ? (
+              <span className="inline-flex items-center gap-1.5 text-fg-2">
+                <Icon concept="x" size={14} /> Closed without merging
+              </span>
+            ) : data.mergeable === null ? (
               <span className="inline-flex items-center gap-1.5 text-fg-2">
                 <Spinner size={12} /> Mergeability computing…
               </span>
@@ -305,7 +315,7 @@ export function PullRequestPage() {
               </span>
             )}
           </span>
-          {data.mergeableState ? <span className="text-fg-3">state: {data.mergeableState}</span> : null}
+          {data.mergeableState && data.state === 'open' ? <span className="text-fg-3">state: {data.mergeableState}</span> : null}
           {data.checks ? <ChecksLine checks={data.checks} /> : null}
         </Card>
       }
@@ -323,6 +333,7 @@ export function PullRequestPage() {
       content={tab === 'files' ? filesPanel : commentsPanel}
       rail={
         <>
+          <MergePullRequestCard projectId={projectId} codebaseId={codebaseId} pr={data} />
           <Card data-testid="pr-review-panel">
             <Card.Header title="Review in chat" />
             <Card.Body>

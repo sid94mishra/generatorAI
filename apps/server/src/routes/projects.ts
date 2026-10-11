@@ -5,12 +5,21 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import multer from 'multer';
-import { McpServerBodySchema, mcpCredentialNamespace } from '@generatorai/shared';
 import {
+  CloseIssueBodySchema,
+  CreateIssueBodySchema,
+  IssueCommentBodySchema,
+  McpServerBodySchema,
+  MergePullRequestBodySchema,
+  mcpCredentialNamespace,
+} from '@generatorai/shared';
+import {
+  CodebaseRemoteResolver,
   McpCredentialVault,
   WorktreeCleanupService,
   buildPullRequestReviewPrompt,
-  parseRepoSlug,
+  codebaseRepoDir,
+  mergePullRequest,
   redactTokens,
   toMcpServerEntry,
 } from '@generatorai/core';
@@ -24,10 +33,12 @@ import type {
   ProjectArtifactPrefEntry,
   ProjectArtifactPrefs,
   ProjectCodebase,
+  ProjectIssue,
   ProjectPullRequest,
   ProjectRunListItem,
   ProjectRunListPage,
   ProjectSummary,
+  ScmIssueState,
   ScmPullRequestState,
   WorkflowRun,
   WorktreeInfo,
@@ -951,46 +962,38 @@ export function createProjectRoutes(container: Container): Router {
   // Pull requests under a project (doc §6) + codebase readiness (doc §3)
   // ════════════════════════════════════════════════════════════════
 
-  /** Where a codebase's git repository actually lives on this host. */
-  function codebaseRepoDir(codebase: ProjectCodebase): string | null {
-    return codebase.clonePath || codebase.localPath || null;
+  /**
+   * `{ slug, provider }` for a codebase, or the user-facing reason why there
+   * is none (link a remote, connect an account) — never a generic 500. The
+   * same resolution backs the agent's GitHub tools (D-146).
+   */
+  const remotes = new CodebaseRemoteResolver({ git: gitManager, registry: sourceControlRegistry });
+  const resolveCodebaseRemote = (codebase: ProjectCodebase) => remotes.resolve(codebase);
+
+  /** Send the right error for a codebase that cannot reach its host: 409 when connecting the host is the fix. */
+  function sendUnresolved(res: Response, resolved: { reason: string; host?: string }): void {
+    if (resolved.host) {
+      res.status(409).json({ error: { code: 'SCM_NOT_CONNECTED', message: resolved.reason } });
+    } else {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: resolved.reason } });
+    }
   }
 
-  /**
-   * Resolve `{ slug, provider }` for a codebase, or the user-facing reason
-   * why there is none. Every failure mode here is something the user can act
-   * on (link a remote, connect an account), so it is phrased for them and
-   * never swallowed into a generic 500.
-   */
-  async function resolveCodebaseRemote(
-    codebase: ProjectCodebase,
+  /** The codebase + provider + repo slug for a codebase-scoped host route (creating an issue), or null once the error is sent. */
+  async function loadRepoTarget(
+    codebaseId: string,
+    res: Response,
   ): Promise<
-    | { ok: true; repoDir: string; slug: { owner: string; repo: string; host: string }; provider: ISourceControlProvider }
-    | { ok: false; reason: string; host?: string }
+    | { codebase: ProjectCodebase; repoDir: string; provider: ISourceControlProvider; slug: { owner: string; repo: string; host: string } }
+    | null
   > {
-    const repoDir = codebaseRepoDir(codebase);
-    if (!repoDir) return { ok: false, reason: 'This codebase has no local checkout yet' };
-
-    let remoteUrl: string | null = null;
-    try {
-      remoteUrl = await gitManager.getRemoteUrl(repoDir);
-    } catch (err) {
-      return { ok: false, reason: redactTokens(err instanceof Error ? err.message : String(err)) };
+    const codebase = await codebaseService.getCodebaseStatus(codebaseId);
+    const resolved = await resolveCodebaseRemote(codebase);
+    if (!resolved.ok) {
+      sendUnresolved(res, resolved);
+      return null;
     }
-    if (!remoteUrl) return { ok: false, reason: 'No git remote configured' };
-
-    const slug = parseRepoSlug(remoteUrl);
-    if (!slug) return { ok: false, reason: 'The git remote is not a recognisable repository URL' };
-
-    const provider = sourceControlRegistry.providerFor(slug.host);
-    if (!provider) {
-      return {
-        ok: false,
-        host: slug.host,
-        reason: `Remote host ${slug.host} is not connected — connect it in Settings → Source Control`,
-      };
-    }
-    return { ok: true, repoDir, slug, provider };
+    return { codebase, repoDir: resolved.repoDir, provider: resolved.provider, slug: resolved.slug };
   }
 
   /**
@@ -1002,6 +1005,7 @@ export function createProjectRoutes(container: Container): Router {
     codebaseId: string,
     numberRaw: string,
     res: Response,
+    noun = 'Pull request',
   ): Promise<
     | { codebase: ProjectCodebase; repoDir: string; provider: ISourceControlProvider; ref: PullRequestRef }
     | null
@@ -1009,31 +1013,25 @@ export function createProjectRoutes(container: Container): Router {
     const number = Number(numberRaw);
     if (!Number.isInteger(number) || number <= 0) {
       res.status(400).json({
-        error: { code: 'VALIDATION_ERROR', message: 'Pull request number must be a positive integer' },
+        error: { code: 'VALIDATION_ERROR', message: `${noun} number must be a positive integer` },
       });
       return null;
     }
-    const codebase = await codebaseService.getCodebaseStatus(codebaseId);
-    const resolved = await resolveCodebaseRemote(codebase);
-    if (!resolved.ok) {
-      if (resolved.host) {
-        res.status(409).json({ error: { code: 'SCM_NOT_CONNECTED', message: resolved.reason } });
-      } else {
-        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: resolved.reason } });
-      }
-      return null;
-    }
+    const target = await loadRepoTarget(codebaseId, res);
+    if (!target) return null;
     return {
-      codebase,
-      repoDir: resolved.repoDir,
-      provider: resolved.provider,
-      ref: {
-        owner: resolved.slug.owner,
-        repo: resolved.slug.repo,
-        number,
-        host: resolved.slug.host,
-      },
+      codebase: target.codebase,
+      repoDir: target.repoDir,
+      provider: target.provider,
+      ref: { owner: target.slug.owner, repo: target.slug.repo, number, host: target.slug.host },
     };
+  }
+
+  /** Reject a body that fails its schema with the first issue, phrased as `field: message`. */
+  function invalidBody(res: Response, error: { issues: Array<{ path: PropertyKey[]; message: string }> }): void {
+    const issue = error.issues[0];
+    const message = issue ? (issue.path.length ? `${issue.path.map(String).join('.')}: ${issue.message}` : issue.message) : 'Invalid request body';
+    res.status(400).json({ error: { code: 'VALIDATION_ERROR', message } });
   }
 
   // GET /projects/:id/pull-requests — every codebase's PRs in one list.
@@ -1221,6 +1219,164 @@ export function createProjectRoutes(container: Container): Router {
       }
 
       res.status(201).json({ chat });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST …/pull-requests/:number/merge — merge with a method, optionally
+  // deleting the head branch (D-146). A PR the host will not merge
+  // (conflicts, required checks, already merged) answers 409
+  // SCM_NOT_MERGEABLE with the host's reason.
+  router.post('/:id/codebases/:cid/pull-requests/:number/merge', async (req, res, next) => {
+    try {
+      const parsed = MergePullRequestBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        invalidBody(res, parsed.error);
+        return;
+      }
+      const target = await loadPullRequestTarget(String(req.params['cid']), String(req.params['number']), res);
+      if (!target) return;
+      const { method, deleteBranch, commitTitle, commitMessage } = parsed.data;
+      res.json(
+        await mergePullRequest(target.provider, target.ref, {
+          method,
+          ...(deleteBranch ? { deleteBranch } : {}),
+          ...(commitTitle ? { commitTitle } : {}),
+          ...(commitMessage ? { commitMessage } : {}),
+        }),
+      );
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ════════════════════════════════════════════════════════════════
+  // Issues under a project (D-146) — the same codebase → repository
+  // resolution as the pull requests above.
+  // ════════════════════════════════════════════════════════════════
+
+  // GET /projects/:id/issues — every codebase's issues in one list; a
+  // codebase that cannot be listed becomes an `unavailable` row.
+  router.get('/:id/issues', async (req, res, next) => {
+    try {
+      const stateRaw = req.query['state'];
+      const state: ScmIssueState | 'all' = stateRaw === 'closed' || stateRaw === 'all' ? stateRaw : 'open';
+      const labelsRaw = typeof req.query['labels'] === 'string' ? req.query['labels'] : '';
+      const labels = labelsRaw.split(',').map((l) => l.trim()).filter(Boolean);
+
+      const codebases = await codebaseService.getByProjectId(String(req.params['id']));
+      const items: ProjectIssue[] = [];
+      const unavailable: Array<{ codebaseId: string; alias: string; reason: string }> = [];
+
+      await Promise.all(
+        codebases.map(async (codebase) => {
+          const resolved = await resolveCodebaseRemote(codebase);
+          if (!resolved.ok) {
+            unavailable.push({ codebaseId: codebase.id, alias: codebase.alias, reason: resolved.reason });
+            return;
+          }
+          try {
+            const issues = await resolved.provider.listIssues({
+              owner: resolved.slug.owner,
+              repo: resolved.slug.repo,
+              state,
+              host: resolved.slug.host,
+              ...(labels.length > 0 ? { labels } : {}),
+            });
+            for (const issue of issues) {
+              items.push({ ...issue, codebaseId: codebase.id, codebaseAlias: codebase.alias });
+            }
+          } catch (err) {
+            unavailable.push({
+              codebaseId: codebase.id,
+              alias: codebase.alias,
+              reason: redactTokens(err instanceof Error ? err.message : String(err)),
+            });
+          }
+        }),
+      );
+
+      items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      res.json({ items, unavailable });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /projects/:id/codebases/:cid/issues — create an issue.
+  router.post('/:id/codebases/:cid/issues', async (req, res, next) => {
+    try {
+      const parsed = CreateIssueBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        invalidBody(res, parsed.error);
+        return;
+      }
+      const target = await loadRepoTarget(String(req.params['cid']), res);
+      if (!target) return;
+      const { title, body, labels } = parsed.data;
+      const issue = await target.provider.createIssue({
+        owner: target.slug.owner,
+        repo: target.slug.repo,
+        host: target.slug.host,
+        title,
+        ...(body ? { body } : {}),
+        ...(labels?.length ? { labels } : {}),
+      });
+      res.status(201).json(issue);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /projects/:id/codebases/:cid/issues/:number — the issue + its comments.
+  router.get('/:id/codebases/:cid/issues/:number', async (req, res, next) => {
+    try {
+      const target = await loadPullRequestTarget(String(req.params['cid']), String(req.params['number']), res, 'Issue');
+      if (!target) return;
+      const issue = await target.provider.getIssue(target.ref);
+      if (!issue) {
+        res.status(404).json({
+          error: { code: 'NOT_FOUND', message: `#${target.ref.number} is not an issue in ${target.ref.owner}/${target.ref.repo}` },
+        });
+        return;
+      }
+      const comments = issue.comments > 0 ? await target.provider.listIssueComments(target.ref) : [];
+      res.json({ issue, comments });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST …/issues/:number/comments — comment on an issue.
+  router.post('/:id/codebases/:cid/issues/:number/comments', async (req, res, next) => {
+    try {
+      const parsed = IssueCommentBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        invalidBody(res, parsed.error);
+        return;
+      }
+      const target = await loadPullRequestTarget(String(req.params['cid']), String(req.params['number']), res, 'Issue');
+      if (!target) return;
+      res.status(201).json(await target.provider.commentOnIssue(target.ref, parsed.data.body));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST …/issues/:number/close — close as completed / not planned, with an
+  // optional comment posted first.
+  router.post('/:id/codebases/:cid/issues/:number/close', async (req, res, next) => {
+    try {
+      const parsed = CloseIssueBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        invalidBody(res, parsed.error);
+        return;
+      }
+      const target = await loadPullRequestTarget(String(req.params['cid']), String(req.params['number']), res, 'Issue');
+      if (!target) return;
+      if (parsed.data.comment) await target.provider.commentOnIssue(target.ref, parsed.data.comment);
+      res.json(await target.provider.closeIssue(target.ref, parsed.data.reason ? { reason: parsed.data.reason } : {}));
     } catch (err) {
       next(err);
     }

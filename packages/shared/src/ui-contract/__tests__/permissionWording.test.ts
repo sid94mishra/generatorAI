@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { permissionWording } from '../permissionWording.js';
+import { toolDisplayName, toolStepKind } from '../toolVerbs.js';
 
 describe('permissionWording (D-107)', () => {
   it('names the action for the built-in kinds', () => {
@@ -18,6 +19,16 @@ describe('permissionWording (D-107)', () => {
     expect(permissionWording('mcp__generatorai-tools__screenshot_page', 'other')).toEqual({ title: 'Take a screenshot of the page?', kindLabel: 'Browser' });
     expect(permissionWording('render_widget', 'other')).toEqual({ title: 'Show a widget?', kindLabel: 'Widget' });
     expect(permissionWording('computer_click', 'other').kindLabel).toBe('Computer');
+  });
+
+  it('words the GitHub tools as GitHub actions, not file edits (D-146)', () => {
+    expect(permissionWording('github_create_issue', 'other')).toEqual({ title: 'Create a GitHub issue?', kindLabel: 'GitHub' });
+    expect(permissionWording('mcp__generatorai-tools__github_merge_pull_request', 'other')).toEqual({
+      title: 'Merge this pull request?',
+      kindLabel: 'GitHub',
+    });
+    expect(toolStepKind('github_create_issue')).toBe('tool');
+    expect(toolDisplayName('github_close_issue')).toBe('Close GitHub issue');
   });
 
   it('names an MCP connector and its tool', () => {

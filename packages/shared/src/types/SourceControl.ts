@@ -155,6 +155,97 @@ export interface ProjectPullRequestsResponse {
   unavailable: Array<{ codebaseId: string; alias: string; reason: string }>;
 }
 
+// ── Merging a pull request ──
+
+/** How a pull request lands on its base: a merge commit, one squashed commit, or rebased commits. */
+export type PullRequestMergeMethod = 'merge' | 'squash' | 'rebase';
+
+/** `POST /api/projects/:id/codebases/:cid/pull-requests/:number/merge` body. */
+export interface MergePullRequestRequest {
+  method: PullRequestMergeMethod;
+  /** Delete the head branch on the host once merged. */
+  deleteBranch?: boolean;
+  commitTitle?: string;
+  commitMessage?: string;
+}
+
+export interface MergePullRequestResult {
+  merged: boolean;
+  /** The merge (or squash / last rebased) commit on the base branch. */
+  sha?: string;
+  /** The host's own message ("Pull Request successfully merged"). */
+  message: string;
+  /** Present when `deleteBranch` was asked for: true when the host deleted it, false when it was already gone. */
+  branchDeleted?: boolean;
+  /** Why the head branch could not be deleted (the merge itself succeeded). */
+  branchDeleteError?: string;
+}
+
+// ── Issues ──
+
+export type IssueState = 'open' | 'closed';
+
+/** Why a closed issue was closed (GitHub's `state_reason`). */
+export type IssueCloseReason = 'completed' | 'not_planned';
+
+/** A host issue (never a pull request, even where the host lists both together). */
+export interface IssueSummary {
+  provider: SourceControlProviderId;
+  number: number;
+  title: string;
+  /** Markdown; empty when the issue has no description. */
+  body: string;
+  state: IssueState;
+  stateReason?: IssueCloseReason | 'reopened';
+  labels: string[];
+  author?: string;
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Number of comments on the issue. */
+  comments: number;
+}
+
+export interface IssueComment {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+  url?: string;
+}
+
+/** `GET /api/projects/:id/codebases/:cid/issues/:number`. */
+export interface IssueDetailResponse {
+  issue: IssueSummary;
+  comments: IssueComment[];
+}
+
+/** An issue row as listed under a project, with the codebase it belongs to. */
+export interface ProjectIssue extends IssueSummary {
+  codebaseId: string;
+  codebaseAlias: string;
+}
+
+export interface ProjectIssuesResponse {
+  items: ProjectIssue[];
+  /** Codebases that could not be listed, with a user-facing reason. */
+  unavailable: Array<{ codebaseId: string; alias: string; reason: string }>;
+}
+
+/** `POST /api/projects/:id/codebases/:cid/issues` body. */
+export interface CreateIssueRequest {
+  title: string;
+  body?: string;
+  labels?: string[];
+}
+
+/** `POST …/issues/:number/close` body. */
+export interface CloseIssueRequest {
+  reason?: IssueCloseReason;
+  /** Posted as a comment before the issue is closed. */
+  comment?: string;
+}
+
 /** Everything the client needs to decide which SCM actions to offer for one mount. */
 export interface RepoReadiness {
   alias: string;

@@ -157,3 +157,45 @@ function toolSummary(tool: ToolDefinition): string {
   if (!first) return tool.name;
   return first.length > 140 ? `${first.slice(0, 139)}…` : first;
 }
+
+/**
+ * D-146: platform tools that change something OUTSIDE the workspace on the user's account (a GitHub issue, a
+ * merged pull request). Stricter than `askBeforeRunning`: every one is refused while the turn plans, and an
+ * `always` tool (merging a pull request) asks a person in every permission mode — bypass included — and is
+ * refused where nobody can be asked (no approval channel, or no turn in flight). The others ask exactly like
+ * `askBeforeRunning` (in the asking modes, when there is an approval channel) and run unasked otherwise.
+ */
+export function askBeforeActing(
+  tools: readonly ToolDefinition[],
+  opts: { turnOf: () => TurnContext | undefined; port: GatePort | undefined; always: ReadonlySet<string> },
+): ToolDefinition[] {
+  return tools.map((tool) => {
+    const runBudgetMs = tool.timeoutMs ?? toolTimeoutMs();
+    const always = opts.always.has(tool.name);
+    return {
+      ...tool,
+      skipPermission: true,
+      timeoutMs: APPROVAL_WAIT_MS + runBudgetMs,
+      handler: async (args: Record<string, unknown>, ctx?: ToolCallContext) => {
+        const turn = opts.turnOf();
+        if (turn?.permissionMode === 'plan') {
+          throw new Error(`${tool.name} changes things outside the workspace; it is not available while planning.`);
+        }
+        const ask = always || (turn !== undefined && ASKING_MODES.has(turn.permissionMode));
+        if (!ask) return tool.handler(args, ctx);
+        if (!opts.port || !turn) {
+          // No approval channel (an unattended worker): the asking tools run as `askBeforeRunning` lets them; an
+          // `always` tool never runs without a person.
+          if (!always) return tool.handler(args, ctx);
+          throw new Error(`${tool.name} needs a person to approve it, and this session has no one to ask.`);
+        }
+        const answer = await opts.port.permission(
+          { type: 'other', description: toolSummary(tool), details: { toolName: tool.name, input: args, provider: 'platform' } },
+          turn,
+        );
+        if (!answer.granted) throw new Error(answer.reason ?? `Using ${tool.name} was not allowed.`);
+        return withBudget(tool.handler(args, ctx), runBudgetMs, tool.name);
+      },
+    };
+  });
+}

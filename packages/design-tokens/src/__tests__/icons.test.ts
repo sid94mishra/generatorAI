@@ -98,7 +98,7 @@ describe('mobile icon registry (02 §5.4)', () => {
 
   it('keeps the lucideOnly set exactly (a change is a deliberate edit here)', () => {
     expect(all.filter(([, d]) => d.lucideOnly).map(([c]) => c).sort()).toEqual(
-      ['agents', 'branch', 'changes', 'commit', 'diff', 'hook', 'pr', 'variable', 'webhook'].sort(),
+      ['agents', 'branch', 'changes', 'commit', 'diff', 'hook', 'issue', 'merge', 'pr', 'variable', 'webhook'].sort(),
     );
   });
 

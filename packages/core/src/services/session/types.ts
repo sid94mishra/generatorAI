@@ -24,6 +24,7 @@ import type { SystemArtifactService } from '../SystemArtifactService.js';
 import type { AgentInteractionService } from '../AgentInteractionService.js';
 import type { PlanService } from '../PlanService.js';
 import type { WorkflowToolHost } from '../../tools/workflows/WorkflowToolHost.js';
+import type { GitHubToolHost } from '../../tools/github/GitHubToolHost.js';
 
 /** Who a session belongs to. */
 export type SessionOwner =
@@ -89,6 +90,8 @@ export interface SessionComposerDeps {
   planService?: PlanService;
   /** The workflow tools (P06 WP-6.1): bound when the owner's `workflows` / `workflowAuthoring` groups are on. */
   workflowTools?: WorkflowToolHost;
+  /** The GitHub issue + merge tools (D-146): bound into project sessions whose project has a connected GitHub remote. */
+  githubTools?: GitHubToolHost;
 }
 
 /**

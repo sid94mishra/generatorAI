@@ -5,7 +5,7 @@
 // PageHeader (Projects / name · New chat · More), PageTitle (description +
 // mono meta: root path · created · retention · max codebases), the needs-you
 // Banner (G-01, filtered to the project), and tabs as PATH SEGMENTS (R-3):
-// /projects/:id/codebases|chats|runs|pull-requests|customization|settings,
+// /projects/:id/codebases|chats|runs|pull-requests|issues|customization|settings,
 // `codebases` by default. Each tab is its own file under ./detail (the
 // 1,389-line legacy page is split one file per tab).
 // ────────────────────────────────────────────────────────────────
@@ -33,18 +33,20 @@ import { useLiveCodebases } from './codebaseParts.js';
 import { ChatsTab } from './detail/ChatsTab.js';
 import { CodebasesTab } from './detail/CodebasesTab.js';
 import { CustomizationTab } from './detail/customization/CustomizationTab.js';
+import { IssuesTab } from './detail/IssuesTab.js';
 import { PullRequestsTab } from './detail/PullRequestsTab.js';
 import { RunsTab } from './detail/RunsTab.js';
 import { SettingsTab } from './detail/SettingsTab.js';
 import { formatShortDate, plural, retentionLabel } from './projectFormat.js';
 
-const TABS = ['codebases', 'chats', 'runs', 'pull-requests', 'customization', 'settings'] as const;
+const TABS = ['codebases', 'chats', 'runs', 'pull-requests', 'issues', 'customization', 'settings'] as const;
 type ProjectTab = (typeof TABS)[number];
 const TAB_LABEL: Record<ProjectTab, string> = {
   codebases: 'Codebases',
   chats: 'Chats',
   runs: 'Runs',
   'pull-requests': 'Pull requests',
+  issues: 'Issues',
   customization: 'Customization',
   settings: 'Settings',
 };
@@ -122,6 +124,9 @@ export function ProjectDetailPage() {
       break;
     case 'pull-requests':
       content = <PullRequestsTab projectId={id} />;
+      break;
+    case 'issues':
+      content = <IssuesTab projectId={id} />;
       break;
     case 'customization':
       content = <CustomizationTab projectId={id} />;

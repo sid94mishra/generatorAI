@@ -7,11 +7,20 @@ import type {
   IScmHttpClient,
   IScmProcessRunner,
   ISourceControlProvider,
+  ScmHttpResponse,
 } from './ports.js';
 import type {
   ChecksSummary,
   CheckConclusion,
+  CloseIssueInput,
+  CreateIssueInput,
   CreatePullRequestInput,
+  IssueComment,
+  IssueRef,
+  IssueSummary,
+  ListIssuesInput,
+  MergePullRequestInput,
+  MergePullRequestResult,
   ListPullRequestsInput,
   ProviderRepository,
   ProviderUser,
@@ -23,7 +32,7 @@ import type {
   PullRequestState,
   PullRequestSummary,
 } from './types.js';
-import { ProviderNotConfiguredError, SourceControlError } from './errors.js';
+import { ProviderNotConfiguredError, PullRequestNotMergeableError, SourceControlError } from './errors.js';
 
 export interface GitHubProviderOptions {
   /** GitHub token (PAT / installation). When absent, REST calls are unavailable. */
@@ -77,6 +86,22 @@ interface GitHubComment {
   path?: string;
   line?: number | null;
   original_line?: number | null;
+}
+
+interface GitHubIssue {
+  number: number;
+  html_url: string;
+  title: string;
+  body?: string | null;
+  state: string;
+  state_reason?: string | null;
+  labels?: Array<{ name?: string } | string>;
+  user?: { login?: string } | null;
+  comments?: number;
+  created_at?: string;
+  updated_at?: string;
+  /** Present when the "issue" is a pull request (the issues API lists both). */
+  pull_request?: unknown;
 }
 
 /**
@@ -354,6 +379,154 @@ export class GitHubProvider implements ISourceControlProvider {
     return first ? this.mapPr(first) : null;
   }
 
+  // ── Merge ──
+
+  async mergePullRequest(ref: PullRequestRef, input: MergePullRequestInput): Promise<MergePullRequestResult> {
+    this.requireToken('mergePullRequest');
+    const body: Record<string, unknown> = { merge_method: input.method };
+    if (input.commitTitle) body['commit_title'] = input.commitTitle;
+    if (input.commitMessage) body['commit_message'] = input.commitMessage;
+    const res = await this.http.request({
+      method: 'PUT',
+      url: `${this.repoBase(ref)}/pulls/${ref.number}/merge`,
+      headers: this.headers(),
+      body: JSON.stringify(body),
+      timeout: 30_000,
+    });
+    // 405: not mergeable (conflicts, required checks / reviews, protection,
+    // a method the repo does not allow); 409: the head moved under us.
+    if (res.status === 405 || res.status === 409) {
+      throw new PullRequestNotMergeableError(
+        `Pull request #${ref.number} cannot be merged: ${githubMessage(res.body) ?? 'the host refused the merge'}`,
+      );
+    }
+    if (res.status >= 400) {
+      throw new SourceControlError(describeFailure('merge the pull request', res));
+    }
+    const data = JSON.parse(res.body) as { sha?: string; merged?: boolean; message?: string };
+    const result: MergePullRequestResult = {
+      merged: data.merged ?? true,
+      message: data.message ?? 'Pull request merged',
+    };
+    if (data.sha) result.sha = data.sha;
+    return result;
+  }
+
+  async deleteBranch(owner: string, repo: string, branch: string, host?: string): Promise<boolean> {
+    this.requireToken('deleteBranch');
+    const refPath = branch.split('/').map(encodeURIComponent).join('/');
+    const res = await this.http.request({
+      method: 'DELETE',
+      url: `${this.apiBase(host)}/repos/${owner}/${repo}/git/refs/heads/${refPath}`,
+      headers: this.headers(),
+      timeout: 15_000,
+    });
+    if (res.status === 204 || res.status === 200) return true;
+    // "Reference does not exist": deleted already (the repo auto-deletes head branches).
+    if (res.status === 404 || res.status === 422) return false;
+    throw new SourceControlError(describeFailure(`delete the branch ${branch}`, res));
+  }
+
+  // ── Issues ──
+
+  async listIssues(input: ListIssuesInput): Promise<IssueSummary[]> {
+    this.requireToken('listIssues');
+    const params = new URLSearchParams({ state: input.state ?? 'open', per_page: '100' });
+    const labels = (input.labels ?? []).map((l) => l.trim()).filter(Boolean);
+    if (labels.length > 0) params.set('labels', labels.join(','));
+    const res = await this.http.request({
+      method: 'GET',
+      url: `${this.apiBase(input.host)}/repos/${input.owner}/${input.repo}/issues?${params.toString()}`,
+      headers: this.headers(),
+      timeout: 15_000,
+    });
+    if (res.status >= 400) {
+      throw new SourceControlError(describeFailure('list issues', res));
+    }
+    const arr = JSON.parse(res.body) as GitHubIssue[];
+    return arr.filter((i) => !i.pull_request).map(mapIssue);
+  }
+
+  async getIssue(ref: IssueRef): Promise<IssueSummary | null> {
+    this.requireToken('getIssue');
+    const res = await this.http.request({
+      method: 'GET',
+      url: `${this.repoBase(ref)}/issues/${ref.number}`,
+      headers: this.headers(),
+      timeout: 15_000,
+    });
+    if (res.status === 404 || res.status === 410) return null;
+    if (res.status >= 400) {
+      throw new SourceControlError(describeFailure(`read issue #${ref.number}`, res));
+    }
+    const issue = JSON.parse(res.body) as GitHubIssue;
+    return issue.pull_request ? null : mapIssue(issue);
+  }
+
+  async listIssueComments(ref: IssueRef): Promise<IssueComment[]> {
+    this.requireToken('listIssueComments');
+    const res = await this.http.request({
+      method: 'GET',
+      url: `${this.repoBase(ref)}/issues/${ref.number}/comments?per_page=100`,
+      headers: this.headers(),
+      timeout: 20_000,
+    });
+    if (res.status >= 400) {
+      throw new SourceControlError(describeFailure(`read the comments on issue #${ref.number}`, res));
+    }
+    return (JSON.parse(res.body) as GitHubComment[])
+      .map(mapIssueComment)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  async createIssue(input: CreateIssueInput): Promise<IssueSummary> {
+    this.requireToken('createIssue');
+    const body: Record<string, unknown> = { title: input.title };
+    if (input.body) body['body'] = input.body;
+    if (input.labels && input.labels.length > 0) body['labels'] = input.labels;
+    const res = await this.http.request({
+      method: 'POST',
+      url: `${this.apiBase(input.host)}/repos/${input.owner}/${input.repo}/issues`,
+      headers: this.headers(),
+      body: JSON.stringify(body),
+      timeout: 20_000,
+    });
+    if (res.status >= 400) {
+      throw new SourceControlError(describeFailure('create the issue', res));
+    }
+    return mapIssue(JSON.parse(res.body) as GitHubIssue);
+  }
+
+  async commentOnIssue(ref: IssueRef, body: string): Promise<IssueComment> {
+    this.requireToken('commentOnIssue');
+    const res = await this.http.request({
+      method: 'POST',
+      url: `${this.repoBase(ref)}/issues/${ref.number}/comments`,
+      headers: this.headers(),
+      body: JSON.stringify({ body }),
+      timeout: 20_000,
+    });
+    if (res.status >= 400) {
+      throw new SourceControlError(describeFailure(`comment on issue #${ref.number}`, res));
+    }
+    return mapIssueComment(JSON.parse(res.body) as GitHubComment);
+  }
+
+  async closeIssue(ref: IssueRef, input: CloseIssueInput = {}): Promise<IssueSummary> {
+    this.requireToken('closeIssue');
+    const res = await this.http.request({
+      method: 'PATCH',
+      url: `${this.repoBase(ref)}/issues/${ref.number}`,
+      headers: this.headers(),
+      body: JSON.stringify({ state: 'closed', state_reason: input.reason ?? 'completed' }),
+      timeout: 20_000,
+    });
+    if (res.status >= 400) {
+      throw new SourceControlError(describeFailure(`close issue #${ref.number}`, res));
+    }
+    return mapIssue(JSON.parse(res.body) as GitHubIssue);
+  }
+
   // ── REST create ──
 
   private async createViaApi(input: CreatePullRequestInput): Promise<PullRequest> {
@@ -430,6 +603,10 @@ export class GitHubProvider implements ISourceControlProvider {
     if (!this.options.token) {
       throw new ProviderNotConfiguredError(`GitHub ${op} requires a configured token`);
     }
+  }
+
+  private repoBase(ref: { owner: string; repo: string; host?: string }): string {
+    return `${this.apiBase(ref.host)}/repos/${ref.owner}/${ref.repo}`;
   }
 
   private apiBase(host?: string): string {
@@ -555,5 +732,70 @@ function mapComment(c: GitHubComment, kind: 'review' | 'issue'): PullRequestComm
     const line = c.line ?? c.original_line;
     if (typeof line === 'number') mapped.line = line;
   }
+  return mapped;
+}
+
+/** GitHub's own error text: `message` plus any field-level `errors[].message`. */
+function githubMessage(body: string): string | undefined {
+  try {
+    const data = JSON.parse(body) as { message?: unknown; errors?: unknown };
+    const parts: string[] = [];
+    if (typeof data.message === 'string' && data.message.trim()) parts.push(data.message.trim());
+    if (Array.isArray(data.errors)) {
+      for (const e of data.errors) {
+        const m = typeof e === 'string' ? e : (e as { message?: unknown } | null)?.message;
+        if (typeof m === 'string' && m.trim()) parts.push(m.trim());
+      }
+    }
+    return parts.length > 0 ? parts.join(' — ') : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A readable sentence for a failed call: what we tried, why the host said no, and the fix when it is ours to name. */
+function describeFailure(action: string, res: ScmHttpResponse): string {
+  const reason = githubMessage(res.body) ?? `HTTP ${res.status}`;
+  if (res.status === 401) {
+    return `GitHub could not ${action}: the connected account's token is invalid or expired — reconnect it in Settings → Source Control`;
+  }
+  if (res.status === 403) {
+    return `GitHub could not ${action}: ${reason} (the connected account needs write access to this repository)`;
+  }
+  if (res.status === 404) {
+    return `GitHub could not ${action}: not found, or the connected account cannot see this repository`;
+  }
+  if (res.status === 410) return `GitHub could not ${action}: issues are disabled for this repository`;
+  return `GitHub could not ${action} (${res.status}): ${reason}`;
+}
+
+function mapIssue(i: GitHubIssue): IssueSummary {
+  const issue: IssueSummary = {
+    provider: 'github',
+    number: i.number,
+    title: i.title,
+    body: i.body ?? '',
+    state: i.state === 'closed' ? 'closed' : 'open',
+    labels: (i.labels ?? []).map((l) => (typeof l === 'string' ? l : (l.name ?? ''))).filter(Boolean),
+    url: i.html_url,
+    createdAt: i.created_at ?? '',
+    updatedAt: i.updated_at ?? i.created_at ?? '',
+    comments: i.comments ?? 0,
+  };
+  if (i.user?.login) issue.author = i.user.login;
+  if (i.state_reason === 'completed' || i.state_reason === 'not_planned' || i.state_reason === 'reopened') {
+    issue.stateReason = i.state_reason;
+  }
+  return issue;
+}
+
+function mapIssueComment(c: GitHubComment): IssueComment {
+  const mapped: IssueComment = {
+    id: String(c.id),
+    author: c.user?.login ?? '',
+    body: c.body ?? '',
+    createdAt: c.created_at ?? '',
+  };
+  if (c.html_url) mapped.url = c.html_url;
   return mapped;
 }

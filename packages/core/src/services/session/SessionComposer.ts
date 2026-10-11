@@ -317,6 +317,13 @@ export class SessionComposer {
         },
       });
     }
+    // D-146 — the GitHub issue + merge tools, after the workflow tools (R-10). Workers never.
+    await this.binder.github(cfg, target, {
+      projectId: i.projectId,
+      enabled: !isWorker,
+      port: i.gates && i.attended ? withAgentToolPolicy(i.gates, projection.toolPolicy.groups) : undefined,
+      turnOf: () => this.turns.get(i.conversationId),
+    });
     this.binder.hooks(cfg, target);
     if (levels && toolCount(cfg) > toolsBefore) {
       if (levels.hostTools === 'none') {

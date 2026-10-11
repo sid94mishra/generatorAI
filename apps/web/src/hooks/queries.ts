@@ -12,6 +12,9 @@ import type {
   ScmGenerateRequest,
   OpenInEditorRequest,
   ChatSourceControlOptions,
+  MergePullRequestRequest,
+  CreateIssueRequest,
+  CloseIssueRequest,
 } from '@generatorai/shared';
 import type { HttpPlatformClient, RewindScope } from '../platform/HttpPlatformClient.js';
 import { formatTranscriptMarkdown } from '@generatorai/client-core';
@@ -1088,6 +1091,9 @@ export const scmKeys = {
     ['pull-request-files', projectId, codebaseId, number] as const,
   pullRequestComments: (projectId: string, codebaseId: string, number: number) =>
     ['pull-request-comments', projectId, codebaseId, number] as const,
+  projectIssuesAll: (projectId: string) => ['project-issues', projectId] as const,
+  projectIssues: (projectId: string, state: string) => ['project-issues', projectId, state] as const,
+  issue: (projectId: string, codebaseId: string, number: number) => ['issue', projectId, codebaseId, number] as const,
 };
 
 /** Accounts, generation model, editor + the login methods the server offers. */
@@ -1334,6 +1340,83 @@ export function useCreatePullRequestReviewChat(
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.chats });
     },
+  });
+}
+
+/**
+ * Merge a PR (D-146). Settles by refetching the PR (state → merged), the
+ * project's PR lists and the codebase readiness (a deleted head branch).
+ */
+export function useMergePullRequest(
+  projectId: string | undefined,
+  codebaseId: string | undefined,
+  number: number | undefined,
+) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: MergePullRequestRequest) => platform.mergePullRequest(projectId!, codebaseId!, number!, input),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: scmKeys.pullRequest(projectId ?? '', codebaseId ?? '', number ?? 0) });
+      void queryClient.invalidateQueries({ queryKey: ['project-pull-requests', projectId ?? ''] });
+      void queryClient.invalidateQueries({ queryKey: scmKeys.codebaseReadiness(projectId ?? '', codebaseId ?? '') });
+    },
+  });
+}
+
+/** Issues across every codebase of a project (D-146). */
+export function useProjectIssues(projectId: string | undefined, state: 'open' | 'closed' | 'all' = 'open') {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.projectIssues(projectId ?? '', state),
+    queryFn: () => platform.listProjectIssues(projectId!, state),
+    enabled: !!projectId,
+    staleTime: 30_000,
+  });
+}
+
+/** One issue with its comments. */
+export function useIssue(projectId: string | undefined, codebaseId: string | undefined, number: number | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.issue(projectId ?? '', codebaseId ?? '', number ?? 0),
+    queryFn: () => platform.getIssue(projectId!, codebaseId!, number!),
+    enabled: !!projectId && !!codebaseId && Number.isFinite(number),
+    staleTime: 15_000,
+  });
+}
+
+function invalidateIssue(queryClient: ReturnType<typeof useQueryClient>, projectId: string, codebaseId: string, number?: number) {
+  void queryClient.invalidateQueries({ queryKey: scmKeys.projectIssuesAll(projectId) });
+  if (number !== undefined) void queryClient.invalidateQueries({ queryKey: scmKeys.issue(projectId, codebaseId, number) });
+}
+
+/** Create an issue in one codebase's repository; the codebase is part of the input (the dialog picks it). */
+export function useCreateIssue(projectId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ codebaseId, ...input }: CreateIssueRequest & { codebaseId: string }) =>
+      platform.createIssue(projectId!, codebaseId, input),
+    onSuccess: (_issue, { codebaseId }) => invalidateIssue(queryClient, projectId ?? '', codebaseId),
+  });
+}
+
+export function useCommentOnIssue(projectId: string | undefined, codebaseId: string | undefined, number: number | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: string) => platform.commentOnIssue(projectId!, codebaseId!, number!, body),
+    onSuccess: () => invalidateIssue(queryClient, projectId ?? '', codebaseId ?? '', number),
+  });
+}
+
+export function useCloseIssue(projectId: string | undefined, codebaseId: string | undefined, number: number | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CloseIssueRequest) => platform.closeIssue(projectId!, codebaseId!, number!, input),
+    onSuccess: () => invalidateIssue(queryClient, projectId ?? '', codebaseId ?? '', number),
   });
 }
 

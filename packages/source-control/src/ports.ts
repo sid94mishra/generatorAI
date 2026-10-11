@@ -4,7 +4,15 @@
 
 import type {
   ChecksSummary,
+  CloseIssueInput,
+  CreateIssueInput,
   CreatePullRequestInput,
+  IssueComment,
+  IssueRef,
+  IssueSummary,
+  ListIssuesInput,
+  MergePullRequestInput,
+  MergePullRequestResult,
   ListPullRequestsInput,
   ProviderRepository,
   ProviderUser,
@@ -44,6 +52,25 @@ export interface ISourceControlProvider {
     headBranch: string,
     host?: string,
   ): Promise<PullRequestSummary | null>;
+
+  /**
+   * Merge a pull request. A PR the host refuses to merge (conflicts, required
+   * checks or reviews, a stale head) throws `PullRequestNotMergeableError`
+   * carrying the host's reason.
+   */
+  mergePullRequest(ref: PullRequestRef, input: MergePullRequestInput): Promise<MergePullRequestResult>;
+  /** Delete a branch on the host. False when it does not exist (already deleted). */
+  deleteBranch(owner: string, repo: string, branch: string, host?: string): Promise<boolean>;
+
+  // ── Issues (pull requests are never returned, even where the host lists them together) ──
+  listIssues(input: ListIssuesInput): Promise<IssueSummary[]>;
+  /** The issue, or null when there is none (or the number is a pull request). */
+  getIssue(ref: IssueRef): Promise<IssueSummary | null>;
+  /** Comments on an issue, oldest first. */
+  listIssueComments(ref: IssueRef): Promise<IssueComment[]>;
+  createIssue(input: CreateIssueInput): Promise<IssueSummary>;
+  commentOnIssue(ref: IssueRef, body: string): Promise<IssueComment>;
+  closeIssue(ref: IssueRef, input?: CloseIssueInput): Promise<IssueSummary>;
 }
 
 /** Minimal HTTP port (structurally compatible with core's IHttpClient). */

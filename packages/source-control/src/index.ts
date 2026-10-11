@@ -14,7 +14,7 @@ export type { ProviderFactoryDeps } from './providerFactory.js';
 export { SourceControlRegistry, hostFromAccount, normalizeHost } from './SourceControlRegistry.js';
 export { parseRepoSlug, isLocalRemote } from './parseRepoSlug.js';
 export type { RepoSlug } from './parseRepoSlug.js';
-export { ProviderNotConfiguredError, SourceControlError } from './errors.js';
+export { ProviderNotConfiguredError, PullRequestNotMergeableError, SourceControlError } from './errors.js';
 export type {
   ISourceControlProvider,
   IScmHttpClient,
@@ -27,7 +27,17 @@ export type {
   ActiveProvider,
   ChecksSummary,
   CheckConclusion,
+  CloseIssueInput,
+  CreateIssueInput,
   CreatePullRequestInput,
+  IssueCloseReason,
+  IssueComment,
+  IssueRef,
+  IssueSummary,
+  ListIssuesInput,
+  MergePullRequestInput,
+  MergePullRequestResult,
+  PullRequestMergeMethod,
   DeviceLoginStart,
   DeviceLoginStatus,
   ListPullRequestsInput,

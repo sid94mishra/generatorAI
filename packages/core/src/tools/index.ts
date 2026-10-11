@@ -63,3 +63,6 @@ export type {
   ExtensionAuthorToolName,
 } from './extensionAuthorTools.js';
 
+
+// GitHub issue + merge tools (D-146) — bound into project sessions.
+export * from './github/index.js';

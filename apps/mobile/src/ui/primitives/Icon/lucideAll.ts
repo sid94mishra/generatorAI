@@ -127,6 +127,8 @@ import LHide from 'lucide-react-native/icons/eye-off';
 import LGrip from 'lucide-react-native/icons/grip-vertical';
 import LLatest from 'lucide-react-native/icons/arrow-down';
 import LMinimize from 'lucide-react-native/icons/minimize-2';
+import LMerge from 'lucide-react-native/icons/git-merge';
+import LIssue from 'lucide-react-native/icons/circle-dot';
 
 export const LUCIDE_ALL = {
   'home': LHome,
@@ -256,4 +258,6 @@ export const LUCIDE_ALL = {
   'grip': LGrip,
   'latest': LLatest,
   'minimize': LMinimize,
+  'merge': LMerge,
+  'issue': LIssue,
 } as const;

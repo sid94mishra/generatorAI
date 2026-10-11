@@ -13,7 +13,7 @@ export const projectsRoutes: RouteObject[] = [
     () => import('@/features/projects/CreateProjectPage.js').then((m) => ({ default: m.CreateProjectPage })),
     { nav: 'projects', title: 'New project' },
   ),
-  // R-3: tabs are path segments (codebases|chats|runs|pull-requests|
+  // R-3: tabs are path segments (codebases|chats|runs|pull-requests|issues|
   // customization|settings); the codebase routes below outrank `:tab`.
   defineRoute(
     'projects/:id/:tab?',
@@ -29,5 +29,10 @@ export const projectsRoutes: RouteObject[] = [
     'projects/:id/codebases/:cid/pull-requests/:number',
     () => import('@/features/projects/PullRequestPage.js').then((m) => ({ default: m.PullRequestPage })),
     { nav: 'projects', title: 'Pull request' },
+  ),
+  defineRoute(
+    'projects/:id/codebases/:cid/issues/:number',
+    () => import('@/features/projects/IssuePage.js').then((m) => ({ default: m.IssuePage })),
+    { nav: 'projects', title: 'Issue' },
   ),
 ];

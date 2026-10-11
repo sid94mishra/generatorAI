@@ -111,6 +111,8 @@ import {
   SourceControlConfigService,
   SourceControlRegistry,
   RepoReadinessService,
+  CodebaseRemoteResolver,
+  GitHubToolHost,
   ScmTextGenerator,
   SourceControlFlowService,
   EditorLauncherService,
@@ -1733,7 +1735,14 @@ export async function createContainer(config: AppConfig, options: CreateContaine
       // Best effort — never block workspace deletion.
     }
   }, 'storage');
-  chatExtensions.codebaseRepo = projectCodebaseRepo;  // ── Integrated Browser (v13) ──
+  chatExtensions.codebaseRepo = projectCodebaseRepo;
+  // D-146 — the agent's GitHub issue + merge tools: the repository comes from
+  // the project's codebase remote, the token from the connected account.
+  chatExtensions.githubTools = new GitHubToolHost({
+    codebases: projectCodebaseRepo,
+    resolver: new CodebaseRemoteResolver({ git: gitManager, registry: scmRegistry }),
+  });
+  // ── Integrated Browser (v13) ──
   // BrowserService owns the per-workspace Chromium lifecycle. The bridge
   // chain is tried in order: `ElectronBridgeAdapter` first (only available
   // when running under the desktop shell with

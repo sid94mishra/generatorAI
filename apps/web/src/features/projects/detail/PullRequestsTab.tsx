@@ -25,7 +25,7 @@ type StateFilter = 'open' | 'closed' | 'all';
 export const PR_STATE_TONE: Record<ScmPullRequestState, BadgeTone> = { open: 'ok', merged: 'run', closed: 'err' };
 
 /** True when the reason is the one thing Settings › Source control can fix. */
-function isConnectReason(reason: string): boolean {
+export function isConnectReason(reason: string): boolean {
   return /not connected|connect it in settings|no account/i.test(reason);
 }
 

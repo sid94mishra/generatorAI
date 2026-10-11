@@ -99,6 +99,13 @@ export const TOOL_VERB_OVERRIDES: Readonly<Record<string, { done: string; live: 
   spawn_background_agent: { done: 'Delegated', live: 'Delegating' },
   // Claude Code's deferred-tool loader: "Loaded tools: Delegate, Check tasks".
   toolsearch: { done: 'Loaded tools', live: 'Loading tools' },
+  // D-146 — the GitHub tools act on the project's repository, not on files.
+  github_list_issues: { done: 'Listed issues', live: 'Listing issues' },
+  github_get_issue: { done: 'Read issue', live: 'Reading issue' },
+  github_create_issue: { done: 'Created issue', live: 'Creating issue' },
+  github_comment_issue: { done: 'Commented on issue', live: 'Commenting on issue' },
+  github_close_issue: { done: 'Closed issue', live: 'Closing issue' },
+  github_merge_pull_request: { done: 'Merged pull request', live: 'Merging pull request' },
 };
 
 /**
@@ -116,6 +123,12 @@ const TOOL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   list_available_agents: 'List agents',
   list_models: 'List models',
   toolsearch: 'Load tools',
+  github_list_issues: 'List GitHub issues',
+  github_get_issue: 'Read GitHub issue',
+  github_create_issue: 'Create GitHub issue',
+  github_comment_issue: 'Comment on GitHub issue',
+  github_close_issue: 'Close GitHub issue',
+  github_merge_pull_request: 'Merge pull request',
 };
 
 /** The orchestrator's own bookkeeping tools (spawning is `delegate`): plain tool calls, not sub-agents. */
@@ -224,6 +237,8 @@ export function toolStepKind(toolName: string): StepKind {
   if (n === 'task' || n === 'agent') return 'subagent';
   if (n === SPAWN_WORKER_TOOL) return 'delegate';
   if (n === 'toolsearch' || ORCHESTRATOR_TOOLS.has(n)) return 'tool';
+  // D-146 — before the substring rules, which would read `github_create_issue` as a file edit.
+  if (n.startsWith('github_')) return 'tool';
   if (n === 'todowrite' || n === 'update_plan' || n === 'exit_plan_mode') return 'plan';
   if (isShellTool(n)) return 'run';
   if (n.startsWith('computer_')) return 'computer';

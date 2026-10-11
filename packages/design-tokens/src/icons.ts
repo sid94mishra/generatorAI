@@ -175,6 +175,9 @@ const UI_CONCEPTS = {
   wand: { lucide: 'wand-sparkles', sfSymbol: 'wand.and.stars', material: 'wand_stars' },
   /** Narrow a list (the Activity column's filter menu, D-92). */
   filter: { lucide: 'list-filter', sfSymbol: 'line.3.horizontal.decrease', material: 'filter_list' },
+  /** GitHub domain glyphs (D-146): merging a pull request, an issue. */
+  merge: { lucide: 'git-merge', lucideOnly: true },
+  issue: { lucide: 'circle-dot', lucideOnly: true },
 } as const satisfies Record<string, IconConceptDef>;
 
 export const ICON_CONCEPTS = {

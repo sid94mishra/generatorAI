@@ -5,7 +5,7 @@
 // tool set and the hook bridge, for either owner (chat or stage). The chat
 // create path is the canonical order and must stay byte-identical (R-10):
 // browser → computer → widgets → SCM hint → [MCP] → custom → orchestrator →
-// workflows → hooks. The composer calls the methods in that order; each one
+// workflows → GitHub → hooks. The composer calls the methods in that order; each one
 // appends its tools and system block and nothing else. The workflow tools
 // (P06) come after every existing tool, so a session without them keeps
 // its tool prefix byte-identical.
@@ -19,7 +19,9 @@ import { buildWidgetTools } from '../../tools/widgetTools.js';
 import { buildOrchestratorToolSet } from '../../tools/orchestrator/index.js';
 import { isExtensionAuthorToolName } from '../../tools/extensionAuthorTools.js';
 import { buildWorkflowToolSet, WORKFLOW_AUTHORING_HINT, type WorkflowToolCaller, type WorkflowToolTurn } from '../../tools/workflows/index.js';
+import { buildGitHubToolSet, GITHUB_MERGE_TOOL_NAME, GITHUB_TOOLS_HINT } from '../../tools/github/index.js';
 import type { ToolCallContext } from '../../domain/ports/IAgentHarness.js';
+import { askBeforeActing, type GatePort } from './gates.js';
 import { ORCHESTRATOR_SYSTEM_PROMPT } from '../orchestrator/prompts.js';
 import type { StageOrchestratorParent } from '../orchestrator/OrchestratorService.js';
 import {
@@ -30,7 +32,7 @@ import {
   buildAutoCommitHint,
 } from '../chatSystemHints.js';
 import { appendSystemBlock, appendTools, unionList, type ConversationConfig } from './cfg.js';
-import { ownerId, ownerTag, type SessionComposerDeps, type SessionOwner } from './types.js';
+import { ownerId, ownerTag, type SessionComposerDeps, type SessionOwner, type TurnContext } from './types.js';
 
 /** What every binder method needs to know about the session it binds. */
 export interface BindTarget {
@@ -252,6 +254,34 @@ export class PlatformToolBinder {
     if (tools.length === 0) return;
     appendTools(cfg, tools);
     if (opts.authoring && host.hasAuthoring) appendSystemBlock(cfg, WORKFLOW_AUTHORING_HINT);
+  }
+
+  /**
+   * D-146 — the GitHub issue + merge tools, for a project session whose project
+   * has a codebase with a connected GitHub remote (checked once, at bind time).
+   * Reads run unasked; issue writes ask in the asking modes; merging always
+   * asks a person (refused without one); every write is refused while
+   * planning (`askBeforeActing`). Appended after the workflow tools (R-10).
+   */
+  async github(
+    cfg: ConversationConfig,
+    t: BindTarget,
+    opts: { projectId: string | undefined; enabled: boolean; port: GatePort | undefined; turnOf: () => TurnContext | undefined },
+  ): Promise<void> {
+    const host = this.deps.githubTools;
+    if (!host || !opts.enabled || !opts.projectId) return;
+    try {
+      if (!(await host.hasRepository(opts.projectId))) return;
+      const tools = askBeforeActing(buildGitHubToolSet(host, { projectId: opts.projectId }, { owner: ownerTag(t.owner) }), {
+        turnOf: opts.turnOf,
+        port: opts.port,
+        always: new Set([GITHUB_MERGE_TOOL_NAME]),
+      });
+      appendTools(cfg, tools);
+      appendSystemBlock(cfg, GITHUB_TOOLS_HINT);
+    } catch (err) {
+      console.warn(`[PlatformToolBinder] GitHub tool registration failed for ${ownerTag(t.owner)}:`, err);
+    }
   }
 
   /** The synchronous hook bridge (HKS-01), one factory for both owners. */

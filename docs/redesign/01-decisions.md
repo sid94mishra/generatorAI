@@ -1385,6 +1385,36 @@ on the page; the header has **Attach all** / **Send all**. The intent leads each
 menu is just **Open DevTools** (Network / Console / Inspect elements opened the same window). The toolbar's Reload
 bypasses the cache: found end to end — the agent fixed `style.css`, a plain reload kept the cached stylesheet.
 
+### D-146 GitHub: merge pull requests, an Issues tab, and issue tools for agents (2026-10-11) — Final
+A user could open PRs but not merge them, and had no issues at all, so "raise an issue, let a workflow fix it" was
+impossible. **Provider** (`ISourceControlProvider` / `GitHubProvider`): `mergePullRequest` (`PUT …/pulls/n/merge`,
+merge | squash | rebase; 405/409 → `PullRequestNotMergeableError`, 409 `SCM_NOT_MERGEABLE` with GitHub's reason),
+`deleteBranch` (a missing ref is "already deleted"), and `listIssues` (pull requests filtered out — the issues API
+lists both), `getIssue`, `listIssueComments`, `createIssue`, `commentOnIssue`, `closeIssue` (completed | not planned).
+Write failures are sentences (`401` → reconnect, `403` → needs write access, `410` → issues disabled). **Routes**:
+`POST …/pull-requests/:n/merge {method, deleteBranch?}` (one sequence, `mergePullRequest` in core: a merged, closed or
+draft PR is refused before GitHub is asked; a branch that cannot be deleted never fails a merge that happened —
+`branchDeleteError`), `GET /projects/:id/issues` (every codebase, `unavailable` rows like the PR list),
+`GET|POST …/codebases/:cid/issues[/:n]`, `POST …/issues/:n/comments`, `POST …/issues/:n/close {reason?, comment?}`;
+bodies validated by shared zod schemas (`SourceControlSchemas.ts`). The codebase → owner/repo → connected-account
+resolution is one core class, `CodebaseRemoteResolver`, shared by the routes and the tools. **Agent tools**
+(`tools/github`, bound by `PlatformToolBinder.github` after the workflow tools, R-10) into project chats and stages
+whose project has a codebase with a connected GitHub remote (checked at bind time); never into orchestrator workers.
+`github_list_issues` / `github_get_issue` run unasked; `github_create_issue` / `github_comment_issue` /
+`github_close_issue` ask through the session's permission gate in the asking modes (as D-102); `github_merge_pull_request`
+ALWAYS asks a person — bypass included — and is refused where nobody can be asked; every write is refused while the turn
+plans (`askBeforeActing`). The repository comes from the project (a `codebase` alias only when there are several), the
+token never leaves the provider. Gate cards read "Create a GitHub issue?" … "Merge this pull request?" (kind GitHub).
+**Web**: the PR page's rail gets a **Merge** card — split button (Merge pull request · Squash and merge · Rebase and
+merge), "Delete <head> after merging", an AlertDialog confirm, disabled with the reason (merged, closed, draft,
+mergeability computing, conflicts), a caution for blocked / unstable / behind; completion is a toast (a host job) and
+the PR refetches to Merged (the banner says "Merged into main", not GitHub's "not mergeable"). The project gets an
+**Issues** tab (Open / Closed / All, # · Issue + labels · Comments · Updated, **New issue** dialog, Connect GitHub on
+unreachable codebases) and an issue page (`/projects/:id/codebases/:cid/issues/:n`: Markdown body and comments, comment
+box, Close as completed / not planned, and **Fix in chat**, which opens the New chat dialog on the project with
+"Fix #N: title\n\nbody\n\nOpen a PR that closes #N." — the existing dialog, not a server-side chat, so the user picks
+agent, model and sources). New icon concepts `merge` and `issue` (lucide-only). Mobile parity is follow-up work.
+
 ### D-142 (withdrawn 2026-10-11) Local self-signed signing does not stop the Keychain prompt
 Tried and reverted: signing local builds with a self-signed "GeneratorAI Local Signing" identity kept the code signature
 stable, but macOS still asked for the "GeneratorAI Safe Storage" key after the next rebuild — Keychain access for

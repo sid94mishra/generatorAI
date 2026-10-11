@@ -35,6 +35,14 @@ const BROWSER_TITLES: Readonly<Record<string, string>> = {
   run_playwright_code: 'Run code in the browser?',
 };
 
+/** D-146 — the platform's GitHub tools that ask before they act. */
+const GITHUB_TITLES: Readonly<Record<string, string>> = {
+  github_create_issue: 'Create a GitHub issue?',
+  github_comment_issue: 'Comment on a GitHub issue?',
+  github_close_issue: 'Close a GitHub issue?',
+  github_merge_pull_request: 'Merge this pull request?',
+};
+
 /** `mcp__<server>__<tool>` → the server's name; undefined for any other tool. */
 function mcpServerOf(toolName: string): string | undefined {
   if (!toolName.startsWith('mcp__')) return undefined;
@@ -57,6 +65,8 @@ export function permissionWording(toolName: string, type: PermissionWordingType 
   if (type === 'network') return { title: name.includes('search') ? 'Search the web?' : 'Fetch this page?', kindLabel: 'Network' };
   if (connector) return { title: `Allow ${connector}: ${display}?`, kindLabel: `MCP · ${connector}` };
 
+  const github = GITHUB_TITLES[name];
+  if (github) return { title: github, kindLabel: 'GitHub' };
   const kind = toolStepKind(toolName);
   if (kind === 'browser') return { title: BROWSER_TITLES[name] ?? 'Use the browser?', kindLabel: 'Browser' };
   if (kind === 'computer') return { title: `Control the computer: ${display}?`, kindLabel: 'Computer' };

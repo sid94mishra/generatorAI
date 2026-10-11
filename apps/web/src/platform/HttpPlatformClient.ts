@@ -104,6 +104,14 @@ import type {
   PullRequestDetail as ScmPullRequestDetail,
   PullRequestFile as ScmPullRequestFile,
   PullRequestComment as ScmPullRequestComment,
+  MergePullRequestRequest as ScmMergePullRequestRequest,
+  MergePullRequestResult as ScmMergePullRequestResult,
+  ProjectIssuesResponse as ScmProjectIssues,
+  IssueSummary as ScmIssue,
+  IssueComment as ScmIssueComment,
+  IssueDetailResponse as ScmIssueDetail,
+  CreateIssueRequest as ScmCreateIssueRequest,
+  CloseIssueRequest as ScmCloseIssueRequest,
   OpenInEditorRequest as ScmOpenInEditorRequest,
   OpenInEditorResult as ScmOpenInEditorResult,
   ChatSourceControlOptions,
@@ -1941,6 +1949,54 @@ export class HttpPlatformClient implements IPlatformClient {
       `${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/pull-requests/${number}/review-chat`,
       { method: 'POST', body: JSON.stringify(input) },
     );
+  }
+
+  /** Merge a PR (D-146); 409 SCM_NOT_MERGEABLE carries the host's reason. */
+  async mergePullRequest(
+    projectId: string,
+    codebaseId: string,
+    number: number,
+    input: ScmMergePullRequestRequest,
+  ): Promise<ScmMergePullRequestResult> {
+    return apiFetch(
+      `${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/pull-requests/${number}/merge`,
+      { method: 'POST', body: JSON.stringify(input) },
+    );
+  }
+
+  /** Every open/closed issue across a project's codebases, plus the ones we
+   *  could not reach and why (D-146). */
+  async listProjectIssues(
+    projectId: string,
+    state: 'open' | 'closed' | 'all' = 'open',
+  ): Promise<ScmProjectIssues> {
+    const params = new URLSearchParams({ state });
+    return apiFetch(`${this.baseUrl}/api/projects/${projectId}/issues?${params}`);
+  }
+
+  async getIssue(projectId: string, codebaseId: string, number: number): Promise<ScmIssueDetail> {
+    return apiFetch(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/issues/${number}`);
+  }
+
+  async createIssue(projectId: string, codebaseId: string, input: ScmCreateIssueRequest): Promise<ScmIssue> {
+    return apiFetch(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/issues`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }
+
+  async commentOnIssue(projectId: string, codebaseId: string, number: number, body: string): Promise<ScmIssueComment> {
+    return apiFetch(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/issues/${number}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ body }),
+    });
+  }
+
+  async closeIssue(projectId: string, codebaseId: string, number: number, input: ScmCloseIssueRequest = {}): Promise<ScmIssue> {
+    return apiFetch(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/issues/${number}/close`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
   }
 
   /** Editors the SERVER host can launch, plus their URL scheme for the

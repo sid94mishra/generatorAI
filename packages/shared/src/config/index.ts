@@ -24,6 +24,16 @@ export type { ChildEnvOptions } from './childEnv.js';
 export { AppConfigSchema } from './AppConfig.js';
 export { McpServerBodySchema, McpTransportSchema, SystemMcpPrefsBodySchema } from './McpSchemas.js';
 export type { McpServerBody, SystemMcpPrefsBody } from './McpSchemas.js';
+export {
+  ISSUE_BODY_MAX,
+  ISSUE_TITLE_MAX,
+  PullRequestMergeMethodSchema,
+  MergePullRequestBodySchema,
+  CreateIssueBodySchema,
+  IssueCommentBodySchema,
+  CloseIssueBodySchema,
+} from './SourceControlSchemas.js';
+export type { MergePullRequestBody, CreateIssueBody, IssueCommentBody, CloseIssueBody } from './SourceControlSchemas.js';
 export type { AppConfig } from './AppConfig.js';
 export {
   McpServerConfigSchema,

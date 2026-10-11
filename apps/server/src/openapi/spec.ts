@@ -83,6 +83,19 @@ const prNumberParam = {
   schema: { type: 'integer', minimum: 1 },
 };
 
+const issueNumberParam = {
+  in: 'path',
+  name: 'number',
+  required: true,
+  description: 'Issue number',
+  schema: { type: 'integer', minimum: 1 },
+};
+
+const errorResponse = (description: string) => ({
+  description,
+  content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+});
+
 const runIdParam = {
   in: 'path',
   name: 'runId',
@@ -409,6 +422,81 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
                 alias: { type: 'string' },
                 reason: { type: 'string' },
               },
+              required: ['codebaseId', 'alias', 'reason'],
+            },
+          },
+        },
+        required: ['items', 'unavailable'],
+      },
+      MergePullRequestResult: {
+        type: 'object',
+        properties: {
+          merged: { type: 'boolean' },
+          sha: { type: 'string', description: 'The merge (or squash / last rebased) commit on the base branch.' },
+          message: { type: 'string', description: "The host's own message." },
+          branchDeleted: { type: 'boolean', description: 'Present when deleteBranch was asked for: false when the branch was already gone.' },
+          branchDeleteError: { type: 'string', description: 'Why the head branch could not be deleted (the merge itself succeeded).' },
+        },
+        required: ['merged', 'message'],
+      },
+      IssueSummary: {
+        type: 'object',
+        description: 'A host issue — never a pull request, even where the host lists both together.',
+        properties: {
+          provider: { type: 'string', enum: ['github'] },
+          number: { type: 'integer' },
+          title: { type: 'string' },
+          body: { type: 'string', description: 'Markdown; empty when the issue has no description.' },
+          state: { type: 'string', enum: ['open', 'closed'] },
+          stateReason: { type: 'string', enum: ['completed', 'not_planned', 'reopened'] },
+          labels: { type: 'array', items: { type: 'string' } },
+          author: { type: 'string' },
+          url: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+          comments: { type: 'integer', description: 'Number of comments.' },
+        },
+        required: ['provider', 'number', 'title', 'body', 'state', 'labels', 'url', 'createdAt', 'updatedAt', 'comments'],
+      },
+      IssueComment: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          author: { type: 'string' },
+          body: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' },
+          url: { type: 'string' },
+        },
+        required: ['id', 'author', 'body', 'createdAt'],
+      },
+      IssueDetailResponse: {
+        type: 'object',
+        properties: {
+          issue: { $ref: '#/components/schemas/IssueSummary' },
+          comments: { type: 'array', items: { $ref: '#/components/schemas/IssueComment' } },
+        },
+        required: ['issue', 'comments'],
+      },
+      ProjectIssue: {
+        allOf: [
+          { $ref: '#/components/schemas/IssueSummary' },
+          {
+            type: 'object',
+            properties: { codebaseId: { type: 'string' }, codebaseAlias: { type: 'string' } },
+            required: ['codebaseId', 'codebaseAlias'],
+          },
+        ],
+      },
+      ProjectIssuesResponse: {
+        type: 'object',
+        properties: {
+          items: { type: 'array', items: { $ref: '#/components/schemas/ProjectIssue' } },
+          unavailable: {
+            type: 'array',
+            description: 'Codebases that could not be listed, each with a user-facing reason.',
+            items: {
+              type: 'object',
+              properties: { codebaseId: { type: 'string' }, alias: { type: 'string' }, reason: { type: 'string' } },
               required: ['codebaseId', 'alias', 'reason'],
             },
           },
@@ -3612,6 +3700,139 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           },
           '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
           '409': { description: 'The remote host is not connected', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/projects/{id}/codebases/{cid}/pull-requests/{number}/merge': {
+      post: {
+        tags: ['SourceControl', 'Projects'],
+        summary: 'Merge a pull request (D-146)',
+        description:
+          'Merges with the chosen method and, when asked, deletes the head branch on the host. A merged, closed or draft PR, or one ' +
+          'the host refuses (conflicts, required checks or reviews, a moved head), answers 409 SCM_NOT_MERGEABLE with the reason. ' +
+          'A branch that cannot be deleted never fails a merge that happened: see branchDeleteError.',
+        parameters: [idParam, cidParam, prNumberParam],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  method: { type: 'string', enum: ['merge', 'squash', 'rebase'], default: 'merge' },
+                  deleteBranch: { type: 'boolean' },
+                  commitTitle: { type: 'string', maxLength: 256 },
+                  commitMessage: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Merged', content: { 'application/json': { schema: { $ref: '#/components/schemas/MergePullRequestResult' } } } },
+          '400': errorResponse('Invalid request'),
+          '409': errorResponse('The remote host is not connected (SCM_NOT_CONNECTED) or the PR cannot be merged (SCM_NOT_MERGEABLE)'),
+        },
+      },
+    },
+
+    // ── Source control: issues under a project (D-146) ──
+
+    '/api/projects/{id}/issues': {
+      get: {
+        tags: ['SourceControl', 'Projects'],
+        summary: 'Issues across every codebase of a project, newest activity first',
+        description: 'Pull requests are excluded. A codebase without a remote, without a connected account, or whose host call failed is listed under `unavailable`.',
+        parameters: [
+          idParam,
+          { in: 'query', name: 'state', required: false, schema: { type: 'string', enum: ['open', 'closed', 'all'] } },
+          { in: 'query', name: 'labels', required: false, description: 'Comma-separated: only issues carrying every label', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': { description: 'Issues + unavailable codebases', content: { 'application/json': { schema: { $ref: '#/components/schemas/ProjectIssuesResponse' } } } },
+        },
+      },
+    },
+    '/api/projects/{id}/codebases/{cid}/issues': {
+      post: {
+        tags: ['SourceControl', 'Projects'],
+        summary: "Create an issue in the codebase's repository",
+        parameters: [idParam, cidParam],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string', minLength: 1, maxLength: 256 },
+                  body: { type: 'string' },
+                  labels: { type: 'array', items: { type: 'string' } },
+                },
+                required: ['title'],
+              },
+            },
+          },
+        },
+        responses: {
+          '201': { description: 'Created issue', content: { 'application/json': { schema: { $ref: '#/components/schemas/IssueSummary' } } } },
+          '400': errorResponse('Invalid request'),
+          '409': errorResponse('The remote host is not connected'),
+        },
+      },
+    },
+    '/api/projects/{id}/codebases/{cid}/issues/{number}': {
+      get: {
+        tags: ['SourceControl', 'Projects'],
+        summary: 'An issue with its comments (oldest first)',
+        parameters: [idParam, cidParam, issueNumberParam],
+        responses: {
+          '200': { description: 'Issue + comments', content: { 'application/json': { schema: { $ref: '#/components/schemas/IssueDetailResponse' } } } },
+          '400': errorResponse('Invalid request'),
+          '404': errorResponse('Not an issue (missing, or a pull request)'),
+          '409': errorResponse('The remote host is not connected'),
+        },
+      },
+    },
+    '/api/projects/{id}/codebases/{cid}/issues/{number}/comments': {
+      post: {
+        tags: ['SourceControl', 'Projects'],
+        summary: 'Comment on an issue',
+        parameters: [idParam, cidParam, issueNumberParam],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { type: 'object', properties: { body: { type: 'string', minLength: 1 } }, required: ['body'] } } },
+        },
+        responses: {
+          '201': { description: 'Created comment', content: { 'application/json': { schema: { $ref: '#/components/schemas/IssueComment' } } } },
+          '400': errorResponse('Invalid request'),
+          '409': errorResponse('The remote host is not connected'),
+        },
+      },
+    },
+    '/api/projects/{id}/codebases/{cid}/issues/{number}/close': {
+      post: {
+        tags: ['SourceControl', 'Projects'],
+        summary: 'Close an issue as completed or not planned, optionally commenting first',
+        parameters: [idParam, cidParam, issueNumberParam],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  reason: { type: 'string', enum: ['completed', 'not_planned'], default: 'completed' },
+                  comment: { type: 'string' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'The closed issue', content: { 'application/json': { schema: { $ref: '#/components/schemas/IssueSummary' } } } },
+          '400': errorResponse('Invalid request'),
+          '409': errorResponse('The remote host is not connected'),
         },
       },
     },
