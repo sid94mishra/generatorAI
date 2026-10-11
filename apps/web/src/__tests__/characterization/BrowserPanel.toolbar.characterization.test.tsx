@@ -61,7 +61,8 @@ const OFF: BrowserDescriptorFixture = { status: 'off', mode: 'off', ready: false
 type PanelProps = React.ComponentProps<typeof BrowserPanel>;
 
 function panel(props: Partial<PanelProps> = {}): React.JSX.Element {
-  return <BrowserPanel workspaceId="ws-1" tabId="tab-1" open visible onClose={() => {}} {...props} />;
+  // A chat host by default (Annotate and Screenshot exist only where there is a chat to send to).
+  return <BrowserPanel workspaceId="ws-1" tabId="tab-1" open visible onClose={() => {}} onCapture={() => {}} {...props} />;
 }
 
 function renderPanel(props: Partial<PanelProps> = {}) {
@@ -74,8 +75,8 @@ function enableWebInteractivity(): void {
 }
 
 const urlBox = (): HTMLInputElement => screen.getByRole('textbox') as HTMLInputElement;
-const inspectButton = (): HTMLElement => screen.getByRole('button', { name: /^Comment — click elements/ });
-const captureButton = (): HTMLElement => screen.getByRole('button', { name: /^Capture region — drag/ });
+const inspectButton = (): HTMLElement => screen.getByTestId('browser-annotate');
+const captureButton = (): HTMLElement => screen.getByRole('button', { name: /^Screenshot an area — drag/ });
 
 async function submitUrl(value: string): Promise<void> {
   fireEvent.change(urlBox(), { target: { value } });

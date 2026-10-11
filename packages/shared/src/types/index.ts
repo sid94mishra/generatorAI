@@ -493,6 +493,7 @@ export type {
   BrowserPickResult,
   BrowserAnnotationSummary,
   BrowserAnnotatePollResult,
+  BrowserCaptureResult,
 } from './DesktopShell.js';
 
 // ── Chat ingest (mobile MG-09) ──

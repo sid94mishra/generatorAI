@@ -14,6 +14,7 @@
 // page (`stopState`, from `useTwoPhaseStop`), and only its face is derived here.
 // ────────────────────────────────────────────────────────────────
 
+import { BROWSER_COMMENTS_PROMPT, BROWSER_COMMENT_FILE } from '../../browser/browserAnnotations.js';
 import { useCallback, useRef } from 'react';
 import type { AgentMode, WorkspacePrepStatus } from '@generatorai/shared';
 import type { ComposerBlockingState, ComposerPrimaryAction } from '@generatorai/shared/ui-contract';
@@ -71,8 +72,6 @@ export interface ComposerSend {
   handleSend: () => Promise<void>;
 }
 
-const BROWSER_COMMENT_PROMPT =
-  'Please address the attached browser comment(s). Each .md file has my note and the element it is about; the .png shows it.';
 const ATTACHMENTS_PROMPT = 'Please take a look at the attached file(s).';
 
 export function useComposerSend({
@@ -165,9 +164,9 @@ export function useComposerSend({
         // The server needs words. Say what the attachments are for rather than
         // making the user type a sentence that adds nothing.
         const fromBrowser = [...currentAttachments.map((a) => a.file), ...captureFiles].some((f) =>
-          /^(element|region)-/.test(f.name),
+          BROWSER_COMMENT_FILE.test(f.name),
         );
-        prompt = fromBrowser ? BROWSER_COMMENT_PROMPT : ATTACHMENTS_PROMPT;
+        prompt = fromBrowser ? BROWSER_COMMENTS_PROMPT : ATTACHMENTS_PROMPT;
       }
 
       if (!prompt.trim() && currentAttachments.length + captureFiles.length === 0) {

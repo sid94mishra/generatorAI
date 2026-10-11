@@ -233,51 +233,65 @@ export interface NativeBrowserEvent {
   loading?: boolean;
 }
 
-/** Element-picker result returned by `pickElement`. Mirrors VS Code's
- * "select and attach UI elements to chat": the element's identity, HTML and
- * CSS, plus a cropped screenshot of just that element. */
+/** One browser comment (D-140), serialised by the in-page Annotate overlay
+ * when it is sent: the element's identity, HTML and curated CSS (or an area's
+ * box), the user's comment, and a screenshot of it in context — scrolled into
+ * view, padded, its numbered pin and outline visible. */
 export interface BrowserPickResult {
+  /** Stable key assigned by the overlay. */
+  key?: string;
+  /** The pin number the user saw. */
+  n?: number;
   url: string;
-  /** Lowercase tag name (e.g. 'div', 'h1', 'button'). */
+  /** The page title when it was sent. */
+  title?: string;
+  /** Lowercase tag name ('div', 'button'), or 'area' for a dragged area. */
   tag: string;
-  /** Element id, or null. */
   id: string | null;
-  /** Class list. */
   classes: string[];
-  /** Short human label like `div#hero.container` (DevTools-style). */
+  /** Short label like `button#buy.cta` (DevTools-style), or `area 320×120`. */
   label: string;
-  /** Trimmed visible text content (truncated). */
+  /** Trimmed visible text (truncated). */
   text: string;
   cssSelector: string;
   xpath: string;
   outerHtml: string;
+  /** Viewport-relative box at capture time. */
   boundingBox: { x: number; y: number; width: number; height: number };
-  /** Curated computed CSS declarations (subset, DevTools-relevant). */
+  viewport?: { width: number; height: number };
   computedStyle?: Record<string, string>;
-  /** PNG data URL of just the selected element's box, or null. */
+  /** PNG data URL of the element/area in context, or null. */
   screenshot?: string | null;
-  /** Stable key assigned by the in-page annotation overlay. */
-  key?: string;
-  /** User's free-text comment attached to this element. */
   comment?: string;
 }
 
-/** A lightweight annotation list entry (for the count badge + popover). */
+/** A comment as the tray lists it. */
 export interface BrowserAnnotationSummary {
   key: string;
   n: number;
   label: string;
   tag: string;
   comment: string;
+  /** A dragged area rather than an element. */
   region: boolean;
+  /** The element's visible text (empty for an area). */
+  text: string;
 }
 
-/** Result of an annotation poll: live comment count + the current list. */
+/** What the overlay reports on each poll. */
 export interface BrowserAnnotatePollResult {
-  /** Total live annotations currently pinned on the page. */
-  total: number;
-  /** Lightweight list of the current annotations. */
+  /** Saved comments, in pin order (drafts excluded). */
   items: BrowserAnnotationSummary[];
-  /** Full notes the user pressed the card "Send" button on (drained). */
-  sent: BrowserPickResult[];
+  /** The user pressed Esc with no card open: leave Annotate mode. */
+  exit: boolean;
+  /** The user pressed ⌘/Ctrl↵ in a card: send every comment now. */
+  sendAll: boolean;
+}
+
+/** A user screenshot of the page (`capture`). */
+export interface BrowserCaptureResult {
+  /** PNG data URL. */
+  dataUrl: string;
+  /** What was actually captured — 'full' can degrade to 'visible'. */
+  mode: 'visible' | 'full';
 }

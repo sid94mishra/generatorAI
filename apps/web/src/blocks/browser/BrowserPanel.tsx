@@ -39,7 +39,8 @@ import { BrowserToolbar } from './BrowserToolbar.js';
 import { DeviceEmulationBar } from './DeviceEmulationBar.js';
 import { useNativeBrowserAvailable } from './nativeBrowserBridge.js';
 import { NativeBrowserView } from './NativeBrowserView.js';
-import { useBrowserAnnotations, type BrowserCaptureHandler } from './useBrowserAnnotations.js';
+import { CommentTray } from './CommentTray.js';
+import { useBrowserAnnotations, type BrowserCaptureHandler, type BrowserSendHandler } from './useBrowserAnnotations.js';
 import { useBrowserCapture } from './useBrowserCapture.js';
 import { useBrowserDescriptor } from './useBrowserDescriptor.js';
 import { useBrowserEvents } from './useBrowserEvents.js';
@@ -68,6 +69,8 @@ export interface BrowserPanelProps {
   onClose?: () => void;
   /** Called when the user picks an inspector selection / region to send to chat. */
   onCapture?: BrowserCaptureHandler;
+  /** Send files as a message now (browser comments' "Send to agent"). */
+  onSend?: BrowserSendHandler;
   /** True while a chat / stage turn streams: locks the share toggle and shows the AgentBrowsingStrip. */
   agentBusy?: boolean;
   /** The agent driving the turn, for the AgentBrowsingStrip ("The agent" when omitted). */
@@ -152,7 +155,7 @@ function BrowserStatusBar({ descriptor, streamState, zoom }: {
 // ── Component ────────────────────────────────────────────────
 
 export function BrowserPanel({
-  workspaceId, tabId, open, onCapture, agentBusy = false, agentName, onTabStateChange, urlScopeKey, visible = true,
+  workspaceId, tabId, open, onCapture, onSend, agentBusy = false, agentName, onTabStateChange, urlScopeKey, visible = true,
 }: BrowserPanelProps): React.JSX.Element | null {
   const { resolvedTheme, themeId } = useTheme();
   // Colours of the overlays injected into native-browser pages (06 §4.4).
@@ -173,9 +176,9 @@ export function BrowserPanel({
 
   const {
     inspectorOn, setInspectorOn, captureMode, setCaptureMode,
-    annotateOn, annotateItems, commentsOpen, setCommentsOpen,
-    handleToggleInspector, handleToggleCapture, sendAnnotations, removeAnnotation, clearAnnotations,
-  } = useBrowserAnnotations({ open, workspaceId, nativeTabId, nativeAvailable, palette: overlayPalette, onCapture, setError });
+    annotateOn, items: comments, sending, notice,
+    toggleAnnotate, send: sendComments, openComment, removeComment, clearComments, screenshot,
+  } = useBrowserAnnotations({ open, workspaceId, nativeTabId, nativeAvailable, palette: overlayPalette, onCapture, onSend, setError });
 
   // Inspector selection → the chat composer via `onCapture`. One-shot:
   // Inspect turns off after a pick (InspectorScript.setEnabled(false)).
@@ -249,17 +252,12 @@ export function BrowserPanel({
         attachedToChat={attachedToChat}
         shareTitle={shareTitle}
         onToggleShare={() => { void handleToggleShare(); }}
-        commentOn={inspectorOn || annotateOn}
-        annotateOn={annotateOn}
-        onToggleComment={() => { void handleToggleInspector(); }}
+        canComment={!!(onCapture || onSend)}
+        annotateOn={inspectorOn || annotateOn}
+        commentCount={comments.length}
+        onToggleAnnotate={() => { void toggleAnnotate(); }}
         captureMode={captureMode}
-        onToggleCapture={() => { void handleToggleCapture(); }}
-        comments={annotateItems}
-        commentsOpen={commentsOpen}
-        onCommentsOpenChange={setCommentsOpen}
-        onSendComments={(keys) => { void sendAnnotations(keys); }}
-        onRemoveComment={(key) => { void removeAnnotation(key); }}
-        onClearComments={() => { void clearAnnotations(); }}
+        onScreenshot={(kind) => { void screenshot(kind); }}
         emulationOn={emulationOn}
         onToggleEmulation={handleToggleEmulation}
       />
@@ -281,19 +279,6 @@ export function BrowserPanel({
           onMobile={handleEmuMobile}
           onZoom={handleEmuZoom}
         />
-      )}
-
-      {/* Annotate-mode strip: the notes live inside the page (native WCV
-          overlay); reviewing and sending is the Comments popover. */}
-      {nativeAvailable && isOn && annotateOn && (
-        <div className="flex items-center gap-2 border-b border-line-soft bg-run-bg px-3 py-1.5 text-small text-fg-2">
-          <Icon concept="pointer" size={14} className="text-run" />
-          <span>
-            {annotateItems.length > 0
-              ? `${annotateItems.length} comment${annotateItems.length > 1 ? 's' : ''} — open Comments to review & send`
-              : 'Click an element or drag a region to leave a comment'}
-          </span>
-        </div>
       )}
 
       {error && (
@@ -367,6 +352,22 @@ export function BrowserPanel({
             </div>
           )}
         </div>
+      )}
+
+      {nativeAvailable && isOn && (onCapture || onSend) && (
+        <CommentTray
+          items={comments}
+          annotating={annotateOn}
+          sending={sending}
+          notice={notice}
+          canSendNow={!!onSend}
+          canAddToMessage={!!onCapture}
+          onSendNow={() => { void sendComments('now'); }}
+          onAddToMessage={() => { void sendComments('message'); }}
+          onOpen={(key) => { void openComment(key); }}
+          onRemove={(key) => { void removeComment(key); }}
+          onClear={() => { void clearComments(); }}
+        />
       )}
 
       {descriptor && <BrowserStatusBar descriptor={descriptor} streamState={streamState} zoom={nativeAvailable && emulationOn ? emuZoom : null} />}

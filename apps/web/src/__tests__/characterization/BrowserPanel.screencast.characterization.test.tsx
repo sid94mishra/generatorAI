@@ -83,7 +83,8 @@ class FakeResizeObserver {
 type PanelProps = React.ComponentProps<typeof BrowserPanel>;
 
 function panel(props: Partial<PanelProps> = {}): React.JSX.Element {
-  return <BrowserPanel workspaceId="ws-1" tabId="tab-1" open visible onClose={() => {}} {...props} />;
+  // A chat host by default (Annotate and Screenshot exist only where there is a chat to send to).
+  return <BrowserPanel workspaceId="ws-1" tabId="tab-1" open visible onClose={() => {}} onCapture={() => {}} {...props} />;
 }
 
 async function mountReady(props: Partial<PanelProps> = {}) {
@@ -103,7 +104,7 @@ async function paintFrame(): Promise<void> {
 }
 
 const liveView = (): HTMLElement => screen.getByRole('img', { name: 'Browser live view' });
-const inspectButton = (): HTMLElement => screen.getByRole('button', { name: /^Comment — click elements/ });
+const inspectButton = (): HTMLElement => screen.getByTestId('browser-annotate');
 const inputs = (): unknown[] => fetchStub.to('input').map((c) => c.body);
 /** The overlay scrollbar track: the only aria-hidden <div> the panel renders (BrowserPanel.tsx:2088-2098). */
 const scrollbar = (container: HTMLElement): HTMLElement | null => container.querySelector('div[aria-hidden="true"]');
@@ -361,7 +362,7 @@ describe('BrowserPanel screencast — keyboard input (BrowserPanel.tsx:983-997)'
 // ── Drag capture ─────────────────────────────────────────────
 
 describe('BrowserPanel screencast — drag capture (BrowserPanel.tsx:1000-1056)', () => {
-  const captureButton = (): HTMLElement => screen.getByRole('button', { name: /^Capture region — drag/ });
+  const captureButton = (): HTMLElement => screen.getByRole('button', { name: /^Screenshot an area — drag/ });
 
   async function drag(from: [number, number], to: [number, number]): Promise<void> {
     fireEvent.mouseDown(liveView(), { clientX: from[0], clientY: from[1] });

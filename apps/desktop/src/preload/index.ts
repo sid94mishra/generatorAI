@@ -231,8 +231,8 @@ const api = {
       ipcRenderer.invoke(BROWSER_IPC.setEmulation, tabId, params),
     setZoom: (tabId: string, factor: number): Promise<void> =>
       ipcRenderer.invoke(BROWSER_IPC.setZoom, tabId, factor),
-    pickElement: (tabId: string, palette?: AnnotationPalette): Promise<unknown> =>
-      ipcRenderer.invoke(BROWSER_IPC.pickElement, tabId, palette),
+    capture: (tabId: string, mode: 'visible' | 'full'): Promise<unknown> =>
+      ipcRenderer.invoke(BROWSER_IPC.capture, tabId, mode),
     captureRegion: (tabId: string, palette?: AnnotationPalette): Promise<string | null> =>
       ipcRenderer.invoke(BROWSER_IPC.captureRegion, tabId, palette),
     annotateStart: (tabId: string, palette: AnnotationPalette): Promise<void> =>
@@ -243,8 +243,8 @@ const api = {
       ipcRenderer.invoke(BROWSER_IPC.annotatePoll, tabId),
     annotateSend: (tabId: string, keys?: string[]): Promise<unknown> =>
       ipcRenderer.invoke(BROWSER_IPC.annotateSend, tabId, keys),
-    annotateRegion: (tabId: string): Promise<void> =>
-      ipcRenderer.invoke(BROWSER_IPC.annotateRegion, tabId),
+    annotateOpen: (tabId: string, key: string): Promise<void> =>
+      ipcRenderer.invoke(BROWSER_IPC.annotateOpen, tabId, key),
     annotateRemove: (tabId: string, key: string): Promise<void> =>
       ipcRenderer.invoke(BROWSER_IPC.annotateRemove, tabId, key),
     annotateClear: (tabId: string): Promise<void> =>

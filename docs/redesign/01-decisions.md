@@ -1318,6 +1318,25 @@ and never checkpointed again. `remove` now forgets the rows of each alias whose 
 (`CheckpointService.forgetRepo`, late-wired like the baseline capture). Also: the Sources popover header names the
 chat's project.
 
+### D-140 Browser comments: one Annotate mode, a tray under the page, one file per send (2026-10-11) — Final
+Owner: hover elements, comment, send one or many to the chat for a fix, drag for a screenshot. Modelled on the Codex
+in-app browser (Annotate: click an element or drag an area, comments go with the message), Cursor's browser Design
+Mode (point, describe, send) and Agentation (structured Markdown per annotation). The toolbar's Comment toggle,
+"Comments ▾" popover and region-comment camera become **Annotate** (count on the button) and **Screenshot ▾**
+(Visible area · Full page · Select an area…). In the page (`apps/desktop/src/main/annotate-overlay.ts`): hover shows an
+outline and a `tag.class W×H` chip; click selects an element, a drag ≥ 6px selects an area; either opens an anchored
+card — ↵ adds, ⇧↵ new line, ⌘/Ctrl↵ adds and sends everything, Esc cancels (a cancelled draft leaves no pin); a pin
+reopens its card; Esc with no card leaves the mode; leaving hides the pins and keeps the comments. The list is a
+**tray under the view** (`CommentTray`), never an overlay on it (an overlay hides the WebContentsView, D-19): numbered
+rows open their comment in the page; **Send to agent** sends a message now (a busy chat attaches it to the next one —
+no queue, D-29), **Add to message** puts it in the composer. A send is ONE `browser-comments-<stamp>.md` (page, then
+each numbered comment with element label, selector, text, size, HTML, computed CSS — or the area's box) plus one PNG
+per comment captured in context: scrolled into view, padded 32px, only its own pin and outline showing. Full page is
+CDP `captureBeyondViewport` (≤ 16k px tall), falling back to the viewport and saying so. Where there is no chat
+(workflow run page) Annotate and Screenshot are hidden. Removed: `pickElement` and `annotateRegion` IPC, the
+CommentsPopover, the 2-files-per-comment naming. Web (screencast) keeps the one-shot inspector pick and the dragged
+area capture under the same two buttons.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

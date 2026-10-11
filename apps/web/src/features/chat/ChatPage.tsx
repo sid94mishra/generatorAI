@@ -33,6 +33,8 @@ import { SourcesBlock } from '@/blocks/files/SourcesBlock.js';
 import { TerminalDockPanel, TerminalDockProvider, terminalTabLabel, type TerminalDockContextValue } from '@/blocks/terminal/terminalDock.js';
 import { BrowserDockPanel, BrowserDockProvider, browserDockTabLabel, type BrowserDockContextValue } from '@/blocks/browser/browserDock.js';
 import type { BrowserTabState } from '@/blocks/browser/useBrowserTabState.js';
+import { BROWSER_COMMENTS_PROMPT } from '@/blocks/browser/browserAnnotations.js';
+import type { BrowserSendHandler } from '@/blocks/browser/useBrowserAnnotations.js';
 import { ScmResultCard } from '@/blocks/scm/ScmResultCard.js';
 import { WidgetFrame } from '@/blocks/widgets/index.js';
 import { Workspace } from '@/ui/templates/Workspace/Workspace.js';
@@ -161,6 +163,20 @@ export function ChatPage() {
       setPendingCaptures((prev) => [...prev, { id: `${source}:${Date.now()}:${file.name}`, file, source, label: file.name }]),
     [],
   );
+  // Browser comments' "Send to agent": a message of its own, now. While a turn
+  // runs there is no queue (D-29), so they wait in the composer instead.
+  const { sendPrompt } = view;
+  const sendBrowserComments = useCallback<BrowserSendHandler>(
+    async (files) => {
+      if (isWorking) {
+        for (const file of files) addCapture('browser')(file);
+        return 'attached';
+      }
+      await sendPrompt({ prompt: BROWSER_COMMENTS_PROMPT, attachments: files });
+      return 'sent';
+    },
+    [isWorking, addCapture, sendPrompt],
+  );
   const onBrowserTabState = useCallback((tabId: string, s: BrowserTabState) => {
     setBrowserTabs((prev) => {
       const cur = prev[tabId];
@@ -174,11 +190,12 @@ export function ChatPage() {
       workspaceId: chat?.workspaceId,
       urlScopeKey: browserUrlScopeKey,
       onCapture: addCapture('browser'),
+      onSend: sendBrowserComments,
       agentBusy: isWorking,
       ...(agentName ? { agentName } : {}),
       onTabStateChange: onBrowserTabState,
     }),
-    [chat?.workspaceId, browserUrlScopeKey, addCapture, isWorking, agentName, onBrowserTabState],
+    [chat?.workspaceId, browserUrlScopeKey, addCapture, sendBrowserComments, isWorking, agentName, onBrowserTabState],
   );
   const terminalDock = useMemo<TerminalDockContextValue>(
     () => ({

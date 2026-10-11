@@ -232,7 +232,7 @@ describe('ChatInput — attachment-only sends (09 §5.1; 03 §6.1 #9)', () => {
     });
   });
 
-  it.each(['element-buy-17.md', 'region-17.png'])(
+  it.each(['browser-comments-20261011-090507.md', 'browser-comments-20261011-090507-1.png'])(
     'a capture named %s uses the browser-comment sentence (captures stay with the page)',
     async (name) => {
       const user = userEvent.setup();
@@ -242,7 +242,7 @@ describe('ChatInput — attachment-only sends (09 §5.1; 03 §6.1 #9)', () => {
       await waitFor(() => expect(customSendFn).toHaveBeenCalled());
       expect(customSendFn).toHaveBeenCalledWith({
         prompt:
-          'Please address the attached browser comment(s). Each .md file has my note and the element it is about; the .png shows it.',
+          'Please address my browser comments. The .md file lists each numbered comment with the element or area it is about; the matching .png shows it on the page.',
         attachments: [],
         mode: 'auto',
       });

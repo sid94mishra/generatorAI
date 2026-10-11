@@ -74,14 +74,20 @@ async function mount(props: Partial<PanelProps> = {}) {
 }
 
 const urlBox = (): HTMLInputElement => screen.getByRole('textbox') as HTMLInputElement;
-const inspectButton = (): HTMLElement => screen.getByRole('button', { name: /^Comment(ing)? — click elements/ });
+const annotateButton = (): HTMLElement => screen.getByTestId('browser-annotate');
 
 function annotation(key: string, n: number, comment: string) {
-  return { key, n, label: `div.item-${n}`, tag: 'div', comment, region: false };
+  return { key, n, label: `div.item-${n}`, tag: 'div', comment, region: false, text: '' };
+}
+
+function polled(items: ReturnType<typeof annotation>[], flags: Partial<{ exit: boolean; sendAll: boolean }> = {}) {
+  return { items, exit: false, sendAll: false, ...flags };
 }
 
 function pick(overrides: Partial<{ id: string | null; screenshot: string | null; comment: string }> = {}) {
   return {
+    key: 'k1',
+    n: 1,
     url: 'https://example.com/',
     tag: 'button',
     id: 'buy',
@@ -223,139 +229,178 @@ describe('BrowserPanel native — URL bar and tab label', () => {
   });
 });
 
-// ── Annotate (Inspect) ───────────────────────────────────────
+// ── Annotate (D-140) ─────────────────────────────────────────
 
-describe('BrowserPanel native — annotate mode (BrowserPanel.tsx:728-824)', () => {
-  it('Inspect starts annotate in the page (palette passed), polls every 400 ms, and stops on the second click', async () => {
-    await mount();
-    fireEvent.click(inspectButton());
+describe('BrowserPanel native — Annotate, the comment tray and screenshots', () => {
+  type SendResult = 'sent' | 'attached';
+  const sendTo = { onCapture: vi.fn(), onSend: vi.fn(async (): Promise<SendResult> => 'sent') };
+  beforeEach(() => {
+    sendTo.onCapture = vi.fn();
+    sendTo.onSend = vi.fn(async (): Promise<SendResult> => 'sent');
+  });
+
+  it('Annotate starts the in-page overlay (palette passed), polls every 400 ms, shows the hint, and stops on the second click', async () => {
+    await mount(sendTo);
+    fireEvent.click(annotateButton());
     await flush();
-    // P4-06 (06 §4.4): the injected overlay takes a token-derived palette instead of 'light' | 'dark'.
     expect(bridge.api.annotateStart).toHaveBeenCalledWith(
       'tab-1',
       expect.objectContaining({ accent: expect.stringMatching(/^#[0-9a-f]{6}$/i) }),
     );
     expect(fetchStub.count('actions')).toBe(0); // no server inspector in native mode
-    expect(inspectButton()).toHaveAttribute('aria-pressed', 'true');
-    expect(inspectButton()).toHaveAttribute('title', 'Commenting — click elements to leave notes; click to exit');
-    expect(screen.getByText('Click an element or drag a region to leave a comment')).toBeInTheDocument();
+    expect(annotateButton()).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Click an element or drag across an area to comment.')).toBeInTheDocument();
 
     expect(bridge.api.annotatePoll).toHaveBeenCalledTimes(1);
-    await advance(399);
-    expect(bridge.api.annotatePoll).toHaveBeenCalledTimes(1);
-    await advance(1);
-    expect(bridge.api.annotatePoll).toHaveBeenCalledTimes(2);
     await advance(400);
-    expect(bridge.api.annotatePoll).toHaveBeenCalledTimes(3);
+    expect(bridge.api.annotatePoll).toHaveBeenCalledTimes(2);
 
-    fireEvent.click(inspectButton());
+    fireEvent.click(annotateButton());
     await flush();
     expect(bridge.api.annotateStop).toHaveBeenCalledWith('tab-1');
-    expect(inspectButton()).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.queryByRole('button', { name: /^Comments \(/ })).toBeNull();
+    expect(annotateButton()).toHaveAttribute('aria-pressed', 'false');
+    // No comments and the mode off: nothing left to track, and the tray is gone.
+    expect(screen.queryByTestId('browser-comment-tray')).toBeNull();
     const polls = bridge.api.annotatePoll.mock.calls.length;
     await advance(2000);
     expect(bridge.api.annotatePoll).toHaveBeenCalledTimes(polls);
   });
 
-  it('the poll drives the Comments count and the status strip', async () => {
-    bridge.api.annotatePoll.mockResolvedValue({ total: 2, items: [annotation('a', 1, ''), annotation('b', 2, 'fix')], sent: [] });
-    await mount();
-    fireEvent.click(inspectButton());
+  it('the tray lists saved comments; the count rides on the Annotate button', async () => {
+    bridge.api.annotatePoll.mockResolvedValue(polled([annotation('a', 1, 'Make it bigger'), annotation('b', 2, 'Fix the spacing')]));
+    await mount(sendTo);
+    fireEvent.click(annotateButton());
     await flush();
-    expect(screen.getByRole('button', { name: 'Comments (2)' })).toBeInTheDocument();
-    expect(screen.getByText('2 comments — open Comments to review & send')).toBeInTheDocument();
+    const tray = screen.getByTestId('browser-comment-tray');
+    expect(within(tray).getByText('Make it bigger')).toBeInTheDocument();
+    expect(within(tray).getByText('Fix the spacing')).toBeInTheDocument();
+    expect(within(annotateButton()).getByText('2')).toBeInTheDocument();
   });
 
-  it('cards sent from inside the page are attached as element-*.md (+ .png when there is a screenshot)', async () => {
-    const onCapture = vi.fn();
-    bridge.api.annotatePoll.mockResolvedValueOnce({
-      total: 0, items: [], sent: [pick({ screenshot: 'data:image/png;base64,iVBORw0KGgo=' })],
-    });
-    await mount({ onCapture });
-    fireEvent.click(inspectButton());
+  it('"Send to agent" sends one Markdown file + a PNG per comment as a message, says so, and leaves the mode', async () => {
+    bridge.api.annotatePoll.mockResolvedValue(polled([annotation('k1', 1, 'make it blue')]));
+    bridge.api.annotateSend.mockResolvedValueOnce([pick({ screenshot: 'data:image/png;base64,iVBORw0KGgo=' })]);
+    await mount(sendTo);
+    fireEvent.click(annotateButton());
     await flush();
-    expect(onCapture).toHaveBeenCalledTimes(2);
-    const [md, mdKind] = onCapture.mock.calls[0] as [File, string];
-    const [png, pngKind] = onCapture.mock.calls[1] as [File, string];
-    expect(mdKind).toBe('selection');
-    expect(md.name).toMatch(/^element-buy-\d+-[a-z0-9]+\.md$/);
-    expect(md.type).toBe('text/markdown');
-    const text = await md.text();
-    expect(text).toContain('# UI change request');
-    expect(text).toContain('**Requested change:** make it blue');
-    expect(text).toContain('- **CSS selector:** `#buy`');
-    expect(pngKind).toBe('screenshot');
-    expect(png.name).toMatch(/^element-buy-\d+-[a-z0-9]+\.png$/);
-    expect(png.type).toBe('image/png');
-  });
-
-  it('"Send all to chat" appears only when at least one annotation has a comment, and drains all', async () => {
-    const onCapture = vi.fn();
-    bridge.api.annotatePoll.mockResolvedValue({ total: 1, items: [annotation('a', 1, '')], sent: [] });
-    await mount({ onCapture });
-    fireEvent.click(inspectButton());
-    await flush();
-    fireEvent.click(screen.getByRole('button', { name: 'Comments (1)' }));
-    await flush();
-    const menu = screen.getByRole('dialog');
-    expect(within(menu).getByText('No comment yet')).toBeInTheDocument();
-    expect(within(menu).getByRole('button', { name: 'Send this comment to chat' })).toBeDisabled();
-    expect(within(menu).queryByRole('button', { name: /Send all to chat/ })).toBeNull();
-
-    bridge.api.annotatePoll.mockResolvedValue({ total: 1, items: [annotation('a', 1, 'make it blue')], sent: [] });
-    await advance(400);
-    bridge.api.annotateSend.mockResolvedValueOnce([pick()]);
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Send all to chat/ }));
+    fireEvent.click(screen.getByTestId('browser-comments-send'));
     await flush();
     expect(bridge.api.annotateSend).toHaveBeenCalledWith('tab-1', undefined);
-    expect(onCapture).toHaveBeenCalledWith(expect.any(File), 'selection');
+    expect(sendTo.onSend).toHaveBeenCalledTimes(1);
+    const files = (sendTo.onSend.mock.calls[0] as unknown as [File[]])[0];
+    expect(files.map((f) => f.name)).toEqual([
+      expect.stringMatching(/^browser-comments-\d{8}-\d{6}\.md$/),
+      expect.stringMatching(/^browser-comments-\d{8}-\d{6}-1\.png$/),
+    ]);
+    expect(await files[0]!.text()).toContain('## 1. make it blue');
+    expect(sendTo.onCapture).not.toHaveBeenCalled();
+    expect(screen.getByTestId('browser-comment-notice')).toHaveTextContent('Sent 1 comment to the agent');
+    expect(bridge.api.annotateStop).toHaveBeenCalledWith('tab-1');
   });
 
-  it('per-item send drains just that key; delete removes it', async () => {
-    bridge.api.annotatePoll.mockResolvedValue({ total: 1, items: [annotation('k1', 1, 'note')], sent: [] });
-    await mount({ onCapture: vi.fn() });
-    fireEvent.click(inspectButton());
+  it('"Add to message" puts the files in the composer instead', async () => {
+    bridge.api.annotatePoll.mockResolvedValue(polled([annotation('k1', 1, 'make it blue')]));
+    bridge.api.annotateSend.mockResolvedValueOnce([pick({ screenshot: 'data:image/png;base64,iVBORw0KGgo=' })]);
+    await mount(sendTo);
+    fireEvent.click(annotateButton());
     await flush();
-    fireEvent.click(screen.getByRole('button', { name: 'Comments (1)' }));
+    fireEvent.click(screen.getByTestId('browser-comments-add'));
     await flush();
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Send this comment to chat' }));
+    expect(sendTo.onSend).not.toHaveBeenCalled();
+    expect(sendTo.onCapture.mock.calls.map(([f, kind]) => [(f as File).type, kind])).toEqual([
+      ['text/markdown', 'selection'],
+      ['image/png', 'screenshot'],
+    ]);
+    expect(screen.getByTestId('browser-comment-notice')).toHaveTextContent('Added 1 comment to your message');
+  });
+
+  it('a busy chat keeps the comments for the next message, and the tray says so', async () => {
+    sendTo.onSend = vi.fn(async (): Promise<SendResult> => 'attached');
+    bridge.api.annotatePoll.mockResolvedValue(polled([annotation('k1', 1, 'make it blue')]));
+    bridge.api.annotateSend.mockResolvedValueOnce([pick()]);
+    await mount(sendTo);
+    fireEvent.click(annotateButton());
     await flush();
-    expect(bridge.api.annotateSend).toHaveBeenCalledWith('tab-1', ['k1']);
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete this comment' }));
+    fireEvent.click(screen.getByTestId('browser-comments-send'));
+    await flush();
+    expect(screen.getByTestId('browser-comment-notice')).toHaveTextContent('The agent is busy — 1 comment added to your next message');
+  });
+
+  it('acts on the page: ⌘↵ in a card sends everything; Esc with no card leaves the mode', async () => {
+    bridge.api.annotatePoll.mockResolvedValueOnce(polled([annotation('k1', 1, 'note')], { sendAll: true }));
+    bridge.api.annotateSend.mockResolvedValueOnce([pick()]);
+    await mount(sendTo);
+    fireEvent.click(annotateButton());
+    await flush();
+    await flush();
+    expect(bridge.api.annotateSend).toHaveBeenCalledWith('tab-1', undefined);
+    expect(sendTo.onSend).toHaveBeenCalledTimes(1);
+
+    bridge.api.annotatePoll.mockResolvedValue(polled([], { exit: true }));
+    fireEvent.click(annotateButton());
+    await flush();
+    await advance(400);
+    expect(annotateButton()).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('a row opens its comment in the page; delete and Clear go to the page too', async () => {
+    bridge.api.annotatePoll.mockResolvedValue(polled([annotation('k1', 1, 'note')]));
+    await mount(sendTo);
+    fireEvent.click(annotateButton());
+    await flush();
+    fireEvent.click(screen.getByTestId('browser-comment-row'));
+    await flush();
+    expect(bridge.api.annotateOpen).toHaveBeenCalledWith('tab-1', 'k1');
+    fireEvent.click(screen.getByRole('button', { name: 'Delete comment 1' }));
     await flush();
     expect(bridge.api.annotateRemove).toHaveBeenCalledWith('tab-1', 'k1');
+    fireEvent.click(within(screen.getByTestId('browser-comment-tray')).getByRole('button', { name: 'Clear' }));
+    await flush();
+    expect(bridge.api.annotateClear).toHaveBeenCalledWith('tab-1');
   });
 
-  it('Capture in native mode is a region comment: starts annotate if needed, then annotateRegion — no /capture', async () => {
-    await mount();
-    fireEvent.click(screen.getByRole('button', { name: /^Comment on a region — drag/ }));
-    await flush();
-    expect(bridge.api.annotateStart).toHaveBeenCalledTimes(1);
-    expect(bridge.api.annotateRegion).toHaveBeenCalledWith('tab-1');
-    expect(inspectButton()).toHaveAttribute('aria-pressed', 'true');
+  it('Screenshot adds the visible area, the full page (or says it fell back), or a dragged area to the message', async () => {
+    await mount(sendTo);
+    const choose = async (name: string) => {
+      fireEvent.click(screen.getByTestId('browser-screenshot'));
+      await flush();
+      fireEvent.click(screen.getByRole('menuitem', { name }));
+      await flush();
+    };
+    bridge.api.capture.mockResolvedValueOnce({ dataUrl: 'data:image/png;base64,iVBORw0KGgo=', mode: 'visible' });
+    await choose('Visible area');
+    expect(bridge.api.capture).toHaveBeenLastCalledWith('tab-1', 'visible');
+    expect((sendTo.onCapture.mock.calls[0]![0] as File).name).toMatch(/^screenshot-visible-\d{8}-\d{6}\.png$/);
+
+    bridge.api.capture.mockResolvedValueOnce({ dataUrl: 'data:image/png;base64,iVBORw0KGgo=', mode: 'visible' });
+    await choose('Full page');
+    expect(bridge.api.capture).toHaveBeenLastCalledWith('tab-1', 'full');
+    expect(screen.getByTestId('browser-comment-notice')).toHaveTextContent('Full page was unavailable — added the visible area instead');
+
+    bridge.api.captureRegion.mockResolvedValueOnce('data:image/png;base64,iVBORw0KGgo=');
+    await choose('Select an area…');
+    expect(bridge.api.captureRegion).toHaveBeenCalledWith('tab-1', expect.objectContaining({ accent: expect.any(String) }));
+    expect((sendTo.onCapture.mock.calls[2]![0] as File).name).toMatch(/^screenshot-area-/);
     expect(fetchStub.count('capture')).toBe(0);
-    fireEvent.click(screen.getByRole('button', { name: /^Comment on a region — drag/ }));
-    await flush();
-    expect(bridge.api.annotateStart).toHaveBeenCalledTimes(1);
-    expect(bridge.api.annotateRegion).toHaveBeenCalledTimes(2);
   });
 
-  it('closing the panel exits annotate mode (annotateStop) and reopening starts clean', async () => {
-    const view = await mount();
-    fireEvent.click(inspectButton());
+  it('without a chat to send to there is no Annotate or Screenshot', async () => {
+    await mount();
+    expect(screen.queryByTestId('browser-annotate')).toBeNull();
+    expect(screen.queryByTestId('browser-screenshot')).toBeNull();
+  });
+
+  it('closing the panel leaves Annotate mode', async () => {
+    const view = await mount(sendTo);
+    fireEvent.click(annotateButton());
     await flush();
     view.update({ open: false });
     await flush();
     expect(bridge.api.annotateStop).toHaveBeenCalledWith('tab-1');
-    const polls = bridge.api.annotatePoll.mock.calls.length;
-    await advance(2000);
-    expect(bridge.api.annotatePoll).toHaveBeenCalledTimes(polls);
     view.update({ open: true });
     await flush();
     await flush();
-    expect(inspectButton()).toHaveAttribute('aria-pressed', 'false');
-    expect(screen.queryByText('Click an element or drag a region to leave a comment')).toBeNull();
+    expect(annotateButton()).toHaveAttribute('aria-pressed', 'false');
   });
 });
 

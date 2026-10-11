@@ -29,6 +29,7 @@ export type {
   BrowserPickResult,
   BrowserAnnotationSummary,
   BrowserAnnotatePollResult,
+  BrowserCaptureResult,
 } from '@generatorai/shared';
 
 // The overlay palette is the one browser-IPC payload declared outside shared:
@@ -53,13 +54,13 @@ export const BROWSER_IPC = {
   openDevtools: 'desktop:browser:openDevtools',
   setEmulation: 'desktop:browser:setEmulation',
   setZoom: 'desktop:browser:setZoom',
-  pickElement: 'desktop:browser:pickElement',
+  capture: 'desktop:browser:capture',
   captureRegion: 'desktop:browser:captureRegion',
   annotateStart: 'desktop:browser:annotateStart',
   annotateStop: 'desktop:browser:annotateStop',
   annotatePoll: 'desktop:browser:annotatePoll',
   annotateSend: 'desktop:browser:annotateSend',
-  annotateRegion: 'desktop:browser:annotateRegion',
+  annotateOpen: 'desktop:browser:annotateOpen',
   annotateRemove: 'desktop:browser:annotateRemove',
   annotateClear: 'desktop:browser:annotateClear',
 } as const;

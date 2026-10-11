@@ -1,59 +1,78 @@
-// Native annotations → attachments, and device-emulation mapping.
+// Browser comments → attachments, and device-emulation mapping.
 import { describe, expect, it } from 'vitest';
 
-import { annotationFileStem, annotationMarkdown, annotationMarkdownFile, annotationScreenshotFile, type PickedElement } from './browserAnnotations.js';
+import { BROWSER_COMMENT_FILE, commentFiles, commentsMarkdown, fileStamp, type PickedElement } from './browserAnnotations.js';
 import { DEVICE_PRESETS, emulationParams, emulationZoom, findDevicePreset, ZOOM_LEVELS } from './deviceEmulation.js';
 
-const picked: PickedElement = {
-  url: 'https://example.com/',
+const png = `data:image/png;base64,${btoa('abc')}`;
+const button: PickedElement = {
+  key: 'a1',
+  n: 1,
+  url: 'https://example.com/pricing',
+  title: 'Pricing',
   tag: 'button',
   id: 'buy',
   classes: ['btn', 'primary'],
-  label: 'button#buy',
+  label: 'button#buy.btn.primary',
   text: 'Buy now',
   cssSelector: '#buy',
   xpath: '/html/body/button',
   outerHtml: '<button id="buy">Buy now</button>',
   boundingBox: { x: 10.4, y: 20.6, width: 99.5, height: 30.2 },
   computedStyle: { color: 'red' },
-  comment: '  make it bigger  ',
+  comment: '  Make it the primary colour  ',
+  screenshot: png,
+};
+const area: PickedElement = {
+  key: 'a2',
+  n: 2,
+  url: 'https://example.com/pricing',
+  tag: 'area',
+  id: null,
+  classes: [],
+  label: 'area 640×220',
+  text: '',
+  cssSelector: '',
+  xpath: '',
+  outerHtml: '',
+  boundingBox: { x: 0, y: 300, width: 640, height: 220 },
+  viewport: { width: 1280, height: 800 },
+  comment: 'The cards overflow here',
+  screenshot: null,
 };
 
-describe('annotationMarkdown', () => {
-  it('writes the request, the element summary, the HTML and the computed CSS', () => {
-    const md = annotationMarkdown(picked);
-    expect(md).toContain('**Requested change:** make it bigger');
-    expect(md).toContain('- **Tag:** `button` · **id:** `buy` · **classes:** `btn primary`');
-    expect(md).toContain('- **Text:** Buy now');
-    expect(md).toContain('- **Box:** 100×30 @ (10, 21)');
+describe('commentsMarkdown', () => {
+  it('lists every numbered comment with its element or area, once, under the page', () => {
+    const md = commentsMarkdown([button, area], 'browser-comments-s1');
+    expect(md).toContain('# Browser comments (2)');
+    expect(md).toContain('Page: Pricing — https://example.com/pricing');
+    expect(md).toContain('## 1. Make it the primary colour');
+    expect(md).toContain('- **Element:** `button#buy.btn.primary`');
+    expect(md).toContain('- **Selector:** `#buy`');
+    expect(md).toContain('- **Text:** “Buy now”');
+    expect(md).toContain('- **Screenshot:** `browser-comments-s1-1.png`');
     expect(md).toContain('```html\n<button id="buy">Buy now</button>\n```');
-    expect(md).toContain('## Computed CSS\n```css\n#buy {\n  color: red;\n}\n```');
-  });
-
-  it('says so when there is no comment, and omits the empty parts', () => {
-    const md = annotationMarkdown({ ...picked, comment: undefined, id: null, classes: [], text: '', computedStyle: undefined });
-    expect(md).toContain('**Requested change:** _(none provided)_');
-    expect(md).toContain('- **Tag:** `button`\n');
-    expect(md).not.toContain('**Text:**');
-    expect(md).not.toContain('Computed CSS');
+    expect(md).toContain('#buy {\n  color: red;\n}');
+    expect(md).toContain('## 2. The cards overflow here');
+    expect(md).toContain('- **Area:** 640×220 at (0, 300) in a 1280×800 viewport');
+    // No screenshot was captured for the area, so none is referenced.
+    expect(md).not.toContain('browser-comments-s1-2.png');
   });
 });
 
-describe('annotation files', () => {
-  it('names files after the id (or tag) and the stamp', () => {
-    expect(annotationFileStem(picked, 's1')).toBe('element-buy-s1');
-    expect(annotationFileStem({ ...picked, id: null, tag: 'my tag!' }, 's1')).toBe('element-my-tag--s1');
-    expect(annotationFileStem({ ...picked, id: 'x'.repeat(40) }, 's1')).toBe(`element-${'x'.repeat(32)}-s1`);
-    const md = annotationMarkdownFile(picked, 'element-buy-s1');
-    expect(md.name).toBe('element-buy-s1.md');
-    expect(md.type).toBe('text/markdown');
+describe('commentFiles', () => {
+  it('makes one Markdown file plus a PNG per captured comment', async () => {
+    const files = commentFiles([button, area], 's1');
+    expect(files.map((f) => f.name)).toEqual(['browser-comments-s1.md', 'browser-comments-s1-1.png']);
+    expect(files[0]!.type).toBe('text/markdown');
+    expect(files[1]!.type).toBe('image/png');
+    expect(await files[1]!.text()).toBe('abc');
+    expect(files.every((f) => BROWSER_COMMENT_FILE.test(f.name))).toBe(true);
+    expect(commentFiles([], 's1')).toEqual([]);
   });
 
-  it('decodes the cropped screenshot into a PNG', async () => {
-    const png = annotationScreenshotFile(`data:image/png;base64,${btoa('abc')}`, 'element-buy-s1');
-    expect(png.name).toBe('element-buy-s1.png');
-    expect(png.type).toBe('image/png');
-    expect(await png.text()).toBe('abc');
+  it('stamps files sortably', () => {
+    expect(fileStamp(new Date(2026, 9, 11, 9, 5, 7))).toBe('20261011-090507');
   });
 });
 

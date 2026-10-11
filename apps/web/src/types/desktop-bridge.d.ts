@@ -27,13 +27,15 @@ interface GeneratorAIDesktopBrowserApi {
   openDevtools: (tabId: string, panel?: GeneratorAIDesktopBrowserDevtoolsPanel) => Promise<void>;
   setEmulation: (tabId: string, params: GeneratorAIDesktopBrowserEmulationParams | null) => Promise<void>;
   setZoom: (tabId: string, factor: number) => Promise<void>;
-  pickElement: (tabId: string, palette?: GeneratorAIDesktopAnnotationPalette) => Promise<GeneratorAIDesktopBrowserPickResult | null>;
+  /** A PNG of the viewport, or of the whole page ('full' degrades to 'visible'). */
+  capture: (tabId: string, mode: 'visible' | 'full') => Promise<GeneratorAIDesktopBrowserCaptureResult | null>;
   captureRegion: (tabId: string, palette?: GeneratorAIDesktopAnnotationPalette) => Promise<string | null>;
   annotateStart: (tabId: string, palette: GeneratorAIDesktopAnnotationPalette) => Promise<void>;
   annotateStop: (tabId: string) => Promise<void>;
   annotatePoll: (tabId: string) => Promise<GeneratorAIDesktopBrowserAnnotatePollResult>;
   annotateSend: (tabId: string, keys?: string[]) => Promise<GeneratorAIDesktopBrowserPickResult[]>;
-  annotateRegion: (tabId: string) => Promise<void>;
+  /** Scroll a comment into view and open its card in the page. */
+  annotateOpen: (tabId: string, key: string) => Promise<void>;
   annotateRemove: (tabId: string, key: string) => Promise<void>;
   annotateClear: (tabId: string) => Promise<void>;
   onDidNavigate: (cb: (evt: GeneratorAIDesktopNativeBrowserEvent) => void) => () => void;
@@ -74,6 +76,7 @@ type GeneratorAIDesktopNativeBrowserDescriptor = import('@generatorai/shared/cli
 type GeneratorAIDesktopNativeBrowserEvent = import('@generatorai/shared/client').NativeBrowserEvent;
 type GeneratorAIDesktopBrowserPickResult = import('@generatorai/shared/client').BrowserPickResult;
 type GeneratorAIDesktopBrowserAnnotatePollResult = import('@generatorai/shared/client').BrowserAnnotatePollResult;
+type GeneratorAIDesktopBrowserCaptureResult = import('@generatorai/shared/client').BrowserCaptureResult;
 // The overlay palette is declared next to `annotationPalette()` in design-tokens
 // (a dependency-free leaf shared must not depend on; 06 §4.4).
 type GeneratorAIDesktopAnnotationPalette = import('@generatorai/design-tokens').AnnotationPalette;

@@ -1,80 +1,91 @@
 // ────────────────────────────────────────────────────────────────
-// Native annotation (comment pin) → chat attachments. Pure.
+// Browser comments and screenshots → chat attachments (D-140). Pure.
 //
-// A drained annotation becomes a Markdown context file (the element summary
-// plus the user's requested change) and, when the page cropped one, a PNG.
+// Sending N comments makes ONE Markdown file — every numbered comment with
+// the element (or area) it is about — plus one PNG per comment showing it in
+// context. One file the agent reads top to bottom beats 2N loose files, and
+// the composer shows N+1 chips instead of 2N.
 // ────────────────────────────────────────────────────────────────
 
-/** A picked DOM element (native desktop) awaiting a user comment. */
-export interface PickedElement {
-  url: string;
-  tag: string;
-  id: string | null;
-  classes: string[];
-  label: string;
-  text: string;
-  cssSelector: string;
-  xpath: string;
-  outerHtml: string;
-  boundingBox: { x: number; y: number; width: number; height: number };
-  computedStyle?: Record<string, string>;
-  screenshot?: string | null;
-  comment?: string;
+import type { BrowserAnnotationSummary, BrowserPickResult } from '@generatorai/shared';
+
+/** A sent comment, as the page serialised it. */
+export type PickedElement = BrowserPickResult;
+/** A comment as the tray lists it. */
+export type AnnotationSummary = BrowserAnnotationSummary;
+
+/** What the agent is told when comments are sent without a message of your own. */
+export const BROWSER_COMMENTS_PROMPT =
+  'Please address my browser comments. The .md file lists each numbered comment with the element or area it is about; the matching .png shows it on the page.';
+
+/** Attachment names the composer recognises as browser comments (it supplies BROWSER_COMMENTS_PROMPT). */
+export const BROWSER_COMMENT_FILE = /^browser-comments-/;
+
+function screenshotName(stem: string, n: number): string {
+  return `${stem}-${n}.png`;
 }
 
-/** A lightweight annotation list entry (count badge + comments popover). */
-export interface AnnotationSummary {
-  key: string;
-  n: number;
-  label: string;
-  tag: string;
-  comment: string;
-  region: boolean;
-}
-
-/** The Markdown "UI change request" for one annotation. */
-export function annotationMarkdown(p: PickedElement): string {
-  const comment = (p.comment ?? '').trim();
-  const cssLines = p.computedStyle
+function one(p: PickedElement, index: number, stem: string): string {
+  const n = p.n ?? index + 1;
+  const area = p.tag === 'area';
+  const box = p.boundingBox;
+  const css = p.computedStyle
     ? Object.entries(p.computedStyle).map(([k, v]) => `  ${k}: ${v};`).join('\n')
     : '';
-  return [
-    `# UI change request`,
-    ``,
-    `**Requested change:** ${comment || '_(none provided)_'}`,
-    ``,
-    `## Selected element`,
-    `- **Element:** \`${p.label}\``,
-    `- **Tag:** \`${p.tag}\`${p.id ? ` · **id:** \`${p.id}\`` : ''}${p.classes.length ? ` · **classes:** \`${p.classes.join(' ')}\`` : ''}`,
-    `- **Page:** ${p.url}`,
-    `- **CSS selector:** \`${p.cssSelector}\``,
-    `- **XPath:** \`${p.xpath}\``,
-    p.text ? `- **Text:** ${p.text}` : '',
-    `- **Box:** ${Math.round(p.boundingBox.width)}×${Math.round(p.boundingBox.height)} @ (${Math.round(p.boundingBox.x)}, ${Math.round(p.boundingBox.y)})`,
-    ``,
-    `## HTML`,
-    '```html',
-    p.outerHtml,
-    '```',
-    cssLines ? `\n## Computed CSS\n\`\`\`css\n${p.cssSelector} {\n${cssLines}\n}\n\`\`\`` : '',
+  const lines = [
+    `## ${n}. ${(p.comment ?? '').trim() || '_(no comment)_'}`,
     '',
-  ].filter((l) => l !== '').join('\n');
+    area
+      ? `- **Area:** ${Math.round(box.width)}×${Math.round(box.height)} at (${Math.round(box.x)}, ${Math.round(box.y)}) in a ${p.viewport ? `${p.viewport.width}×${p.viewport.height}` : ''} viewport`
+      : `- **Element:** \`${p.label}\``,
+    area ? '' : `- **Selector:** \`${p.cssSelector}\``,
+    area || !p.text ? '' : `- **Text:** “${p.text}”`,
+    area ? '' : `- **Size:** ${Math.round(box.width)}×${Math.round(box.height)}`,
+    p.screenshot ? `- **Screenshot:** \`${screenshotName(stem, n)}\`` : '',
+  ].filter((l) => l !== '');
+  if (!area && p.outerHtml) lines.push('', '```html', p.outerHtml, '```');
+  if (!area && css) lines.push('', '<details><summary>Computed CSS</summary>', '', '```css', `${p.cssSelector} {`, css, '}', '```', '</details>');
+  return lines.join('\n');
 }
 
-/** `element-<id|tag>-<stamp>`: the shared stem of an annotation's files. */
-export function annotationFileStem(p: PickedElement, stamp: string): string {
-  const safe = (p.id || p.tag || 'element').replace(/[^a-z0-9]+/gi, '-').slice(0, 32);
-  return `element-${safe}-${stamp}`;
+/** The Markdown for a batch of comments on one page. */
+export function commentsMarkdown(items: readonly PickedElement[], stem: string): string {
+  const first = items[0];
+  const count = items.length;
+  const header = [
+    `# Browser comments (${count})`,
+    '',
+    first ? `Page: ${first.title ? `${first.title} — ` : ''}${first.url}` : '',
+    '',
+    'Each comment is about the element or area below it; the screenshot shows it on the page with its numbered pin.',
+  ].filter((l, i, a) => l !== '' || a[i - 1] !== '');
+  return [...header, '', ...items.map((p, i) => one(p, i, stem)).flatMap((s) => [s, ''])].join('\n');
 }
 
-export function annotationMarkdownFile(p: PickedElement, stem: string): File {
-  return new File([new Blob([annotationMarkdown(p)], { type: 'text/markdown' })], `${stem}.md`, { type: 'text/markdown' });
-}
-
-/** The cropped screenshot (a base64 data URL) as a PNG file. Throws on bad base64. */
-export function annotationScreenshotFile(dataUrl: string, stem: string): File {
+/** A PNG data URL as a File. Throws on bad base64. */
+export function dataUrlFile(dataUrl: string, name: string): File {
   const bstr = atob(dataUrl.split(',')[1] ?? '');
   const u8 = new Uint8Array(bstr.length);
   for (let i = 0; i < bstr.length; i++) u8[i] = bstr.charCodeAt(i);
-  return new File([new Blob([u8], { type: 'image/png' })], `${stem}.png`, { type: 'image/png' });
+  return new File([new Blob([u8], { type: 'image/png' })], name, { type: 'image/png' });
+}
+
+/** `browser-comments-<stamp>.md` plus `browser-comments-<stamp>-<n>.png` per comment that has a screenshot. */
+export function commentFiles(items: readonly PickedElement[], stamp: string): File[] {
+  if (items.length === 0) return [];
+  const stem = `browser-comments-${stamp}`;
+  const files = [new File([new Blob([commentsMarkdown(items, stem)], { type: 'text/markdown' })], `${stem}.md`, { type: 'text/markdown' })];
+  items.forEach((p, i) => {
+    if (!p.screenshot) return;
+    try {
+      files.push(dataUrlFile(p.screenshot, screenshotName(stem, p.n ?? i + 1)));
+    } catch { /* a broken capture just goes without its picture */ }
+  });
+  return files;
+}
+
+/** A sortable, filename-safe stamp: `20261011-142233`. */
+export function fileStamp(date = new Date()): string {
+  const pad = (v: number) => String(v).padStart(2, '0');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }

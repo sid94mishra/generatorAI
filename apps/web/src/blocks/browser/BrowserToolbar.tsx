@@ -2,17 +2,19 @@
 // BrowserToolbar (F-dock-04) — two rows inside the URL form:
 //
 //   [◀] [▶] [↻]  ┌──── URL ────┐  [Sharing]  [Start]
-//   [Comment] [Comments n ▾] [capture] [device] ………… [⋯ DevTools] [■]
+//   [Annotate n] [Screenshot ▾] [device] ………………………… [⋯ DevTools] [■]
 //
+// Annotate (D-140) is one mode: hover, click an element or drag an area,
+// comment; the comments collect in the tray under the page. Screenshot puts
+// the visible area, the full page or a dragged area into the message.
 // Restricted web interactivity swaps the URL field for a read-only pill and
-// keeps only Share and Comment (the only way to attach an element there).
-// Device, DevTools and the Comments list are desktop-native only.
+// keeps only Share and Annotate (the only way to attach an element there).
+// Device, DevTools and the full/visible screenshots are desktop-native only.
 // ────────────────────────────────────────────────────────────────
 
 import type { FormEvent } from 'react';
-import type { AnnotationSummary } from './browserAnnotations.js';
-import { CommentsPopover } from './CommentsPopover.js';
 import { openNativeDevtools } from './nativeBrowserBridge.js';
+import type { BrowserScreenshotKind } from './useBrowserAnnotations.js';
 import type { BrowserBusy, BrowserHistoryAction } from './useBrowserNavigation.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
@@ -43,18 +45,15 @@ export interface BrowserToolbarProps {
   attachedToChat: boolean;
   shareTitle: string;
   onToggleShare: () => void;
-  // Comment / capture
-  commentOn: boolean;
+  // Annotate / screenshot — only where there is a chat to send them to
+  canComment: boolean;
   annotateOn: boolean;
-  onToggleComment: () => void;
+  /** Saved comments (the count on the Annotate button). */
+  commentCount: number;
+  onToggleAnnotate: () => void;
+  /** Web: the dragged-area capture is armed on the live view. */
   captureMode: boolean;
-  onToggleCapture: () => void;
-  comments: readonly AnnotationSummary[];
-  commentsOpen: boolean;
-  onCommentsOpenChange: (open: boolean) => void;
-  onSendComments: (keys?: string[]) => void;
-  onRemoveComment: (key: string) => void;
-  onClearComments: () => void;
+  onScreenshot: (kind: BrowserScreenshotKind) => void;
   // Device emulation
   emulationOn: boolean;
   onToggleEmulation: () => void;
@@ -64,12 +63,9 @@ export function BrowserToolbar(p: BrowserToolbarProps): React.JSX.Element {
   const { isOn, canDrive, nativeAvailable, loading } = p;
   const nativeTools = nativeAvailable && isOn && p.devtoolsTabId !== null;
   const tabId = p.devtoolsTabId;
-  const commentTitle = p.annotateOn
-    ? 'Commenting — click elements to leave notes; click to exit'
-    : 'Comment — click elements to leave notes and attach them to chat';
-  const captureTitle = nativeAvailable
-    ? 'Comment on a region — drag to select an area, add a note, and send to chat'
-    : 'Capture region — drag to select an area and attach it to chat';
+  const annotateTitle = p.annotateOn
+    ? 'Annotating — click an element or drag across an area to comment. Click to finish'
+    : 'Annotate — comment on elements or areas of the page and send them to the agent';
 
   return (
     <form data-testid="browser-toolbar" onSubmit={p.onSubmit} className="@container flex flex-col border-b border-line-soft">
@@ -126,30 +122,45 @@ export function BrowserToolbar(p: BrowserToolbarProps): React.JSX.Element {
 
       {isOn && (
         <div className="flex items-center gap-1 px-2 pb-1.5">
+          {p.canComment && (
           <Button
             variant="ghost"
             size="sm"
             icon="message"
-            pressed={p.commentOn}
-            onClick={p.onToggleComment}
-            title={commentTitle}
-            aria-label={commentTitle}
+            pressed={p.annotateOn}
+            onClick={p.onToggleAnnotate}
+            title={annotateTitle}
+            aria-label={annotateTitle}
+            data-testid="browser-annotate"
           >
-            Comment
+            Annotate
+            {p.commentCount > 0 ? <span className="font-mono text-micro text-run tabular-nums">{p.commentCount}</span> : null}
           </Button>
-          {nativeAvailable && p.annotateOn && (
-            <CommentsPopover
-              items={p.comments}
-              open={p.commentsOpen}
-              onOpenChange={p.onCommentsOpenChange}
-              onSend={p.onSendComments}
-              onRemove={p.onRemoveComment}
-              onClear={p.onClearComments}
+          )}
+          {!p.canComment ? null : canDrive && nativeAvailable ? (
+            <MenuRoot>
+              <MenuTrigger
+                render={
+                  <Button variant="ghost" size="sm" icon="camera" trailingIcon="chevron-down" data-testid="browser-screenshot" title="Screenshot — add the page to your message">
+                    <span className="hidden @md:inline">Screenshot</span>
+                  </Button>
+                }
+              />
+              <MenuPopup align="start">
+                <MenuItem icon="image" onClick={() => p.onScreenshot('visible')}>Visible area</MenuItem>
+                <MenuItem icon="file" onClick={() => p.onScreenshot('full')}>Full page</MenuItem>
+                <MenuItem icon="scan" onClick={() => p.onScreenshot('area')}>Select an area…</MenuItem>
+              </MenuPopup>
+            </MenuRoot>
+          ) : canDrive ? (
+            <IconButton
+              size="sm"
+              icon="camera"
+              label="Screenshot an area — drag on the page to add it to your message"
+              pressed={p.captureMode}
+              onClick={() => p.onScreenshot('area')}
             />
-          )}
-          {canDrive && (
-            <IconButton size="sm" icon="camera" label={captureTitle} pressed={p.captureMode} onClick={p.onToggleCapture} />
-          )}
+          ) : null}
           {nativeTools && (
             <IconButton
               size="sm"

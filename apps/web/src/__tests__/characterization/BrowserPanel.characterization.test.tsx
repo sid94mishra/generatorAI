@@ -71,7 +71,8 @@ const NATIVE_READY: BrowserDescriptorFixture = { ...READY, mode: 'native' };
 type PanelProps = React.ComponentProps<typeof BrowserPanel>;
 
 function panel(props: Partial<PanelProps> = {}): React.JSX.Element {
-  return <BrowserPanel workspaceId="ws-1" tabId="tab-1" open visible onClose={() => {}} {...props} />;
+  // A chat host by default (Annotate and Screenshot exist only where there is a chat to send to).
+  return <BrowserPanel workspaceId="ws-1" tabId="tab-1" open visible onClose={() => {}} onCapture={() => {}} {...props} />;
 }
 
 function renderPanel(props: Partial<PanelProps> = {}) {
@@ -93,8 +94,8 @@ function sseEmit(frame: unknown): void {
 }
 
 const urlBox = (): HTMLInputElement => screen.getByRole('textbox') as HTMLInputElement;
-const inspectButton = (): HTMLElement => screen.getByRole('button', { name: /^Comment — click elements/ });
-const captureButton = (): HTMLElement => screen.getByRole('button', { name: /^Capture region — drag/ });
+const inspectButton = (): HTMLElement => screen.getByTestId('browser-annotate');
+const captureButton = (): HTMLElement => screen.getByRole('button', { name: /^Screenshot an area — drag/ });
 
 let fetchStub: BrowserFetchStub;
 let bridge: BrowserBridge | null = null;
@@ -468,13 +469,10 @@ describe('BrowserPanel — browser event stream (BrowserPanel.tsx:464-507)', () 
     expect(fetchStub.to('actions')).toHaveLength(1);
   });
 
-  it('browser.selection without an onCapture handler leaves Inspect on', async () => {
-    renderPanel();
+  it('without a chat to send to there is no Annotate (nothing could receive a pick)', async () => {
+    renderPanel({ onCapture: undefined });
     await flush();
-    fireEvent.click(inspectButton());
-    await flush();
-    sseEmit({ kind: 'browser.selection', data: { artifactId: 'art-1' } });
-    expect(inspectButton()).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByTestId('browser-annotate')).toBeNull();
   });
 
   // Was P4 defect #4 (fixed in P4-03): the real mux stream delivers `{kind, payload}` (platform/muxStream.ts:524, and

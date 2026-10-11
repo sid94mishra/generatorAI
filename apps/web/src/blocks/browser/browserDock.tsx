@@ -9,7 +9,7 @@ import { createContext, lazy, memo, Suspense, useCallback, useContext } from 're
 import type { DockPanelProps } from '@/blocks/dock/dockRegistry.js';
 import { useActivated } from '@/blocks/dock/useActivated.js';
 import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
-import type { BrowserCaptureHandler } from './useBrowserAnnotations.js';
+import type { BrowserCaptureHandler, BrowserSendHandler } from './useBrowserAnnotations.js';
 import type { BrowserTabState } from './useBrowserTabState.js';
 
 const BrowserPanel = lazy(() => import('./BrowserPanel.js').then((m) => ({ default: m.BrowserPanel })));
@@ -19,6 +19,8 @@ export interface BrowserDockContextValue {
   /** Namespace of each tab's remembered URL (`chat:<id>`, `workflow-run:<id>`). */
   urlScopeKey?: string;
   onCapture?: BrowserCaptureHandler;
+  /** Send browser comments as a message now; absent where there is no chat to send to. */
+  onSend?: BrowserSendHandler;
   /** A turn is streaming: detach is locked and the agent strip shows. */
   agentBusy?: boolean;
   agentName?: string;
@@ -62,6 +64,7 @@ export const BrowserDockPanel = memo(function BrowserDockPanel({ id, active }: D
         visible={active}
         {...(ctx.urlScopeKey ? { urlScopeKey: ctx.urlScopeKey } : {})}
         {...(ctx.onCapture ? { onCapture: ctx.onCapture } : {})}
+        {...(ctx.onSend ? { onSend: ctx.onSend } : {})}
         agentBusy={ctx.agentBusy ?? false}
         {...(ctx.agentName ? { agentName: ctx.agentName } : {})}
         onTabStateChange={onStateChange}

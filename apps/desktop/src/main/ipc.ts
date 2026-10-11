@@ -505,9 +505,9 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
     // Overlay palettes are interpolated into scripts run in third-party pages:
     // validate every value here, before anything reaches executeJavaScript;
     // an invalid or missing palette becomes the default one (06 §4.4).
-    guardedHandle(BROWSER_IPC.pickElement, async (_e, tabId: string, palette?: unknown) => {
+    guardedHandle(BROWSER_IPC.capture, async (_e, tabId: string, mode: unknown) => {
       if (typeof tabId !== 'string' || !tabId) return null;
-      return host.pickElement(tabId, sanitizeAnnotationPalette(palette));
+      return host.capture(tabId, mode === 'full' ? 'full' : 'visible');
     });
     guardedHandle(BROWSER_IPC.captureRegion, async (_e, tabId: string, palette?: unknown) => {
       if (typeof tabId !== 'string' || !tabId) return null;
@@ -520,7 +520,7 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
       if (typeof tabId === 'string' && tabId) await host.annotateStop(tabId);
     });
     guardedHandle(BROWSER_IPC.annotatePoll, async (_e, tabId: string) => {
-      if (typeof tabId !== 'string' || !tabId) return { total: 0, items: [] };
+      if (typeof tabId !== 'string' || !tabId) return { items: [], exit: false, sendAll: false };
       return host.annotatePoll(tabId);
     });
     guardedHandle(BROWSER_IPC.annotateSend, async (_e, tabId: string, keys?: unknown) => {
@@ -528,8 +528,8 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
       const arr = Array.isArray(keys) ? keys.filter((k): k is string => typeof k === 'string') : undefined;
       return host.annotateSend(tabId, arr);
     });
-    guardedHandle(BROWSER_IPC.annotateRegion, async (_e, tabId: string) => {
-      if (typeof tabId === 'string' && tabId) await host.annotateRegion(tabId);
+    guardedHandle(BROWSER_IPC.annotateOpen, async (_e, tabId: string, key: string) => {
+      if (typeof tabId === 'string' && tabId && typeof key === 'string') await host.annotateOpen(tabId, key);
     });
     guardedHandle(BROWSER_IPC.annotateRemove, async (_e, tabId: string, key: string) => {
       if (typeof tabId === 'string' && tabId && typeof key === 'string') await host.annotateRemove(tabId, key);
