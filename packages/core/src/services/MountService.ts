@@ -36,7 +36,7 @@ import type {
   WorktreeInfo,
   WorktreeRunType,
 } from '@generatorai/shared';
-import { ConflictError, NotFoundError, ValidationError } from '@generatorai/shared';
+import { ConflictError, NotFoundError, ValidationError, type MountableSourceSpec } from '@generatorai/shared';
 import type { IGitClient } from '@generatorai/git';
 import { shadowGitDirFor } from '@generatorai/changes';
 import type { IWorkspaceMountRepository } from '../domain/ports/IWorkspaceMountRepository.js';
@@ -231,7 +231,25 @@ export class MountService {
       return planned;
     }
 
+    // The chat folder keeps its alias (so its path, so `replace` keeps the
+    // existing directory and its files) whatever the other sources are called.
+    const keepChatFolder = sources.some((s) => s.kind === 'chat-folder');
+    if (keepChatFolder) aliases.add(GENERATED_MOUNT_ALIAS);
+
     for (const source of sources) {
+      if (source.kind === 'chat-folder') {
+        const p = path.join(resolvedRoot, SOURCE_DIR, GENERATED_MOUNT_ALIAS);
+        claimPath(p, 'The chat folder');
+        planned.push({
+          alias: GENERATED_MOUNT_ALIAS,
+          position: planned.length,
+          originKind: 'generated',
+          mode: 'generated',
+          path: p,
+          intent: { isRepo: true },
+        });
+        continue;
+      }
       if (source.kind === 'codebase') {
         const codebase = await this.resolveCodebase(source.codebaseId, projectId);
         if (codebase.status !== 'ready') {
@@ -347,7 +365,7 @@ export class MountService {
    */
   private async resolveGitIntent(
     originPath: string,
-    source: ChatSourceSpec,
+    source: MountableSourceSpec,
     ctx: { mode: 'in-place' | 'worktree'; codebase?: ProjectCodebase; branchSlug?: string; isBare: boolean; mountPath: string },
   ): Promise<PlannedMount['intent']> {
     const git = this.deps.git;
@@ -811,6 +829,10 @@ export class MountService {
     const mounts = await this.list(parentWorkspaceId);
     const out: ChatSourceSpec[] = [];
     for (const spec of sources) {
+      if (spec.kind === 'chat-folder') {
+        out.push(spec);
+        continue;
+      }
       const mount = mounts.find((m) =>
         spec.kind === 'codebase'
           ? m.codebaseId === spec.codebaseId || (!!spec.alias && m.alias === spec.alias)
@@ -1192,6 +1214,31 @@ async function assertDirectory(p: string, label: string): Promise<void> {
     if (err instanceof ValidationError) throw err;
     throw new ValidationError(`${label} does not exist: ${p}`);
   }
+}
+
+/**
+ * How many files a directory holds, up to `cap`, not counting `.git` — the
+ * chat folder's "is there work here?" (D-141). Breadth-first and stops at the
+ * cap, so a big tree costs no more than `cap` entries.
+ */
+export async function countFiles(dir: string, cap = 1000): Promise<number> {
+  let count = 0;
+  const queue = [dir];
+  while (queue.length > 0 && count < cap) {
+    const current = queue.shift()!;
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (e.name === '.git') continue;
+      if (e.isDirectory()) queue.push(path.join(current, e.name));
+      else if (++count >= cap) break;
+    }
+  }
+  return count;
 }
 
 async function hasDotGit(dir: string): Promise<boolean> {

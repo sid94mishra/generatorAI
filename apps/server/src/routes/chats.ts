@@ -681,8 +681,12 @@ export function createChatApiRoutes(container: Container): Router {
   router.put('/:id/sources', validate(UpdateChatSourcesSchema), async (req, res, next) => {
     try {
       const chatId = String(req.params['id']);
-      const { sources, primary } = req.body as { sources: Parameters<typeof chatManagementService.updateChatSources>[1]; primary?: string };
-      const chat = await chatManagementService.updateChatSources(chatId, sources, primary);
+      const { sources, primary, discardChatFolder } = req.body as {
+        sources: Parameters<typeof chatManagementService.updateChatSources>[1];
+        primary?: string;
+        discardChatFolder?: boolean;
+      };
+      const chat = await chatManagementService.updateChatSources(chatId, sources, primary, { discardChatFolder: discardChatFolder === true });
       res.json(await withWorkspacePrep(container, chat));
     } catch (err) {
       const code = (err as { code?: string }).code;

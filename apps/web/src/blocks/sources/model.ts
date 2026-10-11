@@ -13,7 +13,28 @@
 // where the real bugs live (aliases colliding, a default branch name that
 // does not match the placeholder the user was shown) — can be unit-tested.
 
-import type { ChatSourceSpec, WorkspaceMount } from '@generatorai/shared';
+import { CHAT_FOLDER_ALIAS, type ChatSourceSpec, type WorkspaceMount } from '@generatorai/shared';
+import { CHAT_FOLDER_LABEL } from '@generatorai/client-core';
+
+/** The chat folder as a row of the picker (D-141): kept unless removed. */
+export function draftFromChatFolder(files: number): DraftSource {
+  return {
+    key: 'chat-folder',
+    kind: 'chat-folder',
+    alias: CHAT_FOLDER_ALIAS,
+    mode: 'in-place',
+    branchMode: 'current',
+    newBranch: '',
+    branch: '',
+    baseRef: '',
+    meta: { label: CHAT_FOLDER_LABEL, isGit: true, allowInPlace: true, allowWorktree: false, branches: [], files },
+  };
+}
+
+/** Files in the chat folder, from the workspace's mounts (0 when it is empty or absent). */
+export function chatFolderFiles(mounts: readonly WorkspaceMount[] | undefined): number {
+  return (mounts ?? []).find((m) => m.mode === 'generated' && m.status !== 'removed')?.fileCount ?? 0;
+}
 
 /** How a source is materialised. `generated` is server-side only. */
 export type SourceMode = 'in-place' | 'worktree';
@@ -51,13 +72,16 @@ export interface DraftMeta {
   loading?: boolean;
   /** Why this source cannot be used at all (e.g. the folder went away). */
   error?: string;
+  /** The chat folder only: how many files it holds (D-141). */
+  files?: number;
 }
 
 /** One row of the picker. */
 export interface DraftSource {
   /** Stable React key; not part of the payload. */
   key: string;
-  kind: 'codebase' | 'folder';
+  /** `chat-folder`: the folder the chat owns — what "Empty workspace" grows into (D-141). */
+  kind: 'codebase' | 'folder' | 'chat-folder';
   codebaseId?: string;
   /** Absolute path, for `kind: 'folder'`. */
   path?: string;
@@ -133,6 +157,7 @@ export function effectiveBranch(draft: DraftSource, chatName: string): string | 
  */
 export function draftsToSources(drafts: DraftSource[], chatName: string): ChatSourceSpec[] {
   return drafts.map((d) => {
+    if (d.kind === 'chat-folder') return { kind: 'chat-folder' } as ChatSourceSpec;
     const common: {
       mode: SourceMode;
       alias: string;
@@ -155,6 +180,7 @@ export function draftsToSources(drafts: DraftSource[], chatName: string): ChatSo
 
 /** `frontend → worktree on generatorai/cart-fix from main` */
 export function describeDraft(draft: DraftSource, chatName: string): string {
+  if (draft.kind === 'chat-folder') return `${CHAT_FOLDER_LABEL} → kept`;
   const mode = draft.mode === 'worktree' ? 'worktree' : 'in place';
   const branch = effectiveBranch(draft, chatName);
   if (!branch) return `${draft.alias} → ${mode}`;
@@ -313,12 +339,15 @@ export function draftsFromSpecs(
   const byId = new Map((ctx.codebases ?? []).map((c) => [c.id, c]));
 
   if (!specs || specs.length === 0) {
+    // No plan saved: the mounts are the truth. A chat folder with files is
+    // listed (kept); an empty one is just "Empty workspace", not a row.
     return (ctx.mounts ?? [])
-      .filter((m) => m.status !== 'removed' && m.mode !== 'generated')
-      .map((m) => draftFromMount(m, byId));
+      .filter((m) => m.status !== 'removed' && (m.mode !== 'generated' || (m.fileCount ?? 0) > 0))
+      .map((m) => (m.mode === 'generated' ? draftFromChatFolder(m.fileCount ?? 0) : draftFromMount(m, byId)));
   }
 
   return specs.map((spec, i) => {
+    if (spec.kind === 'chat-folder') return draftFromChatFolder(chatFolderFiles(ctx.mounts));
     const alias =
       spec.alias ??
       (spec.kind === 'codebase'

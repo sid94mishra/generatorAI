@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { chatSourceAlias, type WorkspaceMount } from '@generatorai/shared';
 import {
   basename,
+  chatFolderFiles,
+  draftFromChatFolder,
   defaultNewBranch,
   describeDraft,
   draftFromCodebase,
@@ -146,7 +149,27 @@ describe('draftsToSources', () => {
 
   it('preserves order — sources[0] is the agent’s cwd', () => {
     const specs = draftsToSources([worktree, folder], CHAT);
-    expect(specs.map((s) => s.alias)).toEqual(['frontend', 'backend']);
+    expect(specs.map((s) => chatSourceAlias(s))).toEqual(['frontend', 'backend']);
+  });
+
+  it('the chat folder is sent as itself, with no path or branch (D-141)', () => {
+    expect(draftsToSources([folder, draftFromChatFolder(3)], CHAT)[1]).toEqual({ kind: 'chat-folder' });
+  });
+});
+
+describe('the chat folder (D-141)', () => {
+  const generated = (fileCount: number) =>
+    ({ id: 'g', alias: 'main', mode: 'generated', originKind: 'generated', path: '/ws/source/main', status: 'ready', fileCount }) as unknown as WorkspaceMount;
+
+  it('is listed from the mounts when it holds files, and not when it is empty', () => {
+    expect(draftsFromSpecs([], { mounts: [generated(3)] }).map((d) => d.kind)).toEqual(['chat-folder']);
+    expect(draftsFromSpecs([], { mounts: [generated(0)] })).toEqual([]);
+    expect(chatFolderFiles([generated(3)])).toBe(3);
+  });
+
+  it('comes back from a saved plan with its file count', () => {
+    const [d] = draftsFromSpecs([{ kind: 'chat-folder' }], { mounts: [generated(5)] });
+    expect(d).toMatchObject({ kind: 'chat-folder', alias: 'main', meta: { files: 5 } });
   });
 });
 

@@ -80,12 +80,20 @@ const sourceCommon = {
 export const ChatSourceSpecSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('codebase'), codebaseId: z.string().min(1).max(200), ...sourceCommon }),
   z.object({ kind: z.literal('folder'), path: z.string().min(1).max(1000), ...sourceCommon }),
+  // The folder the chat owns (what "Empty workspace" grows into) — kept beside other sources (D-141).
+  z.object({ kind: z.literal('chat-folder') }),
 ]);
 
 /** PUT /api/chats/:id/sources — replace the mount plan of an idle chat. */
 export const UpdateChatSourcesSchema = z.object({
   sources: z.array(ChatSourceSpecSchema).max(8),
   primary: z.string().max(64).optional(),
+  /**
+   * Delete the chat folder's files when it is left out of `sources`. Without
+   * it, a chat folder that holds files is kept (D-141): work the agent did
+   * is never deleted by an edit that did not ask to delete it.
+   */
+  discardChatFolder: z.boolean().optional(),
 });
 
 /**

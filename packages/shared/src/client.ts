@@ -47,6 +47,8 @@ export * from './constants/index.js';
 // Pure helpers.
 export { generateId, deepMerge, sleep, interpolateVariables } from './utils/pure.js';
 export * from './utils/pairingCode.js';
+export { CHAT_FOLDER_ALIAS, chatSourceAlias, isMountableSource } from './utils/sourceSpec.js';
+export type { MountableSourceSpec } from './utils/sourceSpec.js';
 export { insertTextAtCaret, CaretInsertionSequencer } from './utils/insertAtCaret.js';
 export type { CaretInsertResult } from './utils/insertAtCaret.js';
 export {

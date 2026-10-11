@@ -24,7 +24,7 @@ import type { IGitClient } from '@generatorai/git';
 import type { IProjectCodebaseRepository } from '../../domain/ports/IProjectCodebaseRepository.js';
 import type { IExecutionWorkspaceRepository } from '../../domain/ports/IExecutionWorkspaceRepository.js';
 import type { IWorkspaceMountRepository } from '../../domain/ports/IWorkspaceMountRepository.js';
-import { MountService, buildExposure, SCRATCH_DIR } from '../MountService.js';
+import { MountService, buildExposure, countFiles, SCRATCH_DIR } from '../MountService.js';
 
 function makeLogger(): ILogger {
   const logger: ILogger = {
@@ -281,6 +281,38 @@ describe('MountService.plan validation', () => {
       position: 0,
       path: path.join(root, 'source', 'main'),
     });
+  });
+});
+
+// ── the chat folder (D-141) ──────────────────────────────────────
+
+describe('the chat folder', () => {
+  it('plans as the generated mount at source/main, beside a folder — even one called "main"', async () => {
+    const workspacesDir = await tmpDir();
+    const { service } = makeService({ workspacesDir });
+    const root = path.join(workspacesDir, 'executions', 'chat-1');
+    const userMain = path.join(await tmpDir(), 'main');
+    await fs.mkdir(userMain);
+
+    const planned = await service.plan(root, undefined, [{ kind: 'folder', path: userMain }, { kind: 'chat-folder' }]);
+
+    expect(planned.map((m) => [m.alias, m.mode, m.path])).toEqual([
+      ['main-2', 'in-place', userMain],
+      ['main', 'generated', path.join(root, 'source', 'main')],
+    ]);
+  });
+
+  it('counts files without .git, and stops at the cap', async () => {
+    const dir = await tmpDir();
+    await fs.mkdir(path.join(dir, '.git'));
+    await fs.writeFile(path.join(dir, '.git', 'HEAD'), 'ref: refs/heads/main');
+    expect(await countFiles(dir)).toBe(0);
+    await fs.mkdir(path.join(dir, 'src'));
+    await fs.writeFile(path.join(dir, 'a.txt'), '1');
+    await fs.writeFile(path.join(dir, 'src', 'b.ts'), '2');
+    await fs.writeFile(path.join(dir, 'src', 'c.ts'), '3');
+    expect(await countFiles(dir)).toBe(3);
+    expect(await countFiles(dir, 2)).toBe(2);
   });
 });
 

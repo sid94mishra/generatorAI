@@ -1343,6 +1343,17 @@ CDP `captureBeyondViewport` (≤ 16k px tall), falling back to the viewport and 
 CommentsPopover, the 2-files-per-comment naming. Web (screencast) keeps the one-shot inspector pick and the dragged
 area capture under the same two buttons.
 
+### D-141 The chat folder is kept: linking a folder never deletes what the agent made (2026-10-11) — Final
+A chat with no sources works in a folder it owns (`<workspace>/source/main`). Linking a folder through Edit sources
+used to remove that mount and delete its files silently. Workspace-based agent apps never drop the agent's work
+behind the user's back, and neither does this one: the folder becomes a source of its own, `{ kind: 'chat-folder' }`
+(fixed alias `main`, so `replace` keeps the existing directory). Workspace info reports its `fileCount` (capped at
+1000); the chip and popover call it **Chat folder** once it holds files ("Empty workspace" only while empty). Edit
+sources lists it as a row ("N files the agent made in this chat"), kept by default and orderable as the working
+directory; removing it shows "Saving deletes the chat folder and the N files…" and sends `discardChatFolder`. The
+server is the guarantee for every client: a chat folder with files that an update leaves out is appended back unless
+`discardChatFolder` is set; with it, the mount is removed first so an empty plan starts a fresh folder.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

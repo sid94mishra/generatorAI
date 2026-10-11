@@ -66,3 +66,7 @@ export {
   parseSecretRefValue,
   isSensitiveKey,
 } from './secretRefs.js';
+
+// Source specs (D-141): the chat folder beside codebases and folders.
+export { CHAT_FOLDER_ALIAS, chatSourceAlias, isMountableSource } from './sourceSpec.js';
+export type { MountableSourceSpec } from './sourceSpec.js';

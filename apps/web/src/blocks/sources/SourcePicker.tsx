@@ -321,7 +321,7 @@ export function SourcePicker({
         <ul className="overflow-hidden rounded-card border border-line" data-testid="source-list">
           {drafts.map((draft, index) => (
             <li key={draft.key} className="border-b border-line">
-              <Row {...rowProps(draft, index)} />
+              {draft.kind === 'chat-folder' ? <ChatFolderRow {...rowProps(draft, index)} /> : <Row {...rowProps(draft, index)} />}
             </li>
           ))}
           {notIncluded.map((cb) => (
@@ -588,6 +588,36 @@ function WorkingDirectoryBadge() {
     <Badge icon="home" title="The agent's working directory">
       Working directory
     </Badge>
+  );
+}
+
+// ── The chat folder (D-141) ──────────────────────────────────
+
+/**
+ * The folder this chat owns, once the agent has made files in it. Kept beside
+ * the user's sources by default; removing it says what will be deleted.
+ */
+function ChatFolderRow({ draft, disabled, isPrimary, onRemove, onMakePrimary }: SourceRowProps) {
+  const files = draft.meta.files ?? 0;
+  return (
+    <div className="flex items-center gap-2.5 py-2.5 pr-2.5 pl-3" data-testid="source-chat-folder">
+      <Icon concept="folder-open" size={14} className="shrink-0 text-fg-3" />
+      <div className="flex min-w-0 flex-col">
+        <span className="text-ui font-medium text-fg">Chat folder</span>
+        <span className="text-small text-fg-3">
+          {files >= 1000 ? '1000+' : files} file{files === 1 ? '' : 's'} the agent made in this chat
+        </span>
+      </div>
+      {isPrimary ? (
+        <WorkingDirectoryBadge />
+      ) : (
+        <Button variant="ghost" size="sm" icon="home" disabled={disabled} onClick={onMakePrimary} title="The agent's working directory">
+          Make working directory
+        </Button>
+      )}
+      <span className="flex-1" />
+      <IconButton icon="trash" size="sm" label="Remove the chat folder" tooltip="Remove — deletes its files" disabled={disabled} onClick={onRemove} />
+    </div>
   );
 }
 

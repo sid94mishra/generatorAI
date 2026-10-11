@@ -52,6 +52,7 @@ export interface SourcesChipViewProps {
 
 const KIND_ICON: Record<MountDisplay['kind'], IconConcept> = {
   empty: 'folder-open',
+  chat: 'folder-open',
   folder: 'folder-open',
   repo: 'folder-open',
   worktree: 'branch',

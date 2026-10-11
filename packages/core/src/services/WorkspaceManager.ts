@@ -26,7 +26,7 @@ import type { IWorktreeRepository } from '../domain/ports/IWorktreeRepository.js
 import { PathResolver } from './PathResolver.js';
 import type { IGitClient } from '@generatorai/git';
 import { shadowGitDirFor, type MountRef } from '@generatorai/changes';
-import { buildExposure, SCRATCH_DIR } from './MountService.js';
+import { buildExposure, countFiles, SCRATCH_DIR } from './MountService.js';
 
 export interface WorkspaceManagerConfig {
   workspacesDir: string;
@@ -815,6 +815,11 @@ export class WorkspaceManager {
   private async toInfo(ws: ExecutionWorkspace): Promise<WorkspaceInfo> {
     const mounts = await this.listMounts(ws);
     const exposure = buildExposure(ws, mounts);
+    // The chat folder reports how much work is in it, so the UI can say so
+    // and keep it when a folder is linked (D-141).
+    const withCounts = await Promise.all(
+      exposure.mounts.map(async (m) => (m.mode === 'generated' ? { ...m, fileCount: await countFiles(m.path) } : m)),
+    );
     return {
       id: ws.id,
       ownerType: ws.ownerType,
@@ -827,7 +832,7 @@ export class WorkspaceManager {
       status: ws.status,
       prepStatus: ws.prepStatus ?? 'ready',
       ...(ws.prepError ? { prepError: ws.prepError } : {}),
-      mounts: exposure.mounts,
+      mounts: withCounts,
       scratchPath: exposure.scratchDir,
       worktrees: this.worktreeDetailsFromMounts(ws, mounts),
       createdAt: ws.createdAt,

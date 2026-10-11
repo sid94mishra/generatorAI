@@ -21,7 +21,7 @@ import type {
   QuestionCardSummary,
   ToolPermissionRequestPayload,
 } from '@generatorai/shared';
-import { generateId, DEFAULT_AGENT_MODE, ValidationError } from '@generatorai/shared';
+import { generateId, DEFAULT_AGENT_MODE, ValidationError, chatSourceAlias, isMountableSource } from '@generatorai/shared';
 import * as path from 'node:path';
 import type { ChatSourceSpec, ExecutionWorkspace, WorkspaceExposure } from '@generatorai/shared';
 import * as fs from 'node:fs/promises';
@@ -49,7 +49,7 @@ import type { EventBus } from '../events/EventBus.js';
 import { StreamingChatRegistry, type StreamingChangeListener } from './StreamingChatRegistry.js';
 import type { RecordPlanArgs, RecordPlanResult } from '../tools/recordPlanTool.js';
 import type { WorktreeService } from './WorktreeService.js';
-import { branchSlugFor, type MountService, type PlannedMount } from './MountService.js';
+import { branchSlugFor, countFiles, type MountService, type PlannedMount } from './MountService.js';
 import type { WorkspaceCheckpointService } from './WorkspaceCheckpointService.js';
 import type { IProjectCodebaseRepository } from '../domain/ports/IProjectCodebaseRepository.js';
 import { redactProjection } from './AgentResolver.js';
@@ -1221,6 +1221,7 @@ export class ChatManagementService {
     chatId: string,
     sources: ChatSourceSpec[],
     primary?: string,
+    opts: { discardChatFolder?: boolean } = {},
   ): Promise<Chat> {
     const chat = await this.chatRepo.getById(chatId);
     if (chat.status !== 'active') throw new ValidationError('Archived chats cannot be re-mounted');
@@ -1240,13 +1241,28 @@ export class ChatManagementService {
       throw new ValidationError('Worker chats share their orchestrator\'s workspace; change the sources there');
     }
 
-    await mounts.replace(workspace, chat.projectId, sources, {
+    // D-141: the files the agent made in the chat folder are never deleted by
+    // an edit that did not ask for it. Linking a folder keeps the chat folder
+    // beside it; only `discardChatFolder` lets it go.
+    let plan = sources;
+    const chatFolder = (await mounts.list(workspace.id)).find((m) => m.mode === 'generated');
+    if (chatFolder && !sources.some((s) => s.kind === 'chat-folder')) {
+      if (opts.discardChatFolder) {
+        // Asked for: gone now, so an empty plan starts a fresh, empty folder
+        // instead of keeping this one (same alias, same path).
+        await mounts.remove(chatFolder.id);
+      } else if (sources.length > 0 && (await countFiles(chatFolder.path, 1)) > 0) {
+        plan = [...sources, { kind: 'chat-folder' }];
+      }
+    }
+
+    await mounts.replace(workspace, chat.projectId, plan, {
       ...(primary ? { primary } : {}),
       branchSlug: branchSlugFor(chat.name, chatId),
     });
     const updated = await this.chatRepo.update(chatId, {
-      sources,
-      primarySource: primary ?? sources[0]?.alias,
+      sources: plan,
+      primarySource: primary ?? (plan[0] ? chatSourceAlias(plan[0]) : undefined),
     });
     const session = await this.sessionRepo.getById(chat.sessionId);
     void mounts.prepare(workspace.id, { sessionId: chat.sessionId, chatId });
@@ -1401,7 +1417,7 @@ export class ChatManagementService {
         ownerId: chatId,
         projectId: params.projectId,
         codebaseIds: params.codebaseIds,
-        useWorktree: sources.some((s) => s.mode === 'worktree'),
+        useWorktree: sources.some((s) => isMountableSource(s) && s.mode === 'worktree'),
         // The managed root is scratch, not a repository. Change tracking
         // runs per mount through private shadow stores.
         gitEnabled: false,
@@ -3130,7 +3146,7 @@ function normaliseSources(params: CreateChatParams): ChatSourceSpec[] {
 
 function firstAlias(sources: ChatSourceSpec[]): string | undefined {
   const first = sources[0];
-  return first?.alias;
+  return first ? chatSourceAlias(first) : undefined;
 }
 
 /** The chat a turn belongs to (chat gates are only ever called with chat turns). */

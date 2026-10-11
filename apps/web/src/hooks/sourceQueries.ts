@@ -90,8 +90,8 @@ export function useUpdateChatSources(chatId: string | undefined) {
   const platform = usePlatform() as HttpPlatformClient;
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (params: { sources: ChatSourceSpec[]; primary?: string }) =>
-      platform.updateChatSources(chatId!, params.sources, params.primary),
+    mutationFn: (params: { sources: ChatSourceSpec[]; primary?: string; discardChatFolder?: boolean }) =>
+      platform.updateChatSources(chatId!, params),
     onSuccess: (chat) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId ?? '') });
       void queryClient.invalidateQueries({ queryKey: queryKeys.chats });

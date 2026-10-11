@@ -24,7 +24,8 @@ import type { Chat, ChatSourceControlOptions } from '@generatorai/shared';
 import { useProjectCodebases } from '@/hooks/projectQueries.js';
 import { useUpdateChatSources, useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import { useUpdateChatSourceControl } from '@/hooks/queries.js';
-import { SourcePicker, draftsFromSpecs, draftsToSources, validateDrafts, type DraftSource } from '@/blocks/sources/index.js';
+import { SourcePicker, chatFolderFiles, draftsFromSpecs, draftsToSources, validateDrafts, type DraftSource } from '@/blocks/sources/index.js';
+import { Callout } from '@/ui/primitives/Callout/Callout.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Dialog, DialogBody, DialogFooter } from '@/ui/primitives/Dialog/Dialog.js';
 import { ModalForm } from '@/ui/patterns/ModalForm/ModalForm.js';
@@ -77,6 +78,11 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
 
   const busy = update.isPending || updateSourceControl.isPending;
 
+  // D-141: the agent's files in the chat folder are kept unless the user
+  // removes the folder here — and then the dialog says what goes.
+  const chatFiles = chatFolderFiles(mounts);
+  const discardChatFolder = chatFiles > 0 && !drafts.some((d) => d.kind === 'chat-folder');
+
   const save = async () => {
     const local = validateDrafts(drafts);
     if (local) {
@@ -88,6 +94,7 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
       await update.mutateAsync({
         sources: draftsToSources(drafts, chat.name),
         ...(primary ? { primary } : {}),
+        ...(discardChatFolder ? { discardChatFolder: true } : {}),
       });
       // Separate endpoint (`PATCH /api/chats/:id`), separate failure mode:
       // a rejected source plan must not silently drop the switches, and a
@@ -129,6 +136,12 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
               error={error}
               disabled={busy}
             />
+            {discardChatFolder ? (
+              <Callout tone="warn" data-testid="chat-folder-discard">
+                Saving deletes the chat folder and the {chatFiles >= 1000 ? '1000+' : chatFiles} file{chatFiles === 1 ? '' : 's'} the agent
+                made in it. Press Cancel to keep them.
+              </Callout>
+            ) : null}
           </ModalForm.Section>
           <ModalForm.Section
             title="After each turn"

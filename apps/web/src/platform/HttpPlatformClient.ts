@@ -770,13 +770,16 @@ export class HttpPlatformClient implements IPlatformClient {
    */
   async updateChatSources(
     chatId: string,
-    sources: ChatSourceSpec[],
-    primary?: string,
+    params: { sources: ChatSourceSpec[]; primary?: string; discardChatFolder?: boolean },
   ): Promise<Chat> {
     return apiFetch<Chat>(`${this.baseUrl}/api/chats/${chatId}/sources`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sources, ...(primary ? { primary } : {}) }),
+      body: JSON.stringify({
+        sources: params.sources,
+        ...(params.primary ? { primary: params.primary } : {}),
+        ...(params.discardChatFolder ? { discardChatFolder: true } : {}),
+      }),
     });
   }
 
