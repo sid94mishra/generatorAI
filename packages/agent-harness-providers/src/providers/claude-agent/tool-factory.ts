@@ -54,9 +54,11 @@ export function buildClaudeAgentMcpTools(
 ): {
   mcpServerConfig: ReturnType<typeof createSdkMcpServer>;
   toolNames: string[];
+  /** The SDK names of tools that declared `skipPermission` (inherently safe: never gated, U-24). */
+  skipPermissionToolNames: string[];
 } {
   if (toolDefs.length === 0) {
-    return { mcpServerConfig: createSdkMcpServer({ name: MCP_SERVER_NAME, version: '1.0.0', tools: [] }), toolNames: [] };
+    return { mcpServerConfig: createSdkMcpServer({ name: MCP_SERVER_NAME, version: '1.0.0', tools: [] }), toolNames: [], skipPermissionToolNames: [] };
   }
 
   // The SDK's tool() helper (and the underlying @modelcontextprotocol/sdk
@@ -134,7 +136,9 @@ export function buildClaudeAgentMcpTools(
     (d) => `mcp__${MCP_SERVER_NAME}__${d.name}`,
   );
 
-  return { mcpServerConfig, toolNames };
+  const skipPermissionToolNames = toolDefs.filter((d) => d.skipPermission === true).map((d) => `mcp__${MCP_SERVER_NAME}__${d.name}`);
+
+  return { mcpServerConfig, toolNames, skipPermissionToolNames };
 }
 
 /**

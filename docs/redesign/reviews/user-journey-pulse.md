@@ -43,6 +43,7 @@ engine (`packages/checker`); Vitest + Playwright; GitHub Actions CI. Iterations 
 | U-21 | Workflow run → stage transcript | A JSON-contract stage's final answer shows as raw JSON with literal `\n` | low | open (the review card now renders it; the transcript bubble still raw) |
 | U-22 | Workflow run page | A run that opened a PR doesn't link it anywhere | medium | fixed — "Pull request #N opened · title · head → base  [View pull request]" banner (in-app PR page) |
 | U-23 | Workflow post-processing | Nothing after `create_pr` can see the PR it opened — an Issue Fixer cannot comment the PR link on the issue (the Workflow Author found this gap) | low — GitHub cross-references a PR whose body says "Fixes #N" | open |
+| U-24 | Claude stages / chats in "Accept edits" | Read-only GeneratorAI tools (`github_get_issue`, `list_workflows`, `describe_workflow` …) still ask — they declare `skipPermission`, but only the Copilot provider honoured it; Claude mapped every host tool to `other` | medium | fixed — the Claude provider allows `skipPermission` tools without the domain gate |
 
 ## Journey log
 - **Iteration 1 (orchestrator chat, ~30 min):** Pulse Tech Lead planned and delegated — Architect (spec + ADR), Backend (Codex Terra: shared/checker/api), Frontend (Sonnet: web), QA (Codex Luna: clean-checkout run), Reviewer (Opus: 15 fixes). 61 files, 8 commits, **101 tests pass**, lint/format/build green. Pushed and **PR #9** opened from the Changes tab (after U-6 fix + token permissions); CI ran on GitHub Actions.

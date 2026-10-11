@@ -763,6 +763,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * why the transition is realised here rather than via `setPermissionMode`.
    */
   private planPhases = new Map<string, PlanPhaseState>();
+  /** Per conversation: domain tools that declared `skipPermission` — allowed without the domain gate (U-24; Copilot honours it natively). */
+  private skipPermissionTools = new Map<string, Set<string>>();
 
   // Accumulated messages per conversation for getMessages()
   private conversationMessages = new Map<string, ConversationMessage[]>();
@@ -1245,13 +1247,14 @@ export class ClaudeAgentProvider implements IAgentHarness {
         // W13-B1 — the conversationId is what lets the semaphore refuse to run
         // a tool for a turn already marked truncated. Without it the latch has
         // no key and every tool executes regardless of stop reason.
-        const { mcpServerConfig, toolNames } = buildClaudeAgentMcpTools(
+        const { mcpServerConfig, toolNames, skipPermissionToolNames } = buildClaudeAgentMcpTools(
           params.tools,
           this.toolSemaphore,
           params.conversationId,
         );
         mcpConfig = { 'generatorai-tools': mcpServerConfig };
         domainToolNames = toolNames;
+        this.skipPermissionTools.set(params.conversationId, new Set(skipPermissionToolNames));
       }
 
       // Resolve system prompt
@@ -2894,6 +2897,11 @@ export class ClaudeAgentProvider implements IAgentHarness {
             // acceptEdits: everything else still goes through the domain gate.
           }
 
+          // ── Inherently safe domain tools (`skipPermission`, e.g. github_get_issue) ──
+          if (this.skipPermissionTools.get(capturedConvId)?.has(toolName)) {
+            return { behavior: 'allow', updatedInput: input };
+          }
+
           // ── Ordinary permission path ──
           if (!domainHandler) {
             return { behavior: 'allow', updatedInput: input };
@@ -3951,6 +3959,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
   }
 
   private cleanupConversation(conversationId: string): void {
+    this.skipPermissionTools.delete(conversationId);
     // A conversation deleted or swept before its first prompt still owns a
     // spawned CLI process if it was pre-warmed.
     this.discardWarmSession(conversationId, 'conversation cleaned up');
