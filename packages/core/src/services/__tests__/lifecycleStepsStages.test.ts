@@ -30,3 +30,30 @@ describe('lifecycle templates and stage outputs', () => {
     expect(ctx.variables['out']).toBe('## Summary\n\nDone.');
   });
 });
+
+describe('create_pr with nothing to propose (U-26)', () => {
+  it('skips instead of failing the run', async () => {
+    const flow = {
+      run: vi.fn(async () => ({
+        status: 'blocked',
+        alias: 'pulse',
+        steps: [{ id: 'pull_request', status: 'blocked', detail: 'Nothing to open a PR from (branch has no commits ahead of base)' }],
+        readiness: { reasons: { pullRequest: 'Nothing to open a PR from (branch has no commits ahead of base)' } },
+      })),
+    };
+    const steps = new LifecycleSteps(
+      { cloneToDirectory: vi.fn() } as never,
+      { run: vi.fn() } as never,
+      { emitGlobal: vi.fn(async () => undefined) } as never,
+      { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
+      flow as never,
+    );
+    const ctx: LifecycleStepContext = { runId: 'r', variables: {}, codebases: { pulse: { path: '/w/pulse', branch: 'b', baseRef: 'develop' } }, workDir: '/w' };
+    const results = await steps.executePostProcessing(
+      [{ name: 'Open PR', failOnError: true, config: { type: 'create_pr', title: 't', body: 'b', repoAlias: 'pulse' } } as never],
+      ctx,
+    );
+    expect(results[0]).toMatchObject({ success: true });
+    expect(results[0]!.output).toMatch(/no changes to propose/);
+  });
+});

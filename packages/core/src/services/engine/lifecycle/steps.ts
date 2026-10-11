@@ -25,6 +25,7 @@ import {
 import type { IScriptRunner } from '../../../domain/ports/IScriptRunner.js';
 import type { EventBus } from '../../../events/EventBus.js';
 import type { GitManager } from '../../../infrastructure/GitManager.js';
+import { REASON_NOTHING_TO_PROPOSE } from '../../scm/RepoReadinessService.js';
 
 type PreConfig = PreprocessingStep['config'];
 type PostConfig = PostProcessingStep['config'];
@@ -330,6 +331,8 @@ export class LifecycleSteps {
     ctx: LifecycleStepContext,
     build: (alias: string) => ScmFlowRequest,
     describe: (result: ScmFlowResult) => string,
+    /** A blocked result that is an expected no-op for this step: its line, instead of a failure. */
+    skip?: (result: ScmFlowResult) => string | null,
   ): Promise<PostStepOutcome> {
     const results: ScmFlowResult[] = [];
     const lines: string[] = [];
@@ -343,6 +346,11 @@ export class LifecycleSteps {
         context: { hint },
       });
       results.push(result);
+      const skipped = result.status === 'blocked' ? (skip?.(result) ?? null) : null;
+      if (skipped !== null) {
+        lines.push(skipped);
+        continue;
+      }
       if (result.status !== 'ok') throw new ScmPostProcessingError(scmFailureReason(result), results);
       lines.push(describe(result));
     }
@@ -396,6 +404,9 @@ export class LifecycleSteps {
         const pr = result.pullRequest;
         return pr ? `PR #${pr.number} created for ${result.alias}: ${pr.url}` : `${result.alias}: no pull request was opened`;
       },
+      // U-26: a run that changed nothing (e.g. an issue triaged as not actionable) has nothing to
+      // propose — skip the PR like a commit with nothing to commit, rather than failing the run.
+      (result) => (result.readiness.reasons.pullRequest === REASON_NOTHING_TO_PROPOSE ? `${result.alias}: no changes to propose — pull request skipped` : null),
     );
   }
 
