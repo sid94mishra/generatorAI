@@ -3,8 +3,11 @@
 // P-31 Dialog.Body.
 //
 // `ModalForm`: a gap-20 flex column (drop it straight into `<Dialog.Body>`).
-// `ModalForm.Section`: one titled group — a `text-ui` 600 `h3` with its hint on
-// the line below, then the fields, gap 16. Every section after the `first` is
+// `ModalForm.Section`: one titled group — a `text-ui` 600 `h3`, then the
+// fields, gap 16. The section's `hint` is not a paragraph under the heading
+// (a grey block before every group read as noise, D-138): it sits behind an
+// `info` icon beside the title, as a Tooltip on hover and keyboard focus, and
+// stays in the accessibility tree as the icon's text. Every section after the `first` is
 // set off by a rule and 20 of top padding, so the groups read as separate
 // steps (D-133). The rule is `line`, not `line-soft`: a dialog sits on
 // `overlay`, where `line-soft` is the same value as the surface and vanishes.
@@ -14,6 +17,8 @@
 
 import type { ComponentProps, ReactNode } from 'react';
 import { cn } from '../../lib/cn.js';
+import { Icon } from '../../icons/Icon.js';
+import { Tooltip } from '../../primitives/Tooltip/Tooltip.js';
 
 export type ModalFormProps = ComponentProps<'div'>;
 
@@ -25,6 +30,7 @@ export function ModalForm({ className, ...rest }: ModalFormProps) {
 export interface ModalFormSectionProps extends Omit<ComponentProps<'section'>, 'title'> {
   /** Omit for an untitled lead section (the form's main fields). */
   title?: ReactNode;
+  /** What the section is for; shown as a tooltip on the info icon beside the title. */
   hint?: ReactNode;
   /** No rule above (the section opens the form). */
   first?: boolean;
@@ -35,9 +41,20 @@ export function ModalFormSection({ title, hint, first = false, className, childr
   return (
     <section className={cn('flex flex-col gap-4', !first && 'border-t border-line pt-5', className)} {...rest}>
       {title != null ? (
-        <div className="flex flex-col gap-0.5">
+        <div className="flex items-center gap-1.5">
           <h3 className="text-ui font-semibold text-fg">{title}</h3>
-          {hint != null ? <p className="text-small text-fg-3">{hint}</p> : null}
+          {hint != null ? (
+            <Tooltip content={hint} side="right">
+              <span
+                tabIndex={0}
+                className="inline-flex size-4 cursor-help items-center justify-center rounded-full text-fg-3 transition-control hover:text-fg-2 focus-ring"
+                data-testid="modal-form-section-info"
+              >
+                <Icon concept="info" size={14} />
+                <span className="sr-only">{hint}</span>
+              </span>
+            </Tooltip>
+          ) : null}
         </div>
       ) : null}
       {children}

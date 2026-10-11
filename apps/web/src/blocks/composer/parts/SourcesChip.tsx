@@ -13,7 +13,9 @@
 // to what the chat was created with.
 //
 // Chrome: P-09 Chip `dropdown` (Rosetta `.chip` + chevron), like the
-// Skills · MCP chip beside it.
+// Skills · MCP chip beside it. The popover is ONE `overlay` surface (D-138):
+// header, source rows and footer share its background and are split by `line`
+// rules — no sunken header band, no boxed cards inside the box.
 // ────────────────────────────────────────────────────────────────
 
 import type { WorkspaceMount } from '@generatorai/shared';
@@ -83,12 +85,12 @@ export function SourcesChipView({ mounts, projectName, fallback, onEditSources, 
         }
       />
       <PopoverPopup side="top" align="start" className="w-110 max-w-full overflow-hidden">
-        <div className="flex h-bar items-center gap-2 border-b border-line bg-sunken px-3">
+        <div className="flex h-bar items-center gap-2 border-b border-line px-3">
           <Icon concept="folder-open" size={14} className="text-fg-3" />
           <PopoverTitle className="text-ui font-semibold text-fg">Sources</PopoverTitle>
           {known && !empty ? (
             <span className="min-w-0 truncate font-mono text-micro text-fg-3">
-              {known.length} mount{known.length > 1 ? 's' : ''}
+              {known.length} source{known.length > 1 ? 's' : ''}
               {projectName ? ` · ${projectName}` : ''}
             </span>
           ) : null}
@@ -102,7 +104,7 @@ export function SourcesChipView({ mounts, projectName, fallback, onEditSources, 
             </PopoverClose>
           ) : null}
         </div>
-        <div className="flex flex-col gap-1.5 p-2">
+        <div className="flex flex-col">
           {known ? (
             known.map(({ mount, display }) => (
               <MountCard key={mount.id} display={display} onCopyPath={onCopyPath} />
@@ -111,11 +113,7 @@ export function SourcesChipView({ mounts, projectName, fallback, onEditSources, 
             <FallbackList fallback={fallback} />
           )}
         </div>
-        <p className="border-t border-line px-3 py-2 text-micro text-fg-3">
-          {empty
-            ? 'Edits apply to the next turn.'
-            : 'Edits apply to the next turn; existing mounts keep their history.'}
-        </p>
+        <p className="border-t border-line px-3 py-2 text-micro text-fg-3">Changes take effect from your next message.</p>
       </PopoverPopup>
     </PopoverRoot>
   );
@@ -124,7 +122,7 @@ export function SourcesChipView({ mounts, projectName, fallback, onEditSources, 
 /** One mount: name, mode, branch, then the user's folder (or what the agent works in). */
 function MountCard({ display, onCopyPath }: { display: MountDisplay; onCopyPath?: ((path: string) => void) | undefined }) {
   return (
-    <div className="flex flex-col gap-0.5 rounded-control border border-line px-2 py-1.5" data-testid="composer-source-mount">
+    <div className="flex flex-col gap-0.5 border-t border-line px-3 py-2 first:border-t-0" data-testid="composer-source-mount">
       <div className="flex h-badge min-w-0 items-center gap-2">
         <Icon concept={KIND_ICON[display.kind]} size={14} className="shrink-0 text-fg-3" />
         <span className={cn('truncate text-ui font-medium', display.kind === 'empty' ? 'text-fg-2' : 'text-fg')}>{display.label}</span>
@@ -165,7 +163,7 @@ function MountCard({ display, onCopyPath }: { display: MountDisplay; onCopyPath?
 
 function FallbackList({ fallback }: { fallback: SourceFallback }) {
   return (
-    <div className="flex flex-col gap-2 px-1 text-small">
+    <div className="flex flex-col gap-2 px-3 py-2 text-small">
       {fallback.projectLinked ? (
         <div className="flex flex-col gap-1">
           <p className="text-fg-3">Project codebases</p>
@@ -174,7 +172,7 @@ function FallbackList({ fallback }: { fallback: SourceFallback }) {
               <Spinner size={12} /> Loading…
             </span>
           ) : fallback.codebases.length === 0 ? (
-            <p className="text-fg-3">No codebases in project.</p>
+            <p className="text-fg-3">This project has no codebases yet.</p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {fallback.codebases.map((cb) => (
@@ -186,7 +184,7 @@ function FallbackList({ fallback }: { fallback: SourceFallback }) {
           )}
         </div>
       ) : fallback.count === 0 ? (
-        <p className="text-fg-3">No sources: the agent works in an empty folder this chat owns.</p>
+        <p className="text-fg-3">Nothing linked yet. The agent works in an empty folder of its own.</p>
       ) : (
         <p className="text-fg-2">No project linked</p>
       )}

@@ -241,7 +241,7 @@ export const SourcesEmptyWorkspace: Story = {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole('button', { name: /Empty workspace/ }));
     const body = within(canvasElement.ownerDocument.body);
-    await body.findByText(/the agent works in an empty folder this chat owns/);
+    await body.findByText(/The agent works in an empty folder of its own/);
     await expect(body.queryByText(/source\/main/)).toBeNull();
   },
 };
@@ -263,7 +263,7 @@ export const SourcesAndSkills: Story = {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole('button', { name: /payments-api/ }));
     const body = within(canvasElement.ownerDocument.body);
-    const note = await body.findByText('Edits apply to the next turn; existing mounts keep their history.');
+    const note = await body.findByText('Changes take effect from your next message.');
     await waitFor(() => expect(note).toBeVisible());
   },
 };

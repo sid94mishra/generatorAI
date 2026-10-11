@@ -3,9 +3,10 @@
 // Dialog; was components/chat/sources). Mounted by app/shell/EditSourcesHost.
 //
 // Layout (D-136, the New chat dialog's D-133 structure): ModalForm sections
-// split by `line` rules — Where (the full B-04 SourcePicker: Project, then one
-// source list) and Source control (label + hint + switch rows). Labels sit
-// above controls on one left edge.
+// split by `line` rules — "Folders and codebases" (the full B-04
+// SourcePicker: Project, then one source list) and "After each turn" (label +
+// hint + switch rows). Labels sit above controls on one left edge; each
+// section's explanation is behind its info icon (D-138).
 // ────────────────────────────────────────────────────────────────
 //
 // The same B-04 SourcePicker the create flows use, pre-filled from
@@ -114,8 +115,8 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
         <ModalForm>
           <ModalForm.Section
             first
-            title="Where"
-            hint="What this chat works on. The agent starts in the working directory; changes apply to the next turn and existing mounts keep their history."
+            title="Folders and codebases"
+            hint="What the agent can read and edit. It starts in the working directory. Changes take effect from your next message; sources you keep are left as they are."
           >
             <SourcePicker
               chatName={chat.name}
@@ -129,7 +130,10 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
               disabled={busy}
             />
           </ModalForm.Section>
-          <ModalForm.Section title="Source control" hint="What the agent does with git after each turn.">
+          <ModalForm.Section
+            title="After each turn"
+            hint="Git steps the agent takes when a reply finishes with file changes. They apply to git repositories only."
+          >
             <SourceControlOptionsFields value={sourceControl} onChange={setSourceControl} disabled={busy} />
           </ModalForm.Section>
         </ModalForm>

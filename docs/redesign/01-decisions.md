@@ -1296,6 +1296,17 @@ on the live conversation and sends `cwd` with every `turn/start` ("this turn and
 writable-roots sandbox policy; Faux adopts them too. Copilot (a CLI client per cwd) and the experimental OpenCode/ACP
 are not changed yet — open item in `reviews/chat-sources.md`.
 
+### D-138 Form-dialog section hints sit behind an info icon; the Sources popover is one surface (2026-10-11) — Final
+Owner feedback: a grey sentence under every dialog section heading ("Where — What this chat works on…") read as noise,
+and the composer's Sources popover mixed a sunken header band with boxed mount cards on the overlay. `ModalForm.Section`
+now renders `hint` as a Tooltip on an `info` icon beside the title (hover + keyboard focus; the text stays in the
+accessibility tree via `sr-only`), so every form dialog (New chat, Edit sources) gets it at once. Section titles say what
+the user picks, not interrogatives: "Agent and model", "Folders and codebases", "After each turn" (the git switches:
+Commit changes / Push the branch / Open a pull request). The popover keeps the `overlay` surface throughout — header,
+divided source rows and footer split by `line` rules. A folder that is not a git repository shows neither Mode nor
+branch controls (it can only be edited in place). Page forms (`FormSection` on ChatCreate) keep visible hints: a page
+has the room and no hover-only text.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

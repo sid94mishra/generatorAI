@@ -243,7 +243,10 @@ export function NewChatDialog() {
           </ModalForm.Section>
 
           {/* ── Who ── */}
-          <ModalForm.Section title="Who" hint="The agent brings its own instructions, skills and MCP servers.">
+          <ModalForm.Section
+            title="Agent and model"
+            hint="An agent brings its own instructions, skills and MCP servers. Without one, the chat uses the model you pick."
+          >
             <div className="grid grid-cols-2 gap-4">
               <Field label="Agent" hint={capabilitySummary}>
                 <AgentPicker
@@ -278,7 +281,10 @@ export function NewChatDialog() {
           </ModalForm.Section>
 
           {/* ── Where ── */}
-          <ModalForm.Section title="Where" hint="What the agent works on. The first source is its working directory.">
+          <ModalForm.Section
+            title="Folders and codebases"
+            hint="What the agent can read and edit. It starts in the working directory. Leave it empty to start in a fresh folder."
+          >
             <SourcePicker
               chatName={chatCreateDisplayName({ name, prompt: task }) || 'chat'}
               compact

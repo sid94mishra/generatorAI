@@ -85,8 +85,7 @@ export interface SourcePickerProps {
 const NO_PROJECT = '__no-project__';
 const CURRENT_HEAD = '__current-head__';
 
-const EMPTY_HINT =
-  'No sources: the agent works in an empty folder this chat owns (Empty workspace). Add a folder or codebase to work on existing code.';
+const EMPTY_HINT = 'Nothing linked yet. The agent starts in an empty folder of its own — add a folder to work on your files.';
 
 /** The project codebase row shape this picker reads (from `useProjectCodebases`). */
 interface ProjectCodebase {
@@ -292,7 +291,7 @@ export function SourcePicker({
         <Spinner size={14} label="Loading codebases" /> Loading codebases…
       </div>
     ) : !codebases || codebases.length === 0 ? (
-      <p className="text-small text-fg-3">No codebases linked to this project.</p>
+      <p className="text-small text-fg-3">This project has no codebases yet.</p>
     ) : null
   ) : null;
 
@@ -610,7 +609,8 @@ function CompactSourceRow(props: SourceRowProps) {
         {isPrimary ? <WorkingDirectoryBadge /> : null}
         <DirtyMark dirty={facts.dirty} />
         <span className="flex-1" />
-        <ModeControl {...props} />
+        {/* A folder that is not a repository can only be edited in place. */}
+        {draft.meta.isGit ? <ModeControl {...props} /> : null}
       </div>
       {/* A plain folder has no branches to choose (the server refuses them). */}
       {draft.meta.isGit ? (
@@ -674,7 +674,7 @@ function SourceRow(props: SourceRowProps) {
             Make working directory
           </Button>
         )}
-        {draft.meta.isGit ? null : <Badge>plain folder</Badge>}
+        {draft.meta.isGit ? null : <Badge>not a git repo</Badge>}
         <DirtyMark dirty={facts.dirty} />
         {nested.length > 0 && (
           <Tooltip content={`Nested repositories: ${nested.join(', ')}`}>
@@ -733,11 +733,14 @@ function SourceRow(props: SourceRowProps) {
         </div>
       )}
 
-      {/* How the agent gets it: mode, then the branch it works on */}
-      <div className="flex flex-wrap items-center gap-2 pl-6">
-        <ModeControl {...props} />
-        {draft.meta.isGit ? <BranchControls {...props} facts={facts} /> : null}
-      </div>
+      {/* How the agent gets it: mode, then the branch it works on. A folder
+          that is not a repository has neither — it is edited in place. */}
+      {draft.meta.isGit ? (
+        <div className="flex flex-wrap items-center gap-2 pl-6">
+          <ModeControl {...props} />
+          <BranchControls {...props} facts={facts} />
+        </div>
+      ) : null}
 
       <RowNotes draft={draft} facts={facts} className="pl-6" />
     </div>

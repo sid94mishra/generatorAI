@@ -28,20 +28,20 @@ export interface SourceControlOptionsFieldsProps {
 /**
  * Label + hint + switch rows (the New chat dialog's Behaviour idiom, D-133),
  * rule-separated with `line` so they hold on the dialog's `overlay` surface.
- * The host section supplies the "Source control" heading.
+ * The host section supplies the "After each turn" heading.
  */
 export function SourceControlOptionsFields({ value, onChange, disabled = false }: SourceControlOptionsFieldsProps) {
   const patch = (delta: Partial<ChatSourceControlOptions>) => onChange({ ...value, ...delta });
 
   return (
-    <div className="flex flex-col" data-testid="source-control-options" role="group" aria-label="Source control">
+    <div className="flex flex-col" data-testid="source-control-options" role="group" aria-label="After each turn">
       <SettingRow
         className="border-line"
-        label="Auto-commit after each turn"
-        hint="Commit the change set to git whenever a turn finishes with changes."
+        label="Commit changes"
+        hint="Commit the files the agent changed to its branch."
         control={
           <Switch
-            aria-label="Auto-commit after each turn"
+            aria-label="Commit changes"
             checked={value.autoCommit}
             disabled={disabled}
             onCheckedChange={(checked) =>
@@ -57,11 +57,11 @@ export function SourceControlOptionsFields({ value, onChange, disabled = false }
       />
       <SettingRow
         className="border-line"
-        label="Push"
-        hint="Push the work branch after committing. Never to the default branch."
+        label="Push the branch"
+        hint="Push the agent's branch to the remote. Never pushes to the default branch."
         control={
           <Switch
-            aria-label="Push"
+            aria-label="Push the branch"
             checked={value.autoPush}
             disabled={disabled || !value.autoCommit}
             onCheckedChange={(checked) =>
@@ -72,11 +72,11 @@ export function SourceControlOptionsFields({ value, onChange, disabled = false }
       />
       <SettingRow
         className="border-line"
-        label="Open pull request"
-        hint="Open one pull request for the work branch, once."
+        label="Open a pull request"
+        hint="Open one pull request for the agent's branch."
         control={
           <Switch
-            aria-label="Open pull request"
+            aria-label="Open a pull request"
             checked={value.autoPullRequest}
             disabled={disabled || !value.autoCommit}
             onCheckedChange={(checked) =>
@@ -92,14 +92,14 @@ export function SourceControlOptionsFields({ value, onChange, disabled = false }
                   value={value.base ?? ''}
                   disabled={disabled}
                   onChange={(e) => patch({ base: e.target.value || undefined })}
-                  placeholder="repo default"
+                  placeholder="Repository default"
                   data-testid="scm-options-base"
                 />
               </Field>
               <Switch
                 checked={value.draft ?? false}
                 disabled={disabled}
-                label="Draft"
+                label="Open as draft"
                 onCheckedChange={(checked) => patch({ draft: checked })}
                 className="pb-1.5"
               />

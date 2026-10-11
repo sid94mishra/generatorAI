@@ -459,7 +459,7 @@ export function ChatCreatePage() {
   );
 
   const whereSection = (
-    <FormSection title="Where" hint="What the agent works on. It starts in the working directory.">
+    <FormSection title="Folders and codebases" hint="What the agent can read and edit. It starts in the working directory; leave it empty to start in a fresh folder.">
       <SourcePicker
         chatName={displayName || 'chat'}
         compact={false}
@@ -624,12 +624,12 @@ export function ChatCreatePage() {
       ),
     },
     {
-      label: 'Where',
+      label: 'Works on',
       content: (
         <div className="flex flex-col gap-0.5">
           {projectName ? <span>{projectName}</span> : null}
           {sourceDrafts.length === 0 ? (
-            <span className="text-small text-fg-3">Empty managed workspace</span>
+            <span className="text-small text-fg-3">A fresh, empty folder</span>
           ) : (
             sourceDrafts.map((d) => (
               <span key={d.key} className="font-mono text-small text-fg-2 break-all">

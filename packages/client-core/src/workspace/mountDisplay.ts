@@ -53,7 +53,7 @@ export function describeMount(mount: MountLike): MountDisplay {
     return {
       kind: 'empty',
       label: EMPTY_WORKSPACE_LABEL,
-      detail: 'No sources: the agent works in an empty folder this chat owns. Add a folder or codebase to work on existing code.',
+      detail: 'Nothing linked yet. The agent works in an empty folder of its own — use Edit sources to add your folder.',
     };
   }
   const branch = mount.git?.isRepo ? mount.git.branch : undefined;
