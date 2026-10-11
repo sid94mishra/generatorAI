@@ -1,8 +1,21 @@
 // A completion review's output as Markdown (U-19). A JSON output contract
-// (`{"body": "## Summary…"}`) shows its text fields as Markdown, not as an
-// escaped JSON string; other JSON shows as a code block; text shows as is.
+// shows field by field: long text as Markdown under its name, short values
+// inline, lists as bullets, anything nested as a small JSON block. A contract
+// with a single text field (`{"body": "## Summary…"}`) shows just that text.
+// Other output shows as is; JSON that does not parse shows as a code block.
 
 const fence = (text: string) => `\`\`\`json\n${text}\n\`\`\``;
+const isLongText = (v: unknown): v is string => typeof v === 'string' && (v.length > 80 || v.includes('\n'));
+const title = (key: string) => key.replace(/[_-]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+
+function field(key: string, value: unknown): string {
+  if (isLongText(value)) return `#### ${title(key)}\n\n${value}`;
+  if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return `**${title(key)}:** ${value === '' ? '—' : String(value)}`;
+  if (Array.isArray(value) && value.every((v) => v === null || ['string', 'number', 'boolean'].includes(typeof v))) {
+    return value.length === 0 ? `**${title(key)}:** none` : `**${title(key)}:**\n\n${value.map((v) => `- ${String(v)}`).join('\n')}`;
+  }
+  return `**${title(key)}:**\n\n${fence(JSON.stringify(value, null, 2))}`;
+}
 
 export function reviewOutputMarkdown(output: string): string {
   const trimmed = output.trim();
@@ -15,8 +28,8 @@ export function reviewOutputMarkdown(output: string): string {
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fence(trimmed);
   const entries = Object.entries(parsed as Record<string, unknown>);
-  const texts = entries.filter(([, v]) => typeof v === 'string' && (v as string).length > 0) as Array<[string, string]>;
-  if (texts.length === 0 || texts.length !== entries.length) return fence(JSON.stringify(parsed, null, 2));
-  if (texts.length === 1) return texts[0]![1];
-  return texts.map(([k, v]) => `#### ${k}\n\n${v}`).join('\n\n');
+  if (entries.length === 1 && typeof entries[0]![1] === 'string') return entries[0]![1];
+  // Short fields first (verdict, counts), then the long texts.
+  const ordered = [...entries.filter(([, v]) => !isLongText(v)), ...entries.filter(([, v]) => isLongText(v))];
+  return ordered.map(([k, v]) => field(k, v)).join('\n\n');
 }

@@ -5,11 +5,13 @@ describe('reviewOutputMarkdown (U-19)', () => {
   it('shows a single text field of a JSON contract as its Markdown', () => {
     expect(reviewOutputMarkdown('{"body":"## Summary\\n\\nDone."}')).toBe('## Summary\n\nDone.');
   });
-  it('heads several text fields by name', () => {
-    expect(reviewOutputMarkdown('{"title":"T","body":"B"}')).toBe('#### title\n\nT\n\n#### body\n\nB');
+  it('shows a mixed contract field by field: short values first, long text as Markdown', () => {
+    const out = reviewOutputMarkdown(JSON.stringify({ pr_description: '## Summary\n\nFixed.', verdict: 'approve', concerns: [] }));
+    expect(out).toBe('**Verdict:** approve\n\n**Concerns:** none\n\n#### Pr description\n\n## Summary\n\nFixed.');
   });
-  it('shows other JSON as a code block', () => {
-    expect(reviewOutputMarkdown('{"count":3}')).toBe('```json\n{\n  "count": 3\n}\n```');
+  it('lists string arrays and fences nested values', () => {
+    expect(reviewOutputMarkdown('{"files":["a.ts","b.ts"]}')).toBe('**Files:**\n\n- a.ts\n- b.ts');
+    expect(reviewOutputMarkdown('{"meta":{"n":1}}')).toBe('**Meta:**\n\n```json\n{\n  "n": 1\n}\n```');
   });
   it('keeps plain text and fences broken JSON', () => {
     expect(reviewOutputMarkdown('All good.')).toBe('All good.');
