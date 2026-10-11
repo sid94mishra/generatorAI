@@ -22,6 +22,7 @@ import {
   Panel,
   ReactFlow,
   useReactFlow,
+  useStore,
   type Edge,
   type EdgeTypes,
   type Node,
@@ -48,7 +49,6 @@ import { wrapStages } from './canvasActions.js';
 import { CanvasContext, type CanvasContextValue, type NodeTag } from './canvasContext.js';
 import {
   CONNECTION_LINE_STYLE,
-  FIT_OPTIONS,
   GRID_COLOR,
   GRID_GAP,
   MAX_ZOOM,
@@ -59,6 +59,7 @@ import {
   PANEL_STYLE,
   XY_THEME,
 } from './canvasTheme.js';
+import { readableViewport } from './canvasFit.js';
 import { AddStageControl, EdgeLegend, EmptyCanvas, SelectionBar, ZoomBar } from './CanvasPanels.js';
 import { GroupNode } from './GroupNode.js';
 import { StageEdge } from './StageEdge.js';
@@ -195,25 +196,34 @@ export function BuilderCanvas({ onAddStage, onAddedTemplate, nodeTags = NO_TAGS,
   );
 
   // ── Fit: Auto-layout, first render, a stage added, an issue focused ──
+  const canvasWidth = useStore((s) => s.width);
+  const canvasHeight = useStore((s) => s.height);
+  const fitReadable = useCallback(
+    (duration: number) => {
+      const all = flow.getNodes();
+      if (all.length === 0 || !canvasWidth || !canvasHeight) return;
+      void flow.setViewport(readableViewport(flow.getNodesBounds(all), canvasWidth, canvasHeight), { duration });
+    },
+    [flow, canvasWidth, canvasHeight],
+  );
   const handleAutoLayout = useCallback(() => {
     autoLayout();
-    setTimeout(() => void flow.fitView({ ...FIT_OPTIONS, duration: 300 }), FIT_DELAY_MS / 2);
-  }, [autoLayout, flow]);
+    setTimeout(() => fitReadable(300), FIT_DELAY_MS / 2);
+  }, [autoLayout, fitReadable]);
 
-  const prevCount = useRef(nodes.length);
+  const prevCount = useRef(0);
   useEffect(() => {
     if (nodes.length === 0) {
       prevCount.current = 0;
       return;
     }
+    const first = prevCount.current === 0;
     const added = nodes.length > prevCount.current;
     prevCount.current = nodes.length;
-    const t = setTimeout(
-      () => void flow.fitView({ ...FIT_OPTIONS, duration: added ? 400 : 300 }),
-      added ? FIT_DELAY_NEW_STAGE_MS : FIT_DELAY_MS,
-    );
+    // The first fit is instant: the canvas opens where it will stay.
+    const t = setTimeout(() => fitReadable(first ? 0 : added ? 400 : 300), added ? FIT_DELAY_NEW_STAGE_MS : FIT_DELAY_MS);
     return () => clearTimeout(t);
-  }, [nodes.length, flow]);
+  }, [nodes.length, fitReadable]);
 
   const focusRequest = useWorkflowBuilderStore((s) => s.focusRequest);
   useEffect(() => {
@@ -273,8 +283,6 @@ export function BuilderCanvas({ onAddStage, onAddedTemplate, nodeTags = NO_TAGS,
           edgeTypes={edgeTypes}
           defaultEdgeOptions={defaultEdgeOptions}
           colorMode={appearance}
-          fitView
-          fitViewOptions={FIT_OPTIONS}
           minZoom={MIN_ZOOM}
           maxZoom={MAX_ZOOM}
           snapToGrid

@@ -24,6 +24,7 @@ import { Link as RouterLink, useNavigate } from 'react-router';
 import { DANGER, RISK_LABELS } from '@generatorai/shared/ui-contract';
 import { riskFlags, type WorkflowDefinitionRecord, type WorkflowGraph } from '@generatorai/workflow-spec';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
+import { useChat } from '@/hooks/queries.js';
 import {
   useDefinitionVersions,
   useDeleteWorkflowDefinition,
@@ -104,6 +105,10 @@ export function AgentDraftBanner({ record, graph, onPublish, publishing }: Agent
   const discard = useDeleteWorkflowDefinition();
   const { replacesId, replaced, diff } = useReplacedDiff(record, graph);
   const { data: sourceRun } = useWorkflowRun(author?.kind === 'stage' ? author.runId : undefined);
+  const inChat = author?.kind === 'chat' || author?.kind === 'orchestrator';
+  // U-13: name the chat's agent ("Pulse Tech Lead"), not its role.
+  const { data: sourceChat } = useChat(inChat ? author.chatId : undefined);
+  const chatAgentName = sourceChat?.agentSnapshot?.driving?.name;
   const { data: replacedVersions } = useDefinitionVersions(replacesId);
   const { data: ownVersions } = useDefinitionVersions(record.id);
   const [reviewing, setReviewing] = useState(false);
@@ -156,7 +161,7 @@ export function AgentDraftBanner({ record, graph, onPublish, publishing }: Agent
     case 'orchestrator':
       byline = (
         <>
-          Drafted by <span className="font-medium text-fg">{author.kind === 'orchestrator' ? 'Orchestrator' : 'an agent'}</span> in a chat
+          Drafted by <span className="font-medium text-fg">{chatAgentName ?? (author.kind === 'orchestrator' ? 'Orchestrator' : 'an agent')}</span> in a chat
           {author.chatId ? (
             <>
               {' '}

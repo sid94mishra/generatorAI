@@ -62,7 +62,8 @@ export function DetailPage({
           <div className={cn('flex min-h-0 flex-1 gap-4 px-7 pb-6', railStacked ? 'flex-col' : 'flex-row')}>
             {/* Stacked, flex-1 would grow the content down the column and push the rail away. */}
             <div className={cn('min-w-0', !railStacked && 'flex-1')}>{content}</div>
-            {rail != null ? <div className={cn('flex shrink-0 flex-col gap-2.5', !railStacked && 'w-side-rail')}>{rail}</div> : null}
+            {/* The page scrolls, not the rail: its cards keep their height (a shrunk Card clips its body). */}
+            {rail != null ? <div className={cn('flex shrink-0 flex-col gap-2.5 *:shrink-0', !railStacked && 'w-side-rail')}>{rail}</div> : null}
           </div>
         </div>
         {inspector}
