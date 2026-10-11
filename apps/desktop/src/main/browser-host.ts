@@ -703,9 +703,14 @@ export class NativeBrowserHost extends EventEmitter {
     else if (typeof wc?.goForward === 'function') wc.goForward();
   }
 
+  /**
+   * Reload bypassing the cache. This browser previews the user's own site
+   * while an agent edits it; a plain reload re-validates only the document, so
+   * a stylesheet the agent just changed could still come from the cache.
+   */
   reload(tabId: string): void {
     const sess = this.sessions.get(tabId);
-    sess?.view.webContents.reload();
+    sess?.view.webContents.reloadIgnoringCache();
   }
 
   async screenshot(tabId: string): Promise<string | null> {

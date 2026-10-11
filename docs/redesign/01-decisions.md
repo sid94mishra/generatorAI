@@ -1382,7 +1382,8 @@ diff's `ReviewComposerPopover` so both use one component: intent chips (Fix · Q
 the comment, **Add comment** / **Add & send**; keyboard focus moves to the app on a pick. Saved comments are numbered
 pins; each row has Edit (the same form, **Update comment**), Attach to the message, Send, Delete, and shows its element
 on the page; the header has **Attach all** / **Send all**. The intent leads each comment in the sent Markdown. The ⋯
-menu is just **Open DevTools** (Network / Console / Inspect elements opened the same window).
+menu is just **Open DevTools** (Network / Console / Inspect elements opened the same window). The toolbar's Reload
+bypasses the cache: found end to end — the agent fixed `style.css`, a plain reload kept the cached stylesheet.
 
 ### D-142 (withdrawn 2026-10-11) Local self-signed signing does not stop the Keychain prompt
 Tried and reverted: signing local builds with a self-signed "GeneratorAI Local Signing" identity kept the code signature
