@@ -164,7 +164,7 @@ export class GitHubProvider implements ISourceControlProvider {
     });
     if (res.status === 404) return null;
     if (res.status >= 400) {
-      throw new SourceControlError(`GitHub getPullRequest failed (${res.status}): ${res.body}`);
+      throw new SourceControlError(describeFailure('read the pull request', res));
     }
     return this.mapPr(JSON.parse(res.body) as GitHubPr);
   }
@@ -179,7 +179,7 @@ export class GitHubProvider implements ISourceControlProvider {
       timeout: 15_000,
     });
     if (res.status >= 400) {
-      throw new SourceControlError(`GitHub listPullRequests failed (${res.status}): ${res.body}`);
+      throw new SourceControlError(describeFailure('list pull requests', res));
     }
     const arr = JSON.parse(res.body) as GitHubPr[];
     return arr.map((pr) => this.mapPr(pr));
@@ -195,7 +195,7 @@ export class GitHubProvider implements ISourceControlProvider {
       timeout: 15_000,
     });
     if (prRes.status >= 400) {
-      throw new SourceControlError(`GitHub getStatusChecks (pr) failed (${prRes.status})`);
+      throw new SourceControlError(describeFailure('read the pull request checks', prRes));
     }
     const pr = JSON.parse(prRes.body) as { head?: { sha?: string } };
     const sha = pr.head?.sha;
@@ -225,7 +225,7 @@ export class GitHubProvider implements ISourceControlProvider {
       timeout: 15_000,
     });
     if (res.status >= 400) {
-      throw new SourceControlError(`GitHub getAuthenticatedUser failed (${res.status})`);
+      throw new SourceControlError(describeFailure('read the connected account', res));
     }
     const data = JSON.parse(res.body) as { login?: string; avatar_url?: string };
     const user: ProviderUser = { login: data.login ?? '' };
@@ -245,7 +245,7 @@ export class GitHubProvider implements ISourceControlProvider {
       timeout: 15_000,
     });
     if (res.status >= 400) {
-      throw new SourceControlError(`GitHub getRepository failed (${res.status}): ${res.body}`);
+      throw new SourceControlError(describeFailure('read the repository', res));
     }
     const data = JSON.parse(res.body) as {
       default_branch?: string;
@@ -271,7 +271,7 @@ export class GitHubProvider implements ISourceControlProvider {
       timeout: 15_000,
     });
     if (res.status >= 400) {
-      throw new SourceControlError(`GitHub getPullRequestDetail failed (${res.status}): ${res.body}`);
+      throw new SourceControlError(describeFailure('read the pull request', res));
     }
     const pr = JSON.parse(res.body) as GitHubPrDetail;
     return {
@@ -298,7 +298,7 @@ export class GitHubProvider implements ISourceControlProvider {
       timeout: 20_000,
     });
     if (res.status >= 400) {
-      throw new SourceControlError(`GitHub listPullRequestFiles failed (${res.status}): ${res.body}`);
+      throw new SourceControlError(describeFailure("list the pull request's files", res));
     }
     const files = JSON.parse(res.body) as GitHubPrFile[];
     return files.map((f) => {
@@ -333,14 +333,10 @@ export class GitHubProvider implements ISourceControlProvider {
       }),
     ]);
     if (reviewRes.status >= 400) {
-      throw new SourceControlError(
-        `GitHub listPullRequestComments (review) failed (${reviewRes.status})`,
-      );
+      throw new SourceControlError(describeFailure('read the review comments', reviewRes));
     }
     if (issueRes.status >= 400) {
-      throw new SourceControlError(
-        `GitHub listPullRequestComments (issue) failed (${issueRes.status})`,
-      );
+      throw new SourceControlError(describeFailure('read the comments', issueRes));
     }
     const review = (JSON.parse(reviewRes.body) as GitHubComment[]).map((c) =>
       mapComment(c, 'review'),
@@ -546,7 +542,7 @@ export class GitHubProvider implements ISourceControlProvider {
       timeout: 20_000,
     });
     if (res.status >= 400) {
-      throw new SourceControlError(`GitHub createPullRequest failed (${res.status}): ${res.body}`);
+      throw new SourceControlError(describeFailure('open the pull request', res));
     }
     return this.mapPr(JSON.parse(res.body) as GitHubPr);
   }
@@ -754,12 +750,45 @@ function githubMessage(body: string): string | undefined {
 }
 
 /** A readable sentence for a failed call: what we tried, why the host said no, and the fix when it is ours to name. */
+const PERMISSION_LABEL: Record<string, string> = {
+  pull_requests: 'Pull requests',
+  contents: 'Contents',
+  issues: 'Issues',
+  metadata: 'Metadata',
+  checks: 'Checks',
+  statuses: 'Commit statuses',
+  workflows: 'Workflows',
+  actions: 'Actions',
+};
+
+/** `pull_requests=write; contents=read` → ['"Pull requests: Read and write"', '"Contents: Read-only"'] (the token page's wording). */
+export function acceptedPermissions(header: string | undefined): string[] {
+  if (!header) return [];
+  return header
+    .split(/[;,]/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const [name = '', level = ''] = part.split('=').map((x) => x.trim());
+      const label = PERMISSION_LABEL[name] ?? name.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+      return `"${label}: ${level === 'write' ? 'Read and write' : level === 'read' ? 'Read-only' : level}"`;
+    });
+}
+
 function describeFailure(action: string, res: ScmHttpResponse): string {
   const reason = githubMessage(res.body) ?? `HTTP ${res.status}`;
   if (res.status === 401) {
     return `GitHub could not ${action}: the connected account's token is invalid or expired — reconnect it in Settings → Source Control`;
   }
   if (res.status === 403) {
+    // U-9: a fine-grained token missing a permission — GitHub names it in X-Accepted-GitHub-Permissions.
+    const needed = acceptedPermissions(headerValue(res.headers ?? {}, 'x-accepted-github-permissions'));
+    if (needed.length > 0) {
+      return (
+        `GitHub could not ${action}: the connected token lacks ${needed.join(' and ')} on this repository — ` +
+        `edit the token on GitHub (Settings → Developer settings → Fine-grained tokens), then try again`
+      );
+    }
     return `GitHub could not ${action}: ${reason} (the connected account needs write access to this repository)`;
   }
   if (res.status === 404) {

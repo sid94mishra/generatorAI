@@ -204,3 +204,11 @@ describe('GitHubProvider issues', () => {
     await expect(p.listIssues({ owner: 'a', repo: 'b' })).rejects.toThrow(/requires a configured token/);
   });
 });
+
+describe('acceptedPermissions (U-9)', () => {
+  it('names a fine-grained token permission in the token page wording', async () => {
+    const { acceptedPermissions } = await import('../src/GitHubProvider.js');
+    expect(acceptedPermissions('pull_requests=write; contents=read')).toEqual(['"Pull requests: Read and write"', '"Contents: Read-only"']);
+    expect(acceptedPermissions(undefined)).toEqual([]);
+  });
+});
