@@ -98,3 +98,17 @@ touched files (715) and ComposerParts / Chip stories (new `SourcesEmptyWorkspace
 - Copilot / OpenCode / ACP after Edit sources (D-137 open item).
 - The desktop app connected to a remote server, end to end in the real SPA (the smoke uses a stand-in page; a sandbox
   shown as "remote" stops at pairing).
+
+## Real-user pass on the installed app (2026-10-11)
+Installed `/Applications/GeneratorAI.app`, isolated profile (`--user-data-dir`), folders picked in the real macOS dialog
+(⇧⌘G via System Events), real Claude turns. 41/43 checks passed first run; both failures were real and are fixed
+(D-139), re-test 5/5.
+- Plain folder in place (New chat → Add local folder): chip/popover/mount correct, agent wrote into the folder.
+- Local git repo: in place on its branch; worktree on `generatorai/<slug>` with the user checkout untouched; dirty repo badge.
+- Edit sources on a live chat: Empty workspace → folder → agent follows in the same conversation → remove → Empty workspace.
+- Projects: `octocat/Hello-World` cloned, auto-included (D-108), agent read README from its worktree; local git (Browse →
+  OS dialog) + local folder project, neither auto-included, both mounted when ticked.
+- Fixed: plain folder showed "1 file changed · Undo all" before any turn (Undo would have deleted user files); a re-added
+  `main` could never checkpoint again; the popover did not name the project.
+- Open: removing the Empty workspace (adding a folder via Edit sources) deletes what the agent built there, silently;
+  Changes footer shows "detached HEAD · Nothing to commit" for an empty workspace with new files; Copilot rebinding (D-137).
