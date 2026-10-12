@@ -220,7 +220,7 @@ describe('MountService.plan validation', () => {
     };
     const { service, git } = makeService({ workspacesDir, codebases: [codebase] });
     const taken = new Set(['generatorai/use-only-the-read', 'feature/login']);
-    git.branchExists.mockImplementation(async (_repo: string, name: string) => taken.has(name));
+    git.branchExists.mockImplementation((async (_repo: string, name: string) => taken.has(name)) as never);
 
     const planned = await service.plan(path.join(workspacesDir, 'executions', 'chat-2'), undefined, [
       { kind: 'codebase', codebaseId: 'cb-api', mode: 'worktree', newBranch: 'generatorai/use-only-the-read' },

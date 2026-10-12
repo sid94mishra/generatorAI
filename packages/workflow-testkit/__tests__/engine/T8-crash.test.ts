@@ -42,6 +42,31 @@ const T8 = {
 };
 
 describe('T8 crash recovery (engine)', () => {
+  it('a graceful shutdown mid-turn never settles the cut-off turn: the stage is recovered, not completed (U-48)', async () => {
+    engine = await createTestEngine({
+      script: { c1: [{ hang: true }, { text: 'C1 answer after the restart: 1 2 3 ... 600, all written out.' }] },
+    });
+    const run = await engine.runWorkflow(T8);
+    await pendingCall(engine, 'c1');
+    const call = engine.calls.find((c) => c.stageName === 'c1' && c.outcome === 'pending')!;
+
+    // The server's shutdown: the engine stops first, then the providers go away, which makes the
+    // hung turn RESOLVE with what it had (claude-agent does exactly this).
+    await engine.services.engine.stop();
+    await engine.harness.abortConversation(call.conversationId);
+    await engine.settle(300);
+
+    const turns = engine.sqlite
+      .prepare(`SELECT value FROM registers WHERE scope = 'stage_run' AND scope_id = ? AND key LIKE 'turn/%'`)
+      .all(run.stageRunId('c1')) as Array<{ value: string }>;
+    expect(turns.some((t) => t.value.includes('"settled"'))).toBe(false);
+
+    await engine.killAndRestart();
+    const snap = await run.waitForStage('c1', 'paused');
+    expect(snap.stages['c1']!.status).toBe('paused');
+    expect(snap.stages['c2']!.status).toBe('pending');
+  });
+
   it('a crash mid-turn pauses the interrupted stage (never completes it); an operator retry finishes it (W-16)', async () => {
     engine = await createTestEngine({
       script: { c1: [{ hang: true }, { text: 'C1 answer after the restart: 1 2 3 ... 600, all written out.' }] },

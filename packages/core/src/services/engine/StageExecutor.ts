@@ -554,6 +554,10 @@ export class StageExecutor {
         /* a failed write must not stop the shutdown */
       }
     }
+    // …and from here on write nothing. Stopping the providers next makes an in-flight turn RESOLVE with
+    // whatever it had (claude-agent), and the turn settled as if it had finished: a quit mid-turn completed
+    // the Backend stage on a reply cut off mid-word. Recovery owns these attempts now (`kill`'s contract).
+    this.kill();
   }
 
   /** Stop every frame (process shutdown): each reports `aborted`. */
@@ -1239,6 +1243,8 @@ export class StageExecutor {
       frame.turnAc = undefined;
       frame.ac.signal.removeEventListener('abort', onAttemptAbort);
     }
+    // The process is shutting down (or dying): what the turn returned is not an answer — never settle it.
+    if (this.dead) throw new AttemptStop({ kind: 'aborted', reason: 'superseded' });
     // An aborted turn that RESOLVES (claude-agent) is handled like one that threw.
     if (frame.stop) {
       this.persistPartial(ctx, t.role, turnMeta);
