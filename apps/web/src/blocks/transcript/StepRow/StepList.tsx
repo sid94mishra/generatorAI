@@ -113,10 +113,16 @@ function StepDetail({ step, mode, live }: { step: TimelineStep; mode: 'normal' |
     return typeof step.detail === 'function' ? step.detail() : step.detail;
   }, [wantRaw, step.detail]);
   const filePath = step.fileOp?.filePath;
+  // A group's panel is only its child rows: it grows with them, so an expanded
+  // child's own output is never a scroll box inside another scroll box.
+  const groupOnly = !diff && !detailText && !!step.children?.length;
   return (
     <div
       data-testid="step-detail-panel"
-      className={cn('flex min-w-0 flex-col gap-1.5 overflow-auto', step.workerChatId ? 'max-h-90' : 'max-h-65')}
+      // A grid, not a flex column: flex items shrink to the capped height and
+      // clip their own overflow, so a long output was cut off with nothing to
+      // scroll (U-51). Grid rows keep their content height and the panel scrolls.
+      className={cn('grid min-w-0 grid-cols-1 gap-1.5', !groupOnly && 'overflow-auto', !groupOnly && (step.workerChatId ? 'max-h-90' : 'max-h-65'))}
     >
       {diff ? (
         <DiffSnippet
@@ -135,7 +141,7 @@ function StepDetail({ step, mode, live }: { step: TimelineStep; mode: 'normal' |
         <Button
           size="sm"
           variant="ghost"
-          className="self-start"
+          className="justify-self-start"
           aria-expanded={showRaw}
           aria-controls={rawId}
           onClick={() => {
