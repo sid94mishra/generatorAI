@@ -38,7 +38,8 @@ const nodeTypes = { runGraphNode: RunGraphNode } as NodeTypes;
 const edgeTypes = { runGraphEdge: RunGraphEdge } as EdgeTypes;
 
 /** Fit padding / zoom cap, and the centre offset of a node (half its card). */
-const FIT = { padding: 0.18, maxZoom: 1.3 } as const;
+// minZoom: React Flow's default floor (0.5) cannot fit a long pipeline, so its ends were cut off (U-52).
+const FIT = { padding: 0.18, maxZoom: 1.3, minZoom: 0.2 } as const;
 const NODE_CENTER = { x: 140, y: 40 } as const;
 /** The minimap earns its space only on larger graphs. */
 const MINIMAP_MIN_NODES = 6;
@@ -49,6 +50,8 @@ export interface RunGraphProps {
   definitionEdges?: EdgeSpec[] | undefined;
   /** Stages of the run's pinned graph (a loop node's exit rules). */
   definitionStages?: StageSpec[] | undefined;
+  /** A node was clicked: the page focuses that stage and scrolls the stage list to it. */
+  onSelectStage?: ((id: string) => void) | undefined;
   className?: string;
 }
 
@@ -64,7 +67,7 @@ function stageRunToNode(sr: StageRun, position: { x: number; y: number }, isSele
   };
 }
 
-function RunGraphCanvas({ definitionEdges, definitionStages, className }: RunGraphProps) {
+function RunGraphCanvas({ definitionEdges, definitionStages, onSelectStage, className }: RunGraphProps) {
   const { resolvedTheme } = useTheme();
   const colors = useResolvedGraphColors();
   const run = useWorkflowRunStore((s) => s.run);
@@ -118,7 +121,10 @@ function RunGraphCanvas({ definitionEdges, definitionStages, className }: RunGra
     [selectStageRun],
   );
   // A click is more reliable than a selection change for a single click.
-  const onNodeClick = useCallback((_event: MouseEvent, node: Node) => selectStageRun(node.id), [selectStageRun]);
+  const onNodeClick = useCallback(
+    (_event: MouseEvent, node: Node) => (onSelectStage ?? selectStageRun)(node.id),
+    [onSelectStage, selectStageRun],
+  );
 
   // Fit when the node count changes.
   useEffect(() => {
@@ -179,6 +185,8 @@ function RunGraphCanvas({ definitionEdges, definitionStages, className }: RunGra
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           fitView
+          fitViewOptions={FIT}
+          minZoom={FIT.minZoom}
           nodesDraggable={false}
           nodesConnectable={false}
           elementsSelectable

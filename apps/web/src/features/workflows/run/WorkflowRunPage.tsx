@@ -710,7 +710,7 @@ export function WorkflowRunPage() {
     <div className="flex min-h-0 flex-1 flex-col">
       {graphOpen ? (
         <div className="h-2/5 min-h-64 shrink-0 border-b border-line-soft bg-sunken" data-testid="run-graph">
-          <RunGraph definitionEdges={pinnedGraph?.edges} definitionStages={pinnedGraph?.stages} />
+          <RunGraph definitionEdges={pinnedGraph?.edges} definitionStages={pinnedGraph?.stages} onSelectStage={focusStage} />
         </div>
       ) : null}
       <div ref={scrollHostRef} className="min-h-0 flex-1 overflow-y-auto" data-testid="run-scroll">

@@ -155,7 +155,6 @@ export const RunHeader = memo(function RunHeader({
   ];
 
   const more: MenuButtonItem[] = [
-    { id: 'graph', label: graphOpen ? 'Hide graph' : 'Show graph', icon: 'workflows', onSelect: onToggleGraph },
     { id: 'timeline', label: 'Event timeline', icon: 'history', onSelect: onOpenTimeline },
   ];
   if (editor.target) {
@@ -232,6 +231,14 @@ export const RunHeader = memo(function RunHeader({
               Retry failed
             </Button>
           ) : null}
+          {/* U-52: the graph is a view of the page, not an action buried in More. */}
+          <IconButton
+            icon="workflows"
+            label={graphOpen ? 'Hide graph' : 'Show graph'}
+            pressed={graphOpen}
+            onClick={onToggleGraph}
+            data-testid="run-graph-toggle"
+          />
           <MenuButton label="More" icon="more" iconOnly items={more} align="end" data-testid="run-header-more" />
         </>
       }
