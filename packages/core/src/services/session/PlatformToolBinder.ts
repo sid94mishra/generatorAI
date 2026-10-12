@@ -19,7 +19,8 @@ import { buildWidgetTools } from '../../tools/widgetTools.js';
 import { buildOrchestratorToolSet } from '../../tools/orchestrator/index.js';
 import { isExtensionAuthorToolName } from '../../tools/extensionAuthorTools.js';
 import { buildWorkflowToolSet, WORKFLOW_AUTHORING_HINT, type WorkflowToolCaller, type WorkflowToolTurn } from '../../tools/workflows/index.js';
-import { buildGitHubToolSet, GITHUB_MERGE_TOOL_NAME, GITHUB_TOOLS_HINT } from '../../tools/github/index.js';
+import { buildGitHubToolSet, GITHUB_MERGE_TOOL_NAME, GITHUB_READ_TOOL_NAMES, GITHUB_TOOLS_HINT } from '../../tools/github/index.js';
+
 import type { ToolCallContext } from '../../domain/ports/IAgentHarness.js';
 import { askBeforeActing, type GatePort } from './gates.js';
 import { ORCHESTRATOR_SYSTEM_PROMPT } from '../orchestrator/prompts.js';
@@ -33,6 +34,9 @@ import {
 } from '../chatSystemHints.js';
 import { appendSystemBlock, appendTools, unionList, type ConversationConfig } from './cfg.js';
 import { ownerId, ownerTag, type SessionComposerDeps, type SessionOwner, type TurnContext } from './types.js';
+
+/** The GitHub tools that only read: never gated (D-146). */
+const GITHUB_READ_TOOLS: ReadonlySet<string> = new Set(GITHUB_READ_TOOL_NAMES);
 
 /** What every binder method needs to know about the session it binds. */
 export interface BindTarget {
@@ -272,11 +276,16 @@ export class PlatformToolBinder {
     if (!host || !opts.enabled || !opts.projectId) return;
     try {
       if (!(await host.hasRepository(opts.projectId))) return;
-      const tools = askBeforeActing(buildGitHubToolSet(host, { projectId: opts.projectId }, { owner: ownerTag(t.owner) }), {
+      const all = buildGitHubToolSet(host, { projectId: opts.projectId }, { owner: ownerTag(t.owner) });
+      // Reads stay unwrapped: wrapped, they asked in "Accept edits" (the Issue Patrol stopped on listing
+      // issues) and were refused while planning, though they change nothing.
+      const reads = all.filter((tool) => GITHUB_READ_TOOLS.has(tool.name));
+      const writes = askBeforeActing(all.filter((tool) => !GITHUB_READ_TOOLS.has(tool.name)), {
         turnOf: opts.turnOf,
         port: opts.port,
         always: new Set([GITHUB_MERGE_TOOL_NAME]),
       });
+      const tools = [...reads, ...writes];
       appendTools(cfg, tools);
       appendSystemBlock(cfg, GITHUB_TOOLS_HINT);
     } catch (err) {
