@@ -854,7 +854,10 @@ export class StageExecutor {
       workspace,
       workDir: pinned ?? this.deps.workspaceManager.getWorkingDirectory(workspace),
       permissionSource: runPermissionSource(() => this.deps.runRepo.getById(runId), stage.session, graph.workflow.session),
-      recorder: new TurnRecorder(),
+      // The chat's ordering (the turn registry's sequence, shared with the gate cards): without it a persisted
+      // stage turn lost where its text fell between the tool calls, and the transcript showed all of its text
+      // first, run together, then every step.
+      recorder: new TurnRecorder({ takeSequence: () => (frame.conversationId ? this.deps.composer.turns.takeSequence(frame.conversationId) : undefined) }),
       replayPolicy: 'never',
       strategies: [],
       // A wrap-up is free text: its loop exposes it as output.wrapUp.

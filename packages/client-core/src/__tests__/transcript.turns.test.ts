@@ -147,3 +147,17 @@ describe('find', () => {
     expect(text).toContain('git push');
   });
 });
+
+describe('textJoint', () => {
+  it('starts a new paragraph between finished messages that ran together', async () => {
+    const { textJoint } = await import('../transcript/deriveTimeline.js');
+    expect(textJoint('Reviewed the egress code.', 'Next I am checking')).toBe('\n\n');
+  });
+
+  it('joins a stream split mid-sentence as it is', async () => {
+    const { textJoint } = await import('../transcript/deriveTimeline.js');
+    expect(textJoint('Reviewed the', ' egress code')).toBe('');
+    expect(textJoint('Reviewed the egr', 'ess code')).toBe('');
+    expect(textJoint('', 'Start')).toBe('');
+  });
+});

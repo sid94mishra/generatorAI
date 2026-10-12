@@ -779,6 +779,17 @@ export type StreamSegment =
   /** The draft a `create_workflow_draft` call submitted: open it in the builder, or publish it. */
   | { type: 'workflow_draft'; id: string; draft: WorkflowDraftToolCard };
 
+/**
+ * What goes between two adjacent text blocks of one segment. Separate messages of a turn (a persisted
+ * turn whose segments carry no ordinal, so its tool calls do not split them) ran together as
+ * "…the egress code.Next I'm checking…": a finished sentence followed by one with no space starts a
+ * new paragraph. A stream split mid-sentence keeps its own spacing and is joined as is.
+ */
+export function textJoint(before: string, next: string): string {
+  if (!before || !next || /\s$/.test(before) || /^\s/.test(next)) return '';
+  return /[.!?:)]$/.test(before) ? '\n\n' : '';
+}
+
 /** Walk stream blocks in order and produce interleaved step / answer /
  *  inline-widget segments that preserve the temporal sequence in which
  *  the agent emitted reasoning, tool calls and prose. */
@@ -829,7 +840,7 @@ export function deriveSegments(
     } else if (b.type === 'text') {
       flushSteps();
       if (textStartId === null) textStartId = b.blockId;
-      textBuf += b.content;
+      textBuf += textJoint(textBuf, b.content) + b.content;
     } else if (b.type === 'widget') {
       flushSteps();
       flushText();
