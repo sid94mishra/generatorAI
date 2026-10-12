@@ -11,12 +11,19 @@
 import { Fragment, useState, type ReactNode } from 'react';
 import type { IconConcept } from '@generatorai/design-tokens';
 import type { ChatMessage } from '@generatorai/shared';
-import { TRANSCRIPT_COPY, parseReviewPrompt, type ParsedReviewPrompt } from '@generatorai/shared/ui-contract';
+import {
+  TRANSCRIPT_COPY,
+  parseReviewPrompt,
+  parseStagePrompt,
+  type ParsedReviewPrompt,
+  type ParsedStagePrompt,
+} from '@generatorai/shared/ui-contract';
 import { cn } from '@/ui/lib/cn.js';
 import { InlineCode } from '@/ui/primitives/InlineCode/InlineCode.js';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Icon } from '@/ui/icons/Icon.js';
+import { Collapsible } from '@/ui/primitives/Collapsible/Collapsible.js';
 import { AttachmentList } from './AttachmentList.js';
 import { formatTurnTime } from '../formatTime.js';
 
@@ -62,14 +69,17 @@ export function isLongMessage(content: string): boolean {
 
 /** A user prompt card. */
 export function UserMessage({ content, attachments, chatId, timestamp, pending = false, actions, label, className }: UserMessageProps) {
-  const long = isLongMessage(content);
+  const review = parseReviewPrompt(content);
+  // A workflow stage's prompt: the instruction, with the engine's context fence and output contract folded away.
+  const stagePrompt = review ? null : parseStagePrompt(content);
+  const text = stagePrompt ? stagePrompt.instruction : content;
+  const long = isLongMessage(text);
   const [expanded, setExpanded] = useState(false);
   const time = pending
     ? TRANSCRIPT_COPY.justNow
     : timestamp != null
       ? formatTurnTime(timestamp)
       : null;
-  const review = parseReviewPrompt(content);
   return (
     <div className={cn('group relative min-w-0', className)} data-chat-row data-gai-block="user">
       <div className="flex min-w-0 flex-col gap-2 rounded-panel border border-line bg-raised px-3.5 py-3">
@@ -82,18 +92,28 @@ export function UserMessage({ content, attachments, chatId, timestamp, pending =
         {review ? (
           <ReviewComments review={review} />
         ) : (
-          <p
-            className={cn('pr-16 text-body break-words whitespace-pre-wrap text-fg', long && !expanded && 'max-h-48 overflow-hidden')}
-            {...(long ? { 'data-collapsed': expanded ? 'false' : 'true' } : {})}
-          >
-            {withInlineCode(content)}
-          </p>
+          <>
+            {stagePrompt?.resumed ? (
+              <Badge tone="warn" icon="retry" className="self-start">
+                Resent after an interruption
+              </Badge>
+            ) : null}
+            {text ? (
+              <p
+                className={cn('pr-16 text-body break-words whitespace-pre-wrap text-fg', long && !expanded && 'max-h-48 overflow-hidden')}
+                {...(long ? { 'data-collapsed': expanded ? 'false' : 'true' } : {})}
+              >
+                {withInlineCode(text)}
+              </p>
+            ) : null}
+          </>
         )}
         {long && !review ? (
           <Button size="sm" variant="ghost" className="self-start" aria-expanded={expanded} onClick={() => setExpanded((e) => !e)}>
             {expanded ? TRANSCRIPT_COPY.showLess : TRANSCRIPT_COPY.showMore}
           </Button>
         ) : null}
+        {stagePrompt ? <StagePromptFolds prompt={stagePrompt} /> : null}
         {attachments && attachments.length > 0 ? <AttachmentList attachments={attachments} chatId={chatId} /> : null}
       </div>
       <div
@@ -106,6 +126,37 @@ export function UserMessage({ content, attachments, chatId, timestamp, pending =
         {time ? <span className="font-mono text-micro text-fg-3">{time}</span> : null}
         {actions}
       </div>
+    </div>
+  );
+}
+
+/** The context a stage prompt carried and the output it asked for, each one click away. */
+function StagePromptFolds({ prompt }: { prompt: ParsedStagePrompt }) {
+  const names = prompt.context.map((c) => c.stage ?? 'context');
+  if (names.length === 0 && !prompt.outputContract) return null;
+  return (
+    <div className="flex min-w-0 flex-col" data-testid="stage-prompt-folds">
+      {names.length > 0 ? (
+        <Collapsible variant="disclosure" icon="layers" trigger={`Context from ${names.join(', ')}`}>
+          <div className="flex min-w-0 flex-col gap-2 pt-1">
+            {prompt.context.map((c, i) => (
+              <div key={i} className="flex min-w-0 flex-col gap-1">
+                {c.stage ? <span className="text-small font-medium text-fg-2">{c.stage}</span> : null}
+                <pre className="max-h-80 overflow-auto rounded-control border border-line-soft bg-sunken px-2.5 py-1.5 font-mono text-small break-words whitespace-pre-wrap text-fg-2">
+                  {c.body}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </Collapsible>
+      ) : null}
+      {prompt.outputContract ? (
+        <Collapsible variant="disclosure" icon="braces" trigger="Expected output">
+          <pre className="mt-1 max-h-80 overflow-auto rounded-control border border-line-soft bg-sunken px-2.5 py-1.5 font-mono text-small break-words whitespace-pre-wrap text-fg-2">
+            {prompt.outputContract}
+          </pre>
+        </Collapsible>
+      ) : null}
     </div>
   );
 }

@@ -17,7 +17,7 @@ import { memo, useEffect, useState, type ReactNode } from 'react';
 import { resolveMapping, resolveStatus, STATUS_STATE_DEFS } from '@generatorai/shared';
 import type { RunCommand } from '@generatorai/workflow-spec';
 import type { IconConcept } from '@generatorai/design-tokens';
-import { TranscriptProvider, TurnBody, UsageChip } from '@/blocks/transcript/index.js';
+import { TranscriptProvider, TurnBody, UsageChip, UserMessage } from '@/blocks/transcript/index.js';
 import { ContextGauge } from '@/blocks/composer/parts/ContextGauge.js';
 import { cn } from '@/ui/lib/cn.js';
 import { Icon } from '@/ui/icons/Icon.js';
@@ -94,6 +94,8 @@ function planInteraction(stage: StageView, planId: string): string | undefined {
 
 const DEPTH_PAD = ['pl-2', 'pl-8', 'pl-14', 'pl-20', 'pl-26'] as const;
 const BODY_PAD = ['pl-13', 'pl-19', 'pl-25', 'pl-31', 'pl-37'] as const;
+
+const STAGE_PROMPT_LABEL = { text: 'Stage prompt', icon: 'user' } as const;
 
 const SHARED_CONTEXT_NOTE = 'This run shares one conversation across stages, so this is the run’s context window — not this stage alone.';
 
@@ -222,9 +224,10 @@ export const StageRow = memo(function StageRow({
     <div
       data-stage-id={stage.id}
       data-testid="stage-row"
-      className={cn(showConnector && 'border-b border-line-soft', focused && 'bg-sunken')}
+      className={cn(showConnector && 'border-b border-line-soft')}
     >
-      <div className={cn('group flex h-row min-w-0 items-center gap-1 pr-2', DEPTH_PAD[d], 'hover:bg-hover')}>
+      {/* Only the header marks focus: tinting the open transcript too sank its cards into the background. */}
+      <div className={cn('group flex h-row min-w-0 items-center gap-1 pr-2', DEPTH_PAD[d], focused ? 'bg-sunken' : 'hover:bg-hover')}>
         <Button
           variant="ghost"
           onClick={toggle}
@@ -255,11 +258,8 @@ export const StageRow = memo(function StageRow({
             </span>
           </span>
         </Button>
-        <span className="hidden w-32 shrink-0 truncate font-mono text-micro text-fg-3 md:inline" title={stage.stageKey}>
-          {stage.stageKey}
-        </span>
+        {/* Variable badges sit before the fixed Key and Time columns, so those line up down the table. */}
         {stage.attempt && stage.attempt > 1 ? <span className="hidden shrink-0 text-small text-fg-3 md:inline">attempt {stage.attempt}</span> : null}
-
         {headerExtra}
         {parallel > 0 ? (
           <Badge tone="run" icon="zap" className="hidden md:inline-flex">
@@ -278,7 +278,7 @@ export const StageRow = memo(function StageRow({
               {fileCount}
             </span>
           ) : null}
-          {gauge}
+          {isActive ? gauge : null}
           {stage.amendedAt ? (
             <Badge
               tone="run"
@@ -288,6 +288,9 @@ export const StageRow = memo(function StageRow({
               Amended
             </Badge>
           ) : null}
+        </span>
+        <span className="hidden w-32 shrink-0 truncate font-mono text-micro text-fg-3 md:inline" title={stage.stageKey}>
+          {stage.stageKey}
         </span>
         <span className="w-16 shrink-0 text-right font-mono text-micro text-fg-2 tabular-nums">{dur ?? '—'}</span>
         {isFailed && onRetry ? (
@@ -345,15 +348,7 @@ export const StageRow = memo(function StageRow({
                 liveBody={turnBody}
                 fallback={
                   <>
-                    {!hidePrompt && stage.prompt ? (
-                      <div className="flex flex-col gap-1">
-                        <span className="flex items-center gap-1.5 text-small text-fg-3">
-                          <Icon concept="user" size={12} />
-                          Stage prompt
-                        </span>
-                        <p className="rounded-card border border-line-soft bg-sunken px-3 py-2 text-body whitespace-pre-wrap text-fg">{stage.prompt}</p>
-                      </div>
-                    ) : null}
+                    {!hidePrompt && stage.prompt ? <UserMessage content={stage.prompt} label={STAGE_PROMPT_LABEL} /> : null}
                     {preamble}
                     {turnBody}
                   </>
