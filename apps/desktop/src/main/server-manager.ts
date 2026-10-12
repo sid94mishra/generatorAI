@@ -74,6 +74,43 @@ export const VAULT_UNREADABLE_MESSAGE =
   'system keystore. That key is no longer available, so the existing ' +
   'credential vault cannot be read.';
 
+/**
+ * The OS keystore refused (or does not have) the key that protects the vault.
+ * A packaged server refuses to start without one, so spawning it would only
+ * restart-loop into a bare "exited (code=1)" screen. Shown verbatim to the
+ * user: what happened on their OS and the one thing that fixes it.
+ */
+export function keystoreUnavailableMessage(platform: NodeJS.Platform): string {
+  if (platform === 'darwin') {
+    return (
+      'GeneratorAI could not open its key in your keychain.\n\n' +
+      'macOS asks once for access to "GeneratorAI Safe Storage". The request was ' +
+      'denied or dismissed, so the credential vault stays locked. Choose Try again ' +
+      'and click "Always Allow" when macOS asks.'
+    );
+  }
+  if (platform === 'win32') {
+    return (
+      'GeneratorAI could not use Windows data protection to unlock its key.\n\n' +
+      'Sign in to Windows with your own account (not a temporary profile), then ' +
+      'choose Try again.'
+    );
+  }
+  return (
+    'GeneratorAI could not find a secret service to protect its key.\n\n' +
+    'Install and unlock gnome-keyring or KWallet (or set GENERATORAI_SECRET_PASSPHRASE), ' +
+    'then choose Try again.'
+  );
+}
+
+/** `start()` rejects with this when the vault key could not be unlocked. */
+export class KeystoreUnavailableError extends Error {
+  constructor() {
+    super(keystoreUnavailableMessage(process.platform));
+    this.name = 'KeystoreUnavailableError';
+  }
+}
+
 export class ServerManager extends EventEmitter {
   private child: ServerChild | null = null;
   /** F-8 — the vault key this shell hands to the server when it asks over the channel. */
@@ -278,7 +315,14 @@ export class ServerManager extends EventEmitter {
     await repairProcessPath();
 
     const launch = this.resolveLaunch();
-    const env = this.buildEnv();
+    let env: NodeJS.ProcessEnv;
+    try {
+      env = this.buildEnv();
+    } catch (err) {
+      // Nothing was spawned, so there is no exit to restart from.
+      this.setState('crashed', err instanceof Error ? err.message : String(err));
+      throw err;
+    }
 
     log.info('Starting embedded server', { ...launch, port: this.port });
 
@@ -523,14 +567,12 @@ export class ServerManager extends EventEmitter {
         env[SECRET_KEY_HANDOFF_ENV] = 'parent';
         this.secretBackend = protection.backend;
       } else {
-        // The platform could not protect a key (e.g. Linux without a secret
-        // service). The server still starts and reports an insecure backend
-        // in its posture, so the user is told rather than silently exposed.
+        // The keystore refused the key (a dismissed macOS keychain prompt) or
+        // has none (Linux without a secret service). The packaged server
+        // refuses an unprotected vault, so stop here with a reason the shell
+        // can show, rather than restart-looping a server that cannot start.
         this.secretBackend = 'unprotected';
-        log.warn(
-          'Starting without an OS-protected vault key. Credentials will be protected only ' +
-            'by file permissions. Install gnome-keyring/kwallet, or set GENERATORAI_SECRET_KEY.',
-        );
+        throw new KeystoreUnavailableError();
       }
     } else {
       this.secretBackend = 'env';

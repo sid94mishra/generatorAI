@@ -11,7 +11,7 @@ import { app, dialog, nativeTheme, BrowserWindow, session } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { log } from './logger';
 import { loadSettings } from './config';
-import { getServerManager, VAULT_UNREADABLE_MESSAGE } from './server-manager';
+import { getServerManager, KeystoreUnavailableError, VAULT_UNREADABLE_MESSAGE } from './server-manager';
 import { resolveTarget } from './serverConnections';
 import { VERIFY_USE_CHROMIUM, verifyWithPins } from './pinnedTrust';
 import { getWindowManager } from './window-manager';
@@ -254,7 +254,10 @@ async function onReady(): Promise<void> {
         return;
       }
       log.error('Embedded server failed to start', err);
-      if (sm.isVaultUnreadable()) {
+      if (err instanceof KeystoreUnavailableError) {
+        await offerKeystoreRetry(err);
+        return;
+      } else if (sm.isVaultUnreadable()) {
         // Recoverable, but only by discarding the vault — so it is the user's
         // call, not ours. Without this the app restart-looped and then sat on
         // an error screen quoting a decryption stack trace, with no way out.
@@ -300,6 +303,28 @@ async function onReady(): Promise<void> {
   if (initialLink) handleDeepLink(initialLink);
 
   void initAutoUpdates();
+}
+
+/**
+ * The OS keystore would not hand over the vault key — most often a macOS
+ * keychain prompt that was dismissed or denied. Nothing is lost, so offer the
+ * fix instead of an error screen. A fresh process is the reliable retry: the
+ * keystore answer can stick for the life of this one, and a relaunch asks the
+ * OS again.
+ */
+async function offerKeystoreRetry(err: KeystoreUnavailableError): Promise<void> {
+  const { response } = await dialog.showMessageBox({
+    type: 'warning',
+    buttons: ['Try again', 'Quit'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'GeneratorAI is locked',
+    message: 'GeneratorAI is locked',
+    detail: err.message,
+  });
+  if (response === 0) app.relaunch();
+  // Nothing was started, so there is no graceful shutdown to wait for.
+  app.exit(0);
 }
 
 /**
