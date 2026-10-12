@@ -69,6 +69,11 @@ describe('T8 crash recovery (engine)', () => {
     expect(snap.stages['c1']!.attempts?.map((a) => `${a.mode}:${a.status}`)).toEqual(['fresh:interrupted', 'resume:succeeded']);
     const c1Calls = snap.calls.filter((c) => c.stageName === 'c1');
     expect(c1Calls.map((c) => `${c.generation}:${c.kind}`)).toEqual(['0:prompt', '1:continuation']);
+    // The re-sent turn is not persisted again: the stage's history holds its prompt once.
+    const prompts = engine.sqlite
+      .prepare(`SELECT COUNT(*) AS n FROM chat_messages WHERE role = 'user' AND json_extract(metadata, '$.stageRunId') = ?`)
+      .get(run.stageRunId('c1')) as { n: number };
+    expect(prompts.n).toBe(1);
     expect(snap.stages['c2']!.status).toBe('completed');
     expect(snap.calls.filter((c) => c.stageName === 'c2').every((c) => c.generation === 1)).toBe(true);
   });

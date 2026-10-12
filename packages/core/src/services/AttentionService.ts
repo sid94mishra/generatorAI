@@ -1054,7 +1054,8 @@ export class AttentionService {
           ask: {
             kind: 'run_paused',
             id: runId,
-            summary: paused.some((s) => s.statusReason === 'interrupted')
+            // `interrupted` (a gate lost to a restart) or `interrupted:<cause>` (a turn cut off by one).
+            summary: paused.some((s) => s.statusReason?.startsWith('interrupted'))
               ? `${names} stopped when the app closed — resume to continue`
               : `${names} paused — resume to continue`,
             actions: ['open'],

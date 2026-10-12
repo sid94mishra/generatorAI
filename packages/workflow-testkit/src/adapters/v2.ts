@@ -150,10 +150,13 @@ function buildV2Adapter(ctx: AdapterContext, opts: V2AdapterOptions): EngineAdap
   };
 
   const classifyTurn = (conversationId: string, prompt: string): TurnKind => {
+    // A turn re-sent after a crash is not persisted a second time (its first send's row stands),
+    // so the notice prefixed to it is what identifies it.
+    if (prompt.startsWith('The previous request for this step was interrupted')) return 'continuation';
     const row = turnRoleOf.get(conversationId, prompt) as { role: string | null } | undefined;
     switch (row?.role) {
       case 'prompt':
-        return prompt.startsWith('The previous request for this step was interrupted') ? 'continuation' : 'prompt';
+        return 'prompt';
       case 'repair':
         return 'repair';
       case 'summary':

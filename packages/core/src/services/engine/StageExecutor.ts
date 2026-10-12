@@ -1125,7 +1125,10 @@ export class StageExecutor {
       return prior.turn;
     }
     let text = t.text;
-    if (prior?.state === 'intent') {
+    // A turn re-sent after a restart: the agent is told it was interrupted, but the history
+    // already holds this prompt from the first send — a second row showed it twice.
+    const resent = prior?.state === 'intent';
+    if (resent) {
       stores.turns.discard(stageRunId, t.opId);
       text = RESUME_NOTICE + text;
     }
@@ -1146,7 +1149,7 @@ export class StageExecutor {
       role: t.role,
       policy: ctx.replayPolicy,
       now: this.now(),
-      message: {
+      ...(resent ? {} : { message: {
         id: generateId(),
         sessionId: session!.id,
         role: 'user',
@@ -1164,7 +1167,7 @@ export class StageExecutor {
               })),
             }
           : {}),
-      },
+      } }),
     });
     if (t.role === 'operator') {
       await this.emitSession(ctx, 'stage_run.operator_message', {
