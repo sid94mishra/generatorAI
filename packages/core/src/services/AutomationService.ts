@@ -1047,7 +1047,13 @@ ${serialized}`).digest('hex');
       // cancellation / final-status updates land on the right row. The
       // previous attempt's execRun row remains as an audit trail of
       // "attempt 1 failed with class X".
-      const execRun: AutomationExecutionRun = {
+      // A re-driven attempt (a resumed execution reclaiming its slot) is answered with the run it already
+      // started: that run keeps its row. A second row left the first one "running" forever, so a finished
+      // execution showed a running run in its history (U-55).
+      const existing = (await this.executionRepo.getExecutionRunsByExecutionId(executionId)).find(
+        (r) => r.workflowRunId === run.id,
+      );
+      const execRun: AutomationExecutionRun = existing ?? {
         id: generateId(),
         executionId,
         workflowRunId: run.id,
@@ -1059,7 +1065,8 @@ ${serialized}`).digest('hex');
         attemptCount: attempt,
         createdAt: new Date(),
       };
-      await this.executionRepo.createExecutionRun(execRun);
+      if (existing) await this.executionRepo.updateExecutionRun(existing.id, { status: 'running', attemptCount: attempt });
+      else await this.executionRepo.createExecutionRun(execRun);
       lastExecRunId = execRun.id;
 
       try {
@@ -1390,7 +1397,36 @@ ${serialized}`).digest('hex');
   async getExecutionWithRuns(executionId: string): Promise<AutomationExecutionWithRuns> {
     const execution = await this.executionRepo.getExecutionById(executionId);
     const runs = await this.executionRepo.getExecutionRunsByExecutionId(executionId);
-    return { ...execution, runs };
+    if (execution.status === 'running' || execution.status === 'pending') return { ...execution, runs };
+    return { ...execution, runs: await this.settledRuns(runs) };
+  }
+
+  /**
+   * A finished execution's rows, true to their workflow runs (U-55): a row an
+   * earlier build left "running" takes its run's final status, and a second
+   * row for the same run (a re-driven attempt used to add one) is dropped.
+   */
+  private async settledRuns(runs: AutomationExecutionRun[]): Promise<AutomationExecutionRun[]> {
+    const latest = new Map<string, AutomationExecutionRun>();
+    const out: AutomationExecutionRun[] = [];
+    for (const run of runs) {
+      if (!run.workflowRunId) out.push(run);
+      else {
+        const prior = latest.get(run.workflowRunId);
+        if (!prior || run.createdAt >= prior.createdAt) latest.set(run.workflowRunId, run);
+      }
+    }
+    for (const run of latest.values()) {
+      if (run.status !== 'running' && run.status !== 'pending') {
+        out.push(run);
+        continue;
+      }
+      const wfr = await this.workflowRunRepo.getById(run.workflowRunId!).catch(() => null);
+      const status = wfr && (wfr.status === 'completed' || wfr.status === 'failed' || wfr.status === 'cancelled') ? wfr.status : null;
+      if (status) await this.executionRepo.updateExecutionRun(run.id, { status }).catch(() => undefined);
+      out.push(status ? { ...run, status } : run);
+    }
+    return out.sort((a, b) => a.iterationIndex - b.iterationIndex || a.createdAt.getTime() - b.createdAt.getTime());
   }
 
   async getExecutionsByAutomation(automationId: string): Promise<AutomationExecution[]> {

@@ -442,4 +442,38 @@ describe('P0-b — an interrupted automation batch resumes instead of reporting 
     expect(recovered).toBe(1);
     expect(stores.executions.get(EXECUTION_ID)!.status).toBe('completed');
   });
+  it('U-55: a re-driven iteration answered with the run it already started keeps one row for that run', async () => {
+    simulateCrashedBatch();
+    // Iteration 4's run started before the crash and finished meanwhile; its row still says running.
+    stores.workflowRuns.set('pre-crash-run-4', { id: 'pre-crash-run-4', status: 'completed' } as unknown as WorkflowRun);
+    stores.execRuns.push({
+      id: 'pre-crash-exec-run-4',
+      executionId: EXECUTION_ID,
+      workflowRunId: 'pre-crash-run-4',
+      workflowDefinitionId: 'wf-1',
+      iterationIndex: 4,
+      status: 'running',
+      createdAt: new Date(),
+    });
+    // The invocation's idempotency key answers iteration 4 with that same run.
+    const runs = workflowRunService(stores);
+    const repo = workflowRunRepo(stores);
+    const base = invocationOver(runs, repo);
+    const invocation = {
+      invoke: async (req: unknown, ctx: { trigger: { iterationIndex?: number } }) =>
+        ctx.trigger.iterationIndex === 4 ? { runId: 'pre-crash-run-4' } : (base.invoke as (r: unknown, c: unknown) => Promise<{ runId: string }>)(req, ctx),
+      waitFor: base.waitFor,
+    } as unknown as Pick<WorkflowInvocationService, 'invoke' | 'waitFor'>;
+    const svc = new AutomationService(
+      automationRepo(stores), executionRepo(stores), runs, invocation, repo,
+      {} as unknown as WorkflowDefinitionService, new EventBus(), mockLogger(), engine,
+    );
+    const outcome = await svc.resumeExecution(EXECUTION_ID);
+    await outcome.completion;
+
+    const rows = stores.execRuns.filter((r) => r.workflowRunId === 'pre-crash-run-4');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.status).toBe('completed');
+    expect(stores.execRuns.some((r) => r.status === 'running')).toBe(false);
+  });
 });

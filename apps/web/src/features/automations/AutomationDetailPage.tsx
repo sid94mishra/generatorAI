@@ -59,11 +59,14 @@ function formatDate(date: Date | string | undefined): string {
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+/** "45s", "6m 12s", "20h 10m" — a long run never reads "1210m 11s" (U-56). */
 function formatDuration(ms: number): string {
-  const totalSeconds = Math.round(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+  const total = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
 /** Client-side equivalent of D-58's G-10 stats: no automation-stats endpoint
