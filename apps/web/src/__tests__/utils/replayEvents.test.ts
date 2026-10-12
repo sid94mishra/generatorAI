@@ -172,6 +172,15 @@ describe('replayEventsIntoStore', () => {
     expect(stream?.blocks.length).toBe(0);
   });
 
+  it('keeps a turn live when a reload lands while a tool runs after a finished message', () => {
+    replayEventsIntoStore('s1', [
+      makeEvent('harness.token', { text: 'Let me check.' }, 1),
+      makeEvent('harness.message_complete', { content: 'Let me check.' }, 2),
+      makeEvent('harness.tool_start', { tool: 'Bash', callId: 'c1', args: { command: 'pnpm test' } }, 3),
+    ]);
+    expect(useStreamStore.getState().streams['s1']?.status).not.toBe('complete');
+  });
+
   it('leaves stream as streaming when no message_complete or idle (session may still be active)', () => {
     const events = [
       makeEvent('harness.token', { text: 'Hello' }, 1),

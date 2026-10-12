@@ -423,7 +423,10 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
   // Track the last meaningful copilot event in the current turn
   // so we know whether to auto-complete at the end of replay.
   let sawIdleInCurrentTurn = false;
+  // The current turn's LAST activity was a finished message: a provider emits one before every
+  // tool call, so it only suggests a finished turn when nothing (a tool, more text) followed it.
   let sawMessageCompleteInCurrentTurn = false;
+  let openToolCalls = 0;
 
   const flushTokens = () => {
     if (tokenBuf) {
@@ -494,6 +497,7 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
       // ── Streaming tokens (batched) ──
       case 'harness.token':
         if (isInternal) break;
+        sawMessageCompleteInCurrentTurn = false;
         // If we had thinking buffered, flush it before switching to text
         if (thinkingBuf) flushThinking();
         {
@@ -504,6 +508,7 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
 
       case 'harness.reasoning_delta':
         if (isInternal) break;
+        sawMessageCompleteInCurrentTurn = false;
         // If we had text buffered, flush it before switching to thinking
         if (tokenBuf) flushTokens();
         {
@@ -521,6 +526,8 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
       // ── Tool calls ──
       case 'harness.tool_start':
         if (isInternal) break;
+        sawMessageCompleteInCurrentTurn = false;
+        openToolCalls += 1;
         flushAll();
         store.addToolCall(
           streamKey,
@@ -533,6 +540,7 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
 
       case 'harness.tool_complete':
         if (isInternal) break;
+        openToolCalls = Math.max(0, openToolCalls - 1);
         flushAll();
         store.completeToolCall(
           streamKey,
@@ -794,6 +802,7 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
         // Reset per-turn tracking
         sawIdleInCurrentTurn = false;
         sawMessageCompleteInCurrentTurn = false;
+        openToolCalls = 0;
         // Use startPending directly (NOT clearStream + startPending).
         // startPending already resets all stream fields via ...DEFAULT_STREAM
         // and crucially preserves _nextBlockId so React keys don't collide
@@ -856,7 +865,9 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
         store.completeStream(streamKey);
       }
     }
-  } else if (sawMessageCompleteInCurrentTurn) {
+  } else if (sawMessageCompleteInCurrentTurn && openToolCalls === 0) {
+    // A reload while a tool runs (or after more activity) is a live turn: completing it hid Stop
+    // and the next message was refused as CHAT_BUSY.
     const stream = useStreamStore.getState().streams[streamKey];
     if (
       stream &&
