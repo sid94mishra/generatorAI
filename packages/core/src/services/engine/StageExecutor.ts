@@ -235,6 +235,8 @@ interface Frame {
   turnAc?: AbortController;
   /** Set by `cancelTurn`: the turn in flight ends as a stopped turn. */
   turnStop?: { force: boolean };
+  /** Persists what the turn in flight streamed so far (a process shutdown leaves the frame to recovery). */
+  flushPartial?: () => void;
   /** Operator messages waiting for the next turn boundary. */
   operatorQueue: OperatorTurn[];
   /** Set while the frame waits for an operator message (its last answer was stopped). */
@@ -534,6 +536,24 @@ export class StageExecutor {
         await this.releaseAfterAmend(ctx).catch(() => undefined);
       });
     return { done };
+  }
+
+  /**
+   * The process is shutting down and leaves its frames to the next boot's recovery: persist what
+   * every turn in flight streamed so far, as a partial (`complete: false`) assistant row. Without it
+   * a stage interrupted by a quit lost its streamed text; the resumed turn's answer follows the
+   * partial in the stage's history.
+   */
+  flushInFlightTurns(): void {
+    for (const f of this.frames.values()) {
+      const flush = f.flushPartial;
+      f.flushPartial = undefined;
+      try {
+        flush?.();
+      } catch {
+        /* a failed write must not stop the shutdown */
+      }
+    }
   }
 
   /** Stop every frame (process shutdown): each reports `aborted`. */
@@ -1202,6 +1222,7 @@ export class StageExecutor {
     frame.ac.signal.addEventListener('abort', onAttemptAbort, { once: true });
     frame.turnAc = turnAc;
     frame.turnInFlight = true;
+    frame.flushPartial = () => this.persistPartial(ctx, t.role, turnMeta);
     frame.lastProgressAt = this.now();
     let response: { content: string; structuredOutput?: unknown } | undefined;
     let failure: unknown;
@@ -1211,6 +1232,7 @@ export class StageExecutor {
       failure = err ?? new Error('The turn failed');
     } finally {
       frame.turnInFlight = false;
+      frame.flushPartial = undefined;
       frame.turnAc = undefined;
       frame.ac.signal.removeEventListener('abort', onAttemptAbort);
     }

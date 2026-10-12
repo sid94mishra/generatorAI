@@ -104,6 +104,20 @@ describe('InterruptedTurnRecoveryService', () => {
     expect(h.store.rows.get(c.sessionId)!.at(-1)!.kind).toBe('harness.idle');
   });
 
+  it('does not save it twice either when the turn outgrew the tail window (no turn id in sight)', async () => {
+    const c = chat('chat-long');
+    const h = build([c]);
+    h.created.push({ chatId: 'chat-long', role: 'user', content: 'write a lot' });
+    await h.eventBus.emit(c.sessionId, ev('harness.turn_start', { turnId: 't-long' }));
+    // Every token is its own event: 450 of them push the turn_start out of the 400-event tail.
+    for (let i = 0; i < 450; i += 1) await h.eventBus.emit(c.sessionId, ev('harness.token', { text: 'x' }));
+    h.created.push({ chatId: 'chat-long', role: 'assistant', content: 'x'.repeat(450), metadata: { turnId: 't-long', partial: true } });
+
+    const summary = await h.service.recover();
+    expect(summary).toMatchObject({ interrupted: 1, persistedPartials: 0 });
+    expect(h.messageRepo.create).not.toHaveBeenCalled();
+  });
+
   it('leaves a turn that finished normally alone', async () => {
     const c = chat('chat-b');
     const h = build([c]);

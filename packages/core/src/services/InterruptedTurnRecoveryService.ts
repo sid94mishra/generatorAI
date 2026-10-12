@@ -122,7 +122,7 @@ export class InterruptedTurnRecoveryService {
     let persisted = false;
     // A quit (not a crash) already saved the partial turn (`ChatManagementService.flushInFlightTurns`); saving it
     // again showed the same partial answer twice after the restart.
-    if (content.trim().length > 0 && !(turnId && (await this.hasAssistantMessageFor(chat.id, turnId)))) {
+    if (content.trim().length > 0 && !(await this.hasAssistantMessageFor(chat.id, turnId))) {
       const metadata: ChatMessageMetadata = { partial: true } as ChatMessageMetadata;
       (metadata as Record<string, unknown>)['interrupted'] = 'server_restart';
       if (turnId) metadata.turnId = turnId;
@@ -154,12 +154,27 @@ export class InterruptedTurnRecoveryService {
     return { interrupted: true, persisted };
   }
 
-  private async hasAssistantMessageFor(chatId: string, turnId: string): Promise<boolean> {
+  /**
+   * Whether the open turn's response is already persisted. With its turn id, by that id. Without one
+   * (a turn longer than the tail window, whose `turn_start` fell out of it), by position: any assistant
+   * row after the latest user row belongs to this turn — the quit flush saved it.
+   */
+  private async hasAssistantMessageFor(chatId: string, turnId: string | undefined): Promise<boolean> {
     const total = await this.messageRepo.countByChatId(chatId).catch(() => 0);
     if (total === 0) return false;
     const recent = await this.messageRepo.getByChatId(chatId, 10, Math.max(0, total - 10)).catch(() => []);
-    return recent.some((m) => m.role === 'assistant' && m.metadata?.turnId === turnId);
+    if (turnId) return recent.some((m) => m.role === 'assistant' && m.metadata?.turnId === turnId);
+    return answeredAfterLastPrompt(recent);
   }
+}
+
+/** An assistant row follows the latest user row (rows oldest first). */
+export function answeredAfterLastPrompt(rows: ReadonlyArray<{ role: string }>): boolean {
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    if (rows[i]!.role === 'user') return false;
+    if (rows[i]!.role === 'assistant') return true;
+  }
+  return false;
 }
 
 function isTurnActivity(e: PersistedEvent): boolean {

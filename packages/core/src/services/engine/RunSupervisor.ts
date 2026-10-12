@@ -408,6 +408,9 @@ export class RunSupervisor {
 
   /** Stop hosting: timers, the reaper and the lock. Frames are left as they are (a restart recovers them). */
   async stop(opts: { releaseLock?: boolean } = {}): Promise<void> {
+    // Frames stay for recovery, but what their turns streamed is written now, while the process can
+    // (a shutdown; losing the lock keeps the process, and its turns settle normally).
+    if (!this.stopped && opts.releaseLock !== false) this.executor.flushInFlightTurns();
     this.stopped = true;
     if (this.startRetry) clearTimeout(this.startRetry);
     this.startRetry = undefined;

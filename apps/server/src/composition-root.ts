@@ -2753,6 +2753,15 @@ export async function createContainer(config: AppConfig, options: CreateContaine
 
     /** Graceful shutdown. */
     async shutdown(): Promise<void> {
+      // Persist every turn still streaming as cut short, FIRST: a quit or restart mid-turn used to drop
+      // the whole turn (an orchestrator's six minutes of steps, delegations and an open question
+      // vanished; only the user's message survived). It ran after the terminal, browser and sandbox
+      // teardown, so a shell that bounds the shutdown (the desktop app kills the server after 15 s)
+      // could cut it off, and recovery then saved the text alone. The finaliser is idempotent: the
+      // turn's own end, if it still comes, does not write it again.
+      await chatManagementService.flushInFlightTurns().catch((err: unknown) => {
+        logger.warn(`[Container] flushing in-flight turns failed: ${String(err)}`);
+      });
       tailscale.stop();
       attentionService.stop();
       chatChangeStatsService.stop();
@@ -2816,12 +2825,6 @@ export async function createContainer(config: AppConfig, options: CreateContaine
         await sandboxLifecycleManager.destroyAll();
       }
 
-      // Persist every turn still streaming as cut short before the providers go away: a quit or restart
-      // mid-turn used to drop the whole turn (an orchestrator's six minutes of steps, delegations and an
-      // open question vanished; only the user's message survived).
-      await chatManagementService.flushInFlightTurns().catch((err: unknown) => {
-        logger.warn(`[Container] flushing in-flight turns failed: ${String(err)}`);
-      });
       await harness.shutdown();
       // Flush the security audit queue before the DB closes, otherwise the
       // final revoke/denied events would be written against a closed handle.
