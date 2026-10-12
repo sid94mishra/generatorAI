@@ -22,7 +22,7 @@ import { Textarea } from '@/ui/primitives/Textarea/Textarea.js';
 import { InlineCode } from '@/ui/primitives/InlineCode/InlineCode.js';
 import { useConfirm } from '@/ui/primitives/AlertDialog/AlertDialog.js';
 import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
-import { reviewOutputMarkdown } from './reviewOutput.js';
+import { jsonAnswerMarkdown } from '@/blocks/transcript/index.js';
 
 export interface ReviewCardProps {
   stageName: string;
@@ -120,7 +120,7 @@ export function ReviewCard({
         ) : null}
         {output ? (
           <section aria-label="Output to approve" className="max-h-96 overflow-auto rounded-card border border-line-soft bg-sunken px-3 py-2" data-testid="stage-review-output">
-            <Markdown>{reviewOutputMarkdown(output)}</Markdown>
+            <Markdown>{jsonAnswerMarkdown(output)}</Markdown>
           </section>
         ) : null}
         <Textarea

@@ -25,7 +25,7 @@ import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { STATUS_TONE_TEXT } from '@/ui/primitives/StatusBadge/StatusBadge.js';
-import { readableAnswer } from './reviewOutput.js';
+import { StageTranscript } from './StageTranscript.js';
 import { MenuButton, type MenuButtonItem } from '@/ui/patterns/MenuButton/MenuButton.js';
 import { formatStageDuration } from '../model/format.js';
 import type { StageView } from '../model/types.js';
@@ -185,12 +185,6 @@ export const StageRow = memo(function StageRow({
     setOpen((o) => !o);
   };
 
-  // U-21: a finished stage with a JSON output contract shows its answer as Markdown, not raw JSON.
-  const contractAnswer = !!stage.outputData && stage.status !== 'running' && stage.streaming !== true;
-  const readableStageAnswer = contractAnswer && stage.answer ? readableAnswer(stage.answer) : stage.answer;
-  const readableSegments = contractAnswer && stage.segments
-    ? stage.segments.map((seg) => (seg.type === 'answer' ? { ...seg, text: readableAnswer(seg.text) } : seg))
-    : stage.segments;
   const status = resolveStatus('stageRun', stage.rawStatus) ?? resolveMapping({ state: 'queued' }, 'stageRun');
   // U-18: a check that ran to the end but did not pass completes (it never fails the run on its own),
   // yet it must not read "Succeeded".
@@ -210,6 +204,19 @@ export const StageRow = memo(function StageRow({
         <ContextGauge snapshot={stage.contextUsage ?? null} usage={stage.usage ?? null} showLabel={false} />
       </span>
     ) : null;
+
+  const turnBody = (
+    <TurnBody
+      segments={stage.segments}
+      steps={stage.steps}
+      answer={stage.answer}
+      streamKey={`stageRun:${stage.id}`}
+      active={stage.status === 'running' || stage.streaming === true}
+      answerStreaming={isActive && !isAwaiting}
+      loading={isActive && !isAwaiting && stage.steps.length === 0 && !stage.answer}
+      error={isFailed ? stage.error : undefined}
+    />
+  );
 
   return (
     <div
@@ -302,17 +309,6 @@ export const StageRow = memo(function StageRow({
         <div className={cn('flex flex-col gap-2.5 pt-1 pr-4 pb-3', BODY_PAD[d])}>
           {body}
 
-          {!body && !hidePrompt && stage.prompt ? (
-            <div className="flex flex-col gap-1">
-              <span className="flex items-center gap-1.5 text-small text-fg-3">
-                <Icon concept="user" size={12} />
-                Stage prompt
-              </span>
-              <p className="rounded-card border border-line-soft bg-sunken px-3 py-2 text-body whitespace-pre-wrap text-fg">{stage.prompt}</p>
-            </div>
-          ) : null}
-
-          {!body ? preamble : null}
           {!body ? (
             <TranscriptProvider
               value={{
@@ -343,15 +339,25 @@ export const StageRow = memo(function StageRow({
                   : {}),
               }}
             >
-              <TurnBody
-                segments={readableSegments}
-                steps={stage.steps}
-                answer={readableStageAnswer}
-                streamKey={`stageRun:${stage.id}`}
-                active={stage.status === 'running' || stage.streaming === true}
-                answerStreaming={isActive && !isAwaiting}
-                loading={isActive && !isAwaiting && stage.steps.length === 0 && !stage.answer}
-                error={isFailed ? stage.error : undefined}
+              <StageTranscript
+                stage={stage}
+                live={stage.status === 'running' || stage.streaming === true || (isAwaiting && !stage.interrupt)}
+                liveBody={turnBody}
+                fallback={
+                  <>
+                    {!hidePrompt && stage.prompt ? (
+                      <div className="flex flex-col gap-1">
+                        <span className="flex items-center gap-1.5 text-small text-fg-3">
+                          <Icon concept="user" size={12} />
+                          Stage prompt
+                        </span>
+                        <p className="rounded-card border border-line-soft bg-sunken px-3 py-2 text-body whitespace-pre-wrap text-fg">{stage.prompt}</p>
+                      </div>
+                    ) : null}
+                    {preamble}
+                    {turnBody}
+                  </>
+                }
               />
             </TranscriptProvider>
           ) : null}

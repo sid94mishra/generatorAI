@@ -22,7 +22,8 @@ import {
   type TranscriptTurn as TurnModel,
 } from '@generatorai/client-core';
 import type { ChatMessage } from '@generatorai/shared';
-import { TRANSCRIPT_COPY } from '@generatorai/shared/ui-contract';
+import { TRANSCRIPT_COPY, TURN_ROLE_LABELS } from '@generatorai/shared/ui-contract';
+import type { IconConcept } from '@generatorai/design-tokens';
 import { cn } from '@/ui/lib/cn.js';
 import { Callout } from '@/ui/primitives/Callout/Callout.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
@@ -180,6 +181,12 @@ function turnDurationMs(
   return Number.isFinite(ms) && ms > 0 ? ms : undefined;
 }
 
+/** A workflow turn's label (a stage prompt, an iteration input …); people's messages have none. */
+function turnLabel(turnRole: string | undefined): { text: string; icon: IconConcept } | undefined {
+  const known = turnRole ? TURN_ROLE_LABELS[turnRole] : undefined;
+  return known ? { text: known.label, icon: known.icon as IconConcept } : undefined;
+}
+
 function renderEntry(entry: TranscriptEntry, props: TranscriptTurnProps, startedAt?: ChatMessage['timestamp']): ReactNode {
   switch (entry.kind) {
     case 'user':
@@ -194,6 +201,7 @@ function renderEntry(entry: TranscriptEntry, props: TranscriptTurnProps, started
           chatId={entry.message.chatId}
           timestamp={entry.message.timestamp}
           actions={props.renderUserActions?.(entry.message)}
+          label={turnLabel(entry.message.turnRole)}
         />
       );
     case 'pending_user':

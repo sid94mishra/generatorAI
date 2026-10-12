@@ -153,7 +153,22 @@ export const TRANSCRIPT_COPY = {
   viewModes: { normal: 'Normal', verbose: 'Verbose', summary: 'Summary' },
   delegated: (n: number): string => `Delegated ${n} task${n === 1 ? '' : 's'}`,
   find: 'Find in transcript',
+  showMore: 'Show more',
+  showLess: 'Show less',
 } as const;
+
+/**
+ * Workflow conversation turns (`chat_messages.turn_role`) the transcript labels: a stage
+ * session's user rows are the engine's prompts, not something a person typed. `icon` is an
+ * `IconConcept` id kept as a plain string (see EMPTY_STATE_COPY).
+ */
+export const TURN_ROLE_LABELS: Readonly<Record<string, { label: string; icon: string }>> = {
+  prompt: { label: 'Stage prompt', icon: 'user' },
+  iteration_input: { label: 'Iteration input', icon: 'download' },
+  operator: { label: 'Operator message', icon: 'message' },
+  digest: { label: 'Conversation digest', icon: 'layers' },
+  wrap_up: { label: 'Wrap-up prompt', icon: 'archive' },
+};
 
 /** The three transcript view modes (G-06; client-only). */
 export const TRANSCRIPT_VIEW_MODES = ['normal', 'verbose', 'summary'] as const;

@@ -6,9 +6,10 @@
 // markdown itself is the kit `Markdown` pattern.
 // ────────────────────────────────────────────────────────────────
 
-import { memo, useRef } from 'react';
+import { memo, useMemo, useRef } from 'react';
 import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import { useTranscriptActions } from '../transcriptContext.js';
+import { jsonAnswerMarkdown } from './jsonAnswer.js';
 import { usePacedText } from './usePacedText.js';
 import { useRevealFade } from './useRevealFade.js';
 
@@ -23,7 +24,9 @@ export const AssistantText = memo(function AssistantText({ text, streaming = fal
   // Streaming text is revealed at a steady pace (D-91); the full text is shown
   // the moment the turn ends, the reader scrolls away or the view mode changes.
   const ctx = useTranscriptActions();
-  const shown = usePacedText(text, streaming, { paced: ctx.pacing, flushKey: ctx.viewMode });
+  const paced = usePacedText(text, streaming, { paced: ctx.pacing, flushKey: ctx.viewMode });
+  // An answer that is JSON shows as one JSON block, not as prose.
+  const shown = useMemo(() => jsonAnswerMarkdown(paced, streaming), [paced, streaming]);
   // …and the newest words fade in (colour only, no layout shift).
   const ref = useRef<HTMLDivElement>(null);
   useRevealFade(ref, streaming && ctx.pacing !== false);
