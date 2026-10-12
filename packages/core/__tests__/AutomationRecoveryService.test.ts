@@ -253,6 +253,29 @@ describe('AutomationRecoveryService (Track A1)', () => {
     expect(execStore.executions.get('e1')?.status).toBe('running');
   });
 
+  it('settles an execution left running at boot once its live run ends (no wait for the next boot)', async () => {
+    const auto = baseAutomation('a1');
+    execStore.executions.set('e1', baseExecution('e1', 'a1', 'running'));
+    execStore.runs.set('e1', [baseExecRun('r1', 'e1', 'wfr-1', 'running')]);
+    const run = { id: 'wfr-1', status: 'running' as WorkflowRunStatus };
+    const eventBus = new EventBus({ store: async () => 0 } as never, createLogger(), { allocate: async () => 1 } as never);
+    const service = new AutomationRecoveryService(
+      createAutomationRepo([auto]),
+      createExecutionRepo(execStore),
+      createWorkflowRunRepo([run]),
+      eventBus,
+      createIdempotencyRepo(),
+      createLogger(),
+    );
+    await service.recoverOnBoot();
+    expect(execStore.executions.get('e1')?.status).toBe('running');
+
+    run.status = 'completed';
+    await eventBus.emit('stage-session', { kind: 'workflow_run.completed', data: { workflowRunId: 'wfr-1' } } as never);
+    await vi.waitFor(() => expect(execStore.executions.get('e1')?.status).toBe('completed'));
+    service.stopIdempotencySweeper();
+  });
+
   it('marks execution cancelled when only cancellations are seen', async () => {
     const auto = baseAutomation('a1');
     execStore.executions.set('e1', baseExecution('e1', 'a1', 'running'));
