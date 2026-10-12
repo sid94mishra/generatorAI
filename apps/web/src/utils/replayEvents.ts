@@ -307,15 +307,20 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
   }
   const streamKey = activeStageRunId ? `stageRun:${activeStageRunId}` : sessionId;
 
-  // Guard: if the stream is already in an active state (user just sent a
-  // message via ChatInput.startPending), skip replay to avoid wiping the
-  // pending state. The live SSE events will continue filling in the response.
+  // Guard: the composer just sent a message (`startPending`) and nothing came
+  // back from the server yet — keep that optimistic state; the live events
+  // fill in the response.
+  //
+  // A stream that already HAS server content is not protected. It is what this
+  // tab had when the view last unsubscribed: leaving a chat or a run page
+  // mid-turn closes its subscription but leaves the entry "streaming", so the
+  // events of the absence were never applied. Skipping the replay on return
+  // dropped all of them (and a turn that ended meanwhile stayed on
+  // "Generating" until the stall watchdog called it interrupted). The history
+  // is authoritative: rebuild from it; live frames that arrived during the
+  // fetch are buffered and flushed after it with sequence dedup.
   const existingStream = store.streams[streamKey];
-  if (existingStream && (
-    existingStream.status === 'pending' ||
-    existingStream.status === 'streaming' ||
-    existingStream.status === 'thinking'
-  )) {
+  if (existingStream && existingStream.status === 'pending' && existingStream.blocks.length === 0) {
     return;
   }
 

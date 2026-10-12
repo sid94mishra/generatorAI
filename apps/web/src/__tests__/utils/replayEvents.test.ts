@@ -41,6 +41,36 @@ describe('replayEventsIntoStore', () => {
     expect(stream?.blocks[0]?.type).toBe('text');
   });
 
+  it('rebuilds a stream left mid-turn from the history on return (the absence is not lost)', () => {
+    // What the tab had when the view unsubscribed: a partial, still "streaming" turn.
+    replayEventsIntoStore('s1', [makeEvent('harness.token', { text: 'Hel' }, 1)]);
+    expect(useStreamStore.getState().streams['s1']?.text).toBe('Hel');
+
+    // Back on the page while the turn still runs: the history holds what streamed meanwhile.
+    replayEventsIntoStore('s1', [makeEvent('harness.token', { text: 'Hel' }, 1), makeEvent('harness.token', { text: 'lo' }, 2)]);
+    expect(useStreamStore.getState().streams['s1']?.text).toBe('Hello');
+  });
+
+  it('settles a stream whose turn ended while the view was away', () => {
+    replayEventsIntoStore('s1', [makeEvent('harness.token', { text: 'Hel' }, 1)]);
+    replayEventsIntoStore('s1', [
+      makeEvent('copilot.user_message', { content: 'hi' }, 1),
+      makeEvent('harness.token', { text: 'Hello' }, 2),
+      makeEvent('harness.message_complete', { content: 'Hello' }, 3),
+      makeEvent('harness.idle', {}, 4),
+    ]);
+    // Finished turns come from the persisted history; the stream is no longer "streaming".
+    expect(['idle', 'complete']).toContain(useStreamStore.getState().streams['s1']?.status ?? 'idle');
+  });
+
+  it('keeps an optimistic send the server has not answered yet', () => {
+    useStreamStore.getState().startPending('s1', 'hi');
+    replayEventsIntoStore('s1', [makeEvent('harness.token', { text: 'old' }, 1)]);
+    const stream = useStreamStore.getState().streams['s1'];
+    expect(stream?.status).toBe('pending');
+    expect(stream?.text).toBe('');
+  });
+
   it('reconstructs thinking blocks from reasoning events', () => {
     const events = [
       makeEvent('harness.reasoning_delta', { text: 'Let me ' }, 1),
