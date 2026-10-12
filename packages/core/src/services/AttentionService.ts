@@ -727,6 +727,9 @@ export class AttentionService {
           try {
             const drafts = await this.compute(ref);
             if (!this.stopped) this.apply(ref, drafts);
+            // U-41: an automation's item reads its runs' asks, so a run's change re-reads its execution.
+            const execution = ref.entity === 'workflow_run' ? this.runExecutions.get(ref.id) : undefined;
+            if (execution && !this.stopped) this.schedule({ entity: 'automation_execution', id: execution });
           } catch (err) {
             this.deps.logger?.warn('[Attention] re-read failed', { entity: key, error: errorText(err) });
           }
@@ -952,6 +955,9 @@ export class AttentionService {
     }
   }
 
+  /** The execution each automation-started run belongs to (U-41). */
+  private readonly runExecutions = new Map<string, string>();
+
   private async computeRun(runId: string): Promise<Draft[]> {
     const { runs, stageRuns, definitions } = this.deps;
     let run: WorkflowRun;
@@ -960,6 +966,8 @@ export class AttentionService {
     } catch {
       return [];
     }
+    const executionId = run?.trigger?.kind === 'automation' ? run.trigger['executionId'] : undefined;
+    if (typeof executionId === 'string' && executionId) this.runExecutions.set(runId, executionId);
     if (!run || !LIVE_RUN_STATUSES.includes(run.status)) return [];
 
     const [instances, graph] = await Promise.all([
@@ -1102,6 +1110,19 @@ export class AttentionService {
     if (!execution || !LIVE_EXECUTION_STATUSES.has(execution.status)) return [];
     const automation = await automations.getById(execution.automationId).catch(() => null);
     const project = await this.projectRef(automation?.projectId);
+    // U-41: when every live run of the execution waits on a person (their asks show as their own
+    // Needs you items), the execution is not working: it waits, it does not spin under Running.
+    const liveRuns: string[] = [];
+    for (const [runId, exec] of this.runExecutions) {
+      if (exec !== executionId) continue;
+      const run = await this.deps.runs.getById(runId).catch(() => null);
+      if (run && LIVE_RUN_STATUSES.includes(run.status)) liveRuns.push(runId);
+      else this.runExecutions.delete(runId);
+    }
+    const waitingOnPerson =
+      liveRuns.length > 0 &&
+      liveRuns.every((runId) => [...this.items.values()].some((i) => i.entity === 'workflow_run' && i.entityId === runId && i.ask)) &&
+      execution.status === 'running';
     const total = execution.totalIterations;
     const finished = execution.completedIterations + execution.failedIterations;
     const step = total > 0 ? Math.min(finished + 1, total) : undefined;
@@ -1113,7 +1134,9 @@ export class AttentionService {
         title: automation?.name?.trim() || 'Automation',
         href: `/automations/${execution.automationId}`,
         ...(project ? { project } : {}),
-        state: stateOf(STATUS_MAPS.automationExecution[execution.status], 'running'),
+        state: waitingOnPerson
+          ? stateOf(STATUS_MAPS.stageRun.waiting, 'waiting')
+          : stateOf(STATUS_MAPS.automationExecution[execution.status], 'running'),
         since: iso(execution.startedAt ?? execution.createdAt),
         ...(step !== undefined ? { progress: { label: `Iteration ${step} of ${total}`, step, of: total } } : {}),
         // `POST /automations/:id/executions/:executionId/cancel` stops a live execution.

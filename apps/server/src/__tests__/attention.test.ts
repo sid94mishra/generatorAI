@@ -426,6 +426,24 @@ describe('AttentionService — boot rebuild', () => {
     });
   });
 
+  it('an automation whose only live run waits on a person waits, not spins (U-41)', async () => {
+    await makeProject(P1, 'Website');
+    await makeDefinition('d1', { projectId: P1 });
+    await makeAutomation('a1', P1);
+    await makeExecution('e-held', 'a1', 'running');
+    await makeRun('r-auto', 'd1', 'waiting');
+    sqliteHandle(db)
+      .prepare(`UPDATE workflow_runs SET trigger = ? WHERE id = 'r-auto'`)
+      .run(JSON.stringify({ kind: 'automation', automationId: 'a1', executionId: 'e-held', via: 'schedule', iterationIndex: 0 }));
+    makeStage('s1', 'r-auto', 'Patrol', 'paused');
+
+    await startService().start();
+    await service.settled();
+    const snap = service.getSnapshot();
+    expect(snap.needsYou.map((i) => i.key)).toContain('workflow_run:r-auto:r-auto');
+    expect(snap.running.find((i) => i.key === 'automation_execution:e-held')).toMatchObject({ state: 'waiting' });
+  });
+
   it('starts empty on an empty database (no run history at all)', async () => {
     await startService().start();
     const snap = service.getSnapshot();
