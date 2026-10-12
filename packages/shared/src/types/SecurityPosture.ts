@@ -81,6 +81,8 @@ export interface SecurityPosture {
   secretStore?: { kind: string; secure: boolean; reason: string | null; supportsRotation: boolean };
   devices?: { active: number; revoked: number; relayBound: number };
   relay: { enabled: boolean; clientAvailable: boolean; state?: string; hostId?: string | null };
+  /** What a chat runs with when nobody picked a permission mode (G14: Accept edits unless a local dev server). */
+  agents?: { defaultPermissionMode: 'default' | 'acceptEdits' | 'bypassPermissions' };
   scopes: readonly string[];
   warnings?: SecurityWarning[];
 }

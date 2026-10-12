@@ -114,6 +114,20 @@ export function securityErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * The permission mode a new chat starts with when nobody picks one (the posture's `agents`, G14). Read once
+ * while a form needs it — not polled like the Security section's posture.
+ */
+export function useDefaultChatPermissionMode(enabled: boolean): 'default' | 'acceptEdits' | 'bypassPermissions' | undefined {
+  const { data } = useQuery({
+    queryKey: [...securityKeys.posture, 'agents'],
+    queryFn: () => apiFetch<SecurityPosture>('/api/security/posture'),
+    enabled,
+    staleTime: 60_000,
+  });
+  return data?.agents?.defaultPermissionMode;
+}
+
 export function useSecurityPosture(): UseQueryResult<SecurityPosture> {
   return useQuery({ queryKey: securityKeys.posture, queryFn: () => apiFetch<SecurityPosture>('/api/security/posture'), ...poll });
 }

@@ -14,12 +14,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import type { Agent, HarnessCatalogModel } from '@generatorai/shared';
-import { EMPTY_CREATE_CHAT_DRAFT, reasoningEffortLabel, type CreateChatDraft } from '@generatorai/shared/ui-contract';
+import {
+  APPROVAL_MODE_LABELS,
+  CHAT_APPROVAL_MODES,
+  EMPTY_CREATE_CHAT_DRAFT,
+  reasoningEffortLabel,
+  type CreateChatDraft,
+} from '@generatorai/shared/ui-contract';
 import { AgentPicker } from '@/blocks/agent-picker/index.js';
 import { ModelPicker } from '@/blocks/model-picker/index.js';
 import { SourcePicker, type DraftSource } from '@/blocks/sources/index.js';
 import { useCreateChat, useSendChatPromptTo } from '@/hooks/queries.js';
 import { useModels } from '@/hooks/harnessQueries.js';
+import { useDefaultChatPermissionMode } from '@/hooks/securityQueries.js';
 import { getDefaultChatModel } from '@/lib/appPreferences.js';
 import { useNewChatStore } from '@/stores/newChatStore.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
@@ -29,6 +36,7 @@ import { Dialog, DialogBody, DialogClose, DialogFooter } from '@/ui/primitives/D
 import { Field } from '@/ui/primitives/Field/Field.js';
 import { Input } from '@/ui/primitives/Input/Input.js';
 import { SegmentedControl } from '@/ui/primitives/SegmentedControl/SegmentedControl.js';
+import { Select } from '@/ui/primitives/Select/Select.js';
 import { Switch } from '@/ui/primitives/Switch/Switch.js';
 import { Textarea } from '@/ui/primitives/Textarea/Textarea.js';
 import { KbdHintRow } from '@/ui/patterns/KbdHintRow/KbdHintRow.js';
@@ -39,6 +47,9 @@ import { BrowserVisibilityField, DEFAULT_BROWSER_SETTINGS } from './BrowserVisib
 import { agentRuntimeSelection, defaultReasoningEffortFor, reasoningLevelsFor } from './modelControls.js';
 import { buildCreateChatParams, chatCreateBlockingReason, chatCreateDisplayName, chatCreateFirstMessage } from './mapDraftToParams.js';
 import { modChord } from '@/lib/shortcuts.js';
+
+/** The approval policies a chat can start with (plan-only is the Plan agent mode). */
+type ChatApprovalMode = 'default' | 'acceptEdits' | 'bypassPermissions';
 
 
 /** The dialog and its wiring — no props, it reads/writes `useNewChatStore`. */
@@ -65,6 +76,10 @@ export function NewChatDialog() {
   const [reasoningEffort, setReasoningEffort] = useState<string | undefined>(undefined);
   const [orchestratorMode, setOrchestratorMode] = useState(false);
   const [planFirst, setPlanFirst] = useState(false);
+  // U-47: the mode the chat starts with. Unset = the deployment's default (G14), which the posture names.
+  const [permissionMode, setPermissionMode] = useState<ChatApprovalMode | undefined>(undefined);
+  const defaultPermissionMode: ChatApprovalMode = useDefaultChatPermissionMode(isOpen) ?? 'acceptEdits';
+  const effectivePermissionMode = permissionMode ?? defaultPermissionMode;
   const [browser, setBrowser] = useState(DEFAULT_BROWSER_SETTINGS);
   const [submitting, setSubmitting] = useState(false);
 
@@ -90,6 +105,7 @@ export function NewChatDialog() {
     setReasoningEffort(undefined);
     setOrchestratorMode(false);
     setPlanFirst(false);
+    setPermissionMode(undefined);
     setBrowser(DEFAULT_BROWSER_SETTINGS);
   }
 
@@ -126,7 +142,10 @@ export function NewChatDialog() {
     if (blockingReason || submitting) return;
     setSubmitting(true);
     try {
-      const params = buildCreateChatParams({ draft: currentDraft(), sourceDrafts });
+      const params = {
+        ...buildCreateChatParams({ draft: currentDraft(), sourceDrafts }),
+        ...(permissionMode ? { permissionMode } : {}),
+      };
       const chat = await createChat.mutateAsync(params);
       // Fire-and-forget: the server returns before persisting the user
       // message (useSendChatPromptTo's own doc comment); SSE handles the rest.
@@ -195,6 +214,7 @@ export function NewChatDialog() {
   const optionsSummary = [
     orchestrateOn ? 'Orchestrate mode' : null,
     planFirst && hasFirstMessage ? 'Plan first' : null,
+    permissionMode && permissionMode !== defaultPermissionMode ? APPROVAL_MODE_LABELS[permissionMode].label : null,
     description.trim() ? 'Description' : null,
     tags.length > 0 ? `${tags.length} tag${tags.length === 1 ? '' : 's'}` : null,
     browser.visibility !== 'headless' ? `Browser ${browser.visibility}` : null,
@@ -345,6 +365,30 @@ export function NewChatDialog() {
                     }
                   />
                 </div>
+                <SettingRow
+                  label="Permissions"
+                  hint={
+                    effectivePermissionMode === 'bypassPermissions'
+                      ? 'Tools and shell commands run without asking.'
+                      : effectivePermissionMode === 'acceptEdits'
+                        ? 'File edits apply on their own; shell commands and other tools ask first.'
+                        : 'Every tool asks before it runs.'
+                  }
+                  control={
+                    <Select
+                      size="sm"
+                      aria-label="Permissions"
+                      value={effectivePermissionMode}
+                      onValueChange={(v) => {
+                        if (v) setPermissionMode(v as ChatApprovalMode);
+                      }}
+                      items={CHAT_APPROVAL_MODES.map((value) => ({
+                        value,
+                        label: value === defaultPermissionMode ? `${APPROVAL_MODE_LABELS[value].label} (default)` : APPROVAL_MODE_LABELS[value].label,
+                      }))}
+                    />
+                  }
+                />
                 <Field label="Description" optional>
                   <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Shown in the chat list" />
                 </Field>

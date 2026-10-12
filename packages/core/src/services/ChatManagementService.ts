@@ -45,6 +45,7 @@ import {
   decideToolPermission,
   isAttachedFileRead,
   buildToolPermissionPayload,
+  getDefaultChatPermissionMode,
 } from './agentModePolicy.js';
 import type { EventBus } from '../events/EventBus.js';
 import { rememberRefusalOf, rememberRulesOf } from './PermissionRuleService.js';
@@ -777,7 +778,7 @@ export class ChatManagementService {
       ...(shouldAttachPermissionHandler(chat.permissionMode) ? { attach: { mode: chat.permissionMode } } : {}),
       // Binding-key label only: it must equal the mode the new chat row is stored
       // with (the WS-A new-chat default debt), or the first turn would rebind.
-      bindingMode: chat.permissionMode ?? 'bypassPermissions', // security-ok: key label, grants nothing
+      bindingMode: chat.permissionMode ?? getDefaultChatPermissionMode(), // security-ok: key label, grants nothing
     };
   }
 
@@ -1590,7 +1591,10 @@ export class ChatManagementService {
       defaultAgentMode: params.parentChatId
         ? DEFAULT_AGENT_MODE
         : (params.defaultAgentMode ?? DEFAULT_AGENT_MODE),
-      permissionMode: params.permissionMode ?? 'bypassPermissions',
+      // U-47: the deployment's default (G14 — Accept edits for the packaged app and anything reachable beyond
+      // loopback; full autonomy only for a local dev server), not a hard-coded Full access: every chat started
+      // from the desktop app ran with no approval gate, whatever the posture said.
+      permissionMode: params.permissionMode ?? getDefaultChatPermissionMode(),
       ...(params.agentRef ? { agentRef: params.agentRef } : {}),
       ...(agentProjection.agentId ? { agentId: agentProjection.agentId } : {}),
       ...(agentProjection.agentVersion ? { agentVersion: agentProjection.agentVersion } : {}),

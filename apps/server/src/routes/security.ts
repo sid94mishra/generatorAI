@@ -18,6 +18,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { dirname, resolve } from 'node:path';
 import { SCOPES, type Principal } from '@generatorai/auth';
+import { getDefaultChatPermissionMode } from '@generatorai/core';
 import type { NetworkAccess, SecurityPosture } from '@generatorai/shared';
 import type { Container } from '../composition-root.js';
 import { serverEndpoints } from '../network/serverEndpoints.js';
@@ -59,6 +60,7 @@ export function createSecurityRoutes(container: Container): Router {
         server: { hostId: identity.hostId, loopbackOnly: posture.loopbackOnly },
         authentication: { required: posture.authenticationRequired, dpopRequired: true },
         relay: { enabled: posture.relayEnabled, clientAvailable: false },
+        agents: { defaultPermissionMode: getDefaultChatPermissionMode() as 'acceptEdits' | 'bypassPermissions' },
         scopes: SCOPES,
       };
       if (!seesSecurityDetail(req.principal)) {
@@ -100,6 +102,7 @@ export function createSecurityRoutes(container: Container): Router {
           state: container.relayHostBroker.connectionState,
           hostId: posture.relayEnabled ? container.relayHostBroker.relayHostId : null,
         },
+        agents: { defaultPermissionMode: getDefaultChatPermissionMode() as 'acceptEdits' | 'bypassPermissions' },
         scopes: SCOPES,
         /**
          * Actionable warnings. Surfaced prominently so an operator does not
