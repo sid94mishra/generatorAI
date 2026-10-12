@@ -1621,6 +1621,8 @@ export class StageExecutor {
   /** Back to `running`; the instance's version after the CAS. */
   private backToRunning(ctx: AttemptContext, from: 'validating' | 'awaiting_input'): number {
     const r = this.deps.stores.stages.transition(ctx.frame.req.stageRunId, [from], 'running', {
+      // An answered in-turn gate is over: a completed stage kept reporting its last permission request (U-43).
+      ...(from === 'awaiting_input' ? { patch: { interruptData: null } } : {}),
       lease: { owner: ctx.frame.owner, ttlMs: this.timing.leaseTtlMs },
       runId: ctx.frame.req.runId,
       now: this.now(),
