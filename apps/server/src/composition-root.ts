@@ -1316,6 +1316,11 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     codebaseRepo: projectCodebaseRepo,
     eventBus,
     worktreeRepo,
+    // A finished run's worktree lets go of its branch when a chat asks for it (fixing the PR it opened).
+    isRunFinished: async (runId) => {
+      const run = await workflowRunRepo.getById(runId).catch(() => null);
+      return !!run && (run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled');
+    },
   });
   // A codebase worktree mount's `worktrees` row shares the mount's id: removing
   // it (Remove, Clean up orphans, the retention sweep) releases the mount.

@@ -103,6 +103,12 @@ export interface MountServiceDeps {
    * the project counts and the retention sweep see chat and run worktrees.
    */
   worktreeRepo?: IWorktreeRepository;
+  /**
+   * Whether a workflow run is over. A finished run's worktree keeps its branch checked out, so a chat
+   * could not be opened on the branch of the pull request the run opened (to fix its CI, say); a branch
+   * held only by a finished run's clean worktree is released instead (see `releaseFinishedRunWorktree`).
+   */
+  isRunFinished?: (runId: string) => Promise<boolean>;
 }
 
 /**
@@ -405,7 +411,7 @@ export class MountService {
     if (ctx.mode === 'worktree') {
       if (branch && !newBranch) {
         const holder = await git.worktreeHoldingBranch(originPath, branch);
-        if (holder && !samePath(holder)) {
+        if (holder && !samePath(holder) && !(await this.releaseFinishedRunWorktree(holder))) {
           throw new ValidationError(
             `Branch "${branch}" is already checked out at ${holder}; a branch can only be checked out in one place. Choose "new branch" instead.`,
           );
@@ -434,6 +440,25 @@ export class MountService {
     if (branch) return { isRepo: true, branch };
     const current = await git.currentBranch(originPath);
     return { isRepo: true, ...(current ? { branch: current } : {}) };
+  }
+
+  /**
+   * A branch held by the worktree of a FINISHED workflow run with nothing uncommitted: detach that
+   * worktree (it stays at the same commit — its Changes view is unaffected) so the branch can be checked
+   * out here. Anything else (a live run, a chat, uncommitted work, a folder we do not manage) keeps it.
+   */
+  private async releaseFinishedRunWorktree(holder: string): Promise<boolean> {
+    const finished = this.deps.isRunFinished;
+    if (!finished) return false;
+    const rel = path.relative(path.join(this.deps.workspacesDir, 'executions'), holder);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+    // A map item's workspace is owned by `<runId>~<instance>-<index>`.
+    const runId = rel.split(/[\\/]/)[0]?.split('~')[0];
+    if (!runId || !(await finished(runId).catch(() => false))) return false;
+    if (!(await this.deps.git.isClean(holder).catch(() => false))) return false;
+    await this.deps.git.detachHead(holder);
+    this.deps.logger.info(`[Mounts] Released ${holder} (finished run ${runId}) so its branch can be checked out elsewhere`);
+    return true;
   }
 
   private async defaultBranchName(originPath: string, slug: string | undefined): Promise<string> {

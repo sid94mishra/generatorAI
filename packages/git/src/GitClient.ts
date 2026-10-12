@@ -230,6 +230,13 @@ export class GitClient implements IGitClient {
     }
   }
 
+  async detachHead(repoDir: string): Promise<void> {
+    const result = await this.runner.run('git', ['checkout', '-q', '--detach'], { cwd: repoDir, timeout: 60_000 });
+    if (result.exitCode !== 0) {
+      throw new GitError(`Failed to detach HEAD: ${result.stderr}`);
+    }
+  }
+
   async worktreeHoldingBranch(repoPath: string, branch: string): Promise<string | null> {
     const result = await this.runner.run('git', ['worktree', 'list', '--porcelain'], {
       cwd: repoPath,

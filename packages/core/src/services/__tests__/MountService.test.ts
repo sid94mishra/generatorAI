@@ -50,6 +50,7 @@ function makeGit() {
     nestedRepos: vi.fn(async () => []),
     createBranch: vi.fn(async () => {}),
     checkoutBranch: vi.fn(async () => {}),
+    detachHead: vi.fn(async () => {}),
     addWorktree: vi.fn(async () => {}),
     initShadowRepo: vi.fn(async () => true),
     commonObjectsDir: vi.fn(async () => null),
@@ -232,6 +233,45 @@ describe('MountService.plan validation', () => {
         { kind: 'codebase', codebaseId: 'cb-api', mode: 'worktree', newBranch: 'feature/login' },
       ]),
     ).rejects.toThrow(/already exists/);
+  });
+
+  it("releases a branch held by a finished run's clean worktree, but not a live run's", async () => {
+    const workspacesDir = await tmpDir();
+    const home = await tmpDir();
+    const clonePath = path.join(home, 'api.git');
+    await fs.mkdir(clonePath, { recursive: true });
+    const codebase: ProjectCodebase = {
+      id: 'cb-api', projectId: 'proj', alias: 'api', type: 'git-remote', url: 'https://example.invalid/api.git',
+      clonePath, status: 'ready', settings: {}, createdAt: new Date(), updatedAt: new Date(),
+    };
+    const finished = new Set(['run-done']);
+    const git = makeGit();
+    const service = new MountService({
+      mountRepo: mountRepo(),
+      workspaceRepo: workspaceRepo(),
+      git: git as unknown as IGitClient,
+      logger: makeLogger(),
+      workspacesDir,
+      codebaseRepo: { getById: vi.fn(async () => codebase), getByAlias: vi.fn(async () => codebase) } as unknown as IProjectCodebaseRepository,
+      isRunFinished: async (runId) => finished.has(runId),
+    });
+    git.branchExists.mockImplementation((async () => true) as never);
+    const holderOf = (runId: string) => path.join(workspacesDir, 'executions', runId, 'source', 'api');
+
+    git.worktreeHoldingBranch.mockImplementation((async () => holderOf('run-done')) as never);
+    await service.plan(path.join(workspacesDir, 'executions', 'chat-9'), undefined, [
+      { kind: 'codebase', codebaseId: 'cb-api', mode: 'worktree', branch: 'generatorai/pr-17' },
+    ]);
+    expect(git.detachHead).toHaveBeenCalledWith(holderOf('run-done'));
+
+    git.detachHead.mockClear();
+    git.worktreeHoldingBranch.mockImplementation((async () => holderOf('run-live')) as never);
+    await expect(
+      service.plan(path.join(workspacesDir, 'executions', 'chat-10'), undefined, [
+        { kind: 'codebase', codebaseId: 'cb-api', mode: 'worktree', branch: 'generatorai/pr-17' },
+      ]),
+    ).rejects.toThrow(/already checked out/);
+    expect(git.detachHead).not.toHaveBeenCalled();
   });
 
   it('refuses a codebase that is not ready', async () => {

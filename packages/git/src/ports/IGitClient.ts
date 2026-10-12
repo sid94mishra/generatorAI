@@ -172,6 +172,8 @@ export interface IGitClient {
   createBranch(repoDir: string, name: string, base?: string): Promise<void>;
   /** `git checkout <branch>` in an existing checkout. */
   checkoutBranch(repoDir: string, branch: string): Promise<void>;
+  /** `git checkout --detach` — the checkout stays at its commit and lets go of its branch. */
+  detachHead(repoDir: string): Promise<void>;
   /** Path of the worktree that has `branch` checked out, or null. */
   worktreeHoldingBranch(repoPath: string, branch: string): Promise<string | null>;
   /** `git worktree add` with an existing or a new branch. */
