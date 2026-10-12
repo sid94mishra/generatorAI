@@ -68,6 +68,8 @@ engine (`packages/checker`); Vitest + Playwright; GitHub Actions CI. Iterations 
 | U-45 | Chat model | A chat with no model of its own showed "Opus 5.5" but its first turn ran claude-sonnet-5-5 (SDK default; the SDK does not read the CLI settings) | high | fixed — the provider falls back to its catalog's default |
 | U-46 | Claude tools | Chat C's session had no Glob (and no Grep): "No such tool available: Glob … use find via Bash" — while chat A, eleven minutes earlier in the same process, used both 21 times | medium | open — intermittent, CLI-side message; to reproduce |
 | U-47 | New chat · permission | New chats default to Full access (`bypassPermissions`, a code default) and the New chat form does not show or offer the mode | question for the owner | open |
+| U-48 | Engine · quit mid-turn | A quit mid-turn completed iteration 4's Backend stage on a reply cut off mid-word: stopping the providers makes claude-agent resolve the aborted turn, which settled as finished, and recovery completed the stage | high | fixed — after the shutdown flush the executor writes nothing (kill's contract); a testkit case covers it |
+| U-27b | Accept-edits hint | The Frontend agent (Claude) still wrote a file through a shell heredoc (`cat > api/auth-types.ts <<'EOF'`) in an Accept-edits run | low | open — observe whether the hint reaches stage sessions |
 
 ## Journey log
 - **Iteration 1 (orchestrator chat, ~30 min):** Pulse Tech Lead planned and delegated — Architect (spec + ADR), Backend (Codex Terra: shared/checker/api), Frontend (Sonnet: web), QA (Codex Luna: clean-checkout run), Reviewer (Opus: 15 fixes). 61 files, 8 commits, **101 tests pass**, lint/format/build green. Pushed and **PR #9** opened from the Changes tab (after U-6 fix + token permissions); CI ran on GitHub Actions.
@@ -88,3 +90,11 @@ engine (`packages/checker`); Vitest + Playwright; GitHub Actions CI. Iterations 
 - **Automation "Pulse Issue Patrol"** (Describe it → published; schedule `0 */2 * * *`). Filed **issue #15** (race from the iteration 2 follow-ups) in the Issues tab; **Run now** → the patrol listed bug issues, posted "🤖 Issue Patrol: starting the Pulse Issue Fixer", started the Issue Fixer for #15 (a child run) and summarised. The fixer went green in one round; the approval card showed only a closing sentence (U-29); approved → **PR #16** with "Fixes #15".
 - **Merged PR #16** from GeneratorAI → GitHub auto-closed **#15**. The autonomous loop is complete: issue → patrol automation → Issue Fixer → approval → PR → CI → merge → issue closed.
 
+
+
+### 2026-10-12 — durability pass (installed build, real profile)
+- Paused patrol (interrupted by an app quit): header Paused + Resume, no spinners, Send; Needs you item; Resume ran it to completion with one prompt row (U-32, U-36).
+- Finished stages render like the chat: labelled Stage prompt, agent header, steps, answer; JSON answers as one JSON block (U-33, U-34).
+- Two chats streaming while hopping between them and a run page: both complete on return, no stuck "Generating" (U-35).
+- Reload during a running Read: Stop stays, the turn continues (U-38).
+- Quit mid-turn (chat C + iteration 4 Backend/Frontend): chat partial persisted once with 22 tool calls, stage partials with 49 and 13 tool calls; after relaunch the chat shows "Stopped before the response finished", the run shows Paused + Resume, resume adds no duplicate prompt (U-37, U-36). Found U-48 (Backend completed on its cut-off reply).
