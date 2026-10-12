@@ -1175,6 +1175,16 @@ export class ClaudeAgentProvider implements IAgentHarness {
     this.modelCache = null;
   }
 
+  /**
+   * The model the catalog flags as the default — what the picker shows a chat with no model of its own.
+   * A conversation created without a model used to run the SDK's built-in default instead (Sonnet, while
+   * the picker and the chat said "Opus 5.5"): the SDK sessions do not read the user's CLI settings, which
+   * is where the `default` alias the catalog resolved comes from. Undefined until the catalog was probed.
+   */
+  private catalogDefaultModel(): string | undefined {
+    return this.modelCache?.rows.find((r) => r.model.isDefault)?.model.id;
+  }
+
   /** The real probe. May throw; only {@link getModels} calls it. */
   private async probeModels(): Promise<HarnessModel[]> {
     // The cache holds the CLI's catalog as probed; observed limits are laid
@@ -1377,7 +1387,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       // left its session id in `evictedSessionIds`, so a caller that simply
       // re-creates it gets its history back without knowing anything happened.
       const previous = this.conversations.get(params.conversationId);
-      const nextModel = params.model ?? this.options.defaultModel;
+      const nextModel = params.model ?? this.options.defaultModel ?? this.catalogDefaultModel();
       const modelChanged = !!previous && previous.model !== nextModel;
       const remembered = this.evictedSessionIds.get(params.conversationId);
       this.evictedSessionIds.delete(params.conversationId);
@@ -1478,7 +1488,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
     // turn rebuilds the CLI session with `resume` (history kept).
     const existing = this.conversations.get(conversationId);
     if (existing) {
-      const requestedModel = params?.model ?? this.options.defaultModel;
+      const requestedModel = params?.model ?? this.options.defaultModel ?? this.catalogDefaultModel();
       const rootsChanged = !!params && !sameRoots(existing, params, this.options.defaultCwd);
       if (!params || (requestedModel === existing.model && !rootsChanged)) {
         if (this.verbose) console.log(`[ClaudeAgentAdapter] Conversation ${conversationId} already in memory, skipping resume`);
@@ -1515,7 +1525,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
     this.evictedSessionIds.delete(conversationId);
     this.conversations.set(conversationId, {
       conversationId,
-      model: this.options.defaultModel,
+      model: this.options.defaultModel ?? this.catalogDefaultModel(),
       workingDirectory: this.options.defaultCwd,
       permissionMode: this.options.defaultPermissionMode ?? 'bypassPermissions',
       sdkSessionId: remembered ?? conversationId,
