@@ -233,6 +233,15 @@ export function parseBrief(text: string): NonNullable<BackgroundTaskDetail['brie
   };
 }
 
+/** The first line of a brief that says something (not a heading), as plain text, clipped for a list row. */
+export function firstBriefLine(text: string): string {
+  const line = text
+    .split('\n')
+    .map((l) => l.replace(/^#+\s*|^[-*]\s+|\*\*/g, '').trim())
+    .find((l) => l.length > 0 && !/^(objective|context|task)\s*:?$/i.test(l)) ?? '';
+  return line.length > 200 ? `${line.slice(0, 199)}…` : line;
+}
+
 /**
  * Minimum gap between two `chat.background_task.progress` events for the SAME
  * worker. A worker streaming tokens produces hundreds of events a second and
@@ -1117,6 +1126,7 @@ export class OrchestratorService {
       model?: string;
       agentRef?: string;
       agentName?: string;
+      objective?: string;
       reviewRounds: number;
       cancelledBy?: BackgroundTaskCancelledBy;
       cancelledAt?: number;
@@ -1162,9 +1172,28 @@ export class OrchestratorService {
       };
     }));
     const order = new Map(rows.map((c, i) => [c.id, i]));
-    return [...[...mem.values()].map(live), ...persisted].sort(
+    const all = [...[...mem.values()].map(live), ...persisted].sort(
       (a, b) => (order.get(a.taskId) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.taskId) ?? Number.MAX_SAFE_INTEGER),
     );
+    return Promise.all(all.map(async (t) => {
+      const objective = await this.objectiveOf(t.taskId);
+      return objective ? { ...t, objective } : t;
+    }));
+  }
+
+  /** Each worker's brief objective, first line: a brief never changes, so it is read once per process. */
+  private readonly objectives = new Map<string, string>();
+
+  private async objectiveOf(taskId: string): Promise<string | undefined> {
+    const known = this.objectives.get(taskId);
+    if (known !== undefined) return known;
+    const [first] = await this.messageRepo.getByChatId(taskId, 1, 0).catch(() => []);
+    // Not persisted yet (a worker spawning right now): look again on the next listing.
+    if (!first || first.role !== 'user') return undefined;
+    const brief = parseBrief(first.content);
+    const objective = firstBriefLine(brief.objective ?? brief.text);
+    this.objectives.set(taskId, objective);
+    return objective || undefined;
   }
 
   /**

@@ -24,9 +24,11 @@ function noCount(): undefined {
   return undefined;
 }
 
-function StackedSection({ section, ctx }: { section: TasksSectionDefinition; ctx: TasksSectionContext }) {
+function StackedSection({ section, ctx, hideWhenEmpty }: { section: TasksSectionDefinition; ctx: TasksSectionContext; hideWhenEmpty: boolean }) {
   const useCount = section.useCount ?? noCount;
   const count = useCount(ctx);
+  // An empty section under another one is only a heading with a 0 ("Workflow runs from this chat 0").
+  if (hideWhenEmpty && count === 0) return null;
   return (
     <section aria-label={section.title} data-testid={`tasks-section-${section.id}`} className="flex flex-col border-b border-line-soft">
       <SectionHeader variant="title" level={3} title={section.title} count={count} className="px-3 pt-2" />
@@ -64,8 +66,8 @@ export function TasksPanel({ chatId, chat }: TasksPanelProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-surface">
-      {visible.map((section) => (
-        <StackedSection key={section.id} section={section} ctx={{ chatId, chat, stacked: true }} />
+      {visible.map((section, i) => (
+        <StackedSection key={section.id} section={section} ctx={{ chatId, chat, stacked: true }} hideWhenEmpty={i > 0} />
       ))}
     </div>
   );

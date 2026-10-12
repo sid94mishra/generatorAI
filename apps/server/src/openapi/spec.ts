@@ -4071,6 +4071,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
                           model: { type: 'string' },
                           agentRef: { type: 'string' },
                           agentName: { type: 'string' },
+                          objective: { type: 'string', description: 'The first line of what the orchestrator asked the worker to do (its brief).' },
                           reviewRounds: { type: 'integer' },
                           cancelledBy: { type: 'string', enum: ['user', 'orchestrator'] },
                           cancelledAt: { type: 'integer' },

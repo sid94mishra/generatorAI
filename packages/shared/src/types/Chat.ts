@@ -91,6 +91,8 @@ export interface BackgroundTaskListItem {
   /** The agent the orchestrator bound the worker to (`agentRef` on spawn), and its name — DockTasks rows show it. */
   agentRef?: string;
   agentName?: string;
+  /** The first line of the brief's objective — what the orchestrator asked the worker to do (Tasks rows show it). */
+  objective?: string;
   reviewRounds: number;
   /** G-20: present while `status === 'cancelled'`. */
   cancelledBy?: BackgroundTaskCancelledBy;

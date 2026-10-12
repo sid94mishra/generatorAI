@@ -46,6 +46,8 @@ import {
   filterTasks,
   formatElapsed,
   progressSegments,
+  showTaskFilter,
+  taskTitle,
   type SegmentTone,
   type TaskFilter,
 } from './backgroundTasksModel.js';
@@ -58,14 +60,6 @@ const SEGMENT_CLASS: Record<SegmentTone, string> = {
   ok: 'border-ok',
   err: 'border-err',
   muted: 'border-line',
-};
-const DOT_CLASS: Record<SegmentTone, string> = {
-  warn: 'bg-warn',
-  run: 'bg-run',
-  line: 'bg-fg-3',
-  ok: 'bg-ok',
-  err: 'bg-err',
-  muted: 'bg-line',
 };
 
 /** Live progress per worker, folded from the orchestrator's own stream (no polling of worker chats). */
@@ -171,7 +165,7 @@ function TaskRow({
       <li className="flex flex-col gap-2 bg-sunken px-3 py-3" data-testid="bg-task-cancel-confirm">
         <div className="flex items-center gap-2">
           <Avatar name={task.taskName} size={24} decorative />
-          <span className="min-w-0 truncate text-ui font-medium text-fg">Cancel “{task.taskName}”?</span>
+          <span className="min-w-0 truncate text-ui font-medium text-fg">Cancel “{taskTitle(task.taskName)}”?</span>
         </div>
         <div className="flex items-center gap-2 pl-8">
           <span className="min-w-0 flex-1 text-small text-fg-3">Edits so far stay in the workspace.</span>
@@ -205,7 +199,10 @@ function TaskRow({
         onKeyDown={(e) => activateOnKey(e, onOpen)}
         className={cn('flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5 rounded-control', focusRing)}
       >
-        <span className="truncate text-ui font-medium text-fg">{task.taskName}</span>
+        <span className="truncate text-ui font-medium text-fg" title={task.taskName}>
+          {taskTitle(task.taskName)}
+        </span>
+        {task.objective ? <span className="line-clamp-2 text-small text-fg-2">{task.objective}</span> : null}
         <TaskMeta task={task} />
         <LiveStep block={block} />
       </div>
@@ -323,7 +320,9 @@ function TaskDetail({
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-2">
             <Avatar name={task.agentName ?? task.taskName} size={24} decorative />
-            <h3 className="min-w-0 truncate text-title text-fg">{task.taskName}</h3>
+            <h3 className="min-w-0 truncate text-title text-fg" title={task.taskName}>
+              {taskTitle(task.taskName)}
+            </h3>
           </div>
           <div className="flex flex-wrap items-center gap-2 pl-8">
             <TaskStatus status={task.status} />
@@ -487,35 +486,32 @@ export function BackgroundTasksSection({ chatId, chat, stacked }: TasksSectionCo
     { value: 'done', label: 'Done', count: buckets.done },
   ];
 
+  // One line says where the work stands ("2 running · 3 done"); the bar shows it only while it moves.
+  const summary = segments.map((s) => `${s.count} ${s.label}`).join(' · ');
+  const moving = buckets.active > 0 || asks.length > 0;
   return (
     <div className={cn('flex min-h-0 flex-col', !stacked && 'h-full')}>
       <div className="flex shrink-0 flex-col gap-2 px-3 pt-3 pb-2">
-        {stacked ? null : (
-          <SectionHeader title="Background tasks" level={3} hint={`${buckets.total} task${buckets.total === 1 ? '' : 's'}`} />
+        {stacked ? (
+          summary ? <p className="text-small text-fg-3">{summary}</p> : null
+        ) : (
+          <SectionHeader title="Background tasks" level={3} hint={summary || `${buckets.total} task${buckets.total === 1 ? '' : 's'}`} />
         )}
-        {segments.length > 0 ? (
-          <>
-            <div className="flex gap-0.5" aria-hidden>
-              {segments.map((s) => (
-                <span
-                  key={s.key}
-                  className={cn('min-w-2 rounded-badge border-t-4', SEGMENT_CLASS[s.tone])}
-                  // Computed geometry: each segment's share of the bar.
-                  style={{ flexGrow: s.count }}
-                />
-              ))}
-            </div>
-            <ul className="flex flex-wrap gap-x-3 gap-y-1" aria-label="Task progress">
-              {segments.map((s) => (
-                <li key={s.key} className="flex items-center gap-1.5 text-small text-fg-2">
-                  <span className={cn('size-1.5 rounded-full', DOT_CLASS[s.tone])} aria-hidden />
-                  {s.count} {s.label}
-                </li>
-              ))}
-            </ul>
-          </>
+        {moving && segments.length > 0 ? (
+          <div className="flex gap-0.5" aria-hidden data-testid="bg-task-progress">
+            {segments.map((s) => (
+              <span
+                key={s.key}
+                className={cn('min-w-2 rounded-badge border-t-4', SEGMENT_CLASS[s.tone])}
+                // Computed geometry: each segment's share of the bar.
+                style={{ flexGrow: s.count }}
+              />
+            ))}
+          </div>
         ) : null}
-        <SegmentedControl label="Show tasks" value={filter} onValueChange={setFilter} items={filterItems} className="self-start" />
+        {showTaskFilter(buckets) ? (
+          <SegmentedControl label="Show tasks" value={filter} onValueChange={setFilter} items={filterItems} className="self-start" />
+        ) : null}
       </div>
       <div className={cn('flex flex-col', !stacked && 'min-h-0 flex-1 overflow-y-auto')}>
         {asks.length > 0 ? (

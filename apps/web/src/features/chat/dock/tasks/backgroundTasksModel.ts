@@ -8,6 +8,17 @@ export type TaskFilter = 'all' | 'active' | 'done';
 
 const ACTIVE: ReadonlySet<BackgroundTaskStatus> = new Set(['spawned', 'running', 'needs_review']);
 
+/** `backend-shared-checker-api` → `Backend shared checker api`: the orchestrator names tasks as slugs. */
+export function taskTitle(name: string): string {
+  const words = name.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return words ? words[0]!.toUpperCase() + words.slice(1) : name;
+}
+
+/** The filter earns its space only on a long list that mixes running and finished tasks. */
+export function showTaskFilter(b: TaskBuckets): boolean {
+  return b.total > 6 && b.active > 0 && b.done > 0;
+}
+
 export function isActiveTask(status: BackgroundTaskStatus): boolean {
   return ACTIVE.has(status);
 }
