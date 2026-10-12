@@ -304,6 +304,9 @@ function hasConversation(stream: StreamState | undefined): boolean {
   return !!stream?.blocks.some((b) => b.type === 'system' && b.category === 'operator');
 }
 
+/** Stage states with no turn in flight, whatever their stream last said. */
+const STOPPED_STAGE_STATUSES: ReadonlySet<StageStatus> = new Set(['paused', 'failed', 'cancelled', 'skipped']);
+
 function isLive(stream: StreamState | undefined): boolean {
   return !!stream && (stream.status === 'pending' || stream.status === 'streaming' || stream.status === 'thinking');
 }
@@ -456,11 +459,14 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
     ? (sr.interruptData as Record<string, unknown>)
     : undefined;
   const completionReview = status === 'awaiting_input' && (raw?.['kind'] === undefined || raw['kind'] === 'stage_completion_review');
-  const conversing = isLive(stream) || hasConversation(stream);
+  // U-32: a paused or stopped stage has no turn in flight. Its stream can still read "streaming" when the
+  // server stopped mid-turn (an app quit), and treating that as live kept every spinner of the stage turning.
+  const streamLive = isLive(stream) && !STOPPED_STAGE_STATUSES.has(status);
+  const conversing = streamLive || hasConversation(stream);
   const streamedAnswer = deriveAnswer(stream?.blocks);
   const persistedAnswer = (isTerminal || completionReview) && !conversing ? sr.outputText?.trim() : undefined;
   const answer = persistedAnswer || streamedAnswer;
-  const segments = persistedAnswer ? [] : deriveSegments(stream?.blocks, { active: status === 'running' || isLive(stream) });
+  const segments = persistedAnswer ? [] : deriveSegments(stream?.blocks, { active: status === 'running' || streamLive });
 
   // A completion review → InlineHitlControls props (in-turn gates are stream cards).
   let interrupt: StageView['interrupt'];
@@ -523,7 +529,8 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
     ...(sr.outputText ? { outputText: sr.outputText } : {}),
     // A check or wait stage has no agent turn to end its stream entry; a finished stage is never "streaming"
     // (the expanded Test check showed a loading skeleton after it had passed).
-    streaming: isLive(stream) && !['completed', 'failed', 'cancelled', 'skipped'].includes(status),
+    streaming: streamLive && status !== 'completed',
+    ...(sr.sessionId ? { sessionId: sr.sessionId } : {}),
     hooks: hooksFrom(stream, sr.id),
     usage: usageFrom(stream),
     contextUsage: stream?.contextUsage ?? undefined,

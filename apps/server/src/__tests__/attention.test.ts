@@ -410,6 +410,22 @@ describe('AttentionService — boot rebuild', () => {
     expect(p1.running.map((i) => i.key).sort()).toEqual(['automation_execution:e-run', 'workflow_run:r-live']);
   });
 
+  it('lists a live run held only by paused stages under Needs you (U-32)', async () => {
+    await makeDefinition('d1', { projectId: P1 });
+    await makeRun('r-held', 'd1', 'waiting');
+    makeStage('s1', 'r-held', 'Scan', 'completed');
+    makeStage('s2', 'r-held', 'Patrol', 'paused');
+    sqliteHandle(db).prepare(`UPDATE stage_runs SET status_reason = 'interrupted' WHERE id = 's2'`).run();
+
+    await startService().start();
+    const snap = service.getSnapshot();
+    expect(snap.running.map((i) => i.key)).not.toContain('workflow_run:r-held');
+    expect(snap.needsYou.find((i) => i.key === 'workflow_run:r-held:r-held')).toMatchObject({
+      state: 'paused',
+      ask: { kind: 'run_paused', summary: 'Patrol stopped when the app closed — resume to continue', actions: ['open'] },
+    });
+  });
+
   it('starts empty on an empty database (no run history at all)', async () => {
     await startService().start();
     const snap = service.getSnapshot();

@@ -80,6 +80,8 @@ export interface StageView {
   amendedAt?: number;
   /** A turn of this stage is streaming now (including an amendment of a completed stage). */
   streaming?: boolean;
+  /** The stage conversation's session: its persisted messages are the transcript (agent stages only). */
+  sessionId?: string;
   /** Optional short prompt to show at the top of the card. */
   prompt?: string;
   /** Steps for the ActivityTimeline (chat primitive). */

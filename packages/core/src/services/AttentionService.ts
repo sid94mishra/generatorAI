@@ -1039,6 +1039,30 @@ export class AttentionService {
       });
     }
 
+    // U-32: a live run nothing moves but paused stages (an app quit interrupted them, or someone
+    // paused them) waits on a person to resume them: Needs you, not Running.
+    if (drafts.length === 0 && (run.status === 'running' || run.status === 'waiting')) {
+      const paused = instances.filter((s) => s.status === 'paused');
+      const moving = instances.some((s) => !TERMINAL_STAGE_STATUSES.has(s.status) && s.status !== 'paused' && s.status !== 'pending');
+      if (paused.length > 0 && !moving) {
+        const names = clip(paused.map((s) => s.name).join(', '), LABEL_MAX);
+        drafts.push({
+          ...base,
+          key: `workflow_run:${runId}:${runId}`,
+          state: stateOf(STATUS_MAPS.workflowRun.paused, 'paused'),
+          since: iso(run.updatedAt),
+          ask: {
+            kind: 'run_paused',
+            id: runId,
+            summary: paused.some((s) => s.statusReason === 'interrupted')
+              ? `${names} stopped when the app closed — resume to continue`
+              : `${names} paused — resume to continue`,
+            actions: ['open'],
+          },
+        });
+      }
+    }
+
     // D-92: a run an automation started rolls up into its execution's item (one
     // card, one count, like workers into their orchestrator); its asks still show.
     if (drafts.length === 0 && run.trigger?.kind === 'automation') return [];

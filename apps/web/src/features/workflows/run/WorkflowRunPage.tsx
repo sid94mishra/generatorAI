@@ -86,6 +86,7 @@ import { RunDockContext, RunInspectorDockPanel, RunUsageDockPanel, RunWidgetDock
 import { createStageViewCache, deriveRunView, pickStageStreams } from './model/deriveRunView.js';
 import type { RenderStage } from './model/renderStage.js';
 import type { StageView } from './model/types.js';
+import { heldByPausedStages } from './model/pausedStages.js';
 import { useStageFiles } from './useStageFiles.js';
 import { formatWhen } from '@/lib/formatWhen.js';
 
@@ -325,7 +326,12 @@ export function WorkflowRunPage() {
 
   // Pause in `interrupt` mode: in-flight stages pause too, not just new launches.
   const handlePause = useCallback(() => void sendCommand({ command: 'pause', mode: 'interrupt' }), [sendCommand]);
-  const handleResume = useCallback(() => void sendCommand({ command: 'resume' }), [sendCommand]);
+  // A paused run resumes as a whole; a live run held only by paused stages (U-32) resumes those stages.
+  const heldStageIds = useMemo(() => (runView ? heldByPausedStages(runView).join(',') : ''), [runView]);
+  const handleResume = useCallback(() => {
+    if (!heldStageIds) return void sendCommand({ command: 'resume' });
+    for (const instanceId of heldStageIds.split(',')) void sendCommand({ command: 'resume', instanceId });
+  }, [sendCommand, heldStageIds]);
   // A run paused by its exhausted budget: add half of each limit (WP-7.3).
   const runBudget = runData?.budget;
   const handleRaiseBudget = useCallback(() => {

@@ -24,6 +24,7 @@ import { ContextGauge } from '@/blocks/composer/parts/ContextGauge.js';
 import { PageHeader } from '@/ui/patterns/PageHeader/PageHeader.js';
 import { Breadcrumb, type BreadcrumbItem } from '@/ui/patterns/Breadcrumb/Breadcrumb.js';
 import { MenuButton, type MenuButtonItem } from '@/ui/patterns/MenuButton/MenuButton.js';
+import { heldByPausedStages } from '../model/pausedStages.js';
 import { StatusBadge } from '@/ui/primitives/StatusBadge/StatusBadge.js';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
@@ -125,8 +126,10 @@ export const RunHeader = memo(function RunHeader({
   const done = run.stages.filter((s) => s.status === 'completed' || s.status === 'skipped').length;
   const failed = run.stages.filter((s) => s.status === 'failed').length;
 
-  const isRunning = run.status === 'running' || run.status === 'starting' || run.status === 'waiting';
-  const isPaused = run.status === 'paused';
+  // U-32: a live run held only by paused stages reads and acts as paused (Resume resumes those stages).
+  const heldPaused = heldByPausedStages(run).length > 0;
+  const isRunning = (run.status === 'running' || run.status === 'starting' || run.status === 'waiting') && !heldPaused;
+  const isPaused = run.status === 'paused' || heldPaused;
   const isTerminal = run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled';
   const elapsedMs = useElapsed(run.startedAt, run.completedAt, !isTerminal && run.status !== 'pending');
   const budgetExhausted = statusReason === 'budget_exhausted';
@@ -135,7 +138,7 @@ export const RunHeader = memo(function RunHeader({
   const status =
     awaitingCount > 0 && !isTerminal
       ? { ...resolveMapping({ state: 'needs_you' }, 'workflowRun'), label: awaitingCount > 1 ? `Needs you · ${awaitingCount}` : 'Needs you' }
-      : (resolveStatus('workflowRun', run.status) ?? resolveMapping({ state: 'queued' }, 'workflowRun'));
+      : (resolveStatus('workflowRun', heldPaused ? 'paused' : run.status) ?? resolveMapping({ state: 'queued' }, 'workflowRun'));
 
   const crumbs: BreadcrumbItem[] = [
     { label: 'Workflows', render: <RouterLink to="/workflows" /> },
