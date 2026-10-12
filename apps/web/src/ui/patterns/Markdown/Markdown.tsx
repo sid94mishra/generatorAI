@@ -283,6 +283,9 @@ function makeCode(size: MarkdownSize) {
       <CodeBlock
         // Highlight once the fence has closed; a streaming fence stays plain text.
         lang={incomplete ? undefined : lang}
+        // JSON wraps (U-49): a payload's long string values (a PR description, a summary) stay readable in
+        // full instead of running off the side; code keeps its lines, where indentation carries meaning.
+        wrap={lang === 'json'}
         copy={code}
         header={
           <>
