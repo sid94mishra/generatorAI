@@ -209,6 +209,31 @@ describe('MountService.plan validation', () => {
     ).rejects.toThrow(/remote clone with no working copy/);
   });
 
+  it('takes the next free name when a generated branch name is taken by another chat, but refuses a chosen one', async () => {
+    const workspacesDir = await tmpDir();
+    const home = await tmpDir();
+    const clonePath = path.join(home, 'api.git');
+    await fs.mkdir(clonePath, { recursive: true });
+    const codebase: ProjectCodebase = {
+      id: 'cb-api', projectId: 'proj', alias: 'api', type: 'git-remote', url: 'https://example.invalid/api.git',
+      clonePath, status: 'ready', settings: {}, createdAt: new Date(), updatedAt: new Date(),
+    };
+    const { service, git } = makeService({ workspacesDir, codebases: [codebase] });
+    const taken = new Set(['generatorai/use-only-the-read', 'feature/login']);
+    git.branchExists.mockImplementation(async (_repo: string, name: string) => taken.has(name));
+
+    const planned = await service.plan(path.join(workspacesDir, 'executions', 'chat-2'), undefined, [
+      { kind: 'codebase', codebaseId: 'cb-api', mode: 'worktree', newBranch: 'generatorai/use-only-the-read' },
+    ]);
+    expect(JSON.stringify(planned)).toContain('generatorai/use-only-the-read-2');
+
+    await expect(
+      service.plan(path.join(workspacesDir, 'executions', 'chat-3'), undefined, [
+        { kind: 'codebase', codebaseId: 'cb-api', mode: 'worktree', newBranch: 'feature/login' },
+      ]),
+    ).rejects.toThrow(/already exists/);
+  });
+
   it('refuses a codebase that is not ready', async () => {
     const workspacesDir = await tmpDir();
     const codebase: ProjectCodebase = {

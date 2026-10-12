@@ -575,6 +575,9 @@ export function useCreateChat() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.chats });
     },
+    // Both callers (the New chat dialog, the create page) say why it failed in their own toast; the
+    // global "Action failed" repeated the same message underneath it.
+    meta: { silentError: true },
   });
 }
 

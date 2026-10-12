@@ -386,11 +386,17 @@ export class MountService {
         ctx.mode === 'worktree'
           ? samePath(await git.worktreeHoldingBranch(originPath, newBranch))
           : (await git.currentBranch(originPath)) === newBranch;
-      if (!ours) {
+      if (ours) {
+        branch = newBranch;
+        newBranch = undefined;
+      } else if (newBranch.startsWith(`${GENERATED_BRANCH_PREFIX}`)) {
+        // Our own namespace: the New chat form fills `generatorai/<chat name>` in when the field is left empty,
+        // so a second chat named like the first ("Use only the Read, Glob…") failed to start on a branch the
+        // person never chose. Take the next free name, as `defaultBranchName` does.
+        newBranch = await this.uniqueBranchName(originPath, newBranch);
+      } else {
         throw new ValidationError(`Branch "${newBranch}" already exists in ${originPath}; pick another name or check it out instead`);
       }
-      branch = newBranch;
-      newBranch = undefined;
     }
     if (baseRef && !(await git.revParse(originPath, baseRef))) {
       throw new ValidationError(`Base ref "${baseRef}" does not resolve in ${originPath}`);
@@ -431,7 +437,11 @@ export class MountService {
   }
 
   private async defaultBranchName(originPath: string, slug: string | undefined): Promise<string> {
-    const base = `generatorai/${slug && slug.length > 0 ? slug : 'chat'}`;
+    return this.uniqueBranchName(originPath, `${GENERATED_BRANCH_PREFIX}${slug && slug.length > 0 ? slug : 'chat'}`);
+  }
+
+  /** `base`, or `base-2`, `base-3` … — the first that does not exist yet. */
+  private async uniqueBranchName(originPath: string, base: string): Promise<string> {
     let name = base;
     let n = 2;
     while (await this.deps.git.branchExists(originPath, name)) name = `${base}-${n++}`;
@@ -1280,6 +1290,9 @@ async function rmWithRetry(target: string, attempts = 4): Promise<void> {
   }
   throw last;
 }
+
+/** The namespace of the branches GeneratorAI names itself. */
+export const GENERATED_BRANCH_PREFIX = 'generatorai/';
 
 /** `generatorai/<slug>` material from a chat name + short id. */
 export function branchSlugFor(name: string, id: string): string {
