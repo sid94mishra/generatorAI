@@ -221,7 +221,7 @@ export function AutomationDetailPage() {
       mono: true as const,
       cell: (row: AutomationExecution) => (row.startedAt && row.completedAt ? formatDuration(new Date(row.completedAt).getTime() - new Date(row.startedAt).getTime()) : '—'),
     },
-    { id: 'started', header: 'Started', width: 112, align: 'end' as const, mono: true as const, cell: (row: AutomationExecution) => formatDate(row.createdAt) },
+    { id: 'started', header: 'Started', width: 168, align: 'end' as const, mono: true as const, cell: (row: AutomationExecution) => formatDate(row.createdAt) },
   ];
 
   return (
