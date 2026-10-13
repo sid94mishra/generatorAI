@@ -53,6 +53,21 @@ export function mergeCaution(pr: MergeFacts): string | null {
   }
 }
 
+/** The header's word for an open, mergeable PR that GitHub still holds back (U-74); null when it is plainly mergeable. */
+export function mergeHoldLabel(pr: MergeFacts): string | null {
+  if (mergeBlockReason(pr)) return null;
+  switch (pr.mergeableState) {
+    case 'blocked':
+      return 'Blocked by required checks or reviews';
+    case 'unstable':
+      return 'Mergeable · checks failing or pending';
+    case 'behind':
+      return 'Behind the base branch';
+    default:
+      return null;
+  }
+}
+
 /** The New chat draft's first message for "Fix in chat". */
 export function issueFixPrompt(issue: Pick<IssueSummary, 'number' | 'title' | 'body'>): string {
   const body = issue.body.trim();

@@ -45,6 +45,7 @@ import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { DetailPage } from '@/ui/templates/DetailPage/DetailPage.js';
 import { PR_STATE_TONE } from './detail/PullRequestsTab.js';
 import { MergePullRequestCard } from './MergePullRequestCard.js';
+import { mergeHoldLabel } from './githubActions.js';
 import { useNarrow } from '@/lib/useNarrow.js';
 import { formatWhen } from '@/lib/formatWhen.js';
 import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
@@ -305,6 +306,10 @@ export function PullRequestPage() {
               <span className="inline-flex items-center gap-1.5 text-fg-2">
                 <Spinner size={12} /> Mergeability computing…
               </span>
+            ) : data.mergeable && mergeHoldLabel(data) ? (
+              <span className="inline-flex items-center gap-1.5 text-warn">
+                <Icon concept="warning" size={14} /> {mergeHoldLabel(data)}
+              </span>
             ) : data.mergeable ? (
               <span className="inline-flex items-center gap-1.5 text-ok">
                 <Icon concept="check" size={14} /> Mergeable
@@ -315,7 +320,6 @@ export function PullRequestPage() {
               </span>
             )}
           </span>
-          {data.mergeableState && data.state === 'open' ? <span className="text-fg-3">state: {data.mergeableState}</span> : null}
           {data.checks ? <ChecksLine checks={data.checks} /> : null}
         </Card>
       }

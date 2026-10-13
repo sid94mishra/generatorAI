@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { issueFixPrompt, mergeBlockReason, mergeCaution, parseLabels } from './githubActions.js';
+import { issueFixPrompt, mergeBlockReason, mergeCaution, mergeHoldLabel, parseLabels } from './githubActions.js';
 
 const open = { state: 'open' as const, draft: false, mergeable: true, mergeableState: 'clean' };
 
@@ -31,6 +31,15 @@ describe('mergeCaution', () => {
     expect(mergeCaution({ ...open, mergeableState: 'behind' })).toContain('behind');
     expect(mergeCaution(open)).toBeNull();
     expect(mergeCaution({ ...open, state: 'closed', mergeableState: 'blocked' })).toBeNull();
+  });
+});
+
+describe('mergeHoldLabel', () => {
+  it('names what GitHub holds an open, mergeable PR back for, in words (U-74)', () => {
+    expect(mergeHoldLabel({ ...open, mergeableState: 'blocked' })).toBe('Blocked by required checks or reviews');
+    expect(mergeHoldLabel({ ...open, mergeableState: 'behind' })).toBe('Behind the base branch');
+    expect(mergeHoldLabel(open)).toBeNull();
+    expect(mergeHoldLabel({ ...open, state: 'merged', mergeableState: 'blocked' })).toBeNull();
   });
 });
 
