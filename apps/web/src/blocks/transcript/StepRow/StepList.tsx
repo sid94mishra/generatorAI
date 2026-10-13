@@ -237,8 +237,9 @@ function stepItem(step: TimelineStep, mode: 'normal' | 'verbose', live: boolean,
   const entry = resolveToolCard(step.tool);
   const verb = entry?.verb?.(step) ?? step.verb;
   const raw = entry?.target?.(step) ?? step.target;
-  // A lone delegation reads like the grouped ones: the task as a title, not its slug (U-70).
-  const target = step.kind === 'delegate' && raw ? taskTitle(raw) : raw;
+  // A lone delegation and its worker row read like the grouped ones: the task as a title, not its slug (U-70).
+  const worker = step.kind === 'delegate' || (step.kind === 'subagent' && !!step.workerChatId);
+  const target = worker && raw ? taskTitle(raw) : raw;
   const custom = entry?.result?.(step);
   const expandable = !!(step.children?.length || step.detail || step.diff);
   const below: ReactNode[] = [];
