@@ -327,21 +327,38 @@ export function AutomationDetailPage() {
                             </span>
                           ),
                         },
+                        {
+                          id: 'run',
+                          header: 'Workflow run',
+                          width: 150,
+                          cell: (row: AutomationExecutionWithRuns['runs'][number]) =>
+                            row.workflowRunId ? (
+                              <Link render={<RouterLink to={`/workflows/${row.workflowDefinitionId}/runs/${row.workflowRunId}`} />} className="font-mono text-small">
+                                {row.workflowRunId.slice(0, 8)}…
+                              </Link>
+                            ) : (
+                              <span className="text-small text-fg-3">Deleted</span>
+                            ),
+                        },
+                        {
+                          id: 'changes',
+                          header: 'Changes',
+                          width: 110,
+                          cell: (row: AutomationExecutionWithRuns['runs'][number]) => (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              icon="diff"
+                              pressed={selectedRunId === row.id}
+                              onClick={() => setSelectedRunId((current) => (current === row.id ? null : row.id))}
+                            >
+                              {selectedRunId === row.id ? 'Hide' : 'Show'}
+                            </Button>
+                          ),
+                        },
                       ]}
                       rows={selectedExecution.runs}
                       getRowId={(row) => row.id}
-                      rowActions={(row) => (
-                        <span className="flex items-center gap-2">
-                          <Button variant="ghost" size="sm" icon="diff" onClick={() => setSelectedRunId((current) => (current === row.id ? null : row.id))}>
-                            Changes
-                          </Button>
-                          {row.workflowRunId ? (
-                            <Link render={<RouterLink to={`/workflows/${row.workflowDefinitionId}/runs/${row.workflowRunId}`} />} className="text-small">
-                              Run: {row.workflowRunId.slice(0, 8)}…
-                            </Link>
-                          ) : null}
-                        </span>
-                      )}
                     />
                   )}
                   {selectedRunId ? (
