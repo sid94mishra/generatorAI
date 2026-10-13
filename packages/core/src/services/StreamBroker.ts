@@ -172,10 +172,11 @@ export class StreamBroker {
     // from the caller's perspective: the delta log buffers and flushes on its
     // own schedule (see `DeltaLog.append`) and must never be awaited on the
     // token path.
-    if (this.deltaLog && classifyEvent(kind, data) === 'delta') {
-      this.deltaLog.append(scope, scopeId, { seq: row.seq, kind, payload: data, ts: row.ts });
+    if (this.deltaLog && !row.coalesced && classifyEvent(kind, data) === 'delta') {
+      this.deltaLog.append(scope, scopeId, { seq: row.seq, kind, payload: row.payload, ts: row.ts });
     }
-    await this.fanOut(row);
+    // U-39: a delta folded into a later event's row is broadcast with that row, not twice.
+    if (!row.coalesced) await this.fanOut(row);
     return { seq: row.seq, id: row.id, ts: row.ts };
   }
 

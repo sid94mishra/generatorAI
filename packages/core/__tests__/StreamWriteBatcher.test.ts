@@ -309,3 +309,26 @@ describe('delta flush latency (review 3.4)', () => {
     expect(rowCount()).toBe(3);
   });
 });
+
+describe('a full queue folds text deltas instead of dropping them (U-39)', () => {
+  it('joins the oldest delta into the next one of its stream; nothing is lost and the order holds', async () => {
+    const w = new StreamWriteBatcher(repo, mockLogger(), { deltaBatchMs: 10_000, maxPending: 3 });
+    const writes = ['a', 'b', 'c', 'd'].map((text) => w.write('chat', 'c1', 'harness.token', { text }));
+    const rows = await Promise.all(writes);
+    expect(rowCount()).toBe(3);
+    expect(rows.map((r) => (r.payload as { text: string }).text)).toEqual(['ab', 'ab', 'c', 'd']);
+    expect(rows[0]!.coalesced).toBe(true);
+    expect(rows[0]!.seq).toBe(rows[1]!.seq);
+  });
+
+  it('the broker broadcasts a folded row once', async () => {
+    const broker = new StreamBroker(repo, mockLogger(), { deltaBatchMs: 10_000, maxPending: 3 });
+    const texts: string[] = [];
+    await broker.subscribe('chat', 'c1', (row) => {
+      texts.push((row.payload as { text: string }).text);
+    });
+    await Promise.all(['a', 'b', 'c', 'd'].map((text) => broker.publish('chat', 'c1', 'harness.token', { text })));
+    expect(texts.join('')).toBe('abcd');
+    expect(texts).toHaveLength(3);
+  });
+});
