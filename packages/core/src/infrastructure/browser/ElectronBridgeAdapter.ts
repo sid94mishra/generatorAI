@@ -181,16 +181,22 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
 
   private async startOnce(opts: BrowserStartOptions, observer?: BrowserHostObserver): Promise<BrowserHandle> {
 
-    const ep = await this.waitForEndpoint(opts.workspaceId);
+    let ep = await this.waitForEndpoint(opts.workspaceId);
     this.logger.info(`[ElectronBridgeAdapter] Connecting over CDP to scoped proxy for workspace ${opts.workspaceId}`);
     let browser: Browser;
     try {
       browser = await chromium.connectOverCDP(ep);
     } catch (err) {
-      throw new Error(
-        `[ElectronBridgeAdapter] connectOverCDP failed: ${(err as Error).message}. ` +
-          `Ensure the desktop app was started with GENERATORAI_DESKTOP_NATIVE_BROWSER=1.`,
-      );
+      // The tab behind `ep` went away while we dialled it (the Browser dock took over the hidden agent tab, U-60):
+      // its endpoint has been replaced or cleared by now, so connect once more to whichever tab carries it next.
+      if (this.opts.cdpEndpoint || this.endpoints.get(opts.workspaceId) === ep) throw connectError(err);
+      ep = await this.waitForEndpoint(opts.workspaceId);
+      this.logger.info(`[ElectronBridgeAdapter] Endpoint changed mid-connect; reconnecting for workspace ${opts.workspaceId}`);
+      try {
+        browser = await chromium.connectOverCDP(ep);
+      } catch (retryErr) {
+        throw connectError(retryErr);
+      }
     }
     const context = browser.contexts()[0];
     const page = context?.pages()[0];
@@ -943,4 +949,11 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
     void page.evaluate(INSPECTOR_SCRIPT).catch(() => undefined);
     void page.evaluate(ANTI_DETECTION_SCRIPT).catch(() => undefined);
   }
+}
+
+function connectError(err: unknown): Error {
+  return new Error(
+    `[ElectronBridgeAdapter] connectOverCDP failed: ${(err as Error).message}. ` +
+      `Ensure the desktop app was started with GENERATORAI_DESKTOP_NATIVE_BROWSER=1.`,
+  );
 }

@@ -73,7 +73,8 @@ vi.mock('../cdp/ScopedCdpProxy', () => ({
   ScopedCdpProxy: class { start = vi.fn(async () => 'ws://x'); stop = vi.fn(async () => undefined); },
 }));
 vi.mock('../cdp/ipc-token', () => ({ getIpcToken: () => 'token' }));
-vi.mock('../server-manager', () => ({ getServerManager: () => ({ getUrl: () => null, getState: () => ({}) }) }));
+const server = vi.hoisted(() => ({ url: null as string | null }));
+vi.mock('../server-manager', () => ({ getServerManager: () => ({ url: server.url, getUrl: () => server.url, getState: () => ({}) }) }));
 
 import { NativeBrowserHost, ORPHAN_GRACE_MS } from '../browser-host';
 
@@ -272,5 +273,26 @@ describe('the agent tab (D-105)', () => {
     expect(win.children).not.toContain(agent);
     // No agent tab left: the hidden window goes too (it would keep the app from quitting on Windows / Linux).
     expect(FakeAgentWindow.last!.destroy).toHaveBeenCalled();
+  });
+
+  it('clears the server endpoint when it hands over, before the Browser tab pushes its own (U-60)', async () => {
+    server.url = 'http://server';
+    const pushed: Array<string | null> = [];
+    const fetchMock = vi.fn(async (_url: string, init: { body: string }) => {
+      pushed.push((JSON.parse(init.body) as { wsUrl: string | null }).wsUrl);
+      return { ok: true, status: 200 };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      host.ensureAgentTab('ws-1');
+      await vi.waitFor(() => expect(pushed).toEqual(['ws://x']));
+      host.create('browser-1', 'ws-1', false);
+      // Without the clear, the server kept the dead agent tab's endpoint until the new one landed and the dock's
+      // start dialled it: ECONNREFUSED.
+      await vi.waitFor(() => expect(pushed).toEqual(['ws://x', null, 'ws://x']));
+    } finally {
+      vi.unstubAllGlobals();
+      server.url = null;
+    }
   });
 });

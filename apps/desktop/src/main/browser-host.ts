@@ -172,6 +172,12 @@ export class NativeBrowserHost extends EventEmitter {
    *  `ensureActiveProxy()`. Replaces the old app-wide `--remote-debugging-
    *  port` switch: each proxy exposes exactly one tab's webContents. */
   private cdpProxies = new Map<string, ScopedCdpProxy>();
+  /** The tab whose proxy endpoint the server currently holds, per workspace. When that tab's proxy stops (a hand-over
+   *  from the hidden agent tab, a tab switch) the endpoint is cleared at once, so the server waits for the next tab's
+   *  endpoint instead of dialling a dead port (U-60). */
+  private postedTab = new Map<string, string>();
+  /** Endpoint pushes per workspace, chained so a clear never lands after the push that replaced it. */
+  private pushes = new Map<string, Promise<boolean>>();
   /** Pending sweep of views orphaned by the last document change. */
   private orphanReaper: ReturnType<typeof setTimeout> | null = null;
   /**
@@ -417,6 +423,7 @@ export class NativeBrowserHost extends EventEmitter {
       if (siblingSess && siblingSess.workspaceId === workspaceId && tabId !== activeTabId) {
         this.cdpProxies.delete(tabId);
         void proxy.stop().catch(() => undefined);
+        this.clearPostedEndpoint(workspaceId, tabId);
       }
     }
 
@@ -427,7 +434,8 @@ export class NativeBrowserHost extends EventEmitter {
       proxy = new ScopedCdpProxy(sess.view.webContents);
       const wsUrl = await proxy.start();
       this.cdpProxies.set(activeTabId, proxy);
-      const pushed = await this.postCdpEndpoint(workspaceId, wsUrl);
+      const pushed = await this.pushEndpoint(workspaceId, wsUrl);
+      if (pushed) this.postedTab.set(workspaceId, activeTabId);
       if (!pushed) {
         // The proxy is live but the server never learned its address, so
         // nothing can ever connect to it. Leaving it cached would strand a
@@ -457,6 +465,22 @@ export class NativeBrowserHost extends EventEmitter {
    *  keeping a proxy the server can never reach. A permanent failure just
    *  leaves the agent CDP path unavailable for this workspace, matching the
    *  old flag-off behavior — it never breaks the native WCV the user sees. */
+  private pushEndpoint(workspaceId: string, wsUrl: string | null): Promise<boolean> {
+    const next = (this.pushes.get(workspaceId) ?? Promise.resolve(true)).catch(() => false).then(() => this.postCdpEndpoint(workspaceId, wsUrl));
+    this.pushes.set(workspaceId, next);
+    void next.finally(() => {
+      if (this.pushes.get(workspaceId) === next) this.pushes.delete(workspaceId);
+    });
+    return next;
+  }
+
+  /** The server's endpoint for `workspaceId` came from `tabId`'s proxy, which just stopped: clear it. */
+  private clearPostedEndpoint(workspaceId: string, tabId: string): void {
+    if (this.postedTab.get(workspaceId) !== tabId) return;
+    this.postedTab.delete(workspaceId);
+    void this.pushEndpoint(workspaceId, null);
+  }
+
   private async postCdpEndpoint(workspaceId: string, wsUrl: string | null): Promise<boolean> {
     const token = getIpcToken();
     if (!token) return false;
@@ -599,9 +623,7 @@ export class NativeBrowserHost extends EventEmitter {
     if (proxy) {
       this.cdpProxies.delete(tabId);
       void proxy.stop().catch(() => undefined);
-      if (this.activeTab.get(sess.workspaceId) === tabId) {
-        void this.postCdpEndpoint(sess.workspaceId, null);
-      }
+      this.clearPostedEndpoint(sess.workspaceId, tabId);
     }
     try {
       if (this.ownerWindow && !this.ownerWindow.isDestroyed()) {
