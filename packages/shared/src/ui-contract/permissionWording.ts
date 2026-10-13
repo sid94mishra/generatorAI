@@ -43,6 +43,11 @@ const GITHUB_TITLES: Readonly<Record<string, string>> = {
   github_merge_pull_request: 'Merge this pull request?',
 };
 
+/** U-76 — starting a workflow run asks in the asking modes; its name reads as a shell "run" otherwise. */
+const WORKFLOW_TITLES: Readonly<Record<string, string>> = {
+  run_workflow: 'Start a workflow run?',
+};
+
 /** `mcp__<server>__<tool>` → the server's name; undefined for any other tool. */
 function mcpServerOf(toolName: string): string | undefined {
   if (!toolName.startsWith('mcp__')) return undefined;
@@ -67,6 +72,8 @@ export function permissionWording(toolName: string, type: PermissionWordingType 
 
   const github = GITHUB_TITLES[name];
   if (github) return { title: github, kindLabel: 'GitHub' };
+  const workflow = WORKFLOW_TITLES[name];
+  if (workflow) return { title: workflow, kindLabel: 'Workflow' };
   const kind = toolStepKind(toolName);
   if (kind === 'browser') return { title: BROWSER_TITLES[name] ?? 'Use the browser?', kindLabel: 'Browser' };
   if (kind === 'computer') return { title: `Control the computer: ${display}?`, kindLabel: 'Computer' };

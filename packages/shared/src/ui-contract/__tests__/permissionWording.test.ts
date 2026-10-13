@@ -31,6 +31,10 @@ describe('permissionWording (D-107)', () => {
     expect(toolDisplayName('github_close_issue')).toBe('Close GitHub issue');
   });
 
+  it('words starting a workflow run as a workflow, not a shell command (U-76)', () => {
+    expect(permissionWording('mcp__generatorai-tools__run_workflow', 'other')).toEqual({ title: 'Start a workflow run?', kindLabel: 'Workflow' });
+  });
+
   it('names an MCP connector and its tool', () => {
     expect(permissionWording('mcp__github__create_issue', 'other')).toEqual({ title: 'Allow github: Create issue?', kindLabel: 'MCP · github' });
   });
