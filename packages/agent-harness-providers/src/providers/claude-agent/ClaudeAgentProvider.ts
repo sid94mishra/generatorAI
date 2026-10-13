@@ -311,6 +311,9 @@ interface TurnState {
 /** Above this an image costs more than it informs; the model reads the file instead. */
 const MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024;
 
+/** The built-in search tools the CLI keeps only when a session names them (U-46). */
+const SEARCH_TOOLS: readonly string[] = ['Glob', 'Grep'];
+
 /**
  * How long a speculative pre-warm waits for the CLI's initialize handshake
  * before giving up. The SDK's own default is 60 s, which is far too patient
@@ -1300,6 +1303,14 @@ export class ClaudeAgentProvider implements IAgentHarness {
       const resolvedAllowedTools: string[] = [];
       if (!hasNoToolRestriction && params.availableTools) {
         resolvedAllowedTools.push(...params.availableTools);
+      }
+      // U-46: the native CLI drops Glob and Grep — pointing the model at `find` / `grep` through Bash, which
+      // asks in the asking modes — unless the session names them in `tools` or `allowedTools`. A restricted
+      // session names them in both; an unrestricted one named neither, so whether a chat could search without
+      // a prompt depended on whether its agent happened to list tools.
+      if (hasNoToolRestriction) {
+        const excluded = new Set([...(params.excludedTools ?? []), ...(params.excludedBuiltinTools ?? [])]);
+        resolvedAllowedTools.push(...SEARCH_TOOLS.filter((t) => !excluded.has(t)));
       }
       // Add domain MCP tool names to allowed list
       resolvedAllowedTools.push(...domainToolNames);
