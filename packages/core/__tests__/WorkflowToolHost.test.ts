@@ -2,7 +2,7 @@
 // permission ceiling of stages and external callers, and the caps under
 // parallel calls.
 import { afterEach, describe, expect, it } from 'vitest';
-import { WorkflowToolHost } from '../src/tools/workflows/WorkflowToolHost.js';
+import { WorkflowToolHost, toolRunName } from '../src/tools/workflows/WorkflowToolHost.js';
 import { buildWorkflowToolSet, type WorkflowToolCaller } from '../src/tools/workflows/index.js';
 import { checkInvocationScopes } from '../src/services/workflow-invocation/validateInvocation.js';
 import { getDefaultChatPermissionMode, setDefaultChatPermissionMode } from '../src/services/agentModePolicy.js';
@@ -55,6 +55,16 @@ function makeHost(opts: { chat?: Record<string, unknown> | null; runs?: Record<s
 }
 
 const CHAT: WorkflowToolCaller = { kind: 'chat', chatId: 'c1', sessionId: 's1', conversationId: 'cv', orchestrator: false };
+
+describe('toolRunName (U-30)', () => {
+  it('names an agent-started run for what it is for: its own name, else the reason, kept short', () => {
+    expect(toolRunName({ name: '  Fix #19: maintenance lookups ', reason: 'patrol' })).toBe('Fix #19: maintenance lookups');
+    expect(toolRunName({ reason: 'Issue Patrol: fix bug #19\n(maintenance lookups)' })).toBe('Issue Patrol: fix bug #19 (maintenance lookups)');
+    const long = toolRunName({ reason: 'Start the Pulse Issue Fixer for issue #19 because the repository reads the whole window-to-monitor table on every check' });
+    expect(long.length).toBeLessThanOrEqual(81);
+    expect(long.endsWith('…')).toBe(true);
+  });
+});
 
 describe('WorkflowToolHost limits', () => {
   const posture = getDefaultChatPermissionMode();

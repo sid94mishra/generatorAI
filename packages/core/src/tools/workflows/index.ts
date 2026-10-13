@@ -177,6 +177,10 @@ export function buildWorkflowToolSet(
             waitSeconds: { type: 'number', description: 'How long to wait (max 600, default 60)' },
             approvalDelegate: { type: 'string', enum: ['human', 'invoker'], description: 'Who answers completion reviews (default human)' },
             reason: { type: 'string', description: 'One line: why you start this run (shown to the user and stored on the run)' },
+            name: {
+              type: 'string',
+              description: 'Short run name, e.g. "Fix #19: maintenance lookups" — it also names the run\'s branch. Default: the reason',
+            },
             projectId: { type: 'string', description: 'Project whose codebases the run mounts; default the workflow\'s or this chat\'s' },
           },
           ['workflowId', 'reason'],

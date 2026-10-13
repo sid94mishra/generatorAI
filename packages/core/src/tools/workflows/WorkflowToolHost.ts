@@ -196,7 +196,19 @@ export interface RunToolArgs {
   waitSeconds?: number;
   approvalDelegate?: 'human' | 'invoker';
   reason: string;
+  /** The run's name (and so its branch); default the reason (U-30). */
+  name?: string;
   projectId?: string;
+}
+
+/** A run started by an agent is named for what it is for, not `<workflow> - Run <timestamp>` (U-30). */
+export function toolRunName(args: Pick<RunToolArgs, 'name' | 'reason'>): string {
+  const own = typeof args.name === 'string' ? args.name.trim() : '';
+  const text = (own || args.reason.trim()).replace(/\s+/g, ' ');
+  if (text.length <= 80) return text;
+  const cut = text.slice(0, 80);
+  const space = cut.lastIndexOf(' ');
+  return `${space > 40 ? cut.slice(0, space) : cut}…`;
 }
 
 export class WorkflowToolHost {
@@ -523,6 +535,7 @@ export class WorkflowToolHost {
     const request: InvocationRequest = {
       target: { kind: 'definition', workflowDefinitionId: args.workflowId },
       variables: args.variables ?? {},
+      name: toolRunName(args),
       ...(projectId ? { projectId } : {}),
       ...(codebases ? { codebases } : {}),
       ...(args.stageOverrides?.length ? { stageOverrides: args.stageOverrides } : {}),
