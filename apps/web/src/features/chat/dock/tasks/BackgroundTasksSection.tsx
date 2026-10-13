@@ -85,7 +85,10 @@ function useNow(on: boolean): number {
 
 function elapsedOf(block: BackgroundTaskBlock | undefined, now: number): string | null {
   if (!block?.startedAt) return null;
-  return formatElapsed((block.endedAt ?? now) - block.startedAt);
+  // A task sent back for a review round runs again from a new startedAt while its block keeps the
+  // previous round's endedAt; a live task's clock always runs to now.
+  const live = block.status === 'running' || block.status === 'spawned';
+  return formatElapsed((live ? now : (block.endedAt ?? now)) - block.startedAt);
 }
 
 function TaskStatus({ status }: { status: BackgroundTaskListItem['status'] }) {
