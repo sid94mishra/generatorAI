@@ -86,6 +86,8 @@ engine (`packages/checker`); Vitest + Playwright; GitHub Actions CI. Iterations 
 | U-62 | Home / Diagnostics | The installed app reported "Version 0.0.0" (the staged server runtime's manifest) | low | fixed — staging writes the app's version |
 | U-63 | Computer · Activity | Activity rows wrapped over each other (a block Icon inside the Button's text span) | medium | fixed — one flex row |
 | U-64 | Computer use | An approval nobody answered within 120 s reached the agent as "The user did not approve this action" | medium | fixed — `consent_expired`: tell the user what needs approving and retry |
+| U-65 | Browser | When the person opened the Browser tab as the agent handed over its page, the dock restored the tab's remembered page (Actions) over it, and the agent's next screenshot came from the wrong page | medium | fixed — the new tab reports the handed-over URL until its own page commits, so the restore is skipped |
+| U-66 | Chat gates | "Needs you · Read the browser page?" and the composer's "waiting for you to allow or deny" with no card to answer, even after a reload: the card was announced by polling the pending list for 500 ms, and the row landed later (SQLite busy behind git snapshots) | high | fixed — `open(…, { onOpened })` announces plan, question and permission cards with the row's own id |
 | B-4 | Computer use (macOS) | The desktop driver reports "Process has no CFBundleIdentifier. Screen Recording is NOT granted" — needs the owner's grant in System Settings → Privacy & Security; not clicked by the agent | — | owner action |
 
 ## Journey log
@@ -123,3 +125,4 @@ engine (`packages/checker`); Vitest + Playwright; GitHub Actions CI. Iterations 
 - PR #17's CI (hadolint DL3018) fixed from a GeneratorAI chat (pinned `apk` packages `~=` and `node:22-alpine3.24`), committed and pushed from the Changes tab, CI green, merged from the PR page.
 - Browser: the agent opened PR #17 and the Actions tab, took screenshots and reported correctly; opening the dock's Browser tab mid-way hit U-60.
 - Computer use: enabled (background only); `/computer-use` appears in the menu and the Computer tab opens on a consent request; Calculator never launched (driver lacks Screen Recording, B-4), and the expired consent read as a refusal (U-64). Fixed U-57…U-64.
+- Rebuilt and installed; verified U-52 (readable graph), U-57, U-58, U-59, U-61, U-62, U-63 and U-60 (Browser tab attaches mid-turn, no error) in the installed app. The same browser check surfaced U-65 and U-66.
