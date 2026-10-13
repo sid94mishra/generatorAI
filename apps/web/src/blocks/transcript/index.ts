@@ -27,6 +27,7 @@ export { QuestionCard, type QuestionCardProps } from './gates/QuestionCard.js';
 export { PlanReadyCard, toPlainText, type PlanReadyCardProps } from './gates/PlanReadyCard.js';
 export { ComputerConsentCard, type ComputerConsentCardProps } from './gates/ComputerConsentCard.js';
 export { InlineError, type InlineErrorProps } from './InlineError/InlineError.js';
+export { taskTitle } from './taskTitle.js';
 export { DelegationGroup, delegationTasks, delegationSummary, type DelegatedTask, type DelegationGroupProps } from './DelegationGroup/DelegationGroup.js';
 export { BackgroundStepTail, type BackgroundStepTailProps } from './BackgroundStepTail/BackgroundStepTail.js';
 export { UsageChip, cacheScopeKey, noteCacheReport, hasReportedCache, _resetCacheReportLedger, type UsageChipProps } from './UsageChip/UsageChip.js';

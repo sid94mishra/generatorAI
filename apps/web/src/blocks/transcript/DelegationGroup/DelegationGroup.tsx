@@ -19,6 +19,7 @@ import { Button } from '@/ui/primitives/Button/Button.js';
 import { Link } from '@/ui/primitives/Link/Link.js';
 import { StatusBadge } from '@/ui/primitives/StatusBadge/StatusBadge.js';
 import { Icon } from '@/ui/icons/Icon.js';
+import { taskTitle } from '../taskTitle.js';
 
 export interface DelegatedTask {
   id: string;
@@ -44,7 +45,8 @@ export function delegationTasks(steps: readonly TimelineStep[]): DelegatedTask[]
               ? 'queued'
               : 'succeeded';
     const chatId = worker?.workerChatId ?? step.workerChatId;
-    return { id: step.id, title: worker?.target || step.target || step.verb, state, ...(chatId ? { chatId } : {}) };
+    const name = worker?.target || step.target;
+    return { id: step.id, title: name ? taskTitle(name) : step.verb, state, ...(chatId ? { chatId } : {}) };
   });
 }
 

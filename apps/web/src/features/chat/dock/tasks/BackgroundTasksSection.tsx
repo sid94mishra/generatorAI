@@ -22,6 +22,7 @@ import {
   useResumeBackgroundTask,
 } from '@/hooks/queries.js';
 import { StepList } from '@/blocks/transcript/StepRow/StepList.js';
+import { taskTitle } from '@/blocks/transcript/taskTitle.js';
 import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import { useAttention } from '@/hooks/attentionQueries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
@@ -47,7 +48,6 @@ import {
   formatElapsed,
   progressSegments,
   showTaskFilter,
-  taskTitle,
   type SegmentTone,
   type TaskFilter,
 } from './backgroundTasksModel.js';
