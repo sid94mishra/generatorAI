@@ -327,6 +327,8 @@ export class SessionComposer {
           const yieldKeys = turn.yieldKeys ?? (() => this.harness.yieldTurnPermit?.(i.conversationId));
           return { turnId: turn.turnId, permissionMode: turn.permissionMode, yieldKeys };
         },
+        port: i.gates && i.attended ? withAgentToolPolicy(i.gates, projection.toolPolicy.groups) : undefined,
+        gateTurnOf: () => this.turns.get(i.conversationId),
       });
     }
     // U-27 — in "Accept edits" a per-call provider runs file edits through its edit tools unasked, but

@@ -320,8 +320,9 @@
           "reason"
         ]
       },
-      "skipPermission": false,
-      "owner": "chat:<uuid>"
+      "skipPermission": true,
+      "owner": "chat:<uuid>",
+      "timeoutMs": 86520000
     },
     {
       "name": "check_workflow_run",
@@ -408,7 +409,8 @@
         ]
       },
       "skipPermission": true,
-      "owner": "chat:<uuid>"
+      "owner": "chat:<uuid>",
+      "timeoutMs": 86520000
     },
     {
       "name": "record_plan",

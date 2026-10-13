@@ -22,7 +22,7 @@ import { buildWorkflowToolSet, WORKFLOW_AUTHORING_HINT, type WorkflowToolCaller,
 import { buildGitHubToolSet, GITHUB_MERGE_TOOL_NAME, GITHUB_READ_TOOL_NAMES, GITHUB_TOOLS_HINT } from '../../tools/github/index.js';
 
 import type { ToolCallContext } from '../../domain/ports/IAgentHarness.js';
-import { askBeforeActing, type GatePort } from './gates.js';
+import { askBeforeActing, askBeforeRunning, type GatePort } from './gates.js';
 import { ORCHESTRATOR_SYSTEM_PROMPT } from '../orchestrator/prompts.js';
 import type { StageOrchestratorParent } from '../orchestrator/OrchestratorService.js';
 import {
@@ -48,6 +48,9 @@ export interface BindTarget {
   /** The bound agent's resolved capability groups. */
   groups: AgentToolPolicy;
 }
+
+/** Workflow tools that start or stop work a person did not see: asked in the asking modes (U-76). */
+const WORKFLOW_ASKING_TOOLS: ReadonlySet<string> = new Set(['run_workflow', 'cancel_workflow_run']);
 
 export class PlatformToolBinder {
   constructor(private readonly deps: SessionComposerDeps) {}
@@ -246,7 +249,15 @@ export class PlatformToolBinder {
   workflows(
     cfg: ConversationConfig,
     t: BindTarget,
-    opts: { run: boolean; authoring: boolean; orchestrator: boolean; turnOf: () => WorkflowToolTurn | undefined },
+    opts: {
+      run: boolean;
+      authoring: boolean;
+      orchestrator: boolean;
+      turnOf: () => WorkflowToolTurn | undefined;
+      /** The session's gate and turn: starting or cancelling a run asks in the asking modes (U-76). */
+      port?: GatePort | undefined;
+      gateTurnOf?: (() => TurnContext | undefined) | undefined;
+    },
   ): void {
     const host = this.deps.workflowTools;
     if (!host || (!opts.run && !opts.authoring)) return;
@@ -254,8 +265,14 @@ export class PlatformToolBinder {
       t.owner.kind === 'chat'
         ? { kind: 'chat', chatId: t.owner.chatId, sessionId: t.sessionId, conversationId: t.conversationId, orchestrator: opts.orchestrator }
         : { kind: 'stage', runId: t.owner.workflowRunId, stageRunId: t.owner.stageRunId, conversationId: t.conversationId };
-    const tools = buildWorkflowToolSet(host, caller, { run: opts.run, authoring: opts.authoring }, { turnOf: opts.turnOf, owner: ownerTag(t.owner) });
-    if (tools.length === 0) return;
+    const all = buildWorkflowToolSet(host, caller, { run: opts.run, authoring: opts.authoring }, { turnOf: opts.turnOf, owner: ownerTag(t.owner) });
+    if (all.length === 0) return;
+    // U-76: providers pre-approve host tools (Claude lists them in `allowedTools`), so `run_workflow` started runs that
+    // commit, push or open a PR from an "Accept edits, ask for the rest" chat without asking anyone. Starting and
+    // cancelling a run ask like the browser does; reads, approvals delegated to the agent and drafts do not.
+    const asking = all.filter((tool) => WORKFLOW_ASKING_TOOLS.has(tool.name));
+    const gated = opts.gateTurnOf ? askBeforeRunning(asking, { turnOf: opts.gateTurnOf, port: opts.port }) : asking;
+    const tools = all.map((tool) => gated.find((g) => g.name === tool.name) ?? tool);
     appendTools(cfg, tools);
     if (opts.authoring && host.hasAuthoring) appendSystemBlock(cfg, WORKFLOW_AUTHORING_HINT);
   }
