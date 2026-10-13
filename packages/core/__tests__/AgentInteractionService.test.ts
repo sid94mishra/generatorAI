@@ -145,6 +145,34 @@ describe('AgentInteractionService', () => {
     await expect(outcome).resolves.toEqual({ ok: true });
   });
 
+  it('onOpened hands the caller the row it just wrote, however late the write lands (U-66)', async () => {
+    const create = repo.create.bind(repo);
+    // A slow write (SQLite busy behind git snapshots) — the old announcer gave up polling after 500 ms.
+    repo.create = async (params) => {
+      await new Promise((r) => setTimeout(r, 30));
+      return create(params);
+    };
+    const announced: string[] = [];
+    const gate = service.open(SCOPE, 'tool_permission', {}, { onOpened: (row) => void announced.push(row.id) });
+    await vi.waitFor(() => expect(announced).toHaveLength(1));
+    const [pending] = await service.listPendingByChat('chat-1');
+    expect(announced[0]).toBe(pending!.id);
+    await service.resolve(pending!.id, 'answered', { granted: true });
+    await expect(gate).resolves.toMatchObject({ status: 'answered' });
+  });
+
+  it('a failing onOpened leaves the gate open and answerable', async () => {
+    const gate = service.open(SCOPE, 'question', {}, {
+      onOpened: () => {
+        throw new Error('event bus down');
+      },
+    });
+    await vi.waitFor(async () => expect(await service.listPendingByChat('chat-1')).toHaveLength(1));
+    const [pending] = await service.listPendingByChat('chat-1');
+    await service.resolve(pending!.id, 'answered', { answers: {} });
+    await expect(gate).resolves.toMatchObject({ status: 'answered' });
+  });
+
   it('only one approver wins; the loser gets ok:false', async () => {
     void service.open(SCOPE, 'plan_review', {});
     const [pending] = await service.listPendingByChat('chat-1');

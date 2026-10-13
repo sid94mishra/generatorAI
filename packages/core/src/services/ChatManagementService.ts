@@ -438,12 +438,14 @@ export class ChatManagementService {
       } as AgentEvent);
     }
 
-    const announce = (async () => {
-      for (let attempt = 0; attempt < 40; attempt += 1) {
-        const pending = (await interactions.listPendingByChat(chatId)).find(
-          (i) => i.kind === 'plan_review',
-        );
-        if (pending) {
+    // Announced from `onOpened`, with the row's own id: polling the pending list for it gave up after a fixed budget
+    // when the write ran late, and the card never appeared while the agent waited on it (U-66).
+    const outcome = await interactions.open<PlanDecision>(
+      { kind: 'chat', chatId, sessionId: ctx.sessionId, turnId: ctx.turnId },
+      'plan_review',
+      { planId, revision, title, summary: request.summary, actions: request.actions },
+      {
+        onOpened: async (pending) => {
           await this.eventBus.emit(ctx.sessionId, {
             kind: 'chat.plan.review_requested',
             data: {
@@ -462,18 +464,9 @@ export class ChatManagementService {
                 : {}),
             },
           } as AgentEvent);
-          return;
-        }
-        await new Promise((r) => setTimeout(r, 25));
-      }
-    })();
-
-    const outcome = await interactions.open<PlanDecision>(
-      { kind: 'chat', chatId, sessionId: ctx.sessionId, turnId: ctx.turnId },
-      'plan_review',
-      { planId, revision, title, summary: request.summary, actions: request.actions },
+        },
+      },
     );
-    await announce.catch(() => undefined);
 
     if (outcome.status === 'approved') {
       const decision = outcome.value as PlanDecision | undefined;
@@ -565,16 +558,13 @@ export class ChatManagementService {
       return { granted: true };
     }
 
-    // `open` blocks until the user answers, so the card is announced from a
-    // microtask that runs once the row exists — the same approach the
-    // question gate uses to learn the id without threading it out of the
-    // blocking call.
-    const announce = (async () => {
-      for (let attempt = 0; attempt < 20; attempt += 1) {
-        const pending = (await interactions.listPendingByChat(chatId)).find(
-          (i) => i.kind === 'tool_permission' && !ctx.interactionIds.includes(i.id),
-        );
-        if (pending) {
+    // The card is announced from `onOpened` with the row's own id (U-66): see the plan gate.
+    const outcome = await interactions.open<PermissionResponse>(
+      { kind: 'chat', chatId, sessionId: ctx.sessionId, turnId: ctx.turnId },
+      'tool_permission',
+      payload as unknown as Record<string, unknown>,
+      {
+        onOpened: async (pending) => {
           ctx.interactionIds.push(pending.id);
           this.stampCardSequence(ctx, pending.id);
           const chat = await this.chatRepo.getById(chatId).catch(() => null);
@@ -584,18 +574,9 @@ export class ChatManagementService {
               data: { chatId, interactionId: pending.id, turnId: ctx.turnId, ...payload },
             } as AgentEvent);
           }
-          return;
-        }
-        await new Promise((r) => setTimeout(r, 25));
-      }
-    })();
-
-    const outcome = await interactions.open<PermissionResponse>(
-      { kind: 'chat', chatId, sessionId: ctx.sessionId, turnId: ctx.turnId },
-      'tool_permission',
-      payload as unknown as Record<string, unknown>,
+        },
+      },
     );
-    await announce.catch(() => undefined);
 
     if (outcome.status === 'answered' && outcome.value) {
       // The stored resolution may also carry the rules it remembered (U-16); the harness gets the decision only.
@@ -675,36 +656,19 @@ export class ChatManagementService {
       return { answers: {} };
     }
 
-    // `open` blocks, so announce the gate from a microtask that runs once
-    // the row exists. Polling the pending list is how we learn the id
-    // without threading it back out of the blocking call.
-    const announce = (async () => {
-      for (let attempt = 0; attempt < 20; attempt += 1) {
-        const pending = (await interactions.listPendingByChat(chatId)).find(
-          (i) => i.kind === 'question' && !ctx.interactionIds.includes(i.id),
-        );
-        if (pending) {
-          ctx.interactionIds.push(pending.id);
-          this.stampCardSequence(ctx, pending.id);
-          await this.announceQuestionGate(
-            chatId,
-            ctx.sessionId,
-            ctx.turnId,
-            pending.id,
-            request.questions,
-          );
-          return;
-        }
-        await new Promise((r) => setTimeout(r, 25));
-      }
-    })();
-
+    // The card is announced from `onOpened` with the row's own id (U-66): see the plan gate.
     const outcome = await interactions.open<AgentQuestionResponse>(
       { kind: 'chat', chatId, sessionId: ctx.sessionId, turnId: ctx.turnId },
       'question',
       { questions: request.questions },
+      {
+        onOpened: async (pending) => {
+          ctx.interactionIds.push(pending.id);
+          this.stampCardSequence(ctx, pending.id);
+          await this.announceQuestionGate(chatId, ctx.sessionId, ctx.turnId, pending.id, request.questions);
+        },
+      },
     );
-    await announce.catch(() => undefined);
 
     if (outcome.status === 'answered' && outcome.value) {
       return outcome.value;

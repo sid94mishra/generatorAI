@@ -40,6 +40,11 @@ export type InteractionScope =
 export interface OpenInteractionOptions {
   /** Wall-clock budget for the gate. Defaults to the service-wide max age. */
   timeoutMs?: number;
+  /**
+   * Runs once the row exists, with its id — how a caller announces the gate (its card) while `open` keeps blocking.
+   * A failure is logged, never thrown: the gate stays open and answerable from the pending list.
+   */
+  onOpened?: (interaction: AgentInteraction) => void | Promise<void>;
 }
 
 export interface InteractionOutcome<T> {
@@ -122,6 +127,13 @@ export class AgentInteractionService {
       });
       await this.onEvent?.({ type: 'opened', interaction });
       this.logger?.info?.('[AgentInteraction] opened', { id, kind, scope: scope.kind });
+      if (options.onOpened) {
+        try {
+          await options.onOpened(interaction);
+        } catch (err) {
+          this.logger?.warn?.('[AgentInteraction] announcing the gate failed', { id, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
     } catch (err) {
       // Failing to persist must not leave a dangling waiter.
       this.waiters.delete(id);
