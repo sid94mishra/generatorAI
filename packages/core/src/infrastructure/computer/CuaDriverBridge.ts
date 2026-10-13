@@ -482,11 +482,13 @@ export class CuaDriverBridge implements IComputerBridge {
       const root = JSON.parse(result.structuredJson ?? '{}') as {
         checks?: Array<{ name?: unknown; status?: unknown; message?: unknown }>;
       };
-      return (root.checks ?? []).map((c) => ({
-        name: typeof c.name === 'string' ? c.name : 'unknown',
-        status: c.status === 'pass' || c.status === 'fail' ? c.status : 'skip',
-        message: typeof c.message === 'string' ? c.message : '',
-      }));
+      return (root.checks ?? []).map((c) =>
+        embeddedIdentity({
+          name: typeof c.name === 'string' ? c.name : 'unknown',
+          status: c.status === 'pass' || c.status === 'fail' ? c.status : 'skip',
+          message: typeof c.message === 'string' ? c.message : '',
+        }),
+      );
     };
 
     try {
@@ -1781,4 +1783,15 @@ function mapRoute(route: number | undefined): ComputerActionPath {
       // unverifiable action is never presented as a semantic one.
       return 'synthetic';
   }
+}
+
+/**
+ * On macOS the driver always runs embedded — spawned under GeneratorAI.app, whose identity macOS charges its
+ * Accessibility and Screen Recording checks to — so its own "no CFBundleIdentifier" is expected and not a problem;
+ * the grants that matter are the `tcc_*` checks. Reported as informational instead of turning the runtime
+ * "degraded" with a warning nobody can act on (U-68).
+ */
+export function embeddedIdentity(check: ComputerRuntimeCheck, platform: NodeJS.Platform = process.platform): ComputerRuntimeCheck {
+  if (platform !== 'darwin' || check.name !== 'bundle_identity' || check.status !== 'fail') return check;
+  return { ...check, status: 'skip', message: 'Runs inside GeneratorAI.app, which holds its macOS permissions.' };
 }
