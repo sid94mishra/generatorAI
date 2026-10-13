@@ -41,6 +41,8 @@ const edgeTypes = { runGraphEdge: RunGraphEdge } as EdgeTypes;
 // minZoom: React Flow's default floor (0.5) cannot fit a long pipeline, so its ends were cut off (U-52).
 const FIT = { padding: 0.18, maxZoom: 1.3, minZoom: 0.2 } as const;
 const NODE_CENTER = { x: 140, y: 40 } as const;
+/** Below this a stage card's text is unreadable: a longer pipeline opens on its focused stage instead (fit shows it all). */
+const READABLE_ZOOM = 0.75;
 /** The minimap earns its space only on larger graphs. */
 const MINIMAP_MIN_NODES = 6;
 const MINIMAP_SIZE = { width: 150, height: 90 } as const;
@@ -126,12 +128,48 @@ function RunGraphCanvas({ definitionEdges, definitionStages, onSelectStage, clas
     [onSelectStage, selectStageRun],
   );
 
-  // Fit when the node count changes.
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const selectedRef = useRef(selectedStageRunId);
+  selectedRef.current = selectedStageRunId;
+
+  // Frame the graph: all of it when it fits at a readable zoom; otherwise the focused (else the running,
+  // else the first) stage at a readable zoom, kept inside the graph's extent (U-52).
+  const frame = useCallback(
+    (duration: number) => {
+      const el = containerRef.current;
+      const all = nodesRef.current;
+      if (!el || all.length === 0) return;
+      const xs = all.map((n) => n.position.x);
+      const ys = all.map((n) => n.position.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs) + NODE_CENTER.x * 2;
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys) + NODE_CENTER.y * 2;
+      const pad = 1 + FIT.padding * 2;
+      const fitZoom = Math.min(el.clientWidth / ((maxX - minX) * pad), el.clientHeight / ((maxY - minY) * pad));
+      if (fitZoom >= READABLE_ZOOM) {
+        void reactFlow.fitView({ ...FIT, duration });
+        return;
+      }
+      const focus =
+        all.find((n) => n.id === selectedRef.current) ??
+        all.find((n) => (n.data as RunGraphNodeData).stageRun.status === 'running') ??
+        all[0]!;
+      const halfW = el.clientWidth / 2 / READABLE_ZOOM;
+      const margin = NODE_CENTER.x / 2;
+      const x = Math.min(Math.max(focus.position.x + NODE_CENTER.x, minX - margin + halfW), maxX + margin - halfW);
+      void reactFlow.setCenter(x, (minY + maxY) / 2, { zoom: READABLE_ZOOM, duration });
+    },
+    [reactFlow],
+  );
+
+  // Frame when the node count changes.
   useEffect(() => {
     if (nodes.length === 0) return;
-    const timer = setTimeout(() => void reactFlow.fitView({ ...FIT, duration: 300 }), 100);
+    const timer = setTimeout(() => frame(300), 100);
     return () => clearTimeout(timer);
-  }, [nodes.length, reactFlow]);
+  }, [nodes.length, frame]);
 
   // Re-fit when the container resizes (the dock or the split changes) so the
   // graph never ends up stranded off-centre after a layout change.
@@ -141,18 +179,16 @@ function RunGraphCanvas({ definitionEdges, definitionStages, onSelectStage, clas
     let raf = 0;
     const ro = new ResizeObserver(() => {
       cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => void reactFlow.fitView({ ...FIT, duration: 200 }));
+      raf = requestAnimationFrame(() => frame(200));
     });
     ro.observe(el);
     return () => {
       ro.disconnect();
       cancelAnimationFrame(raf);
     };
-  }, [nodes.length, reactFlow]);
+  }, [nodes.length, frame]);
 
   // Centre the focused stage.
-  const nodesRef = useRef(nodes);
-  nodesRef.current = nodes;
   useEffect(() => {
     if (!selectedStageRunId) return;
     const node = nodesRef.current.find((n) => n.id === selectedStageRunId);
