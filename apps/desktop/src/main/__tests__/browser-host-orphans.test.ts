@@ -275,6 +275,13 @@ describe('the agent tab (D-105)', () => {
     expect(FakeAgentWindow.last!.destroy).toHaveBeenCalled();
   });
 
+  it('reports the handed-over page as the new tab\'s URL, so the dock does not restore its old page over it (U-65)', () => {
+    host.ensureAgentTab('ws-1');
+    views[views.length - 1]!.webContents.getURL = () => 'https://github.com/acme/repo/issues';
+    const descriptor = host.create('browser-1', 'ws-1', false);
+    expect(descriptor.currentUrl).toBe('https://github.com/acme/repo/issues');
+  });
+
   it('clears the server endpoint when it hands over, before the Browser tab pushes its own (U-60)', async () => {
     server.url = 'http://server';
     const pushed: Array<string | null> = [];

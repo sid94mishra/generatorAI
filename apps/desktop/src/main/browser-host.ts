@@ -140,6 +140,11 @@ interface Session {
    * navigation waits on it; see `navigate()`.
    */
   ready: Promise<void>;
+  /**
+   * The page the hidden agent tab handed this tab (D-105), reported as its URL until its own page commits — so the
+   * dock does not restore the tab's remembered page over the one the agent is working on (U-65).
+   */
+  handedOverUrl?: string;
 }
 
 /**
@@ -608,6 +613,7 @@ export class NativeBrowserHost extends EventEmitter {
       const nextUrl = next.view.webContents.getURL();
       // A tab created a moment ago has no URL yet (its blank discovery page is still loading).
       if (url && !url.startsWith('about:') && (!nextUrl || nextUrl.startsWith('about:'))) {
+        next.handedOverUrl = url;
         void this.navigate(toTab, url).catch(() => undefined);
       }
     }
@@ -1145,10 +1151,11 @@ export class NativeBrowserHost extends EventEmitter {
     };
     const canGoBack = navUnknown.navigationHistory?.canGoBack?.() ?? navUnknown.canGoBack?.() ?? false;
     const canGoForward = navUnknown.navigationHistory?.canGoForward?.() ?? navUnknown.canGoForward?.() ?? false;
+    const url = wc.getURL();
     return {
       tabId,
       workspaceId: sess.workspaceId,
-      currentUrl: wc.getURL() || null,
+      currentUrl: (url && !url.startsWith('about:') ? url : sess.handedOverUrl) || null,
       title: wc.getTitle() || null,
       favicon: sess.favicon,
       isLoading: wc.isLoading(),
