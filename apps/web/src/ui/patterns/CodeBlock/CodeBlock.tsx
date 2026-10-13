@@ -12,11 +12,14 @@
 // an unsupported `lang`), the code renders as plain escaped text — never a
 // blocked/empty block. A `lang` that `resolveLang` does not know never loads
 // Shiki at all. `lineNumbers` adds a `text-fg-3` gutter (not with `wrap`: a
-// wrapped line would no longer line up with its number).
+// wrapped line would no longer line up with its number). `collapse` caps a
+// tall block (a 10 KB JSON payload in an agent's answer) at `max-h-80` with a
+// "Show all" footer, so one block never buries the message around it.
 // ────────────────────────────────────────────────────────────────
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { cn } from '../../lib/cn.js';
+import { Button } from '../../primitives/Button/Button.js';
 import { IconButton } from '../../primitives/IconButton/IconButton.js';
 import { highlightCode, peekHighlightedCode, resolveLang, withPreChrome } from './highlighter.js';
 
@@ -34,6 +37,8 @@ export interface CodeBlockProps {
   wrap?: boolean;
   /** Shows a line-number gutter (ignored with `wrap`). */
   lineNumbers?: boolean;
+  /** Starts a block taller than `max-h-80` clamped, with a "Show all" / "Show less" footer. */
+  collapse?: boolean;
   className?: string;
 }
 
@@ -46,6 +51,7 @@ export function CodeBlock({
   copy,
   wrap = false,
   lineNumbers = false,
+  collapse = false,
   className,
 }: CodeBlockProps) {
   const highlightLang = resolveLang(lang);
@@ -65,6 +71,24 @@ export function CodeBlock({
   }, [children, highlightLang]);
 
   const showGutter = lineNumbers && !wrap;
+  const body = useRef<HTMLDivElement>(null);
+  const [overflows, setOverflows] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const clamped = collapse && !expanded;
+
+  // Measured, not counted: a wrapped JSON value is three source lines and eighty on screen.
+  useLayoutEffect(() => {
+    const el = body.current;
+    if (!collapse || !el || expanded) return;
+    // The scroller child (overflow-x-auto implies overflow-y) holds the height, not the row itself.
+    const measure = () => setOverflows([el, ...el.children].some((c) => c.scrollHeight > el.clientHeight + 1));
+    measure();
+    // Re-measure as the highlighted HTML, fonts or the column width settle.
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    for (const child of el.children) observer.observe(child);
+    return () => observer.disconnect();
+  }, [collapse, expanded, children, html, wrap]);
 
   return (
     <div
@@ -80,7 +104,7 @@ export function CodeBlock({
           {copy != null ? <CopyButton text={copy} /> : null}
         </div>
       ) : null}
-      <div className={cn('flex py-2', showGutter ? 'pr-2.5' : 'px-2.5')}>
+      <div ref={body} className={cn('flex py-2', showGutter ? 'pr-2.5' : 'px-2.5', clamped && 'max-h-80 overflow-hidden')}>
         {showGutter ? (
           <pre
             aria-hidden="true"
@@ -89,7 +113,7 @@ export function CodeBlock({
             {lineNumberColumn(children)}
           </pre>
         ) : null}
-        <div className={cn('min-w-0 flex-1 overflow-x-auto', showGutter && 'pl-2.5', wrap && 'overflow-x-hidden')}>
+        <div className={cn('min-w-0 flex-1 overflow-x-auto', showGutter && 'pl-2.5', wrap && 'overflow-x-hidden', clamped && 'overflow-y-hidden')}>
           {html != null ? (
             // Shiki's own output: text content is escaped by the tokenizer, and colours come only from
             // the fixed `SYNTAX_THEME` this file controls (never from the highlighted source). Its `<pre>`
@@ -100,6 +124,13 @@ export function CodeBlock({
           )}
         </div>
       </div>
+      {collapse && (overflows || expanded) ? (
+        <div className="flex items-center border-t border-line-soft px-1 py-0.5">
+          <Button variant="ghost" size="sm" icon={expanded ? 'chevron-up' : 'chevron-down'} aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}>
+            {expanded ? 'Show less' : wrap ? 'Show all' : `Show all ${children.split('\n').length} lines`}
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 }

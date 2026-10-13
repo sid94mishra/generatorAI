@@ -286,6 +286,8 @@ function makeCode(size: MarkdownSize) {
         // JSON wraps (U-49): a payload's long string values (a PR description, a summary) stay readable in
         // full instead of running off the side; code keeps its lines, where indentation carries meaning.
         wrap={lang === 'json'}
+        // A long fence (a whole payload, a full file) starts clamped once it has closed.
+        collapse={!incomplete}
         copy={code}
         header={
           <>

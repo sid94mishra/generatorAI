@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, waitFor } from 'storybook/test';
+import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { CodeBlock } from './CodeBlock.js';
 
 const TS_SNIPPET = `export function greet(name: string): string {
@@ -73,5 +73,20 @@ export const OtherLanguage: Story = {
   play: async ({ canvasElement }) => {
     await expect(canvasElement.textContent).toContain('greet');
     await waitFor(() => expect(canvasElement.innerHTML).toContain('--syntax-'), { timeout: 10_000 });
+  },
+};
+
+/** `collapse`: a block taller than the cap starts clamped with a "Show all" footer; a short one shows no footer. */
+export const Collapsed: Story = {
+  args: {
+    lang: 'text',
+    header: 'build.log',
+    collapse: true,
+    children: Array.from({ length: 60 }, (_, i) => `step ${i + 1}: ok`).join('\n'),
+  },
+  play: async ({ canvasElement }) => {
+    const toggle = await within(canvasElement).findByRole('button', { name: 'Show all 60 lines' });
+    await userEvent.click(toggle);
+    await expect(within(canvasElement).getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true');
   },
 };
