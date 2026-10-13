@@ -56,6 +56,11 @@ describe('shell rules', () => {
     expect(rulesOf('sleep 1 & echo done')).toEqual(['sleep', 'echo']);
   });
 
+  it('does not remember the shell options a line sets (U-72)', () => {
+    expect(rulesOf('set -e\nset -o pipefail\ngit add a && git commit -m x')).toEqual(['git add', 'git commit']);
+    expect(rulesOf('set foo')).toEqual(['set']);
+  });
+
   it('keeps quoted separators inside their word', () => {
     expect(rulesOf('echo "a; rm -rf x && b" | grep \'x|y\'')).toEqual(['echo', 'grep']);
     expect(rulesOf('git commit -m "fix: a && b"')).toEqual(['git commit']);

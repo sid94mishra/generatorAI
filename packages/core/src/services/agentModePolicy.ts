@@ -137,7 +137,9 @@ export function isAttachedFileRead(request: PermissionRequest, attachedPaths: re
   return attachedPaths.some((p) => norm(p) === norm(target));
 }
 
-const INPUT_SUMMARY_MAX_CHARS = 600;
+// The person approves what the card shows, so a multi-line command must arrive whole (the card scrolls); 600
+// characters cut a six-commit line after its second commit (U-72). Pushes and attention asks clip their own text.
+const INPUT_SUMMARY_MAX_CHARS = 16_000;
 const SECRET_KEY_PATTERN = /token|secret|password|passwd|api[_-]?key|authorization|cookie/i;
 
 /** Redacts secret-looking keys and bounds the rendering so a card never ships a raw env dump. */

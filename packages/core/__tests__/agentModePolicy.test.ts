@@ -173,4 +173,14 @@ describe('buildToolPermissionPayload — gate risk (MG-04)', () => {
     expect(standard.risk).toBe('standard');
     expect(standard).not.toHaveProperty('riskReasons');
   });
+
+  it('carries a long command whole, so the person sees every line they approve (U-72)', () => {
+    const lines = Array.from({ length: 12 }, (_, i) => `git add src/file-${i}.ts && git commit -q -m "feat: step ${i} of a long series of commits"`);
+    const command = [...lines, 'git push origin main'].join('\n');
+    const payload = buildToolPermissionPayload({ type: 'shell_exec', description: 'Commit', details: { toolName: 'Bash', input: { command } } }, 'default');
+    expect(command.length).toBeGreaterThan(600);
+    expect(JSON.parse(payload.inputSummary) as { command: string }).toEqual({ command });
+    // The push at the very end is judged too.
+    expect(payload.risk).toBe('risky');
+  });
 });

@@ -420,6 +420,8 @@ function commandRule(input: readonly Word[]): CommandVerdict {
   const never = NEVER_PROGRAMS.get(program) ?? NEVER_PROGRAMS.get(base) ?? (/^mkfs\./.test(base) ? NEVER_PROGRAMS.get('mkfs') : undefined);
   if (never) return { refusal: never };
   const args = words.slice(1);
+  // `set -e`, `set -o pipefail`: shell options of this line, not a command worth remembering ("Allow set +4", U-72).
+  if (program === 'set' && args.every((a) => !a.dynamic && (/^[-+]/.test(a.text) || a.text === 'pipefail'))) return { none: true };
 
   if (base === 'rm' || base === 'rmdir') {
     if (args.some((a) => a.dynamic || leavesWorkspace(a.text))) return { refusal: 'Deleting outside the workspace always asks.' };
