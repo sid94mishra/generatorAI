@@ -99,6 +99,18 @@ export interface LifecycleStepContext {
   codebases: Record<string, RunCodebase>;
   /** `stages.<key>.{status, output, summary}` — post-processing only (the stages have run). */
   stages?: Record<string, unknown>;
+  /** The pull requests an earlier `create_pr` step opened; later scripts get them as GEN_PR_* (U-23). */
+  pullRequests?: Array<{ alias: string; number: number; url: string }>;
+}
+
+/**
+ * U-23: a script after "Open pull request" can act on it — comment the link on an issue, label it, notify a channel.
+ * `GEN_PR_NUMBER` / `GEN_PR_URL` name the first one; `GEN_PRS` lists every codebase's as JSON.
+ */
+export function prEnv(prs: LifecycleStepContext['pullRequests']): Record<string, string> {
+  const first = prs?.[0];
+  if (!first) return {};
+  return { GEN_PR_NUMBER: String(first.number), GEN_PR_URL: first.url, GEN_PRS: JSON.stringify(prs) };
 }
 
 /** Max bytes per `GEN_VAR_*` env var value — prevents blowing past ARG_MAX. */
@@ -384,7 +396,7 @@ export class LifecycleSteps {
     const title = this.render(config.title, ctx);
     const body = this.render(config.body, ctx);
     const targets = this.scmTargets(config.repoAlias, ctx);
-    return this.runScmFlow(
+    const outcome = await this.runScmFlow(
       targets,
       ctx,
       (alias) => {
@@ -408,6 +420,11 @@ export class LifecycleSteps {
       // propose — skip the PR like a commit with nothing to commit, rather than failing the run.
       (result) => (result.readiness.reasons.pullRequest === REASON_NOTHING_TO_PROPOSE ? `${result.alias}: no changes to propose — pull request skipped` : null),
     );
+    for (const result of outcome.scm ?? []) {
+      const pr = result.pullRequest;
+      if (pr) (ctx.pullRequests ??= []).push({ alias: result.alias, number: pr.number, url: pr.url });
+    }
+    return outcome;
   }
 
   // ── Preprocessing ───────────────────────────────────────────
@@ -460,7 +477,7 @@ export class LifecycleSteps {
     const result = await this.scriptRunner.run(shell.command, shell.args, {
       cwd,
       timeout: config.timeoutMs ?? 60_000,
-      env: buildGenVarEnv(ctx.variables),
+      env: { ...buildGenVarEnv(ctx.variables), ...prEnv(ctx.pullRequests) },
     });
     if (result.exitCode !== 0) throw new Error(`${label} failed (exit ${result.exitCode}): ${result.stderr}`);
     return result.stdout;

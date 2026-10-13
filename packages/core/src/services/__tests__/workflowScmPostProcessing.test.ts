@@ -203,6 +203,39 @@ describe('workflow post-processing → SourceControlFlowService', () => {
     expect(results[0]?.scm?.[0]?.pullRequest?.number).toBe(42);
   });
 
+  it('a script after the PR step gets the pull request as GEN_PR_* (U-23)', async () => {
+    const flow: WorkflowScmFlowPort = {
+      async run({ alias }) {
+        return {
+          status: 'ok',
+          alias,
+          steps: [{ id: 'pull_request', status: 'done' }],
+          pushed: true,
+          pullRequest: {
+            provider: 'github', number: 42, url: `https://github.com/acme/${alias}/pull/42`, title: 'T', state: 'open',
+            head: 'generatorai/run', base: 'develop',
+          },
+          readiness: readiness(alias),
+        };
+      },
+    };
+    const envs: Array<Record<string, string> | undefined> = [];
+    const scriptRunner = {
+      run: vi.fn(async (_cmd: string, _args: string[], opts: { env?: Record<string, string> }) => {
+        envs.push(opts.env);
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      }),
+    } as unknown as IScriptRunner;
+    const steps = new LifecycleSteps({} as GitManager, scriptRunner, { emitGlobal: vi.fn(async () => undefined) } as unknown as EventBus, logger, flow);
+    const script = { name: 'Comment on the issue', config: { type: 'run_script', script: 'echo $GEN_PR_URL' }, failOnError: true } as PostProcessingStep;
+
+    const results = await steps.executePostProcessing([prStep(), script], context({ codebases: { api: CODEBASES['api']! } }));
+
+    expect(results.map((r) => r.success)).toEqual([true, true]);
+    expect(envs[0]).toMatchObject({ GEN_PR_NUMBER: '42', GEN_PR_URL: 'https://github.com/acme/api/pull/42' });
+    expect(JSON.parse(envs[0]!['GEN_PRS']!)).toEqual([{ alias: 'api', number: 42, url: 'https://github.com/acme/api/pull/42' }]);
+  });
+
   it('an explicit baseBranch on the step beats the codebase default', async () => {
     const requests: ScmFlowRequest[] = [];
     const flow: WorkflowScmFlowPort = {

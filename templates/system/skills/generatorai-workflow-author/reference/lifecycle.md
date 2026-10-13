@@ -129,6 +129,8 @@ else steps). Prefer `validate_input` to check inputs early; avoid `run_script` u
 - `autoCommit` commits the run's changes when the run **completes**; `autoPush` pushes the work branch;
   `autoCreatePR` opens a pull request (it implies commit and push).
 - `steps` add explicit `commit_and_push`, `create_pr` or `run_script` steps (messages and titles are templates).
+- A `run_script` after `create_pr` gets the opened pull request as `GEN_PR_NUMBER` and `GEN_PR_URL` (the first
+  codebase's) and `GEN_PRS` (JSON, every codebase's) — e.g. to comment the PR link on the issue it fixes.
 - A failed or cancelled run commits nothing. So the safe gate before a push or PR is `approval` on the last stage:
   a rejection fails the run (see `stages.md`). Do not add an `on: "failure"` edge from that stage, or a rejection
   becomes a handled failure and the run completes and pushes.
