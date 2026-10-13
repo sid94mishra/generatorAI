@@ -39,7 +39,7 @@ const every = <U extends string>(r: Every<U>): string[] => Object.keys(r).sort()
 const UNION_VALUES: Record<StatusDomain, string[]> = {
   workflowRun: every<RunStatus>({ created: true, pending: true, starting: true, running: true, waiting: true, paused: true, finalizing: true, cancelling: true, completed: true, failed: true, cancelled: true }),
   stageRun: every<StageRunStatus>({ pending: true, ready: true, starting: true, running: true, validating: true, awaiting_input: true, waiting: true, retry_wait: true, paused: true, completed: true, failed: true, skipped: true, cancelled: true }),
-  automationExecution: every<AutomationExecutionStatus>({ pending: true, running: true, completed: true, partial: true, failed: true, cancelled: true }),
+  automationExecution: every<AutomationExecutionStatus>({ pending: true, running: true, completed: true, partial: true, failed: true, cancelled: true, skipped: true }),
   automationRunItem: every<AutomationRunItemStatus>({ pending: true, running: true, completed: true, failed: true, cancelled: true }),
   backgroundTask: every<BackgroundTaskStatus>({ spawned: true, running: true, needs_review: true, completed: true, failed: true, cancelled: true, interrupted: true }),
   chat: every<ChatStatus>({ active: true, archived: true }),

@@ -14,7 +14,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createDB, migrateDB, EntryRepository, RegisterRepository } from '@generatorai/db';
-import { AutomationService } from '../src/services/AutomationService.js';
+import { AutomationService, MISSED_GRACE_MS, automationRunName } from '../src/services/AutomationService.js';
 import { DurableExecutionEngine } from '../src/services/DurableExecutionEngine.js';
 import type {
   IAutomationRepository,
@@ -380,6 +380,40 @@ describe('Item 38 — DB-backed due-row scheduler', () => {
     const data = skipped!.data as { reason: string; missedCount?: number };
     expect(data.reason).toBe('missed');
     expect(data.missedCount).toBeGreaterThan(0);
+  });
+
+  it('skips a daily slot reached hours late, though no later slot has passed, and records it in the history (U-77, U-78)', async () => {
+    // 0 2 * * * reached at 09:21: the app was closed at 02:00. No second slot elapsed, but the run was missed.
+    const scheduledFor = new Date(Date.now() - 7 * 60 * 60_000);
+    h.automationRepo.seed(scheduleAutomation({ cronExpression: '0 2 * * *', nextRunAt: scheduledFor, missedRunPolicy: 'skip' }));
+
+    await h.service.runSchedulerTick();
+    await flush();
+
+    expect(h.createLog).toHaveLength(0);
+    const rows = [...h.executions.values()].filter((e) => e.automationId === AUTOMATION_ID);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: 'skipped', triggeredBy: 'schedule', totalIterations: 0, createdAt: scheduledFor });
+    expect(rows[0]!.error).toMatch(/not running at the scheduled time/);
+  });
+
+  it('runs a slot reached within the grace window, and "run once" still runs a late one', async () => {
+    h.automationRepo.seed(scheduleAutomation({ cronExpression: '0 2 * * *', nextRunAt: new Date(Date.now() - MISSED_GRACE_MS / 2) }));
+    await h.service.runSchedulerTick();
+    await flush();
+    expect(h.createLog).toHaveLength(1);
+
+    const late = setup();
+    late.automationRepo.seed(scheduleAutomation({ cronExpression: '0 2 * * *', nextRunAt: new Date(Date.now() - 7 * 60 * 60_000), missedRunPolicy: 'run_once' }));
+    await late.service.runSchedulerTick();
+    await flush();
+    expect(late.createLog).toHaveLength(1);
+  });
+
+  it('names a run for its automation and trigger, not a timestamp (U-79)', () => {
+    expect(automationRunName('Pulse Nightly Health', 'schedule', 'Single run')).toBe('Pulse Nightly Health · scheduled');
+    expect(automationRunName('Pulse Issue Patrol', 'manual')).toBe('Pulse Issue Patrol · run now');
+    expect(automationRunName('Triage', 'webhook', 'issue 42')).toBe('Triage · webhook · issue 42');
   });
 
   it('overlap policy "skip" does not start a second run while one is active', async () => {

@@ -912,7 +912,7 @@ export const automationExecutions = sqliteTable(
       .notNull()
       .references(() => automations.id, { onDelete: 'cascade' }),
     status: text('status', {
-      enum: ['pending', 'running', 'completed', 'partial', 'failed', 'cancelled'],
+      enum: ['pending', 'running', 'completed', 'partial', 'failed', 'cancelled', 'skipped'],
     }).notNull().default('pending'),
     triggeredBy: text('triggered_by', { enum: ['manual', 'schedule', 'webhook'] }).notNull(),
     webhookPayload: text('webhook_payload'),

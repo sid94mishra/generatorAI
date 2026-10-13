@@ -36,7 +36,7 @@ import { PageTitle } from '@/ui/patterns/PageTitle/PageTitle.js';
 import { PERMISSION_LABELS } from '@/blocks/workflow/index.js';
 import { ListPage } from '@/ui/templates/ListPage/ListPage.js';
 
-const ALL_EXECUTION_STATUSES: AutomationExecutionStatus[] = ['pending', 'running', 'completed', 'partial', 'failed', 'cancelled'];
+const ALL_EXECUTION_STATUSES: AutomationExecutionStatus[] = ['pending', 'running', 'completed', 'partial', 'failed', 'cancelled', 'skipped'];
 
 type StatusFilter = 'all' | 'enabled' | 'disabled';
 

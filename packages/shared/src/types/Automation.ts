@@ -24,9 +24,10 @@ export type AutomationErrorPolicy = 'continue' | 'stop';
  * Automation execution status. `partial` = the run finished with BOTH
  * successes and failures; it is alerted through the same channel as
  * `failed` so unattended operation never reports a mostly-failed batch
- * as a success.
+ * as a success. `skipped` = a scheduled slot that did not run (missed or
+ * overlapping, per the automation's policies); it has no runs.
  */
-export type AutomationExecutionStatus = 'pending' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled';
+export type AutomationExecutionStatus = 'pending' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled' | 'skipped';
 
 /** What the scheduler does with slots that elapsed while nobody could run them. */
 export type AutomationMissedRunPolicy = 'skip' | 'run_once';

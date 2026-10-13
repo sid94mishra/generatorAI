@@ -73,7 +73,8 @@ function formatDuration(ms: number): string {
  *  exists, so this aggregates the already-fetched execution list — real
  *  data, computed in the browser (D-36). */
 function computeStats(executions: readonly AutomationExecution[] | undefined) {
-  const list = executions ?? [];
+  // A skipped slot (U-78) is history, not an execution: it counts towards none of the stats.
+  const list = (executions ?? []).filter((e) => e.status !== 'skipped');
   const since = Date.now() - 30 * 24 * 60 * 60_000;
   const last30d = list.filter((e) => new Date(e.createdAt).getTime() >= since);
   const terminal = list.filter((e) => e.status === 'completed' || e.status === 'partial' || e.status === 'failed' || e.status === 'cancelled');
@@ -300,9 +301,9 @@ export function AutomationDetailPage() {
               <Card data-testid="execution-detail">
                 <Card.Header title={`Execution #${selectedExecutionId.slice(0, 8)}…`} action={<Button variant="ghost" size="sm" onClick={() => setSelectedExecutionId(null)}>Close</Button>} />
                 <Card.Body>
-                  {selectedExecution.error ? <Callout tone="err">{selectedExecution.error}</Callout> : null}
+                  {selectedExecution.error ? <Callout tone={selectedExecution.status === 'skipped' ? 'info' : 'err'}>{selectedExecution.error}</Callout> : null}
                   {selectedExecution.runs.length === 0 ? (
-                    <p className="text-small text-fg-3">No workflow runs yet.</p>
+                    <p className="text-small text-fg-3">{selectedExecution.status === 'skipped' ? 'Nothing ran.' : 'No workflow runs yet.'}</p>
                   ) : (
                     <IterationsTable
                       label={`Execution #${selectedExecutionId.slice(0, 8)} iterations`}

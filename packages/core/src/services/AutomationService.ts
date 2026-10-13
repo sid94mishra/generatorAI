@@ -131,6 +131,23 @@ interface IterationWorkItem {
   slotId?: string;
 }
 
+/** How late a scheduler tick may reach a slot and still run it; later than this the slot was missed (U-77). */
+export const MISSED_GRACE_MS = 5 * 60_000;
+
+/** The label of an automation's one iteration when it has no dataset. */
+const SINGLE_RUN_LABEL = 'Single run';
+
+const TRIGGER_WORDS: Readonly<Record<AutomationTriggerType, string>> = { schedule: 'scheduled', manual: 'run now', webhook: 'webhook' };
+
+/**
+ * An automation's run is named for the automation and how it started ("Pulse Nightly Health · scheduled"), not
+ * `<workflow> - Run <epoch-ms>`, which also named its branch `…-run-1791863505866-…` (U-79).
+ */
+export function automationRunName(automationName: string, triggeredBy: AutomationTriggerType, iterationLabel?: string): string {
+  const row = iterationLabel === SINGLE_RUN_LABEL ? undefined : iterationLabel?.trim();
+  return [automationName.trim(), TRIGGER_WORDS[triggeredBy], row].filter(Boolean).join(' · ');
+}
+
 export class AutomationService {
   /** The due-row poller's interval timer, or null while stopped. */
   private pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -660,7 +677,7 @@ ${serialized}`).digest('hex');
       return plannedIterations.iterations;
     }
     // The iteration index travels in the run's trigger, never as a variable (W-06).
-    return [{ variables: { ...automation.variables }, label: 'Single run' }];
+    return [{ variables: { ...automation.variables }, label: SINGLE_RUN_LABEL }];
   }
 
   /**
@@ -777,6 +794,7 @@ ${serialized}`).digest('hex');
                     automation.retryPolicy,
                     execution.triggeredBy,
                     automation.permissionMode,
+                    automationRunName(automation.name, execution.triggeredBy, iterationLabel),
                   );
                   if (success) {
                     completedCount++;
@@ -1010,6 +1028,8 @@ ${serialized}`).digest('hex');
     triggeredBy: AutomationTriggerType,
     /** PD-18 — the automation's declared mode: the run's trigger layer. */
     permissionMode: Automation['permissionMode'],
+    /** U-79 — names the run (and so its branch). */
+    runName: string,
   ): Promise<boolean> {
     const maxAttempts = Math.max(1, retryPolicy?.maxAttempts ?? 1);
     const retryOn = new Set(retryPolicy?.retryOn ?? []);
@@ -1030,6 +1050,7 @@ ${serialized}`).digest('hex');
       const invoked = await this.invocation.invoke(
         {
           target: { kind: 'definition', workflowDefinitionId: workflowDefId },
+          name: runName,
           variables,
           ...(projectId ? { projectId } : {}),
           ...(projectId && codebases?.length ? { codebases: automationCodebases(codebases) } : {}),
@@ -1286,8 +1307,11 @@ ${serialized}`).digest('hex');
         ? countCronRunsBetween(automation.cronExpression, scheduledFor, now, automation.timezone)
         : 0;
       const missedRunPolicy = automation.missedRunPolicy ?? 'skip';
+      // A slot reached long after its time is missed too, even when no later slot has passed yet: a nightly
+      // run whose 02:00 fell while the app was closed ran at 09:21 on launch, though "Skip" was chosen (U-77).
+      const late = now.getTime() - scheduledFor.getTime() > MISSED_GRACE_MS;
 
-      if (additionalMissed > 0 && missedRunPolicy === 'skip') {
+      if ((additionalMissed > 0 || late) && missedRunPolicy === 'skip') {
         const totalMissed = additionalMissed + 1; // + the due slot itself
         const nextRunAt = this.computeNextRunAt(automation, now);
         await this.automationRepo.update(automation.id, { nextRunAt } as Partial<Automation>);
@@ -1308,6 +1332,13 @@ ${serialized}`).digest('hex');
         }).catch((err) => {
           this.logger.warn(`[AutomationService] Failed to emit schedule_skipped(missed) for ${automation.id}: ${err instanceof Error ? err.message : String(err)}`);
         });
+        await this.recordSkipped(
+          automation,
+          scheduledFor,
+          totalMissed > 1
+            ? `Skipped ${totalMissed} scheduled runs: GeneratorAI was not running at their times, and missed runs are set to Skip.`
+            : 'Skipped: GeneratorAI was not running at the scheduled time, and missed runs are set to Skip.',
+        );
         return; // lease released in finally — nothing was dispatched
       }
       // `run_once` (or no backlog) falls through to the normal dispatch
@@ -1339,6 +1370,7 @@ ${serialized}`).digest('hex');
         }).catch((err) => {
           this.logger.warn(`[AutomationService] Failed to emit schedule_skipped(overlap) for ${automation.id}: ${err instanceof Error ? err.message : String(err)}`);
         });
+        await this.recordSkipped(automation, scheduledFor, 'Skipped: the previous execution was still running, and overlapping runs are set to Skip.');
         return; // lease released in finally — nothing was dispatched
       }
 
@@ -1384,6 +1416,29 @@ ${serialized}`).digest('hex');
         );
       });
     }
+  }
+
+  /**
+   * A skipped slot leaves a row in the execution history (U-78): with only a log line and an event nobody
+   * listens to, a schedule that never ran looked like a schedule that never fired. Dated at the slot; it does
+   * not advance `lastRunAt` — nothing ran.
+   */
+  private async recordSkipped(automation: Automation, scheduledFor: Date, note: string): Promise<void> {
+    await this.executionRepo
+      .createExecution({
+        id: generateId(),
+        automationId: automation.id,
+        status: 'skipped',
+        triggeredBy: 'schedule',
+        totalIterations: 0,
+        completedIterations: 0,
+        failedIterations: 0,
+        error: note,
+        createdAt: scheduledFor,
+      })
+      .catch((err) => {
+        this.logger.warn(`[AutomationService] Failed to record the skipped run of ${automation.id}: ${err instanceof Error ? err.message : String(err)}`);
+      });
   }
 
   // ═══════════════════════════════════════════════════════════════
