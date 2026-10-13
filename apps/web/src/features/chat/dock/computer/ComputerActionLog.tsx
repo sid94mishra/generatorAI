@@ -66,15 +66,18 @@ export function ComputerActionLog({ entries, pinnedId, pinnedIsFallback, onPin, 
                   title={entry.message ?? (tookScreen(entry.path) ? 'Took over the keyboard and mouse' : undefined)}
                   className="justify-start gap-2 font-normal"
                 >
-                  <span className="w-16 shrink-0 text-left font-mono text-micro text-fg-3">{clock(entry.at)}</span>
-                  <Icon concept={g.concept} size={12} className={cn('shrink-0', g.className)} />
-                  <span className="shrink-0 text-fg">{entry.action}</span>
-                  <span className="min-w-0 flex-1 truncate text-left font-mono text-fg-3">
-                    {[entry.appLabel, entry.target, entry.message].filter(Boolean).join(' · ')}
+                  {/* One flex row: Button wraps its children in a block span, where a block Icon broke the line (U-63). */}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="w-20 shrink-0 text-left font-mono text-micro text-fg-3">{clock(entry.at)}</span>
+                    <Icon concept={g.concept} size={12} className={cn('shrink-0', g.className)} />
+                    <span className="shrink-0 text-fg">{entry.action}</span>
+                    <span className="min-w-0 flex-1 truncate text-left font-mono text-fg-3">
+                      {[entry.appLabel, entry.target, entry.message].filter(Boolean).join(' · ')}
+                    </span>
+                    {entry.kind === 'action' && entry.verified ? (
+                      <Icon concept="check" size={12} className="shrink-0 text-ok" label="Verified" />
+                    ) : null}
                   </span>
-                  {entry.kind === 'action' && entry.verified ? (
-                    <Icon concept="check" size={12} className="shrink-0 text-ok" label="Verified" />
-                  ) : null}
                 </Button>
               </li>
             );
