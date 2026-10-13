@@ -536,7 +536,9 @@ export class ChatManagementService {
     const payload = buildToolPermissionPayload(request, mode);
 
     // U-16 (D-147): "Allow for this chat" rules cover this request — allow it without a card, and say so.
-    const covered = await this.extensions.permissionRules?.covering({ kind: 'chat', id: chatId }, payload, mode).catch(() => null);
+    // A worker answers to its orchestrator's rules (D-148).
+    const scope = await this.approvalScopeOf(chatId);
+    const covered = await this.extensions.permissionRules?.covering(scope, payload, mode).catch(() => null);
     if (covered) {
       // Kept in the turn's transcript (a completed chat skips event replay) and announced live.
       const noteId = generateId();
@@ -591,6 +593,15 @@ export class ChatManagementService {
   }
 
   /**
+   * Whose "Allow for this chat" rules a chat's gates read and write (D-148): an orchestrator worker's are its
+   * orchestrator's, so one approval covers the whole team and a worker's card adds to the chat the person is in.
+   */
+  private async approvalScopeOf(chatId: string): Promise<{ kind: 'chat'; id: string }> {
+    const chat = await this.chatRepo.getById(chatId).catch(() => null);
+    return { kind: 'chat', id: chat?.parentChatId ?? chatId };
+  }
+
+  /**
    * Resolve a pending tool-permission gate. Mirrors `answerQuestion`: the
    * service — not the route — checks the interaction belongs to this chat and
    * emits the resolution event, so a reload replays a settled card rather than
@@ -622,7 +633,7 @@ export class ChatManagementService {
         return { ok: false, code: 'NOT_REMEMBERABLE', reason: store ? rememberRefusalOf(record.payload) : 'Remembered permissions are not enabled' };
       }
       if (record.status !== 'pending') return { ok: false, reason: 'Already resolved' };
-      await store.remember({ kind: 'chat', id: chatId }, rules);
+      await store.remember(await this.approvalScopeOf(chatId), rules);
       remembered = rules;
     }
 

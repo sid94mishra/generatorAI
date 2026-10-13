@@ -57,11 +57,17 @@ describe('mode config and the tool-policy wrapper', () => {
     expect(asked).toEqual(['shell_exec']);
   });
 
-  it('unattended sessions (workers) get no gates; a call with no turn in flight is denied', async () => {
+  it('unattended sessions (workers) get only the permission gate (D-148); a call with no turn in flight is denied', async () => {
     const turns = new TurnContextRegistry();
     const worker: Record<string, unknown> = {};
-    applyModeConfig(worker, { conversationId: 'w', turns, gates: { permission: async () => ({ granted: true }) }, attended: false, groups: DEFAULT_AGENT_TOOL_POLICY });
-    expect(worker['onPermissionRequest']).toBeUndefined();
+    applyModeConfig(worker, {
+      conversationId: 'w', turns, gates: { permission: async () => ({ granted: true }), question: async () => ({ answers: {} }) },
+      attended: false, groups: DEFAULT_AGENT_TOOL_POLICY, attachPermissionMode: { mode: 'acceptEdits' },
+    });
+    expect(worker['onPermissionRequest']).toBeTypeOf('function');
+    expect(worker['permissionMode']).toBe('acceptEdits');
+    expect(worker['onQuestionRequest']).toBeUndefined();
+    expect(worker['onPlanReviewRequest']).toBeUndefined();
     const cfg: Record<string, unknown> = {};
     applyModeConfig(cfg, { conversationId: 'c', turns, gates: { permission: async () => ({ granted: true }) }, attended: true, groups: DEFAULT_AGENT_TOOL_POLICY });
     await expect((cfg['onPermissionRequest'] as (r: PermissionRequest) => Promise<unknown>)(req('other'))).resolves.toMatchObject({ granted: false });

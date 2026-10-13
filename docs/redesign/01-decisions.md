@@ -1457,6 +1457,20 @@ this chat: …". The composer's Approvals group and the run header show "N rules
 the Activity page's quick answers keep Allow once (the contract is shared; their UI is not built yet); the CLI's
 run timeline does not render `auto_allowed` yet.
 
+### D-148 Orchestrator workers ask a person for tools; they share their orchestrator's approvals (U-73) (2026-10-13) — Final
+Workers were "unattended": the session composer gave them no gate at all, so in "Accept edits" (the packaged-app
+default since U-47) a Claude worker's every shell command was refused by the SDK itself ("This command requires
+approval") and a Codex worker's sandbox escalations were declined — nobody was asked, and iteration 5's Architect and
+Frontend workers could not run one test. Now `applyModeConfig` installs the **tool-permission gate** for unattended
+sessions too (plan reviews and questions stay off; workers keep the autonomous agent mode), and attaches the worker's
+inherited permission mode. The gate opens in the worker's own chat (a live turn there), which the orchestrator's
+Tasks dock already shows as an ask ("<worker> asks · Open task chat") and Needs you lists; the orchestrator's
+`check_background_agents(wait=true)` is bounded, so a waiting worker does not hang it. **Approval scope:**
+`ChatManagementService.approvalScopeOf` maps a worker to its parent chat — a worker's request is covered by the
+orchestrator chat's "Allow for this chat" rules (D-147), and "Allow … for this chat" on a worker's card stores the
+rule on the orchestrator chat, so one approval covers the whole team. Workers also get the Accept-edits hint (U-27).
+Full access is unchanged (no gate reaches the handler).
+
 ### D-142 (withdrawn 2026-10-11) Local self-signed signing does not stop the Keychain prompt
 Tried and reverted: signing local builds with a self-signed "GeneratorAI Local Signing" identity kept the code signature
 stable, but macOS still asked for the "GeneratorAI Safe Storage" key after the next rebuild — Keychain access for

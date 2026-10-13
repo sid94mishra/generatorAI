@@ -332,7 +332,7 @@ export class SessionComposer {
     // U-27 — in "Accept edits" a per-call provider runs file edits through its edit tools unasked, but
     // every shell command (a heredoc, a sed/perl/python rewrite) parks a gate for a person. Agents that
     // edit through the shell stall unattended runs; say so once.
-    if (mode === 'acceptEdits' && levels?.approvalGating === 'per_call' && !isWorker) appendSystemBlock(cfg, ACCEPT_EDITS_HINT);
+    if (mode === 'acceptEdits' && levels?.approvalGating === 'per_call') appendSystemBlock(cfg, ACCEPT_EDITS_HINT);
     // D-146 — the GitHub issue + merge tools, after the workflow tools (R-10). Workers never.
     await this.binder.github(cfg, target, {
       projectId: i.projectId,

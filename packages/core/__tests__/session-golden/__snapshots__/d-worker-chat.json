@@ -17,5 +17,6 @@
   ],
   "reasoningEffort": "high",
   "maxTurns": 7,
-  "mcpServers": {}
+  "mcpServers": {},
+  "onPermissionRequest": "[Function]"
 }

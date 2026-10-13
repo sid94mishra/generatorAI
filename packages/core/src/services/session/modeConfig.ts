@@ -20,7 +20,10 @@ export interface ModeConfigInput {
   turns: TurnContextRegistry;
   /** The owner's gates; undefined when plan mode is not wired (nothing is installed). */
   gates: GatePort | undefined;
-  /** Unattended sessions (orchestrator workers) never open a gate: nobody would answer. */
+  /**
+   * Unattended sessions (orchestrator workers) get only the tool-permission gate (D-148): it opens in the worker's
+   * own chat, which the orchestrator's Tasks dock and Needs you surface. Plan reviews and questions stay off.
+   */
   attended: boolean;
   /** The bound agent's tool groups, enforced in the permission gate (W-53). */
   groups: AgentToolPolicy;
@@ -36,9 +39,24 @@ export interface ModeConfigInput {
 }
 
 export function applyModeConfig(cfg: ConversationConfig, i: ModeConfigInput): void {
-  if (!i.gates || !i.attended) return;
+  if (!i.gates) return;
   const port = withAgentToolPolicy(i.gates, i.groups);
   const { turns, conversationId } = i;
+
+  const onPermission = async (req: Parameters<GatePort['permission']>[0]) => {
+    const turn = turns.get(conversationId);
+    // Reaching the handler means the harness did not auto-allow the call; a
+    // silent allow here is the failure review 5.1 was about.
+    if (!turn) return { granted: false, reason: 'No approval channel is available for this session.' };
+    return port.permission(req, turn);
+  };
+  if (!i.attended) {
+    // U-73: without the handler a worker in "Accept edits" had every shell command refused by its provider
+    // ("This command requires approval") and nobody was ever asked.
+    cfg['onPermissionRequest'] = onPermission;
+    if (i.attachPermissionMode) cfg['permissionMode'] = i.attachPermissionMode.mode;
+    return;
+  }
 
   cfg['onPlanReviewRequest'] = async (req: Parameters<NonNullable<GatePort['planReview']>>[0]) => {
     const turn = turns.get(conversationId);
@@ -52,13 +70,7 @@ export function applyModeConfig(cfg: ConversationConfig, i: ModeConfigInput): vo
     if (!turn || !port.question) return { answers: {} };
     return port.question(req, turn);
   };
-  cfg['onPermissionRequest'] = async (req: Parameters<GatePort['permission']>[0]) => {
-    const turn = turns.get(conversationId);
-    // Reaching the handler means the harness did not auto-allow the call; a
-    // silent allow here is the failure review 5.1 was about.
-    if (!turn) return { granted: false, reason: 'No approval channel is available for this session.' };
-    return port.permission(req, turn);
-  };
+  cfg['onPermissionRequest'] = onPermission;
 
   // Both instruction blocks go in regardless of the owner's default mode —
   // the mode is chosen per turn. `planModeInstructions` is Claude-only and
