@@ -139,7 +139,8 @@ describe('ipc.ts registers every channel through the guard', () => {
     // minus getWindowChrome (P3-04: a preload launch argument now, 06 §3.6).
     // D-140/D-145: browser comments drop pickElement + annotateRegion and add
     // capture, annotateOpen, annotateSave, annotateCancel (net +2).
-    expect(guarded.length).toBe(51);
+    // U-67: computerPermissions (macOS privacy grants for computer use).
+    expect(guarded.length).toBe(52);
   });
 });
 

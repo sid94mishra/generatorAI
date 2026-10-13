@@ -19,7 +19,7 @@
 // binary — or a user who never enables the feature — never loads it.
 // ────────────────────────────────────────────────────────────────
 
-import { app } from 'electron';
+import { app, desktopCapturer, shell, systemPreferences } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -62,12 +62,6 @@ interface DriverSdk {
   };
 }
 
-interface ElectronHelpers {
-  requestMacOSPermissions(): MacPermissionStatus;
-  hasRequiredMacOSPermissions(status: MacPermissionStatus): boolean;
-  openMacOSScreenRecordingSettings(): Promise<void>;
-}
-
 export class ComputerHost {
   private host: EmbeddedHostLike | null = null;
   private endpoint: ComputerHostEndpoint | null = null;
@@ -82,22 +76,15 @@ export class ComputerHost {
   }
 
   /**
-   * Accessibility + Screen Recording status. Returns `null` off macOS, where
-   * neither grant exists — callers must treat that as "not applicable", not
-   * as "denied".
+   * Accessibility + Screen Recording status, without prompting. Returns `null` off macOS, where neither grant
+   * exists — callers must treat that as "not applicable", not as "denied".
    */
   async permissionStatus(): Promise<MacPermissionStatus | null> {
-    if (process.platform !== 'darwin') return null;
-    const helpers = await this.loadElectronHelpers();
-    if (!helpers) return null;
-    // The SDK's request call is also the status probe: on first invocation it
-    // triggers the system prompt, afterwards it just reports.
-    return helpers.requestMacOSPermissions();
+    return process.platform === 'darwin' ? macPermissionStatus() : null;
   }
 
   async openScreenRecordingSettings(): Promise<void> {
-    const helpers = await this.loadElectronHelpers();
-    await helpers?.openMacOSScreenRecordingSettings();
+    await openScreenRecordingSettings();
   }
 
   /**
@@ -120,9 +107,10 @@ export class ComputerHost {
 
   private async startHost(): Promise<ComputerHostEndpoint> {
     if (process.platform === 'darwin') {
-      const helpers = await this.loadElectronHelpers();
-      const status = helpers?.requestMacOSPermissions();
-      if (status && helpers && !helpers.hasRequiredMacOSPermissions(status)) {
+      // Asked from here, the permission-owning app: the embedded driver never prompts, and the SDK's native helper
+      // did not load in the packaged app — so GeneratorAI never asked, and never appeared under Privacy (U-67).
+      const status = await requestMacPermissions();
+      if (!status.accessibility || !status.screenRecording) {
         throw new Error(
           `macOS has not granted the permissions computer use requires (accessibility: ${status.accessibility}, screen recording: ${status.screenRecording}). Grant them in System Settings → Privacy & Security, then try again.`,
         );
@@ -231,15 +219,6 @@ export class ComputerHost {
       return null;
     }
   }
-
-  private async loadElectronHelpers(): Promise<ElectronHelpers | null> {
-    try {
-      return (await import('@trycua/cua-driver/electron')) as unknown as ElectronHelpers;
-    } catch (err) {
-      this.log(`cua-driver Electron helpers unavailable: ${(err as Error).message}`);
-      return null;
-    }
-  }
 }
 
 /**
@@ -292,4 +271,33 @@ export function detectDisplayServer(): string | undefined {
   if (desktop.includes('gnome')) return 'wayland-gnome';
   if (desktop.includes('kde')) return 'wayland-kde';
   return 'wayland-unknown';
+}
+
+const SCREEN_RECORDING_SETTINGS = 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture';
+
+/** Both grants, read without prompting (macOS only). */
+export function macPermissionStatus(): MacPermissionStatus {
+  return {
+    accessibility: systemPreferences.isTrustedAccessibilityClient(false),
+    screenRecording: systemPreferences.getMediaAccessStatus('screen') === 'granted',
+  };
+}
+
+export async function openScreenRecordingSettings(): Promise<void> {
+  await shell.openExternal(SCREEN_RECORDING_SETTINGS);
+}
+
+/**
+ * Asks macOS for both grants and reports them. Each request also lists GeneratorAI under its Privacy & Security
+ * pane (macOS lists only apps that have asked): Accessibility through the trusted-client check with its prompt,
+ * Screen Recording through a capture-source query, which raises the system's own prompt the first time.
+ */
+export async function requestMacPermissions(): Promise<MacPermissionStatus> {
+  const accessibility = systemPreferences.isTrustedAccessibilityClient(true);
+  let screenRecording = systemPreferences.getMediaAccessStatus('screen') === 'granted';
+  if (!screenRecording) {
+    await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } }).catch(() => []);
+    screenRecording = systemPreferences.getMediaAccessStatus('screen') === 'granted';
+  }
+  return { accessibility, screenRecording };
 }

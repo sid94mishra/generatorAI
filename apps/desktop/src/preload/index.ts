@@ -97,6 +97,11 @@ const api = {
 
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.openExternal, url),
 
+  computerPermissions: (
+    action?: 'status' | 'request' | 'openSettings',
+  ): Promise<{ accessibility: boolean; screenRecording: boolean } | null> =>
+    ipcRenderer.invoke(IPC.computerPermissions, action),
+
   getSetting: <T = unknown>(key: string): Promise<T | undefined> =>
     ipcRenderer.invoke(IPC.getSetting, key),
   setSetting: (key: string, value: unknown): Promise<void> =>

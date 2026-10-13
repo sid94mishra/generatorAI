@@ -375,3 +375,17 @@ export function applyFullscreenInsets(chrome: DesktopWindowChrome, fullScreen: b
   root.style.setProperty('--gai-titlebar-inset-left', `${fullScreen ? 0 : chrome.insetLeft}px`);
   root.style.setProperty('--gai-titlebar-inset-right', `${fullScreen ? 0 : chrome.insetRight}px`);
 }
+
+export interface MacComputerPermissions {
+  accessibility: boolean;
+  screenRecording: boolean;
+}
+
+/**
+ * macOS Accessibility + Screen Recording for computer use: `status` reads them, `request` asks macOS (which also
+ * lists GeneratorAI under both Privacy panes), `openSettings` opens Screen Recording settings. Null outside the
+ * macOS desktop shell.
+ */
+export async function macComputerPermissions(action: 'status' | 'request' | 'openSettings' = 'status'): Promise<MacComputerPermissions | null> {
+  return (await bridge()?.computerPermissions?.(action)) ?? null;
+}

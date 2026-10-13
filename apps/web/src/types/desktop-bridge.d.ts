@@ -158,6 +158,12 @@ interface GeneratorAIDesktopBridge {
   /** The OS folder picker; the chosen absolute path, or null when cancelled (D-136). */
   selectDirectory?: (opts?: { defaultPath?: string }) => Promise<string | null>;
 
+  // ── macOS privacy grants for computer use (local-only) ──
+  /** Accessibility + Screen Recording: read, ask macOS (lists the app under both panes), or open settings. Null off macOS. */
+  computerPermissions?: (
+    action?: 'status' | 'request' | 'openSettings',
+  ) => Promise<{ accessibility: boolean; screenRecording: boolean } | null>;
+
   // ── OS file manager ──
   /** Reveals a path in Finder / File Explorer. False when it is not on this machine. */
   showItemInFolder?: (fullPath: string) => Promise<boolean>;

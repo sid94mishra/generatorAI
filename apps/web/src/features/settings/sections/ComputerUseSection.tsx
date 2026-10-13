@@ -6,8 +6,10 @@
 // whether the agent is handed the `computer_*` tools at all.
 // ────────────────────────────────────────────────────────────────
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useComputerUseSettings, useSetComputerUseEnabled } from '@/hooks/composerQueries.js';
+import { isDesktop, isMacOS, macComputerPermissions, type MacComputerPermissions } from '@/lib/desktop.js';
+import { Button } from '@/ui/primitives/Button/Button.js';
 import type { ComputerRuntime } from '@/hooks/computerQueries.js';
 import { Callout } from '@/ui/primitives/Callout/Callout.js';
 import { Icon } from '@/ui/icons/Icon.js';
@@ -52,6 +54,65 @@ function DriverStatusGroup({ runtime }: { runtime: ComputerRuntime }) {
       <p className="text-small text-fg-3">
         Start, restart, and per-window health live in the Computer tab of a chat, where a workspace is in scope.
       </p>
+    </section>
+  );
+}
+
+/**
+ * macOS only lists an app under Accessibility and Screen Recording once it has asked, and the desktop driver never
+ * asks on its own (U-67) — so this group reads both grants and asks for them from GeneratorAI itself.
+ */
+function MacPermissionsGroup() {
+  const [status, setStatus] = useState<MacComputerPermissions | null>(null);
+  const [busy, setBusy] = useState(false);
+  const refresh = useCallback(() => void macComputerPermissions('status').then(setStatus), []);
+  useEffect(() => {
+    refresh();
+    // A grant made in System Settings shows up when the person comes back to the window.
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, [refresh]);
+  if (!status) return null;
+  const granted = (on: boolean) => (on ? 'Granted' : 'Not granted');
+  const all = status.accessibility && status.screenRecording;
+  return (
+    <section className="flex flex-col gap-2" data-testid="computer-mac-permissions">
+      <SectionHeader title="macOS permissions" level={3} />
+      <KeyValueList
+        labelWidth={120}
+        items={[
+          { label: 'Accessibility', value: granted(status.accessibility) },
+          { label: 'Screen Recording', value: granted(status.screenRecording) },
+        ]}
+      />
+      {all ? null : (
+        <>
+          <p className="text-small text-fg-3">
+            Grant access adds GeneratorAI to both lists in System Settings → Privacy &amp; Security and asks macOS for each. Turn GeneratorAI on in both,
+            then quit and reopen GeneratorAI.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="primary"
+              size="sm"
+              icon="shield"
+              loading={busy}
+              onClick={() => {
+                setBusy(true);
+                void macComputerPermissions('request').then((next) => {
+                  setStatus(next);
+                  setBusy(false);
+                });
+              }}
+            >
+              Grant access
+            </Button>
+            <Button size="sm" variant="ghost" icon="external-link" onClick={() => void macComputerPermissions('openSettings')}>
+              Open Screen Recording settings
+            </Button>
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -116,6 +177,8 @@ export function ComputerUseSection() {
         )}
 
         {error ? <Callout tone="err">{error}</Callout> : null}
+
+        {enabled && isDesktop && isMacOS ? <MacPermissionsGroup /> : null}
 
         {enabled && data?.runtime ? <DriverStatusGroup runtime={data.runtime} /> : null}
 

@@ -95,6 +95,12 @@ export const IPC = {
   saveFile: 'desktop:saveFile',
   openExternal: 'desktop:openExternal',
   /**
+   * macOS Accessibility + Screen Recording for computer use (U-67): `status` reads them, `request` asks macOS
+   * (listing GeneratorAI under both Privacy panes), `openSettings` opens Screen Recording settings. Null off macOS.
+   * Local-only: a remote server's page must not prompt for this computer's grants.
+   */
+  computerPermissions: 'desktop:computerPermissions',
+  /**
    * The renderer's appearance ({@link DesktopAppearancePush}). Main persists it,
    * mirrors `nativeTheme.themeSource`, repaints the window background and the
    * caption glyphs, and updates the View ▸ Appearance radio.

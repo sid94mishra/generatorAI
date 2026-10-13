@@ -46,6 +46,7 @@ import {
 } from './updater';
 import { setUnsavedWork } from './unsaved-work';
 import { log } from './logger';
+import { macPermissionStatus, openScreenRecordingSettings, requestMacPermissions } from './computer-host';
 import { createIpcGuard, defaultFromWebContents } from './ipc-guard';
 import { admitPairingRequest, PairingGate } from './pairing-gate';
 import { isRendererSettingKey, validateSettingValue } from './settings-schema';
@@ -266,6 +267,13 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
 
   guardedHandle(IPC.openExternal, (_e, url: string) => {
     wm.openExternalSafely(url);
+  });
+
+  guardedHandle(IPC.computerPermissions, async (_e, action?: unknown) => {
+    if (process.platform !== 'darwin') return null;
+    if (action === 'request') return requestMacPermissions();
+    if (action === 'openSettings') await openScreenRecordingSettings();
+    return macPermissionStatus();
   });
 
   // Window chrome is not a channel: it is static per process, so the main
