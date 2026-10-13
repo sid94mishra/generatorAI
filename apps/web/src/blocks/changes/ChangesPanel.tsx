@@ -28,6 +28,7 @@ import { useConfirm } from '@/ui/primitives/AlertDialog/AlertDialog.js';
 import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { DiffCodeView } from '@/blocks/diff/DiffCodeView.js';
 import { DiffProviders } from '@/blocks/diff/DiffProviders.js';
+import { useDiffPainted } from '@/blocks/diff/useDiffPainted.js';
 import { ReviewComposerPopover } from '@/blocks/diff/review/ReviewComposerPopover.js';
 import { ReviewThreadCard } from '@/blocks/diff/review/ReviewThreadCard.js';
 import { FileTree } from '@/blocks/files/FileTree.js';
@@ -174,6 +175,9 @@ export function ChangesPanel({
     viewerRef,
   });
   const { threadsById, focusedThreadId, openThreadCountByFile, commentOnFile } = review;
+  // U-4: the viewer's first paint waits on its worker pool; until then the list area says so instead of staying blank.
+  const diffAreaRef = useRef<HTMLDivElement>(null);
+  const diffPainted = useDiffPainted(diffAreaRef, review.decoratedSources.length > 0);
 
   const renderAnnotation = useCallback(
     (annotation: DiffAnnotation) => {
@@ -477,7 +481,16 @@ export function ChangesPanel({
                   never open a diff never load the highlighter. */}
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <DiffProviders>
-                  <div className="min-h-0 flex-1">
+                  <div ref={diffAreaRef} className="relative min-h-0 flex-1">
+                    {diffPainted ? null : (
+                      <div
+                        role="status"
+                        className="absolute inset-0 z-sticky flex items-center justify-center gap-2 bg-surface text-small text-fg-3"
+                        data-testid="changes-preparing"
+                      >
+                        <Spinner size={14} /> Preparing diffs…
+                      </div>
+                    )}
                     <DiffCodeView
                       ref={viewerRef}
                       sources={review.decoratedSources}
