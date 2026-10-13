@@ -409,8 +409,7 @@
         ]
       },
       "skipPermission": true,
-      "owner": "chat:<uuid>",
-      "timeoutMs": 86520000
+      "owner": "chat:<uuid>"
     },
     {
       "name": "record_plan",

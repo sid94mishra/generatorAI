@@ -49,8 +49,11 @@ export interface BindTarget {
   groups: AgentToolPolicy;
 }
 
-/** Workflow tools that start or stop work a person did not see: asked in the asking modes (U-76). */
-const WORKFLOW_ASKING_TOOLS: ReadonlySet<string> = new Set(['run_workflow', 'cancel_workflow_run']);
+/**
+ * Workflow tools that start work a person did not see: asked in the asking modes (U-76). Cancelling a run the agent
+ * started stays unasked (by design); answering a review only works on runs whose start delegated it.
+ */
+const WORKFLOW_ASKING_TOOLS: ReadonlySet<string> = new Set(['run_workflow']);
 
 export class PlatformToolBinder {
   constructor(private readonly deps: SessionComposerDeps) {}
@@ -254,7 +257,7 @@ export class PlatformToolBinder {
       authoring: boolean;
       orchestrator: boolean;
       turnOf: () => WorkflowToolTurn | undefined;
-      /** The session's gate and turn: starting or cancelling a run asks in the asking modes (U-76). */
+      /** The session's gate and turn: starting a run asks in the asking modes (U-76). */
       port?: GatePort | undefined;
       gateTurnOf?: (() => TurnContext | undefined) | undefined;
     },
@@ -268,8 +271,8 @@ export class PlatformToolBinder {
     const all = buildWorkflowToolSet(host, caller, { run: opts.run, authoring: opts.authoring }, { turnOf: opts.turnOf, owner: ownerTag(t.owner) });
     if (all.length === 0) return;
     // U-76: providers pre-approve host tools (Claude lists them in `allowedTools`), so `run_workflow` started runs that
-    // commit, push or open a PR from an "Accept edits, ask for the rest" chat without asking anyone. Starting and
-    // cancelling a run ask like the browser does; reads, approvals delegated to the agent and drafts do not.
+    // commit, push or open a PR from an "Accept edits, ask for the rest" chat without asking anyone. Starting asks like
+    // the browser does; reads, cancelling its own run, approvals delegated to the agent and drafts do not.
     const asking = all.filter((tool) => WORKFLOW_ASKING_TOOLS.has(tool.name));
     const gated = opts.gateTurnOf ? askBeforeRunning(asking, { turnOf: opts.gateTurnOf, port: opts.port }) : asking;
     const tools = all.map((tool) => gated.find((g) => g.name === tool.name) ?? tool);

@@ -1,4 +1,4 @@
-// U-76: starting or cancelling a workflow run asks a person in the asking modes. Providers pre-approve host tools,
+// U-76: starting a workflow run asks a person in the asking modes. Providers pre-approve host tools,
 // so without the server-side ask `run_workflow` ran unasked from an "Accept edits, ask for the rest" chat.
 
 import { describe, expect, it, vi } from 'vitest';
@@ -31,14 +31,15 @@ function bind(mode: string, permission: (...a: unknown[]) => Promise<{ granted: 
   return { host, tool };
 }
 
-describe('workflow tools ask before starting or cancelling a run (U-76)', () => {
-  it('run_workflow and cancel_workflow_run ask in Accept edits; reads do not', async () => {
+describe('workflow tools ask before starting a run (U-76)', () => {
+  it('run_workflow asks in Accept edits; reads and cancelling its own run do not', async () => {
     const permission = vi.fn(async () => ({ granted: true }));
     const { host, tool } = bind('acceptEdits', permission);
     await tool('run_workflow').handler({ workflowId: 'w1', reason: 'check develop' });
     await tool('cancel_workflow_run').handler({ runId: 'r1', reason: 'not needed' });
     await tool('list_workflows').handler({});
-    expect(permission).toHaveBeenCalledTimes(2);
+    expect(permission).toHaveBeenCalledTimes(1);
+    expect(host.cancel).toHaveBeenCalledTimes(1);
     expect(permission).toHaveBeenCalledWith(expect.objectContaining({ details: expect.objectContaining({ toolName: 'run_workflow' }) }), expect.anything());
     expect(host.run).toHaveBeenCalledTimes(1);
   });
