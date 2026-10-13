@@ -78,6 +78,15 @@ engine (`packages/checker`); Vitest + Playwright; GitHub Actions CI. Iterations 
 | U-54 | Chat · Tasks panel | Tasks rows said only a slug, agent and model — not what each worker was asked; a progress bar, legend and All/Active/Done filter repeated "5 done"; an empty "Workflow runs from this chat 0" section | medium | fixed — rows read as titles with the brief's objective; bar only while work moves; filter only on long mixed lists; empty stacked sections hidden |
 | U-55 | Scheduled automation | Execution #2 of the patrol listed Succeeded, but opened it showed its one run twice — "Running" and "Succeeded": a re-driven iteration (resume after a restart) got its existing run back and added a second row, leaving the first running forever | high | fixed — the attempt reuses the run's row; a finished execution's rows read their run's final status |
 | U-56 | Automation durations | "1210m 11s", "Avg 403m 39s" | low | fixed — hours: "20h 10m" |
+| U-57 | Automation execution | An execution's iteration rows hid the "Run: …" link and the Changes toggle behind hover in a 120px column; start times wrapped onto two lines | medium | fixed — "Workflow run" and "Changes" are columns; Started fits one line |
+| U-58 | Messages | An agent's final answer holding a 10 KB JSON payload (a PR body) rendered at full height and buried the stage | medium | fixed — a long code fence starts clamped at `max-h-80` with "Show all" |
+| U-59 | PR page | After merging, the Merge card kept a dead "Merge pull request" button and a "Delete … after merging" checkbox whose branch name wrapped in a narrow column | low | fixed — a merged or closed PR shows only the outcome |
+| U-60 | Browser | Opening the Browser dock tab while the agent browsed showed "connectOverCDP failed: ECONNREFUSED" and a blank page: the hand-over destroyed the hidden agent tab without clearing its endpoint, and the dock's start dialled the dead port | high | fixed — the endpoint is cleared when its tab's proxy stops (pushes serialised); a start whose endpoint moved mid-connect retries once |
+| U-61 | Changes | After Commit & push, the footer still offered an enabled "Push" with 0 ahead | low | fixed — "Up to date", disabled |
+| U-62 | Home / Diagnostics | The installed app reported "Version 0.0.0" (the staged server runtime's manifest) | low | fixed — staging writes the app's version |
+| U-63 | Computer · Activity | Activity rows wrapped over each other (a block Icon inside the Button's text span) | medium | fixed — one flex row |
+| U-64 | Computer use | An approval nobody answered within 120 s reached the agent as "The user did not approve this action" | medium | fixed — `consent_expired`: tell the user what needs approving and retry |
+| B-4 | Computer use (macOS) | The desktop driver reports "Process has no CFBundleIdentifier. Screen Recording is NOT granted" — needs the owner's grant in System Settings → Privacy & Security; not clicked by the agent | — | owner action |
 
 ## Journey log
 - **Iteration 1 (orchestrator chat, ~30 min):** Pulse Tech Lead planned and delegated — Architect (spec + ADR), Backend (Codex Terra: shared/checker/api), Frontend (Sonnet: web), QA (Codex Luna: clean-checkout run), Reviewer (Opus: 15 fixes). 61 files, 8 commits, **101 tests pass**, lint/format/build green. Pushed and **PR #9** opened from the Changes tab (after U-6 fix + token permissions); CI ran on GitHub Actions.
@@ -110,4 +119,7 @@ engine (`packages/checker`); Vitest + Playwright; GitHub Actions CI. Iterations 
 ### 2026-10-13 — owner's UI pass (installed build)
 - Owner: the stage pane is "clumsy … chaotic", tool output cut off, the graph view "not working", the Tasks panel unclear, a scheduled automation "showing succeed but when I open its showing running".
 - Reproduced each in the installed app (iteration 4's run page, Iteration 1's Tasks dock, the patrol's execution #2) and fixed U-51…U-56 and U-41.
-
+- Verified in the installed build: graph toggle fits 9/9 and a node click scrolls to its row; command output scrolls to its last line; the Backend prompt shows its instruction with "Context from Spec" folded; Tasks rows read as titles with objectives; patrol execution #2 shows one Succeeded row; Avg duration reads "5h 2m". A "Running" Nightly Health in the sidebar was a real catch-up run (03:51:45–03:52:22) and cleared when it finished.
+- PR #17's CI (hadolint DL3018) fixed from a GeneratorAI chat (pinned `apk` packages `~=` and `node:22-alpine3.24`), committed and pushed from the Changes tab, CI green, merged from the PR page.
+- Browser: the agent opened PR #17 and the Actions tab, took screenshots and reported correctly; opening the dock's Browser tab mid-way hit U-60.
+- Computer use: enabled (background only); `/computer-use` appears in the menu and the Computer tab opens on a consent request; Calculator never launched (driver lacks Screen Recording, B-4), and the expired consent read as a refusal (U-64). Fixed U-57…U-64.
