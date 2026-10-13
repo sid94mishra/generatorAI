@@ -23,6 +23,7 @@ import {
 } from '@/hooks/queries.js';
 import { StepList } from '@/blocks/transcript/StepRow/StepList.js';
 import { taskTitle } from '@/blocks/transcript/taskTitle.js';
+import { gateInputText } from '@/blocks/transcript/gates/gateInput.js';
 import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import { useAttention } from '@/hooks/attentionQueries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
@@ -230,17 +231,22 @@ function TaskRow({
 function AskCard({ item, now }: { item: AttentionItem; now: number }) {
   const navigate = useNavigate();
   const since = Date.parse(item.since);
+  // U-75: a worker's ask links back to this very dock (`item.href`), so the button opens the worker's own chat,
+  // where its card is answered; it is named for its agent, and a shell request reads as the command, not JSON.
+  const who = item.meta?.agent ?? taskTitle(item.title.replace(/^\W+/, ''));
+  const chatHref = item.entity === 'chat' ? `/chats/${item.entityId}` : item.href;
+  const detail = item.ask?.detail ? gateInputText(item.ask.detail) : null;
   return (
     <div className="flex flex-col gap-2 rounded-card border border-line bg-raised p-3" data-testid="bg-task-ask">
       <div className="flex items-center gap-2">
         <Icon concept="hand" size={14} className="text-warn" />
-        <span className="min-w-0 flex-1 truncate text-ui font-semibold text-fg">{item.title} asks</span>
+        <span className="min-w-0 flex-1 truncate text-ui font-semibold text-fg">{who} asks</span>
         {Number.isFinite(since) ? <Count>waiting {formatElapsed(now - since)}</Count> : null}
       </div>
       {item.ask ? <p className="text-ui text-fg">{item.ask.summary}</p> : null}
-      {item.ask?.detail ? <p className="text-small break-words text-fg-2">{item.ask.detail}</p> : null}
+      {detail ? <p className="font-mono text-small break-words whitespace-pre-wrap text-fg-2">{detail}</p> : null}
       <div className="flex justify-end">
-        <Button size="sm" variant="primary" onClick={() => navigate(item.href)}>
+        <Button size="sm" variant="primary" onClick={() => navigate(chatHref)}>
           {item.ask?.actions.includes('answer') ? 'Answer' : 'Open task chat'}
         </Button>
       </div>
