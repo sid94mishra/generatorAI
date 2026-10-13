@@ -39,6 +39,7 @@ import { resolveToolCard } from '../ToolCallCard/toolCardRegistry.js';
 import { browserArtifactUrl, useTranscriptActions, type TranscriptActions } from '../transcriptContext.js';
 import { DiffSnippet } from './DiffSnippet.js';
 import { StepGlyph, STEP_KIND_ICON } from './stepGlyph.js';
+import { taskTitle } from '../taskTitle.js';
 
 export interface StepListProps {
   steps: readonly TimelineStep[];
@@ -85,7 +86,7 @@ function foldDelegations(entries: Array<{ type: 'step'; step: TimelineStep } | S
 function targetNode(step: TimelineStep, target: string): ReactNode {
   if (!target) return undefined;
   // The rail draws targets mono; prose targets (task names, thinking) read as prose.
-  return step.mono === false ? <span className="font-sans text-ui text-fg-2">{target}</span> : target;
+  return step.mono === false || step.kind === 'delegate' ? <span className="font-sans text-ui text-fg-2">{target}</span> : target;
 }
 
 function resultOf(step: TimelineStep): Pick<StepRailItem, 'result' | 'resultTone'> {
@@ -235,7 +236,9 @@ function stepActions(step: TimelineStep, actions: TranscriptActions, openIn: str
 function stepItem(step: TimelineStep, mode: 'normal' | 'verbose', live: boolean, actions: TranscriptActions): StepRailItem {
   const entry = resolveToolCard(step.tool);
   const verb = entry?.verb?.(step) ?? step.verb;
-  const target = entry?.target?.(step) ?? step.target;
+  const raw = entry?.target?.(step) ?? step.target;
+  // A lone delegation reads like the grouped ones: the task as a title, not its slug (U-70).
+  const target = step.kind === 'delegate' && raw ? taskTitle(raw) : raw;
   const custom = entry?.result?.(step);
   const expandable = !!(step.children?.length || step.detail || step.diff);
   const below: ReactNode[] = [];
