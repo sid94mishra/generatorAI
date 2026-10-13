@@ -156,6 +156,14 @@ export const Ready: Story = {
   },
 };
 
+/** Clean and already pushed: nothing to run, and the action says so instead of offering a no-op Push (U-61). */
+export const UpToDate: Story = {
+  args: { repos: [repo({ dirty: false, changedFiles: 0, ahead: 0 })] },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole('button', { name: 'Up to date' })).toBeDisabled();
+  },
+};
+
 /** The PR card: head → base, title with Generate, description, draft. */
 export const PullRequest: Story = {
   args: { openPr: true, message: 'Fix coupon/total race in checkout' },

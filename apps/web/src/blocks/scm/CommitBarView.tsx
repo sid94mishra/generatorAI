@@ -108,6 +108,8 @@ export function CommitBarView({
   const { blockedReason, needsConnect, canPush, canOpenPr, mergeInProgress } = availability;
   const prOn = openPr && canOpenPr;
   const pushOn = push && canPush;
+  // A clean tree on a branch its upstream already has: a push would do nothing (U-61).
+  const upToDate = !selected.dirty && selected.hasUpstream && selected.ahead === 0;
   // One note for what the toggles cannot do (the connect link covers the PR when it is the fix).
   // A reason another one already says ("No git remote" beside "No git remote configured") is dropped.
   const unavailable = [
@@ -297,13 +299,13 @@ export function CommitBarView({
               variant="primary"
               icon={prOn ? 'pr' : 'commit'}
               loading={running}
-              disabled={!selected.can.commit && !selected.dirty && !pushOn && !prOn}
+              disabled={(!selected.can.commit && !selected.dirty && !pushOn && !prOn) || (upToDate && !prOn)}
               onClick={onRun}
               data-testid="scm-run-flow"
             >
               {selected.dirty
                 ? prOn ? 'Commit & open pull request' : pushOn ? 'Commit & push' : 'Commit'
-                : prOn ? 'Open pull request' : pushOn ? 'Push' : 'Nothing to commit'}
+                : prOn ? 'Open pull request' : upToDate ? 'Up to date' : pushOn ? 'Push' : 'Nothing to commit'}
             </Button>
           </div>
         </div>
