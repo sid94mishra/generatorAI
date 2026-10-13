@@ -9,7 +9,8 @@
 //                   `codebaseAliases`; never "all codebases", W-22) as a
 //                   worktree or in place, else one generated directory. The
 //                   same shadow stores, checkpoints and Changes as a chat.
-//                   `pre_clone` / `post_clone` hooks
+//                   `pre_clone` / `post_clone` hooks; warns when a codebase
+//                   asks for a newer Node than the shells have (U-25)
 //   uploads         files staged before the run (one writer, C-16)
 //   projectConfigs  the project's agents, prompts and skills
 //   preprocess      the definition's preprocessing steps;
@@ -33,6 +34,7 @@ import { branchSlugFor } from '../../MountService.js';
 import { runWorkspace } from '../../session/workspaceExposure.js';
 import { mapItemPlacement, runForItem } from '../MapEffects.js';
 import type { PhaseResult, RunLifecycleDeps } from '../RunLifecycle.js';
+import { nodeVersionWarnings } from './nodeVersion.js';
 import { scanRunUploads, writeRunUpload, type UploadCategory } from './runUploads.js';
 
 /** The project configs the `projectConfigs` phase copies into the run (ProjectConfigService). */
@@ -151,7 +153,12 @@ const worktrees: Phase = async ({ deps, graph, hooks }, run) => {
   const workingDirectory = rows[0]?.path ?? deps.workspaceManager.getWorkingDirectory(ws);
   const updated: WorkflowRun = { ...run, systemVars: { ...(run.systemVars ?? {}), codebases, workingDirectory } };
   await hooks('post_clone', updated);
-  return { systemVars: { codebases, workingDirectory }, detail: `${Object.keys(codebases).length} codebase(s)` };
+  const warnings = await nodeVersionWarnings(codebases);
+  for (const w of warnings) deps.logger?.warn(`[RunLifecycle] ${run.id}: ${w}`);
+  return {
+    systemVars: { codebases, workingDirectory, ...(warnings.length ? { warnings } : {}) },
+    detail: `${Object.keys(codebases).length} codebase(s)`,
+  };
 };
 
 const uploads: Phase = async ({ deps }, run) => {

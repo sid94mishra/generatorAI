@@ -80,6 +80,8 @@ export interface RunSystemVars {
   approvalDelegate?: 'human' | 'invoker';
   /** The chat workspace a run started with `workspace: from_chat_branch` was cut from (P06, G4 §2.6). */
   parentWorkspaceId?: string;
+  /** What the person should know before trusting the run's checks, e.g. an older Node than the codebase asks for (U-25). */
+  warnings?: string[];
 }
 
 /** Workspace/artifact info for a workflow run (`GET /workflow-runs/:id/workspace`). */
