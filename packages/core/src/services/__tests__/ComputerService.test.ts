@@ -652,7 +652,7 @@ describe('ComputerService consent', () => {
     expect(consent.prompts.map((p) => p.scope)).toEqual(['mutate']);
   });
 
-  it('a hung prompt expires into a denial instead of hanging the call', async () => {
+  it('a hung prompt expires — reported as unanswered, not denied — instead of hanging the call', async () => {
     const { service, consent } = makeService([SLACK], { ...enabled(), consentTtlSeconds: 10 });
     consent.hang = true;
     vi.useFakeTimers();
@@ -660,7 +660,8 @@ describe('ComputerService consent', () => {
     await vi.advanceTimersByTimeAsync(11_000);
     const result = await pending;
     vi.useRealTimers();
-    expect(result.refusal?.code).toBe('consent_denied');
+    expect(result.refusal?.code).toBe('consent_expired');
+    expect(consent.stored.size).toBe(0);
   });
 
   it('treats an out-of-union decision as a denial', async () => {

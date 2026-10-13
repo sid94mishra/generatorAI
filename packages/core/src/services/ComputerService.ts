@@ -230,6 +230,8 @@ const REFUSAL_MESSAGES: Record<ComputerRefusalCode, string> = {
   background_uipi_blocked: 'Windows blocked the interaction (the target runs at a higher integrity level).',
   app_blocked: 'This application is blocked from automation for security reasons.',
   consent_denied: 'The user did not approve this action.',
+  consent_expired:
+    'Nobody answered the approval request in time. Tell the user what you need approved — the request appears in the Computer tab — and retry once they are ready.',
   target_not_focused: 'The target window is not focused, and this action requires focus.',
   provider_unavailable: 'Computer use is not available in this environment.',
   stale_snapshot: 'That snapshot is out of date. Take a new computer_snapshot and retry.',
@@ -1652,6 +1654,8 @@ export class ComputerService {
       },
     });
 
+    // Unanswered is not refused: the agent is told to ask again rather than that the person said no.
+    if (decision === 'expired') return this.refusal('consent_expired');
     if (decision === 'deny') {
       await this.consent.save(ctx.workspaceId, app.appId, app.name, 'deny', scope);
       return this.refusal('consent_denied');

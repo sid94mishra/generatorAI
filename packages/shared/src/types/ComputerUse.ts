@@ -49,6 +49,8 @@ export type ComputerRefusalCode =
   | 'app_blocked'
   /** User declined the consent prompt, or a stored deny grant matched. */
   | 'consent_denied'
+  /** Nobody answered the consent prompt before it expired (not a denial: nothing is stored). */
+  | 'consent_expired'
   /** Action needs focus (synthetic input) and the target is not frontmost. */
   | 'target_not_focused'
   /** No bridge is available — server/CI, no desktop attached, feature off. */
