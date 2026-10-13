@@ -123,6 +123,63 @@ export function decideToolPermission(
 }
 
 /**
+ * U-27b — a shell command that only writes one file inside the working directory from a heredoc
+ * (`cat > src/a.ts <<'EOF' … EOF`, optionally after `mkdir -p src &&`) is a file edit: "Accept edits" allows it
+ * as it allows the Write tool, instead of asking as for any shell command. The target must be a plain relative
+ * path with no `..` and no dot-directory (`.git/hooks`, `.claude`, `.github`: those still ask), and the body
+ * must not expand (a quoted delimiter, or no `$`, backtick or backslash). Returns the target, else null.
+ */
+export function heredocWriteTarget(command: string): string | null {
+  const lines = command.replace(/\r\n/g, '\n').replace(/\n+$/, '').split('\n');
+  if (lines.length < 2) return null;
+  const head = lines[0]!.trim();
+  const REL = String.raw`([\w@+./-]+)`;
+  const DELIM = String.raw`<<(-?)\s*(?:'(\w+)'|"(\w+)"|(\w+))`;
+  const prefix = String.raw`^(?:mkdir\s+-p\s+${REL}\s*&&\s*)?cat\s+`;
+  const outFirst = new RegExp(`${prefix}>\\s*${REL}\\s+${DELIM}$`).exec(head);
+  const inFirst = outFirst ? null : new RegExp(`${prefix}${DELIM}\\s+>\\s*${REL}$`).exec(head);
+  const parts = outFirst
+    ? [outFirst[1], outFirst[2], outFirst[3], outFirst[4], outFirst[5], outFirst[6]]
+    : inFirst
+      ? [inFirst[1], inFirst[6], inFirst[2], inFirst[3], inFirst[4], inFirst[5]]
+      : null;
+  if (!parts) return null;
+  const [dir, target, dash, single, double, bare] = parts;
+  const delimiter = single ?? double ?? bare;
+  const closes = (line: string) => (dash ? line.replace(/^\t+/, '') : line) === delimiter;
+  // The heredoc ends at the FIRST delimiter line: anything after it would run as commands.
+  const end = lines.findIndex((line, i) => i > 0 && closes(line));
+  if (!target || !delimiter || end !== lines.length - 1) return null;
+  const body = lines.slice(1, -1).join('\n');
+  if (bare && /[$`\\]/.test(body)) return null;
+  const plain = (p: string, file: boolean) => {
+    const parts = p.replace(/\/+$/, '').split('/');
+    return (
+      !p.startsWith('/') &&
+      !p.startsWith('-') &&
+      parts.every((seg, i) => seg !== '' && seg !== '..' && (seg !== '.' || i < parts.length - 1) && (!seg.startsWith('.') || seg === '.' || (file && i === parts.length - 1)))
+    );
+  };
+  if (!plain(target, true) || (dir !== undefined && !plain(dir, false))) return null;
+  return target;
+}
+
+/** The tool input a permission request carries: Claude's `details.input`, else Copilot's raw request fields. */
+function requestInput(details: Record<string, unknown>): unknown {
+  if ('input' in details) return details['input'];
+  const rest: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(details)) if (!DETAIL_META_KEYS.has(k)) rest[k] = v;
+  return Object.keys(rest).length > 0 ? rest : undefined;
+}
+
+/** The kind of access a request is judged as: a heredoc file write counts as a file write (U-27b). */
+export function permissionTypeOf(request: PermissionRequest): PermissionRequest['type'] {
+  if (request.type !== 'shell_exec') return request.type;
+  const command = fullShellCommand(requestInput((request.details ?? {}) as Record<string, unknown>));
+  return command && heredocWriteTarget(command) ? 'file_write' : request.type;
+}
+
+/**
  * A read of a file attached to the current turn. Attachments are stored as artifacts outside the workspace, so
  * the provider asks before reading them; the person who attached a file already said the agent may read it.
  * Claude reports `{ input: { file_path } }`, Copilot `{ path }`.
@@ -208,14 +265,7 @@ export function buildToolPermissionPayload(
       : typeof details['kind'] === 'string' && details['kind'].length > 0
         ? details['kind']
         : request.type;
-  let input: unknown;
-  if ('input' in details) {
-    input = details['input'];
-  } else {
-    const rest: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(details)) if (!DETAIL_META_KEYS.has(k)) rest[k] = v;
-    input = Object.keys(rest).length > 0 ? rest : undefined;
-  }
+  const input = requestInput(details);
   const inputSummary = summariseToolInput(input);
   // MG-04: stamped once, here, so the stored gate, its event, the attention
   // ask and the push all carry the same verdict.

@@ -26,6 +26,7 @@ import type { RecordPlanArgs, RecordPlanResult } from '../../tools/recordPlanToo
 import {
   buildToolPermissionPayload,
   decideToolPermission,
+  permissionTypeOf,
   resolveModeDescriptor,
   resolveTurnPermissionMode,
 } from '../agentModePolicy.js';
@@ -84,7 +85,7 @@ export class StageGatePort implements GatePort {
   async permission(req: PermissionRequest, turn: TurnContext): Promise<PermissionResponse> {
     const ids = stageIds(turn);
     const mode = turn.permissionMode;
-    const verdict = decideToolPermission(mode, req.type);
+    const verdict = decideToolPermission(mode, permissionTypeOf(req));
     if (verdict === 'allow') return { granted: true };
     if (verdict === 'deny') return { granted: false, reason: `Blocked by the run's ${mode} permission mode.` };
 

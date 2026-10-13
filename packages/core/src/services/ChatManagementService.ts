@@ -43,6 +43,7 @@ import {
   resolveTurnPermissionMode,
   shouldAttachPermissionHandler,
   decideToolPermission,
+  permissionTypeOf,
   isAttachedFileRead,
   buildToolPermissionPayload,
   getDefaultChatPermissionMode,
@@ -527,7 +528,7 @@ export class ChatManagementService {
     const mode = ctx.permissionMode;
     // The person attached these files to this very message; asking whether the agent may read them was noise.
     if (isAttachedFileRead(request, ctx.attachedPaths)) return { granted: true };
-    const verdict = decideToolPermission(mode, request.type);
+    const verdict = decideToolPermission(mode, permissionTypeOf(request));
     if (verdict === 'allow') return { granted: true };
     if (verdict === 'deny') {
       return { granted: false, reason: `Blocked by the chat's ${mode} permission mode.` };

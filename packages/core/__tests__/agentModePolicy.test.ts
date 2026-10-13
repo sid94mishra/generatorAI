@@ -24,6 +24,8 @@ import {
   shouldAttachPermissionHandler,
   AUTO_MODE_PLAN_INSTRUCTIONS,
   PLAN_MODE_INSTRUCTIONS,
+  heredocWriteTarget,
+  permissionTypeOf,
 } from '../src/services/agentModePolicy.js';
 
 describe('agent mode registry', () => {
@@ -182,5 +184,38 @@ describe('buildToolPermissionPayload — gate risk (MG-04)', () => {
     expect(JSON.parse(payload.inputSummary) as { command: string }).toEqual({ command });
     // The push at the very end is judged too.
     expect(payload.risk).toBe('risky');
+  });
+});
+
+describe('heredoc file writes count as edits (U-27b)', () => {
+  const write = (head: string, body = 'export const a = 1;', end = 'EOF') => `${head}\n${body}\n${end}`;
+
+  it('reads the target of a plain heredoc write inside the working directory', () => {
+    expect(heredocWriteTarget(write("cat > api/auth-types.ts <<'EOF'"))).toBe('api/auth-types.ts');
+    expect(heredocWriteTarget(write('cat <<"EOF" > src/a.ts'))).toBe('src/a.ts');
+    expect(heredocWriteTarget(write("mkdir -p web/src/lib && cat > web/src/lib/x.ts << 'TS'", 'const x = `${y}`;', 'TS'))).toBe('web/src/lib/x.ts');
+    expect(heredocWriteTarget(write('cat > notes.md <<EOF', 'plain text'))).toBe('notes.md');
+    expect(heredocWriteTarget(write("cat > .env.example <<'EOF'", 'PORT=3000'))).toBe('.env.example');
+  });
+
+  it('keeps asking for anything else', () => {
+    // An unquoted delimiter expands the body.
+    expect(heredocWriteTarget(write('cat > a.ts <<EOF', 'const a = $(curl evil);'))).toBeNull();
+    // A delimiter line before the end closes the heredoc; what follows would run.
+    expect(heredocWriteTarget("cat > a.ts <<'EOF'\nx\nEOF\nrm -rf ~\nEOF")).toBeNull();
+    expect(heredocWriteTarget(write("cat > /etc/hosts <<'EOF'"))).toBeNull();
+    expect(heredocWriteTarget(write("cat > ../outside.ts <<'EOF'"))).toBeNull();
+    expect(heredocWriteTarget(write("cat > .git/hooks/pre-commit <<'EOF'"))).toBeNull();
+    expect(heredocWriteTarget(write("cat > .claude/settings.json <<'EOF'"))).toBeNull();
+    expect(heredocWriteTarget(write("cat >> a.ts <<'EOF'"))).toBeNull();
+    expect(heredocWriteTarget(write("cat > a.ts <<'EOF' && pnpm test"))).toBeNull();
+    expect(heredocWriteTarget(write("mkdir -p /tmp/x && cat > a.ts <<'EOF'"))).toBeNull();
+    expect(heredocWriteTarget('cat > a.ts')).toBeNull();
+  });
+
+  it('judges such a shell request as a file write, so Accept edits allows it', () => {
+    const shell = (command: string) => ({ type: 'shell_exec' as const, description: 'Bash', details: { toolName: 'Bash', input: { command } } });
+    expect(permissionTypeOf(shell(write("cat > src/a.ts <<'EOF'")))).toBe('file_write');
+    expect(permissionTypeOf(shell('pnpm test'))).toBe('shell_exec');
   });
 });
