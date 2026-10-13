@@ -59,6 +59,8 @@ export interface AgentPickerViewProps {
   disabled?: boolean;
   /** Trigger text when no agent is selected. */
   placeholder?: string;
+  /** What the trigger picks; it is announced as "<label>: <agent or placeholder>". Default `Agent`. */
+  label?: string;
   /** Render the "N skills · M MCP servers · model" line under the trigger. */
   showSummary?: boolean;
   /** Where "Manage agents" goes. Omit to hide the link. */
@@ -89,6 +91,7 @@ export function AgentPickerView({
   loading = false,
   disabled = false,
   placeholder = 'No agent (platform default)',
+  label = 'Agent',
   showSummary = true,
   manageAgentsHref,
   onNavigate,
@@ -119,6 +122,7 @@ export function AgentPickerView({
                 size="lg"
                 trailingIcon="chevron-down"
                 disabled={disabled}
+                aria-label={`${label}: ${selected?.name ?? placeholder}`}
                 data-testid={testId}
                 className="w-full justify-between border-line-strong bg-sunken font-normal data-popup-open:border-focus"
               >
