@@ -121,7 +121,8 @@ fs.writeFileSync(
   `${JSON.stringify(
     {
       name: 'generatorai-server-runtime',
-      version: '0.0.0',
+      // The server reports the nearest package.json's version (Diagnostics, Home): make it the app's own.
+      version: JSON.parse(fs.readFileSync(path.join(desktopRoot, 'package.json'), 'utf8')).version,
       private: true,
       description: 'Runtime dependencies for the packaged GeneratorAI server bundle.',
       // Read back by the packaging step, which refuses to build an installer
