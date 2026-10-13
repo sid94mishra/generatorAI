@@ -36,7 +36,7 @@ describe('mergeCaution', () => {
 
 describe('mergeHoldLabel', () => {
   it('names what GitHub holds an open, mergeable PR back for, in words (U-74)', () => {
-    expect(mergeHoldLabel({ ...open, mergeableState: 'blocked' })).toBe('Blocked by required checks or reviews');
+    expect(mergeHoldLabel({ ...open, mergeableState: 'blocked' })).toBe('Branch protection may block the merge');
     expect(mergeHoldLabel({ ...open, mergeableState: 'behind' })).toBe('Behind the base branch');
     expect(mergeHoldLabel(open)).toBeNull();
     expect(mergeHoldLabel({ ...open, state: 'merged', mergeableState: 'blocked' })).toBeNull();

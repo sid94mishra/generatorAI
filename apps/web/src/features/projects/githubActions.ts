@@ -58,7 +58,7 @@ export function mergeHoldLabel(pr: MergeFacts): string | null {
   if (mergeBlockReason(pr)) return null;
   switch (pr.mergeableState) {
     case 'blocked':
-      return 'Blocked by required checks or reviews';
+      return 'Branch protection may block the merge';
     case 'unstable':
       return 'Mergeable · checks failing or pending';
     case 'behind':
