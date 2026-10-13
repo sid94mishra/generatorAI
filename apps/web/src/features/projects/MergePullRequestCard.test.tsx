@@ -42,10 +42,11 @@ function wrap(node: ReactNode, platform: Record<string, unknown>) {
 }
 
 describe('MergePullRequestCard', () => {
-  it('is disabled with the reason when the PR is already merged', () => {
+  it('shows only the outcome once the PR is merged (U-59)', () => {
     wrap(<MergePullRequestCard projectId="p1" codebaseId="cb" pr={{ ...PR, state: 'merged' }} />, {});
     expect(screen.getByTestId('pr-merge-blocked').textContent).toContain('already merged');
-    expect(screen.getByRole('button', { name: 'Merge pull request' })).toHaveProperty('disabled', true);
+    expect(screen.queryByRole('button', { name: 'Merge pull request' })).toBeNull();
+    expect(screen.queryByTestId('pr-merge-delete-branch')).toBeNull();
   });
 
   it('is disabled while GitHub computes mergeability, and on conflicts', () => {

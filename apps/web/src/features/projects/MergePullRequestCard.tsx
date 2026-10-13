@@ -6,7 +6,8 @@
 // head branch" checkbox, and a confirmation AlertDialog before anything
 // reaches GitHub. When the PR cannot be merged from here (merged, closed,
 // draft, conflicts, mergeability still computing) the controls are disabled
-// and the reason is said in the card. A merge is a background job on the
+// and the reason is said in the card; a merged or closed PR shows only that outcome
+// (no dead checkbox and button, U-59). A merge is a background job on the
 // host, so its completion is a toast; the PR refetches to "merged".
 // ────────────────────────────────────────────────────────────────
 
@@ -18,7 +19,13 @@ import { AlertDialog } from '@/ui/primitives/AlertDialog/AlertDialog.js';
 import { Card } from '@/ui/primitives/Card/Card.js';
 import { Checkbox } from '@/ui/primitives/Checkbox/Checkbox.js';
 import { toast } from '@/ui/primitives/Toast/Toast.js';
-import { MERGE_METHOD_HINT, MERGE_METHOD_LABEL, MERGE_METHODS, mergeBlockReason, mergeCaution } from './githubActions.js';
+import {
+  MERGE_METHOD_HINT,
+  MERGE_METHOD_LABEL,
+  MERGE_METHODS,
+  mergeBlockReason,
+  mergeCaution,
+} from './githubActions.js';
 
 export function MergePullRequestCard({
   projectId,
@@ -36,6 +43,7 @@ export function MergePullRequestCard({
   const blocked = mergeBlockReason(pr);
   const caution = mergeCaution(pr);
   const disabled = blocked !== null || merge.isPending;
+  const settled = pr.state === 'merged' || pr.state === 'closed';
 
   const run = async () => {
     try {
@@ -66,42 +74,47 @@ export function MergePullRequestCard({
           </p>
         ) : (
           <p className="text-small text-fg-3">
-            Merges <span className="font-mono">{pr.head}</span> into <span className="font-mono">{pr.base}</span> on GitHub.
+            Merges <span className="font-mono">{pr.head}</span> into <span className="font-mono">{pr.base}</span> on
+            GitHub.
           </p>
         )}
-        <Checkbox
-          label={
-            <>
-              Delete <span className="font-mono">{pr.head}</span> after merging
-            </>
-          }
-          checked={deleteBranch}
-          onCheckedChange={setDeleteBranch}
-          disabled={disabled}
-          data-testid="pr-merge-delete-branch"
-        />
-        <MenuButton
-          split
-          variant="primary"
-          icon="merge"
-          label={MERGE_METHOD_LABEL[method]}
-          menuLabel="Merge method"
-          onPrimary={() => setConfirming(true)}
-          disabled={disabled}
-          align="start"
-          className="self-start"
-          data-testid="pr-merge"
-          items={MERGE_METHODS.map((m) => ({
-            id: m,
-            label: (
-              <span className="flex flex-col">
-                <span className={m === method ? 'font-medium text-fg' : undefined}>{MERGE_METHOD_LABEL[m]}</span>
-                <span className="text-micro text-fg-3">{MERGE_METHOD_HINT[m]}</span>
-              </span>
-            ),
-            onSelect: () => setMethod(m),
-          }))}
-        />
+        {settled ? null : (
+          <>
+            <Checkbox
+              label={
+                <span className="min-w-0 break-all">
+                  Delete <span className="font-mono">{pr.head}</span> after merging
+                </span>
+              }
+              checked={deleteBranch}
+              onCheckedChange={setDeleteBranch}
+              disabled={disabled}
+              data-testid="pr-merge-delete-branch"
+            />
+            <MenuButton
+              split
+              variant="primary"
+              icon="merge"
+              label={MERGE_METHOD_LABEL[method]}
+              menuLabel="Merge method"
+              onPrimary={() => setConfirming(true)}
+              disabled={disabled}
+              align="start"
+              className="self-start"
+              data-testid="pr-merge"
+              items={MERGE_METHODS.map((m) => ({
+                id: m,
+                label: (
+                  <span className="flex flex-col">
+                    <span className={m === method ? 'font-medium text-fg' : undefined}>{MERGE_METHOD_LABEL[m]}</span>
+                    <span className="text-micro text-fg-3">{MERGE_METHOD_HINT[m]}</span>
+                  </span>
+                ),
+                onSelect: () => setMethod(m),
+              }))}
+            />
+          </>
+        )}
       </Card.Body>
       <AlertDialog
         open={confirming}
