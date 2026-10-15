@@ -1150,6 +1150,29 @@ export function createUnifiedStreamRoutes(container: Container): Router {
   }
 
   /**
+   * GET /api/stream/replay/prelude?id=<chatId>
+   * Opening a chat (U-39): the latest turn's first seq and the earlier rows its transcript still needs, so the client
+   * pages `/replay` from `turnStartSeq` instead of every row of every turn. `turnStartSeq: 0` means replay everything.
+   */
+  router.get('/replay/prelude', async (req, res, next) => {
+    try {
+      const chatId = typeof req.query['id'] === 'string' ? req.query['id'] : '';
+      if (!chatId) {
+        res.status(400).json({ error: { code: 'MISSING_ID', message: 'id required' } });
+        return;
+      }
+      const missingScope = req.principal ? missingStreamScope(req.principal, 'chat') : undefined;
+      if (missingScope) {
+        res.status(403).json(insufficientScopeBody('Reading', { scope: 'chat', id: chatId }, missingScope));
+        return;
+      }
+      res.json(await streamBroker.chatTurnPrelude(chatId));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
    * GET /api/stream/replay?scope=<s>&id=<id>&afterSeq=<n>&limit=<n>
    * REST pagination companion. Use when replay exceeds the SSE sync cap
    * (STR-06) — client calls this with the last seq it saw and continues

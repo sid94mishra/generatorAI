@@ -9,7 +9,7 @@
 
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, gt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, lt, or, sql } from 'drizzle-orm';
 import { streamCursors, streamSequences } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 
@@ -331,6 +331,71 @@ export class DrizzleStreamCursorRepository {
       payload: r.payload,
       ts: r.ts,
     }));
+  }
+
+  /**
+   * What a client opening a long chat needs from before its latest turn (U-39): opening one used to page every row of
+   * every turn to the browser, which then kept the latest turn alone plus a handful of kinds.
+   *
+   * `turnStartSeq` is the seq of the latest row of `turnKind` that `isTurnStart` accepts (0 when there is none among
+   * the last 50: replay everything). `rows` are the rows before it whose kind starts with one of `keepPrefixes`, plus
+   * the last `latestCount` rows of each `latestKinds` kind, oldest first. The client replays from `turnStartSeq`.
+   */
+  async turnPrelude(
+    scope: StreamScope,
+    scopeId: string,
+    opts: {
+      turnKind: string;
+      isTurnStart: (payload: unknown) => boolean;
+      keepPrefixes: readonly string[];
+      latestKinds: readonly string[];
+      latestCount: number;
+    },
+  ): Promise<{ turnStartSeq: number; rows: StreamEventRow[] }> {
+    const inScope = and(eq(streamCursors.scope, scope), eq(streamCursors.scopeId, scopeId));
+    const starts = await this.db
+      .select({ seq: streamCursors.seq, payload: streamCursors.payload })
+      .from(streamCursors)
+      .where(and(inScope, eq(streamCursors.kind, opts.turnKind)))
+      .orderBy(desc(streamCursors.seq))
+      .limit(50);
+    const turnStartSeq = starts.find((r) => opts.isTurnStart(r.payload))?.seq ?? 0;
+    if (turnStartSeq <= 1) return { turnStartSeq: 0, rows: [] };
+
+    const columns = {
+      id: streamCursors.id,
+      scope: streamCursors.scope,
+      scopeId: streamCursors.scopeId,
+      seq: streamCursors.seq,
+      kind: streamCursors.kind,
+      payload: streamCursors.payload,
+      ts: streamCursors.ts,
+    };
+    const before = and(inScope, lt(streamCursors.seq, turnStartSeq));
+    // Exact prefixes: LIKE would read `_` in `chat.background_task.` as a wildcard.
+    const kept = opts.keepPrefixes.length
+      ? await this.db
+          .select(columns)
+          .from(streamCursors)
+          .where(and(before, or(...opts.keepPrefixes.map((p) => sql`substr(${streamCursors.kind}, 1, ${p.length}) = ${p}`))))
+          .orderBy(asc(streamCursors.seq))
+      : [];
+    const latest = await Promise.all(
+      opts.latestKinds.map((kind) =>
+        this.db
+          .select(columns)
+          .from(streamCursors)
+          .where(and(before, eq(streamCursors.kind, kind)))
+          .orderBy(desc(streamCursors.seq))
+          .limit(opts.latestCount),
+      ),
+    );
+    const bySeq = new Map<number, (typeof kept)[number]>();
+    for (const r of [...kept, ...latest.flat()]) bySeq.set(r.seq, r);
+    const rows = [...bySeq.values()]
+      .sort((a, b) => a.seq - b.seq)
+      .map((r) => ({ id: r.id, scope: r.scope as StreamScope, scopeId: r.scopeId, seq: r.seq, kind: r.kind, payload: r.payload, ts: r.ts }));
+    return { turnStartSeq, rows };
   }
 
   /**

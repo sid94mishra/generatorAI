@@ -3010,6 +3010,14 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         responses: { '200': { description: 'Events' } },
       },
     },
+    '/api/stream/replay/prelude': {
+      get: {
+        tags: ['Streaming'],
+        summary: "Opening a chat: its latest turn's first seq and the earlier rows its transcript still needs",
+        parameters: [{ in: 'query', name: 'id', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: '{ turnStartSeq, rows } — page /api/stream/replay from turnStartSeq (0: from the start)' } },
+      },
+    },
 
     // ── Source control: accounts + settings (doc §2) ──
 

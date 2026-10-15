@@ -23,7 +23,7 @@ import type {
   StreamEventRow,
   StreamScope,
 } from '@generatorai/db';
-import { classifyEvent, type ILogger } from '@generatorai/shared';
+import { CHAT_TURN_PRELUDE, classifyEvent, isChatTurnStart, type ILogger } from '@generatorai/shared';
 import { isNoiseEventKind } from '../events/EventBus.js';
 import type { DeltaLog } from './DeltaLog.js';
 import { StreamWriteBatcher, type StreamWriteBatcherOptions } from './StreamWriteBatcher.js';
@@ -393,6 +393,14 @@ export class StreamBroker {
   ): Promise<StreamEventRow[]> {
     const clamped = Math.max(1, Math.min(limit, MAX_SYNC_REPLAY));
     return this.repo.replayAfter(scope, scopeId, afterSeq, clamped);
+  }
+
+  /**
+   * A chat's latest-turn start and the earlier rows its transcript still needs (U-39): see
+   * `CHAT_TURN_PRELUDE`. The client replays from `turnStartSeq` instead of from 0.
+   */
+  async chatTurnPrelude(chatId: string): Promise<{ turnStartSeq: number; rows: StreamEventRow[] }> {
+    return this.repo.turnPrelude('chat', chatId, { ...CHAT_TURN_PRELUDE, isTurnStart: isChatTurnStart });
   }
 
   /** Current live-subscriber count for (scope, scopeId). */

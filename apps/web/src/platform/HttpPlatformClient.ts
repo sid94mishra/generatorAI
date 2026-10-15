@@ -751,6 +751,17 @@ export class HttpPlatformClient implements IPlatformClient {
     return response.rows;
   }
 
+  /**
+   * Opening a chat (U-39): the latest turn's first seq and the earlier rows its transcript still needs. Rows have the
+   * `streamReplay` shape; `turnStartSeq: 0` means replay from the start.
+   */
+  async streamChatPrelude(chatId: string): Promise<{
+    turnStartSeq: number;
+    rows: Awaited<ReturnType<HttpPlatformClient['streamReplay']>>;
+  }> {
+    return apiFetch(`${this.baseUrl}/api/stream/replay/prelude?${new URLSearchParams({ id: chatId }).toString()}`);
+  }
+
   // ── v2: Chat Operations ──
 
   async createChat(params: CreateChatParams): Promise<Chat> {

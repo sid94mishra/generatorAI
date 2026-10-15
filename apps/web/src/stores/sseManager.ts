@@ -68,6 +68,7 @@ import {
 import type { HttpPlatformClient } from '../platform/HttpPlatformClient.js';
 import { openMultiplexedStream } from '../platform/muxStream.js';
 import { globalSingleton } from '../lib/globalSingleton.js';
+import { SequenceLedger } from './sequenceLedger.js';
 import { blockDeliveryEntry } from '../platform/surfaceCapabilities.js';
 
 // ── Connection scope ──
@@ -106,9 +107,11 @@ interface ConnectionState {
   draining: boolean;
   replayPromise: Promise<void> | null;
   pendingSSEEvents: PersistedEvent[];
-  lastReplayedSequence: number;
-  maxSeenSequence: number;
-  seenSequenceIds: Set<number>;
+  /**
+   * Every sequence this connection has applied, as ranges (U-39): dedup for live frames, replay overlap and gap fill.
+   * `seen.frontier` (nothing missing at or below it) is where a gap fill resumes; `seen.max` is the tip.
+   */
+  seen: SequenceLedger;
 
   /**
    * W26 — the ONE event router, shared with mobile and available to the CLI.
@@ -138,7 +141,7 @@ interface ConnectionState {
   // resume can miss it, stranding the UI on "Copilot is thinking…" forever.
   // The watchdog periodically reconciles against server truth: when an active
   // (non-terminal) stream has received no events for `STALL_MS`, it re-fetches
-  // events after `maxSeenSequence` via REST replay and processes any it missed
+  // events after `seen.frontier` via REST replay and processes any it missed
   // (including the idle), which drives the stream to `complete` naturally.
   /** Wall-clock ms of the last processed event (live or gap-filled). */
   lastEventAt: number;
@@ -146,14 +149,6 @@ interface ConnectionState {
   watchdogTimer: ReturnType<typeof setInterval> | null;
   /** Re-entrancy guard so overlapping ticks don't double-fetch. */
   gapFilling: boolean;
-  /**
-   * Highest sequence below which NOTHING is missing.
-   *
-   * Distinct from `maxSeenSequence`: a single dropped frame leaves a hole
-   * below the tip, and replaying from the tip can never fetch it back. Gap
-   * fill therefore resumes from this frontier, not from the high-water mark.
-   */
-  contiguousSequence: number;
   /** Consecutive stall ticks that found nothing new, for the terminal reconcile. */
   emptyGapFills: number;
 }
@@ -166,14 +161,13 @@ const connections = globalSingleton(
 );
 
 /**
- * How far below the tip `seenSequenceIds` is retained.
+ * How far the tip may run ahead of the contiguous frontier before a gap fill runs (U-39).
  *
- * Two things depend on it and must agree: pruning the dedup set, and how far
- * back a gap fill may resume. A hole older than this window cannot be
- * recovered without re-processing events we can no longer recognise as
- * duplicates — see `gapFill`, which reports what it had to skip.
+ * A dropped frame in a busy stream used to wait for the stall watchdog, which only fires after 20 s of silence — by
+ * then thousands of events could have passed it. Frames of one scope arrive in order, so a frontier this far behind
+ * is a hole, not reordering.
  */
-const DEDUP_WINDOW = 2000;
+const HOLE_REFILL_AFTER = 50;
 
 // ── P1-51: Per-tick invalidation de-duplication ─────────────────────────────
 // A 20-stage run can fire ~160 full refetches per second: each stage event
@@ -232,33 +226,14 @@ export function _flushInvalidationsNow(): void {
 }
 
 /**
- * Where a gap fill may resume from — and what it has to give up to get there.
- *
- * Resuming from the contiguous frontier is what makes a dropped frame
- * recoverable. But `seenSequenceIds` only retains `DEDUP_WINDOW` entries below
- * the tip, so a hole older than that cannot be refetched without re-processing
- * events we can no longer recognise as duplicates (duplicated tool calls,
- * duplicated text). The clamp past it is therefore permanent data loss for
- * this tab.
- *
- * N4: it used to happen in complete silence — the comment acknowledged it and
- * nothing surfaced it. This function is where that stops: it counts the lost
- * sequences and records them against the connection, which is what puts a
- * "some events could not be recovered" badge in front of the user instead of
- * leaving a transcript quietly missing a tool result. Exported so the branch
- * has a test rather than a comment.
+ * Events this tab can no longer get: the server's retention swept them before a gap fill asked, or the stream had
+ * more separate holes than the ledger keeps (U-39). N4: never silent — it puts the "some events could not be
+ * recovered" badge in front of the user instead of leaving a transcript quietly missing a tool result.
  */
-export function resolveGapResume(
-  contiguousSequence: number,
-  maxSeenSequence: number,
-  sessionId: string,
-): number {
-  const windowFloor = maxSeenSequence - DEDUP_WINDOW;
-  if (windowFloor <= contiguousSequence) return contiguousSequence;
-  const skipped = windowFloor - contiguousSequence;
-  countFallback('streamGapSkippedEvents', skipped);
-  useConnectionStore.getState().recordGap(sessionId, skipped);
-  return windowFloor;
+function recordLoss(sessionId: string, count: number): void {
+  if (count <= 0) return;
+  countFallback('streamGapSkippedEvents', count);
+  useConnectionStore.getState().recordGap(sessionId, count);
 }
 
 // ── Event processing ──
@@ -321,11 +296,7 @@ const MESSAGE_SETTLE_REFETCH_MS = 1_000;
  * advancing and the missing event stays reachable.
  */
 function noteSeen(conn: ConnectionState, seq: number): void {
-  conn.seenSequenceIds.add(seq);
-  if (seq > conn.maxSeenSequence) conn.maxSeenSequence = seq;
-  while (conn.seenSequenceIds.has(conn.contiguousSequence + 1)) {
-    conn.contiguousSequence += 1;
-  }
+  recordLoss(conn.primarySessionId, conn.seen.add(seq));
 }
 
 function connKey(scope: StreamScope, scopeId: string): string {
@@ -746,10 +717,7 @@ function openConnection(
     draining: false,
     replayPromise: null,
     pendingSSEEvents: [],
-    lastReplayedSequence: 0,
-    maxSeenSequence: 0,
-    seenSequenceIds: new Set(),
-    contiguousSequence: 0,
+    seen: new SequenceLedger(),
     emptyGapFills: 0,
     router: new StreamEventRouter({ blockDelivery: blockDeliveryEntry() }),
     drainHandle: null,
@@ -809,6 +777,23 @@ function openConnection(
       type StreamRow = Awaited<ReturnType<typeof platform.streamReplay>>[number];
       const allRows: StreamRow[] = [];
       let afterSeq = 0;
+
+      // U-39 — a chat opens from its latest turn. Earlier turns are in the persisted messages and the rebuild below
+      // keeps only the latest turn plus a few kinds (CHAT_TURN_PRELUDE), yet opening a long chat paged every row of
+      // every turn first: 18 sequential requests for one 8,580-row chat. The server hands over those kept rows and
+      // where the latest turn starts; paging resumes there. If the prelude fails, page everything as before.
+      if (scope === 'chat') {
+        try {
+          const prelude = await platform.streamChatPrelude(scopeId);
+          if (prelude.turnStartSeq > 0) {
+            for (const row of prelude.rows) allRows.push(row);
+            afterSeq = prelude.turnStartSeq - 1;
+          }
+        } catch (err) {
+          if (import.meta.env?.DEV) console.debug('[sseManager] Chat prelude failed for', key, err);
+        }
+        if (conn.refCount <= 0) return;
+      }
 
       // Per-stage / session replayed-event counts so we only rebuild a stream
       // when its accumulated event count actually changes across pages. This
@@ -922,10 +907,10 @@ function openConnection(
           replayEventsIntoStore(primarySessionId, events);
         }
 
+        // Everything up to the replayed tip counts as applied — including the earlier-turn rows the prelude left out
+        // on purpose — so live frames and gap fills dedup against it.
         const maxSeq = events.reduce((m, e) => Math.max(m, e.sequenceId), 0);
-        conn.lastReplayedSequence = maxSeq;
-        conn.maxSeenSequence = maxSeq;
-        conn.contiguousSequence = maxSeq;
+        if (maxSeq > 0) conn.seen.addRange(1, maxSeq);
       };
 
       while (true) {
@@ -996,14 +981,8 @@ function openConnection(
       if (import.meta.env?.DEV) {
         console.debug('[sseManager] Replay failed for', key);
       }
-      // Fallback: if replay fails, set high water from buffered SSE events
-      // so we don't re-process events already delivered via live stream.
-      if (conn.pendingSSEEvents.length > 0) {
-        const maxBuffered = conn.pendingSSEEvents.reduce(
-          (m, e) => Math.max(m, e.sequenceId ?? 0), 0,
-        );
-        if (maxBuffered > 0) conn.maxSeenSequence = maxBuffered;
-      }
+      // The buffered live frames are applied (and noted) by the flush below; the history before them stays a hole
+      // the next gap fill refills.
     }
 
     if (conn.refCount <= 0) return;
@@ -1016,7 +995,7 @@ function openConnection(
     conn.pendingSSEEvents = [];
     for (const ev of pending) {
       if (ev.sequenceId != null && ev.sequenceId > 0) {
-        if (ev.sequenceId <= conn.lastReplayedSequence || conn.seenSequenceIds.has(ev.sequenceId)) continue;
+        if (conn.seen.has(ev.sequenceId)) continue;
         noteSeen(conn, ev.sequenceId);
       }
       processEvent(ev.sessionId, conn, ev);
@@ -1060,27 +1039,13 @@ function openConnection(
 
         // Dedup by seq (handles out-of-order delivery + replay overlap).
         if (event.sequenceId > 0) {
-          if (event.sequenceId <= conn.lastReplayedSequence || conn.seenSequenceIds.has(event.sequenceId)) {
-            return;
-          }
-          conn.seenSequenceIds.add(event.sequenceId);
-          if (event.sequenceId > conn.maxSeenSequence) conn.maxSeenSequence = event.sequenceId;
-          while (conn.seenSequenceIds.has(conn.contiguousSequence + 1)) {
-            conn.contiguousSequence += 1;
-          }
-          // Bounded seen set: use a sliding window that retains the last N sequence
-          // IDs based on the maximum seen, pruning entries well below the window.
-          // A wider window (maxSeenSequence - 500) prevents legitimate late arrivals
-          // from being dropped on high-latency networks while keeping memory bounded.
-          if (conn.seenSequenceIds.size > DEDUP_WINDOW + 500) {
-            const threshold = conn.maxSeenSequence - DEDUP_WINDOW;
-            for (const id of conn.seenSequenceIds) {
-              if (id < threshold) conn.seenSequenceIds.delete(id);
-            }
-          }
+          if (conn.seen.has(event.sequenceId)) return;
+          noteSeen(conn, event.sequenceId);
         }
 
         processEvent(event.sessionId, conn, event);
+        // A frame dropped mid-stream: refill it now rather than when the stream next goes quiet (U-39).
+        if (!conn.gapFilling && conn.seen.max - conn.seen.frontier > HOLE_REFILL_AFTER) void gapFill();
       },
       onError: (es) => {
         const state = useConnectionStore.getState();
@@ -1133,15 +1098,22 @@ function openConnection(
     let applied = 0;
     try {
       const PAGE_SIZE = 500;
-      // Resume from the contiguous frontier, not the tip: a dropped frame
-      // leaves a hole BELOW `maxSeenSequence`, and replaying from the tip can
-      // never fetch it back. Bounded by the dedup window — anything older has
-      // been pruned from `seenSequenceIds` and would re-process.
-      let afterSeq = resolveGapResume(
-        conn.contiguousSequence,
-        conn.maxSeenSequence,
-        primarySessionId,
-      );
+      // Resume from the contiguous frontier, not the tip: a dropped frame leaves a hole BELOW `seen.max`, and
+      // replaying from the tip can never fetch it back. The ledger remembers every applied sequence, so a hole of any
+      // age is refilled exactly — nothing is re-applied and nothing is skipped (U-39).
+      let afterSeq = conn.seen.frontier;
+      // Sequences are gap-free per scope and committed in order, so a sequence the replay steps over is one the
+      // server no longer has (retention swept it): that, and only that, is lost.
+      let expected = afterSeq + 1;
+      const giveUpTo = (seq: number): void => {
+        if (seq > expected) {
+          let lost = 0;
+          for (let gone = expected; gone < seq; gone++) if (!conn.seen.has(gone)) lost += 1;
+          recordLoss(primarySessionId, lost + conn.seen.addRange(expected, seq - 1));
+        }
+        expected = Math.max(expected, seq + 1);
+      };
+      let scanned = false;
       countFallback('streamGapFills');
       while (conn.refCount > 0) {
         let page: Awaited<ReturnType<typeof platform.streamReplay>>;
@@ -1157,10 +1129,15 @@ function openConnection(
         } catch {
           break; // transient — try again on the next tick
         }
-        if (conn.refCount <= 0 || page.length === 0) break;
+        if (conn.refCount <= 0) break;
+        if (page.length === 0) {
+          scanned = true;
+          break;
+        }
         for (const row of page) {
           const seq = row.seq;
-          if (seq <= conn.lastReplayedSequence || conn.seenSequenceIds.has(seq)) continue;
+          giveUpTo(seq);
+          if (conn.seen.has(seq)) continue;
           noteSeen(conn, seq);
           applied += 1;
           const payload = (row.payload ?? {}) as Record<string, unknown>;
@@ -1173,9 +1150,14 @@ function openConnection(
             timestamp: row.ts,
           });
         }
-        if (page.length < PAGE_SIZE) break;
+        if (page.length < PAGE_SIZE) {
+          scanned = true;
+          break;
+        }
         afterSeq = page[page.length - 1]!.seq;
       }
+      // A complete scan that never reached a hole below the tip: the server has none of it any more.
+      if (scanned && conn.seen.frontier < conn.seen.max) giveUpTo(conn.seen.max);
     } finally {
       conn.gapFilling = false;
       // Repeated empty replays justify checking server liveness, but cannot
@@ -1255,7 +1237,7 @@ function closeConnection(scope: StreamScope, scopeId: string): void {
     if (conn.watchdogTimer) { clearInterval(conn.watchdogTimer); conn.watchdogTimer = null; }
     conn.router.reset();
     conn.pendingSSEEvents = [];
-    conn.seenSequenceIds.clear();
+    conn.seen.clear();
     conn.eventSource?.close();
     conn.eventSource = null;
     connections.delete(key);

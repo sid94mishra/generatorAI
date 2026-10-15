@@ -34,6 +34,8 @@ export type { EventClass } from './eventClass.js';
 export {
   EVENT_CLASS,
   DELTA_SESSION_INFO_TYPES,
+  CHAT_TURN_PRELUDE,
+  isChatTurnStart,
   classifyEvent,
   isDeltaEvent,
 } from './eventClass.js';
