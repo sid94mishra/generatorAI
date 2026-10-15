@@ -367,8 +367,8 @@ describe('isNoiseEventKind — empty streaming deltas', () => {
     ).toBe(false);
   });
 
-  it('keeps a non-empty tool_input_delta and drops an empty one', () => {
-    expect(isNoiseEventKind('harness.session_info', { infoType: 'tool_input_delta', message: '"}' })).toBe(false);
+  it('drops tool_input_delta, empty or not: nothing renders it and it was most of every chat (U-39)', () => {
+    expect(isNoiseEventKind('harness.session_info', { infoType: 'tool_input_delta', message: '"}' })).toBe(true);
     expect(isNoiseEventKind('harness.session_info', { infoType: 'tool_input_delta', message: '' })).toBe(true);
   });
 

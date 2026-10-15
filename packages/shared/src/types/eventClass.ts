@@ -343,6 +343,10 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
 export const DELTA_SESSION_INFO_TYPES: ReadonlySet<string> = new Set([
   'tool_partial_result',
   'tool_progress',
+  // Claude's tool input as it streams (`input_json_delta`), a few characters per frame. No surface renders it — the
+  // finished input arrives with `harness.tool_start` — yet it was 85% of every stored chat row (140,124 of 165k on
+  // the owner's database), and opening a chat downloaded all of them (U-39).
+  'tool_input_delta',
   // Codex re-sends the WHOLE unified diff of the turn's working tree on every
   // file write (`turn/diff/updated`), so it is a snapshot each later one
   // supersedes, emitted many times per turn — the delta bar exactly. Nothing
@@ -374,4 +378,24 @@ export function classifyEvent(kind: string, data?: unknown): EventClass {
 /** Convenience predicate. Reads better at call sites that only care about one. */
 export function isDeltaEvent(kind: string, data?: unknown): boolean {
   return classifyEvent(kind, data) === 'delta';
+}
+
+/**
+ * What a client opening a chat needs from before the chat's latest turn (U-39). Earlier turns live in the persisted
+ * messages, so the transcript rebuild keeps only the latest turn plus these: inline widgets (they exist only as
+ * events), orchestrator workers and source-control results (`chat.*`), the workspace changes a stale cache must hear
+ * about (`workspace.*`), and the latest usage and context-window figures. The server answers with these and the
+ * latest turn's first seq; the client replays from there instead of paging every row of every turn.
+ */
+export const CHAT_TURN_PRELUDE = {
+  /** A turn starts at the person's message; a row flagged `__isInternalTurn` (a summary, a context turn) does not count. */
+  turnKind: 'harness.user_message',
+  keepPrefixes: ['harness.widget.', 'chat.', 'workspace.'],
+  latestKinds: ['harness.usage', 'harness.context_usage'],
+  /** Sub-agent figures are skipped by the reader, so a few of each are kept. */
+  latestCount: 10,
+} as const;
+
+export function isChatTurnStart(payload: unknown): boolean {
+  return !(payload && typeof payload === 'object' && (payload as Record<string, unknown>)['__isInternalTurn']);
 }
