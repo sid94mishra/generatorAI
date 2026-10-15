@@ -269,7 +269,7 @@ export function AutomationsListPage() {
                   }
                 />
               }
-              footer="Schedules fire only while the server is running · times shown in your local timezone"
+              footer="Schedules fire only while GeneratorAI is running and the computer is awake · times shown in your local timezone"
             />
           )
         }

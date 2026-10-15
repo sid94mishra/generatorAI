@@ -143,6 +143,15 @@ const TRIGGER_WORDS: Readonly<Record<AutomationTriggerType, string>> = { schedul
  * An automation's run is named for the automation and how it started ("Pulse Nightly Health · scheduled"), not
  * `<workflow> - Run <epoch-ms>`, which also named its branch `…-run-1791863505866-…` (U-79).
  */
+export function missedRunNote(count: number, firstSlot: Date, serverStartedAt: number): string {
+  // A slot after this process started was missed while it kept running: the computer slept (U-81).
+  const asleep = firstSlot.getTime() >= serverStartedAt;
+  const why = asleep ? 'the computer was asleep' : 'GeneratorAI was not running';
+  return count > 1
+    ? `Skipped ${count} scheduled runs: ${why} at their times, and missed runs are set to Skip.`
+    : `Skipped: ${why} at the scheduled time, and missed runs are set to Skip.`;
+}
+
 export function automationRunName(automationName: string, triggeredBy: AutomationTriggerType, iterationLabel?: string): string {
   const row = iterationLabel === SINGLE_RUN_LABEL ? undefined : iterationLabel?.trim();
   return [automationName.trim(), TRIGGER_WORDS[triggeredBy], row].filter(Boolean).join(' · ');
@@ -176,6 +185,8 @@ export class AutomationService {
    */
   private triggerDebounceMs: () => number = () => 0;
   private readonly lastTrigger = new Map<string, { at: number; key: string; execution: AutomationExecution }>();
+  /** When this process started: a slot missed after it was missed to sleep, not to the app being closed. */
+  private readonly startedAt = Date.now();
 
   constructor(
     private automationRepo: IAutomationRepository,
@@ -1335,9 +1346,7 @@ ${serialized}`).digest('hex');
         await this.recordSkipped(
           automation,
           scheduledFor,
-          totalMissed > 1
-            ? `Skipped ${totalMissed} scheduled runs: GeneratorAI was not running at their times, and missed runs are set to Skip.`
-            : 'Skipped: GeneratorAI was not running at the scheduled time, and missed runs are set to Skip.',
+          missedRunNote(totalMissed, scheduledFor, this.startedAt),
         );
         return; // lease released in finally — nothing was dispatched
       }

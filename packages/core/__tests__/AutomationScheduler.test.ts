@@ -14,7 +14,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createDB, migrateDB, EntryRepository, RegisterRepository } from '@generatorai/db';
-import { AutomationService, MISSED_GRACE_MS, automationRunName } from '../src/services/AutomationService.js';
+import { AutomationService, MISSED_GRACE_MS, automationRunName, missedRunNote } from '../src/services/AutomationService.js';
 import { DurableExecutionEngine } from '../src/services/DurableExecutionEngine.js';
 import type {
   IAutomationRepository,
@@ -408,6 +408,12 @@ describe('Item 38 — DB-backed due-row scheduler', () => {
     await late.service.runSchedulerTick();
     await flush();
     expect(late.createLog).toHaveLength(1);
+  });
+
+  it('says the computer slept when a slot was missed after the server started (U-81)', () => {
+    const started = Date.parse('2026-10-13T17:14:00Z');
+    expect(missedRunNote(1, new Date('2026-10-13T17:08:00Z'), started)).toMatch(/^Skipped: GeneratorAI was not running at the scheduled time/);
+    expect(missedRunNote(16, new Date('2026-10-14T22:30:00Z'), started)).toMatch(/^Skipped 16 scheduled runs: the computer was asleep at their times/);
   });
 
   it('names a run for its automation and trigger, not a timestamp (U-79)', () => {
