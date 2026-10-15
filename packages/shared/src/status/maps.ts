@@ -82,7 +82,7 @@ export const STATUS_MAPS = {
     failed: m('failed'),
     cancelled: m('skipped', 'Cancelled'),
     // U-78: a scheduled slot that did not run (missed while the app was closed, or overlapping).
-    skipped: m('skipped', 'Skipped'),
+    skipped: m('skipped'),
   } satisfies Record<AutomationExecutionStatus, StatusMapping | null>,
 
   automationRunItem: {
