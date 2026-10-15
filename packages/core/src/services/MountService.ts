@@ -24,6 +24,7 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import type { Dirent } from 'node:fs';
 import type {
   AgentEvent,
   ChatSourceSpec,
@@ -1269,7 +1270,7 @@ export async function countFiles(dir: string, cap = 1000): Promise<number> {
   const queue = [dir];
   while (queue.length > 0 && count < cap) {
     const current = queue.shift()!;
-    let entries: import('node:fs').Dirent[];
+    let entries: Dirent[];
     try {
       entries = await fs.readdir(current, { withFileTypes: true });
     } catch {
