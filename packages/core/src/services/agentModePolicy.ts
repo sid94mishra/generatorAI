@@ -172,6 +172,14 @@ function requestInput(details: Record<string, unknown>): unknown {
   return Object.keys(rest).length > 0 ? rest : undefined;
 }
 
+/**
+ * What the agent is told when a person denies a request with a reason: bare, "Not now." read as the platform's own
+ * refusal ("The platform refused it with …"), not the user's answer (U-82).
+ */
+export function personDenied(reason: string): string {
+  return `The user denied this request: ${reason}`;
+}
+
 /** The kind of access a request is judged as: a heredoc file write counts as a file write (U-27b). */
 export function permissionTypeOf(request: PermissionRequest): PermissionRequest['type'] {
   if (request.type !== 'shell_exec') return request.type;

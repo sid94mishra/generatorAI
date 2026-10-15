@@ -44,6 +44,7 @@ import {
   shouldAttachPermissionHandler,
   decideToolPermission,
   permissionTypeOf,
+  personDenied,
   isAttachedFileRead,
   buildToolPermissionPayload,
   getDefaultChatPermissionMode,
@@ -583,7 +584,8 @@ export class ChatManagementService {
 
     if (outcome.status === 'answered' && outcome.value) {
       // The stored resolution may also carry the rules it remembered (U-16); the harness gets the decision only.
-      return { granted: outcome.value.granted, ...(outcome.value.reason ? { reason: outcome.value.reason } : {}) };
+      const { granted, reason } = outcome.value;
+      return { granted, ...(reason ? { reason: granted ? reason : personDenied(reason) } : {}) };
     }
     // Cancelled, expired, or the turn was stopped. Deny — an unanswered
     // approval is not an approval.

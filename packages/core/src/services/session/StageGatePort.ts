@@ -27,6 +27,7 @@ import {
   buildToolPermissionPayload,
   decideToolPermission,
   permissionTypeOf,
+  personDenied,
   resolveModeDescriptor,
   resolveTurnPermissionMode,
 } from '../agentModePolicy.js';
@@ -134,7 +135,8 @@ export class StageGatePort implements GatePort {
         ...(remembered.length > 0 ? { remembered } : {}),
       });
     }
-    return { granted, ...(r.reason ? { reason: r.reason } : {}) };
+    if (!r.reason) return { granted };
+    return { granted, reason: granted || isExpiry(r) ? r.reason : personDenied(r.reason) };
   }
 
   async question(req: QuestionRequest, turn: TurnContext): Promise<AgentQuestionResponse> {
