@@ -23,6 +23,9 @@ export interface SourceControlAccount {
   host?: string;
   /** User login as reported by the host. */
   login?: string;
+  /** The host's numeric user id and profile name: the default account commits as them when git has no identity (U-83). */
+  userId?: number;
+  displayName?: string;
   avatarUrl?: string;
   scopes?: string[];
   authMethod: SourceControlAuthMethod;

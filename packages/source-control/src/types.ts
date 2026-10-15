@@ -131,6 +131,10 @@ export interface CloseIssueInput {
 /** The authenticated user behind a provider's credentials (never carries the token). */
 export interface ProviderUser {
   login: string;
+  /** The host's numeric user id (GitHub's noreply commit address carries it). */
+  id?: number;
+  /** The profile's display name, when set. */
+  name?: string;
   avatarUrl?: string;
   scopes?: string[];
 }

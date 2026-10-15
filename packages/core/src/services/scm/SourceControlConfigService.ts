@@ -37,6 +37,7 @@ import {
   type SourceControlRegistry,
 } from '@generatorai/source-control';
 import { redactTokens } from './redact.js';
+import { githubCommitIdentity, type CommitIdentity } from './gitIdentity.js';
 
 export interface SourceControlConfigDeps {
   http: IScmHttpClient;
@@ -46,6 +47,8 @@ export interface SourceControlConfigDeps {
   logger: ILogger;
   /** Directory holding `source-control.json`. */
   configDir: string;
+  /** Where the default account's commit identity is written for git (U-83); omitted, nothing is written. */
+  gitIdentity?: { setIdentity(identity: CommitIdentity | null): Promise<void> };
   /** Boot-time env fallbacks. */
   env?: { githubToken?: string; githubHost?: string; oauthClientId?: string };
 }
@@ -184,6 +187,8 @@ export class SourceControlConfigService {
 
     if (migrated) await this.persist();
     await this.registerAll();
+    // In the background: an account connected before U-83 has no user id yet, and boot must not wait on GitHub.
+    void this.syncCommitIdentity();
     this.deps.logger.info(
       `[SCM] Source control loaded — ${this.settings.accounts.length} account(s), default=${this.settings.defaultAccountId ?? 'none'}`,
     );
@@ -229,6 +234,7 @@ export class SourceControlConfigService {
       }
       this.settings.defaultAccountId = id;
       this.registry.setDefault(id);
+      await this.syncCommitIdentity();
     }
     if (partial.generation) {
       if (partial.generation.provider !== undefined) {
@@ -318,7 +324,42 @@ export class SourceControlConfigService {
       this.settings.defaultAccountId = this.settings.accounts[0]?.id ?? null;
       this.registry.setDefault(this.settings.defaultAccountId);
     }
-    if (existed) await this.persist();
+    if (existed) {
+      await this.persist();
+      await this.syncCommitIdentity();
+    }
+  }
+
+  /**
+   * The default GitHub account is who agents and the app commit as when git has no identity of its own (U-83).
+   * Never throws: a failed refresh leaves the last identity in place.
+   */
+  private async syncCommitIdentity(): Promise<void> {
+    const sink = this.deps.gitIdentity;
+    if (!sink) return;
+    try {
+      const account = this.settings.accounts.find((a) => a.id === this.settings.defaultAccountId);
+      if (!account || account.provider !== 'github') {
+        await sink.setIdentity(null);
+        return;
+      }
+      if (account.userId === undefined) await this.refreshAccountUser(account);
+      await sink.setIdentity(githubCommitIdentity(account, account.host));
+    } catch (err) {
+      this.deps.logger.warn(`[SCM] Could not update the git commit identity: ${errText(err)}`);
+    }
+  }
+
+  /** Reads the account's user id and profile name from the host (accounts connected before they were kept). */
+  private async refreshAccountUser(account: SourceControlAccount): Promise<void> {
+    const provider = this.registry.providerForAccount(account.id);
+    if (!provider) return;
+    const user = await provider.getAuthenticatedUser();
+    if (user.id !== undefined) account.userId = user.id;
+    if (user.name) account.displayName = user.name;
+    if (user.login && !account.login) account.login = user.login;
+    this.registry.registerAccount(account, provider);
+    await this.persist();
   }
 
   // ── Sign-in methods ──
@@ -446,7 +487,7 @@ export class SourceControlConfigService {
       },
     );
 
-    let user: { login: string; avatarUrl?: string; scopes?: string[] };
+    let user: { login: string; id?: number; name?: string; avatarUrl?: string; scopes?: string[] };
     try {
       user = await provider.getAuthenticatedUser();
     } catch (err) {
@@ -461,6 +502,8 @@ export class SourceControlConfigService {
       label: input.label ?? `${user.login} @ ${hostLabel(input.host)}`,
       ...(input.host ? { host: input.host } : {}),
       ...(user.login ? { login: user.login } : {}),
+      ...(user.id !== undefined ? { userId: user.id } : {}),
+      ...(user.name ? { displayName: user.name } : {}),
       ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
       ...(user.scopes ? { scopes: user.scopes } : {}),
       authMethod: input.method,
@@ -475,6 +518,7 @@ export class SourceControlConfigService {
       this.registry.setDefault(account.id);
     }
     await this.persist();
+    await this.syncCommitIdentity();
     this.deps.logger.info(`[SCM] Connected account ${account.label} (${account.authMethod})`);
     return account;
   }

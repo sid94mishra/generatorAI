@@ -1062,8 +1062,12 @@ export class WorkspaceManager {
       const opts = { cwd: rootPath, timeout: 15_000 };
 
       await execFileAsync('git', ['init'], opts);
-      await execFileAsync('git', ['config', 'user.email', 'generatorai@local'], opts);
-      await execFileAsync('git', ['config', 'user.name', 'GeneratorAI'], opts);
+      // A placeholder identity only where git has none at all (see GitClient.initIfNeeded, U-83).
+      const email = await execFileAsync('git', ['config', 'user.email'], opts).then((r) => String(r.stdout).trim(), () => '');
+      if (!email) {
+        await execFileAsync('git', ['config', 'user.email', 'generatorai@local'], opts);
+        await execFileAsync('git', ['config', 'user.name', 'GeneratorAI'], opts);
+      }
 
       // Create .gitignore that excludes workflow-runtime metadata so the
       // diff view only shows real source-code changes, not the agent's

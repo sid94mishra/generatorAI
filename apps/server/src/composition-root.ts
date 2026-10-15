@@ -110,6 +110,7 @@ import {
   ReviewThreadService,
   SourceControlService,
   SourceControlConfigService,
+  GitGlobalConfig,
   SourceControlRegistry,
   RepoReadinessService,
   CodebaseRemoteResolver,
@@ -250,6 +251,13 @@ export async function createContainer(config: AppConfig, options: CreateContaine
   // because createDB throws first for other drivers.
   const db: AppDatabase = createDB(process.env['GENERATORAI_DATABASE_URL'] ?? config.dbPath);
   migrateDB(db);
+
+  // U-83 — before any child starts: git everywhere the server reaches falls back to the connected GitHub account's
+  // identity instead of `user@hostname`, below anything the person set themselves (see gitIdentity.ts).
+  const gitGlobalConfig = new GitGlobalConfig(path.join(dirname(resolve(config.dbPath)), 'git'));
+  await gitGlobalConfig.install().catch((err: unknown) => {
+    logger.warn(`[SCM] Could not install the git fallback identity: ${err instanceof Error ? err.message : String(err)}`);
+  });
 
   // Review 6.6 — a stored JSON column that fails validation is replaced by a
   // default, and the next unrelated save persists that default over the real
@@ -701,6 +709,7 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     secrets: security.secretStore,
     logger,
     configDir: resolve(config.dbPath, '..'),
+    gitIdentity: gitGlobalConfig,
     env: {
       ...(githubToken ? { githubToken } : {}),
       ...(githubHost ? { githubHost } : {}),

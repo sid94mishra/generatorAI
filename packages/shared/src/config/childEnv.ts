@@ -58,6 +58,8 @@ export const BASE_CHILD_ENV_ALLOWLIST: readonly string[] = [
   'USERNAME', 'USERDOMAIN', 'HOMEDRIVE', 'HOMEPATH',
   // Unix identity used by git and shells.
   'USER', 'LOGNAME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME',
+  // The server's git config: the connected GitHub account as the fallback commit identity (U-83).
+  'GIT_CONFIG_GLOBAL',
 ];
 
 /**

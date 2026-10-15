@@ -614,14 +614,19 @@ export class GitClient implements IGitClient {
         }
       }
 
-      await this.runner.run('git', ['config', 'user.email', 'agent@generatorai.local'], {
-        cwd: dir,
-        timeout: 5_000,
-      });
-      await this.runner.run('git', ['config', 'user.name', 'GeneratorAI Agent'], {
-        cwd: dir,
-        timeout: 5_000,
-      });
+      // A placeholder identity only where git has none at all, so commits do not fail: a repo-local one would outrank
+      // the person's own identity and the connected GitHub account (U-83) on everything later pushed from it.
+      const email = await this.runner.run('git', ['config', 'user.email'], { cwd: dir, timeout: 5_000 });
+      if (email.exitCode !== 0 || !email.stdout.trim()) {
+        await this.runner.run('git', ['config', 'user.email', 'agent@generatorai.local'], {
+          cwd: dir,
+          timeout: 5_000,
+        });
+        await this.runner.run('git', ['config', 'user.name', 'GeneratorAI Agent'], {
+          cwd: dir,
+          timeout: 5_000,
+        });
+      }
       this.logger.info(`[Git] Initialized git repo at ${dir}`);
       return true;
     } catch (err) {

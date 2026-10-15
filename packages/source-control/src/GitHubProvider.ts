@@ -227,8 +227,10 @@ export class GitHubProvider implements ISourceControlProvider {
     if (res.status >= 400) {
       throw new SourceControlError(describeFailure('read the connected account', res));
     }
-    const data = JSON.parse(res.body) as { login?: string; avatar_url?: string };
+    const data = JSON.parse(res.body) as { login?: string; id?: number; name?: string | null; avatar_url?: string };
     const user: ProviderUser = { login: data.login ?? '' };
+    if (typeof data.id === 'number') user.id = data.id;
+    if (data.name) user.name = data.name;
     if (data.avatar_url) user.avatarUrl = data.avatar_url;
     // Classic PATs / OAuth tokens report their grants here; fine-grained PATs omit it.
     const scopes = parseScopeHeader(headerValue(res.headers, 'x-oauth-scopes'));

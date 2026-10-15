@@ -8,6 +8,7 @@
 export { redactTokens } from './redact.js';
 
 export { SourceControlConfigService } from './SourceControlConfigService.js';
+export { GitGlobalConfig, githubCommitIdentity, type CommitIdentity } from './gitIdentity.js';
 export type {
   SourceControlConfigDeps,
   SafeSourceControlConfig,
