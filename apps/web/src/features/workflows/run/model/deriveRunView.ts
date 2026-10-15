@@ -524,6 +524,7 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
     durationMs: stageDuration(sr),
     interrupt,
     error: sr.error,
+    ...(sr.skipReason ? { skipReason: sr.skipReason } : {}),
     summary: sr.summary,
     outputData: sr.outputData,
     ...(sr.outputText ? { outputText: sr.outputText } : {}),

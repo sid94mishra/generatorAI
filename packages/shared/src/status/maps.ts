@@ -291,3 +291,16 @@ export function chatActivity(input: { stream: StreamStatus; pendingInteraction: 
   if (input.pendingInteraction) return m('needs_you');
   return STATUS_MAPS.stream[input.stream];
 }
+
+const STAGE_SKIP_REASONS: Readonly<Record<string, string>> = {
+  operator: 'Turned off for this run',
+  guard_false: 'Condition not met',
+  upstream_skipped: 'An earlier stage it needs was skipped',
+  join_unsatisfiable: 'An earlier stage it needs failed or was skipped',
+  scope_aborted: 'Its group stopped before it ran',
+};
+
+/** Why a skipped stage did not run, in words: every skip read "Condition not met", a stage turned off too (U-84). */
+export function stageSkipReasonLabel(reason: string | null | undefined): string {
+  return (reason && STAGE_SKIP_REASONS[reason]) || 'Skipped';
+}

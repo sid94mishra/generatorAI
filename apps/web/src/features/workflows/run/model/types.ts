@@ -113,6 +113,8 @@ export interface StageView {
   };
   /** Error message when status = failed. */
   error?: string;
+  /** Why a skipped stage was skipped (`operator`, `guard_false`, `upstream_skipped`, …). */
+  skipReason?: string;
   /** Summary passed to successor stages. */
   summary?: string;
   /** Structured output JSON. */

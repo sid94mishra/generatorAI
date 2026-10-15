@@ -14,7 +14,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { memo, useEffect, useState, type ReactNode } from 'react';
-import { resolveMapping, resolveStatus, STATUS_STATE_DEFS } from '@generatorai/shared';
+import { resolveMapping, resolveStatus, stageSkipReasonLabel, STATUS_STATE_DEFS } from '@generatorai/shared';
 import type { RunCommand } from '@generatorai/workflow-spec';
 import type { IconConcept } from '@generatorai/design-tokens';
 import { TranscriptProvider, TurnBody, UsageChip, UserMessage } from '@/blocks/transcript/index.js';
@@ -403,7 +403,7 @@ export const StageRow = memo(function StageRow({
 
       {isSkippedOrCancelled ? (
         <p className={cn('pr-4 pb-2 text-small text-fg-3', BODY_PAD[d])}>
-          {stage.status === 'skipped' ? (stage.error ?? 'Condition not met') : 'Cancelled'}
+          {stage.status === 'skipped' ? (stage.error ?? stageSkipReasonLabel(stage.skipReason)) : 'Cancelled'}
         </p>
       ) : null}
     </div>

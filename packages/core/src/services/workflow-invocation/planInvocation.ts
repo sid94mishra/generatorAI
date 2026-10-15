@@ -74,7 +74,9 @@ export function planInvocation(
       ...(s.parentKey ? { parentKey: s.parentKey } : {}),
     };
   });
-  const checks = graph.stages.filter((s) => s.kind === 'check');
+  // A check turned off for this run runs nothing (the warning listed stages the person had just switched off).
+  const off = new Set(stages.filter((s) => s.skipped).map((s) => s.key));
+  const checks = graph.stages.filter((s) => s.kind === 'check' && !off.has(s.key));
   const risks: InvocationPlan['risks'] = checks.length
     ? [
         {
