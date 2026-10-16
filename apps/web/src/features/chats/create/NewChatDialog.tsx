@@ -73,6 +73,13 @@ export function NewChatDialog() {
   const [agentRef, setAgentRef] = useState<string | undefined>(undefined);
   const [selectedAgent, setSelectedAgent] = useState<Agent | undefined>(undefined);
   const [model, setModel] = useState(() => getDefaultChatModel());
+  // E-2: with no saved default the field read "Select a model…" and left the user to guess what would run (the
+  // configured primary, Copilot, was not even ready). Start on the first ready provider's default model instead.
+  useEffect(() => {
+    if (model || agentRef || !models?.length) return;
+    const first = models[0]!;
+    setModel((models.find((m) => m.provider === first.provider && m.isDefault) ?? first).id);
+  }, [model, agentRef, models]);
   const [reasoningEffort, setReasoningEffort] = useState<string | undefined>(undefined);
   const [orchestratorMode, setOrchestratorMode] = useState(false);
   const [planFirst, setPlanFirst] = useState(false);
