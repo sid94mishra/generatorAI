@@ -178,3 +178,28 @@ export function applyConversationSeed(seed: string, prompt: string): string {
   if (!s) return prompt;
   return `${s}\n\n[New message from the user]\n${prompt}`;
 }
+
+/** How much of an interrupted reply goes back to the agent: its tail is what it continues from. */
+const INTERRUPTED_REPLY_MAX_CHARS = 8_000;
+
+/**
+ * When the chat's last reply was cut off before it finished (`metadata.partial`) and nothing has been said since,
+ * the notice that tells the agent what it had written (E-5); otherwise ''.
+ */
+export function interruptedReplyNotice(messages: readonly ChatMessage[]): string {
+  let last = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]!.role === 'assistant') {
+      last = i;
+      break;
+    }
+  }
+  if (last < 0) return '';
+  const reply = messages[last]!;
+  // The prompt being sent may already be saved; any earlier user message means a later turn answered already.
+  if (messages.slice(last + 1).filter((m) => m.role === 'user').length > 1) return '';
+  const text = typeof reply.content === 'string' ? reply.content.trim() : '';
+  if (!(reply.metadata as { partial?: boolean } | undefined)?.partial || !text) return '';
+  const shown = text.length > INTERRUPTED_REPLY_MAX_CHARS ? `…${text.slice(-INTERRUPTED_REPLY_MAX_CHARS)}` : text;
+  return `[Your previous reply was cut off before it finished. The user saw this much of it:]\n${shown}\n[End of the interrupted reply]\n\n`;
+}

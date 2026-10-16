@@ -164,6 +164,30 @@ describe('ChatManagementService', () => {
     });
   });
 
+  // ── E-5: a reply cut off by a restart ──
+
+  describe('after an interrupted reply', () => {
+    it('tells the agent what it had written, once', async () => {
+      const chat = await service.createChat({ name: 'Cut off' });
+      await messageRepo.create({ id: 'u1', chatId: chat.id, sessionId: chat.sessionId, role: 'user', content: 'Write a story.', createdAt: new Date() } as ChatMessage);
+      await messageRepo.create({ id: 'a1', chatId: chat.id, sessionId: chat.sessionId, role: 'assistant', content: 'The keeper climbed the stairs', metadata: { partial: true }, createdAt: new Date() } as ChatMessage);
+
+      await service.sendPrompt(chat.id, 'Please continue.');
+      const prompts = () => copilot.calls.filter((c) => c.method === 'sendPrompt').map((c) => String(c.args[1]));
+      expect(prompts()[0]).toContain('cut off before it finished');
+      expect(prompts()[0]).toContain('The keeper climbed the stairs');
+      expect(prompts()[0]).toContain('Please continue.');
+    });
+
+    it('says nothing after a finished reply', async () => {
+      const chat = await service.createChat({ name: 'Whole' });
+      await messageRepo.create({ id: 'a2', chatId: chat.id, sessionId: chat.sessionId, role: 'assistant', content: 'Done.', createdAt: new Date() } as ChatMessage);
+      await service.sendPrompt(chat.id, 'Thanks.');
+      const sent = copilot.calls.filter((c) => c.method === 'sendPrompt').map((c) => String(c.args[1]));
+      expect(sent[0]).not.toContain('cut off');
+    });
+  });
+
   // ── sendPrompt ──
 
   describe('sendPrompt', () => {

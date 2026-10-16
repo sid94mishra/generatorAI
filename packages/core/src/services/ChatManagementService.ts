@@ -81,6 +81,7 @@ import {
   firstAnchor,
   buildConversationSeed,
   applyConversationSeed,
+  interruptedReplyNotice,
 } from './chatTranscript.js';
 import type { ConversationAnchor } from '../domain/ports/IAgentHarness.js';
 import type { RestoreTurnResult } from './WorkspaceCheckpointService.js';
@@ -2338,6 +2339,14 @@ export class ChatManagementService {
 
       const restoreNotice = this.drainRestoreNotice(chatId);
       if (restoreNotice) promptForHarness = restoreNotice + promptForHarness;
+
+      // E-5 — the previous reply was cut off (the app quit mid-turn, a crash, a Stop). The chat kept what was
+      // written, but the provider session records only finished messages: asked to continue, the agent said it had
+      // no idea what it had written. Hand it the interrupted text once (a seed below already carries it).
+      if (!chat.conversationSeed) {
+        const interrupted = interruptedReplyNotice(await this.messageRepo.getByChatId(chatId));
+        if (interrupted) promptForHarness = interrupted + promptForHarness;
+      }
 
       // A synthetic rewind/fork (provider without native branching) left the
       // digest of the surviving conversation on the chat. It goes in front of
