@@ -98,7 +98,7 @@ describe('a resumed Claude session', () => {
     const session = {
       conversationId: id, query, input: { end: vi.fn(), push: vi.fn() }, fingerprint: 'fp',
       liveModel: undefined, livePermissionMode: undefined, liveMcpKey: '{}', sdkSessionId: undefined,
-      closed: false, reader: Promise.resolve(),
+      closed: false, reader: Promise.resolve(), backgroundAgents: new Set<string>(),
     };
     session.reader = internals.readSession(session);
     internals.sessions.set(id, session);

@@ -214,7 +214,18 @@ interface PersistentSession {
   sdkSessionId: string | undefined;
   closed: boolean;
   reader: Promise<void>;
+  /** Live background tasks that report back to the model (sub-agents, workflows), from `background_tasks_changed`. */
+  backgroundAgents: Set<string>;
 }
+
+/**
+ * Background task types whose completion the CLI hands back to the model, which then answers in a new model turn.
+ * A background shell (`local_bash`) is not one: a dev server can run for hours and must never hold a turn open.
+ */
+const REPORTING_TASK_TYPES: ReadonlySet<string> = new Set(['local_agent', 'remote_agent', 'in_process_teammate', 'local_workflow']);
+
+/** How long a held turn waits, once its background agents are gone, for the CLI to continue before it ends anyway. */
+const BACKGROUND_RELEASE_MS = 120_000;
 
 /**
  * Per-turn bookkeeping shared by the persistent and one-shot paths, so the
@@ -224,6 +235,13 @@ interface PersistentSession {
 /** The events that end a turn for everything downstream of the provider. */
 function isTerminalEvent(event: { kind: string }): boolean {
   return event.kind === 'harness.idle' || event.kind === 'harness.error';
+}
+
+/** The live background task set a `background_tasks_changed` message carries (REPLACE semantics), else null. */
+function backgroundTasksOf(message: SDKMessage): Array<{ task_id: string; task_type: string }> | null {
+  const m = message as { type?: string; subtype?: string; tasks?: unknown };
+  if (m.type !== 'system' || m.subtype !== 'background_tasks_changed' || !Array.isArray(m.tasks)) return null;
+  return m.tasks as Array<{ task_id: string; task_type: string }>;
 }
 
 /**
@@ -296,6 +314,12 @@ interface TurnState {
    */
   session?: PersistentSession;
   settled: boolean;
+  /**
+   * The terminal events of a `result` that arrived while background agents were still out: the model will answer
+   * again when they report, so the turn stays open and these are published at its real end.
+   */
+  heldTerminal?: AgentEvent[];
+  heldTimer?: ReturnType<typeof setTimeout>;
   /** Resolves when the turn has reached a terminal state, however it got there. */
   done: Promise<void>;
   settle: () => void;
@@ -3607,6 +3631,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       sdkSessionId: config.sdkSessionId,
       closed: false,
       reader: Promise.resolve(),
+      backgroundAgents: new Set(),
     };
     session.reader = this.readSession(session);
     this.sessions.set(conversationId, session);
@@ -3652,6 +3677,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
         // `harness.idle`, and the chat persists the provider session from that handler — it read nothing,
         // so a Claude chat never stored a resumable session and lost its context on every restart.
         this.rememberSdkSessionId(session, message as { session_id?: string });
+        const tasks = backgroundTasksOf(message);
+        if (tasks) session.backgroundAgents = new Set(tasks.filter((t) => REPORTING_TASK_TYPES.has(t.task_type)).map((t) => t.task_id));
         const turn = this.turns.get(conversationId);
         if (!turn || turn.aborted) {
           // Nothing is waiting for this (a cancelled turn, or output that
@@ -3677,10 +3704,25 @@ export class ClaudeAgentProvider implements IAgentHarness {
           this.rememberSdkSessionId(session, message);
           continue;
         }
-        await this.applyMessageToTurn(turn, message, session.query);
+        // Background sub-agents report back after the turn's `result`: the model answers them in a new model turn.
+        // That answer used to arrive with no turn in flight and was dropped — a chat that fanned work out to
+        // background agents showed "I'll put it together once they report" and never the result (E-3). While any
+        // are out, a `result` keeps the turn open and its end is published when the model is really done.
+        if (turn.heldTimer) {
+          clearTimeout(turn.heldTimer);
+          turn.heldTimer = undefined;
+        }
+        const hold = message.type === 'result' && session.backgroundAgents.size > 0;
+        await this.applyMessageToTurn(turn, message, session.query, hold);
         if (message.type === 'result') {
           this.rememberSdkSessionId(session, message);
-          this.finishTurnFromResult(turn);
+          if (!hold) {
+            turn.heldTerminal = undefined;
+            this.finishTurnFromResult(turn);
+          }
+        } else if (turn.heldTerminal && session.backgroundAgents.size === 0) {
+          // The agents are done; the CLI continues on its own. If it never does, end the turn rather than hang.
+          turn.heldTimer = setTimeout(() => void this.releaseHeldTurn(turn), BACKGROUND_RELEASE_MS);
         }
       }
     } catch (err) {
@@ -3699,6 +3741,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       if (turn && !turn.settled && turn.session === session) {
         turn.cancellation?.acknowledgeTerminal();
         if (turn.aborted) this.completeTurn(turn, 'aborted');
+        else if (turn.heldTerminal) await this.releaseHeldTurn(turn);
         else await this.failTurn(turn, new Error('The agent session ended before the turn produced a result'));
       }
     }
@@ -3763,10 +3806,15 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * is a fix applied to one copy of duplicated logic and not the other, and
    * this is the logic that maps every provider message to a domain event.
    */
-  private async applyMessageToTurn(turn: TurnState, message: SDKMessage, queryHandle: Query): Promise<void> {
+  private async applyMessageToTurn(turn: TurnState, message: SDKMessage, queryHandle: Query, hold = false): Promise<void> {
     const { conversationId } = turn;
 
     for (const event of mapClaudeAgentMessageToAgentEvents(message)) {
+      if (hold && isTerminalEvent(event)) {
+        // Background agents are still out (see `readSession`): the turn is not over yet.
+        (turn.heldTerminal ??= []).push(event);
+        continue;
+      }
       if (message.type === 'result' && isTerminalEvent(event)) {
         // BEFORE the terminal event, not after it: the chat service drops its
         // subscription the moment it sees `harness.idle`, so a snapshot sent
@@ -3813,6 +3861,17 @@ export class ClaudeAgentProvider implements IAgentHarness {
         turn.fullContent = message.result;
       }
     }
+  }
+
+  /** End a held turn: publish the terminal events its last `result` carried, then settle it. */
+  private async releaseHeldTurn(turn: TurnState): Promise<void> {
+    if (turn.heldTimer) clearTimeout(turn.heldTimer);
+    turn.heldTimer = undefined;
+    if (turn.settled || !turn.heldTerminal) return;
+    const events = turn.heldTerminal;
+    turn.heldTerminal = undefined;
+    for (const event of events) await this.emitEventToHandlers(turn.conversationId, event);
+    this.finishTurnFromResult(turn);
   }
 
   /**
