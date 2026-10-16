@@ -97,11 +97,21 @@ export function useChatWorkspace(chatId: string | undefined) {
   // fallback to fire and persist the wrong model over the chat's own.
   const effectiveModel = selectedModel || chat?.model || '';
 
+  // E-4: a model is sent with its provider. Without it the server — rightly — never lets a model name alone move an
+  // established conversation to another provider, so picking Sonnet in a Codex chat showed "Sonnet 5.5" while the
+  // next turn kept running on Codex.
   const changeModel = useCallback((model: string) => {
     if (!chat) return;
     setSelectedModel(model);
-    updateChatMutation.mutate({ model });
-  }, [chat, updateChatMutation]);
+    const provider = catalogModels?.find((m) => m.id === model)?.provider;
+    const cfg = chat.harnessConfig ?? {};
+    updateChatMutation.mutate({
+      model,
+      ...(provider
+        ? { harnessConfig: { ...cfg, harnessType: provider as NonNullable<typeof cfg.harnessType>, ...(cfg.model ? { model } : {}) } }
+        : {}),
+    });
+  }, [chat, catalogModels, updateChatMutation]);
 
   // Effort and tier persist into harnessConfig, merged with what is there.
   const changeReasoningEffort = useCallback((effort: string) => {

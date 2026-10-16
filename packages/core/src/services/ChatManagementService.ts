@@ -1938,6 +1938,18 @@ export class ChatManagementService {
     const bindingChanged =
       this.conversationBindings.get(session.conversationId) !== desiredBinding;
     if (!this.harness.hasLiveConversation(session.conversationId) || bindingChanged) {
+      // E-4 — a model from another provider moves the conversation to a FRESH session there (MultiHarness): the
+      // new provider knows nothing of this chat, so a "review what you just did" landed on an agent with no
+      // memory of it. Seed it with the transcript once, exactly as a synthetic fork or rewind does.
+      const pinned = chat.harnessConfig?.harnessType;
+      const owner = this.harness.conversationHarness?.(session.conversationId);
+      if (pinned && owner && pinned !== owner && !chat.conversationSeed) {
+        const seed = buildConversationSeed(await this.messageRepo.getByChatId(chatId));
+        if (seed) {
+          chat.conversationSeed = seed;
+          await this.chatRepo.update(chatId, { conversationSeed: seed });
+        }
+      }
       const cfg = await this.buildConversationConfig(chat, session.conversationId);
       try {
         await withDeadline(

@@ -165,7 +165,7 @@ export function buildConversationSeed(messages: readonly ChatMessage[]): string 
     dropped += 1;
   }
   const header =
-    '[Conversation history — restored after the conversation was rewound or branched. ' +
+    '[Conversation history — this chat continues in a fresh agent session (it was rewound, branched, or moved to another model provider). ' +
     'This is what was said so far in this chat; treat it as your own memory and continue from here. ' +
     'Files on disk reflect the current state, not necessarily every action below.]';
   const omitted = dropped > 0 ? `\n[${dropped} earlier turn${dropped === 1 ? '' : 's'} omitted]` : '';
