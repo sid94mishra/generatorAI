@@ -139,8 +139,10 @@ function renderTurnForSeed(turn: ChatTurn): string {
     if (tools.length > SEED_TOOL_MAX) toolLines.push(`  - …and ${tools.length - SEED_TOOL_MAX} more tool calls`);
     const body = clip(a.content, SEED_TEXT_MAX);
     const partial = a.metadata?.partial ? ' (stopped before finishing)' : '';
+    // A chat moved between providers: the new one was asked "which model did what" and could only say "not recorded".
+    const by = [a.metadata?.model, a.metadata?.provider].filter((v): v is string => typeof v === 'string' && v.length > 0);
     parts.push(
-      `Assistant${partial}:` +
+      `Assistant${by.length ? ` [${by.join(' · ')}]` : ''}${partial}:` +
         (toolLines.length ? `\n[actions]\n${toolLines.join('\n')}` : '') +
         (body ? `\n${body}` : ''),
     );

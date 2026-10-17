@@ -118,6 +118,14 @@ describe('buildConversationSeed', () => {
     expect(seed.trimEnd().endsWith('[End of restored history]')).toBe(true);
   });
 
+  it('names the model and provider behind each reply, so a chat moved between providers knows who did what', () => {
+    const seed = buildConversationSeed([
+      msg('user', 'Add formatDuration', { turnId: 't1' }),
+      msg('assistant', 'Added.', { turnId: 't1', model: 'gpt-5.6-terra', provider: 'codex' }),
+    ]);
+    expect(seed).toContain('Assistant [gpt-5.6-terra · codex]:\nAdded.');
+  });
+
   it('is empty for an empty transcript and bounded for a huge one, dropping the OLDEST turns', () => {
     expect(buildConversationSeed([])).toBe('');
     const rows: ChatMessage[] = [];
