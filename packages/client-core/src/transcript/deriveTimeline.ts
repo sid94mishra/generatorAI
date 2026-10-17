@@ -430,7 +430,8 @@ export function deriveTimeline(
         const planDraft = providerPlanDraft(b.tool, b.args, b.status !== 'complete' && opts.active);
         const target = planDraft ? '' : toolSearch ?? summary.target;
         const meta = toolSearch ? undefined : summary.meta;
-        const kind = toolStepKind(b.tool);
+        // A write to the provider's plan file is a plan step: it never groups with real file edits ("Edited 2 files").
+        const kind = planDraft ? 'plan' : toolStepKind(b.tool);
         // A tool call may only spin while the turn is genuinely live. Several
         // legitimate paths drop the matching `tool_complete` (harness.error,
         // aborted/denied turns, providers that only echo a tool_result for

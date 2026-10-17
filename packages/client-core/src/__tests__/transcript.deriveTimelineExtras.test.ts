@@ -165,6 +165,15 @@ describe("the provider's own plan file", () => {
       ['Edited', expect.stringContaining('notes.md')],
     ]);
   });
+
+  it('keeps two revisions of the plan file as plan steps, never an "Edited 2 files" group', () => {
+    const plan = '/Users/me/.claude/plans/p.md';
+    const steps = deriveTimeline(
+      [tool('Edit', 'a', { args: { file_path: plan } }), tool('Edit', 'b', { args: { file_path: plan } })],
+      { active: false },
+    );
+    expect(steps.every((s) => s.kind === 'plan' && s.verb === 'Revised plan')).toBe(true);
+  });
 });
 
 describe('a plan sent back for changes', () => {
