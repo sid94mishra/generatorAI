@@ -287,10 +287,16 @@ export function buildWorkspaceHint(input: WorkspaceHintInput): string {
   );
   lines.push(`- Do not create files in ${input.rootPath} outside scratch/ and plans/.`);
   // Asked for an exact response shape, an agent deleted an endpoint's existing latency fields to fit it and never
-  // said so; the dashboard lost its latency line and only a review of the diff found out.
+  // said so; told to say so, the next one did — and still left the web client unwrapping the envelope it removed.
+  // Disclosure alone is not enough: the callers have to be looked up.
   lines.push(
-    '- If your change removes or alters existing behaviour (a field, endpoint, default, signature or output), ' +
-      'say so in your reply, even when the request implied it.',
+    '- Before changing a shared contract (an endpoint\'s request or response, a schema or type other code imports, ' +
+      'an exported function\'s signature or behaviour), search the repository for everything that uses it and ' +
+      'update those callers in the same change.',
+  );
+  lines.push(
+    '- In your reply, name any existing behaviour you removed or altered and any caller you left as it was, ' +
+      'even when the request implied the change.',
   );
   return lines.join('\n');
 }
