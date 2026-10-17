@@ -206,12 +206,17 @@ export function readyCatalogModels(response: HarnessProvidersResponse): HarnessC
   return ordered.flatMap((p) => p.models.map((m) => ({ ...m, provider: m.provider ?? p.type })));
 }
 
-/** A model by id (and provider, when two providers serve the same id). */
+/**
+ * A model by id (and provider, when two providers serve the same id). A reply records the concrete model it ran on
+ * (`claude-opus-5-5`) while the catalog lists the alias (`opus`), so an id that matches no entry falls back to the
+ * entry that resolves to it.
+ */
 export function findPickerModel(
   catalog: ModelPickerCatalog,
   id: string | null | undefined,
   provider?: string | null,
 ): PickerModel | undefined {
   if (!id) return undefined;
-  return catalog.models.find((m) => m.id === id && (!provider || m.provider === provider));
+  const served = (m: PickerModel) => !provider || m.provider === provider;
+  return catalog.models.find((m) => m.id === id && served(m)) ?? catalog.models.find((m) => m.source.resolvedModel === id && served(m));
 }

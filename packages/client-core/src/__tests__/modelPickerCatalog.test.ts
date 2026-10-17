@@ -237,6 +237,15 @@ describe('helpers', () => {
     expect(providerAvailability(signedOut('a'))).toBe('signed_out');
   });
 
+  it('findPickerModel: by id, else by the concrete model an alias resolves to', () => {
+    const catalog = buildModelPickerCatalog(response('claude-agent', [
+      provider('claude-agent', { models: [{ id: 'opus', name: 'Opus 5.5', resolvedModel: 'claude-opus-5-5' }, { id: 'claude-opus-5', name: 'Opus 5' }] }),
+    ]));
+    expect(findPickerModel(catalog, 'claude-opus-5-5')?.name).toBe('Opus 5.5');
+    expect(findPickerModel(catalog, 'claude-opus-5')?.name).toBe('Opus 5');
+    expect(findPickerModel(catalog, 'claude-opus-5-5', 'codex')).toBeUndefined();
+  });
+
   it('readyCatalogModels: ready providers only, configured default first, provider-tagged', () => {
     const flat = readyCatalogModels(
       response('codex', [provider('copilot'), signedOut('claude-agent'), provider('codex')]),
