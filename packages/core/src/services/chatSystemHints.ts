@@ -286,6 +286,12 @@ export function buildWorkspaceHint(input: WorkspaceHintInput): string {
       'restore, clean) in a mount; the user controls branches and the Changes tab handles undo.',
   );
   lines.push(`- Do not create files in ${input.rootPath} outside scratch/ and plans/.`);
+  // Asked for an exact response shape, an agent deleted an endpoint's existing latency fields to fit it and never
+  // said so; the dashboard lost its latency line and only a review of the diff found out.
+  lines.push(
+    '- If your change removes or alters existing behaviour (a field, endpoint, default, signature or output), ' +
+      'say so in your reply, even when the request implied it.',
+  );
   return lines.join('\n');
 }
 
