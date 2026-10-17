@@ -752,8 +752,8 @@ export class HttpPlatformClient implements IPlatformClient {
   }
 
   /**
-   * Opening a chat (U-39): the latest turn's first seq and the earlier rows its transcript still needs. Rows have the
-   * `streamReplay` shape; `turnStartSeq: 0` means replay from the start.
+   * Opening a chat (U-39): the rows its transcript needs (earlier kept rows, the latest turn with deltas folded) and
+   * `turnStartSeq`, where paging resumes. Rows have the `streamReplay` shape; `turnStartSeq: 0` means replay from the start.
    */
   async streamChatPrelude(chatId: string): Promise<{
     turnStartSeq: number;

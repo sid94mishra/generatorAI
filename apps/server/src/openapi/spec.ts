@@ -3013,9 +3013,9 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
     '/api/stream/replay/prelude': {
       get: {
         tags: ['Streaming'],
-        summary: "Opening a chat: its latest turn's first seq and the earlier rows its transcript still needs",
+        summary: 'Opening a chat: the rows its transcript needs — earlier kept rows and the latest turn, deltas folded — and where paging resumes',
         parameters: [{ in: 'query', name: 'id', required: true, schema: { type: 'string' } }],
-        responses: { '200': { description: '{ turnStartSeq, rows } — page /api/stream/replay from turnStartSeq (0: from the start)' } },
+        responses: { '200': { description: '{ turnStartSeq, rows } — page /api/stream/replay after turnStartSeq − 1 (0: from the start)' } },
       },
     },
 

@@ -26,6 +26,7 @@ import type {
 import { CHAT_TURN_PRELUDE, classifyEvent, isChatTurnStart, type ILogger } from '@generatorai/shared';
 import { isNoiseEventKind } from '../events/EventBus.js';
 import type { DeltaLog } from './DeltaLog.js';
+import { foldTurnRows } from './streamTurnFold.js';
 import { StreamWriteBatcher, type StreamWriteBatcherOptions } from './StreamWriteBatcher.js';
 
 export type { StreamEventRow, StreamScope } from '@generatorai/db';
@@ -86,6 +87,8 @@ export interface StreamResumeStatus {
 
 /** Hard ceiling on synchronous replay to prevent a client asking for 10k events at once. */
 const MAX_SYNC_REPLAY = 1000;
+/** A latest turn longer than this is paged as before rather than read whole into one prelude response. */
+const PRELUDE_TURN_MAX_ROWS = 20_000;
 /** Hard ceiling on filter prefix count — STR-06 says 10. */
 const MAX_KIND_PREFIXES = 10;
 
@@ -396,11 +399,19 @@ export class StreamBroker {
   }
 
   /**
-   * A chat's latest-turn start and the earlier rows its transcript still needs (U-39): see
-   * `CHAT_TURN_PRELUDE`. The client replays from `turnStartSeq` instead of from 0.
+   * What a client opening a chat replays before paging (U-39): the earlier rows its transcript still needs (see
+   * `CHAT_TURN_PRELUDE`) and the latest turn itself, deltas folded (`foldTurnRows`), so a chat that is one long
+   * turn opens in one response instead of paging it 500 rows at a time. `turnStartSeq` is where paging resumes:
+   * one past the last row returned, or the turn's first seq when the turn is too long to inline.
    */
   async chatTurnPrelude(chatId: string): Promise<{ turnStartSeq: number; rows: StreamEventRow[] }> {
-    return this.repo.turnPrelude('chat', chatId, { ...CHAT_TURN_PRELUDE, isTurnStart: isChatTurnStart });
+    const prelude = await this.repo.turnPrelude('chat', chatId, { ...CHAT_TURN_PRELUDE, isTurnStart: isChatTurnStart });
+    // 0: no earlier turn to skip (a single-turn worker starts at seq 1) — the "turn" is the whole chat.
+    const from = Math.max(0, prelude.turnStartSeq - 1);
+    const turn = await this.repo.replayAfter('chat', chatId, from, PRELUDE_TURN_MAX_ROWS);
+    const last = turn[turn.length - 1];
+    if (!last || turn.length >= PRELUDE_TURN_MAX_ROWS) return prelude;
+    return { turnStartSeq: last.seq + 1, rows: [...prelude.rows, ...foldTurnRows(turn)] };
   }
 
   /** Current live-subscriber count for (scope, scopeId). */
