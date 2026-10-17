@@ -67,6 +67,7 @@ import type { HookBridge } from '@generatorai/core';
 import type { AgentEvent, AgentEventKind } from '@generatorai/shared';
 import { HarnessSessionError, withSpan, getMeter, createAgentEvent, GenAiTurnSpans } from '@generatorai/shared';
 import { lastIterationUsage, mapClaudeAgentMessageToAgentEvents } from './event-mapper.js';
+import { sessionTotalsOf, usageSince, type SessionUsageTotals } from './sessionUsage.js';
 // W41 — `./tool-factory.js` value-imports `createSdkMcpServer` from the Claude
 // SDK (and `zod`), so importing it statically here would defeat the lazy load
 // above. It is imported dynamically at its single call site in
@@ -216,6 +217,8 @@ interface PersistentSession {
   reader: Promise<void>;
   /** Live background tasks that report back to the model (sub-agents, workflows), from `background_tasks_changed`. */
   backgroundAgents: Set<string>;
+  /** The process's running cost and token totals, from its latest `result` (see `sessionUsage.ts`). */
+  usageTotals?: SessionUsageTotals;
 }
 
 /**
@@ -295,6 +298,11 @@ interface TurnState {
    * with a zero-turn result and no assistant message, legitimately.
    */
   localCommand: boolean;
+  /**
+   * Persistent mode: the session's totals when this turn's first message arrived (absent — the key unset — until
+   * then; `undefined` for a fresh process). `harness.usage` reports what the turn added on top of them.
+   */
+  usageBase?: SessionUsageTotals | undefined;
   truncationStopReason?: string;
   releaseExecution?: () => void;
   /**
@@ -3681,6 +3689,9 @@ export class ClaudeAgentProvider implements IAgentHarness {
         // `harness.idle`, and the chat persists the provider session from that handler — it read nothing,
         // so a Claude chat never stored a resumable session and lost its context on every restart.
         this.rememberSdkSessionId(session, message as { session_id?: string });
+        // The session's totals before this message, then after it: a turn's usage is what it added.
+        const totalsBefore = session.usageTotals;
+        if (message.type === 'result') session.usageTotals = sessionTotalsOf(message);
         const tasks = backgroundTasksOf(message);
         if (tasks) session.backgroundAgents = new Set(tasks.filter((t) => REPORTING_TASK_TYPES.has(t.task_type)).map((t) => t.task_id));
         const turn = this.turns.get(conversationId);
@@ -3717,7 +3728,10 @@ export class ClaudeAgentProvider implements IAgentHarness {
           turn.heldTimer = undefined;
         }
         const hold = message.type === 'result' && session.backgroundAgents.size > 0;
-        await this.applyMessageToTurn(turn, message, session.query, hold);
+        // Fixed at the turn's first message, so every `result` of a held turn reports the turn to date.
+        if (!('usageBase' in turn)) turn.usageBase = totalsBefore;
+        const applied = message.type === 'result' ? usageSince(message, turn.usageBase) : message;
+        await this.applyMessageToTurn(turn, applied, session.query, hold);
         if (message.type === 'result') {
           this.rememberSdkSessionId(session, message);
           if (!hold) {
