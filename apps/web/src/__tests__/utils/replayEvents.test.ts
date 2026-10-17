@@ -24,6 +24,22 @@ describe('replayEventsIntoStore', () => {
     useStreamStore.setState({ streams: {} });
   });
 
+  it("rebuilds an open plan turn as card → the person's reply → the edits → the next revision", () => {
+    replayEventsIntoStore('s1', [
+      makeEvent('harness.user_message', { content: 'add a helper' }, 1),
+      makeEvent('chat.plan.created', { planId: 'p1', revision: 1, title: 'Plan' }, 2),
+      makeEvent('chat.plan.review_requested', { planId: 'p1', revision: 1, interactionId: 'i1' }, 3),
+      makeEvent('chat.plan.decided', { planId: 'p1', approved: false, note: 'Rename the test file' }, 4),
+      makeEvent('harness.tool_start', { tool: 'Edit', callId: 'e1', args: {} }, 5),
+      makeEvent('harness.tool_complete', { tool: 'Edit', callId: 'e1', result: 'ok' }, 6),
+      makeEvent('chat.plan.review_requested', { planId: 'p1', revision: 2, interactionId: 'i2' }, 7),
+    ]);
+    const blocks = useStreamStore.getState().streams['s1']?.blocks ?? [];
+    expect(blocks.map((b) => b.type)).toEqual(['system', 'tool_call', 'plan']);
+    expect(blocks[0]).toMatchObject({ category: 'operator', message: 'Rename the test file', label: 'Changes requested' });
+    expect(blocks[2]).toMatchObject({ revision: 2, status: 'awaiting_review' });
+  });
+
   it('reconstructs text blocks from token events', () => {
     const events = [
       makeEvent('harness.token', { text: 'Hello ' }, 1),

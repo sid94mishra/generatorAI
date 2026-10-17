@@ -8,7 +8,7 @@ import { useStreamStore } from '../stores/streamStore.js';
 import type { PersistedEvent, ScmFlowResult } from '@generatorai/shared';
 import type { SystemCategory, QuestionBlock } from '../stores/streamStore.js';
 import { StreamEventRouter, partitionEffects } from '@generatorai/client-core';
-import { PERMISSION_GATE_COPY } from '@generatorai/shared/ui-contract';
+import { PERMISSION_GATE_COPY, PLAN_GATE_COPY } from '@generatorai/shared/ui-contract';
 import type { ContextUsageSnapshot, StreamEffect, ToolFileOp } from '@generatorai/client-core';
 
 /**
@@ -712,6 +712,16 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
         flushAll();
         const approved = data['approved'] === true;
         const action = typeof data['action'] === 'string' ? data['action'] : undefined;
+        // The person's reply to the revision, where they sent it (the live router emits the same note).
+        if (typeof data['note'] === 'string' && data['note'].trim()) {
+          store.applyEffects([{
+            op: 'addSystemMessage',
+            key: streamKey,
+            message: data['note'],
+            category: 'operator',
+            label: PLAN_GATE_COPY.note[approved ? 'approved' : 'changes_requested'],
+          }]);
+        }
         store.setPlanStatus(
           streamKey,
           String(data['planId'] ?? ''),
