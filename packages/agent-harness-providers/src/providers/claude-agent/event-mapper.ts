@@ -693,10 +693,13 @@ export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEv
       if (message.subtype === 'success') {
         events.push(createAgentEvent('harness.idle', {} as Record<string, never>));
       } else {
+        // A failed turn still ENDS: error, then idle (the provider contract, as Codex does). The chat service closes a
+        // turn only on idle, so an error alone left the chat "running" for good after a failed resume (2026-10-17).
         events.push(createAgentEvent(
           'harness.error',
           buildErrorPayload(message.errors?.join('; ') ?? `Query failed: ${message.subtype}`),
         ));
+        events.push(createAgentEvent('harness.idle', {} as Record<string, never>));
       }
       break;
     }

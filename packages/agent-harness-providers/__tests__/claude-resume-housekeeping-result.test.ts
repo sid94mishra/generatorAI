@@ -160,6 +160,21 @@ describe('a resumed Claude session', () => {
     expect(turn.settled).toBe(true);
   });
 
+  it('ends a failed turn with error THEN idle, so the chat is not left running', async () => {
+    // Live (2026-10-17): a resume of an unknown session failed with an error result; only `harness.error` went out,
+    // and the chat service — which closes a turn on idle — kept the chat "running" for good.
+    const { query, turn, events } = await turnInFlight('c6', 'hello');
+    query.push({
+      type: 'result', subtype: 'error_during_execution', is_error: true, num_turns: 0, session_id: 'sdk-1',
+      errors: ['No conversation found with session ID: 01a1'],
+      usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+    });
+    await turn.done;
+    const kinds = events.map((e) => e.kind).filter((k) => k === 'harness.error' || k === 'harness.idle');
+    expect(kinds).toEqual(['harness.error', 'harness.idle']);
+    expect(events.filter((e) => e.kind === 'harness.context_usage').length).toBeLessThanOrEqual(1);
+  });
+
   it('publishes the provider context breakdown even when the probe lands after the result', async () => {
     // A one-message answer is over before a 1–3 s `getContextUsage()` can
     // return. The session stays open, so the late answer is still good —

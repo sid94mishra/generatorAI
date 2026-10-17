@@ -2047,8 +2047,10 @@ export class ClaudeAgentProvider implements IAgentHarness {
           // Map to domain events and emit to handlers. AWAITED (item 19): a
           // slow consumer pauses this loop, and the SDK's reader behind it.
           const events = mapClaudeAgentMessageToAgentEvents(message);
+          let snapshotSent = false;
           for (const event of events) {
-            if (message.type === 'result' && isTerminalEvent(event)) {
+            if (message.type === 'result' && isTerminalEvent(event) && !snapshotSent) {
+              snapshotSent = true;
               // Ahead of the terminal event — see `applyMessageToTurn`.
               this.recordObservedLimits(message);
               await this.emitContextUsageSnapshot(conversationId, message);
@@ -3383,6 +3385,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[ClaudeAgentAdapter] Turn failed for ${turn.conversationId}: ${message}`);
     await this.emitToHandlers(turn.conversationId, 'harness.error', { message, provider: 'claude-agent' });
+    // Error, then idle: the chat service ends a turn only on idle (see the event mapper's failed `result`).
+    await this.emitEventToHandlers(turn.conversationId, createAgentEvent('harness.idle', {} as Record<string, never>));
     this.completeTurn(turn, 'failed');
   }
 
@@ -3809,13 +3813,16 @@ export class ClaudeAgentProvider implements IAgentHarness {
   private async applyMessageToTurn(turn: TurnState, message: SDKMessage, queryHandle: Query, hold = false): Promise<void> {
     const { conversationId } = turn;
 
+    let snapshotSent = false;
     for (const event of mapClaudeAgentMessageToAgentEvents(message)) {
       if (hold && isTerminalEvent(event)) {
         // Background agents are still out (see `readSession`): the turn is not over yet.
         (turn.heldTerminal ??= []).push(event);
         continue;
       }
-      if (message.type === 'result' && isTerminalEvent(event)) {
+      // A failed result carries two terminal events (error, idle); the snapshot goes once, ahead of the first.
+      if (message.type === 'result' && isTerminalEvent(event) && !snapshotSent) {
+        snapshotSent = true;
         // BEFORE the terminal event, not after it: the chat service drops its
         // subscription the moment it sees `harness.idle`, so a snapshot sent
         // afterwards reaches nobody. It did exactly that — the breakdown was
