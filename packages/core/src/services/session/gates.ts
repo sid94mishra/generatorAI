@@ -64,6 +64,12 @@ export function stampCardSequence(ctx: TurnContext, cardId: string): void {
   ctx.nextSequence += 1;
 }
 
+/** Moves a card to the current point of the turn: a plan's new revision is reviewed after the work that revised it. */
+export function restampCardSequence(ctx: TurnContext, cardId: string): void {
+  ctx.cardSequence.set(cardId, ctx.nextSequence);
+  ctx.nextSequence += 1;
+}
+
 /** What a request asks for, when the bound agent's tool groups refuse it. */
 function deniedByAgent(request: PermissionRequest, groups: AgentToolPolicy): string | null {
   if (request.type === 'file_write' && !groups.fileWrite) return 'write files';

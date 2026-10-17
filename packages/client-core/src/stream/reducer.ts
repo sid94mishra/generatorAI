@@ -555,6 +555,7 @@ export function addSystemMessage(
   sessionId: string,
   message: string,
   category: SystemCategory = 'system',
+  label?: string,
 ): StreamsRecord {
   if (!message?.trim()) return streams;
 
@@ -564,6 +565,7 @@ export function addSystemMessage(
     blockId: existing._nextBlockId,
     message,
     category,
+    ...(label ? { label } : {}),
   };
 
   return put(streams, sessionId, {
@@ -1005,14 +1007,16 @@ export function upsertPlan(
   now: number = Date.now(),
 ): StreamsRecord {
   const existing = existingOrDefault(streams, sessionId);
-  // De-dup by planId — a revision updates the card in place, so "request
-  // changes" does not stack a new card on every review round.
+  // De-dup by planId — "request changes" does not stack a new card on every
+  // review round: the one card follows the plan, and a newer revision moves it
+  // to the end, after the reply and the edits that produced it.
   const idx = existing.blocks.findIndex((b) => b.type === 'plan' && b.planId === plan.planId);
   const openedAt = plan.status === 'awaiting_review' ? { openedAt: now } : {};
 
   if (idx >= 0) {
     const blocks = existing.blocks.slice();
-    blocks[idx] = { ...(blocks[idx] as PlanBlock), ...plan, ...openedAt };
+    const next: PlanBlock = { ...(blocks[idx] as PlanBlock), ...plan, ...openedAt };
+    placeRevision(blocks, idx, next, (blocks[idx] as PlanBlock).revision);
     return put(streams, sessionId, { ...existing, blocks });
   }
 
@@ -1037,18 +1041,29 @@ export function setPlanStatus(
   extra?: { interactionId?: string; revision?: number },
   now: number = Date.now(),
 ): StreamsRecord {
-  return replaceBlock(
-    streams,
-    sessionId,
-    (b) => b.type === 'plan' && b.planId === planId,
-    (b) => ({
-      ...(b as PlanBlock),
-      status,
-      ...(status === 'awaiting_review' ? { openedAt: now } : {}),
-      ...(extra?.interactionId ? { interactionId: extra.interactionId } : {}),
-      ...(extra?.revision !== undefined ? { revision: extra.revision } : {}),
-    }),
-  );
+  const existing = streams[sessionId];
+  const idx = existing ? existing.blocks.findIndex((b) => b.type === 'plan' && b.planId === planId) : -1;
+  if (!existing || idx < 0) return streams;
+  const prior = existing.blocks[idx] as PlanBlock;
+  const blocks = existing.blocks.slice();
+  placeRevision(blocks, idx, {
+    ...prior,
+    status,
+    ...(status === 'awaiting_review' ? { openedAt: now } : {}),
+    ...(extra?.interactionId ? { interactionId: extra.interactionId } : {}),
+    ...(extra?.revision !== undefined ? { revision: extra.revision } : {}),
+  }, prior.revision);
+  return put(streams, sessionId, { ...existing, blocks });
+}
+
+/** Writes `next` over `blocks[idx]`; a newer revision than `priorRevision` moves it to the end instead. */
+function placeRevision(blocks: StreamBlock[], idx: number, next: PlanBlock, priorRevision: number): void {
+  if (next.revision > priorRevision) {
+    blocks.splice(idx, 1);
+    blocks.push(next);
+  } else {
+    blocks[idx] = next;
+  }
 }
 
 export function upsertQuestion(

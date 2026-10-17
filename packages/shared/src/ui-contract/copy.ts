@@ -91,6 +91,10 @@ export const PLAN_GATE_COPY = {
   revision: (n: number): string => `Revision ${n}`,
   feedbackLabel: 'What should change?',
   feedbackPlaceholder: 'Be specific — this goes straight to the agent.',
+  /** The label over the person's reply to a revision, shown in the transcript where they sent it. */
+  note: { changes_requested: 'Changes requested', approved: 'Approved with notes' },
+  /** A decision that carried only inline comments. */
+  commentsNote: (n: number): string => `${n} comment${n === 1 ? '' : 's'} on the plan`,
   status: {
     drafting: 'Drafting',
     recorded: 'Recorded',

@@ -255,6 +255,20 @@ export interface PlanCardSummary {
    * ordinal existed.
    */
   sequence?: number;
+  /**
+   * What the person said when deciding a revision ("Request changes", or approving with notes), each at its own
+   * ordinal: the transcript shows it as their reply under the card, before the work it led to.
+   */
+  notes?: PlanCardNote[];
+}
+
+/** One decision on a plan revision that carried words for the agent. */
+export interface PlanCardNote {
+  revision: number;
+  decision: 'changes_requested' | 'approved';
+  /** The person's own feedback (or a count of their inline comments), not the composed message the agent receives. */
+  text: string;
+  sequence?: number;
 }
 
 // ────────────────────────────────────────────────────────────────

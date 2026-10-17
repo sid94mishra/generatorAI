@@ -17,12 +17,14 @@ import type {
   AgentInteraction,
   PermissionCardSummary,
   PlanCardSummary,
+  PlanCardNote,
   PlanDecision,
   QuestionCardSummary,
   ToolPermissionRequestPayload,
   PermissionRule,
 } from '@generatorai/shared';
 import { generateId, DEFAULT_AGENT_MODE, ValidationError, chatSourceAlias, isMountableSource } from '@generatorai/shared';
+import { PLAN_GATE_COPY } from '@generatorai/shared/ui-contract';
 import * as path from 'node:path';
 import type { ChatSourceSpec, ExecutionWorkspace, WorkspaceExposure } from '@generatorai/shared';
 import * as fs from 'node:fs/promises';
@@ -70,7 +72,7 @@ import type { PlatformToolBinder } from './session/PlatformToolBinder.js';
 import { formatConversationBindingKey } from './session/bindingKey.js';
 import { workspaceExposure } from './session/workspaceExposure.js';
 import type { ComposeWarning, SessionComposerDeps, TurnContext, TurnPolicy } from './session/types.js';
-import { stampCardSequence, TurnContextRegistry, type GatePort } from './session/gates.js';
+import { restampCardSequence, stampCardSequence, TurnContextRegistry, type GatePort } from './session/gates.js';
 import { SessionComposer, type ComposeInput } from './session/SessionComposer.js';
 import { chatSessionSpec } from './session/chatSpec.js';
 import { TurnRecorder } from './session/TurnRecorder.js';
@@ -405,6 +407,9 @@ export class ChatManagementService {
       title = existing.title;
       fileName = existing.fileName;
       await planService.setStatus(planId, 'awaiting_review');
+      // The revision is reviewed where it was made: after the person's reply and the agent's edits, not up at the
+      // first revision's place in the turn.
+      restampCardSequence(ctx, planId);
       await this.eventBus.emit(ctx.sessionId, {
         kind: 'chat.plan.updated',
         data: { chatId, planId, revision, title, fileName, summary: request.summary },
@@ -926,6 +931,7 @@ export class ChatManagementService {
           summary: current?.summary ?? plan.title,
           status: plan.status,
           ...(sequence === undefined ? {} : { sequence }),
+          ...(ctx.planNotes?.get(plan.id)?.length ? { notes: ctx.planNotes.get(plan.id) } : {}),
         });
       }
     }
@@ -1067,6 +1073,21 @@ export class ChatManagementService {
     // The agent has these comments now: settle them so the next revision's decision does not send them again.
     for (const c of delivered) await planService.resolveComment(c.id, true).catch(() => undefined);
 
+    // The person's own words stay in the transcript as their reply under the card, at the point they sent it.
+    const noteText = isExitOnlyDecision
+      ? ''
+      : decision.feedback?.trim() || (delivered.length > 0 ? PLAN_GATE_COPY.commentsNote(delivered.length) : '');
+    const note: PlanCardNote | null = noteText
+      ? { revision: plan.currentRevision, decision: decision.approved ? 'approved' : 'changes_requested', text: noteText }
+      : null;
+    const turn = this.turns.get(this.chatConversations.get(chatId) ?? '');
+    if (note && turn) {
+      note.sequence = turn.nextSequence;
+      turn.nextSequence += 1;
+      const notes = (turn.planNotes ??= new Map()).get(planId) ?? [];
+      turn.planNotes.set(planId, [...notes, note]);
+    }
+
     if (chat) {
       await this.eventBus.emit(chat.sessionId, {
         kind: 'chat.plan.decided',
@@ -1077,6 +1098,7 @@ export class ChatManagementService {
           approved: decision.approved,
           ...(decision.action ? { action: decision.action } : {}),
           ...(feedback ? { feedback } : {}),
+          ...(note ? { note: note.text } : {}),
         },
       } as AgentEvent);
     }

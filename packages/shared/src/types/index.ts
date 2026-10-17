@@ -140,6 +140,7 @@ export type {
   PlanScope,
   PlanDocument,
   PlanCardSummary,
+  PlanCardNote,
   AgentQuestionOption,
   AgentQuestion,
   AgentQuestionResponse,

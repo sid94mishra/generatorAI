@@ -58,7 +58,7 @@ export function applyStreamEffect(streams: StreamsRecord, effect: StreamEffect):
         effect.success,
       );
     case 'addSystemMessage':
-      return r.addSystemMessage(streams, effect.key, effect.message, effect.category);
+      return r.addSystemMessage(streams, effect.key, effect.message, effect.category, effect.label);
     case 'upsertBackgroundTask':
       return r.upsertBackgroundTask(streams, effect.key, effect.task);
     case 'upsertScmResult':

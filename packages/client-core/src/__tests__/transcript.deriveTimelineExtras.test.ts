@@ -148,3 +148,31 @@ describe('plan updates render as one collapsed step with the checklist as childr
     expect(steps[0]!.children).toBeUndefined();
   });
 });
+
+describe("the provider's own plan file", () => {
+  it('reads as drafting or revising the plan, not as an edit to a file outside the workspace', () => {
+    const steps = deriveTimeline(
+      [
+        tool('Write', 'w1', { args: { file_path: '/Users/me/.claude/plans/add-a-helper-parallel-gray.md' } }),
+        tool('Edit', 'e1', { args: { file_path: 'C:\\Users\\me\\.claude\\plans\\add-a-helper-parallel-gray.md' } }),
+        tool('Edit', 'e2', { args: { file_path: '/repo/docs/plans/notes.md' } }),
+      ],
+      { active: false },
+    );
+    expect(steps.map((s) => [s.verb, s.target])).toEqual([
+      ['Drafted plan', ''],
+      ['Revised plan', ''],
+      ['Edited', expect.stringContaining('notes.md')],
+    ]);
+  });
+});
+
+describe('a plan sent back for changes', () => {
+  it("leaves the exit-plan step done: the plan card shows the decision", () => {
+    const steps = deriveTimeline(
+      [tool('ExitPlanMode', 'x1', { error: true, result: '## Requested changes to plan "P" (revision 1)' }), tool('Bash', 'b1', { error: true })],
+      { active: false },
+    );
+    expect(steps.map((s) => s.status)).toEqual(['done', 'failed']);
+  });
+});

@@ -243,6 +243,15 @@ describe('StreamEventRouter — plan and question gates', () => {
     expect(run([{ kind, data: {} }])).toContainEqual({ op: 'invalidate', resource });
   });
 
+  it("puts the person's reply to a plan revision in the transcript before the status change", () => {
+    const effects = run([{ kind: 'chat.plan.decided', data: { planId: 'p1', approved: false, note: 'Rename the test file' } }]);
+    expect(effects.slice(0, 2)).toEqual([
+      { op: 'addSystemMessage', key: expect.any(String), message: 'Rename the test file', category: 'operator', label: 'Changes requested' },
+      expect.objectContaining({ op: 'setPlanStatus', planId: 'p1', status: 'changes_requested' }),
+    ]);
+    expect(run([{ kind: 'chat.plan.decided', data: { planId: 'p1', approved: true } }]).some((e) => e.op === 'addSystemMessage')).toBe(false);
+  });
+
   it('builds a question card so the gate can render before the refetch lands', () => {
     const effects = run([
       {

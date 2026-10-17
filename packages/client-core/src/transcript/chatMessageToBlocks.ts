@@ -23,7 +23,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ChatMessage } from '@generatorai/shared';
-import { PERMISSION_GATE_COPY, permissionWording } from '@generatorai/shared/ui-contract';
+import { PERMISSION_GATE_COPY, PLAN_GATE_COPY, permissionWording } from '@generatorai/shared/ui-contract';
 import type { TranscriptMessageInput } from './messageInput.js';
 import type { StreamBlock } from '../stream/types.js';
 import { parseInlineToolCalls } from '../stream/parseInlineToolCalls.js';
@@ -98,6 +98,19 @@ export function chatMessageToBlocks(message: TranscriptMessageInput): StreamBloc
   // the `chat.plan.*` / `chat.question.*` events, so the metadata is the only
   // surviving record of the cards.
   for (const card of metadata?.planCards ?? []) {
+    // The person's replies to its revisions, each where they sent it (before the revision it led to).
+    for (const note of card.notes ?? []) {
+      ordered.push({
+        sequence: note.sequence,
+        make: (blockId) => ({
+          type: 'system',
+          blockId,
+          message: note.text,
+          category: 'operator',
+          label: PLAN_GATE_COPY.note[note.decision],
+        }),
+      });
+    }
     ordered.push({
       sequence: card.sequence,
       make: (blockId) => ({

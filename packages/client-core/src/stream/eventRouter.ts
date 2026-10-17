@@ -22,7 +22,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ScmFlowResult, TransportCapabilitySet } from '@generatorai/shared';
-import { isSpawnWorkerTool, permissionWording, PERMISSION_GATE_COPY } from '@generatorai/shared/ui-contract';
+import { isSpawnWorkerTool, permissionWording, PERMISSION_GATE_COPY, PLAN_GATE_COPY } from '@generatorai/shared/ui-contract';
 import type { WorkflowRunCardEvent } from './workflowRuns.js';
 
 import type {
@@ -110,7 +110,7 @@ export type StreamEffect =
   | { op: 'appendTokenIfNoText'; key: string; text: string }
   | { op: 'addToolCall'; key: string; tool: string; args: unknown; callId?: string; parentCallId?: string }
   | { op: 'completeToolCall'; key: string; toolOrCallId: string; result: unknown; fileOp?: ToolFileOp; success?: boolean }
-  | { op: 'addSystemMessage'; key: string; message: string; category: SystemCategory }
+  | { op: 'addSystemMessage'; key: string; message: string; category: SystemCategory; label?: string }
   /**
    * Insert or merge one orchestrator background worker, keyed by `taskId`.
    * Fields the patch omits keep their previous value — the five
@@ -963,6 +963,17 @@ export class StreamEventRouter {
         this.flushKey(key, out);
         const approved = data['approved'] === true;
         const action = optStr(data['action']);
+        // The person's reply, where they sent it: under the card, before the revision or work it leads to.
+        const note = optStr(data['note']);
+        if (note) {
+          out.push({
+            op: 'addSystemMessage',
+            key,
+            message: note,
+            category: 'operator',
+            label: PLAN_GATE_COPY.note[approved ? 'approved' : 'changes_requested'],
+          });
+        }
         out.push({
           op: 'setPlanStatus',
           key,

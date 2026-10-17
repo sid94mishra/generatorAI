@@ -7,7 +7,7 @@
 // to the model and when (the chat turn loop, the stage script).
 // ────────────────────────────────────────────────────────────────
 
-import type { AgentMode, AgentToolPolicy, PermissionCardSummary } from '@generatorai/shared';
+import type { AgentMode, AgentToolPolicy, PermissionCardSummary, PlanCardNote } from '@generatorai/shared';
 import type { HookBridge } from '../../domain/ports/IHookBridge.js';
 import type { HarnessPermissionMode } from '../../domain/ports/IAgentHarness.js';
 import type { CustomToolRegistry } from '../../tools/CustomToolRegistry.js';
@@ -173,6 +173,8 @@ export interface TurnContext {
   policy?: TurnPolicy | undefined;
   /** U-16 (D-147): requests remembered rules allowed without asking this turn (kept in the transcript as notes). */
   autoAllowedPermissions?: PermissionCardSummary[] | undefined;
+  /** What the person said deciding a plan revision this turn, per plan, each at the ordinal it was sent. */
+  planNotes?: Map<string, PlanCardNote[]> | undefined;
   /** Files the person attached to this turn: reading them never asks (they are stored outside the workspace). */
   attachedPaths?: string[] | undefined;
   /**

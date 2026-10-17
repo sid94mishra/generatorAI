@@ -98,6 +98,8 @@ export interface SystemBlock {
   blockId: number;
   message: string;
   category: SystemCategory;
+  /** A heading over the note (an `operator` reply to a plan revision: "Changes requested"). */
+  label?: string;
 }
 
 /**

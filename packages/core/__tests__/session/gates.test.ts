@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_AGENT_TOOL_POLICY, type AgentToolPolicy } from '@generatorai/shared';
 import type { PermissionRequest } from '../../src/domain/ports/IAgentHarness.js';
-import { TurnContextRegistry, askBeforeRunning, type GatePort } from '../../src/services/session/gates.js';
+import { TurnContextRegistry, askBeforeRunning, restampCardSequence, stampCardSequence, type GatePort } from '../../src/services/session/gates.js';
 import { applyModeConfig } from '../../src/services/session/modeConfig.js';
 import { StageGatePort } from '../../src/services/session/StageGatePort.js';
 import type { SessionOwner, TurnContext } from '../../src/services/session/types.js';
@@ -38,6 +38,19 @@ const stageOwner = (stageRunId: string, workflowRunId = 'run-1'): SessionOwner =
 });
 
 const req = (type: PermissionRequest['type']): PermissionRequest => ({ type, description: `${type} request` });
+
+describe('card ordinals', () => {
+  it('stamps a card once, and a plan revision moves it to the current point of the turn', () => {
+    const ctx = { nextSequence: 3, cardSequence: new Map<string, number>() } as unknown as TurnContext;
+    stampCardSequence(ctx, 'p1');
+    stampCardSequence(ctx, 'p1');
+    expect(ctx.cardSequence.get('p1')).toBe(3);
+    ctx.nextSequence = 7; // a reply and the agent's edits took 4–6
+    restampCardSequence(ctx, 'p1');
+    expect(ctx.cardSequence.get('p1')).toBe(7);
+    expect(ctx.nextSequence).toBe(8);
+  });
+});
 
 describe('mode config and the tool-policy wrapper', () => {
   it('a chat enforces the agent tool groups before its gate (W-53)', async () => {

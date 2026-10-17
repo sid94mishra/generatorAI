@@ -217,6 +217,25 @@ function screenshotOf(result: unknown): { relativePath: string; label: string } 
   return { relativePath: p, label: base };
 }
 
+/** The provider's "leave plan mode" tool, whose outcome is the plan card's decision. */
+function isPlanExitTool(toolName: string): boolean {
+  return toolName.toLowerCase().replace(/[^a-z]/g, '') === 'exitplanmode';
+}
+
+/**
+ * Claude drafts a plan-mode plan in its own folder (`~/.claude/plans/<random-slug>.md`); the plan card names the copy
+ * the workspace keeps. A write there reads as what happened ("Drafted plan"), not as an edit to a file the person
+ * can find nowhere in the workspace.
+ */
+function providerPlanDraft(toolName: string, args: unknown, live: boolean): string | undefined {
+  if (toolStepKind(toolName) !== 'edit' || args == null || typeof args !== 'object') return undefined;
+  const a = args as Record<string, unknown>;
+  const file = typeof a['file_path'] === 'string' ? a['file_path'] : typeof a['path'] === 'string' ? a['path'] : '';
+  if (!/[\\/]\.claude[\\/]plans[\\/][^\\/]+\.md$/i.test(file)) return undefined;
+  const drafted = /^write$/i.test(toolName);
+  return live ? (drafted ? 'Drafting plan' : 'Revising plan') : (drafted ? 'Drafted plan' : 'Revised plan');
+}
+
 function summarizeArgs(toolName: string, args: unknown): { target: string; meta?: string } {
   // No target beats repeating the tool name next to itself ("Write Write").
   if (args == null || typeof args !== 'object') return { target: '' };
@@ -408,7 +427,8 @@ export function deriveTimeline(
       case 'tool_call': {
         const summary = summarizeArgs(b.tool, b.args);
         const toolSearch = isToolSearchTool(b.tool) ? toolSearchTarget(b.args) : undefined;
-        const target = toolSearch ?? summary.target;
+        const planDraft = providerPlanDraft(b.tool, b.args, b.status !== 'complete' && opts.active);
+        const target = planDraft ? '' : toolSearch ?? summary.target;
         const meta = toolSearch ? undefined : summary.meta;
         const kind = toolStepKind(b.tool);
         // A tool call may only spin while the turn is genuinely live. Several
@@ -418,8 +438,10 @@ export function deriveTimeline(
         // persisted). Keying off `b.status` alone left those rows spinning
         // forever after the turn ended. Once the turn is settled, an
         // unresolved call degrades to a neutral terminal state instead.
+        // A plan the person sent back returns from the provider's exit-plan tool as an error; the plan card shows
+        // that decision, so the step reads as done rather than failed.
         const status: StepStatus = b.status === 'complete'
-          ? (toolCallFailed(b) ? 'failed' : 'done')
+          ? (toolCallFailed(b) && !isPlanExitTool(b.tool) ? 'failed' : 'done')
           : awaitingDecision
             ? 'waiting'
             : opts.active ? 'running' : 'pending';
@@ -462,11 +484,11 @@ export function deriveTimeline(
               status: 'done',
             }]
           : undefined;
-        const errorText = b.status === 'complete' ? toolCallErrorText(b) : undefined;
+        const errorText = b.status === 'complete' && !isPlanExitTool(b.tool) ? toolCallErrorText(b) : undefined;
         const step: TimelineStep = {
           id: `tool-${b.blockId}`,
           kind,
-          verb: worker ? 'Delegated' : toolStepVerb(b.tool, status === 'running'),
+          verb: worker ? 'Delegated' : planDraft ?? toolStepVerb(b.tool, status === 'running'),
           tool: b.tool,
           ...(args != null ? { args } : {}),
           ...(result != null ? { result } : {}),
@@ -773,7 +795,7 @@ export type StreamSegment =
   | { type: 'permission'; id: string; permission: Extract<StreamBlock, { type: 'permission' }> }
   | { type: 'scm_result'; id: string; scmResult: Extract<StreamBlock, { type: 'scm_result' }> }
   /** A message an operator sent into a workflow stage (the stage conversation). */
-  | { type: 'operator'; id: string; text: string }
+  | { type: 'operator'; id: string; text: string; label?: string }
   /** The run a `run_workflow` call started (P06 WP-6.2): drawn from the chat's live run cards. */
   | { type: 'workflow_run'; id: string; run: WorkflowRunToolCard; callId: string }
   /** The draft a `create_workflow_draft` call submitted: open it in the builder, or publish it. */
@@ -877,7 +899,7 @@ export function deriveSegments(
       // The operator's own message: a user bubble in the stage transcript.
       flushSteps();
       flushText();
-      segments.push({ type: 'operator', id: `operator-${b.blockId}`, text: b.message });
+      segments.push({ type: 'operator', id: `operator-${b.blockId}`, text: b.message, ...(b.label ? { label: b.label } : {}) });
     } else {
       // tool_call / system / background_task → step-rail block.
       flushText();

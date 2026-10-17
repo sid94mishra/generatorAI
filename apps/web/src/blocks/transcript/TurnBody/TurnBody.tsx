@@ -171,8 +171,8 @@ function TurnBodyImpl({
               </div>
             ) : null;
           case 'operator':
-            // A message an operator sent into a workflow stage (the stage conversation).
-            return <UserMessage key={seg.id} content={seg.text} />;
+            // A message an operator sent into a stage, or the person's reply to a plan revision (labelled).
+            return <UserMessage key={seg.id} content={seg.text} {...(seg.label ? { label: { text: seg.label, icon: 'plan' } } : {})} />;
           case 'workflow_run': {
             const render = segmentCardRenderer('workflow_run');
             return render ? (

@@ -52,6 +52,12 @@ export function transcriptMessageInput(message: { content: string; metadata?: un
     planId: str(card['planId'])!, revision: num(card['revision']) ?? 1, title: str(card['title']) ?? 'Plan',
     fileName: str(card['fileName']) ?? '', summary: str(card['summary']) ?? '',
     status: (str(card['status']) ?? 'expired') as PlanCardSummary['status'], sequence: num(card['sequence']),
+    ...(Array.isArray(card['notes']) ? {
+      notes: records(card['notes']).filter((note) => !!str(note['text'])).map((note) => ({
+        revision: num(note['revision']) ?? 1, text: str(note['text'])!, sequence: num(note['sequence']),
+        decision: note['decision'] === 'approved' ? 'approved' as const : 'changes_requested' as const,
+      })),
+    } : {}),
   }));
   metadata.questionCards = records(raw['questionCards']).filter((card) => !!str(card['interactionId'])).map((card) => {
     const response = record(card['response']);
