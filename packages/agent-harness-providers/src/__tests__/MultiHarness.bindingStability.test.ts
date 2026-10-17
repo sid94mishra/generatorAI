@@ -189,6 +189,24 @@ describe('MultiHarness — an established binding survives a model-name inferenc
     expect(adapters.copilot!.createConversation).toHaveBeenCalled();
   });
 
+  it("never hands the old provider's session id to the provider the conversation moves to", async () => {
+    // Live (2026-10-17): a Codex chat switched to Sonnet passed the Codex thread id on as Claude's resume id, and
+    // the turn died with "No conversation found with session ID".
+    const { registry, adapters } = makeRegistry();
+    const harness = new MultiHarness(registry);
+    await harness.createConversation({ conversationId: 'chat-x', harnessType: 'claude-agent' } as CreateConversationParams);
+
+    await harness.resumeConversation('chat-x', {
+      conversationId: 'chat-x',
+      harnessType: 'copilot',
+      resumeProviderSessionId: 'claude-session-1',
+    } as CreateConversationParams);
+
+    const params = adapters.copilot!.createConversation.mock.calls.at(-1)?.[0] as CreateConversationParams;
+    expect(params.conversationId).toBe('chat-x');
+    expect(params.resumeProviderSessionId).toBeUndefined();
+  });
+
   it('still routes a NEW conversation by model, where there is no binding to protect', async () => {
     const { registry } = makeRegistry();
     const harness = new MultiHarness(registry);

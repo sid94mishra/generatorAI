@@ -252,6 +252,16 @@ export class MultiHarness implements IAgentHarness {
   }
 
   /**
+   * Params for a FRESH session on `target` after the conversation left another provider (or a deleted account). The
+   * caller's `resumeProviderSessionId` is the old provider's handle — a Codex thread id handed to Claude failed the
+   * turn with "No conversation found with session ID" (E-4, 2026-10-17) — so it never crosses over.
+   */
+  private freshParamsFor(target: HarnessType, params: CreateConversationParams | undefined): Partial<CreateConversationParams> {
+    const { resumeProviderSessionId: _foreign, ...rest } = this.withModelSupportedBy(target, params) ?? {};
+    return rest;
+  }
+
+  /**
    * The provider already bound to `conversationId`, or `undefined` for a
    * genuinely new conversation. Unlike `ownerOf` this does NOT fall back to
    * the primary — routing has to be able to tell "bound to the primary" apart
@@ -556,7 +566,7 @@ export class MultiHarness implements IAgentHarness {
       );
       const freshAdapter = await this.registry.get(target);
       await freshAdapter.createConversation({
-        ...(this.withModelSupportedBy(target, params) ?? {}),
+        ...this.freshParamsFor(target, params),
         conversationId,
       } as CreateConversationParams);
       return;
@@ -583,9 +593,9 @@ export class MultiHarness implements IAgentHarness {
       );
       const adapter = await this.registry.get(target);
       await adapter.createConversation({
-        ...(this.withModelSupportedBy(target, params) as CreateConversationParams),
+        ...this.freshParamsFor(target, params),
         conversationId,
-      });
+      } as CreateConversationParams);
       return;
     }
 
