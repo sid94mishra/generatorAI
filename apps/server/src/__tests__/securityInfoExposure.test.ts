@@ -115,6 +115,8 @@ describe('GET /api/security/posture and /network-access', () => {
       authentication: { required: true, dpopRequired: true },
       relay: { enabled: false, clientAvailable: false },
       scopes: expect.any(Array),
+      // U-47: New chat preselects the deployment's permission default, so every client may read it.
+      agents: { defaultPermissionMode: expect.any(String) },
     });
     const network = await request(app).get('/api/security/network-access');
     expect(network.body).toEqual({
