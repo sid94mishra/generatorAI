@@ -2123,6 +2123,8 @@ export class ChatManagementService {
     // finalises first (see `finalizeTurn`).
     let turnError: string | undefined;
     let outcomeRecorded = false;
+    // This turn's prompt carries the chat's conversation seed (see below); `finalizeTurn` decides whether it is spent.
+    let seedInFlight = false;
     const recordTurnOutcome = (opts: { cancelled?: boolean; error?: string }): void => {
       if (outcomeRecorded) return;
       outcomeRecorded = true;
@@ -2175,6 +2177,16 @@ export class ChatManagementService {
       // stopped, and is recorded even when empty — the transcript renders it as
       // its "stopped" note. A completed turn still requires text.
       const recorded = recorder.take({ partial });
+      if (seedInFlight) {
+        // The seed is spent once the agent answered with it. A turn that failed or stopped before producing
+        // anything (a move whose new session never started, a quit) keeps it for the next prompt: clearing it up
+        // front left the retry on a provider with no memory of the chat.
+        seedInFlight = false;
+        const answered = !!recorded?.content.trim() || (recorded?.metadata.toolCalls?.length ?? 0) > 0;
+        if (answered || (!partial && !(opts.error ?? turnError))) {
+          await this.chatRepo.update(chatId, { conversationSeed: '' });
+        }
+      }
       if (!recorded) return;
       const { content, metadata, complete } = recorded;
 
@@ -2354,7 +2366,7 @@ export class ChatManagementService {
       // memory of the chat otherwise.
       if (chat.conversationSeed) {
         promptForHarness = applyConversationSeed(chat.conversationSeed, promptForHarness);
-        await this.chatRepo.update(chatId, { conversationSeed: '' });
+        seedInFlight = true;
       }
 
       // The `before` snapshot must be complete before the agent can touch the

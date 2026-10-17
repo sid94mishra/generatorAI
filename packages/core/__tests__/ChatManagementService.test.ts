@@ -160,7 +160,31 @@ describe('ChatManagementService', () => {
       expect(sent[0]).toContain('moved to another model provider');
       expect(sent[0]).toContain('Added GET /results.csv with tests.');
       expect(sent[0]).toContain('Review what you just did.');
+      const { conversationId } = await sessionRepo.getById(chat.sessionId);
+      copilot.simulateConversationEvent(conversationId, { kind: 'harness.message_complete', data: { content: 'Reviewed.' } } as never);
+      copilot.simulateConversationEvent(conversationId, { kind: 'harness.idle', data: {} } as never);
+      await new Promise((r) => setTimeout(r, 0));
       expect((await chatRepo.getById(chat.id)).conversationSeed ?? '').toBe('');
+    });
+
+    it('keeps the chat so far for the next prompt when the switched turn fails before answering', async () => {
+      const chat = await service.createChat({ name: 'Switch fails', model: 'gpt-5.6-terra' });
+      await messageRepo.create({ id: 'm1', chatId: chat.id, sessionId: chat.sessionId, role: 'user', content: 'Add a CSV export.', createdAt: new Date() } as ChatMessage);
+      await messageRepo.create({ id: 'm2', chatId: chat.id, sessionId: chat.sessionId, role: 'assistant', content: 'Added GET /results.csv with tests.', createdAt: new Date() } as ChatMessage);
+      (copilot as unknown as { conversationHarness: () => string }).conversationHarness = () => 'codex';
+      await chatRepo.update(chat.id, { model: 'sonnet', harnessConfig: { harnessType: 'claude-agent' } });
+
+      await service.sendPrompt(chat.id, 'Review what you just did.');
+      const { conversationId } = await sessionRepo.getById(chat.sessionId);
+      copilot.simulateConversationEvent(conversationId, { kind: 'harness.error', data: { message: 'No conversation found' } } as never);
+      copilot.simulateConversationEvent(conversationId, { kind: 'harness.idle', data: {} } as never);
+      await new Promise((r) => setTimeout(r, 0));
+      expect((await chatRepo.getById(chat.id)).conversationSeed).toContain('Added GET /results.csv with tests.');
+
+      await service.sendPrompt(chat.id, 'Try again.');
+      const sent = copilot.calls.filter((c) => c.method === 'sendPrompt').map((c) => String(c.args[1]));
+      expect(sent[1]).toContain('Added GET /results.csv with tests.');
+      expect(sent[1]).toContain('Try again.');
     });
   });
 
