@@ -2225,7 +2225,22 @@ export function stageSessionSpec(
   const model = run.stageOverrides?.find((x) => x.stageKey === stage.key)?.model;
   const stageRunLayer: SessionSpec | undefined = model ? { model } : undefined;
   return {
-    merged: resolveSessionSpec(graph.workflow.session, runLayer, stage.session, stageRunLayer),
+    merged: readOnlyWithoutPlanExit(resolveSessionSpec(graph.workflow.session, runLayer, stage.session, stageRunLayer)),
     binding: resolveSessionSpec(runLayer, stage.session, stageRunLayer),
   };
+}
+
+/**
+ * E-6 — a workflow stage in permission mode `plan` is a READ-ONLY step (presets, the validator and the risk plan all
+ * read it that way), not a plan put up for review: that is `defaultAgentMode: 'plan'`. Claude in plan mode still
+ * reaches for ExitPlanMode once it has its answer; the call failed or opened a review nobody asked for, and the
+ * stage's output became the model's reply to that instead of its answer. Such a stage never gets the tool.
+ */
+const EXIT_PLAN_MODE_TOOL = 'ExitPlanMode';
+
+function readOnlyWithoutPlanExit(spec: SessionSpec): SessionSpec {
+  if (spec.permissionMode !== 'plan' || spec.defaultAgentMode === 'plan') return spec;
+  const excluded = spec.tools?.excluded ?? [];
+  if (excluded.includes(EXIT_PLAN_MODE_TOOL)) return spec;
+  return { ...spec, tools: { ...spec.tools, excluded: [...excluded, EXIT_PLAN_MODE_TOOL] } };
 }
