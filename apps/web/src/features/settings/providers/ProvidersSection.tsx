@@ -69,6 +69,9 @@ export function ProvidersSection() {
 
   const providers = data?.providers ?? [];
   const primary = data?.primary;
+  // A default that is not signed in is not what chats use: say which provider is (`inUse`, the server's routing).
+  const inUse = data?.inUse;
+  const defaultUnused = !!primary && inUse !== undefined && inUse !== primary;
 
   const report = (result: ProviderActionResult) => setMessage({ tone: result.ok ? 'ok' : 'err', text: result.message });
   const reportError = (err: unknown) => setMessage({ tone: 'err', text: err instanceof Error ? err.message : 'Network error' });
@@ -169,7 +172,8 @@ export function ProvidersSection() {
               }
               badges={
                 <>
-                  {p.type === primary ? <Badge tone="neutral">Default</Badge> : null}
+                  {p.type === primary ? <Badge tone={defaultUnused ? 'warn' : 'neutral'}>{defaultUnused ? 'Default · not in use' : 'Default'}</Badge> : null}
+                  {defaultUnused && p.type === inUse ? <Badge tone="ok">Used for new chats</Badge> : null}
                   <ConnectionBadge provider={p} checking={busy === p.type || busy === '__all__'} />
                 </>
               }

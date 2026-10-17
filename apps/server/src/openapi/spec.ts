@@ -1396,6 +1396,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         type: 'object',
         properties: {
           primary: { type: 'string', description: 'Configured default provider, reported whether or not it is ready' },
+          inUse: { type: 'string', nullable: true, description: 'Where a chat that names no provider goes: primary when ready, else the first ready provider' },
           stale: { type: 'boolean', description: 'Served from the snapshot while a background re-probe runs' },
           providers: { type: 'array', items: { $ref: '#/components/schemas/HarnessProviderStatus' } },
         },

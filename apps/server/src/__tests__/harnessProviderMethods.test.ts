@@ -76,6 +76,8 @@ describe('GET /api/harness/providers (G-09 shape)', () => {
     const res = await request(makeApp(registry)).get('/api/harness/providers').expect(200);
     const body = res.body as HarnessProvidersResponse;
     expect(body.primary).toBe('copilot');
+    // Copilot is the default but not signed in: chats go to the first ready provider, and Settings says so.
+    expect(body.inUse).toBe('claude-agent');
     expect(body.stale).toBe(false);
     expect(body.providers.map((p) => [p.type, p.ready, p.supportsLogin, p.modelCount])).toEqual([
       ['copilot', false, false, 0],

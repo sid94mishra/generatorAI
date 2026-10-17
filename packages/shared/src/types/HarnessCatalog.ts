@@ -75,6 +75,11 @@ export interface HarnessProviderStatus {
 export interface HarnessProvidersResponse {
   /** The server's configured default provider — reported whether or not it is ready. */
   primary: string;
+  /**
+   * Where a chat that names no provider actually goes: `primary` when it is ready, else the first ready provider
+   * (`MultiHarness.defaultTarget`); null when none is ready. Settings shows it next to a default that is not signed in.
+   */
+  inUse?: string | null;
   /** Served from the last-known snapshot while a background re-probe runs; poll until false. */
   stale: boolean;
   providers: HarnessProviderStatus[];

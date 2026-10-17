@@ -117,8 +117,13 @@ export function createHarnessRoutes(container: Container): Router {
 
       // Typed with the shared wire shape (G-09) so a drift between this body
       // and what web / mobile / CLI read is a compile error.
+      const primaryStatus = statuses.find((s) => s.type === harnessRegistry.primary);
       const body: HarnessProvidersResponse = {
         primary: harnessRegistry.primary,
+        // The same rule `MultiHarness.defaultTarget` routes by: a configured default that is not signed in is not used.
+        inUse: primaryStatus?.ready
+          ? harnessRegistry.primary
+          : (statuses.find((s) => s.ready && !harnessRegistry.isHidden(s.type))?.type ?? null),
         // `stale` tells the client this is last-known-good and a fresher
         // answer is being fetched, so it can poll briefly and converge rather
         // than sit on cache until its own staleTime expires.
