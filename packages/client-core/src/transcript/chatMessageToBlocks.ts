@@ -58,8 +58,10 @@ export function chatMessageToBlocks(message: TranscriptMessageInput): StreamBloc
   // Assistant narration between tool waves. Present only on turns that said
   // more than their closing paragraph.
   const textSegments = metadata?.textSegments ?? [];
+  let closingIndex = -1;
   for (const seg of textSegments) {
     if (!seg.content?.trim()) continue;
+    closingIndex = ordered.length;
     ordered.push({
       sequence: seg.sequence,
       make: (blockId) => ({ type: 'text', blockId, content: seg.content }),
@@ -179,11 +181,17 @@ export function chatMessageToBlocks(message: TranscriptMessageInput): StreamBloc
   }
 
   // Messages persisted before the ordinal existed carry no sequence at all.
-  // Array#sort is stable, so those keep their append order (tools, then plans,
-  // then questions) and simply trail the ones that do carry an ordinal.
+  // Array#sort is stable, so those keep their append order (text, tools, then
+  // plans, then questions) and simply trail the ones that do carry an ordinal.
   ordered.sort(
     (a, b) => (a.sequence ?? Number.MAX_SAFE_INTEGER) - (b.sequence ?? Number.MAX_SAFE_INTEGER),
   );
+  // Such a turn (a stage turn before U-42) cannot place its narration between
+  // its steps, but its last text segment is the closing answer: it goes after
+  // them, not above the tool call it reports on.
+  if (closingIndex >= 0 && ordered.every((item) => item.sequence === undefined)) {
+    ordered.push(...ordered.splice(closingIndex, 1));
+  }
   for (const item of ordered) {
     blocks.push(item.make(nextId++));
   }
