@@ -411,11 +411,15 @@ export class WorkspaceManager {
     return out;
   }
 
-  /** Mounts as the change/checkpoint engines see them (with shadow dirs). */
+  /**
+   * Mounts as the change/checkpoint engines see them (with shadow dirs). Only prepared ones: a mount still
+   * preparing has no worktree or shadow store yet, and the Changes read a new chat makes while its repo is
+   * still being fetched ran git in a directory that did not exist ("spawn git ENOENT", every new chat).
+   */
   async toMountRefs(workspace: ExecutionWorkspace): Promise<MountRef[]> {
     const mounts = await this.listMounts(workspace);
     return mounts
-      .filter((m) => m.status === 'ready' || m.status === 'preparing')
+      .filter((m) => m.status === 'ready')
       .map((m) => {
         const shadow = m.git?.shadow !== false;
         return {
