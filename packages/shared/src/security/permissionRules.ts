@@ -145,6 +145,8 @@ class ShellLineParser {
   private i = 0;
   readonly commands: Word[][] = [];
   problem: string | undefined;
+  /** An output redirect (`>`, `>>`, `&>`, `>|`, `<>`, `>(…)`) to anything but /dev/null: the line writes a file. */
+  writesFile = false;
 
   constructor(private readonly s: string) {}
 
@@ -161,11 +163,15 @@ class ShellLineParser {
     let inWord = false;
     let dynamic = false;
     let redirectTarget = false;
+    let redirectOut = false;
 
     const endWord = (): void => {
       if (inWord) {
-        if (redirectTarget) redirectTarget = false;
-        else words.push({ text: cur, dynamic });
+        if (redirectTarget) {
+          if (redirectOut && (dynamic || cur !== '/dev/null')) this.writesFile = true;
+          redirectTarget = false;
+          redirectOut = false;
+        } else words.push({ text: cur, dynamic });
       }
       cur = '';
       inWord = false;
@@ -255,6 +261,7 @@ class ShellLineParser {
       }
       if ((c === '<' || c === '>') && next === '(') {
         // Process substitution: a command of its own, used as a file name.
+        if (c === '>') this.writesFile = true;
         endWord();
         this.i += 2;
         this.list(true);
@@ -290,6 +297,7 @@ class ShellLineParser {
           endWord();
           this.i += s[this.i + 2] === '>' ? 3 : 2;
           redirectTarget = true;
+          redirectOut = true;
           continue;
         }
         endCommand(); // `cmd &` — background, then the next command.
@@ -327,6 +335,7 @@ class ShellLineParser {
           this.i += 1;
         }
         redirectTarget = true;
+        redirectOut = c === '>' || op === '>';
         continue;
       }
       if (c === '(' && !inWord) {
@@ -494,6 +503,70 @@ export function shellCommandRules(command: string): RememberablePermission {
   }
   if (rules.length === 0) return { rules: [], refusal: 'This command has nothing to remember.' };
   return { rules };
+}
+
+// ── Read-only inspection (D-150) ────────────────────────────────
+
+/** Programs that only read and print. `sed`, `sort` and `git` have per-argument conditions below. */
+const INSPECTORS: ReadonlySet<string> = new Set([
+  'cat', 'head', 'tail', 'ls', 'pwd', 'wc', 'nl', 'grep', 'egrep', 'fgrep', 'rg', 'echo', 'printf', 'diff', 'stat',
+  'file', 'which', 'basename', 'dirname', 'cut', 'tr', 'sort', 'sed', 'cd', 'true',
+]);
+const INSPECTING_GIT: ReadonlySet<string> = new Set(['status', 'diff', 'log', 'show', 'blame', 'rev-parse', 'ls-files', 'grep']);
+/** Shells whose `-c` script is the real command line (Codex sends `/bin/zsh -lc '<line>'`). */
+const WRAPPING_SHELLS: ReadonlySet<string> = new Set(['sh', 'bash', 'zsh']);
+
+/** A path argument, or the value glued to a flag (`-f/etc/x`, `--file=~/x`), that leaves the working directory. */
+function argLeaves(text: string): boolean {
+  return leavesWorkspace(text) || leavesWorkspace(text.replace(/^--?[A-Za-z0-9-]+=?/, ''));
+}
+
+function inspects(words: readonly Word[]): boolean {
+  if (words.length === 0 || words.some((w) => w.dynamic)) return false;
+  const base = words[0]!.text.replace(/^.*[\\/]/, '');
+  const args = words.slice(1).map((w) => w.text);
+  if (args.some(argLeaves)) return false;
+  if (base === 'git') {
+    // No global flags (`-C`, `-c`, `--git-dir`): the subcommand comes first, and it only reads.
+    return INSPECTING_GIT.has(args[0] ?? '') && !args.some((a) => /^--(?:output|ext-diff|textconv)/.test(a));
+  }
+  if (!INSPECTORS.has(base)) return false;
+  switch (base) {
+    case 'cd':
+      // Exactly one relative directory: a bare `cd` goes home, `cd -` somewhere unknown.
+      return args.length === 1 && args[0] !== '-';
+    case 'sed': {
+      // Only `sed -n <lines>p <files>`: in-place edits, `w` and `e` commands write or run.
+      const script = args.filter((a) => a !== '-n')[0];
+      return args.includes('-n') && !!script && /^(?:\d+|\$)(?:,(?:\d+|\$))?p$/.test(script) && !args.some((a) => a.startsWith('-') && a !== '-n');
+    }
+    case 'sort':
+      return !args.some((a) => a === '-o' || a.startsWith('--output') || /^-[a-zA-Z]*o/.test(a));
+    case 'rg':
+      return !args.some((a) => a.startsWith('--pre'));
+    default:
+      return true;
+  }
+}
+
+/**
+ * Whether a shell line only reads and prints inside the working directory: every command is an inspector
+ * (`cat`, `sed -n 1,80p`, `grep`, `git diff` …), nothing expands, no output is redirected to a file, no path
+ * leaves the workspace, and there is no control flow or here-document. "Accept edits" treats such a line as the
+ * file read it is (D-150). A `sh|bash|zsh -c '<line>'` wrapper is judged by its line.
+ */
+export function isReadOnlyInspection(command: string, depth = 0): boolean {
+  const parsed = new ShellLineParser(command).parse();
+  if (parsed.problem || parsed.writesFile || parsed.commands.length === 0) return false;
+  const [only] = parsed.commands;
+  if (parsed.commands.length === 1 && only && depth === 0) {
+    const base = only[0]!.text.replace(/^.*[\\/]/, '');
+    if (WRAPPING_SHELLS.has(base) && only.length === 3 && /^-l?c$/.test(only[1]!.text) && !only[2]!.dynamic) {
+      return isReadOnlyInspection(only[2]!.text, depth + 1);
+    }
+  }
+  if (classifyPermissionRisk({ type: 'shell_exec', toolName: 'shell', inputSummary: command }).risk === 'risky') return false;
+  return parsed.commands.every(inspects);
 }
 
 // ── Gates ───────────────────────────────────────────────────────

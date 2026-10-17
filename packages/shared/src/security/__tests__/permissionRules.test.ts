@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isReadOnlyInspection,
   permissionRulesFor,
   rememberablePermission,
   ruleMatches,
@@ -187,5 +188,49 @@ describe('summarizePermissionRules', () => {
   it('shows the first rules and a count', () => {
     expect(summarizePermissionRules([cmd('pnpm lint')])).toBe('pnpm lint');
     expect(summarizePermissionRules([cmd('a'), cmd('b'), cmd('c'), cmd('d')])).toBe('a, b +2');
+  });
+});
+
+// D-150 — read-only inspection lines run under "Accept edits" without a card; anything that could write, run code
+// or read outside the workspace must not pass.
+describe('isReadOnlyInspection', () => {
+  it.each([
+    'cat -n src/app.ts',
+    'sed -n 1,80p apps/api/src/routes.ts; echo ----; sed -n 250,320p apps/web/src/View.tsx',
+    'git diff --stat; git status --short && git log --oneline | head -20',
+    'grep -rn "formatDuration" apps packages | head -5',
+    'cd src && cat main.tsx index.css',
+    'ls -la tasks/ 2>&1',
+    'rg -n "maintenance" apps/api/src 2>/dev/null | wc -l',
+    "/bin/zsh -lc 'git show --stat HEAD'",
+    'git diff > /dev/null',
+  ])('reads only: %s', (line) => {
+    expect(isReadOnlyInspection(line)).toBe(true);
+  });
+
+  it.each([
+    ['writes a file by redirect', 'cat src/a.ts > src/b.ts'],
+    ['appends by redirect', 'echo x >> notes.md'],
+    ['writes via &>', 'git log &> out.txt'],
+    ['writes via process substitution', 'cat a.ts | tee >(cat)'],
+    ['edits in place', "sed -i '' 's/a/b/' src/a.ts"],
+    ['sed script that writes', "sed -n 'w out.txt' src/a.ts"],
+    ['sort -o writes', 'sort -o out.txt in.txt'],
+    ['reads outside the workspace', 'cat ~/.ssh/id_rsa'],
+    ['absolute path outside', 'cat /etc/passwd'],
+    ['climbs out', 'cat ../../secrets.env'],
+    ['glued flag path', 'grep -f/etc/passwd src'],
+    ['expands a variable', 'cat $HOME/.netrc'],
+    ['command substitution', 'echo $(rm -rf build)'],
+    ['bare cd goes home', 'cd && cat .ssh/config'],
+    ['runs code', 'pnpm test'],
+    ['git global flag', 'git -C /tmp log'],
+    ['git writes', 'git commit -m x'],
+    ['rg preprocessor runs a program', 'rg --pre ./x.sh foo'],
+    ['control flow', 'for f in a b; do cat $f; done'],
+    ['wrapped writer', "/bin/zsh -lc 'git add -A && git commit -m x'"],
+    ['here-document', "cat <<'EOF'\nhi\nEOF"],
+  ])('%s: %s', (_why, line) => {
+    expect(isReadOnlyInspection(line)).toBe(false);
   });
 });

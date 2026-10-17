@@ -18,7 +18,7 @@ import type {
   HarnessPermissionMode,
   PermissionRequest,
 } from '../domain/ports/IAgentHarness.js';
-import { classifyPermissionRisk, rememberablePermission, type ToolPermissionRequestPayload } from '@generatorai/shared';
+import { classifyPermissionRisk, isReadOnlyInspection, rememberablePermission, type ToolPermissionRequestPayload } from '@generatorai/shared';
 import { permissionWording } from '@generatorai/shared/ui-contract';
 
 /** The behavioural contract for a mode. Re-exported so callers need one import. */
@@ -180,11 +180,15 @@ export function personDenied(reason: string): string {
   return `The user denied this request: ${reason}`;
 }
 
-/** The kind of access a request is judged as: a heredoc file write counts as a file write (U-27b). */
+/** The kind of access a request is judged as: a heredoc file write counts as a file write (U-27b), a read-only inspection line as a file read (D-150). */
 export function permissionTypeOf(request: PermissionRequest): PermissionRequest['type'] {
   if (request.type !== 'shell_exec') return request.type;
   const command = fullShellCommand(requestInput((request.details ?? {}) as Record<string, unknown>));
-  return command && heredocWriteTarget(command) ? 'file_write' : request.type;
+  if (!command) return request.type;
+  if (heredocWriteTarget(command)) return 'file_write';
+  // D-150 — `cat`, `sed -n 1,80p`, `grep`, `git diff` inside the workspace read like the Read tool: "Accept edits"
+  // allows them as it allows reads. They were half of a team run's approvals, each one a stop.
+  return isReadOnlyInspection(command) ? 'file_read' : request.type;
 }
 
 /**

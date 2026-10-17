@@ -1482,6 +1482,17 @@ the tier it says "Read-only" (`APPROVAL_MODE_LABELS` in `packages/shared`, the o
 Plan agent mode alone says "Plan". Automations use the same table (their `plan` is the run's ceiling, so every stage
 is read-only — the old "the plan waits for approval" hint was wrong).
 
+### D-150 "Accept edits" runs read-only inspection commands without asking (2026-10-17) — Final
+In the evaluation's team runs about half of all tool approvals were commands that only read inside the workspace
+(`cat -n`, `sed -n 1,80p`, `grep -rn`, `ls`, `git diff/log/show/status`), each one a stop for every worker. "Accept
+edits" already allows the Read tool and file writes, so a shell line that only reads is judged as the file read it
+is (`isReadOnlyInspection` in `packages/shared`, used by `permissionTypeOf`): every command is an inspector, nothing
+expands (`$`, substitutions), no output is redirected to a file, no path or glued flag value leaves the working
+directory (absolute, `~`, `..`), no control flow or here-document, not risky (MG-04); `sed` only as `sed -n <lines>p`,
+`git` only reading subcommands without global flags, `cd` only to one relative directory. A `sh|bash|zsh -c '<line>'`
+wrapper (Codex) is judged by its line. "Ask before tools" and read-only runs still ask; tests, installs and writes
+still ask in Accept edits, and "Allow for this chat/run" (D-147) remains the way to stop those asking.
+
 ### D-142 (withdrawn 2026-10-11) Local self-signed signing does not stop the Keychain prompt
 Tried and reverted: signing local builds with a self-signed "GeneratorAI Local Signing" identity kept the code signature
 stable, but macOS still asked for the "GeneratorAI Safe Storage" key after the next rebuild — Keychain access for

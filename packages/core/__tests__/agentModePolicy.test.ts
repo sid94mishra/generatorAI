@@ -24,6 +24,7 @@ import {
   shouldAttachPermissionHandler,
   AUTO_MODE_PLAN_INSTRUCTIONS,
   PLAN_MODE_INSTRUCTIONS,
+  decideToolPermission,
   heredocWriteTarget,
   permissionTypeOf,
 } from '../src/services/agentModePolicy.js';
@@ -217,5 +218,17 @@ describe('heredoc file writes count as edits (U-27b)', () => {
     const shell = (command: string) => ({ type: 'shell_exec' as const, description: 'Bash', details: { toolName: 'Bash', input: { command } } });
     expect(permissionTypeOf(shell(write("cat > src/a.ts <<'EOF'")))).toBe('file_write');
     expect(permissionTypeOf(shell('pnpm test'))).toBe('shell_exec');
+  });
+});
+
+describe('read-only inspection lines (D-150)', () => {
+  const shell = (command: string) => ({ type: 'shell_exec' as const, description: 'Bash', details: { toolName: 'Bash', input: { command } } });
+  it('Accept edits runs them like reads; Ask still asks; a writer still asks', () => {
+    expect(permissionTypeOf(shell('sed -n 1,80p src/a.ts; git diff --stat'))).toBe('file_read');
+    expect(decideToolPermission('acceptEdits', permissionTypeOf(shell('grep -rn foo src | head')))).toBe('allow');
+    expect(decideToolPermission('default', permissionTypeOf(shell('cat src/a.ts')))).toBe('prompt');
+    expect(decideToolPermission('acceptEdits', permissionTypeOf(shell('cat src/a.ts > src/b.ts')))).toBe('prompt');
+    // Codex wraps its line in a shell.
+    expect(permissionTypeOf(shell("/bin/zsh -lc 'git status --short'"))).toBe('file_read');
   });
 });
