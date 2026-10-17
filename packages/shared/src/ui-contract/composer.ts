@@ -144,14 +144,18 @@ export function reasoningEffortLabel(level: string): string {
 export type ApprovalMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions';
 
 /**
- * How each approval policy is named: `label` in pickers (composer Agent mode menu, run header), `short` beside the
- * mode on the composer chip (null = the default "never ask" state shows nothing extra).
+ * How each approval policy is named: `label` in pickers (composer Agent mode menu, run header, workflow session
+ * editor), `short` beside the mode on the composer chip (null = the default "never ask" state shows nothing extra),
+ * `word` in compact summaries (workflow setup card, settings, run dialog).
+ *
+ * `plan` is the read-only tier (D-149): it is called "Read-only" wherever a person reads it, so it is never
+ * mistaken for the Plan AGENT mode (plan first, wait for approval).
  */
-export const APPROVAL_MODE_LABELS: Record<ApprovalMode, { label: string; short: string | null }> = {
-  default: { label: 'Ask before tools run', short: 'Ask first' },
-  acceptEdits: { label: 'Accept edits, ask for the rest', short: 'Accept edits' },
-  plan: { label: 'Plan only (no changes)', short: 'Plan only' },
-  bypassPermissions: { label: 'Full access (never ask)', short: null },
+export const APPROVAL_MODE_LABELS: Record<ApprovalMode, { label: string; short: string | null; word: string }> = {
+  default: { label: 'Ask before tools run', short: 'Ask first', word: 'Ask' },
+  acceptEdits: { label: 'Accept edits, ask for the rest', short: 'Accept edits', word: 'Accept edits' },
+  plan: { label: 'Read-only (no changes)', short: 'Read-only', word: 'Read-only' },
+  bypassPermissions: { label: 'Full access (never ask)', short: null, word: 'Full access' },
 };
 
 /** The approval policies a person picks for a chat (plan-only is the Plan agent mode there). */

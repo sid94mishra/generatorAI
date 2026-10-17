@@ -1471,6 +1471,17 @@ orchestrator chat's "Allow for this chat" rules (D-147), and "Allow … for this
 rule on the orchestrator chat, so one approval covers the whole team. Workers also get the Accept-edits hint (U-27).
 Full access is unchanged (no gate reaches the handler).
 
+### D-149 The `plan` permission mode is the read-only tier, and is called "Read-only" (E-6 follow-up) (2026-10-17) — Final
+A workflow stage with `permissionMode: 'plan'` was offered ExitPlanMode and its output became the model's reply to the
+failed call (E-6). The platform has two different "plan"s: the permission tier (nothing is written: run ceilings,
+read-only map steps, Codex's read-only sandbox, Claude's `plan`) and the Plan AGENT mode (plan first, wait for
+approval, `defaultAgentMode: 'plan'`). Decision: keep `plan` as the stored value of the tier — renaming it would touch
+run ceilings, chats, providers, presets and every saved definition for no behaviour change — and (1) a stage on the
+tier without the Plan agent mode is never offered ExitPlanMode (`readOnlyWithoutPlanExit`), (2) wherever a person reads
+the tier it says "Read-only" (`APPROVAL_MODE_LABELS` in `packages/shared`, the one table workflow screens use), and the
+Plan agent mode alone says "Plan". Automations use the same table (their `plan` is the run's ceiling, so every stage
+is read-only — the old "the plan waits for approval" hint was wrong).
+
 ### D-142 (withdrawn 2026-10-11) Local self-signed signing does not stop the Keychain prompt
 Tried and reverted: signing local builds with a self-signed "GeneratorAI Local Signing" identity kept the code signature
 stable, but macOS still asked for the "GeneratorAI Safe Storage" key after the next rebuild — Keychain access for

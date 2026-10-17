@@ -9,6 +9,7 @@
 import type { InvocationRequest, RunPermissionMode, VariableDefinition } from '@generatorai/workflow-spec';
 import { activeStageOverrides, selectedCodebases, type CodebaseDraft, type StageOverrideDraft } from '@generatorai/client-core';
 import type { WorkflowApiError } from '../apiErrors.js';
+import { APPROVAL_MODE_LABELS } from '@generatorai/shared/ui-contract';
 
 export type InvocationTarget = InvocationRequest['target'];
 
@@ -18,10 +19,10 @@ export const BRANCH_VARIABLE_NAMES = new Set(['branch', 'git_branch', 'repo_bran
 
 /** The permission modes a start offers; '' omits it (the deployment posture decides). */
 export const PERMISSION_LABELS: Record<RunPermissionMode, string> = {
-  default: 'Ask',
-  acceptEdits: 'Accept edits',
-  plan: 'Plan',
-  bypassPermissions: 'Full auto',
+  default: APPROVAL_MODE_LABELS.default.word,
+  acceptEdits: APPROVAL_MODE_LABELS.acceptEdits.word,
+  plan: APPROVAL_MODE_LABELS.plan.word,
+  bypassPermissions: APPROVAL_MODE_LABELS.bypassPermissions.word,
 };
 
 /** A refusal as the dialog shows it: the envelope's message and its issues. */

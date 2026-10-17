@@ -48,6 +48,7 @@ import {
   type AutomationDatasetMode,
 } from './automationFormSchema.js';
 import { WebhookCredentialsDialog, type WebhookCredentials } from './WebhookCredentialsDialog.js';
+import { APPROVAL_MODE_LABELS } from '@generatorai/shared/ui-contract';
 
 const STEP_IDS = ['basics', 'trigger', 'workflow', 'review'] as const;
 type StepId = (typeof STEP_IDS)[number];
@@ -73,10 +74,10 @@ const INPUT_MODE_OPTIONS: { value: AutomationDatasetMode; title: string; descrip
 ];
 
 const PERMISSION_ITEMS: SelectItem[] = [
-  { value: 'acceptEdits', label: 'Accept edits', meta: 'file edits run, other tools wait' },
-  { value: 'default', label: 'Ask', meta: 'every gated tool call waits' },
-  { value: 'plan', label: 'Plan', meta: 'read-only; the plan waits for approval' },
-  { value: 'bypassPermissions', label: 'Bypass', meta: 'no approvals — needs admin for a webhook' },
+  { value: 'acceptEdits', label: APPROVAL_MODE_LABELS.acceptEdits.word, meta: 'file edits run, other tools wait' },
+  { value: 'default', label: APPROVAL_MODE_LABELS.default.word, meta: 'every gated tool call waits' },
+  { value: 'plan', label: APPROVAL_MODE_LABELS.plan.word, meta: 'agents read and report; nothing is changed' },
+  { value: 'bypassPermissions', label: APPROVAL_MODE_LABELS.bypassPermissions.word, meta: 'no approvals — needs admin for a webhook' },
 ];
 
 export function CreateAutomationPage() {

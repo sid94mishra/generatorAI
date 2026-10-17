@@ -42,16 +42,11 @@ import { PageHeader } from '@/ui/patterns/PageHeader/PageHeader.js';
 import { PageTitle } from '@/ui/patterns/PageTitle/PageTitle.js';
 import { StatStrip, type StatTileItem } from '@/ui/patterns/StatStrip/StatStrip.js';
 import { DetailPage } from '@/ui/templates/DetailPage/DetailPage.js';
+import { APPROVAL_MODE_LABELS, type ApprovalMode } from '@generatorai/shared/ui-contract';
 import { formatNextRun } from '@/lib/nextRun.js';
 import { TriggerAutomationDialog } from './TriggerAutomationDialog.js';
 import { WebhookCredentialsDialog, type WebhookCredentials } from './WebhookCredentialsDialog.js';
 
-const PERMISSION_MODE_LABEL: Record<string, string> = {
-  acceptEdits: 'Accept edits',
-  default: 'Ask',
-  plan: 'Plan (read-only)',
-  bypassPermissions: 'Bypass',
-};
 
 function formatDate(date: Date | string | undefined): string {
   if (!date) return '—';
@@ -421,7 +416,7 @@ export function AutomationDetailPage() {
                           .filter(Boolean)
                           .join(', ') || `${automation.workflowIds.length} workflow${automation.workflowIds.length === 1 ? '' : 's'}`,
                     },
-                    { label: 'Permission', value: PERMISSION_MODE_LABEL[automation.permissionMode] ?? automation.permissionMode },
+                    { label: 'Permission', value: APPROVAL_MODE_LABELS[automation.permissionMode as ApprovalMode]?.word ?? automation.permissionMode },
                     { label: 'On error', value: automation.onError === 'stop' ? 'Stop on error' : 'Continue on error' },
                     { label: 'Concurrency', value: String(automation.maxConcurrency) },
                     // D-103: the codebases runs mount and the branch each is cut from.

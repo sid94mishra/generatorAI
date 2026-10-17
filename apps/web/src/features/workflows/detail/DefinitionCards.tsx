@@ -21,6 +21,7 @@ import { Link } from '@/ui/primitives/Link/Link.js';
 import { Table, TableBody, TableCell, TableHeadCell, TableHeader, TableRow } from '@/ui/primitives/Table/Table.js';
 import { formatDuration, plural } from '../workflowFormat.js';
 import { ModelLabel } from '@/blocks/model-picker/ModelLabel.js';
+import { APPROVAL_MODE_LABELS, type ApprovalMode } from '@generatorai/shared/ui-contract';
 
 type Stage = WorkflowGraph['stages'][number];
 type Edge = WorkflowGraph['edges'][number];
@@ -126,12 +127,6 @@ export function StagesCard({ graph }: { graph: WorkflowGraph }) {
   );
 }
 
-const PERMISSION_WORD: Record<string, string> = {
-  default: 'Ask',
-  acceptEdits: 'Accept edits',
-  plan: 'Plan',
-  bypassPermissions: 'Full auto',
-};
 
 export function SetupCard({ graph, projectName }: { graph: WorkflowGraph; projectName: string | undefined }) {
   const w = graph.workflow;
@@ -184,7 +179,7 @@ export function SetupCard({ graph, projectName }: { graph: WorkflowGraph; projec
         session.agentRef || session.model || session.reasoningEffort || session.permissionMode ? (
           <span className="flex min-w-0 flex-wrap items-center gap-1.5">
             {session.model ? <ModelLabel modelId={session.model} /> : null}
-            {[session.agentRef, session.reasoningEffort, session.permissionMode ? PERMISSION_WORD[session.permissionMode] : null]
+            {[session.agentRef, session.reasoningEffort, session.permissionMode ? APPROVAL_MODE_LABELS[session.permissionMode as ApprovalMode]?.word : null]
               .filter(Boolean)
               .map((part) => (
                 <span key={String(part)}>· {part}</span>

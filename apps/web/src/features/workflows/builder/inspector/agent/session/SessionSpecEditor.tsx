@@ -21,7 +21,7 @@ import {
   type SessionSpec,
 } from '@generatorai/workflow-spec';
 import { sessionCapabilityWarnings, type Agent } from '@generatorai/shared';
-import { reasoningEffortLabel } from '@generatorai/shared/ui-contract';
+import { APPROVAL_MODE_LABELS, reasoningEffortLabel } from '@generatorai/shared/ui-contract';
 import { useModels } from '@/hooks/harnessQueries.js';
 import { ProviderSelect } from '@/blocks/provider-select/index.js';
 import { ModelPicker } from '@/blocks/model-picker/ModelPicker.js';
@@ -70,10 +70,10 @@ export interface SessionSpecEditorProps {
 
 
 const PERMISSION_LABELS: Record<(typeof RUN_PERMISSION_MODES)[number], string> = {
-  default: 'Ask before tools run',
-  acceptEdits: 'Accept edits, ask for the rest',
-  plan: 'Plan only (no changes)',
-  bypassPermissions: 'Full access (never ask)',
+  default: APPROVAL_MODE_LABELS.default.label,
+  acceptEdits: APPROVAL_MODE_LABELS.acceptEdits.label,
+  plan: APPROVAL_MODE_LABELS.plan.label,
+  bypassPermissions: APPROVAL_MODE_LABELS.bypassPermissions.label,
 };
 
 /** Sentinel of a segmented "inherit" choice (a radio value cannot be empty). */

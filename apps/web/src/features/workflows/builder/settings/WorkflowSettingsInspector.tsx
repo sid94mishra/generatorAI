@@ -30,6 +30,7 @@ import { ProjectTab } from './ProjectTab.js';
 import { TagsTab } from './TagsTab.js';
 import { VariablesTab } from './VariablesTab.js';
 import { useModelLabel } from '@/blocks/model-picker/useModelLabel.js';
+import { APPROVAL_MODE_LABELS, type ApprovalMode } from '@generatorai/shared/ui-contract';
 
 export interface WorkflowSettingsInspectorProps {
   tab: SettingsTab;
@@ -50,12 +51,6 @@ function tabHasError(issues: readonly BuilderIssue[], tab: SettingsTab): boolean
   return issues.some((i) => i.severity === 'error' && TAB_PATHS[tab].some((p) => i.path === p || i.path.startsWith(`${p}/`)));
 }
 
-const PERMISSION_SHORT: Record<string, string> = {
-  default: 'Ask before tools',
-  acceptEdits: 'Accept edits',
-  plan: 'Plan only',
-  bypassPermissions: 'Full access',
-};
 
 export function WorkflowSettingsInspector({ tab, onTabChange }: WorkflowSettingsInspectorProps) {
   const { close } = useBuilderInspector();
@@ -90,7 +85,7 @@ export function WorkflowSettingsInspector({ tab, onTabChange }: WorkflowSettings
   ];
 
   const sessionModelName = useModelLabel(session.model);
-  const sessionSummary = [session.model ? (sessionModelName ?? session.model) : 'Default model', session.permissionMode ? PERMISSION_SHORT[session.permissionMode] : undefined]
+  const sessionSummary = [session.model ? (sessionModelName ?? session.model) : 'Default model', session.permissionMode ? APPROVAL_MODE_LABELS[session.permissionMode as ApprovalMode]?.word : undefined]
     .filter(Boolean)
     .join(' · ');
 
