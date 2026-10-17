@@ -134,3 +134,23 @@ describe('deriveRunView — a finished run replays its answer without the live s
     expect(view.stages[0]!.answer).toBe(PERSISTED);
   });
 });
+
+describe('deriveRunView — a follow-up on a completed stage', () => {
+  const live = (status: string) => ({ 'stageRun:sr-1': { status, blocks: [{ type: 'text', content: STREAMED }] } }) as unknown as DeriveRunViewInput['streams'];
+
+  it('streams the amendment of a completed agent stage', () => {
+    const view = deriveRunView(input({
+      run: { id: 'run-1', status: 'completed', stageRuns: [stageRun({ sessionId: 's-1', outputText: PERSISTED })] } as never,
+      streams: live('streaming'),
+    }));
+    expect(view.stages[0]!.streaming).toBe(true);
+  });
+
+  it('never leaves a finished stage without an agent session (a check) streaming', () => {
+    const view = deriveRunView(input({
+      run: { id: 'run-1', status: 'completed', stageRuns: [stageRun({ outputText: PERSISTED })] } as never,
+      streams: live('streaming'),
+    }));
+    expect(view.stages[0]!.streaming).toBe(false);
+  });
+});

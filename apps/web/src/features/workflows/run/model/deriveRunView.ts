@@ -528,9 +528,10 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
     summary: sr.summary,
     outputData: sr.outputData,
     ...(sr.outputText ? { outputText: sr.outputText } : {}),
-    // A check or wait stage has no agent turn to end its stream entry; a finished stage is never "streaming"
-    // (the expanded Test check showed a loading skeleton after it had passed).
-    streaming: streamLive && status !== 'completed',
+    // A check or wait stage has no agent turn to end its stream entry, so once finished it is never "streaming"
+    // (the expanded Test check showed a loading skeleton after it had passed). A completed agent stage streams
+    // again when the person follows up: that amendment renders live, not all at once when it ends.
+    streaming: streamLive && (status !== 'completed' || !!sr.sessionId),
     ...(sr.sessionId ? { sessionId: sr.sessionId } : {}),
     hooks: hooksFrom(stream, sr.id),
     usage: usageFrom(stream),
