@@ -1497,8 +1497,8 @@ still ask in Accept edits, and "Allow for this chat/run" (D-147) remains the way
 Claude and Codex both announce a tool call (`tool_start`) and only then ask for approval, so the card's ordinal follows
 the step: the transcript reads "Running pnpm test" → "Allow this command?" → the result, live and after a reload. Moving
 the card above its step would need the gate to rewrite a step already on screen and would break the one-ordinal rule
-(every block keeps the place it was first given). The step row shows "Waiting for you" while its card is open, so the
-pair reads as one unit; nothing moves when it is answered.
+(every block keeps the place it was first given). Card and step stay adjacent, so the pair reads as one unit, and nothing
+moves when the card is answered.
 
 ### D-142 (withdrawn 2026-10-11) Local self-signed signing does not stop the Keychain prompt
 Tried and reverted: signing local builds with a self-signed "GeneratorAI Local Signing" identity kept the code signature
