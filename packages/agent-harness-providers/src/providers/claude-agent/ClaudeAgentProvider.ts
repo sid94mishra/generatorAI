@@ -689,6 +689,16 @@ export function isTruncationStopReason(reason: string): boolean {
   return r === 'max_tokens' || r === 'length' || r.includes('max_token') || r.includes('context_length');
 }
 
+/** Empty `ExitPlanMode` calls in a row before the person is told the agent is stuck (fewer are self-corrected). */
+const PLAN_CAPTURE_MISSES_WORTH_A_WARNING = 3;
+
+/** Count an `ExitPlanMode` call that carried no plan; true exactly when the run of misses is worth a warning. */
+export function notePlanCaptureMiss(phase: PlanPhaseState | undefined): boolean {
+  if (!phase) return false;
+  phase.captureMisses = (phase.captureMisses ?? 0) + 1;
+  return phase.captureMisses === PLAN_CAPTURE_MISSES_WORTH_A_WARNING;
+}
+
 export class ClaudeAgentProvider implements IAgentHarness {
   // ── Internal State ──
   private conversations = new Map<string, StoredConversationConfig>();
@@ -2884,13 +2894,16 @@ export class ClaudeAgentProvider implements IAgentHarness {
             const phase = this.planPhases.get(capturedConvId);
             const planContent = extractPlanContent(args, phase?.planText ?? '');
             if (!planContent) {
-              // Fail loudly rather than opening a gate on an empty plan.
-              await this.emitToHandlers(capturedConvId, 'harness.error', {
-                message:
-                  'Plan mode: could not capture the plan text from the model. ' +
-                  'Ask the agent to restate its plan in the reply.',
-                provider: 'claude-agent',
-              });
+              // Never open a gate on an empty plan. The model called ExitPlanMode before writing one (it often
+              // does, then writes the plan file and calls again): the denial tells it so, and the turn carries on.
+              // Not `harness.error` — that settled the turn as failed mid-stream and asked the person to fix
+              // what the agent fixes itself. Only an agent stuck in that loop is worth a word.
+              if (notePlanCaptureMiss(phase)) {
+                await this.emitToHandlers(capturedConvId, 'harness.warning', {
+                  message: 'Plan mode: the agent keeps finishing its plan without writing it out. Ask it to write the plan in its reply.',
+                  provider: 'claude-agent',
+                });
+              }
               return {
                 behavior: 'deny',
                 message:
@@ -2900,6 +2913,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
               };
             }
 
+            if (phase) phase.captureMisses = 0;
             const decision = await planReviewHandler({
               summary: derivePlanSummary(planContent),
               planContent,

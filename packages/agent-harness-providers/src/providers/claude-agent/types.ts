@@ -248,6 +248,8 @@ export interface PlanPhaseState {
    * `ExitPlanModeInput` does not declare a `plan` field).
    */
   planText: string;
+  /** `ExitPlanMode` calls in a row that carried no plan to review (the model finished before writing one). */
+  captureMisses?: number;
 }
 
 
