@@ -543,10 +543,12 @@ export class ChatManagementService {
 
     const payload = buildToolPermissionPayload(request, mode);
 
-    // U-16 (D-147): "Allow for this chat" rules cover this request — allow it without a card, and say so.
-    // A worker answers to its orchestrator's rules (D-148).
-    const scope = await this.approvalScopeOf(chatId);
-    const covered = await this.extensions.permissionRules?.covering(scope, payload, mode).catch(() => null);
+    // U-16 (D-147): "Allow for this chat" (or "in this project") rules cover this request — allow it without a
+    // card, and say so. A worker answers to its orchestrator's rules (D-148), and to the project's.
+    const { chat: scope, project } = await this.approvalOwnersOf(chatId);
+    const covered = await this.extensions.permissionRules
+      ?.covering(project ? [scope, project] : [scope], payload, mode)
+      .catch(() => null);
     if (covered) {
       // Kept in the turn's transcript (a completed chat skips event replay) and announced live.
       const noteId = generateId();
@@ -605,9 +607,14 @@ export class ChatManagementService {
    * Whose "Allow for this chat" rules a chat's gates read and write (D-148): an orchestrator worker's are its
    * orchestrator's, so one approval covers the whole team and a worker's card adds to the chat the person is in.
    */
-  private async approvalScopeOf(chatId: string): Promise<{ kind: 'chat'; id: string }> {
+  private async approvalOwnersOf(
+    chatId: string,
+  ): Promise<{ chat: { kind: 'chat'; id: string }; project: { kind: 'project'; id: string } | null }> {
     const chat = await this.chatRepo.getById(chatId).catch(() => null);
-    return { kind: 'chat', id: chat?.parentChatId ?? chatId };
+    const ownerId = chat?.parentChatId ?? chatId;
+    const owner = ownerId === chatId ? chat : await this.chatRepo.getById(ownerId).catch(() => null);
+    const projectId = owner?.projectId ?? chat?.projectId ?? null;
+    return { chat: { kind: 'chat', id: ownerId }, project: projectId ? { kind: 'project', id: projectId } : null };
   }
 
   /**
@@ -619,7 +626,7 @@ export class ChatManagementService {
   async resolveToolPermission(
     chatId: string,
     interactionId: string,
-    decision: { behavior: 'allow' | 'deny'; message?: string; remember?: boolean },
+    decision: { behavior: 'allow' | 'deny'; message?: string; remember?: 'owner' | 'project' },
   ): Promise<{ ok: boolean; reason?: string; code?: 'NOT_REMEMBERABLE' }> {
     const interactions = this.extensions.agentInteractionService;
     if (!interactions) return { ok: false, reason: 'Approvals are not enabled' };
@@ -642,8 +649,11 @@ export class ChatManagementService {
         return { ok: false, code: 'NOT_REMEMBERABLE', reason: store ? rememberRefusalOf(record.payload) : 'Remembered permissions are not enabled' };
       }
       if (record.status !== 'pending') return { ok: false, reason: 'Already resolved' };
-      await store.remember(await this.approvalScopeOf(chatId), rules);
-      remembered = rules;
+      const owners = await this.approvalOwnersOf(chatId);
+      if (decision.remember === 'project' && !owners.project) {
+        return { ok: false, code: 'NOT_REMEMBERABLE', reason: 'This chat is not in a project.' };
+      }
+      remembered = await store.remember(decision.remember === 'project' ? owners.project! : owners.chat, rules);
     }
 
     const response: PermissionResponse & { remembered?: PermissionRule[] } = {

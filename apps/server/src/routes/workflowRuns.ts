@@ -482,8 +482,8 @@ export function createWorkflowRunRoutes(container: Container): Router {
     kind: 'permission',
     behavior: b.behavior,
     ...(b.message ? { message: b.message } : {}),
-    // U-16 (D-147): "Allow for this run" — the rules are stored for the run, shared by every stage.
-    ...(b.remember ? { remember: true } : {}),
+    // U-16 (D-147): "Allow for this run" — the rules are stored for the run, shared by every stage — or for its project.
+    ...(b.remember ? { remember: b.remember } : {}),
   }));
 
   // U-16 (D-147) — the run's remembered permission rules: list, revoke one, clear.

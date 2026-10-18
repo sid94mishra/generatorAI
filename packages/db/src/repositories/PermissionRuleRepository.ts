@@ -1,6 +1,6 @@
 // ────────────────────────────────────────────────────────────────
 // DrizzlePermissionRuleRepository — the permission rules a chat or a
-// workflow run remembered ("Allow for this chat / run"; v67, U-16 / D-147).
+// workflow run or a project remembered ("Allow for this chat / run / project"; v67, v68, U-16 / D-147).
 // ────────────────────────────────────────────────────────────────
 
 import { and, asc, eq, type SQL } from 'drizzle-orm';
@@ -10,7 +10,14 @@ import { permissionRules } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 
 function ownerIs(owner: PermissionRuleOwner): SQL {
-  return owner.kind === 'chat' ? eq(permissionRules.chatId, owner.id) : eq(permissionRules.runId, owner.id);
+  switch (owner.kind) {
+    case 'chat':
+      return eq(permissionRules.chatId, owner.id);
+    case 'run':
+      return eq(permissionRules.runId, owner.id);
+    case 'project':
+      return eq(permissionRules.projectId, owner.id);
+  }
 }
 
 export class DrizzlePermissionRuleRepository implements IPermissionRuleRepository {
@@ -35,6 +42,7 @@ export class DrizzlePermissionRuleRepository implements IPermissionRuleRepositor
           id: generateId(),
           chatId: owner.kind === 'chat' ? owner.id : null,
           runId: owner.kind === 'run' ? owner.id : null,
+          projectId: owner.kind === 'project' ? owner.id : null,
           kind: r.kind,
           match: r.match,
           createdAt: now,

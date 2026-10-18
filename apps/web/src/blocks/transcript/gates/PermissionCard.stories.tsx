@@ -75,10 +75,34 @@ export const PendingChat: Story = {
     await expect(scoped).toHaveTextContent('Allow pnpm lint for this chat');
     await expect(scoped).toHaveAccessibleName('Always allow pnpm lint in this chat');
     await userEvent.click(scoped);
-    await expect(answer).toHaveBeenCalledWith('p1', 'allow', undefined, { remember: true });
+    await expect(answer).toHaveBeenCalledWith('p1', 'allow', undefined, { remember: 'owner' });
     // ↵ stays Allow once.
     await userEvent.click(canvas.getByRole('button', { name: 'Allow once Bash' }));
     await expect(answer).toHaveBeenLastCalledWith('p1', 'allow');
+  },
+};
+
+/** In a project: a second action remembers the rule for the whole project (every chat and run in it). */
+export const PendingInProject: Story = {
+  args: { projectScope: true },
+  play: async ({ canvas }) => {
+    answer.mockClear();
+    const project = canvas.getByTestId('permission-allow-project');
+    await expect(project).toHaveTextContent('Allow pnpm lint for this project');
+    await expect(project).toHaveAccessibleName('Always allow pnpm lint in this project');
+    await userEvent.click(project);
+    await expect(answer).toHaveBeenCalledWith('p1', 'allow', undefined, { remember: 'project' });
+  },
+};
+
+/** Allowed by a project rule: the outcome names the project, not the chat. */
+export const AllowedForProject: Story = {
+  args: {
+    permission: { ...base, status: 'allowed', remembered: [{ kind: 'command', match: 'pnpm lint', scope: 'project' }] },
+    onAnswer: undefined,
+  },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByTestId('permission-outcome')).toHaveTextContent('Allowed for this project: pnpm lint');
   },
 };
 

@@ -54,12 +54,12 @@ const STAGE_GATE_ENDING_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 /** The well-formed remembered-permission rules of a persisted event (U-16). */
-function replayRules(value: unknown): Array<{ kind: 'command' | 'tool'; match: string }> {
+function replayRules(value: unknown): Array<{ kind: 'command' | 'tool'; match: string; scope?: 'project' }> {
   if (!Array.isArray(value)) return [];
   return value.flatMap((r) => {
-    const rule = (r ?? {}) as { kind?: unknown; match?: unknown };
+    const rule = (r ?? {}) as { kind?: unknown; match?: unknown; scope?: unknown };
     return (rule.kind === 'command' || rule.kind === 'tool') && typeof rule.match === 'string' && rule.match
-      ? [{ kind: rule.kind, match: rule.match }]
+      ? [{ kind: rule.kind, match: rule.match, ...(rule.scope === 'project' ? { scope: 'project' as const } : {}) }]
       : [];
   });
 }
@@ -791,7 +791,10 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
         const rules = replayRules(data['rules']);
         store.addSystemMessage(
           streamKey,
-          PERMISSION_GATE_COPY.autoAllowed(rules.map((r) => r.match).join(', ') || String(data['toolName'] ?? ''), 'chat'),
+          PERMISSION_GATE_COPY.autoAllowed(
+            rules.map((r) => r.match).join(', ') || String(data['toolName'] ?? ''),
+            rules.length > 0 && rules.every((r) => r.scope === 'project') ? 'project' : 'chat',
+          ),
           'permission',
         );
         break;

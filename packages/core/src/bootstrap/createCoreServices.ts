@@ -522,6 +522,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     stageRuns: stageRunRepo,
     logger,
     permissionRules: () => sessionExtensions.permissionRules,
+    projectOfRun: async (runId) => (await workflowRunRepo.getById(runId).catch(() => null))?.projectId ?? undefined,
   });
 
   // PD-17 — which provider a stage would run on, for the run-start and

@@ -86,7 +86,9 @@ export function transcriptMessageInput(message: { content: string; metadata?: un
     ...(Array.isArray(card['remembered'])
       ? {
           remembered: records(card['remembered']).flatMap((r) =>
-            (r['kind'] === 'command' || r['kind'] === 'tool') && str(r['match']) ? [{ kind: r['kind'] as 'command' | 'tool', match: str(r['match'])! }] : [],
+            (r['kind'] === 'command' || r['kind'] === 'tool') && str(r['match'])
+              ? [{ kind: r['kind'] as 'command' | 'tool', match: str(r['match'])!, ...(r['scope'] === 'project' ? { scope: 'project' as const } : {}) }]
+              : [],
           ),
         }
       : {}),

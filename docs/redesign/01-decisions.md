@@ -1525,6 +1525,20 @@ only" for the transcript's streaming cues; everything else in D-20 stands (CSS o
   (fade + 4px rise, 320 ms), table rows and list items fade (360 ms). Insertion only: settled and reopened turns do
   not animate. All of it stops under reduced motion.
 
+### D-153 "Allow … for this project": remembered permission rules per project (evaluation action 4, 2026-10-18) — Final
+D-147 remembered rules per chat or run, so a team (D-148 shares an orchestrator's rules with its workers) still asked
+for `pnpm test` in every new chat of the same codebase. A rule can now belong to a project: `permission_rules.project_id`
+(v68; the table is rebuilt so "exactly one owner" spans chat / run / project; `ON DELETE CASCADE`).
+- **Answer:** `ResolveToolPermissionSchema.remember` is `'owner' | 'project'` (was a boolean): `owner` = the route's
+  chat or run, `project` = the chat's (a worker's orchestrator's) or the run's project; 422 `NOT_REMEMBERABLE` when it
+  has none. The card shows "Allow pnpm test for this project" next to "… for this chat / run" when there is a project.
+- **Covering:** a gate is covered when the owner's rules and its project's rules together hold every command it
+  derived (`PermissionRuleService.covering(owners[])`). Rules that came from the project are tagged `scope: 'project'`
+  on `remembered` / `rules`, so the outcome and the "Allowed by a rule for this project: …" note say whose they are.
+- **Managing:** `GET / DELETE /api/projects/:id/permission-rules(/:ruleId)`; the composer's Approvals menu lists them
+  as "N project rules · Clear" next to the chat's own.
+- Unchanged: risky gates, always-ask tools, the never-list and plan-mode file writes still ask (D-147).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

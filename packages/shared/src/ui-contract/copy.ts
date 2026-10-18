@@ -46,11 +46,12 @@ export const PERMISSION_GATE_COPY = {
   autoAllowed: (rules: string, scope: PermissionRuleScope): string => `Allowed by a rule for this ${scope}: ${rules}`,
   /** The menus that list an owner's rules. */
   rulesCount: (n: number): string => (n === 1 ? '1 rule' : `${n} rules`),
+  projectRulesCount: (n: number): string => (n === 1 ? '1 project rule' : `${n} project rules`),
   clearRules: 'Clear',
 } as const;
 
 /** Who remembered permission rules belong to (U-16): a chat for its lifetime, a workflow run for all its stages. */
-export type PermissionRuleScope = 'chat' | 'run';
+export type PermissionRuleScope = 'chat' | 'run' | 'project';
 
 /** Words of the clarifying-question gate (B-20 QuestionCard). */
 export const QUESTION_GATE_COPY = {

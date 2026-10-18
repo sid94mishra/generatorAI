@@ -14,6 +14,8 @@
 // card. A gate that cannot be remembered (risky, an always-ask tool, a
 // never-listed command) shows why instead of the action. The host says whose
 // rules they are (`rememberScope`); without one only Allow once is offered.
+// In a project (`projectScope`) a second action remembers them for the whole
+// project — every chat and run in it, a team's workers included.
 //
 // A gate the server marked risky (mobile MG-04) carries a neutral "Risky"
 // badge; on web and desktop the answer stays a click (signing is phone-only).
@@ -31,9 +33,9 @@ import { InlineCode } from '@/ui/primitives/InlineCode/InlineCode.js';
 import { Input } from '@/ui/primitives/Input/Input.js';
 import { gateKeyChips, gateKeyDown } from './gateKeys.js';
 
-/** How an answer is given: `remember` = "Allow for this chat / run" (U-16). */
+/** How an answer is given: `remember` = "Allow for this chat / run" (`owner`, U-16) or "… for this project". */
 export interface PermissionAnswerOptions {
-  remember?: boolean;
+  remember?: 'owner' | 'project';
 }
 
 export interface PermissionCardProps {
@@ -42,6 +44,8 @@ export interface PermissionCardProps {
   onAnswer?: ((interactionId: string, behavior: 'allow' | 'deny', message?: string, options?: PermissionAnswerOptions) => void) | undefined;
   /** Whose rules "Allow for this …" remembers (a chat, a workflow run). Omitted → Allow once only. */
   rememberScope?: PermissionRuleScope | undefined;
+  /** The chat or run belongs to a project: also offer "Allow … for this project". */
+  projectScope?: boolean | undefined;
   busy?: boolean;
 }
 
@@ -52,7 +56,7 @@ function shortRules(matches: readonly string[]): string {
   return matches.length > 1 ? `${cut} +${matches.length - 1}` : cut;
 }
 
-export function PermissionCard({ permission, onAnswer, rememberScope, busy = false }: PermissionCardProps) {
+export function PermissionCard({ permission, onAnswer, rememberScope, projectScope = false, busy = false }: PermissionCardProps) {
   const [denying, setDenying] = useState(false);
   const [reason, setReason] = useState('');
   const { status, toolName } = permission;
@@ -60,7 +64,11 @@ export function PermissionCard({ permission, onAnswer, rememberScope, busy = fal
   const ruleMatches = (permission.rememberRules ?? []).map((r) => r.match);
 
   const allow = () => onAnswer?.(permission.interactionId, 'allow');
-  const allowForOwner = () => onAnswer?.(permission.interactionId, 'allow', undefined, { remember: true });
+  const allowForOwner = () => onAnswer?.(permission.interactionId, 'allow', undefined, { remember: 'owner' });
+  const allowForProject = () => onAnswer?.(permission.interactionId, 'allow', undefined, { remember: 'project' });
+  // Rules a project remembered (or that covered this gate) say so; otherwise they are the host's.
+  const outcomeScope: PermissionRuleScope =
+    permission.remembered?.length && permission.remembered.every((r) => r.scope === 'project') ? 'project' : (rememberScope ?? 'chat');
   const confirmDeny = () => {
     onAnswer?.(permission.interactionId, 'deny', reason.trim() || undefined);
     setDenying(false);
@@ -102,6 +110,17 @@ export function PermissionCard({ permission, onAnswer, rememberScope, busy = fal
               disabled: busy,
               'data-testid': 'permission-allow-scope',
             } satisfies GateAction,
+            ...(projectScope
+              ? [
+                  {
+                    label: COPY.allowForOwner(shortRules(ruleMatches), 'project'),
+                    ariaLabel: COPY.allowForOwnerLabel(ruleMatches.join(', '), 'project'),
+                    onClick: allowForProject,
+                    disabled: busy,
+                    'data-testid': 'permission-allow-project',
+                  } satisfies GateAction,
+                ]
+              : []),
           ]
         : []),
       {
@@ -180,7 +199,7 @@ export function PermissionCard({ permission, onAnswer, rememberScope, busy = fal
         >
           <Icon concept={status === 'allowed' ? 'status-succeeded' : 'status-failed'} size={14} />
           {status === 'allowed' && permission.remembered?.length
-            ? COPY.outcomeRemembered(permission.remembered.map((r) => r.match).join(', '), rememberScope ?? 'chat')
+            ? COPY.outcomeRemembered(permission.remembered.map((r) => r.match).join(', '), outcomeScope)
             : status === 'allowed'
               ? COPY.outcomeAllowed
               : COPY.outcomeDenied}

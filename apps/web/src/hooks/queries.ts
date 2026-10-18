@@ -989,7 +989,7 @@ export function useAnswerPermission(chatId: string) {
       behavior: 'allow' | 'deny';
       message?: string;
       /** "Allow for this chat" (U-16, D-147). */
-      remember?: boolean;
+      remember?: 'owner' | 'project';
     }) => {
       const { interactionId, ...response } = params;
       return platform.respondToChatPermission(chatId, interactionId, response);
@@ -997,7 +997,10 @@ export function useAnswerPermission(chatId: string) {
     meta: { errorTitle: 'Answer not sent' },
     onSuccess: (_data, params) => {
       void queryClient.invalidateQueries({ queryKey: ['chat', chatId, 'interactions'] });
-      if (params.remember) void queryClient.invalidateQueries({ queryKey: chatPermissionRulesKey(chatId) });
+      if (params.remember) {
+        void queryClient.invalidateQueries({ queryKey: chatPermissionRulesKey(chatId) });
+        void queryClient.invalidateQueries({ queryKey: ['project'], predicate: (q) => q.queryKey[2] === 'permission-rules' });
+      }
     },
   });
 }
@@ -1024,6 +1027,31 @@ export function useClearChatPermissionRules(chatId: string) {
     mutationFn: () => platform.clearPermissionRules({ kind: 'chat', id: chatId }),
     meta: { errorTitle: 'Rules not cleared' },
     onSettled: () => void queryClient.invalidateQueries({ queryKey: chatPermissionRulesKey(chatId) }),
+  });
+}
+
+/** The query key of a project's remembered permission rules ("Allow in this project"). */
+export const projectPermissionRulesKey = (projectId: string) => ['project', projectId, 'permission-rules'] as const;
+
+/** The permission rules a project remembered: they cover every chat and run in it. */
+export function useProjectPermissionRules(projectId: string | null | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: projectPermissionRulesKey(projectId ?? ''),
+    queryFn: () => platform.listPermissionRules({ kind: 'project', id: projectId! }),
+    enabled: !!projectId,
+    select: (r) => r.rules,
+  });
+}
+
+/** Forget every rule a project remembered: its chats and runs ask again. */
+export function useClearProjectPermissionRules(projectId: string | null | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => platform.clearPermissionRules({ kind: 'project', id: projectId! }),
+    meta: { errorTitle: 'Rules not cleared' },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: projectPermissionRulesKey(projectId ?? '') }),
   });
 }
 

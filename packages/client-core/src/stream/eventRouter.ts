@@ -1120,7 +1120,11 @@ export class StreamEventRouter {
           key,
           message: PERMISSION_GATE_COPY.autoAllowed(
             rules.map((r) => r.match).join(', ') || str(data['toolName']),
-            kind === 'stage.permission.auto_allowed' ? 'run' : 'chat',
+            rules.length > 0 && rules.every((r) => r.scope === 'project')
+              ? 'project'
+              : kind === 'stage.permission.auto_allowed'
+                ? 'run'
+                : 'chat',
           ),
           category: 'permission',
         });
@@ -1872,13 +1876,13 @@ export class StreamEventRouter {
 
 /** D-107: the server-stamped question and kind label, worded here for gates raised before they existed. */
 /** A remembered-rule list of an event (U-16), keeping only well-formed rules. */
-type PermissionRuleView = { kind: 'command' | 'tool'; match: string };
+type PermissionRuleView = { kind: 'command' | 'tool'; match: string; scope?: 'project' };
 function rulesOf(value: unknown): PermissionRuleView[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((r): PermissionRuleView[] => {
-    const rule = (r ?? {}) as { kind?: unknown; match?: unknown };
+    const rule = (r ?? {}) as { kind?: unknown; match?: unknown; scope?: unknown };
     return (rule.kind === 'command' || rule.kind === 'tool') && typeof rule.match === 'string' && rule.match
-      ? [{ kind: rule.kind, match: rule.match }]
+      ? [{ kind: rule.kind, match: rule.match, ...(rule.scope === 'project' ? { scope: 'project' as const } : {}) }]
       : [];
   });
 }

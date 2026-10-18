@@ -60,6 +60,8 @@ export interface StageGatePortDeps {
   readPermissionMode: () => Promise<string | undefined>;
   /** U-16 (D-147): the run's remembered permission rules (shared by all of its stages), read at call time. */
   permissionRules?: (() => PermissionRuleService | undefined) | undefined;
+  /** The run's project: its "Allow in this project" rules cover the run's gates too. */
+  projectId?: string | undefined;
 }
 
 function stageIds(turn: TurnContext): { stageRunId: string; workflowRunId: string } {
@@ -94,7 +96,14 @@ export class StageGatePort implements GatePort {
     // U-16 (D-147): "Allow for this run" rules cover this request — allow it without parking, and say so.
     const covered = await this.deps
       .permissionRules?.()
-      ?.covering({ kind: 'run', id: ids.workflowRunId }, payload, mode)
+      ?.covering(
+        [
+          { kind: 'run', id: ids.workflowRunId },
+          ...(this.deps.projectId ? [{ kind: 'project' as const, id: this.deps.projectId }] : []),
+        ],
+        payload,
+        mode,
+      )
       .catch(() => null);
     if (covered) {
       await this.emit(turn.sessionId, 'stage.permission.auto_allowed', {

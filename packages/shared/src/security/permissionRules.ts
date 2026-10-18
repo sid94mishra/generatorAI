@@ -33,6 +33,8 @@ export interface PermissionRule {
   kind: 'command' | 'tool';
   /** `pnpm lint`, `git status`, `ls` — or the tool name. */
   match: string;
+  /** On a remembered / covering rule: it belongs to the project ("Allow in this project"), not the chat or run. */
+  scope?: 'project';
 }
 
 /** What the rule module needs to know about a gate. */

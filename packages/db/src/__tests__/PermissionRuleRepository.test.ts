@@ -75,4 +75,22 @@ describe('DrizzlePermissionRuleRepository', () => {
     expect(() => insert.run('x1', null, null, T)).toThrow();
     expect(() => insert.run('x2', 'c1', 'r', T)).toThrow();
   });
+
+  it('v68: a project owns rules of its own, isolated from its chats, and they go with the project', async () => {
+    const { s, repo } = setup();
+    s.prepare(`INSERT INTO projects (id, name, root_path, created_at, updated_at) VALUES ('p1', 'P', '/tmp', ?, ?)`).run(T, T);
+    await repo.add({ kind: 'project', id: 'p1' }, [{ kind: 'command', match: 'pnpm test' }]);
+    await repo.add({ kind: 'project', id: 'p1' }, [{ kind: 'command', match: 'pnpm test' }]);
+    await repo.add({ kind: 'chat', id: 'c1' }, [{ kind: 'command', match: 'pnpm test' }]);
+    expect((await repo.list({ kind: 'project', id: 'p1' })).map((r) => r.match)).toEqual(['pnpm test']);
+    expect(await repo.list({ kind: 'chat', id: 'c2' })).toEqual([]);
+    // Exactly one owner per row.
+    expect(() =>
+      s.prepare(`INSERT INTO permission_rules (id, chat_id, project_id, kind, match, created_at) VALUES ('x', 'c1', 'p1', 'tool', 'Bash', ?)`).run(T),
+    ).toThrow();
+    s.prepare(`DELETE FROM projects WHERE id = 'p1'`).run();
+    expect(await repo.list({ kind: 'project', id: 'p1' })).toEqual([]);
+    expect((await repo.list({ kind: 'chat', id: 'c1' })).length).toBe(1);
+  });
 });
+

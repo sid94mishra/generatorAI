@@ -168,11 +168,29 @@ describe('StageConversationService answering with remember', () => {
       { kind: 'tool_permission', interactionId: 'i1', rememberRules: [{ kind: 'command', match: 'pnpm test' }] },
       new PermissionRuleService(repo),
     );
-    await svc.resolveInteraction('run-1', 'inst-1', 'i1', { kind: 'permission', behavior: 'allow', remember: true });
+    await svc.resolveInteraction('run-1', 'inst-1', 'i1', { kind: 'permission', behavior: 'allow', remember: 'owner' });
     expect(await repo.list({ kind: 'run', id: 'run-1' })).toEqual([expect.objectContaining({ kind: 'command', match: 'pnpm test' })]);
     expect(command).toHaveBeenCalledWith(
       'run-1',
       expect.objectContaining({ outcome: 'approved', data: { interactionId: 'i1', remembered: [{ kind: 'command', match: 'pnpm test' }] } }),
+    );
+  });
+
+  it('"Allow for this project" stores the rules for the run\'s project, tagged as project rules', async () => {
+    const repo = new MemoryRules();
+    const command = vi.fn(async () => ({ ok: true }));
+    const svc = new StageConversationService({
+      engine: { running: true, stores: { stages: { getInstance: () => ({ workflowRunId: 'run-1', kind: 'agent', status: 'awaiting_input' }) } }, command } as never,
+      stageRuns: { getById: async () => ({ interruptData: { kind: 'tool_permission', interactionId: 'i1', rememberRules: [{ kind: 'command', match: 'pnpm test' }] }, version: 3 }) } as never,
+      permissionRules: () => new PermissionRuleService(repo),
+      projectOfRun: async () => 'proj-1',
+    });
+    await svc.resolveInteraction('run-1', 'inst-1', 'i1', { kind: 'permission', behavior: 'allow', remember: 'project' });
+    expect(await repo.list({ kind: 'run', id: 'run-1' })).toEqual([]);
+    expect(await repo.list({ kind: 'project', id: 'proj-1' })).toEqual([expect.objectContaining({ kind: 'command', match: 'pnpm test' })]);
+    expect(command).toHaveBeenCalledWith(
+      'run-1',
+      expect.objectContaining({ data: { interactionId: 'i1', remembered: [{ kind: 'command', match: 'pnpm test', scope: 'project' }] } }),
     );
   });
 
@@ -181,7 +199,7 @@ describe('StageConversationService answering with remember', () => {
       { kind: 'tool_permission', interactionId: 'i1', rememberRules: [], rememberRefusal: 'Risky requests always ask (pushes to a git remote).' },
       new PermissionRuleService(new MemoryRules()),
     );
-    await expect(svc.resolveInteraction('run-1', 'inst-1', 'i1', { kind: 'permission', behavior: 'allow', remember: true })).rejects.toMatchObject({
+    await expect(svc.resolveInteraction('run-1', 'inst-1', 'i1', { kind: 'permission', behavior: 'allow', remember: 'owner' })).rejects.toMatchObject({
       code: 'NOT_REMEMBERABLE',
       httpStatus: 422,
     });
@@ -219,7 +237,7 @@ describe('chat-scoped rules (ChatManagementService)', () => {
     const first = gate(a.id, bash('pnpm lint'), ctx(a.id));
     const open = await pending(a.id);
     expect(open.payload).toMatchObject({ rememberRules: [{ kind: 'command', match: 'pnpm lint' }] });
-    await expect(chats.resolveToolPermission(a.id, open.id, { behavior: 'allow', remember: true })).resolves.toEqual({ ok: true });
+    await expect(chats.resolveToolPermission(a.id, open.id, { behavior: 'allow', remember: 'owner' })).resolves.toEqual({ ok: true });
     await expect(first).resolves.toMatchObject({ granted: true });
 
     // Same chat, covered: answered at once, no new gate.
@@ -244,11 +262,60 @@ describe('chat-scoped rules (ChatManagementService)', () => {
     await expect(uncovered).resolves.toMatchObject({ granted: false });
   });
 
+  it('"Allow for this project" covers every chat of the project, chat rules and project rules combine, other projects still ask', async () => {
+    const { env, chats, a, b, gate, ctx, pending } = await boot();
+    const c = await chats.createChat({ name: 'C' });
+    const now = Date.now();
+    const sqlite = (env.db as unknown as { $client: { prepare: (q: string) => { run: (...a: unknown[]) => void } } }).$client;
+    for (const p of ['proj-1', 'proj-2']) {
+      sqlite.prepare(`INSERT INTO projects (id, name, root_path, created_at, updated_at) VALUES (?, ?, '/tmp', ?, ?)`).run(p, p, now, now);
+    }
+    sqlite.prepare(`UPDATE chats SET project_id = ? WHERE id IN (?, ?)`).run('proj-1', a.id, b.id);
+    sqlite.prepare(`UPDATE chats SET project_id = ? WHERE id = ?`).run('proj-2', c.id);
+
+    const first = gate(a.id, bash('pnpm test'), ctx(a.id));
+    const open = await pending(a.id);
+    await expect(chats.resolveToolPermission(a.id, open.id, { behavior: 'allow', remember: 'project' })).resolves.toEqual({ ok: true });
+    await expect(first).resolves.toMatchObject({ granted: true });
+
+    // Another chat of the same project: allowed unasked, recorded as a project rule.
+    const turnB = ctx(b.id);
+    await expect(gate(b.id, bash('pnpm test'), turnB)).resolves.toEqual({ granted: true });
+    expect(turnB.autoAllowedPermissions).toEqual([
+      expect.objectContaining({ autoAllowed: true, remembered: [{ kind: 'command', match: 'pnpm test', scope: 'project' }] }),
+    ]);
+
+    // B's own chat rule plus the project's rule cover a line that needs both.
+    const lint = gate(b.id, bash('pnpm lint'), ctx(b.id));
+    const openLint = await pending(b.id);
+    await chats.resolveToolPermission(b.id, openLint.id, { behavior: 'allow', remember: 'owner' });
+    await lint;
+    await expect(gate(b.id, bash('pnpm lint && pnpm test'), ctx(b.id))).resolves.toEqual({ granted: true });
+
+    // A chat of another project still asks.
+    const other = gate(c.id, bash('pnpm test'), turn({ kind: 'chat', chatId: c.id, sessionId: c.sessionId }, { permissionMode: 'acceptEdits' }));
+    const openC = await pending(c.id);
+    await chats.resolveToolPermission(c.id, openC.id, { behavior: 'deny' });
+    await expect(other).resolves.toMatchObject({ granted: false });
+  });
+
+  it('refuses "Allow for this project" in a chat outside any project', async () => {
+    const { chats, a, gate, ctx, pending } = await boot();
+    const call = gate(a.id, bash('pnpm test'), ctx(a.id));
+    const open = await pending(a.id);
+    await expect(chats.resolveToolPermission(a.id, open.id, { behavior: 'allow', remember: 'project' })).resolves.toMatchObject({
+      ok: false,
+      code: 'NOT_REMEMBERABLE',
+    });
+    await chats.resolveToolPermission(a.id, open.id, { behavior: 'allow' });
+    await expect(call).resolves.toMatchObject({ granted: true });
+  });
+
   it('refuses "Allow for this chat" on a never-listed command and leaves the gate open', async () => {
     const { chats, a, gate, ctx, pending } = await boot();
     const call = gate(a.id, bash('sudo ls'), ctx(a.id));
     const open = await pending(a.id);
-    await expect(chats.resolveToolPermission(a.id, open.id, { behavior: 'allow', remember: true })).resolves.toMatchObject({
+    await expect(chats.resolveToolPermission(a.id, open.id, { behavior: 'allow', remember: 'owner' })).resolves.toMatchObject({
       ok: false,
       code: 'NOT_REMEMBERABLE',
     });

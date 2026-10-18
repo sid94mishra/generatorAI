@@ -176,7 +176,10 @@ export function chatMessageToBlocks(message: TranscriptMessageInput): StreamBloc
         make: (blockId) => ({
           type: 'system',
           blockId,
-          message: PERMISSION_GATE_COPY.autoAllowed((card.remembered ?? []).map((r) => r.match).join(', ') || card.toolName, 'chat'),
+          message: PERMISSION_GATE_COPY.autoAllowed(
+            (card.remembered ?? []).map((r) => r.match).join(', ') || card.toolName,
+            card.remembered?.length && card.remembered.every((r) => r.scope === 'project') ? 'project' : 'chat',
+          ),
           category: 'permission',
         }),
       });

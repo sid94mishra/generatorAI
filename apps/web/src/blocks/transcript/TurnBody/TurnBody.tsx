@@ -162,6 +162,7 @@ function TurnBodyImpl({
                 permission={seg.permission}
                 onAnswer={ctx.onAnswerPermission}
                 rememberScope={ctx.permissionScope}
+                projectScope={ctx.permissionProjectScope}
                 busy={ctx.gateBusy ?? false}
               />
             );

@@ -27,6 +27,7 @@
 // feedback path besides this API; there is no approve-with-follow-up).
 // ────────────────────────────────────────────────────────────────
 
+import type { PermissionRuleOwner } from '../../domain/ports/IPermissionRuleRepository.js';
 import type { AgentMode, ILogger, PermissionRule } from '@generatorai/shared';
 import type { RunCommand } from '@generatorai/workflow-spec';
 import type { IStageRunRepository } from '../../domain/ports/IStageRunRepository.js';
@@ -49,7 +50,7 @@ export type StageSendOutcome = 'queued' | 'amending' | 'retrying';
 
 /** A gate answer, in the chat's shapes (ResolveToolPermissionSchema, AnswerQuestionSchema, PlanDecisionSchema). */
 export type StageGateAnswer =
-  | { kind: 'permission'; behavior: 'allow' | 'deny'; message?: string; remember?: boolean }
+  | { kind: 'permission'; behavior: 'allow' | 'deny'; message?: string; remember?: 'owner' | 'project' }
   | { kind: 'answer'; answers: Record<string, string[]>; freeformResponse?: string }
   | { kind: 'plan'; approved: boolean; action?: 'exit_only' | 'implement_interactive' | 'implement_autopilot'; feedback?: string };
 
@@ -66,6 +67,8 @@ export interface StageConversationServiceDeps {
   logger?: ILogger | undefined;
   /** U-16 (D-147): where "Allow for this run" remembers a gate's rules (read at call time: wired late). */
   permissionRules?: (() => PermissionRuleService | undefined) | undefined;
+  /** The run's project, for "Allow in this project". */
+  projectOfRun?: ((runId: string) => Promise<string | undefined>) | undefined;
 }
 
 export class StageConversationService {
@@ -213,8 +216,13 @@ export class StageConversationService {
       if (rules.length === 0 || !store) {
         throw new StageConversationError('NOT_REMEMBERABLE', store ? rememberRefusalOf(stage.interruptData) : 'Remembered permissions are not enabled');
       }
-      await store.remember({ kind: 'run', id: runId }, rules);
-      remembered = rules;
+      let owner: PermissionRuleOwner = { kind: 'run', id: runId };
+      if (answer.remember === 'project') {
+        const projectId = await this.deps.projectOfRun?.(runId);
+        if (!projectId) throw new StageConversationError('NOT_REMEMBERABLE', 'This run is not in a project.');
+        owner = { kind: 'project', id: projectId };
+      }
+      remembered = await store.remember(owner, rules);
     }
     // Bound to the instance version the check above read: the answer never reaches a later gate (ENGINE-R11).
     const r = await this.engine.command(runId, { ...approveCommand(instanceId, interactionId, answer, remembered), expectedVersion: stage.version } as RunCommand);

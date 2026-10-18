@@ -2847,7 +2847,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         summary: "Answer a stage's tool-permission gate ({behavior: allow|deny, message?, remember?})",
         description:
           'A risky gate (the MG-04 verdict on the parked interaction) answered by a mobile device carries `approvalProof` (gate {kind: tool_permission, id: interactionId, entityId: runId}, decision = behavior). ' +
-          '`remember: true` with `allow` ("Allow for this run", U-16) also stores the gate\'s `rememberRules` for the run: every stage then allows a request they cover without asking.',
+          '`remember: "owner"` with `allow` ("Allow for this run", U-16) also stores the gate\'s `rememberRules` for the run: every stage then allows a request they cover without asking. `remember: "project"` stores them for the run\'s project (422 when it has none), covering every chat and run in it.',
         parameters: [runIdParam, instanceIdParam, interactionIdParam],
         responses: {
           '202': { description: 'Answered' },
@@ -2877,6 +2877,28 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         summary: 'Revoke one remembered permission rule',
         parameters: [runIdParam, { name: 'ruleId', in: 'path', required: true, schema: { type: 'string' } }],
         responses: { '204': { description: 'Revoked' }, '404': { description: 'No such rule on this run' } },
+      },
+    },
+    '/api/projects/{id}/permission-rules': {
+      get: {
+        tags: ['Projects', 'HITL'],
+        summary: 'The permission rules this project remembered ("Allow in this project"): {rules: [{id, kind: command|tool, match, createdAt}]}; they cover every chat and run in the project',
+        parameters: [idParam],
+        responses: { '200': { description: 'Rules, oldest first' }, '404': { description: 'Unknown project' } },
+      },
+      delete: {
+        tags: ['Projects', 'HITL'],
+        summary: "Clear the project's remembered permission rules: {removed}",
+        parameters: [idParam],
+        responses: { '200': { description: 'Cleared' }, '404': { description: 'Unknown project' } },
+      },
+    },
+    '/api/projects/{id}/permission-rules/{ruleId}': {
+      delete: {
+        tags: ['Projects', 'HITL'],
+        summary: 'Revoke one of the project\'s remembered permission rules',
+        parameters: [idParam, { name: 'ruleId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '204': { description: 'Revoked' }, '404': { description: 'No such rule on this project' } },
       },
     },
     '/api/workflow-runs/{runId}/instances/{instanceId}/interactions/{interactionId}/answer': {

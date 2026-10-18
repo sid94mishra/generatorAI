@@ -1535,7 +1535,7 @@ export function createChatApiRoutes(container: Container): Router {
       try {
         const chatId = String(req.params['id']);
         const interactionId = String(req.params['interactionId']);
-        const { behavior, message, remember } = req.body as { behavior: 'allow' | 'deny'; message?: string; remember?: boolean };
+        const { behavior, message, remember } = req.body as { behavior: 'allow' | 'deny'; message?: string; remember?: 'owner' | 'project' };
         // MG-05: a risky gate answered from a phone must be signed there.
         const interaction = await container.agentInteractionService?.findById(interactionId);
         if (interaction && interaction.kind === 'tool_permission') {
@@ -1555,7 +1555,7 @@ export function createChatApiRoutes(container: Container): Router {
         const result = await chatManagementService.resolveToolPermission(chatId, interactionId, {
           behavior,
           ...(message !== undefined ? { message } : {}),
-          ...(remember ? { remember: true } : {}),
+          ...(remember ? { remember } : {}),
         });
         if (!result.ok) {
           const reason = result.reason ?? 'Already resolved';

@@ -2857,6 +2857,33 @@ export const MIGRATIONS: readonly Migration[] = [
         `CREATE UNIQUE INDEX idx_permission_rules_run ON permission_rules(run_id, kind, match) WHERE run_id IS NOT NULL;`,
       ],
     },
+    // Evaluation action 4: "Allow in this project" — a rule can belong to a project, so every chat and run of
+    // that project (a team's workers included) stops asking for `pnpm test`. SQLite cannot widen a CHECK in
+    // place: the table is rebuilt with `project_id` and "exactly one owner" over three columns.
+    {
+      version: 68,
+      name: 'permission_rules_project',
+      disableForeignKeys: true,
+      sql: [
+        `CREATE TABLE permission_rules_new (
+           id TEXT PRIMARY KEY,
+           chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE,
+           run_id TEXT REFERENCES workflow_runs(id) ON DELETE CASCADE,
+           project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+           kind TEXT NOT NULL CHECK (kind IN ('command', 'tool')),
+           match TEXT NOT NULL,
+           created_at INTEGER NOT NULL,
+           CHECK ((chat_id IS NOT NULL) + (run_id IS NOT NULL) + (project_id IS NOT NULL) = 1)
+         );`,
+        `INSERT INTO permission_rules_new (id, chat_id, run_id, project_id, kind, match, created_at)
+           SELECT id, chat_id, run_id, NULL, kind, match, created_at FROM permission_rules;`,
+        `DROP TABLE permission_rules;`,
+        `ALTER TABLE permission_rules_new RENAME TO permission_rules;`,
+        `CREATE UNIQUE INDEX idx_permission_rules_chat ON permission_rules(chat_id, kind, match) WHERE chat_id IS NOT NULL;`,
+        `CREATE UNIQUE INDEX idx_permission_rules_run ON permission_rules(run_id, kind, match) WHERE run_id IS NOT NULL;`,
+        `CREATE UNIQUE INDEX idx_permission_rules_project ON permission_rules(project_id, kind, match) WHERE project_id IS NOT NULL;`,
+      ],
+    },
   ];
 
 

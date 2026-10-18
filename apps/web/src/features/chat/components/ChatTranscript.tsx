@@ -237,8 +237,9 @@ export function ChatTranscript({
       onRequestPlanChanges: requestPlanChanges,
       onAnswerQuestion: answerQuestion,
       onAnswerPermission: answerPermission,
-      // U-16: "Allow for this chat" remembers the gate's rules for this chat.
+      // U-16: "Allow for this chat" remembers the gate's rules for this chat — or, in a project, for the project.
       permissionScope: 'chat',
+      permissionProjectScope: !!chat?.projectId,
       gateBusy: decisionBusy,
       ...(workspaceId ? { workspaceId } : {}),
       ...(chatId ? { chatId } : {}),

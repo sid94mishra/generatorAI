@@ -19,7 +19,13 @@ import { useNavigate, useParams } from 'react-router';
 import { awaitsUserDecision, type ScmResultBlock, type WidgetBlock } from '@generatorai/client-core';
 import { composerPromptPlaceholder, harnessProviderLabel, type ApprovalMode } from '@generatorai/shared/ui-contract';
 import { useMarkChatRead } from '@/hooks/chatListQueries.js';
-import { useChatPermissionRules, useClearChatPermissionRules, useSetChatPermissionMode } from '@/hooks/queries.js';
+import {
+  useChatPermissionRules,
+  useClearChatPermissionRules,
+  useClearProjectPermissionRules,
+  useProjectPermissionRules,
+  useSetChatPermissionMode,
+} from '@/hooks/queries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useEditSourcesStore } from '@/stores/editSourcesStore.js';
 import { parseWidgetTabId } from '@/lib/widgetTabId.js';
@@ -91,6 +97,9 @@ export function ChatPage() {
   const permissionRules = useChatPermissionRules(chatId);
   const clearPermissionRules = useClearChatPermissionRules(chatId ?? '');
   const { chat, sessionId, workspace, stream, transcript, gates, stopRewind, dock } = view;
+  // "Allow … for this project": rules every chat and run of the project shares.
+  const projectRules = useProjectPermissionRules(chat?.projectId);
+  const clearProjectRules = useClearProjectPermissionRules(chat?.projectId);
   const { isWorking } = stream;
   useMarkChatRead(chatId, isWorking);
   const { messages, promptHistory } = transcript;
@@ -430,6 +439,7 @@ export function ChatPage() {
               onApprovalModeChange: (mode: ApprovalMode) => setPermissionMode.mutate(mode),
               // U-16: what "Allow for this chat" remembered, with Clear.
               rememberedRules: { matches: (permissionRules.data ?? []).map((r) => r.match), onClear: () => clearPermissionRules.mutate() },
+              projectRules: { matches: (projectRules.data ?? []).map((r) => r.match), onClear: () => clearProjectRules.mutate() },
             }
           : {})}
         {...(agentName ? { agentName } : {})}

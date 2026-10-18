@@ -1,13 +1,13 @@
 // ────────────────────────────────────────────────────────────────
 // Remembered permission rules (U-16, D-147) — per owner: a chat for its
-// lifetime, a workflow run for all of its stages. Rows go with their owner
-// (ON DELETE CASCADE).
+// lifetime, a workflow run for all of its stages, a project for every chat
+// and run in it (v68). Rows go with their owner (ON DELETE CASCADE).
 // ────────────────────────────────────────────────────────────────
 
 import type { PermissionRule } from '@generatorai/shared';
 
 /** Who a rule belongs to. */
-export type PermissionRuleOwner = { kind: 'chat'; id: string } | { kind: 'run'; id: string };
+export type PermissionRuleOwner = { kind: 'chat'; id: string } | { kind: 'run'; id: string } | { kind: 'project'; id: string };
 
 /** A rule as stored. */
 export interface StoredPermissionRule extends PermissionRule {

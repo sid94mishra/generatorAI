@@ -224,7 +224,7 @@ export interface PermissionBlock {
   rememberRules?: Array<{ kind: 'command' | 'tool'; match: string }>;
   rememberRefusal?: string;
   /** U-16 — the rules the answer remembered (a settled "Allow for this chat / run"). */
-  remembered?: Array<{ kind: 'command' | 'tool'; match: string }>;
+  remembered?: Array<{ kind: 'command' | 'tool'; match: string; scope?: 'project' }>;
   /** See {@link PlanBlock.openedAt}. */
   openedAt?: number;
 }

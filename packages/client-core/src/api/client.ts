@@ -1417,7 +1417,7 @@ export function createApiClient(fetchImpl: ApiFetch) {
         id: string,
         interactionId: string,
         /** `approvalProof` (MG-05) is required for a risky gate answered from a phone; `remember` = "Allow for this chat" (U-16). */
-        response: { behavior: 'allow' | 'deny'; message?: string; approvalProof?: ApprovalProof; remember?: boolean },
+        response: { behavior: 'allow' | 'deny'; message?: string; approvalProof?: ApprovalProof; remember?: 'owner' | 'project' },
       ) =>
         request<void>(
           fetchImpl,
@@ -1587,7 +1587,7 @@ export function createApiClient(fetchImpl: ApiFetch) {
         instanceId: string,
         interactionId: string,
         /** `remember` = "Allow for this run" (U-16): the gate's rules then cover every stage of the run. */
-        response: { behavior: 'allow' | 'deny'; message?: string; approvalProof?: ApprovalProof; remember?: boolean },
+        response: { behavior: 'allow' | 'deny'; message?: string; approvalProof?: ApprovalProof; remember?: 'owner' | 'project' },
       ) =>
         request<void>(
           fetchImpl,

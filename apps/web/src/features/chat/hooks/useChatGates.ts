@@ -91,7 +91,7 @@ export function useChatGates({
   );
 
   const answerPermissionGate = useCallback(
-    (interactionId: string, behavior: 'allow' | 'deny', message?: string, options?: { remember?: boolean }) => {
+    (interactionId: string, behavior: 'allow' | 'deny', message?: string, options?: { remember?: 'owner' | 'project' }) => {
       // A remembered answer settles from the server's `chat.permission.resolved` (it names the rules it stored, and
       // a gate that cannot be remembered is refused with 422 — the card must stay answerable then).
       if (sessionId && !options?.remember) {
@@ -101,7 +101,7 @@ export function useChatGates({
         interactionId,
         behavior,
         ...(message ? { message } : {}),
-        ...(options?.remember ? { remember: true } : {}),
+        ...(options?.remember ? { remember: options.remember } : {}),
       });
     },
     [answerPermission, sessionId],

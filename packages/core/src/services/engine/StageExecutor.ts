@@ -965,6 +965,7 @@ export class StageExecutor {
         harnessTypeOf: () => spec.harnessType ?? 'unknown',
         readPermissionMode: () => ctx.permissionSource.read(),
         permissionRules: () => composer.permissionRules,
+        projectId: ctx.run.projectId ?? ctx.graph.workflow.projectId ?? undefined,
       }),
       permission: { source: ctx.permissionSource },
       platform: {

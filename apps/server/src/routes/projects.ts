@@ -221,6 +221,41 @@ export function createProjectRoutes(container: Container): Router {
     }
   });
 
+  // "Allow in this project" (evaluation action 4) — the project's remembered permission rules, which cover every
+  // chat and run in it: list, revoke one, clear.
+  const projectRuleOwner = async (projectId: string) => {
+    await projectService.getProject(projectId); // 404 for an unknown project
+    return { kind: 'project' as const, id: projectId };
+  };
+  router.get('/:id/permission-rules', async (req, res, next) => {
+    try {
+      const owner = await projectRuleOwner(String(req.params['id']));
+      res.json({ rules: (await container.permissionRuleService?.list(owner)) ?? [] });
+    } catch (err) {
+      next(err);
+    }
+  });
+  router.delete('/:id/permission-rules', async (req, res, next) => {
+    try {
+      const owner = await projectRuleOwner(String(req.params['id']));
+      res.json({ removed: (await container.permissionRuleService?.clear(owner)) ?? 0 });
+    } catch (err) {
+      next(err);
+    }
+  });
+  router.delete('/:id/permission-rules/:ruleId', async (req, res, next) => {
+    try {
+      const owner = await projectRuleOwner(String(req.params['id']));
+      if (!(await container.permissionRuleService?.revoke(owner, String(req.params['ruleId'])))) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such rule on this project' } });
+        return;
+      }
+      res.status(204).end();
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // PUT /projects/:id — Update project
   router.put('/:id', async (req, res, next) => {
     try {

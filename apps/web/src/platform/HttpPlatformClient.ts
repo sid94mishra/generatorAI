@@ -1101,7 +1101,7 @@ export class HttpPlatformClient implements IPlatformClient {
     chatId: string,
     interactionId: string,
     /** `remember` = "Allow for this chat" (U-16, D-147). */
-    response: { behavior: 'allow' | 'deny'; message?: string; remember?: boolean },
+    response: { behavior: 'allow' | 'deny'; message?: string; remember?: 'owner' | 'project' },
   ): Promise<void> {
     await apiFetch(`${this.baseUrl}/api/chats/${chatId}/interactions/${interactionId}/permission`, {
       method: 'POST',
@@ -1318,7 +1318,7 @@ export class HttpPlatformClient implements IPlatformClient {
     instanceId: string,
     interactionId: string,
     answer:
-      | { kind: 'permission'; behavior: 'allow' | 'deny'; message?: string; remember?: boolean }
+      | { kind: 'permission'; behavior: 'allow' | 'deny'; message?: string; remember?: 'owner' | 'project' }
       | { kind: 'answer'; answers: Record<string, string[]>; freeformResponse?: string }
       | { kind: 'plan'; approved: boolean; action?: 'exit_only' | 'implement_interactive' | 'implement_autopilot'; feedback?: string },
   ): Promise<void> {
@@ -1332,11 +1332,11 @@ export class HttpPlatformClient implements IPlatformClient {
 
   // ── U-16 (D-147) — remembered permission rules ("Allow for this chat / run") ──
 
-  async listPermissionRules(owner: { kind: 'chat' | 'run'; id: string }): Promise<{ rules: StoredPermissionRuleView[] }> {
+  async listPermissionRules(owner: { kind: 'chat' | 'run' | 'project'; id: string }): Promise<{ rules: StoredPermissionRuleView[] }> {
     return apiFetch(`${this.baseUrl}${permissionRulesPath(owner)}`);
   }
 
-  async clearPermissionRules(owner: { kind: 'chat' | 'run'; id: string }): Promise<{ removed: number }> {
+  async clearPermissionRules(owner: { kind: 'chat' | 'run' | 'project'; id: string }): Promise<{ removed: number }> {
     return apiFetch(`${this.baseUrl}${permissionRulesPath(owner)}`, { method: 'DELETE' });
   }
 
@@ -2984,9 +2984,8 @@ export interface StoredPermissionRuleView {
   createdAt: string;
 }
 
-/** The rules resource of a chat or a run. */
-function permissionRulesPath(owner: { kind: 'chat' | 'run'; id: string }): string {
-  return owner.kind === 'chat'
-    ? `/api/chats/${encodeURIComponent(owner.id)}/permission-rules`
-    : `/api/workflow-runs/${encodeURIComponent(owner.id)}/permission-rules`;
+/** The rules resource of a chat, a run or a project. */
+function permissionRulesPath(owner: { kind: 'chat' | 'run' | 'project'; id: string }): string {
+  const base = { chat: '/api/chats', run: '/api/workflow-runs', project: '/api/projects' }[owner.kind];
+  return `${base}/${encodeURIComponent(owner.id)}/permission-rules`;
 }

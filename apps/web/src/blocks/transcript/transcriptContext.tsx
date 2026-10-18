@@ -29,9 +29,11 @@ export interface TranscriptActions {
   onApprovePlan?: (planId: string, action: PlanApproval) => void;
   onRequestPlanChanges?: (planId: string, feedback: string) => void;
   onAnswerQuestion?: (interactionId: string, answers: Record<string, string[]>, freeformResponse?: string) => void;
-  onAnswerPermission?: (interactionId: string, behavior: 'allow' | 'deny', message?: string, options?: { remember?: boolean }) => void;
+  onAnswerPermission?: (interactionId: string, behavior: 'allow' | 'deny', message?: string, options?: { remember?: 'owner' | 'project' }) => void;
   /** U-16: whose rules a permission card's "Allow for this …" remembers (a chat, a workflow run). Absent → Allow once only. */
   permissionScope?: PermissionRuleScope;
+  /** The chat or run is in a project: permission cards also offer "Allow … for this project". */
+  permissionProjectScope?: boolean;
   /** A gate decision is in flight. */
   gateBusy?: boolean;
   /** Workspace behind the transcript — resolves agent screenshots. */

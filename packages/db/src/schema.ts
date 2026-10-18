@@ -666,6 +666,8 @@ export const permissionRules = sqliteTable(
     id: text('id').primaryKey(),
     chatId: text('chat_id').references(() => chats.id, { onDelete: 'cascade' }),
     runId: text('run_id').references(() => workflowRuns.id, { onDelete: 'cascade' }),
+    /** v68: a project's rule covers every chat and run of that project. */
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
     /** `command` (`pnpm lint`) or `tool` (a tool name). */
     kind: text('kind').$type<'command' | 'tool'>().notNull(),
     match: text('match').notNull(),
@@ -674,6 +676,9 @@ export const permissionRules = sqliteTable(
   (table) => ({
     chatIdx: uniqueIndex('idx_permission_rules_chat').on(table.chatId, table.kind, table.match).where(sql`chat_id IS NOT NULL`),
     runIdx: uniqueIndex('idx_permission_rules_run').on(table.runId, table.kind, table.match).where(sql`run_id IS NOT NULL`),
+    projectIdx: uniqueIndex('idx_permission_rules_project')
+      .on(table.projectId, table.kind, table.match)
+      .where(sql`project_id IS NOT NULL`),
   }),
 );
 

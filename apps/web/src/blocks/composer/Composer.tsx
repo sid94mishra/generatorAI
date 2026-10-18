@@ -137,6 +137,8 @@ export interface ComposerProps {
    * the Approvals group as "N rules · Clear" while there are any.
    */
   rememberedRules?: { matches: readonly string[]; onClear: () => void } | undefined;
+  /** What "Allow … for this project" remembered (they cover every chat and run of the project), and how to forget it. */
+  projectRules?: { matches: readonly string[]; onClear: () => void } | undefined;
   /** Hidden in background-worker chats. */
   showAgentModePicker?: boolean;
   /** Set while a gate is open; the server refuses prompts until it closes. */
@@ -221,6 +223,7 @@ export function Composer({
   approvalMode,
   onApprovalModeChange,
   rememberedRules,
+  projectRules,
   showAgentModePicker = true,
   pendingInteractionLabel,
   onCancelPendingInteraction,
@@ -675,6 +678,19 @@ export function Composer({
                                 }}
                               >
                                 {PERMISSION_GATE_COPY.rulesCount(rememberedRules.matches.length)} · {PERMISSION_GATE_COPY.clearRules}
+                              </ToolbarOption>
+                            ) : null}
+                            {projectRules && projectRules.matches.length > 0 ? (
+                              <ToolbarOption
+                                selected={false}
+                                description={projectRules.matches.join(', ')}
+                                data-testid="composer-project-permission-rules"
+                                onClick={() => {
+                                  projectRules.onClear();
+                                  setOpenMenu(null);
+                                }}
+                              >
+                                {PERMISSION_GATE_COPY.projectRulesCount(projectRules.matches.length)} · {PERMISSION_GATE_COPY.clearRules}
                               </ToolbarOption>
                             ) : null}
                           </div>

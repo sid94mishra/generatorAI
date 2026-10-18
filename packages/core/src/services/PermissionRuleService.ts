@@ -1,5 +1,7 @@
 // ────────────────────────────────────────────────────────────────
-// PermissionRuleService (U-16, D-147) — "Allow for this chat / for this run".
+// PermissionRuleService (U-16, D-147) — "Allow for this chat / for this run",
+// and "Allow in this project" (evaluation action 4): a project's rules cover
+// every chat and run in that project, so a team stops asking for `pnpm test`.
 //
 // A tool-permission gate answered with `remember` stores the gate's rules
 // (`payload.rememberRules`, derived by `rememberablePermission` from the full
@@ -25,8 +27,10 @@ export class PermissionRuleService {
   }
 
   /** Remembers a gate's rules for its owner. A gate that derived none is refused by the caller first. */
-  async remember(owner: PermissionRuleOwner, rules: readonly PermissionRule[]): Promise<void> {
-    if (rules.length > 0) await this.repo.add(owner, rules);
+  async remember(owner: PermissionRuleOwner, rules: readonly PermissionRule[]): Promise<PermissionRule[]> {
+    const plain = rules.map(({ kind, match }) => ({ kind, match }));
+    if (plain.length > 0) await this.repo.add(owner, plain);
+    return owner.kind === 'project' ? plain.map((r) => ({ ...r, scope: 'project' as const })) : plain;
   }
 
   revoke(owner: PermissionRuleOwner, ruleId: string): Promise<boolean> {
@@ -43,15 +47,28 @@ export class PermissionRuleService {
    * them — every command of a shell line. A file write in plan mode always asks.
    */
   async covering(
-    owner: PermissionRuleOwner,
+    owners: PermissionRuleOwner | readonly PermissionRuleOwner[],
     payload: Pick<ToolPermissionRequestPayload, 'type' | 'rememberRules'>,
     permissionMode: string,
   ): Promise<PermissionRule[] | null> {
     const wanted = payload.rememberRules ?? [];
     if (wanted.length === 0) return null;
     if (permissionMode === 'plan' && payload.type === 'file_write') return null;
-    const have = new Set((await this.repo.list(owner)).map(permissionRuleKey));
-    return wanted.every((r) => have.has(permissionRuleKey(r))) ? wanted : null;
+    // The owner's own rules first, then its project's: each command may be covered by either.
+    const own = new Set<string>();
+    const project = new Set<string>();
+    for (const owner of Array.isArray(owners) ? owners : [owners]) {
+      const into = (owner as PermissionRuleOwner).kind === 'project' ? project : own;
+      for (const r of await this.repo.list(owner as PermissionRuleOwner)) into.add(permissionRuleKey(r));
+    }
+    const covered: PermissionRule[] = [];
+    for (const { kind, match } of wanted) {
+      const key = permissionRuleKey({ kind, match });
+      if (own.has(key)) covered.push({ kind, match });
+      else if (project.has(key)) covered.push({ kind, match, scope: 'project' });
+      else return null;
+    }
+    return covered;
   }
 }
 

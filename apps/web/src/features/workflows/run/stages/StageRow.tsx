@@ -35,7 +35,7 @@ import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 
 /** An answer to one of a stage's in-turn gates, in the chat's shapes (the stage conversation API). */
 export type StageGateResolution =
-  | { kind: 'permission'; interactionId: string; behavior: 'allow' | 'deny'; message?: string; remember?: boolean }
+  | { kind: 'permission'; interactionId: string; behavior: 'allow' | 'deny'; message?: string; remember?: 'owner' | 'project' }
   | { kind: 'answer'; interactionId: string; answers: Record<string, string[]>; freeformResponse?: string }
   | { kind: 'plan'; interactionId: string; approved: boolean; action?: 'implement_interactive' | 'implement_autopilot'; feedback?: string };
 
@@ -72,6 +72,8 @@ export interface StageRowProps {
   onResolveGate?: (id: string, resolution: StageGateResolution) => void;
   /** A gate answer or approval of this stage is in flight (D-13). */
   gateBusy?: boolean;
+  /** The run is in a project: permission cards also offer "Allow … for this project". */
+  inProject?: boolean;
   menu?: StageMenuActions;
   onRetry?: (id: string) => void;
   /** Open the dock's Inspector on this stage. */
@@ -152,6 +154,7 @@ export const StageRow = memo(function StageRow({
   onTerminalRejectHitl,
   onResolveGate,
   gateBusy = false,
+  inProject = false,
   menu,
   onRetry,
   onOpenInspector,
@@ -320,13 +323,14 @@ export const StageRow = memo(function StageRow({
                   ? {
                       // U-16: "Allow for this run" remembers the gate's rules for every stage of the run.
                       permissionScope: 'run' as const,
-                      onAnswerPermission: (interactionId: string, behavior: 'allow' | 'deny', message?: string, options?: { remember?: boolean }) =>
+                      permissionProjectScope: inProject,
+                      onAnswerPermission: (interactionId: string, behavior: 'allow' | 'deny', message?: string, options?: { remember?: 'owner' | 'project' }) =>
                         onResolveGate(stage.id, {
                           kind: 'permission',
                           interactionId,
                           behavior,
                           ...(message ? { message } : {}),
-                          ...(options?.remember ? { remember: true } : {}),
+                          ...(options?.remember ? { remember: options.remember } : {}),
                         }),
                       onAnswerQuestion: (interactionId: string, answers: Record<string, string[]>, freeformResponse?: string) =>
                         onResolveGate(stage.id, { kind: 'answer', interactionId, answers, ...(freeformResponse ? { freeformResponse } : {}) }),

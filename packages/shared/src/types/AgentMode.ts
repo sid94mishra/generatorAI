@@ -405,8 +405,8 @@ export interface ToolPermissionResolution {
   behavior: 'allow' | 'deny';
   /** Optional reason relayed to the agent when denying. */
   message?: string;
-  /** U-16 (D-147): allow, and remember the gate's rules for its owner (the chat, or the whole run). */
-  remember?: boolean;
+  /** U-16 (D-147): allow, and remember the gate's rules for its owner (the chat, or the whole run), or its project. */
+  remember?: 'owner' | 'project';
 }
 
 /** Compact projection embedded in the chat transcript. */

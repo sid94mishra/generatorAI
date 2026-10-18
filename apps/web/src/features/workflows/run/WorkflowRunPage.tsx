@@ -540,6 +540,7 @@ export function WorkflowRunPage() {
         onTerminalRejectHitl={handleTerminalRejectHitl}
         onResolveGate={handleResolveGate}
         gateBusy={gateBusyStage === s.id}
+        inProject={!!runData?.projectId}
         menu={stageMenu}
         {...(runIsTerminal ? { onRetry: handleRetryStage } : {})}
         onOpenInspector={handleOpenInspector}
@@ -569,6 +570,7 @@ export function WorkflowRunPage() {
       handleTerminalRejectHitl,
       handleResolveGate,
       gateBusyStage,
+      runData?.projectId,
       stageMenu,
       handleRetryStage,
       handleOpenInspector,

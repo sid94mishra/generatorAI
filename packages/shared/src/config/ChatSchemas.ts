@@ -231,11 +231,12 @@ export const ResolveToolPermissionSchema = z
     /** MG-05 — signed answer from a phone; required for a risky gate answered by a mobile device. */
     approvalProof: z.unknown().optional(),
     /**
-     * U-16 (D-147) — "Allow for this chat / for this run": allow, and remember the gate's rules
-     * (`payload.rememberRules`) for its owner, so a later request they cover is allowed without asking.
+     * U-16 (D-147) — allow, and remember the gate's rules (`payload.rememberRules`) so a later request
+     * they cover is allowed without asking: `owner` = for this chat / this run (the route's), `project` =
+     * for every chat and run of its project ("Allow in this project"; 422 when it has none).
      * Only with `behavior: 'allow'`; refused (422) for a gate that cannot be remembered.
      */
-    remember: z.boolean().optional(),
+    remember: z.enum(['owner', 'project']).optional(),
   })
   .refine((b) => !(b.remember && b.behavior !== 'allow'), {
     message: 'remember is only valid with behavior "allow"',
