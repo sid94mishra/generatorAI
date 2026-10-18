@@ -258,6 +258,15 @@ function describeMount(m: WorkspaceMount): string {
   return bits.join(', ');
 }
 
+/**
+ * Evaluation: writing replies ran ~60% over a requested length (2,396 words for a 1,500-word runbook). Told to
+ * every session, so it is kept to two short lines: it is paid for on every request.
+ */
+export const REPLY_LENGTH_HINT =
+  '\n\n[Replies]\n' +
+  '- When the request names a length (words, lines, pages, items), stay within about 10% of it. If the content truly ' +
+  'needs more, deliver the requested length and say in one line what you left out.';
+
 export function buildWorkspaceHint(input: WorkspaceHintInput): string {
   const [primary, ...rest] = input.mounts;
   const lines: string[] = ['', '', '[Workspace]'];
