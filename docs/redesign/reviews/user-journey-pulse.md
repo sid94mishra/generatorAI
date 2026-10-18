@@ -251,3 +251,21 @@ Owner: "test stream durability, orchestrator efficiency, chats, workflows, agent
 - **Fixed build (E-31, E-32):** the server was ready 2 s after the keychain was allowed ("Embedded server is ready",
   healthy). A Sonnet stream showed the fade on screen — the newest words in a faint Running tint settling to ink over
   the words before them. Reopening the finished chat ran no entrance, wave or shimmer animation and left no highlight.
+
+### 2026-10-18 — backlog closing pass (installed build with D-153, D-154)
+- **Migration v68:** applied on the real profile; 57 remembered rules before and after (backup taken first).
+- **Project rules (D-153):** R-1 (Sonnet, Pulse) asked for `pnpm --filter @pulse/shared test` with "Allow pnpm test for
+  this chat" and "… for this project"; the project action stored `pnpm test` for Pulse ("Allowed for this project: pnpm
+  test"). R-3 (another Sonnet chat in Pulse) ran it without a card: "Allowed · by a rule for this project: pnpm test",
+  persisted with `scope: project`. The composer's Approvals menu listed "1 project rule · Clear"; Clear removed it.
+  A Codex chat (R-2) never asked at all — Codex runs workspace-only commands in its sandbox without an approval.
+- **Review with Sonnet:** under RV-1's Codex turn (added `pct.ts`) "Review with Sonnet 5.5" moved the chat to Sonnet and
+  sent the review prompt; Sonnet found a real defect (`export … from './pct'` without `.js` under NodeNext), a
+  zero-denominator gap and the missing test, and edited nothing (the worktree held only Codex's two changes).
+- **Copilot on first use (D-154):** the app is 1.5 GB (was 1.8 GB), only the loader ships. Settings → Download GitHub
+  Copilot CLI: 4 → 68 → 128 of 147 MB in ~18 s with a progress bar, then "Not signed in" with the CLI installed under
+  `data/cli/copilot/1.0.75`. While it was missing the card said "Client running: Yes" (fixed: follows the CLI).
+- **Reply length:** "a 300-word explanation" came back at 326 words (+9%; the evaluation's runbook was +60%).
+
+- **Fix build:** with the downloaded CLI moved aside, Copilot read Installed No · Client running No · Download offered;
+  moved back and restarted, the app picked the CLI up at boot (installed, waiting for sign-in).
