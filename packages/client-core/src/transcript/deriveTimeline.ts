@@ -227,12 +227,14 @@ function isPlanExitTool(toolName: string): boolean {
  * the workspace keeps. A write there reads as what happened ("Drafted plan"), not as an edit to a file the person
  * can find nowhere in the workspace.
  */
-function providerPlanDraft(toolName: string, args: unknown, live: boolean): string | undefined {
+function providerPlanDraft(toolName: string, args: unknown, live: boolean, written: Set<string>): string | undefined {
   if (toolStepKind(toolName) !== 'edit' || args == null || typeof args !== 'object') return undefined;
   const a = args as Record<string, unknown>;
   const file = typeof a['file_path'] === 'string' ? a['file_path'] : typeof a['path'] === 'string' ? a['path'] : '';
   if (!/[\\/]\.claude[\\/]plans[\\/][^\\/]+\.md$/i.test(file)) return undefined;
-  const drafted = /^write$/i.test(toolName);
+  // A whole-file rewrite of a plan already written this turn is a revision too (after "Request changes").
+  const drafted = /^write$/i.test(toolName) && !written.has(file);
+  written.add(file);
   return live ? (drafted ? 'Drafting plan' : 'Revising plan') : (drafted ? 'Drafted plan' : 'Revised plan');
 }
 
@@ -403,6 +405,8 @@ export function deriveTimeline(
    * disappearing.
    */
   const stepByCallId = new Map<string, TimelineStep>();
+  /** The provider's plan files written so far, so a second write reads "Revised plan". */
+  const planFiles = new Set<string>();
 
   for (const b of blocks) {
     switch (b.type) {
@@ -427,7 +431,7 @@ export function deriveTimeline(
       case 'tool_call': {
         const summary = summarizeArgs(b.tool, b.args);
         const toolSearch = isToolSearchTool(b.tool) ? toolSearchTarget(b.args) : undefined;
-        const planDraft = providerPlanDraft(b.tool, b.args, b.status !== 'complete' && opts.active);
+        const planDraft = providerPlanDraft(b.tool, b.args, b.status !== 'complete' && opts.active, planFiles);
         const target = planDraft ? '' : toolSearch ?? summary.target;
         const meta = toolSearch ? undefined : summary.meta;
         // A write to the provider's plan file is a plan step: it never groups with real file edits ("Edited 2 files").

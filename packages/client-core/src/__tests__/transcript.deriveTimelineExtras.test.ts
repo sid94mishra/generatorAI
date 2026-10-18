@@ -174,6 +174,15 @@ describe("the provider's own plan file", () => {
     );
     expect(steps.every((s) => s.kind === 'plan' && s.verb === 'Revised plan')).toBe(true);
   });
+
+  it('a second whole-file write of the plan reads as a revision', () => {
+    const plan = '/Users/me/.claude/plans/p.md';
+    const steps = deriveTimeline(
+      [tool('Write', 'a', { args: { file_path: plan } }), tool('Write', 'b', { args: { file_path: plan } })],
+      { active: false },
+    );
+    expect(steps.map((s) => s.verb)).toEqual(['Drafted plan', 'Revised plan']);
+  });
 });
 
 describe('a plan sent back for changes', () => {
