@@ -1493,6 +1493,13 @@ directory (absolute, `~`, `..`), no control flow or here-document, not risky (MG
 wrapper (Codex) is judged by its line. "Ask before tools" and read-only runs still ask; tests, installs and writes
 still ask in Accept edits, and "Allow for this chat/run" (D-147) remains the way to stop those asking.
 
+### D-151 A permission card sits right after the step it asks about (2026-10-18) — Final
+Claude and Codex both announce a tool call (`tool_start`) and only then ask for approval, so the card's ordinal follows
+the step: the transcript reads "Running pnpm test" → "Allow this command?" → the result, live and after a reload. Moving
+the card above its step would need the gate to rewrite a step already on screen and would break the one-ordinal rule
+(every block keeps the place it was first given). The step row shows "Waiting for you" while its card is open, so the
+pair reads as one unit; nothing moves when it is answered.
+
 ### D-142 (withdrawn 2026-10-11) Local self-signed signing does not stop the Keychain prompt
 Tried and reverted: signing local builds with a self-signed "GeneratorAI Local Signing" identity kept the code signature
 stable, but macOS still asked for the "GeneratorAI Safe Storage" key after the next rebuild — Keychain access for
