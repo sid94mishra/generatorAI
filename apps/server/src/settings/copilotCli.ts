@@ -5,14 +5,13 @@
 // At boot it points the provider at a CLI downloaded earlier
 // (`COPILOT_CLI_PATH`, which `resolveCopilotCliPath` reads before the
 // loader). `install()` starts the download in the background; the providers
-// route reports it (`installable` / `installing` / `installError`) and the
+// route reports it (`installable`, `installing`, or the error) and the
 // Settings page polls until the CLI is there, then the provider is re-probed.
 // A development checkout has the platform package in node_modules: never
 // installable, nothing to download.
 // ────────────────────────────────────────────────────────────────
 
 import { existsSync } from 'node:fs';
-import path from 'node:path';
 import {
   bundledCopilotCliVersion,
   downloadedCopilotCliPath,
@@ -75,7 +74,7 @@ export class CopilotCliService {
     })
       .then((entry) => {
         process.env['COPILOT_CLI_PATH'] = entry;
-        this.logger?.info(`[CopilotCli] installed ${path.basename(path.dirname(entry))} ${version}`);
+        this.logger?.info(`[CopilotCli] installed the Copilot CLI ${version} at ${entry}`);
         this.onInstalled();
       })
       .catch((err: unknown) => {

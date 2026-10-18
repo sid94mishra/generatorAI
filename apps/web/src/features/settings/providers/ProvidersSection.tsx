@@ -329,7 +329,7 @@ function ProviderDetails({
         dense
         items={[
           { label: 'Provider id', value: provider.type, mono: true },
-          { label: 'SDK installed', value: provider.installed ? 'Yes' : 'No' },
+          { label: 'Installed', value: provider.installed ? 'Yes' : 'No' },
           { label: 'Client running', value: provider.connected ? 'Yes' : 'No' },
           { label: 'Authenticated', value: provider.authenticated ? 'Yes' : 'No' },
         ]}
