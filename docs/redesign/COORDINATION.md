@@ -97,3 +97,13 @@ each rendered by web/desktop and not yet by mobile:
   "Approved with notes"); mobile shows the text without the label. Live, `chat.plan.decided` carries `note`.
 - `SystemBlock.label` (client-core) carries that label on the live path.
 - Claude's empty `ExitPlanMode` calls no longer emit `harness.error` (a `harness.warning` after three in a row).
+
+**Streaming motion and Codex pass (2026-10-18, note for the mobile session).**
+- `advancePacer` (client-core) takes `easeMs` (D-152): the reveal rate eases toward `minimum + backlog / drain`
+  instead of jumping and holding. Defaults are unchanged, so mobile's `AssistantText` behaves as before; web passes
+  `{ easeMs: 220, wordSlack: 0, minCharsPerSecond: 70 }`. Mobile can opt in with the same options.
+- D-152 also moved web's busy cues to a three-dot wave + shimmering label and removed the turn-header spinner;
+  mobile mirrors the information architecture, not the motion — decide there.
+- Codex: `request_user_input` is now offered outside plan mode (question cards arrive from Codex chats too), and
+  Codex turns now stream reasoning (`thinkingSegments` appear on Codex turns). Thinking after an answered question
+  is a separate segment below the card.
