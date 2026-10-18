@@ -219,3 +219,9 @@ Owner: "test stream durability, orchestrator efficiency, chats, workflows, agent
 - **Plan mode (E-21):** plan → "Changes requested" → edits → Revision 2 → approve → implementation; live, reopened after the turn and reopened mid-review all read the same: steps · your reply · "Revised plan +1 −1" · Revision 2 · implementation steps.
 - **Stage follow-up (E-22):** the amendment's message shows at 1.5 s, text at 3 s, its first step at 5 s.
 - **Open:** a Codex chat went blank for ~3 s during a network drop (seen once, not reproduced; no reload in the log). Permission cards follow the step they gate (providers ask after announcing the call). Mobile shows the plan reply without its label (mobile redesign owns it).
+
+### 2026-10-18 — closing pass (installed build with E-23…E-26)
+- **Plan mode to done (V-D4 old build, V-D5 new build, Sonnet):** plan → "Changes requested" → Revision 2 → approve → files, tests and lint; V-D5 had no mid-stream moves and live equals reload. V-D4 (old build) showed E-23's red rows and E-24's misplaced "Thought"; V-D5 did not exit early, so E-23 and E-25 rest on unit tests.
+- **Thinking order (V-T1, Opus):** `ls` → thinking → `wc -l` → answer; after reload "Thought" stays between the two commands (E-24 verified).
+- **Codex blank:** synthetic offline/online events, a 6 s socket cut mid-turn and a 95 s quiet command did not blank the page; `main.log` now records "App page loaded" and renderer errors (E-26 verified on launch).
+- Evaluation write-up published as a page: verdict, ratings, task outcomes, E-1…E-26, action-item status.
