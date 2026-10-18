@@ -205,6 +205,8 @@ export interface IPlatformClient {
   loginProvider(type: string): Promise<HarnessLoginResult>;
   /** Sign the provider's account out. */
   logoutProvider(type: string): Promise<void>;
+  /** Start downloading a provider's CLI (Copilot, on first use); `installing` on the providers list tracks it. */
+  installProvider(type: string): Promise<void>;
   /** Make a READY provider the default for requests that name none (409 otherwise). */
   setDefaultProvider(type: string): Promise<HarnessSetDefaultResult>;
   /** Which providers this server serves (`GET /api/harness/visibility`, D-131). */

@@ -29,6 +29,7 @@ export const HARNESS_PROVIDERS_KEY = ['harness-providers'] as const;
 export const HARNESS_VISIBILITY_KEY = ['harness-visibility'] as const;
 
 const HARNESS_PROVIDERS_STALE_POLL_MS = 3_000;
+const HARNESS_PROVIDERS_INSTALL_POLL_MS = 1_500;
 const HARNESS_PROVIDERS_STALE_TIME_MS = 5 * 60_000;
 
 function useProvidersQuery<T>(select: (data: HarnessProvidersResponse) => T) {
@@ -38,7 +39,13 @@ function useProvidersQuery<T>(select: (data: HarnessProvidersResponse) => T) {
     queryFn: () => platform.getHarnessProviders(),
     staleTime: HARNESS_PROVIDERS_STALE_TIME_MS,
     refetchOnWindowFocus: false,
-    refetchInterval: (query) => (query.state.data?.stale ? HARNESS_PROVIDERS_STALE_POLL_MS : false),
+    // A CLI download in flight is followed closely: its progress, then the provider coming up.
+    refetchInterval: (query) =>
+      query.state.data?.providers.some((p) => p.installing)
+        ? HARNESS_PROVIDERS_INSTALL_POLL_MS
+        : query.state.data?.stale
+          ? HARNESS_PROVIDERS_STALE_POLL_MS
+          : false,
     select,
   });
 }
@@ -96,6 +103,17 @@ export function useProviderLogin() {
     onSuccess: (result) => {
       if (result.completed) void queryClient.invalidateQueries({ queryKey: HARNESS_PROVIDERS_KEY });
     },
+  });
+}
+
+/** Start downloading a provider's CLI (Copilot); the providers query then polls its progress. */
+export function useInstallProvider() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (type: string) => platform.installProvider(type),
+    meta: { errorTitle: 'Download not started' },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: HARNESS_PROVIDERS_KEY }),
   });
 }
 

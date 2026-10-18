@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import { WorkflowEngineSettingsStore } from './settings/workflowEngine.js';
 import { ProviderVisibilityStore } from './settings/providerVisibility.js';
+import { CopilotCliService } from './settings/copilotCli.js';
 import * as path from 'node:path';
 import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider, resolveCodexCommand, harnessErrorOf } from '@generatorai/agent-harness-providers';
 import type { ProviderInstanceId } from '@generatorai/core';
@@ -507,6 +508,15 @@ export async function createContainer(config: AppConfig, options: CreateContaine
   });
   // D-131 — which providers this server serves. Applied before anything can
   // probe or list a provider, so a hidden one never spawns its CLI.
+  // The Copilot CLI is downloaded on first use rather than bundled (evaluation: ~308 MB per download).
+  const copilotCli = new CopilotCliService(
+    path.join(dirname(resolve(config.dbPath)), 'cli', 'copilot'),
+    () => {
+      harnessRegistry.invalidate('copilot');
+      harnessRegistry.requestRefresh();
+    },
+    { info: (m) => logger.info(m), warn: (m) => logger.warn(m) },
+  );
   const providerVisibility = await ProviderVisibilityStore.load(dirname(resolve(config.dbPath)), process.env, (hidden) =>
     harnessRegistry.setHiddenTypes(hidden),
   );
@@ -2518,6 +2528,7 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     admissionController,
     workflowEngineSettings,
     providerVisibility,
+    copilotCli,
     streamBroker,
     customToolRegistry,
     mcpHub,
@@ -3044,6 +3055,8 @@ export interface Container {
   workflowEngineSettings: WorkflowEngineSettingsStore;
   /** D-131 — which agent providers this server serves (Settings › Model providers, admin). */
   providerVisibility: ProviderVisibilityStore;
+  /** The Copilot CLI, downloaded on first use. */
+  copilotCli: CopilotCliService;
   streamBroker: StreamBroker;
   /** TOL-01 — harness-agnostic custom tool catalog. Empty by default. */
   customToolRegistry: CustomToolRegistry;

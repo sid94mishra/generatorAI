@@ -1539,6 +1539,18 @@ for `pnpm test` in every new chat of the same codebase. A rule can now belong to
   as "N project rules · Clear" next to the chat's own.
 - Unchanged: risky gates, always-ask tools, the never-list and plan-mode file writes still ask (D-147).
 
+### D-154 The Copilot CLI is downloaded on first use (evaluation action 10, 2026-10-18) — Final
+The packaged app shipped `@github/copilot-<platform>-<arch>` (~308 MB unpacked) to everyone, for a provider most people
+never sign into. Staging (`stage-server-runtime.mjs`) now drops the per-platform packages and keeps only the
+`@github/copilot` loader, which pins the CLI version the SDK was built against. Settings › Model providers shows
+Copilot "Not installed" with **Download GitHub Copilot CLI**; `POST /api/harness/providers/copilot/install` starts
+`installCopilotCli` (agent-harness-providers): the registry's `dist.tarball` for that exact version, verified against
+its `sha512` integrity, unpacked with the system `tar` (macOS, Linux, Windows 10+) into staging and moved to
+`<dataDir>/cli/copilot/<version>/package` — a half-unpacked CLI is never found. `GET /providers` reports
+`installable` / `installing {receivedBytes, totalBytes}` (Settings polls every 1.5 s and shows a progress bar);
+when it lands, `COPILOT_CLI_PATH` points at it (also at boot) and the provider is re-probed. A development checkout
+still has the platform package in node_modules and never downloads. Measured: a 154 MB download, 18 s, verified.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

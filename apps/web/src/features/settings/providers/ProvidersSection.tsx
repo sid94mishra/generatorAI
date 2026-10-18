@@ -20,6 +20,7 @@ import type { HarnessProviderStatus, HarnessProviderVisibility } from '@generato
 import {
   useHarnessProviders,
   useHarnessVisibility,
+  useInstallProvider,
   useSetHarnessVisibility,
   useSetDefaultProvider,
   useSignInProvider,
@@ -31,6 +32,7 @@ import {
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Callout } from '@/ui/primitives/Callout/Callout.js';
+import { ProgressBar } from '@/ui/primitives/ProgressBar/ProgressBar.js';
 import { ProviderLogo } from '@/ui/primitives/ProviderLogo/ProviderLogo.js';
 import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
 import { Switch } from '@/ui/primitives/Switch/Switch.js';
@@ -53,6 +55,7 @@ const SIGN_IN_HINTS: Record<string, string> = {
 };
 
 const INSTALL_HINTS: Record<string, string> = {
+  copilot: 'The Copilot CLI is downloaded the first time you use it (about 155 MB), so the app itself stays smaller. Download it above, then sign in.',
   codex: 'This build ships the Codex CLI, so this usually means its platform package could not be installed. Install Codex with `npm i -g @openai/codex` or the ChatGPT desktop app, or set CODEX_CLI_PATH to its location — then restart GeneratorAI.',
 };
 
@@ -63,6 +66,7 @@ export function ProvidersSection() {
   const signInMutation = useSignInProvider();
   const signOutMutation = useProviderLogout();
   const makeDefaultMutation = useSetDefaultProvider();
+  const installMutation = useInstallProvider();
   const [expanded, setExpanded] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
@@ -190,6 +194,7 @@ export function ProvidersSection() {
                 onMakeDefault={() => void makeDefault(p)}
                 onSignIn={() => void signIn(p)}
                 onSignOut={() => void signOut(p)}
+                onInstall={() => installMutation.mutate(p.type)}
               />
             </CatalogRow>
           ))}
@@ -266,6 +271,7 @@ function ConnectionBadge({ provider, checking }: { provider: HarnessProviderStat
   if (provider.ready) return <Badge tone="ok">Connected</Badge>;
   // Not an error: an optional provider that is absent is neutral (the model picker
   // dims it the same way); an installed one waiting for sign-in asks for action.
+  if (provider.installing) return <Badge tone="neutral">Downloading…</Badge>;
   return provider.installed ? <Badge tone="warn">Not signed in</Badge> : <Badge tone="neutral">Not installed</Badge>;
 }
 
@@ -277,6 +283,7 @@ function ProviderDetails({
   onMakeDefault,
   onSignIn,
   onSignOut,
+  onInstall,
 }: {
   provider: HarnessProviderStatus;
   isDefault: boolean;
@@ -285,13 +292,21 @@ function ProviderDetails({
   onMakeDefault: () => void;
   onSignIn: () => void;
   onSignOut: () => void;
+  onInstall: () => void;
 }) {
+  const mb = (bytes: number) => Math.round(bytes / (1024 * 1024));
+  const progress = provider.installing;
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="secondary" size="sm" icon="refresh" loading={busy} onClick={onTest}>
           Test connection
         </Button>
+        {provider.installable && !progress ? (
+          <Button variant="primary" size="sm" icon="download" disabled={busy} onClick={onInstall} data-testid={`provider-install-${provider.type}`}>
+            Download {provider.label} CLI
+          </Button>
+        ) : null}
         {provider.supportsLogin && provider.installed && !provider.authenticated ? (
           <Button variant="primary" size="sm" icon="power" disabled={busy} onClick={onSignIn} data-testid={`provider-sign-in-${provider.type}`}>
             Sign in
@@ -320,6 +335,13 @@ function ProviderDetails({
         ]}
       />
 
+      {progress ? (
+        <ProgressBar
+          value={progress.totalBytes ? progress.receivedBytes : null}
+          max={progress.totalBytes ?? 100}
+          label={`Downloading the ${provider.label} CLI${progress.totalBytes ? ` · ${mb(progress.receivedBytes)} of ${mb(progress.totalBytes)} MB` : ''}`}
+        />
+      ) : null}
       {provider.error ? <Callout tone="err">{provider.error}</Callout> : null}
 
       <div className="flex flex-col gap-1.5">

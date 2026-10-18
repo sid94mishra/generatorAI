@@ -26,7 +26,7 @@ const VisibilityBody = z
 
 export function createHarnessRoutes(container: Container): Router {
   const router = Router();
-  const { harnessRegistry, providerVisibility, logger } = container;
+  const { harnessRegistry, providerVisibility, copilotCli, logger } = container;
 
   /**
    * D-131 — a provider id a client may act on: known AND served. A hidden
@@ -128,14 +128,21 @@ export function createHarnessRoutes(container: Container): Router {
         // answer is being fetched, so it can poll briefly and converge rather
         // than sit on cache until its own staleTime expires.
         stale: servedFromCache && harnessRegistry.statusesAreStale,
-        providers: statuses.map((s) => ({
+        providers: statuses.map((s) => {
+          // Copilot's CLI is downloaded on first use: until it is, the provider is not installed, whatever the
+          // SDK import says, and the download is offered (with its progress while it runs).
+          const cli = s.type === 'copilot' ? copilotCli.state() : undefined;
+          const missingCli = !!cli && !cli.available;
+          return {
           type: s.type,
           label: s.label,
-          installed: s.installed,
+          installed: s.installed && !missingCli,
           connected: s.connected,
           authenticated: s.authenticated,
-          ready: s.ready,
-          error: s.error,
+          ready: s.ready && !missingCli,
+          error: missingCli ? cli.error : s.error,
+          ...(missingCli && cli.installable ? { installable: true } : {}),
+          ...(cli?.installing ? { installing: cli.installing } : {}),
           checkedAt: s.checkedAt,
           modelCount: s.models.length,
           models: s.models,
@@ -144,12 +151,27 @@ export function createHarnessRoutes(container: Container): Router {
           // up; a provider that has not been brought up yet reports false
           // and flips once the probe has run.
           supportsLogin: typeof harnessRegistry.peek?.(s.type as HarnessType)?.startLogin === 'function',
-        })),
+          };
+        }),
       };
       res.json(body);
     } catch (err) {
       next(err);
     }
+  });
+
+  // POST /harness/providers/:type/install — download a provider's CLI in the background (Copilot: on first use).
+  // Answers at once; GET /providers reports `installing` until it is done, then the provider is re-probed.
+  router.post('/providers/:type/install', (req, res) => {
+    const type = servedType(req.params['type'], res);
+    if (!type) return;
+    if (type !== 'copilot') {
+      res.status(409).json({ error: { code: 'UNSUPPORTED', message: `${type} is not downloaded in-app.` } });
+      return;
+    }
+    const state = copilotCli.install();
+    logger.info('[HarnessRoutes] copilot CLI download requested', { requestId: req.requestId, available: state.available });
+    res.status(202).json(state);
   });
 
   // POST /harness/providers/:type/login — start the provider's own sign-in

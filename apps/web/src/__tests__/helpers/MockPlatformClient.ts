@@ -278,6 +278,7 @@ export class MockPlatformClient implements IPlatformClient {
   );
 
   loginProvider = vi.fn(async (_type: string): Promise<HarnessLoginResult> => ({}));
+  installProvider = vi.fn(async (_type: string): Promise<void> => {});
 
   logoutProvider = vi.fn(async (_type: string): Promise<void> => undefined);
 

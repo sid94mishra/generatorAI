@@ -77,9 +77,9 @@ export const RUNTIME_PACKAGES = [
   // user's `CODEX_HOME`; the binary is just the protocol the build was typed
   // against (see schemas/versions.json).
   '@openai/codex',
-  // The GitHub Copilot CLI, for the same reason (E-1): the SDK is inlined, but `resolveCopilotCliPath` finds the
-  // per-platform binary (`@github/copilot-<platform>-<arch>`) with `createRequire(...).resolve()`, so the packaged
-  // app reported "Could not resolve a @github/copilot platform package" and the model picker said "Not signed in".
+  // The GitHub Copilot CLI's loader (E-1): it pins the CLI version. The per-platform binary
+  // (`@github/copilot-<platform>-<arch>`, ~308 MB) is dropped at staging and downloaded on first use
+  // (apps/server settings/copilotCli.ts), so the app no longer ships it to everyone.
   '@github/copilot',
 ];
 

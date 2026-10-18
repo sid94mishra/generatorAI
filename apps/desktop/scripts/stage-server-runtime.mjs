@@ -182,6 +182,15 @@ if (install.status !== 0) {
   fail(`pnpm install failed in ${stageDir} (exit ${install.status}).`);
 }
 
+// The Copilot CLI is downloaded on first use (apps/server settings/copilotCli.ts): only its loader package ships —
+// it pins the version to fetch — and its per-platform binaries (~308 MB) are dropped from the bundle.
+for (const entry of fs.readdirSync(path.join(nodeModules, '@github'), { withFileTypes: true })) {
+  if (entry.isDirectory() && /^copilot-(linux|linuxmusl|darwin|win32)-/.test(entry.name)) {
+    fs.rmSync(path.join(nodeModules, '@github', entry.name), { recursive: true, force: true });
+    console.log(`[stage] dropped @github/${entry.name} (downloaded on first use)`);
+  }
+}
+
 // ── Verify ───────────────────────────────────────────────────────
 // A mis-staged tree installs cleanly and fails on first use inside the packaged
 // app, which is a long way from here. Check the invariants while it is cheap.

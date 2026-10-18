@@ -69,6 +69,10 @@ export interface HarnessProviderStatus {
   models: HarnessCatalogModel[];
   /** The provider can sign the user in from the app (`POST /harness/providers/:type/login`). */
   supportsLogin: boolean;
+  /** Its CLI is not here yet but can be downloaded in-app (`POST /harness/providers/:type/install`; Copilot). */
+  installable?: boolean;
+  /** That download is running. */
+  installing?: { receivedBytes: number; totalBytes?: number };
 }
 
 /** `GET /api/harness/providers[?refresh=1]`. */

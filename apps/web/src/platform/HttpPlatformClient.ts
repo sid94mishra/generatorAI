@@ -2881,6 +2881,10 @@ export class HttpPlatformClient implements IPlatformClient {
     );
   }
 
+  async installProvider(type: string): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/harness/providers/${encodeURIComponent(type)}/install`, { method: 'POST' });
+  }
+
   async loginProvider(type: string): Promise<HarnessLoginResult> {
     return apiFetch<HarnessLoginResult>(
       `${this.baseUrl}/api/harness/providers/${encodeURIComponent(type)}/login`,
