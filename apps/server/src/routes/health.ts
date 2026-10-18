@@ -8,6 +8,9 @@ import { getConfigCorrections, fallbackReport } from '@generatorai/shared';
 import type { Container } from '../composition-root.js';
 import { getSlowStatementStats } from '@generatorai/db';
 
+/** How long /health waits on the harness ping before reporting `degraded`. */
+const HARNESS_PING_BUDGET_MS = 1500;
+
 export function createHealthRoutes(container: Container): Router {
   const router = Router();
   const { harness, config, templateRegistry, logger } = container;
@@ -18,10 +21,21 @@ export function createHealthRoutes(container: Container): Router {
     let harnessAlive = false;
     let dbOk = true; // If we got this far, DB is serving requests
 
+    // Bounded: this is the liveness probe (the desktop shell waits on it with a
+    // 2 s timeout). A provider that is slow to answer makes the server
+    // `degraded`, never unreachable.
+    let budget: NodeJS.Timeout | undefined;
     try {
-      harnessAlive = await harness.ping();
+      harnessAlive = await Promise.race([
+        harness.ping(),
+        new Promise<boolean>((resolve) => {
+          budget = setTimeout(() => resolve(false), HARNESS_PING_BUDGET_MS);
+        }),
+      ]);
     } catch {
       harnessAlive = false;
+    } finally {
+      clearTimeout(budget);
     }
 
     // v2: Gather workflow run and chat counts

@@ -868,14 +868,26 @@ export class MultiHarness implements IAgentHarness {
       ? this.registry.readyTypes
       : ALL_HARNESS_TYPES.filter((t) => this.registry.peek(t) !== null);
 
-    const results = await Promise.all(
-      candidates.map(async (t) => {
+    // Alive as soon as ANY adapter answers yes: Codex's ping is a real
+    // `model/list` round-trip (~3 s cold, far longer offline), and waiting for
+    // every adapter made /api/health as slow as the slowest one — the desktop
+    // shell's 2 s probe then timed out for a minute and reported a healthy
+    // server as failed.
+    return new Promise<boolean>((resolve) => {
+      let pending = candidates.length;
+      if (pending === 0) return resolve(false);
+      for (const t of candidates) {
         const adapter = this.registry.peek(t);
-        if (!adapter) return false;
-        try { return await adapter.ping(); } catch { return false; }
-      }),
-    );
-    return results.some(Boolean);
+        void Promise.resolve()
+          .then(() => (adapter ? adapter.ping() : false))
+          .catch(() => false)
+          .then((alive) => {
+            pending -= 1;
+            if (alive) resolve(true);
+            else if (pending === 0) resolve(false);
+          });
+      }
+    });
   }
 
   runtimeDiagnostics(): HarnessRuntimeDiagnostics {
