@@ -14,6 +14,7 @@ import { memo, useCallback, useDeferredValue, useMemo, useRef, type ReactNode } 
 import {
   buildTranscriptTurns,
   deriveSegments,
+  turnChangedFiles,
   type ScmResultBlock,
   type UsageInfo,
   type WidgetBlock,
@@ -54,6 +55,8 @@ export interface ChatTranscriptProps {
   renderScmResult?: (block: ScmResultBlock) => ReactNode;
   /** Focus a dock tab (browser, background tasks). */
   focusDockTab?: (type: 'browser' | 'tasks') => void;
+  /** "Review with <model>" under the newest Codex turn that changed files; absent while a turn runs. */
+  review?: { model: string; run: () => void; busy: boolean } | undefined;
 }
 
 /** D-33 fallback: finished turns before the last N start collapsed. */
@@ -148,6 +151,7 @@ export function ChatTranscript({
   renderWidget,
   renderScmResult,
   focusDockTab,
+  review,
 }: ChatTranscriptProps) {
   const { chat, chatId, sessionId, stream, transcript, gates, dock } = { ...view, chatId: view.chat?.id };
   const workspaceId = chat?.workspaceId;
@@ -215,9 +219,17 @@ export function ChatTranscript({
       // Hover-only actions mount once the response is hovered or focused (a
       // long transcript would otherwise mount two mutations per message).
       if (!latest && !engaged) return <div className="h-control-sm" aria-hidden />;
-      return <MessageActions chatId={owner} turnId={message.metadata?.turnId} alwaysVisible={latest} />;
+      const reviewable = latest && review && message.metadata?.provider === 'codex' && turnChangedFiles(message.metadata?.toolCalls);
+      return (
+        <MessageActions
+          chatId={owner}
+          turnId={message.metadata?.turnId}
+          alwaysVisible={latest}
+          {...(reviewable ? { review } : {})}
+        />
+      );
     },
-    [chatId, latestAssistantId],
+    [chatId, latestAssistantId, review],
   );
 
   // Built from the individual (stable) callbacks, never from the `dock` /

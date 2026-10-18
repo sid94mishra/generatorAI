@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AgentMode } from '@generatorai/shared';
+import { pickReviewModel } from '@generatorai/client-core';
 import { useChat, useHarnessConfig, useUpdateChat } from '@/hooks/queries.js';
 import { useModels } from '@/hooks/harnessQueries.js';
 import { useChatSessionConnection } from '@/hooks/chatSessionQueries.js';
@@ -100,18 +101,32 @@ export function useChatWorkspace(chatId: string | undefined) {
   // E-4: a model is sent with its provider. Without it the server — rightly — never lets a model name alone move an
   // established conversation to another provider, so picking Sonnet in a Codex chat showed "Sonnet 5.5" while the
   // next turn kept running on Codex.
+  const modelPatch = useCallback(
+    (model: string) => {
+      const provider = catalogModels?.find((m) => m.id === model)?.provider;
+      const cfg = chat?.harnessConfig ?? {};
+      return {
+        model,
+        ...(provider
+          ? { harnessConfig: { ...cfg, harnessType: provider as NonNullable<typeof cfg.harnessType>, ...(cfg.model ? { model } : {}) } }
+          : {}),
+      };
+    },
+    [chat?.harnessConfig, catalogModels],
+  );
   const changeModel = useCallback((model: string) => {
     if (!chat) return;
     setSelectedModel(model);
-    const provider = catalogModels?.find((m) => m.id === model)?.provider;
-    const cfg = chat.harnessConfig ?? {};
-    updateChatMutation.mutate({
-      model,
-      ...(provider
-        ? { harnessConfig: { ...cfg, harnessType: provider as NonNullable<typeof cfg.harnessType>, ...(cfg.model ? { model } : {}) } }
-        : {}),
-    });
-  }, [chat, catalogModels, updateChatMutation]);
+    updateChatMutation.mutate(modelPatch(model));
+  }, [chat, modelPatch, updateChatMutation]);
+  /** The same move, awaited: a prompt sent right after must already run on the new provider. */
+  const switchModel = useCallback(async (model: string) => {
+    if (!chat) return;
+    setSelectedModel(model);
+    await updateChatMutation.mutateAsync(modelPatch(model));
+  }, [chat, modelPatch, updateChatMutation]);
+  // Evaluation: where "Review with Sonnet" sends a Codex turn's changes.
+  const reviewModel = useMemo(() => pickReviewModel(catalogModels), [catalogModels]);
 
   // Effort and tier persist into harnessConfig, merged with what is there.
   const changeReasoningEffort = useCallback((effort: string) => {
@@ -162,6 +177,8 @@ export function useChatWorkspace(chatId: string | undefined) {
     harnessProvider,
     effectiveModel,
     changeModel,
+    switchModel,
+    reviewModel,
     reasoningEffort,
     changeReasoningEffort,
     contextTier,

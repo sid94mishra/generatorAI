@@ -17,7 +17,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { awaitsUserDecision, type ScmResultBlock, type WidgetBlock } from '@generatorai/client-core';
-import { composerPromptPlaceholder, harnessProviderLabel, type ApprovalMode } from '@generatorai/shared/ui-contract';
+import { composerPromptPlaceholder, harnessProviderLabel, TRANSCRIPT_COPY, type ApprovalMode } from '@generatorai/shared/ui-contract';
 import { useMarkChatRead } from '@/hooks/chatListQueries.js';
 import {
   useChatPermissionRules,
@@ -195,6 +195,26 @@ export function ChatPage() {
       return { ...prev, [tabId]: s };
     });
   }, []);
+  // Evaluation: one click moves the chat to Claude and asks it to review what the last Codex turn changed.
+  const [reviewing, setReviewing] = useState(false);
+  const { switchModel, reviewModel } = workspace;
+  const runReview = useCallback(async () => {
+    if (!reviewModel) return;
+    setReviewing(true);
+    try {
+      await switchModel(reviewModel.id);
+      await sendPrompt({ prompt: TRANSCRIPT_COPY.reviewPrompt });
+    } finally {
+      setReviewing(false);
+    }
+  }, [reviewModel, switchModel, sendPrompt]);
+  const review = useMemo(
+    () =>
+      reviewModel && !isWorking
+        ? { model: reviewModel.name ?? reviewModel.id, run: () => void runReview(), busy: reviewing }
+        : undefined,
+    [reviewModel, isWorking, runReview, reviewing],
+  );
   const agentName = chat?.agentSnapshot?.driving?.name;
   const browserDock = useMemo<BrowserDockContextValue>(
     () => ({
@@ -507,6 +527,7 @@ export function ChatPage() {
                         renderWidget={renderTranscriptWidget}
                         renderScmResult={renderTranscriptScm}
                         focusDockTab={focusDockTab}
+                        review={review}
                       />
                     </>
                   }

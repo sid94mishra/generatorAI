@@ -127,6 +127,11 @@ export const COMPUTER_CONSENT_GATE_COPY = {
 
 /** Transcript chrome words (B-14…B-24). */
 export const TRANSCRIPT_COPY = {
+  /** Evaluation: one click asks Claude to review what a Codex turn changed. */
+  reviewWith: (model: string): string => `Review with ${model}`,
+  reviewTitle: 'Ask Claude to review the changes this turn made — it reads and reports, and edits nothing',
+  reviewPrompt:
+    'Review the changes the previous turn made (run git diff on the files it touched). Look for existing behaviour it removed or altered, callers it left broken, and missing or weakened tests. Do not edit any files: list the issues worth fixing, most important first, each with the file and line, and say plainly if you found none.',
   you: 'You',
   justNow: 'just now',
   thinking: 'Thinking…',

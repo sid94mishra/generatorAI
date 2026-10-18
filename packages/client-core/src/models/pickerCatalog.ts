@@ -207,6 +207,22 @@ export function readyCatalogModels(response: HarnessProvidersResponse): HarnessC
 }
 
 /**
+ * The model a second review runs on after a Codex turn changed code (evaluation: a Sonnet review caught Codex's
+ * regressions every time it was asked): the first ready Claude Sonnet, else any ready Claude model.
+ */
+export function pickReviewModel(models: readonly HarnessCatalogModel[] | undefined): HarnessCatalogModel | undefined {
+  const claude = (models ?? []).filter((m) => m.provider === 'claude-agent');
+  return claude.find((m) => /sonnet/i.test(m.id)) ?? claude[0];
+}
+
+/** A finished turn changed files: a recorded file operation, or a writing tool that completed. */
+export function turnChangedFiles(toolCalls: ReadonlyArray<{ tool: string; fileOp?: unknown; success?: boolean }> | undefined): boolean {
+  return (toolCalls ?? []).some(
+    (c) => !!c.fileOp || (c.success !== false && /^(apply_patch|edit|multiedit|write|notebookedit)$/i.test(c.tool)),
+  );
+}
+
+/**
  * A model by id (and provider, when two providers serve the same id). A reply records the concrete model it ran on
  * (`claude-opus-5-5`) while the catalog lists the alias (`opus`), so an id that matches no entry falls back to the
  * entry that resolves to it.
