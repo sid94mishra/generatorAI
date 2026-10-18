@@ -8,10 +8,15 @@
 // than the abrupt three-step fade that read as flicker. No element is
 // added, moved or re-rendered — colour only, so there is no layout shift and
 // the markdown tree is untouched. Off with reduced motion, where the API is
-// missing, and the moment the turn ends.
+// missing, and ~420 ms after the reveal ends.
+//
+// The ranges are rebuilt every frame AND right after each commit (`version`):
+// React rewriting a text node collapses every range inside it, so ranges built
+// only per frame were empty whenever the page painted between a commit and the
+// next frame — the fade then often did not show at all.
 // ────────────────────────────────────────────────────────────────
 
-import { useEffect, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { prefersReducedMotion } from '@/ui/lib/motion.js';
 
 const NAMES = ['gai-reveal-1', 'gai-reveal-2', 'gai-reveal-3', 'gai-reveal-4', 'gai-reveal-5', 'gai-reveal-6'] as const;
@@ -69,7 +74,7 @@ function rangesFor(root: Element, total: number, cuts: readonly number[]): Range
   return out;
 }
 
-export function useRevealFade(ref: RefObject<HTMLElement | null>, active: boolean): void {
+export function useRevealFade(ref: RefObject<HTMLElement | null>, active: boolean, version: unknown): void {
   // The last characters revealed still finish settling after the reveal ends.
   const [on, setOn] = useState(active);
   useEffect(() => {
@@ -80,6 +85,7 @@ export function useRevealFade(ref: RefObject<HTMLElement | null>, active: boolea
     const timer = setTimeout(() => setOn(false), AGES[AGES.length - 1]! + 40);
     return () => clearTimeout(timer);
   }, [active]);
+  const update = useRef<((now: number) => void) | null>(null);
   useEffect(() => {
     if (!on || !api()) return undefined;
     if (prefersReducedMotion()) return undefined;
@@ -87,7 +93,7 @@ export function useRevealFade(ref: RefObject<HTMLElement | null>, active: boolea
     const id = Symbol('reveal');
     const history: Array<{ len: number; t: number }> = [];
     let frame = 0;
-    const tick = (now: number) => {
+    const step = (now: number) => {
       const el = ref.current;
       if (el) {
         const len = el.textContent?.length ?? 0;
@@ -102,13 +108,22 @@ export function useRevealFade(ref: RefObject<HTMLElement | null>, active: boolea
         panels.set(id, rangesFor(el, len, cuts));
         publish();
       }
+    };
+    const tick = (now: number) => {
+      step(now);
       frame = requestAnimationFrame(tick);
     };
+    update.current = step;
     frame = requestAnimationFrame(tick);
     return () => {
+      update.current = null;
       cancelAnimationFrame(frame);
       panels.delete(id);
       publish();
     };
   }, [ref, on]);
+  // After React wrote new text (and collapsed the ranges in it), before the page paints.
+  useLayoutEffect(() => {
+    update.current?.(performance.now());
+  }, [version]);
 }

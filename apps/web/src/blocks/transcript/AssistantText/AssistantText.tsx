@@ -30,7 +30,7 @@ export const AssistantText = memo(function AssistantText({ text, streaming = fal
   // …and the newest words fade in (colour only, no layout shift).
   const ref = useRef<HTMLDivElement>(null);
   // Still on while the end of the reveal drains after the turn ends.
-  useRevealFade(ref, (streaming || paced.length < text.length) && ctx.pacing !== false);
+  useRevealFade(ref, (streaming || paced.length < text.length) && ctx.pacing !== false, shown);
   return (
     <div
       ref={ref}
