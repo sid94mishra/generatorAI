@@ -86,3 +86,14 @@ with RunAsNode / NODE_OPTIONS / --inspect fuses off and hands the vault key over
 `packaged-app-smoke` / `terminal-desktop-smoke` do. `build:server` stages Electron-ABI native modules into
 `apps/server/dist-bundle/node_modules`, so a sandbox started from that bundle needs `GENERATORAI_SANDBOX_BUNDLE` pointing
 at a bundle without them.
+
+**Streaming and plan-mode pass (2026-10-18, note for the mobile session).** Shared contract changes on the next merge,
+each rendered by web/desktop and not yet by mobile:
+- `ChatMessageMetadata.thinkingSegments` (`{ text, sequence? }[]`): each stretch of thinking with its turn ordinal.
+  `thinkingText` is still written (joined); a client that places blocks by `sequence` should place these too, or a
+  reopened turn shows "Thought" above steps that came before it (`chatMessageToBlocks` in client-core already does).
+- `PlanCardSummary.notes` (`PlanCardNote`: `revision`, `decision`, `text`, `sequence?`): the person's reply to a plan
+  revision. Web renders it as a user message with the label `PLAN_GATE_COPY.note[decision]` ("Changes requested" /
+  "Approved with notes"); mobile shows the text without the label. Live, `chat.plan.decided` carries `note`.
+- `SystemBlock.label` (client-core) carries that label on the live path.
+- Claude's empty `ExitPlanMode` calls no longer emit `harness.error` (a `harness.warning` after three in a row).
