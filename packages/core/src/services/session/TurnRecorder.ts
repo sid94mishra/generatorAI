@@ -43,6 +43,9 @@ export class TurnRecorder {
   turnId: string | undefined;
   agentMode: AgentMode | undefined;
   private thinking = '';
+  /** Each stretch of thinking, stamped with the ordinal it started at; `thinkingOpen` while one is still growing. */
+  private thinkingSegments: Array<{ text: string; sequence?: number }> = [];
+  private thinkingOpen = false;
   private calls: RecordedToolCall[] = [];
   private system: string[] = [];
   private segments: Array<{ content: string; sequence?: number }> = [];
@@ -62,6 +65,8 @@ export class TurnRecorder {
     this.turnId = turn.turnId;
     this.agentMode = turn.agentMode;
     this.thinking = '';
+    this.thinkingSegments = [];
+    this.thinkingOpen = false;
     this.calls = [];
     this.system = [];
     this.segments = [];
@@ -92,19 +97,40 @@ export class TurnRecorder {
     this.system.push(message);
   }
 
+  /** The stretch of thinking now growing; a new one (with its ordinal) after anything else the turn did. */
+  private openThinking(): { text: string; sequence?: number } {
+    if (!this.thinkingOpen || this.thinkingSegments.length === 0) {
+      const sequence = this.opts.takeSequence?.();
+      this.thinkingSegments.push({ text: '', ...(sequence === undefined ? {} : { sequence }) });
+      this.thinkingOpen = true;
+    }
+    return this.thinkingSegments[this.thinkingSegments.length - 1]!;
+  }
+
   observe(event: AgentEvent): void {
     const data = event.data as Record<string, unknown> | undefined;
+    if (event.kind === 'harness.token' || event.kind === 'harness.tool_start' || event.kind === 'harness.message_complete') {
+      this.thinkingOpen = false;
+    }
     switch (event.kind) {
       case 'harness.token':
         this.streamed += (data?.['text'] as string) ?? '';
         break;
-      case 'harness.reasoning_delta':
-        this.thinking += (data?.['text'] as string) ?? '';
+      case 'harness.reasoning_delta': {
+        const text = (data?.['text'] as string) ?? '';
+        this.thinking += text;
+        if (text) this.openThinking().text += text;
         break;
+      }
       case 'harness.reasoning_complete': {
         // Providers that emit only the finished block never send deltas.
         const full = (data?.['content'] as string) ?? '';
-        if (full.length > this.thinking.length) this.thinking = full;
+        if (!full) break;
+        const seg = this.openThinking();
+        if (full.length > seg.text.length) {
+          this.thinking = this.thinking.slice(0, this.thinking.length - seg.text.length) + full;
+          seg.text = full;
+        }
         break;
       }
       case 'harness.tool_start': {
@@ -236,6 +262,8 @@ export class TurnRecorder {
 
     const metadata: ChatMessageMetadata = {};
     if (this.thinking) metadata.thinkingText = this.thinking;
+    const thoughts = this.thinkingSegments.filter((t) => t.text.trim());
+    if (thoughts.some((t) => t.sequence !== undefined)) metadata.thinkingSegments = thoughts;
     if (this.calls.length > 0) metadata.toolCalls = this.calls;
     if (this.system.length > 0) metadata.systemMessages = this.system;
     // Only worth keeping when the turn said more than the line in `content`.

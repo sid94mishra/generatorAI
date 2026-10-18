@@ -28,6 +28,23 @@ describe('chatMessageToBlocks — a turn without ordinals', () => {
   });
 });
 
+describe('chatMessageToBlocks — thinking', () => {
+  it('replays each stretch of thinking where it happened, not above the whole turn', () => {
+    const blocks = chatMessageToBlocks(turn({
+      thinkingText: 'ab',
+      thinkingSegments: [{ text: 'a', sequence: 1 }, { text: 'b', sequence: 3 }],
+      textSegments: [{ content: 'Looking.', sequence: 0 }, { content: 'Issue opened: #13', sequence: 4 }],
+      toolCalls: [{ id: 't1', tool: 'create_issue', args: {}, status: 'complete', sequence: 2 }],
+    }));
+    expect(shape(blocks)).toEqual(['Looking.', 'thinking', 'create_issue', 'thinking', 'Issue opened: #13']);
+  });
+
+  it('a turn saved with one thinking blob shows it first', () => {
+    const blocks = chatMessageToBlocks(turn({ thinkingText: 'ab' }));
+    expect(shape(blocks)).toEqual(['thinking', 'Issue opened: #13']);
+  });
+});
+
 describe('chatMessageToBlocks — a revised plan', () => {
   it("replays the person's reply where they sent it and the card at its latest revision's place", () => {
     const blocks = chatMessageToBlocks(turn({

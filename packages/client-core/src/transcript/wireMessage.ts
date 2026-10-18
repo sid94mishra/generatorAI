@@ -38,6 +38,10 @@ export function transcriptMessageInput(message: { content: string; metadata?: un
   }
   const thinking = str(raw['thinkingText']);
   if (thinking) metadata.thinkingText = thinking;
+  const thoughts = records(raw['thinkingSegments'])
+    .map((seg) => ({ text: str(seg['text']) ?? '', sequence: num(seg['sequence']) }))
+    .filter((seg) => seg.text.trim());
+  if (thoughts.length) metadata.thinkingSegments = thoughts;
   metadata.textSegments = records(raw['textSegments']).map((seg) => ({
     content: str(seg['content']) ?? '', sequence: num(seg['sequence']),
   }));

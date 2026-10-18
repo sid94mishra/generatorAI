@@ -10,9 +10,10 @@
 // restoring the turn's true chronology.
 //
 // Sources, in render order (matches the old AssistantMessage):
-//  1. metadata.thinkingText   → one completed ThinkingBlock
-//  2. text segments, tool calls and plan/question cards, interleaved by the
-//     turn ordinal the server stamped on each (`sequence`)
+//  1. metadata.thinkingText   → one completed ThinkingBlock, for a turn saved
+//     without `thinkingSegments`
+//  2. thinking and text segments, tool calls and plan/question cards,
+//     interleaved by the turn ordinal the server stamped on each (`sequence`)
 //  3. message.content         → TextBlock, or interleaved text/tool_call
 //     blocks when the model embedded <tool_calls>/<function_calls> XML
 //     (parsed by the same utils/parseInlineToolCalls streamStore uses).
@@ -42,8 +43,9 @@ export function chatMessageToBlocks(message: TranscriptMessageInput): StreamBloc
 
   const metadata = message.metadata;
 
-  // 1. Persisted thinking — always complete in history.
-  if (metadata?.thinkingText) {
+  // 1. Persisted thinking — always complete in history. Placed by its ordinals when the turn kept them (below).
+  const thoughts = metadata?.thinkingSegments ?? [];
+  if (metadata?.thinkingText && thoughts.length === 0) {
     blocks.push({
       type: 'thinking',
       blockId: nextId++,
@@ -54,6 +56,13 @@ export function chatMessageToBlocks(message: TranscriptMessageInput): StreamBloc
 
   // 2. Everything the agent DID, in the order it happened.
   const ordered: OrderedBlock[] = [];
+
+  for (const thought of thoughts) {
+    ordered.push({
+      sequence: thought.sequence,
+      make: (blockId) => ({ type: 'thinking', blockId, text: thought.text, isComplete: true }),
+    });
+  }
 
   // Assistant narration between tool waves. Present only on turns that said
   // more than their closing paragraph.

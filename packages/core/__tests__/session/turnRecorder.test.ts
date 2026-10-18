@@ -28,6 +28,22 @@ describe('TurnRecorder', () => {
     });
   });
 
+  it('keeps each stretch of thinking at the ordinal it started, so history shows it after the steps before it', () => {
+    let n = 0;
+    const r = new TurnRecorder({ takeSequence: () => n++ });
+    r.begin();
+    r.observe(ev('harness.tool_start', { callId: 'c1', tool: 'bash', args: {} }));
+    r.observe(ev('harness.reasoning_delta', { text: 'The plan ' }));
+    r.observe(ev('harness.reasoning_delta', { text: 'needs a file.' }));
+    r.observe(ev('harness.tool_start', { callId: 'c2', tool: 'Write', args: {} }));
+    r.observe(ev('harness.reasoning_complete', { content: 'Now exit.' }));
+    r.observe(ev('harness.message_complete', { content: 'Plan ready' }));
+    const { metadata } = r.take()!;
+    expect(metadata.thinkingSegments).toEqual([{ text: 'The plan needs a file.', sequence: 1 }, { text: 'Now exit.', sequence: 3 }]);
+    expect(metadata.thinkingText).toBe('The plan needs a file.Now exit.');
+    expect(metadata.toolCalls!.map((c) => c.sequence)).toEqual([0, 2]);
+  });
+
   it('snapshot/restore round-trips a settled turn and marks it persisted', () => {
     const r = new TurnRecorder();
     r.begin();

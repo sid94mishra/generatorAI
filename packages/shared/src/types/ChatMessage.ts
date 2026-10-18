@@ -11,8 +11,10 @@ import type {
 import type { FileOpStat } from './AgentEvent.js';
 
 export interface ChatMessageMetadata {
-  /** Thinking/reasoning text from the harness */
+  /** Thinking/reasoning text from the harness (all of the turn's, joined) */
   thinkingText?: string;
+  /** Each stretch of thinking with the turn ordinal it started at, so history shows it where it happened. */
+  thinkingSegments?: Array<{ text: string; sequence?: number }>;
   /** Tool calls made during this response */
   toolCalls?: Array<{
     id: string;
