@@ -37,6 +37,8 @@ export interface RecordedTurn {
 export interface TurnRecorderOptions {
   /** The turn ordinal shared with the gate cards (tool calls and text segments). */
   takeSequence?: () => number | undefined;
+  /** The ordinal handed out next, without taking it: a gate card stamped since ends a stretch of thinking. */
+  peekSequence?: () => number | undefined;
 }
 
 export class TurnRecorder {
@@ -99,7 +101,11 @@ export class TurnRecorder {
 
   /** The stretch of thinking now growing; a new one (with its ordinal) after anything else the turn did. */
   private openThinking(): { text: string; sequence?: number } {
-    if (!this.thinkingOpen || this.thinkingSegments.length === 0) {
+    const last = this.thinkingSegments[this.thinkingSegments.length - 1];
+    // A question, plan or permission card stamped since takes an ordinal without an event here.
+    const next = this.opts.peekSequence?.();
+    const carded = last?.sequence !== undefined && next !== undefined && next > last.sequence + 1;
+    if (!this.thinkingOpen || !last || carded) {
       const sequence = this.opts.takeSequence?.();
       this.thinkingSegments.push({ text: '', ...(sequence === undefined ? {} : { sequence }) });
       this.thinkingOpen = true;

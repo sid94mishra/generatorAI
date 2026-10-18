@@ -2138,7 +2138,10 @@ export class ChatManagementService {
     if (prevUnsub) prevUnsub();
 
     // What this turn produced (P02 WP-2.9: one recorder for chats and stages).
-    const recorder = new TurnRecorder({ takeSequence: () => this.takeTurnSequence(session.conversationId!) });
+    const recorder = new TurnRecorder({
+      takeSequence: () => this.takeTurnSequence(session.conversationId!),
+      peekSequence: () => this.turns.peekSequence(session.conversationId!),
+    });
     recorder.begin({ turnId, agentMode });
     // G-02 — how the turn ended, for the chat list's Status column. The
     // first provider error of the turn; recorded once, by whichever route

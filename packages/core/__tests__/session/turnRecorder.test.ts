@@ -44,6 +44,20 @@ describe('TurnRecorder', () => {
     expect(metadata.toolCalls!.map((c) => c.sequence)).toEqual([0, 2]);
   });
 
+  it('ends a stretch of thinking at a card stamped since, so thinking after an answered question stays below it', () => {
+    let n = 0;
+    const r = new TurnRecorder({ takeSequence: () => n++, peekSequence: () => n });
+    r.begin();
+    r.observe(ev('harness.reasoning_delta', { text: 'Ask first.' }));
+    n++; // the question card's stamp
+    r.observe(ev('harness.reasoning_delta', { text: 'They chose strings.ts.' }));
+    r.observe(ev('harness.message_complete', { content: 'Done' }));
+    expect(r.take()!.metadata.thinkingSegments).toEqual([
+      { text: 'Ask first.', sequence: 0 },
+      { text: 'They chose strings.ts.', sequence: 2 },
+    ]);
+  });
+
   it('snapshot/restore round-trips a settled turn and marks it persisted', () => {
     const r = new TurnRecorder();
     r.begin();

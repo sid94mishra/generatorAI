@@ -55,6 +55,11 @@ export class TurnContextRegistry {
     ctx.nextSequence += 1;
     return seq;
   }
+
+  /** The ordinal the turn in flight hands out next, without taking it. */
+  peekSequence(conversationId: string): number | undefined {
+    return this.byConversation.get(conversationId)?.nextSequence;
+  }
 }
 
 /** Record where a plan/question card falls in the turn's ordered items. */
