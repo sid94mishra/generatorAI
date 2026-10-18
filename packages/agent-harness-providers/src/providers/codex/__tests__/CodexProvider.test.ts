@@ -716,9 +716,11 @@ describe('CodexProvider — integration parity with the other providers', () => 
     warn.push(...p.getConversationWarnings('wire'));
     const echoed = JSON.parse((await p.sendPromptAndWait('wire', 'ECHO_PARAMS')).content) as {
       thread: { config?: { mcp_servers?: Record<string, unknown>; projects?: unknown }; dynamicTools?: unknown[] };
-      turn: { effort?: string };
+      turn: { effort?: string; summary?: string };
       skillRoots: string[] | null;
     };
+    // Without a summary request Codex streams no reasoning at all.
+    expect(echoed.turn.summary).toBe('auto');
     expect(echoed.thread.config?.projects).toEqual({ [process.cwd()]: { trust_level: 'trusted' } });
     // A localhost test server needs a socket; the workspace sandbox denies them unless network access is on.
     expect((echoed.thread.config as Record<string, unknown> | undefined)?.['sandbox_workspace_write']).toEqual({ network_access: true });

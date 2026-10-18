@@ -1735,6 +1735,9 @@ export class CodexProvider implements IAgentHarness {
       // "This turn and subsequent turns" — re-sent each turn so a change made
       // between turns (or a resumed thread) always takes the chat's effort.
       ...(conv.params.reasoningEffort ? { effort: conv.params.reasoningEffort } : {}),
+      // Left unset, Codex streams no reasoning at all (verified against codex
+      // 0.162), so a Codex chat never showed what the model thought.
+      summary: 'auto',
       // RV-9 — a workflow stage's final prompt turn asks for its structured output.
       ...(options?.outputSchema ? { outputSchema: options.outputSchema } : {}),
     };
