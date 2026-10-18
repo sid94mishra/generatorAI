@@ -248,3 +248,6 @@ Owner: "test stream durability, orchestrator efficiency, chats, workflows, agent
   the status line, the breathing caret. The fade did not show in screenshots — traced to E-31.
 - E-32 seen by the owner after a launch with the network down (main.log: `ENOTFOUND raw.githubusercontent.com`).
 
+- **Fixed build (E-31, E-32):** the server was ready 2 s after the keychain was allowed ("Embedded server is ready",
+  healthy). A Sonnet stream showed the fade on screen — the newest words in a faint Running tint settling to ink over
+  the words before them. Reopening the finished chat ran no entrance, wave or shimmer animation and left no highlight.
