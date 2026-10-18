@@ -804,6 +804,13 @@ describe('CodexProvider — integration parity with the other providers', () => 
     expect(plain.thread.config?.['features']).toBeUndefined();
   }, 20_000);
 
+  it('offers the question tool outside plan mode only when someone can answer it', async () => {
+    const p = await started();
+    await p.createConversation({ ...CONV('asks'), onQuestionRequest: async () => ({ answers: {} }) } as unknown as CreateConversationParams);
+    const asks = JSON.parse((await p.sendPromptAndWait('asks', 'ECHO_PARAMS')).content) as { thread: { config?: Record<string, unknown> } };
+    expect(asks.thread.config).toMatchObject({ features: { default_mode_request_user_input: true } });
+  }, 20_000);
+
   it('re-asserts instructions, MCP servers and delegation policy when resuming a thread', async () => {
     const p = await started();
     await p.createConversation({

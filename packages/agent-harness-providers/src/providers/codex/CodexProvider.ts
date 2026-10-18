@@ -1333,10 +1333,15 @@ export class CodexProvider implements IAgentHarness {
     // through `spawn_background_agent`). Codex's equivalent is its multi-agent
     // feature; left on, an orchestrator handed work to Codex-internal
     // sub-agents that never appear as Background Tasks.
+    const features: Record<string, boolean> = {};
     const excluded = params.excludedBuiltinTools ?? [];
-    if (excluded.includes('Agent') || excluded.includes('Task')) {
-      config['features'] = { multi_agent: false };
-    }
+    if (excluded.includes('Agent') || excluded.includes('Task')) features['multi_agent'] = false;
+    // Codex offers `request_user_input` only in its plan collaboration mode, so
+    // a chat that asked it to stop and ask got a numbered list in prose instead
+    // of a question card. Where someone can answer, offer it in every turn, as
+    // Claude's AskUserQuestion is (verified against codex 0.162).
+    if (params.onQuestionRequest) features['default_mode_request_user_input'] = true;
+    if (Object.keys(features).length) config['features'] = features;
     return {
       ...this.buildInstructions(params, warnings),
       ...(Object.keys(config).length ? { config } : {}),
