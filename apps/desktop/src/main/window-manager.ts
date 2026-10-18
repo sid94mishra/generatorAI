@@ -310,9 +310,18 @@ export class WindowManager {
       if (!this.quitting) this.discardConfirmed = false;
       this.emitRendererReset();
     });
-    win.webContents.on('render-process-gone', () => {
+    win.webContents.on('render-process-gone', (_event, details) => {
+      log.error('App renderer gone', details);
       this.appPageLoaded = false;
       this.emitRendererReset();
+    });
+    // The page's own errors and stalls go to the app log: a blank or reset page someone reports later is otherwise
+    // unexplainable, because the renderer console dies with the window.
+    win.webContents.on('unresponsive', () => log.warn('App renderer unresponsive'));
+    win.webContents.on('responsive', () => log.info('App renderer responsive again'));
+    win.webContents.on('console-message', (event) => {
+      if (event.level !== 'error') return;
+      log.warn('App renderer error', { message: event.message.slice(0, 2000), source: `${event.sourceId}:${event.lineNumber}` });
     });
     // `did-navigate`, not `did-start-navigation`: only a committed top-level
     // document replaces the page. A navigation that never commits (an external
@@ -322,6 +331,7 @@ export class WindowManager {
     // A committed document is not the app page until it finishes loading, so
     // routes asked for meanwhile are held (G-08).
     win.webContents.on('did-navigate', () => {
+      log.info('App page loaded (a new document: launch, reload or backend switch)');
       this.appPageLoaded = false;
       this.emitRendererReset();
       this.emitNavHistory(win);
