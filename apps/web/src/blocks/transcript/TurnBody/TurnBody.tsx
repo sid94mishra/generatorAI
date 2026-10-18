@@ -14,7 +14,7 @@ import { countTimelineSteps, type StreamSegment, type TimelineStep, type UsageIn
 import { TRANSCRIPT_COPY } from '@generatorai/shared/ui-contract';
 import { cn } from '@/ui/lib/cn.js';
 import { Skeleton } from '@/ui/primitives/Skeleton/Skeleton.js';
-import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
+import { WorkingIndicator } from '@/ui/primitives/WorkingIndicator/WorkingIndicator.js';
 import { AssistantText } from '../AssistantText/AssistantText.js';
 import { InlineError } from '../InlineError/InlineError.js';
 import { PermissionCard } from '../gates/PermissionCard.js';
@@ -122,7 +122,8 @@ function TurnBodyImpl({
   if (list.length === 0 && !loading && !error && !usage && !active) return null;
 
   return (
-    <div className={cn('flex min-w-0 flex-col gap-2.5', className)}>
+    // `data-gai-live`: blocks that appear while the turn streams ease in (D-152).
+    <div className={cn('flex min-w-0 flex-col gap-2.5', className)} data-gai-live={active || undefined}>
       {list.map((seg, i) => {
         switch (seg.type) {
           case 'thinking':
@@ -203,10 +204,7 @@ function TurnBodyImpl({
       {/* While the answer itself is streaming its caret shows the activity; a spinner row under
           moving text only travelled down with every line (D-91). */}
       {active && !awaitingUser && (summary || !(streaming && lastAnswer === list.length - 1)) ? (
-        <div role="status" aria-label={TRANSCRIPT_COPY.generating} className="flex h-step items-center gap-2 pl-0.5">
-          <Spinner size={14} className="text-fg-3" />
-          {summary ? <span className="text-small text-fg-3">{TRANSCRIPT_COPY.workingSteps(stepCount)}</span> : null}
-        </div>
+        <WorkingIndicator aria-label={TRANSCRIPT_COPY.generating} label={TRANSCRIPT_COPY.workingSteps(summary ? stepCount : 0)} />
       ) : null}
 
       {error ? <InlineError message={error} /> : null}

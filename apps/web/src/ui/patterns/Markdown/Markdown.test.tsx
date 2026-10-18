@@ -19,7 +19,7 @@ vi.mock('../CodeBlock/CodeBlock.js', () => ({
 import { Markdown } from './Markdown.js';
 
 /** The caret: a host element's `::after` (D-91), or the bar element when nothing can host it. */
-const CARET = '[data-gai-caret], span[aria-hidden="true"].bg-fg';
+const CARET = '[data-gai-caret], span[aria-hidden="true"].caret-stream';
 
 describe('Markdown', () => {
   it('renders GFM prose with design-vocabulary elements', () => {

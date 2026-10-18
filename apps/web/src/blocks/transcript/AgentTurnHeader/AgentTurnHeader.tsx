@@ -5,13 +5,13 @@
 // A collapsed turn shows its one-line digest ("6 steps · +14 −6") instead of
 // its body; a finished turn shows its usage chip on hover.
 //
-// States: streaming (a spinner after the name) · complete · collapsed.
+// States: complete · collapsed. A live turn carries no spinner here: the transcript's
+// working cue and the step glyphs show the activity (D-152).
 // ────────────────────────────────────────────────────────────────
 
 import type { ReactNode } from 'react';
 import { cn } from '@/ui/lib/cn.js';
 import { Avatar } from '@/ui/primitives/Avatar/Avatar.js';
-import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
 import { Icon } from '@/ui/icons/Icon.js';
 import { formatTurnTime } from '../formatTime.js';
 import { ProviderLogo } from '@/ui/primitives/ProviderLogo/ProviderLogo.js';
@@ -29,7 +29,6 @@ export interface AgentTurnHeaderProps {
   avatar?: 'initials' | 'bot';
   /** The provider answered as itself (no named agent): its logo replaces the initials (D-132). */
   avatarProvider?: string | undefined;
-  streaming?: boolean;
   /** The turn is collapsed: show this digest line after the name. */
   digest?: string | undefined;
   /** Hover detail (the usage chip of a finished turn). */
@@ -47,7 +46,6 @@ export function AgentTurnHeader({
   timestamp,
   avatar = 'initials',
   avatarProvider,
-  streaming = false,
   digest,
   usage,
   trailing,
@@ -74,7 +72,6 @@ export function AgentTurnHeader({
           <span className="min-w-0 truncate">{model}</span>
         </span>
       ) : null}
-      {streaming ? <Spinner size={12} className="shrink-0 text-run" label="Responding" /> : null}
       {digest ? <span className="min-w-0 truncate text-small text-fg-3">· {digest}</span> : null}
       <span className="ml-auto flex shrink-0 items-center gap-2">
         {usage != null ? (

@@ -41,7 +41,6 @@ import { Workspace } from '@/ui/templates/Workspace/Workspace.js';
 import { Banner } from '@/ui/patterns/Banner/Banner.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Skeleton } from '@/ui/primitives/Skeleton/Skeleton.js';
-import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
 import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 import { Icon } from '@/ui/icons/Icon.js';
 import { ChatHeader } from './components/ChatHeader.js';
@@ -471,7 +470,8 @@ export function ChatPage() {
                           It eases in and out (D-109), so the transcript under it never jumps. */}
                       <Reveal open={isWorking} className="shrink-0">
                         <div role="status" className="flex items-center gap-2 border-b border-line-soft px-7 py-1.5 text-small font-medium text-run">
-                          {awaitingUserDecision ? <Icon concept="pause" size={14} /> : <Spinner size={14} />}
+                          {/* The header badge and the transcript's working cue already move; this line only says it. */}
+                          {awaitingUserDecision ? <Icon concept="pause" size={14} /> : null}
                           <span>
                             {awaitingUserDecision
                               ? 'Paused — waiting for your input'

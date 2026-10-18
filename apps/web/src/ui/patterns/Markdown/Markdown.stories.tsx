@@ -166,7 +166,7 @@ export const StreamingIncompleteFence: Story = {
   play: async ({ canvasElement }) => {
     await expect(canvasElement.textContent).not.toContain('```');
     await expect(canvasElement.querySelector('pre')?.textContent).toContain('return null;');
-    await expect(canvasElement.querySelector('span[aria-hidden="true"].bg-fg')).not.toBeNull();
+    await expect(canvasElement.querySelector('span[aria-hidden="true"].caret-stream')).not.toBeNull();
   },
 };
 
@@ -188,7 +188,7 @@ export const Streaming: Story = {
   render: () => <LiveStream />,
   play: async ({ canvasElement }) => {
     await waitFor(() => expect(canvasElement.textContent).toContain('second line'), { timeout: 30_000 });
-    await waitFor(() => expect(canvasElement.querySelector('span[aria-hidden="true"].bg-fg')).toBeNull());
+    await waitFor(() => expect(canvasElement.querySelector('span[aria-hidden="true"].caret-stream')).toBeNull());
   },
 };
 

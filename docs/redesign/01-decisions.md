@@ -1507,6 +1507,24 @@ non-Apple-issued signatures is not carried across builds the way a Developer ID 
 release signing (Developer ID + notarization), which stays on the backlog; until then each local rebuild needs one
 "Always Allow".
 
+### D-152 Streaming motion: one working cue, eased reveal, shimmer (owner, 2026-10-18) — Final
+Owner: a running chat showed a spinner in the header badge, the status line, the turn header, the tool step and the
+end of the stream, and streamed text appended too fast and flickered. Supersedes D-20's "no shimmer" and "spinners
+only" for the transcript's streaming cues; everything else in D-20 stands (CSS only, reduced motion honoured).
+- **Spinners:** only a running step's glyph spins. The chat header badge shows a still Running dot (`StatusBadge
+  still`), the status line under the header has no icon while working, the agent turn header has none.
+- **Working cue:** the end of a live turn shows `WorkingIndicator` — three Running-tone dots in a soft wave and a
+  label with a light sweep (`text-shimmer`: "Working", Summary "Working · N steps"); a placeholder turn and a live
+  "Thinking…" pill use the same sweep instead of a spinner.
+- **Reveal:** `advancePacer` takes `easeMs` — the rate is a velocity easing toward `minimum + backlog / drain`
+  (floor `backlog / 2·drain`), so bursts glide in and slow into their last words; the web reveals by character
+  (`wordSlack: 0`, 220 ms ease, 70 chars/s minimum; mobile keeps the D-91 defaults). The fade has six highlights over
+  ~420 ms from a faint Running tint to full ink, and lingers past the end of the reveal.
+- **Caret:** a rounded 2px Running-tone bar that breathes (opacity 1 ↔ 0.35, 1.1 s), never a hard blink.
+- **Entrance:** in a live turn (`data-gai-live` on TurnBody) each new block — step row, card, markdown block — eases in
+  (fade + 4px rise, 320 ms), table rows and list items fade (360 ms). Insertion only: settled and reopened turns do
+  not animate. All of it stops under reduced motion.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

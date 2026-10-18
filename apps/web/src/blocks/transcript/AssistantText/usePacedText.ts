@@ -8,6 +8,10 @@
 // scrolled away) and when `flushKey` changes (a view-mode switch); when the
 // turn ends the rest catches up within 250 ms rather than in one frame.
 // Reduced motion reveals whole bursts in steps.
+//
+// D-152: the reveal goes by character with an eased rate (`easeMs`), so a
+// burst glides in and slows into its last words instead of popping whole
+// words at a held speed; useRevealFade softens the leading edge.
 // ────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from 'react';
@@ -20,6 +24,9 @@ const MOUNT_REPLAY_LIMIT = 240;
 /** While text streams, a burst is shown within this; after the turn ends the rest catches up within END_DRAIN_MS. */
 const STREAM_DRAIN_MS = 900;
 const END_DRAIN_MS = 250;
+/** Time constant of the eased reveal rate, and the slowest rate (characters per second). */
+const EASE_MS = 220;
+const MIN_CHARS_PER_SECOND = 70;
 
 export function usePacedText(text: string, active: boolean, options: { paced?: boolean; flushKey?: unknown } = {}): string {
   const paced = options.paced !== false;
@@ -62,7 +69,13 @@ export function usePacedText(text: string, active: boolean, options: { paced?: b
       }
       const dt = last === null ? 1000 / 60 : now - last;
       last = now;
-      const next = advancePacer(stateRef.current, textRef.current, dt, { reducedMotion, drainMs });
+      const next = advancePacer(stateRef.current, textRef.current, dt, {
+        reducedMotion,
+        drainMs,
+        easeMs: EASE_MS,
+        wordSlack: 0,
+        minCharsPerSecond: MIN_CHARS_PER_SECOND,
+      });
       stateRef.current = next;
       setShown(next.shown);
       if (next.shown < textRef.current.length) frame = requestAnimationFrame(tick);

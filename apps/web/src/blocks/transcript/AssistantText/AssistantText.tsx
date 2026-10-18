@@ -29,7 +29,8 @@ export const AssistantText = memo(function AssistantText({ text, streaming = fal
   const shown = useMemo(() => jsonAnswerMarkdown(paced, streaming), [paced, streaming]);
   // …and the newest words fade in (colour only, no layout shift).
   const ref = useRef<HTMLDivElement>(null);
-  useRevealFade(ref, streaming && ctx.pacing !== false);
+  // Still on while the end of the reveal drains after the turn ends.
+  useRevealFade(ref, (streaming || paced.length < text.length) && ctx.pacing !== false);
   return (
     <div
       ref={ref}

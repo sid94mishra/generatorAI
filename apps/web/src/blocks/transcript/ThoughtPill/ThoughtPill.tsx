@@ -9,7 +9,8 @@
 
 import { TRANSCRIPT_COPY } from '@generatorai/shared/ui-contract';
 import { Collapsible } from '@/ui/primitives/Collapsible/Collapsible.js';
-import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
+import { cn } from '@/ui/lib/cn.js';
+import { WorkingIndicator } from '@/ui/primitives/WorkingIndicator/WorkingIndicator.js';
 
 export interface ThoughtPillProps {
   /** Reasoning text (plain; rendered pre-wrapped). */
@@ -31,10 +32,8 @@ export function ThoughtPill({ text, live = false, defaultOpen = false, duration 
         variant="disclosure"
         defaultOpen={defaultOpen}
         trigger={
-          <span className="inline-flex items-center gap-1.5 text-ui text-fg-2">
-            {label}
-            {live ? <Spinner size={12} className="text-fg-3" /> : null}
-          </span>
+          // While it streams the label shimmers (D-152) instead of carrying a spinner.
+          <span className={cn('inline-flex items-center gap-1.5 text-ui', live ? 'text-shimmer' : 'text-fg-2')}>{label}</span>
         }
       >
         <p className="max-h-65 overflow-auto border-l border-line pl-3 text-ui break-words whitespace-pre-wrap text-fg-2">
@@ -48,9 +47,6 @@ export function ThoughtPill({ text, live = false, defaultOpen = false, duration 
 /** The pending state of a turn that has produced nothing yet: "Claude is thinking". */
 export function ThinkingPlaceholder({ label }: { label: string }) {
   return (
-    <div className="flex h-step items-center gap-2 pl-0.5 text-ui text-fg-2" data-testid="thinking-placeholder" role="status">
-      <Spinner size={14} className="text-run" />
-      <span>{label}</span>
-    </div>
+    <WorkingIndicator label={label} data-testid="thinking-placeholder" />
   );
 }

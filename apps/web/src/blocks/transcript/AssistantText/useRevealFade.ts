@@ -1,20 +1,22 @@
 // ────────────────────────────────────────────────────────────────
-// useRevealFade — the newest streamed words fade in (D-91).
+// useRevealFade — the newest streamed characters fade in (D-91, D-152).
 //
-// Drawn with the CSS Custom Highlight API: three highlights (`gai-reveal-1…3`,
-// globals.css) colour the text revealed in the last ~60 / 120 / 180 ms at
-// 25 / 55 / 80 % of the ink, so a word settles in over ~180 ms. No element is
+// Drawn with the CSS Custom Highlight API: six highlights (`gai-reveal-1…6`,
+// globals.css) colour the text revealed in the last 70 / 140 / … / 420 ms from
+// a faint Running tint up to full ink, so each character settles in over
+// ~420 ms on an eased curve — a soft shimmer riding the leading edge rather
+// than the abrupt three-step fade that read as flicker. No element is
 // added, moved or re-rendered — colour only, so there is no layout shift and
 // the markdown tree is untouched. Off with reduced motion, where the API is
 // missing, and the moment the turn ends.
 // ────────────────────────────────────────────────────────────────
 
-import { useEffect, type RefObject } from 'react';
+import { useEffect, useState, type RefObject } from 'react';
 import { prefersReducedMotion } from '@/ui/lib/motion.js';
 
-const NAMES = ['gai-reveal-1', 'gai-reveal-2', 'gai-reveal-3'] as const;
+const NAMES = ['gai-reveal-1', 'gai-reveal-2', 'gai-reveal-3', 'gai-reveal-4', 'gai-reveal-5', 'gai-reveal-6'] as const;
 /** Upper age, in ms, of the text each highlight covers (newest first). */
-const AGES = [60, 120, 180] as const;
+const AGES = [70, 140, 210, 280, 350, 420] as const;
 
 type Highlights = { set(name: string, value: unknown): void; delete(name: string): void };
 type HighlightCtor = new (...ranges: Range[]) => unknown;
@@ -68,8 +70,18 @@ function rangesFor(root: Element, total: number, cuts: readonly number[]): Range
 }
 
 export function useRevealFade(ref: RefObject<HTMLElement | null>, active: boolean): void {
+  // The last characters revealed still finish settling after the reveal ends.
+  const [on, setOn] = useState(active);
   useEffect(() => {
-    if (!active || !api()) return undefined;
+    if (active) {
+      setOn(true);
+      return undefined;
+    }
+    const timer = setTimeout(() => setOn(false), AGES[AGES.length - 1]! + 40);
+    return () => clearTimeout(timer);
+  }, [active]);
+  useEffect(() => {
+    if (!on || !api()) return undefined;
     if (prefersReducedMotion()) return undefined;
     if (document.documentElement.dataset['motion'] === 'reduce') return undefined;
     const id = Symbol('reveal');
@@ -85,7 +97,7 @@ export function useRevealFade(ref: RefObject<HTMLElement | null>, active: boolea
           for (let i = history.length - 1; i >= 0; i -= 1) if (now - history[i]!.t >= age) return history[i]!.len;
           return history[0]!.len;
         };
-        // [len … lenAt(60)) newest, then [lenAt(60) … lenAt(120)), [lenAt(120) … lenAt(180)).
+        // [len … lenAt(70)) newest, then [lenAt(70) … lenAt(140)), … [lenAt(350) … lenAt(420)).
         const cuts = [len, ...AGES.map(lenAt)];
         panels.set(id, rangesFor(el, len, cuts));
         publish();
@@ -98,5 +110,5 @@ export function useRevealFade(ref: RefObject<HTMLElement | null>, active: boolea
       panels.delete(id);
       publish();
     };
-  }, [ref, active]);
+  }, [ref, on]);
 }

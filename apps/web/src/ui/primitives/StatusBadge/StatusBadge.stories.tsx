@@ -56,5 +56,13 @@ export const PhaseAndLabel: Story = {
   },
 };
 
+/** `still`: a dot instead of the spinning glyph, where the page already shows motion (the chat header). */
+export const Still: Story = {
+  args: { state: 'running', context: 'chat', still: true },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByText('Running')).toBeVisible();
+  },
+};
+
 /** Under "Reduce motion" the Running glyph stops. */
 export const ReducedMotion: Story = { globals: { reduceMotion: 'on' } };

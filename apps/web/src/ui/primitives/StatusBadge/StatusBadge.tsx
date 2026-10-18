@@ -14,6 +14,7 @@ import type { StatusBadgeProps as StatusBadgeContract } from '@generatorai/share
 import type { IconConcept } from '@generatorai/design-tokens';
 import { cn } from '../../lib/cn.js';
 import { Icon } from '../../icons/Icon.js';
+import { StatusDot } from '../StatusDot/StatusDot.js';
 import { Badge, type BadgeTone } from '../Badge/Badge.js';
 
 /** Glyph colour per shared tone (02 §7.1 "Colour tokens"). */
@@ -40,18 +41,25 @@ export function statusWord({ state, context = 'run', label, phase }: StatusBadge
   return phase ? `${base} · ${phase}` : base;
 }
 
-export interface StatusBadgeProps extends StatusBadgeContract, Omit<ComponentProps<'span'>, 'children'> {}
+export interface StatusBadgeProps extends StatusBadgeContract, Omit<ComponentProps<'span'>, 'children'> {
+  /** A still dot in place of the spinning glyph, where something nearby already shows the motion (D-152). */
+  still?: boolean;
+}
 
-/** Glyph + word for one of the 8 visual states. Running spins (static under reduced motion). */
-export function StatusBadge({ state, context, label, phase, className, ...rest }: StatusBadgeProps) {
+/** Glyph + word for one of the 8 visual states. Running spins (static under reduced motion) unless `still`. */
+export function StatusBadge({ state, context, label, phase, still = false, className, ...rest }: StatusBadgeProps) {
   const def = STATUS_STATE_DEFS[state];
   return (
     <Badge tone={BADGE_TONE[def.badge]} className={className} data-status={state} {...rest}>
-      <Icon
-        concept={def.glyph as IconConcept}
-        size={12}
-        className={cn(STATUS_TONE_TEXT[def.tone], def.spin && 'animate-spin reduced:animate-none')}
-      />
+      {still && def.spin ? (
+        <StatusDot state={state} size="sm" />
+      ) : (
+        <Icon
+          concept={def.glyph as IconConcept}
+          size={12}
+          className={cn(STATUS_TONE_TEXT[def.tone], def.spin && 'animate-spin reduced:animate-none')}
+        />
+      )}
       {statusWord({ state, context, label, phase })}
     </Badge>
   );

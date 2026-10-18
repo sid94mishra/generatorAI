@@ -210,7 +210,7 @@ export function ChatHeader({ chat, streamStatus, awaitingUser, dockOpen, onToggl
           archived ? (
             <Badge tone="neutral">Archived</Badge>
           ) : status ? (
-            <StatusBadge state={status.state} label={status.label} context="chat" data-testid="chat-status-badge" />
+            <StatusBadge state={status.state} label={status.label} context="chat" still data-testid="chat-status-badge" />
           ) : null
         }
         meta={

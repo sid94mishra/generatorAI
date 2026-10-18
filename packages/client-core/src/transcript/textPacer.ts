@@ -14,6 +14,12 @@
 // not watching (scrolled away, switched view mode). With reduced motion it
 // reveals whole bursts in steps (`reducedStepMs`) instead of animating.
 //
+// With `easeMs` (D-152) the rate is a velocity that eases toward
+// `backlog / drain` instead of jumping to it and holding: a burst speeds the
+// reveal up gradually and the end of a burst slows it down gradually, so text
+// glides rather than lurching. The lag stays bounded: the rate never falls
+// below `backlog / (2 × drainMs)`.
+//
 // Pure and React-free: web (`usePacedText`) and mobile drive it from their
 // own frame loops.
 // ────────────────────────────────────────────────────────────────
@@ -27,8 +33,10 @@ export interface TextPacerOptions {
   reducedMotion?: boolean;
   /** Step for reduced motion. Default 250 ms. */
   reducedStepMs?: number;
-  /** How far past the target the reveal may run to finish a word. Default 24 characters. */
+  /** How far past the target the reveal may run to finish a word. Default 24 characters; 0 reveals by character. */
   wordSlack?: number;
+  /** Time constant, in ms, of the eased rate; omitted = the rate jumps to the backlog and holds per burst. */
+  easeMs?: number;
 }
 
 export interface TextPacerState {
@@ -67,8 +75,10 @@ export function snapToWordEnd(text: string, index: number, slack = 24): number {
  */
 export function advancePacer(state: TextPacerState, text: string, dtMs: number, options: TextPacerOptions = {}): TextPacerState {
   const total = text.length;
-  if (state.shown >= total) return { shown: total, carry: 0, sinceStep: 0, rate: 0 };
   const dt = Math.max(0, Math.min(dtMs, 100));
+  const ease = options.easeMs;
+  // Caught up: an eased rate coasts down, so the next burst starts from where this one left off.
+  if (state.shown >= total) return { shown: total, carry: 0, sinceStep: 0, rate: ease ? state.rate * Math.exp(-dt / ease) : 0 };
   if (options.reducedMotion) {
     const sinceStep = state.sinceStep + dt;
     if (sinceStep < (options.reducedStepMs ?? 250)) return { ...state, sinceStep };
@@ -77,13 +87,17 @@ export function advancePacer(state: TextPacerState, text: string, dtMs: number, 
   const backlog = total - state.shown;
   const drainMs = options.drainMs ?? 1200;
   const minRate = (options.minCharsPerSecond ?? 90) / 1000;
-  const rate = Math.max(minRate, state.rate, backlog / drainMs);
+  // Eased: the velocity glides toward `minimum + backlog / drain` (it never stalls on a small backlog), and is
+  // never below `backlog / (2 × drain)`, so a big burst is not left far behind.
+  const rate = ease
+    ? Math.max(backlog / (2 * drainMs), state.rate + (minRate + backlog / drainMs - state.rate) * (1 - Math.exp(-dt / ease)))
+    : Math.max(minRate, state.rate, backlog / drainMs);
   const exact = rate * dt + state.carry;
   const step = Math.floor(exact);
   if (step <= 0) return { shown: state.shown, carry: exact, sinceStep: 0, rate };
   const target = Math.min(total, state.shown + step);
   const shown = snapToWordEnd(text, target, options.wordSlack ?? 24);
-  return { shown, carry: shown > target ? 0 : exact - step, sinceStep: 0, rate: shown >= total ? 0 : rate };
+  return { shown, carry: shown > target ? 0 : exact - step, sinceStep: 0, rate: shown >= total && !ease ? 0 : rate };
 }
 
 /** Everything that has arrived, at once (turn ended, page hidden, the reader looked away). */

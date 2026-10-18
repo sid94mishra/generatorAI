@@ -56,7 +56,7 @@ test.describe('Live streaming turn', () => {
         .evaluate(() => {
           const transcript = document.querySelector('[data-testid="transcript-scroll"]') as HTMLElement | null;
           const busy = !!document.querySelector(
-            '[data-testid="thinking-placeholder"], [role="status"][aria-label="Generating"], [data-testid="agent-turn-header"] [aria-label="Responding"]',
+            '[data-testid="thinking-placeholder"], [role="status"][aria-label="Generating"], [data-gai-live]',
           );
           return { length: ((transcript ?? document.body).innerText || '').length, busy };
         })

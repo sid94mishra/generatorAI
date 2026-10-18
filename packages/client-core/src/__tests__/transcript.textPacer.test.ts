@@ -53,4 +53,28 @@ describe('text pacer (D-91)', () => {
     const later = run(text, 300, INITIAL_PACER_STATE, reduced);
     expect(later.shown).toBe(text.length);
   });
+
+  it('eased (D-152): speeds up and slows down gradually, by character, and still finishes within twice the drain', () => {
+    const burst = 'word '.repeat(120);
+    const eased = { easeMs: 220, wordSlack: 0, drainMs: 900 };
+    // Per-frame steps across the burst: they rise, then fall — never one jump to the top speed.
+    const steps: number[] = [];
+    let s = INITIAL_PACER_STATE;
+    for (let t = 0; t < 2400 && s.shown < burst.length; t += FRAME) {
+      const next = advancePacer(s, burst, FRAME, eased);
+      steps.push(next.shown - s.shown);
+      s = next;
+    }
+    expect(s.shown).toBe(burst.length);
+    expect(steps.length * FRAME).toBeLessThanOrEqual(1800 + FRAME);
+    const peak = Math.max(...steps);
+    expect(steps[0]!).toBeLessThanOrEqual(peak / 2);
+    expect(steps[steps.length - 1]!).toBeLessThan(peak / 2);
+    // By character: a frame can stop inside a word.
+    expect(steps.some((n, i) => i < steps.length - 1 && n % 5 !== 0)).toBe(true);
+    // Caught up, the rate coasts down rather than dropping to zero.
+    const after = advancePacer(s, burst, FRAME, eased);
+    expect(after.rate).toBeGreaterThan(0);
+    expect(after.rate).toBeLessThan(s.rate);
+  });
 });

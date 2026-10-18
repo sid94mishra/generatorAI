@@ -118,7 +118,6 @@ const LiveTurn = memo(function LiveTurn({ sessionId, agentName, harnessProvider,
         avatarProvider={harnessProvider ? (usage?.provider ?? harnessProvider) : undefined}
         model={usage?.model ? (modelName ?? usage.model) : undefined}
         provider={usage?.provider}
-        streaming={active}
         usage={usage ? <UsageChip usage={usage} prevUsage={prevUsage} prevCompletedAt={prevCompletedAt} scopeId={sessionId} /> : undefined}
       />
       {hasContent ? (

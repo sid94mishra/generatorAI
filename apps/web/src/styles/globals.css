@@ -5136,21 +5136,37 @@ label:has(> input[type="radio"]) {
   transition-duration: 0.01ms !important;
 }
 
-/* Streaming reveal (D-91): the newest words settle in over ~180 ms through
-   three Custom Highlights set by blocks/transcript useRevealFade — colour
-   only, no element and no layout change. Not drawn under reduced motion. */
+/* Streaming reveal (D-91, D-152): the newest characters settle in over ~420 ms
+   through six Custom Highlights set by blocks/transcript useRevealFade — a soft
+   Running-tinted leading edge that cools to ink. Colour only: no element and no
+   layout change. Not drawn under reduced motion. */
 ::highlight(gai-reveal-1) {
-  color: color-mix(in oklab, var(--gai-fg) 25%, transparent);
+  color: color-mix(in oklab, var(--gai-run) 30%, transparent);
 }
 ::highlight(gai-reveal-2) {
-  color: color-mix(in oklab, var(--gai-fg) 55%, transparent);
+  color: color-mix(in oklab, color-mix(in oklab, var(--gai-run) 60%, var(--gai-fg)) 50%, transparent);
 }
 ::highlight(gai-reveal-3) {
-  color: color-mix(in oklab, var(--gai-fg) 80%, transparent);
+  color: color-mix(in oklab, color-mix(in oklab, var(--gai-run) 35%, var(--gai-fg)) 68%, transparent);
+}
+::highlight(gai-reveal-4) {
+  color: color-mix(in oklab, color-mix(in oklab, var(--gai-run) 15%, var(--gai-fg)) 82%, transparent);
+}
+::highlight(gai-reveal-5) {
+  color: color-mix(in oklab, var(--gai-fg) 92%, transparent);
+}
+::highlight(gai-reveal-6) {
+  color: color-mix(in oklab, var(--gai-fg) 97%, transparent);
 }
 
-/* Streaming caret (D-91): the 2px bar after the last word, drawn on the host
-   element Markdown marks — a pseudo-element, so its travel is not a layout shift. */
+/* Streaming caret (D-91, D-152): a rounded 2px bar after the last character that
+   breathes (no hard blink), drawn on the host element Markdown marks — a
+   pseudo-element, so its travel is not a layout shift. `caret-stream` is the
+   same bar as an element (an empty answer, an open code fence). */
+@keyframes gai-caret-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
 [data-gai-caret]::after {
   content: '';
   display: inline-block;
@@ -5158,7 +5174,76 @@ label:has(> input[type="radio"]) {
   height: 1lh;
   margin-left: 2px;
   vertical-align: top;
-  background-color: var(--gai-fg);
+  border-radius: 1px;
+  background-color: var(--gai-run);
+  animation: gai-caret-breathe 1.1s var(--gai-ease-in-out) infinite;
+}
+@utility caret-stream {
+  display: inline-block;
+  width: 2px;
+  height: 1lh;
+  margin-left: 2px;
+  vertical-align: top;
+  border-radius: 1px;
+  background-color: var(--gai-run);
+  animation: gai-caret-breathe 1.1s var(--gai-ease-in-out) infinite;
+}
+
+/* Live turn entrance (D-152): while a turn streams ([data-gai-live] on its
+   body), each block that appears — a step, a card, a paragraph, a table, its
+   rows, a list item — eases in (fade + 4px rise). Insertion only: a settled
+   or reopened turn never animates. */
+@keyframes gai-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes gai-enter-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+[data-gai-live] > *,
+[data-gai-live] [data-gai-block="steps"] > *,
+[data-gai-live] [data-gai-md] > * > * {
+  animation: gai-enter 320ms var(--gai-ease-standard) both;
+}
+[data-gai-live] [data-gai-md] :is(tr, li) {
+  animation: gai-enter-fade 360ms var(--gai-ease-standard) both;
+}
+
+/* Working indicator (D-152): three dots in a soft wave, and a label with a
+   light sweep. Both stop under reduced motion (the global rule). */
+@keyframes gai-wave {
+  0%, 60%, 100% { opacity: 0.35; transform: translateY(0) scale(0.85); }
+  30% { opacity: 1; transform: translateY(-2px) scale(1); }
+}
+@utility wave-dot {
+  animation: gai-wave 1.2s var(--gai-ease-in-out) infinite;
+}
+@utility wave-delay-1 {
+  animation-delay: 150ms;
+}
+@utility wave-delay-2 {
+  animation-delay: 300ms;
+}
+@keyframes gai-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+@utility text-shimmer {
+  color: transparent;
+  background-image: linear-gradient(90deg, var(--gai-fg-3) 0%, var(--gai-fg-3) 35%, var(--gai-fg) 50%, var(--gai-fg-3) 65%, var(--gai-fg-3) 100%);
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  animation: gai-shimmer 2.2s linear infinite;
+  &:where([data-motion="reduce"] *) {
+    color: var(--gai-fg-3);
+    background-image: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    color: var(--gai-fg-3);
+    background-image: none;
+  }
 }
 
 /* Prose for the transcript and Streamdown output (02 §5.3). */

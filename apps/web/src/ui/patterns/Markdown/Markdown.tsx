@@ -22,7 +22,7 @@
 // at all while a fence is still streaming (plain text until it closes). No
 // mermaid / math plugins.
 //
-// The streaming caret is a 2px `bg-fg` bar appended, by a rehype pass that
+// The streaming caret is a breathing 2px Running-tone bar (D-152) appended, by a rehype pass that
 // runs only on the tail block, to the deepest last element of the document —
 // so it sits right after the last word, inside the paragraph / list item /
 // table cell / bold run being typed (after the block for a code fence).
@@ -83,7 +83,8 @@ export function Markdown({ children, streaming = false, size = 'prose', classNam
   const tail = useMemo<TailState>(() => ({ streaming, blockCount }), [streaming]);
 
   return (
-    <div className={cn('min-w-0 break-words text-fg', size === 'prose' ? 'text-body' : 'text-small', className)}>
+    // `data-gai-md`: inside a live turn its blocks, table rows and list items ease in (D-152).
+    <div className={cn('min-w-0 break-words text-fg', size === 'prose' ? 'text-body' : 'text-small', className)} data-gai-md="">
       <TailContext.Provider value={tail}>
         <Streamdown
           mode={streaming || !needsWholeDocument(source) ? 'streaming' : 'static'}
@@ -122,7 +123,7 @@ const TailContext = createContext<TailState>({ streaming: false, blockCount: { c
 const CARET_TAG = 'gai-caret';
 
 function StreamingCaret() {
-  return <span aria-hidden="true" className="ml-0.5 inline-block h-lh w-0.5 align-top bg-fg" />;
+  return <span aria-hidden="true" className="caret-stream" />;
 }
 
 /**
