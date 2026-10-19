@@ -230,6 +230,16 @@ describe('CodexProvider — provider notices', () => {
   }, 20_000);
 });
 
+// ── A systemError announced before the error that explains it ──
+
+describe('CodexProvider — the reason for a systemError reaches the caller', () => {
+  it('fails the turn with Codex\'s own message, not the generic system-error line', async () => {
+    const p = await started({ rpcTimeoutMs: 30_000 });
+    await p.createConversation(CONV('why'));
+    await expect(p.sendPromptAndWait('why', 'SYSTEM_ERROR_THEN_REASON')).rejects.toThrow('Invalid schema for response_format');
+  }, 20_000);
+});
+
 // ── Gap: a thread that died mid-turn hung until the RPC deadline ──
 
 describe('CodexProvider — thread lifecycle settles an in-flight turn', () => {

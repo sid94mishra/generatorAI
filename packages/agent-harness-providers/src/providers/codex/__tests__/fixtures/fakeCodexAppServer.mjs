@@ -369,6 +369,17 @@ async function runTurn(threadId, turnId, prompt, turnStartParams) {
     return;
   }
 
+  if (prompt.includes('SYSTEM_ERROR_THEN_REASON')) {
+    // What codex 0.162 does on a refused request: the status flips to systemError first, the error that says why
+    // arrives right after, then the failed turn.
+    notify('thread/status/changed', { threadId, status: { type: 'systemError' } });
+    setTimeout(() => {
+      notify('error', { threadId, turnId, willRetry: false, error: { message: 'Invalid schema for response_format', codexErrorInfo: 'other', additionalDetails: null, misalignment: null } });
+      running.delete(threadId);
+    }, 50);
+    return;
+  }
+
   if (prompt.includes('CLOSE_DEMO') || prompt.includes('THREAD_CLOSED_DEMO')) {
     const msg = nextItemId();
     notify('item/agentMessage/delta', { threadId, turnId, itemId: msg, delta: 'starting ' });

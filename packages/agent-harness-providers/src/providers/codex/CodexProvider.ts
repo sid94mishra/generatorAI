@@ -316,6 +316,9 @@ async function sleep(ms: number): Promise<void> {
  * message: its JSON is the turn's structured output. Text that does not
  * parse leaves the output unset (the engine's extractor then repairs).
  */
+/** How long a `systemError` waits for the error that explains it before failing the turn generically. */
+const SYSTEM_ERROR_GRACE_MS = 1_500;
+
 function withStructuredOutput(content: string, options: SendPromptOptions | undefined): ConversationResponse {
   if (!options?.outputSchema) return { content };
   try {
@@ -2663,7 +2666,11 @@ export class CodexProvider implements IAgentHarness {
           );
           return;
         }
-        conv.failTurn?.('The Codex thread entered a system error state.');
+        // Codex announces `systemError` BEFORE the `error` that says why ("Invalid schema for response_format …",
+        // "Selected model is at capacity"): failing the turn here showed only this generic line, and a retryable
+        // capacity error was treated as fatal. The error (or `turn/completed`) settles the turn first when it
+        // comes; this line is the fallback for a thread that dies without one.
+        setTimeout(() => conv.failTurn?.('The Codex thread entered a system error state.'), SYSTEM_ERROR_GRACE_MS);
         return;
       }
 
