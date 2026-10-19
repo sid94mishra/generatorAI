@@ -269,3 +269,11 @@ Owner: "test stream durability, orchestrator efficiency, chats, workflows, agent
 
 - **Fix build:** with the downloaded CLI moved aside, Copilot read Installed No · Client running No · Download offered;
   moved back and restarted, the app picked the CLI up at boot (installed, waiting for sign-in).
+
+### 2026-10-19 — workflow evaluation (installed builds, Pulse, publishing removed)
+- **W1 Feature Pipeline copy** (Opus spec/review, Codex Terra backend ∥ Sonnet frontend, Codex Luna QA loop, checks, approval): monitor tags end to end; 467 tests, lint, build re-run by hand; QA green on round 1; reviewer fixed a paste bug; ≈26 min active, $2.72 + Codex. Parallel stages share one worktree (frontend read the backend's in-progress types).
+- **W2 fix-review loop, Codex only**: every Codex JSON stage failed (OpenAI strict schema) → fixed (5c8cc875). Checker bug fixed correctly (endless body: 56 ms, +11 MB). Login race: stock prompts produced a test that passes on the buggy code and Codex review approved it; improved prompts produced a test that fails on it (7 vs 5) with reviewer revert-proof.
+- **W2 v3 (Sonnet fixer, Codex reviewer, forced round 2)**: round-2 commands were all refused "stage was stopped" (continued session bound to round 1's attempt) → fixed (4b1cba4e, testkit T9); re-run on the fixed build asked and ran; round 1 review found a real edge-trim defect. Codex "model at capacity" showed only "system error state" → fixed (8bd56863).
+- **W3 plan-then-execute (Opus → Sonnet)**: precise plan, 264 tests, but no formula-injection handling; improved template (W3b) added a review step and the protection, 270 tests, 5.5 min.
+- Shipped (d0feee00): fix-review and plan-then-execute prompts, the edit-tool workspace rule, the `budget-turns-units` validator warning (shown in the editor for the pipeline's 1500/120/250).
+- Write-up: https://claude.ai/artifact/9do1PhvzsEbiuP4tK9WpAU
