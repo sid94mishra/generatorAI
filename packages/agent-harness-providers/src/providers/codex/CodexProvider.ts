@@ -69,6 +69,7 @@ import type {
 import type { AgentEvent, AgentQuestion } from '@generatorai/shared';
 import { HarnessSessionError } from '@generatorai/shared';
 import { buildHarnessEnv } from '../../childEnv.js';
+import { dropOptionalNulls, toStrictSchema } from './strictSchema.js';
 import type { CodexProviderOptions } from '../../types.js';
 import type {
   JSONRPCErrorError,
@@ -318,7 +319,9 @@ async function sleep(ms: number): Promise<void> {
 function withStructuredOutput(content: string, options: SendPromptOptions | undefined): ConversationResponse {
   if (!options?.outputSchema) return { content };
   try {
-    return { content, structuredOutput: JSON.parse(content.trim()) as unknown };
+    // Strict mode answered null for the properties the stage left optional (see strictSchema.ts).
+    const structuredOutput = dropOptionalNulls(JSON.parse(content.trim()) as unknown, options.outputSchema);
+    return { content: JSON.stringify(structuredOutput), structuredOutput };
   } catch {
     return { content };
   }
@@ -1739,7 +1742,8 @@ export class CodexProvider implements IAgentHarness {
       // 0.162), so a Codex chat never showed what the model thought.
       summary: 'auto',
       // RV-9 — a workflow stage's final prompt turn asks for its structured output.
-      ...(options?.outputSchema ? { outputSchema: options.outputSchema } : {}),
+      // Codex runs it in OpenAI's strict mode, which refuses open objects and optional properties.
+      ...(options?.outputSchema ? { outputSchema: toStrictSchema(options.outputSchema) as V2TurnStartParams['outputSchema'] } : {}),
     };
 
     let assistantText = '';
