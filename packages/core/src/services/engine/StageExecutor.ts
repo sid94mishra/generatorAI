@@ -352,6 +352,12 @@ export function reviewOutputOf(outputText: string, data: unknown): string {
 
 export class StageExecutor {
   private readonly frames = new Map<string, Frame>();
+  /**
+   * The live attempt of each stage run. A loop body that continues its session (`sessionReuse: continue`) keeps the
+   * conversation, and with it the gate port composed for the FIRST iteration: a gate raised in a later iteration
+   * must park on that iteration's attempt, not the finished one (which refused every tool as "stage was stopped").
+   */
+  private readonly contexts = new Map<string, AttemptContext>();
   private readonly timing: ExecutorTiming;
   private readonly now: () => number;
 
@@ -497,7 +503,10 @@ export class StageExecutor {
       for (const t of frame.timers) clearInterval(t);
       frame.timers.length = 0;
       frame.unsubscribe?.();
-      if (this.frames.get(stageRunId) === frame) this.frames.delete(stageRunId);
+      if (this.frames.get(stageRunId) === frame) {
+        this.frames.delete(stageRunId);
+        this.contexts.delete(stageRunId);
+      }
     };
     let ctx: AttemptContext;
     try {
@@ -654,7 +663,10 @@ export class StageExecutor {
       } catch {
         /* best effort */
       }
-      if (this.frames.get(req.stageRunId) === frame) this.frames.delete(req.stageRunId);
+      if (this.frames.get(req.stageRunId) === frame) {
+        this.frames.delete(req.stageRunId);
+        this.contexts.delete(req.stageRunId);
+      }
     }
     if (this.dead) return;
     // A stop wins over whatever the body concluded after it (an aborted turn that resolved).
@@ -886,6 +898,8 @@ export class StageExecutor {
       opSeq: 1 + Math.max(-1, ...journal.filter((j) => j.opId.startsWith(`a${epoch}/operator/`)).map((j) => Number(j.opId.slice(`a${epoch}/operator/`.length)) || 0)),
       lastStopped: false,
     };
+    this.contexts.set(stageRunId, ctx);
+
     return ctx;
   }
 
@@ -958,7 +972,9 @@ export class StageExecutor {
       ...(session?.providerSessionId ? { resumeProviderSessionId: session.providerSessionId } : {}),
       attended: true,
       gates: new StageGatePort({
-        park: (turn, data, prompt) => this.park(ctx, turn, data, prompt),
+        // The turn's own stage run (see `contexts`), falling back to the attempt that composed the session.
+        park: (turn, data, prompt) =>
+          this.park((turn.owner.kind === 'stage' && this.contexts.get(turn.owner.stageRunId)) || ctx, turn, data, prompt),
         eventBus: this.deps.eventBus,
         planService: this.deps.planService,
         workspaceRoot: ctx.workspace.rootPath,
