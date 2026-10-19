@@ -295,6 +295,9 @@ export function buildWorkspaceHint(input: WorkspaceHintInput): string {
       'restore, clean) in a mount; the user controls branches and the Changes tab handles undo.',
   );
   lines.push(`- Do not create files in ${input.rootPath} outside scratch/ and plans/.`);
+  // Evaluation: agents edited files through `python3 - <<EOF` and `sed -i` scripts, which every approval policy treats
+  // as an arbitrary shell command (a card each time even in Accept edits), where the edit tool is allowed outright.
+  lines.push('- Edit files with your file-edit tools, not with shell scripts, heredocs or sed; keep the shell for running commands.');
   // Asked for an exact response shape, an agent deleted an endpoint's existing latency fields to fit it and never
   // said so; told to say so, the next one did — and still left the web client unwrapping the envelope it removed.
   // Disclosure alone is not enough: the callers have to be looked up.

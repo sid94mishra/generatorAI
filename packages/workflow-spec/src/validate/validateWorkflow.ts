@@ -47,6 +47,9 @@ import { pointerToken, toPointer, type ValidationIssue } from './issues.js';
 import { GraphTypes, isContainerKind, preprocessingVariableNames, type ExprPlace } from './scope.js';
 import { securityIssues } from './security.js';
 
+/** Above this, a `budget.maxTurns` was almost certainly written as tool calls (they count agent turns). */
+const TURN_BUDGET_UNITS_HINT = 100;
+
 export interface ValidateOptions {
   /**
    * Commands a `check` stage may run (default: DEFAULT_COMMAND_ALLOWLIST).
@@ -637,6 +640,24 @@ function referenceIssues(graph: WorkflowGraph, ctx: GraphContext, opts: Validate
     });
   };
   if (wf.budget?.maxCostUsd !== undefined) budgetCost('/workflow/budget/maxCostUsd', undefined, graph.stages);
+  // Evaluation: a pipeline authored with maxTurns 1500 (run) and 120–250 (stages) — tool-call numbers — ran with
+  // 6 agent turns and showed "6/1500 turns"; the budget could never bind.
+  const turnUnits = (pointer: string, value: number | undefined, stageKey?: string) => {
+    if (value === undefined || value <= TURN_BUDGET_UNITS_HINT) return;
+    out.push({
+      code: 'budget-turns-units',
+      severity: 'warning',
+      path: pointer,
+      ...(stageKey ? { stageKey } : {}),
+      message: `maxTurns ${value} counts agent turns (each prompt, follow-up or repair), not tool calls, so it will not fire`,
+      hint: 'Use a small number of agent turns here; bound tool calls with session.maxTurns',
+    });
+  };
+  turnUnits('/workflow/budget/maxTurns', wf.budget?.maxTurns);
+  graph.stages.forEach((s, i) => {
+    const budget = 'budget' in s ? (s.budget as { maxTurns?: number } | undefined) : undefined;
+    turnUnits(`/stages/${i}/budget/maxTurns`, budget?.maxTurns, s.key);
+  });
 
   graph.stages.forEach((s, i) => {
     const p = `/stages/${i}`;

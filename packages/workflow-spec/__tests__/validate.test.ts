@@ -307,3 +307,12 @@ describe('issue shape', () => {
     expect(find(r.issues, 'template-in-command')?.path).toBe('/stages/0/session/mcp/servers/a~1b/command');
   });
 });
+
+describe('budget units (evaluation)', () => {
+  it('warns when a maxTurns budget is high enough to be tool calls (it counts agent turns)', () => {
+    const r = validateWorkflow(graph([agent('a', { budget: { maxTurns: 250 } }), agent('b', { budget: { maxTurns: 8 } })]));
+    const warnings = r.issues.filter((i) => i.code === 'budget-turns-units');
+    expect(warnings.map((w) => [w.path, w.severity])).toEqual([['/stages/0/budget/maxTurns', 'warning']]);
+    expect(r.valid).toBe(true);
+  });
+});

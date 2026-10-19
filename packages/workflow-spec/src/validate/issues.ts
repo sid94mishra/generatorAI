@@ -132,6 +132,11 @@ export const VALIDATION_CODES = {
   'subworkflow-input': { layer: 'references', severity: 'error', description: "A sub-workflow input the child does not declare, or a required child variable left unset" },
   'subworkflow-depth': { layer: 'references', severity: 'error', description: 'Sub-workflows nested more than 3 deep' },
   'subworkflow-cycle': { layer: 'references', severity: 'error', description: 'Sub-workflows that run each other in a cycle' },
+  'budget-turns-units': {
+    layer: 'references',
+    severity: 'warning',
+    description: 'A maxTurns budget so high it was likely meant as tool calls: it counts agent turns (prompts, follow-ups, repairs) and never fires',
+  },
   'budget-cost-unsupported': {
     layer: 'references',
     severity: 'warning',
