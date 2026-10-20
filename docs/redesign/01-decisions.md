@@ -1592,7 +1592,9 @@ each removable, **Clear all**, an input to allow a command, and the project's ow
 `test|lint|typecheck|check|build|format[:…]` with the lockfile's package manager; npm only `npm test`, since `npm run
 lint` would be remembered as `npm run`). `POST /api/projects/:id/permission-rules {commands}` derives the rules the
 same way a card does and refuses (422 `NOT_REMEMBERABLE`) anything on the never-list. `sleep` and `date` (not `date
--s`) join the read-only inspectors (D-150), so a polling line no longer asks.
+-s`) join the read-only inspectors (D-150), so a polling line no longer asks. Under Accept edits the read-only parts of a
+mixed line need no rule of their own (derived rules carry `readOnly`): `pnpm --filter api test 2>&1 | tail -8` is covered
+by the project's `pnpm test` alone. Measured on the E1 run: 3 cards for the whole run, 2 of them such lines.
 
 ### D-158 A mixed run's cost says what it leaves out (workflow evaluation, 2026-10-20) — Final
 Codex reports tokens but no cost, so W1's "$2.72" covered only its Claude stages and read as the run's whole cost. A

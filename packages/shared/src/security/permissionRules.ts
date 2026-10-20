@@ -35,6 +35,11 @@ export interface PermissionRule {
   match: string;
   /** On a remembered / covering rule: it belongs to the project ("Allow in this project"), not the chat or run. */
   scope?: 'project';
+  /**
+   * On a derived rule: this command of the line only reads (a D-150 inspector — `tail -30`, `grep -n x src`). Under
+   * Accept edits it needs no rule of its own, so `pnpm test 2>&1 | tail -30` is covered by `pnpm test` (D-157).
+   */
+  readOnly?: true;
 }
 
 /** What the rule module needs to know about a gate. */
@@ -494,14 +499,21 @@ function commandRule(input: readonly Word[]): CommandVerdict {
 export function shellCommandRules(command: string): RememberablePermission {
   const parsed = new ShellLineParser(command).parse();
   if (parsed.problem) return { rules: [], refusal: `This command always asks: ${parsed.problem}.` };
-  const seen = new Set<string>();
+  const byRule = new Map<string, PermissionRule>();
   const rules: PermissionRule[] = [];
   for (const words of parsed.commands) {
     const verdict = commandRule(words);
     if ('refusal' in verdict) return { rules: [], refusal: verdict.refusal };
-    if ('none' in verdict || seen.has(verdict.rule)) continue;
-    seen.add(verdict.rule);
-    rules.push({ kind: 'command', match: verdict.rule });
+    if ('none' in verdict) continue;
+    const readOnly = inspects(words);
+    const seen = byRule.get(verdict.rule);
+    if (seen) {
+      if (!readOnly) delete seen.readOnly; // one use that does more than read: the rule is needed
+      continue;
+    }
+    const rule: PermissionRule = { kind: 'command', match: verdict.rule, ...(readOnly ? { readOnly: true as const } : {}) };
+    byRule.set(verdict.rule, rule);
+    rules.push(rule);
   }
   if (rules.length === 0) return { rules: [], refusal: 'This command has nothing to remember.' };
   return { rules };

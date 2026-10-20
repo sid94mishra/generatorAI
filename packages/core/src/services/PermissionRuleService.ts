@@ -51,7 +51,9 @@ export class PermissionRuleService {
     payload: Pick<ToolPermissionRequestPayload, 'type' | 'rememberRules'>,
     permissionMode: string,
   ): Promise<PermissionRule[] | null> {
-    const wanted = payload.rememberRules ?? [];
+    // Under Accept edits a read-only part of the line (`| tail -30`) needs no rule of its own (D-157): the rest does.
+    const lenient = permissionMode === 'acceptEdits' || permissionMode === 'bypassPermissions';
+    const wanted = (payload.rememberRules ?? []).filter((r) => !(lenient && r.readOnly));
     if (wanted.length === 0) return null;
     if (permissionMode === 'plan' && payload.type === 'file_write') return null;
     // The owner's own rules first, then its project's: each command may be covered by either.

@@ -16,6 +16,14 @@ const refusalOf = (command: string) => rememberablePermission(shell(command)).re
 const cmd = (match: string): PermissionRule => ({ kind: 'command', match });
 
 describe('shell rules', () => {
+  it('marks the read-only parts of a line, so Accept edits needs rules only for the rest (D-157)', () => {
+    const rules = shellCommandRules('pnpm --filter @pulse/api test 2>&1 | tail -8; grep -n x docs/CHANGELOG.md || echo none').rules;
+    expect(rules.filter((r) => !r.readOnly).map((r) => r.match)).toEqual(['pnpm test']);
+    expect(rules.filter((r) => r.readOnly).map((r) => r.match)).toEqual(['tail', 'grep', 'echo']);
+    // A use that leaves the workspace is not read-only, even if another use of the same program is.
+    expect(shellCommandRules('cat a.txt; cat /etc/hosts').rules).toEqual([{ kind: 'command', match: 'cat' }]);
+  });
+
   it('names the program, plus the subcommand of multi-command tools', () => {
     expect(rulesOf('pnpm lint')).toEqual(['pnpm lint']);
     expect(rulesOf('pnpm -r test')).toEqual(['pnpm test']);

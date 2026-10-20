@@ -324,3 +324,23 @@ describe('chat-scoped rules (ChatManagementService)', () => {
     await expect(call).resolves.toMatchObject({ granted: true });
   });
 });
+
+// D-157 — under Accept edits a line's read-only parts need no rule of their own.
+describe('covering a line with read-only parts', () => {
+  it('covers `pnpm test | tail` with the project\'s `pnpm test` under Accept edits only', async () => {
+    const rules = new PermissionRuleService(new MemoryRules());
+    const project = { kind: 'project' as const, id: 'p1' };
+    await rules.remember(project, [{ kind: 'command', match: 'pnpm test' }]);
+    const payload = {
+      type: 'shell_exec' as const,
+      rememberRules: [
+        { kind: 'command' as const, match: 'pnpm test' },
+        { kind: 'command' as const, match: 'tail', readOnly: true as const },
+      ],
+    };
+    expect(await rules.covering([project], payload, 'acceptEdits')).toEqual([{ kind: 'command', match: 'pnpm test', scope: 'project' }]);
+    expect(await rules.covering([project], payload, 'default')).toBeNull();
+    // Only read-only parts: nothing a rule covers (D-150 decides those lines).
+    expect(await rules.covering([project], { type: 'shell_exec', rememberRules: [payload.rememberRules[1]!] }, 'acceptEdits')).toBeNull();
+  });
+});
