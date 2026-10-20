@@ -15,8 +15,8 @@
 //
 // Layout (Comfortable): column max 760 inside the transcript column; box =
 // 1px line, radius dialog (12), `raised`, pad 12/10/8/14; toolbar row; team
-// row (orchestrator agents); under the box the meta row (Sources · Skills·MCP)
-// and the key-hint row. Menus open upward from their chip.
+// row (orchestrator agents); under the box the meta row (Sources · Skills·MCP;
+// no key legends — the placeholder names / and @). Menus open upward from their chip.
 // ────────────────────────────────────────────────────────────────
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -31,6 +31,7 @@ import {
 } from '@generatorai/shared';
 import {
   APPROVAL_MODE_LABELS,
+  COMPOSER_APPROVALS_COPY,
   PERMISSION_GATE_COPY,
   CHAT_APPROVAL_MODES,
   reasoningEffortLabel,
@@ -52,7 +53,6 @@ import { Input } from '@/ui/primitives/Input/Input.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { Textarea } from '@/ui/primitives/Textarea/Textarea.js';
 import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
-import { KbdHintRow, type KbdHint } from '@/ui/patterns/KbdHintRow/KbdHintRow.js';
 import type { CaptureSource } from './model/types.js';
 import type { PromptHistoryEntry } from './model/promptHistory.js';
 import { COMPOSER } from './hooks/affordances.js';
@@ -392,15 +392,6 @@ export function Composer({
   }, [menu, filteredCommands, filteredMentions]);
   const highlightedCommand = menu?.type === 'slash' ? filteredCommands[menuIndex] : undefined;
 
-  const hints = useMemo<KbdHint[]>(() => {
-    const out: KbdHint[] = [];
-    if (COMPOSER.sendShortcut) out.push({ keys: '↵', label: 'Send' }, { keys: ['Shift', '↵'], label: 'New line' });
-    out.push({ keys: '/', label: 'Skills' });
-    if (workspaceId) out.push({ keys: '@', label: 'Files' });
-    out.push({ keys: '↑', label: 'History' });
-    return out;
-  }, [workspaceId]);
-
   // Subtrees that do not change while typing are built once per input change,
   // not on every keystroke (the textarea re-renders the host per character).
   const modelPicker = useMemo(
@@ -635,7 +626,7 @@ export function Composer({
                       {approvalShort ? <span className="text-fg-3"> · {approvalShort}</span> : null}
                     </ToolbarChip>
                     {openMenu === 'mode' ? (
-                      <ToolbarPopup widthClass="w-64" role="listbox" aria-label="Agent mode">
+                      <ToolbarPopup widthClass="w-72" role="listbox" aria-label="Agent mode">
                         <div role="group" aria-label="Agent mode">
                           <ToolbarPopupHeader>Agent mode</ToolbarPopupHeader>
                           {AGENT_MODE_OPTIONS.map((o) => (
@@ -654,11 +645,12 @@ export function Composer({
                         </div>
                         {onApprovalModeChange ? (
                           <div role="group" aria-label="Approvals" className="mt-1 border-t border-line-soft">
-                            <ToolbarPopupHeader>Approvals · from the next message</ToolbarPopupHeader>
+                            <ToolbarPopupHeader>{COMPOSER_APPROVALS_COPY.heading}</ToolbarPopupHeader>
                             {CHAT_APPROVAL_MODES.map((mode) => (
                               <ToolbarOption
                                 key={mode}
                                 selected={(approvalMode ?? 'bypassPermissions') === mode}
+                                description={APPROVAL_MODE_LABELS[mode].hint}
                                 onClick={() => {
                                   onApprovalModeChange(mode);
                                   setOpenMenu(null);
@@ -693,6 +685,9 @@ export function Composer({
                                 {PERMISSION_GATE_COPY.projectRulesCount(projectRules.matches.length)} · {PERMISSION_GATE_COPY.clearRules}
                               </ToolbarOption>
                             ) : null}
+                            <p className="px-2 pt-1 pb-1.5 text-small text-fg-3" data-testid="composer-approvals-note">
+                              {activeAgentMode === 'plan' ? COMPOSER_APPROVALS_COPY.inPlanMode : COMPOSER_APPROVALS_COPY.appliesNext}
+                            </p>
                           </div>
                         ) : null}
                       </ToolbarPopup>
@@ -803,12 +798,11 @@ export function Composer({
           {!compact && isOrchestratorAgent ? <TeamRow team={team} running={runningTasks} onOpenTasks={onOpenTasks} /> : null}
         </div>
 
-        {/* Meta row + key hints */}
+        {/* Meta row: sources and the chat's skills · MCP (no key legends — the placeholder names / and @). */}
         {!compact ? (
           <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2">
             {sourcesChip}
             {snapshot ? <SkillsMcpChip skills={skillNames} mcpServers={mcpNames} /> : null}
-            <KbdHintRow hints={hints} className="ml-auto hidden md:flex" />
           </div>
         ) : null}
 

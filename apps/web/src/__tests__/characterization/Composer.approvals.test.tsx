@@ -31,8 +31,11 @@ describe('Composer — Approvals', () => {
     await user.click(modeChip());
     const group = screen.getByRole('group', { name: 'Approvals' });
     expect(group).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Ask before tools run' })).toHaveAttribute('aria-selected', 'true');
-    await user.click(screen.getByRole('option', { name: 'Full access (never ask)' }));
+    expect(screen.getByRole('option', { name: /^Ask before tools run/ })).toHaveAttribute('aria-selected', 'true');
+    // Each policy says what runs on its own and what waits; the note says when a change applies.
+    expect(screen.getByRole('option', { name: /^Accept edits, ask for the rest/ })).toHaveTextContent('File edits run; commands, network and MCP tools ask.');
+    expect(screen.getByTestId('composer-approvals-note')).toHaveTextContent('Applies from your next message.');
+    await user.click(screen.getByRole('option', { name: /^Full access \(never ask\)/ }));
     expect(onApprovalModeChange).toHaveBeenCalledWith('bypassPermissions');
     expect(screen.queryByRole('listbox', { name: 'Agent mode' })).not.toBeInTheDocument();
   });

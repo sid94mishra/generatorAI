@@ -146,17 +146,34 @@ export type ApprovalMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissio
 /**
  * How each approval policy is named: `label` in pickers (composer Agent mode menu, run header, workflow session
  * editor), `short` beside the mode on the composer chip (null = the default "never ask" state shows nothing extra),
- * `word` in compact summaries (workflow setup card, settings, run dialog).
+ * `word` in compact summaries (workflow setup card, settings, run dialog), `hint` under the label in a picker (what
+ * runs on its own and what waits for you).
  *
  * `plan` is the read-only tier (D-149): it is called "Read-only" wherever a person reads it, so it is never
  * mistaken for the Plan AGENT mode (plan first, wait for approval).
  */
-export const APPROVAL_MODE_LABELS: Record<ApprovalMode, { label: string; short: string | null; word: string }> = {
-  default: { label: 'Ask before tools run', short: 'Ask first', word: 'Ask' },
-  acceptEdits: { label: 'Accept edits, ask for the rest', short: 'Accept edits', word: 'Accept edits' },
-  plan: { label: 'Read-only (no changes)', short: 'Read-only', word: 'Read-only' },
-  bypassPermissions: { label: 'Full access (never ask)', short: null, word: 'Full access' },
+export const APPROVAL_MODE_LABELS: Record<ApprovalMode, { label: string; short: string | null; word: string; hint: string }> = {
+  default: { label: 'Ask before tools run', short: 'Ask first', word: 'Ask', hint: 'Every edit and command waits for your OK.' },
+  acceptEdits: {
+    label: 'Accept edits, ask for the rest',
+    short: 'Accept edits',
+    word: 'Accept edits',
+    hint: 'File edits run; commands, network and MCP tools ask.',
+  },
+  plan: { label: 'Read-only (no changes)', short: 'Read-only', word: 'Read-only', hint: 'Reads and searches only; nothing is changed.' },
+  bypassPermissions: { label: 'Full access (never ask)', short: null, word: 'Full access', hint: 'Nothing asks. For folders you trust.' },
 };
+
+/**
+ * The composer's Agent mode menu: its Approvals group's heading and note. A chat's approval policy is part of its
+ * session binding, so a change applies from the next message (a turn already running keeps its policy); in Plan
+ * mode nothing is written until the plan is approved, so the policy governs the implementation after that.
+ */
+export const COMPOSER_APPROVALS_COPY = {
+  heading: 'Tool approvals',
+  appliesNext: 'Applies from your next message.',
+  inPlanMode: 'Plan mode changes nothing until you approve the plan; this applies to the work after.',
+} as const;
 
 /** The approval policies a person picks for a chat (plan-only is the Plan agent mode there). */
 export const CHAT_APPROVAL_MODES: readonly ApprovalMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
