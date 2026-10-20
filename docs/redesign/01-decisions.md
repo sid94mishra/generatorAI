@@ -1571,6 +1571,18 @@ or whose enclosing loop may, now works in its own git worktree (`domain/schedule
 - Git before 2.40 (Apple's git is 2.37) has no `merge-tree --merge-base`: `mergeTrees` falls back to a throwaway-index
   merge (`read-tree -m --aggressive` + `merge-file`), which also fixes `mount_per_item` map merges there.
 
+### D-156 A reviewer runs on another provider than the stage it reviews (workflow evaluation, 2026-10-20) — Final
+In the evaluation a Codex reviewer approved Codex's fixes on the first pass three times out of three (once with a test
+that passed on the buggy code); Claude reviewers found real defects every time. An agent stage names the stage whose
+work it reviews with `reviewOf` (the fix-review loop's Review, the goal loop's Assess, Critique, Critic). At
+invocation (`crossProviderReviewers`, so the plan preview shows it): a reviewer that pins no agent, provider or model —
+and whose workflow and run name no provider or agent — and has no per-stage model for the run, and would run on the
+reviewed stage's provider, gets the default model of another ready provider as its per-stage model (Claude, then Codex,
+then Copilot; never a model id two ready providers share). The person's per-stage pick wins; with one provider ready
+nothing changes. The Run dialog's Models row says "(another provider than fix)"; the stage editor's Session tab has
+**Reviews** and **Edits in** (D-155). The validator errors on a `reviewOf` that is not another agent stage and warns
+(`review-same-provider`) when both are pinned to one provider.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

@@ -57,9 +57,10 @@ import type { RunDefinitionReader } from '../definitions/RunDefinitionReader.js'
 import { safeUploadName, UPLOAD_EXTENSIONS } from '../engine/lifecycle/runUploads.js';
 import { IdempotencyKeyReusedError, INVOCATION_IDEMPOTENCY_TTL_MS, type IdempotencyService } from '../IdempotencyService.js';
 import type { WorkflowDefinitionService } from '../WorkflowDefinitionService.js';
-import { RunCommandRefusedError, type WorkflowRunService } from '../WorkflowRunService.js';
+import { RunCommandRefusedError, type StageProviderResolver, type WorkflowRunService } from '../WorkflowRunService.js';
 import type { WorkflowApprovalService } from '../WorkflowApprovalService.js';
 import { outputDrift } from '../engine/SubworkflowEffects.js';
+import { crossProviderReviewers } from './crossProviderReviewers.js';
 import { planInvocation } from './planInvocation.js';
 import { InvocationError, issue, type InvocationContext } from './types.js';
 import { checkInvocationScopes, validateInvocation, type ValidatedInvocation } from './validateInvocation.js';
@@ -82,7 +83,9 @@ export interface WorkflowInvocationDeps {
   uploadsDir?: string | undefined;
   codebases?: IProjectCodebaseRepository | undefined;
   scripts?: InvocationScriptSource | undefined;
-  models?: (() => Promise<Array<{ id: string }>>) | undefined;
+  models?: (() => Promise<Array<{ id: string; provider?: string | undefined; isDefault?: boolean | undefined }>>) | undefined;
+  /** Which provider a stage session runs on: an unpinned reviewer moves off its reviewed stage's (D-156). */
+  providerOf?: StageProviderResolver | undefined;
   /** The deployment runs stages in a sandbox (the plan lists the `sandbox` phase). */
   sandboxEnabled?: boolean | undefined;
   /** The web app origin, for result links. */
@@ -440,13 +443,13 @@ export class WorkflowInvocationService {
     return canonicalGraph(untagged).hash.slice(0, 16) === hash;
   }
 
-  private validate(
+  private async validate(
     req: InvocationRequest,
     ctx: InvocationContext,
     target: ResolvedTarget,
     opts: { codebaseRequired?: 'error' | 'warning'; resolvedScopes?: 'error' | 'warning' } = {},
   ): Promise<ValidatedInvocation> {
-    return validateInvocation(req, ctx, target, {
+    const v = await validateInvocation(req, ctx, target, {
       ...(opts.codebaseRequired ? { codebaseRequired: opts.codebaseRequired } : {}),
       ...(opts.resolvedScopes ? { resolvedScopes: opts.resolvedScopes } : {}),
       codebases: this.deps.codebases,
@@ -457,6 +460,23 @@ export class WorkflowInvocationService {
       subworkflows: (graph, projectId) => this.subworkflowIssues(graph, projectId),
       now: this.now,
     });
+    return this.withCrossProviderReviewers(target.graph, v);
+  }
+
+  /** An unpinned reviewer on its reviewed stage's provider runs on another one (D-156). */
+  private async withCrossProviderReviewers(graph: WorkflowGraph, v: ValidatedInvocation): Promise<ValidatedInvocation> {
+    const { providerOf, models } = this.deps;
+    if (!providerOf || !models) return v;
+    const added = await crossProviderReviewers(graph, v, { providerOf, models }).catch((err: unknown) => {
+      this.deps.logger?.warn?.(`[Invocation] choosing cross-provider reviewers failed: ${String(err)}`);
+      return [];
+    });
+    if (added.length === 0) return v;
+    return {
+      ...v,
+      stageOverrides: [...v.stageOverrides, ...added.map(({ stageKey, model }) => ({ stageKey, model }))],
+      crossProviderOf: Object.fromEntries(added.map((a) => [a.stageKey, a.reviewOf])),
+    };
   }
 
   /**

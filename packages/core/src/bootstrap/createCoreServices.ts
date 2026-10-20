@@ -578,6 +578,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
       : {}),
     ...(inputs.projectCodebaseRepo ? { codebases: inputs.projectCodebaseRepo } : {}),
     models: () => harness.getModels(),
+    providerOf: stageProvider,
     ...(inputs.appUrl ? { appUrl: inputs.appUrl } : {}),
     approvals: workflowApprovalService,
     logger,

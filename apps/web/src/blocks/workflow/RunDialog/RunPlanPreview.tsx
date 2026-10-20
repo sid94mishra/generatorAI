@@ -138,7 +138,7 @@ export function RunPlanPreview({ plan, loading, error, stale, unavailable, footn
               <Row label="Models">
                 {plan.stages
                   .filter((s) => (s.model || s.agentRef) && !s.skipped)
-                  .map((s) => `${s.key}: ${s.model ?? "the agent's model"}`)
+                  .map((s) => `${s.key}: ${s.model ?? "the agent's model"}${s.crossProviderOf ? ` (another provider than ${s.crossProviderOf})` : ''}`)
                   .join(', ')}
               </Row>
             ) : null}

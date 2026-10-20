@@ -272,6 +272,8 @@ export interface InvocationPlan {
     model?: string;
     harnessType?: string;
     agentRef?: string;
+    /** A reviewer moved to another provider than the stage it reviews (`reviewOf`), whose key this is. */
+    crossProviderOf?: string;
     /** A completion review parks the stage for a person. */
     approvalRequired: boolean;
     kind: string;

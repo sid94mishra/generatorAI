@@ -192,6 +192,8 @@ export interface ValidatedInvocation {
   uploads: Array<{ uploadId: string; category: 'skills' | 'agents' | 'prompts' }>;
   name?: string;
   warnings: InvocationIssue[];
+  /** Reviewers moved to another provider for this run (D-156): reviewer key → the stage it reviews. */
+  crossProviderOf?: Record<string, string>;
 }
 
 /**

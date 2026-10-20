@@ -68,6 +68,7 @@ export function planInvocation(
       ...(model ? { model } : {}),
       ...(harnessType ? { harnessType } : {}),
       ...(agentRef ? { agentRef } : {}),
+      ...(v.crossProviderOf?.[s.key] ? { crossProviderOf: v.crossProviderOf[s.key] } : {}),
       // An agent stage with an approval gate, or an approval wait (the preview's Approval row listed neither).
       approvalRequired: (s.kind === 'agent' && !!s.approval) || (s.kind === 'wait' && s.wait.type === 'approval'),
       kind: s.kind,

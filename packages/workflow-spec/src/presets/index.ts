@@ -152,7 +152,7 @@ export const fixReviewLoop = define({
           followUpPrompts: [
             {
               label: 'address',
-              text: 'The reviewer requested changes:\n{{loop.carry.openComments | bullets}}\nAddress each one, run the tests, and report per comment id in `addressed`.',
+              text: "The reviewer requested changes:\n{{loop.carry.openComments | bullets}}\nAddress each one (a test the reviewer says does not fail without the fix must be rewritten until it does), re-run the tests and lint, and report per comment id in `addressed`.",
             },
           ],
           output: { format: 'json', schema: FIX_SCHEMA },
@@ -163,10 +163,11 @@ export const fixReviewLoop = define({
           kind: 'agent',
           parentKey: v.key,
           sessionReuse: 'fresh',
+          reviewOf: v.fixKey,
           prompts: [
             {
               label: 'review',
-              text: `${v.reviewPrompt}{{#if loop.previous}} Verify these earlier comments were addressed: {{loop.carry.openComments | json}}. Fix report: {{stages.${v.fixKey}.output.addressed | json}}{{/if}}`,
+              text: `${v.reviewPrompt}{{#if loop.previous}}\nVerify these earlier comments were addressed: {{loop.carry.openComments | json}}. Fix report: {{stages.${v.fixKey}.output.addressed | json}}{{/if}}`,
             },
           ],
           output: { format: 'json', schema: REVIEW_SCHEMA },
@@ -314,6 +315,7 @@ export const goalLoop = define({
         kind: 'agent',
         parentKey: v.key,
         sessionReuse: 'fresh',
+        reviewOf: v.workKey,
         ...(v.assessModel ? { session: { model: v.assessModel } } : {}),
         prompts: [
           {
@@ -386,6 +388,7 @@ export const refineUntilScore = define({
         kind: 'agent',
         parentKey: v.key,
         sessionReuse: 'fresh',
+        reviewOf: v.draftKey,
         prompts: [
           {
             label: 'score',
@@ -520,6 +523,7 @@ export const completenessCritic = define({
         kind: 'agent',
         parentKey: v.key,
         sessionReuse: 'fresh',
+        reviewOf: v.workKey,
         prompts: [
           {
             label: 'critique',
@@ -972,7 +976,7 @@ export const planThenExecute = define({
         .string()
         .min(1)
         .default(
-          'Goal: {{variables.goal}}\nPlan how to reach it as a few independent or ordered steps. Each step is a stage run by its own agent in this workspace: give it a short key, a name and a precise, self-contained prompt; mark read-only steps readOnly. Add an edge from a step to every step that needs its result; steps without edges between them run in parallel, each in its own copy of the code that merges back when it finishes, so a step never sees a parallel step\'s changes.',
+          "Goal: {{variables.goal}}\nRead the code first, then plan how to reach the goal as a few independent or ordered steps. Each step is a stage run by its own agent in this workspace: give it a short key, a name and a precise, self-contained prompt that names the files to change, the existing helpers to follow, the exact test and lint commands to run, and what done looks like; mark read-only steps readOnly. Steps that edit the same files must be ordered, not parallel. End with a review step that depends on every other step: it reads the whole diff, checks the goal's acceptance criteria and the edge cases a careful reviewer would raise (invalid input, security, limits), fixes what it finds and runs every affected test and lint. Add an edge from a step to every step that needs its result; steps without edges between them run in parallel, each in its own copy of the code that merges back when it finishes, so a step never sees a parallel step's changes.",
         ),
     })
     .strict(),
@@ -1321,7 +1325,7 @@ const TEMPLATE_SOURCES: TemplateSource[] = [
         key: 'triage',
         name: 'Triage',
         kind: 'agent',
-        prompts: [{ label: 'triage', text: 'Triage the issue {{variables.issue_url}}: summarise it, find the files involved and propose a plan.' }],
+        prompts: [{ label: 'triage', text: "Triage the issue {{variables.issue_url}} in the working directory: read the code involved and do not edit anything. In `summary` state the root cause with file:line. In `plan` give the steps, including the exact test command(s) that will prove the fix. List the files to change in `files`." }],
         output: {
           format: 'json',
           schema: {
@@ -1335,7 +1339,8 @@ const TEMPLATE_SOURCES: TemplateSource[] = [
     fragment: fixReviewLoop.build({
       maxTurns: 250,
       maxCostUsd: 12,
-      fixPrompt: 'Fix issue {{variables.issue_url}}. Triage: {{stages.triage.output.summary}}\nPlan:\n{{stages.triage.output.plan | bullets}}',
+      fixPrompt: "Fix issue {{variables.issue_url}}.\nTriage: {{stages.triage.output.summary}}\nPlan:\n{{stages.triage.output.plan | bullets}}\n\n1. First write a test that reproduces the bug and run it: it must FAIL on the current code. Quote the failure in `changes`.\n2. Fix the root cause, not the symptom, and run the test again: it must pass.\n3. Run the affected packages' tests and lint and make them pass.\nChange only what the fix needs, edit files with your edit tool rather than shell scripts, and name any existing behaviour you changed.",
+      reviewPrompt: "Review the change for {{variables.issue_url}}: run git diff (include untracked files). Approve only when ALL of these hold; otherwise request changes with one comment per problem (file, line, what to do):\n- the root cause is fixed, not a symptom, and nothing unrelated changed;\n- the new test FAILS without the fix: save the source part of the fix with `git diff -- <changed source files> > <scratch dir>/fix.patch`, undo it with `git apply -R`, run the test and see it fail, then restore it with `git apply` and see it pass (never stash, checkout or reset);\n- the affected tests and lint pass.",
     }),
     after: [
       {
