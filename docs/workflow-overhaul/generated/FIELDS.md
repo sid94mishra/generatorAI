@@ -388,6 +388,8 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `stages[].sessionReuse` | 'fresh' \| 'continue' |  | `"fresh"` | continue keeps one conversation across loop iterations; fresh starts a new one each time |
 | `stages[].compactAfter` | integer (≥1, ≤20) |  |  | With sessionReuse continue: every n iterations the conversation is replaced by a fresh one seeded with a deterministic digest (no model call) |
 | `stages[].sessionGroup` | string `^[a-z][a-z0-9_]{0,47}$` |  |  | Stages with the same group share one conversation, one at a time |
+| `stages[].workspace` | 'auto' \| 'shared' \| 'isolated' |  |  | Where the stage edits: auto (default) works in its own git worktree while another stage of the run may run at the same time, merged back when it completes; shared always works in the run's folder; isolated always forks |
+| `stages[].reviewOf` | string `^[a-z][a-z0-9_]{0,47}$` |  |  | The agent stage whose work this stage reviews: unless this stage pins its agent, provider or model, it runs on another provider than that stage's |
 | `stages[].context` | object |  | `{}` | Which upstream results the stage receives, fenced as untrusted context |
 | `stages[].context.from` | string `^[a-z][a-z0-9_]{0,47}$`[] (≤50) |  |  | Stages whose output is delivered as context; omitted means the direct predecessors |
 | `stages[].context.mode` | 'summary' \| 'output' \| 'structured' \| 'none' |  | `"summary"` | summary: each source summary; output: full output text; structured: JSON output; none: no context |
@@ -948,6 +950,9 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `subworkflow-input` | references | error | A sub-workflow input the child does not declare, or a required child variable left unset |
 | `subworkflow-depth` | references | error | Sub-workflows nested more than 3 deep |
 | `subworkflow-cycle` | references | error | Sub-workflows that run each other in a cycle |
+| `unknown-review-target` | references | error | reviewOf names a stage that is not another agent stage |
+| `review-same-provider` | references | warning | A reviewer pinned to the provider of the stage it reviews: a reviewer on another provider catches more |
+| `budget-turns-units` | references | warning | A maxTurns budget so high it was likely meant as tool calls: it counts agent turns (prompts, follow-ups, repairs) and never fires |
 | `budget-cost-unsupported` | references | warning | A maxCostUsd budget over stages whose provider reports no cost (it can never fire) |
 | `expr-syntax` | expressions | error | An expression does not parse |
 | `expr-unknown-root` | expressions | error | An expression names an unknown root (variables, stages, run, …) |

@@ -28,6 +28,7 @@ import type { FinalizePhase, Lifecycle, PostProcessingStep, WorkflowGraph, Workf
 import type { RunOutcome } from '../../../domain/scheduler/types.js';
 import { runEndStages } from '../../../domain/scheduler/scope.js';
 import { mapItemPlacement, releaseRunMapItems } from '../MapEffects.js';
+import { releaseStageWorktrees } from '../StageIsolation.js';
 import { PhaseFailure, type PhaseResult, type RunLifecycleDeps } from '../RunLifecycle.js';
 import { runAction } from './hooks.js';
 
@@ -185,6 +186,10 @@ const release: Phase = async ({ deps, graph, now }, run) => {
     await deps.eventBus.emitGlobal({ kind: 'workflow_run.sandbox_destroyed', data: { workflowRunId: run.id } }).catch(() => undefined);
   }
   await releaseRunMapItems(deps, run, graph).catch((err: unknown) => deps.logger?.warn(`[RunLifecycle] ${run.id}: releasing the map item worktrees failed: ${String(err)}`));
+  const stageKeys = (stores.runStore.loadRunState(run.id)?.instances ?? []).map((i) => i.stageKey);
+  await releaseStageWorktrees(deps, run, stageKeys, { allRefs: true }).catch((err: unknown) =>
+    deps.logger?.warn(`[RunLifecycle] ${run.id}: releasing the stage worktrees failed: ${String(err)}`),
+  );
   // An inherited workspace is the parent run's: it is released with the parent.
   if (run.workspaceId && !run.systemVars?.inheritedWorkspace) {
     await deps.workspaceManager.completeWorkspace(run.workspaceId).catch((err: unknown) => {

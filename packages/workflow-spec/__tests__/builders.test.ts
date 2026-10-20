@@ -36,6 +36,7 @@ function full() {
         .followUp('Address the review')
         .sessionReuse('fresh')
         .sessionGroup('coding')
+        .workspace('isolated')
         .retry({ maxAttempts: 3, jitter: 'none' })
         .repair({ maxRepairs: 1 })
         .onExhausted('pause')
@@ -52,6 +53,7 @@ function full() {
       s
         .name('Review')
         .agent('global:reviewer')
+        .reviewOf('fix')
         .prompt('Review {{issue}}')
         .outputSchema(reviewSchema)
         .contextFrom(['fix'], 'output')

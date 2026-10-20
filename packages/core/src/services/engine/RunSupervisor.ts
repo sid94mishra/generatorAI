@@ -54,6 +54,7 @@ import type { WorkflowSecretResolver } from '../../mcp/McpCredentialVault.js';
 import type { IWorkflowRunRepository } from '../../domain/ports/IWorkflowRunRepository.js';
 import type { RunMessage, RunOutcome } from '../../domain/scheduler/types.js';
 import { graphForInstance } from '../../domain/scheduler/expansion.js';
+import { worksIsolated } from '../../domain/scheduler/isolation.js';
 import { expansionNodes, expansionStateOf } from '../../domain/scheduler/scope.js';
 import { compile, type CompiledWorkflow } from '../../domain/workflow-graph/compile.js';
 import type { EventBus } from '../../events/EventBus.js';
@@ -70,6 +71,7 @@ import { EngineTelemetry } from './EngineTelemetry.js';
 import type { LifecycleSteps } from './lifecycle/steps.js';
 import { LoopEffects } from './LoopEffects.js';
 import { MapEffects } from './MapEffects.js';
+import { StageIsolation } from './StageIsolation.js';
 import { SubworkflowEffects } from './SubworkflowEffects.js';
 import { SummaryEffects } from './summaries.js';
 import { WorktreeLeases } from './WorktreeLeases.js';
@@ -192,6 +194,11 @@ export class RunSupervisor {
     this.now = deps.now ?? Date.now;
     this.timing = { ...DEFAULT_SUPERVISOR_TIMING, ...(deps.timing ?? {}) };
     const post = (runId: string, msg: RunMessage): void => this.post(runId, msg);
+    this.leases = new WorktreeLeases();
+    const platform = () => {
+      const p = this.lifecycle instanceof DefaultRunLifecycle ? this.lifecycle.platform : {};
+      return { mounts: p.mounts, steps: p.steps as LifecycleSteps | undefined };
+    };
     this.executor = new StageExecutor({
       bootId: this.bootId,
       stores: deps.stores,
@@ -211,6 +218,7 @@ export class RunSupervisor {
       artifacts: deps.artifacts,
       callbacks: deps.callbacks,
       telemetry: this.telemetry,
+      isolation: new StageIsolation({ workspaceManager: deps.workspaceManager, leases: this.leases, platform, logger: deps.logger }),
       post,
       logger: deps.logger,
       now: this.now,
@@ -255,11 +263,6 @@ export class RunSupervisor {
         now: this.now,
       });
     this.loops = new LoopEffects({ runRepo: deps.runRepo, workspaceManager: deps.workspaceManager, checkpoints: deps.checkpoints, logger: deps.logger });
-    this.leases = new WorktreeLeases();
-    const platform = () => {
-      const p = this.lifecycle instanceof DefaultRunLifecycle ? this.lifecycle.platform : {};
-      return { mounts: p.mounts, steps: p.steps as LifecycleSteps | undefined };
-    };
     this.maps = new MapEffects({
       stores: deps.stores,
       runRepo: deps.runRepo,
@@ -516,6 +519,13 @@ export class RunSupervisor {
   private async writerLeaseKeys(runId: string, stageRunId: string): Promise<string[]> {
     const compiled = this.compiledByRun.get(runId);
     if (!compiled || ![...compiled.nodes.values()].some((n) => n.map?.workspace === 'mount_per_item')) return [];
+    // A stage in a worktree of its own (D-155) writes no run mount; its merge takes the exclusive lease.
+    const state = this.deps.stores.runStore.loadRunState(runId);
+    const inst = state?.instances.find((i) => i.id === stageRunId);
+    if (state && inst) {
+      const run = await this.deps.runRepo.getById(runId);
+      if (worksIsolated(graphForInstance(await this.deps.definitions.get(run.definitionVersionId), state, inst), state, inst)) return [];
+    }
     return this.maps.leaseKeys(runId, stageRunId);
   }
 

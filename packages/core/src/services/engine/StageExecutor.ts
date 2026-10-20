@@ -84,6 +84,7 @@ import { TurnRecorder } from '../session/TurnRecorder.js';
 import type { SessionOwner, TurnContext } from '../session/types.js';
 import { runWorkspace, workspaceExposure } from '../session/workspaceExposure.js';
 import { mapItemPlacement, runForItem } from './MapEffects.js';
+import type { IsolatedMerge, IsolatedPlacement, StageIsolation } from './StageIsolation.js';
 import type { WorkflowCallbacks } from './WorkflowCallbacks.js';
 import { waitInterruptOf } from '../../domain/scheduler/waits.js';
 import { StageConversationError } from './StageConversationError.js';
@@ -93,6 +94,7 @@ import { AUTO_SUMMARY_TURN_THRESHOLD, autoSummary, jsonSummary, summaryPrompt } 
 import { compile, type CompiledNode, type CompiledWorkflow } from '../../domain/workflow-graph/compile.js';
 import { isWrapUp, scopeIndexOf, templateScope } from '../../domain/scheduler/scope.js';
 import { graphForInstance, validateExpansion } from '../../domain/scheduler/expansion.js';
+import { worksIsolated } from '../../domain/scheduler/isolation.js';
 import {
   checkOutputContract,
   chooseStrategies,
@@ -165,6 +167,8 @@ export interface StageExecutorDeps {
   callbacks?: WorkflowCallbacks | undefined;
   /** The `invoke_agent` span of each attempt (P07 WP-7.4). */
   telemetry?: EngineTelemetry | undefined;
+  /** The worktrees of stages that run alongside others (D-155); without it every stage works in the run's folder. */
+  isolation?: StageIsolation | undefined;
   logger?: ILogger | undefined;
   now?: () => number;
   timing?: Partial<ExecutorTiming>;
@@ -263,6 +267,8 @@ interface AttemptContext {
   loop?: { inst: InstanceState; node: CompiledNode; k: number };
   /** This instance is its loop's wrap-up (`<loop>#wrapup/<stage>`). */
   wrapUp: boolean;
+  /** The stage's own worktree, merged into the run's folder when it completes (D-155). */
+  isolated?: IsolatedPlacement;
   /** The prompt turns of this attempt: `prompts`, `followUpPrompts` from iteration 1, or the wrap-up prompt. */
   prompts: PromptDefinition[];
   mode: AttemptMode;
@@ -309,6 +315,19 @@ const RESUME_NOTICE =
   'The previous request for this step was interrupted before it finished. Continue from where you stopped; do not redo steps that are already done.\n\n';
 
 /** Short, stable digest of a human's feedback (an operation id of a review round). */
+/** Turns an isolated stage gets to resolve merge conflicts before it fails (D-155). */
+const MERGE_RESOLUTION_ROUNDS = 2;
+
+function mergeConflictPrompt(paths: readonly string[]): string {
+  const list = paths.slice(0, 20).map((p) => `- ${p}`).join('\n');
+  return [
+    'Your changes could not be merged into the run\'s folder: a stage that ran alongside you changed the same lines in:',
+    `${list}${paths.length > 20 ? `\n- … and ${paths.length - 20} more` : ''}`,
+    '',
+    "Those files in your folder now hold both versions between git conflict markers (<<<<<<<, =======, >>>>>>>): the other stage's version first, yours second. Resolve every conflict so both changes keep working, leave no markers behind, and re-run the checks that cover these files. Then reply with what you resolved.",
+  ].join('\n');
+}
+
 function digest(text: string): string {
   return createHash('sha256').update(text).digest('hex').slice(0, 12);
 }
@@ -770,7 +789,50 @@ export class StageExecutor {
     await this.promptTurns(ctx);
     const output = await this.validateAndReview(ctx);
     await this.postRunHooks(ctx);
+    if (ctx.isolated) await this.mergeIsolated(ctx);
     return { kind: 'succeeded', output };
+  }
+
+  /** The stage's worktree (D-155); a run folder that cannot be forked keeps the stage in it. */
+  private async isolate(run: WorkflowRun, stageKey: string): Promise<IsolatedPlacement | null> {
+    try {
+      return await this.deps.isolation!.place(run, stageKey);
+    } catch (err) {
+      throw new StageError('mount_fork_failed', `The stage's worktree could not be cut from the run's folder: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * An isolated stage's changes go back into the run's folder (D-155). A
+   * conflict with what a parallel stage merged first goes to the agent: its
+   * worktree gets the merge with conflict markers, and it resolves them in a
+   * turn of its own. Still conflicting after that, the stage fails with its
+   * worktree kept (a retry continues in it).
+   */
+  private async mergeIsolated(ctx: AttemptContext): Promise<void> {
+    const iso = this.deps.isolation!;
+    const placement = ctx.isolated!;
+    const key = ctx.instance.stageKey;
+    for (let round = 1; ; round++) {
+      let r: IsolatedMerge;
+      try {
+        r = await iso.merge(ctx.run, key, placement, ctx.frame.req.stageRunId, () => !!ctx.frame.stop);
+      } catch (err) {
+        if (ctx.frame.stop) throw new AttemptStop(ctx.frame.stop);
+        throw new StageError('merge_failed', `The stage's changes could not be merged into the run's folder: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      if (r.ok) {
+        await iso.release(ctx.run, key).catch((err: unknown) => this.logger?.warn(`[StageExecutor] releasing the worktree of ${key}: ${String(err)}`));
+        return;
+      }
+      if (round > MERGE_RESOLUTION_ROUNDS || r.conflict.plans.length === 0) {
+        throw new StageError('merge_conflict', `The stage's changes conflict with a parallel stage's (${r.conflict.summary}); its worktree is kept at ${placement.primaryDir}`);
+      }
+      await iso.markConflicts(ctx.run, key, placement, r.conflict);
+      this.backToRunning(ctx, 'validating');
+      await this.turn(ctx, { opId: `a${ctx.epoch}/merge/${round}`, role: 'feedback', text: mergeConflictPrompt(r.conflict.paths) });
+      this.toValidating(ctx);
+    }
   }
 
   /** One attempt of a check stage: starting → running → the command → validating (P05 §1.2). */
@@ -845,8 +907,11 @@ export class StageExecutor {
     // workspace and worktrees (P05 §4.1); everywhere else in the run's.
     const item = mapItemPlacement(state, instance);
     const itemWorkspace = item?.workspaceId ? await this.deps.workspaceManager.getExecutionWorkspace(item.workspaceId) : null;
-    const placed = item && itemWorkspace ? runForItem(run, item) : run;
-    const workspace = itemWorkspace ?? (await runWorkspace(this.deps.workspaceManager, run));
+    // A stage that may run alongside another works in a worktree of its own (D-155); an amendment edits the run's folder.
+    const isolated = !item && !frame.amend && this.deps.isolation && worksIsolated(graph, state, instance) ? await this.isolate(run, instance.stageKey) : null;
+    const isolatedWorkspace = isolated ? await this.deps.workspaceManager.getExecutionWorkspace(isolated.workspaceId) : null;
+    const placed = item && itemWorkspace ? runForItem(run, item) : isolated && isolatedWorkspace ? runForItem(run, isolated) : run;
+    const workspace = itemWorkspace ?? isolatedWorkspace ?? (await runWorkspace(this.deps.workspaceManager, run));
     // The run's primary mount, pinned by the lifecycle's `worktrees` phase (system values, never variables: W-06).
     const pinned = placed.systemVars?.workingDirectory;
     // An amendment has its own operation ids; an attempt continues its epoch's journal.
@@ -861,6 +926,7 @@ export class StageExecutor {
       compiled,
       ...(loopInst && loopNode ? { loop: { inst: loopInst, node: loopNode, k } } : {}),
       wrapUp,
+      ...(isolated && isolatedWorkspace ? { isolated } : {}),
       prompts,
       mode,
       epoch,

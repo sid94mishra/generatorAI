@@ -703,6 +703,22 @@ function referenceIssues(graph: WorkflowGraph, ctx: GraphContext, opts: Validate
           });
         }
       });
+      if (s.reviewOf !== undefined) {
+        const path = `${p}/reviewOf`;
+        const target = ctx.indexByKey.has(s.reviewOf) ? graph.stages[ctx.indexByKey.get(s.reviewOf)!] : undefined;
+        if (!target || target.kind !== 'agent' || s.reviewOf === k) {
+          out.push({ code: 'unknown-review-target', severity: 'error', path, stageKey: k, message: `reviewOf names '${s.reviewOf}', which is not another agent stage` });
+        } else if (s.session?.harnessType && s.session.harnessType === providerOf(graph, target)) {
+          out.push({
+            code: 'review-same-provider',
+            severity: 'warning',
+            path: `${p}/session/harnessType`,
+            stageKey: k,
+            message: `'${k}' reviews '${s.reviewOf}' on the same provider (${s.session.harnessType}): a reviewer on another provider catches more`,
+            hint: 'Pin another provider on one of them, or leave the reviewer unpinned to get one',
+          });
+        }
+      }
       if (s.expands) {
         // A planner's output is its plan (P08 §8): the engine fixes its contract.
         if (s.output.schema !== undefined) {

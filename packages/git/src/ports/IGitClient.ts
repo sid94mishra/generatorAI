@@ -308,11 +308,18 @@ export interface IGitClient {
   readBlobById(repoDir: string, sha: string): Promise<string | null>;
   /**
    * A 3-way merge of two commits against an explicit base, without a working
-   * tree (`git merge-tree --write-tree --merge-base`, git >= 2.40): the
-   * merged tree, or the conflicted paths. `supported: false` when git cannot
-   * answer (too old, an unresolvable commit).
+   * tree (`git merge-tree --write-tree --merge-base`; before git 2.40, a
+   * throwaway-index merge with `merge-file`): the
+   * merged tree, or the conflicted paths and `conflictTree`, the merge with
+   * conflict markers written into those files. `supported: false` when git
+   * cannot answer (too old, an unresolvable commit).
    */
-  mergeTrees(repoDir: string, base: string, ours: string, theirs: string): Promise<{ supported: boolean; tree: string | null; conflicts: string[] }>;
+  mergeTrees(
+    repoDir: string,
+    base: string,
+    ours: string,
+    theirs: string,
+  ): Promise<{ supported: boolean; tree: string | null; conflicts: string[]; conflictTree?: string | null }>;
   /**
    * Move the working tree from `fromTree` to `toTree` (a two-way
    * `read-tree -m -u` through the throwaway `indexFile`): only the paths

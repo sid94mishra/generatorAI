@@ -132,6 +132,12 @@ export const VALIDATION_CODES = {
   'subworkflow-input': { layer: 'references', severity: 'error', description: "A sub-workflow input the child does not declare, or a required child variable left unset" },
   'subworkflow-depth': { layer: 'references', severity: 'error', description: 'Sub-workflows nested more than 3 deep' },
   'subworkflow-cycle': { layer: 'references', severity: 'error', description: 'Sub-workflows that run each other in a cycle' },
+  'unknown-review-target': { layer: 'references', severity: 'error', description: 'reviewOf names a stage that is not another agent stage' },
+  'review-same-provider': {
+    layer: 'references',
+    severity: 'warning',
+    description: 'A reviewer pinned to the provider of the stage it reviews: a reviewer on another provider catches more',
+  },
   'budget-turns-units': {
     layer: 'references',
     severity: 'warning',

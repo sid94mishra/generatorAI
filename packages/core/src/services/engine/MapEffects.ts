@@ -383,7 +383,7 @@ export class MapEffects {
         const head = await git.revParse(m.path, 'HEAD');
         const ours = await git.commitTree(m.path, curTree, 'GeneratorAI map merge base', head ?? undefined);
         const merged = await git.mergeTrees(m.path, base, ours, theirs);
-        if (!merged.supported) throw new Error('git cannot merge trees here (git 2.40 or later is needed for merge-tree --merge-base)');
+        if (!merged.supported) throw new Error(`git could not merge the trees of mount "${m.alias}"`);
         if (merged.conflicts.length > 0 || !merged.tree) {
           conflicts.push(`${m.alias}: ${merged.conflicts.slice(0, 10).join(', ')}${merged.conflicts.length > 10 ? ` (+${merged.conflicts.length - 10})` : ''}`);
           continue;
@@ -527,8 +527,8 @@ export function mapItemPlacement(state: RunState, inst: InstanceState): MapItemS
   return null;
 }
 
-/** A run as an instance inside a map item sees it: its primary directory and codebases are the item's. */
-export function runForItem<R extends Pick<WorkflowRun, 'systemVars'>>(run: R, item: MapItemState): R {
+/** A run as an instance inside a map item (or an isolated stage, D-155) sees it: its primary directory and codebases are the item's. */
+export function runForItem<R extends Pick<WorkflowRun, 'systemVars'>>(run: R, item: Pick<MapItemState, 'mounts' | 'primaryDir' | 'branch'>): R {
   const codebases: Record<string, RunCodebase> = {};
   for (const [alias, cb] of Object.entries(run.systemVars?.codebases ?? {})) {
     codebases[alias] = item.mounts?.[alias] ? { ...cb, path: item.mounts[alias]!, branch: item.branch ?? cb.branch } : cb;

@@ -1551,6 +1551,26 @@ its `sha512` integrity, unpacked with the system `tar` (macOS, Linux, Windows 10
 when it lands, `COPILOT_CLI_PATH` points at it (also at boot) and the provider is re-probed. A development checkout
 still has the platform package in node_modules and never downloads. Measured: a 154 MB download, 18 s, verified.
 
+### D-155 Parallel stages work in worktrees of their own (workflow evaluation, 2026-10-20) — Final
+Stages that ran at the same time shared the run's folder: in W1 the frontend read the backend's half-written types,
+and two stages' edits could land on top of each other. An agent stage that may run while another working stage of
+its scope does (neither reaches the other through edges; a planned step is weighed against its plan's other steps),
+or whose enclosing loop may, now works in its own git worktree (`domain/scheduler/isolation.ts`,
+`engine/StageIsolation.ts`):
+- **Cut** when the attempt starts, from a snapshot of the run folder as it is (uncommitted work included), on a branch
+  `generatorai/<run>-<stage>`, in a workspace whose root is fixed per (run, stage key): a retry continues in it and a
+  loop's next iteration gets the same path. The run folder's installed `node_modules` are linked in entry by entry
+  (real directories, so they stay ignored; relative workspace links resolve inside the worktree, so imports see the
+  stage's own edits).
+- **Merged** when the stage completes (after its approval gate and post-run hooks): a 3-way merge per mount under the
+  mount's exclusive lease (base: the snapshot, ours: the run folder now, theirs: the stage). A conflict applies
+  nothing; the worktree gets the merge with conflict markers and the agent resolves it in a turn of its own (twice at
+  most), then `merge_conflict` with the worktree kept. Merged worktrees go at once; the rest when the run finalizes.
+- `workspace: 'shared'` on a stage keeps it in the run folder, `'isolated'` always forks; nothing forks inside a map,
+  in an amendment, or when the run folder is not git backed. An isolated stage takes no `write` lease.
+- Git before 2.40 (Apple's git is 2.37) has no `merge-tree --merge-base`: `mergeTrees` falls back to a throwaway-index
+  merge (`read-tree -m --aggressive` + `merge-file`), which also fixes `mount_per_item` map merges there.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

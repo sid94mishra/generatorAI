@@ -234,6 +234,15 @@ export const AgentStageSchema = z
       .regex(/^[a-z][a-z0-9_]{0,47}$/)
       .optional()
       .describe('Stages with the same group share one conversation, one at a time'),
+    workspace: z
+      .enum(['auto', 'shared', 'isolated'])
+      .optional()
+      .describe(
+        "Where the stage edits: auto (default) works in its own git worktree while another stage of the run may run at the same time, merged back when it completes; shared always works in the run's folder; isolated always forks",
+      ),
+    reviewOf: StageKeySchema.optional().describe(
+      "The agent stage whose work this stage reviews: unless this stage pins its agent, provider or model, it runs on another provider than that stage's",
+    ),
     context: ContextSpecSchema.default({}),
     output: OutputContractSchema.default({}),
     retry: RetryPolicySchema.optional(),

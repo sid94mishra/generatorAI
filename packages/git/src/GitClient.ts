@@ -1696,7 +1696,12 @@ export class GitClient implements IGitClient {
    * back to a real `--no-commit` merge rather than mistaking an empty list for
    * a clean result.
    */
-  async mergeTrees(repoDir: string, base: string, ours: string, theirs: string): Promise<{ supported: boolean; tree: string | null; conflicts: string[] }> {
+  async mergeTrees(
+    repoDir: string,
+    base: string,
+    ours: string,
+    theirs: string,
+  ): Promise<{ supported: boolean; tree: string | null; conflicts: string[]; conflictTree?: string | null }> {
     let result;
     try {
       result = await this.runner.run('git', ['merge-tree', '--write-tree', '--name-only', `--merge-base=${base}`, ours, theirs], {
@@ -1705,18 +1710,91 @@ export class GitClient implements IGitClient {
         env: this.snapshotEnv(),
       });
     } catch {
-      return { supported: false, tree: null, conflicts: [] };
+      return this.mergeTreesViaIndex(repoDir, base, ours, theirs);
     }
+    // git before 2.40 has no `--merge-base` (a usage error): the index merge answers the same.
+    if (result.exitCode !== 0 && result.exitCode !== 1) return this.mergeTreesViaIndex(repoDir, base, ours, theirs);
     const lines = result.stdout.split('\n').map((l) => l.replace(/\r$/, ''));
     const tree = lines[0]?.trim() || null;
     if (result.exitCode === 0) return { supported: !!tree, tree, conflicts: [] };
-    if (result.exitCode !== 1) return { supported: false, tree: null, conflicts: [] };
     const conflicts: string[] = [];
     for (const line of lines.slice(1)) {
       if (line.trim().length === 0) break; // the informational messages follow a blank line
       if (!conflicts.includes(line)) conflicts.push(line);
     }
-    return { supported: true, tree: null, conflicts };
+    return { supported: true, tree: null, conflicts, conflictTree: tree };
+  }
+
+  /**
+   * `mergeTrees` for git before 2.40: `read-tree -m --aggressive` into a
+   * throwaway index settles every path only one side changed; each path both
+   * changed goes through `merge-file` (conflict markers when they overlap).
+   * A binary file, or one deleted on one side and changed on the other, is a
+   * conflict whose `conflictTree` keeps the version that still has it (ours
+   * first).
+   */
+  private async mergeTreesViaIndex(
+    repoDir: string,
+    base: string,
+    ours: string,
+    theirs: string,
+  ): Promise<{ supported: boolean; tree: string | null; conflicts: string[]; conflictTree?: string | null }> {
+    const unsupported = { supported: false, tree: null, conflicts: [] };
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gai-merge-'));
+    const env = this.snapshotEnv(path.join(dir, 'index'));
+    const git = (args: string[], stdin?: string) =>
+      this.runner.run('git', args, { cwd: repoDir, timeout: 120_000, env, ...(stdin !== undefined ? { stdin } : {}) });
+    try {
+      if ((await git(['read-tree', '-m', '-i', '--aggressive', base, ours, theirs])).exitCode !== 0) return unsupported;
+      const unmerged = await git(['ls-files', '-u', '-z']);
+      if (unmerged.exitCode !== 0) return unsupported;
+      const stages = new Map<string, Record<number, { mode: string; sha: string }>>();
+      for (const rec of unmerged.stdout.split('\0')) {
+        const tab = rec.indexOf('\t');
+        if (tab < 0) continue;
+        const [mode, sha, stage] = rec.slice(0, tab).split(' ');
+        const p = rec.slice(tab + 1);
+        stages.set(p, { ...(stages.get(p) ?? {}), [Number(stage)]: { mode: mode!, sha: sha! } });
+      }
+      const text = async (sha: string): Promise<string | null> => {
+        const r = await git(['cat-file', 'blob', sha]);
+        return r.exitCode === 0 && !r.stdout.includes('\0') && !r.stdout.includes('\uFFFD') ? r.stdout : null;
+      };
+      const conflicts: string[] = [];
+      const records: string[] = [];
+      for (const [p, st] of stages) {
+        const o = st[2];
+        const t = st[3];
+        const kept = (o ?? t)!;
+        let entry = { mode: kept.mode, sha: kept.sha };
+        let clean = false;
+        if (o && t) {
+          const [oc, tc, bc] = await Promise.all([text(o.sha), text(t.sha), st[1] ? text(st[1].sha) : Promise.resolve('')]);
+          if (oc !== null && tc !== null && bc !== null) {
+            const files = ['ours', 'base', 'theirs'].map((n) => path.join(dir, n));
+            await Promise.all([fs.writeFile(files[0]!, oc), fs.writeFile(files[1]!, bc), fs.writeFile(files[2]!, tc)]);
+            const merged = await git(['merge-file', '-p', '-L', 'run', '-L', 'base', '-L', 'stage', ...files]);
+            if (merged.exitCode >= 0 && merged.exitCode < 128) {
+              const blob = await git(['hash-object', '-w', '--stdin'], merged.stdout);
+              if (blob.exitCode !== 0) return unsupported;
+              entry = { mode: o.mode, sha: blob.stdout.trim() };
+              clean = merged.exitCode === 0;
+            }
+          }
+        }
+        if (!clean) conflicts.push(p);
+        records.push(`0 ${'0'.repeat(kept.sha.length)}\t${p}`, `${entry.mode} ${entry.sha}\t${p}`);
+      }
+      if (records.length > 0 && (await git(['update-index', '-z', '--index-info'], records.map((r) => `${r}\0`).join(''))).exitCode !== 0) return unsupported;
+      const write = await git(['write-tree']);
+      const tree = write.exitCode === 0 ? write.stdout.trim() || null : null;
+      if (!tree) return unsupported;
+      return conflicts.length === 0 ? { supported: true, tree, conflicts: [] } : { supported: true, tree: null, conflicts, conflictTree: tree };
+    } catch {
+      return unsupported;
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 
   async checkoutTree(repoDir: string, fromTree: string, toTree: string, indexFile: string): Promise<void> {

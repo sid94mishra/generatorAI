@@ -139,6 +139,16 @@ export class StageBuilder {
     this.spec.sessionGroup = group;
     return this;
   }
+  /** Where the stage edits (D-155): its own worktree while it may run alongside another stage (`auto`), always the run's folder, or always its own. */
+  workspace(mode: 'auto' | 'shared' | 'isolated'): this {
+    this.spec.workspace = mode;
+    return this;
+  }
+  /** The stage whose work this one reviews: an unpinned reviewer runs on another provider. */
+  reviewOf(stageKey: string): this {
+    this.spec.reviewOf = stageKey;
+    return this;
+  }
   /** With sessionReuse continue: replace the conversation by a deterministic digest every n iterations. */
   compactAfter(n: number): this {
     this.spec.compactAfter = n;

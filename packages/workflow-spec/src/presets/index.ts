@@ -972,7 +972,7 @@ export const planThenExecute = define({
         .string()
         .min(1)
         .default(
-          'Goal: {{variables.goal}}\nPlan how to reach it as a few independent or ordered steps. Each step is a stage run by its own agent in this workspace: give it a short key, a name and a precise, self-contained prompt; mark read-only steps readOnly. Add an edge from a step to every step that needs its result; steps without edges between them run in parallel.',
+          'Goal: {{variables.goal}}\nPlan how to reach it as a few independent or ordered steps. Each step is a stage run by its own agent in this workspace: give it a short key, a name and a precise, self-contained prompt; mark read-only steps readOnly. Add an edge from a step to every step that needs its result; steps without edges between them run in parallel, each in its own copy of the code that merges back when it finishes, so a step never sees a parallel step\'s changes.',
         ),
     })
     .strict(),
