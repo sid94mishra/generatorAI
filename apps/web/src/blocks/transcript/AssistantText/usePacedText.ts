@@ -12,12 +12,15 @@
 // D-152: the rate is eased (`easeMs`), so a burst glides in and slows into
 // its last words; useRevealFade softens the leading edge.
 //
-// D-160: the reveal holds a reading pace (~110 characters a second) instead of
-// the model's 300+, trailing what arrived by at most a few seconds; it goes by
-// whole words (a half-typed word at a line end jumped to the next line), and
-// it paints only markdown that renders as it will stay (`visibleLength`: whole
+// D-160: the reveal holds a reading pace (~130 characters a second) instead of
+// the model's 300+, trailing what arrived by at most 8 s; it goes by whole
+// words (a half-typed word at a line end jumped to the next line), and it
+// paints only markdown that renders as it will stay (`visibleLength`: whole
 // table rows and code lines, a list item with its first word). When the turn
-// ends the rest glides in within about a second and a half.
+// ends the rest glides in over a few seconds — also across the swap of the live
+// turn for its persisted message: the live panel publishes its progress
+// (`handoff`) and the persisted panel that mounts with the same text picks the
+// reveal up there instead of showing the last thousand characters at once.
 // ────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from 'react';
@@ -28,9 +31,32 @@ import { prefersReducedMotion } from '@/ui/lib/motion.js';
 const MOUNT_REPLAY_LIMIT = 240;
 
 /** Reading pace while text streams, and the longest the reveal may trail what arrived (D-160). */
-const STREAM = { drainMs: 1200, maxCharsPerSecond: 110, maxLagMs: 4000 } as const;
-/** After the turn ends: the rest catches up, eased, within about this. */
-const END = { drainMs: 500, maxCharsPerSecond: 110, maxLagMs: 1200 } as const;
+const STREAM = { drainMs: 1200, maxCharsPerSecond: 130, maxLagMs: 8000 } as const;
+/** After the turn ends: the rest catches up, eased, trailing by at most this. */
+const END = { drainMs: 600, maxCharsPerSecond: 130, maxLagMs: 1500 } as const;
+
+/**
+ * Reveal progress by answer, for the live → persisted swap: keyed by the text's
+ * first characters (the same answer in both panels), read by a panel mounting
+ * within HANDOFF_MS of the last write.
+ */
+const handoff = new Map<string, { shown: number; rate: number; at: number }>();
+const HANDOFF_MS = 2000;
+const HANDOFF_KEY_CHARS = 200;
+const handoffKey = (text: string) => text.slice(0, HANDOFF_KEY_CHARS);
+
+function publishProgress(text: string, state: TextPacerState): void {
+  const now = performance.now();
+  for (const [key, entry] of handoff) if (now - entry.at > HANDOFF_MS) handoff.delete(key);
+  if (state.shown < text.length) handoff.set(handoffKey(text), { shown: state.shown, rate: state.rate, at: now });
+  else handoff.delete(handoffKey(text));
+}
+
+function resumedProgress(text: string): TextPacerState | null {
+  const entry = handoff.get(handoffKey(text));
+  if (!entry || performance.now() - entry.at > HANDOFF_MS || entry.shown >= text.length) return null;
+  return { shown: entry.shown, carry: 0, sinceStep: 0, rate: entry.rate };
+}
 /** Time constant of the eased reveal rate, and the slowest rate (characters per second). */
 const EASE_MS = 400;
 const MIN_CHARS_PER_SECOND = 40;
@@ -40,8 +66,12 @@ export function usePacedText(text: string, active: boolean, options: { paced?: b
   // A panel mounted in the middle of a long stream (navigating back to a chat)
   // shows what already arrived and paces only what comes next.
   const startPaced = active && paced && text.length < MOUNT_REPLAY_LIMIT;
-  const [shown, setShown] = useState(() => (startPaced ? 0 : text.length));
-  const stateRef = useRef<TextPacerState>(startPaced ? INITIAL_PACER_STATE : flushPacer(text));
+  // …and one that replaces a live panel mid-reveal (the turn just ended) carries on from where it was.
+  const [initial] = useState<TextPacerState>(() =>
+    (paced && !active ? resumedProgress(text) : null) ?? (startPaced ? INITIAL_PACER_STATE : flushPacer(text)),
+  );
+  const [shown, setShown] = useState(initial.shown);
+  const stateRef = useRef<TextPacerState>(initial);
   const textRef = useRef(text);
   textRef.current = text;
   // The turn ended with text still to reveal: it catches up quickly instead of landing in one frame.
@@ -55,7 +85,11 @@ export function usePacedText(text: string, active: boolean, options: { paced?: b
     stateRef.current = flushPacer(textRef.current);
     setShown(textRef.current.length);
   }, [paced, text]);
+  const flushKeyRef = useRef(flushKey);
   useEffect(() => {
+    // A change, not the mount: on mount it flushed the reveal a panel had just started (or resumed).
+    if (flushKeyRef.current === flushKey) return;
+    flushKeyRef.current = flushKey;
     stateRef.current = flushPacer(textRef.current);
     setShown(textRef.current.length);
   }, [flushKey]);
@@ -83,6 +117,7 @@ export function usePacedText(text: string, active: boolean, options: { paced?: b
         minCharsPerSecond: MIN_CHARS_PER_SECOND,
       });
       stateRef.current = next;
+      publishProgress(textRef.current, next);
       setShown(next.shown);
       if (next.shown < textRef.current.length) frame = requestAnimationFrame(tick);
     };

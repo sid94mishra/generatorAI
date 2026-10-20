@@ -1617,9 +1617,12 @@ shows **result**, then the raw `outputData`, then the text as **last message**; 
 The owner found streaming too fast to follow and flickering. Filmed at ~52 fps, an answer revealed at the model's
 ~310 characters a second; a table's columns re-flowed every frame as cells grew by a character; a half-typed word at a
 line end jumped to the next line; the newest characters wore a Running-tinted band; and the caret hopped word to word
-and line to line. Now (client-core `textPacer`, shared with mobile): the reveal holds ~110 characters a second
-(`maxCharsPerSecond`), trailing what arrived by at most 4 s (`maxLagMs`), eased (400 ms), whole words, the overshoot of
-finishing a word paid back by the next frames; after the turn ends the rest glides in within ~1.2 s instead of 250 ms.
+and line to line. Now (client-core `textPacer`, shared with mobile): the reveal holds ~130 characters a second
+(`maxCharsPerSecond`), trailing what arrived by at most 8 s (`maxLagMs`), eased (400 ms), whole words, the overshoot of
+finishing a word paid back by the next frames; after the turn ends the rest glides in over a few seconds. That glide
+used to be cut short: the live turn is swapped for its persisted message, whose fresh panel showed everything — about
+1,000 characters landing at once at the end of a long answer. The live panel now publishes its progress, and the
+persisted panel mounting with the same text resumes the reveal from there.
 `visibleLength` paints a table row, a code line or a fence only when complete, a table header together with its
 delimiter row, a list item or heading with its first word, and never a lone rule line (they rendered as a paragraph of
 pipes, a setext underline, an empty item). The leading edge fades in neutral ink over ~540 ms (six Custom Highlights,
