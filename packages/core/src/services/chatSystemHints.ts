@@ -267,6 +267,16 @@ export const REPLY_LENGTH_HINT =
   '- When the request names a length (words, lines, pages, items), stay within about 10% of it. If the content truly ' +
   'needs more, deliver the requested length and say in one line what you left out.';
 
+/**
+ * A read-only stage runs in permission mode `plan` without the plan tool (E-6), yet Claude's plan mode still tells
+ * the model to finish with ExitPlanMode: it went looking for the tool, loaded it, and closed with "I couldn't call
+ * ExitPlanMode here" (evaluation, 2026-10-20). Told to such stages only.
+ */
+export const READ_ONLY_STAGE_HINT =
+  '\n\n[Read-only stage]\n' +
+  '- This stage only reads. There is no plan to approve and no ExitPlanMode tool: do not look for it. When the work is ' +
+  'done, give your answer (or submit your output) directly.';
+
 export function buildWorkspaceHint(input: WorkspaceHintInput): string {
   const [primary, ...rest] = input.mounts;
   const lines: string[] = ['', '', '[Workspace]'];

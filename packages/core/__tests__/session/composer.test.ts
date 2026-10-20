@@ -244,3 +244,14 @@ describe('composer platform gating', () => {
     ).rejects.toMatchObject({ code: 'agent_not_found' });
   });
 });
+
+// Evaluation 2026-10-20 — a read-only stage (plan permission, no plan tool) is told there is no plan to exit.
+describe('read-only stage hint', () => {
+  const systemOf = (params: unknown) => JSON.stringify((params as { systemMessage?: unknown }).systemMessage ?? '');
+  it('tells a stage without ExitPlanMode not to look for it, and nobody else', async () => {
+    const readOnly = await composer().compose(stageInput({ spec: { harnessType: 'claude-agent', permissionMode: 'plan', tools: { excluded: ['ExitPlanMode'] } } }));
+    expect(systemOf(readOnly.params)).toContain('no ExitPlanMode tool');
+    const writer = await composer().compose(stageInput({ spec: { harnessType: 'claude-agent' } }));
+    expect(systemOf(writer.params)).not.toContain('ExitPlanMode');
+  });
+});

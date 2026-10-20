@@ -49,7 +49,7 @@ import { PlatformToolBinder, type BindTarget } from './PlatformToolBinder.js';
 import { resolveMcp } from './resolveMcp.js';
 import { ComposeError, ownerTag, type ComposeWarning, type SessionComposerDeps, type SessionOwner, type TurnContext, type TurnPolicy } from './types.js';
 import { applyWorkspaceExposure } from './workspaceExposure.js';
-import { REPLY_LENGTH_HINT, buildWorkspaceHint } from '../chatSystemHints.js';
+import { READ_ONLY_STAGE_HINT, REPLY_LENGTH_HINT, buildWorkspaceHint } from '../chatSystemHints.js';
 
 export interface ComposeInput {
   owner: SessionOwner;
@@ -215,6 +215,8 @@ export class SessionComposer {
         : workspaceHint,
     );
     appendSystemBlock(cfg, REPLY_LENGTH_HINT);
+    // A read-only stage has no plan tool (E-6): it is told so, or it goes looking for ExitPlanMode.
+    if (i.owner.kind === 'stage' && i.spec.tools?.excluded?.includes('ExitPlanMode')) appendSystemBlock(cfg, READ_ONLY_STAGE_HINT);
 
     const provider = await this.providerOf(cfg, i.conversationId);
     const levels = capabilityLevelsFor(provider);
