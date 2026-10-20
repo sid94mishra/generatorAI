@@ -23,6 +23,21 @@ import { InlineCode } from '@/ui/primitives/InlineCode/InlineCode.js';
 import { useConfirm } from '@/ui/primitives/AlertDialog/AlertDialog.js';
 import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import { jsonAnswerMarkdown } from '@/blocks/transcript/index.js';
+import { hasStructuredOutput, structuredOutputMarkdown } from '../model/structuredOutput.js';
+
+/** The output under review: a structured one readable field by field (D-159), else as it came. */
+function reviewMarkdown(output: string): string {
+  const trimmed = output.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const data: unknown = JSON.parse(trimmed);
+      if (hasStructuredOutput(data)) return structuredOutputMarkdown(data);
+    } catch {
+      /* not JSON after all */
+    }
+  }
+  return jsonAnswerMarkdown(output);
+}
 
 export interface ReviewCardProps {
   stageName: string;
@@ -120,7 +135,7 @@ export function ReviewCard({
         ) : null}
         {output ? (
           <section aria-label="Output to approve" className="max-h-96 overflow-auto rounded-card border border-line-soft bg-sunken px-3 py-2" data-testid="stage-review-output">
-            <Markdown>{jsonAnswerMarkdown(output)}</Markdown>
+            <Markdown>{reviewMarkdown(output)}</Markdown>
           </section>
         ) : null}
         <Textarea

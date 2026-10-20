@@ -492,7 +492,9 @@ export function WorkflowRunPage() {
   // D-30: no success toast; a failed copy says so.
   const handleCopyOutput = useCallback((stageId: string) => {
     const sr = stageRunsRef.current?.find((s) => s.id === stageId);
-    const text = sr?.outputText ?? (sr?.outputData ? JSON.stringify(sr.outputData, null, 2) : '');
+    // A JSON stage copies its data, not its closing remark (D-159).
+    const data = sr?.kind === 'agent' && sr.outputData && typeof sr.outputData === 'object' ? JSON.stringify(sr.outputData, null, 2) : undefined;
+    const text = data ?? sr?.outputText ?? (sr?.outputData ? JSON.stringify(sr.outputData, null, 2) : '');
     if (!text) return;
     void navigator.clipboard.writeText(text).catch(() => toast.error('Could not copy the output'));
   }, []);

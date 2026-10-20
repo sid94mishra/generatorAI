@@ -21,6 +21,7 @@ import type { UsageInfo } from '@generatorai/client-core';
 import type { RunView, StageView, StageStatus, RunStatus, HookInvocation, MapView, WaitView } from './types.js';
 import { deriveTimeline, deriveAnswer, deriveSegments, widgetBlocks } from '@generatorai/client-core';
 import { deriveLoopView, parseLoopPath } from './loopView.js';
+import { hasStructuredOutput, structuredOutputMarkdown } from './structuredOutput.js';
 import type { AdmissionWait } from '@/stores/workflowRunStore.js';
 
 // ── Status normalizers ────────────────────────────────────────
@@ -464,7 +465,9 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
   const streamLive = isLive(stream) && !STOPPED_STAGE_STATUSES.has(status);
   const conversing = streamLive || hasConversation(stream);
   const streamedAnswer = deriveAnswer(stream?.blocks);
-  const persistedAnswer = (isTerminal || completionReview) && !conversing ? sr.outputText?.trim() : undefined;
+  // A JSON stage's answer is its data, not its closing remark (D-159).
+  const persisted = sr.kind === 'agent' && hasStructuredOutput(sr.outputData) ? structuredOutputMarkdown(sr.outputData) : sr.outputText?.trim();
+  const persistedAnswer = (isTerminal || completionReview) && !conversing ? persisted : undefined;
   const answer = persistedAnswer || streamedAnswer;
   const segments = persistedAnswer ? [] : deriveSegments(stream?.blocks, { active: status === 'running' || streamLive });
 

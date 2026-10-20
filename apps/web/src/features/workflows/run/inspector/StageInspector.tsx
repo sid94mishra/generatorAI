@@ -17,6 +17,7 @@ import { cn } from '@/ui/lib/cn.js';
 import { CodeBlock } from '@/ui/patterns/CodeBlock/CodeBlock.js';
 import { Inspector } from '@/ui/patterns/Inspector/Inspector.js';
 import { KeyValueList, type KeyValueItem } from '@/ui/patterns/KeyValueList/KeyValueList.js';
+import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Dialog } from '@/ui/primitives/Dialog/Dialog.js';
@@ -25,6 +26,7 @@ import { StatusBadge } from '@/ui/primitives/StatusBadge/StatusBadge.js';
 import { StatusDot, type DotTone } from '@/ui/primitives/StatusDot/StatusDot.js';
 import type { TabItem } from '@/ui/primitives/Tabs/Tabs.js';
 import { compactCount, formatMs, formatUsd } from '../model/format.js';
+import { hasStructuredOutput, structuredOutputMarkdown } from '../model/structuredOutput.js';
 import type { FileChange, HookInvocation, StageView } from '../model/types.js';
 import { StageEventsTab } from './StageEventsTab.js';
 import { StageHistoryTab } from './StageHistoryTab.js';
@@ -221,23 +223,37 @@ function OutputTab({ stage }: { stage: StageView }) {
   // A text stage whose summary IS its output would render the same wall of
   // text twice — prefer the output text, hide the summary.
   const summaryMatchesText = !!text && !!summary && summary.trim() === text.trim();
-  const showSummary = !!summary && !summaryMatchesText;
+  // A JSON stage's result is its data; its text is the closing remark it ended on (D-159). A summary that only
+  // restates the data's own fields is not shown again.
+  const structured = stage.kind === 'agent' && hasStructuredOutput(data);
+  const showSummary = !!summary && !summaryMatchesText && !structured;
   const facts = stageFacts(stage);
+  const textBlock = text ? (
+    <div>
+      <Caption icon="file-text">{structured ? 'last message' : 'output'}</Caption>
+      <p className={cn('rounded-control border border-line-soft p-2 text-small whitespace-pre-wrap', structured ? 'bg-raised text-fg-2' : 'bg-sunken text-fg')}>{text}</p>
+    </div>
+  ) : null;
   return (
     <div className="flex flex-col gap-3">
       {!data && !summary && !text ? <p className="text-small text-fg-3">No structured output or summary.</p> : null}
-      {text ? (
-        <div>
-          <Caption icon="file-text">output</Caption>
-          <p className="rounded-control border border-line-soft bg-sunken p-2 text-small whitespace-pre-wrap text-fg">{text}</p>
+      {structured ? (
+        <div data-testid="stage-structured-result">
+          <Caption icon="database">result</Caption>
+          <div className="rounded-control border border-line-soft bg-sunken px-3 py-2">
+            <Markdown>{structuredOutputMarkdown(data)}</Markdown>
+          </div>
         </div>
-      ) : null}
+      ) : (
+        textBlock
+      )}
       {data ? (
         <div>
           <Caption icon="database">outputData</Caption>
           <CodeBlock lang="json">{JSON.stringify(data, null, 2)}</CodeBlock>
         </div>
       ) : null}
+      {structured ? textBlock : null}
       {showSummary ? (
         <div>
           <Caption icon="file-text">summary</Caption>

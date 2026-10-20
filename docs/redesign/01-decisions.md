@@ -1603,6 +1603,14 @@ are in the tokens and not in the cost, and that a cost limit does not count them
 reported". Still no pricing table (P07 WP-7.3): nothing is estimated, and `maxTokens` is the limit that sees every
 provider (the validator's `budget-cost-unsupported` already says so).
 
+### D-159 A JSON stage shows its result, not its last remark (workflow evaluation, 2026-10-20) — Final
+A stage with a structured output ends its turn on a closing sentence; W1's Spec row read "Now I'm writing the spec…"
+while the spec was only in the data (successors already got the data, `jsonSummary`). A finished or under-review agent
+stage with an object or list output now shows that data as its answer, readable field by field
+(`structuredOutputMarkdown`: each field under its label, lists as bullets, a list of flat records one bullet per
+record, deeper nesting as JSON). The approval card renders a JSON output the same way; the inspector's Output tab
+shows **result**, then the raw `outputData`, then the text as **last message**; Copy output copies the JSON.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
