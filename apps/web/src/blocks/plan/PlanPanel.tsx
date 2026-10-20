@@ -4,7 +4,8 @@
 // The full plan document: path + status, revision switcher (older revisions
 // are read-only with a stale banner), rendered content, inline review
 // comments anchored to selected text, edit with an optimistic revision (409 →
-// "Plan changed while you were editing"), save a tracked copy to the
+// "Plan changed while you were editing") in an editor that fills the panel
+// (Write / Preview, ⌘S saves as the next revision, Esc cancels), save a tracked copy to the
 // workspace, and the decision footer (Discard · +N comments · Request changes
 // · Approve, Ctrl+Enter). Revisions and anchored comments are the existing API.
 //
@@ -89,6 +90,7 @@ export function PlanPanel({ chatId, planId }: PlanPanelProps) {
   const [viewRevision, setViewRevision] = useState<number | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
+  const [editorView, setEditorView] = useState<'write' | 'preview'>('write');
   const [feedback, setFeedback] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -179,6 +181,20 @@ export function PlanPanel({ chatId, planId }: PlanPanelProps) {
     }
   };
 
+  const dirty = editing && draft !== revision.content;
+
+  // ⌘/Ctrl+S saves the edit as a new revision; Esc leaves the editor (the draft is discarded).
+  const onEditorKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 's' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      if (dirty && !updateContent.isPending) void handleSaveEdit();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      setEditing(false);
+    }
+  };
+
   const handleDecision = async (approved: boolean, action?: PlanAction) => {
     try {
       await decide.mutateAsync({
@@ -225,6 +241,7 @@ export function PlanPanel({ chatId, planId }: PlanPanelProps) {
                 label="Edit plan"
                 onClick={() => {
                   setDraft(revision.content);
+                  setEditorView('write');
                   setEditing(true);
                 }}
               />
@@ -266,20 +283,49 @@ export function PlanPanel({ chatId, planId }: PlanPanelProps) {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {editing ? (
-          <div className="flex h-full flex-col gap-2 p-3">
-            <Textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              aria-label="Edit plan document"
-              spellCheck={false}
-              className="min-h-0 flex-1"
-              textareaClassName="font-mono text-small"
-            />
-            <div className="flex items-center justify-end gap-1.5">
-              <Button size="sm" variant="ghost" icon="x" onClick={() => setEditing(false)}>
+          <div className="flex h-full min-h-0 flex-col gap-2 p-3" data-testid="plan-editor" onKeyDown={onEditorKeyDown}>
+            <div className="flex shrink-0 items-center gap-2">
+              <SegmentedControl
+                label="Plan editor view"
+                value={editorView}
+                onValueChange={(v) => setEditorView(v === 'preview' ? 'preview' : 'write')}
+                items={[
+                  { value: 'write', label: 'Write' },
+                  { value: 'preview', label: 'Preview' },
+                ]}
+              />
+              <span className="ml-auto text-small text-fg-3" role="status">
+                {dirty ? 'Unsaved changes' : 'No changes yet'}
+              </span>
+            </div>
+            {editorView === 'write' ? (
+              <Textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                aria-label="Edit plan document"
+                spellCheck={false}
+                autoFocus
+                className="min-h-0 flex-1"
+                textareaClassName="h-full min-h-0 flex-1 resize-none px-3 py-2.5 font-mono text-small"
+              />
+            ) : (
+              <div className="min-h-0 flex-1 overflow-y-auto rounded-control border border-line-soft px-4 py-3" data-testid="plan-editor-preview">
+                <Markdown>{draft}</Markdown>
+              </div>
+            )}
+            <div className="flex shrink-0 items-center justify-end gap-1.5">
+              <Button size="sm" variant="ghost" icon="x" shortcut={['Esc']} onClick={() => setEditing(false)}>
                 Cancel
               </Button>
-              <Button size="sm" variant="primary" icon="save" loading={updateContent.isPending} onClick={() => void handleSaveEdit()}>
+              <Button
+                size="sm"
+                variant="primary"
+                icon="save"
+                shortcut={modChord('S')}
+                disabled={!dirty}
+                loading={updateContent.isPending}
+                onClick={() => void handleSaveEdit()}
+              >
                 Save as v{plan.currentRevision + 1}
               </Button>
             </div>
