@@ -308,6 +308,8 @@ export function buildWorkspaceHint(input: WorkspaceHintInput): string {
   // Evaluation: agents edited files through `python3 - <<EOF` and `sed -i` scripts, which every approval policy treats
   // as an arbitrary shell command (a card each time even in Accept edits), where the edit tool is allowed outright.
   lines.push('- Edit files with your file-edit tools, not with shell scripts, heredocs or sed; keep the shell for running commands.');
+  // Evaluation W1: QA added a root `typecheck` script because the spec named a command the repo did not have.
+  lines.push("- If a command you were told to run does not exist (no such script), say so; don't add scripts, dependencies or config the task did not ask for.");
   // Asked for an exact response shape, an agent deleted an endpoint's existing latency fields to fit it and never
   // said so; told to say so, the next one did — and still left the web client unwrapping the envelope it removed.
   // Disclosure alone is not enough: the callers have to be looked up.
