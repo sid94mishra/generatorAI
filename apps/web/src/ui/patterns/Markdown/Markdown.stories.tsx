@@ -145,28 +145,22 @@ export const FencedCode: Story = {
   },
 };
 
-/**
- * Streaming: an unterminated `**bold` is repaired (no literal asterisks) and
- * the 2px caret sits right after the last word, inside the bold run.
- */
+/** Streaming: an unterminated `**bold` is repaired (no literal asterisks); no caret (D-160). */
 export const StreamingIncompleteBold: Story = {
   args: { children: INCOMPLETE_BOLD, streaming: true },
   play: async ({ canvas, canvasElement }) => {
     await expect(canvasElement.textContent).not.toContain('**');
     const strong = canvas.getByText(/important part is the guard/).closest('strong');
     await expect(strong).not.toBeNull();
-    // The caret is the bold run's own ::after (D-91): it hosts the `data-gai-caret` mark.
-    await expect(strong!.hasAttribute('data-gai-caret')).toBe(true);
   },
 };
 
-/** Streaming: an unterminated fence renders as a (not yet highlighted) code block, caret below it. */
+/** Streaming: an unterminated fence renders as a (not yet highlighted) code block. */
 export const StreamingIncompleteFence: Story = {
   args: { children: INCOMPLETE_FENCE, streaming: true },
   play: async ({ canvasElement }) => {
     await expect(canvasElement.textContent).not.toContain('```');
     await expect(canvasElement.querySelector('pre')?.textContent).toContain('return null;');
-    await expect(canvasElement.querySelector('span[aria-hidden="true"].caret-stream')).not.toBeNull();
   },
 };
 
@@ -188,11 +182,10 @@ export const Streaming: Story = {
   render: () => <LiveStream />,
   play: async ({ canvasElement }) => {
     await waitFor(() => expect(canvasElement.textContent).toContain('second line'), { timeout: 30_000 });
-    await waitFor(() => expect(canvasElement.querySelector('span[aria-hidden="true"].caret-stream')).toBeNull());
   },
 };
 
-/** Empty source renders nothing (while streaming: just the caret). */
+/** Empty source renders nothing, streaming or not. */
 export const Empty: Story = {
   args: { children: '' },
 };

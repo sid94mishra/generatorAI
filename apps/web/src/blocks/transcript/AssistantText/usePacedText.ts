@@ -9,24 +9,31 @@
 // turn ends the rest catches up within 250 ms rather than in one frame.
 // Reduced motion reveals whole bursts in steps.
 //
-// D-152: the reveal goes by character with an eased rate (`easeMs`), so a
-// burst glides in and slows into its last words instead of popping whole
-// words at a held speed; useRevealFade softens the leading edge.
+// D-152: the rate is eased (`easeMs`), so a burst glides in and slows into
+// its last words; useRevealFade softens the leading edge.
+//
+// D-160: the reveal holds a reading pace (~110 characters a second) instead of
+// the model's 300+, trailing what arrived by at most a few seconds; it goes by
+// whole words (a half-typed word at a line end jumped to the next line), and
+// it paints only markdown that renders as it will stay (`visibleLength`: whole
+// table rows and code lines, a list item with its first word). When the turn
+// ends the rest glides in within about a second and a half.
 // ────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from 'react';
-import { INITIAL_PACER_STATE, advancePacer, flushPacer, type TextPacerState } from '@generatorai/client-core';
+import { INITIAL_PACER_STATE, advancePacer, flushPacer, visibleLength, type TextPacerState } from '@generatorai/client-core';
 import { prefersReducedMotion } from '@/ui/lib/motion.js';
 
 /** Text longer than this when the panel mounts is shown at once, not replayed. */
 const MOUNT_REPLAY_LIMIT = 240;
 
-/** While text streams, a burst is shown within this; after the turn ends the rest catches up within END_DRAIN_MS. */
-const STREAM_DRAIN_MS = 900;
-const END_DRAIN_MS = 250;
+/** Reading pace while text streams, and the longest the reveal may trail what arrived (D-160). */
+const STREAM = { drainMs: 1200, maxCharsPerSecond: 110, maxLagMs: 4000 } as const;
+/** After the turn ends: the rest catches up, eased, within about this. */
+const END = { drainMs: 500, maxCharsPerSecond: 110, maxLagMs: 1200 } as const;
 /** Time constant of the eased reveal rate, and the slowest rate (characters per second). */
-const EASE_MS = 220;
-const MIN_CHARS_PER_SECOND = 70;
+const EASE_MS = 400;
+const MIN_CHARS_PER_SECOND = 40;
 
 export function usePacedText(text: string, active: boolean, options: { paced?: boolean; flushKey?: unknown } = {}): string {
   const paced = options.paced !== false;
@@ -60,7 +67,7 @@ export function usePacedText(text: string, active: boolean, options: { paced?: b
     let frame = 0;
     let last: number | null = null;
     const reducedMotion = prefersReducedMotion();
-    const drainMs = active ? STREAM_DRAIN_MS : END_DRAIN_MS;
+    const pace = active ? STREAM : END;
     const tick = (now: number) => {
       if (typeof document !== 'undefined' && document.hidden) {
         stateRef.current = flushPacer(textRef.current);
@@ -71,9 +78,8 @@ export function usePacedText(text: string, active: boolean, options: { paced?: b
       last = now;
       const next = advancePacer(stateRef.current, textRef.current, dt, {
         reducedMotion,
-        drainMs,
+        ...pace,
         easeMs: EASE_MS,
-        wordSlack: 0,
         minCharsPerSecond: MIN_CHARS_PER_SECOND,
       });
       stateRef.current = next;
@@ -84,5 +90,5 @@ export function usePacedText(text: string, active: boolean, options: { paced?: b
     return () => cancelAnimationFrame(frame);
   }, [revealing, active, text]);
 
-  return revealing ? text.slice(0, Math.min(shown, text.length)) : text;
+  return revealing ? text.slice(0, visibleLength(text, shown, !active)) : text;
 }

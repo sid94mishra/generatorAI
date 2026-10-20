@@ -1,14 +1,14 @@
 // ────────────────────────────────────────────────────────────────
-// useRevealFade — the newest streamed characters fade in (D-91, D-152).
+// useRevealFade — the newest streamed words fade in (D-91, D-152, D-160).
 //
 // Drawn with the CSS Custom Highlight API: six highlights (`gai-reveal-1…6`,
-// globals.css) colour the text revealed in the last 70 / 140 / … / 420 ms from
-// a faint Running tint up to full ink, so each character settles in over
-// ~420 ms on an eased curve — a soft shimmer riding the leading edge rather
-// than the abrupt three-step fade that read as flicker. No element is
-// added, moved or re-rendered — colour only, so there is no layout shift and
-// the markdown tree is untouched. Off with reduced motion, where the API is
-// missing, and ~420 ms after the reveal ends.
+// globals.css) colour the text revealed in the last 90 / 180 / … / 540 ms
+// from faint ink up to full ink, so each word settles in over ~half a second
+// — a soft shimmer riding the leading edge. Neutral ink only (D-160): the
+// Running-tinted edge read as a coloured band flickering along the line.
+// No element is added, moved or re-rendered — colour only, so there is no
+// layout shift and the markdown tree is untouched. Off with reduced motion,
+// where the API is missing, and ~540 ms after the reveal ends.
 //
 // The ranges are rebuilt every frame AND right after each commit (`version`):
 // React rewriting a text node collapses every range inside it, so ranges built
@@ -21,7 +21,7 @@ import { prefersReducedMotion } from '@/ui/lib/motion.js';
 
 const NAMES = ['gai-reveal-1', 'gai-reveal-2', 'gai-reveal-3', 'gai-reveal-4', 'gai-reveal-5', 'gai-reveal-6'] as const;
 /** Upper age, in ms, of the text each highlight covers (newest first). */
-const AGES = [70, 140, 210, 280, 350, 420] as const;
+const AGES = [90, 180, 270, 360, 450, 540] as const;
 
 type Highlights = { set(name: string, value: unknown): void; delete(name: string): void };
 type HighlightCtor = new (...ranges: Range[]) => unknown;
@@ -103,7 +103,7 @@ export function useRevealFade(ref: RefObject<HTMLElement | null>, active: boolea
           for (let i = history.length - 1; i >= 0; i -= 1) if (now - history[i]!.t >= age) return history[i]!.len;
           return history[0]!.len;
         };
-        // [len … lenAt(70)) newest, then [lenAt(70) … lenAt(140)), … [lenAt(350) … lenAt(420)).
+        // [len … lenAt(90)) newest, then [lenAt(90) … lenAt(180)), … [lenAt(450) … lenAt(540)).
         const cuts = [len, ...AGES.map(lenAt)];
         panels.set(id, rangesFor(el, len, cuts));
         publish();

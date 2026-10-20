@@ -35,7 +35,7 @@ export interface TurnBodyProps {
   answer?: string | undefined;
   /** The turn is live (streaming or parked on a gate). */
   active?: boolean;
-  /** Answer tokens are arriving (caret on the last answer). Default: `active`. */
+  /** Answer tokens are arriving (the last answer reveals at a reading pace). Default: `active`. */
   answerStreaming?: boolean;
   /** Tokens are expected but none have arrived yet. */
   loading?: boolean;
@@ -202,8 +202,8 @@ function TurnBodyImpl({
         </div>
       ) : null}
 
-      {/* While the answer itself is streaming its caret shows the activity; a spinner row under
-          moving text only travelled down with every line (D-91). */}
+      {/* While the answer itself is streaming its fading leading edge shows the activity (D-160); a spinner
+          row under moving text only travelled down with every line (D-91). */}
       {active && !awaitingUser && (summary || !(streaming && lastAnswer === list.length - 1)) ? (
         <WorkingIndicator aria-label={TRANSCRIPT_COPY.generating} label={TRANSCRIPT_COPY.workingSteps(summary ? stepCount : 0)} />
       ) : null}

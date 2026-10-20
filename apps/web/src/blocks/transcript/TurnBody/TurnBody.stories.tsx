@@ -93,7 +93,7 @@ export const EveryBlockKind: Story = {
   },
 };
 
-/** Streaming: live steps, the caret on the last answer. */
+/** Streaming: live steps, the last answer revealing. */
 export const Streaming: Story = {
   args: {
     segments: deriveSegments(

@@ -18,7 +18,7 @@ vi.mock('../CodeBlock/CodeBlock.js', () => ({
 
 import { Markdown } from './Markdown.js';
 
-/** The caret: a host element's `::after` (D-91), or the bar element when nothing can host it. */
+/** The old streaming caret (removed in D-160): a host mark or the bar element. */
 const CARET = '[data-gai-caret], span[aria-hidden="true"].caret-stream';
 
 describe('Markdown', () => {
@@ -65,14 +65,11 @@ describe('Markdown', () => {
     expect(screen.getByText(/\[blocked\]/).className).toBe('text-fg-3');
   });
 
-  it('repairs incomplete markdown and draws the caret at the end of the text while streaming', () => {
+  it('repairs incomplete markdown while streaming, with no caret (D-160)', () => {
     const { container } = render(<Markdown streaming>{'Intro.\n\nThe **important part'}</Markdown>);
     expect(container.textContent).not.toContain('**');
-    const caret = container.querySelector(CARET);
-    expect(caret).not.toBeNull();
-    // Inside the bold run being typed, not on a line of its own.
-    expect(caret!.tagName).toBe('STRONG');
-    expect(container.querySelectorAll(CARET)).toHaveLength(1);
+    expect(container.querySelector('strong')?.textContent).toBe('important part');
+    expect(container.querySelector(CARET)).toBeNull();
   });
 
   it('renders an unterminated fence as a plain (not yet highlighted) code block', () => {
@@ -82,19 +79,12 @@ describe('Markdown', () => {
     expect(block.dataset.lang).toBe('');
   });
 
-  it('drops the caret when streaming ends', () => {
-    const { container, rerender } = render(<Markdown streaming>{'Hello'}</Markdown>);
-    expect(container.querySelector(CARET)).not.toBeNull();
-    rerender(<Markdown>{'Hello'}</Markdown>);
-    expect(container.querySelector(CARET)).toBeNull();
-  });
-
-  it('shows only the caret for an empty streaming message, and nothing when idle', () => {
+  it('renders nothing for an empty message, streaming or not', () => {
     const streaming = render(<Markdown streaming>{''}</Markdown>);
-    expect(streaming.container.querySelectorAll(CARET)).toHaveLength(1);
+    expect(streaming.container.textContent).toBe('');
+    expect(streaming.container.querySelector(CARET)).toBeNull();
     const idle = render(<Markdown>{''}</Markdown>);
     expect(idle.container.textContent).toBe('');
-    expect(idle.container.querySelector(CARET)).toBeNull();
   });
 
   it('re-renders only the tail block while streaming', () => {

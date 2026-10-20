@@ -1,8 +1,8 @@
 // ────────────────────────────────────────────────────────────────
 // B-19 AssistantText — the agent's prose: Streamdown 2 (incomplete markdown
 // is repaired while it streams) with fenced code on the kit's lazy Shiki 4
-// CodeBlock (themes from `--syntax-*`), 14/1.6 prose, a 2px caret while
-// streaming (D-33), revealed at a steady pace while it streams (D-91). The
+// CodeBlock (themes from `--syntax-*`), 14/1.6 prose, revealed at a reading
+// pace while it streams with its newest words fading in (D-91, D-160). The
 // markdown itself is the kit `Markdown` pattern.
 // ────────────────────────────────────────────────────────────────
 

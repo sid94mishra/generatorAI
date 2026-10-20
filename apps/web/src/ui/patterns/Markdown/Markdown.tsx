@@ -6,7 +6,7 @@
 // (remend: an unterminated ``` fence, `**bold`, a half-typed link) and splits
 // the source into blocks that are each memoised — a new token re-renders only
 // the tail block. When the stream ends the blocks stay: every settled block
-// keeps its memoised render and only the tail re-renders without the caret
+// keeps its memoised render and only the tail re-renders once more
 // (D-88 — re-parsing a 4,000-word answer as one document was a 100+ ms long
 // task at the end of every large response, and again on every remount). Only
 // a document that needs a single parse — constructs that span blocks: link
@@ -22,27 +22,15 @@
 // at all while a fence is still streaming (plain text until it closes). No
 // mermaid / math plugins.
 //
-// The streaming caret is a breathing 2px Running-tone bar (D-152) appended, by a rehype pass that
-// runs only on the tail block, to the deepest last element of the document —
-// so it sits right after the last word, inside the paragraph / list item /
-// table cell / bold run being typed (after the block for a code fence).
+// No streaming caret (D-160): the transcript's paced reveal fades the newest
+// words in, which says where the text grows; a bar hopping word to word and
+// line to line read as flicker.
 // ────────────────────────────────────────────────────────────────
 
+import { isValidElement, useCallback, type ReactNode } from 'react';
 import {
-  createContext,
-  isValidElement,
-  useCallback,
-  useContext,
-  useMemo,
-  useRef,
-  type ReactNode,
-  type RefObject,
-} from 'react';
-import {
-  Block,
   Streamdown,
   useIsCodeFenceIncomplete,
-  type BlockProps,
   type Components,
   type ExtraProps,
   type LinkSafetyConfig,
@@ -56,7 +44,7 @@ import { needsWholeDocument, splitMarkdownBlocks } from './markdownBlocks.js';
 export interface MarkdownProps {
   /** Markdown source. */
   children: string;
-  /** True while tokens are still arriving: incomplete markdown is repaired (Streamdown) and a 2px caret is drawn at the end. */
+  /** True while tokens are still arriving: incomplete markdown is repaired (Streamdown) and only the tail block re-parses. */
   streaming?: boolean;
   /** `prose` (default) = 14/1.6 transcript prose; `compact` = text-small for cards/previews. */
   size?: 'prose' | 'compact';
@@ -72,36 +60,24 @@ export function Markdown({ children, streaming = false, size = 'prose', classNam
   // source was tried and dropped — under load it skipped frames and then
   // committed thousands of characters at once, the very burst pacing removes.
   const source = children;
-  // Streamdown splits the (repaired) source into blocks with this function; the
-  // count it last produced tells `TailBlock` which block is the tail.
-  const blockCount = useRef(0);
-  const parseBlocks = useCallback((markdown: string) => {
-    const blocks = splitMarkdownBlocks(markdown);
-    blockCount.current = blocks.length;
-    return blocks;
-  }, []);
-  const tail = useMemo<TailState>(() => ({ streaming, blockCount }), [streaming]);
+  const parseBlocks = useCallback((markdown: string) => splitMarkdownBlocks(markdown), []);
 
   return (
     // `data-gai-md`: inside a live turn its blocks, table rows and list items ease in (D-152).
     <div className={cn('min-w-0 break-words text-fg', size === 'prose' ? 'text-body' : 'text-small', className)} data-gai-md="">
-      <TailContext.Provider value={tail}>
-        <Streamdown
-          mode={streaming || !needsWholeDocument(source) ? 'streaming' : 'static'}
-          isAnimating={streaming}
-          parseIncompleteMarkdown={streaming}
-          parseMarkdownIntoBlocksFn={parseBlocks}
-          BlockComponent={TailBlock}
-          components={COMPONENTS[size]}
-          controls={false}
-          linkSafety={LINK_SAFETY_OFF}
-          lineNumbers={false}
-          className={ROOT_SPACING[size]}
-        >
-          {source}
-        </Streamdown>
-      </TailContext.Provider>
-      {streaming && source.trim() === '' ? <StreamingCaret /> : null}
+      <Streamdown
+        mode={streaming || !needsWholeDocument(source) ? 'streaming' : 'static'}
+        isAnimating={streaming}
+        parseIncompleteMarkdown={streaming}
+        parseMarkdownIntoBlocksFn={parseBlocks}
+        components={COMPONENTS[size]}
+        controls={false}
+        linkSafety={LINK_SAFETY_OFF}
+        lineNumbers={false}
+        className={ROOT_SPACING[size]}
+      >
+        {source}
+      </Streamdown>
     </div>
   );
 }
@@ -110,78 +86,6 @@ const LINK_SAFETY_OFF: LinkSafetyConfig = { enabled: false };
 
 /** Vertical rhythm between top-level blocks (replaces Streamdown's own `space-y-4` via its tailwind-merge). */
 const ROOT_SPACING: Record<MarkdownSize, string> = { prose: 'space-y-2', compact: 'space-y-1.5' };
-
-// ── Streaming caret ──────────────────────────────────────────────
-
-interface TailState {
-  streaming: boolean;
-  blockCount: RefObject<number>;
-}
-
-const TailContext = createContext<TailState>({ streaming: false, blockCount: { current: 0 } });
-
-const CARET_TAG = 'gai-caret';
-
-function StreamingCaret() {
-  return <span aria-hidden="true" className="caret-stream" />;
-}
-
-/**
- * Streamdown's `Block`, plus the caret pass on the tail block while streaming.
- * Only the tail's `rehypePlugins` identity changes, so every settled block
- * keeps hitting `Block`'s memo.
- */
-function TailBlock(props: BlockProps) {
-  const { streaming, blockCount } = useContext(TailContext);
-  const isTail = streaming && props.index === blockCount.current - 1;
-  const { rehypePlugins } = props;
-  const plugins = useMemo(
-    () => (isTail ? [...(rehypePlugins ?? []), rehypeStreamingCaret] : rehypePlugins),
-    [isTail, rehypePlugins],
-  );
-  return <Block {...props} rehypePlugins={plugins} />;
-}
-
-/** Minimal hast shapes (the plugin needs no more than this). */
-interface HastNode {
-  type: string;
-  tagName?: string;
-  value?: string;
-  properties?: Record<string, unknown>;
-  children?: HastNode[];
-}
-
-/** Elements that cannot hold the caret (void, or whose text is code). */
-const NO_CARET_INSIDE = new Set(['pre', 'img', 'hr', 'br', 'input']);
-
-/**
- * Rehype pass: mark the deepest last element of the tree as the caret's host —
- * `[data-gai-caret]::after` (globals.css) draws the 2px bar after its last
- * word. A pseudo-element, not a child element, so the caret travelling with
- * the text is not a layout shift (D-91). With no element to hold it (the tail
- * is an open code fence) a caret element goes after the block.
- */
-function rehypeStreamingCaret() {
-  return (tree: HastNode) => {
-    let host = tree;
-    for (;;) {
-      const kids = host.children ?? [];
-      let i = kids.length - 1;
-      while (i >= 0 && kids[i]!.type === 'text' && !kids[i]!.value?.trim()) i--;
-      const last = i >= 0 ? kids[i]! : undefined;
-      if (last?.type === 'element' && !NO_CARET_INSIDE.has(last.tagName ?? '')) {
-        host = last;
-        continue;
-      }
-      break;
-    }
-    if (host !== tree) {
-      host.properties = { ...(host.properties ?? {}), dataGaiCaret: '' };
-      return;
-    }
-    host.children = [...(host.children ?? []), { type: 'element', tagName: CARET_TAG, properties: {}, children: [] }];
-  };
-}
 
 // ── Element overrides ────────────────────────────────────────────
 
@@ -361,7 +265,6 @@ function makeComponents(size: MarkdownSize): Components {
     span: MdSpan,
     input: MdInput,
     code: makeCode(size),
-    [CARET_TAG]: StreamingCaret,
   } as Components;
 }
 
