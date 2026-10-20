@@ -41,16 +41,26 @@ export function formatDuration(ms: number): string {
   return m % 60 ? `${h}h ${m % 60}m` : `${h}h`;
 }
 
-/** The body lines of a stage node. `agentName` resolves an agent ref to its display name. */
-export function stageLines(stage: StageSpec, agentName: (ref: string) => string | undefined): StageLines {
+/** What a node knows of a bound agent: its display name and the model it pins. */
+export interface AgentInfo {
+  name: string;
+  model?: string | undefined;
+}
+
+/**
+ * The body lines of a stage node. `agentOf` resolves an agent ref: its name, and its own model, shown when the
+ * stage pins none (cards read "default model" for agents pinned to Opus or Terra; evaluation 2026-10-20).
+ */
+export function stageLines(stage: StageSpec, agentOf: (ref: string) => AgentInfo | undefined): StageLines {
   switch (stage.kind) {
     case 'agent': {
       const ref = stage.session?.agentRef;
-      const model = stage.session?.model;
+      const agent = ref ? agentOf(ref) : undefined;
+      const model = stage.session?.model ?? agent?.model;
       const effort = stage.session?.reasoningEffort;
       return {
         lead: ref
-          ? { icon: 'agents', text: agentName(ref) ?? ref }
+          ? { icon: 'agents', text: agent?.name ?? ref }
           : { icon: 'agents', text: 'No agent · model only', muted: true },
         detail: `${model ?? 'default model'}${effort ? ` · ${effort}` : ''}`,
       };

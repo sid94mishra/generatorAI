@@ -36,11 +36,11 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
   const selectNode = useWorkflowBuilderStore((s) => s.selectNode);
   const removeStage = useWorkflowBuilderStore((s) => s.removeStage);
   const duplicateStage = useWorkflowBuilderStore((s) => s.duplicateStage);
-  const { nodeTags, agentNames } = useCanvasContext();
+  const { nodeTags, agents } = useCanvasContext();
   const issues = useStageIssues(id);
   const invalid = issues.errors.length > 0;
 
-  const lines = stageLines(stage, (ref) => agentNames.get(ref));
+  const lines = stageLines(stage, (ref) => agents.get(ref));
   const pills = stagePills(stage, stage.parentKey !== undefined);
 
   const items: MenuButtonItem[] = [

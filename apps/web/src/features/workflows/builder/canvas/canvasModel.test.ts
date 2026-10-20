@@ -21,10 +21,16 @@ describe('stageSummary', () => {
     expect(labels).toContain('Guard');
     expect(labels).toContain('Retry 3×');
     expect(labels).not.toContain('Fresh');
-    expect(stageLines(stage, (ref) => (ref === 'global:auditor' ? 'Security Auditor' : undefined))).toEqual({
+    expect(stageLines(stage, (ref) => (ref === 'global:auditor' ? { name: 'Security Auditor' } : undefined))).toEqual({
       lead: { icon: 'agents', text: 'Security Auditor' },
       detail: 'claude-opus-5-5 · high',
     });
+  });
+
+  it("shows a bound agent's own model when the stage pins none", () => {
+    const stage = { ...newAgentStage('spec', 'Spec'), session: { agentRef: 'project:architect' } } as Parameters<typeof stageLines>[0];
+    expect(stageLines(stage, () => ({ name: 'Architect', model: 'opus' })).detail).toBe('opus');
+    expect(stageLines(stage, () => ({ name: 'Architect' })).detail).toBe('default model');
   });
 
   it('marks session reuse only inside a container, and names a model-only stage', () => {

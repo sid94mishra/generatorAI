@@ -240,10 +240,13 @@ export function BuilderCanvas({ onAddStage, onAddedTemplate, nodeTags = NO_TAGS,
   const onEdgeMouseEnter = useCallback((_e: MouseEvent, edge: Edge) => setHoveredEdgeId(edge.id), []);
   const onEdgeMouseLeave = useCallback(() => setHoveredEdgeId(null), []);
 
-  // ── Agent display names for the nodes ──
-  const agents = useSelectableAgents(projectId ?? undefined);
-  const agentNames = useMemo(() => new Map((agents.data ?? []).map((a) => [a.ref, a.name])), [agents.data]);
-  const context = useMemo<CanvasContextValue>(() => ({ nodeTags, agentNames, hoveredEdgeId }), [nodeTags, agentNames, hoveredEdgeId]);
+  // ── Agent names and pinned models for the nodes ──
+  const selectable = useSelectableAgents(projectId ?? undefined);
+  const agents = useMemo(
+    () => new Map((selectable.data ?? []).map((a) => [a.ref, { name: a.name, model: a.runtime?.model }] as const)),
+    [selectable.data],
+  );
+  const context = useMemo<CanvasContextValue>(() => ({ nodeTags, agents, hoveredEdgeId }), [nodeTags, agents, hoveredEdgeId]);
 
   // ── Legend: only the edge kinds this graph uses ──
   const legend = useMemo(() => {

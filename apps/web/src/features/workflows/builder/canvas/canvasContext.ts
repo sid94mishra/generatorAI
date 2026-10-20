@@ -6,6 +6,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { createContext, useContext } from 'react';
+import type { AgentInfo } from './stageSummary.js';
 
 /** A node's tag in a draft diff (board WorkflowAgentDraft). */
 export type NodeTag = 'added' | 'changed';
@@ -14,12 +15,13 @@ export interface CanvasContextValue {
   /** Stage key → diff tag; empty when the page shows no diff. */
   nodeTags: Readonly<Record<string, NodeTag>>;
   /** Agent ref (`scope:slug`) → display name. */
-  agentNames: ReadonlyMap<string, string>;
+  /** Bound agents by ref: name and pinned model, for the node lines. */
+  agents: ReadonlyMap<string, AgentInfo>;
   /** The edge under the pointer, if any. */
   hoveredEdgeId: string | null;
 }
 
-const EMPTY: CanvasContextValue = { nodeTags: {}, agentNames: new Map(), hoveredEdgeId: null };
+const EMPTY: CanvasContextValue = { nodeTags: {}, agents: new Map(), hoveredEdgeId: null };
 
 export const CanvasContext = createContext<CanvasContextValue>(EMPTY);
 
