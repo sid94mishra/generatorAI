@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { fieldLabel, hasStructuredOutput, structuredOutputMarkdown } from './structuredOutput.js';
 
 describe('structuredOutputMarkdown', () => {
+  it('keeps angle-bracket placeholders as text, and code spans as they are', () => {
+    expect(structuredOutputMarkdown({ footer: 'shows "Pulse v<version> · <n> monitors" via `meta<T>()`' })).toBe(
+      '**Footer:** shows "Pulse v\\<version\\> · \\<n\\> monitors" via `meta<T>()`',
+    );
+  });
+
   it('shows a spec field by field: short text inline, lists as bullets, flat records one per line', () => {
     const md = structuredOutputMarkdown({
       summary: 'Maintenance windows suppress incidents.',
@@ -27,6 +33,7 @@ describe('structuredOutputMarkdown', () => {
   it('labels camel and snake keys, and knows what is worth showing', () => {
     expect(fieldLabel('frontend_tasks')).toBe('Frontend tasks');
     expect(fieldLabel('acceptanceCriteria')).toBe('Acceptance criteria');
+    expect(fieldLabel('apiTasks')).toBe('API tasks');
     expect(hasStructuredOutput({ a: 1 })).toBe(true);
     expect(hasStructuredOutput({})).toBe(false);
     expect(hasStructuredOutput('text')).toBe(false);

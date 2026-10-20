@@ -124,6 +124,8 @@ export interface StageView {
    * of its prompt, repair and revision turns, or of an amendment.
    */
   outputText?: string;
+  /** A finished agent stage's structured output, as readable markdown (D-159). */
+  result?: string;
   /**
    * Files this stage changed, from its checkpoint to the next one (D-22).
    * Only the focused stage's are fetched.

@@ -32,6 +32,7 @@ import type { StageView } from '../model/types.js';
 import { ReviewCard } from './ReviewCard.js';
 import { formatWhen } from '@/lib/formatWhen.js';
 import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
+import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 
 /** An answer to one of a stage's in-turn gates, in the chat's shapes (the stage conversation API). */
 export type StageGateResolution =
@@ -359,6 +360,13 @@ export const StageRow = memo(function StageRow({
                 }
               />
             </TranscriptProvider>
+          ) : null}
+
+          {stage.result ? (
+            <section aria-label={`${stage.name} result`} className="rounded-card border border-line-soft bg-sunken px-3 py-2" data-testid="stage-result">
+              <div className="mb-1 text-micro font-medium text-fg-3">Result</div>
+              <Markdown>{stage.result}</Markdown>
+            </section>
           ) : null}
 
           {isTerminal && (fileCount > 0 || stage.outputData || stage.usage || stage.contextUsage || onOpenInspector) ? (

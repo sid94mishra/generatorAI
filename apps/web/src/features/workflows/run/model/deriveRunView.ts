@@ -465,9 +465,9 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
   const streamLive = isLive(stream) && !STOPPED_STAGE_STATUSES.has(status);
   const conversing = streamLive || hasConversation(stream);
   const streamedAnswer = deriveAnswer(stream?.blocks);
-  // A JSON stage's answer is its data, not its closing remark (D-159).
-  const persisted = sr.kind === 'agent' && hasStructuredOutput(sr.outputData) ? structuredOutputMarkdown(sr.outputData) : sr.outputText?.trim();
-  const persistedAnswer = (isTerminal || completionReview) && !conversing ? persisted : undefined;
+  // A finished JSON stage shows its data as its result, never its closing remark as its answer (D-159).
+  const result = sr.kind === 'agent' && isTerminal && hasStructuredOutput(sr.outputData) ? structuredOutputMarkdown(sr.outputData) : undefined;
+  const persistedAnswer = (isTerminal || completionReview) && !conversing && !result ? sr.outputText?.trim() : undefined;
   const answer = persistedAnswer || streamedAnswer;
   const segments = persistedAnswer ? [] : deriveSegments(stream?.blocks, { active: status === 'running' || streamLive });
 
@@ -529,6 +529,7 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
     error: sr.error,
     ...(sr.skipReason ? { skipReason: sr.skipReason } : {}),
     summary: sr.summary,
+    ...(result ? { result } : {}),
     outputData: sr.outputData,
     ...(sr.outputText ? { outputText: sr.outputText } : {}),
     // A check or wait stage has no agent turn to end its stream entry, so once finished it is never "streaming"

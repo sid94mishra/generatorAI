@@ -14,14 +14,27 @@ const isScalar = (v: unknown): v is string | number | boolean => typeof v === 's
 const empty = (v: unknown) => v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0) || (isRecord(v) && Object.keys(v).length === 0);
 const flat = (v: Json) => Object.values(v).every((x) => isScalar(x) || x === null);
 
-/** `backendTasks` / `backend_tasks` → "Backend tasks". */
+const ACRONYMS: Readonly<Record<string, string>> = { api: 'API', ui: 'UI', url: 'URL', id: 'ID', ids: 'IDs', pr: 'PR', json: 'JSON', http: 'HTTP', sql: 'SQL', adr: 'ADR' };
+
+/** `backendTasks` / `backend_tasks` → "Backend tasks"; `apiTasks` → "API tasks". */
 export function fieldLabel(key: string): string {
   const words = key
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/[_-]+/g, ' ')
     .trim()
-    .toLowerCase();
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => ACRONYMS[w] ?? w)
+    .join(' ');
   return words ? `${words[0]!.toUpperCase()}${words.slice(1)}` : key;
+}
+
+/** `Pulse v<version>` keeps its placeholder: angle brackets outside code spans would be read as HTML tags. */
+function text(value: string): string {
+  return value
+    .split(/(`[^`]*`)/)
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(/[<>]/g, (c) => `\\${c}`)))
+    .join('');
 }
 
 const jsonBlock = (v: unknown) => `\`\`\`json\n${JSON.stringify(v, null, 2)}\n\`\`\``;
@@ -32,22 +45,22 @@ function recordLine(v: Json): string {
   const entries = Object.entries(v).filter(([, x]) => !empty(x));
   const lead = entries.find(([, x]) => typeof x === 'string');
   const rest = entries.filter((e) => e !== lead).map(([k, x]) => `${fieldLabel(k)}: ${String(x)}`);
-  return [lead ? String(lead[1]) : '', rest.join(' · ')].filter(Boolean).join(' — ');
+  return text([lead ? String(lead[1]) : '', rest.join(' · ')].filter(Boolean).join(' — '));
 }
 
 function list(items: readonly unknown[]): string | null {
-  if (items.every(isScalar)) return items.map((x) => `- ${String(x).replace(/\n+/g, ' ')}`).join('\n');
+  if (items.every(isScalar)) return items.map((x) => `- ${text(String(x).replace(/\n+/g, ' '))}`).join('\n');
   if (items.every((x) => isRecord(x) && flat(x))) return items.map((x) => `- ${recordLine(x as Json).replace(/\n+/g, ' ')}`).join('\n');
   return null;
 }
 
 function field(key: string, value: unknown): string {
   const label = fieldLabel(key);
-  if (typeof value === 'string') return oneLine(value) ? `**${label}:** ${value}` : `**${label}**\n\n${value}`;
+  if (typeof value === 'string') return oneLine(value) ? `**${label}:** ${text(value)}` : `**${label}**\n\n${text(value)}`;
   if (isScalar(value)) return `**${label}:** ${String(value)}`;
   if (Array.isArray(value)) return `**${label}**\n\n${list(value) ?? jsonBlock(value)}`;
   if (isRecord(value) && flat(value)) {
-    const rows = Object.entries(value).filter(([, x]) => !empty(x)).map(([k, x]) => `- ${fieldLabel(k)}: ${String(x)}`);
+    const rows = Object.entries(value).filter(([, x]) => !empty(x)).map(([k, x]) => `- ${fieldLabel(k)}: ${text(String(x))}`);
     return `**${label}**\n\n${rows.join('\n')}`;
   }
   return `**${label}**\n\n${jsonBlock(value)}`;
@@ -55,7 +68,7 @@ function field(key: string, value: unknown): string {
 
 /** Markdown for a stage's structured output (see the file header). */
 export function structuredOutputMarkdown(data: unknown): string {
-  if (isScalar(data)) return String(data);
+  if (isScalar(data)) return text(String(data));
   if (Array.isArray(data)) return list(data) ?? jsonBlock(data);
   if (!isRecord(data)) return '';
   const fields = Object.entries(data).filter(([, v]) => !empty(v));
