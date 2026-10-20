@@ -513,6 +513,8 @@ export function shellCommandRules(command: string): RememberablePermission {
 const INSPECTORS: ReadonlySet<string> = new Set([
   'cat', 'head', 'tail', 'ls', 'pwd', 'wc', 'nl', 'grep', 'egrep', 'fgrep', 'rg', 'echo', 'printf', 'diff', 'stat',
   'file', 'which', 'basename', 'dirname', 'cut', 'tr', 'sort', 'sed', 'cd', 'true',
+  // Waiting and the time: an agent polling a background job (`sleep 5; tail -n 40 out.log`) asked every round.
+  'sleep', 'date',
 ]);
 const INSPECTING_GIT: ReadonlySet<string> = new Set(['status', 'diff', 'log', 'show', 'blame', 'rev-parse', 'ls-files', 'grep']);
 /** Shells whose `-c` script is the real command line (Codex sends `/bin/zsh -lc '<line>'`). */
@@ -546,6 +548,9 @@ function inspects(words: readonly Word[]): boolean {
       return !args.some((a) => a === '-o' || a.startsWith('--output') || /^-[a-zA-Z]*o/.test(a));
     case 'rg':
       return !args.some((a) => a.startsWith('--pre'));
+    case 'date':
+      // Printing only: `-s` / `--set` sets the clock.
+      return !args.some((a) => /^-[a-zA-Z]*s/.test(a) || a.startsWith('--set'));
     default:
       return true;
   }

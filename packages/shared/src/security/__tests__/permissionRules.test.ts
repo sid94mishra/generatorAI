@@ -204,6 +204,8 @@ describe('isReadOnlyInspection', () => {
     'rg -n "maintenance" apps/api/src 2>/dev/null | wc -l',
     "/bin/zsh -lc 'git show --stat HEAD'",
     'git diff > /dev/null',
+    'sleep 5; tail -n 40 scratch/server.log',
+    'date -u && sleep 2 && cat scratch/test-output.txt',
   ])('reads only: %s', (line) => {
     expect(isReadOnlyInspection(line)).toBe(true);
   });
@@ -230,6 +232,8 @@ describe('isReadOnlyInspection', () => {
     ['control flow', 'for f in a b; do cat $f; done'],
     ['wrapped writer', "/bin/zsh -lc 'git add -A && git commit -m x'"],
     ['here-document', "cat <<'EOF'\nhi\nEOF"],
+    ['sets the clock', 'date -s 12:00'],
+    ['polls then runs', 'sleep 5 && pnpm test'],
   ])('%s: %s', (_why, line) => {
     expect(isReadOnlyInspection(line)).toBe(false);
   });

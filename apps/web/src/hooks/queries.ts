@@ -1055,6 +1055,39 @@ export function useClearProjectPermissionRules(projectId: string | null | undefi
   });
 }
 
+/** D-157 — allow commands for every chat and run of a project, up front. */
+export function useAddProjectCommandRules(projectId: string) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (commands: readonly string[]) => platform.addProjectCommandRules(projectId, commands),
+    meta: { errorTitle: 'Command not allowed' },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: projectPermissionRulesKey(projectId) }),
+  });
+}
+
+/** Forget one of a project's rules: its chats and runs ask for it again. */
+export function useRevokeProjectPermissionRule(projectId: string) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ruleId: string) => platform.revokePermissionRule({ kind: 'project', id: projectId }, ruleId),
+    meta: { errorTitle: 'Rule not removed' },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: projectPermissionRulesKey(projectId) }),
+  });
+}
+
+/** The project's test / lint / build scripts, offered for "run without asking". */
+export function useProjectCommandSuggestions(projectId: string) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: [...projectPermissionRulesKey(projectId), 'suggestions'] as const,
+    queryFn: () => platform.projectCommandSuggestions(projectId),
+    select: (r) => r.suggestions,
+    staleTime: 60_000,
+  });
+}
+
 /** Promote an approved plan into the tracked working tree. */
 export function useSavePlanToWorkspace(chatId: string) {
   const platform = usePlatform() as HttpPlatformClient;

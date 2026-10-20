@@ -1583,6 +1583,17 @@ nothing changes. The Run dialog's Models row says "(another provider than fix)";
 **Reviews** and **Edits in** (D-155). The validator errors on a `reviewOf` that is not another agent stage and warns
 (`review-same-provider`) when both are pinned to one provider.
 
+### D-157 A project's commands are allowed up front (workflow evaluation, 2026-10-20) — Final
+Every run asked again for the commands its stages always run (tests, lint, typecheck), and agents polling a background
+job (`sleep 5; tail -n 40 out.log`) raised a card every round. Project › Settings › **Commands agents run without
+asking** lists the project's rules (D-153 — "Allow … for this project" on any card of its chats and stages adds there),
+each removable, **Clear all**, an input to allow a command, and the project's own scripts as one-click suggestions
+(`GET /api/projects/:id/permission-rules/suggestions`: each codebase's committed `package.json`, else the folder's;
+`test|lint|typecheck|check|build|format[:…]` with the lockfile's package manager; npm only `npm test`, since `npm run
+lint` would be remembered as `npm run`). `POST /api/projects/:id/permission-rules {commands}` derives the rules the
+same way a card does and refuses (422 `NOT_REMEMBERABLE`) anything on the never-list. `sleep` and `date` (not `date
+-s`) join the read-only inspectors (D-150), so a polling line no longer asks.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

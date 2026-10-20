@@ -1340,6 +1340,24 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch(`${this.baseUrl}${permissionRulesPath(owner)}`, { method: 'DELETE' });
   }
 
+  async revokePermissionRule(owner: { kind: 'chat' | 'run' | 'project'; id: string }, ruleId: string): Promise<void> {
+    await apiFetch(`${this.baseUrl}${permissionRulesPath(owner)}/${encodeURIComponent(ruleId)}`, { method: 'DELETE' });
+  }
+
+  /** D-157 — commands a project's chats and runs run without asking. */
+  async addProjectCommandRules(projectId: string, commands: readonly string[]): Promise<{ rules: Array<{ kind: 'command' | 'tool'; match: string }> }> {
+    return apiFetch(`${this.baseUrl}${permissionRulesPath({ kind: 'project', id: projectId })}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commands }),
+    });
+  }
+
+  /** The project's own test / lint / build scripts, suggested for "run without asking". */
+  async projectCommandSuggestions(projectId: string): Promise<{ suggestions: Array<{ command: string; source: string }> }> {
+    return apiFetch(`${this.baseUrl}${permissionRulesPath({ kind: 'project', id: projectId })}/suggestions`);
+  }
+
   async deleteRun(id: string): Promise<void> {
     await apiFetch(`${this.baseUrl}/api/workflow-runs/${id}`, { method: 'DELETE' });
   }

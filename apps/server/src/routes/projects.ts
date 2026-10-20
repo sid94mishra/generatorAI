@@ -2,6 +2,8 @@
 // Project Routes — CRUD for Projects, Codebases, Configs, Worktrees
 // ────────────────────────────────────────────────────────────────
 
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
 import { Router } from 'express';
 import type { Response } from 'express';
 import multer from 'multer';
@@ -12,6 +14,7 @@ import {
   McpServerBodySchema,
   MergePullRequestBodySchema,
   mcpCredentialNamespace,
+  shellCommandRules,
 } from '@generatorai/shared';
 import {
   CodebaseRemoteResolver,
@@ -19,12 +22,15 @@ import {
   WorktreeCleanupService,
   buildPullRequestReviewPrompt,
   codebaseRepoDir,
+  commandSuggestions,
   mergePullRequest,
+  packageManagerOf,
   redactTokens,
   toMcpServerEntry,
 } from '@generatorai/core';
 import type {
   CatalogMcpServer,
+  CommandSuggestion,
   ISourceControlProvider,
   PullRequestRef,
 } from '@generatorai/core';
@@ -239,6 +245,59 @@ export function createProjectRoutes(container: Container): Router {
     try {
       const owner = await projectRuleOwner(String(req.params['id']));
       res.json({ removed: (await container.permissionRuleService?.clear(owner)) ?? 0 });
+    } catch (err) {
+      next(err);
+    }
+  });
+  // D-157 — commands a person allows for the whole project up front ("run without asking"), and the
+  // project's own test / lint / build scripts suggested for it.
+  router.post('/:id/permission-rules', async (req, res, next) => {
+    try {
+      const owner = await projectRuleOwner(String(req.params['id']));
+      const commands: unknown = req.body?.commands;
+      if (!Array.isArray(commands) || commands.length === 0 || commands.length > 20 || !commands.every((c) => typeof c === 'string' && c.trim() && c.length <= 500)) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'commands: 1–20 command lines' } });
+        return;
+      }
+      const rules = [];
+      for (const command of commands as string[]) {
+        const derived = shellCommandRules(command.trim());
+        if (derived.refusal || derived.rules.length === 0) {
+          res.status(422).json({ error: { code: 'NOT_REMEMBERABLE', message: `${command.trim()}: ${derived.refusal ?? 'nothing to allow'}` } });
+          return;
+        }
+        rules.push(...derived.rules);
+      }
+      res.status(201).json({ rules: (await container.permissionRuleService?.remember(owner, rules)) ?? [] });
+    } catch (err) {
+      next(err);
+    }
+  });
+  router.get('/:id/permission-rules/suggestions', async (req, res, next) => {
+    try {
+      const projectId = String(req.params['id']);
+      await projectRuleOwner(projectId);
+      const suggestions: CommandSuggestion[] = [];
+      for (const cb of await codebaseService.getByProjectId(projectId)) {
+        const repoDir = codebaseRepoDir(cb);
+        if (!repoDir) continue;
+        const sub = cb.subdirectory ? `${cb.subdirectory.replace(/\\/g, '/').replace(/\/+$/, '')}/` : '';
+        const ref = cb.defaultBranch ?? 'HEAD';
+        // The committed default branch (a bare clone has no files), else the folder on disk.
+        const read = async (file: string): Promise<string | null> =>
+          gitManager.showFile(repoDir, `${sub}${file}`, ref).catch(() =>
+            fs.readFile(path.join(repoDir, ...sub.split('/').filter(Boolean), file), 'utf-8').catch(() => null),
+          );
+        const pkg = await read('package.json');
+        if (!pkg) continue;
+        const names = await gitManager
+          .lsTree(repoDir, sub, ref)
+          .then((entries) => entries.map((e) => e.name))
+          .catch(() => fs.readdir(path.join(repoDir, ...sub.split('/').filter(Boolean))).catch(() => [] as string[]));
+        suggestions.push(...commandSuggestions(pkg, packageManagerOf(names), `${cb.alias}/${sub}package.json`));
+      }
+      const seen = new Set<string>();
+      res.json({ suggestions: suggestions.filter((s) => !seen.has(s.command) && seen.add(s.command)) });
     } catch (err) {
       next(err);
     }

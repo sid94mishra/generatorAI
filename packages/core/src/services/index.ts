@@ -125,6 +125,7 @@ export type {
 export { PlanService, PLAN_DIR, buildPlanFileName } from './PlanService.js';
 // U-16 (D-147) — remembered permission rules ("Allow for this chat / run").
 export { PermissionRuleService, rememberRulesOf, rememberRefusalOf } from './PermissionRuleService.js';
+export { commandSuggestions, packageManagerOf, type CommandSuggestion, type PackageManager } from './projectCommandSuggestions.js';
 export type { CreatePlanFromGateParams, PlanServiceLogger } from './PlanService.js';
 
 // Project & Codebase Management services

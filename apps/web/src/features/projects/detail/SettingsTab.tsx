@@ -1,8 +1,9 @@
 // ────────────────────────────────────────────────────────────────
 // ProjectDetail · Settings (P5-04; F-projects-08; 04 §4.5 #50; mobile
 // MProjectSettings content). Worktrees (retention, max codebases; Save when
-// dirty), Location (root path, created), Project (Archive / Unarchive,
-// Delete project… — the confirmation names what goes with it).
+// dirty), Commands agents run without asking (D-157), Location (root path,
+// created), Project (Archive / Unarchive, Delete project… — the confirmation
+// names what goes with it).
 // ────────────────────────────────────────────────────────────────
 
 import { useEffect, useState } from 'react';
@@ -26,6 +27,7 @@ import {
   retentionHint,
 } from '../projectFormat.js';
 import { formatWhen } from '@/lib/formatWhen.js';
+import { ProjectCommandRules } from './ProjectCommandRules.js';
 
 export function SettingsTab({ project }: { project: Project }) {
   const navigate = useNavigate();
@@ -131,6 +133,8 @@ export function SettingsTab({ project }: { project: Project }) {
           </Button>
         </div>
       </SettingsSection>
+
+      <ProjectCommandRules projectId={project.id} />
 
       <SettingsSection title="Location">
         <div>
