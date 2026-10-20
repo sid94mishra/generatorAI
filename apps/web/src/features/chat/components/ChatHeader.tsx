@@ -9,9 +9,10 @@
 //               archived chat; nothing while idle (no fake state, D-36)
 //   meta        fork provenance ("Forked from …", back to the parent) and the
 //               primary mount's branch chip (dropped below 1200px)
-//   actions     More ▸ Open in <editor> (+ the other editors, Copy path, Show
-//               in Finder on desktop), Rename…, Copy transcript, Fork,
-//               Archive… (confirm; active chats only)
+//   actions     Open (split: the default editor's mark; the menu offers VS
+//               Code and Cursor), then More ▸ Copy path, Show in Finder on
+//               desktop, Rename…, Copy transcript, Fork, Archive… (confirm;
+//               active chats only)
 //   dockToggle  "Show side pane" / "Hide side pane" (`dock-toggle`), pressed
 //               while the dock is open (09 §7.3)
 // ────────────────────────────────────────────────────────────────
@@ -27,6 +28,7 @@ import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import { RAIL_QUERY, useMediaQuery } from '@/hooks/useMediaQuery.js';
 import { shortcutFor } from '@/lib/shortcuts.js';
 import { useEditorActions, FILE_MANAGER } from '@/blocks/editor/useEditorActions.js';
+import { OpenInEditorButton } from '@/blocks/editor/OpenInEditorButton.js';
 import { PageHeader } from '@/ui/patterns/PageHeader/PageHeader.js';
 import { Breadcrumb, type BreadcrumbItem } from '@/ui/patterns/Breadcrumb/Breadcrumb.js';
 import { MenuButton, type MenuButtonItem } from '@/ui/patterns/MenuButton/MenuButton.js';
@@ -175,15 +177,6 @@ export function ChatHeader({ chat, streamStatus, awaitingUser, dockOpen, onToggl
 
   const items: MenuButtonItem[] = [];
   if (editor.target) {
-    items.push({ id: 'open-in-editor', label: editor.label, icon: 'external-link', onSelect: () => editor.open(editor.preferred?.id) });
-    for (const other of editor.editors) {
-      if (other.id === editor.preferred?.id) continue;
-      items.push({
-        id: `open-in-${other.id}`,
-        label: other.available ? `Open in ${other.name}` : `Open in ${other.name} (not installed)`,
-        onSelect: () => editor.open(other.id),
-      });
-    }
     items.push({ id: 'copy-path', label: 'Copy path', icon: 'copy', onSelect: () => void editor.copyPath() });
     const reveal = editor.reveal;
     if (reveal) items.push({ id: 'reveal', label: `Show in ${FILE_MANAGER}`, icon: 'folder-open', onSelect: () => void reveal() });
@@ -223,7 +216,12 @@ export function ChatHeader({ chat, streamStatus, awaitingUser, dockOpen, onToggl
             ) : null}
           </>
         }
-        actions={<MenuButton label="More" icon="more" iconOnly items={items} align="end" data-testid="chat-header-more" />}
+        actions={
+          <>
+            <OpenInEditorButton />
+            <MenuButton label="More" icon="more" iconOnly items={items} align="end" data-testid="chat-header-more" />
+          </>
+        }
         dockToggle={
           <IconButton
             icon="dock"

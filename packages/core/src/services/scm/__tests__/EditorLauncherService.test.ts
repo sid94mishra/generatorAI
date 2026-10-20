@@ -83,7 +83,7 @@ describe('EditorLauncherService', () => {
 
   it('reports an editor that is nowhere as unavailable', async () => {
     const { service } = make({ onPath: [], installed: [] });
-    expect(await service.resolve('windsurf')).toBeNull();
+    expect(await service.resolve('cursor')).toBeNull();
     expect((await service.listEditors()).every((e) => !e.available)).toBe(true);
   });
 
@@ -113,8 +113,8 @@ describe('EditorLauncherService', () => {
   });
 
   it('falls back to the first available editor', async () => {
-    const { service } = make({ onPath: ['windsurf'], defaultEditor: null });
-    expect((await service.open({ path: '/src/a.ts' })).editor).toBe('windsurf');
+    const { service } = make({ onPath: ['cursor'], defaultEditor: null });
+    expect((await service.open({ path: '/src/a.ts' })).editor).toBe('cursor');
   });
 
   it('returns ok:false with an error AND a fallbackUrl for an unavailable editor', async () => {

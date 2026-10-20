@@ -77,7 +77,7 @@ Use the visible Settings controls for these host-wide preferences. Global event-
 | `defaultAccountId` | string or `null`; use an actual connected account ID |
 | `generation.provider` | string or `null` |
 | `generation.model` | string or `null`; use a live model catalogue value |
-| `editor.defaultEditor` | `vscode`, `vscode-insiders`, `cursor`, `windsurf`, or `null` |
+| `editor.defaultEditor` | `vscode`, `cursor`, or `null` |
 | `defaultBase` | non-empty branch string or `null` |
 
 ```json

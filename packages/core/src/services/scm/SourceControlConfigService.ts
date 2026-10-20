@@ -16,6 +16,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import {
+  EDITOR_IDS,
   ValidationError,
   type DeviceLoginStart,
   type DeviceLoginStatus,
@@ -703,7 +704,8 @@ function normaliseSettings(raw: Partial<SourceControlSettings> | undefined): Sou
       provider: raw.generation?.provider ?? null,
       model: raw.generation?.model ?? null,
     },
-    editor: { defaultEditor: raw.editor?.defaultEditor ?? null },
+    // An editor no longer offered (VS Code Insiders, Windsurf) reads as no preference.
+    editor: { defaultEditor: raw.editor?.defaultEditor && EDITOR_IDS.includes(raw.editor.defaultEditor) ? raw.editor.defaultEditor : null },
     defaultBase: raw.defaultBase ?? null,
   };
 }

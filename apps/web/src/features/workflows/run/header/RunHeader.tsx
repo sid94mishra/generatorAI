@@ -3,8 +3,8 @@
 //
 //   row 1   breadcrumb Workflows / <definition> / <run> (h1) · pinned version
 //           chip · D-18 status (Needs you while a stage waits on a review) ·
-//           the run clock · Pause/Resume · Cancel · Retry failed · More
-//           (graph, event timeline, Open in editor …) · dock toggle
+//           the run clock · Pause/Resume · Cancel · Retry failed · Open (VS
+//           Code / Cursor) · More (event timeline, Copy path …) · dock toggle
 //   row 2   permission mode · WF-06 BudgetMeter · stage progress · budget
 //           exhausted + Raise budget · the focused stage's context gauge ·
 //           trigger and start time
@@ -20,6 +20,7 @@ import { runTitle } from '@generatorai/client-core';
 import type { ContextUsageSnapshot, UsageInfo } from '@generatorai/client-core';
 import { shortcutFor } from '@/lib/shortcuts.js';
 import { useEditorActions, FILE_MANAGER } from '@/blocks/editor/useEditorActions.js';
+import { OpenInEditorButton } from '@/blocks/editor/OpenInEditorButton.js';
 import { ContextGauge } from '@/blocks/composer/parts/ContextGauge.js';
 import { PageHeader } from '@/ui/patterns/PageHeader/PageHeader.js';
 import { Breadcrumb, type BreadcrumbItem } from '@/ui/patterns/Breadcrumb/Breadcrumb.js';
@@ -159,15 +160,6 @@ export const RunHeader = memo(function RunHeader({
   ];
   if (editor.target) {
     more.push({ type: 'separator', id: 'sep-editor' });
-    more.push({ id: 'open-in-editor', label: editor.label, icon: 'external-link', onSelect: () => editor.open(editor.preferred?.id) });
-    for (const other of editor.editors) {
-      if (other.id === editor.preferred?.id) continue;
-      more.push({
-        id: `open-in-${other.id}`,
-        label: other.available ? `Open in ${other.name}` : `Open in ${other.name} (not installed)`,
-        onSelect: () => editor.open(other.id),
-      });
-    }
     more.push({ id: 'copy-path', label: 'Copy path', icon: 'copy', onSelect: () => void editor.copyPath() });
     const reveal = editor.reveal;
     if (reveal) more.push({ id: 'reveal', label: `Show in ${FILE_MANAGER}`, icon: 'folder-open', onSelect: () => void reveal() });
@@ -239,6 +231,7 @@ export const RunHeader = memo(function RunHeader({
             onClick={onToggleGraph}
             data-testid="run-graph-toggle"
           />
+          <OpenInEditorButton />
           <MenuButton label="More" icon="more" iconOnly items={more} align="end" data-testid="run-header-more" />
         </>
       }

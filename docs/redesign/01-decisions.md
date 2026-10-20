@@ -1613,6 +1613,26 @@ stage with an object or list output now shows that data as its answer, readable 
 record, deeper nesting as JSON). The approval card renders a JSON output the same way; the inspector's Output tab
 shows **result**, then the raw `outputData`, then the text as **last message**; Copy output copies the JSON.
 
+### D-160 Streamed text at a reading pace, painted only when it renders as it will stay; no caret (owner, 2026-10-20) — Final
+The owner found streaming too fast to follow and flickering. Filmed at ~52 fps, an answer revealed at the model's
+~310 characters a second; a table's columns re-flowed every frame as cells grew by a character; a half-typed word at a
+line end jumped to the next line; the newest characters wore a Running-tinted band; and the caret hopped word to word
+and line to line. Now (client-core `textPacer`, shared with mobile): the reveal holds ~110 characters a second
+(`maxCharsPerSecond`), trailing what arrived by at most 4 s (`maxLagMs`), eased (400 ms), whole words, the overshoot of
+finishing a word paid back by the next frames; after the turn ends the rest glides in within ~1.2 s instead of 250 ms.
+`visibleLength` paints a table row, a code line or a fence only when complete, a table header together with its
+delimiter row, a list item or heading with its first word, and never a lone rule line (they rendered as a paragraph of
+pipes, a setext underline, an empty item). The leading edge fades in neutral ink over ~540 ms (six Custom Highlights,
+no tint). The streaming caret is removed (supersedes the caret of D-33/D-91/D-152); the fading edge shows where the
+text grows, and the live activity line says the agent is working.
+
+### D-161 "Open in" offers VS Code and Cursor, as a header split button with their marks (owner, 2026-10-20) — Final
+`EditorId` is `vscode | cursor` (VS Code Insiders and Windsurf removed from the launcher, routes, OpenAPI and docs; a
+stored default for either reads as none). Chat and run headers show an Open split button: the main part opens the
+page's folder in the default editor and wears its mark; the chevron lists VS Code and Cursor with their marks
+(Simple Icons, CC0; VS Code in its brand blue, Cursor in the text colour), the default checked and a missing one
+marked "Not installed". Picking one opens there and makes it the default. Copy path and Show in Finder stay in More.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

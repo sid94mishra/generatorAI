@@ -449,6 +449,7 @@ export type {
   RemoteRefsRequest,
   RemoteRefs,
 } from './SourceControl.js';
+export { EDITOR_IDS } from './SourceControl.js';
 
 // ── Own device record (mobile MG-01) ──
 export type { SelfDevicePlatform, SelfDeviceApprovalKey, SelfDeviceView } from './Device.js';

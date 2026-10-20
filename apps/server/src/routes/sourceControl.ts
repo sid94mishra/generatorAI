@@ -17,6 +17,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { redactTokens } from '@generatorai/core';
 import type { Container } from '../composition-root.js';
 import type { ActiveProvider } from '@generatorai/core';
+import { EDITOR_IDS } from '@generatorai/shared';
 import type {
   EditorId,
   RemoteRefs,
@@ -25,7 +26,6 @@ import type {
 } from '@generatorai/shared';
 
 const AUTH_METHODS: readonly SourceControlAuthMethod[] = ['token', 'gh-cli', 'device'];
-const EDITOR_IDS: readonly EditorId[] = ['vscode', 'vscode-insiders', 'cursor', 'windsurf'];
 
 /** The route-level 400. Service-thrown `ValidationError`s take the `next(err)` path instead. */
 function badRequest(res: Response, message: string): void {

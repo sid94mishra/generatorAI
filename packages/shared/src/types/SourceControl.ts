@@ -39,7 +39,10 @@ export interface SourceControlProviderInfo {
   loginMethods: SourceControlAuthMethod[];
 }
 
-export type EditorId = 'vscode' | 'vscode-insiders' | 'cursor' | 'windsurf';
+/** The editors "Open in" offers: VS Code and Cursor (owner, 2026-10-20). */
+export type EditorId = 'vscode' | 'cursor';
+
+export const EDITOR_IDS: readonly EditorId[] = ['vscode', 'cursor'];
 
 export interface EditorInfo {
   id: EditorId;

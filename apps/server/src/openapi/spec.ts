@@ -274,12 +274,12 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       EditorId: {
         type: 'string',
         nullable: true,
-        enum: ['vscode', 'vscode-insiders', 'cursor', 'windsurf', null],
+        enum: ['vscode', 'cursor', null],
       },
       EditorInfo: {
         type: 'object',
         properties: {
-          id: { type: 'string', enum: ['vscode', 'vscode-insiders', 'cursor', 'windsurf'] },
+          id: { type: 'string', enum: ['vscode', 'cursor'] },
           name: { type: 'string' },
           available: { type: 'boolean', description: 'The server host can launch this editor (CLI found).' },
           scheme: { type: 'string', description: 'URL scheme for the browser-side fallback, e.g. `vscode`.' },
@@ -296,7 +296,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           },
           line: { type: 'integer', minimum: 1 },
           column: { type: 'integer', minimum: 1 },
-          editor: { type: 'string', enum: ['vscode', 'vscode-insiders', 'cursor', 'windsurf'] },
+          editor: { type: 'string', enum: ['vscode', 'cursor'] },
         },
         required: ['path'],
       },
@@ -304,7 +304,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         type: 'object',
         properties: {
           ok: { type: 'boolean' },
-          editor: { type: 'string', enum: ['vscode', 'vscode-insiders', 'cursor', 'windsurf'] },
+          editor: { type: 'string', enum: ['vscode', 'cursor'] },
           fallbackUrl: {
             type: 'string',
             description: 'A URL the client can try when the server could not launch anything.',

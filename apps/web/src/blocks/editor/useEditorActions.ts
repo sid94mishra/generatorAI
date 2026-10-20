@@ -1,9 +1,10 @@
 // ────────────────────────────────────────────────────────────────
 // useEditorActions — "Open in <editor>" for the page's published target
-// (`editorTargetStore`): the default editor, every editor the server knows,
-// Copy path and (desktop) Show in the file manager. Page headers render it
-// (the chat header's More menu, P4-12; project / codebase / run pages as they
-// port); the legacy OpenInEditorButton shares `resolveDefaultEditor`.
+// (`editorTargetStore`): the default editor, the editors the server offers (VS
+// Code, Cursor), Copy path and (desktop) Show in the file manager. Page headers
+// render it (the chat header's Open button and More menu, P4-12). Opening in an
+// editor from the menu makes it the default, so the button's mark follows the
+// last choice.
 //
 // Cross-platform by construction: which editors exist and whether each is
 // installed is answered by the server for its own host. Only the file
@@ -12,7 +13,7 @@
 
 import { useCallback, useMemo } from 'react';
 import type { EditorId, EditorInfo } from '@generatorai/shared';
-import { useEditors, useOpenInEditor, useSourceControlSettings } from '@/hooks/queries.js';
+import { useEditors, useOpenInEditor, useSourceControlSettings, useUpdateSourceControlSettings } from '@/hooks/queries.js';
 import { isDesktop } from '@/lib/desktop.js';
 import { useEditorTargetStore, type EditorTarget } from '@/stores/editorTargetStore.js';
 import { copyTextToClipboard } from '@/utils/copyToClipboard.js';
@@ -52,6 +53,8 @@ export interface EditorActions {
   label: string;
   pending: boolean;
   open: (editor?: EditorId) => void;
+  /** Open in `editor` and make it the default (the menu's rows). */
+  choose: (editor: EditorId) => void;
   copyPath: () => Promise<void>;
   /** Desktop only (undefined in a browser). */
   reveal: (() => Promise<void>) | undefined;
@@ -62,6 +65,7 @@ export function useEditorActions(): EditorActions {
   const { data: editorList } = useEditors();
   const { data: scmSettings } = useSourceControlSettings();
   const openInEditor = useOpenInEditor();
+  const updateSettings = useUpdateSourceControlSettings();
   const editors = useMemo(() => editorList ?? [], [editorList]);
   const preferred = resolveDefaultEditor(editors, scmSettings?.settings.editor.defaultEditor);
 
@@ -71,6 +75,16 @@ export function useEditorActions(): EditorActions {
       openInEditor.mutate({ path: target.path, ...(editor ? { editor } : {}) });
     },
     [openInEditor, target],
+  );
+
+  const preferredId = preferred?.id;
+  const { mutate: saveSettings } = updateSettings;
+  const choose = useCallback(
+    (editor: EditorId) => {
+      open(editor);
+      if (editor !== preferredId) saveSettings({ editor: { defaultEditor: editor } });
+    },
+    [open, preferredId, saveSettings],
   );
 
   const copyPath = useCallback(async () => {
@@ -103,6 +117,7 @@ export function useEditorActions(): EditorActions {
     label: preferred ? `Open in ${preferred.name}` : 'Open in editor',
     pending: openInEditor.isPending,
     open,
+    choose,
     copyPath,
     reveal: isDesktop ? reveal : undefined,
   };
