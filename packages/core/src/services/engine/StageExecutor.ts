@@ -336,15 +336,20 @@ function fenceContext(blocks: string[]): string {
   return `<generatorai:stage-context trust="untrusted">\n${blocks.join('\n\n---\n\n')}\n</generatorai:stage-context>\n\n`;
 }
 
-function asUsage(data: Record<string, unknown>): Usage {
+export function asUsage(data: Record<string, unknown>): Usage {
   const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
   // Dollars only when the provider reports them (`costUsd`); no pricing table (P07 WP-7.3).
   const cost = n(data['costUsd']);
+  const input = n(data['inputTokens']);
+  const output = n(data['outputTokens']);
+  // A turn without a cost still spent tokens: counted apart, so a mixed run's cost says what it leaves out (D-158).
+  const unpriced = cost === undefined && (input !== undefined || output !== undefined) ? (input ?? 0) + (output ?? 0) : undefined;
   return {
     turns: 1,
     ...(cost !== undefined ? { costUsd: cost } : {}),
-    ...(n(data['inputTokens']) !== undefined ? { inputTokens: n(data['inputTokens'])! } : {}),
-    ...(n(data['outputTokens']) !== undefined ? { outputTokens: n(data['outputTokens'])! } : {}),
+    ...(input !== undefined ? { inputTokens: input } : {}),
+    ...(output !== undefined ? { outputTokens: output } : {}),
+    ...(unpriced ? { unpricedTokens: unpriced } : {}),
   };
 }
 

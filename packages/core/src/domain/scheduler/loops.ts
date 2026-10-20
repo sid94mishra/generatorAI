@@ -287,7 +287,7 @@ function finishIteration(w: Working, inst: LoopInstance, node: CompiledNode, has
   const outcome: RunOutcome = computeScopeOutcome(w.graph, scope, w.scopeFor);
   const usage = scope.reduce<Usage>((acc, i) => {
     const out: Usage = { ...acc };
-    for (const key of ['turns', 'costUsd', 'inputTokens', 'outputTokens', 'toolCalls'] as const) {
+    for (const key of ['turns', 'costUsd', 'inputTokens', 'outputTokens', 'unpricedTokens', 'toolCalls'] as const) {
       if (i.usage[key] !== undefined) out[key] = (out[key] ?? 0) + i.usage[key]!;
     }
     return out;

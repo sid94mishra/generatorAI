@@ -6,7 +6,8 @@
 //
 // Dollars appear only when a provider reported cost (`usage.costUsd`, D-81);
 // otherwise tokens are the spend (tokens-only, D-35). No pricing table, so
-// nothing is an estimate.
+// nothing is an estimate. Tokens of providers that report no cost (Codex) in a
+// run that has a cost are said beside it: "$2.72 + 1.2M unpriced" (D-158).
 // ────────────────────────────────────────────────────────────────
 
 import type { RunUsage } from '@generatorai/shared';
@@ -25,6 +26,8 @@ export interface BudgetItem {
   usedText: string;
   limitText?: string;
   over: boolean;
+  /** Cost only: the tokens of providers that report no cost, which it leaves out (D-158). */
+  unpricedText?: string;
 }
 
 /**
@@ -52,7 +55,10 @@ export function budgetItems(usage: RunUsage | undefined, budget: Record<string, 
   ];
   const maxWall = limitOf(budget, 'maxWallClockMs');
   if (maxWall !== undefined) items.push(item('wall', 'wall clock', elapsedMs, maxWall, formatDuration));
-  if (typeof usage?.costUsd === 'number') items.push(item('cost', 'reported cost', usage.costUsd, limitOf(budget, 'maxCostUsd'), formatUsd));
+  if (typeof usage?.costUsd === 'number') {
+    const cost = item('cost', 'reported cost', usage.costUsd, limitOf(budget, 'maxCostUsd'), formatUsd);
+    items.push(usage.unpricedTokens ? { ...cost, unpricedText: compactCount(usage.unpricedTokens) } : cost);
+  }
   return items;
 }
 
@@ -76,7 +82,7 @@ export function budgetSummary(items: readonly BudgetItem[], usage: RunUsage | un
 }
 
 function triggerText(i: BudgetItem): string {
-  if (i.key === 'cost') return i.limitText ? `${i.usedText} of ${i.limitText}` : i.usedText;
+  if (i.key === 'cost') return `${i.limitText ? `${i.usedText} of ${i.limitText}` : i.usedText}${i.unpricedText ? ` + ${i.unpricedText} unpriced` : ''}`;
   if (i.key === 'wall') return i.limitText ? `${i.usedText} of ${i.limitText}` : i.usedText;
   return i.limitText ? `${i.usedText}/${i.limitText} ${i.label}` : `${i.usedText} ${i.label}`;
 }
@@ -132,6 +138,11 @@ export function BudgetMeter({ usage, budget, elapsedMs, active = false }: Budget
         )}
         {typeof usage?.costUsd !== 'number' ? (
           <p className="text-small text-fg-3">No provider reported a cost for this run, so tokens are the spend.</p>
+        ) : usage.unpricedTokens ? (
+          <p className="text-small text-fg-3" data-testid="run-budget-unpriced">
+            {compactCount(usage.unpricedTokens)} tokens ran on providers that report no cost (such as Codex): they are in the tokens, not in
+            the cost, and a cost limit does not count them.
+          </p>
         ) : null}
       </PopoverPopup>
     </PopoverRoot>

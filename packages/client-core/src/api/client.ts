@@ -502,7 +502,7 @@ export interface WorkflowRunSummary {
   /** The effective run budget (`maxTurns`, `maxCostUsd`, `maxTokens`, `maxWallClockMs`). */
   budget?: Record<string, unknown> | null;
   /** Rolled-up usage; `costUsd` only when a provider reported cost. */
-  usage?: { turns?: number; costUsd?: number; inputTokens?: number; outputTokens?: number; toolCalls?: number } | null;
+  usage?: { turns?: number; costUsd?: number; inputTokens?: number; outputTokens?: number; unpricedTokens?: number; toolCalls?: number } | null;
 }
 
 export interface StageRunSummary {

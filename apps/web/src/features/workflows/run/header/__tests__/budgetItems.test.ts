@@ -40,4 +40,9 @@ describe('budgetSummary', () => {
     // A finished run with nothing reported shows its zeros.
     expect(budgetSummary(budgetItems(undefined, undefined, 5_000), undefined, false)).toBe('0 turns · 0 tokens');
   });
+
+  it('says what a mixed run\'s cost leaves out (D-158)', () => {
+    const usage = { turns: 9, inputTokens: 1_500_000, outputTokens: 40_000, costUsd: 2.72, unpricedTokens: 1_200_000 };
+    expect(budgetSummary(budgetItems(usage, undefined, 0), usage, false)).toBe('9 turns · 1.5M tokens · $2.72 + 1.2M unpriced');
+  });
 });

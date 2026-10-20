@@ -40,7 +40,7 @@ export const byPath = (a: InstanceState, b: InstanceState) => (a.instancePath < 
 
 export function addUsage(a: Usage, b: Usage): Usage {
   const out: Usage = { ...a };
-  for (const k of ['turns', 'costUsd', 'inputTokens', 'outputTokens', 'toolCalls'] as const) {
+  for (const k of ['turns', 'costUsd', 'inputTokens', 'outputTokens', 'unpricedTokens', 'toolCalls'] as const) {
     if (b[k] !== undefined) out[k] = (out[k] ?? 0) + b[k]!;
   }
   return out;

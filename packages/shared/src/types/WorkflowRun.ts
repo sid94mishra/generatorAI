@@ -54,6 +54,8 @@ export interface RunUsage {
   costUsd?: number;
   inputTokens?: number;
   outputTokens?: number;
+  /** Tokens of turns whose provider reported no cost (Codex): part of the tokens, never of `costUsd` (D-158). */
+  unpricedTokens?: number;
   toolCalls?: number;
 }
 

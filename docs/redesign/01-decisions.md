@@ -1594,6 +1594,15 @@ lint` would be remembered as `npm run`). `POST /api/projects/:id/permission-rule
 same way a card does and refuses (422 `NOT_REMEMBERABLE`) anything on the never-list. `sleep` and `date` (not `date
 -s`) join the read-only inspectors (D-150), so a polling line no longer asks.
 
+### D-158 A mixed run's cost says what it leaves out (workflow evaluation, 2026-10-20) — Final
+Codex reports tokens but no cost, so W1's "$2.72" covered only its Claude stages and read as the run's whole cost. A
+turn without a reported cost now counts its tokens as `usage.unpricedTokens` too (`asUsage`; summed like every usage
+field on the stage, the loop iteration and the run). When the run has a cost, the header meter reads "… · $2.72 + 1.2M
+unpriced" and its popover and the Usage panel say those tokens ran on providers that report no cost (such as Codex),
+are in the tokens and not in the cost, and that a cost limit does not count them; a stage row's cost reads "not
+reported". Still no pricing table (P07 WP-7.3): nothing is estimated, and `maxTokens` is the limit that sees every
+provider (the validator's `budget-cost-unsupported` already says so).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

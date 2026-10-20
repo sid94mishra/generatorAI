@@ -1,6 +1,8 @@
 // ────────────────────────────────────────────────────────────────
 // RunUsagePanel — the run's usage roll-up (P07 WP-7.6): the run totals
-// and one row per stage instance (attempts, turns, tokens, cost, time).
+// and one row per stage instance (attempts, turns, tokens, cost, time). In a
+// run where some providers report cost and others do not, the tokens left out
+// of the cost are counted and said (D-158).
 // Cost is what providers reported, shown only when one did: there is no
 // pricing table, so nothing here is an estimate (D-35, D-81).
 // ────────────────────────────────────────────────────────────────
@@ -22,7 +24,7 @@ interface Row {
   durationMs: number | undefined;
 }
 
-const USAGE_KEYS = ['turns', 'costUsd', 'inputTokens', 'outputTokens', 'toolCalls'] as const;
+const USAGE_KEYS = ['turns', 'costUsd', 'inputTokens', 'outputTokens', 'unpricedTokens', 'toolCalls'] as const;
 
 function rowOf(sr: StageRun): Row {
   return {
@@ -67,6 +69,7 @@ export function RunUsagePanel({ run, onFocusStage }: RunUsagePanelProps) {
     { label: 'Output tokens', value: compactCount(totals.outputTokens ?? 0) },
     { label: 'Tool calls', value: String(totals.toolCalls ?? 0) },
     ...(totals.costUsd !== undefined ? [{ label: 'Cost (reported)', value: formatUsd(totals.costUsd) }] : []),
+    ...(totals.costUsd !== undefined && totals.unpricedTokens ? [{ label: 'Tokens not in the cost', value: compactCount(totals.unpricedTokens) }] : []),
     { label: 'Wall clock', value: formatMs(wall) },
   ];
 
@@ -85,6 +88,11 @@ export function RunUsagePanel({ run, onFocusStage }: RunUsagePanelProps) {
       {!anyCost ? (
         <p className="shrink-0 border-b border-line-soft px-3 py-1.5 text-small text-fg-3">
           No provider of this run reported cost; tokens are the spend.
+        </p>
+      ) : totals.unpricedTokens ? (
+        <p className="shrink-0 border-b border-line-soft px-3 py-1.5 text-small text-fg-3" data-testid="run-usage-unpriced">
+          The cost covers only the stages whose provider reports one; {compactCount(totals.unpricedTokens)} tokens ran on providers that report
+          none (such as Codex) and are not in it.
         </p>
       ) : null}
       <div className="min-h-0 flex-1 overflow-auto">
@@ -125,7 +133,7 @@ export function RunUsagePanel({ run, onFocusStage }: RunUsagePanelProps) {
                   </TableCell>
                   {anyCost ? (
                     <TableCell align="end" mono>
-                      {r.usage.costUsd !== undefined ? formatUsd(r.usage.costUsd) : '—'}
+                      {r.usage.costUsd !== undefined ? formatUsd(r.usage.costUsd) : r.usage.unpricedTokens ? 'not reported' : '—'}
                     </TableCell>
                   ) : null}
                   <TableCell align="end" className="text-small tabular-nums">

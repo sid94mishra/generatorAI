@@ -49,7 +49,7 @@ export function spanMs(start: Date | string | number | undefined, end: Date | st
 /** A usage record's numbers (`StageRun.usage` is untyped JSON). */
 export function usageNumbers(usage: Record<string, unknown> | RunUsage | undefined): RunUsage {
   const out: RunUsage = {};
-  for (const k of ['turns', 'costUsd', 'inputTokens', 'outputTokens', 'toolCalls'] as const) {
+  for (const k of ['turns', 'costUsd', 'inputTokens', 'outputTokens', 'unpricedTokens', 'toolCalls'] as const) {
     const v = (usage as Record<string, unknown> | undefined)?.[k];
     if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
   }
