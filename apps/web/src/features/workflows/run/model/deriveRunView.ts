@@ -485,6 +485,7 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
         tool: typeof r.tool === 'string' ? r.tool : (typeof r.toolName === 'string' ? r.toolName : undefined),
         args: (typeof r.args === 'object' && r.args !== null) ? (r.args as Record<string, unknown>) : undefined,
         ...(typeof r.output === 'string' && r.output.trim() ? { output: r.output } : {}),
+        ...(Array.isArray(r.afterRun) ? { afterRun: r.afterRun.filter((x): x is string => typeof x === 'string') } : {}),
       };
     } else {
       interrupt = {

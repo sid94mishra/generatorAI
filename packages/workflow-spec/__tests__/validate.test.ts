@@ -316,3 +316,15 @@ describe('budget units (evaluation)', () => {
     expect(r.valid).toBe(true);
   });
 });
+
+describe('approval copy and publishing (evaluation)', () => {
+  const gate = agent('ship', { approval: { prompt: 'Approving commits, pushes the branch and opens a PR to develop.' } });
+  it('warns when an approval promises a push or PR the workflow never makes', () => {
+    const r = validateWorkflow(graph([gate]));
+    expect(r.issues.filter((i) => i.code === 'approval-promises-publishing').map((i) => i.path)).toEqual(['/stages/0/approval/prompt']);
+  });
+  it('is quiet when the workflow publishes', () => {
+    const r = validateWorkflow(graph([gate], [], { lifecycle: { postProcessing: { autoCreatePR: true } } }));
+    expect(r.issues.some((i) => i.code === 'approval-promises-publishing')).toBe(false);
+  });
+});

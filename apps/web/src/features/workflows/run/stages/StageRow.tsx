@@ -402,6 +402,7 @@ export const StageRow = memo(function StageRow({
               tool={stage.interrupt.tool}
               args={stage.interrupt.args}
               output={stage.interrupt.output}
+              afterRun={stage.interrupt.afterRun}
               approveStarts={approveStarts}
               busy={gateBusy}
               onApprove={() => onApproveHitl?.(stage.id)}

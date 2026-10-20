@@ -810,6 +810,30 @@ function referenceIssues(graph: WorkflowGraph, ctx: GraphContext, opts: Validate
     if (s.kind === 'subworkflow' && ctx.resolveRef) out.push(...subworkflowIssues(ctx, s, p, opts.definitionId));
   });
 
+  // An approval that promises a push or a PR the run will not make (evaluation, 2026-10-20: a copy with publishing
+  // removed still asked "Approving commits, pushes the branch and opens a PR").
+  const pp = wf.lifecycle.postProcessing;
+  const publishes =
+    pp.autoPush === true ||
+    pp.autoCreatePR === true ||
+    pp.steps.some((st) => st.config.type === 'create_pr' || (st.config.type === 'commit_and_push' && st.config.push !== false));
+  if (!publishes) {
+    const promises = (text: string | undefined) => !!text && (/\b(push(es|ed|ing)?|pull request|publish(es|ed|ing)?)\b/i.test(text) || /\bPRs?\b/.test(text));
+    graph.stages.forEach((s, i) => {
+      const [text, path] =
+        s.kind === 'agent' ? [s.approval?.prompt, `/stages/${i}/approval/prompt`] : s.kind === 'wait' && s.wait.type === 'approval' ? [s.wait.prompt.text, `/stages/${i}/wait/prompt/text`] : [undefined, ''];
+      if (!promises(text)) return;
+      out.push({
+        code: 'approval-promises-publishing',
+        severity: 'warning',
+        path,
+        stageKey: s.key,
+        message: `The approval for '${s.key}' speaks of pushing or a pull request, but this workflow publishes nothing after the run`,
+        hint: 'Add commit/push/PR post-processing, or reword the approval',
+      });
+    });
+  }
+
   graph.edges.forEach((e, i) => {
     if (e.handlesFailure && (e.on === 'failure')) {
       out.push({ code: 'handles-failure-redundant', severity: 'warning', path: `/edges/${i}/handlesFailure`, message: 'A failure edge already handles failures' });

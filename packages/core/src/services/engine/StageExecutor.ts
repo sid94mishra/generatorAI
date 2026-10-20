@@ -83,6 +83,7 @@ import { StageGatePort } from '../session/StageGatePort.js';
 import { TurnRecorder } from '../session/TurnRecorder.js';
 import type { SessionOwner, TurnContext } from '../session/types.js';
 import { runWorkspace, workspaceExposure } from '../session/workspaceExposure.js';
+import { buildPostProcessingSteps } from './lifecycle/finalize.js';
 import { mapItemPlacement, runForItem } from './MapEffects.js';
 import type { IsolatedMerge, IsolatedPlacement, StageIsolation } from './StageIsolation.js';
 import type { WorkflowCallbacks } from './WorkflowCallbacks.js';
@@ -1952,6 +1953,8 @@ export class StageExecutor {
             outputHash: digest(ctx.outputText),
             reviewRound: round,
             canRequestChanges: approval.allowChanges && round <= maxRounds,
+            // What the run does once it completes, from its settings, whatever the prompt says (evaluation 2026-10-20).
+            afterRun: buildPostProcessingSteps(ctx.graph.workflow.lifecycle, Object.keys(ctx.run.systemVars?.codebases ?? {}).length > 0).map((st) => st.name),
           });
           if (verdict.outcome === 'approved') {
             this.toValidating(ctx);

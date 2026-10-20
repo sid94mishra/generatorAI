@@ -110,6 +110,8 @@ export interface StageView {
     args?: Record<string, unknown>;
     /** A completion review: the stage output being approved (U-19). */
     output?: string;
+    /** A completion review: the steps the run takes once it completes (commit, push, PR …); empty publishes nothing. */
+    afterRun?: string[];
   };
   /** Error message when status = failed. */
   error?: string;

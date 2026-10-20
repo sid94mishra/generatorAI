@@ -138,6 +138,11 @@ export const VALIDATION_CODES = {
     severity: 'warning',
     description: 'A reviewer pinned to the provider of the stage it reviews: a reviewer on another provider catches more',
   },
+  'approval-promises-publishing': {
+    layer: 'references',
+    severity: 'warning',
+    description: 'An approval prompt that speaks of pushing or a pull request in a workflow that publishes nothing after the run',
+  },
   'budget-turns-units': {
     layer: 'references',
     severity: 'warning',
