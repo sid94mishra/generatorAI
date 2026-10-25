@@ -128,7 +128,15 @@ export function composeFlowRequest(selected: RepoReadiness | undefined, form: Sh
 }
 
 /** The toolbar button's verb for the repo's state, or null when there is nothing to ship (D-163). */
-export function shipActionOf(selected: RepoReadiness | undefined): { label: string; mode: ShipMode; prominent: boolean } | null {
+export interface ShipAction {
+  label: string;
+  mode: ShipMode;
+  prominent: boolean;
+  /** Nothing left to ship and a PR is open: the button opens the PR instead of the dialog. */
+  href?: string;
+}
+
+export function shipActionOf(selected: RepoReadiness | undefined): ShipAction | null {
   if (!selected?.isRepo) return null;
   if (selected.mergeInProgress) return { label: 'Finish merge', mode: 'commit', prominent: true };
   if (selected.dirty) return { label: 'Commit', mode: selected.can.push ? 'push' : 'commit', prominent: true };
@@ -138,7 +146,7 @@ export function shipActionOf(selected: RepoReadiness | undefined): { label: stri
   if (selected.openPullRequest) {
     return unpushed
       ? { label: 'Push', mode: 'push', prominent: true }
-      : { label: `PR #${selected.openPullRequest.number}`, mode: 'push', prominent: false };
+      : { label: `PR #${selected.openPullRequest.number}`, mode: 'push', prominent: false, href: selected.openPullRequest.url };
   }
   if (unpushed && selected.can.push) return { label: 'Push', mode: selected.can.pullRequest ? 'pr' : 'push', prominent: true };
   if (selected.can.pullRequest && !selected.onDefaultBranch) return { label: 'Pull request', mode: 'pr', prominent: false };

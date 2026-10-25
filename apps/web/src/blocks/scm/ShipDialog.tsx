@@ -13,7 +13,7 @@ import { joinPath } from '@/blocks/changes/changePaths.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { ScmConflictActions } from './ScmConflictActions.js';
 import { ShipDialogView, type ShipFile } from './ShipDialogView.js';
-import { pickDefaultAlias, shipActionOf, type ShipMode } from './scmFlow.js';
+import { pickDefaultAlias, remoteNameOf, shipActionOf, type ShipMode } from './scmFlow.js';
 import { useShipFlow } from './useShipFlow.js';
 import { useWorkspaceReadiness } from '@/hooks/queries.js';
 
@@ -41,7 +41,18 @@ export function ShipButton(props: ShipDialogProps) {
   const [opened, setOpened] = useState(false);
   return (
     <>
-      {action ? (
+      {action?.href ? (
+        <Button
+          size="sm"
+          variant="secondary"
+          icon="pr"
+          render={<a href={action.href} target="_blank" rel="noreferrer" />}
+          title={`Open ${action.label} on ${repo ? remoteNameOf(repo) : 'the remote'}: everything is committed and pushed`}
+          data-testid="scm-open-pr"
+        >
+          {action.label}
+        </Button>
+      ) : action ? (
         <Button
           size="sm"
           variant={action.prominent ? 'primary' : 'secondary'}

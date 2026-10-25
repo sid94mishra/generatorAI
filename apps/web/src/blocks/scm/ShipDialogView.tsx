@@ -171,6 +171,8 @@ function titleOf(mode: ShipMode, dirty: boolean): string {
 function planOf(mode: ShipMode, selected: RepoReadiness, files: number, base: string): string {
   const parts: string[] = [];
   if (selected.dirty) parts.push(`Commits ${plural(files || selected.changedFiles, 'file')}`);
+  const upToDate = !selected.dirty && selected.hasUpstream && (selected.ahead ?? 0) === 0;
+  if (mode === 'push' && upToDate) return '';
   if (mode !== 'commit') {
     const cut = selected.onDefaultBranch || selected.branch === null;
     parts.push(cut ? 'pushes to a new branch' : `pushes ${selected.branch}`);
@@ -349,13 +351,17 @@ function CommitSection({
 
 function PushNote({ selected }: { selected: RepoReadiness }) {
   const ahead = selected.ahead ?? 0;
-  return (
-    <p className="text-ui text-fg-2">
-      {ahead > 0
-        ? `${plural(ahead, 'commit')} on ${selected.branch} will be pushed to origin.`
-        : `${selected.branch} will be pushed to origin.`}
-    </p>
-  );
+  const behind = selected.behind ?? 0;
+  const remote = remoteNameOf(selected);
+  const pr = selected.openPullRequest;
+  const text = !selected.hasUpstream
+    ? `${selected.branch} goes to ${remote} for the first time.`
+    : ahead > 0
+      ? `${plural(ahead, 'commit')} on ${selected.branch} will be pushed${pr ? `, updating PR #${pr.number}` : ''}.`
+      : behind > 0
+        ? `Nothing of yours to push. ${remote} has ${plural(behind, 'newer commit')}; your next push merges them first.`
+        : `Nothing to push: ${remote} already has every commit on ${selected.branch}.`;
+  return <p className="text-ui text-fg-2">{text}</p>;
 }
 
 // ── Pull request: base, mergeability, title, description, contents ─

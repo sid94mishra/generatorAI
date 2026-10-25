@@ -47,7 +47,9 @@ describe('shipActionOf', () => {
     expect(shipActionOf(repo({ ahead: 2 }))?.label).toBe('Push');
     expect(shipActionOf(repo())?.label).toBe('Pull request');
     const pr = { provider: 'github' as const, number: 9, url: 'u', title: 't', state: 'open' as const, head: 'feature', base: 'main' };
-    expect(shipActionOf(repo({ openPullRequest: pr }))?.label).toBe('PR #9');
+    expect(shipActionOf(repo({ openPullRequest: pr }))).toMatchObject({ label: 'PR #9', href: pr.url });
+    expect(shipActionOf(repo({ openPullRequest: pr, ahead: 1 }))).toMatchObject({ label: 'Push' });
+    expect(shipActionOf(repo({ openPullRequest: pr, ahead: 1 }))?.href).toBeUndefined();
   });
 
   it('offers nothing for a clean, never-pushed branch, the default branch, or a folder', () => {
