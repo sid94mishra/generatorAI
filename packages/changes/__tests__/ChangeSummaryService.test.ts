@@ -493,6 +493,19 @@ describe('ChangeSummaryService (real git)', () => {
     const uncommitted = await service.getSummary({ ...params(), base: { kind: 'ref', id: 'HEAD' } });
     expect(uncommitted.repos[0]!.files.map((f) => f.path)).toEqual(['b.txt']);
 
+    // A repository mount tracked through a shadow store (how chats mount codebases): HEAD is the
+    // repository's, not the store's, and the store reads its objects through alternates.
+    const repoShadow = path.join(tmpRoot, 'shadow', 'repo');
+    const objects = await git.commonObjectsDir(repoDir);
+    expect(await git.initShadowRepo(repoShadow, repoDir, { ...(objects ? { alternatesObjectsDir: objects } : {}) })).toBe(true);
+    const viaShadow = await service.getSummary({
+      ...params(),
+      base: { kind: 'ref', id: 'HEAD' },
+      mounts: [{ alias: 'repo', path: repoDir, gitDir: repoShadow }],
+    });
+    expect(viaShadow.repos[0]!.files.map((f) => f.path)).toEqual(['b.txt']);
+    expect(viaShadow.repos[0]!.base.label).toBe('Last commit');
+
     const folder = path.join(tmpRoot, 'notes');
     const shadow = path.join(tmpRoot, 'shadow', 'notes');
     await fs.mkdir(folder, { recursive: true });

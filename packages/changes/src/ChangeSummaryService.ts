@@ -12,6 +12,7 @@
 //   3. Reports renames, binary files and oversized files explicitly instead
 //      of emitting megabytes of unusable diff text.
 
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { CheckpointRecord, ILogger } from '@generatorai/shared';
 import type { GitBlobEntry, IGitClient } from '@generatorai/git';
@@ -618,14 +619,21 @@ export class ChangeSummaryService {
       }
 
       case 'ref': {
-        // "Uncommitted changes" asks for each mount's own HEAD. A folder the
-        // engine tracks in a shadow store has no commits of its own, and an
-        // unborn branch none yet: both compare against their baseline instead.
-        if (selector.id === 'HEAD' && this.shadows.has(path.resolve(repo.repoDir))) {
-          return this.resolveBaseline(workspaceId, repo);
+        // "Uncommitted changes" asks for each mount's own HEAD. HEAD lives in the mount's
+        // repository, never in its shadow store (which only holds checkpoints, and reads the
+        // repository's objects through `alternates`). A plain folder has no repository of its
+        // own — asking git there would find whatever repo encloses it — and an unborn branch
+        // has no commit yet: both compare against their baseline instead.
+        if (selector.id === 'HEAD') {
+          const ownRepo = await fs
+            .stat(path.join(repo.repoDir, '.git'))
+            .then(() => true)
+            .catch(() => false);
+          const head = ownRepo ? await this.git.revParse(repo.repoDir, 'HEAD') : null;
+          if (!head) return this.resolveBaseline(workspaceId, repo);
+          return { kind: 'ref', id: 'HEAD', treeish: head, label: 'Last commit', normalized: true };
         }
         const sha = selector.id ? await this.gitAt(repo.repoDir).revParse(repo.repoDir, selector.id) : null;
-        if (!sha && selector.id === 'HEAD') return this.resolveBaseline(workspaceId, repo);
         return {
           kind: 'ref',
           ...(selector.id ? { id: selector.id } : {}),

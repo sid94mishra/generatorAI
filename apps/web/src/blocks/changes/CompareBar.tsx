@@ -61,7 +61,7 @@ export function CompareBar({
         onValueChange={(v) => {
           if (v !== null) onBaseChange(v);
         }}
-        className="w-64 max-w-full min-w-0"
+        className="w-80 max-w-full min-w-0"
       />
       {chip ? (
         <Chip
