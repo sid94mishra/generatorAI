@@ -610,6 +610,7 @@ describe('SourceControlFlowService (real git)', () => {
     expect(prompt).toContain('`git push`');
     expect(prompt).toContain('`git rebase`');
     expect(prompt).toContain('prefer the incoming base-branch change');
+    expect(prompt).toContain('`git show :1:<file>` (ancestor)');
     expect(prompt).toContain('one line per file');
   });
 });

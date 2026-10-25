@@ -71,7 +71,8 @@ export function ShipButton(props: ShipDialogProps) {
           variant={action.prominent ? 'primary' : 'secondary'}
           icon={action.mode === 'pr' || action.label.startsWith('PR #') ? 'pr' : 'commit'}
           onClick={() => {
-            setOpenMode(action.mode);
+            // Finishing a merge resumes the run that hit it (a PR stays a PR, its form as it was).
+            if (!(repo?.mergeInProgress && opened)) setOpenMode(action.mode);
             setOpened(true);
             setOpen(true);
           }}
