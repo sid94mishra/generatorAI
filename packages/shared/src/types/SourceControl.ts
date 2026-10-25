@@ -293,7 +293,19 @@ export interface ScmFlowRequest {
   alias?: string;
   commit?: { message?: string; generate?: boolean };
   push?: boolean;
-  pullRequest?: { title?: string; body?: string; base?: string; draft?: boolean; generate?: boolean };
+  pullRequest?: {
+    title?: string;
+    body?: string;
+    base?: string;
+    draft?: boolean;
+    generate?: boolean;
+    /** Logins asked to review once the PR is open (the author is skipped by the host). */
+    reviewers?: string[];
+    assignees?: string[];
+    labels?: string[];
+    /** Issues the PR closes: `Closes #n` lines are appended to the body (given or generated). */
+    closesIssues?: number[];
+  };
   /** Merge the base branch into the current branch before push/PR. Default true when pushing or opening a PR. */
   sync?: boolean;
   /** When on the default branch, cut a work branch first. Default true when pushing or opening a PR. */
@@ -346,6 +358,84 @@ export interface ScmGenerateResult {
   body?: string;
   model?: string;
   source: 'model' | 'heuristic';
+}
+
+/** `GET /workspaces/:id/scm/branches` — the branches a PR can target, read from the remote. */
+export interface ScmBranchList {
+  alias: string;
+  defaultBranch: string | null;
+  /** The branch the work is on (never offered as a base). */
+  current: string | null;
+  /** Remote branch names, default first, then sorted. */
+  branches: string[];
+  /** False when the remote could not be reached and the list is the last fetched one. */
+  fresh: boolean;
+}
+
+export interface ScmCommitEntry {
+  sha: string;
+  subject: string;
+  author: string;
+  /** ISO 8601. */
+  date: string;
+}
+
+export interface ScmCompareFile {
+  path: string;
+  oldPath?: string;
+  status: 'added' | 'modified' | 'deleted' | 'renamed';
+  additions: number;
+  deletions: number;
+}
+
+/**
+ * `GET /workspaces/:id/scm/compare?base=` — what a pull request from the
+ * current branch into `base` would contain, GitHub's "Comparing changes".
+ */
+export interface ScmCompareResult {
+  alias: string;
+  base: string;
+  head: string | null;
+  /** Commits on the branch that `base` lacks, newest first. */
+  commits: ScmCommitEntry[];
+  /** Files changed by those commits (merge base → HEAD). */
+  files: ScmCompareFile[];
+  additions: number;
+  deletions: number;
+  /** Commits on `base` the branch lacks; the flow merges them in before pushing. */
+  behind: number;
+  mergeable: 'clean' | 'conflicts' | 'unknown';
+  conflictFiles: string[];
+  /** Working-tree files not committed yet (a commit in the same run adds them). */
+  uncommittedFiles: number;
+}
+
+export interface ScmPerson {
+  login: string;
+  name?: string;
+  avatarUrl?: string;
+}
+
+export interface ScmLabel {
+  name: string;
+  /** Hex without `#`, as the host returns it. */
+  color: string;
+  description?: string;
+}
+
+/** `GET /workspaces/:id/scm/pull-request-options` — the PR sidebar's pickers. */
+export interface ScmPullRequestOptions {
+  alias: string;
+  /** False when the host cannot be asked (no account, CLI-only auth); `reason` says why. */
+  available: boolean;
+  reason?: string;
+  /** The connected account (can assign itself, cannot review its own PR). */
+  viewer: string | null;
+  /** People who can be assigned or asked to review. */
+  people: ScmPerson[];
+  labels: ScmLabel[];
+  /** Open issues a PR can close. */
+  issues: Array<{ number: number; title: string }>;
 }
 
 /** Agent-native options stored on a chat (and on workflow orchestrator config). */

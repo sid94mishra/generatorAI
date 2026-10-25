@@ -1636,6 +1636,39 @@ page's folder in the default editor and wears its mark; the chevron lists VS Cod
 (Simple Icons, CC0; VS Code in its brand blue, Cursor in the text colour), the default checked and a missing one
 marked "Not installed". Picking one opens there and makes it the default. Copy path and Show in Finder stay in More.
 
+### D-162 Changes compares through one dropdown: Uncommitted changes (default), This chat, Last turn (owner, 2026-10-25) — Final
+The This turn / This chat / Branch segment and the 30-entry "Compare against" list are replaced by one picker (name
+kept: `Compare against`) with at most three choices: **Uncommitted changes** — the working tree against each mount's
+own HEAD (`base=head`; a mount without commits, or a shadow-tracked folder, falls back to its baseline), the default in a
+chat; **This chat** (**This run** on run pages, still their default) — since the session-start snapshot; **Last turn** —
+since the snapshot before the newest turn. Owner asked to drop Last turn too; kept after review, because the agent works
+turn by turn and "what did it just change" is the most frequent review question. "Branch vs base" moved to the PR dialog
+(D-163), where it answers what the PR will contain. Older turns are compared from the checkpoint timeline; while one is
+the base it is listed as "Since turn N". Undo and Undo all now restore to the base on screen (the discard route takes
+`base`), so what was listed is exactly what goes back — before, they always restored the session start, which in a long
+chat also threw away earlier turns' edits the screen was not showing. The compare row also holds the workspace-files
+chip, Keep all and Undo all (one row instead of two).
+
+### D-163 Commit, push and pull request in a dialog opened from the Changes toolbar (owner, 2026-10-25) — Final
+The CommitBar footer (half the panel at most, squeezing the diff) is removed. The toolbar ends with one button naming
+the next step from readiness — **Commit** (changes), **Push** (unpushed commits), **Pull request** (pushed, no PR) or
+**PR #n** — and nothing when there is nothing to ship. It opens a dialog modelled on GitHub's "Open a pull request":
+a mode switch (Commit · Commit & push · Commit & open PR, each disabled with its reason); the commit as Summary +
+Description with Generate and the files it takes; for a PR, "Merge <branch> into [base ▾]" with a searchable picker of
+the remote's branches (`GET /scm/branches`, fetched; no free-text base), the mergeability and how far the base moved
+(`GET /scm/compare`: merge-tree probe, behind count), Title + Generate, Description with Write / Preview (Markdown) and
+"This pull request will contain N commits · M files" with both lists. A sidebar like GitHub's holds Reviewers,
+Assignees ("Assign yourself"), Labels and Closes issues (`GET /scm/pull-request-options`; applied after the PR opens,
+failures reported in the step line; "Closes #n" appended to the body server-side). The primary is GitHub's split
+button: Create pull request / Create draft pull request. After the run the dialog shows the server's steps, the commit
+and a View on GitHub link, or the conflict card. Milestones and projects are left out (rarely set at creation; the
+host's own page covers them).
+
+### D-164 Review comments are sent from a dialog; the panel keeps a one-line bar (owner, 2026-10-25) — Final
+Note and Preview no longer open text areas over the diff. The pending bar reads "N pending comments · M awaiting agent
+· K addressed" with Discard and **Review & send**, which opens a dialog listing each pending comment (file, lines,
+intent, text; show in diff, delete), an optional note for the agent, a Preview of the exact message and one Send.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

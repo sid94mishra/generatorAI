@@ -19,6 +19,7 @@ export type {
   ISourceControlProvider,
   IScmHttpClient,
   IScmProcessRunner,
+  PullRequestMetadata,
   ScmHttpRequestOptions,
   ScmHttpResponse,
   ScmProcessRunResult,

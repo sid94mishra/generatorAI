@@ -423,6 +423,72 @@ describe('SourceControlFlowService (real git)', () => {
     expect((await git(solo, 'status', '--porcelain')).trim()).toContain('b.txt');
   });
 
+  it('(h) lists the remote branches for the PR base picker: default first, never the current branch', async () => {
+    await git(seed, 'checkout', '-b', 'release/1.0');
+    await git(seed, 'push', 'origin', 'release/1.0');
+    await git(seed, 'checkout', 'main');
+    await git(work, 'checkout', '-b', 'feature/pick');
+    const flow = makeService(fakeProviderPair().registry);
+
+    const list = await flow.branches({ repoDir: work, alias: '.' });
+
+    expect(list).toMatchObject({ defaultBranch: 'main', current: 'feature/pick', fresh: true });
+    expect(list.branches).toEqual(['main', 'release/1.0']);
+  });
+
+  it('(i) compares the branch with its base: commits, files, behind, and conflicts before any push', async () => {
+    await git(work, 'checkout', '-b', 'feature/compare');
+    await write(work, 'src/b.ts', 'export const b = 2;\n');
+    await git(work, 'add', '-A');
+    await git(work, 'commit', '-m', 'feat: add b');
+    await write(work, 'shared.txt', 'line one CHANGED HERE\nline two\n');
+    await git(work, 'add', '-A');
+    await git(work, 'commit', '-m', 'fix: our line one');
+    await write(work, 'notes.md', 'uncommitted\n');
+    const flow = makeService(fakeProviderPair().registry);
+
+    const clean = await flow.compare({ repoDir: work, alias: '.', base: 'main' });
+    expect(clean.commits.map((c) => c.subject)).toEqual(['fix: our line one', 'feat: add b']);
+    expect(clean.files.map((f) => `${f.status}:${f.path}`)).toEqual(['modified:shared.txt', 'added:src/b.ts']);
+    expect(clean).toMatchObject({ behind: 0, uncommittedFiles: 1 });
+    expect(clean.mergeable === 'clean' || clean.mergeable === 'unknown').toBe(true);
+
+    await moveBase('shared.txt', 'line one THEIRS\nline two\n', 'fix: their line one');
+    const conflicted = await flow.compare({ repoDir: work, alias: '.', base: 'main' });
+    expect(conflicted.behind).toBe(1);
+    if (conflicted.mergeable !== 'unknown') {
+      expect(conflicted.mergeable).toBe('conflicts');
+      expect(conflicted.conflictFiles).toEqual(['shared.txt']);
+    }
+  });
+
+  it('(j) appends "Closes #n" to the PR body and reports metadata the host refused', async () => {
+    const pair = fakeProviderPair();
+    const addMeta = vi.fn(async () => ['GitHub could not add labels: not found']);
+    Object.assign(pair.provider, { addPullRequestMetadata: addMeta });
+    const flow = makeService(pair.registry);
+    await git(work, 'checkout', '-b', 'feature/meta');
+    await write(work, 'src/c.ts', 'export const c = 3;\n');
+
+    const result = await flow.run({
+      repoDir: work,
+      alias: '.',
+      request: {
+        commit: { message: 'feat: c' },
+        push: true,
+        pullRequest: { title: 'Add c', body: 'Adds c.', labels: ['nope'], reviewers: ['ana'], closesIssues: [7, 7, 9] },
+      },
+    });
+
+    expect(result.status).toBe('ok');
+    expect(pair.created[0]).toMatchObject({ body: 'Adds c.\n\nCloses #7\nCloses #9' });
+    expect(addMeta).toHaveBeenCalledWith(
+      { owner: 'acme', repo: 'web', number: 99, host: expect.anything() },
+      { reviewers: ['ana'], labels: ['nope'] },
+    );
+    expect(result.steps.at(-1)?.detail).toBe('Opened PR #99 · GitHub could not add labels: not found');
+  });
+
   it('skips the commit step on a clean tree without blocking the rest', async () => {
     const { registry } = fakeProviderPair();
     const flow = makeService(registry);

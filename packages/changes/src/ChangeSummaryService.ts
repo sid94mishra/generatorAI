@@ -618,7 +618,14 @@ export class ChangeSummaryService {
       }
 
       case 'ref': {
+        // "Uncommitted changes" asks for each mount's own HEAD. A folder the
+        // engine tracks in a shadow store has no commits of its own, and an
+        // unborn branch none yet: both compare against their baseline instead.
+        if (selector.id === 'HEAD' && this.shadows.has(path.resolve(repo.repoDir))) {
+          return this.resolveBaseline(workspaceId, repo);
+        }
         const sha = selector.id ? await this.gitAt(repo.repoDir).revParse(repo.repoDir, selector.id) : null;
+        if (!sha && selector.id === 'HEAD') return this.resolveBaseline(workspaceId, repo);
         return {
           kind: 'ref',
           ...(selector.id ? { id: selector.id } : {}),

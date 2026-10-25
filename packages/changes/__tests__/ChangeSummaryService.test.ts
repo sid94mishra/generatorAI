@@ -478,6 +478,36 @@ describe('ChangeSummaryService (real git)', () => {
     expect(repo.base.treeish).toBeDefined();
   });
 
+  it('"Uncommitted changes" (ref HEAD) lists only what the last commit lacks; a shadow folder falls back to its baseline', async () => {
+    await fs.writeFile(path.join(repoDir, 'a.txt'), 'v1\n');
+    await snapshot('baseline');
+    await fs.writeFile(path.join(repoDir, 'a.txt'), 'v2\n');
+    const run = (...args: string[]) =>
+      realRunner.run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd: repoDir, timeout: 15_000 });
+    await run('add', '-A');
+    await run('commit', '-m', 'committed');
+    await fs.writeFile(path.join(repoDir, 'b.txt'), 'not committed\n');
+
+    const sinceChat = await service.getSummary(params());
+    expect(sinceChat.repos[0]!.files.map((f) => f.path).sort()).toEqual(['a.txt', 'b.txt']);
+    const uncommitted = await service.getSummary({ ...params(), base: { kind: 'ref', id: 'HEAD' } });
+    expect(uncommitted.repos[0]!.files.map((f) => f.path)).toEqual(['b.txt']);
+
+    const folder = path.join(tmpRoot, 'notes');
+    const shadow = path.join(tmpRoot, 'shadow', 'notes');
+    await fs.mkdir(folder, { recursive: true });
+    await fs.writeFile(path.join(folder, 'existing.txt'), 'mine\n');
+    expect(await git.initShadowRepo(shadow, folder)).toBe(true);
+    const plain = await service.getSummary({
+      ...params(),
+      base: { kind: 'ref', id: 'HEAD' },
+      mounts: [{ alias: 'notes', path: folder, gitDir: shadow }],
+    });
+    const notes = plain.repos.find((r) => r.alias === 'notes')!;
+    expect(notes.files).toEqual([]);
+    expect(notes.base.label).toBe('Session start');
+  });
+
   it('marks the first-commit fallback normalized, so a CRLF checkout is not all-changed', async () => {
     const g = (...args: string[]) =>
       realRunner.run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: repoDir, timeout: 15_000 });

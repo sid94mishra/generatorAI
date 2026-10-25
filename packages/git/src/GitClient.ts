@@ -18,6 +18,7 @@ import type {
   GitBlobEntry,
   GitClientOptions,
   GitCommitResult,
+  GitLogEntry,
   GitMergeResult,
   GitMergeTreeResult,
   GitNameStatusEntry,
@@ -1951,6 +1952,29 @@ export class GitClient implements IGitClient {
         .split('\n')
         .map((l) => l.replace(/\r$/, '').trim())
         .filter((l) => l.length > 0);
+    } catch {
+      return [];
+    }
+  }
+
+  async logEntries(repoDir: string, range: string, max = 100): Promise<GitLogEntry[]> {
+    try {
+      // Unit separator between fields, one commit per line: subjects never carry either.
+      const result = await this.runner.run(
+        'git',
+        ['log', '--no-merges', '--pretty=format:%H%x1f%s%x1f%an%x1f%aI', '-n', String(max), range],
+        { cwd: repoDir, timeout: 30_000 },
+      );
+      if (result.exitCode !== 0) return [];
+      return result.stdout
+        .split('\n')
+        .map((l) => l.replace(/\r$/, ''))
+        .filter((l) => l.length > 0)
+        .map((l) => {
+          const [sha = '', subject = '', author = '', date = ''] = l.split('\x1f');
+          return { sha, subject, author, date };
+        })
+        .filter((e) => e.sha.length > 0);
     } catch {
       return [];
     }

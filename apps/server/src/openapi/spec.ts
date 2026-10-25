@@ -589,6 +589,14 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
               base: { type: 'string' },
               draft: { type: 'boolean' },
               generate: { type: 'boolean' },
+              reviewers: { type: 'array', items: { type: 'string' }, description: 'Logins asked to review once the PR is open.' },
+              assignees: { type: 'array', items: { type: 'string' } },
+              labels: { type: 'array', items: { type: 'string' } },
+              closesIssues: {
+                type: 'array',
+                items: { type: 'integer' },
+                description: '`Closes #n` lines appended to the body (given or generated).',
+              },
             },
           },
           sync: {
@@ -3328,6 +3336,127 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
             },
           },
           '400': { description: 'Invalid request', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '404': { description: 'Workspace not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/workspaces/{id}/scm/branches': {
+      get: {
+        tags: ['SourceControl', 'Workspaces'],
+        summary: "The remote's branches (fetched first), default first, never the current branch — the PR base picker",
+        parameters: [idParam, { name: 'alias', in: 'query', required: false, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Branches',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    alias: { type: 'string' },
+                    defaultBranch: { type: 'string', nullable: true },
+                    current: { type: 'string', nullable: true },
+                    branches: { type: 'array', items: { type: 'string' } },
+                    fresh: { type: 'boolean', description: 'False when the remote could not be reached (last fetched list).' },
+                  },
+                  required: ['alias', 'defaultBranch', 'current', 'branches', 'fresh'],
+                },
+              },
+            },
+          },
+          '404': { description: 'Workspace not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/workspaces/{id}/scm/compare': {
+      get: {
+        tags: ['SourceControl', 'Workspaces'],
+        summary: 'What a PR from the current branch into `base` would contain: commits, files, behind, mergeability',
+        parameters: [
+          idParam,
+          { name: 'alias', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'base', in: 'query', required: false, schema: { type: 'string' }, description: 'Defaults to the repo default branch.' },
+        ],
+        responses: {
+          '200': {
+            description: 'Comparison',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    alias: { type: 'string' },
+                    base: { type: 'string' },
+                    head: { type: 'string', nullable: true },
+                    commits: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: { sha: { type: 'string' }, subject: { type: 'string' }, author: { type: 'string' }, date: { type: 'string' } },
+                      },
+                    },
+                    files: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          path: { type: 'string' },
+                          oldPath: { type: 'string' },
+                          status: { type: 'string', enum: ['added', 'modified', 'deleted', 'renamed'] },
+                          additions: { type: 'integer' },
+                          deletions: { type: 'integer' },
+                        },
+                      },
+                    },
+                    additions: { type: 'integer' },
+                    deletions: { type: 'integer' },
+                    behind: { type: 'integer' },
+                    mergeable: { type: 'string', enum: ['clean', 'conflicts', 'unknown'] },
+                    conflictFiles: { type: 'array', items: { type: 'string' } },
+                    uncommittedFiles: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '404': { description: 'Workspace not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/workspaces/{id}/scm/pull-request-options': {
+      get: {
+        tags: ['SourceControl', 'Workspaces'],
+        summary: 'People, labels and open issues for the PR form (unavailable is a 200 with a reason)',
+        parameters: [idParam, { name: 'alias', in: 'query', required: false, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Options',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    alias: { type: 'string' },
+                    available: { type: 'boolean' },
+                    reason: { type: 'string' },
+                    viewer: { type: 'string', nullable: true },
+                    people: {
+                      type: 'array',
+                      items: { type: 'object', properties: { login: { type: 'string' }, name: { type: 'string' }, avatarUrl: { type: 'string' } } },
+                    },
+                    labels: {
+                      type: 'array',
+                      items: { type: 'object', properties: { name: { type: 'string' }, color: { type: 'string' }, description: { type: 'string' } } },
+                    },
+                    issues: {
+                      type: 'array',
+                      items: { type: 'object', properties: { number: { type: 'integer' }, title: { type: 'string' } } },
+                    },
+                  },
+                },
+              },
+            },
+          },
           '404': { description: 'Workspace not found', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },

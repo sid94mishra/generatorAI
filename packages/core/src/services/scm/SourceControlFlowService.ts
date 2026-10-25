@@ -22,14 +22,18 @@ import type {
   ScmFlowResult,
   ScmFlowStep,
   ScmFlowStepId,
+  ScmBranchList,
+  ScmCompareFile,
+  ScmCompareResult,
   ScmGenerateRequest,
   ScmGenerateResult,
+  ScmPullRequestOptions,
   PullRequestSummary,
   RepoReadiness,
   SourceControlSettings,
 } from '@generatorai/shared';
 import type { IGitClient } from '@generatorai/git';
-import { parseRepoSlug, type SourceControlRegistry } from '@generatorai/source-control';
+import { ProviderNotConfiguredError, parseRepoSlug, type SourceControlRegistry } from '@generatorai/source-control';
 import type { RepoReadinessService } from './RepoReadinessService.js';
 import { notConnectedReason, REASON_NOTHING_TO_COMMIT } from './RepoReadinessService.js';
 import type { GenerationFallback, ScmTextGenerator } from './ScmTextGenerator.js';
@@ -347,6 +351,131 @@ export class SourceControlFlowService {
   }
 
   // ────────────────────────────────────────────────────────────
+  // The pull-request form: branches, "Comparing changes", sidebar pickers
+  // ────────────────────────────────────────────────────────────
+
+  /**
+   * Branches a PR from this repo can target: the remote's, freshly fetched
+   * (falls back to the last fetched list offline), default first, never the
+   * branch the work is on.
+   */
+  async branches(input: { repoDir: string; alias: string }): Promise<ScmBranchList> {
+    const { repoDir, alias } = input;
+    const git = this.deps.git;
+    let fresh = true;
+    try {
+      await git.fetch(repoDir, REMOTE);
+    } catch {
+      fresh = false;
+    }
+    const prefix = `refs/remotes/${REMOTE}/`;
+    const refs = await safe(() => git.listRefs(repoDir, prefix), []);
+    const current = await safe(() => git.currentBranch(repoDir), null);
+    const defaultBranch = await safe(() => git.defaultBranch(repoDir), null);
+    const names = refs
+      .map((r) => r.ref.slice(prefix.length))
+      .filter((name) => name && name !== 'HEAD' && name !== current);
+    names.sort((a, b) => (a === defaultBranch ? -1 : b === defaultBranch ? 1 : a.localeCompare(b)));
+    return { alias, defaultBranch, current, branches: [...new Set(names)], fresh };
+  }
+
+  /** What a PR from the current branch into `base` would contain (merge base → HEAD), and whether it merges. */
+  async compare(input: { repoDir: string; alias: string; base?: string }): Promise<ScmCompareResult> {
+    const { repoDir, alias } = input;
+    const git = this.deps.git;
+    const base = await this.resolveBase(repoDir, input.base);
+    const head = await safe(() => git.currentBranch(repoDir), null);
+    const uncommittedFiles = (await safe(() => git.changedFilesSummary(repoDir), [])).length;
+    const empty: ScmCompareResult = {
+      alias,
+      base,
+      head,
+      commits: [],
+      files: [],
+      additions: 0,
+      deletions: 0,
+      behind: 0,
+      mergeable: 'unknown',
+      conflictFiles: [],
+      uncommittedFiles,
+    };
+    await safe(() => git.fetchBranch(repoDir, REMOTE, base), undefined);
+    const ref = `${REMOTE}/${base}`;
+    if (!(await safe(() => git.revParse(repoDir, ref), null))) return empty;
+    if (await git.isUnborn(repoDir).catch(() => true)) return empty;
+
+    const range = `${ref}...HEAD`;
+    const [commits, nameStatus, numstat, aheadBehind, probe] = await Promise.all([
+      git.logEntries(repoDir, `${ref}..HEAD`, 100),
+      safe(() => git.diffNameStatusZ(repoDir, range), []),
+      safe(() => git.diffNumstat(repoDir, range), []),
+      safe(() => git.aheadBehind(repoDir, 'HEAD', ref), null),
+      safe(() => git.mergeTreeConflicts(repoDir, 'HEAD', ref), { supported: false, conflicts: [] as string[] }),
+    ]);
+    const counts = new Map(numstat.map((n) => [n.path, n]));
+    const files: ScmCompareFile[] = nameStatus.map((entry) => {
+      const n = counts.get(entry.path);
+      return {
+        path: entry.path,
+        ...(entry.oldPath ? { oldPath: entry.oldPath } : {}),
+        status: compareStatus(entry.code),
+        additions: Math.max(0, n?.additions ?? 0),
+        deletions: Math.max(0, n?.deletions ?? 0),
+      };
+    });
+    return {
+      ...empty,
+      commits,
+      files,
+      additions: files.reduce((sum, f) => sum + f.additions, 0),
+      deletions: files.reduce((sum, f) => sum + f.deletions, 0),
+      behind: aheadBehind?.behind ?? 0,
+      mergeable: !probe.supported ? 'unknown' : probe.conflicts.length > 0 ? 'conflicts' : 'clean',
+      conflictFiles: probe.conflicts,
+    };
+  }
+
+  /** The PR sidebar's pickers: people, labels, open issues — from the host, with the reason when it cannot be asked. */
+  async pullRequestOptions(input: { repoDir: string; alias: string }): Promise<ScmPullRequestOptions> {
+    const { repoDir, alias } = input;
+    const unavailable = (reason: string): ScmPullRequestOptions => ({
+      alias,
+      available: false,
+      reason,
+      viewer: null,
+      people: [],
+      labels: [],
+      issues: [],
+    });
+    const remoteUrl = await safe(() => this.deps.git.getRemoteUrl(repoDir), null);
+    const slug = remoteUrl ? parseRepoSlug(remoteUrl) : null;
+    if (!slug) return unavailable('This repository has no hosted remote');
+    const provider = this.deps.registry.providerFor(slug.host);
+    if (!provider) return unavailable(notConnectedReason(slug.host));
+    try {
+      const [viewer, people, labels, issues] = await Promise.all([
+        provider.getAuthenticatedUser(),
+        provider.listAssignableUsers(slug.owner, slug.repo, slug.host),
+        provider.listLabels(slug.owner, slug.repo, slug.host),
+        safe(() => provider.listIssues({ owner: slug.owner, repo: slug.repo, host: slug.host, state: 'open' }), []),
+      ]);
+      return {
+        alias,
+        available: true,
+        viewer: viewer.login || null,
+        people,
+        labels,
+        issues: issues.map((i) => ({ number: i.number, title: i.title })),
+      };
+    } catch (err) {
+      if (err instanceof ProviderNotConfiguredError) {
+        return unavailable('Reviewers, assignees and labels need a GitHub account connected with a token');
+      }
+      return unavailable(messageOf(err));
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────
   // Conflicts
   // ────────────────────────────────────────────────────────────
 
@@ -557,6 +686,12 @@ export class SourceControlFlowService {
       }
     }
 
+    const closes = [...new Set(request.pullRequest?.closesIssues ?? [])].filter((n) => Number.isInteger(n) && n > 0);
+    if (closes.length > 0) {
+      const lines = closes.map((n) => `Closes #${n}`).join('\n');
+      body = body?.trim() ? `${body.trimEnd()}\n\n${lines}` : lines;
+    }
+
     const pr = await provider.createPullRequest({
       owner: slug.owner,
       repo: slug.repo,
@@ -568,7 +703,23 @@ export class SourceControlFlowService {
       ...(request.pullRequest?.draft !== undefined ? { draft: request.pullRequest.draft } : {}),
       repoDir,
     });
-    steps.push({ id: 'pull_request', status: 'done', detail: `Opened PR #${pr.number}` });
+    const meta = request.pullRequest;
+    const problems =
+      meta && (meta.reviewers?.length || meta.assignees?.length || meta.labels?.length)
+        ? await provider.addPullRequestMetadata(
+            { owner: slug.owner, repo: slug.repo, number: pr.number, host: slug.host },
+            {
+              ...(meta.reviewers ? { reviewers: meta.reviewers } : {}),
+              ...(meta.assignees ? { assignees: meta.assignees } : {}),
+              ...(meta.labels ? { labels: meta.labels } : {}),
+            },
+          )
+        : [];
+    steps.push({
+      id: 'pull_request',
+      status: 'done',
+      detail: [`Opened PR #${pr.number}`, ...problems].join(' · '),
+    });
     return pr;
   }
 
@@ -628,6 +779,13 @@ function blockingReason(
     return readiness.reasons.pullRequest ?? 'Cannot open a pull request';
   }
   return null;
+}
+
+function compareStatus(code: string): ScmCompareFile['status'] {
+  if (code.startsWith('A')) return 'added';
+  if (code.startsWith('D')) return 'deleted';
+  if (code.startsWith('R')) return 'renamed';
+  return 'modified';
 }
 
 function firstLine(text: string): string {

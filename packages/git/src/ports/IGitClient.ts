@@ -94,6 +94,15 @@ export interface GitCommitResult {
   message: string;
 }
 
+/** One commit from `logEntries`. */
+export interface GitLogEntry {
+  sha: string;
+  subject: string;
+  author: string;
+  /** ISO 8601 author date. */
+  date: string;
+}
+
 /** Options for `merge`. */
 export interface MergeOptions {
   /** Merge without creating the commit (`--no-commit --no-ff`). */
@@ -402,6 +411,8 @@ export interface IGitClient {
   pushSetUpstream(repoDir: string, remote: string, branch: string): Promise<void>;
   /** `git log --no-merges --pretty=format:%s -n <max> <range>` → subject lines. Empty array on failure. */
   log(repoDir: string, range: string, max?: number): Promise<string[]>;
+  /** `git log --no-merges` over `range` → sha, subject, author, ISO date per commit, newest first. Empty on failure. */
+  logEntries(repoDir: string, range: string, max?: number): Promise<GitLogEntry[]>;
   /** Name-status of staged + unstaged + untracked changes in the working tree. */
   changedFilesSummary(repoDir: string): Promise<GitNameStatusEntry[]>;
   /** `git --version` → e.g. `2.45.1`, or null. Cached for the client's lifetime. */

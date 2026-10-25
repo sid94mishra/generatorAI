@@ -18,6 +18,7 @@ export type {
   GitMergeTreeResult,
   GitMergeResult,
   GitCommitResult,
+  GitLogEntry,
   MergeOptions,
   GitStreamOptions,
   GitRemoteBranches,

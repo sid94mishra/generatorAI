@@ -2,6 +2,7 @@
 // Ports — source-control provider interface + tiny infra ports
 // ────────────────────────────────────────────────────────────────
 
+import type { ScmLabel, ScmPerson } from '@generatorai/shared';
 import type {
   ChecksSummary,
   CloseIssueInput,
@@ -71,6 +72,23 @@ export interface ISourceControlProvider {
   createIssue(input: CreateIssueInput): Promise<IssueSummary>;
   commentOnIssue(ref: IssueRef, body: string): Promise<IssueComment>;
   closeIssue(ref: IssueRef, input?: CloseIssueInput): Promise<IssueSummary>;
+
+  // ── Pull-request metadata (the PR form's sidebar) ──
+  /** People who can be assigned to (and asked to review) the repository's PRs and issues. */
+  listAssignableUsers(owner: string, repo: string, host?: string): Promise<ScmPerson[]>;
+  listLabels(owner: string, repo: string, host?: string): Promise<ScmLabel[]>;
+  /**
+   * Request reviewers, add assignees and labels on an open PR. Each part is
+   * tried on its own; what failed comes back as one line per part, never thrown,
+   * because the PR itself is already open.
+   */
+  addPullRequestMetadata(ref: PullRequestRef, meta: PullRequestMetadata): Promise<string[]>;
+}
+
+export interface PullRequestMetadata {
+  reviewers?: string[];
+  assignees?: string[];
+  labels?: string[];
 }
 
 /** Minimal HTTP port (structurally compatible with core's IHttpClient). */

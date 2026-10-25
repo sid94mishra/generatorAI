@@ -2,11 +2,12 @@
 // GitHubProvider — GitHub REST API (token) with `gh` CLI fallback
 // ────────────────────────────────────────────────────────────────
 
-import type { ILogger } from '@generatorai/shared';
+import type { ILogger, ScmLabel, ScmPerson } from '@generatorai/shared';
 import type {
   IScmHttpClient,
   IScmProcessRunner,
   ISourceControlProvider,
+  PullRequestMetadata,
   ScmHttpResponse,
 } from './ports.js';
 import type {
@@ -523,6 +524,71 @@ export class GitHubProvider implements ISourceControlProvider {
       throw new SourceControlError(describeFailure(`close issue #${ref.number}`, res));
     }
     return mapIssue(JSON.parse(res.body) as GitHubIssue);
+  }
+
+  // ── Pull-request metadata ──
+
+  async listAssignableUsers(owner: string, repo: string, host?: string): Promise<ScmPerson[]> {
+    this.requireToken('listAssignableUsers');
+    const res = await this.http.request({
+      method: 'GET',
+      url: `${this.apiBase(host)}/repos/${owner}/${repo}/assignees?per_page=100`,
+      headers: this.headers(),
+      timeout: 15_000,
+    });
+    if (res.status >= 400) {
+      throw new SourceControlError(describeFailure('list the people on this repository', res));
+    }
+    const arr = JSON.parse(res.body) as Array<{ login?: string; avatar_url?: string }>;
+    return arr
+      .filter((u): u is { login: string; avatar_url?: string } => typeof u.login === 'string' && u.login.length > 0)
+      .map((u) => ({ login: u.login, ...(u.avatar_url ? { avatarUrl: u.avatar_url } : {}) }));
+  }
+
+  async listLabels(owner: string, repo: string, host?: string): Promise<ScmLabel[]> {
+    this.requireToken('listLabels');
+    const res = await this.http.request({
+      method: 'GET',
+      url: `${this.apiBase(host)}/repos/${owner}/${repo}/labels?per_page=100`,
+      headers: this.headers(),
+      timeout: 15_000,
+    });
+    if (res.status >= 400) {
+      throw new SourceControlError(describeFailure('list the labels', res));
+    }
+    const arr = JSON.parse(res.body) as Array<{ name?: string; color?: string; description?: string | null }>;
+    return arr
+      .filter((l): l is { name: string; color?: string; description?: string | null } => typeof l.name === 'string' && l.name.length > 0)
+      .map((l) => ({ name: l.name, color: l.color ?? '', ...(l.description ? { description: l.description } : {}) }));
+  }
+
+  async addPullRequestMetadata(ref: PullRequestRef, meta: PullRequestMetadata): Promise<string[]> {
+    this.requireToken('addPullRequestMetadata');
+    const base = `${this.repoBase(ref)}`;
+    const problems: string[] = [];
+    // A PR is an issue on GitHub: assignees and labels go through the issues API.
+    const parts: Array<{ what: string; items: string[] | undefined; url: string; key: string }> = [
+      { what: 'request reviewers', items: meta.reviewers, url: `${base}/pulls/${ref.number}/requested_reviewers`, key: 'reviewers' },
+      { what: 'add assignees', items: meta.assignees, url: `${base}/issues/${ref.number}/assignees`, key: 'assignees' },
+      { what: 'add labels', items: meta.labels, url: `${base}/issues/${ref.number}/labels`, key: 'labels' },
+    ];
+    for (const part of parts) {
+      const items = (part.items ?? []).map((i) => i.trim()).filter(Boolean);
+      if (items.length === 0) continue;
+      try {
+        const res = await this.http.request({
+          method: 'POST',
+          url: part.url,
+          headers: this.headers(),
+          body: JSON.stringify({ [part.key]: items }),
+          timeout: 15_000,
+        });
+        if (res.status >= 400) problems.push(describeFailure(part.what, res));
+      } catch (err) {
+        problems.push(`GitHub could not ${part.what}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return problems;
   }
 
   // ── REST create ──
