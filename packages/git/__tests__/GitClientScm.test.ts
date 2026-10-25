@@ -13,7 +13,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { GitClient } from '../src/GitClient.js';
+import { GitClient, parseLegacyMergeTree } from '../src/GitClient.js';
 import type {
   IGitProcessRunner,
   GitProcessRunOptions,
@@ -158,12 +158,9 @@ describe('GitClient.mergeTreeConflicts', () => {
 
     const result = await git.mergeTreeConflicts(dir, 'main', 'feature');
 
-    if (result.supported) {
-      expect(result.conflicts).toContain('conflict.txt');
-    } else {
-      // git < 2.38 has no `--write-tree`; callers must fall back to `merge`.
-      expect(result.conflicts).toEqual([]);
-    }
+    // git >= 2.38 answers with `--write-tree`; older git through the three-way form.
+    expect(result.supported).toBe(true);
+    expect(result.conflicts).toContain('conflict.txt');
 
     // Whatever the answer, the probe must be side-effect free.
     expect(await fs.readFile(path.join(dir, 'conflict.txt'), 'utf-8')).toBe('from main\n');
@@ -233,6 +230,34 @@ describe('GitClient.mergeTreeConflicts', () => {
     expect(result.supported).toBe(true);
     // De-duplicated, tree oid dropped, messages section excluded.
     expect(result.conflicts).toEqual(['src/a.ts', 'src/b.ts']);
+  });
+
+  it('reads the pre-2.38 three-way output: only blocks with conflict markers count', () => {
+    const stdout = [
+      'added in both',
+      '  our    100644 aabe3d2c65c32dbec693e8b9e74ea671122f2fca packages/shared/src/truncate.ts',
+      '  their  100644 843dfe4fec8874488128987f2a524fa9fcf0300c packages/shared/src/truncate.ts',
+      '@@ -1,4 +1,8 @@',
+      '+<<<<<<< .our',
+      ' export function truncate(text: string, limit: number): string {',
+      '+=======',
+      '+export function truncate(value: string, max: number): string {',
+      '+>>>>>>> .their',
+      '\\ No newline at end of file',
+      'changed in both',
+      '  base   100644 1111111111111111111111111111111111111111 src/index.ts',
+      '  our    100644 2222222222222222222222222222222222222222 src/index.ts',
+      '  their  100644 3333333333333333333333333333333333333333 src/index.ts',
+      '@@ -1,2 +1,3 @@',
+      ' export * from "./a.js";',
+      '+export * from "./b.js";',
+      'added in remote',
+      '  their  100644 4444444444444444444444444444444444444444 test/truncate.test.ts',
+      '@@ -0,0 +1,1 @@',
+      "+import { describe } from 'vitest';",
+      '',
+    ].join('\n');
+    expect(parseLegacyMergeTree(stdout)).toEqual(['packages/shared/src/truncate.ts']);
   });
 
   it('treats a clean exit as a clean merge', async () => {

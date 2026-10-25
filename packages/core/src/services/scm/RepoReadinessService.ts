@@ -93,7 +93,10 @@ export class RepoReadinessService {
     const changedFiles = changed.length;
     const dirty = changedFiles > 0;
 
-    const upstream = branch ? await this.safe(() => git.upstreamOf(repoDir, branch), null) : null;
+    // Only the branch's own copy counts: a work branch cut from `origin/develop` tracks it until the
+    // first push, and reading that as "on the remote, up to date" would be wrong.
+    const tracked = branch ? await this.safe(() => git.upstreamOf(repoDir, branch), null) : null;
+    const upstream = tracked && branch && tracked.slice(tracked.indexOf('/') + 1) === branch ? tracked : null;
     const hasUpstream = upstream !== null;
     let ahead: number | null = null;
     let behind: number | null = null;

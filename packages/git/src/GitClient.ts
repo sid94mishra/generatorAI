@@ -1818,11 +1818,12 @@ export class GitClient implements IGitClient {
         { cwd: repoDir, timeout: 60_000 },
       );
     } catch {
-      return { supported: false, conflicts: [] };
+      return this.legacyMergeTreeConflicts(repoDir, ours, theirs);
     }
 
     if (result.exitCode === 0) return { supported: true, conflicts: [] };
-    if (result.exitCode !== 1) return { supported: false, conflicts: [] };
+    // git < 2.38 has no `--write-tree`; its three-way form still answers without touching the tree.
+    if (result.exitCode !== 1) return this.legacyMergeTreeConflicts(repoDir, ours, theirs);
 
     // stdout is "<tree oid>\n<conflicted path>\n…" optionally followed by a
     // blank line and an informational messages section.
@@ -1836,6 +1837,24 @@ export class GitClient implements IGitClient {
       conflicts.push(line);
     }
     return { supported: true, conflicts };
+  }
+
+  /**
+   * `git merge-tree <base> <ours> <theirs>` (the pre-2.38 form): prints each touched path's merge,
+   * with `<<<<<<< .our` markers where both sides clash. Blocks start at an unindented header
+   * ("changed in both", "added in both", …); `  our|their|base <mode> <oid> <path>` lines name the path.
+   */
+  private async legacyMergeTreeConflicts(repoDir: string, ours: string, theirs: string): Promise<GitMergeTreeResult> {
+    try {
+      const base = await this.runner.run('git', ['merge-base', ours, theirs], { cwd: repoDir, timeout: 30_000 });
+      const baseOid = base.stdout.trim();
+      if (base.exitCode !== 0 || !baseOid) return { supported: false, conflicts: [] };
+      const result = await this.runner.run('git', ['merge-tree', baseOid, ours, theirs], { cwd: repoDir, timeout: 60_000 });
+      if (result.exitCode !== 0) return { supported: false, conflicts: [] };
+      return { supported: true, conflicts: parseLegacyMergeTree(result.stdout) };
+    } catch {
+      return { supported: false, conflicts: [] };
+    }
   }
 
   async merge(repoDir: string, ref: string, opts: MergeOptions = {}): Promise<GitMergeResult> {
@@ -2053,4 +2072,31 @@ export class GitClient implements IGitClient {
     this.gitVersionCache = { value };
     return value;
   }
+}
+
+/** Paths whose legacy `git merge-tree` block carries conflict markers. */
+export function parseLegacyMergeTree(stdout: string): string[] {
+  const conflicts: string[] = [];
+  let path: string | null = null;
+  let clashed = false;
+  const flush = () => {
+    if (path && clashed && !conflicts.includes(path)) conflicts.push(path);
+    path = null;
+    clashed = false;
+  };
+  for (const raw of stdout.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    if (/^\S/.test(line) && !/^[+\-@ \\]/.test(line)) {
+      flush();
+      continue;
+    }
+    const entry = /^ {2}(?:our|their|base)\s+\d+\s+[0-9a-f]+\s+(.+)$/.exec(line);
+    if (entry) {
+      path ??= entry[1]!;
+      continue;
+    }
+    if (/^\+<{7} /.test(line)) clashed = true;
+  }
+  flush();
+  return conflicts;
 }
