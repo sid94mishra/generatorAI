@@ -4,7 +4,8 @@
 // 40h bar: ± and the change count (plus "N to review · M kept" once
 // something is kept) on the left; on the right the comments popover (a slot,
 // review only), Show file tree, Expand all, View settings (Unified / Split,
-// Wrap lines, tree Left / Right), Checkpoints & rewind, Refresh. Pure view.
+// Wrap lines, tree Left / Right), Checkpoints & rewind, Refresh, and the ship
+// action (Commit · Push · Pull request, D-163) last. Pure view.
 //
 // The accessible names and `data-testid`s are pinned by the Changes-panel
 // characterization tests and the e2e / desktop smokes (09 §5.3) — keep them.
@@ -22,6 +23,8 @@ export interface ChangesToolbarProps {
   keptCount: number;
   /** The review comments popover (its own trigger); omitted without review. */
   commentsSlot?: ReactNode;
+  /** The ship button (ShipButton), after the view controls. */
+  actionSlot?: ReactNode;
   showTree: boolean;
   onToggleTree: () => void;
   allExpanded: boolean;
@@ -44,6 +47,7 @@ export function ChangesToolbar({
   stats,
   keptCount,
   commentsSlot,
+  actionSlot,
   showTree,
   onToggleTree,
   allExpanded,
@@ -129,6 +133,7 @@ export function ChangesToolbar({
           onClick={onToggleCheckpoints}
         />
         <IconButton size="sm" icon="refresh" label="Refresh" loading={refreshing} disabled={refreshing} onClick={onRefresh} />
+        {actionSlot ? <div className="ml-1.5 flex items-center border-l border-line-soft pl-2">{actionSlot}</div> : null}
       </div>
     </div>
   );

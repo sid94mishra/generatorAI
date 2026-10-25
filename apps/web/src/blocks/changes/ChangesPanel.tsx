@@ -7,17 +7,17 @@
 // highlights in workers. The data layer is the P4-04 hooks in this block;
 // this file only composes them with the pure parts:
 //
-//   ChangesToolbar   ± · N changes · [Comments] tree · expand · view · checkpoints · refresh
-//   CompareBar       This turn / This chat / Branch · Compare against
-//   ChangesListBar   +N workspace files · Keep all · Undo all
+//   ChangesToolbar   ± · N changes · [Comments] tree · expand · view · checkpoints · refresh · [Commit]
+//   CompareBar       Compare against ▾ (Uncommitted · This chat · Last turn) · +N workspace files · Keep all · Undo all
 //   MountGroupsBar   (several mounts)
-//   PendingCommentsBar, comment composer, send preview (review)
+//   PendingCommentsBar "N pending · Review & send" → ReviewSendDialog; the comment composer (review)
 //   error banner
 //   body             CheckpointScrubber strip · [FileTree] DiffView (ChangeFileRow headers) · Kept (N)
-//   CommitBar        commit → push → PR (hidden at 0 changes)
+//
+// Commit → push → PR runs in ShipDialog, opened from the toolbar (D-163).
 // ────────────────────────────────────────────────────────────────
 
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { cn } from '@/ui/lib/cn.js';
 import { Icon } from '@/ui/icons/Icon.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
@@ -32,15 +32,17 @@ import { useDiffPainted } from '@/blocks/diff/useDiffPainted.js';
 import { ReviewComposerPopover } from '@/blocks/diff/review/ReviewComposerPopover.js';
 import { ReviewThreadCard } from '@/blocks/diff/review/ReviewThreadCard.js';
 import { FileTree } from '@/blocks/files/FileTree.js';
-import { CommitBar } from '@/blocks/scm/CommitBar.js';
+import { ShipButton } from '@/blocks/scm/ShipDialog.js';
 import type { ReviewIntent, ReviewScope, ReviewSubmitTarget } from '@/types/review.js';
 import { ChangeFileRow } from './ChangeFileRow.js';
-import { ChangesListBar, CompareBar } from './CompareBar.js';
+import { CompareBar } from './CompareBar.js';
+import { undoTargetOf } from './compareChoices.js';
 import { ChangesToolbar } from './ChangesToolbar.js';
 import { MountGroupsBar } from './MountGroupsBar.js';
 import { CheckpointScrubber } from './checkpoints/CheckpointScrubber.js';
 import { CommentsPopover } from './review/CommentsPopover.js';
 import { PendingCommentsBar } from './review/PendingCommentsBar.js';
+import { ReviewSendDialog } from './review/ReviewSendDialog.js';
 import type { DiffAnnotation, DiffCodeViewHandle } from './diffTypes.js';
 import { useChangesEditor } from './useChangesEditor.js';
 import { useChangesModel } from './useChangesModel.js';
@@ -98,7 +100,7 @@ export function ChangesPanel({
   focusFile,
 }: ChangesPanelProps) {
   const settings = useChangesViewSettings(defaultBase);
-  const { base, setBase, viewMode, setViewMode, showTree, toggleTree, treePosition, placeTree, wrapLines, toggleWrapLines } =
+  const { base: requestedBase, setBase, viewMode, setViewMode, showTree, toggleTree, treePosition, placeTree, wrapLines, toggleWrapLines } =
     settings;
   const checkpointsPanel = useCheckpointPanel();
   const confirmer = useConfirm();
@@ -115,12 +117,22 @@ export function ChangesPanel({
     [confirmer],
   );
 
-  const model = useChangesModel({ workspaceId, base });
+  const scope = chatId ? 'chat' : 'run';
+  const model = useChangesModel({ workspaceId, base: requestedBase, scope });
+  const { base } = model;
   const { summary, multiMount, display, revisionsByAlias } = model;
   const editor = useChangesEditor(model.mounts);
   const { canOpenInEditor, openFile: openFileInEditor } = editor;
 
-  const actions = useFileActions({ workspaceId, revisionsByAlias, display, requestConfirmation, warn: warnToast });
+  const actions = useFileActions({
+    workspaceId,
+    base,
+    baseDescription: undoTargetOf(base, model.compareOptions, scope),
+    revisionsByAlias,
+    display,
+    requestConfirmation,
+    warn: warnToast,
+  });
   const { confirmRevert, requestRevert, cancelRevert, busyRow, bulkBusy, canRevertFile, revertFile, undoAll } = actions;
 
   // Kept files move out of the main list into their own group, so what is
@@ -175,6 +187,11 @@ export function ChangesPanel({
     viewerRef,
   });
   const { threadsById, focusedThreadId, openThreadCountByFile, commentOnFile } = review;
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const pendingThreads = useMemo(
+    () => review.threads.filter((t) => t.status === 'pending' || t.status === 'draft'),
+    [review.threads],
+  );
   // U-4: the viewer's first paint waits on its worker pool; until then the list area says so instead of staying blank.
   const diffAreaRef = useRef<HTMLDivElement>(null);
   const diffPainted = useDiffPainted(diffAreaRef, review.decoratedSources.length > 0);
@@ -295,7 +312,7 @@ export function ChangesPanel({
   }
 
   const { stats, hiddenWorkspaceFiles, showWorkspaceFiles } = model;
-  const { threads, pendingSelection, previewPrompt } = review;
+  const { threads, pendingSelection } = review;
 
   return (
     <div ref={checkpointsPanel.surfaceRef} className="flex h-full min-h-0 flex-col bg-surface text-fg">
@@ -334,11 +351,20 @@ export function ChangesPanel({
         onToggleCheckpoints={onOpenCheckpoints ?? checkpointsPanel.toggle}
         refreshing={model.isRefetching}
         onRefresh={() => void model.refetch()}
+        actionSlot={
+          <ShipButton
+            workspaceId={workspaceId}
+            {...(chatId ? { chatId } : {})}
+            {...(scmHint ? { hint: scmHint } : {})}
+            {...(canOpenInEditor ? { onOpenFile: editor.openAbsolute } : {})}
+          />
+        }
       />
 
-      <CompareBar base={base} onBaseChange={setBase} options={model.compareOptions} />
-
-      <ChangesListBar
+      <CompareBar
+        base={base}
+        onBaseChange={setBase}
+        options={model.compareOptions}
         hiddenWorkspaceFiles={hiddenWorkspaceFiles}
         showWorkspaceFiles={showWorkspaceFiles}
         onToggleWorkspaceFiles={model.toggleWorkspaceFiles}
@@ -363,20 +389,32 @@ export function ChangesPanel({
       ) : null}
 
       {reviewEnabled ? (
-        <PendingCommentsBar
-          pendingCount={review.threadCounts.pending}
-          submittedCount={review.threadCounts.submitted}
-          addressedCount={review.threadCounts.addressed}
-          busy={review.sending}
-          {...(reviewTarget
-            ? {
-                onSendAll: (note: string) => void review.sendBatch(note),
-                onPreview: (note: string) => void review.sendBatch(note, true),
-              }
-            : {})}
-          onDiscardAll={review.discardPending}
-          {...(reviewDisabledReason ? { disabledReason: reviewDisabledReason } : {})}
-        />
+        <>
+          <PendingCommentsBar
+            pendingCount={review.threadCounts.pending}
+            submittedCount={review.threadCounts.submitted}
+            addressedCount={review.threadCounts.addressed}
+            onReview={() => setReviewOpen(true)}
+            onDiscardAll={review.discardPending}
+          />
+          <ReviewSendDialog
+            open={reviewOpen}
+            onOpenChange={setReviewOpen}
+            threads={pendingThreads}
+            onJump={(thread) => {
+              setReviewOpen(false);
+              review.jumpToThread(thread);
+            }}
+            onDelete={review.deleteThread}
+            {...(reviewTarget
+              ? { onSend: (note: string) => review.sendBatch(note), onPreview: (note: string) => review.sendBatch(note, true) }
+              : {})}
+            previewPrompt={review.previewPrompt}
+            onClosePreview={review.closePreview}
+            busy={review.sending}
+            {...(reviewDisabledReason ? { disabledReason: reviewDisabledReason } : {})}
+          />
+        </>
       ) : null}
 
       {/* The comment composer floats beside the selected lines (portal). */}
@@ -399,20 +437,6 @@ export function ChangesPanel({
               }
             : {})}
         />
-      ) : null}
-
-      {previewPrompt !== null ? (
-        <div className="shrink-0 border-b border-line-soft px-3 py-2">
-          <div className="mb-1.5 flex items-center gap-2 text-small">
-            <span className="font-medium text-fg">This will be sent to the agent:</span>
-            <Button size="sm" variant="ghost" className="ml-auto" onClick={review.closePreview}>
-              Close
-            </Button>
-          </div>
-          <pre className="max-h-52 overflow-auto rounded-control border border-line-soft bg-sunken px-2.5 py-2 font-mono text-micro whitespace-pre-wrap text-fg-2">
-            {previewPrompt}
-          </pre>
-        </div>
       ) : null}
 
       {actions.error ? (
@@ -558,19 +582,6 @@ export function ChangesPanel({
         </div>
       </div>
 
-      {/* Ship: commit → push → PR. Readiness-driven; nothing to ship at 0 changes. */}
-      {stats.files > 0 ? (
-        // Capped at half the panel: the flow's step list and result must not
-        // squeeze the diff out of view.
-        <div className="max-h-1/2 shrink-0 overflow-y-auto">
-          <CommitBar
-            workspaceId={workspaceId}
-            {...(chatId ? { chatId } : {})}
-            {...(scmHint ? { hint: scmHint } : {})}
-            {...(canOpenInEditor ? { onOpenFile: editor.openAbsolute } : {})}
-          />
-        </div>
-      ) : null}
       {confirmer.dialog}
     </div>
   );

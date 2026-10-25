@@ -131,13 +131,16 @@ describe('Review batch', () => {
     expect(screen.getByText('1 addressed')).toBeInTheDocument();
   });
 
-  it('Send all sends ONLY pending/draft threads to the target (ChangesSurface.tsx:641-657)', async () => {
+  it('Review & send opens the dialog; Send sends ONLY pending/draft threads to the target (D-164)', async () => {
     singleMount();
     cs.threads = MIXED;
     const user = userEvent.setup();
     await renderReview();
 
-    await user.click(screen.getByRole('button', { name: 'Send all' }));
+    await user.click(screen.getByRole('button', { name: /Review & send/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Send review to the agent' });
+    expect(within(dialog).getByText('2 comments')).toBeInTheDocument();
+    await user.click(within(dialog).getByTestId('review-send'));
 
     expect(cs.submitReview.mutateAsync).toHaveBeenCalledWith({
       threadIds: ['t-pending', 't-draft'],
@@ -145,15 +148,16 @@ describe('Review batch', () => {
     });
   });
 
-  it('Send all carries the trimmed note; Preview asks for a preview and shows the prompt', async () => {
+  it('the dialog carries the trimmed note; Preview asks for a preview and shows the prompt', async () => {
     singleMount();
     cs.threads = MIXED;
     const user = userEvent.setup();
     await renderReview();
 
-    await user.click(screen.getByRole('button', { name: 'Note' }));
-    await user.type(screen.getByRole('textbox', { name: 'Extra instruction for the agent' }), '  be brief  ');
-    await user.click(screen.getByRole('button', { name: 'Preview' }));
+    await user.click(screen.getByRole('button', { name: /Review & send/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Send review to the agent' });
+    await user.type(within(dialog).getByRole('textbox', { name: /^Note for the agent/ }), '  be brief  ');
+    await user.click(within(dialog).getByTestId('review-preview-toggle'));
 
     expect(cs.submitReview.mutateAsync).toHaveBeenLastCalledWith({
       threadIds: ['t-pending', 't-draft'],
@@ -161,12 +165,9 @@ describe('Review batch', () => {
       note: 'be brief',
       preview: true,
     });
-    expect(await screen.findByText('This will be sent to the agent:')).toBeInTheDocument();
-    expect(screen.getByText('PROMPT')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Close' }));
-    expect(screen.queryByText('This will be sent to the agent:')).toBeNull();
+    expect(await within(dialog).findByText('PROMPT')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Send all' }));
+    await user.click(within(dialog).getByTestId('review-send'));
     expect(cs.submitReview.mutateAsync).toHaveBeenLastCalledWith({
       threadIds: ['t-pending', 't-draft'],
       target: TARGET,
@@ -189,12 +190,15 @@ describe('Review batch', () => {
     });
   });
 
-  it('without a review target Send all is disabled and explains why', async () => {
+  it('without a review target Send is disabled and the dialog explains why', async () => {
     singleMount();
     cs.threads = MIXED;
+    const user = userEvent.setup();
     await renderReview({ reviewTarget: undefined, reviewDisabledReason: 'No chat to send to' });
-    expect(screen.getByRole('button', { name: 'Send all' })).toBeDisabled();
-    expect(screen.getByText('No chat to send to')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Review & send/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'Send review to the agent' });
+    expect(within(dialog).getByTestId('review-send')).toBeDisabled();
+    expect(within(dialog).getByText('No chat to send to')).toBeInTheDocument();
   });
 
   it('review UI is off unless enableReview AND a reviewScope are given (ChangesSurface.tsx:462)', async () => {
@@ -202,7 +206,7 @@ describe('Review batch', () => {
     cs.threads = MIXED;
     renderSurface(<ChangesSurface workspaceId="ws-1" enableReview />);
     await screen.findByTestId('changes-count');
-    expect(screen.queryByRole('button', { name: 'Send all' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Review & send/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /^stub-select/ })).toBeNull();
   });
 });

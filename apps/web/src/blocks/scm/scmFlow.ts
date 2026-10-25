@@ -63,32 +63,51 @@ export function scmAvailability(selected: RepoReadiness | undefined, result: Scm
   };
 }
 
-export interface CommitForm {
-  message: string;
-  push: boolean;
-  openPr: boolean;
+/** What the dialog's primary action runs (D-163). */
+export type ShipMode = 'commit' | 'push' | 'pr';
+
+export interface ShipForm {
+  mode: ShipMode;
+  /** Commit summary (first line); blank with a blank description asks the server to write one. */
+  summary: string;
+  description: string;
   prTitle: string;
   prBody: string;
   base: string;
   draft: boolean;
+  reviewers: readonly string[];
+  assignees: readonly string[];
+  labels: readonly string[];
+  closesIssues: readonly number[];
+}
+
+/** `summary` + blank line + `description`, the way git and GitHub split a message. */
+export function commitMessageOf(summary: string, description: string): string {
+  return [summary.trim(), description.trim()].filter(Boolean).join('\n\n');
+}
+
+/** A generated message back into the two fields. */
+export function splitCommitMessage(message: string): { summary: string; description: string } {
+  const [first = '', ...rest] = message.split('\n');
+  return { summary: first.trim(), description: rest.join('\n').trim() };
 }
 
 /**
  * The `POST /scm/flow` body. What this mount cannot do is never asked for,
- * whatever the toggles were left at — `push` defaults to on, and a repo with no
- * remote must still be able to commit. Blank text asks the server to write it.
+ * whatever the mode — a repo with no remote must still be able to commit.
+ * Blank text asks the server to write it.
  */
-export function composeFlowRequest(
-  selected: RepoReadiness | undefined,
-  form: CommitForm,
-  hint: string | undefined,
-): ScmFlowRequest {
-  const trimmed = form.message.trim();
-  const wantsPr = form.openPr && (selected?.can.pullRequest ?? false);
-  const wantsPush = (form.push || wantsPr) && (selected?.can.push ?? false);
+export function composeFlowRequest(selected: RepoReadiness | undefined, form: ShipForm, hint: string | undefined): ScmFlowRequest {
+  const message = commitMessageOf(form.summary, form.description);
+  const wantsPr = form.mode === 'pr' && (selected?.can.pullRequest ?? false);
+  const wantsPush = (form.mode === 'push' || wantsPr) && (selected?.can.push ?? false);
+  const list = (items: readonly string[]) => (items.length > 0 ? [...items] : undefined);
+  const reviewers = list(form.reviewers);
+  const assignees = list(form.assignees);
+  const labels = list(form.labels);
   return {
     ...(selected ? { alias: selected.alias } : {}),
-    commit: trimmed ? { message: trimmed } : { generate: true },
+    commit: message ? { message } : { generate: true },
     push: wantsPush,
     ...(wantsPr
       ? {
@@ -97,11 +116,33 @@ export function composeFlowRequest(
             ...(form.prBody.trim() ? { body: form.prBody.trim() } : {}),
             ...(form.base.trim() ? { base: form.base.trim() } : {}),
             draft: form.draft,
+            ...(reviewers ? { reviewers } : {}),
+            ...(assignees ? { assignees } : {}),
+            ...(labels ? { labels } : {}),
+            ...(form.closesIssues.length > 0 ? { closesIssues: [...form.closesIssues] } : {}),
           },
         }
       : {}),
     ...(hint ? { hint } : {}),
   };
+}
+
+/** The toolbar button's verb for the repo's state, or null when there is nothing to ship (D-163). */
+export function shipActionOf(selected: RepoReadiness | undefined): { label: string; mode: ShipMode; prominent: boolean } | null {
+  if (!selected?.isRepo) return null;
+  if (selected.mergeInProgress) return { label: 'Finish merge', mode: 'commit', prominent: true };
+  if (selected.dirty) return { label: 'Commit', mode: selected.can.push ? 'push' : 'commit', prominent: true };
+  // A clean branch never pushed has nothing of ours to ship (the work branch starts at its base).
+  if (!selected.hasUpstream) return null;
+  const unpushed = (selected.ahead ?? 0) > 0;
+  if (selected.openPullRequest) {
+    return unpushed
+      ? { label: 'Push', mode: 'push', prominent: true }
+      : { label: `PR #${selected.openPullRequest.number}`, mode: 'push', prominent: false };
+  }
+  if (unpushed && selected.can.push) return { label: 'Push', mode: selected.can.pullRequest ? 'pr' : 'push', prominent: true };
+  if (selected.can.pullRequest && !selected.onDefaultBranch) return { label: 'Pull request', mode: 'pr', prominent: false };
+  return null;
 }
 
 /** The first step that stopped the flow, if any. */

@@ -1,93 +1,25 @@
 // ────────────────────────────────────────────────────────────────
-// F-dock-01 CompareSegment + "Compare against" (03-domain §3.3; board
-// DockChanges "This turn / This chat / Branch vs main").
+// F-dock-01 compare row (D-162; board DockChanges): what the list is measured
+// against, plus the list's bulk actions — one 40h row.
 //
-// The segment is the quick switch between the three designed modes, mapped
-// onto today's base selectors: This turn = the newest turn (`turn:<id>`),
-// This chat = `baseline` ("Since session start"), Branch = the first mount's
-// branch base (`ref:<sha>`). The Select beside it is the precise picker —
-// every mount's branch base and the last turns / checkpoints (09 §5.3 pins
-// it as `Compare against`). When the base is none of the three quick modes,
-// no segment is selected. A mode with no data behind it is disabled with the
-// reason (D-36).
+//   [Uncommitted changes ▾]  +N workspace files ········· Keep all · Undo all
 //
-// Under it (when there are changes) the list bar: the "+N workspace files"
-// chip and the bulk Keep all / Undo all (D-28).
+// The picker is the only compare control: Uncommitted changes (the default in
+// a chat), This chat / This run, Last turn — see compareChoices.ts. The
+// accessible name stays `Compare against` (09 §5.3). Keep all accepts every
+// listed file; Undo all puts them back to the selected base, confirmed first
+// (D-28).
 // ────────────────────────────────────────────────────────────────
 
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Chip } from '@/ui/primitives/Chip/Chip.js';
-import { SegmentedControl, type SegmentedItem } from '@/ui/primitives/SegmentedControl/SegmentedControl.js';
 import { Select } from '@/ui/primitives/Select/Select.js';
-import type { CompareOption } from './useChangesModel.js';
-
-export type CompareMode = 'turn' | 'chat' | 'branch';
-
-export interface CompareModes {
-  /** Selector of the newest turn, if any turn was recorded. */
-  turn: string | null;
-  /** Selector and label of the first mount's branch base, if known. */
-  branch: { value: string; label: string } | null;
-}
-
-/** The three quick modes, derived from the full compare list (newest checkpoints first). */
-export function compareModesOf(options: readonly CompareOption[]): CompareModes {
-  const turn = options.find((o) => o.value.startsWith('turn:'))?.value ?? null;
-  const branchOption = options.find((o) => o.value.startsWith('ref:'));
-  const rawRef = branchOption?.label.match(/^Branch base \((.*)\)$/)?.[1];
-  // A fork's base is a commit, not a branch name: show it the way git does (7 characters), not all 40.
-  const ref = rawRef && /^[0-9a-f]{40}$/i.test(rawRef) ? rawRef.slice(0, 7) : rawRef;
-  return {
-    turn,
-    branch: branchOption ? { value: branchOption.value, label: ref ? `Branch vs ${ref}` : 'Branch' } : null,
-  };
-}
+import type { CompareOption } from './compareChoices.js';
 
 export interface CompareBarProps {
   base: string;
   onBaseChange: (base: string) => void;
   options: readonly CompareOption[];
-}
-
-export function CompareBar({ base, onBaseChange, options }: CompareBarProps) {
-  const modes = compareModesOf(options);
-  const current: CompareMode | '' =
-    base === 'baseline' ? 'chat' : base === modes.turn ? 'turn' : base === modes.branch?.value ? 'branch' : '';
-  const items: SegmentedItem<CompareMode>[] = [
-    { value: 'turn', label: 'This turn', disabled: !modes.turn, reason: 'No turn has been recorded yet' },
-    { value: 'chat', label: 'This chat' },
-    {
-      value: 'branch',
-      label: modes.branch?.label ?? 'Branch',
-      disabled: !modes.branch,
-      reason: 'No branch base: the source is not a git branch',
-    },
-  ];
-  return (
-    <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-2 border-b border-line-soft px-3 py-1.5">
-      <SegmentedControl<CompareMode>
-        label="Compare"
-        value={current as CompareMode}
-        items={items}
-        onValueChange={(mode) => {
-          if (mode === 'chat') onBaseChange('baseline');
-          else if (mode === 'turn' && modes.turn) onBaseChange(modes.turn);
-          else if (mode === 'branch' && modes.branch) onBaseChange(modes.branch.value);
-        }}
-      />
-      <Select
-        size="sm"
-        aria-label="Compare against"
-        value={base}
-        items={options}
-        onValueChange={(v) => { if (v !== null) onBaseChange(v as typeof base & string); }}
-        className="max-w-60 min-w-32 flex-1"
-      />
-    </div>
-  );
-}
-
-export interface ChangesListBarProps {
   /** Hidden workspace-root files (0 = the chip only shows while they are on). */
   hiddenWorkspaceFiles: number;
   showWorkspaceFiles: boolean;
@@ -100,7 +32,10 @@ export interface ChangesListBarProps {
   onUndoAll: () => void;
 }
 
-export function ChangesListBar({
+export function CompareBar({
+  base,
+  onBaseChange,
+  options,
   hiddenWorkspaceFiles,
   showWorkspaceFiles,
   onToggleWorkspaceFiles,
@@ -109,11 +44,25 @@ export function ChangesListBar({
   bulkBusy,
   onKeepAll,
   onUndoAll,
-}: ChangesListBarProps) {
+}: CompareBarProps) {
   const chip = hiddenWorkspaceFiles > 0 || showWorkspaceFiles;
-  if (!chip && files === 0) return null;
   return (
-    <div className="flex h-strip shrink-0 items-center gap-1 border-b border-line-soft px-3">
+    <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-2 border-b border-line-soft px-3 py-1.5">
+      <Select
+        size="sm"
+        aria-label="Compare against"
+        value={base}
+        items={options.map((o) => ({
+          value: o.value,
+          label: o.label,
+          ...(o.meta ? { meta: o.meta } : {}),
+          ...(o.disabled ? { disabled: true } : {}),
+        }))}
+        onValueChange={(v) => {
+          if (v !== null) onBaseChange(v);
+        }}
+        className="w-64 max-w-full min-w-0"
+      />
       {chip ? (
         <Chip
           size="sm"
@@ -133,8 +82,6 @@ export function ChangesListBar({
       ) : null}
       {files > 0 ? (
         <div className="ml-auto flex items-center gap-1">
-          {/* Keep all accepts every changed file at its current content,
-              resolved server-side; Undo all is confirmed first (D-28). */}
           <Button
             size="sm"
             variant="ghost"
@@ -153,7 +100,7 @@ export function ChangesListBar({
             icon="undo"
             loading={bulkBusy === 'undo'}
             disabled={bulkBusy !== null}
-            title="Restore every changed file to its base revision"
+            title="Put every listed file back the way it was at the selected point"
             onClick={onUndoAll}
             data-testid="undo-all"
           >

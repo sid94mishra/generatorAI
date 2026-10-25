@@ -3,7 +3,7 @@
 // summary-first API.
 //
 //   summary (GET /changes) → file list, per-mount revisions, mount groups,
-//   tree paths/statuses, "Compare against" options.
+//   tree paths/statuses, the compare picker's choices (compareChoices.ts).
 //
 // File bodies are fetched lazily per expanded row (useDiffSources); this
 // hook never touches them.
@@ -14,29 +14,25 @@ import { useWorkspaceChangeSummary, useWorkspaceCheckpoints } from '@/hooks/quer
 import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import type { ChangeStatus } from '@/types/changes.js';
 import { shouldPrefixAlias, withAliasPrefix } from './changePaths.js';
+import { groupCheckpoints } from './checkpoints/checkpointGroups.js';
+import { compareChoices, effectiveCompareBase, type CompareOption } from './compareChoices.js';
 import { splitWorkspaceChanges } from './changeVisibility.js';
 import { diffSourceId } from './useDiffSources.js';
 import type { MountRevisions } from './useFileActions.js';
 
-/** The at-most count of "Compare against" entries (see DISCREPANCY in the pins). */
-const MAX_COMPARE_OPTIONS = 30;
-
-export interface CompareOption {
-  value: string;
-  label: string;
-}
+export type { CompareOption };
 
 export interface UseChangesModelOptions {
   workspaceId: string | undefined;
-  /** The base selector: `baseline`, `ref:<sha>`, `turn:<id>`, `checkpoint:<id>`. */
+  /** The base selector: `head`, `baseline`, `turn:<id>`, `checkpoint:<id>`, `stage:<id>`. */
   base: string;
+  /** Names the session choice: "This chat" or "This run". */
+  scope: 'chat' | 'run';
 }
 
-export function useChangesModel({ workspaceId, base }: UseChangesModelOptions) {
-  const summaryQuery = useWorkspaceChangeSummary(workspaceId, {
-    base,
-    head: 'working',
-  });
+const timeOf = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+export function useChangesModel({ workspaceId, base: requestedBase, scope }: UseChangesModelOptions) {
   /**
    * The workspace's mounts — the authority for how many things this chat is
    * working on, what each is called, and what each branch was cut from.
@@ -51,6 +47,10 @@ export function useChangesModel({ workspaceId, base }: UseChangesModelOptions) {
     [workspaceInfo.data],
   );
   const checkpoints = useWorkspaceCheckpoints(workspaceId);
+  // Until the mounts load, assume git: the server answers `head` with the baseline for a mount without commits.
+  const hasGit = mounts.length === 0 || mounts.some((m) => m.git?.isRepo);
+  const base = effectiveCompareBase(requestedBase, hasGit);
+  const summaryQuery = useWorkspaceChangeSummary(workspaceId, { base, head: 'working' });
 
   // Supporting files the agent scaffolds at the workspace root stay out of the
   // way while a real codebase is being reviewed — see changeVisibility.ts.
@@ -88,44 +88,17 @@ export function useChangesModel({ workspaceId, base }: UseChangesModelOptions) {
     }));
   }, [summary, mounts]);
 
-  /**
-   * What "compare against" offers.
-   *
-   * Turn checkpoints are grouped by `turnId`: one turn writes one checkpoint
-   * PER MOUNT, so listing them raw produced the same prompt three times over.
-   * `turn:<id>` is the selector the server resolves to that turn's snapshot.
-   *
-   * "Branch base" is the commit a mount's branch was cut from — the answer to
-   * "what does this branch add?", which no checkpoint can express because
-   * checkpoints only start at session start.
-   */
-  const compareOptions = useMemo<CompareOption[]>(() => {
-    const options: CompareOption[] = [{ value: 'baseline', label: 'Since session start' }];
-
-    for (const mount of mounts) {
-      const sha = mount.git?.baseCommit;
-      if (!sha) continue;
-      options.push({
-        value: `ref:${sha}`,
-        label: `Branch base (${mount.git?.baseRef ?? mount.git?.branch ?? mount.alias})`,
-      });
-    }
-
-    const seenTurns = new Set<string>();
-    for (const c of checkpoints.data?.checkpoints ?? []) {
-      if (c.kind === 'baseline' || c.kind === 'pre_restore') continue;
-      if (c.turnId) {
-        if (seenTurns.has(c.turnId)) continue;
-        seenTurns.add(c.turnId);
-      }
-      options.push({
-        value: c.turnId ? `turn:${c.turnId}` : `checkpoint:${c.id}`,
-        label: `${c.label ?? c.kind} · ${new Date(c.createdAt).toLocaleTimeString()}`,
-      });
-      if (options.length > MAX_COMPARE_OPTIONS) break;
-    }
-    return options;
-  }, [mounts, checkpoints.data]);
+  const compareOptions = useMemo<CompareOption[]>(
+    () =>
+      compareChoices({
+        base,
+        hasGit,
+        scope,
+        groups: groupCheckpoints(checkpoints.data?.checkpoints ?? []),
+        formatTime: timeOf,
+      }),
+    [base, hasGit, scope, checkpoints.data],
+  );
 
   /**
    * Each mount's OWN base and head revision.
@@ -184,6 +157,8 @@ export function useChangesModel({ workspaceId, base }: UseChangesModelOptions) {
   const stats = summary?.stats ?? { files: 0, additions: 0, deletions: 0 };
 
   return {
+    /** The base the summary was asked for (`head` becomes `baseline` without git). */
+    base,
     summary,
     stats,
     isLoading: summaryQuery.isLoading,

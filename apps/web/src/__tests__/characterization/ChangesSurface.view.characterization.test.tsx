@@ -152,16 +152,14 @@ describe('Compare against', () => {
     return screen.getByRole('listbox');
   }
 
-  it('first fetches {base:"baseline", head:"working"}, or the defaultBase (ChangesSurface.tsx:232, 281-284)', async () => {
+  it('first fetches {base:"baseline", head:"working"} ("This run"), or the defaultBase; defaultBase seeds once', async () => {
     singleMount();
     const { rerenderSurface } = await renderReady();
     expect(useWorkspaceChangeSummaryMock).toHaveBeenLastCalledWith('ws-1', {
       base: 'baseline',
       head: 'working',
     });
-    expect(screen.getByRole('combobox', { name: 'Compare against' })).toHaveTextContent(
-      'Since session start',
-    );
+    expect(screen.getByRole('combobox', { name: 'Compare against' })).toHaveTextContent('This run');
     rerenderSurface(<ChangesSurface workspaceId="ws-2" defaultBase="stage:s1" />);
     // defaultBase seeds state once; a later prop change does not reset it.
     expect(useWorkspaceChangeSummaryMock).toHaveBeenLastCalledWith('ws-2', {
@@ -170,60 +168,49 @@ describe('Compare against', () => {
     });
   });
 
-  it('offers "Since session start", one "Branch base (…)" per mount with a base commit, then turns grouped by turnId (ChangesSurface.tsx:370-396)', async () => {
+  it('a chat on a git mount opens on "Uncommitted changes" (base head) (D-162)', async () => {
+    cs.mounts = [mount('app', { git: { isRepo: true, branch: 'feat/x' } })];
+    cs.summary = summaryOf([repo('app', FOUR)]);
+    await renderReady({ chatId: 'chat-1', defaultBase: 'head' });
+    expect(useWorkspaceChangeSummaryMock).toHaveBeenLastCalledWith('ws-1', { base: 'head', head: 'working' });
+    expect(screen.getByRole('combobox', { name: 'Compare against' })).toHaveTextContent('Uncommitted changes');
+  });
+
+  it('offers Uncommitted changes, This chat and Last turn — one entry for the newest turn, not one per checkpoint (D-162)', async () => {
     cs.mounts = [
-      mount('api', { git: { baseCommit: 'c0ffee', baseRef: 'main', branch: 'feat/x' } }),
-      mount('web', { git: { baseCommit: 'beef', branch: 'feat/y' } }),
-      mount('docs'), // no git base → no Branch base entry
+      mount('api', { git: { isRepo: true, baseCommit: 'c0ffee', baseRef: 'main', branch: 'feat/x' } }),
+      mount('docs'),
     ];
-    cs.summary = summaryOf([repo('api', [file('src/a.ts')]), repo('web', [file('src/b.ts')])]);
+    cs.summary = summaryOf([repo('api', [file('src/a.ts')])]);
     cs.checkpoints = [
       checkpoint('base', { kind: 'baseline' }),
-      checkpoint('t1-api', { turnId: 't1', label: 'Fix login', repoAlias: 'api' }),
-      checkpoint('t1-web', { turnId: 't1', label: 'Fix login', repoAlias: 'web' }),
+      checkpoint('t1-api', { turnId: 't1', label: 'Fix login', repoAlias: 'api', createdAt: '2026-09-01T10:00:00.000Z' }),
+      checkpoint('t2-api', { turnId: 't2', label: 'Fix logout', repoAlias: 'api', createdAt: '2026-09-01T10:05:00.000Z' }),
       checkpoint('pre', { kind: 'pre_restore' }),
       checkpoint('m1', { kind: 'manual', label: 'Snapshot' }),
     ];
-    await renderReady();
+    await renderReady({ chatId: 'chat-1' });
 
     await openCompare();
     const labels = screen.getAllByRole('option').map((o) => o.textContent ?? '');
-    expect(labels).toHaveLength(5);
-    expect(labels[0]).toBe('Since session start');
-    expect(labels[1]).toBe('Branch base (main)'); // baseRef wins
-    expect(labels[2]).toBe('Branch base (feat/y)'); // falls back to branch
-    // One entry per turn (not per mount); baseline and pre_restore are skipped.
-    expect(labels[3]).toMatch(/^Fix login · /);
-    expect(labels[4]).toMatch(/^Snapshot · /);
+    expect(labels).toHaveLength(3);
+    expect(labels[0]).toMatch(/^Uncommitted changes/);
+    expect(labels[1]).toMatch(/^This chat/);
+    expect(labels[2]).toMatch(/^Last turn/);
   });
 
-  it('caps the list at 31 entries: "Since session start" plus at most 30 checkpoints (ChangesSurface.tsx:393)', async () => {
-    singleMount();
-    cs.checkpoints = Array.from({ length: 40 }, (_, i) => checkpoint(`c${i}`, { turnId: `t${i}` }));
-    await renderReady();
-    await openCompare();
-    // DISCREPANCY (09 §5.3): "turns or checkpoints (at most 30)" — the cap is
-    // on the WHOLE option list (`options.length > 30` → break after the push),
-    // so with branch-base entries present fewer than 30 checkpoints are listed
-    // (ChangesSurface.tsx:393).
-    expect(screen.getAllByRole('option')).toHaveLength(31);
-  });
-
-  it('choosing an option refetches with {base:<selector>, head:"working"} (ChangesSurface.tsx:1325-1331)', async () => {
-    singleMount();
-    cs.mounts = [mount('app', { git: { baseCommit: 'c0ffee', baseRef: 'main' } })];
-    cs.checkpoints = [
-      checkpoint('t1-app', { turnId: 't1', label: 'Turn one' }),
-      checkpoint('solo', { label: 'Lone' }),
-    ];
-    await renderReady();
+  it('choosing an option refetches with {base:<selector>, head:"working"}', async () => {
+    cs.mounts = [mount('app', { git: { isRepo: true, branch: 'feat/x' } })];
+    cs.summary = summaryOf([repo('app', FOUR)]);
+    cs.checkpoints = [checkpoint('t1-app', { turnId: 't1', label: 'Turn one' })];
+    await renderReady({ chatId: 'chat-1', defaultBase: 'head' });
     // A full pointer sequence: Base UI Select commits on the pointer, not on a bare synthetic click.
     const user = userEvent.setup();
 
     for (const [name, base] of [
-      [/^Turn one/, 'turn:t1'],
-      [/^Lone/, 'checkpoint:solo'],
-      ['Branch base (main)', 'ref:c0ffee'],
+      [/^Last turn/, 'turn:t1'],
+      [/^This chat/, 'baseline'],
+      [/^Uncommitted changes/, 'head'],
     ] as const) {
       await openCompare();
       await user.click(screen.getByRole('option', { name }));

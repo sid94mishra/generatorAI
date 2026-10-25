@@ -246,6 +246,8 @@ export function ChatPage() {
       ...(chat?.workspaceId ? { workspaceId: chat.workspaceId } : {}),
       ...(chatId ? { chatId } : {}),
       ...(chat?.name ? { scmHint: chat.name } : {}),
+      // A chat opens on what is not committed yet (D-162); runs keep their session view.
+      defaultBase: 'head',
       enableReview: true,
       // Threads are scoped to the chat; "Send all" posts the batch as a new user turn.
       reviewScope: { scope: 'chat', scopeId: chatId ?? '' },

@@ -96,6 +96,9 @@ import type {
   EditorInfo as ScmEditorInfo,
   RepoReadiness as ScmRepoReadiness,
   WorkspaceReadinessResponse as ScmWorkspaceReadiness,
+  ScmBranchList,
+  ScmCompareResult,
+  ScmPullRequestOptions,
   ScmFlowRequest,
   ScmFlowResult,
   ScmGenerateRequest,
@@ -1498,7 +1501,7 @@ export class HttpPlatformClient implements IPlatformClient {
    */
   async discardWorkspaceChanges(
     workspaceId: string,
-    body: { files?: ChangeFileRef[]; all?: boolean },
+    body: { files?: ChangeFileRef[]; all?: boolean; base?: string },
   ): Promise<DiscardChangesResult> {
     return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/changes/discard`, {
       method: 'POST',
@@ -1887,6 +1890,27 @@ export class HttpPlatformClient implements IPlatformClient {
       method: 'POST',
       body: JSON.stringify(request),
     });
+  }
+
+  /** The remote's branches, for the pull-request base picker. */
+  async getScmBranches(workspaceId: string, alias?: string): Promise<ScmBranchList> {
+    const qs = alias ? `?${new URLSearchParams({ alias })}` : '';
+    return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/branches${qs}`);
+  }
+
+  /** What a PR from the current branch into `base` would contain. */
+  async getScmCompare(workspaceId: string, input: { alias?: string; base?: string }): Promise<ScmCompareResult> {
+    const params = new URLSearchParams();
+    if (input.alias) params.set('alias', input.alias);
+    if (input.base) params.set('base', input.base);
+    const qs = params.size > 0 ? `?${params}` : '';
+    return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/compare${qs}`);
+  }
+
+  /** Reviewers, assignees, labels and issues for the PR form's sidebar. */
+  async getScmPullRequestOptions(workspaceId: string, alias?: string): Promise<ScmPullRequestOptions> {
+    const qs = alias ? `?${new URLSearchParams({ alias })}` : '';
+    return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/pull-request-options${qs}`);
   }
 
   /** Apply the conflicting merge to the working tree so it can be edited. */

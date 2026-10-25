@@ -31,6 +31,10 @@ export interface ChangesNotice {
 
 export interface UseFileActionsOptions {
   workspaceId: string | undefined;
+  /** The compare base on screen: Undo restores to it, so what was listed is what goes back. */
+  base: string;
+  /** Where Undo all puts files back, for its confirmation ("to the last commit"). */
+  baseDescription: string;
   revisionsByAlias: ReadonlyMap<string, MountRevisions>;
   /** How a file is named on screen (alias-prefixed only with several mounts). */
   display: (alias: string, path: string) => string;
@@ -48,6 +52,8 @@ function errorMessage(err: unknown): string {
 
 export function useFileActions({
   workspaceId,
+  base,
+  baseDescription,
   revisionsByAlias,
   display,
   requestConfirmation,
@@ -136,7 +142,8 @@ export function useFileActions({
   }, []);
 
   /**
-   * Undo one file's changes, returning it to its mount's base revision.
+   * Undo one file's changes, returning it to the selected base (D-162) —
+   * the last commit, the session start or the snapshot before a turn.
    *
    * Deliberately a server-side restore rather than a reverse-applied patch:
    * restoring is tree-to-tree (adds, deletes and renames all behave), it
@@ -154,7 +161,7 @@ export function useFileActions({
       setError(null);
       setBusyRow(id);
       try {
-        reportDiscard(await discardChanges.mutateAsync({ files: [{ alias, path }] }));
+        reportDiscard(await discardChanges.mutateAsync({ files: [{ alias, path }], base }));
       } catch (err) {
         setError(errorMessage(err));
       } finally {
@@ -162,7 +169,7 @@ export function useFileActions({
         setConfirmRevert(null);
       }
     },
-    [discardChanges, reportDiscard],
+    [discardChanges, reportDiscard, base],
   );
 
   /**
@@ -175,16 +182,16 @@ export function useFileActions({
     const ok = await requestConfirmation({
       title: 'Undo all changes?',
       description:
-        `This restores every changed file in this workspace to its base revision. ` +
+        `This puts every listed file back ${baseDescription}. ` +
         `A checkpoint is written first, so it can still be rewound.`,
       confirmLabel: 'Undo all',
       variant: 'destructive',
     });
     if (!ok) return;
     await runBulkAction('undo', async () => {
-      reportDiscard(await discardChanges.mutateAsync({ all: true }));
+      reportDiscard(await discardChanges.mutateAsync({ all: true, base }));
     });
-  }, [requestConfirmation, discardChanges, reportDiscard, runBulkAction]);
+  }, [requestConfirmation, discardChanges, reportDiscard, runBulkAction, base, baseDescription]);
 
   return {
     busyRow,

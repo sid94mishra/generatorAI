@@ -223,6 +223,7 @@ describe('Undo one file', () => {
 
     expect(cs.discard.mutateAsync).toHaveBeenCalledWith({
       files: [{ alias: 'app', path: 'src/a.ts' }],
+      base: 'baseline',
     });
     // The confirm closes once the discard settles.
     await waitFor(() =>
@@ -262,6 +263,7 @@ describe('Undo one file', () => {
     // …but the restore path never does: a mount's base tree is that mount's tree.
     expect(cs.discard.mutateAsync).toHaveBeenCalledWith({
       files: [{ alias: 'web', path: 'src/app.tsx' }],
+      base: 'baseline',
     });
   });
 
@@ -283,6 +285,7 @@ describe('Undo one file', () => {
 
     expect(cs.discard.mutateAsync).toHaveBeenCalledWith({
       files: [{ alias: 'api', path: 'api/handler.ts' }],
+      base: 'baseline',
     });
   });
 
@@ -328,7 +331,7 @@ describe('Undo all', () => {
 
     await user.click(within(dialog).getByRole('button', { name: 'Undo all' }));
 
-    expect(cs.discard.mutateAsync).toHaveBeenCalledWith({ all: true });
+    expect(cs.discard.mutateAsync).toHaveBeenCalledWith({ all: true, base: 'baseline' });
   });
 
   it('cancelling the dialog discards nothing', async () => {

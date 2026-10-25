@@ -457,7 +457,7 @@ export function useDiscardWorkspaceChanges(workspaceId: string | undefined) {
   const platform = usePlatform() as HttpPlatformClient;
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: { files?: Array<{ alias: string; path: string }>; all?: boolean }) =>
+    mutationFn: (body: { files?: Array<{ alias: string; path: string }>; all?: boolean; base?: string }) =>
       platform.discardWorkspaceChanges(workspaceId!, body),
     onSuccess: () => invalidateWorkspaceChanges(queryClient, workspaceId),
   });
@@ -1173,6 +1173,9 @@ export const scmKeys = {
   deviceLogin: (loginId: string) => ['scm-device-login', loginId] as const,
   readiness: (workspaceId: string, alias?: string) =>
     ['scm-readiness', workspaceId, alias ?? '*'] as const,
+  branches: (workspaceId: string, alias: string) => ['scm-branches', workspaceId, alias] as const,
+  compare: (workspaceId: string, alias: string, base: string) => ['scm-compare', workspaceId, alias, base] as const,
+  pullRequestOptions: (workspaceId: string, alias: string) => ['scm-pr-options', workspaceId, alias] as const,
   codebaseReadiness: (projectId: string, codebaseId: string) =>
     ['scm-codebase-readiness', projectId, codebaseId] as const,
   editors: ['scm-editors'] as const,
@@ -1312,6 +1315,7 @@ function invalidateScmSurfaces(queryClient: ReturnType<typeof useQueryClient>, w
   void queryClient.invalidateQueries({ queryKey: ['workspace-changes', workspaceId] });
   void queryClient.invalidateQueries({ queryKey: ['workspace-change-summary', workspaceId] });
   void queryClient.invalidateQueries({ queryKey: ['workspace-pull-requests', workspaceId] });
+  void queryClient.invalidateQueries({ queryKey: ['scm-compare', workspaceId ?? ''] });
 }
 
 /** Run branch → commit → sync → push → PR. */
@@ -1321,6 +1325,39 @@ export function useRunScmFlow(workspaceId: string | undefined) {
   return useMutation({
     mutationFn: (request: ScmFlowRequest) => platform.runWorkspaceScmFlow(workspaceId!, request),
     onSettled: () => invalidateScmSurfaces(queryClient, workspaceId),
+  });
+}
+
+/** The remote's branches (fetched on the server), for the PR base picker. */
+export function useScmBranches(workspaceId: string | undefined, alias: string | undefined, enabled = true) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.branches(workspaceId ?? '', alias ?? '.'),
+    queryFn: () => platform.getScmBranches(workspaceId!, alias),
+    enabled: enabled && !!workspaceId && !!alias,
+    staleTime: 60_000,
+  });
+}
+
+/** Commits, files and mergeability of a PR from the current branch into `base`. */
+export function useScmCompare(workspaceId: string | undefined, alias: string | undefined, base: string, enabled = true) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.compare(workspaceId ?? '', alias ?? '.', base),
+    queryFn: () => platform.getScmCompare(workspaceId!, { ...(alias ? { alias } : {}), ...(base ? { base } : {}) }),
+    enabled: enabled && !!workspaceId && !!alias && !!base,
+    staleTime: 15_000,
+  });
+}
+
+/** People, labels and open issues for the PR form's sidebar. */
+export function useScmPullRequestOptions(workspaceId: string | undefined, alias: string | undefined, enabled = true) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.pullRequestOptions(workspaceId ?? '', alias ?? '.'),
+    queryFn: () => platform.getScmPullRequestOptions(workspaceId!, alias),
+    enabled: enabled && !!workspaceId && !!alias,
+    staleTime: 5 * 60_000,
   });
 }
 
