@@ -178,7 +178,8 @@ export function ShipDialogView(props: ShipDialogViewProps) {
       open={open}
       onOpenChange={onOpenChange}
       size={writingPr && showForm ? 'xl' : 'md'}
-      title={titleOf(mode, selected.dirty)}
+      // After a run the tree is clean again; the heading keeps naming what ran.
+      title={titleOf(mode, selected.dirty || !!result?.commit)}
       badge={props.repos.length > 1 ? <Badge>{mountLabel(selected.alias)}</Badge> : undefined}
       data-testid="scm-dialog"
     >

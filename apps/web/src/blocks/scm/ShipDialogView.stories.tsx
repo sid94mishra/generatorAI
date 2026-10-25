@@ -236,6 +236,27 @@ export const Done: Story = {
   },
 };
 
+/** A push to a branch whose PR is open: the PR is reported as updated, and the heading still names what ran. */
+export const PushUpdatedPullRequest: Story = {
+  args: {} as ShipDialogViewProps,
+  render: () => {
+    const pr = OK.pullRequest!;
+    const clean = repo({ dirty: false, changedFiles: 0, hasUpstream: true, ahead: 0, behind: 0, openPullRequest: pr });
+    return (
+      <Harness
+        selected={clean}
+        initialMode="push"
+        result={{ ...OK, steps: [...OK.steps.slice(0, -1), { id: 'pull_request', status: 'done', detail: `Updated PR #${pr.number}` }], readiness: clean }}
+      />
+    );
+  },
+  play: async () => {
+    const dialog = await screen.findByRole('dialog', { name: 'Commit and push' });
+    await expect(within(dialog).getByText('Updated PR #22')).toBeInTheDocument();
+    await expect(within(dialog).getByRole('link', { name: 'View on GitHub' })).toBeInTheDocument();
+  },
+};
+
 /** Not a repository: nothing can run, and the dialog says why. */
 export const Blocked: Story = {
   args: {} as ShipDialogViewProps,
