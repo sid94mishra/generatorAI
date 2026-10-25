@@ -484,27 +484,30 @@ function PullRequestBody({ value, onChange }: { value: string; onChange: (value:
 
 function PullRequestContents({
   compare,
-  loading,
+  loading: _loading,
   uncommitted,
 }: {
   compare: ScmCompareResult | undefined;
   loading: boolean;
   uncommitted: number;
 }) {
-  if (!compare) return loading ? null : null;
+  if (!compare) return null;
   const commits = compare.commits.length;
+  const files = compare.files.length;
+  // What the PR carries: the branch's commits, plus what this run commits first.
+  const summary =
+    commits === 0
+      ? uncommitted > 0
+        ? `the ${plural(uncommitted, 'file')} this commit adds`
+        : 'no changes yet'
+      : `${plural(commits, 'commit')} · ${plural(files, 'file')} changed${uncommitted > 0 ? `, plus the ${plural(uncommitted, 'file')} this commit adds` : ''}`;
   return (
     <div className="flex flex-col gap-2 rounded-card border border-line p-3" data-testid="scm-pr-contents">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-ui">
         <span className="font-medium text-fg">This pull request will contain</span>
-        <span className="text-fg-2">
-          {plural(commits, 'commit')} · {plural(compare.files.length, 'file')} changed
-        </span>
+        <span className="text-fg-2">{summary}</span>
         {compare.additions > 0 || compare.deletions > 0 ? <DiffStat added={compare.additions} removed={compare.deletions} /> : null}
       </div>
-      {uncommitted > 0 ? (
-        <p className="text-small text-fg-3">Plus the {plural(uncommitted, 'file')} this commit adds.</p>
-      ) : null}
       {commits > 0 ? (
         <Collapsible variant="disclosure" trigger={`Commits (${commits})`} data-testid="scm-pr-commits">
           <ul className="flex flex-col">

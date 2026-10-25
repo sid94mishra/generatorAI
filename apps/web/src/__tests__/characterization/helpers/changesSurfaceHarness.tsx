@@ -46,7 +46,7 @@ export interface MountFixture {
   alias: string;
   path: string;
   status?: string;
-  git?: { baseCommit?: string; baseRef?: string; branch?: string };
+  git?: { isRepo?: boolean; baseCommit?: string; baseRef?: string; branch?: string };
 }
 
 export interface ChangesSurfaceState {

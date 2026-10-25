@@ -430,7 +430,15 @@ export class SourceControlFlowService {
       additions: files.reduce((sum, f) => sum + f.additions, 0),
       deletions: files.reduce((sum, f) => sum + f.deletions, 0),
       behind: aheadBehind?.behind ?? 0,
-      mergeable: !probe.supported ? 'unknown' : probe.conflicts.length > 0 ? 'conflicts' : 'clean',
+      // Without merge-tree (git < 2.38) one case is still certain: a base that has not moved since
+      // the branch was cut is an ancestor of HEAD, so the merge is a fast-forward.
+      mergeable: probe.supported
+        ? probe.conflicts.length > 0
+          ? 'conflicts'
+          : 'clean'
+        : aheadBehind?.behind === 0
+          ? 'clean'
+          : 'unknown',
       conflictFiles: probe.conflicts,
     };
   }
