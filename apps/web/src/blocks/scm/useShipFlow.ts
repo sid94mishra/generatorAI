@@ -18,6 +18,7 @@ import {
   useScmBranches,
   useScmCompare,
   useScmPullRequestOptions,
+  useFetchedReadiness,
   useWorkspaceChangeSummary,
   useWorkspaceReadiness,
 } from '@/hooks/queries.js';
@@ -49,6 +50,8 @@ function errorText(e: unknown): string {
 
 export function useShipFlow({ workspaceId, hint, open, initialMode }: UseShipFlowOptions) {
   const readiness = useWorkspaceReadiness(workspaceId);
+  // Each opening asks the remote first, so ahead/behind are current.
+  const fetched = useFetchedReadiness(workspaceId, open);
   const flow = useRunScmFlow(workspaceId);
   const generateText = useGenerateScmText(workspaceId);
 
@@ -168,6 +171,7 @@ export function useShipFlow({ workspaceId, hint, open, initialMode }: UseShipFlo
 
   return {
     loading: readiness.isLoading,
+    checkingRemote: fetched.isFetching,
     repos,
     selected,
     selectAlias: setAlias,

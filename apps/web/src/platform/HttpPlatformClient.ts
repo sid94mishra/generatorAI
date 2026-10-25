@@ -1863,8 +1863,10 @@ export class HttpPlatformClient implements IPlatformClient {
   async getWorkspaceScmReadiness(
     workspaceId: string,
     alias?: string,
+    opts?: { fetch?: boolean },
   ): Promise<ScmWorkspaceReadiness> {
-    const qs = alias ? `?${new URLSearchParams({ alias })}` : '';
+    const params = new URLSearchParams({ ...(alias ? { alias } : {}), ...(opts?.fetch ? { fetch: '1' } : {}) });
+    const qs = params.size > 0 ? `?${params}` : '';
     return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/readiness${qs}`);
   }
 
@@ -1916,7 +1918,7 @@ export class HttpPlatformClient implements IPlatformClient {
   /** Apply the conflicting merge to the working tree so it can be edited. */
   async startScmConflictResolution(
     workspaceId: string,
-    input: { alias?: string },
+    input: { alias?: string; base?: string },
   ): Promise<ScmConflictActionResult> {
     // The server answers with the conflict report (no `ok` field); an HTTP
     // error is thrown by apiFetch, so reaching here means the merge started.
@@ -1930,7 +1932,7 @@ export class HttpPlatformClient implements IPlatformClient {
   /** Verify nothing is unmerged and commit the merge. */
   async continueScmConflictResolution(
     workspaceId: string,
-    input: { alias?: string },
+    input: { alias?: string; base?: string },
   ): Promise<ScmConflictActionResult> {
     return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/conflicts/continue`, {
       method: 'POST',
@@ -1941,7 +1943,7 @@ export class HttpPlatformClient implements IPlatformClient {
   /** Hand the conflict to the chat's agent as a normal, watchable turn. */
   async resolveScmConflictWithAgent(
     workspaceId: string,
-    input: { alias?: string; chatId: string },
+    input: { alias?: string; chatId: string; base?: string },
   ): Promise<ScmConflictActionResult> {
     const sent = await apiFetch<{ chatId: string; files: string[] }>(
       `${this.baseUrl}/api/workspaces/${workspaceId}/scm/conflicts/resolve-with-agent`,
@@ -1953,7 +1955,7 @@ export class HttpPlatformClient implements IPlatformClient {
   /** `git merge --abort`. */
   async abortScmConflictResolution(
     workspaceId: string,
-    input: { alias?: string },
+    input: { alias?: string; base?: string },
   ): Promise<ScmConflictActionResult> {
     await apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/conflicts/abort`, {
       method: 'POST',

@@ -52,6 +52,7 @@ export function ScmConflictActions({
         const result = await action.mutateAsync({
           action: verb,
           alias,
+          base: conflicts.base,
           ...(verb === 'resolve-with-agent' && chatId ? { chatId } : {}),
         });
         if (!result.ok) {
@@ -68,7 +69,7 @@ export function ScmConflictActions({
         setError(e instanceof Error ? e.message : String(e));
       }
     },
-    [action, alias, chatId],
+    [action, alias, chatId, conflicts.base],
   );
 
   return (

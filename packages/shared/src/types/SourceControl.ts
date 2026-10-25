@@ -272,9 +272,12 @@ export interface RepoReadiness {
   onDefaultBranch: boolean;
   dirty: boolean;
   changedFiles: number;
+  /** Against the branch's own upstream (`origin/<branch>`), or the remote default branch before the first push. */
   ahead: number | null;
   behind: number | null;
   hasUpstream: boolean;
+  /** How the branch stands against the remote default branch; absent on that branch or without a remote. */
+  vsBase?: { branch: string; ahead: number; behind: number };
   mergeInProgress: boolean;
   conflictedFiles: string[];
   /** Open PR whose head is the current branch, when one exists. */

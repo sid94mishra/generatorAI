@@ -12,6 +12,7 @@ function repo(overrides: Partial<RepoReadiness> = {}): RepoReadiness {
     isRepo: true,
     hasRemote: true,
     remoteUrl: 'https://github.com/acme/pulse.git',
+    slug: { owner: 'acme', repo: 'pulse', host: 'github.com' },
     connected: true,
     branch: 'generatorai/add-slugify',
     detached: false,
@@ -22,6 +23,7 @@ function repo(overrides: Partial<RepoReadiness> = {}): RepoReadiness {
     ahead: null,
     behind: null,
     hasUpstream: false,
+    vsBase: { branch: 'develop', ahead: 0, behind: 0 },
     mergeInProgress: false,
     conflictedFiles: [],
     openPullRequest: null,
@@ -196,6 +198,7 @@ export const OpenPullRequest: Story = {
         hasUpstream: true,
         ahead: 1,
         behind: 0,
+        vsBase: { branch: 'develop', ahead: 2, behind: 0 },
         openPullRequest: { provider: 'github', number: 21, url: 'https://github.com/acme/pulse/pull/21', title: 'Add slugify', state: 'open', head: 'generatorai/add-slugify', base: 'develop', draft: false },
       })}
     />
@@ -203,6 +206,7 @@ export const OpenPullRequest: Story = {
   play: async () => {
     const dialog = await screen.findByRole('dialog', { name: 'Push commits' });
     await expect(within(dialog).getByText('PR #21 open')).toBeInTheDocument();
+    await expect(within(dialog).getByTestId('scm-status-line')).toHaveTextContent(/2 commits ahead of develop.*1 commit not pushed/);
     await expect(within(dialog).queryByRole('radio', { name: 'Open pull request' })).toBeNull();
     await expect(within(dialog).getByText(/1 commit on generatorai\/add-slugify will be pushed/)).toBeInTheDocument();
   },

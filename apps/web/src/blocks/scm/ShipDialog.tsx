@@ -127,6 +127,7 @@ function ShipDialog({
       availability={flow.availability}
       mode={flow.mode}
       onModeChange={flow.setMode}
+      checkingRemote={flow.checkingRemote}
       summary={flow.summary}
       onSummaryChange={flow.setSummary}
       description={flow.description}

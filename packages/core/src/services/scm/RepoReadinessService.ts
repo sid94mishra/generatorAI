@@ -40,7 +40,8 @@ export function notConnectedReason(host: string): string {
 export class RepoReadinessService {
   constructor(private readonly deps: RepoReadinessDeps) {}
 
-  async readiness(input: { repoDir: string; alias: string }): Promise<RepoReadiness> {
+  /** `fetch`: refresh `origin` first, so the counts include what landed on the remote since the last fetch. */
+  async readiness(input: { repoDir: string; alias: string; fetch?: boolean }): Promise<RepoReadiness> {
     const { repoDir, alias } = input;
     const { git } = this.deps;
 
@@ -75,6 +76,7 @@ export class RepoReadinessService {
 
     const remoteUrl = await this.safe(() => git.getRemoteUrl(repoDir), null);
     const hasRemote = Boolean(remoteUrl);
+    if (input.fetch && hasRemote) await this.safe(() => git.fetch(repoDir, 'origin'), undefined);
     const slug = remoteUrl ? parseRepoSlug(remoteUrl) : null;
     const account = slug ? this.deps.registry.accountFor(slug.host) : null;
     const connected = slug ? this.deps.registry.providerFor(slug.host) !== null : false;
@@ -114,12 +116,14 @@ export class RepoReadinessService {
     // actually about. `ahead` above is relative to the upstream (an already
     // pushed work branch reads 0/0 there while still being ahead of main).
     let aheadOfBase: number | null = null;
+    let vsBase: RepoReadiness['vsBase'];
     if (branch && defaultBranch && hasRemote && branch !== defaultBranch) {
       const counts = await this.safe(
         () => git.aheadBehind(repoDir, branch, `origin/${defaultBranch}`),
         null,
       );
       aheadOfBase = counts?.ahead ?? null;
+      if (counts) vsBase = { branch: defaultBranch, ahead: counts.ahead, behind: counts.behind };
     }
 
     const mergeInProgress = await this.safe(() => git.mergeInProgress(repoDir), false);
@@ -195,6 +199,7 @@ export class RepoReadinessService {
       ahead,
       behind,
       hasUpstream,
+      ...(vsBase ? { vsBase } : {}),
       mergeInProgress,
       conflictedFiles,
       openPullRequest,

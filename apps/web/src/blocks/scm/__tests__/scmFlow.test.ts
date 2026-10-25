@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RepoReadiness } from '@generatorai/shared';
-import { composeFlowRequest, shipActionOf, splitCommitMessage, type ShipForm } from '../scmFlow.js';
+import { branchFactsOf, composeFlowRequest, shipActionOf, splitCommitMessage, type ShipForm } from '../scmFlow.js';
 
 function repo(overrides: Partial<RepoReadiness> = {}): RepoReadiness {
   return {
@@ -78,5 +78,31 @@ describe('composeFlowRequest', () => {
       summary: 'Add slugify',
       description: 'Strips accents.\nKeeps digits.',
     });
+  });
+});
+
+describe('branchFactsOf', () => {
+  const github = { slug: { owner: 'acme', repo: 'web', host: 'github.com' } };
+
+  it('a pushed branch reads against the base, not a bare "0 ahead · 0 behind"', () => {
+    expect(branchFactsOf(repo({ ...github, vsBase: { branch: 'main', ahead: 3, behind: 0 } }))).toEqual([
+      '3 commits ahead of main',
+      'Up to date with GitHub',
+    ]);
+  });
+
+  it('names uncommitted files, both directions against the base, and unpushed or incoming commits', () => {
+    expect(
+      branchFactsOf(repo({ dirty: true, changedFiles: 1, ahead: 2, behind: 1, vsBase: { branch: 'main', ahead: 4, behind: 2 } })),
+    ).toEqual(['1 file not committed', '4 commits ahead of main, 2 behind', '2 commits to push, 1 new on the remote']);
+    expect(branchFactsOf(repo({ ...github, behind: 1, vsBase: { branch: 'main', ahead: 0, behind: 0 } }))).toEqual([
+      'Even with main',
+      '1 new commit on GitHub',
+    ]);
+  });
+
+  it('a branch never pushed says so; no remote, no remote facts', () => {
+    expect(branchFactsOf(repo({ ...github, hasUpstream: false, ahead: 5 }))).toEqual(['Not on GitHub yet']);
+    expect(branchFactsOf(repo({ hasRemote: false, hasUpstream: false }))).toEqual([]);
   });
 });

@@ -65,7 +65,7 @@ function conflictFlow(): ScmFlowResult {
       { id: 'commit', status: 'done' },
       { id: 'sync', status: 'blocked', detail: '1 file conflicts' },
     ],
-    conflicts: { base: 'main', head: 'generatorai/work', files: ['src/a.ts'], mergeStarted: false },
+    conflicts: { base: 'release/2.0', head: 'generatorai/work', files: ['src/a.ts'], mergeStarted: false },
     readiness: repo(),
   };
 }
@@ -127,12 +127,13 @@ async function openDialog() {
 }
 
 describe('ShipButton / ShipDialog', () => {
-  it('shows the branch and ahead/behind for the selected mount', async () => {
-    renderPanel(makePlatform([repo()]));
+  it('shows the branch, its standing against the base and what a push would send', async () => {
+    renderPanel(makePlatform([repo({ vsBase: { branch: 'main', ahead: 3, behind: 1 } })]));
     await openDialog();
     const line = await screen.findByTestId('scm-status-line');
     expect(line).toHaveTextContent('generatorai/work');
-    expect(line).toHaveTextContent('2 ahead · 0 behind');
+    expect(line).toHaveTextContent('3 commits ahead of main, 1 behind');
+    expect(line).toHaveTextContent('2 commits not pushed');
   });
 
   it('names an unborn branch, says it has no commits, and offers the commit', async () => {
@@ -371,7 +372,7 @@ describe('ShipButton / ShipDialog', () => {
       await openDialog();
       fireEvent.click(await screen.findByTestId('scm-run-flow'));
 
-      expect(await screen.findByTestId('scm-conflict-card')).toHaveTextContent('main');
+      expect(await screen.findByTestId('scm-conflict-card')).toHaveTextContent('release/2.0');
       expect(screen.getByTestId('scm-conflict-files')).toHaveTextContent('src/a.ts');
       expect(screen.getByTestId('scm-conflict-manual')).toBeInTheDocument();
       expect(screen.getByTestId('scm-conflict-agent')).toBeInTheDocument();
@@ -402,7 +403,7 @@ describe('ShipButton / ShipDialog', () => {
       fireEvent.click(await screen.findByTestId('scm-conflict-manual'));
 
       await waitFor(() =>
-        expect(platform.startScmConflictResolution).toHaveBeenCalledWith('w1', { alias: '.' }),
+        expect(platform.startScmConflictResolution).toHaveBeenCalledWith('w1', { alias: '.', base: 'release/2.0' }),
       );
       expect(await screen.findByTestId('scm-conflict-instructions')).toHaveTextContent(
         /conflict markers/,
@@ -410,7 +411,7 @@ describe('ShipButton / ShipDialog', () => {
 
       fireEvent.click(screen.getByTestId('scm-conflict-continue'));
       await waitFor(() =>
-        expect(platform.continueScmConflictResolution).toHaveBeenCalledWith('w1', { alias: '.' }),
+        expect(platform.continueScmConflictResolution).toHaveBeenCalledWith('w1', { alias: '.', base: 'release/2.0' }),
       );
       // The push only happens after Continue — that is the guardrail.
       await waitFor(() => expect(runFlow).toHaveBeenCalledTimes(2));
@@ -430,6 +431,7 @@ describe('ShipButton / ShipDialog', () => {
       await waitFor(() =>
         expect(platform.resolveScmConflictWithAgent).toHaveBeenCalledWith('w1', {
           alias: '.',
+          base: 'release/2.0',
           chatId: 'c1',
         }),
       );
@@ -449,7 +451,7 @@ describe('ShipButton / ShipDialog', () => {
       fireEvent.click(await screen.findByTestId('scm-conflict-abort'));
 
       await waitFor(() =>
-        expect(platform.abortScmConflictResolution).toHaveBeenCalledWith('w1', { alias: '.' }),
+        expect(platform.abortScmConflictResolution).toHaveBeenCalledWith('w1', { alias: '.', base: 'release/2.0' }),
       );
       await waitFor(() => expect(screen.queryByTestId('scm-conflict-card')).toBeNull());
     });

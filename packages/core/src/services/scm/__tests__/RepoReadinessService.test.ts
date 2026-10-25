@@ -24,6 +24,7 @@ type GitOverrides = Partial<{
   ) => Promise<{ ahead: number; behind: number } | null>;
   mergeInProgress: (dir: string) => Promise<boolean>;
   unmergedFiles: (dir: string) => Promise<string[]>;
+  fetch: (dir: string, remote?: string) => Promise<void>;
 }>;
 
 function fakeGit(overrides: GitOverrides = {}): IGitClient {
@@ -177,6 +178,25 @@ describe('RepoReadinessService', () => {
     expect(r.reasons.pullRequest).toBe(
       'Nothing to open a PR from (branch has no commits ahead of base)',
     );
+  });
+
+  it('reports a pushed branch against the default branch too, and fetches first when asked', async () => {
+    const fetch = vi.fn(async () => undefined);
+    const svc = service(
+      fakeGit({
+        fetch,
+        upstreamOf: async () => 'origin/feature/x',
+        aheadBehind: async (_dir, _ref, against) =>
+          against === 'origin/feature/x' ? { ahead: 0, behind: 0 } : { ahead: 3, behind: 1 },
+      }),
+      fakeRegistry(),
+    );
+    const r = await svc.readiness({ repoDir: '/repo', alias: '.', fetch: true });
+    expect(fetch).toHaveBeenCalledWith('/repo', 'origin');
+    expect([r.ahead, r.behind]).toEqual([0, 0]);
+    expect(r.vsBase).toEqual({ branch: 'main', ahead: 3, behind: 1 });
+    await svc.readiness({ repoDir: '/repo', alias: '.' });
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it('gives a merge in progress priority over "Nothing to commit"', async () => {

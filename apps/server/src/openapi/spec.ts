@@ -533,6 +533,12 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           ahead: { type: 'integer', nullable: true },
           behind: { type: 'integer', nullable: true },
           hasUpstream: { type: 'boolean' },
+          vsBase: {
+            type: 'object',
+            description: 'How the branch stands against the remote default branch; absent on that branch or without a remote.',
+            properties: { branch: { type: 'string' }, ahead: { type: 'integer' }, behind: { type: 'integer' } },
+            required: ['branch', 'ahead', 'behind'],
+          },
           mergeInProgress: { type: 'boolean' },
           conflictedFiles: { type: 'array', items: { type: 'string' } },
           openPullRequest: {
@@ -3278,6 +3284,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         parameters: [
           idParam,
           { in: 'query', name: 'alias', required: false, schema: { type: 'string' } },
+          { in: 'query', name: 'fetch', required: false, description: '`1` fetches `origin` first, so the counts include what landed on the remote.', schema: { type: 'string', enum: ['1'] } },
         ],
         responses: {
           '200': {
@@ -3500,7 +3507,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
             'application/json': {
               schema: {
                 type: 'object',
-                properties: { alias: { type: 'string' }, message: { type: 'string' } },
+                properties: { alias: { type: 'string' }, message: { type: 'string' }, base: { type: 'string', description: 'The branch the conflicting merge brought in; names the merge commit.' } },
               },
             },
           },
@@ -3551,7 +3558,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
             'application/json': {
               schema: {
                 type: 'object',
-                properties: { alias: { type: 'string' }, chatId: { type: 'string' } },
+                properties: { alias: { type: 'string' }, chatId: { type: 'string' }, base: { type: 'string' } },
                 required: ['chatId'],
               },
             },

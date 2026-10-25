@@ -362,8 +362,9 @@ export function createWorkspaceRoutes(container: Container): Router {
           ? [{ alias: aliasQuery, dir: mountDir(info, aliasQuery) ?? info.workingDirectory }]
           : scmMounts(info);
 
+      const fetch = req.query['fetch'] === '1';
       const repos = await Promise.all(
-        targets.map((t) => repoReadinessService.readiness({ repoDir: t.dir, alias: t.alias })),
+        targets.map((t) => repoReadinessService.readiness({ repoDir: t.dir, alias: t.alias, ...(fetch ? { fetch } : {}) })),
       );
       res.json({ workspaceId: id, repos });
     } catch (err) {
@@ -498,10 +499,12 @@ export function createWorkspaceRoutes(container: Container): Router {
       const target = await scmTarget(req, res);
       if (!target) return;
       const message = typeof req.body?.message === 'string' ? req.body.message : undefined;
+      const base = typeof req.body?.base === 'string' ? req.body.base : undefined;
       const result = await sourceControlFlowService.continueAfterConflicts({
         repoDir: target.repoDir,
         alias: target.alias,
         ...(message ? { message } : {}),
+        ...(base ? { base } : {}),
       });
       res.json(result);
     } catch (err) {
@@ -543,9 +546,11 @@ export function createWorkspaceRoutes(container: Container): Router {
       // to read, so it has to have happened first. `startConflictMerge` is
       // idempotent — it reports the already-conflicted paths when a merge is
       // in progress rather than starting a second one.
+      const base = typeof req.body?.base === 'string' ? req.body.base : undefined;
       const report = await sourceControlFlowService.startConflictMerge({
         repoDir: target.repoDir,
         alias: target.alias,
+        ...(base ? { base } : {}),
       });
 
       if (report.files.length === 0) {

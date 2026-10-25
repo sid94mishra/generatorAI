@@ -414,6 +414,53 @@ describe('SourceControlFlowService (real git)', () => {
     expect(result.steps.find((s) => s.id === 'pull_request')).toMatchObject({ status: 'done', detail: 'Updated PR #11' });
   });
 
+  /** Someone else pushed to the work branch (another machine, GitHub's "Update branch"). */
+  async function pushToBranchElsewhere(branch: string, rel: string, content: string): Promise<void> {
+    await git(seed, 'fetch', 'origin');
+    await git(seed, 'checkout', '-B', branch, `origin/${branch}`);
+    await write(seed, rel, content);
+    await git(seed, 'add', '-A');
+    await git(seed, 'commit', '-m', `edit ${rel} elsewhere`);
+    await git(seed, 'push', 'origin', branch);
+    await git(seed, 'checkout', 'main');
+  }
+
+  it('(k) merges new commits from the branch on the remote before pushing, so the push is not rejected', async () => {
+    const { registry } = fakeProviderPair();
+    const flow = makeService(registry);
+    await git(work, 'checkout', '-b', 'feature/moved');
+    await write(work, 'src/a.ts', 'export const a = 1;\n');
+    await git(work, 'add', '-A');
+    await git(work, 'commit', '-m', 'feat: a');
+    await git(work, 'push', '-u', 'origin', 'feature/moved');
+    await pushToBranchElsewhere('feature/moved', 'src/b.ts', 'export const b = 1;\n');
+    await write(work, 'src/a.ts', 'export const a = 2;\n');
+
+    const result = await flow.run({ repoDir: work, alias: '.', request: { commit: { message: 'fix: a' }, push: true } });
+
+    expect(result.status).toBe('ok');
+    expect(result.steps.find((s) => s.id === 'sync')?.detail).toBe('Merged origin/feature/moved and origin/main');
+    expect(await fs.readFile(path.join(work, 'src/b.ts'), 'utf8')).toBe('export const b = 1;\n');
+    expect(result.readiness.ahead).toBe(0);
+    expect(result.readiness.behind).toBe(0);
+  });
+
+  it('(l) a conflicting commit pushed to the remote branch stops at a conflict report naming that branch', async () => {
+    const { registry } = fakeProviderPair();
+    const flow = makeService(registry);
+    await git(work, 'checkout', '-b', 'feature/clash');
+    await write(work, 'shared.txt', 'line one\nline two\n');
+    await git(work, 'push', '-u', 'origin', 'feature/clash');
+    await pushToBranchElsewhere('feature/clash', 'shared.txt', 'line one\nTHEIRS\n');
+    await write(work, 'shared.txt', 'line one\nOURS\n');
+
+    const result = await flow.run({ repoDir: work, alias: '.', request: { commit: { message: 'fix: ours' }, push: true } });
+
+    expect(result.status).toBe('conflicts');
+    expect(result.conflicts).toMatchObject({ base: 'feature/clash', files: ['shared.txt'] });
+    expect(result.steps.at(-1)).toMatchObject({ id: 'sync', status: 'failed', detail: 'Merge conflicts with origin/feature/clash' });
+  });
+
   it('(g) blocks a push in a repo with no remote', async () => {
     const { registry } = fakeProviderPair();
     const flow = makeService(registry);

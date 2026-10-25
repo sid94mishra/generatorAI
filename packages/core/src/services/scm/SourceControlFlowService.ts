@@ -212,31 +212,32 @@ export class SourceControlFlowService {
       // 4 ── sync
       stepId = 'sync';
       if (wantPush && request.sync !== false && readiness.hasRemote) {
-        if (!base) {
-          steps.push({ id: 'sync', status: 'skipped', detail: 'No base branch could be resolved' });
-        } else if (base === branchNow) {
-          steps.push({ id: 'sync', status: 'skipped', detail: `Already on ${base}` });
-        } else {
-          const conflicts = await this.syncWithBase(repoDir, base, branchNow ?? 'HEAD');
-          if (conflicts) {
-            return {
-              status: 'conflicts',
-              alias,
-              steps: [
-                ...steps,
-                {
-                  id: 'sync',
-                  status: 'failed',
-                  detail: `Merge conflicts with ${REMOTE}/${base}`,
-                },
-              ],
-              conflicts,
-              readiness: await this.refreshReadiness(repoDir, alias, readiness),
-              ...partial,
-            };
-          }
-          steps.push({ id: 'sync', status: 'done', detail: `Merged ${REMOTE}/${base}` });
+        const merged: string[] = [];
+        const conflictResult = async (conflicts: ScmConflictReport): Promise<ScmFlowResult> => ({
+          status: 'conflicts',
+          alias,
+          steps: [...steps, { id: 'sync', status: 'failed', detail: `Merge conflicts with ${REMOTE}/${conflicts.base}` }],
+          conflicts,
+          readiness: await this.refreshReadiness(repoDir, alias, readiness),
+          ...partial,
+        });
+        // The branch's own copy on the remote first: a push on top of commits made there
+        // (another machine, GitHub's "Update branch") is rejected otherwise.
+        if (readiness.hasUpstream && branchNow && !partial.branch && (await this.remoteHasNewCommits(repoDir, branchNow))) {
+          const conflicts = await this.syncWithBase(repoDir, branchNow, branchNow);
+          if (conflicts) return conflictResult(conflicts);
+          merged.push(`${REMOTE}/${branchNow}`);
         }
+        if (base && base !== branchNow) {
+          const conflicts = await this.syncWithBase(repoDir, base, branchNow ?? 'HEAD');
+          if (conflicts) return conflictResult(conflicts);
+          merged.push(`${REMOTE}/${base}`);
+        }
+        steps.push(
+          merged.length > 0
+            ? { id: 'sync', status: 'done', detail: `Merged ${merged.join(' and ')}` }
+            : { id: 'sync', status: 'skipped', detail: base ? `Already on ${base}` : 'No base branch could be resolved' },
+        );
       } else {
         steps.push({
           id: 'sync',
@@ -526,6 +527,8 @@ export class SourceControlFlowService {
     repoDir: string;
     alias: string;
     message?: string;
+    /** The branch the conflicting merge brought in (the conflict report's `base`). */
+    base?: string;
   }): Promise<{ ok: boolean; sha?: string; remaining: string[] }> {
     const { repoDir } = input;
     const git = this.deps.git;
@@ -541,7 +544,7 @@ export class SourceControlFlowService {
     }
 
     const head = (await git.currentBranch(repoDir)) ?? 'HEAD';
-    const base = await this.resolveBase(repoDir, undefined);
+    const base = await this.resolveBase(repoDir, input.base);
     const sha = await git.commitMerge(
       repoDir,
       input.message ?? `Merge ${REMOTE}/${base} into ${head}`,
@@ -591,6 +594,18 @@ export class SourceControlFlowService {
     } catch {
       return previous;
     }
+  }
+
+  /** Whether `origin/<branch>` has commits this checkout lacks (fetched first; a deleted remote branch reads false). */
+  private async remoteHasNewCommits(repoDir: string, branch: string): Promise<boolean> {
+    const git = this.deps.git;
+    const fetched = await safe(async () => {
+      await git.fetchBranch(repoDir, REMOTE, branch);
+      return true;
+    }, false);
+    if (!fetched) return false;
+    const counts = await safe(() => git.aheadBehind(repoDir, branch, `${REMOTE}/${branch}`), null);
+    return (counts?.behind ?? 0) > 0;
   }
 
   private async syncWithBase(

@@ -1295,6 +1295,26 @@ export function useWorkspaceReadiness(workspaceId: string | undefined, alias?: s
   });
 }
 
+/**
+ * Fetches `origin`, then refreshes the workspace's readiness with the result — run while the
+ * ship dialog is open, so ahead/behind counts include what landed on the remote meanwhile.
+ */
+export function useFetchedReadiness(workspaceId: string | undefined, enabled: boolean) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: ['scm-readiness-fetched', workspaceId ?? ''],
+    queryFn: async () => {
+      const fresh = await platform.getWorkspaceScmReadiness(workspaceId!, undefined, { fetch: true });
+      queryClient.setQueryData(scmKeys.readiness(workspaceId!), fresh);
+      return fresh;
+    },
+    enabled: !!workspaceId && enabled,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  });
+}
+
 /** Readiness for a project codebase's own checkout. */
 export function useCodebaseReadiness(projectId: string | undefined, codebaseId: string | undefined) {
   const platform = usePlatform() as HttpPlatformClient;
@@ -1378,8 +1398,13 @@ export function useScmConflictAction(workspaceId: string | undefined) {
       action: 'start' | 'continue' | 'abort' | 'resolve-with-agent';
       alias?: string;
       chatId?: string;
+      /** The branch the conflicting merge brings in (the conflict report's base). */
+      base?: string;
     }) => {
-      const alias = input.alias !== undefined ? { alias: input.alias } : {};
+      const alias = {
+        ...(input.alias !== undefined ? { alias: input.alias } : {}),
+        ...(input.base ? { base: input.base } : {}),
+      };
       switch (input.action) {
         case 'start':
           return platform.startScmConflictResolution(workspaceId!, alias);

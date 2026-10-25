@@ -1,5 +1,5 @@
 // ────────────────────────────────────────────────────────────────
-// Pure source-control rules shared by the CommitBar hook and its view.
+// Pure source-control rules shared by the ship dialog's hook and its view.
 //
 // Everything is decided from `GET /scm/readiness` (`RepoReadiness.can` /
 // `.reasons`): the server is the judge of what a mount can do, one
@@ -148,4 +148,40 @@ export function shipActionOf(selected: RepoReadiness | undefined): { label: stri
 /** The first step that stopped the flow, if any. */
 export function failingStep(result: ScmFlowResult): ScmFlowStep | undefined {
   return result.steps.find((s) => s.status === 'failed' || s.status === 'blocked');
+}
+
+function count(n: number, one: string): string {
+  return `${n} ${one}${n === 1 ? '' : 's'}`;
+}
+
+/** What the remote is called in sentences: GitHub, or "the remote" for any other host or a path. */
+export function remoteNameOf(selected: RepoReadiness): string {
+  return selected.slug?.host === 'github.com' ? 'GitHub' : 'the remote';
+}
+
+/**
+ * The branch's state in plain words, GitHub-style: uncommitted files, where it stands against the
+ * default branch (what a PR is about), and against its own copy on the remote (what a push does).
+ */
+export function branchFactsOf(selected: RepoReadiness): string[] {
+  const facts: string[] = [];
+  if (selected.dirty) facts.push(`${count(selected.changedFiles, 'file')} not committed`);
+  if (selected.vsBase) {
+    const { branch, ahead, behind } = selected.vsBase;
+    if (ahead === 0 && behind === 0) facts.push(`Even with ${branch}`);
+    else if (behind === 0) facts.push(`${count(ahead, 'commit')} ahead of ${branch}`);
+    else if (ahead === 0) facts.push(`${count(behind, 'commit')} behind ${branch}`);
+    else facts.push(`${count(ahead, 'commit')} ahead of ${branch}, ${behind} behind`);
+  }
+  if (selected.hasRemote && selected.branch && !selected.unborn) {
+    const remote = remoteNameOf(selected);
+    const ahead = selected.ahead ?? 0;
+    const behind = selected.behind ?? 0;
+    if (!selected.hasUpstream) facts.push(`Not on ${remote} yet`);
+    else if (ahead > 0 && behind > 0) facts.push(`${count(ahead, 'commit')} to push, ${behind} new on ${remote}`);
+    else if (ahead > 0) facts.push(`${count(ahead, 'commit')} not pushed`);
+    else if (behind > 0) facts.push(`${count(behind, 'new commit')} on ${remote}`);
+    else facts.push(`Up to date with ${remote}`);
+  }
+  return facts;
 }

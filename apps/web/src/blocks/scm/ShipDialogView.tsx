@@ -7,7 +7,7 @@
 // footer that squeezed the diff. Modelled on GitHub's "Open a pull request":
 //
 //   ┌ Open a pull request ─────────────────────────────────────────── × ┐
-//   │ ⑂ generatorai/v-d5 · 3 files not committed                         │
+//   │ ⑂ generatorai/v-d5 · 3 files not committed · 2 commits ahead of develop · Up to date with GitHub │
 //   │ [ Commit | Commit & push | Commit & open PR ]                      │
 //   │ Commit    Summary [……………………… Generate]  Description […]  ▸ 3 files │ Reviewers  [……]
 //   │ Pull request  Merge ⑂ head → into [develop ▾]  ✓ Able to merge     │ Assignees  [……]
@@ -53,7 +53,15 @@ import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import { MenuButton } from '@/ui/patterns/MenuButton/MenuButton.js';
 import { StepRail, type StepRailItem } from '@/ui/patterns/StepRail/StepRail.js';
 import { CHANGE_TONE_CLASS } from '@/blocks/changes/ChangeFileRow.js';
-import { failingStep, SCM_SETTINGS_PATH, SCM_STEP_LABEL, type ScmAvailability, type ShipMode } from './scmFlow.js';
+import {
+  branchFactsOf,
+  failingStep,
+  remoteNameOf,
+  SCM_SETTINGS_PATH,
+  SCM_STEP_LABEL,
+  type ScmAvailability,
+  type ShipMode,
+} from './scmFlow.js';
 import type { ScmTextKind } from './useShipFlow.js';
 
 /** One file a commit (or a PR) carries. */
@@ -75,6 +83,8 @@ export interface ShipDialogViewProps {
 
   mode: ShipMode;
   onModeChange: (mode: ShipMode) => void;
+  /** The dialog is fetching the remote; the counts may still move. */
+  checkingRemote?: boolean;
 
   summary: string;
   onSummaryChange: (value: string) => void;
@@ -128,10 +138,11 @@ function modeItems(selected: RepoReadiness, availability: ScmAvailability): Segm
   const dirty = selected.dirty;
   const pr = selected.openPullRequest;
   return [
-    { value: 'commit', label: 'Commit', disabled: !dirty, reason: 'Nothing to commit' },
+    { value: 'commit', label: 'Commit', icon: 'commit', disabled: !dirty, reason: 'Nothing to commit' },
     {
       value: 'push',
       label: dirty ? 'Commit & push' : 'Push',
+      icon: 'upload',
       disabled: !availability.canPush,
       reason: selected.reasons.push ?? 'Cannot push from here',
     },
@@ -142,6 +153,7 @@ function modeItems(selected: RepoReadiness, availability: ScmAvailability): Segm
           {
             value: 'pr' as const,
             label: dirty ? 'Commit & open PR' : 'Open pull request',
+            icon: 'pr' as const,
             disabled: !availability.canOpenPr,
             reason: selected.reasons.pullRequest ?? 'Cannot open a pull request from here',
           },
@@ -212,7 +224,7 @@ export function ShipDialogView(props: ShipDialogViewProps) {
 
 // ── Header: repo, branch, state, and the mode switch ─────────────
 
-function ShipHeader({ repos, selected, onSelectAlias, availability, mode, onModeChange }: ShipDialogViewProps) {
+function ShipHeader({ repos, selected, onSelectAlias, availability, mode, onModeChange, checkingRemote }: ShipDialogViewProps) {
   return (
     <div className="flex flex-col gap-3">
       {repos.length > 1 ? (
@@ -238,10 +250,14 @@ function ShipHeader({ repos, selected, onSelectAlias, availability, mode, onMode
             No commits yet
           </span>
         ) : null}
-        {selected.dirty ? <span className="text-fg-3">· {plural(selected.changedFiles, 'file')} not committed</span> : null}
-        {selected.hasUpstream ? (
-          <span className="text-fg-3">
-            · {selected.ahead ?? 0} ahead · {selected.behind ?? 0} behind
+        {branchFactsOf(selected).map((fact) => (
+          <span key={fact} className="text-fg-3">
+            · {fact}
+          </span>
+        ))}
+        {checkingRemote ? (
+          <span className="inline-flex items-center gap-1 text-fg-3" data-testid="scm-checking-remote">
+            <Spinner size={12} /> Checking {remoteNameOf(selected)}…
           </span>
         ) : null}
         {selected.openPullRequest ? (
@@ -255,8 +271,7 @@ function ShipHeader({ repos, selected, onSelectAlias, availability, mode, onMode
         value={mode}
         items={modeItems(selected, availability)}
         onValueChange={onModeChange}
-        fullWidth
-        distribute="content"
+        className="self-start"
         data-testid="scm-mode"
       />
       {availability.needsConnect && !availability.canOpenPr ? (
