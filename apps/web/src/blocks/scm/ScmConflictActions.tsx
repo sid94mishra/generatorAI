@@ -22,6 +22,8 @@ export interface ScmConflictActionsProps {
   onContinued?: () => void;
   /** Called after a successful abort so the host can drop its stale result. */
   onAborted?: () => void;
+  /** Called once the agent has the conflict, so a host that covers the chat can step aside. */
+  onHandedToAgent?: (files: readonly string[]) => void;
   /** Opens one conflicted file in the user's editor, when that is possible. */
   onOpenFile?: (path: string) => void;
   className?: string;
@@ -36,6 +38,7 @@ export function ScmConflictActions({
   chatId,
   onContinued,
   onAborted,
+  onHandedToAgent,
   onOpenFile,
   className,
 }: ScmConflictActionsProps) {
@@ -58,7 +61,7 @@ export function ScmConflictActions({
         if (!result.ok) {
           setError(
             result.unmerged?.length
-              ? `Still unresolved: ${result.unmerged.join(', ')}`
+              ? `Conflict markers are still in ${result.unmerged.join(', ')}. Edit them out, then Continue.`
               : (result.error ?? 'That did not work.'),
           );
           return;
@@ -81,7 +84,7 @@ export function ScmConflictActions({
       error={error}
       canAskAgent={!!chatId}
       onResolveManually={() => void run('start', 'manual')}
-      onAskAgent={() => void run('resolve-with-agent', 'agent')}
+      onAskAgent={() => void run('resolve-with-agent', 'agent', onHandedToAgent ? () => onHandedToAgent(conflicts.files) : undefined)}
       onContinue={() => void run('continue', 'resolved', onContinued)}
       onAbort={() => void run('abort', 'idle', onAborted)}
       {...(onOpenFile ? { onOpenFile } : {})}

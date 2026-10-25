@@ -8,9 +8,10 @@
 // sync collides or a merge is already in progress.
 // ────────────────────────────────────────────────────────────────
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { joinPath } from '@/blocks/changes/changePaths.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
+import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { ScmConflictActions } from './ScmConflictActions.js';
 import { ShipDialogView, type ShipFile } from './ShipDialogView.js';
 import { pickDefaultAlias, remoteNameOf, shipActionOf, type ShipMode } from './scmFlow.js';
@@ -25,11 +26,23 @@ export interface ShipDialogProps {
   hint?: string;
   /** Opens a path in the user's editor; omitted when that is unavailable. */
   onOpenFile?: (absolutePath: string) => void;
+  /**
+   * Changes whenever the surrounding change list does. Edits made outside the agent (the user's
+   * own editor, a terminal commit) send no event, so this is what re-reads readiness for them.
+   */
+  changesKey?: string;
 }
 
 /** The toolbar button; renders nothing when the workspace has nothing to commit, push or propose. */
 export function ShipButton(props: ShipDialogProps) {
   const readiness = useWorkspaceReadiness(props.workspaceId);
+  const seenKey = useRef(props.changesKey);
+  const { refetch } = readiness;
+  useEffect(() => {
+    if (seenKey.current === props.changesKey) return;
+    seenKey.current = props.changesKey;
+    void refetch();
+  }, [props.changesKey, refetch]);
   const repos = readiness.data?.repos ?? [];
   const repo = repos.find((r) => r.alias === pickDefaultAlias(repos));
   const action = shipActionOf(repo);
@@ -89,6 +102,15 @@ function ShipDialog({
     onOpenFile ? { onOpenFile: (file: string) => onOpenFile(joinPath(repoDir, file)) } : {};
   const chat = chatId ? { chatId } : {};
   const rerun = () => void flow.run(false);
+  // The dialog covers the chat the agent is about to work in: step aside, and say how to come back.
+  const handOff = (files: readonly string[]) => {
+    onOpenChange(false);
+    flow.clearResult();
+    toast.info(`The agent is resolving ${files.length === 1 ? files[0] : `${files.length} conflicted files`}`, {
+      description: 'Watch it in the chat and check its changes, then press Finish merge to commit and push.',
+      duration: 10_000,
+    });
+  };
 
   const conflicts =
     result?.status === 'conflicts' && result.conflicts ? (
@@ -101,6 +123,7 @@ function ShipDialog({
         {...openIn(result.readiness.repoDir)}
         onContinued={rerun}
         onAborted={flow.clearResult}
+        onHandedToAgent={handOff}
       />
     ) : flow.availability.mergeInProgress ? (
       <ScmConflictActions

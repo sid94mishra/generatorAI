@@ -44,6 +44,7 @@ const FORM: ShipForm = {
 describe('shipActionOf', () => {
   it('names the next step for the repo state', () => {
     expect(shipActionOf(repo({ dirty: true }))?.label).toBe('Commit');
+    expect(shipActionOf(repo({ mergeInProgress: true }))).toMatchObject({ label: 'Finish merge', mode: 'push' });
     expect(shipActionOf(repo({ ahead: 2 }))?.label).toBe('Push');
     expect(shipActionOf(repo())?.label).toBe('Pull request');
     const pr = { provider: 'github' as const, number: 9, url: 'u', title: 't', state: 'open' as const, head: 'feature', base: 'main' };
@@ -54,8 +55,19 @@ describe('shipActionOf', () => {
 
   it('offers nothing for a clean, never-pushed branch, the default branch, or a folder', () => {
     expect(shipActionOf(repo({ hasUpstream: false, ahead: null }))).toBeNull();
+    expect(shipActionOf(repo({ hasUpstream: false, ahead: 0 }))).toBeNull();
     expect(shipActionOf(repo({ onDefaultBranch: true, branch: 'main' }))).toBeNull();
     expect(shipActionOf(repo({ isRepo: false }))).toBeNull();
+  });
+});
+
+describe('shipActionOf after a Commit-only run or a failed push', () => {
+  it('a never-pushed branch with its own commits offers Push (and the PR when it can)', () => {
+    expect(shipActionOf(repo({ hasUpstream: false, ahead: 1 }))).toMatchObject({ label: 'Push', mode: 'pr' });
+    expect(shipActionOf(repo({ hasUpstream: false, ahead: 1, can: { commit: false, push: true, pullRequest: false } }))).toMatchObject({
+      label: 'Push',
+      mode: 'push',
+    });
   });
 });
 

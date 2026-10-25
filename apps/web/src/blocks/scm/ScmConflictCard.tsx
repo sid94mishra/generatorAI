@@ -63,15 +63,22 @@ export function ScmConflictCard({
       className={className}
       data-testid="scm-conflict-card"
       title={
-        <>
-          Merging <span className="font-mono text-small">{conflicts.base}</span> into{' '}
-          <span className="font-mono text-small">{conflicts.head}</span> conflicts
-        </>
+        conflicts.base === conflicts.head ? (
+          // The branch's own remote copy moved (another machine, GitHub's "Update branch").
+          <>
+            New commits on <span className="font-mono text-small">origin/{conflicts.head}</span> clash with yours
+          </>
+        ) : (
+          <>
+            Merging <span className="font-mono text-small">{conflicts.base}</span> into{' '}
+            <span className="font-mono text-small">{conflicts.head}</span> conflicts
+          </>
+        )
       }
     >
       <div className="flex min-w-0 flex-col gap-2">
         <p>
-          {fileCount} {fileCount === 1 ? 'file' : 'files'} need a decision before this branch can be pushed.
+          {fileCount === 1 ? '1 file needs' : `${fileCount} files need`} a decision before this branch can be pushed.
         </p>
 
         <ul className="flex min-w-0 flex-col gap-0.5" data-testid="scm-conflict-files">

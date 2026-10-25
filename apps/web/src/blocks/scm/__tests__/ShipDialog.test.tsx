@@ -418,7 +418,7 @@ describe('ShipButton / ShipDialog', () => {
       expect(await screen.findByTestId('scm-result-ok')).toHaveTextContent('abc1234');
     });
 
-    it('Ask the agent hands the files to this chat and waits for a review', async () => {
+    it('Ask the agent hands the files to this chat and steps aside so the chat is visible', async () => {
       const platform = makePlatform([repo()], {
         runWorkspaceScmFlow: vi.fn().mockResolvedValue(conflictFlow()),
       });
@@ -435,9 +435,8 @@ describe('ShipButton / ShipDialog', () => {
           chatId: 'c1',
         }),
       );
-      expect(await screen.findByTestId('scm-conflict-instructions')).toHaveTextContent(
-        /agent is resolving/i,
-      );
+      // The dialog covered the chat the agent works in; it closes and Finish merge brings it back.
+      await waitFor(() => expect(screen.queryByTestId('scm-conflict-card')).toBeNull());
     });
 
     it('Abort clears the result without touching the branch', async () => {

@@ -138,10 +138,15 @@ export interface ShipAction {
 
 export function shipActionOf(selected: RepoReadiness | undefined): ShipAction | null {
   if (!selected?.isRepo) return null;
-  if (selected.mergeInProgress) return { label: 'Finish merge', mode: 'commit', prominent: true };
+  // Continue commits the merge; in push mode the same run then pushes it, which is what the merge was for.
+  if (selected.mergeInProgress) return { label: 'Finish merge', mode: selected.can.push ? 'push' : 'commit', prominent: true };
   if (selected.dirty) return { label: 'Commit', mode: selected.can.push ? 'push' : 'commit', prominent: true };
-  // A clean branch never pushed has nothing of ours to ship (the work branch starts at its base).
-  if (!selected.hasUpstream) return null;
+  // Never pushed: `ahead` counts against the remote default branch. A branch still at its base has
+  // nothing of ours to ship; one with its own commits (a Commit-only run, a push that failed) does.
+  if (!selected.hasUpstream) {
+    if ((selected.ahead ?? 0) === 0 || !selected.can.push || selected.onDefaultBranch) return null;
+    return { label: 'Push', mode: selected.can.pullRequest ? 'pr' : 'push', prominent: true };
+  }
   const unpushed = (selected.ahead ?? 0) > 0;
   if (selected.openPullRequest) {
     return unpushed

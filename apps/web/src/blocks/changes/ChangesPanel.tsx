@@ -357,6 +357,7 @@ export function ChangesPanel({
             {...(chatId ? { chatId } : {})}
             {...(scmHint ? { hint: scmHint } : {})}
             {...(canOpenInEditor ? { onOpenFile: editor.openAbsolute } : {})}
+            changesKey={`${stats.files}:${stats.additions}:${stats.deletions}`}
           />
         }
       />

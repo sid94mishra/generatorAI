@@ -840,8 +840,10 @@ export function ScmFlowSteps({ steps, running = false }: { steps: readonly ScmFl
     id: step.id,
     glyph: stepGlyph(step.status),
     verb: SCM_STEP_LABEL[step.id],
-    ...(step.detail ? { target: step.detail } : {}),
+    // A failed step's detail is the outcome callout's text; the rail just marks where it stopped.
+    ...(step.detail && step.status !== 'failed' ? { target: step.detail } : {}),
     ...(step.status === 'skipped' ? { result: 'skipped', resultTone: 'muted' as const } : {}),
+    ...(step.status === 'failed' ? { result: 'failed', resultTone: 'err' as const } : {}),
   }));
   if (running) items.push({ id: 'running', glyph: <Spinner size={14} className="text-run" />, verb: 'Running…' });
   return <StepRail items={items} label="Source control steps" data-testid="scm-steps" />;
@@ -859,11 +861,15 @@ export function ScmResultSummary({ result }: { result: ScmFlowResult }) {
             <span>
               Committed <span className="font-mono text-fg">{result.commit.sha.slice(0, 7)}</span>
             </span>
+          ) : result.pushed ? (
+            <span>
+              Pushed <span className="font-mono text-fg">{result.readiness.branch ?? 'the branch'}</span>
+            </span>
           ) : (
             <span>Nothing to commit</span>
           )}
-          {result.branch ? <span className="font-mono text-fg-3">on {result.branch}</span> : null}
-          {result.pushed ? <span>· pushed</span> : null}
+          {result.commit && result.branch ? <span className="font-mono text-fg-3">on {result.branch}</span> : null}
+          {result.commit && result.pushed ? <span>· pushed</span> : null}
         </div>
         {pr ? (
           <div className="flex min-w-0 items-center gap-1.5">
@@ -882,10 +888,22 @@ export function ScmResultSummary({ result }: { result: ScmFlowResult }) {
   const failing = failingStep(result);
   const detail = failing?.detail ?? result.error;
   return (
-    <Callout tone="err" role="alert" data-testid="scm-result-problem">
-      {result.status === 'blocked' ? 'Blocked' : 'Failed'}
-      {failing ? ` at ${SCM_STEP_LABEL[failing.id]}` : ''}
-      {detail ? ` — ${detail}` : ''}
-    </Callout>
+    <div className="flex min-w-0 flex-col gap-2">
+      {result.commit ? (
+        // What already happened stays true: the commit is in the branch, only the later steps did not run.
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-ui text-fg-2" data-testid="scm-result-partial">
+          <Icon concept="status-succeeded" size={14} className="text-ok" />
+          <span>
+            Committed <span className="font-mono text-fg">{result.commit.sha.slice(0, 7)}</span>
+          </span>
+          {result.pushed ? <span>· pushed</span> : <span>· not pushed yet</span>}
+        </div>
+      ) : null}
+      <Callout tone="err" role="alert" data-testid="scm-result-problem">
+        {result.status === 'blocked' ? 'Blocked' : 'Failed'}
+        {failing ? ` at ${SCM_STEP_LABEL[failing.id]}` : ''}
+        {detail ? ` — ${detail}` : ''}
+      </Callout>
+    </div>
   );
 }

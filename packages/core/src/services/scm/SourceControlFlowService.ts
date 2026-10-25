@@ -43,6 +43,7 @@ import {
   heuristicPullRequestText,
 } from './ScmTextGenerator.js';
 import { redactTokens } from './redact.js';
+import { explainScmFailure } from './explainFailure.js';
 
 export { redactTokens };
 
@@ -224,19 +225,23 @@ export class SourceControlFlowService {
         // The branch's own copy on the remote first: a push on top of commits made there
         // (another machine, GitHub's "Update branch") is rejected otherwise.
         if (readiness.hasUpstream && branchNow && !partial.branch && (await this.remoteHasNewCommits(repoDir, branchNow))) {
-          const conflicts = await this.syncWithBase(repoDir, branchNow, branchNow);
-          if (conflicts) return conflictResult(conflicts);
-          merged.push(`${REMOTE}/${branchNow}`);
+          const outcome = await this.syncWithBase(repoDir, branchNow, branchNow);
+          if (typeof outcome === 'object') return conflictResult(outcome);
+          if (outcome === 'merged') merged.push(`${REMOTE}/${branchNow}`);
         }
+        let baseState: string | null = base ? null : 'No base branch could be resolved';
         if (base && base !== branchNow) {
-          const conflicts = await this.syncWithBase(repoDir, base, branchNow ?? 'HEAD');
-          if (conflicts) return conflictResult(conflicts);
-          merged.push(`${REMOTE}/${base}`);
+          const outcome = await this.syncWithBase(repoDir, base, branchNow ?? 'HEAD');
+          if (typeof outcome === 'object') return conflictResult(outcome);
+          if (outcome === 'merged') merged.push(`${REMOTE}/${base}`);
+          else baseState = `Up to date with ${REMOTE}/${base}`;
+        } else if (base) {
+          baseState = `Already on ${base}`;
         }
         steps.push(
           merged.length > 0
             ? { id: 'sync', status: 'done', detail: `Merged ${merged.join(' and ')}` }
-            : { id: 'sync', status: 'skipped', detail: base ? `Already on ${base}` : 'No base branch could be resolved' },
+            : { id: 'sync', status: 'skipped', detail: baseState ?? 'Nothing to merge' },
         );
       } else {
         steps.push({
@@ -285,8 +290,9 @@ export class SourceControlFlowService {
 
       return { status: 'ok', alias, steps, readiness: await this.refreshReadiness(repoDir, alias, readiness), ...partial };
     } catch (err) {
-      const detail = messageOf(err);
-      this.deps.logger.warn(`[SCM] Flow failed at ${stepId}: ${detail}`);
+      const raw = messageOf(err);
+      this.deps.logger.warn(`[SCM] Flow failed at ${stepId}: ${raw}`);
+      const detail = explainScmFailure(stepId, raw);
       return {
         status: 'failed',
         alias,
@@ -612,10 +618,13 @@ export class SourceControlFlowService {
     repoDir: string,
     base: string,
     head: string,
-  ): Promise<ScmConflictReport | null> {
+  ): Promise<ScmConflictReport | 'merged' | 'up-to-date'> {
     const git = this.deps.git;
     const ref = `${REMOTE}/${base}`;
     await git.fetchBranch(repoDir, REMOTE, base);
+    // Nothing new on the base: no merge, and the step says so instead of "Merged".
+    const counts = await safe(() => git.aheadBehind(repoDir, 'HEAD', ref), null);
+    if (counts && counts.behind === 0) return 'up-to-date';
 
     // Preferred: ask git without touching the working tree (git >= 2.38).
     const probe = await git.mergeTreeConflicts(repoDir, 'HEAD', ref);
@@ -638,7 +647,7 @@ export class SourceControlFlowService {
       // Raced with a push to the base between the probe and the merge.
       return { base, head, files: merged.conflicts, mergeStarted: true };
     }
-    return null;
+    return 'merged';
   }
 
   /** The chat's own model, offered to the text generator as a last resort. */

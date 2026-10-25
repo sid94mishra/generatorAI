@@ -248,7 +248,7 @@ describe('SourceControlFlowService (real git)', () => {
       'readiness:done',
       'branch:done',
       'commit:done',
-      'sync:done',
+      'sync:skipped',
       'push:done',
       'pull_request:done',
     ]);
@@ -439,7 +439,7 @@ describe('SourceControlFlowService (real git)', () => {
     const result = await flow.run({ repoDir: work, alias: '.', request: { commit: { message: 'fix: a' }, push: true } });
 
     expect(result.status).toBe('ok');
-    expect(result.steps.find((s) => s.id === 'sync')?.detail).toBe('Merged origin/feature/moved and origin/main');
+    expect(result.steps.find((s) => s.id === 'sync')?.detail).toBe('Merged origin/feature/moved');
     expect(await fs.readFile(path.join(work, 'src/b.ts'), 'utf8')).toBe('export const b = 1;\n');
     expect(result.readiness.ahead).toBe(0);
     expect(result.readiness.behind).toBe(0);

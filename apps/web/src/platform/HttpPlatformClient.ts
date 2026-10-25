@@ -1934,10 +1934,16 @@ export class HttpPlatformClient implements IPlatformClient {
     workspaceId: string,
     input: { alias?: string; base?: string },
   ): Promise<ScmConflictActionResult> {
-    return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/conflicts/continue`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
+    // The server names the files still carrying markers `remaining`.
+    const result = await apiFetch<{ ok: boolean; sha?: string; remaining?: string[] }>(
+      `${this.baseUrl}/api/workspaces/${workspaceId}/scm/conflicts/continue`,
+      { method: 'POST', body: JSON.stringify(input) },
+    );
+    return {
+      ok: result.ok,
+      ...(result.remaining?.length ? { unmerged: result.remaining } : {}),
+      ...(result.ok ? { committed: true } : {}),
+    };
   }
 
   /** Hand the conflict to the chat's agent as a normal, watchable turn. */

@@ -80,9 +80,18 @@ export const Busy: Story = {
 
 /** Continue was premature: the paths still unresolved. */
 export const Unresolved: Story = {
-  args: { mode: 'manual', error: 'Still unresolved: src/cart/applyCoupon.ts' },
+  args: { mode: 'manual', error: 'Conflict markers are still in src/cart/applyCoupon.ts. Edit them out, then Continue.' },
   play: async ({ canvas }) => {
     await expect(canvas.getByRole('alert')).toHaveTextContent('src/cart/applyCoupon.ts');
+  },
+};
+
+/** The branch's own remote copy moved under it (another machine, GitHub's "Update branch"). */
+export const RemoteBranchMoved: Story = {
+  args: { conflicts: { base: 'fix/checkout-flake', head: 'fix/checkout-flake', files: ['src/cart/applyCoupon.ts'], mergeStarted: false } },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByTestId('scm-conflict-card')).toHaveTextContent('New commits on origin/fix/checkout-flake clash with yours');
+    await expect(canvas.getByText('1 file needs a decision before this branch can be pushed.')).toBeInTheDocument();
   },
 };
 
