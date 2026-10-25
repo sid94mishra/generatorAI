@@ -185,7 +185,7 @@ export const PullRequestNoToken: Story = {
   },
 };
 
-/** A PR is already open for the branch: pushing updates it, so the PR mode is off. */
+/** A PR is already open for the branch: pushing updates it, so there is no PR mode. */
 export const OpenPullRequest: Story = {
   args: {} as ShipDialogViewProps,
   render: () => (
@@ -203,7 +203,7 @@ export const OpenPullRequest: Story = {
   play: async () => {
     const dialog = await screen.findByRole('dialog', { name: 'Push commits' });
     await expect(within(dialog).getByText('PR #21 open')).toBeInTheDocument();
-    await expect(within(dialog).getByRole('radio', { name: 'Open pull request' })).toHaveAttribute('aria-disabled', 'true');
+    await expect(within(dialog).queryByRole('radio', { name: 'Open pull request' })).toBeNull();
     await expect(within(dialog).getByText(/1 commit on generatorai\/add-slugify will be pushed/)).toBeInTheDocument();
   },
 };

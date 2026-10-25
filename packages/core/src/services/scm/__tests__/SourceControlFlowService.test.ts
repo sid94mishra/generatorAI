@@ -396,6 +396,24 @@ describe('SourceControlFlowService (real git)', () => {
     });
   });
 
+  it('(f2) a plain push to a branch with an open PR reports that PR as updated', async () => {
+    const { registry, provider } = fakeProviderPair({ existingPr: OPEN_PR });
+    const flow = makeService(registry);
+    await git(work, 'checkout', '-b', 'feature/update');
+    await write(work, 'src/u.ts', 'export const u = 1;\n');
+    await git(work, 'add', '-A');
+    await git(work, 'commit', '-m', 'feat: u');
+    await git(work, 'push', '-u', 'origin', 'feature/update');
+    await write(work, 'src/u.ts', 'export const u = 2;\n');
+
+    const result = await flow.run({ repoDir: work, alias: '.', request: { commit: { message: 'fix: u' }, push: true } });
+
+    expect(result.status).toBe('ok');
+    expect(result.pullRequest).toEqual(OPEN_PR);
+    expect(provider.createPullRequest).not.toHaveBeenCalled();
+    expect(result.steps.find((s) => s.id === 'pull_request')).toMatchObject({ status: 'done', detail: 'Updated PR #11' });
+  });
+
   it('(g) blocks a push in a repo with no remote', async () => {
     const { registry } = fakeProviderPair();
     const flow = makeService(registry);

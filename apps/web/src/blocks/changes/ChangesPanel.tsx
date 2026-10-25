@@ -36,7 +36,7 @@ import { ShipButton } from '@/blocks/scm/ShipDialog.js';
 import type { ReviewIntent, ReviewScope, ReviewSubmitTarget } from '@/types/review.js';
 import { ChangeFileRow } from './ChangeFileRow.js';
 import { CompareBar } from './CompareBar.js';
-import { undoTargetOf } from './compareChoices.js';
+import { UNCOMMITTED_BASE, undoTargetOf } from './compareChoices.js';
 import { ChangesToolbar } from './ChangesToolbar.js';
 import { MountGroupsBar } from './MountGroupsBar.js';
 import { CheckpointScrubber } from './checkpoints/CheckpointScrubber.js';
@@ -479,7 +479,15 @@ export function ChangesPanel({
             </div>
           ) : stats.files === 0 ? (
             <div className="flex flex-1 items-center justify-center p-6">
-              <EmptyState icon="changes" title="No changes detected in this workspace." />
+              {base === UNCOMMITTED_BASE ? (
+                <EmptyState
+                  icon="changes"
+                  title="Everything is committed."
+                  description={`Nothing has changed since the last commit. Pick ${scope === 'chat' ? 'This chat' : 'This run'} to see everything it changed.`}
+                />
+              ) : (
+                <EmptyState icon="changes" title="No changes detected in this workspace." />
+              )}
             </div>
           ) : (
             <>

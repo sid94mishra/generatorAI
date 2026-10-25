@@ -135,14 +135,17 @@ function modeItems(selected: RepoReadiness, availability: ScmAvailability): Segm
       disabled: !availability.canPush,
       reason: selected.reasons.push ?? 'Cannot push from here',
     },
-    {
-      value: 'pr',
-      label: dirty ? 'Commit & open PR' : 'Open pull request',
-      disabled: !availability.canOpenPr || !!pr,
-      reason: pr
-        ? `PR #${pr.number} is already open for this branch: pushing updates it`
-        : (selected.reasons.pullRequest ?? 'Cannot open a pull request from here'),
-    },
+    // The header already links the branch's open PR, and pushing updates it: no third choice then.
+    ...(pr
+      ? []
+      : [
+          {
+            value: 'pr' as const,
+            label: dirty ? 'Commit & open PR' : 'Open pull request',
+            disabled: !availability.canOpenPr,
+            reason: selected.reasons.pullRequest ?? 'Cannot open a pull request from here',
+          },
+        ]),
   ];
 }
 

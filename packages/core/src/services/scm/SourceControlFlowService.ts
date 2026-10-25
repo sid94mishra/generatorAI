@@ -274,6 +274,10 @@ export class SourceControlFlowService {
           steps,
         });
         partial.pullRequest = pr;
+      } else if (partial.pushed && readiness.openPullRequest) {
+        // The branch's open PR now carries the pushed commits.
+        partial.pullRequest = readiness.openPullRequest;
+        steps.push({ id: 'pull_request', status: 'done', detail: `Updated PR #${readiness.openPullRequest.number}` });
       } else {
         steps.push({ id: 'pull_request', status: 'skipped', detail: 'Not requested' });
       }
