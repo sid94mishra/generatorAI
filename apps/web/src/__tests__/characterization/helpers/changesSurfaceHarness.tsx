@@ -131,7 +131,7 @@ export function queriesMock(original: Record<string, unknown>): Record<string, u
     useOpenInEditor: () => cs.openInEditor,
     useRestoreWorkspaceCheckpoint: () => cs.restore,
     // Source control (SourceControlPanel): no repos → it renders nothing.
-    useWorkspaceReadiness: () => ({ data: { workspaceId: 'ws-1', repos: [] }, isLoading: false }),
+    useWorkspaceReadiness: () => ({ data: { workspaceId: 'ws-1', repos: [] }, isLoading: false, refetch: () => Promise.resolve() }),
     useRunScmFlow: () => mutation(),
     useGenerateScmText: () => mutation(),
     useScmConflictAction: () => mutation(),

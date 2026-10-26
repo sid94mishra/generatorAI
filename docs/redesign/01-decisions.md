@@ -1664,6 +1664,21 @@ button: Create pull request / Create draft pull request. After the run the dialo
 and a View on GitHub link, or the conflict card. Milestones and projects are left out (rarely set at creation; the
 host's own page covers them).
 
+Amended 2026-10-26 (owner: "0 ahead · 0 behind always"; failure scenarios tested on a dummy repo and on GitHub):
+- **Status line** reads the branch against the default branch ("3 commits ahead of develop, 1 behind") and against its
+  own remote copy ("Not on GitHub yet" · "2 commits not pushed" · "1 new commit on GitHub" · "Up to date with GitHub").
+  Only `origin/<branch>` counts as that copy (a chat branch tracks `origin/develop` until its first push). The dialog
+  fetches `origin` each time it opens (`GET /scm/readiness?fetch=1`). Mode tabs hug their labels, with icons.
+- **Sync** merges new commits on `origin/<branch>` before the base (else the push is rejected), and says "Up to date
+  with origin/<base>" instead of "Merged" when nothing moved. Conflicts are previewed on git < 2.38 through the
+  three-way `merge-tree`.
+- **Failures** read as what the hook or remote said ("The commit was refused: …", "The remote refused the push: …"),
+  once; a commit that landed before a failed push says "not pushed yet". A never-pushed branch with its own commits
+  offers Push; with nothing left to ship, **PR #n** opens the PR.
+- **Conflicts** keep their own base end to end (the card, Ask the agent, Continue, the merge commit; an in-progress merge
+  names its source from git's MERGE_MSG). Ask the agent closes the dialog (it covered the chat) and Finish merge resumes
+  the run, a draft staying a draft. The agent's prompt compares both sides with the common ancestor first.
+
 ### D-164 Review comments are sent from a dialog; the panel keeps a one-line bar (owner, 2026-10-25) — Final
 Note and Preview no longer open text areas over the diff. The pending bar reads "N pending comments · M awaiting agent
 · K addressed" with Discard and **Review & send**, which opens a dialog listing each pending comment (file, lines,
