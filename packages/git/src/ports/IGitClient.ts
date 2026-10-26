@@ -416,7 +416,7 @@ export interface IGitClient {
   pushSetUpstream(repoDir: string, remote: string, branch: string): Promise<void>;
   /** `git log --no-merges --pretty=format:%s -n <max> <range>` → subject lines. Empty array on failure. */
   log(repoDir: string, range: string, max?: number): Promise<string[]>;
-  /** `git log --no-merges` over `range` → sha, subject, author, ISO date per commit, newest first. Empty on failure. */
+  /** `git log` over `range` (merge commits included, as GitHub counts them) → sha, subject, author, ISO date per commit, newest first. Empty on failure. */
   logEntries(repoDir: string, range: string, max?: number): Promise<GitLogEntry[]>;
   /** Name-status of staged + unstaged + untracked changes in the working tree. */
   changedFilesSummary(repoDir: string): Promise<GitNameStatusEntry[]>;

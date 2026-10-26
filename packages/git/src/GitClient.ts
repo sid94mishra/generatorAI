@@ -1984,10 +1984,11 @@ export class GitClient implements IGitClient {
 
   async logEntries(repoDir: string, range: string, max = 100): Promise<GitLogEntry[]> {
     try {
-      // Unit separator between fields, one commit per line: subjects never carry either.
+      // Unit separator between fields, one commit per line: subjects never carry either. Merge commits
+      // stay in: GitHub counts them in a PR, and so does "N commits ahead".
       const result = await this.runner.run(
         'git',
-        ['log', '--no-merges', '--pretty=format:%H%x1f%s%x1f%an%x1f%aI', '-n', String(max), range],
+        ['log', '--pretty=format:%H%x1f%s%x1f%an%x1f%aI', '-n', String(max), range],
         { cwd: repoDir, timeout: 30_000 },
       );
       if (result.exitCode !== 0) return [];
