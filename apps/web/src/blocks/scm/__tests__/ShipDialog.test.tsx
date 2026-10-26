@@ -418,6 +418,20 @@ describe('ShipButton / ShipDialog', () => {
       expect(await screen.findByTestId('scm-result-ok')).toHaveTextContent('abc1234');
     });
 
+    it('Continue finishes a draft PR run as a draft', async () => {
+      const runFlow = vi.fn().mockResolvedValueOnce(conflictFlow()).mockResolvedValueOnce(okFlow());
+      const platform = makePlatform([repo()], { runWorkspaceScmFlow: runFlow });
+      renderPanel(platform, { chatId: 'c1' });
+      await openDialog();
+      await userEvent.click(screen.getByRole('radio', { name: 'Commit & open PR' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'More ways to open it' }));
+      await userEvent.click(await screen.findByRole('menuitem', { name: 'Create draft pull request' }));
+      fireEvent.click(await screen.findByTestId('scm-conflict-manual'));
+      fireEvent.click(await screen.findByTestId('scm-conflict-continue'));
+      await waitFor(() => expect(runFlow).toHaveBeenCalledTimes(2));
+      expect(runFlow.mock.calls[1]![1]).toMatchObject({ pullRequest: { draft: true } });
+    });
+
     it('Ask the agent hands the files to this chat and steps aside so the chat is visible', async () => {
       const platform = makePlatform([repo()], {
         runWorkspaceScmFlow: vi.fn().mockResolvedValue(conflictFlow()),

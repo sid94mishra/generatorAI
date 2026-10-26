@@ -102,7 +102,7 @@ function ShipDialog({
   const openIn = (repoDir: string) =>
     onOpenFile ? { onOpenFile: (file: string) => onOpenFile(joinPath(repoDir, file)) } : {};
   const chat = chatId ? { chatId } : {};
-  const rerun = () => void flow.run(false);
+  const rerun = () => void flow.rerun();
   // The dialog covers the chat the agent is about to work in: step aside, and say how to come back.
   const handOff = (files: readonly string[]) => {
     onOpenChange(false);

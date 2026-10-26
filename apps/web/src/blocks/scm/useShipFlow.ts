@@ -138,8 +138,11 @@ export function useShipFlow({ workspaceId, hint, open, initialMode }: UseShipFlo
     [generateText, selected, hint, base],
   );
 
+  // A run that stops at a conflict is finished by Continue, which runs it again: as a draft if it was one.
+  const [lastDraft, setLastDraft] = useState(false);
   const run = useCallback(
     async (draft: boolean) => {
+      setLastDraft(draft);
       try {
         const res = await flow.mutateAsync(
           composeFlowRequest(
@@ -210,6 +213,7 @@ export function useShipFlow({ workspaceId, hint, open, initialMode }: UseShipFlo
     resultId,
     clearResult: useCallback(() => setResult(null), []),
     run,
+    rerun: useCallback(() => run(lastDraft), [run, lastDraft]),
   };
 }
 

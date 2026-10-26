@@ -394,7 +394,7 @@ function PullRequestSection(props: ShipDialogViewProps) {
           searchPlaceholder="Find a branch"
           emptyText={branchesLoading ? 'Loading branches…' : 'No matching branch'}
           data-testid="scm-pr-base"
-          className="w-56 max-w-full"
+          className="w-80 max-w-full"
         />
         {branches && !branches.fresh ? (
           <span className="text-small text-fg-3" title="The remote could not be reached; this is the last fetched list">
