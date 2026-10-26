@@ -490,7 +490,9 @@ export class SourceControlFlowService {
       if (err instanceof ProviderNotConfiguredError) {
         return unavailable('Reviewers, assignees and labels need a GitHub account connected with a token');
       }
-      return unavailable(messageOf(err));
+      // "Request blocked: getaddrinfo ENOTFOUND …" means nothing to a user; say what could not load, then why.
+      const detail = messageOf(err).replace(/^Request blocked:\s*/i, '').replace(/:\s*getaddrinfo \S+ \S+$/, '');
+      return unavailable(`Could not load reviewers, assignees and labels from ${slug.host}: ${detail}`);
     }
   }
 

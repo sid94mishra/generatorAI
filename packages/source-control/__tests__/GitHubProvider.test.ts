@@ -148,6 +148,21 @@ describe('GitHubProvider.createPullRequest via REST', () => {
   });
 });
 
+describe('GitHubProvider never follows a remote to another host', () => {
+  it('a github.com account talks to api.github.com whatever host the remote names', async () => {
+    const urls: string[] = [];
+    const http = {
+      async request(req: { url: string }) {
+        urls.push(req.url);
+        return { status: 200, headers: {}, body: JSON.stringify([]) };
+      },
+    } as unknown as ConstructorParameters<typeof GitHubProvider>[0];
+    const p = new GitHubProvider(http, silentLogger, { token: 't' });
+    await p.listPullRequests({ owner: 'a', repo: 'b', host: 'evil.example.com', state: 'open' } as never).catch(() => undefined);
+    expect(urls[0]).toMatch(/^https:\/\/api\.github\.com\//);
+  });
+});
+
 describe('GitHubProvider enterprise host', () => {
   it('uses /api/v3 base for enterprise hosts', async () => {
     let url = '';

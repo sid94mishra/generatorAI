@@ -191,33 +191,30 @@ export function ShipDialogView(props: ShipDialogViewProps) {
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      size={writingPr && showForm ? 'xl' : 'md'}
+      // One frame for every mode, result and conflict: switching Commit → Push → Open pull request
+      // must not resize the dialog under the pointer. The body scrolls inside it.
+      size="xl"
       // After a run the tree is clean again; the heading keeps naming what ran.
       title={titleOf(mode, selected.dirty || !!result?.commit)}
       badge={props.repos.length > 1 ? <Badge>{mountLabel(selected.alias)}</Badge> : undefined}
       data-testid="scm-dialog"
     >
-      <DialogBody className={cn(writingPr && showForm && 'p-0')}>
-        {showForm ? (
-          writingPr ? (
-            <div className="flex min-h-full">
-              <div className="flex min-w-0 flex-1 flex-col gap-5 p-5">
+      <DialogBody className="p-0">
+        <div className="flex min-h-full">
+          <div className="flex min-w-0 flex-1 flex-col gap-5 p-5">
+            {showForm ? (
+              <>
                 <ShipHeader {...props} />
                 <CommitSection {...props} />
-                <PullRequestSection {...props} />
-              </div>
-              <PullRequestSidebar {...props} />
-            </div>
-          ) : (
-            <>
-              <ShipHeader {...props} />
-              <CommitSection {...props} />
-              {!selected.dirty && mode === 'push' ? <PushNote selected={selected} /> : null}
-            </>
-          )
-        ) : (
-          <ShipOutcome {...props} />
-        )}
+                {writingPr ? <PullRequestSection {...props} /> : null}
+                {!writingPr && !selected.dirty && mode === 'push' ? <PushNote selected={selected} /> : null}
+              </>
+            ) : (
+              <ShipOutcome {...props} />
+            )}
+          </div>
+          {showForm && writingPr ? <PullRequestSidebar {...props} /> : null}
+        </div>
       </DialogBody>
       <ShipFooter {...props} writingPr={writingPr} showForm={showForm} running={running} />
     </Dialog>

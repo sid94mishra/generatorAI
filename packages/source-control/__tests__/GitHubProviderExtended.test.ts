@@ -105,11 +105,11 @@ describe('GitHubProvider.getRepository', () => {
     });
   });
 
-  it('honours a per-call enterprise host override', async () => {
+  it('ignores a per-call host: the token only goes to the API of its own account', async () => {
     const calls: ScmHttpRequestOptions[] = [];
     const p = new GitHubProvider(mockHttp(() => json({}), calls), silentLogger, { token: 't' });
     await p.getRepository('a', 'b', 'https://ghe.acme.com');
-    expect(calls[0]?.url).toBe('https://ghe.acme.com/api/v3/repos/a/b');
+    expect(calls[0]?.url).toBe('https://api.github.com/repos/a/b');
   });
 });
 

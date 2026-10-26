@@ -673,11 +673,11 @@ export class GitHubProvider implements ISourceControlProvider {
     return `${this.apiBase(ref.host)}/repos/${ref.owner}/${ref.repo}`;
   }
 
-  private apiBase(host?: string): string {
-    // The account's configured host is authoritative (it carries scheme and
-    // port); a bare hostname parsed from a remote URL only fills in when the
-    // provider was built without one.
-    const raw = this.options.host ?? host;
+  private apiBase(_remoteHost?: string): string {
+    // Only the account's own host, never one parsed from a remote: the registry falls back to the
+    // default account for unmatched hosts (SSH aliases like `github-work`), and the token must not
+    // follow a remote to whatever server it names. No configured host means github.com.
+    const raw = this.options.host;
     if (!raw || /(^|\/\/)(www\.)?github\.com/.test(raw)) {
       return 'https://api.github.com';
     }

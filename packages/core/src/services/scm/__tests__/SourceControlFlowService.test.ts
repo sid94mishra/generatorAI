@@ -149,11 +149,11 @@ describe('SourceControlFlowService (real git)', () => {
   let origin: string;
   let work: string;
   let seed: string;
-  let gitClient: GitClient;
+  let baseGitClient: GitClient;
 
   beforeEach(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'scm-flow-'));
-    // Nested so `parseRepoSlug` sees a `.../acme/web.git` shaped remote.
+    // The bare origin; `hostedRemote` makes it read as github.com/acme/web for the PR steps.
     const ownerDir = path.join(root, 'acme');
     await fs.mkdir(ownerDir, { recursive: true });
     origin = path.join(ownerDir, 'web.git');
@@ -176,7 +176,7 @@ describe('SourceControlFlowService (real git)', () => {
     await execFileAsync('git', ['clone', '-c', 'core.autocrlf=false', origin, work]);
     await identify(work);
 
-    gitClient = new GitClient(new NodeGitRunner(), silentLogger, {
+    baseGitClient = new GitClient(new NodeGitRunner(), silentLogger, {
       workspacesDir: root,
       defaultTimeoutMs: 60_000,
     });
@@ -186,7 +186,19 @@ describe('SourceControlFlowService (real git)', () => {
     await removeDirWithRetry(root);
   });
 
+  /**
+   * The real client, except the remote reads as hosted: the bare origin is a local path, which (rightly)
+   * has no host to open a PR on. Pushes and fetches still go to the local origin.
+   */
+  function hostedRemote(client: GitClient): GitClient {
+    const wrapped = Object.create(client) as GitClient;
+    wrapped.getRemoteUrl = async (dir: string, remote?: string) =>
+      (await client.getRemoteUrl(dir, remote)) ? 'https://github.com/acme/web.git' : null;
+    return wrapped;
+  }
+
   function makeService(registry: SourceControlRegistry, defaultBase: string | null = null) {
+    const gitClient = hostedRemote(baseGitClient);
     const harness = {
       createConversation: vi.fn(),
       sendPromptAndWait: vi.fn(),
@@ -329,7 +341,7 @@ describe('SourceControlFlowService (real git)', () => {
     expect(provider.createPullRequest).not.toHaveBeenCalled();
 
     // The tree is untouched: no merge in progress, no markers, clean status.
-    expect(await gitClient.mergeInProgress(work)).toBe(false);
+    expect(await baseGitClient.mergeInProgress(work)).toBe(false);
     expect((await git(work, 'status', '--porcelain')).trim()).toBe('');
     expect(await fs.readFile(path.join(work, 'shared.txt'), 'utf-8')).toBe('OURS\nline two\n');
   });
@@ -347,7 +359,7 @@ describe('SourceControlFlowService (real git)', () => {
     const report = await flow.startConflictMerge({ repoDir: work, alias: '.', base: 'main' });
     expect(report).toMatchObject({ base: 'main', head: 'feature/conflict', mergeStarted: true });
     expect(report.files).toContain('shared.txt');
-    expect(await gitClient.mergeInProgress(work)).toBe(true);
+    expect(await baseGitClient.mergeInProgress(work)).toBe(true);
     expect(await fs.readFile(path.join(work, 'shared.txt'), 'utf-8')).toContain('<<<<<<<');
 
     // Still conflicted → refuses to commit.
@@ -360,7 +372,7 @@ describe('SourceControlFlowService (real git)', () => {
     expect(done.ok).toBe(true);
     expect(done.sha).toMatch(/^[0-9a-f]{40}$/);
     expect(done.remaining).toEqual([]);
-    expect(await gitClient.mergeInProgress(work)).toBe(false);
+    expect(await baseGitClient.mergeInProgress(work)).toBe(false);
     expect((await git(work, 'status', '--porcelain')).trim()).toBe('');
 
     // And abort restores a clean tree from a fresh conflicted merge.
@@ -368,8 +380,8 @@ describe('SourceControlFlowService (real git)', () => {
     const second = await flow.startConflictMerge({ repoDir: work, alias: '.', base: 'main' });
     expect(second.files).toContain('shared.txt');
     await flow.abortConflicts({ repoDir: work, alias: '.' });
-    expect(await gitClient.mergeInProgress(work)).toBe(false);
-    expect(await gitClient.isClean(work)).toBe(true);
+    expect(await baseGitClient.mergeInProgress(work)).toBe(false);
+    expect(await baseGitClient.isClean(work)).toBe(true);
     expect(await fs.readFile(path.join(work, 'shared.txt'), 'utf-8')).toBe(
       'OURS AND THEIRS\nline two\n',
     );

@@ -56,6 +56,8 @@ describe('parseRepoSlug', () => {
       '~/git/app.git',
     ]) {
       expect(isLocalRemote(remote)).toBe(true);
+      // No fake host: `/private/tmp/x/origin.git` once parsed as host "private".
+      expect(parseRepoSlug(remote)).toBeNull();
     }
     expect(isLocalRemote('git@github.com:acme/web.git')).toBe(false);
     expect(isLocalRemote('https://github.com/acme/web')).toBe(false);

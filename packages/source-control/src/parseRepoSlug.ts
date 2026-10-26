@@ -20,6 +20,8 @@ export interface RepoSlug {
 export function parseRepoSlug(remoteUrl: string): RepoSlug | null {
   if (!remoteUrl) return null;
   const url = remoteUrl.trim();
+  // `/srv/git/app.git` would otherwise parse as `https:///srv/…`, host "srv".
+  if (isLocalRemote(url)) return null;
 
   // scp-like SSH: git@host:owner/repo(.git)
   const scp = url.match(/^[^@]+@([^:]+):([^/]+)\/(.+?)(?:\.git)?\/?$/);
