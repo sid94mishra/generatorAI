@@ -300,8 +300,11 @@ function CommitSection({
   commitFiles,
   generating,
   onGenerate,
+  mode,
+  availability,
 }: ShipDialogViewProps) {
   if (!selected.dirty) return null;
+  const writingPr = mode === 'pr' && availability.canOpenPr && !selected.openPullRequest;
   return (
     <section aria-label="Commit" className="flex flex-col gap-3" data-testid="scm-commit-section">
       <SectionTitle icon="commit">Commit</SectionTitle>
@@ -333,7 +336,8 @@ function CommitSection({
           onChange={(e) => onDescriptionChange(e.target.value)}
           placeholder="Why the change was made, anything a reviewer should know"
           aria-label="Commit description"
-          autosize={{ minRows: 2, maxRows: 8 }}
+          // Room to write when the commit is the whole dialog; compact beside a pull request.
+          autosize={writingPr ? { minRows: 2, maxRows: 8 } : { minRows: 4, maxRows: 12 }}
           data-testid="scm-commit-description"
         />
       </Field>
@@ -341,6 +345,7 @@ function CommitSection({
         files={commitFiles}
         title={`${plural(commitFiles.length || selected.changedFiles, 'file')} will be committed`}
         testId="scm-commit-files"
+        defaultOpen={!writingPr}
       />
     </section>
   );
@@ -699,10 +704,20 @@ function SectionTitle({ icon, children }: { icon: 'commit' | 'pr'; children: Rea
   );
 }
 
-function FileList({ files, title, testId }: { files: readonly ShipFile[]; title: string; testId: string }) {
+function FileList({
+  files,
+  title,
+  testId,
+  defaultOpen = false,
+}: {
+  files: readonly ShipFile[];
+  title: string;
+  testId: string;
+  defaultOpen?: boolean;
+}) {
   if (files.length === 0) return null;
   return (
-    <Collapsible variant="disclosure" trigger={title} data-testid={testId}>
+    <Collapsible variant="disclosure" trigger={title} defaultOpen={defaultOpen} data-testid={testId}>
       <ul className="flex flex-col">
         {files.map((f) => {
           const kind = CHANGE_KIND[f.status];
