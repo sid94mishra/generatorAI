@@ -1670,6 +1670,12 @@ export class GitClient implements IGitClient {
       .catch(() => false);
   }
 
+  async mergeSource(repoDir: string): Promise<string | null> {
+    const gitDir = (await this.absoluteGitDir(repoDir)) ?? path.join(repoDir, '.git');
+    const message = await fs.readFile(path.join(gitDir, 'MERGE_MSG'), 'utf-8').catch(() => null);
+    return message ? parseMergeSource(message) : null;
+  }
+
   async unmergedFiles(repoDir: string): Promise<string[]> {
     try {
       const result = await this.runner.run('git', ['diff', '--name-only', '--diff-filter=U'], {
@@ -2099,4 +2105,12 @@ export function parseLegacyMergeTree(stdout: string): string[] {
   }
   flush();
   return conflicts;
+}
+
+/** The merged branch named on a merge message's first line, without `origin/`. */
+export function parseMergeSource(message: string): string | null {
+  const first = message.split('\n')[0]?.trim() ?? '';
+  const ref =
+    /^Merge (?:remote-tracking )?branch '([^']+)'/.exec(first)?.[1] ?? /^Merge (\S+) into \S+/.exec(first)?.[1] ?? null;
+  return ref ? ref.replace(/^origin\//, '') : null;
 }

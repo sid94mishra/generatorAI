@@ -130,6 +130,7 @@ export class RepoReadinessService {
     }
 
     const mergeInProgress = await this.safe(() => git.mergeInProgress(repoDir), false);
+    const mergingFrom = mergeInProgress ? await this.safe(() => git.mergeSource(repoDir), null) : null;
     const conflictedFiles = await this.safe(() => git.unmergedFiles(repoDir), []);
 
     let openPullRequest: RepoReadiness['openPullRequest'] = null;
@@ -204,6 +205,7 @@ export class RepoReadinessService {
       hasUpstream,
       ...(vsBase ? { vsBase } : {}),
       mergeInProgress,
+      ...(mergingFrom ? { mergingFrom } : {}),
       conflictedFiles,
       openPullRequest,
       can,

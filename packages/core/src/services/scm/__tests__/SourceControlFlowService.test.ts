@@ -375,6 +375,28 @@ describe('SourceControlFlowService (real git)', () => {
     );
   });
 
+  it('(e2) a merge from a non-default branch keeps its name through start and continue, whatever the caller guesses', async () => {
+    const { registry } = fakeProviderPair();
+    const flow = makeService(registry);
+    await git(seed, 'checkout', '-b', 'release/2.0');
+    await write(seed, 'shared.txt', 'RELEASE\nline two\n');
+    await git(seed, 'add', '-A');
+    await git(seed, 'commit', '-m', 'fix: release line one');
+    await git(seed, 'push', 'origin', 'release/2.0');
+    await git(seed, 'checkout', 'main');
+    await git(work, 'checkout', '-b', 'feature/rel');
+    await write(work, 'shared.txt', 'OURS\nline two\n');
+    await git(work, 'add', '-A');
+    await git(work, 'commit', '-m', 'fix: our line one');
+
+    await flow.startConflictMerge({ repoDir: work, alias: '.', base: 'release/2.0' });
+    // After a restart the client only knows the default branch; the merge in progress still names its source.
+    expect(await flow.startConflictMerge({ repoDir: work, alias: '.', base: 'main' })).toMatchObject({ base: 'release/2.0' });
+    await write(work, 'shared.txt', 'OURS AND RELEASE\nline two\n');
+    expect((await flow.continueAfterConflicts({ repoDir: work, alias: '.', base: 'main' })).ok).toBe(true);
+    expect((await git(work, 'log', '-1', '--format=%s')).trim()).toBe('Merge origin/release/2.0 into feature/rel');
+  });
+
   it('(f) reuses an already-open pull request instead of creating one', async () => {
     const { registry, provider } = fakeProviderPair({ existingPr: OPEN_PR });
     const flow = makeService(registry);

@@ -507,11 +507,13 @@ export class SourceControlFlowService {
     const { repoDir } = input;
     const git = this.deps.git;
     const head = (await git.currentBranch(repoDir)) ?? 'HEAD';
-    const base = await this.resolveBase(repoDir, input.base);
 
     if (await git.mergeInProgress(repoDir)) {
+      // The merge already under way names its own source; a caller's guess must not rename it.
+      const base = (await safe(() => git.mergeSource(repoDir), null)) ?? (await this.resolveBase(repoDir, input.base));
       return { base, head, files: await git.unmergedFiles(repoDir), mergeStarted: true };
     }
+    const base = await this.resolveBase(repoDir, input.base);
 
     await git.fetchBranch(repoDir, REMOTE, base);
     await git.merge(repoDir, `${REMOTE}/${base}`, { noCommit: true });
@@ -550,7 +552,7 @@ export class SourceControlFlowService {
     }
 
     const head = (await git.currentBranch(repoDir)) ?? 'HEAD';
-    const base = await this.resolveBase(repoDir, input.base);
+    const base = (await safe(() => git.mergeSource(repoDir), null)) ?? (await this.resolveBase(repoDir, input.base));
     const sha = await git.commitMerge(
       repoDir,
       input.message ?? `Merge ${REMOTE}/${base} into ${head}`,

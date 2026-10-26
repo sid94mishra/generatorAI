@@ -380,6 +380,11 @@ export interface IGitClient {
   isDetached(repoDir: string): Promise<boolean>;
   /** True when `<gitdir>/MERGE_HEAD` exists (use `absoluteGitDir`, fall back to `<repoDir>/.git`). */
   mergeInProgress(repoDir: string): Promise<boolean>;
+  /**
+   * The branch an in-progress merge brings in, read from `<gitdir>/MERGE_MSG` ("Merge remote-tracking
+   * branch 'origin/x' …", "Merge branch 'x' …" or "Merge origin/x into …"), without the `origin/`; null otherwise.
+   */
+  mergeSource(repoDir: string): Promise<string | null>;
   /** `git diff --name-only --diff-filter=U` — paths with unresolved conflicts. */
   unmergedFiles(repoDir: string): Promise<string[]>;
   /**

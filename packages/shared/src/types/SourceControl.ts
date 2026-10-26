@@ -279,6 +279,8 @@ export interface RepoReadiness {
   /** How the branch stands against the remote default branch; absent on that branch or without a remote. */
   vsBase?: { branch: string; ahead: number; behind: number };
   mergeInProgress: boolean;
+  /** The branch an in-progress merge brings in (from git's merge message); absent otherwise. */
+  mergingFrom?: string;
   conflictedFiles: string[];
   /** Open PR whose head is the current branch, when one exists. */
   openPullRequest: PullRequestSummary | null;

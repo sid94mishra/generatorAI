@@ -131,7 +131,7 @@ function ShipDialog({
         key={`merge-${selected.alias}`}
         workspaceId={workspaceId}
         conflicts={{
-          base: selected.defaultBranch ?? (flow.base.trim() || 'main'),
+          base: selected.mergingFrom ?? selected.defaultBranch ?? (flow.base.trim() || 'main'),
           head: selected.branch ?? 'HEAD',
           files: selected.conflictedFiles,
           mergeStarted: true,

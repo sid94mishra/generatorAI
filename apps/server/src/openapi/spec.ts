@@ -540,6 +540,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
             required: ['branch', 'ahead', 'behind'],
           },
           mergeInProgress: { type: 'boolean' },
+          mergingFrom: { type: 'string', description: 'The branch an in-progress merge brings in (from git\'s merge message).' },
           conflictedFiles: { type: 'array', items: { type: 'string' } },
           openPullRequest: {
             allOf: [{ $ref: '#/components/schemas/PullRequestSummary' }],

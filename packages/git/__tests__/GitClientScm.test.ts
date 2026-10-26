@@ -13,7 +13,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { GitClient, parseLegacyMergeTree } from '../src/GitClient.js';
+import { GitClient, parseLegacyMergeTree, parseMergeSource } from '../src/GitClient.js';
 import type {
   IGitProcessRunner,
   GitProcessRunOptions,
@@ -276,6 +276,15 @@ describe('GitClient.mergeTreeConflicts', () => {
       supported: true,
       conflicts: [],
     });
+  });
+});
+
+describe('parseMergeSource', () => {
+  it("names the branch git's merge message brings in, without origin/", () => {
+    expect(parseMergeSource("Merge remote-tracking branch 'origin/feature/x' into work\n\n# Conflicts:\n")).toBe('feature/x');
+    expect(parseMergeSource("Merge branch 'release/2.0'\n")).toBe('release/2.0');
+    expect(parseMergeSource('Merge origin/develop into generatorai/v-1\n')).toBe('develop');
+    expect(parseMergeSource('feat: not a merge\n')).toBeNull();
   });
 });
 
