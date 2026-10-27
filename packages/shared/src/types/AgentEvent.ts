@@ -754,6 +754,9 @@ export type AgentEvent =
   /** Some iterations succeeded and some failed. Alerted like `.failed`. */
   | { kind: 'automation_execution.partial'; data: { executionId: string; automationId: string; completedRuns: number; failedRuns: number; error?: string } }
   | { kind: 'automation_execution.cancelled'; data: { executionId: string; automationId: string } }
+  /** U-85: every run the execution waits on paused for a person (`reason` says why), or one resumed. */
+  | { kind: 'automation_execution.paused'; data: { executionId: string; automationId: string; reason: string } }
+  | { kind: 'automation_execution.resumed'; data: { executionId: string; automationId: string } }
   | { kind: 'automation_execution.recovered'; data: { executionId: string; automationId: string; finalStatus: 'completed' | 'failed' | 'cancelled' | 'partial'; error?: string } }
   /** The scheduler decided NOT to run a due slot (missed while offline, or overlap). */
   | { kind: 'automation.schedule_skipped'; data: { automationId: string; reason: 'missed' | 'overlap'; scheduledFor: string; missedCount?: number; nextRunAt?: string; note: string } }

@@ -25,9 +25,11 @@ export type AutomationErrorPolicy = 'continue' | 'stop';
  * successes and failures; it is alerted through the same channel as
  * `failed` so unattended operation never reports a mostly-failed batch
  * as a success. `skipped` = a scheduled slot that did not run (missed or
- * overlapping, per the automation's policies); it has no runs.
+ * overlapping, per the automation's policies); it has no runs. `paused` = still
+ * live, but every run it is waiting on is paused for a person (a stage that spent
+ * its retries, an interruption); `error` says why until a run resumes (U-85).
  */
-export type AutomationExecutionStatus = 'pending' | 'running' | 'completed' | 'partial' | 'failed' | 'cancelled' | 'skipped';
+export type AutomationExecutionStatus = 'pending' | 'running' | 'paused' | 'completed' | 'partial' | 'failed' | 'cancelled' | 'skipped';
 
 /** What the scheduler does with slots that elapsed while nobody could run them. */
 export type AutomationMissedRunPolicy = 'skip' | 'run_once';
@@ -36,7 +38,7 @@ export type AutomationMissedRunPolicy = 'skip' | 'run_once';
 export type AutomationOverlapPolicy = 'skip' | 'queue';
 
 /** Individual run status within an execution */
-export type AutomationRunItemStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type AutomationRunItemStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
 
 /**
  * Retry policy applied to a single iteration (per workflow-run within

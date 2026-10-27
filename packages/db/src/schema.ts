@@ -917,7 +917,7 @@ export const automationExecutions = sqliteTable(
       .notNull()
       .references(() => automations.id, { onDelete: 'cascade' }),
     status: text('status', {
-      enum: ['pending', 'running', 'completed', 'partial', 'failed', 'cancelled', 'skipped'],
+      enum: ['pending', 'running', 'paused', 'completed', 'partial', 'failed', 'cancelled', 'skipped'],
     }).notNull().default('pending'),
     triggeredBy: text('triggered_by', { enum: ['manual', 'schedule', 'webhook'] }).notNull(),
     webhookPayload: text('webhook_payload'),
@@ -960,7 +960,7 @@ export const automationExecutionRuns = sqliteTable(
     iterationVariables: text('iteration_variables', { mode: 'json' }).$type<Record<string, unknown>>(),
     iterationLabel: text('iteration_label'),
     status: text('status', {
-      enum: ['pending', 'running', 'completed', 'failed', 'cancelled'],
+      enum: ['pending', 'running', 'paused', 'completed', 'failed', 'cancelled'],
     }).notNull().default('pending'),
     /** Track A — how many attempts this run consumed (1 = no retry). */
     attemptCount: integer('attempt_count').notNull().default(1),

@@ -19,6 +19,7 @@ import type {
   AutomationWithExecutions,
   AutomationExecutionWithRuns,
   ILogger,
+  PersistedEvent,
 } from '@generatorai/shared';
 import { hashWebhookToken } from '@generatorai/shared/node';
 import {
@@ -36,8 +37,50 @@ import type { EventBus } from '../events/EventBus.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
 import { planIterations } from './IterationPlanner.js';
 import type { DurableExecutionEngine } from './DurableExecutionEngine.js';
+import type { RunDigest } from '@generatorai/workflow-spec';
 
 export { hashWebhookToken };
+
+/**
+ * U-85 — how long an execution lets one run WORK before stopping it. Time the run spends waiting on a
+ * person (a stage paused after its retries, an approval) does not count: the engine's unattended pause
+ * limit (PD-2, 72 h) ends a pause nobody answers. Before, a flat 2 h wait counted the pause too, then
+ * failed the execution and left the paused run behind ("Failed" here, "Paused" on the run).
+ */
+const RUN_WORK_LIMIT_MS = 2 * 3_600_000;
+/** How often a waiting execution re-reads its run: the work clock's step. */
+const RUN_WAIT_SLICE_MS = 60_000;
+/** Run and stage events after which a run may have paused for a person, or resumed. */
+const PAUSE_EVENT_KINDS: ReadonlySet<string> = new Set([
+  'stage_run.paused',
+  'stage_run.resumed',
+  'stage_run.running',
+  'stage_run.retrying',
+  'workflow_run.paused',
+  'workflow_run.resumed',
+  'workflow_run.running',
+]);
+
+/** The run's pause for a person, with the reason the execution shows; null while it works or waits on an answer. */
+export function runPauseOf(digest: Pick<RunDigest, 'status' | 'statusReason' | 'stages'>): string | null {
+  const stage = digest.stages.find((s) => s.status === 'paused');
+  if (stage) {
+    const why = stage.error?.trim();
+    return why ? `${stage.name} paused: ${why}` : `${stage.name} paused.`;
+  }
+  if (digest.status === 'paused') return digest.statusReason ? `The run paused (${digest.statusReason}).` : 'The run paused.';
+  return null;
+}
+
+/** The run waits on a person: paused, or a stage asks for an approval or an answer. */
+function waitsOnPerson(digest: RunDigest): boolean {
+  return runPauseOf(digest) !== null || digest.pendingApprovals.length > 0;
+}
+
+/** An execution still being driven: running, or paused on its runs (U-85). */
+function isLiveExecution(status: AutomationExecutionStatus): boolean {
+  return status === 'pending' || status === 'running' || status === 'paused';
+}
 
 /**
  * A webhook delivery that was matched to an automation, with everything the
@@ -110,7 +153,8 @@ export interface IAutomationExecutionRepository {
   openExecution(execution: AutomationExecution, lastRunAt: Date): Promise<void>;
   getExecutionById(id: string): Promise<AutomationExecution>;
   getExecutionsByAutomationId(automationId: string): Promise<AutomationExecution[]>;
-  updateExecution(id: string, updates: Partial<AutomationExecution>): Promise<AutomationExecution>;
+  /** `error: null` clears the reason (a paused execution whose run resumed, U-85). */
+  updateExecution(id: string, updates: Partial<Omit<AutomationExecution, 'error'>> & { error?: string | null }): Promise<AutomationExecution>;
   deleteExecution(id: string): Promise<void>;
   createExecutionRun(run: AutomationExecutionRun): Promise<AutomationExecutionRun>;
   getExecutionRunsByExecutionId(executionId: string): Promise<AutomationExecutionRun[]>;
@@ -193,7 +237,7 @@ export class AutomationService {
     private executionRepo: IAutomationExecutionRepository,
     private workflowRunService: WorkflowRunService,
     /** THE way a run starts (P04): every iteration's run is an invocation with an automation trigger. */
-    private invocation: Pick<WorkflowInvocationService, 'invoke' | 'waitFor'>,
+    private invocation: Pick<WorkflowInvocationService, 'invoke' | 'waitFor' | 'digest'>,
     private workflowRunRepo: IWorkflowRunRepository,
     private workflowDefinitionService: WorkflowDefinitionService,
     private eventBus: EventBus,
@@ -376,7 +420,7 @@ export class AutomationService {
     // Cancel any running executions before deleting
     const executions = await this.executionRepo.getExecutionsByAutomationId(id);
     for (const exec of executions) {
-      if (exec.status === 'running' || exec.status === 'pending') {
+      if (isLiveExecution(exec.status)) {
         try {
           await this.cancelExecution(exec.id);
         } catch {
@@ -721,6 +765,8 @@ ${serialized}`).digest('hex');
 
     let completedCount = seed.completed;
     let failedCount = seed.failed;
+    /** Why the first failed run failed: the execution's `error` when it ends failed or partial. */
+    let firstFailure: string | undefined;
 
     try {
       const iterations = buildIterations();
@@ -793,7 +839,7 @@ ${serialized}`).digest('hex');
                 }
 
                 try {
-                  const success = await this.runSingleWorkflow(
+                  const outcome = await this.runSingleWorkflow(
                     automation.id,
                     execution.id,
                     workflowDefId,
@@ -807,11 +853,12 @@ ${serialized}`).digest('hex');
                     automation.permissionMode,
                     automationRunName(automation.name, execution.triggeredBy, iterationLabel),
                   );
-                  if (success) {
+                  if (outcome.ok) {
                     completedCount++;
                   } else {
                     failedCount++;
-                    slotError ??= `workflow ${workflowDefId} did not complete`;
+                    firstFailure ??= outcome.error;
+                    slotError ??= outcome.error ?? `workflow ${workflowDefId} did not complete`;
                     if (automation.onError === 'stop') {
                       throw new Error('Workflow run failed');
                     }
@@ -819,6 +866,7 @@ ${serialized}`).digest('hex');
                 } catch (err) {
                   failedCount++;
                   const message = err instanceof Error ? err.message : String(err);
+                  firstFailure ??= message;
                   slotError ??= message;
                   this.logger.error(`[AutomationService] Workflow run error (iter ${iterIdx}, def ${workflowDefId}): ${message}`);
                   if (automation.onError === 'stop') {
@@ -886,6 +934,8 @@ ${serialized}`).digest('hex');
         status: finalStatus,
         completedIterations: completedCount,
         failedIterations: failedCount,
+        // A paused run's reason leaves with the pause; a failure says why (U-85).
+        error: finalStatus === 'completed' ? null : (firstFailure ?? null),
         completedAt: new Date(),
       });
 
@@ -1008,7 +1058,7 @@ ${serialized}`).digest('hex');
 
   /**
    * Run a single workflow within an execution, honouring the automation's
-   * retry policy. Returns true if any attempt completed successfully.
+   * retry policy. `ok` when an attempt completed; otherwise `error` says why the last one did not.
    *
    * Retry semantics (Track A2):
    *   * `policy.maxAttempts` = 1 (or null policy) → no retry.
@@ -1041,7 +1091,7 @@ ${serialized}`).digest('hex');
     permissionMode: Automation['permissionMode'],
     /** U-79 — names the run (and so its branch). */
     runName: string,
-  ): Promise<boolean> {
+  ): Promise<{ ok: boolean; error?: string }> {
     const maxAttempts = Math.max(1, retryPolicy?.maxAttempts ?? 1);
     const retryOn = new Set(retryPolicy?.retryOn ?? []);
     // Clamp policy inputs so a malformed persisted policy can't spin us
@@ -1102,19 +1152,14 @@ ${serialized}`).digest('hex');
       lastExecRunId = execRun.id;
 
       try {
-        // W-63: wait for `finalized` (after post-processing), subscribed before the read.
-        const finalRun = await this.invocation.waitFor(run.id, {
-          timeoutMs: 7_200_000,
-          ...(this.executionAborts.get(executionId) ? { signal: this.executionAborts.get(executionId)!.signal } : {}),
-        });
-        if (finalRun.waited === 'timeout') throw new Error(`Workflow run ${run.id} timed out after 7200000ms`);
+        const finalRun = await this.waitForRun(run.id, executionId);
         if (finalRun.waited === 'aborted') throw new Error(`Workflow run ${run.id} wait was cancelled`);
         if (finalRun.status === 'completed') {
           await this.executionRepo.updateExecutionRun(execRun.id, {
             status: 'completed',
             attemptCount: attempt,
           });
-          return true;
+          return { ok: true };
         }
 
         if (finalRun.status === 'cancelled') {
@@ -1123,7 +1168,7 @@ ${serialized}`).digest('hex');
             status: 'cancelled',
             attemptCount: attempt,
           });
-          return false;
+          return { ok: false, error: 'The workflow run was cancelled.' };
         }
 
         // Non-completed, non-cancelled → failure.
@@ -1131,10 +1176,11 @@ ${serialized}`).digest('hex');
           status: 'failed',
           attemptCount: attempt,
         });
+        const failure = finalRun.error ?? finalRun.stages.find((st) => st.status === 'failed' && st.error)?.error ?? 'The workflow run failed.';
 
         // Decide whether to retry: `workflow_failed` must be in retryOn.
         const shouldRetry = attempt < maxAttempts && retryOn.has('workflow_failed');
-        if (!shouldRetry) return false;
+        if (!shouldRetry) return { ok: false, error: failure };
 
         this.logger.info(
           `[AutomationService] Iteration ${iterationIndex} attempt ${attempt} failed; retrying in ${backoff}ms (attempt ${attempt + 1}/${maxAttempts})`,
@@ -1149,7 +1195,7 @@ ${serialized}`).digest('hex');
             status: 'cancelled',
             attemptCount: attempt,
           });
-          return false;
+          return { ok: false, error: 'The execution was cancelled.' };
         }
 
         // Classify the error to see if it's retryable.
@@ -1180,7 +1226,116 @@ ${serialized}`).digest('hex');
         });
       } catch { /* best-effort */ }
     }
-    return false;
+    return { ok: false };
+  }
+
+  /**
+   * U-85 — wait for the run to finalize (W-63: after post-processing). The work clock runs only while the run
+   * is not waiting on a person (RUN_WORK_LIMIT_MS); past it the run is stopped, so no run outlives the
+   * execution that started it. The pause itself shows through `projectRunPause`.
+   */
+  private async waitForRun(runId: string, executionId: string): Promise<RunDigest> {
+    let worked = 0;
+    for (;;) {
+      const signal = this.executionAborts.get(executionId)?.signal;
+      const sliceStart = Date.now();
+      const digest = await this.invocation.waitFor(runId, { timeoutMs: RUN_WAIT_SLICE_MS, ...(signal ? { signal } : {}) });
+      if (digest.waited !== 'timeout') return digest;
+      if (!waitsOnPerson(digest)) worked += Date.now() - sliceStart;
+      if (worked >= RUN_WORK_LIMIT_MS) {
+        await this.workflowRunService.command(runId, { command: 'cancel' }).catch(() => undefined);
+        throw new Error(`Timed out: the run was still working after ${RUN_WORK_LIMIT_MS / 3_600_000} hours, so it was stopped.`);
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // U-85 — a run paused for a person pauses its execution
+  //
+  // The engine pauses a stage that spent its retries (PD-2) and waits for a
+  // person. The execution showed "Running" all that time, the run "Paused",
+  // the stage's transcript the failure. One projection, for every run an
+  // automation started — driven by this process or by boot recovery's watch:
+  // its row and its execution become `paused` with the reason, and `running`
+  // again once it resumes.
+  // ═══════════════════════════════════════════════════════════════
+
+  private pauseUnsubscribe: (() => void) | null = null;
+  /** Per run, the projection in flight: events for one run are projected in order. */
+  private readonly projecting = new Map<string, Promise<void>>();
+
+  /** Idempotent. */
+  private startPauseProjection(): void {
+    if (this.pauseUnsubscribe) return;
+    this.pauseUnsubscribe = this.eventBus.subscribeGlobal((event: PersistedEvent) => {
+      if (!PAUSE_EVENT_KINDS.has(event.kind)) return;
+      const runId = (event.data as Record<string, unknown> | undefined)?.['workflowRunId'];
+      if (typeof runId === 'string') void this.queueRunPauseProjection(runId);
+    });
+    // Runs that paused before this process started send no event: project the live ones once.
+    void this.projectLiveRuns().catch((err: unknown) => {
+      this.logger.warn(`[AutomationService] Could not project paused runs at start: ${err instanceof Error ? err.message : String(err)}`);
+    });
+  }
+
+  private async projectLiveRuns(): Promise<void> {
+    for (const automation of await this.automationRepo.getAll()) {
+      for (const execution of await this.executionRepo.getExecutionsByAutomationId(automation.id)) {
+        if (execution.status !== 'running' && execution.status !== 'paused') continue;
+        for (const row of await this.executionRepo.getExecutionRunsByExecutionId(execution.id)) {
+          if (row.workflowRunId && (row.status === 'running' || row.status === 'paused')) await this.queueRunPauseProjection(row.workflowRunId);
+        }
+      }
+    }
+  }
+
+  /** Project the run's pause onto its execution after any projection already queued for it. Public for tests. */
+  queueRunPauseProjection(runId: string): Promise<void> {
+    const next = (this.projecting.get(runId) ?? Promise.resolve())
+      .then(() => this.projectRunPause(runId))
+      .catch((err: unknown) => {
+        this.logger.warn(`[AutomationService] Could not project run ${runId}'s pause: ${err instanceof Error ? err.message : String(err)}`);
+      })
+      .finally(() => {
+        if (this.projecting.get(runId) === next) this.projecting.delete(runId);
+      });
+    this.projecting.set(runId, next);
+    return next;
+  }
+
+  private async projectRunPause(runId: string): Promise<void> {
+    const run = await this.workflowRunRepo.getById(runId).catch(() => null);
+    const executionId = run?.trigger?.kind === 'automation' ? run.trigger['executionId'] : undefined;
+    if (typeof executionId !== 'string') return;
+    const digest = await this.invocation.digest(runId);
+    if (digest.finalized) return;
+    const rows = await this.executionRepo.getExecutionRunsByExecutionId(executionId);
+    const row = rows.find((r) => r.workflowRunId === runId && (r.status === 'running' || r.status === 'paused'));
+    if (!row) return;
+    const pause = runPauseOf(digest);
+    const rowStatus = pause ? 'paused' : 'running';
+    if (row.status !== rowStatus) await this.executionRepo.updateExecutionRun(row.id, { status: rowStatus });
+
+    const execution = await this.executionRepo.getExecutionById(executionId).catch(() => null);
+    if (!execution || (execution.status !== 'running' && execution.status !== 'paused')) return;
+    const statuses = rows.map((r) => (r.id === row.id ? rowStatus : r.status));
+    const paused = statuses.includes('paused') && !statuses.some((st) => st === 'running' || st === 'pending');
+    if (paused) {
+      // Another paused run's reason stands when this one is not the one paused.
+      const reason = pause ?? execution.error ?? 'A run paused.';
+      if (execution.status === 'paused' && execution.error === reason) return;
+      await this.executionRepo.updateExecution(executionId, { status: 'paused', error: reason });
+      void this.eventBus.emitGlobal({
+        kind: 'automation_execution.paused',
+        data: { executionId, automationId: execution.automationId, reason },
+      }).catch(() => undefined);
+    } else if (execution.status === 'paused') {
+      await this.executionRepo.updateExecution(executionId, { status: 'running', error: null });
+      void this.eventBus.emitGlobal({
+        kind: 'automation_execution.resumed',
+        data: { executionId, automationId: execution.automationId },
+      }).catch(() => undefined);
+    }
   }
 
   /**
@@ -1256,6 +1411,7 @@ ${serialized}`).digest('hex');
    */
   async initializeCronJobs(): Promise<void> {
     this.startPoller();
+    this.startPauseProjection();
   }
 
   /** Idempotent — a second call is a no-op. */
@@ -1356,9 +1512,10 @@ ${serialized}`).digest('hex');
       // ── Overlap policy ──────────────────────────────────────────
       const overlapPolicy = automation.overlapPolicy ?? 'skip';
       const existingExecutions = await this.executionRepo.getExecutionsByAutomationId(automation.id);
-      const hasActiveExecution = existingExecutions.some(
-        (e) => e.status === 'running' || e.status === 'pending',
-      );
+      const active = existingExecutions.filter((e) => isLiveExecution(e.status));
+      const hasActiveExecution = active.length > 0;
+      // U-85: a paused one waits on a person; the skip says so, not that it was still running.
+      const waitsOnYou = hasActiveExecution && active.every((e) => e.status === 'paused');
 
       if (hasActiveExecution && overlapPolicy === 'skip') {
         const nextRunAt = this.computeNextRunAt(automation, now);
@@ -1379,7 +1536,13 @@ ${serialized}`).digest('hex');
         }).catch((err) => {
           this.logger.warn(`[AutomationService] Failed to emit schedule_skipped(overlap) for ${automation.id}: ${err instanceof Error ? err.message : String(err)}`);
         });
-        await this.recordSkipped(automation, scheduledFor, 'Skipped: the previous execution was still running, and overlapping runs are set to Skip.');
+        await this.recordSkipped(
+          automation,
+          scheduledFor,
+          waitsOnYou
+            ? 'Skipped: the previous execution is paused and waiting for you, and overlapping runs are set to Skip. Resume or cancel its run to let the next one start.'
+            : 'Skipped: the previous execution was still running, and overlapping runs are set to Skip.',
+        );
         return; // lease released in finally — nothing was dispatched
       }
 
@@ -1461,7 +1624,7 @@ ${serialized}`).digest('hex');
   async getExecutionWithRuns(executionId: string): Promise<AutomationExecutionWithRuns> {
     const execution = await this.executionRepo.getExecutionById(executionId);
     const runs = await this.executionRepo.getExecutionRunsByExecutionId(executionId);
-    if (execution.status === 'running' || execution.status === 'pending') return { ...execution, runs };
+    if (isLiveExecution(execution.status)) return { ...execution, runs };
     return { ...execution, runs: await this.settledRuns(runs) };
   }
 
@@ -1481,7 +1644,7 @@ ${serialized}`).digest('hex');
       }
     }
     for (const run of latest.values()) {
-      if (run.status !== 'running' && run.status !== 'pending') {
+      if (run.status !== 'running' && run.status !== 'pending' && run.status !== 'paused') {
         out.push(run);
         continue;
       }
@@ -1499,7 +1662,7 @@ ${serialized}`).digest('hex');
 
   async cancelExecution(executionId: string): Promise<void> {
     const execution = await this.executionRepo.getExecutionById(executionId);
-    if (execution.status !== 'running' && execution.status !== 'pending') {
+    if (!isLiveExecution(execution.status)) {
       throw new Error(`Cannot cancel execution in ${execution.status} state`);
     }
 
@@ -1511,7 +1674,7 @@ ${serialized}`).digest('hex');
     // Cancel all pending/running workflow runs in this execution
     const runs = await this.executionRepo.getExecutionRunsByExecutionId(executionId);
     for (const run of runs) {
-      if (run.status === 'running' || run.status === 'pending') {
+      if (run.status === 'running' || run.status === 'pending' || run.status === 'paused') {
         try {
           if (run.workflowRunId) await this.workflowRunService.command(run.workflowRunId, { command: 'cancel' });
         } catch {
@@ -1538,6 +1701,8 @@ ${serialized}`).digest('hex');
    *  apps/server/src/composition-root.ts calls on graceful shutdown. */
   shutdown(): void {
     this.stopPoller();
+    this.pauseUnsubscribe?.();
+    this.pauseUnsubscribe = null;
   }
 }
 

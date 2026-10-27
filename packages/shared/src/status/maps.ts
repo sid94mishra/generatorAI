@@ -77,6 +77,8 @@ export const STATUS_MAPS = {
   automationExecution: {
     pending: m('queued'),
     running: m('running'),
+    // U-85: every run it waits on is paused for a person.
+    paused: m('paused'),
     completed: m('succeeded'),
     partial: m('failed', 'Partly failed'),
     failed: m('failed'),
@@ -88,6 +90,7 @@ export const STATUS_MAPS = {
   automationRunItem: {
     pending: m('queued'),
     running: m('running'),
+    paused: m('paused'),
     completed: m('succeeded'),
     failed: m('failed'),
     cancelled: m('skipped', 'Cancelled'),

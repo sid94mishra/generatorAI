@@ -699,6 +699,12 @@ export function reduceEvent(
     case 'automation_execution.cancelled':
       return push(base, { id: itemId(), kind: 'notice', text: 'Execution cancelled', complete: true, at: now, level: 'warn' }, options);
 
+    case 'automation_execution.paused':
+      return push(base, { id: itemId(), kind: 'notice', text: `Execution paused: ${str(data['reason'])}`, complete: true, at: now, level: 'warn' }, options);
+
+    case 'automation_execution.resumed':
+      return push(base, { id: itemId(), kind: 'notice', text: 'Execution resumed', complete: true, at: now, level: 'info' }, options);
+
     case 'automation_execution.recovered':
       return push(
         base,

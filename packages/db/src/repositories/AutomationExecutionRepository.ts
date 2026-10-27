@@ -92,7 +92,7 @@ export class DrizzleAutomationExecutionRepository {
     return rows.map((r) => this.mapExecutionRow(r));
   }
 
-  async updateExecution(id: string, updates: Partial<AutomationExecution>): Promise<AutomationExecution> {
+  async updateExecution(id: string, updates: Partial<Omit<AutomationExecution, 'error'>> & { error?: string | null }): Promise<AutomationExecution> {
     const values: Partial<typeof automationExecutions.$inferInsert> = {};
     if (updates.status !== undefined) values.status = updates.status;
     if (updates.totalIterations !== undefined) values.totalIterations = updates.totalIterations;

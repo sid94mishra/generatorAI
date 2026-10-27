@@ -82,7 +82,7 @@ export class AutomationRecoveryService {
         automation.id,
       );
       for (const exec of executions) {
-        if (exec.status !== 'running' && exec.status !== 'pending') continue;
+        if (exec.status !== 'running' && exec.status !== 'pending' && exec.status !== 'paused') continue;
         scanned++;
         const recoveredExec = await this.recoverOne(exec);
         if (recoveredExec) recovered++;
@@ -214,7 +214,8 @@ export class AutomationRecoveryService {
       status: finalStatus,
       completedIterations: completed,
       failedIterations: failed,
-      error: errorMsg,
+      // `null` clears a paused execution's reason (U-85).
+      error: errorMsg ?? null,
       completedAt: new Date(),
     });
 
@@ -232,7 +233,7 @@ export class AutomationRecoveryService {
     const settle = (): void => {
       void (async () => {
         const current = await this.executionRepo.getExecutionById(exec.id).catch(() => null);
-        if (!current || (current.status !== 'running' && current.status !== 'pending')) return this.unwatch(exec.id);
+        if (!current || (current.status !== 'running' && current.status !== 'pending' && current.status !== 'paused')) return this.unwatch(exec.id);
         // No re-drive: the boot pass already offered the execution to the resume hook.
         const done = await this.recoverOne(current, { resume: false });
         if (done) this.unwatch(exec.id);

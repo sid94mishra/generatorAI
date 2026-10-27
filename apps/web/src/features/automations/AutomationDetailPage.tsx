@@ -67,6 +67,11 @@ function formatDuration(ms: number): string {
 /** Client-side equivalent of D-58's G-10 stats: no automation-stats endpoint
  *  exists, so this aggregates the already-fetched execution list — real
  *  data, computed in the browser (D-36). */
+/** Still being driven, so it can be cancelled: queued, running or paused on its runs (U-85). */
+function isLive(status: AutomationExecution['status'] | undefined): boolean {
+  return status === 'pending' || status === 'running' || status === 'paused';
+}
+
 function computeStats(executions: readonly AutomationExecution[] | undefined) {
   // A skipped slot (U-78) is history, not an execution: it counts towards none of the stats.
   const list = (executions ?? []).filter((e) => e.status !== 'skipped');
@@ -110,8 +115,10 @@ export function AutomationDetailPage() {
 
   const { data: selectedExecution } = useAutomationExecution(selectedExecutionId ? id : undefined, selectedExecutionId ?? undefined);
   useAutomationExecutionStream(id, selectedExecutionId ?? undefined, {
-    enabled: Boolean(selectedExecutionId) && (selectedExecution?.status === 'running' || selectedExecution?.status === 'pending'),
+    enabled: Boolean(selectedExecutionId) && isLive(selectedExecution?.status),
   });
+  // U-85: the run a paused execution waits on, for the callout's Open run.
+  const pausedRun = selectedExecution?.status === 'paused' ? selectedExecution.runs.find((r) => r.status === 'paused' && r.workflowRunId) : undefined;
   const selectedRun = selectedExecution?.runs.find((r) => r.id === selectedRunId);
   const { data: selectedRunData } = useWorkflowRun(selectedRun?.workflowRunId ?? undefined);
 
@@ -269,7 +276,7 @@ export function AutomationDetailPage() {
                     setSelectedRunId(null);
                   }}
                   rowActions={(row) =>
-                    row.status === 'running' || row.status === 'pending' ? (
+                    isLive(row.status) ? (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -296,7 +303,24 @@ export function AutomationDetailPage() {
               <Card data-testid="execution-detail">
                 <Card.Header title={`Execution #${selectedExecutionId.slice(0, 8)}…`} action={<Button variant="ghost" size="sm" onClick={() => setSelectedExecutionId(null)}>Close</Button>} />
                 <Card.Body>
-                  {selectedExecution.error ? <Callout tone={selectedExecution.status === 'skipped' ? 'info' : 'err'}>{selectedExecution.error}</Callout> : null}
+                  {selectedExecution.status === 'paused' ? (
+                    <Callout
+                      tone="warn"
+                      title="Paused — waiting for you"
+                      action={
+                        pausedRun ? (
+                          <Button size="sm" render={<RouterLink to={`/workflows/${pausedRun.workflowDefinitionId}/runs/${pausedRun.workflowRunId}`} />}>
+                            Open run
+                          </Button>
+                        ) : undefined
+                      }
+                      data-testid="execution-paused"
+                    >
+                      {selectedExecution.error ?? 'A run paused.'} Retry it from the run, or cancel the execution.
+                    </Callout>
+                  ) : selectedExecution.error ? (
+                    <Callout tone={selectedExecution.status === 'skipped' ? 'info' : 'err'}>{selectedExecution.error}</Callout>
+                  ) : null}
                   {selectedExecution.runs.length === 0 ? (
                     <p className="text-small text-fg-3">{selectedExecution.status === 'skipped' ? 'Nothing ran.' : 'No workflow runs yet.'}</p>
                   ) : (

@@ -487,3 +487,173 @@ describe('Item 38 — DB-backed due-row scheduler', () => {
     expect(mixed.events.some((e) => e.kind === 'automation_execution.completed')).toBe(false);
   });
 });
+
+// ── U-85: a run paused for a person pauses its execution ─────────────
+
+type FakeStage = { instanceId: string; key: string; instancePath: string; name: string; status: string; statusReason: string | null; error?: string };
+
+/**
+ * One controllable run: `stage` is its only stage, `finish()` finalizes it. `waitFor` honours its timeout
+ * as a work-clock slice: under `vi.useFakeTimers({ toFake: ['Date'] })` it advances the clock by the slice.
+ */
+function pausableHarness() {
+  const base = setup();
+  const run = { id: 'run-p', status: 'running', error: null as string | null, trigger: { kind: 'automation', executionId: '' } };
+  const stage: FakeStage = { instanceId: 'st-1', key: 'patrol', instancePath: 'patrol', name: 'Patrol', status: 'running', statusReason: null };
+  const finished: Array<() => void> = [];
+  const commands: string[] = [];
+  let sliced = false;
+  const digest = () => ({
+    runId: run.id,
+    status: run.status,
+    statusReason: null,
+    finalized: ['completed', 'failed', 'cancelled'].includes(run.status),
+    error: run.error,
+    stages: [{ ...stage }],
+    pendingApprovals: [],
+    postProcessing: [],
+  });
+  const eventBus = new EventBus();
+  const events: PersistedEvent[] = [];
+  eventBus.subscribeGlobal((e) => events.push(e));
+  const service = new AutomationService(
+    base.automationRepo,
+    base.executionRepo,
+    { command: async (_id: string, c: { command: string }) => { commands.push(c.command); run.status = 'cancelled'; finished.splice(0).forEach((f) => f()); } } as unknown as WorkflowRunService,
+    {
+      invoke: async (_req: unknown, ctx: { trigger: { executionId: string } }) => {
+        run.trigger.executionId = ctx.trigger.executionId;
+        return { runId: run.id };
+      },
+      waitFor: async (_id: string, opts: { timeoutMs: number }) => {
+        if (digest().finalized) return { ...digest(), waited: 'finalized' };
+        if (sliced) {
+          await new Promise((resolve) => setImmediate(resolve));
+          vi.setSystemTime(Date.now() + opts.timeoutMs);
+          return { ...digest(), waited: digest().finalized ? 'finalized' : 'timeout' };
+        }
+        await new Promise<void>((resolve) => finished.push(resolve));
+        return { ...digest(), waited: 'finalized' };
+      },
+      digest: async () => digest(),
+    } as unknown as Pick<WorkflowInvocationService, 'invoke' | 'waitFor' | 'digest'>,
+    { getById: async () => ({ ...run }) } as unknown as IWorkflowRunRepository,
+    {} as unknown as WorkflowDefinitionService,
+    eventBus,
+    mockLogger(),
+    makeEngine(),
+    undefined,
+    { pollIntervalMs: 1_000_000, leaseMs: 60_000 },
+  );
+  base.automationRepo.seed(scheduleAutomation({ triggerType: 'manual' }));
+  return {
+    ...base,
+    service,
+    events,
+    run,
+    stage,
+    commands,
+    useSlices: () => { sliced = true; },
+    finish: (status: 'completed' | 'failed', error?: string) => {
+      run.status = status;
+      run.error = error ?? null;
+      finished.splice(0).forEach((f) => f());
+    },
+  };
+}
+
+describe('U-85 — a paused run pauses its execution', () => {
+  it('names the paused stage and why', async () => {
+    const { runPauseOf } = await import('../src/services/AutomationService.js');
+    const stage = { instanceId: 'i', key: 'k', instancePath: 'k', name: 'Patrol', statusReason: 'retries_exhausted' };
+    expect(runPauseOf({ status: 'waiting', statusReason: null, stages: [{ ...stage, status: 'paused', error: "API Error: Can't reach the API server" }] })).toBe(
+      "Patrol paused: API Error: Can't reach the API server",
+    );
+    expect(runPauseOf({ status: 'running', statusReason: null, stages: [{ ...stage, status: 'running' }] })).toBeNull();
+    expect(runPauseOf({ status: 'paused', statusReason: 'budget_exhausted', stages: [] })).toBe('The run paused (budget_exhausted).');
+  });
+
+  it('shows Paused with the reason while the stage waits, Running once it resumes, and clears the reason when it completes', async () => {
+    const h = pausableHarness();
+    const execution = await h.service.triggerManual(AUTOMATION_ID);
+    await flush();
+
+    Object.assign(h.stage, { status: 'paused', statusReason: 'retries_exhausted', error: "Can't reach the API server (ENOTFOUND)" });
+    await h.service.queueRunPauseProjection(h.run.id);
+    let row = await h.executionRepo.getExecutionById(execution.id);
+    expect(row.status).toBe('paused');
+    expect(row.error).toBe("Patrol paused: Can't reach the API server (ENOTFOUND)");
+    expect((await h.executionRepo.getExecutionRunsByExecutionId(execution.id))[0]!.status).toBe('paused');
+    expect(h.events.some((e) => e.kind === 'automation_execution.paused')).toBe(true);
+
+    Object.assign(h.stage, { status: 'running', statusReason: null, error: undefined });
+    await h.service.queueRunPauseProjection(h.run.id);
+    row = await h.executionRepo.getExecutionById(execution.id);
+    expect(row.status).toBe('running');
+    expect(row.error ?? null).toBeNull();
+
+    Object.assign(h.stage, { status: 'paused', error: 'again' });
+    await h.service.queueRunPauseProjection(h.run.id);
+    h.finish('completed');
+    await flush();
+    row = await h.executionRepo.getExecutionById(execution.id);
+    expect(row.status).toBe('completed');
+    expect(row.error ?? null).toBeNull();
+  });
+
+  it('a scheduled slot that finds it paused says it waits for you', async () => {
+    const h = pausableHarness();
+    const execution = await h.service.triggerManual(AUTOMATION_ID);
+    await flush();
+    Object.assign(h.stage, { status: 'paused', error: 'offline' });
+    await h.service.queueRunPauseProjection(h.run.id);
+    await h.automationRepo.update(AUTOMATION_ID, { triggerType: 'schedule', nextRunAt: new Date(Date.now() - 1_000) } as Partial<Automation>);
+
+    await h.service.runSchedulerTick();
+    await flush();
+
+    const skipped = [...h.executions.values()].find((e) => e.status === 'skipped');
+    expect(skipped?.error).toMatch(/paused and waiting for you/);
+    expect((await h.executionRepo.getExecutionById(execution.id)).status).toBe('paused');
+  });
+
+  it('a failed run gives the execution its reason', async () => {
+    const h = pausableHarness();
+    const execution = await h.service.triggerManual(AUTOMATION_ID);
+    await flush();
+    h.finish('failed', 'Patrol failed: no GitHub token');
+    await flush();
+    const row = await h.executionRepo.getExecutionById(execution.id);
+    expect(row.status).toBe('failed');
+    expect(row.error).toBe('Patrol failed: no GitHub token');
+  });
+
+  it('time paused for a person is not work time; a run still working after the limit is stopped', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const paused = pausableHarness();
+      paused.useSlices();
+      Object.assign(paused.stage, { status: 'paused', error: 'offline' });
+      const waiting = await paused.service.triggerManual(AUTOMATION_ID);
+      // Three hours of one-minute slices go by paused: no timeout, nothing stopped.
+      for (let i = 0; i < 100; i++) await flush();
+      expect(paused.commands).toEqual([]);
+      expect((await paused.executionRepo.getExecutionById(waiting.id)).status).not.toBe('failed');
+      paused.finish('completed');
+      for (let i = 0; i < 3; i++) await flush();
+      expect((await paused.executionRepo.getExecutionById(waiting.id)).status).toBe('completed');
+
+      const working = pausableHarness();
+      working.useSlices();
+      const execution = await working.service.triggerManual(AUTOMATION_ID);
+      for (let i = 0; i < 400 && working.commands.length === 0; i++) await flush();
+      await flush();
+      expect(working.commands).toEqual(['cancel']);
+      const row = await working.executionRepo.getExecutionById(execution.id);
+      expect(row.status).toBe('failed');
+      expect(row.error).toMatch(/still working after 2 hours, so it was stopped/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

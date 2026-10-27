@@ -309,6 +309,8 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'automation_execution.failed': 'item',
   'automation_execution.partial': 'item',
   'automation_execution.cancelled': 'item',
+  'automation_execution.paused': 'item',
+  'automation_execution.resumed': 'item',
   'automation_execution.recovered': 'item',
   'automation.schedule_skipped': 'item',
   'automation.schedule_deferred': 'item',
