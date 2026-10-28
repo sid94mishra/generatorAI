@@ -1684,6 +1684,15 @@ Note and Preview no longer open text areas over the diff. The pending bar reads 
 · K addressed" with Discard and **Review & send**, which opens a dialog listing each pending comment (file, lines,
 intent, text; show in diff, delete), an optional note for the agent, a Preview of the exact message and one Send.
 
+### D-165 Floating layers re-base the depth tokens on overlay (owner, 2026-10-28) — Final
+The boards put fields and segmented tracks on `sunken` and secondary buttons and selected segments on `raised` everywhere,
+including inside dialogs drawn on `overlay`. On a page those sit one small step below / above `surface`; on `overlay` both are
+darker than the dialog, so every control in a modal read as a dark hole (owner report, Edit sources dialog). Every
+`data-gai-overlay` layer now sets `raised` = `overlay` and moves `sunken` and `line-soft` onto the overlay at the same contrast
+step they keep from `surface` (02 §2.3 "Inside floating layers"). One generated CSS rule, no component changes; light themes
+barely move because their `sunken` is already one small step below a white overlay. Dialog dividers drawn in `line-soft`,
+invisible on overlay before, now show as they do on a page.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

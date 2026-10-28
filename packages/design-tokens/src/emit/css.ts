@@ -42,12 +42,14 @@
 import {
   DESIGN_ACCENT_KEYS,
   DESIGN_COLOR_VARS,
+  OVERLAY_COLOR_VARS,
   HEIGHTS,
   MOTION_CSS,
   CONTAINER_WIDTHS,
   TYPE_SCALE,
   Z_INDEX,
   radiusScale,
+  resolveOverlayTokens,
   resolveDesignTokens,
   typeSizes,
 } from '../design.js';
@@ -141,6 +143,8 @@ function designAppearanceBlock(theme: ThemeDef, appearance: Appearance, selector
   const d = resolveDesignTokens(theme, appearance, theme.defaultAccent);
   const lines = [`${selector} {`, `  color-scheme: ${appearance};`];
   for (const [key, name] of DESIGN_COLOR_VARS) lines.push(`  ${name}: ${d[key]};`);
+  const o = resolveOverlayTokens(d);
+  for (const [key, name] of OVERLAY_COLOR_VARS) lines.push(`  ${name}: ${o[key]};`);
   if (appearance === 'dark') {
     // Radius is appearance-independent, so it rides on the dark (base) block
     // only; the light block overrides colours alone (D-14, 02 §6.1).
@@ -165,6 +169,21 @@ function designAccentBlock(theme: ThemeDef, accentId: AccentId, appearance: Appe
 }
 
 export const DESIGN_LAYER_HEADER = '/* ── Layer 1b — design values (--gai-*) ── */';
+
+/**
+ * Inside a floating layer the overlay is the base surface (D-165): `raised`
+ * is the overlay itself and `sunken` / `line-soft` keep their page step on it,
+ * so fields, segmented tracks, secondary buttons and dividers in a dialog look
+ * as they do on a page. Every floating layer carries `data-gai-overlay` (D-19).
+ */
+function overlayRebaseBlock(): string {
+  return [
+    '[data-gai-overlay] {',
+    '  --gai-raised: var(--gai-overlay);',
+    ...OVERLAY_COLOR_VARS.map(([key, name]) => `  ${designVar(key)}: var(${name});`),
+    '}',
+  ].join('\n');
+}
 
 /**
  * Layer 1b: the design layer, on the specificity ladder above. Unlike Layer 1,
@@ -192,6 +211,7 @@ function designLayer(base: ThemeDef): string[] {
       sections.push(designAccentBlock(theme, accentId, 'light'));
     }
   }
+  sections.push(overlayRebaseBlock());
   return sections;
 }
 

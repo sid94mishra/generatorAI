@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { contrastRatio, flatten, parseHex, relativeLuminance, type Rgba } from '../color.js';
-import { DESIGN_ACCENT_KEYS, DESIGN_COLOR_VARS, resolveDesignTokens, type DesignTokens } from '../design.js';
+import { DESIGN_ACCENT_KEYS, DESIGN_COLOR_VARS, resolveDesignTokens, resolveOverlayTokens, type DesignTokens } from '../design.js';
 import { ACCENT_IDS, THEMES, type Appearance, type ThemeDef } from '../themes/index.js';
 
 const APPEARANCES: Appearance[] = ['dark', 'light'];
@@ -212,6 +212,23 @@ describe('design layer — WCAG suite (252 combinations)', () => {
       for (const token of ['fg', 'fg2', 'fg3'] as const) expectOn(label, token, t[token], textBacks(t), 7);
       for (const token of ['runText', 'okText', 'warnText', 'errText'] as const) expectOn(label, token, t[token], fiveSurfaces(t), 7);
     }
+  });
+
+  it('14b: inside a floating layer, fields keep their page step and every text and edge clamp (D-165)', () => {
+    for (const { label, min, tokens: t } of MATRIX7) {
+      const o = resolveOverlayTokens(t);
+      const backs = { 'overlay-sunken': o.sunken };
+      for (const token of ['fg', 'fg2', 'fg3', 'runText', 'okText', 'warnText', 'errText'] as const) expectOn(label, token, t[token], backs, min);
+      expectOn(label, 'line-strong', t.lineStrong, backs, 3);
+      expectOn(label, 'focus', t.focus, backs, 3);
+      for (const key of ['sunken', 'lineSoft'] as const) {
+        const page = contrastRatio(t[key], t.surface);
+        expect(contrastRatio(o[key], t.overlay), `${label}: overlay ${key} ${o[key]} loses the page step ${page.toFixed(3)}`).toBeGreaterThanOrEqual(page - 0.01);
+      }
+    }
+    const instrument = THEMES.find((th) => th.id === 'instrument')!;
+    expect(resolveOverlayTokens(resolveDesignTokens(instrument, 'dark', 'ink'))).toEqual({ sunken: '#1a1a1e', lineSoft: '#27272b' });
+    expect(resolveOverlayTokens(resolveDesignTokens(instrument, 'light', 'ink'))).toEqual({ sunken: '#f6f6f4', lineSoft: '#ecece9' });
   });
 
   it('14: Instrument reproduces the board surfaces and the 02 §2.3 derived values', () => {

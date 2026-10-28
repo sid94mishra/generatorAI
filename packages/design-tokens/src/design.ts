@@ -264,6 +264,51 @@ export function resolveDesignTokens(theme: ThemeDef, appearance: Appearance, acc
   };
 }
 
+/** The tokens a floating layer re-bases on `overlay` (D-165), and their raw variables. */
+export interface OverlayTokens {
+  sunken: string;
+  lineSoft: string;
+}
+export const OVERLAY_COLOR_VARS: ReadonlyArray<readonly [keyof OverlayTokens, string]> = [
+  ['sunken', '--gai-overlay-sunken'],
+  ['lineSoft', '--gai-overlay-line-soft'],
+];
+
+/**
+ * `token` moved from `surface` onto `overlay`: the colour that sits the same
+ * contrast step from `overlay`, on the same side, that `token` sits from
+ * `surface`. It walks toward `token` itself when that is far enough past the
+ * overlay, otherwise toward `fg` (a soft line darker than a dark overlay).
+ */
+function keepPageStep(token: string, surface: string, overlay: string, fg: string): string {
+  const step = contrastRatio(token, surface);
+  const lighter = lum(token) > lum(surface);
+  const beyond = lum(token) > lum(overlay) === lighter && contrastRatio(token, overlay) >= step;
+  const end = beyond || lighter !== lum(fg) > lum(overlay) ? token : fg;
+  for (let k = 0; k <= 100; k += 1) {
+    const candidate = oklabMix(overlay, end, k / 100);
+    if (contrastRatio(candidate, overlay) >= step) return hex(candidate);
+  }
+  return end;
+}
+
+/**
+ * The page's depth tokens inside a floating layer (D-165). On a page, `sunken`
+ * (fields, segmented tracks) sits one small step below `surface` and
+ * `line-soft` one small step off it. Inside a dialog the absolute values sit far
+ * below `overlay` (every field reads as a hole) or vanish into it (track edges,
+ * dividers). These keep each step on `overlay`, so a control in a dialog looks
+ * like the same control on a page. `sunken` stays between `overlay` and the
+ * absolute `sunken`, both text backdrops, so every text and edge clamp holds.
+ * `raised` becomes `overlay` itself (CSS only): the overlay is the top of the ladder.
+ */
+export function resolveOverlayTokens(t: Pick<DesignTokens, 'surface' | 'overlay' | 'sunken' | 'lineSoft' | 'fg'>): OverlayTokens {
+  return {
+    sunken: keepPageStep(t.sunken, t.surface, t.overlay, t.fg),
+    lineSoft: keepPageStep(t.lineSoft, t.surface, t.overlay, t.fg),
+  };
+}
+
 // ────────────────────────────────────────────────────────────────
 // Scales (P1-T6): radius, type, heights + density, z-order, motion, shell
 // widths. Web values; `geometry.ts` collects them per platform (M-04).
