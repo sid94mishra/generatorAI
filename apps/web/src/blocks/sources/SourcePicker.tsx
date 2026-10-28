@@ -890,6 +890,13 @@ function BranchToken({
         ) : (
           <p className="text-small text-fg-3">The agent works on the branch that is checked out{currentBranch ? ` (${currentBranch})` : ''}.</p>
         )}
+        {draft.mode === 'in-place' && draft.branchMode !== 'current' ? (
+          // In place there is no copy: the branch moves in the user's own checkout (refused while it is dirty).
+          <p className="flex items-start gap-2 text-small text-warn" data-testid="source-branch-in-place-warning">
+            <Icon concept="warning" size={14} className="mt-0.5 shrink-0" />
+            <span>Switches the branch of your own folder, which your editor and terminals also see. Refused while it has uncommitted changes.</span>
+          </p>
+        ) : null}
         <div className="flex items-center gap-2">
           <span className="min-w-0 flex-1 text-small text-fg-3">
             {draft.branchMode === 'new' ? 'Created when you save.' : draft.branchMode === 'existing' ? 'Checked out when you save.' : ''}
