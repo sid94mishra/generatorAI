@@ -1720,6 +1720,24 @@ uncommitted badge has no count (mounts record only whether changes exist, D-36);
 warning (committing needs the Changes ship flow; the warning says to commit first or Cancel); no project search (Select-
 sized lists). The compact NewChat list is unchanged.
 
+### D-168 One rule-file policy for every provider (derived, 2026-10-28) — Final
+Each provider loads a different repo rule file (Codex AGENTS.md from the cwd, Copilot its own, Claude none — it runs with
+`settingSources: []` so a repo's hooks and settings never execute) and none reads a non-primary mount's. The `[Workspace]`
+block therefore names the rule files of EVERY mount (`AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, checked
+per mount at compose time) and tells the agent to read a mount's rules before changing it. Claude stays without setting
+sources: following a repo's CLAUDE.md is wanted, running its hooks is not.
+
+### D-169 Every provider sees every mount, and a live source edit reaches it (derived, 2026-10-28) — Final
+Copilot adds each extra directory to the session's path allow-list (`session.permissions.paths.add`, after create and
+resume); OpenCode grants them through the session's own `external_directory` allow rules (create, and PATCH on rebind).
+After "Edit sources" on a live chat the next prompt starts with the current `[Workspace]` block, marked as replacing the
+earlier one — the one path that works for every provider (a live Codex thread cannot swap its instructions). A provider
+whose session cannot follow a moved working directory (OpenCode, ACP; Copilot when resume fails) starts a new one and
+reports `CONVERSATION_RESTARTED`; the chat then seeds it with the transcript once, as a provider move does (E-4).
+An orchestrator worker spawned with `sharedWorkspace: false` gets worktrees of its own on new branches cut from the
+orchestrator's current commit, in-place git mounts included, with the orchestrator's uncommitted files laid over them;
+the spawn result names each branch to merge. Plain folders stay shared. The default stays shared.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

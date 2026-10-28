@@ -869,7 +869,18 @@ export class MountService {
    * parent's own, with every worktree re-pointed at a NEW branch that starts
    * from the commit the parent's worktree is on right now.
    */
-  async sourcesForFork(parentWorkspaceId: string, sources: ChatSourceSpec[]): Promise<ChatSourceSpec[]> {
+  async sourcesForFork(
+    parentWorkspaceId: string,
+    sources: ChatSourceSpec[],
+    opts: {
+      /**
+       * Also give an in-place git mount a worktree of its own (an isolated
+       * orchestrator worker): without it two parallel workers still edit the
+       * one folder. A plain folder has no git to cut a worktree from and stays shared.
+       */
+      isolateInPlace?: boolean;
+    } = {},
+  ): Promise<ChatSourceSpec[]> {
     const mounts = await this.list(parentWorkspaceId);
     const out: ChatSourceSpec[] = [];
     for (const spec of sources) {
@@ -883,7 +894,8 @@ export class MountService {
           : (!!m.originPath && path.resolve(m.originPath) === path.resolve(spec.path)) ||
             (!!spec.alias && m.alias === spec.alias),
       );
-      if (!mount || mount.mode !== 'worktree' || !mount.git?.isRepo) {
+      const cut = mount?.mode === 'worktree' || (opts.isolateInPlace === true && mount?.mode === 'in-place');
+      if (!mount || !cut || !mount.git?.isRepo) {
         out.push(spec);
         continue;
       }

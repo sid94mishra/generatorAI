@@ -42,8 +42,9 @@ export const TaskBriefSchema = z.object({
   boundaries: z.string().max(4000).optional().default(''),
   /**
    * Share the orchestrator's workspace (default true) so this worker's file
-   * changes land in the SAME filesystem the orchestrator sees. Set false only
-   * for a fully-isolated worker (e.g. throwaway exploration).
+   * changes land in the SAME filesystem the orchestrator sees. False gives the
+   * worker its own worktrees on new branches cut from the orchestrator's
+   * current commit (uncommitted files carried over), for parallel edits.
    */
   sharedWorkspace: z.boolean().optional().default(true),
   /** Per-task budget. */

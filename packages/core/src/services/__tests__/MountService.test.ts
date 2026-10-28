@@ -478,6 +478,27 @@ describe('buildExposure', () => {
     expect(exposure.hint).toContain(`Scratch directory: ${scratchDir}`);
   });
 
+  it("names every mount's rule files, not only the working directory's (D-168)", async () => {
+    const api = await tmpDir();
+    const web = await tmpDir();
+    await fs.writeFile(path.join(api, 'AGENTS.md'), '# rules');
+    await fs.mkdir(path.join(web, '.github'));
+    await fs.writeFile(path.join(web, 'CLAUDE.md'), '# rules');
+    await fs.writeFile(path.join(web, '.github', 'copilot-instructions.md'), '# rules');
+    const { hint } = buildExposure(workspace, [
+      mount({ alias: 'api', path: api, position: 0 }),
+      mount({ alias: 'web', path: web, position: 1 }),
+    ]);
+
+    const rules = [
+      path.join(api, 'AGENTS.md'),
+      path.join(web, 'CLAUDE.md'),
+      path.join(web, '.github', 'copilot-instructions.md'),
+    ];
+    expect(hint).toContain(`Project rules: ${rules.join(', ')}`);
+    expect(buildExposure(workspace, [mount({ alias: 'x', path: path.join(path.sep, 'nowhere') })]).hint).not.toContain('Project rules');
+  });
+
   it('is byte-identical for the same mounts, whatever order they arrive in', () => {
     const api = path.join(path.sep, 'home', 'me', 'api');
     const web = path.join(path.sep, 'home', 'me', 'web');

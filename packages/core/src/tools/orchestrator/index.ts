@@ -63,6 +63,14 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
             '(see list_available_agents). Gives the worker that agent\'s instructions, skills, ' +
             'MCP servers and tool policy. Omit for a generic worker.',
         },
+        sharedWorkspace: {
+          type: 'boolean',
+          description:
+            'Default true: the worker edits YOUR folders and branch, so its changes appear where you work. ' +
+            'Set false when parallel workers would edit the same files: the worker gets its own worktrees on new ' +
+            'branches cut from your current commit (your uncommitted files included); the spawn result names them, ' +
+            'and you merge the branch you accept. Plain (non-git) folders stay shared.',
+        },
       },
       required: ['taskName', 'objective'],
     },

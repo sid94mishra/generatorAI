@@ -26,7 +26,7 @@ import type {
 import { generateId, DEFAULT_AGENT_MODE, ValidationError, chatSourceAlias, isMountableSource } from '@generatorai/shared';
 import { PLAN_GATE_COPY } from '@generatorai/shared/ui-contract';
 import * as path from 'node:path';
-import type { ChatSourceSpec, ExecutionWorkspace, WorkspaceExposure } from '@generatorai/shared';
+import type { ChatSourceSpec, ExecutionWorkspace, WorkspaceExposure, WorkspaceMount } from '@generatorai/shared';
 import * as fs from 'node:fs/promises';
 import type { IChatRepository } from '../domain/ports/IChatRepository.js';
 import type { ISessionRepository, IChatMessageRepository } from '../domain/ports/IRepositories.js';
@@ -314,6 +314,30 @@ export class ChatManagementService {
     }
     for (const p of notice.restoredPaths) paths.add(p);
     for (const p of notice.deletedPaths) paths.add(p);
+  }
+
+  // "Edit sources" on a live chat rebinds the conversation with a new
+  // `[Workspace]` block, but not every provider can replace the instructions
+  // of a session that already runs (a live Codex thread keeps the ones it
+  // started with). So the next prompt carries the current block once, as the
+  // authority over whatever the session was told before.
+  private readonly sourcesEdited = new Set<string>();
+
+  /** The current `[Workspace]` block when the chat's sources were edited since the last turn, consumed. */
+  private async drainSourcesNotice(chat: Chat): Promise<string> {
+    if (!this.sourcesEdited.delete(chat.id)) return '';
+    const manager = this.extensions.workspaceManager;
+    const mounts = this.extensions.mountService;
+    if (!manager || !mounts || !chat.workspaceId) return '';
+    const workspace = await manager.getExecutionWorkspace(chat.workspaceId).catch(() => null);
+    if (!workspace) return '';
+    const { hint } = await mounts.exposure(workspace);
+    return (
+      '[Sources changed — the user edited this chat\'s sources since your last turn. ' +
+      'This replaces the [Workspace] block you were given before.]\n' +
+      hint +
+      '\n\n'
+    );
   }
 
   /** The notice for `chatId`, consumed. Empty string when there is none. */
@@ -1326,8 +1350,10 @@ export class ChatManagementService {
     });
     const session = await this.sessionRepo.getById(chat.sessionId);
     void mounts.prepare(workspace.id, { sessionId: chat.sessionId, chatId });
-    // The cwd / hint changed: force the next turn to rebind the conversation.
+    // The cwd / hint changed: force the next turn to rebind the conversation,
+    // and tell the agent the new layout in front of its next prompt.
     if (session.conversationId) this.conversationBindings.delete(session.conversationId);
+    if (await this.messageRepo.getByChatId(chatId).then((m) => m.length > 0, () => false)) this.sourcesEdited.add(chatId);
     return updated;
   }
 
@@ -1994,6 +2020,18 @@ export class ChatManagementService {
           'resume the conversation',
         );
         this.conversationBindings.set(session.conversationId, desiredBinding);
+        // A provider whose session could not follow the rebind (OpenCode after the working directory moved)
+        // started a fresh one: seed it with the transcript once, as a provider move does (E-4).
+        const restarted = this.harness
+          .getConversationWarnings(session.conversationId)
+          .some((w) => w.code === 'CONVERSATION_RESTARTED');
+        if (restarted && !chat.conversationSeed) {
+          const seed = buildConversationSeed(await this.messageRepo.getByChatId(chatId));
+          if (seed) {
+            chat.conversationSeed = seed;
+            await this.chatRepo.update(chatId, { conversationSeed: seed });
+          }
+        }
       } catch {
         try {
           await withDeadline(
@@ -2386,6 +2424,8 @@ export class ChatManagementService {
 
       const restoreNotice = this.drainRestoreNotice(chatId);
       if (restoreNotice) promptForHarness = restoreNotice + promptForHarness;
+      const sourcesNotice = await this.drainSourcesNotice(chat);
+      if (sourcesNotice) promptForHarness = sourcesNotice + promptForHarness;
 
       // E-5 — the previous reply was cut off (the app quit mid-turn, a crash, a Stop). The chat kept what was
       // written, but the provider session records only finished messages: asked to continue, the agent said it had
@@ -2749,6 +2789,35 @@ export class ChatManagementService {
     await this.sessionRepo.update(chat.sessionId, { providerSessionId: '' });
     await this.chatRepo.update(chat.id, { conversationSeed: buildConversationSeed(opts.kept) });
     return 'synthetic';
+  }
+
+  /**
+   * The sources an ISOLATED orchestrator worker is created with: the parent's,
+   * with every git mount — worktree or in place — cut into a new worktree on a
+   * new branch from the commit the parent is on now. Parallel workers then
+   * edit their own copies instead of one folder. Undefined when the parent has
+   * no workspace or sources to copy.
+   */
+  async isolatedWorkerSources(parentChatId: string): Promise<ChatSourceSpec[] | undefined> {
+    const parent = await this.chatRepo.getById(parentChatId);
+    const mounts = this.extensions.mountService;
+    if (!mounts || !parent.workspaceId || !parent.sources?.length) return undefined;
+    return mounts.sourcesForFork(parent.workspaceId, parent.sources, { isolateInPlace: true });
+  }
+
+  /**
+   * Make an isolated worker's fresh worktrees look like its parent's working
+   * tree (uncommitted files included) before its first turn, and return the
+   * worker's mounts so the orchestrator can be told where the work will land.
+   */
+  async seedIsolatedWorker(workerChatId: string, parentChatId: string): Promise<WorkspaceMount[]> {
+    const mounts = this.extensions.mountService;
+    const [worker, parent] = await Promise.all([this.chatRepo.getById(workerChatId), this.chatRepo.getById(parentChatId)]);
+    if (!mounts || !worker.workspaceId || !parent.workspaceId || worker.workspaceId === parent.workspaceId) return [];
+    await mounts.ready(worker.workspaceId);
+    await mounts.seedFrom(parent.workspaceId, worker.workspaceId);
+    await mounts.refreshStatus(worker.workspaceId).catch(() => undefined);
+    return mounts.list(worker.workspaceId);
   }
 
   /** Rewrite persisted anchors after a provider re-keyed the history. */

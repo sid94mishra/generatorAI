@@ -179,7 +179,14 @@ export interface ConversationWarning {
      * the copy is "its tools are unavailable", not "this provider ignores it".
      * `params.server` names it; `params.status` / `params.reason` say why.
      */
-    | 'MCP_SERVER_FAILED';
+    | 'MCP_SERVER_FAILED'
+    /**
+     * The provider could not carry the conversation into its rebound session
+     * (e.g. its working directory moved and the provider's sessions cannot
+     * move with it): the session is new and remembers nothing of the chat.
+     * The caller hands it the transcript once.
+     */
+    | 'CONVERSATION_RESTARTED';
   params: Record<string, string | number>;
 }
 

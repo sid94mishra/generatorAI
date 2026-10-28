@@ -998,16 +998,10 @@ export class CopilotProvider implements IAgentHarness {
       });
     }
 
-    // `SessionConfig` has exactly one root — `workingDirectory`. There is no
-    // field for extra readable/writable directories, so a chat's other mounts
-    // and its managed workspace root reach the model only through the
-    // `[Workspace]` block the caller puts in the system prompt.
-    if (params.additionalDirectories?.length) {
-      warnings.push({
-        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
-        params: { field: 'additionalDirectories', provider: 'copilot' },
-      });
-    }
+    // `SessionConfig` has exactly one root — `workingDirectory`. The extra
+    // directories (a chat's other mounts and its managed root) are added to
+    // the session's path allow-list right after create / resume instead
+    // (`allowExtraDirectories`).
 
     // The CLI's environment is fixed when the workspace client spawns it, and
     // `WorkspacedCopilotPool` keys those clients by cwd — one process serves
@@ -1307,6 +1301,7 @@ export class CopilotProvider implements IAgentHarness {
       }
       throw err;
     }
+    await this.allowExtraDirectories(params.conversationId, session, params.additionalDirectories, warnings);
     // W36 — record which workspace owns this conversation
     const wsKey = params.workingDirectory && workspaceEntry ? params.workingDirectory : '__default__'; /* W36 */
     this.conversationClientKey.set(params.conversationId, wsKey); /* W36 */
@@ -1473,8 +1468,13 @@ export class CopilotProvider implements IAgentHarness {
       );
       this.releaseWorkspaceRef(conversationId);
       await this.createConversation(params);
+      this.conversationWarnings.get(conversationId)?.push({
+        code: 'CONVERSATION_RESTARTED',
+        params: { provider: 'copilot', reason: 'resume in the new working directory failed' },
+      });
       return;
     }
+    if (params) await this.allowExtraDirectories(conversationId, session, params.additionalDirectories, warnings);
     this.attachTurnTextTracker(conversationId, session);
     this.conversations.set(conversationId, session);
     if (params) this.conversationRoots.set(conversationId, rootsOf(params, this.options.defaultCwd));
@@ -1499,6 +1499,32 @@ export class CopilotProvider implements IAgentHarness {
     }
     this.conversationWarnings.set(conversationId, warnings);
     this.conversationAgents.set(conversationId, registeredAgents);
+  }
+
+  /**
+   * The SDK session has one root (`workingDirectory`); every other directory
+   * the chat mounts is added to the session's path allow-list, so file tools
+   * reach them as they reach the cwd instead of knowing them only from the
+   * `[Workspace]` text. The RPC is `@experimental`: a failure is a warning on
+   * the conversation, never a failed turn.
+   */
+  private async allowExtraDirectories(
+    conversationId: string,
+    session: CopilotSession,
+    directories: readonly string[] | undefined,
+    warnings: ConversationWarning[],
+  ): Promise<void> {
+    for (const dir of new Set(directories ?? [])) {
+      try {
+        await session.rpc.permissions.paths.add({ path: dir });
+      } catch (err) {
+        console.warn(`[CopilotAdapter] could not allow ${dir} on ${conversationId}: ${String(err)}`);
+        warnings.push({
+          code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+          params: { field: 'additionalDirectories', provider: 'copilot', reason: String(err) },
+        });
+      }
+    }
   }
 
   getConversationWarnings(conversationId: string): ConversationWarning[] {

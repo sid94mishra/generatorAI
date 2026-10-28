@@ -27,7 +27,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { OpenCodeProvider } from '../OpenCodeProvider.js';
+import { OpenCodeProvider, externalDirectoryRules } from '../OpenCodeProvider.js';
 import {
   runCapabilityDeclarationConformance,
   runConversationLifecycleConformance,
@@ -696,10 +696,7 @@ describe('OpenCodeProvider — per-conversation project directory', () => {
     expect(directoryOf(h2, 'POST', '/session')).toBeNull();
   }, 20_000);
 
-  it('warns that extra roots cannot be honoured — a session has exactly one', async () => {
-    // `Session` carries a single `directory` and no endpoint in the pinned
-    // OpenAPI document accepts a list, so the chat's other mounts reach the
-    // model only through the caller's system prompt.
+  it('opens the extra roots to the session through its external_directory rules', async () => {
     const h = await directoryHarness();
     const p = makeProvider({ baseUrl: h.baseUrl, defaultProviderId: 'opencode' });
     await p.initialize();
@@ -709,13 +706,36 @@ describe('OpenCodeProvider — per-conversation project directory', () => {
       additionalDirectories: ['/work/docs'],
     } as CreateConversationParams);
 
-    expect(p.getConversationWarnings('c-dir5')).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
-          params: expect.objectContaining({ field: 'additionalDirectories' }),
-        }),
-      ]),
-    );
+    const create = h.requests.find((r) => r.method === 'POST' && new URL(r.url, 'http://x').pathname === '/session');
+    expect((create!.body as { permission: unknown }).permission).toEqual(externalDirectoryRules(['/work/docs']));
+    expect(p.getConversationWarnings('c-dir5')).toEqual([]);
+  }, 20_000);
+
+  it('a live rebind re-sets the rules in place and keeps the session', async () => {
+    const h = await directoryHarness();
+    const p = makeProvider({ baseUrl: h.baseUrl, defaultProviderId: 'opencode' });
+    await p.initialize();
+    const base = { conversationId: 'c-dir6', workingDirectory: '/work/repo' } as CreateConversationParams;
+    await p.createConversation(base);
+    await p.resumeConversation('c-dir6', { ...base, additionalDirectories: ['/work/api'] });
+
+    const patch = h.requests.find((r) => r.method === 'PATCH' && new URL(r.url, 'http://x').pathname === '/session/ses_1');
+    expect((patch!.body as { permission: unknown }).permission).toEqual(externalDirectoryRules(['/work/api']));
+    expect(h.requests.filter((r) => r.method === 'POST' && new URL(r.url, 'http://x').pathname === '/session')).toHaveLength(1);
+  }, 20_000);
+
+  it('a moved working directory starts a session there and reports the restart', async () => {
+    const h = await directoryHarness();
+    const p = makeProvider({ baseUrl: h.baseUrl, defaultProviderId: 'opencode' });
+    await p.initialize();
+    const base = { conversationId: 'c-dir7', workingDirectory: '/work/repo' } as CreateConversationParams;
+    await p.createConversation(base);
+    await p.resumeConversation('c-dir7', { ...base, workingDirectory: '/work/api' });
+
+    const creates = h.requests.filter((r) => r.method === 'POST' && new URL(r.url, 'http://x').pathname === '/session');
+    expect(creates.map((r) => new URL(r.url, 'http://x').searchParams.get('directory'))).toEqual(['/work/repo', '/work/api']);
+    expect(p.getConversationWarnings('c-dir7')).toEqual([
+      expect.objectContaining({ code: 'CONVERSATION_RESTARTED' }),
+    ]);
   }, 20_000);
 });

@@ -6,6 +6,8 @@
 // lost the widget instructions and diverged from the prompt-cache prefix.
 // ────────────────────────────────────────────────────────────────
 
+import { statSync } from 'node:fs';
+import * as path from 'node:path';
 export const BROWSER_SYSTEM_HINT =
   `\n\n[Integrated Browser]\nUse the browser tools (open_browser_page, ` +
   `read_page, click_element, type_in_page, screenshot_page, ` +
@@ -277,6 +279,19 @@ export const READ_ONLY_STAGE_HINT =
   '- This stage only reads. There is no plan to approve and no ExitPlanMode tool: do not look for it. When the work is ' +
   'done, give your answer (or submit your output) directly.';
 
+/** Repository rule files the agents in use read, in the order a mount is checked. */
+export const PROJECT_RULE_FILES = ['AGENTS.md', 'CLAUDE.md', path.join('.github', 'copilot-instructions.md')] as const;
+
+function ruleFilesOf(dir: string): string[] {
+  return PROJECT_RULE_FILES.map((f) => path.join(dir, f)).filter((f) => {
+    try {
+      return statSync(f).isFile();
+    } catch {
+      return false;
+    }
+  });
+}
+
 export function buildWorkspaceHint(input: WorkspaceHintInput): string {
   const [primary, ...rest] = input.mounts;
   const lines: string[] = ['', '', '[Workspace]'];
@@ -286,6 +301,14 @@ export function buildWorkspaceHint(input: WorkspaceHintInput): string {
     lines.push(`Working directory: ${input.workingDirectory}`);
   }
   for (const m of rest) lines.push(`Also mounted: ${m.path}  (${describeMount(m)})`);
+  // D-168: one policy for every provider. Each provider loads a different file (or none — Claude runs without
+  // setting sources, so a repo's hooks and settings never execute), and none of them reads a non-primary mount's.
+  // So the rule files of every mount are named here and the agent reads them itself.
+  const rules = (primary ? input.mounts : []).flatMap((m) => ruleFilesOf(m.path));
+  if (rules.length > 0) {
+    lines.push(`Project rules: ${rules.join(', ')}`);
+    lines.push('- Read the rule files of a mount before you change it, and follow them.');
+  }
   if (input.writes === false) return lines.join('\n');
   lines.push(`Scratch directory: ${input.scratchDir}`);
   lines.push('Rules:');

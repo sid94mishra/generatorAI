@@ -715,6 +715,13 @@ export class OrchestratorService {
     // the orchestrator (sharedWorkspace defaults to true).
     const useShared = brief.sharedWorkspace !== false;
     const sharedWorkspaceId = useShared ? parent.workspaceId : undefined;
+    // An isolated worker (sharedWorkspace: false) of a chat gets worktrees of
+    // its own on new branches cut from where the orchestrator is now, so
+    // parallel workers can edit the same files without clobbering each other.
+    const isolatedSources =
+      !useShared && parent.kind === 'chat' && parent.workspaceId
+        ? await this.chatManagementService.isolatedWorkerSources(parentChatId).catch(() => undefined)
+        : undefined;
     // G15 — a worker must never be able to do something its orchestrator
     // could not. Computed before `createChat` so the clamp is part of the
     // creation, not a correction applied afterwards.
@@ -737,6 +744,7 @@ export class OrchestratorService {
         // Reuse the orchestrator's workspace when sharing (skips workspace +
         // worktree creation in createChat).
         ...(sharedWorkspaceId ? { workspaceId: sharedWorkspaceId } : {}),
+        ...(isolatedSources ? { sources: isolatedSources } : {}),
         // Explicitly NOT an orchestrator — workers must never get the
         // background-agent tool set (no recursive spawning in v1). The
         // `parentChatId` guard in createChat also enforces this.
@@ -837,6 +845,20 @@ export class OrchestratorService {
       const ws = await this.workspaceManager.getExecutionWorkspace(parent.workspaceId).catch(() => null);
       if (ws) taskDir = path.join(ws.rootPath, 'tasks', brief.taskName);
     }
+    let isolationNote: string | undefined;
+    if (isolatedSources) {
+      // Seeded BEFORE the brief is sent: the worker's first turn must start
+      // from the orchestrator's working tree, uncommitted files included.
+      const own = await this.chatManagementService.seedIsolatedWorker(worker.id, parentChatId).catch(() => []);
+      const where = own
+        .filter((m) => m.mode === 'worktree' && m.git?.branch)
+        .map((m) => `${m.alias}: branch ${m.git!.branch} at ${m.path}`);
+      if (where.length > 0) {
+        isolationNote =
+          `Isolated worker — its edits stay in its own worktrees (${where.join('; ')}). ` +
+          'When you accept its result, merge that branch (or copy the files) into your own mounts.';
+      }
+    }
     const briefMessage = renderBriefMessage(brief, taskDir);
     this.chatManagementService.sendPrompt(record.taskId, briefMessage).catch((err) => {
       record.status = 'failed';
@@ -845,7 +867,8 @@ export class OrchestratorService {
       void this.chatRepo.updateBackgroundTaskStatus(record.taskId, 'failed').catch(() => {});
     });
 
-    return { ok: true, taskId: record.taskId, taskName: record.taskName, status: 'running', model: workerModel, ...(modelNote ? { note: modelNote } : {}) };
+    const note = [modelNote, isolationNote].filter(Boolean).join(' ');
+    return { ok: true, taskId: record.taskId, taskName: record.taskName, status: 'running', model: workerModel, ...(note ? { note } : {}) };
   }
 
   // ── Follow-up ────────────────────────────────────────────────

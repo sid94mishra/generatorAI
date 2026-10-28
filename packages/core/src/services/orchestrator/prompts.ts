@@ -56,8 +56,11 @@ delegated.
       NOTHING. A worker with an agentRef inherits that agent's instructions,
       skills and tool policy; without one it is a generic worker.
   • spawn_background_agent({ taskName, objective, context?, model?, agentRef?,
-      inputArtifacts?, boundaries?, budget? }) → { taskId }. Returns at once;
-      the worker runs in its own chat and streams in its own pane.
+      inputArtifacts?, boundaries?, budget?, sharedWorkspace? }) → { taskId }. Returns at once;
+      the worker runs in its own chat and streams in its own pane. Workers edit
+      your folders unless you pass sharedWorkspace: false — then each gets its
+      own worktrees (the result names the branch to merge). Use that when
+      parallel workers would touch the same files.
   • check_background_agents({ wait? }) → digests for ALL your workers.
   • check_background_agent({ taskId, wait? }) → the digest for one worker.
   • send_to_background_agent({ taskId, followup }) → a revision round on a
