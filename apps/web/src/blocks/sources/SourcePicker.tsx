@@ -36,6 +36,7 @@ import { Checkbox } from '../../ui/primitives/Checkbox/Checkbox.js';
 import { Field } from '../../ui/primitives/Field/Field.js';
 import { IconButton } from '../../ui/primitives/IconButton/IconButton.js';
 import { Input } from '../../ui/primitives/Input/Input.js';
+import { Menu } from '../../ui/primitives/Menu/Menu.js';
 import { SegmentedControl, type SegmentedItem } from '../../ui/primitives/SegmentedControl/SegmentedControl.js';
 import { Select } from '../../ui/primitives/Select/Select.js';
 import { Spinner } from '../../ui/primitives/Spinner/Spinner.js';
@@ -79,6 +80,11 @@ export interface SourcePickerProps {
    * Default false (ChatCreate page, "Edit sources…").
    */
   compact?: boolean;
+  /**
+   * Editing a live chat ("Edit sources…"): a kept worktree whose setup
+   * changes is rebuilt on save, so the row says so (D-166).
+   */
+  live?: boolean;
 }
 
 /** Base UI Select treats `''` poorly as a value; these stand in for "none". */
@@ -121,6 +127,7 @@ export function SourcePicker({
   disabled = false,
   maxSources = 8,
   compact = false,
+  live = false,
 }: SourcePickerProps) {
   const readGitInfo = useReadFsGitInfo();
   const { data: projects } = useProjects();
@@ -278,6 +285,7 @@ export function SourcePicker({
     chatName,
     projectId,
     disabled,
+    live,
     isPrimary: draft.alias === effectivePrimary,
     onChange: (next) => replaceAt(index, next),
     onRemove: () => removeAt(index),
@@ -297,7 +305,8 @@ export function SourcePicker({
 
   const footer = (
     <>
-      {drafts.length > 0 && (
+      {/* Each full row states its own setup; the compact list keeps the one-line summary. */}
+      {compact && drafts.length > 0 && (
         <p className="text-small text-fg-3" data-testid="sources-summary">
           {sourcesSummary(drafts, chatName)}
         </p>
@@ -399,6 +408,7 @@ interface SourceRowProps {
   chatName: string;
   projectId: string;
   disabled: boolean;
+  live: boolean;
   isPrimary: boolean;
   onChange: (next: DraftSource) => void;
   onRemove: () => void;
@@ -575,7 +585,7 @@ function RowNotes({ draft, facts, className }: { draft: DraftSource; facts: Sour
 function DirtyMark({ dirty }: { dirty: boolean }) {
   if (!dirty) return null;
   return (
-    <Tooltip content="This repository has uncommitted changes. Switching branches will be refused until it is clean.">
+    <Tooltip content="Files here have changes that are not committed yet. A branch switch in place is refused until they are committed or stashed.">
       <Badge tone="warn" icon="warning" data-testid="source-dirty">
         uncommitted
       </Badge>
@@ -655,123 +665,199 @@ function CompactSourceRow(props: SourceRowProps) {
 
 // ── Full row (ChatCreate, Edit sources…) ──────────────────────
 
+/** `https://github.com/acme/web.git` → `github.com/acme/web`; a path keeps its tail. */
+function shortOrigin(origin: string): string {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(origin) || /^git@/i.test(origin)) {
+    return origin
+      .replace(/^[a-z][a-z0-9+.-]*:\/\/([^@/]+@)?/i, '')
+      .replace(/^git@([^:]+):/i, '$1/')
+      .replace(/\.git$/i, '');
+  }
+  return pathTail(origin, 48);
+}
+
+/** The fields that decide how a source is materialised; a kept mount changing any of them is rebuilt. */
+function setupOf(d: DraftSource): string {
+  return [d.alias, d.mode, d.branchMode, d.newBranch.trim(), d.branch, d.baseRef].join('\u0000');
+}
+
+const Mono = ({ children }: { children: ReactNode }) => <span className="font-mono text-fg">{children}</span>;
+
+/** One line in words: how the agent gets this source and which branch it lands on. */
+function SetupSummary({ draft, chatName, currentBranch }: { draft: DraftSource; chatName: string; currentBranch: string | null }) {
+  if (!draft.meta.isGit) return <>In place · not a git repository</>;
+  const mode = draft.mode === 'worktree' ? 'Worktree' : 'In place';
+  const base = draft.baseRef.trim() || currentBranch;
+  if (draft.branchMode === 'new') {
+    return (
+      <>
+        {mode} · new branch <Mono>{draft.newBranch.trim() || defaultNewBranch(chatName)}</Mono>
+        {base ? (
+          <>
+            {' '}from <Mono>{base}</Mono>
+          </>
+        ) : null}
+      </>
+    );
+  }
+  if (draft.branchMode === 'existing') {
+    return draft.branch ? (
+      <>
+        {mode} · on <Mono>{draft.branch}</Mono>
+      </>
+    ) : (
+      <>
+        {mode} · <span className="text-warn">choose a branch</span>
+      </>
+    );
+  }
+  return currentBranch ? (
+    <>
+      {mode} · stays on <Mono>{currentBranch}</Mono>
+    </>
+  ) : (
+    <>{mode} · current branch</>
+  );
+}
+
+const MODE_HINT: Record<SourceMode, string> = {
+  worktree: 'A separate checkout on its own branch. Your folder and its uncommitted files are not touched.',
+  'in-place': 'The agent edits the folder itself, on the branch it has checked out.',
+};
+
+/**
+ * One source: a header line (what it is, its state, a ⋯ menu for the rare
+ * actions), one line saying how the agent gets it, and the setup controls
+ * behind "Change" (D-166). Defaults are right for most chats, so the controls
+ * stay folded until asked for — or until the source needs an answer.
+ */
 function SourceRow(props: SourceRowProps) {
-  const { draft, index, total, disabled, isPrimary, onChange, onRemove, onMakePrimary, onMove } = props;
+  const { draft, index, total, chatName, disabled, live, isPrimary, onChange, onRemove, onMakePrimary, onMove } = props;
   const facts = useSourceFacts(draft, props.projectId);
   const { currentBranch, nested } = facts;
   const origin = draft.meta.origin ?? draft.path;
 
-  const [copied, setCopied] = useState(false);
-  const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(copiedTimer.current), []);
+  const needsAnswer = draft.branchMode === 'existing' && !draft.branch;
+  const [open, setOpen] = useState(needsAnswer);
+  const [renaming, setRenaming] = useState(false);
+  const shown = open || needsAnswer;
+
+  // What the server has now, to tell a rebuild from a no-op (live chats only).
+  const saved = useRef(setupOf(draft));
+  const rebuilt = live && draft.mode === 'worktree' && setupOf(draft) !== saved.current;
+
   const copyPath = useCallback(() => {
-    if (!origin) return;
-    void navigator.clipboard?.writeText(origin).then(
-      () => {
-        setCopied(true);
-        clearTimeout(copiedTimer.current);
-        copiedTimer.current = setTimeout(() => setCopied(false), 1200);
-      },
-      () => undefined,
-    );
+    if (origin) void navigator.clipboard?.writeText(origin).catch(() => undefined);
   }, [origin]);
 
   return (
-    <div className="flex flex-col gap-1.5 py-2.5 pr-2.5 pl-3">
-      {/* Identity: icon · name (renamable) · working directory · git facts · order / remove */}
-      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+    <div className="flex flex-col gap-1 py-2.5 pr-2 pl-3">
+      <div className="flex min-w-0 items-center gap-2">
         <Icon concept={draft.meta.isGit ? 'branch' : 'folder-open'} size={14} className="shrink-0 text-fg-3" />
-        <Input
-          size="sm"
-          mono
-          value={draft.alias}
-          disabled={disabled}
-          onChange={(e) => onChange({ ...draft, alias: e.target.value })}
-          aria-label={`Name for ${draft.meta.label}`}
-          className="w-44"
-        />
-        {isPrimary ? (
-          <WorkingDirectoryBadge />
-        ) : (
-          <Button
-            variant="ghost"
+        {renaming ? (
+          <Input
             size="sm"
-            icon="home"
+            mono
+            autoFocus
+            value={draft.alias}
             disabled={disabled}
-            onClick={onMakePrimary}
-            title="The agent's working directory"
-          >
-            Make working directory
-          </Button>
+            onChange={(e) => onChange({ ...draft, alias: e.target.value })}
+            onBlur={() => setRenaming(false)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === 'Escape') setRenaming(false);
+            }}
+            aria-label={`Name for ${draft.meta.label}`}
+            className="w-44"
+          />
+        ) : (
+          <span className="shrink-0 font-mono text-ui font-medium text-fg" title="The folder name the agent sees">
+            {draft.alias}
+          </span>
         )}
-        {draft.meta.isGit ? null : <Badge>not a git repo</Badge>}
-        <DirtyMark dirty={facts.dirty} />
+        {origin ? (
+          <span className="min-w-0 truncate font-mono text-small text-fg-3" title={origin}>
+            {shortOrigin(origin)}
+          </span>
+        ) : null}
+        <span className="flex-1" />
+        {/* With one source it is the working directory by definition; the badge only tells several apart. */}
+        {isPrimary && total > 1 ? <WorkingDirectoryBadge /> : null}
         {nested.length > 0 && (
           <Tooltip content={`Nested repositories: ${nested.join(', ')}`}>
-            <span className="text-micro text-fg-3">
+            <span className="shrink-0 text-small text-fg-3">
               {nested.length} nested {nested.length === 1 ? 'repo' : 'repos'}
             </span>
           </Tooltip>
         )}
-        <div className="ml-auto flex shrink-0 items-center gap-0.5">
-          <IconButton
-            icon="chevron-up"
-            size="sm"
-            label={`Move ${draft.alias} up`}
-            tooltip="Move up"
-            disabled={disabled || index === 0}
-            onClick={() => onMove(-1)}
-          />
-          <IconButton
-            icon="chevron-down"
-            size="sm"
-            label={`Move ${draft.alias} down`}
-            tooltip="Move down"
-            disabled={disabled || index === total - 1}
-            onClick={() => onMove(1)}
-          />
-          <IconButton
-            icon="trash"
-            size="sm"
-            label={`Remove ${draft.alias}`}
-            tooltip="Remove this source"
-            disabled={disabled}
-            onClick={onRemove}
-          />
-        </div>
+        <DirtyMark dirty={facts.dirty} />
+        <Menu.Root>
+          <Menu.Trigger render={<IconButton icon="more" size="sm" label={`More for ${draft.alias}`} disabled={disabled} />} />
+          <Menu.Popup align="end">
+            <Menu.Item icon="edit" onClick={() => setRenaming(true)}>
+              Rename
+            </Menu.Item>
+            {total > 1 && !isPrimary ? (
+              <Menu.Item icon="home" onClick={onMakePrimary}>
+                Make working directory
+              </Menu.Item>
+            ) : null}
+            {total > 1 ? (
+              <>
+                <Menu.Item icon="chevron-up" disabled={index === 0} onClick={() => onMove(-1)}>
+                  Move up
+                </Menu.Item>
+                <Menu.Item icon="chevron-down" disabled={index === total - 1} onClick={() => onMove(1)}>
+                  Move down
+                </Menu.Item>
+              </>
+            ) : null}
+            {origin ? (
+              <Menu.Item icon="copy" onClick={copyPath}>
+                Copy {draft.kind === 'folder' ? 'path' : 'location'}
+              </Menu.Item>
+            ) : null}
+            <Menu.Separator />
+            <Menu.Item icon="trash" danger onClick={onRemove}>
+              Remove
+            </Menu.Item>
+          </Menu.Popup>
+        </Menu.Root>
       </div>
 
-      {/* The user's folder or repository (current branch when it is one) */}
-      {origin && (
-        <div className="flex min-w-0 items-center gap-1.5 pl-6">
-          {draft.meta.isGit && currentBranch ? (
-            <span className="flex shrink-0 items-center gap-1 font-mono text-micro text-fg-2" title="Current branch">
-              <Icon concept="branch" size={12} />
-              {currentBranch}
-            </span>
-          ) : null}
-          <span className="min-w-0 flex-1 truncate font-mono text-micro text-fg-3" title={origin}>
-            {pathTail(origin, 64)}
-          </span>
-          <IconButton
-            icon={copied ? 'check' : 'copy'}
-            size="sm"
-            label={`Copy path of ${draft.alias}`}
-            tooltip={copied ? 'Copied' : 'Copy path'}
-            onClick={copyPath}
-          />
-        </div>
-      )}
+      <div className="flex min-w-0 items-center gap-2 pl-6">
+        <p className="min-w-0 flex-1 truncate text-small text-fg-2" data-testid="source-setup">
+          <SetupSummary draft={draft} chatName={chatName} currentBranch={currentBranch} />
+        </p>
+        {draft.meta.isGit && !needsAnswer ? (
+          <Button variant="ghost" size="sm" aria-expanded={shown} disabled={disabled} onClick={() => setOpen((v) => !v)}>
+            {shown ? 'Done' : 'Change'}
+          </Button>
+        ) : null}
+      </div>
 
-      {/* How the agent gets it: mode, then the branch it works on. A folder
-          that is not a repository has neither — it is edited in place. */}
-      {draft.meta.isGit ? (
-        <div className="flex flex-wrap items-center gap-2 pl-6">
-          <ModeControl {...props} />
-          <BranchControls {...props} facts={facts} />
+      {draft.meta.isGit && shown ? (
+        <div className="mt-2 flex flex-col gap-3 pl-6">
+          <div className="flex flex-col items-start gap-1.5">
+            <span className="text-small font-medium text-fg-2">Where the agent works</span>
+            <ModeControl {...props} />
+            <span className="text-small text-fg-3">{MODE_HINT[draft.mode]}</span>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-small font-medium text-fg-2">Branch</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <BranchControls {...props} facts={facts} />
+            </div>
+          </div>
         </div>
       ) : null}
 
+      {rebuilt && facts.dirty ? (
+        <Callout tone="warn" className="mt-2 ml-6" data-testid="source-rebuild-dirty">
+          Saving rebuilds the {draft.alias} worktree, and its uncommitted changes are discarded. Commit them first, or press Cancel.
+        </Callout>
+      ) : rebuilt ? (
+        <p className="pl-6 text-small text-fg-3">Saving rebuilds the {draft.alias} worktree with this setup.</p>
+      ) : null}
       <RowNotes draft={draft} facts={facts} className="pl-6" />
     </div>
   );

@@ -1693,6 +1693,16 @@ step they keep from `surface` (02 §2.3 "Inside floating layers"). One generated
 barely move because their `sunken` is already one small step below a white overlay. Dialog dividers drawn in `line-soft`,
 invisible on overlay before, now show as they do on a page.
 
+### D-166 A source row is one summary line; its setup folds behind "Change" (owner, 2026-10-28) — Final
+The full SourcePicker row (ChatCreate page, Edit sources) put an editable name, badges, reorder/remove, the origin with
+the current branch, two segmented controls, the branch input and its base on three crowded lines, then repeated it all
+in a summary under the list. Now: a header (icon, name, short origin such as `github.com/acme/web`, Working directory only
+when there are several sources, uncommitted, a ⋯ menu with Rename / Make working directory / Move up / Move down / Copy /
+Remove), one line in words ("Worktree · new branch `x` from `develop`") and a "Change" button that opens "Where the agent
+works" (Worktree | In place, with a hint) and "Branch". The setup opens by itself when it needs an answer. On a live chat a
+kept worktree whose name, mode or branch changes is rebuilt by `MountService.replace`, which force-removes the old
+worktree, so the row says so and warns when uncommitted changes would be discarded. The compact NewChat list is unchanged.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

@@ -135,6 +135,7 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
               onPrimaryChange={setPrimary}
               error={error}
               disabled={busy}
+              live
             />
             {discardChatFolder ? (
               <Callout tone="warn" data-testid="chat-folder-discard">
