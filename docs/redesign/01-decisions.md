@@ -1738,6 +1738,14 @@ An orchestrator worker spawned with `sharedWorkspace: false` gets worktrees of i
 orchestrator's current commit, in-place git mounts included, with the orchestrator's uncommitted files laid over them;
 the spawn result names each branch to merge. Plain folders stay shared. The default stays shared.
 
+### D-170 Archive, clean-up and monorepo packages keep the work where the user left it (derived, 2026-10-28) — Final
+Reopening an archived chat makes its workspace active again and prepares every worktree that archive retention released,
+on the branch it kept; an orchestrator's workers come back with it. The nightly clean-up keeps a workspace that would
+lose work existing nowhere else: uncommitted changes in any mount, or any commit in a chat folder (its repository lives
+in the workspace and has no remote). A codebase's `subdirectory` is the mount's `workdir`: the agent starts there (when
+the branch has it) and the whole repository stays reachable; a subdirectory outside the repository is refused at link
+time.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

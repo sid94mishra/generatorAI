@@ -1723,6 +1723,35 @@ export class ChatManagementService {
   }
 
   /**
+   * Reopen an archived chat: its workspace is active again and the worktrees
+   * that archive retention released are prepared again on the branches they
+   * kept (the first prompt waits for them, as for a new chat). The provider
+   * conversation is rebuilt on the next prompt. An orchestrator's workers come
+   * back with it, as they went with it.
+   */
+  async unarchiveChat(chatId: string): Promise<void> {
+    const chat = await this.chatRepo.getById(chatId);
+    if (chat.status !== 'archived') return;
+    await this.chatRepo.updateStatus(chatId, 'active');
+    await this.sessionRepo.update(chat.sessionId, { closedAt: undefined }).catch(() => undefined);
+    const manager = this.extensions.workspaceManager;
+    const mounts = this.extensions.mountService;
+    if (chat.workspaceId && manager && mounts) {
+      const ws = await manager.getExecutionWorkspace(chat.workspaceId).catch(() => null);
+      if (ws && ws.ownerId === chatId) {
+        await manager.reactivateWorkspace(ws.id);
+        await mounts.restoreReleased(ws.id, { sessionId: chat.sessionId, chatId });
+      }
+    }
+    if (chat.orchestratorMode && !chat.parentChatId) {
+      const workers = await this.chatRepo.listBackgroundTasks(chatId).catch(() => []);
+      for (const worker of workers) {
+        if (worker.status === 'archived') await this.unarchiveChat(worker.id).catch(() => undefined);
+      }
+    }
+  }
+
+  /**
    * Rebuild a functional SDK conversation for a chat whose in-memory session
    * was lost (server restart with closed session) or destroyed (prior
    * archive). Reconstructs the essential config from the persisted Chat

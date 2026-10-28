@@ -782,7 +782,10 @@ export function createChatApiRoutes(container: Container): Router {
         }
         updates.harnessConfig = harnessConfig;
       }
-      if (status !== undefined && status !== 'archived') updates.status = status;
+      if (status === 'active') {
+        // Reopening an archived chat also brings its workspace and released worktrees back.
+        await chatManagementService.unarchiveChat(chatId);
+      } else if (status !== undefined && status !== 'archived') updates.status = status;
       // PLN-01 — sticky per-chat composer defaults.
       if (isAgentMode(defaultAgentMode)) {
         updates.defaultAgentMode = defaultAgentMode;

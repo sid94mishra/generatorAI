@@ -1221,6 +1221,7 @@ export const workspaceMounts = sqliteTable(
     originPath: text('origin_path'),
     mode: text('mode', { enum: ['in-place', 'worktree', 'generated'] }).notNull(),
     path: text('path').notNull(),
+    workdir: text('workdir'),
     git: text('git', { mode: 'json' }).$type<Record<string, unknown>>(),
     status: text('status', { enum: ['preparing', 'ready', 'error', 'removed'] }).notNull().default('preparing'),
     error: text('error'),

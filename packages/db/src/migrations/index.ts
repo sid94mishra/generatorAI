@@ -2884,6 +2884,12 @@ export const MIGRATIONS: readonly Migration[] = [
         `CREATE UNIQUE INDEX idx_permission_rules_project ON permission_rules(project_id, kind, match) WHERE project_id IS NOT NULL;`,
       ],
     },
+    // S-10 (D-170): a codebase's `subdirectory` is where the agent starts inside its mount (a monorepo package).
+    {
+      version: 69,
+      name: 'workspace_mount_workdir',
+      sql: [`ALTER TABLE workspace_mounts ADD COLUMN workdir TEXT;`],
+    },
   ];
 
 

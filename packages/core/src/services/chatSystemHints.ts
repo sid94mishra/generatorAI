@@ -257,6 +257,7 @@ function describeMount(m: WorkspaceMount): string {
   if (m.git?.branch) bits.push(`branch ${m.git.branch}`);
   if (m.git?.baseRef && m.git.baseRef !== m.git.branch && m.git.baseRef !== 'HEAD') bits.push(`from ${m.git.baseRef}`);
   if (m.git?.nested?.length) bits.push(`contains repos: ${m.git.nested.join(', ')}`);
+  if (m.workdir) bits.push(`work in its ${m.workdir} directory`);
   return bits.join(', ');
 }
 
@@ -296,7 +297,9 @@ export function buildWorkspaceHint(input: WorkspaceHintInput): string {
   const [primary, ...rest] = input.mounts;
   const lines: string[] = ['', '', '[Workspace]'];
   if (primary) {
-    lines.push(`Working directory: ${primary.path}  (${describeMount(primary)})`);
+    // A codebase subdirectory (a monorepo package) is the cwd; the mount is still the whole repository.
+    const inside = input.workingDirectory.startsWith(primary.path + path.sep) ? `, repository root ${primary.path}` : '';
+    lines.push(`Working directory: ${input.workingDirectory}  (${describeMount(primary)}${inside})`);
   } else {
     lines.push(`Working directory: ${input.workingDirectory}`);
   }

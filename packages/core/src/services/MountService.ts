@@ -24,7 +24,7 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import type { Dirent } from 'node:fs';
+import { statSync, type Dirent } from 'node:fs';
 import type {
   AgentEvent,
   ChatSourceSpec,
@@ -58,6 +58,8 @@ export interface PlannedMount {
   mode: WorkspaceMount['mode'];
   /** Absolute directory the agent will edit — known before preparation. */
   path: string;
+  /** Where the agent starts inside `path` (the codebase's subdirectory). */
+  workdir?: string;
   /** Git intent, resolved from the source spec. */
   intent: {
     isRepo: boolean;
@@ -306,6 +308,7 @@ export class MountService {
           originPath: path.resolve(originPath),
           mode,
           path: mountPath,
+          ...(mountWorkdir(codebase.subdirectory) ? { workdir: mountWorkdir(codebase.subdirectory) } : {}),
           intent: {
             ...intent,
             codebaseType: codebase.type,
@@ -509,6 +512,7 @@ export class MountService {
       ...(m.originPath ? { originPath: m.originPath } : {}),
       mode: m.mode,
       path: m.path,
+      ...(m.workdir ? { workdir: m.workdir } : {}),
       git: {
         isRepo: m.intent.isRepo,
         ...(m.intent.branch ? { branch: m.intent.branch } : {}),
@@ -1129,6 +1133,23 @@ export class MountService {
   }
 
   /**
+   * Bring back the worktrees `releaseWorktrees` took away (an archived chat
+   * that is reopened): each released mount is prepared again on the branch it
+   * kept, so the chat continues with its folders where they were. Starts the
+   * preparation and returns how many mounts it covers; `ready()` waits for it.
+   */
+  async restoreReleased(workspaceId: string, scope: PrepareScope = {}): Promise<number> {
+    const mounts = await this.deps.mountRepo.findByWorkspace(workspaceId, { includeRemoved: true });
+    const released = mounts.filter((m) => m.mode === 'worktree' && m.status === 'removed' && !!m.originPath && !!m.git?.branch);
+    for (const m of released) await this.deps.mountRepo.update(m.id, { status: 'preparing', error: null });
+    if (released.length > 0) {
+      await this.deps.workspaceRepo.updatePrep(workspaceId, 'pending', null);
+      void this.prepare(workspaceId, scope).catch(() => undefined);
+    }
+    return released.length;
+  }
+
+  /**
    * Release ONE worktree mount by id (the `worktrees` row of a mount shares
    * its id): the directory goes, the branch and the mount row (`removed`)
    * stay. Returns false when `mountId` is not a worktree mount, so a caller
@@ -1224,8 +1245,10 @@ export function buildExposure(workspace: ExecutionWorkspace, mounts: WorkspaceMo
   const ordered = [...mounts].filter((m) => m.status !== 'removed').sort((a, b) => a.position - b.position);
   const scratchDir = path.join(workspace.rootPath, SCRATCH_DIR);
   const primary = ordered[0];
-  const workingDirectory = primary?.path ?? workspace.codeRoot ?? workspace.rootPath;
+  const workingDirectory = primary ? startDirOf(primary) : (workspace.codeRoot ?? workspace.rootPath);
   const extra = new Set<string>();
+  // Started in a subdirectory, the agent still owns the whole repository.
+  if (primary && path.resolve(workingDirectory) !== path.resolve(primary.path)) extra.add(primary.path);
   for (const m of ordered.slice(1)) extra.add(m.path);
   // The managed root carries scratch, plans and screenshots the agent must
   // be able to read and write. It is an additional directory unless it IS
@@ -1250,6 +1273,34 @@ export function buildExposure(workspace: ExecutionWorkspace, mounts: WorkspaceMo
 }
 
 // ── Helpers ───────────────────────────────────────────────────
+
+/**
+ * A codebase `subdirectory` as a mount's `workdir`: relative, normalised to
+ * forward slashes, inside the repository. Undefined for none / `.`; a value
+ * that leaves the repository is a validation error at link time, and is
+ * ignored here.
+ */
+export function mountWorkdir(subdirectory: string | undefined): string | undefined {
+  const raw = subdirectory?.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (!raw) return undefined;
+  const norm = path.posix.normalize(raw);
+  if (norm === '.' || norm.startsWith('..') || path.isAbsolute(raw) || /^[A-Za-z]:/.test(raw)) return undefined;
+  return norm;
+}
+
+/**
+ * Where the agent starts in a mount: its `workdir` when that directory exists
+ * (a branch may not have the package yet), otherwise the mount itself.
+ */
+export function startDirOf(mount: Pick<WorkspaceMount, 'path' | 'workdir'>): string {
+  if (!mount.workdir) return mount.path;
+  const dir = path.join(mount.path, ...mount.workdir.split('/'));
+  try {
+    return statSync(dir).isDirectory() ? dir : mount.path;
+  } catch {
+    return mount.path;
+  }
+}
 
 function sanitizeAlias(raw: string): string {
   const cleaned = raw.trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[.-]+|[.-]+$/g, '');

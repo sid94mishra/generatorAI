@@ -83,6 +83,8 @@ export class CodebaseService {
       throw new ValidationError(`Project has reached the maximum number of codebases (${maxCodebases})`);
     }
 
+    assertSubdirectory(params.subdirectory);
+
     // Check alias uniqueness
     const existingAlias = await this.codebaseRepo.getByAlias(projectId, params.alias);
     if (existingAlias) {
@@ -326,7 +328,10 @@ export class CodebaseService {
       values.alias = updates.alias;
     }
     if (updates.defaultBranch !== undefined) values.defaultBranch = updates.defaultBranch;
-    if (updates.subdirectory !== undefined) values.subdirectory = updates.subdirectory;
+    if (updates.subdirectory !== undefined) {
+      assertSubdirectory(updates.subdirectory);
+      values.subdirectory = updates.subdirectory;
+    }
     // Correcting the location clears the previous failure, so the next fetch
     // reports the new location's outcome rather than the stale error.
     if (updates.url !== undefined) {
@@ -600,5 +605,15 @@ export class CodebaseService {
       .replace(/⬛/g, '.*')
       .replace(/\?/g, '[^/]');
     return new RegExp(`^${regexStr}$`).test(str);
+  }
+}
+
+/** A codebase's subdirectory is a relative path inside the repository (a monorepo package), never outside it. */
+function assertSubdirectory(subdirectory: string | undefined): void {
+  const raw = subdirectory?.trim();
+  if (!raw) return;
+  const norm = path.posix.normalize(raw.replace(/\\/g, '/'));
+  if (path.isAbsolute(raw) || /^[A-Za-z]:/.test(raw) || norm === '..' || norm.startsWith('../')) {
+    throw new ValidationError(`Subdirectory must be a relative path inside the repository: ${raw}`);
   }
 }

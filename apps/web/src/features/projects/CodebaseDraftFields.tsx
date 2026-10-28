@@ -106,7 +106,7 @@ export function CodebaseDraftFields({ draft, onChange, label = 'Source' }: Codeb
           </div>
         </Field>
       )}
-      <Field label="Subdirectory" optional className="col-span-2">
+      <Field label="Subdirectory" optional hint="Where the agent starts in a monorepo. It can still reach the whole repository." className="col-span-2">
         <Input
           mono
           value={draft.subdirectory}

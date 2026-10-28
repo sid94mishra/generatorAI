@@ -526,6 +526,13 @@ export class WorkspaceManager {
     return null; // Physical archival (tar.gz) deferred to Phase 6
   }
 
+  /** An archived workspace whose owner was reopened is in use again. No-op unless it is archived. */
+  async reactivateWorkspace(workspaceId: string): Promise<void> {
+    const workspace = await this.workspaceRepo.findById(workspaceId);
+    if (!workspace || workspace.status !== 'archived') return;
+    await this.workspaceRepo.updateStatus(workspaceId, 'active', { updatedAt: new Date() });
+  }
+
   /**
    * Delete a workspace and all its contents.
    *
@@ -885,9 +892,7 @@ export class WorkspaceManager {
       const expiredAt = ws.completedAt ?? (policy.includeStaleActive ? ws.updatedAt : undefined);
       if (expiredAt && expiredAt.getTime() < cutoff) {
         if (policy.protectUnpushed) {
-          const mounts = await this.mountRepo.findByWorkspace(ws.id);
-          const hasUnpushed = mounts.some((m) => m.status === 'ready' && m.hasUncommittedChanges);
-          if (hasUnpushed) {
+          if (await this.holdsUnsavedWork(ws.id)) {
             if (policy.archiveIfDirty) {
               await this.archiveWorkspace(ws.id);
             }
@@ -913,6 +918,26 @@ export class WorkspaceManager {
       this.logger.info(`[WorkspaceManager] Cleaned up ${deleted} expired workspaces`);
     }
     return deleted;
+  }
+
+  /**
+   * Whether deleting this workspace would lose work that exists nowhere else:
+   * uncommitted changes in any mount, or ANY commit in a chat folder — its
+   * repository lives inside the workspace and has no remote, so "committed"
+   * there is not "saved". A worktree's commits live on its branch in the
+   * origin repository, which deleting the workspace keeps.
+   */
+  private async holdsUnsavedWork(workspaceId: string): Promise<boolean> {
+    const mounts = (await this.mountRepo.findByWorkspace(workspaceId)).filter((m) => m.status === 'ready');
+    if (mounts.some((m) => m.hasUncommittedChanges)) return true;
+    for (const m of mounts) {
+      if (m.mode !== 'generated') continue;
+      // Unknown means kept: a cleanup must never guess its way into deleting work.
+      if (!this.gitClient) return true;
+      const head = await this.gitClient.revParse(m.path, 'HEAD').catch(() => 'unknown');
+      if (head) return true;
+    }
+    return false;
   }
 
   /**

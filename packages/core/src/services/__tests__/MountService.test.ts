@@ -24,7 +24,7 @@ import type { IGitClient } from '@generatorai/git';
 import type { IProjectCodebaseRepository } from '../../domain/ports/IProjectCodebaseRepository.js';
 import type { IExecutionWorkspaceRepository } from '../../domain/ports/IExecutionWorkspaceRepository.js';
 import type { IWorkspaceMountRepository } from '../../domain/ports/IWorkspaceMountRepository.js';
-import { MountService, buildExposure, countFiles, SCRATCH_DIR } from '../MountService.js';
+import { MountService, buildExposure, countFiles, mountWorkdir, SCRATCH_DIR } from '../MountService.js';
 
 function makeLogger(): ILogger {
   const logger: ILogger = {
@@ -476,6 +476,23 @@ describe('buildExposure', () => {
     expect(exposure.hint).toContain('mount "web"');
     expect(exposure.hint).toContain('branch feature/x');
     expect(exposure.hint).toContain(`Scratch directory: ${scratchDir}`);
+  });
+
+  it("starts the agent in a codebase's subdirectory and still exposes the whole repository (S-10)", async () => {
+    const repo = await tmpDir();
+    await fs.mkdir(path.join(repo, 'packages', 'ledger'), { recursive: true });
+    const exposure = buildExposure(workspace, [mount({ alias: 'mono', path: repo, position: 0, workdir: 'packages/ledger' })]);
+    const pkg = path.join(repo, 'packages', 'ledger');
+    expect(exposure.workingDirectory).toBe(pkg);
+    expect(exposure.additionalDirectories).toContain(repo);
+    expect(exposure.hint).toContain(`Working directory: ${pkg}`);
+    expect(exposure.hint).toContain(`repository root ${repo}`);
+    // A branch without the package yet: the mount itself, never a missing cwd.
+    const missing = buildExposure(workspace, [mount({ alias: 'mono', path: repo, position: 0, workdir: 'apps/none' })]);
+    expect(missing.workingDirectory).toBe(repo);
+    expect(mountWorkdir(' ./packages//ledger/ ')).toBe('packages/ledger');
+    expect(mountWorkdir('../escape')).toBeUndefined();
+    expect(mountWorkdir('.')).toBeUndefined();
   });
 
   it("names every mount's rule files, not only the working directory's (D-168)", async () => {

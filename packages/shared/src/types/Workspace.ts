@@ -68,6 +68,12 @@ export interface WorkspaceMount {
   mode: MountMode;
   /** Absolute directory the agent edits. */
   path: string;
+  /**
+   * Relative directory inside `path` the agent starts in when this is the
+   * working directory — a codebase's `subdirectory` (a monorepo package). The
+   * mount is still the whole repository.
+   */
+  workdir?: string;
   git?: MountGitState;
   status: MountStatus;
   error?: string;
