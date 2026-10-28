@@ -42,7 +42,7 @@ export interface TerminalPanelProps {
   label?: string;
   /** Receives a `.txt` File on "Attach selection"; without it Attach is disabled. */
   onCapture?: (file: File, kind: 'terminal') => void;
-  /** Worktree quick-cd menu (workflow run page). */
+  /** Quick-cd menu: the run's worktrees, or a chat's sources when it has several. */
   worktrees?: TerminalWorktreeOption[];
   /** The agent is working in this workspace (a hint badge only). */
   agentBusy?: boolean;
@@ -125,7 +125,7 @@ export function TerminalPanel({ workspaceId, tabId, label = 'Terminal', onCaptur
         <MenuRoot>
           <MenuTrigger
             render={
-              <Button variant="ghost" size="sm" icon="folder-open" trailingIcon="chevron-down" className="ml-auto" aria-label="cd to a worktree">
+              <Button variant="ghost" size="sm" icon="folder-open" trailingIcon="chevron-down" className="ml-auto" aria-label="cd to a source folder">
                 cd
               </Button>
             }

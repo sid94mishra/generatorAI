@@ -19,6 +19,7 @@ import { useNavigate, useParams } from 'react-router';
 import { awaitsUserDecision, type ScmResultBlock, type WidgetBlock } from '@generatorai/client-core';
 import { composerPromptPlaceholder, harnessProviderLabel, TRANSCRIPT_COPY, type ApprovalMode } from '@generatorai/shared/ui-contract';
 import { useMarkChatRead } from '@/hooks/chatListQueries.js';
+import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import {
   useChatPermissionRules,
   useClearChatPermissionRules,
@@ -228,16 +229,29 @@ export function ChatPage() {
     }),
     [chat?.workspaceId, browserUrlScopeKey, addCapture, sendBrowserComments, isWorking, agentName, onBrowserTabState],
   );
+  // A shell opens in the working directory; with several sources its "cd" menu reaches the others.
+  const workspaceMounts = useWorkspaceInfo(chat?.workspaceId).data?.mounts;
+  const terminalMounts = useMemo(
+    () =>
+      workspaceMounts && workspaceMounts.filter((m) => m.status !== 'removed').length > 1
+        ? [...workspaceMounts]
+            .filter((m) => m.status !== 'removed')
+            .sort((a, b) => a.position - b.position)
+            .map((m) => ({ alias: m.alias, path: m.path }))
+        : undefined,
+    [workspaceMounts],
+  );
   const terminalDock = useMemo<TerminalDockContextValue>(
     () => ({
       workspaceId: chat?.workspaceId,
       onCapture: addCapture('terminal'),
       agentBusy: isWorking,
+      ...(terminalMounts ? { worktrees: terminalMounts } : {}),
       // A "Ran" step's terminal icon swaps the shells for the agent's commands.
       agentConsole:
         agentConsoleCallId != null ? { callId: agentConsoleCallId, sessionId, messages, onClose: closeAgentShell } : null,
     }),
-    [chat?.workspaceId, addCapture, isWorking, agentConsoleCallId, sessionId, messages, closeAgentShell],
+    [chat?.workspaceId, addCapture, isWorking, terminalMounts, agentConsoleCallId, sessionId, messages, closeAgentShell],
   );
 
   // The Changes tab's props, memoised so streamed tokens never re-render it.

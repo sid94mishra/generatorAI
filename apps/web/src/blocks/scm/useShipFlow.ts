@@ -27,8 +27,11 @@ import {
   composeFlowRequest,
   pickDefaultAlias,
   scmAvailability,
+  shipAllRequest,
+  shipAllTargets,
   splitCommitMessage,
   type ScmAvailability,
+  type ShipAllResult,
   type ShipMode,
 } from './scmFlow.js';
 
@@ -172,6 +175,32 @@ export function useShipFlow({ workspaceId, hint, open, initialMode }: UseShipFlo
 
   const availability: ScmAvailability = scmAvailability(selected, result);
 
+  // "… all": the same flow once per repository, one after another (two flows must never share an index), with
+  // generated text — the after-turn steps, run now. Each repo's outcome is kept, in order.
+  const allTargets = useMemo(() => shipAllTargets(repos, mode), [repos, mode]);
+  const [allResults, setAllResults] = useState<ShipAllResult[] | null>(null);
+  const [runningAll, setRunningAll] = useState(false);
+  useEffect(() => {
+    if (open) setAllResults(null);
+  }, [open]);
+  const runAll = useCallback(
+    async (draft: boolean) => {
+      setRunningAll(true);
+      const out: ShipAllResult[] = [];
+      setAllResults(out);
+      for (const repo of allTargets) {
+        try {
+          out.push({ alias: repo.alias, result: await flow.mutateAsync(shipAllRequest(repo, mode, draft, hint)) });
+        } catch (e) {
+          out.push({ alias: repo.alias, error: errorText(e) });
+        }
+        setAllResults([...out]);
+      }
+      setRunningAll(false);
+    },
+    [allTargets, flow, mode, hint],
+  );
+
   return {
     loading: readiness.isLoading,
     checkingRemote: fetched.isFetching,
@@ -214,6 +243,11 @@ export function useShipFlow({ workspaceId, hint, open, initialMode }: UseShipFlo
     clearResult: useCallback(() => setResult(null), []),
     run,
     rerun: useCallback(() => run(lastDraft), [run, lastDraft]),
+    allTargets,
+    allResults,
+    runningAll,
+    runAll,
+    clearAllResults: useCallback(() => setAllResults(null), []),
   };
 }
 

@@ -127,6 +127,38 @@ export function composeFlowRequest(selected: RepoReadiness | undefined, form: Sh
   };
 }
 
+/**
+ * The repositories "… all" ships in `mode`: each one with something that mode would ship and the means to ship
+ * it. A merge in progress is finished one repo at a time, in the single-repo form.
+ */
+export function shipAllTargets(repos: readonly RepoReadiness[], mode: ShipMode): RepoReadiness[] {
+  return repos.filter((r) => {
+    if (!r.isRepo || r.mergeInProgress) return false;
+    const work = r.dirty || (r.ahead ?? 0) > 0;
+    if (mode === 'commit') return r.dirty;
+    if (mode === 'push') return r.can.push && work;
+    return r.can.pullRequest && !r.openPullRequest && work;
+  });
+}
+
+/** One repository's outcome in a "… all" run: the flow's result, or why the request itself failed. */
+export interface ShipAllResult {
+  alias: string;
+  result?: ScmFlowResult;
+  error?: string;
+}
+
+/** One repo's run of "… all": generated commit message and PR text, each repo's own default base. */
+export function shipAllRequest(repo: RepoReadiness, mode: ShipMode, draft: boolean, hint: string | undefined): ScmFlowRequest {
+  return {
+    alias: repo.alias,
+    ...(repo.dirty ? { commit: { generate: true } } : {}),
+    push: mode !== 'commit',
+    ...(mode === 'pr' ? { pullRequest: { generate: true, draft } } : {}),
+    ...(hint ? { hint } : {}),
+  };
+}
+
 /** The toolbar button's verb for the repo's state, or null when there is nothing to ship (D-163). */
 export interface ShipAction {
   label: string;

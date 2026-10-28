@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RepoReadiness } from '@generatorai/shared';
-import { branchFactsOf, composeFlowRequest, shipActionOf, splitCommitMessage, type ShipForm } from '../scmFlow.js';
+import { branchFactsOf, composeFlowRequest, shipActionOf, shipAllRequest, shipAllTargets, splitCommitMessage, type ShipForm } from '../scmFlow.js';
 
 function repo(overrides: Partial<RepoReadiness> = {}): RepoReadiness {
   return {
@@ -118,5 +118,38 @@ describe('branchFactsOf', () => {
   it('a branch never pushed says so; no remote, no remote facts', () => {
     expect(branchFactsOf(repo({ ...github, hasUpstream: false, ahead: 5 }))).toEqual(['Not on GitHub yet']);
     expect(branchFactsOf(repo({ hasRemote: false, hasUpstream: false }))).toEqual([]);
+  });
+});
+
+describe('shipAllTargets / shipAllRequest', () => {
+  const a = repo({ alias: 'api', dirty: true, changedFiles: 2 });
+  const b = repo({ alias: 'web', ahead: 1 });
+  const c = repo({ alias: 'docs' });
+  const d = repo({ alias: 'notes', isRepo: false, dirty: true });
+  const e = repo({ alias: 'app', dirty: true, mergeInProgress: true });
+  const f = repo({ alias: 'lib', dirty: true, can: { commit: true, push: false, pullRequest: false } });
+  const g = repo({ alias: 'ui', ahead: 2, openPullRequest: { number: 3, url: 'u', state: 'open' } as never });
+
+  it('commits every dirty repo, skipping folders and a merge in progress', () => {
+    expect(shipAllTargets([a, b, c, d, e, f], 'commit').map((r) => r.alias)).toEqual(['api', 'lib']);
+  });
+
+  it('pushes repos with changes or unpushed commits that can push', () => {
+    expect(shipAllTargets([a, b, c, f], 'push').map((r) => r.alias)).toEqual(['api', 'web']);
+  });
+
+  it('opens a PR only where none is open yet', () => {
+    expect(shipAllTargets([a, b, g], 'pr').map((r) => r.alias)).toEqual(['api', 'web']);
+  });
+
+  it('generates the text and commits only what is dirty', () => {
+    expect(shipAllRequest(a, 'pr', true, 'Fix x')).toEqual({
+      alias: 'api',
+      commit: { generate: true },
+      push: true,
+      pullRequest: { generate: true, draft: true },
+      hint: 'Fix x',
+    });
+    expect(shipAllRequest(b, 'push', false, undefined)).toEqual({ alias: 'web', push: true });
   });
 });

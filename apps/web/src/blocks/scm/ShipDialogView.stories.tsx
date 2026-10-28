@@ -270,3 +270,33 @@ export const Blocked: Story = {
     await expect(within(dialog).getByTestId('scm-blocked')).toHaveTextContent('Not a git repository');
   },
 };
+
+/** Several repositories with changes: "Commit & push all 2" runs the flow in each, one after another. */
+export const ShipAllOffered: Story = {
+  args: {} as ShipDialogViewProps,
+  render: () => <Harness allTargets={[repo({ alias: 'pulse' }), repo({ alias: 'pulse-api' })]} onRunAll={fn()} />,
+  play: async () => {
+    const dialog = await screen.findByRole('dialog', { name: 'Commit and push' });
+    await expect(within(dialog).getByTestId('scm-ship-all')).toHaveTextContent('Commit & push all 2');
+  },
+};
+
+/** A "… all" run in progress: finished repositories show their outcome, the rest wait their turn. */
+export const ShipAllRunning: Story = {
+  args: {} as ShipDialogViewProps,
+  render: () => (
+    <Harness
+      allTargets={[repo({ alias: 'pulse' }), repo({ alias: 'pulse-api' }), repo({ alias: 'docs' })]}
+      allResults={[{ alias: 'pulse', result: OK }]}
+      runningAll
+      onRunAll={fn()}
+    />
+  ),
+  play: async () => {
+    const dialog = await screen.findByRole('dialog');
+    const list = within(dialog).getByTestId('scm-ship-all-results');
+    await expect(within(list).getByTestId('scm-result-ok')).toHaveTextContent('PR #22');
+    await expect(within(list).getByText('working…')).toBeInTheDocument();
+    await expect(within(list).getByText('waiting')).toBeInTheDocument();
+  },
+};

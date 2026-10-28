@@ -60,6 +60,7 @@ import {
   SCM_SETTINGS_PATH,
   SCM_STEP_LABEL,
   type ScmAvailability,
+  type ShipAllResult,
   type ShipMode,
 } from './scmFlow.js';
 import type { ScmTextKind } from './useShipFlow.js';
@@ -74,6 +75,12 @@ export interface ShipFile {
 }
 
 export interface ShipDialogViewProps {
+  /** "… all": the repositories it would ship in this mode; offered when there are several. */
+  allTargets?: readonly RepoReadiness[];
+  /** The outcome of a "… all" run, one entry per repository so far; null when none ran. */
+  allResults?: readonly ShipAllResult[] | null;
+  runningAll?: boolean;
+  onRunAll?: (draft: boolean) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   repos: readonly RepoReadiness[];
@@ -185,7 +192,7 @@ function planOf(mode: ShipMode, selected: RepoReadiness, files: number, base: st
 export function ShipDialogView(props: ShipDialogViewProps) {
   const { open, onOpenChange, selected, availability, mode, result, running } = props;
   const writingPr = mode === 'pr' && availability.canOpenPr && !selected.openPullRequest;
-  const showForm = !result && !availability.blockedReason && !availability.mergeInProgress;
+  const showForm = !result && !props.allResults && !availability.blockedReason && !availability.mergeInProgress;
 
   return (
     <Dialog
@@ -740,7 +747,8 @@ function FileList({
 
 // ── Outcome: steps, result, conflicts ────────────────────────────
 
-function ShipOutcome({ selected, availability, result, running, conflicts }: ShipDialogViewProps) {
+function ShipOutcome({ selected, availability, result, running, conflicts, allResults, allTargets, runningAll }: ShipDialogViewProps) {
+  if (allResults) return <ShipAllOutcome results={allResults} pending={runningAll ? (allTargets ?? []).slice(allResults.length) : []} />;
   if (availability.blockedReason) {
     return (
       <Callout
@@ -770,6 +778,38 @@ function ShipOutcome({ selected, availability, result, running, conflicts }: Shi
   );
 }
 
+/** "… all": each repository's outcome in run order, then the ones still waiting. */
+function ShipAllOutcome({ results, pending }: { results: readonly ShipAllResult[]; pending: readonly RepoReadiness[] }) {
+  return (
+    <ul className="flex flex-col gap-4" data-testid="scm-ship-all-results">
+      {results.map((r) => (
+        <li key={r.alias} className="flex flex-col gap-2">
+          <span className="font-mono text-small text-fg-2">{mountLabel(r.alias)}</span>
+          {r.result ? (
+            <ScmResultSummary result={r.result} />
+          ) : (
+            <Callout tone="err">{r.error ?? 'Source control failed'}</Callout>
+          )}
+        </li>
+      ))}
+      {pending.map((repo, i) => (
+        <li key={repo.alias} className="flex items-center gap-2 text-small text-fg-3">
+          {i === 0 ? <Spinner size={12} /> : <Icon concept="status-skipped" size={14} />}
+          <span className="font-mono">{mountLabel(repo.alias)}</span>
+          <span>{i === 0 ? 'working…' : 'waiting'}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The "… all" button's label for the mode. */
+function allLabel(mode: ShipMode, count: number): string {
+  if (mode === 'pr') return `Open ${count} pull requests`;
+  if (mode === 'push') return `Commit & push all ${count}`;
+  return `Commit all ${count}`;
+}
+
 function ShipFooter({
   mode,
   selected,
@@ -782,7 +822,18 @@ function ShipFooter({
   showForm,
   running,
   availability,
+  allTargets,
+  allResults,
+  runningAll,
+  onRunAll,
 }: ShipDialogViewProps & { writingPr: boolean; showForm: boolean }) {
+  if (allResults) {
+    return (
+      <DialogFooter>
+        <DialogClose render={<Button variant="primary" disabled={runningAll} />}>Done</DialogClose>
+      </DialogFooter>
+    );
+  }
   if (!showForm) {
     const pr = result?.status === 'ok' ? result.pullRequest : undefined;
     const failed = result && result.status !== 'ok' && result.status !== 'conflicts';
@@ -809,9 +860,22 @@ function ShipFooter({
     (mode === 'push' && (!availability.canPush || upToDate)) ||
     (mode === 'pr' && !writingPr);
   const label = mode === 'commit' ? 'Commit' : mode === 'push' ? (selected.dirty ? 'Commit & push' : upToDate ? 'Up to date' : 'Push') : '';
+  const shipAll =
+    onRunAll && allTargets && allTargets.length > 1 ? (
+      <Button
+        variant="secondary"
+        disabled={running}
+        onClick={() => onRunAll(false)}
+        title={`With generated text, one after another: ${allTargets.map((r) => mountLabel(r.alias)).join(', ')}`}
+        data-testid="scm-ship-all"
+      >
+        {allLabel(mode, allTargets.length)}
+      </Button>
+    ) : null;
   return (
     <DialogFooter hint={planOf(mode, selected, commitFiles.length, base)}>
       <DialogClose render={<Button variant="ghost" />}>Cancel</DialogClose>
+      {shipAll}
       {mode === 'pr' && !running ? (
         <MenuButton
           split

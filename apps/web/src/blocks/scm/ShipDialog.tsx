@@ -194,6 +194,10 @@ function ShipDialog({
       result={result}
       onDismissResult={flow.clearResult}
       onRun={(draft) => void flow.run(draft)}
+      allTargets={flow.allTargets}
+      allResults={flow.allResults}
+      runningAll={flow.runningAll}
+      onRunAll={(draft) => void flow.runAll(draft)}
       conflicts={conflicts}
     />
   );
