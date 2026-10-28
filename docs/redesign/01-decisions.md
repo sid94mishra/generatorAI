@@ -1703,6 +1703,23 @@ works" (Worktree | In place, with a hint) and "Branch". The setup opens by itsel
 kept worktree whose name, mode or branch changes is rebuilt by `MountService.replace`, which force-removes the old
 worktree, so the row says so and warns when uncommitted changes would be discarded. The compact NewChat list is unchanged.
 
+### D-167 Edit sources follows the Enhancements "Edit sources" board, simplified (owner, 2026-10-28) — Final
+Supersedes D-166's row layout. The dialog is "Sources": a one-line intro; ONE list scoped to the project whose header holds
+the project switcher (ghost menu button), "N codebases · M in this chat" and "+ Local folder"; every project codebase is a
+ticked or unticked row; each included source is a header (checkbox, mono name, short origin, Working dir when there are
+several sources, uncommitted, ⋯) and one sentence whose parts are its controls: "[Worktree ▾] on new branch [⑂ name ▾]
+from develop" (in place: "stays on [⑂ main ▾] · edits your checkout directly"). The mode token is a menu with a sentence
+per option (Menu `descriptionFont="sans"`); the branch token is a popover (New / Existing / Current, Name, Start from,
+Done). The chat folder is a ticked row; unticking keeps an unticked row ("Deleted when you save") so it can be ticked back.
+"After each turn" is one four-step choice (Keep local · Commit · Commit & push · Open a PR; each includes the one before),
+a PR adds "Into" + "Open as draft", and a sentence says what will happen with the real branch names. Footer: "Rebuilds N
+worktrees" when saving would rebuild any, else "Esc to close"; Save changes is enabled only when something changed; ⌘/Ctrl ↵.
+Simplified from the board: no Move up / Move down (the working directory is chosen explicitly, so order no longer
+matters); no "Remove" in ⋯ (the checkbox removes); "from develop" is plain text, set inside the branch popover; the
+uncommitted badge has no count (mounts record only whether changes exist, D-36); no "Commit them first" button inside the
+warning (committing needs the Changes ship flow; the warning says to commit first or Cancel); no project search (Select-
+sized lists). The compact NewChat list is unchanged.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

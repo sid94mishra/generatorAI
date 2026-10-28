@@ -162,6 +162,38 @@ function ViewMenu() {
   );
 }
 
+function ModeMenu() {
+  const [mode, setMode] = useState('worktree');
+  return (
+    <Menu.Root defaultOpen>
+      <Menu.Trigger render={<Button trailingIcon="chevron-down">Worktree</Button>} />
+      <Menu.Popup className="w-80">
+        <Menu.RadioGroup value={mode} onValueChange={(v) => setMode(String(v))}>
+          <Menu.RadioItem value="worktree" descriptionFont="sans" description="A separate copy on its own branch. Your checkout is not touched.">
+            Worktree
+          </Menu.RadioItem>
+          <Menu.RadioItem value="in-place" disabled descriptionFont="sans" description="This codebase is a bare clone of a remote — there is no checkout to edit in place.">
+            In place
+          </Menu.RadioItem>
+        </Menu.RadioGroup>
+      </Menu.Popup>
+    </Menu.Root>
+  );
+}
+
+/** A choice explained in words: `descriptionFont="sans"` wraps a sentence under each option (Edit sources' mode token). */
+export const SentenceDescriptions: Story = {
+  render: () => (
+    <div className="min-h-60">
+      <ModeMenu />
+    </div>
+  ),
+  play: async () => {
+    await expect(await screen.findByRole('menuitemradio', { name: /Worktree/ })).toHaveAttribute('aria-checked', 'true');
+    await expect(screen.getByRole('menuitemradio', { name: /In place/ })).toHaveAttribute('aria-disabled', 'true');
+  },
+};
+
 /** Checkbox items and two-line radio items (the Servers menu). */
 export const CheckboxAndRadio: Story = {
   render: () => (

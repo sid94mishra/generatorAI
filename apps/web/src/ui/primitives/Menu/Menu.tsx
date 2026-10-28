@@ -85,18 +85,23 @@ interface ItemDecor {
   danger?: boolean;
   /** Second line (mono micro fg-3): the 40h two-line item. */
   description?: ReactNode;
+  /**
+   * `sans`: the description is a sentence (small fg-3, wraps) rather than an
+   * id or address — a choice explained in words ("Worktree: a separate copy…").
+   */
+  descriptionFont?: 'mono' | 'sans';
   /** Small fg-3 content at the right end: a status ("● Connected") or a hint. */
   trailing?: ReactNode;
 }
 
-function ItemBody({ icon, shortcut, description, trailing, children }: ItemDecor & { children?: ReactNode }) {
+function ItemBody({ icon, shortcut, description, descriptionFont = 'mono', trailing, children }: ItemDecor & { children?: ReactNode }) {
   return (
     <>
       {icon ? <Icon concept={icon} size={16} className="text-current" /> : null}
       {description != null ? (
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate">{children}</span>
-          <span className="truncate font-mono text-micro text-fg-3">{description}</span>
+          <span className={descriptionFont === 'sans' ? 'text-small text-fg-3' : 'truncate font-mono text-micro text-fg-3'}>{description}</span>
         </span>
       ) : (
         <span className="min-w-0 flex-1 truncate">{children}</span>
@@ -114,13 +119,13 @@ export interface MenuItemProps extends Omit<ComponentProps<typeof BaseMenu.Item>
 }
 
 /** An action row. */
-export function MenuItem({ icon, shortcut, danger = false, description, trailing, className, children, ...rest }: MenuItemProps) {
+export function MenuItem({ icon, shortcut, danger = false, description, descriptionFont, trailing, className, children, ...rest }: MenuItemProps) {
   return (
     <BaseMenu.Item
       className={cn(itemBase, description != null && 'min-h-10 py-1', danger && 'text-err', className)}
       {...rest}
     >
-      <ItemBody icon={icon} shortcut={shortcut} description={description} trailing={trailing}>
+      <ItemBody icon={icon} shortcut={shortcut} description={description} {...(descriptionFont ? { descriptionFont } : {})} trailing={trailing}>
         {children}
       </ItemBody>
     </BaseMenu.Item>
@@ -139,7 +144,7 @@ export interface MenuCheckboxItemProps
 }
 
 /** A toggle row with a check column (`menuitemcheckbox`). */
-export function MenuCheckboxItem({ icon, shortcut, description, trailing, className, children, ...rest }: MenuCheckboxItemProps) {
+export function MenuCheckboxItem({ icon, shortcut, description, descriptionFont, trailing, className, children, ...rest }: MenuCheckboxItemProps) {
   return (
     <BaseMenu.CheckboxItem className={cn(itemBase, description != null && 'min-h-10 py-1', className)} {...rest}>
       <CheckColumn>
@@ -147,7 +152,7 @@ export function MenuCheckboxItem({ icon, shortcut, description, trailing, classN
           <Icon concept="check" size={14} />
         </BaseMenu.CheckboxItemIndicator>
       </CheckColumn>
-      <ItemBody icon={icon} shortcut={shortcut} description={description} trailing={trailing}>
+      <ItemBody icon={icon} shortcut={shortcut} description={description} {...(descriptionFont ? { descriptionFont } : {})} trailing={trailing}>
         {children}
       </ItemBody>
     </BaseMenu.CheckboxItem>
@@ -164,7 +169,7 @@ export interface MenuRadioItemProps
 }
 
 /** One choice in a MenuRadioGroup (`menuitemradio`); `description` = two-line server row. */
-export function MenuRadioItem({ icon, shortcut, description, trailing, className, children, ...rest }: MenuRadioItemProps) {
+export function MenuRadioItem({ icon, shortcut, description, descriptionFont, trailing, className, children, ...rest }: MenuRadioItemProps) {
   return (
     <BaseMenu.RadioItem className={cn(itemBase, description != null && 'min-h-10 py-1', className)} {...rest}>
       <CheckColumn>
@@ -172,7 +177,7 @@ export function MenuRadioItem({ icon, shortcut, description, trailing, className
           <Icon concept="check" size={14} />
         </BaseMenu.RadioItemIndicator>
       </CheckColumn>
-      <ItemBody icon={icon} shortcut={shortcut} description={description} trailing={trailing}>
+      <ItemBody icon={icon} shortcut={shortcut} description={description} {...(descriptionFont ? { descriptionFont } : {})} trailing={trailing}>
         {children}
       </ItemBody>
     </BaseMenu.RadioItem>

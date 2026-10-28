@@ -2,11 +2,11 @@
 // EditSourcesDialog — change what a live chat works on (P7-01: on the kit
 // Dialog; was components/chat/sources). Mounted by app/shell/EditSourcesHost.
 //
-// Layout (D-136, the New chat dialog's D-133 structure): ModalForm sections
-// split by `line` rules — "Folders and codebases" (the full B-04
-// SourcePicker: Project, then one source list) and "After each turn" (label +
-// hint + switch rows). Labels sit above controls on one left edge; each
-// section's explanation is behind its info icon (D-138).
+// Layout (D-167, the Enhancements "Edit sources" board): a one-line intro,
+// the full B-04 SourcePicker (one list scoped to the project, each source a
+// sentence whose parts are its controls), then "After each turn" as one
+// four-step choice. The footer says what saving rebuilds; Save is enabled
+// only when something changed, and ⌘/Ctrl ↵ saves.
 // ────────────────────────────────────────────────────────────────
 //
 // The same B-04 SourcePicker the create flows use, pre-filled from
@@ -19,17 +19,32 @@
 // and are shown inline rather than as a toast, because the thing to fix is
 // in this form.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Chat, ChatSourceControlOptions } from '@generatorai/shared';
 import { useProjectCodebases } from '@/hooks/projectQueries.js';
 import { useUpdateChatSources, useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import { useUpdateChatSourceControl } from '@/hooks/queries.js';
-import { SourcePicker, chatFolderFiles, draftsFromSpecs, draftsToSources, validateDrafts, type DraftSource } from '@/blocks/sources/index.js';
+import {
+  SourcePicker,
+  chatFolderFiles,
+  draftSetupKey,
+  draftsFromSpecs,
+  draftsToSources,
+  effectiveBranch,
+  validateDrafts,
+  type DraftSource,
+} from '@/blocks/sources/index.js';
 import { Callout } from '@/ui/primitives/Callout/Callout.js';
+import { modChord } from '@/lib/shortcuts.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
+import { Icon } from '@/ui/icons/Icon.js';
 import { Dialog, DialogBody, DialogFooter } from '@/ui/primitives/Dialog/Dialog.js';
-import { ModalForm } from '@/ui/patterns/ModalForm/ModalForm.js';
 import { DEFAULT_SOURCE_CONTROL_OPTIONS, SourceControlOptionsFields } from './SourceControlOptionsFields.js';
+
+/** Order, setups, working directory and after-turn choice, as one comparable string. */
+function snapshotOf(list: DraftSource[], primary: string | undefined, sc: ChatSourceControlOptions): string {
+  return JSON.stringify([list.map((d) => `${d.key}\u0001${draftSetupKey(d)}`), primary ?? list[0]?.alias, sc]);
+}
 
 export interface EditSourcesDialogProps {
   open: boolean;
@@ -54,6 +69,9 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
    * repos it would be committing to.
    */
   const [sourceControl, setSourceControl] = useState<ChatSourceControlOptions>(DEFAULT_SOURCE_CONTROL_OPTIONS);
+  // What the dialog opened with: tells an edit from a no-op and counts the
+  // worktrees saving would rebuild (MountService.replace, D-166).
+  const [opened, setOpened] = useState<{ snapshot: string; setups: Map<string, string> } | null>(null);
 
   // Re-seed each time the dialog opens so an abandoned edit is not resumed,
   // and again when the mounts arrive (they carry the real branch + dirty
@@ -64,13 +82,14 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
     setProjectId(chat.projectId ?? '');
     setPrimary(chat.primarySource);
     setError(null);
-    setSourceControl(chat.sourceControl ?? DEFAULT_SOURCE_CONTROL_OPTIONS);
-    setDrafts(
-      draftsFromSpecs(chat.sources, {
-        ...(codebases ? { codebases } : {}),
-        ...(mounts ? { mounts } : {}),
-      }),
-    );
+    const sc = chat.sourceControl ?? DEFAULT_SOURCE_CONTROL_OPTIONS;
+    const seeded = draftsFromSpecs(chat.sources, {
+      ...(codebases ? { codebases } : {}),
+      ...(mounts ? { mounts } : {}),
+    });
+    setSourceControl(sc);
+    setDrafts(seeded);
+    setOpened({ snapshot: snapshotOf(seeded, chat.primarySource, sc), setups: new Map(seeded.map((d) => [d.key, draftSetupKey(d)])) });
     // `codebases` is intentionally not a dependency: re-seeding on every
     // catalogue refetch would throw away edits in progress.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -78,12 +97,28 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
 
   const busy = update.isPending || updateSourceControl.isPending;
 
+  // What the dialog opened with, to tell an edit from a no-op and to count
+  // the worktrees saving would rebuild (MountService.replace, D-166).
+  const changed = opened !== null && snapshotOf(drafts, primary, sourceControl) !== opened.snapshot;
+  const rebuilds = drafts.filter((d) => {
+    const before = d.mode === 'worktree' ? opened?.setups.get(d.key) : undefined;
+    return before !== undefined && before !== draftSetupKey(d);
+  }).length;
+
+  // The one git source's branch names the after-turn sentence; several sources each keep their own.
+  const gitSources = drafts.filter((d) => d.kind !== 'chat-folder' && d.meta.isGit);
+  const agentBranch = useMemo(
+    () => (gitSources.length === 1 && gitSources[0] ? effectiveBranch(gitSources[0], chat.name) : null),
+    [gitSources, chat.name],
+  );
+
   // D-141: the agent's files in the chat folder are kept unless the user
   // removes the folder here — and then the dialog says what goes.
   const chatFiles = chatFolderFiles(mounts);
   const discardChatFolder = chatFiles > 0 && !drafts.some((d) => d.kind === 'chat-folder');
 
   const save = async () => {
+    if (!changed || busy) return;
     const local = validateDrafts(drafts);
     if (local) {
       setError(local);
@@ -106,7 +141,20 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
     }
   };
 
-  const count = drafts.length;
+  // ⌘/Ctrl ↵ saves from any field while the dialog is open (the footer advertises it).
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void saveRef.current();
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, [open]);
 
   return (
     <Dialog
@@ -115,49 +163,59 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
       onOpenChange={(next) => {
         if (!next && !busy) onClose();
       }}
-      title="Edit sources"
+      title="Sources"
       size="lg"
     >
-      <DialogBody>
-        <ModalForm>
-          <ModalForm.Section
-            first
-            title="Folders and codebases"
-            hint="What the agent can read and edit. It starts in the working directory. Changes take effect from your next message; sources you keep are left as they are."
-          >
-            <SourcePicker
-              chatName={chat.name}
-              projectId={projectId}
-              onProjectIdChange={setProjectId}
-              drafts={drafts}
-              onChange={setDrafts}
-              primaryAlias={primary}
-              onPrimaryChange={setPrimary}
-              error={error}
-              disabled={busy}
-              live
-            />
-            {discardChatFolder ? (
-              <Callout tone="warn" data-testid="chat-folder-discard">
-                Saving deletes the chat folder and the {chatFiles >= 1000 ? '1000+' : chatFiles} file{chatFiles === 1 ? '' : 's'} the agent
-                made in it. Press Cancel to keep them.
-              </Callout>
-            ) : null}
-          </ModalForm.Section>
-          <ModalForm.Section
-            title="After each turn"
-            hint="Git steps the agent takes when a reply finishes with file changes. They apply to git repositories only."
-          >
-            <SourceControlOptionsFields value={sourceControl} onChange={setSourceControl} disabled={busy} />
-          </ModalForm.Section>
-        </ModalForm>
+      <DialogBody className="gap-6">
+        <div className="flex flex-col gap-3">
+          <p className="text-small text-fg-3">What this chat works on. Changes apply from your next message; sources you keep are left as they are.</p>
+          <SourcePicker
+            chatName={chat.name}
+            projectId={projectId}
+            onProjectIdChange={setProjectId}
+            drafts={drafts}
+            onChange={setDrafts}
+            primaryAlias={primary}
+            onPrimaryChange={setPrimary}
+            error={error}
+            disabled={busy}
+            live
+            chatFolderFiles={chatFiles}
+          />
+          {discardChatFolder ? (
+            <Callout tone="warn" data-testid="chat-folder-discard">
+              Saving deletes the chat folder and the {chatFiles >= 1000 ? '1000+' : chatFiles} file{chatFiles === 1 ? '' : 's'} the agent
+              made in it. Tick it again or press Cancel to keep them.
+            </Callout>
+          ) : null}
+        </div>
+        <section className="flex flex-col gap-2.5" aria-labelledby="after-each-turn">
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <h3 id="after-each-turn" className="text-ui font-semibold text-fg">
+              After each turn
+            </h3>
+            <span className="text-small text-fg-3">For every included git codebase, on its own branch.</span>
+          </div>
+          <SourceControlOptionsFields value={sourceControl} onChange={setSourceControl} branch={agentBranch} disabled={busy} />
+        </section>
       </DialogBody>
-      <DialogFooter>
+      <DialogFooter
+        hint={
+          rebuilds > 0 ? (
+            <span className="inline-flex items-center gap-1.5 text-warn">
+              <Icon concept="refresh" size={14} />
+              Rebuilds {rebuilds} {rebuilds === 1 ? 'worktree' : 'worktrees'}
+            </span>
+          ) : (
+            'Esc to close'
+          )
+        }
+      >
         <Button onClick={onClose} disabled={busy}>
           Cancel
         </Button>
-        <Button variant="primary" icon="save" onClick={() => void save()} loading={busy}>
-          {count === 0 ? 'Save' : `Save ${count} ${count === 1 ? 'source' : 'sources'}`}
+        <Button variant="primary" icon="save" onClick={() => void save()} loading={busy} disabled={!changed} shortcut={modChord('↵')}>
+          Save changes
         </Button>
       </DialogFooter>
     </Dialog>

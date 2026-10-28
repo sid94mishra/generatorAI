@@ -37,6 +37,8 @@ import { Field } from '../../ui/primitives/Field/Field.js';
 import { IconButton } from '../../ui/primitives/IconButton/IconButton.js';
 import { Input } from '../../ui/primitives/Input/Input.js';
 import { Menu } from '../../ui/primitives/Menu/Menu.js';
+import { Chip } from '../../ui/primitives/Chip/Chip.js';
+import { PopoverClose, PopoverPopup, PopoverRoot, PopoverTrigger } from '../../ui/primitives/Popover/Popover.js';
 import { SegmentedControl, type SegmentedItem } from '../../ui/primitives/SegmentedControl/SegmentedControl.js';
 import { Select } from '../../ui/primitives/Select/Select.js';
 import { Spinner } from '../../ui/primitives/Spinner/Spinner.js';
@@ -57,6 +59,9 @@ import {
   type DraftSource,
   type SourceMode,
   autoIncludedCodebase,
+  draftFromChatFolder,
+  draftSetupKey,
+  effectiveBranch,
 } from './model.js';
 
 export interface SourcePickerProps {
@@ -85,6 +90,11 @@ export interface SourcePickerProps {
    * changes is rebuilt on save, so the row says so (D-166).
    */
   live?: boolean;
+  /**
+   * Files in the chat folder (D-141). When the user unticks it the full list
+   * keeps an unticked row so it can be ticked back before saving.
+   */
+  chatFolderFiles?: number;
 }
 
 /** Base UI Select treats `''` poorly as a value; these stand in for "none". */
@@ -128,6 +138,7 @@ export function SourcePicker({
   maxSources = 8,
   compact = false,
   live = false,
+  chatFolderFiles = 0,
 }: SourcePickerProps) {
   const readGitInfo = useReadFsGitInfo();
   const { data: projects } = useProjects();
@@ -160,18 +171,6 @@ export function SourcePicker({
       }
     },
     [drafts, onChange, effectivePrimary, onPrimaryChange],
-  );
-
-  const move = useCallback(
-    (index: number, delta: number) => {
-      const target = index + delta;
-      if (target < 0 || target >= drafts.length) return;
-      const copy = [...drafts];
-      const [item] = copy.splice(index, 1);
-      if (item) copy.splice(target, 0, item);
-      onChange(copy);
-    },
-    [drafts, onChange],
   );
 
   const toggleCodebase = useCallback(
@@ -290,7 +289,6 @@ export function SourcePicker({
     onChange: (next) => replaceAt(index, next),
     onRemove: () => removeAt(index),
     onMakePrimary: () => onPrimaryChange(draft.alias),
-    onMove: (delta) => move(index, delta),
   });
 
   const codebaseStatus = projectId ? (
@@ -321,7 +319,76 @@ export function SourcePicker({
   );
 
   const notIncluded = (codebases ?? []).filter((cb) => !selectedCodebaseIds.has(cb.id));
-  const Row = compact ? CompactSourceRow : SourceRow;
+
+  if (!compact) {
+    // D-167: one list scoped to the project. The header switches project and
+    // adds a folder; every codebase is a ticked or unticked row; each included
+    // source reads as one sentence whose parts are the controls.
+    const included = drafts.filter((d) => d.kind === 'codebase').length;
+    const keepChatFolder = chatFolderFiles > 0 && !drafts.some((d) => d.kind === 'chat-folder');
+    return (
+      <div className="flex flex-col gap-2">
+        <ul className="rounded-card border border-line-soft" data-testid="source-list" aria-label="Sources">
+          <li className="flex h-panel-bar items-center gap-2 border-b border-line-soft pr-2 pl-1.5">
+            <ProjectSwitcher
+              projects={projectItems}
+              value={projectId || NO_PROJECT}
+              disabled={disabled}
+              onChange={(v) => onProjectIdChange(v === NO_PROJECT ? '' : v)}
+            />
+            {codebases && codebases.length > 0 ? (
+              <span className="truncate text-small text-fg-3">
+                {codebases.length} {codebases.length === 1 ? 'codebase' : 'codebases'} · {included} in this chat
+              </span>
+            ) : null}
+            <span className="flex-1" />
+            {limitNote}
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="plus"
+              disabled={disabled || atLimit}
+              onClick={() => void folderPicker.open()}
+              data-testid="add-local-folder"
+            >
+              Local folder
+            </Button>
+          </li>
+          {codebaseStatus ? <li className="border-b border-line-soft px-3 py-2.5">{codebaseStatus}</li> : null}
+          {drafts.map((draft, index) => (
+            <li key={draft.key} className="border-b border-line-soft last:border-b-0">
+              {draft.kind === 'chat-folder' ? <ChatFolderListRow {...rowProps(draft, index)} /> : <SourceRow {...rowProps(draft, index)} />}
+            </li>
+          ))}
+          {notIncluded.map((cb) => (
+            <li key={cb.id} className="border-b border-line-soft last:border-b-0">
+              <CodebaseOption
+                cb={cb}
+                checked={false}
+                disabled={disabled || atLimit || cb.status !== 'ready'}
+                onToggle={() => toggleCodebase(toCodebaseLike(cb))}
+              />
+            </li>
+          ))}
+          {keepChatFolder ? (
+            <li className="border-b border-line-soft last:border-b-0">
+              <ChatFolderOption
+                files={chatFolderFiles}
+                disabled={disabled || atLimit}
+                onKeep={() => onChange([...drafts, draftFromChatFolder(chatFolderFiles)])}
+              />
+            </li>
+          ) : null}
+          {drafts.length === 0 && notIncluded.length === 0 && !keepChatFolder && (
+            <li className="px-3 py-2.5 text-small text-fg-3">{EMPTY_HINT}</li>
+          )}
+        </ul>
+        {footer}
+      </div>
+    );
+  }
+
+  const Row = CompactSourceRow;
   return (
     <div className="flex flex-col gap-4">
       <Field label="Project">{projectSelect}</Field>
@@ -413,7 +480,6 @@ interface SourceRowProps {
   onChange: (next: DraftSource) => void;
   onRemove: () => void;
   onMakePrimary: () => void;
-  onMove: (delta: number) => void;
 }
 
 /**
@@ -663,7 +729,7 @@ function CompactSourceRow(props: SourceRowProps) {
   );
 }
 
-// ── Full row (ChatCreate, Edit sources…) ──────────────────────
+// ── Full list (ChatCreate, Edit sources…) — D-167 ──────────────
 
 /** `https://github.com/acme/web.git` → `github.com/acme/web`; a path keeps its tail. */
 function shortOrigin(origin: string): string {
@@ -676,84 +742,210 @@ function shortOrigin(origin: string): string {
   return pathTail(origin, 48);
 }
 
-/** The fields that decide how a source is materialised; a kept mount changing any of them is rebuilt. */
-function setupOf(d: DraftSource): string {
-  return [d.alias, d.mode, d.branchMode, d.newBranch.trim(), d.branch, d.baseRef].join('\u0000');
-}
-
-const Mono = ({ children }: { children: ReactNode }) => <span className="font-mono text-fg">{children}</span>;
-
-/** One line in words: how the agent gets this source and which branch it lands on. */
-function SetupSummary({ draft, chatName, currentBranch }: { draft: DraftSource; chatName: string; currentBranch: string | null }) {
-  if (!draft.meta.isGit) return <>In place · not a git repository</>;
-  const mode = draft.mode === 'worktree' ? 'Worktree' : 'In place';
-  const base = draft.baseRef.trim() || currentBranch;
-  if (draft.branchMode === 'new') {
-    return (
-      <>
-        {mode} · new branch <Mono>{draft.newBranch.trim() || defaultNewBranch(chatName)}</Mono>
-        {base ? (
-          <>
-            {' '}from <Mono>{base}</Mono>
-          </>
-        ) : null}
-      </>
-    );
-  }
-  if (draft.branchMode === 'existing') {
-    return draft.branch ? (
-      <>
-        {mode} · on <Mono>{draft.branch}</Mono>
-      </>
-    ) : (
-      <>
-        {mode} · <span className="text-warn">choose a branch</span>
-      </>
-    );
-  }
-  return currentBranch ? (
-    <>
-      {mode} · stays on <Mono>{currentBranch}</Mono>
-    </>
-  ) : (
-    <>{mode} · current branch</>
+/** The list header's project switcher: the active project's name as a ghost menu button. */
+function ProjectSwitcher({
+  projects,
+  value,
+  disabled,
+  onChange,
+}: {
+  projects: ReadonlyArray<{ value: string; label: string }>;
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const named = projects.filter((p) => p.value !== NO_PROJECT);
+  const current = named.find((p) => p.value === value)?.label ?? 'No project';
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        render={
+          <Button variant="ghost" size="sm" icon="projects" trailingIcon="chevron-down" disabled={disabled} className="font-semibold text-fg">
+            {current}
+          </Button>
+        }
+        aria-label={`Project: ${current}`}
+      />
+      <Menu.Popup>
+        <Menu.RadioGroup value={value} onValueChange={(v) => onChange(String(v))}>
+          {named.map((p) => (
+            <Menu.RadioItem key={p.value} value={p.value}>
+              {p.label}
+            </Menu.RadioItem>
+          ))}
+          {named.length > 0 ? <Menu.Separator /> : null}
+          <Menu.RadioItem value={NO_PROJECT}>No project · local folders only</Menu.RadioItem>
+        </Menu.RadioGroup>
+      </Menu.Popup>
+    </Menu.Root>
   );
 }
 
-const MODE_HINT: Record<SourceMode, string> = {
-  worktree: 'A separate checkout on its own branch. Your folder and its uncommitted files are not touched.',
-  'in-place': 'The agent edits the folder itself, on the branch it has checked out.',
+const MODE_DESCRIPTION: Record<SourceMode, string> = {
+  worktree: 'A separate copy on its own branch. Your checkout is not touched.',
+  'in-place': 'Edits your checkout directly, on the branch it is on.',
 };
 
+/** "Worktree ▾" — where the agent works, as a token in the source's sentence. */
+function ModeToken({ draft, disabled, onChange }: Pick<SourceRowProps, 'draft' | 'disabled' | 'onChange'>) {
+  const setMode = (mode: SourceMode) => {
+    // A worktree always lands on a branch of its own (see ModeControl).
+    const branchMode: BranchMode = mode === 'worktree' && draft.branchMode === 'current' ? 'new' : draft.branchMode;
+    onChange({ ...draft, mode, branchMode });
+  };
+  const option = (mode: SourceMode, label: string, allowed: boolean, reason?: string) => (
+    <Menu.RadioItem value={mode} disabled={!allowed} description={allowed ? MODE_DESCRIPTION[mode] : (reason ?? MODE_DESCRIPTION[mode])} descriptionFont="sans">
+      {label}
+    </Menu.RadioItem>
+  );
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        disabled={disabled}
+        render={<Chip dropdown>{draft.mode === 'worktree' ? 'Worktree' : 'In place'}</Chip>}
+        aria-label={`Where the agent works: ${draft.mode === 'worktree' ? 'Worktree' : 'In place'}`}
+      />
+      <Menu.Popup className="w-80">
+        <Menu.RadioGroup value={draft.mode} onValueChange={(v) => setMode(v as SourceMode)}>
+          {option('worktree', 'Worktree', draft.meta.allowWorktree, draft.meta.allowWorktreeReason)}
+          {option('in-place', 'In place', draft.meta.allowInPlace, draft.meta.allowInPlaceReason)}
+        </Menu.RadioGroup>
+      </Menu.Popup>
+    </Menu.Root>
+  );
+}
+
+/** "⑂ branch ▾" — which branch, its name and where it starts, in one small popover. */
+function BranchToken({
+  draft,
+  chatName,
+  disabled,
+  onChange,
+  facts,
+}: Pick<SourceRowProps, 'draft' | 'chatName' | 'disabled' | 'onChange'> & { facts: SourceFacts }) {
+  const { branches, currentBranch } = facts;
+  const branchItems = branches.map((b) => ({ value: b, label: b }));
+  const missing = draft.branchMode === 'existing' && !draft.branch;
+  const label =
+    draft.branchMode === 'current' ? (currentBranch ?? 'current branch') : missing ? 'choose a branch' : (effectiveBranch(draft, chatName) ?? '');
+  return (
+    <PopoverRoot>
+      <PopoverTrigger
+        disabled={disabled}
+        render={
+          <Chip mono icon="branch" dropdown aria-haspopup="dialog" className={cn('max-w-full', missing && 'text-warn')}>
+            {label}
+          </Chip>
+        }
+        aria-label={`Branch for ${draft.alias}: ${label}`}
+      />
+      <PopoverPopup className="flex w-80 flex-col gap-3 p-3" aria-label={`Branch for ${draft.alias}`}>
+        <SegmentedControl<BranchMode>
+          label={`Branch for ${draft.alias}`}
+          fullWidth
+          value={draft.branchMode}
+          onValueChange={(branchMode) => onChange({ ...draft, branchMode })}
+          items={[
+            segItem<BranchMode>('new', 'New branch', disabled),
+            segItem<BranchMode>('existing', 'Existing', disabled, branches.length === 0, 'No branches were found in this repository.'),
+            // A worktree with no branch of its own would fight the checkout it was cut from.
+            ...(draft.mode === 'in-place' ? [segItem<BranchMode>('current', 'Current', disabled)] : []),
+          ]}
+        />
+        {draft.branchMode === 'new' ? (
+          <>
+            <Field label="Name">
+              <Input
+                size="sm"
+                mono
+                value={draft.newBranch}
+                disabled={disabled}
+                onChange={(e) => onChange({ ...draft, newBranch: e.target.value })}
+                placeholder={defaultNewBranch(chatName)}
+              />
+            </Field>
+            <Field label="Start from">
+              <Select
+                size="sm"
+                value={draft.baseRef || CURRENT_HEAD}
+                disabled={disabled}
+                onValueChange={(v) => onChange({ ...draft, baseRef: !v || v === CURRENT_HEAD ? '' : v })}
+                className="w-full font-mono"
+                items={[{ value: CURRENT_HEAD, label: currentBranch ? `Current (${currentBranch})` : 'Current HEAD' }, ...branchItems]}
+              />
+            </Field>
+          </>
+        ) : draft.branchMode === 'existing' ? (
+          <Field label="Branch">
+            <Select
+              size="sm"
+              value={draft.branch || null}
+              disabled={disabled || branches.length === 0}
+              onValueChange={(v) => onChange({ ...draft, branch: v ?? '' })}
+              placeholder="Choose a branch…"
+              className="w-full font-mono"
+              items={branchItems}
+            />
+          </Field>
+        ) : (
+          <p className="text-small text-fg-3">The agent works on the branch that is checked out{currentBranch ? ` (${currentBranch})` : ''}.</p>
+        )}
+        <div className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 text-small text-fg-3">
+            {draft.branchMode === 'new' ? 'Created when you save.' : draft.branchMode === 'existing' ? 'Checked out when you save.' : ''}
+          </span>
+          <PopoverClose render={<Button size="sm">Done</Button>} />
+        </div>
+      </PopoverPopup>
+    </PopoverRoot>
+  );
+}
+
+/** The source as one sentence whose parts are its controls: "[Worktree ▾] on new branch [⑂ x ▾] from develop". */
+function SourceSentence(props: SourceRowProps & { facts: SourceFacts }) {
+  const { draft, facts } = props;
+  if (!draft.meta.isGit) {
+    return <p className="pl-6 text-small text-fg-3">In place · not a git repository, so the agent edits the folder itself</p>;
+  }
+  const words = draft.branchMode === 'new' ? 'on new branch' : draft.branchMode === 'existing' ? 'on' : 'stays on';
+  const base = draft.baseRef.trim() || facts.currentBranch;
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 pl-6 text-small text-fg-3" data-testid="source-setup">
+      <ModeToken {...props} />
+      <span>{words}</span>
+      <BranchToken {...props} />
+      {draft.branchMode === 'new' && base ? (
+        <>
+          <span>from</span>
+          <span className="font-mono text-fg-2">{base}</span>
+        </>
+      ) : null}
+      {draft.mode === 'in-place' ? <span>· edits your checkout directly</span> : null}
+    </div>
+  );
+}
+
 /**
- * One source: a header line (what it is, its state, a ⋯ menu for the rare
- * actions), one line saying how the agent gets it, and the setup controls
- * behind "Change" (D-166). Defaults are right for most chats, so the controls
- * stay folded until asked for — or until the source needs an answer.
+ * One included codebase or folder (D-167): tick to keep it, its name and
+ * origin, its state, a ⋯ menu for the rare actions, then the sentence.
  */
 function SourceRow(props: SourceRowProps) {
-  const { draft, index, total, chatName, disabled, live, isPrimary, onChange, onRemove, onMakePrimary, onMove } = props;
+  const { draft, total, disabled, live, isPrimary, onChange, onRemove, onMakePrimary } = props;
   const facts = useSourceFacts(draft, props.projectId);
-  const { currentBranch, nested } = facts;
+  const { nested } = facts;
   const origin = draft.meta.origin ?? draft.path;
-
-  const needsAnswer = draft.branchMode === 'existing' && !draft.branch;
-  const [open, setOpen] = useState(needsAnswer);
   const [renaming, setRenaming] = useState(false);
-  const shown = open || needsAnswer;
 
   // What the server has now, to tell a rebuild from a no-op (live chats only).
-  const saved = useRef(setupOf(draft));
-  const rebuilt = live && draft.mode === 'worktree' && setupOf(draft) !== saved.current;
-
-  const copyPath = useCallback(() => {
-    if (origin) void navigator.clipboard?.writeText(origin).catch(() => undefined);
-  }, [origin]);
+  const saved = useRef(draftSetupKey(draft));
+  const rebuilt = live && draft.mode === 'worktree' && draftSetupKey(draft) !== saved.current;
 
   return (
-    <div className="flex flex-col gap-1 py-2.5 pr-2 pl-3">
-      <div className="flex min-w-0 items-center gap-2">
-        <Icon concept={draft.meta.isGit ? 'branch' : 'folder-open'} size={14} className="shrink-0 text-fg-3" />
+    <div className="flex flex-col gap-2 py-2.5 pr-2 pl-3">
+      <div className="flex min-h-control-sm min-w-0 items-center gap-2">
+        {/* Unticking removes it: a codebase returns to the unticked rows, a folder leaves the list. */}
+        <Checkbox checked disabled={disabled} onCheckedChange={onRemove} aria-label={`Include ${draft.alias}`} />
+        {draft.kind === 'folder' ? <Icon concept="folder-open" size={14} className="shrink-0 text-fg-3" /> : null}
         {renaming ? (
           <Input
             size="sm"
@@ -775,7 +967,7 @@ function SourceRow(props: SourceRowProps) {
           </span>
         )}
         {origin ? (
-          <span className="min-w-0 truncate font-mono text-small text-fg-3" title={origin}>
+          <span className="min-w-0 truncate font-mono text-micro text-fg-3" title={origin}>
             {shortOrigin(origin)}
           </span>
         ) : null}
@@ -794,71 +986,75 @@ function SourceRow(props: SourceRowProps) {
           <Menu.Trigger render={<IconButton icon="more" size="sm" label={`More for ${draft.alias}`} disabled={disabled} />} />
           <Menu.Popup align="end">
             <Menu.Item icon="edit" onClick={() => setRenaming(true)}>
-              Rename
+              Rename…
             </Menu.Item>
             {total > 1 && !isPrimary ? (
               <Menu.Item icon="home" onClick={onMakePrimary}>
                 Make working directory
               </Menu.Item>
             ) : null}
-            {total > 1 ? (
-              <>
-                <Menu.Item icon="chevron-up" disabled={index === 0} onClick={() => onMove(-1)}>
-                  Move up
-                </Menu.Item>
-                <Menu.Item icon="chevron-down" disabled={index === total - 1} onClick={() => onMove(1)}>
-                  Move down
-                </Menu.Item>
-              </>
-            ) : null}
             {origin ? (
-              <Menu.Item icon="copy" onClick={copyPath}>
+              <Menu.Item icon="copy" onClick={() => void navigator.clipboard?.writeText(origin).catch(() => undefined)}>
                 Copy {draft.kind === 'folder' ? 'path' : 'location'}
               </Menu.Item>
             ) : null}
-            <Menu.Separator />
-            <Menu.Item icon="trash" danger onClick={onRemove}>
-              Remove
-            </Menu.Item>
           </Menu.Popup>
         </Menu.Root>
       </div>
 
-      <div className="flex min-w-0 items-center gap-2 pl-6">
-        <p className="min-w-0 flex-1 truncate text-small text-fg-2" data-testid="source-setup">
-          <SetupSummary draft={draft} chatName={chatName} currentBranch={currentBranch} />
-        </p>
-        {draft.meta.isGit && !needsAnswer ? (
-          <Button variant="ghost" size="sm" aria-expanded={shown} disabled={disabled} onClick={() => setOpen((v) => !v)}>
-            {shown ? 'Done' : 'Change'}
-          </Button>
-        ) : null}
-      </div>
-
-      {draft.meta.isGit && shown ? (
-        <div className="mt-2 flex flex-col gap-3 pl-6">
-          <div className="flex flex-col items-start gap-1.5">
-            <span className="text-small font-medium text-fg-2">Where the agent works</span>
-            <ModeControl {...props} />
-            <span className="text-small text-fg-3">{MODE_HINT[draft.mode]}</span>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <span className="text-small font-medium text-fg-2">Branch</span>
-            <div className="flex flex-wrap items-center gap-2">
-              <BranchControls {...props} facts={facts} />
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <SourceSentence {...props} facts={facts} />
 
       {rebuilt && facts.dirty ? (
-        <Callout tone="warn" className="mt-2 ml-6" data-testid="source-rebuild-dirty">
-          Saving rebuilds the {draft.alias} worktree, and its uncommitted changes are discarded. Commit them first, or press Cancel.
-        </Callout>
-      ) : rebuilt ? (
-        <p className="pl-6 text-small text-fg-3">Saving rebuilds the {draft.alias} worktree with this setup.</p>
+        <div className="ml-6 flex items-start gap-2 rounded-control bg-warn-bg px-2.5 py-1.5 text-small text-warn" data-testid="source-rebuild-dirty">
+          <Icon concept="warning" size={14} className="mt-0.5 shrink-0" />
+          <span>Saving rebuilds this worktree and discards its uncommitted changes. Commit them first, or press Cancel.</span>
+        </div>
       ) : null}
       <RowNotes draft={draft} facts={facts} className="pl-6" />
+    </div>
+  );
+}
+
+/** The chat folder in the full list: ticked = kept (D-141). */
+function ChatFolderListRow({ draft, total, disabled, isPrimary, onRemove, onMakePrimary }: SourceRowProps) {
+  const files = draft.meta.files ?? 0;
+  return (
+    <div className="flex h-row items-center gap-2.5 pr-2 pl-3" data-testid="source-chat-folder">
+      <Checkbox checked disabled={disabled} onCheckedChange={onRemove} aria-label="Keep the chat folder" />
+      <Icon concept="folder-open" size={14} className="shrink-0 text-fg-3" />
+      <span className="shrink-0 text-ui font-medium text-fg">Chat folder</span>
+      <span className="min-w-0 truncate text-small text-fg-3">
+        {files >= 1000 ? '1000+' : files} file{files === 1 ? '' : 's'} the agent created
+      </span>
+      <span className="flex-1" />
+      {isPrimary && total > 1 ? <WorkingDirectoryBadge /> : null}
+      <span className="shrink-0 text-small text-fg-3">In place</span>
+      {total > 1 && !isPrimary ? (
+        <Menu.Root>
+          <Menu.Trigger render={<IconButton icon="more" size="sm" label="More for the chat folder" disabled={disabled} />} />
+          <Menu.Popup align="end">
+            <Menu.Item icon="home" onClick={onMakePrimary}>
+              Make working directory
+            </Menu.Item>
+          </Menu.Popup>
+        </Menu.Root>
+      ) : null}
+    </div>
+  );
+}
+
+/** The chat folder after it was unticked: saving deletes it; ticking keeps it again. */
+function ChatFolderOption({ files, disabled, onKeep }: { files: number; disabled: boolean; onKeep: () => void }) {
+  return (
+    <div className="flex h-row items-center gap-2.5 pr-2.5 pl-3">
+      <Checkbox checked={false} disabled={disabled} onCheckedChange={onKeep} aria-label="Keep the chat folder" />
+      <Icon concept="folder-open" size={14} className="shrink-0 text-fg-3" />
+      <span className="shrink-0 text-ui text-fg-2">Chat folder</span>
+      <span className="min-w-0 truncate text-small text-fg-3">
+        {files >= 1000 ? '1000+' : files} file{files === 1 ? '' : 's'} the agent created
+      </span>
+      <span className="flex-1" />
+      <span className="shrink-0 text-small text-warn">Deleted when you save</span>
     </div>
   );
 }

@@ -178,6 +178,15 @@ export function draftsToSources(drafts: DraftSource[], chatName: string): ChatSo
   });
 }
 
+/**
+ * The fields that decide how a source is materialised. A kept mount whose key
+ * changes is rebuilt by the server (`MountService.replace`), so a live chat's
+ * picker compares these to say so (D-166).
+ */
+export function draftSetupKey(d: DraftSource): string {
+  return [d.alias, d.mode, d.branchMode, d.newBranch.trim(), d.branch, d.baseRef.trim()].join('\u0000');
+}
+
 /** `frontend → worktree on generatorai/cart-fix from main` */
 export function describeDraft(draft: DraftSource, chatName: string): string {
   if (draft.kind === 'chat-folder') return `${CHAT_FOLDER_LABEL} → kept`;
