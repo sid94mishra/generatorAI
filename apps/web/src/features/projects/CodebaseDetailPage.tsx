@@ -41,7 +41,7 @@ import { DetailPage } from '@/ui/templates/DetailPage/DetailPage.js';
 import { CodebaseLogsDialog, CodebaseStatusBadge, useFetchCodebaseAction, useLiveCodebases } from './codebaseParts.js';
 import { FilesTab } from './codebase/FilesTab.js';
 import { WorktreesTab } from './codebase/WorktreesTab.js';
-import { CODEBASE_TYPE_LABEL, codebaseLocation, isCodebaseBusy } from './projectFormat.js';
+import { CODEBASE_TYPE_LABEL, codebaseLocation, codebaseRemoveConfirm, isCodebaseBusy } from './projectFormat.js';
 
 type CodebaseTab = 'worktrees' | 'files';
 
@@ -132,11 +132,7 @@ export function CodebaseDetailPage() {
   const worktreeCount = worktrees.data?.items.length;
 
   const remove = async () => {
-    const ok = await confirmer.confirm({
-      title: `Delete ${codebase.alias}?`,
-      description: 'This deletes the codebase, its cloned data and every worktree made from it. It can’t be undone.',
-      confirmLabel: 'Delete codebase',
-    });
+    const ok = await confirmer.confirm(codebaseRemoveConfirm(codebase));
     if (!ok) return;
     try {
       await unlink.mutateAsync({ projectId, codebaseId });
@@ -184,7 +180,7 @@ export function CodebaseDetailPage() {
                         ]
                       : []),
                     { type: 'separator' as const },
-                    { id: 'delete', label: 'Delete codebase…', icon: 'trash' as const, danger: true, onSelect: () => void remove() },
+                    { id: 'delete', label: codebase.type === 'git-remote' ? 'Delete codebase…' : 'Remove from project…', icon: 'trash' as const, danger: true, onSelect: () => void remove() },
                   ]}
                 />
               </>

@@ -30,7 +30,7 @@ import {
   type CodebaseDraft,
 } from '../CodebaseDraftFields.js';
 import { CodebaseLogsDialog, CodebaseStatusBadge, useFetchCodebaseAction } from '../codebaseParts.js';
-import { CODEBASE_TYPE_LABEL, codebaseLocation, isCodebaseBusy } from '../projectFormat.js';
+import { CODEBASE_TYPE_LABEL, codebaseLocation, codebaseRemoveConfirm, isCodebaseBusy } from '../projectFormat.js';
 
 interface AddCodebaseCardProps {
   projectId: string;
@@ -112,11 +112,7 @@ export function CodebasesTab({ projectId, codebases, isLoading, error }: Codebas
   }, [worktrees]);
 
   const onDelete = async (cb: ProjectCodebase) => {
-    const ok = await confirmer.confirm({
-      title: `Delete ${cb.alias}?`,
-      description: 'This deletes the codebase, its cloned data and every worktree made from it. It can’t be undone.',
-      confirmLabel: 'Delete codebase',
-    });
+    const ok = await confirmer.confirm(codebaseRemoveConfirm(cb));
     if (!ok) return;
     unlink.mutate(
       { projectId, codebaseId: cb.id },
@@ -224,7 +220,7 @@ export function CodebasesTab({ projectId, codebases, isLoading, error }: Codebas
               items={[
                 { id: 'open', label: 'Open codebase', icon: 'branch', onSelect: () => navigate(`/projects/${projectId}/codebases/${cb.id}`) },
                 { type: 'separator' },
-                { id: 'delete', label: 'Delete codebase…', icon: 'trash', danger: true, onSelect: () => void onDelete(cb) },
+                { id: 'delete', label: cb.type === 'git-remote' ? 'Delete codebase…' : 'Remove from project…', icon: 'trash', danger: true, onSelect: () => void onDelete(cb) },
               ]}
             />
           </span>

@@ -138,17 +138,31 @@ export class CodebaseService {
   async unlinkCodebase(codebaseId: string): Promise<void> {
     const codebase = await this.codebaseRepo.getById(codebaseId);
 
-    // Clean up filesystem
-    if (codebase.clonePath) {
+    // Only the bare clone this service made under the project's repos dir is
+    // ours to delete. A git-local / local-dir codebase's clonePath IS the
+    // user's own folder: unlinking forgets it and never touches the disk.
+    const clonePath = this.ownedClonePath(codebase);
+    if (clonePath) {
       try {
-        await fs.rm(codebase.clonePath, { recursive: true, force: true });
+        await fs.rm(clonePath, { recursive: true, force: true });
       } catch (err) {
-        this.logger.warn(`[Codebase] Failed to clean up ${codebase.clonePath}: ${err}`);
+        this.logger.warn(`[Codebase] Failed to clean up ${clonePath}: ${err}`);
       }
     }
 
     await this.codebaseRepo.delete(codebaseId);
     this.logger.info(`[Codebase] Unlinked codebase ${codebaseId}`);
+  }
+
+  /** The clone path when it is an app-made clone strictly inside the project's repos dir; otherwise null. */
+  private ownedClonePath(codebase: ProjectCodebase): string | null {
+    if (codebase.type !== 'git-remote' || !codebase.clonePath) return null;
+    const reposDir = path.resolve(this.projectService.getProjectReposDir(codebase.projectId));
+    const clonePath = path.resolve(codebase.clonePath);
+    const rel = path.relative(reposDir, clonePath);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+    if (codebase.localPath && path.resolve(codebase.localPath) === clonePath) return null;
+    return clonePath;
   }
 
   async cloneRemoteRepo(codebase: ProjectCodebase, onLine?: LineSink): Promise<void> {

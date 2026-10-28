@@ -55,6 +55,21 @@ export const CODEBASE_TYPE_HINT: Record<CodebaseType, string> = {
 };
 
 /** True while an async git job (clone or fetch, G-16) runs for the codebase. */
+/** The delete-codebase confirmation: a GitHub clone is the app's to delete; a linked folder is only forgotten. */
+export function codebaseRemoveConfirm(codebase: { alias: string; type: CodebaseType; localPath?: string }) {
+  return codebase.type === 'git-remote'
+    ? {
+        title: `Delete ${codebase.alias}?`,
+        description: 'This deletes the app’s clone of the repository. Branches already pushed stay on the remote.',
+        confirmLabel: 'Delete codebase',
+      }
+    : {
+        title: `Remove ${codebase.alias} from the project?`,
+        description: `The project forgets this codebase. Your folder${codebase.localPath ? ` at ${codebase.localPath}` : ''} and its branches are not touched.`,
+        confirmLabel: 'Remove codebase',
+      };
+}
+
 export function isCodebaseBusy(status: CodebaseStatus): boolean {
   return status === 'cloning' || status === 'pending';
 }
