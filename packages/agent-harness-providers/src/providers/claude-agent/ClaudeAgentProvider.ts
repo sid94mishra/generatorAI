@@ -810,6 +810,16 @@ export class ClaudeAgentProvider implements IAgentHarness {
   private planPhases = new Map<string, PlanPhaseState>();
   /** Per conversation: domain tools that declared `skipPermission` — allowed without the domain gate (U-24; Copilot honours it natively). */
   private skipPermissionTools = new Map<string, Set<string>>();
+  /** Builds a fresh `generatorai-tools` server per Claude process (see `withFreshToolServer`). */
+  private toolServerFactories = new Map<string, () => unknown>();
+
+  /** `options` with a newly built in-process tool server, so no two processes share one MCP transport. */
+  private withFreshToolServer(conversationId: string, options: ClaudeOptions): ClaudeOptions {
+    const make = this.toolServerFactories.get(conversationId);
+    const servers = options.mcpServers as Record<string, unknown> | undefined;
+    if (!make || !servers?.['generatorai-tools']) return options;
+    return { ...options, mcpServers: { ...servers, 'generatorai-tools': make() } as ClaudeOptions['mcpServers'] };
+  }
 
   // Accumulated messages per conversation for getMessages()
   private conversationMessages = new Map<string, ConversationMessage[]>();
@@ -1308,6 +1318,14 @@ export class ClaudeAgentProvider implements IAgentHarness {
           params.conversationId,
         );
         mcpConfig = { 'generatorai-tools': mcpServerConfig };
+        // An in-process MCP server connects to ONE transport for its life: a second Claude process handed the same
+        // instance (a discarded warm-up, a rebuild after a sources or options change) reported it as "failed to
+        // start" and ran without its tools. Every spawn takes a fresh instance from here.
+        const tools = params.tools;
+        const conversationId = params.conversationId;
+        this.toolServerFactories.set(conversationId, () =>
+          buildClaudeAgentMcpTools(tools, this.toolSemaphore, conversationId).mcpServerConfig,
+        );
         domainToolNames = toolNames;
         this.skipPermissionTools.set(params.conversationId, new Set(skipPermissionToolNames));
       }
@@ -2046,7 +2064,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
         if (this.verbose) console.log(`[ClaudeAgentAdapter] Sending prompt to ${conversationId} (${prompt.length} chars)`);
 
         const { query: claudeQuery } = await loadClaudeSdk(); // W41
-        const queryHandle = claudeQuery({ prompt, options });
+        const queryHandle = claudeQuery({ prompt, options: this.withFreshToolServer(conversationId, options) });
         activeQuery.closeHandle = () => queryHandle.close();
 
         let fullContent = '';
@@ -3541,7 +3559,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       // minute when the CLI is missing or wedged — an unreachable executable
       // otherwise hangs here for the full default. Measured initialize is
       // ~14 s, so this is generous and still bounded.
-      const warm = await startup({ options, initializeTimeoutMs: PREWARM_INITIALIZE_TIMEOUT_MS });
+      const warm = await startup({ options: this.withFreshToolServer(conversationId, options), initializeTimeoutMs: PREWARM_INITIALIZE_TIMEOUT_MS });
 
       // A turn may have started, or another warm may have won, while we were
       // spawning. Losing that race must not leak the process.
@@ -3643,7 +3661,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       queryHandle = warmed.warm.query(input);
     } else {
       if (warmed) this.discardWarmSession(conversationId, 'options changed before first use');
-      queryHandle = claudeQuery({ prompt: input, options });
+      queryHandle = claudeQuery({ prompt: input, options: this.withFreshToolServer(conversationId, options) });
     }
 
     const session: PersistentSession = {
@@ -3677,7 +3695,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       }
       const mcpKey = mcpFingerprint(options.mcpServers as Record<string, unknown> | undefined);
       if (mcpKey !== session.liveMcpKey) {
-        await session.query.setMcpServers(options.mcpServers ?? {});
+        await session.query.setMcpServers(this.withFreshToolServer(session.conversationId, options).mcpServers ?? {});
         session.liveMcpKey = mcpKey;
       }
     } catch (err) {
@@ -3815,7 +3833,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       if (this.verbose) console.log(`[ClaudeAgentAdapter] Starting background query for ${conversationId}`);
 
       const { query: claudeQuery } = await loadClaudeSdk(); // W41
-      const queryHandle = claudeQuery({ prompt, options });
+      const queryHandle = claudeQuery({ prompt, options: this.withFreshToolServer(conversationId, options) });
       activeQuery.closeHandle = () => queryHandle.close();
 
       for await (const message of queryHandle) {
@@ -4075,6 +4093,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
 
   private cleanupConversation(conversationId: string): void {
     this.skipPermissionTools.delete(conversationId);
+    this.toolServerFactories.delete(conversationId);
     // A conversation deleted or swept before its first prompt still owns a
     // spawned CLI process if it was pre-warmed.
     this.discardWarmSession(conversationId, 'conversation cleaned up');
