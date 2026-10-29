@@ -65,7 +65,7 @@ export function codebaseRemoveConfirm(codebase: { alias: string; type: CodebaseT
       }
     : {
         title: `Remove ${codebase.alias} from the project?`,
-        description: `The project forgets this codebase. Your folder${codebase.localPath ? ` at ${codebase.localPath}` : ''} and its branches are not touched.`,
+        description: `The project forgets this codebase. Your folder${codebase.localPath ? ` at ${codebase.localPath}` : ''}${codebase.type === 'git-local' ? ' and its branches are' : ' is'} not touched.`,
         confirmLabel: 'Remove codebase',
       };
 }
