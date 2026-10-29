@@ -186,7 +186,7 @@ beforeEach(async () => {
     createChatApiRoutes({
       chatListService,
       chatEntityRepo: chatRepo,
-      chatManagementService: {},
+      chatManagementService: { unarchiveChat: async () => undefined },
       workspaceManager: { getExecutionWorkspace: async () => null },
       eventBus: bus,
       logger,

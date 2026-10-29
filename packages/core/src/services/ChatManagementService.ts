@@ -1723,6 +1723,24 @@ export class ChatManagementService {
   }
 
   /**
+   * A provider whose session could not follow a rebind (OpenCode after the working directory moved) started a
+   * fresh one and said so (`CONVERSATION_RESTARTED`): seed it with the transcript once, as a provider move does
+   * (E-4). Best effort and isolated — it must never turn a successful resume into a failed one.
+   */
+  private async seedIfRestarted(chat: Chat, conversationId: string): Promise<void> {
+    try {
+      const warnings = this.harness.getConversationWarnings?.(conversationId) ?? [];
+      if (chat.conversationSeed || !warnings.some((w) => w.code === 'CONVERSATION_RESTARTED')) return;
+      const seed = buildConversationSeed(await this.messageRepo.getByChatId(chat.id));
+      if (!seed) return;
+      chat.conversationSeed = seed;
+      await this.chatRepo.update(chat.id, { conversationSeed: seed });
+    } catch (err) {
+      console.warn(`[ChatManagement] could not seed restarted conversation for chat ${chat.id}:`, err);
+    }
+  }
+
+  /**
    * Reopen an archived chat: its workspace is active again and the worktrees
    * that archive retention released are prepared again on the branches they
    * kept (the first prompt waits for them, as for a new chat). The provider
@@ -2049,18 +2067,7 @@ export class ChatManagementService {
           'resume the conversation',
         );
         this.conversationBindings.set(session.conversationId, desiredBinding);
-        // A provider whose session could not follow the rebind (OpenCode after the working directory moved)
-        // started a fresh one: seed it with the transcript once, as a provider move does (E-4).
-        const restarted = this.harness
-          .getConversationWarnings(session.conversationId)
-          .some((w) => w.code === 'CONVERSATION_RESTARTED');
-        if (restarted && !chat.conversationSeed) {
-          const seed = buildConversationSeed(await this.messageRepo.getByChatId(chatId));
-          if (seed) {
-            chat.conversationSeed = seed;
-            await this.chatRepo.update(chatId, { conversationSeed: seed });
-          }
-        }
+        await this.seedIfRestarted(chat, session.conversationId);
       } catch {
         try {
           await withDeadline(
