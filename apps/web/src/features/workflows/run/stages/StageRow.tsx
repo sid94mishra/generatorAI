@@ -18,7 +18,7 @@ import { TRANSCRIPT_COPY } from '@generatorai/shared/ui-contract';
 import { resolveMapping, resolveStatus, stageSkipReasonLabel, STATUS_STATE_DEFS } from '@generatorai/shared';
 import type { RunCommand } from '@generatorai/workflow-spec';
 import type { IconConcept } from '@generatorai/design-tokens';
-import { LiveTurn, TranscriptProvider, UsageChip, UserMessage } from '@/blocks/transcript/index.js';
+import { LiveTurn, TranscriptProvider, TurnBody, UsageChip, UserMessage } from '@/blocks/transcript/index.js';
 import { ContextGauge } from '@/blocks/composer/parts/ContextGauge.js';
 import { cn } from '@/ui/lib/cn.js';
 import { Icon } from '@/ui/icons/Icon.js';
@@ -37,9 +37,21 @@ import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 
 /** An answer to one of a stage's in-turn gates, in the chat's shapes (the stage conversation API). */
 export type StageGateResolution =
-  | { kind: 'permission'; interactionId: string; behavior: 'allow' | 'deny'; message?: string; remember?: 'owner' | 'project' }
+  | {
+      kind: 'permission';
+      interactionId: string;
+      behavior: 'allow' | 'deny';
+      message?: string;
+      remember?: 'owner' | 'project';
+    }
   | { kind: 'answer'; interactionId: string; answers: Record<string, string[]>; freeformResponse?: string }
-  | { kind: 'plan'; interactionId: string; approved: boolean; action?: 'implement_interactive' | 'implement_autopilot'; feedback?: string };
+  | {
+      kind: 'plan';
+      interactionId: string;
+      approved: boolean;
+      action?: 'implement_interactive' | 'implement_autopilot';
+      feedback?: string;
+    };
 
 /**
  * The stage "…" menu (D-18). Every command goes through the commands API;
@@ -101,10 +113,15 @@ const BODY_PAD = ['pl-13', 'pl-19', 'pl-25', 'pl-31', 'pl-37'] as const;
 
 const STAGE_PROMPT_LABEL = { text: 'Stage prompt', icon: 'user' } as const;
 
-const SHARED_CONTEXT_NOTE = 'This run shares one conversation across stages, so this is the run’s context window — not this stage alone.';
+const SHARED_CONTEXT_NOTE =
+  'This run shares one conversation across stages, so this is the run’s context window — not this stage alone.';
 
 /** The "…" items of one stage: what the instance's engine state accepts. */
-function stageMenuItems(stage: StageView, menu: StageMenuActions, onOpenInspector?: (id: string) => void): MenuButtonItem[] {
+function stageMenuItems(
+  stage: StageView,
+  menu: StageMenuActions,
+  onOpenInspector?: (id: string) => void,
+): MenuButtonItem[] {
   const raw = stage.rawStatus;
   const live = menu.runLive;
   const inAttempt = raw === 'starting' || raw === 'running' || raw === 'validating';
@@ -116,16 +133,60 @@ function stageMenuItems(stage: StageView, menu: StageMenuActions, onOpenInspecto
   const hasOutput = !!stage.outputText || !!stage.outputData;
   const cmd = (command: RunCommand) => () => menu.onCommand(stage.id, command);
   const items: MenuButtonItem[] = [
-    { id: 'pause', label: 'Pause stage', icon: 'pause', disabled: !canPause, onSelect: cmd({ command: 'pause', instanceId: stage.id, mode: 'interrupt' }) },
-    { id: 'resume', label: 'Resume', icon: 'play', disabled: !paused, onSelect: cmd({ command: 'resume', instanceId: stage.id }) },
-    { id: 'retry-resume', label: 'Retry (continue the conversation)', icon: 'retry', disabled: !paused, onSelect: cmd({ command: 'retry', instanceId: stage.id, mode: 'resume' }) },
-    { id: 'retry-restart', label: 'Retry (restart the stage)', icon: 'restart', disabled: !paused, onSelect: cmd({ command: 'retry', instanceId: stage.id, mode: 'restart' }) },
-    { id: 'skip', label: 'Skip as completed', icon: 'forward', disabled: !canSkip, onSelect: cmd({ command: 'skip', instanceId: stage.id, as: 'completed' }) },
-    { id: 'cancel', label: 'Cancel stage…', icon: 'x', danger: true, disabled: !canCancel, onSelect: cmd({ command: 'cancel', instanceId: stage.id }) },
+    {
+      id: 'pause',
+      label: 'Pause stage',
+      icon: 'pause',
+      disabled: !canPause,
+      onSelect: cmd({ command: 'pause', instanceId: stage.id, mode: 'interrupt' }),
+    },
+    {
+      id: 'resume',
+      label: 'Resume',
+      icon: 'play',
+      disabled: !paused,
+      onSelect: cmd({ command: 'resume', instanceId: stage.id }),
+    },
+    {
+      id: 'retry-resume',
+      label: 'Retry (continue the conversation)',
+      icon: 'retry',
+      disabled: !paused,
+      onSelect: cmd({ command: 'retry', instanceId: stage.id, mode: 'resume' }),
+    },
+    {
+      id: 'retry-restart',
+      label: 'Retry (restart the stage)',
+      icon: 'restart',
+      disabled: !paused,
+      onSelect: cmd({ command: 'retry', instanceId: stage.id, mode: 'restart' }),
+    },
+    {
+      id: 'skip',
+      label: 'Skip as completed',
+      icon: 'forward',
+      disabled: !canSkip,
+      onSelect: cmd({ command: 'skip', instanceId: stage.id, as: 'completed' }),
+    },
+    {
+      id: 'cancel',
+      label: 'Cancel stage…',
+      icon: 'x',
+      danger: true,
+      disabled: !canCancel,
+      onSelect: cmd({ command: 'cancel', instanceId: stage.id }),
+    },
     { type: 'separator', id: 'sep' },
-    { id: 'copy', label: 'Copy output', icon: 'copy', disabled: !hasOutput, onSelect: () => menu.onCopyOutput(stage.id) },
+    {
+      id: 'copy',
+      label: 'Copy output',
+      icon: 'copy',
+      disabled: !hasOutput,
+      onSelect: () => menu.onCopyOutput(stage.id),
+    },
   ];
-  if (onOpenInspector) items.push({ id: 'inspect', label: 'Open in inspector', icon: 'dock', onSelect: () => onOpenInspector(stage.id) });
+  if (onOpenInspector)
+    items.push({ id: 'inspect', label: 'Open in inspector', icon: 'dock', onSelect: () => onOpenInspector(stage.id) });
   items.push({
     id: 'rerun',
     label: live ? 'Re-run from here (once the run has finished)' : 'Re-run from here',
@@ -167,7 +228,11 @@ export const StageRow = memo(function StageRow({
   hidePrompt,
 }: StageRowProps) {
   const isActive = stage.status === 'running' || stage.status === 'awaiting_input' || stage.streaming === true;
-  const isTerminal = stage.status === 'completed' || stage.status === 'failed' || stage.status === 'cancelled' || stage.status === 'skipped';
+  const isTerminal =
+    stage.status === 'completed' ||
+    stage.status === 'failed' ||
+    stage.status === 'cancelled' ||
+    stage.status === 'skipped';
   const isAwaiting = stage.status === 'awaiting_input';
   const isFailed = stage.status === 'failed';
   const isSkippedOrCancelled = stage.status === 'skipped' || stage.status === 'cancelled';
@@ -195,7 +260,8 @@ export const StageRow = memo(function StageRow({
   const status = resolveStatus('stageRun', stage.rawStatus) ?? resolveMapping({ state: 'queued' }, 'stageRun');
   // U-18: a check that ran to the end but did not pass completes (it never fails the run on its own),
   // yet it must not read "Succeeded".
-  const checkFailure = stage.kind === 'check' && stage.status === 'completed' ? checkFailureWord(stage.outputData) : null;
+  const checkFailure =
+    stage.kind === 'check' && stage.status === 'completed' ? checkFailureWord(stage.outputData) : null;
   const def = STATUS_STATE_DEFS[checkFailure ? 'failed' : status.state];
   const word = stage.admission
     ? `Waiting for ${stage.admission.label} (${stage.admission.limit !== null ? `${stage.admission.running}/${stage.admission.limit}` : `${stage.admission.running} running`})`
@@ -212,32 +278,41 @@ export const StageRow = memo(function StageRow({
       </span>
     ) : null;
 
-  // The same live panel as a chat turn (D-172): agent header, body, thinking placeholder. The stage row's
-  // header, result, output chips and review card are the workflow's own parts around it.
-  const turnBody = (
-    <LiveTurn
-      agentName={stage.name}
-      avatar="bot"
-      segments={stage.segments}
-      steps={stage.steps}
-      answer={stage.answer}
-      streamKey={`stageRun:${stage.id}`}
-      active={stage.status === 'running' || stage.streaming === true}
-      answerStreaming={isActive && !isAwaiting}
-      thinking={isActive && !isAwaiting}
-      thinkingLabel={TRANSCRIPT_COPY.agentThinking(stage.name)}
-      error={isFailed ? stage.error : undefined}
-    />
-  );
+  const turnProps = {
+    segments: stage.segments,
+    steps: stage.steps,
+    answer: stage.answer,
+    streamKey: `stageRun:${stage.id}`,
+    active: stage.status === 'running' || stage.streaming === true,
+    answerStreaming: isActive && !isAwaiting,
+    error: isFailed ? stage.error : undefined,
+  };
+  // An agent stage streams through the same live panel as a chat turn (D-172): agent header, body, thinking
+  // placeholder; the stage row's header, result, output chips and review card are the workflow's own parts around
+  // it. A check (a command) is no agent: it keeps the bare body, with no avatar and no "is thinking".
+  const turnBody =
+    stage.kind !== undefined && stage.kind !== 'agent' ? (
+      <TurnBody {...turnProps} loading={isActive && !isAwaiting && stage.steps.length === 0 && !stage.answer} />
+    ) : (
+      <LiveTurn
+        {...turnProps}
+        agentName={stage.name}
+        avatar="bot"
+        thinking={isActive && !isAwaiting}
+        thinkingLabel={TRANSCRIPT_COPY.agentThinking(stage.name)}
+      />
+    );
 
   return (
-    <div
-      data-stage-id={stage.id}
-      data-testid="stage-row"
-      className={cn(showConnector && 'border-b border-line-soft')}
-    >
+    <div data-stage-id={stage.id} data-testid="stage-row" className={cn(showConnector && 'border-b border-line-soft')}>
       {/* Only the header marks focus: tinting the open transcript too sank its cards into the background. */}
-      <div className={cn('group flex h-row min-w-0 items-center gap-1 pr-2', DEPTH_PAD[d], focused ? 'bg-sunken' : 'hover:bg-hover')}>
+      <div
+        className={cn(
+          'group flex h-row min-w-0 items-center gap-1 pr-2',
+          DEPTH_PAD[d],
+          focused ? 'bg-sunken' : 'hover:bg-hover',
+        )}
+      >
         <Button
           variant="ghost"
           onClick={toggle}
@@ -262,14 +337,20 @@ export const StageRow = memo(function StageRow({
             </span>
             <span
               className={cn('shrink-0 text-small', STATUS_TONE_TEXT[def.tone])}
-              {...(stage.admission ? { title: `${stage.admission.queued} launch${stage.admission.queued === 1 ? '' : 'es'} queued on ${stage.admission.flowKey}` } : {})}
+              {...(stage.admission
+                ? {
+                    title: `${stage.admission.queued} launch${stage.admission.queued === 1 ? '' : 'es'} queued on ${stage.admission.flowKey}`,
+                  }
+                : {})}
             >
               {word}
             </span>
           </span>
         </Button>
         {/* Variable badges sit before the fixed Key and Time columns, so those line up down the table. */}
-        {stage.attempt && stage.attempt > 1 ? <span className="hidden shrink-0 text-small text-fg-3 md:inline">attempt {stage.attempt}</span> : null}
+        {stage.attempt && stage.attempt > 1 ? (
+          <span className="hidden shrink-0 text-small text-fg-3 md:inline">attempt {stage.attempt}</span>
+        ) : null}
         {headerExtra}
         {parallel > 0 ? (
           <Badge tone="run" icon="zap" className="hidden md:inline-flex">
@@ -283,7 +364,10 @@ export const StageRow = memo(function StageRow({
             </span>
           ) : null}
           {fileCount > 0 ? (
-            <span className="hidden items-center gap-1 md:inline-flex" title={`${fileCount} changed file${fileCount === 1 ? '' : 's'}`}>
+            <span
+              className="hidden items-center gap-1 md:inline-flex"
+              title={`${fileCount} changed file${fileCount === 1 ? '' : 's'}`}
+            >
               <Icon concept="file" size={12} />
               {fileCount}
             </span>
@@ -331,7 +415,12 @@ export const StageRow = memo(function StageRow({
                       // U-16: "Allow for this run" remembers the gate's rules for every stage of the run.
                       permissionScope: 'run' as const,
                       permissionProjectScope: inProject,
-                      onAnswerPermission: (interactionId: string, behavior: 'allow' | 'deny', message?: string, options?: { remember?: 'owner' | 'project' }) =>
+                      onAnswerPermission: (
+                        interactionId: string,
+                        behavior: 'allow' | 'deny',
+                        message?: string,
+                        options?: { remember?: 'owner' | 'project' },
+                      ) =>
                         onResolveGate(stage.id, {
                           kind: 'permission',
                           interactionId,
@@ -339,15 +428,26 @@ export const StageRow = memo(function StageRow({
                           ...(message ? { message } : {}),
                           ...(options?.remember ? { remember: options.remember } : {}),
                         }),
-                      onAnswerQuestion: (interactionId: string, answers: Record<string, string[]>, freeformResponse?: string) =>
-                        onResolveGate(stage.id, { kind: 'answer', interactionId, answers, ...(freeformResponse ? { freeformResponse } : {}) }),
+                      onAnswerQuestion: (
+                        interactionId: string,
+                        answers: Record<string, string[]>,
+                        freeformResponse?: string,
+                      ) =>
+                        onResolveGate(stage.id, {
+                          kind: 'answer',
+                          interactionId,
+                          answers,
+                          ...(freeformResponse ? { freeformResponse } : {}),
+                        }),
                       onApprovePlan: (planId: string, action: 'implement_interactive' | 'implement_autopilot') => {
                         const interactionId = planInteraction(stage, planId);
-                        if (interactionId) onResolveGate(stage.id, { kind: 'plan', interactionId, approved: true, action });
+                        if (interactionId)
+                          onResolveGate(stage.id, { kind: 'plan', interactionId, approved: true, action });
                       },
                       onRequestPlanChanges: (planId: string, feedback: string) => {
                         const interactionId = planInteraction(stage, planId);
-                        if (interactionId) onResolveGate(stage.id, { kind: 'plan', interactionId, approved: false, feedback });
+                        if (interactionId)
+                          onResolveGate(stage.id, { kind: 'plan', interactionId, approved: false, feedback });
                       },
                     }
                   : {}),
@@ -359,7 +459,9 @@ export const StageRow = memo(function StageRow({
                 liveBody={turnBody}
                 fallback={
                   <>
-                    {!hidePrompt && stage.prompt ? <UserMessage content={stage.prompt} label={STAGE_PROMPT_LABEL} /> : null}
+                    {!hidePrompt && stage.prompt ? (
+                      <UserMessage content={stage.prompt} label={STAGE_PROMPT_LABEL} />
+                    ) : null}
                     {preamble}
                     {turnBody}
                   </>
@@ -369,7 +471,11 @@ export const StageRow = memo(function StageRow({
           ) : null}
 
           {stage.result ? (
-            <section aria-label={`${stage.name} result`} className="rounded-card border border-line-soft bg-sunken px-3 py-2" data-testid="stage-result">
+            <section
+              aria-label={`${stage.name} result`}
+              className="rounded-card border border-line-soft bg-sunken px-3 py-2"
+              data-testid="stage-result"
+            >
               <div className="mb-1 text-micro font-medium text-fg-3">Result</div>
               <Markdown>{stage.result}</Markdown>
             </section>
@@ -388,7 +494,13 @@ export const StageRow = memo(function StageRow({
                 </Button>
               ) : null}
               {onOpenInspector ? (
-                <Button size="sm" variant="ghost" icon="dock" onClick={() => onOpenInspector(stage.id)} title="Open the inspector for this stage">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon="dock"
+                  onClick={() => onOpenInspector(stage.id)}
+                  title="Open the inspector for this stage"
+                >
                   Details
                 </Button>
               ) : null}
@@ -413,10 +525,11 @@ export const StageRow = memo(function StageRow({
               busy={gateBusy}
               onApprove={() => onApproveHitl?.(stage.id)}
               onRequestChanges={(feedback) => onRejectHitl?.(stage.id, feedback)}
-              {...(onTerminalRejectHitl ? { onReject: (reason?: string) => onTerminalRejectHitl(stage.id, reason) } : {})}
+              {...(onTerminalRejectHitl
+                ? { onReject: (reason?: string) => onTerminalRejectHitl(stage.id, reason) }
+                : {})}
             />
           ) : null}
-
         </div>
       </Reveal>
 
