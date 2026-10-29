@@ -32,7 +32,6 @@ import type {
   MergeOptions,
   ShadowRepoOptions,
   WriteTreeOptions,
-  IndexEntry,
 } from './ports/IGitClient.js';
 import { isRemoteGitUrl } from './remoteUrl.js';
 
@@ -1157,8 +1156,12 @@ export class GitClient implements IGitClient {
         return null;
       }
 
-      if (opts?.keep?.length) {
-        const info = opts.keep.map((e) => `${e.mode} ${e.sha}\t${e.path}`).join('\n') + '\n';
+      // Files a sparse checkout keeps off disk are not deleted: every snapshot (checkpoints, the session start,
+      // the working tree Changes diffs) carries the repo's own entries for them, or one side of a diff would
+      // list them as deleted and the other as added (D-171).
+      const keep = await this.skipWorktreeEntries(repoDir);
+      if (keep.length) {
+        const info = keep.map((e) => `${e.mode} ${e.sha}\t${e.path}`).join('\n') + '\n';
         const kept = await this.runner.run('git', this.snapshotArgs(['update-index', '--index-info']), {
           cwd: repoDir,
           timeout: 60_000,
@@ -1186,8 +1189,13 @@ export class GitClient implements IGitClient {
     }
   }
 
-  async skipWorktreeEntries(repoDir: string): Promise<IndexEntry[]> {
-    const run = (args: string[]) => this.runner.run('git', args, { cwd: repoDir, timeout: 30_000 });
+  /**
+   * The entries of `repoDir`'s OWN index that a sparse checkout marks skip-worktree (empty unless
+   * `core.sparseCheckout` is on). Read through the base runner: a shadow-scoped client must still see the
+   * repository's index, not its store's.
+   */
+  private async skipWorktreeEntries(repoDir: string): Promise<Array<{ mode: string; sha: string; path: string }>> {
+    const run = (args: string[]) => this.baseRunner.run('git', args, { cwd: repoDir, timeout: 30_000 });
     try {
       const sparse = await run(['config', '--bool', 'core.sparseCheckout']);
       if (sparse.stdout.trim() !== 'true') return [];
@@ -1200,7 +1208,7 @@ export class GitClient implements IGitClient {
       );
       if (skipped.size === 0) return [];
       const staged = await run(['ls-files', '-s', '-z']);
-      const out: IndexEntry[] = [];
+      const out: Array<{ mode: string; sha: string; path: string }> = [];
       for (const line of staged.stdout.split('\0')) {
         const tab = line.indexOf('\t');
         if (tab < 0) continue;

@@ -510,7 +510,12 @@ describe('ChangeSummaryService (real git)', () => {
     await run('commit', '-m', 'two files');
     await run('sparse-checkout', 'set', '--no-cone', '/*', '!/private.pdf');
     await fs.access(path.join(repoDir, 'private.pdf')).then(() => expect.fail('still on disk'), () => undefined);
+    await snapshot('baseline');
     await fs.writeFile(path.join(repoDir, 'keep.txt'), 'edited\n');
+
+    // Since the session start: the start snapshot keeps the skipped file too, so it is neither added nor deleted.
+    const sinceStart = await service.getSummary(params());
+    expect(sinceStart.repos[0]!.files.map((f) => f.path)).toEqual(['keep.txt']);
 
     const direct = await service.getSummary({ ...params(), base: { kind: 'ref', id: 'HEAD' } });
     expect(direct.repos[0]!.files.map((f) => f.path)).toEqual(['keep.txt']);

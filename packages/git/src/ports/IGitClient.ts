@@ -133,18 +133,6 @@ export interface WriteTreeOptions {
    * is a commit rather than another snapshot.
    */
   honourEol?: boolean;
-  /**
-   * Index entries to carry into the snapshot as they are (`skipWorktreeEntries`): files a sparse checkout keeps
-   * out of the working tree are not deleted, and a snapshot without them reported every one as deleted.
-   */
-  keep?: readonly IndexEntry[];
-}
-
-/** One stage-0 index entry. */
-export interface IndexEntry {
-  mode: string;
-  sha: string;
-  path: string;
 }
 
 /** Options for `initShadowRepo`. */
@@ -260,11 +248,6 @@ export interface IGitClient {
    * Returns the tree SHA, or `null` when the operation fails.
    */
   writeTreeFromWorktree(repoDir: string, indexFile: string, opts?: WriteTreeOptions): Promise<string | null>;
-  /**
-   * The entries of `repoDir`'s own index that a sparse checkout marks skip-worktree (empty unless
-   * `core.sparseCheckout` is on). Read from the repository itself, never a shadow store.
-   */
-  skipWorktreeEntries(repoDir: string): Promise<IndexEntry[]>;
   /** Create a commit object pointing at `treeSha`. Returns the commit SHA. */
   commitTree(
     repoDir: string,
