@@ -580,6 +580,17 @@ describe('CodexProvider — per-conversation workspace', () => {
     expect(turn['sandboxPolicy']).toMatchObject({ type: 'workspaceWrite', writableRoots: ['/work/extra'] });
   }, 20_000);
 
+  it('a model picked mid-chat runs from the next turn on a live thread', async () => {
+    const p = await started({ defaultCwd: SERVER_CWD });
+    await p.createConversation({ conversationId: 'c-model', model: 'gpt-6.1-terra' } as CreateConversationParams);
+    expect((await echo(p, 'c-model')).turn['model']).toBe('gpt-6.1-terra');
+
+    await p.resumeConversation('c-model', { conversationId: 'c-model', model: 'gpt-5.6-terra', reasoningEffort: 'low' } as CreateConversationParams);
+    const turn = (await echo(p, 'c-model')).turn;
+    expect(turn['model']).toBe('gpt-5.6-terra');
+    expect(turn['effort']).toBe('low');
+  }, 20_000);
+
   it('networkAccess: false keeps the sandbox off the network, at thread start and on every turn', async () => {
     const p = await started({ defaultCwd: SERVER_CWD, sandboxMode: 'workspace-write', networkAccess: false });
     await p.createConversation({

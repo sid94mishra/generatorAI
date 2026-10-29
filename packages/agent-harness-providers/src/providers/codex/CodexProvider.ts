@@ -1432,14 +1432,17 @@ export class CodexProvider implements IAgentHarness {
       return;
     }
     // Codex threads are server-side and stateful; a live one needs no resume —
-    // but "Edit sources" may have moved its roots (D-137). `turn/start` takes
-    // the cwd and the writable roots per turn, so adopting them here is enough
-    // for the next turn to run in the new folder.
+    // but "Edit sources" may have moved its roots (D-137), and the user may have
+    // picked another model or effort. `turn/start` takes the cwd, the writable
+    // roots, the model and the effort per turn, so adopting them here is enough
+    // for the next turn to run with them.
     if (params) {
       live.params = {
         ...live.params,
         workingDirectory: params.workingDirectory,
         additionalDirectories: params.additionalDirectories,
+        ...(params.model ? { model: params.model } : {}),
+        ...(params.reasoningEffort ? { reasoningEffort: params.reasoningEffort } : {}),
       };
       const { sandboxPolicy } = this.buildSandboxPolicy(live.params, live.warnings);
       live.sandboxPolicy = sandboxPolicy;
@@ -1739,7 +1742,9 @@ export class CodexProvider implements IAgentHarness {
       // every turn re-asserts the policy (see `ConversationState.sandboxPolicy`).
       ...this.sandboxPolicyForTurn(conv, options),
       // "This turn and subsequent turns" — re-sent each turn so a change made
-      // between turns (or a resumed thread) always takes the chat's effort.
+      // between turns (or a resumed thread) always takes the chat's model and effort.
+      // Without the model a switch mid-chat kept running the thread's first model.
+      ...(conv.params.model ? { model: conv.params.model } : {}),
       ...(conv.params.reasoningEffort ? { effort: conv.params.reasoningEffort } : {}),
       // Left unset, Codex streams no reasoning at all (verified against codex
       // 0.162), so a Codex chat never showed what the model thought.
