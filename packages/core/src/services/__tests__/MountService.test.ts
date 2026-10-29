@@ -177,7 +177,7 @@ describe('MountService.plan validation', () => {
       service.plan(path.join(workspacesDir, 'executions', 'chat-1'), undefined, [
         { kind: 'folder', path: inside },
       ]),
-    ).rejects.toThrow(/managed workspaces directory/);
+    ).rejects.toThrow(/part of GeneratorAI's own workspaces/);
   });
 
   it('refuses two mounts whose directories overlap', async () => {
@@ -195,7 +195,13 @@ describe('MountService.plan validation', () => {
         { kind: 'folder', path: outer },
         { kind: 'folder', path: inner },
       ]),
-    ).rejects.toThrow(/overlaps another mount/);
+    ).rejects.toThrow(/Folder web is inside repo, which is already a source/);
+    await expect(
+      service.plan(path.join(workspacesDir, 'executions', 'chat-1'), undefined, [
+        { kind: 'folder', path: outer },
+        { kind: 'folder', path: outer, alias: 'again' },
+      ]),
+    ).rejects.toThrow(/Folder repo is added twice/);
   });
 
   it('refuses to mount a git-remote codebase in place', async () => {

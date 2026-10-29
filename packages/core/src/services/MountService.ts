@@ -217,9 +217,15 @@ export class MountService {
 
     const claimPath = (p: string, label: string): void => {
       const abs = path.resolve(p);
+      const name = (q: string) => path.basename(q) || q;
       for (const other of paths) {
-        if (abs === other || abs.startsWith(other + path.sep) || other.startsWith(abs + path.sep)) {
-          throw new ValidationError(`${label} overlaps another mount (${other})`);
+        // Said the way the person sees their sources: by folder name, and how the two relate.
+        if (abs === other) throw new ValidationError(`${label} is added twice. Keep one of them.`);
+        if (abs.startsWith(other + path.sep)) {
+          throw new ValidationError(`${label} is inside ${name(other)}, which is already a source.`);
+        }
+        if (other.startsWith(abs + path.sep)) {
+          throw new ValidationError(`${label} contains ${path.relative(abs, other)}, which is already a source.`);
         }
       }
       paths.add(abs);
@@ -326,7 +332,7 @@ export class MountService {
       const abs = path.resolve(folder);
       await assertDirectory(abs, 'Folder');
       if (abs === managedRoot || abs.startsWith(managedRoot + path.sep)) {
-        throw new ValidationError('Folders inside the managed workspaces directory cannot be mounted');
+        throw new ValidationError('That folder is part of GeneratorAI\'s own workspaces, so it cannot be a source. Pick a folder of yours.');
       }
       if (abs === resolvedRoot || abs.startsWith(resolvedRoot + path.sep)) {
         throw new ValidationError('The workspace root itself cannot be mounted');
@@ -341,7 +347,7 @@ export class MountService {
       }
       const alias = takeAlias(source.alias, path.basename(abs) || 'folder');
       const mountPath = mode === 'worktree' ? path.join(resolvedRoot, SOURCE_DIR, alias) : abs;
-      claimPath(mountPath, `Folder ${abs}`);
+      claimPath(mountPath, `Folder ${path.basename(abs) || abs}`);
 
       const intent = isRepo
         ? await this.resolveGitIntent(abs, source, { mode, branchSlug: opts.branchSlug, isBare: false, mountPath })

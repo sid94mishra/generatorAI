@@ -50,6 +50,7 @@ import { useFsGitInfo, useReadFsGitInfo } from '../../hooks/sourceQueries.js';
 import { pathTail } from '@generatorai/client-core';
 import { useFolderPicker } from '../directory-browser/useFolderPicker.js';
 import {
+  basename,
   defaultNewBranch,
   draftFromCodebase,
   draftFromFolder,
@@ -229,9 +230,15 @@ export function SourcePicker({
    * the same object, so a plain folder can never be submitted as a worktree
    * because the answer had not arrived yet.
    */
+  // A folder already in the list, or inside / around one, is refused as it is picked — the server refuses it
+  // too, but only after Start.
+  const [pickNote, setPickNote] = useState<string | null>(null);
   const addFolder = useCallback(
     async (path: string) => {
       if (atLimit) return;
+      const clash = folderClash(path, drafts);
+      setPickNote(clash);
+      if (clash) return;
       let info;
       try {
         info = await readGitInfo(path);
@@ -326,6 +333,11 @@ export function SourcePicker({
 
   const footer = (
     <>
+      {pickNote && (
+        <p className="text-small text-warn" role="status" data-testid="sources-pick-note">
+          {pickNote}
+        </p>
+      )}
       {dropped.length > 0 && (
         <p className="text-small text-fg-3" data-testid="sources-dropped-codebases">
           Removed {dropped.join(', ')}: a chat works with one project, and {dropped.length === 1 ? 'it belongs' : 'they belong'} to
@@ -1136,4 +1148,19 @@ function ChatFolderOption({ files, disabled, onKeep }: { files: number; disabled
       <span className="shrink-0 text-small text-warn">Deleted when you save</span>
     </div>
   );
+}
+
+/** Why `picked` cannot join `drafts` (already there, or inside / around a folder that is), or null. */
+function folderClash(picked: string, drafts: readonly DraftSource[]): string | null {
+  const norm = (p: string) => p.replace(/[\\/]+$/, '');
+  const sep = (p: string) => (p.includes('\\') && !p.includes('/') ? '\\' : '/');
+  const target = norm(picked);
+  for (const d of drafts) {
+    if (d.kind !== 'folder' || !d.path) continue;
+    const other = norm(d.path);
+    if (target === other) return `${basename(target)} is already in this chat.`;
+    if (target.startsWith(other + sep(other))) return `${basename(target)} is inside ${d.alias}, which is already a source.`;
+    if (other.startsWith(target + sep(target))) return `${basename(target)} contains ${d.alias}, which is already a source.`;
+  }
+  return null;
 }
