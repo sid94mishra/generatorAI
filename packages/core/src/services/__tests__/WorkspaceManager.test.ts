@@ -129,6 +129,9 @@ class FakeMountRepo implements IWorkspaceMountRepository {
       .filter((r) => opts?.includeRemoved || r.status !== 'removed')
       .sort((a, b) => a.position - b.position);
   }
+  async findInPlaceByPath(p: string): Promise<WorkspaceMount[]> {
+    return this.rows.filter((r) => r.path === p && r.mode === 'in-place' && r.status !== 'removed');
+  }
   async findByCodebase(codebaseId: string): Promise<WorkspaceMount[]> {
     return this.rows.filter((r) => r.codebaseId === codebaseId);
   }

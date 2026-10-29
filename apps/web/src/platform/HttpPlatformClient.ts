@@ -220,6 +220,8 @@ export interface FsGitInfo {
   branches: string[];
   dirty: boolean;
   nestedRepos: string[];
+  /** Active chats that already edit this folder in place. */
+  usedInPlaceBy?: Array<{ id: string; name: string }>;
 }
 
 /** `GET /api/workspaces/:id` — the mount plan as it was actually realised. */

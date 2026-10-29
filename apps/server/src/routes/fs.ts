@@ -65,7 +65,19 @@ async function windowsDrives(): Promise<string[]> {
 
 export function createFsRoutes(container: Container): Router {
   const router = Router();
-  const { gitManager } = container;
+  const { gitManager, mountService, executionWorkspaceRepo, chatEntityRepo } = container;
+
+  /** Active chats that already edit `dir` in place: two agents in one checkout overwrite each other. */
+  const inPlaceChats = async (dir: string): Promise<Array<{ id: string; name: string }>> => {
+    const out: Array<{ id: string; name: string }> = [];
+    for (const wsId of await mountService.inPlaceWorkspaces(dir).catch(() => [])) {
+      const ws = await executionWorkspaceRepo.findById(wsId).catch(() => null);
+      if (!ws || ws.ownerType !== 'chat') continue;
+      const chat = await chatEntityRepo.getById(ws.ownerId).catch(() => null);
+      if (chat && chat.status === 'active') out.push({ id: chat.id, name: chat.name });
+    }
+    return out;
+  };
 
   // GET /fs/dirs?path=<abs> — child directories (empty path → roots, home and its common folders)
   router.get('/dirs', async (req, res, next) => {
@@ -145,9 +157,9 @@ export function createFsRoutes(container: Container): Router {
         .access(path.join(dir, '.git'))
         .then(() => true)
         .catch(() => false);
-      const nestedRepos = await gitManager.nestedRepos(dir);
+      const [nestedRepos, usedInPlaceBy] = await Promise.all([gitManager.nestedRepos(dir), inPlaceChats(dir)]);
       if (!isRepo) {
-        res.json({ path: dir, isRepo: false, currentBranch: null, branches: [], dirty: false, nestedRepos });
+        res.json({ path: dir, isRepo: false, currentBranch: null, branches: [], dirty: false, nestedRepos, usedInPlaceBy });
         return;
       }
       const [currentBranch, branches, clean] = await Promise.all([
@@ -162,6 +174,7 @@ export function createFsRoutes(container: Container): Router {
         branches: branches.filter((b) => !b.startsWith('origin/HEAD')).slice(0, 1000),
         dirty: !clean,
         nestedRepos,
+        usedInPlaceBy,
       });
     } catch (err) {
       next(err);

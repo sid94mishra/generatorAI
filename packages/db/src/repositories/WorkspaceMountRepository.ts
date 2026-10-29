@@ -67,6 +67,14 @@ export class DrizzleWorkspaceMountRepository implements IWorkspaceMountRepositor
     return rows.map((r) => this.mapRow(r));
   }
 
+  async findInPlaceByPath(path: string): Promise<WorkspaceMount[]> {
+    const rows = await this.db
+      .select()
+      .from(workspaceMounts)
+      .where(and(eq(workspaceMounts.path, path), eq(workspaceMounts.mode, 'in-place'), ne(workspaceMounts.status, 'removed')));
+    return rows.map((r) => this.mapRow(r));
+  }
+
   async update(id: string, updates: WorkspaceMountUpdate): Promise<void> {
     const values: Record<string, unknown> = { updatedAt: new Date() };
     if (updates.status !== undefined) values['status'] = updates.status;

@@ -487,7 +487,7 @@ export class MountService {
     try {
       const cb = await repo.getById(idOrAlias);
       if (projectId && cb.projectId !== projectId) {
-        throw new ValidationError(`Codebase "${idOrAlias}" belongs to a different project`);
+        throw new ValidationError(`Codebase "${cb.alias}" belongs to another project. A chat works with one project.`);
       }
       return cb;
     } catch (err) {
@@ -1019,6 +1019,12 @@ export class MountService {
       for (const m of staged) await this.remove(m.id, { deleteBranch: true }).catch(() => undefined);
       throw err;
     }
+  }
+
+  /** Workspaces that edit `folder` in place right now (the source picker warns before a second chat joins them). */
+  async inPlaceWorkspaces(folder: string): Promise<string[]> {
+    const mounts = await this.deps.mountRepo.findInPlaceByPath(path.resolve(folder));
+    return [...new Set(mounts.map((m) => m.workspaceId))];
   }
 
   async list(workspaceId: string): Promise<WorkspaceMount[]> {

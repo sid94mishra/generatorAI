@@ -170,6 +170,7 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
         <div className="flex flex-col gap-3">
           <p className="text-small text-fg-3">What this chat works on. Changes apply from your next message; sources you keep are left as they are.</p>
           <SourcePicker
+            chatId={chat.id}
             chatName={chat.name}
             projectId={projectId}
             onProjectIdChange={setProjectId}

@@ -53,7 +53,7 @@ import {
   defaultNewBranch,
   draftFromCodebase,
   draftFromFolder,
-  sourcesSummary,
+  plainSetup,
   type BranchMode,
   type CodebaseLike,
   type DraftSource,
@@ -95,6 +95,8 @@ export interface SourcePickerProps {
    * keeps an unticked row so it can be ticked back before saving.
    */
   chatFolderFiles?: number;
+  /** The chat being edited, when there is one (see `SourceRowProps.chatId`). */
+  chatId?: string;
 }
 
 /** Base UI Select treats `''` poorly as a value; these stand in for "none". */
@@ -102,6 +104,7 @@ const NO_PROJECT = '__no-project__';
 const CURRENT_HEAD = '__current-head__';
 
 const EMPTY_HINT = 'Nothing linked yet. The agent starts in an empty folder of its own — add a folder to work on your files.';
+const EMPTY_HINT_WITH_CODEBASES = 'Tick a codebase or add a folder. With nothing ticked, the agent starts in an empty folder of its own.';
 
 /** The project codebase row shape this picker reads (from `useProjectCodebases`). */
 interface ProjectCodebase {
@@ -139,6 +142,7 @@ export function SourcePicker({
   compact = false,
   live = false,
   chatFolderFiles = 0,
+  chatId,
 }: SourcePickerProps) {
   const readGitInfo = useReadFsGitInfo();
   const { data: projects } = useProjects();
@@ -189,14 +193,32 @@ export function SourcePicker({
     [drafts, removeAt, atLimit, takenAliases, onChange, onPrimaryChange],
   );
 
-  // D-108: a project's only codebase is included when the project is picked (once per project, so unticking sticks).
+  // A chat works with ONE project. Switching project drops the codebases of the one it left (folders stay), and
+  // says so — keeping them ticked only for the server to refuse the chat read as a broken form.
+  // D-108: then a project's only codebase is included (once per project, so unticking sticks).
+  const [dropped, setDropped] = useState<string[]>([]);
   const autoIncludedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!projectId || !codebases || autoIncludedFor.current === projectId) return;
-    autoIncludedFor.current = projectId;
-    const only = autoIncludedCodebase(codebases, drafts);
-    if (only) toggleCodebase(toCodebaseLike(only));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- decided once, when the project's codebases arrive
+    if (projectId && !codebases) return;
+    const valid = new Set((codebases ?? []).map((cb) => cb.id));
+    const stale = drafts.filter((d) => d.kind === 'codebase' && !valid.has(d.codebaseId ?? ''));
+    let next = drafts;
+    if (stale.length > 0) {
+      next = drafts.filter((d) => !stale.includes(d));
+      setDropped(stale.map((d) => d.alias));
+    } else {
+      setDropped([]);
+    }
+    if (projectId && codebases && autoIncludedFor.current !== projectId) {
+      autoIncludedFor.current = projectId;
+      const only = autoIncludedCodebase(codebases, next);
+      if (only) next = [...next, draftFromCodebase(toCodebaseLike(only), next.map((d) => d.alias))];
+    }
+    if (next !== drafts) {
+      onChange(next);
+      if (!next.some((d) => d.alias === effectivePrimary)) onPrimaryChange(next[0]?.alias ?? '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reconciled when the project (and so its codebases) changes
   }, [projectId, codebases]);
 
   /**
@@ -285,6 +307,7 @@ export function SourcePicker({
     projectId,
     disabled,
     live,
+    chatId,
     isPrimary: draft.alias === effectivePrimary,
     onChange: (next) => replaceAt(index, next),
     onRemove: () => removeAt(index),
@@ -303,10 +326,10 @@ export function SourcePicker({
 
   const footer = (
     <>
-      {/* Each full row states its own setup; the compact list keeps the one-line summary. */}
-      {compact && drafts.length > 0 && (
-        <p className="text-small text-fg-3" data-testid="sources-summary">
-          {sourcesSummary(drafts, chatName)}
+      {dropped.length > 0 && (
+        <p className="text-small text-fg-3" data-testid="sources-dropped-codebases">
+          Removed {dropped.join(', ')}: a chat works with one project, and {dropped.length === 1 ? 'it belongs' : 'they belong'} to
+          another.
         </p>
       )}
       {error && (
@@ -391,7 +414,9 @@ export function SourcePicker({
   const Row = CompactSourceRow;
   return (
     <div className="flex flex-col gap-4">
-      <Field label="Project">{projectSelect}</Field>
+      <Field label="Project" optional hint={projectId ? undefined : 'Pick one to work on its codebases. Your own folders need none.'}>
+        {projectSelect}
+      </Field>
       <div className="flex flex-col gap-2">
         {codebaseStatus}
         <ul className="overflow-hidden rounded-card border border-line" data-testid="source-list">
@@ -411,7 +436,9 @@ export function SourcePicker({
             </li>
           ))}
           {drafts.length === 0 && (
-            <li className="border-b border-line px-3 py-2.5 text-small text-fg-3">{EMPTY_HINT}</li>
+            <li className="border-b border-line px-3 py-2.5 text-small text-fg-3">
+              {notIncluded.length > 0 ? EMPTY_HINT_WITH_CODEBASES : EMPTY_HINT}
+            </li>
           )}
           <li className="flex items-center gap-2 px-1.5 py-1.5">
             {addFolderButton}
@@ -476,6 +503,8 @@ interface SourceRowProps {
   projectId: string;
   disabled: boolean;
   live: boolean;
+  /** The chat being edited ("Edit sources"), left out of "also edited in place by". */
+  chatId?: string | undefined;
   isPrimary: boolean;
   onChange: (next: DraftSource) => void;
   onRemove: () => void;
@@ -507,6 +536,7 @@ function useSourceFacts(draft: DraftSource, projectId: string) {
     dirty: folderInfo.data?.dirty ?? draft.meta.dirty ?? false,
     nested: folderInfo.data?.nestedRepos ?? draft.meta.nestedRepos ?? [],
     currentBranch: folderInfo.data?.currentBranch ?? draft.meta.defaultBranch ?? null,
+    usedInPlaceBy: folderInfo.data?.usedInPlaceBy ?? [],
   };
 }
 
@@ -629,8 +659,17 @@ function BranchControls({
 }
 
 /** Uncommitted-changes warning and the draft's own error, under the controls. */
-function RowNotes({ draft, facts, className }: { draft: DraftSource; facts: SourceFacts; className?: string }) {
+function RowNotes({ draft, facts, chatId, className }: { draft: DraftSource; facts: SourceFacts; chatId?: string | undefined; className?: string }) {
   const notes: ReactNode[] = [];
+  const others = facts.usedInPlaceBy.filter((c) => c.id !== chatId);
+  if (draft.mode === 'in-place' && others.length > 0) {
+    notes.push(
+      <p key="shared" className="text-small text-warn" data-testid="source-shared-in-place">
+        Also edited in place by {others.map((c) => `“${c.name}”`).join(', ')}. Two agents in one folder can overwrite each
+        other’s changes{draft.meta.isGit ? ' — a worktree keeps this chat apart' : ''}.
+      </p>,
+    );
+  }
   if (draft.branchMode !== 'current' && facts.dirty && draft.mode === 'in-place') {
     notes.push(
       <p key="dirty" className="text-small text-warn">
@@ -700,8 +739,13 @@ function ChatFolderRow({ draft, disabled, isPrimary, onRemove, onMakePrimary }: 
 // ── Compact row (NewChat) ─────────────────────────────────────
 
 function CompactSourceRow(props: SourceRowProps) {
-  const { draft, disabled, isPrimary, onRemove } = props;
+  const { draft, total, chatName, disabled, isPrimary, onRemove, onMakePrimary } = props;
   const facts = useSourceFacts(draft, props.projectId);
+  // The defaults fit most people (your folder as it is; a codebase on a branch of its own), so the setup reads
+  // as one sentence and its controls wait behind "Change". A row that needs an answer opens by itself.
+  const needsAnswer = !!draft.meta.error || (draft.branchMode === 'existing' && !draft.branch);
+  const [open, setOpen] = useState(false);
+  const expanded = open || needsAnswer;
   return (
     <div className="flex flex-col gap-1.5 py-2.5 pr-2.5 pl-3">
       <div className="flex items-center gap-2.5">
@@ -712,19 +756,47 @@ function CompactSourceRow(props: SourceRowProps) {
         <span className="min-w-0 truncate font-mono text-ui font-medium text-fg" title={draft.meta.origin ?? draft.path}>
           {draft.alias}
         </span>
-        {isPrimary ? <WorkingDirectoryBadge /> : null}
+        {/* With one source there is nothing to choose between: the badge would only add a word to learn. */}
+        {isPrimary && total > 1 ? <WorkingDirectoryBadge /> : null}
         <DirtyMark dirty={facts.dirty} />
         <span className="flex-1" />
-        {/* A folder that is not a repository can only be edited in place. */}
-        {draft.meta.isGit ? <ModeControl {...props} /> : null}
+        {!isPrimary && total > 1 ? (
+          <Button variant="ghost" size="sm" icon="home" disabled={disabled} onClick={onMakePrimary} data-testid="source-make-primary">
+            Make working directory
+          </Button>
+        ) : null}
+        {draft.meta.isGit && !needsAnswer ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={disabled}
+            aria-expanded={expanded}
+            onClick={() => setOpen((v) => !v)}
+            aria-label={`${expanded ? 'Done changing' : 'Change'} how the agent works in ${draft.alias}`}
+            data-testid="source-change"
+          >
+            {expanded ? 'Done' : 'Change'}
+          </Button>
+        ) : null}
       </div>
-      {/* A plain folder has no branches to choose (the server refuses them). */}
-      {draft.meta.isGit ? (
-        <div className="flex flex-wrap items-center gap-2 pl-6">
-          <BranchControls {...props} facts={facts} />
+      <p className="pl-6 text-small text-fg-3" data-testid="source-setup-sentence">
+        {plainSetup(draft, chatName, facts.currentBranch)}
+      </p>
+      {expanded && draft.meta.isGit ? (
+        <div className="flex flex-col gap-2 pl-6">
+          <ModeControl {...props} />
+          <div className="flex flex-wrap items-center gap-2">
+            <BranchControls {...props} facts={facts} />
+          </div>
+          {draft.mode === 'in-place' && draft.branchMode !== 'current' ? (
+            <p className="flex items-start gap-2 text-small text-warn" data-testid="source-branch-in-place-warning">
+              <Icon concept="warning" size={14} className="mt-0.5 shrink-0" />
+              <span>Switches the branch of your own folder, which your editor and terminals also see.</span>
+            </p>
+          ) : null}
         </div>
       ) : null}
-      <RowNotes draft={draft} facts={facts} className="pl-6" />
+      <RowNotes draft={draft} facts={facts} chatId={props.chatId} className="pl-6" />
     </div>
   );
 }
@@ -1017,7 +1089,7 @@ function SourceRow(props: SourceRowProps) {
           <span>Saving rebuilds this worktree and discards its uncommitted changes. Commit them first, or press Cancel.</span>
         </div>
       ) : null}
-      <RowNotes draft={draft} facts={facts} className="pl-6" />
+      <RowNotes draft={draft} facts={facts} chatId={props.chatId} className="pl-6" />
     </div>
   );
 }

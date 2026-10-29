@@ -269,6 +269,24 @@ export function NewChatDialog() {
             </Field>
           </ModalForm.Section>
 
+          {/* ── Where: what most people came to choose, right after the task (folder first, project optional). ── */}
+          <ModalForm.Section
+            title="Folders and codebases"
+            hint="What the agent can read and edit. It starts in the working directory. Leave it empty to start in a fresh folder."
+          >
+            <SourcePicker
+              chatName={chatCreateDisplayName({ name, prompt: task }) || 'chat'}
+              compact
+              projectId={projectId}
+              onProjectIdChange={setProjectId}
+              drafts={sourceDrafts}
+              onChange={setSourceDrafts}
+              primaryAlias={primaryAlias}
+              onPrimaryChange={setPrimaryAlias}
+              maxSources={8}
+            />
+          </ModalForm.Section>
+
           {/* ── Who ── */}
           <ModalForm.Section
             title="Agent and model"
@@ -307,24 +325,6 @@ export function NewChatDialog() {
                 />
               </Field>
             ) : null}
-          </ModalForm.Section>
-
-          {/* ── Where ── */}
-          <ModalForm.Section
-            title="Folders and codebases"
-            hint="What the agent can read and edit. It starts in the working directory. Leave it empty to start in a fresh folder."
-          >
-            <SourcePicker
-              chatName={chatCreateDisplayName({ name, prompt: task }) || 'chat'}
-              compact
-              projectId={projectId}
-              onProjectIdChange={setProjectId}
-              drafts={sourceDrafts}
-              onChange={setSourceDrafts}
-              primaryAlias={primaryAlias}
-              onPrimaryChange={setPrimaryAlias}
-              maxSources={8}
-            />
           </ModalForm.Section>
 
           {/* ── Options ── */}

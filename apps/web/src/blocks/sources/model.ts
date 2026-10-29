@@ -198,9 +198,26 @@ export function describeDraft(draft: DraftSource, chatName: string): string {
   return `${draft.alias} → ${mode} on ${branch}${base}`;
 }
 
-/** The one-line summary shown under the source list. */
-export function sourcesSummary(drafts: DraftSource[], chatName: string): string {
-  return drafts.map((d) => describeDraft(d, chatName)).join(' · ');
+/**
+ * One plain sentence for a source's setup, for someone who never heard of a
+ * worktree: where the agent edits and on which branch. `currentBranch` is the
+ * checkout's branch when known.
+ */
+export function plainSetup(draft: DraftSource, chatName: string, currentBranch?: string | null): string {
+  if (draft.kind === 'chat-folder') return 'The folder this chat made. It is kept.';
+  if (!draft.meta.isGit) return 'Edits this folder directly.';
+  const branch = effectiveBranch(draft, chatName);
+  if (draft.mode === 'in-place') {
+    if (draft.branchMode === 'current') {
+      const on = currentBranch ?? draft.meta.defaultBranch;
+      return on ? `Edits this folder directly, on ${on}.` : 'Edits this folder directly, on its current branch.';
+    }
+    if (draft.branchMode === 'new') return `Creates ${branch} in this folder and switches to it.`;
+    return branch ? `Switches this folder to ${branch} and edits it directly.` : 'Choose the branch to switch this folder to.';
+  }
+  const base = draft.baseRef.trim() || currentBranch || '';
+  if (draft.branchMode === 'new') return `Works in a separate copy on a new branch ${branch}${base ? ` from ${base}` : ''}. Your files stay as they are.`;
+  return branch ? `Works in a separate copy of ${branch}. Your files stay as they are.` : 'Choose the branch for the separate copy.';
 }
 
 /**

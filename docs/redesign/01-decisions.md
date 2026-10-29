@@ -1746,6 +1746,16 @@ in the workspace and has no remote). A codebase's `subdirectory` is the mount's 
 the branch has it) and the whole repository stays reachable; a subdirectory outside the repository is refused at link
 time.
 
+### D-171 New chat is simple-first; one project per chat is said, not discovered (owner review, 2026-10-29) — Final
+Most people link their own folder. In New chat the "Folders and codebases" section comes right after the first message;
+Project is marked optional with a hint. Each source reads as one plain sentence ("Edits this folder directly, on
+sid/monitor-sort." / "Works in a separate copy on a new branch … Your files stay as they are.") with its controls behind
+"Change"; a row that needs an answer opens by itself. The Working directory badge shows only with several sources, and
+a non-primary source has "Make working directory". Switching project drops the codebases of the project left (folders
+stay) and says so; the server names the codebase, never its id. A folder another active chat edits in place says so.
+Also: a sparse checkout's skipped files are never shown as deleted (the snapshot keeps the repo's own entries); a new
+worktree branch does not track its base (`--no-track`); the ship dialog offers only git repositories.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

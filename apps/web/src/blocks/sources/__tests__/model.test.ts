@@ -12,7 +12,7 @@ import {
   draftsToSources,
   sanitizeAlias,
   slugifyChatName,
-  sourcesSummary,
+  plainSetup,
   uniqueAlias,
   validateDrafts,
   type DraftSource,
@@ -191,8 +191,28 @@ describe('summary line', () => {
     expect(describeDraft(worktree, CHAT)).toBe(
       'frontend → worktree on generatorai/cart-fix from main',
     );
-    expect(sourcesSummary([worktree, backend], CHAT)).toBe(
-      'frontend → worktree on generatorai/cart-fix from main · backend → in place on develop',
+    expect(describeDraft(backend, CHAT)).toBe('backend → in place on develop');
+  });
+});
+
+describe('plainSetup', () => {
+  const info = { isRepo: true, currentBranch: 'sid/sort', branches: ['develop', 'sid/sort'], dirty: false, nestedRepos: [] };
+  const mine = draftFromFolder('/src/pulse', info, []);
+
+  it('says a folder linked as it is is edited directly, on its branch', () => {
+    expect(plainSetup(mine, CHAT, 'sid/sort')).toBe('Edits this folder directly, on sid/sort.');
+    expect(plainSetup(draftFromFolder('/src/notes', undefined, []), CHAT)).toBe('Edits this folder directly.');
+  });
+
+  it('names a switch of the user\'s own folder plainly', () => {
+    expect(plainSetup({ ...mine, branchMode: 'new' }, CHAT)).toBe('Creates generatorai/cart-fix in this folder and switches to it.');
+    expect(plainSetup({ ...mine, branchMode: 'existing', branch: 'develop' }, CHAT)).toBe('Switches this folder to develop and edits it directly.');
+  });
+
+  it('says a worktree is a separate copy that leaves the files alone', () => {
+    const cb = draftFromCodebase({ id: 'cb1', alias: 'pulse', type: 'git-remote', defaultBranch: 'develop' }, []);
+    expect(plainSetup({ ...cb, baseRef: 'develop' }, CHAT)).toBe(
+      'Works in a separate copy on a new branch generatorai/cart-fix from develop. Your files stay as they are.',
     );
   });
 });
