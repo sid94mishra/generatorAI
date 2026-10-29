@@ -47,6 +47,7 @@ function makeGit() {
     revParse: vi.fn(async () => 'deadbeef'),
     worktreeHoldingBranch: vi.fn(async () => null),
     isClean: vi.fn(async () => true),
+    currentBranch: vi.fn(async (): Promise<string | null> => 'main'),
     nestedRepos: vi.fn(async () => []),
     createBranch: vi.fn(async () => {}),
     checkoutBranch: vi.fn(async () => {}),
@@ -135,6 +136,21 @@ describe('MountService.plan validation', () => {
     await expect(
       service.plan(path.join(workspacesDir, 'executions', 'chat-1'), undefined, sources),
     ).rejects.toThrow(/does not exist/);
+  });
+
+  it('refuses to switch the branch of a dirty folder in place while the chat is created, not later', async () => {
+    const workspacesDir = await tmpDir();
+    const mine = await tmpDir();
+    await fs.mkdir(path.join(mine, '.git'));
+    const { service, git } = makeService({ workspacesDir });
+    git.isClean.mockResolvedValue(false);
+    const plan = (spec: ChatSourceSpec) => service.plan(path.join(workspacesDir, 'executions', 'chat-1'), undefined, [spec]);
+
+    await expect(plan({ kind: 'folder', path: mine, mode: 'in-place', newBranch: 'feature/x' })).rejects.toThrow(
+      /uncommitted changes, so its branch cannot be switched/,
+    );
+    // Staying on the current branch needs no clean tree.
+    await expect(plan({ kind: 'folder', path: mine, mode: 'in-place' })).resolves.toHaveLength(1);
   });
 
   it('refuses a relative folder path', async () => {

@@ -440,9 +440,19 @@ export class MountService {
     }
 
     // in-place
+    const current = await git.currentBranch(originPath);
+    // A switch of the user's own checkout is refused HERE, while the chat is being created, when the folder has
+    // uncommitted work: refused only at prepare, the chat already existed — its first message lost and its header
+    // naming a branch it never got.
+    const switching = !!newBranch || (!!branch && branch !== current);
+    if (switching && !(await git.isClean(originPath))) {
+      const name = path.basename(originPath);
+      throw new ValidationError(
+        `${name} has uncommitted changes, so its branch cannot be switched. Commit or stash them first, or keep its current branch${current ? ` (${current})` : ''}.`,
+      );
+    }
     if (newBranch) return { isRepo: true, newBranch, baseRef: baseRef ?? branch ?? 'HEAD' };
     if (branch) return { isRepo: true, branch };
-    const current = await git.currentBranch(originPath);
     return { isRepo: true, ...(current ? { branch: current } : {}) };
   }
 
