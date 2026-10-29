@@ -68,21 +68,28 @@ export function isLongMessage(content: string): boolean {
 }
 
 /** A user prompt card. */
-export function UserMessage({ content, attachments, chatId, timestamp, pending = false, actions, label, className }: UserMessageProps) {
+export function UserMessage({
+  content,
+  attachments,
+  chatId,
+  timestamp,
+  pending = false,
+  actions,
+  label,
+  className,
+}: UserMessageProps) {
   const review = parseReviewPrompt(content);
   // A workflow stage's prompt: the instruction, with the engine's context fence and output contract folded away.
   const stagePrompt = review ? null : parseStagePrompt(content);
   const text = stagePrompt ? stagePrompt.instruction : content;
   const long = isLongMessage(text);
   const [expanded, setExpanded] = useState(false);
-  const time = pending
-    ? TRANSCRIPT_COPY.justNow
-    : timestamp != null
-      ? formatTurnTime(timestamp)
-      : null;
+  const time = pending ? TRANSCRIPT_COPY.justNow : timestamp != null ? formatTurnTime(timestamp) : null;
   return (
-    <div className={cn('group relative min-w-0', className)} data-chat-row data-gai-block="user">
-      <div className="flex min-w-0 flex-col gap-2 rounded-panel border border-line bg-raised px-3.5 py-3">
+    // Right-aligned and sized to its text (up to 4/5 of the column), so what the person sent never reads as part of
+    // the agent's answer (D-172). The time and hover actions stay at the card's own top-right corner.
+    <div className={cn('flex min-w-0 justify-end', className)} data-chat-row data-gai-block="user">
+      <div className="group relative flex max-w-4/5 min-w-0 flex-col gap-2 rounded-panel border border-line bg-raised px-3.5 py-3">
         {label ? (
           <span className="flex items-center gap-1.5 pr-16 text-small text-fg-3" data-testid="user-message-label">
             <Icon concept={label.icon} size={12} />
@@ -100,7 +107,10 @@ export function UserMessage({ content, attachments, chatId, timestamp, pending =
             ) : null}
             {text ? (
               <p
-                className={cn('pr-16 text-body break-words whitespace-pre-wrap text-fg', long && !expanded && 'max-h-48 overflow-hidden')}
+                className={cn(
+                  'pr-16 text-body break-words whitespace-pre-wrap text-fg',
+                  long && !expanded && 'max-h-48 overflow-hidden',
+                )}
                 {...(long ? { 'data-collapsed': expanded ? 'false' : 'true' } : {})}
               >
                 {withInlineCode(text)}
@@ -109,22 +119,28 @@ export function UserMessage({ content, attachments, chatId, timestamp, pending =
           </>
         )}
         {long && !review ? (
-          <Button size="sm" variant="ghost" className="self-start" aria-expanded={expanded} onClick={() => setExpanded((e) => !e)}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="self-start"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((e) => !e)}
+          >
             {expanded ? TRANSCRIPT_COPY.showLess : TRANSCRIPT_COPY.showMore}
           </Button>
         ) : null}
         {stagePrompt ? <StagePromptFolds prompt={stagePrompt} /> : null}
         {attachments && attachments.length > 0 ? <AttachmentList attachments={attachments} chatId={chatId} /> : null}
-      </div>
-      <div
-        className={cn(
-          'absolute top-2 right-2 flex items-center gap-1',
-          !pending &&
-            'opacity-0 transition-control group-focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100',
-        )}
-      >
-        {time ? <span className="font-mono text-micro text-fg-3">{time}</span> : null}
-        {actions}
+        <div
+          className={cn(
+            'absolute top-2 right-2 flex items-center gap-1',
+            !pending &&
+              'opacity-0 transition-control group-focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100',
+          )}
+        >
+          {time ? <span className="font-mono text-micro text-fg-3">{time}</span> : null}
+          {actions}
+        </div>
       </div>
     </div>
   );
@@ -184,7 +200,9 @@ function ReviewComments({ review }: { review: ParsedReviewPrompt }) {
           </li>
         ))}
       </ul>
-      {review.note ? <p className="text-body break-words whitespace-pre-wrap text-fg">{withInlineCode(review.note)}</p> : null}
+      {review.note ? (
+        <p className="text-body break-words whitespace-pre-wrap text-fg">{withInlineCode(review.note)}</p>
+      ) : null}
     </div>
   );
 }

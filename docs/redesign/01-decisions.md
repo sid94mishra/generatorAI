@@ -1756,6 +1756,14 @@ stay) and says so; the server names the codebase, never its id. A folder another
 Also: a sparse checkout's skipped files are never shown as deleted (the snapshot keeps the repo's own entries); a new
 worktree branch does not track its base (`--no-track`); the ship dialog offers only git repositories.
 
+### D-172 The person's messages sit on the right; a live agent turn is one panel everywhere (owner, 2026-10-29) — Final
+A user message (chat prompt, workflow stage prompt, review comments) is a raised card aligned to the right of the
+transcript and sized to its text, up to 4/5 of the column; the time and hover actions stay at its top-right corner. The
+agent's responses stay full width on the left, so the two never read as one stream. The turn in flight is the kit's
+`LiveTurn` in both the chat and a workflow stage: agent header (avatar, name, model, usage), turn body, stopped note,
+thinking placeholder. A stage signs it with its name and a bot avatar, as its persisted turns already were; the stage
+row header, result, output chips and review card are the workflow's own parts around that core panel.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

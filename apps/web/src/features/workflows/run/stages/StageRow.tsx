@@ -14,10 +14,11 @@
 // ────────────────────────────────────────────────────────────────
 
 import { memo, useEffect, useState, type ReactNode } from 'react';
+import { TRANSCRIPT_COPY } from '@generatorai/shared/ui-contract';
 import { resolveMapping, resolveStatus, stageSkipReasonLabel, STATUS_STATE_DEFS } from '@generatorai/shared';
 import type { RunCommand } from '@generatorai/workflow-spec';
 import type { IconConcept } from '@generatorai/design-tokens';
-import { TranscriptProvider, TurnBody, UsageChip, UserMessage } from '@/blocks/transcript/index.js';
+import { LiveTurn, TranscriptProvider, UsageChip, UserMessage } from '@/blocks/transcript/index.js';
 import { ContextGauge } from '@/blocks/composer/parts/ContextGauge.js';
 import { cn } from '@/ui/lib/cn.js';
 import { Icon } from '@/ui/icons/Icon.js';
@@ -211,15 +212,20 @@ export const StageRow = memo(function StageRow({
       </span>
     ) : null;
 
+  // The same live panel as a chat turn (D-172): agent header, body, thinking placeholder. The stage row's
+  // header, result, output chips and review card are the workflow's own parts around it.
   const turnBody = (
-    <TurnBody
+    <LiveTurn
+      agentName={stage.name}
+      avatar="bot"
       segments={stage.segments}
       steps={stage.steps}
       answer={stage.answer}
       streamKey={`stageRun:${stage.id}`}
       active={stage.status === 'running' || stage.streaming === true}
       answerStreaming={isActive && !isAwaiting}
-      loading={isActive && !isAwaiting && stage.steps.length === 0 && !stage.answer}
+      thinking={isActive && !isAwaiting}
+      thinkingLabel={TRANSCRIPT_COPY.agentThinking(stage.name)}
       error={isFailed ? stage.error : undefined}
     />
   );

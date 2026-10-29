@@ -5,7 +5,7 @@
 // and the response actions.
 //
 // Render isolation (W27) is kept: the live stream record is replaced on every
-// token, and `LiveTurn` below is the ONLY component that subscribes to the
+// token, and `ChatLiveTurn` below is the ONLY component that subscribes to the
 // whole record. Everything else reads the narrow selectors of
 // `useChatStreamState` handed down by the page.
 // ────────────────────────────────────────────────────────────────
@@ -24,12 +24,9 @@ import { TRANSCRIPT_COPY } from '@generatorai/shared/ui-contract';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useTranscriptPrefsStore, useTranscriptViewMode } from '@/stores/transcriptPrefsStore.js';
 import {
-  AgentTurnHeader,
-  StoppedNote,
-  ThinkingPlaceholder,
+  LiveTurn,
   TranscriptProvider,
   TranscriptView,
-  TurnBody,
   UsageChip,
   type TranscriptActions,
 } from '@/blocks/transcript/index.js';
@@ -62,7 +59,7 @@ export interface ChatTranscriptProps {
 /** D-33 fallback: finished turns before the last N start collapsed. */
 const TRANSCRIPT_EXPANDED_TURNS = 20;
 
-interface LiveTurnProps {
+interface ChatLiveTurnProps {
   sessionId: string;
   agentName: string;
   harnessProvider: string | undefined;
@@ -77,7 +74,7 @@ interface LiveTurnProps {
  * The one place that subscribes to the FULL live stream record (W27): a token
  * re-renders this leaf only.
  */
-const LiveTurn = memo(function LiveTurn({ sessionId, agentName, harnessProvider, harnessLabel, prevUsage, prevCompletedAt, thinking }: LiveTurnProps) {
+const ChatLiveTurn = memo(function ChatLiveTurn({ sessionId, agentName, harnessProvider, harnessLabel, prevUsage, prevCompletedAt, thinking }: ChatLiveTurnProps) {
   const current = useStreamStore((state) => state.streams[sessionId]);
   // The transcript swaps a finished live turn for its persisted message in a
   // deferred render (D-88). The stream is cleared as soon as history holds the
@@ -112,31 +109,21 @@ const LiveTurn = memo(function LiveTurn({ sessionId, agentName, harnessProvider,
 
   const modelName = useModelLabel(usage?.model);
 
-  if (!hasContent && !active && !stopped && !thinking) return null;
-
   return (
-    <div className="flex min-w-0 flex-col gap-2" data-testid="live-turn" data-gai-block="live">
-      <AgentTurnHeader
-        agentName={agentName}
-        avatarProvider={harnessProvider ? (usage?.provider ?? harnessProvider) : undefined}
-        model={usage?.model ? (modelName ?? usage.model) : undefined}
-        provider={usage?.provider}
-        usage={usage ? <UsageChip usage={usage} prevUsage={prevUsage} prevCompletedAt={prevCompletedAt} scopeId={sessionId} /> : undefined}
-      />
-      {hasContent ? (
-        <TurnBody
-          segments={segments}
-          active={active}
-          answerStreaming={status === 'streaming'}
-          loading={active && !segments.some((s) => s.type === 'steps' || s.type === 'answer')}
-          streamKey={sessionId}
-        />
-      ) : null}
-      {stopped ? <StoppedNote partial={hasContent} testId="stream-stopped-note" /> : null}
-      {!hasContent && (thinking || active) ? (
-        <ThinkingPlaceholder label={TRANSCRIPT_COPY.agentThinking(harnessLabel ?? 'Agent')} />
-      ) : null}
-    </div>
+    <LiveTurn
+      agentName={agentName}
+      avatarProvider={harnessProvider ? (usage?.provider ?? harnessProvider) : undefined}
+      model={usage?.model ? (modelName ?? usage.model) : undefined}
+      provider={usage?.provider}
+      usage={usage ? <UsageChip usage={usage} prevUsage={prevUsage} prevCompletedAt={prevCompletedAt} scopeId={sessionId} /> : undefined}
+      segments={hasContent ? segments : undefined}
+      streamKey={sessionId}
+      active={active}
+      answerStreaming={status === 'streaming'}
+      stopped={stopped}
+      thinking={thinking}
+      thinkingLabel={TRANSCRIPT_COPY.agentThinking(harnessLabel ?? 'Agent')}
+    />
   );
 });
 
@@ -183,7 +170,7 @@ export function ChatTranscript({
   const renderLive = useCallback(
     () =>
       sessionId ? (
-        <LiveTurn
+        <ChatLiveTurn
           sessionId={sessionId}
           agentName={agentName}
           harnessProvider={harnessProvider}
