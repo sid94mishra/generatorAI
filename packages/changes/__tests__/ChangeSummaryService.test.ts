@@ -478,6 +478,31 @@ describe('ChangeSummaryService (real git)', () => {
     expect(repo.base.treeish).toBeDefined();
   });
 
+  it('files a sparse checkout keeps off disk are not reported as deleted, directly or through a shadow store (D-171)', async () => {
+    const run = (...args: string[]) =>
+      realRunner.run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd: repoDir, timeout: 15_000 });
+    await fs.writeFile(path.join(repoDir, 'keep.txt'), 'kept\n');
+    await fs.writeFile(path.join(repoDir, 'private.pdf'), 'binary-ish\n');
+    await run('add', '-A');
+    await run('commit', '-m', 'two files');
+    await run('sparse-checkout', 'set', '--no-cone', '/*', '!/private.pdf');
+    await fs.access(path.join(repoDir, 'private.pdf')).then(() => expect.fail('still on disk'), () => undefined);
+    await fs.writeFile(path.join(repoDir, 'keep.txt'), 'edited\n');
+
+    const direct = await service.getSummary({ ...params(), base: { kind: 'ref', id: 'HEAD' } });
+    expect(direct.repos[0]!.files.map((f) => f.path)).toEqual(['keep.txt']);
+
+    const shadow = path.join(tmpRoot, 'shadow', 'sparse');
+    const objects = await git.commonObjectsDir(repoDir);
+    expect(await git.initShadowRepo(shadow, repoDir, { ...(objects ? { alternatesObjectsDir: objects } : {}) })).toBe(true);
+    const viaShadow = await service.getSummary({
+      ...params(),
+      base: { kind: 'ref', id: 'HEAD' },
+      mounts: [{ alias: 'repo', path: repoDir, gitDir: shadow }],
+    });
+    expect(viaShadow.repos[0]!.files.map((f) => f.path)).toEqual(['keep.txt']);
+  });
+
   it('"Uncommitted changes" (ref HEAD) lists only what the last commit lacks; a shadow folder falls back to its baseline', async () => {
     await fs.writeFile(path.join(repoDir, 'a.txt'), 'v1\n');
     await snapshot('baseline');

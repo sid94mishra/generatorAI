@@ -32,6 +32,7 @@ import type {
   MergeOptions,
   ShadowRepoOptions,
   WriteTreeOptions,
+  IndexEntry,
 } from './ports/IGitClient.js';
 import { isRemoteGitUrl } from './remoteUrl.js';
 
@@ -259,7 +260,9 @@ export class GitClient implements IGitClient {
     await fs.mkdir(path.dirname(worktreePath), { recursive: true });
     const args = ['worktree', 'add'];
     if (opts.newBranch) {
-      args.push('-b', opts.newBranch, worktreePath);
+      // `--no-track`: a branch cut from `origin/develop` must not take develop as its upstream, or a bare
+      // `git push` typed in the chat's terminal could land on develop. The first push sets the real upstream.
+      args.push('--no-track', '-b', opts.newBranch, worktreePath);
       const start = opts.base ?? opts.branch;
       if (start) args.push(start);
     } else if (opts.branch) {
@@ -1154,6 +1157,17 @@ export class GitClient implements IGitClient {
         return null;
       }
 
+      if (opts?.keep?.length) {
+        const info = opts.keep.map((e) => `${e.mode} ${e.sha}\t${e.path}`).join('\n') + '\n';
+        const kept = await this.runner.run('git', this.snapshotArgs(['update-index', '--index-info']), {
+          cwd: repoDir,
+          timeout: 60_000,
+          env: this.snapshotEnv(indexFile),
+          stdin: info,
+        });
+        if (kept.exitCode !== 0) this.logger.warn(`[Git] could not keep sparse entries in ${repoDir}: ${kept.stderr}`);
+      }
+
       const write = await this.runner.run('git', this.snapshotArgs(['write-tree']), {
         cwd: repoDir,
         timeout: 60_000,
@@ -1169,6 +1183,34 @@ export class GitClient implements IGitClient {
     } catch (err) {
       this.logger.warn(`[Git] writeTreeFromWorktree failed in ${repoDir}: ${err}`);
       return null;
+    }
+  }
+
+  async skipWorktreeEntries(repoDir: string): Promise<IndexEntry[]> {
+    const run = (args: string[]) => this.runner.run('git', args, { cwd: repoDir, timeout: 30_000 });
+    try {
+      const sparse = await run(['config', '--bool', 'core.sparseCheckout']);
+      if (sparse.stdout.trim() !== 'true') return [];
+      const tagged = await run(['ls-files', '-t', '-z']);
+      const skipped = new Set(
+        tagged.stdout
+          .split('\0')
+          .filter((l) => l.startsWith('S '))
+          .map((l) => l.slice(2)),
+      );
+      if (skipped.size === 0) return [];
+      const staged = await run(['ls-files', '-s', '-z']);
+      const out: IndexEntry[] = [];
+      for (const line of staged.stdout.split('\0')) {
+        const tab = line.indexOf('\t');
+        if (tab < 0) continue;
+        const [mode, sha, stage] = line.slice(0, tab).split(' ');
+        const file = line.slice(tab + 1);
+        if (stage === '0' && mode && sha && skipped.has(file)) out.push({ mode, sha, path: file });
+      }
+      return out;
+    } catch {
+      return [];
     }
   }
 

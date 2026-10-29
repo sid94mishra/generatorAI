@@ -12,6 +12,7 @@ export type {
   GitRawDiffEntry,
   GitBlobEntry,
   WriteTreeOptions,
+  IndexEntry,
   ShadowRepoOptions,
   AddWorktreeOptions,
   GitAheadBehind,

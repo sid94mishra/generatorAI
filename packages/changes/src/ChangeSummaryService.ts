@@ -718,7 +718,11 @@ export class ChangeSummaryService {
       indexFile = path.join(gitDir, honourEol ? 'generatorai-readonly-eol.index' : 'generatorai-readonly.index');
       this.workingIndexCache.set(cacheKey, indexFile);
     }
-    const tree = (await this.gitAt(repoDir).writeTreeFromWorktree(repoDir, indexFile, { honourEol })) ?? undefined;
+    // Files a sparse checkout keeps off disk are not deleted: carry the repo's own entries for them (D-171).
+    const keep = await this.git.skipWorktreeEntries(repoDir).catch(() => []);
+    const tree =
+      (await this.gitAt(repoDir).writeTreeFromWorktree(repoDir, indexFile, { honourEol, ...(keep.length ? { keep } : {}) })) ??
+      undefined;
     // A failed snapshot is not memoised: the failure is usually transient (the
     // shadow store is still being initialised) and caching it pinned the wrong
     // answer for the whole TTL.
