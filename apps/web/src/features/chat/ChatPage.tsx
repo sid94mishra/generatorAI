@@ -26,6 +26,7 @@ import {
   useClearProjectPermissionRules,
   useProjectPermissionRules,
   useSetChatPermissionMode,
+  useUnarchiveChat,
 } from '@/hooks/queries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useEditSourcesStore } from '@/stores/editSourcesStore.js';
@@ -94,6 +95,7 @@ export function ChatPage() {
   const view = useChatView({ chatId, dockOpen, setDockOpen, toggleDock });
   // MG-02 / MD-112: the chat is read while it is open (D-83).
   const setPermissionMode = useSetChatPermissionMode(chatId ?? '');
+  const unarchive = useUnarchiveChat();
   // U-16 (D-147): what "Allow for this chat" remembered (the Approvals menu's "N rules · Clear").
   const permissionRules = useChatPermissionRules(chatId);
   const clearPermissionRules = useClearChatPermissionRules(chatId ?? '');
@@ -529,7 +531,17 @@ export function ChatPage() {
                       </Reveal>
                       {chat.status === 'archived' ? (
                         <div className="shrink-0 px-7 pt-3">
-                          <Banner tone="warn" lead="This chat has been archived" detail="You can read it, but it takes no new messages." />
+                          <Banner
+                            tone="warn"
+                            lead="This chat has been archived"
+                            detail="You can read it. Unarchive it to continue — its folders come back as they were."
+                            action={
+                              // The chat itself is where someone looks for a way back (the list row menu was the only one).
+                              <Button size="sm" icon="undo" loading={unarchive.isPending} onClick={() => chatId && unarchive.mutate(chatId)}>
+                                Unarchive
+                              </Button>
+                            }
+                          />
                         </div>
                       ) : null}
                       {/* LiveTurn inside owns the per-token subscription, so this page does not. */}
