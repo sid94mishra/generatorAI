@@ -200,10 +200,18 @@ export class CodebaseService {
     try {
       // Verify the path exists and is a git repo
       await fs.access(path.join(codebase.localPath, '.git'));
-      // Store the local path as clonePath directly (no symlink needed, worktrees reference it)
+      // Store the local path as clonePath directly (no symlink needed, worktrees reference it).
+      // Without a default branch the UI fell back to "main", which this repository may not have: take the
+      // remote's head when it is known locally, else the branch checked out now.
+      const defaultBranch =
+        codebase.defaultBranch ||
+        (await this.gitManager.defaultBranch(codebase.localPath).catch(() => null)) ||
+        (await this.gitManager.currentBranch(codebase.localPath).catch(() => null)) ||
+        undefined;
       await this.codebaseRepo.update(codebase.id, {
         clonePath: codebase.localPath,
         status: 'ready',
+        ...(defaultBranch ? { defaultBranch } : {}),
       });
       this.logger.info(`[Codebase] Linked local git repo "${codebase.alias}" at ${codebase.localPath}`);
     } catch (err) {

@@ -146,7 +146,7 @@ export function CodebasesTab({ projectId, codebases, isLoading, error }: Codebas
       width: 120,
       mono: true,
       hideBelow: 900,
-      cell: (cb) => (cb.type === 'local-dir' ? '—' : (cb.defaultBranch ?? 'main')),
+      cell: (cb) => (cb.type === 'local-dir' ? '—' : (cb.defaultBranch ?? '—')),
     },
     {
       id: 'fetched',
