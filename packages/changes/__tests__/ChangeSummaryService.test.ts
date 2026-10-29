@@ -478,6 +478,29 @@ describe('ChangeSummaryService (real git)', () => {
     expect(repo.base.treeish).toBeDefined();
   });
 
+  it('two chats mounting one folder in place each read through their own shadow store', { timeout: 30_000 }, async () => {
+    const folder = path.join(tmpRoot, 'shared-notes');
+    await fs.mkdir(folder, { recursive: true });
+    await fs.writeFile(path.join(folder, 'spec.md'), 'v1\n');
+    const shadowA = path.join(tmpRoot, 'shadow', 'chat-a');
+    const shadowB = path.join(tmpRoot, 'shadow', 'chat-b');
+    expect(await git.initShadowRepo(shadowA, folder)).toBe(true);
+    expect(await git.initShadowRepo(shadowB, folder)).toBe(true);
+    await fs.writeFile(path.join(folder, 'spec.md'), 'v2\n');
+    const warnings: string[] = [];
+    const logger = { ...silentLogger, warn: (m: string) => void warnings.push(String(m)) } as unknown as ILogger;
+    const svc = new ChangeSummaryService(new GitClient(realRunner, logger, { workspacesDir: tmpRoot }), checkpoints, logger);
+    const read = (gitDir: string) => svc.getSummary({ ...params(), mounts: [{ alias: 'notes', path: folder, gitDir }] });
+    // Alternate the two chats: one must never use the other's index or tree (the tree is not in its store).
+    for (const gitDir of [shadowA, shadowB, shadowA, shadowB]) {
+      // Past the snapshot memo, so each read really stages through an index file.
+      await new Promise((r) => setTimeout(r, ChangeSummaryService.WORKING_TREE_TTL_MS + 200));
+      const summary = await read(gitDir);
+      expect(summary.repos[0]!.base.treeish).toBeDefined();
+    }
+    expect(warnings.filter((w) => /write-tree failed|invalid object/.test(w))).toEqual([]);
+  });
+
   it('files a sparse checkout keeps off disk are not reported as deleted, directly or through a shadow store (D-171)', async () => {
     const run = (...args: string[]) =>
       realRunner.run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd: repoDir, timeout: 15_000 });

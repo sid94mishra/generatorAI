@@ -87,8 +87,10 @@ export class ChangeSummaryService {
    * repo has one, the plain client otherwise. Shadow stores are what keep
    * snapshot objects, refs and index files out of the user's own `.git`.
    */
-  private gitAt(repoDir: string): IGitClient {
-    const gitDir = this.shadows.get(path.resolve(repoDir));
+  private gitAt(repoDir: string, ownGitDir?: string): IGitClient {
+    // The repo's OWN store when the caller knows it: two chats that mount one folder in place each have a
+    // shadow store, and the folder path alone cannot say which one this call belongs to.
+    const gitDir = ownGitDir ?? this.shadows.get(path.resolve(repoDir));
     if (!gitDir) return this.git;
     let client = this.scopedClients.get(gitDir);
     if (!client) {
@@ -187,7 +189,7 @@ export class ChangeSummaryService {
           files,
         };
         if (includeTree) {
-          summary.paths = (await this.gitAt(repo.repoDir).lsFiles(repo.repoDir)).filter(
+          summary.paths = (await this.gitAt(repo.repoDir, repo.gitDir).lsFiles(repo.repoDir)).filter(
             (p) => !isMetadataPath(p),
           );
         }
@@ -272,14 +274,14 @@ export class ChangeSummaryService {
     });
 
     const oldBlob = base.treeish
-      ? await this.gitAt(repo.repoDir).blobShaAt(repo.repoDir, base.treeish, basePath)
+      ? await this.gitAt(repo.repoDir, repo.gitDir).blobShaAt(repo.repoDir, base.treeish, basePath)
       : null;
     const newBlob = head.treeish
-      ? await this.gitAt(repo.repoDir).blobShaAt(repo.repoDir, head.treeish, relPath)
+      ? await this.gitAt(repo.repoDir, repo.gitDir).blobShaAt(repo.repoDir, head.treeish, relPath)
       : await this.workingBlobSha(repo.repoDir, relPath);
 
-    const oldSize = oldBlob ? await this.gitAt(repo.repoDir).blobSize(repo.repoDir, oldBlob) : null;
-    const newSize = newBlob ? await this.gitAt(repo.repoDir).blobSize(repo.repoDir, newBlob) : null;
+    const oldSize = oldBlob ? await this.gitAt(repo.repoDir, repo.gitDir).blobSize(repo.repoDir, oldBlob) : null;
+    const newSize = newBlob ? await this.gitAt(repo.repoDir, repo.gitDir).blobSize(repo.repoDir, newBlob) : null;
     const isTooLarge =
       (oldSize ?? 0) > MAX_FILE_BODY_BYTES || (newSize ?? 0) > MAX_FILE_BODY_BYTES;
 
@@ -289,12 +291,12 @@ export class ChangeSummaryService {
 
     if (!isTooLarge) {
       if (oldBlob) {
-        oldContents = await this.readBlob(repo.repoDir, base.treeish!, basePath);
+        oldContents = await this.readBlob(repo.repoDir, base.treeish!, basePath, repo.gitDir);
         if (oldContents !== null && looksBinary(oldContents)) isBinary = true;
       }
       if (newBlob) {
         newContents = head.treeish
-          ? await this.readBlob(repo.repoDir, head.treeish, relPath)
+          ? await this.readBlob(repo.repoDir, head.treeish, relPath, repo.gitDir)
           : await this.readWorkingFile(repo.repoDir, relPath);
         if (newContents !== null && looksBinary(newContents)) isBinary = true;
       }
@@ -361,6 +363,7 @@ export class ChangeSummaryService {
     repoDir: string,
     sha: string,
     workingPath?: string,
+    gitDir?: string,
   ): Promise<string | null> {
     const key = `${repoDir}\u0000${sha}`;
     const hit = this.blobCache.get(key);
@@ -377,7 +380,7 @@ export class ChangeSummaryService {
       }
     }
 
-    const contents = await this.gitAt(repoDir).readBlobById(repoDir, sha);
+    const contents = await this.gitAt(repoDir, gitDir).readBlobById(repoDir, sha);
     if (contents === null) return null;
     this.cacheBlob(key, contents);
     return contents;
@@ -429,10 +432,10 @@ export class ChangeSummaryService {
     if (!oldBlob && !newBlob) return null;
 
     const [oldContents, newContents] = await Promise.all([
-      oldBlob ? this.readBlobCached(repo.repoDir, oldBlob) : Promise.resolve(null),
+      oldBlob ? this.readBlobCached(repo.repoDir, oldBlob, undefined, repo.gitDir) : Promise.resolve(null),
       // Only the head side can be served from the working tree; the base side
       // is a historical revision that by definition is not on disk.
-      newBlob ? this.readBlobCached(repo.repoDir, newBlob, relPath) : Promise.resolve(null),
+      newBlob ? this.readBlobCached(repo.repoDir, newBlob, relPath, repo.gitDir) : Promise.resolve(null),
     ]);
 
     // A named object that failed to read means the assumption behind this
@@ -482,7 +485,7 @@ export class ChangeSummaryService {
       ? stripAliasPrefix(params.oldPath, repo.alias)
       : relPath;
 
-    let patch = await this.gitAt(repo.repoDir).diffPatch(
+    let patch = await this.gitAt(repo.repoDir, repo.gitDir).diffPatch(
       repo.repoDir,
       base.treeish ?? EMPTY_TREE_SHA,
       head.treeish,
@@ -497,10 +500,10 @@ export class ChangeSummaryService {
     }
 
     const oldBlob = base.treeish
-      ? await this.gitAt(repo.repoDir).blobShaAt(repo.repoDir, base.treeish, basePath)
+      ? await this.gitAt(repo.repoDir, repo.gitDir).blobShaAt(repo.repoDir, base.treeish, basePath)
       : null;
     const newBlob = head.treeish
-      ? await this.gitAt(repo.repoDir).blobShaAt(repo.repoDir, head.treeish, relPath)
+      ? await this.gitAt(repo.repoDir, repo.gitDir).blobShaAt(repo.repoDir, head.treeish, relPath)
       : await this.workingBlobSha(repo.repoDir, relPath);
 
     return {
@@ -541,8 +544,8 @@ export class ChangeSummaryService {
     // file" lookup is gone. On Windows each spawn costs ~250 ms, so this is
     // the difference between a snappy panel and a multi-second stall.
     const [numstat, raw] = await Promise.all([
-      this.gitAt(repo.repoDir).diffNumstat(repo.repoDir, from, to),
-      this.gitAt(repo.repoDir).diffRaw(repo.repoDir, from, to),
+      this.gitAt(repo.repoDir, repo.gitDir).diffNumstat(repo.repoDir, from, to),
+      this.gitAt(repo.repoDir, repo.gitDir).diffRaw(repo.repoDir, from, to),
     ]);
 
     if (raw.length === 0) return [];
@@ -552,8 +555,8 @@ export class ChangeSummaryService {
     // produces a different tree SHA and therefore a different key.
     const needsBaseSizes = raw.some((e) => e.code.startsWith('D') || e.oldSha);
     const [headBlobs, baseBlobs] = await Promise.all([
-      to ? this.lsTreeCached(repo.repoDir, to) : Promise.resolve([]),
-      needsBaseSizes ? this.lsTreeCached(repo.repoDir, from) : Promise.resolve([]),
+      to ? this.lsTreeCached(repo.repoDir, to, repo.gitDir) : Promise.resolve([]),
+      needsBaseSizes ? this.lsTreeCached(repo.repoDir, from, repo.gitDir) : Promise.resolve([]),
     ]);
 
     const sizeBySha = new Map<string, number>();
@@ -610,7 +613,7 @@ export class ChangeSummaryService {
   ): Promise<ChangeRevision> {
     switch (selector.kind) {
       case 'working': {
-        const treeish = await this.materializeWorkingTree(repo.repoDir, opts.honourEol === true);
+        const treeish = await this.materializeWorkingTree(repo.repoDir, opts.honourEol === true, repo.gitDir);
         return {
           kind: 'working',
           ...(treeish ? { treeish } : {}),
@@ -633,7 +636,7 @@ export class ChangeSummaryService {
           if (!head) return this.resolveBaseline(workspaceId, repo);
           return { kind: 'ref', id: 'HEAD', treeish: head, label: 'Last commit', normalized: true };
         }
-        const sha = selector.id ? await this.gitAt(repo.repoDir).revParse(repo.repoDir, selector.id) : null;
+        const sha = selector.id ? await this.gitAt(repo.repoDir, repo.gitDir).revParse(repo.repoDir, selector.id) : null;
         return {
           kind: 'ref',
           ...(selector.id ? { id: selector.id } : {}),
@@ -675,12 +678,12 @@ export class ChangeSummaryService {
   private readonly lsTreeCache = new Map<string, GitBlobEntry[]>();
   private static readonly LS_TREE_CACHE_MAX = 64;
 
-  private async lsTreeCached(repoDir: string, treeish: string): Promise<GitBlobEntry[]> {
-    const key = `${repoDir}\u0000${treeish}`;
+  private async lsTreeCached(repoDir: string, treeish: string, gitDir?: string): Promise<GitBlobEntry[]> {
+    const key = `${gitDir ?? repoDir}\u0000${treeish}`;
     const hit = this.lsTreeCache.get(key);
     if (hit) return hit;
 
-    const blobs = await this.gitAt(repoDir).lsTreeBlobs(repoDir, treeish);
+    const blobs = await this.gitAt(repoDir, gitDir).lsTreeBlobs(repoDir, treeish);
     if (this.lsTreeCache.size >= ChangeSummaryService.LS_TREE_CACHE_MAX) {
       // Simple FIFO eviction — insertion order is Map's iteration order.
       const oldest = this.lsTreeCache.keys().next().value;
@@ -701,10 +704,12 @@ export class ChangeSummaryService {
    * batch read a CONSISTENT snapshot, so the file list and the file bodies
    * can't disagree because the agent wrote something in between.
    */
-  private async materializeWorkingTree(repoDir: string, honourEol = false): Promise<string | undefined> {
+  private async materializeWorkingTree(repoDir: string, honourEol = false, ownGitDir?: string): Promise<string | undefined> {
     // The two flavours are different trees (CRLF-exact vs EOL-normalised), so
-    // they get their own index file and cache slot.
-    const cacheKey = honourEol ? `${repoDir}#eol` : repoDir;
+    // they get their own index file and cache slot — per store, because a tree
+    // written into one chat's shadow store does not exist in another's.
+    const store = ownGitDir ?? this.shadows.get(path.resolve(repoDir)) ?? '';
+    const cacheKey = `${store}\u0000${repoDir}${honourEol ? '#eol' : ''}`;
     const cached = this.workingTreeCache.get(cacheKey);
     if (cached && Date.now() - cached.at < ChangeSummaryService.WORKING_TREE_TTL_MS) {
       return cached.tree;
@@ -712,8 +717,7 @@ export class ChangeSummaryService {
 
     let indexFile = this.workingIndexCache.get(cacheKey);
     if (!indexFile) {
-      const gitDir =
-        this.shadows.get(path.resolve(repoDir)) ?? (await this.gitAt(repoDir).absoluteGitDir(repoDir));
+      const gitDir = store || (await this.gitAt(repoDir).absoluteGitDir(repoDir));
       if (!gitDir) return undefined;
       indexFile = path.join(gitDir, honourEol ? 'generatorai-readonly-eol.index' : 'generatorai-readonly.index');
       this.workingIndexCache.set(cacheKey, indexFile);
@@ -721,7 +725,7 @@ export class ChangeSummaryService {
     // Files a sparse checkout keeps off disk are not deleted: carry the repo's own entries for them (D-171).
     const keep = await this.git.skipWorktreeEntries(repoDir).catch(() => []);
     const tree =
-      (await this.gitAt(repoDir).writeTreeFromWorktree(repoDir, indexFile, { honourEol, ...(keep.length ? { keep } : {}) })) ??
+      (await this.gitAt(repoDir, ownGitDir).writeTreeFromWorktree(repoDir, indexFile, { honourEol, ...(keep.length ? { keep } : {}) })) ??
       undefined;
     // A failed snapshot is not memoised: the failure is usually transient (the
     // shadow store is still being initialised) and caching it pinned the wrong
@@ -749,8 +753,10 @@ export class ChangeSummaryService {
    */
   invalidateWorkingTree(repoDir?: string): void {
     if (repoDir) {
-      this.workingTreeCache.delete(repoDir);
-      this.workingTreeCache.delete(`${repoDir}#eol`);
+      for (const key of [...this.workingTreeCache.keys()]) {
+        const [, dir] = key.split('\u0000');
+        if (dir === repoDir || dir === `${repoDir}#eol`) this.workingTreeCache.delete(key);
+      }
     } else {
       this.workingTreeCache.clear();
     }
@@ -794,11 +800,11 @@ export class ChangeSummaryService {
     // restores nothing. Falling through to the empty tree read every file the
     // user already had as added by the agent, and Undo all deleted them.
     if (repo.kind === 'mount' && repo.gitDir) {
-      const working = await this.materializeWorkingTree(repo.repoDir);
+      const working = await this.materializeWorkingTree(repo.repoDir, false, repo.gitDir);
       if (working) return { kind: 'baseline', treeish: working, label: 'Session start' };
     }
     if (repo.kind === 'linked' || repo.kind === 'mount' || repo.kind === 'nested') {
-      const head = await this.gitAt(repo.repoDir).revParse(repo.repoDir, 'HEAD');
+      const head = await this.gitAt(repo.repoDir, repo.gitDir).revParse(repo.repoDir, 'HEAD');
       if (head) {
         return { kind: 'baseline', treeish: head, label: 'Worktree HEAD', normalized: true };
       }
@@ -806,7 +812,7 @@ export class ChangeSummaryService {
 
     // Root / generated repos are created by the workspace itself, so their
     // root commit really is "the start".
-    const first = await this.gitAt(repo.repoDir).firstCommit(repo.repoDir);
+    const first = await this.gitAt(repo.repoDir, repo.gitDir).firstCommit(repo.repoDir);
     return {
       kind: 'baseline',
       ...(first ? { treeish: first } : { treeish: EMPTY_TREE_SHA }),
@@ -890,9 +896,10 @@ export class ChangeSummaryService {
     repoDir: string,
     treeish: string,
     relPath: string,
+    gitDir?: string,
   ): Promise<string | null> {
     try {
-      return await this.gitAt(repoDir).showFile(repoDir, relPath, treeish);
+      return await this.gitAt(repoDir, gitDir).showFile(repoDir, relPath, treeish);
     } catch {
       return null;
     }
