@@ -782,7 +782,27 @@ export class ChatManagementService {
   /** The chat's view of its workspace (persisted mounts), for the composer. */
   private async exposureOf(workspace: ExecutionWorkspace): Promise<WorkspaceExposure | undefined> {
     const manager = this.extensions.workspaceManager;
-    return manager ? workspaceExposure(manager, workspace) : undefined;
+    const exposure = manager ? await workspaceExposure(manager, workspace) : undefined;
+    if (exposure) this.composedCwd.set(workspace.id, exposure.workingDirectory);
+    return exposure;
+  }
+
+  /** workspaceId → the working directory its conversation was last composed with. */
+  private readonly composedCwd = new Map<string, string>();
+
+  /**
+   * Whether the workspace's working directory, now that its mounts are ready, is not the one the
+   * conversation was composed with — a chat is composed while its worktrees are still being created, so a
+   * codebase subdirectory the branch turns out not to have moves the cwd back to the mount.
+   */
+  private async cwdMovedSinceCompose(workspaceId: string): Promise<boolean> {
+    const composed = this.composedCwd.get(workspaceId);
+    const manager = this.extensions.workspaceManager;
+    if (!composed || !manager) return false;
+    const workspace = await manager.getExecutionWorkspace(workspaceId).catch(() => null);
+    if (!workspace) return false;
+    const now = (await workspaceExposure(manager, workspace).catch(() => null))?.workingDirectory;
+    return !!now && now !== composed;
   }
 
   /**
@@ -2042,7 +2062,8 @@ export class ChatManagementService {
     // (archived → deleted), fall back to creating a fresh functional one.
     const desiredBinding = this.conversationBindingKey(chat);
     const bindingChanged =
-      this.conversationBindings.get(session.conversationId) !== desiredBinding;
+      this.conversationBindings.get(session.conversationId) !== desiredBinding ||
+      (!!chat.workspaceId && (await this.cwdMovedSinceCompose(chat.workspaceId)));
     if (!this.harness.hasLiveConversation(session.conversationId) || bindingChanged) {
       // E-4 — a model from another provider moves the conversation to a FRESH session there (MultiHarness): the
       // new provider knows nothing of this chat, so a "review what you just did" landed on an agent with no

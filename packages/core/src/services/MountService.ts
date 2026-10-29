@@ -1296,11 +1296,15 @@ export function mountWorkdir(subdirectory: string | undefined): string | undefin
 
 /**
  * Where the agent starts in a mount: its `workdir` when that directory exists
- * (a branch may not have the package yet), otherwise the mount itself.
+ * (a branch may not have the package yet), otherwise the mount itself. A mount
+ * still being prepared has no folder yet — its worktree is created after the
+ * conversation is composed — so its `workdir` is trusted until it is ready
+ * (the chat rebinds if the ready mount turns out not to have it).
  */
-export function startDirOf(mount: Pick<WorkspaceMount, 'path' | 'workdir'>): string {
+export function startDirOf(mount: Pick<WorkspaceMount, 'path' | 'workdir' | 'status'>): string {
   if (!mount.workdir) return mount.path;
   const dir = path.join(mount.path, ...mount.workdir.split('/'));
+  if (mount.status !== 'ready') return dir;
   try {
     return statSync(dir).isDirectory() ? dir : mount.path;
   } catch {

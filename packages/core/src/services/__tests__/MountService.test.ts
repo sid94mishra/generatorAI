@@ -490,6 +490,9 @@ describe('buildExposure', () => {
     // A branch without the package yet: the mount itself, never a missing cwd.
     const missing = buildExposure(workspace, [mount({ alias: 'mono', path: repo, position: 0, workdir: 'apps/none' })]);
     expect(missing.workingDirectory).toBe(repo);
+    // Composed while the worktree is still being created: the package folder cannot exist yet, so it is trusted.
+    const preparing = buildExposure(workspace, [mount({ alias: 'mono', path: path.join(repo, 'not-yet'), position: 0, workdir: 'apps/web', status: 'preparing' })]);
+    expect(preparing.workingDirectory).toBe(path.join(repo, 'not-yet', 'apps', 'web'));
     expect(mountWorkdir(' ./packages//ledger/ ')).toBe('packages/ledger');
     expect(mountWorkdir('../escape')).toBeUndefined();
     expect(mountWorkdir('.')).toBeUndefined();
