@@ -58,7 +58,13 @@ export function useShipFlow({ workspaceId, hint, open, initialMode }: UseShipFlo
   const flow = useRunScmFlow(workspaceId);
   const generateText = useGenerateScmText(workspaceId);
 
-  const repos = useMemo<RepoReadiness[]>(() => readiness.data?.repos ?? [], [readiness.data]);
+  // A plain folder among the sources has nothing to commit; it is offered only when no source is a repository
+  // (so the dialog can say why nothing can run).
+  const repos = useMemo<RepoReadiness[]>(() => {
+    const all = readiness.data?.repos ?? [];
+    const git = all.filter((r) => r.isRepo);
+    return git.length > 0 ? git : all;
+  }, [readiness.data]);
   const [alias, setAlias] = useState<string | undefined>(undefined);
   const selected = repos.find((r) => r.alias === alias) ?? repos.find((r) => r.alias === pickDefaultAlias(repos));
 

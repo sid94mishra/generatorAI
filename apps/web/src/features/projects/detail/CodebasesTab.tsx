@@ -177,7 +177,7 @@ export function CodebasesTab({ projectId, codebases, isLoading, error }: Codebas
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-3">
         <p className="min-w-0 flex-1 text-ui text-fg-2">
-          Repositories are cloned under the project root. Every chat and run works in its own worktree.
+          A GitHub repository is cloned into the project and each chat gets its own branch in a worktree. A local repository or folder is used where it is: a chat edits it in place or works in a worktree of it.
         </p>
         {!adding ? (
           <Button icon="plus" onClick={() => setAdding(true)}>

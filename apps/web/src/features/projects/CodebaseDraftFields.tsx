@@ -43,7 +43,7 @@ export function codebaseLinkParams(draft: CodebaseDraft) {
     alias: draft.alias.trim(),
     type: draft.type,
     ...(remote ? { url: draft.url.trim() } : { localPath: draft.localPath.trim() }),
-    ...(draft.branch.trim() ? { defaultBranch: draft.branch.trim() } : {}),
+    ...(draft.type !== 'local-dir' && draft.branch.trim() ? { defaultBranch: draft.branch.trim() } : {}),
     ...(draft.subdirectory.trim() ? { subdirectory: draft.subdirectory.trim() } : {}),
   };
 }
@@ -62,6 +62,7 @@ export function CodebaseDraftFields({ draft, onChange, label = 'Source' }: Codeb
     initialPath: draft.localPath || undefined,
   });
   const remote = draft.type === 'git-remote';
+  const git = draft.type !== 'local-dir';
   return (
     <div className="grid grid-cols-2 gap-3">
       <div className="col-span-2 flex flex-col gap-1.5">
@@ -75,12 +76,15 @@ export function CodebaseDraftFields({ draft, onChange, label = 'Source' }: Codeb
         />
         <span className="text-small text-fg-3">{CODEBASE_TYPE_HINT[draft.type]}</span>
       </div>
-      <Field label="Alias">
+      <Field label="Alias" className={git ? undefined : 'col-span-2'}>
         <Input value={draft.alias} onChange={(e) => onChange({ alias: e.target.value })} placeholder="frontend" />
       </Field>
-      <Field label="Default branch" optional>
-        <Input mono value={draft.branch} onChange={(e) => onChange({ branch: e.target.value })} placeholder="main" />
-      </Field>
+      {/* A plain folder has no branches. */}
+      {git ? (
+        <Field label="Default branch" optional>
+          <Input mono value={draft.branch} onChange={(e) => onChange({ branch: e.target.value })} placeholder="main" />
+        </Field>
+      ) : null}
       {remote ? (
         <Field label="Repository URL" className="col-span-2">
           <Input
