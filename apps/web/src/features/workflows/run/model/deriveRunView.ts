@@ -501,6 +501,8 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
   const runVars = inputs.vars ?? {};
   const rawPrompt = def?.kind === 'agent' ? def.prompts[0]?.text?.trim() : undefined;
   const prompt = rawPrompt ? renderStagePrompt(rawPrompt, runVars, inputs.stageScope) : undefined;
+  // Who answers, as the chat names it: the bound agent, else the provider the stage pins (D-172).
+  const session = def?.kind === 'agent' ? def.session : undefined;
 
   return {
     id: sr.id,
@@ -538,6 +540,8 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
     // again when the person follows up: that amendment renders live, not all at once when it ends.
     streaming: streamLive && (status !== 'completed' || !!sr.sessionId),
     ...(sr.sessionId ? { sessionId: sr.sessionId } : {}),
+    ...(session?.agentRef ? { agentRef: session.agentRef } : {}),
+    ...(session?.harnessType ? { harnessType: session.harnessType } : {}),
     hooks: hooksFrom(stream, sr.id),
     usage: usageFrom(stream),
     contextUsage: stream?.contextUsage ?? undefined,

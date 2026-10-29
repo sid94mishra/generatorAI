@@ -27,6 +27,7 @@ import { Button } from '@/ui/primitives/Button/Button.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { STATUS_TONE_TEXT } from '@/ui/primitives/StatusBadge/StatusBadge.js';
 import { StageTranscript } from './StageTranscript.js';
+import { useStageAgent } from './useStageAgent.js';
 import { MenuButton, type MenuButtonItem } from '@/ui/patterns/MenuButton/MenuButton.js';
 import { formatStageDuration } from '../model/format.js';
 import type { StageView } from '../model/types.js';
@@ -278,6 +279,7 @@ export const StageRow = memo(function StageRow({
       </span>
     ) : null;
 
+  const agent = useStageAgent(stage);
   const turnProps = {
     segments: stage.segments,
     steps: stage.steps,
@@ -296,10 +298,10 @@ export const StageRow = memo(function StageRow({
     ) : (
       <LiveTurn
         {...turnProps}
-        agentName={stage.name}
-        avatar="bot"
+        agentName={agent.name}
+        avatarProvider={agent.harnessProvider}
         thinking={isActive && !isAwaiting}
-        thinkingLabel={TRANSCRIPT_COPY.agentThinking(stage.name)}
+        thinkingLabel={TRANSCRIPT_COPY.agentThinking(agent.name)}
       />
     );
 
@@ -455,6 +457,7 @@ export const StageRow = memo(function StageRow({
             >
               <StageTranscript
                 stage={stage}
+                agent={agent}
                 live={stage.status === 'running' || stage.streaming === true || (isAwaiting && !stage.interrupt)}
                 liveBody={turnBody}
                 fallback={

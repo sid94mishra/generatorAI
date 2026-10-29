@@ -18,9 +18,12 @@ import { TranscriptTurn } from '@/blocks/transcript/index.js';
 import { useStageChatHistory } from '@/hooks/queries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import type { StageView } from '../model/types.js';
+import type { StageAgent } from './useStageAgent.js';
 
 export interface StageTranscriptProps {
   stage: StageView;
+  /** Who answers, named as the chat names it (`useStageAgent`). */
+  agent: StageAgent;
   /** A turn of this stage is in flight: the stream renders it, not its partial persisted copy. */
   live: boolean;
   /** The stream's rendering of the turn in flight (or of a turn the server never finished persisting). */
@@ -34,9 +37,15 @@ export interface StageTranscriptProps {
  * stream: the server persists the response as it goes (`complete: false`) and
  * stamps it with the turn id the stream carries.
  */
-export function persistedRows(messages: readonly ChatMessage[], live: boolean, liveTurnId: string | null): ChatMessage[] {
+export function persistedRows(
+  messages: readonly ChatMessage[],
+  live: boolean,
+  liveTurnId: string | null,
+): ChatMessage[] {
   if (!live) return [...messages];
-  return messages.filter((m) => m.role === 'user' || (m.complete !== false && !(liveTurnId && m.metadata?.turnId === liveTurnId)));
+  return messages.filter(
+    (m) => m.role === 'user' || (m.complete !== false && !(liveTurnId && m.metadata?.turnId === liveTurnId)),
+  );
 }
 
 /** Whether the conversation already holds a response to its latest prompt. */
@@ -49,7 +58,13 @@ export function answeredLastPrompt(messages: readonly ChatMessage[]): boolean {
   return false;
 }
 
-export const StageTranscript = memo(function StageTranscript({ stage, live, liveBody, fallback }: StageTranscriptProps) {
+export const StageTranscript = memo(function StageTranscript({
+  stage,
+  agent,
+  live,
+  liveBody,
+  fallback,
+}: StageTranscriptProps) {
   const { data: messages, refetch } = useStageChatHistory(stage.sessionId, stage.id);
   const liveTurnId = useStreamStore((s) => s.streams[`stageRun:${stage.id}`]?.serverTurnId ?? null);
 
@@ -75,7 +90,13 @@ export const StageTranscript = memo(function StageTranscript({ stage, live, live
   return (
     <div className="flex min-w-0 flex-col gap-4" data-testid="stage-transcript">
       {turns.map((turn) => (
-        <TranscriptTurn key={turn.key} turn={turn} agentName={stage.name} avatar="bot" renderLive={() => liveBody} />
+        <TranscriptTurn
+          key={turn.key}
+          turn={turn}
+          agentName={agent.name}
+          harnessProvider={agent.harnessProvider}
+          renderLive={() => liveBody}
+        />
       ))}
     </div>
   );

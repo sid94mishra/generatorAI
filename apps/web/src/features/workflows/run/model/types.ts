@@ -157,6 +157,10 @@ export interface StageView {
    * stage alone filled it.
    */
   sharedContext?: boolean;
+  /** The agent the stage's session is bound to (`scope:slug`), as its definition names it. */
+  agentRef?: string;
+  /** The provider the stage pins (`claude-agent`, `codex` …); absent routes by model / server default. */
+  harnessType?: string;
   /** The node kind (`agent`, `check`, `loop`, P05). */
   kind?: string;
   /** A loop body instance: the enclosing loop instance's id (`scopeId`). */

@@ -1761,8 +1761,11 @@ A user message (chat prompt, workflow stage prompt, review comments) is a raised
 transcript and sized to its text, up to 4/5 of the column; the time and hover actions stay at its top-right corner. The
 agent's responses stay full width on the left, so the two never read as one stream. The turn in flight is the kit's
 `LiveTurn` in both the chat and a workflow stage: agent header (avatar, name, model, usage), turn body, stopped note,
-thinking placeholder. A stage signs it with its name and a bot avatar, as its persisted turns already were; the stage
-row header, result, output chips and review card are the workflow's own parts around that core panel.
+thinking placeholder. A stage names who answers exactly as the chat does — the bound agent ("Pulse QA Engineer is
+thinking"), else the provider the stage pins ("Codex"), else "Agent"; never the stage's own name — with the chat's avatar
+rule (initials for an agent, the provider's logo otherwise), live and persisted alike. Only agent stages use the panel:
+a check (a command) keeps its bare body. The stage row header, result, output chips and review card are the workflow's
+own parts around that core panel.
 
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
