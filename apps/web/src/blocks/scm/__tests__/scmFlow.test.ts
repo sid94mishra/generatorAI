@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RepoReadiness } from '@generatorai/shared';
-import { branchFactsOf, composeFlowRequest, shipActionOf, shipAllRequest, shipAllTargets, splitCommitMessage, type ShipForm } from '../scmFlow.js';
+import { branchFactsOf, composeFlowRequest, scmAvailability, shipActionOf, shipAllRequest, shipAllTargets, splitCommitMessage, type ShipForm } from '../scmFlow.js';
 
 function repo(overrides: Partial<RepoReadiness> = {}): RepoReadiness {
   return {
@@ -151,5 +151,14 @@ describe('shipAllTargets / shipAllRequest', () => {
       hint: 'Fix x',
     });
     expect(shipAllRequest(b, 'push', false, undefined)).toEqual({ alias: 'web', push: true });
+  });
+});
+
+describe('scmAvailability', () => {
+  it('a finished run shows its outcome even when nothing more can run (first commit, no remote)', () => {
+    const clean = repo({ hasRemote: false, can: { commit: false, push: false, pullRequest: false }, reasons: { commit: 'Nothing to commit' } });
+    expect(scmAvailability(clean, null).blockedReason).toBe('Nothing to commit');
+    const ok = { status: 'ok', alias: '.', steps: [], commit: { sha: 'abc', message: 'm' }, readiness: clean } as never;
+    expect(scmAvailability(clean, ok).blockedReason).toBeNull();
   });
 });

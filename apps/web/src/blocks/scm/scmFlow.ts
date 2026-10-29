@@ -45,7 +45,11 @@ export interface ScmAvailability {
 }
 
 export function scmAvailability(selected: RepoReadiness | undefined, result: ScmFlowResult | null): ScmAvailability {
-  const blockedReason = selected
+  // A run that just finished shows its outcome: right after the first commit of a repo with no remote, nothing
+  // more CAN run, and that "Nothing to commit" used to replace the success it followed.
+  const blockedReason = result
+    ? null
+    : selected
     ? !selected.isRepo
       ? 'Not a git repository'
       : !selected.can.commit && !selected.can.push && !selected.can.pullRequest
