@@ -222,6 +222,16 @@ export function checkFailureWord(output: Record<string, unknown> | undefined): s
   return typeof output['exitCode'] === 'number' ? `Command failed · exit ${output['exitCode']}` : 'Command failed';
 }
 
+/**
+ * The reply drawn above a review card holds the output under review. The streamed reply joins every turn of the
+ * stage (a revision follows the first answer), so it contains the output rather than equalling it.
+ */
+function replyHolds(reply: string, output: string | undefined): boolean {
+  const flat = (t: string) => t.replace(/\s+/g, ' ').trim();
+  const out = output ? flat(output) : '';
+  return out.length > 0 && flat(reply).includes(out);
+}
+
 export const StageRow = memo(function StageRow({
   stage,
   focused,
@@ -568,7 +578,7 @@ export const StageRow = memo(function StageRow({
               tool={stage.interrupt.tool}
               args={stage.interrupt.args}
               output={stage.interrupt.output}
-              outputShownAbove={!!stage.interrupt.output && stage.answer.trim() === stage.interrupt.output.trim()}
+              outputShownAbove={replyHolds(stage.answer, stage.interrupt.output)}
               afterRun={stage.interrupt.afterRun}
               approveStarts={approveStarts}
               busy={gateBusy}

@@ -226,14 +226,17 @@ function FormError({ children }: { children: string }) {
   );
 }
 
-/** An approval wait's decision: the prompt, its form, approve / reject. */
-export function WaitApproval({ wait, onDecide, busy }: { wait: WaitView; onDecide: (outcome: 'approved' | 'rejected', data?: Record<string, unknown>) => void; busy?: boolean }) {
+/**
+ * An approval wait's decision: the prompt, its form, approve / reject. Titled with the stage's name ("Ship it?"):
+ * the prompt's `label` is a key ("ship").
+ */
+export function WaitApproval({ title, wait, onDecide, busy }: { title: string; wait: WaitView; onDecide: (outcome: 'approved' | 'rejected', data?: Record<string, unknown>) => void; busy?: boolean }) {
   const [form, setForm] = useState<FormValue>({ ok: true, data: undefined });
   return (
     <GateCardFrame
       tone="warn"
       icon="hand"
-      title={wait.label ?? 'Approval'}
+      title={title}
       aria-live="polite"
       actions={[
         { label: 'Reject', variant: 'secondary', disabled: busy, onClick: () => onDecide('rejected') },
@@ -381,6 +384,7 @@ export function WaitCard({ stage, runId, onCommand }: { stage: StageView; runId:
   if (wait.type === 'approval') {
     return (
       <WaitApproval
+        title={stage.name}
         wait={wait}
         busy={busy}
         onDecide={(outcome, data) => run({ command: 'approve', instanceId: stage.id, outcome, ...(data ? { data } : {}) })}
@@ -434,6 +438,7 @@ export function PendingDecisionCard({ decision }: { decision: PendingDecisionVie
       <WaitEvent wait={wait} busy={busy} onDeliver={(e) => void send({ command: 'deliver_event', ...e })} />
     ) : (
       <WaitApproval
+        title={decision.name}
         wait={wait}
         busy={busy}
         onDecide={(outcome, data) => void send({ command: 'approve', instanceId: decision.instanceId, outcome, ...(data ? { data } : {}) })}
