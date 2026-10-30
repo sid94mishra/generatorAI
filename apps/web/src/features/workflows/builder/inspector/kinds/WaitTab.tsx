@@ -41,7 +41,7 @@ export function blankWait(type: WaitType, from: WaitSpec): WaitSpec {
       : { ...(from.timeoutMs !== undefined ? { timeoutMs: from.timeoutMs } : {}), onTimeout: from.onTimeout };
   switch (type) {
     case 'approval':
-      return { type, prompt: { label: 'Approve', text: 'Approve to continue.' }, ...timeout };
+      return { type, prompt: { label: 'Approve', text: 'Approve to continue.' }, onReject: 'fail', ...timeout };
     case 'event':
       return { type, eventKey: "'ready'", ...timeout };
     case 'timer':
@@ -112,6 +112,25 @@ export function WaitSections({ stage, onUpdate, issues }: WaitTabProps) {
                 ariaLabel="Approval form JSON Schema"
               />
               <FieldIssues issues={issuesAt(issues, '/wait/form')} />
+            </InspectorRow>
+            <InspectorRow
+              label="On reject"
+              hint={
+                wait.onReject === 'fail'
+                  ? 'The run stops: nothing after it runs, and no commit, push or PR.'
+                  : "Route with an edge when: stages.<key>.output.outcome == 'rejected'. The run still completes and post-processes."
+              }
+            >
+              <SegmentedControl<'fail' | 'complete'>
+                label="On reject"
+                value={wait.onReject}
+                onValueChange={(onReject) => setWait({ ...wait, onReject })}
+                items={[
+                  { value: 'fail', label: 'Stop the run' },
+                  { value: 'complete', label: 'Complete' },
+                ]}
+              />
+              <FieldIssues issues={issuesAt(issues, '/wait/onReject')} />
             </InspectorRow>
           </>
         ) : null}

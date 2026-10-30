@@ -237,6 +237,7 @@ export function WaitApproval({ title, wait, onDecide, busy }: { title: string; w
       tone="warn"
       icon="hand"
       title={title}
+      explanation={wait.onReject === 'complete' ? 'Reject completes it with outcome rejected' : 'Reject stops the run: no commit, push or PR'}
       aria-live="polite"
       actions={[
         { label: 'Reject', variant: 'secondary', disabled: busy, onClick: () => onDecide('rejected') },
@@ -432,6 +433,7 @@ export function PendingDecisionCard({ decision }: { decision: PendingDecisionVie
       ...(typeof d['eventKey'] === 'string' ? { eventKey: d['eventKey'] } : {}),
       ...(typeof d['until'] === 'number' ? { until: d['until'] } : {}),
       ...(typeof d['onTimeout'] === 'string' ? { onTimeout: d['onTimeout'] } : {}),
+      onReject: d['onReject'] === 'complete' ? 'complete' : 'fail',
       ...(decision.callback ? { callback: decision.callback } : {}),
     };
     return wait.type === 'event' ? (

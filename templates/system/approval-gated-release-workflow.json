@@ -89,6 +89,7 @@
               }
             }
           },
+          "onReject": "fail",
           "timeoutMs": 86400000,
           "onTimeout": "complete"
         }

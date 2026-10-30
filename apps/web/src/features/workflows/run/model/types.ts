@@ -235,6 +235,8 @@ export interface WaitView {
   /** When the timer or the timeout fires (epoch ms). */
   until?: number;
   onTimeout?: string;
+  /** An approval wait: whether Reject stops the run (`fail`) or completes the wait for an edge to route. */
+  onReject?: 'fail' | 'complete';
   callback?: { url: string; token: string };
   /** The resolved wait's output. */
   outcome?: { outcome: string; data: unknown; by: string | null; at: number };

@@ -3314,6 +3314,15 @@
                             "additionalProperties": {},
                             "description": "JSON Schema of the approver's input (output.data)"
                           },
+                          "onReject": {
+                            "type": "string",
+                            "enum": [
+                              "fail",
+                              "complete"
+                            ],
+                            "default": "fail",
+                            "description": "fail fails the stage (rejected_by_human): the run stops and post-processing (commit, push, PR) never runs; complete completes it with outcome rejected (route on stages.<key>.output.outcome)"
+                          },
                           "timeoutMs": {
                             "type": "integer",
                             "minimum": 1000,

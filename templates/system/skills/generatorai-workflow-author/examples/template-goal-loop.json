@@ -150,6 +150,7 @@
         }
       ],
       "sessionReuse": "fresh",
+      "reviewOf": "work",
       "context": {
         "mode": "summary"
       },

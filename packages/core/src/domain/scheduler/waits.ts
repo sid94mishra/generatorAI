@@ -3,7 +3,8 @@
 // executor, lease or admission slot: `ready → waiting` with its question in
 // `interrupt_data`, and one of
 //
-//   approval  the `approve` command (approved | rejected, the form data)
+//   approval  the `approve` command (approved | rejected, the form data); a
+//             rejection fails the stage unless `onReject: complete`
 //   event     the oldest unconsumed delivered event with its key: the
 //             `deliver_event` command or the wait's callback URL write a
 //             `workflow_run_events` row (early arrivals wait in the table);
@@ -35,6 +36,8 @@ export interface WaitInterrupt {
   /** When the timer or the timeout fires (epoch ms), for the UI. */
   until?: number | null;
   onTimeout?: 'fail' | 'complete';
+  /** approval: what Reject does, for the card ("Reject stops the run"). */
+  onReject?: 'fail' | 'complete';
 }
 
 export function waitInterruptOf(i: Pick<InstanceState, 'interruptData'>): WaitInterrupt | null {
@@ -73,6 +76,7 @@ function startWait(w: Working, inst: InstanceState, node: CompiledNode): void {
         ...(spec.form ? { form: spec.form } : {}),
         until: spec.timeoutMs !== undefined ? w.now + spec.timeoutMs : null,
         onTimeout: spec.onTimeout,
+        onReject: spec.onReject === 'complete' ? 'complete' : 'fail',
       };
       break;
     }
@@ -151,6 +155,12 @@ export function approveWait(w: Working, inst: InstanceState, outcome: 'approved'
   if (node.wait.type !== 'approval') return `the ${node.wait.type} wait '${inst.stageKey}' is not resolved by an approval`;
   if (inst.status !== 'waiting') return `cannot approve a ${inst.status} wait`;
   if (outcome === 'changes_requested') return 'a wait is approved or rejected; it cannot take a change request';
+  // A "Ship it?" gate rejected must not ship: unless the wait routes its rejection (`onReject: complete`), the
+  // stage fails, so the run fails and its post-processing never commits, pushes or opens a PR.
+  if (outcome === 'rejected' && node.wait.onReject !== 'complete') {
+    failInstance(w, inst, classified('rejected_by_human', 'Rejected by the approver'), 'rejected');
+    return null;
+  }
   completeWait(w, inst, outcome, data, actor ?? null, w.now);
   return null;
 }

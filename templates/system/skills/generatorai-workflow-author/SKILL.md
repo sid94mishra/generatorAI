@@ -3,7 +3,7 @@ name: generatorai-workflow-author
 description: Author GeneratorAI workflows, the multi-stage agent pipelines stored as one WorkflowGraph JSON document, through the validate, plan and draft pipeline. Use when the user asks to create, change, fix or explain a GeneratorAI workflow, pipeline or multi-stage automation (plan-implement-review, fix/review loops, test until green, fan-out over files, approval-gated releases, CI waits, sub-workflows), or to make a repeated task into a workflow. Covers the schema, stage kinds, edges, Expression v2 templates, loops and maps, agents and models, codebases, commits and pull requests, and handing the result to a person as a draft to publish.
 metadata:
   schemaVersion: "2"
-  schemaHash: "dc54830ce62b8251"
+  schemaHash: "3896a07784c33807"
 ---
 
 # GeneratorAI workflow author
@@ -13,7 +13,7 @@ metadata:
 A GeneratorAI workflow is ONE JSON document, a `WorkflowGraph`: `{"formatVersion": 2, "workflow": {…}, "stages": […], "edges": […]}`.
 Stages are the nodes of a DAG; edges connect stage **keys**. A person reviews and publishes what you write.
 
-This copy of the skill matches schema version 2, hash `dc54830ce62b8251`. Pass the hash as `schemaHash` to
+This copy of the skill matches schema version 2, hash `3896a07784c33807`. Pass the hash as `schemaHash` to
 `validate_workflow`: when the server answers with `schemaDrift`, your copy is stale, so read the server's
 `get_workflow_authoring_guide` topics (or the MCP resources) instead of these files.
 
@@ -135,7 +135,7 @@ Stage kinds:
 
 | Kind | What it is | Fields beyond the common ones |
 |---|---|---|
-| `agent` | An LLM agent stage | `prompts`, `followUpPrompts`, `session`, `sessionReuse`, `compactAfter`, `sessionGroup`, `context`, `output`, `retry`, `repair`, `onExhausted`, `timeouts`, `budget`, `approval`, `hooks`, `expands` |
+| `agent` | An LLM agent stage | `prompts`, `followUpPrompts`, `session`, `sessionReuse`, `compactAfter`, `sessionGroup`, `workspace`, `reviewOf`, `context`, `output`, `retry`, `repair`, `onExhausted`, `timeouts`, `budget`, `approval`, `hooks`, `expands` |
 | `check` | One deterministic command, no LLM: its exit code and output are the stage output | `check`, `retry`, `timeouts` |
 | `loop` | Repeat the body (the stages whose parentKey is this key) until a rule fires | `loop`, `budget` |
 | `map` | Run the body (the stages whose parentKey is this key) once per item of a runtime list | `map`, `budget` |

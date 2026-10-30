@@ -668,6 +668,8 @@ export function deriveWaitView(sr: StageRun, def: StageSpec | undefined): WaitVi
   if (typeof d?.['until'] === 'number') out.until = d['until'];
   const onTimeout = typeof d?.['onTimeout'] === 'string' ? d['onTimeout'] : spec && spec.type !== 'timer' ? spec.onTimeout : undefined;
   if (onTimeout) out.onTimeout = onTimeout;
+  const onReject = d?.['onReject'] ?? (spec?.type === 'approval' ? spec.onReject : undefined);
+  if (type === 'approval') out.onReject = onReject === 'complete' ? 'complete' : 'fail';
   if (sr.callback) out.callback = sr.callback;
   const o = sr.outputData;
   if (sr.status === 'completed' && isRecord(o) && typeof o['outcome'] === 'string') {

@@ -1852,6 +1852,19 @@
                     "pattern": "^[a-z][a-z0-9_]{0,47}$",
                     "description": "Stages with the same group share one conversation, one at a time"
                   },
+                  "workspace": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "shared",
+                      "isolated"
+                    ],
+                    "description": "Where the stage edits: auto (default) works in its own git worktree while another stage of the run may run at the same time, merged back when it completes; shared always works in the run's folder; isolated always forks"
+                  },
+                  "reviewOf": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/key",
+                    "description": "The agent stage whose work this stage reviews: unless this stage pins its agent, provider or model, it runs on another provider than that stage's"
+                  },
                   "context": {
                     "type": "object",
                     "properties": {
@@ -3300,6 +3313,15 @@
                             "type": "object",
                             "additionalProperties": {},
                             "description": "JSON Schema of the approver's input (output.data)"
+                          },
+                          "onReject": {
+                            "type": "string",
+                            "enum": [
+                              "fail",
+                              "complete"
+                            ],
+                            "default": "fail",
+                            "description": "fail fails the stage (rejected_by_human): the run stops and post-processing (commit, push, PR) never runs; complete completes it with outcome rejected (route on stages.<key>.output.outcome)"
                           },
                           "timeoutMs": {
                             "type": "integer",

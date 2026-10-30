@@ -603,6 +603,12 @@ export const WaitSpecSchema = z
         type: z.literal('approval').describe('A person approves or rejects, optionally filling a form'),
         prompt: PromptDefinitionSchema.describe('What the approver is asked (a template)'),
         form: z.record(z.unknown()).optional().describe("JSON Schema of the approver's input (output.data)"),
+        onReject: z
+          .enum(['fail', 'complete'])
+          .default('fail')
+          .describe(
+            "fail fails the stage (rejected_by_human): the run stops and post-processing (commit, push, PR) never runs; complete completes it with outcome rejected (route on stages.<key>.output.outcome)",
+          ),
         timeoutMs: waitTimeoutMs,
         onTimeout: waitOnTimeout,
       })

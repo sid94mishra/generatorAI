@@ -8,7 +8,7 @@ kind is the error `field-not-applicable`. This file covers the fields every kind
 
 | Kind | What it is | Fields beyond the common ones |
 |---|---|---|
-| `agent` | An LLM agent stage | `prompts`, `followUpPrompts`, `session`, `sessionReuse`, `compactAfter`, `sessionGroup`, `context`, `output`, `retry`, `repair`, `onExhausted`, `timeouts`, `budget`, `approval`, `hooks`, `expands` |
+| `agent` | An LLM agent stage | `prompts`, `followUpPrompts`, `session`, `sessionReuse`, `compactAfter`, `sessionGroup`, `workspace`, `reviewOf`, `context`, `output`, `retry`, `repair`, `onExhausted`, `timeouts`, `budget`, `approval`, `hooks`, `expands` |
 | `check` | One deterministic command, no LLM: its exit code and output are the stage output | `check`, `retry`, `timeouts` |
 | `loop` | Repeat the body (the stages whose parentKey is this key) until a rule fires | `loop`, `budget` |
 | `map` | Run the body (the stages whose parentKey is this key) once per item of a runtime list | `map`, `budget` |
@@ -48,6 +48,8 @@ session. The stage completes when the last turn is answered and the output contr
 | `sessionReuse` | 'fresh' \| 'continue' |  | `"fresh"` | continue keeps one conversation across loop iterations; fresh starts a new one each time |
 | `compactAfter` | integer (≥1, ≤20) |  |  | With sessionReuse continue: every n iterations the conversation is replaced by a fresh one seeded with a deterministic digest (no model call) |
 | `sessionGroup` | string `^[a-z][a-z0-9_]{0,47}$` |  |  | Stages with the same group share one conversation, one at a time |
+| `workspace` | 'auto' \| 'shared' \| 'isolated' |  |  | Where the stage edits: auto (default) works in its own git worktree while another stage of the run may run at the same time, merged back when it completes; shared always works in the run's folder; isolated always forks |
+| `reviewOf` | string `^[a-z][a-z0-9_]{0,47}$` |  |  | The agent stage whose work this stage reviews: unless this stage pins its agent, provider or model, it runs on another provider than that stage's |
 | `context` | object |  | `{}` | Which upstream results the stage receives, fenced as untrusted context |
 | `output` | object |  | `{}` | The output contract: validated before the stage completes |
 | `retry` | object |  |  | Retry policy for failed attempts |

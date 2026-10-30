@@ -767,6 +767,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `stages[].wait.prompt.label` | string (1..200 chars) | yes |  | Short label shown in the builder and run page |
 | `stages[].wait.prompt.text` | string (1..100000 chars) | yes |  | The prompt text, a template |
 | `stages[].wait.form` | record<string, any> |  |  | JSON Schema of the approver's input (output.data) |
+| `stages[].wait.onReject` | 'fail' \| 'complete' |  | `"fail"` | fail fails the stage (rejected_by_human): the run stops and post-processing (commit, push, PR) never runs; complete completes it with outcome rejected (route on stages.<key>.output.outcome) |
 | `stages[].wait.timeoutMs` | integer (≥1000, ≤2592000000) |  |  | Give up after this long (an unattended run without one expires after 72 h) |
 | `stages[].wait.onTimeout` | 'fail' \| 'complete' |  | `"fail"` | fail fails the stage (wait_timeout); complete completes it with outcome timeout (route on stages.<key>.output.outcome) |
 | `stages[].wait.type` | "event" | yes |  | An external event: the deliver_event command or the per-wait callback URL |
@@ -952,6 +953,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `subworkflow-cycle` | references | error | Sub-workflows that run each other in a cycle |
 | `unknown-review-target` | references | error | reviewOf names a stage that is not another agent stage |
 | `review-same-provider` | references | warning | A reviewer pinned to the provider of the stage it reviews: a reviewer on another provider catches more |
+| `approval-promises-publishing` | references | warning | An approval prompt that speaks of pushing or a pull request in a workflow that publishes nothing after the run |
 | `budget-turns-units` | references | warning | A maxTurns budget so high it was likely meant as tool calls: it counts agent turns (prompts, follow-ups, repairs) and never fires |
 | `budget-cost-unsupported` | references | warning | A maxCostUsd budget over stages whose provider reports no cost (it can never fire) |
 | `expr-syntax` | expressions | error | An expression does not parse |

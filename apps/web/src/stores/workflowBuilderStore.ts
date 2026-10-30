@@ -344,7 +344,7 @@ export function newWaitStage(key: string, name: string): WaitStage {
     key,
     name,
     join: { mode: 'all' },
-    wait: { type: 'approval', prompt: { label: 'Approve', text: 'Approve to continue.' }, onTimeout: 'fail' },
+    wait: { type: 'approval', prompt: { label: 'Approve', text: 'Approve to continue.' }, onReject: 'fail', onTimeout: 'fail' },
   };
 }
 

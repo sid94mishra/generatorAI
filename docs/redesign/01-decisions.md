@@ -1808,6 +1808,15 @@ else the workflow default) when no app-wide one is set, and a generation that ca
 templates, never "<workflow> (workflow run <id>)". A shell step reads as the line it runs (Codex's `/bin/zsh -lc "…"`
 is unwrapped), a failed command's error is its last lines, and reasoning renders as markdown.
 
+### D-177 Rejecting an approval wait stops the run unless the wait routes the rejection (evaluation, 2026-10-30) — Final
+An approval wait gains `onReject: fail | complete` beside `onTimeout`, default `fail`: Reject fails the stage
+(`rejected_by_human`), so the run fails and its post-processing never commits, pushes or opens a PR. Rejecting a
+"Ship it?" gate completed it with outcome rejected, the run completed, and post-processing shipped anyway (draft PR
+#26 on the Pulse test repo) — and post-processing cannot be routed, so no workflow could make a rejection stop the
+ship. `complete` keeps the old routing on `stages.<key>.output.outcome`. The card says what Reject does ("Reject stops
+the run: no commit, push or PR"), the builder's wait inspector has an "On reject" control, and a stored wait without
+the field reads as `fail`. Pre-release: no migration.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

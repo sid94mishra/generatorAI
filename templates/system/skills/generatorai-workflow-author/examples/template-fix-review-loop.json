@@ -41,7 +41,7 @@
       "prompts": [
         {
           "label": "triage",
-          "text": "Triage the issue {{variables.issue_url}}: summarise it, find the files involved and propose a plan."
+          "text": "Triage the issue {{variables.issue_url}} in the working directory: read the code involved and do not edit anything. In `summary` state the root cause with file:line. In `plan` give the steps, including the exact test command(s) that will prove the fix. List the files to change in `files`."
         }
       ],
       "sessionReuse": "fresh",
@@ -132,13 +132,13 @@
       "prompts": [
         {
           "label": "fix",
-          "text": "Fix issue {{variables.issue_url}}. Triage: {{stages.triage.output.summary}}\nPlan:\n{{stages.triage.output.plan | bullets}}"
+          "text": "Fix issue {{variables.issue_url}}.\nTriage: {{stages.triage.output.summary}}\nPlan:\n{{stages.triage.output.plan | bullets}}\n\n1. First write a test that reproduces the bug and run it: it must FAIL on the current code. Quote the failure in `changes`.\n2. Fix the root cause, not the symptom, and run the test again: it must pass.\n3. Run the affected packages' tests and lint and make them pass.\nChange only what the fix needs, edit files with your edit tool rather than shell scripts, and name any existing behaviour you changed."
         }
       ],
       "followUpPrompts": [
         {
           "label": "address",
-          "text": "The reviewer requested changes:\n{{loop.carry.openComments | bullets}}\nAddress each one, run the tests, and report per comment id in `addressed`."
+          "text": "The reviewer requested changes:\n{{loop.carry.openComments | bullets}}\nAddress each one (a test the reviewer says does not fail without the fix must be rewritten until it does), re-run the tests and lint, and report per comment id in `addressed`."
         }
       ],
       "sessionReuse": "continue",
@@ -200,10 +200,11 @@
       "prompts": [
         {
           "label": "review",
-          "text": "Review the diff for {{variables.issue_url}}.{{#if loop.previous}} Verify these earlier comments were addressed: {{loop.carry.openComments | json}}. Fix report: {{stages.fix.output.addressed | json}}{{/if}}"
+          "text": "Review the change for {{variables.issue_url}}: run git diff (include untracked files). Approve only when ALL of these hold; otherwise request changes with one comment per problem (file, line, what to do):\n- the root cause is fixed, not a symptom, and nothing unrelated changed;\n- the new test FAILS without the fix: save the source part of the fix with `git diff -- <changed source files> > <scratch dir>/fix.patch`, undo it with `git apply -R`, run the test and see it fail, then restore it with `git apply` and see it pass (never stash, checkout or reset);\n- the affected tests and lint pass.{{#if loop.previous}}\nVerify these earlier comments were addressed: {{loop.carry.openComments | json}}. Fix report: {{stages.fix.output.addressed | json}}{{/if}}"
         }
       ],
       "sessionReuse": "fresh",
+      "reviewOf": "fix",
       "context": {
         "mode": "summary"
       },

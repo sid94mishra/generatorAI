@@ -214,6 +214,7 @@ Which iteration each place sees:
 | `wait.prompt.label` | string (1..200 chars) | yes |  | Short label shown in the builder and run page |
 | `wait.prompt.text` | string (1..100000 chars) | yes |  | The prompt text, a template |
 | `wait.form` | record<string, any> |  |  | JSON Schema of the approver's input (output.data) |
+| `wait.onReject` | 'fail' \| 'complete' |  | `"fail"` | fail fails the stage (rejected_by_human): the run stops and post-processing (commit, push, PR) never runs; complete completes it with outcome rejected (route on stages.<key>.output.outcome) |
 | `wait.timeoutMs` | integer (≥1000, ≤2592000000) |  |  | Give up after this long (an unattended run without one expires after 72 h) |
 | `wait.onTimeout` | 'fail' \| 'complete' |  | `"fail"` | fail fails the stage (wait_timeout); complete completes it with outcome timeout (route on stages.<key>.output.outcome) |
 | `wait.type` | "event" | yes |  | An external event: the deliver_event command or the per-wait callback URL |
@@ -339,6 +340,7 @@ Prepare a release, wait for an approval that picks the environment, deploy; esca
       "required": ["environment"],
       "properties": { "environment": { "enum": ["staging", "prod"] }, "notes": { "type": "string" } }
     },
+    "onReject": "fail",
     "timeoutMs": 86400000,
     "onTimeout": "complete"
   }

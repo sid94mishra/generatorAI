@@ -110,6 +110,7 @@
         }
       ],
       "sessionReuse": "fresh",
+      "reviewOf": "draft",
       "context": {
         "mode": "summary"
       },

@@ -181,6 +181,10 @@ not, but read them.
 | `subworkflow-input` | references | error | A sub-workflow input the child does not declare, or a required child variable left unset |
 | `subworkflow-depth` | references | error | Sub-workflows nested more than 3 deep |
 | `subworkflow-cycle` | references | error | Sub-workflows that run each other in a cycle |
+| `unknown-review-target` | references | error | reviewOf names a stage that is not another agent stage |
+| `review-same-provider` | references | warning | A reviewer pinned to the provider of the stage it reviews: a reviewer on another provider catches more |
+| `approval-promises-publishing` | references | warning | An approval prompt that speaks of pushing or a pull request in a workflow that publishes nothing after the run |
+| `budget-turns-units` | references | warning | A maxTurns budget so high it was likely meant as tool calls: it counts agent turns (prompts, follow-ups, repairs) and never fires |
 | `budget-cost-unsupported` | references | warning | A maxCostUsd budget over stages whose provider reports no cost (it can never fire) |
 | `expr-syntax` | expressions | error | An expression does not parse |
 | `expr-unknown-root` | expressions | error | An expression names an unknown root (variables, stages, run, …) |

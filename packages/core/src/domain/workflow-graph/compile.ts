@@ -105,7 +105,7 @@ export interface CompiledMap {
 
 /** A wait's settings (P05 §4.3). */
 export type CompiledWait =
-  | { type: 'approval'; prompt: PromptDefinition; form?: Record<string, unknown>; timeoutMs?: number; onTimeout: 'fail' | 'complete' }
+  | { type: 'approval'; prompt: PromptDefinition; form?: Record<string, unknown>; onReject: 'fail' | 'complete'; timeoutMs?: number; onTimeout: 'fail' | 'complete' }
   | { type: 'event'; eventKey: CompiledExpr; timeoutMs?: number; onTimeout: 'fail' | 'complete' }
   | { type: 'timer'; durationMs: number };
 
@@ -229,6 +229,7 @@ function compileWait(spec: WaitSpec): CompiledWait {
         type: 'approval',
         prompt: spec.prompt,
         ...(spec.form ? { form: spec.form } : {}),
+        onReject: spec.onReject,
         ...(spec.timeoutMs !== undefined ? { timeoutMs: spec.timeoutMs } : {}),
         onTimeout: spec.onTimeout,
       };

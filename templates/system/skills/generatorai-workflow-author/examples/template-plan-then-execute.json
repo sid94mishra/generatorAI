@@ -41,7 +41,7 @@
       "prompts": [
         {
           "label": "plan",
-          "text": "Goal: {{variables.goal}}\nPlan how to reach it as a few independent or ordered steps. Each step is a stage run by its own agent in this workspace: give it a short key, a name and a precise, self-contained prompt; mark read-only steps readOnly. Add an edge from a step to every step that needs its result; steps without edges between them run in parallel."
+          "text": "Goal: {{variables.goal}}\nRead the code first, then plan how to reach the goal as a few independent or ordered steps. Each step is a stage run by its own agent in this workspace: give it a short key, a name and a precise, self-contained prompt that names the files to change, the existing helpers to follow, the exact test and lint commands to run, and what done looks like; mark read-only steps readOnly. Steps that edit the same files must be ordered, not parallel. End with a review step that depends on every other step: it reads the whole diff, checks the goal's acceptance criteria and the edge cases a careful reviewer would raise (invalid input, security, limits), fixes what it finds and runs every affected test and lint. Add an edge from a step to every step that needs its result; steps without edges between them run in parallel, each in its own copy of the code that merges back when it finishes, so a step never sees a parallel step's changes."
         }
       ],
       "sessionReuse": "fresh",
