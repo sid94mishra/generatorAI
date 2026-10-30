@@ -90,6 +90,8 @@ export interface LifecycleStepContext {
   runName?: string;
   /** Seeds the generated commit message / PR text. */
   workflowName?: string;
+  /** The run's model, which writes a generated commit message / PR text when no app-wide one is set. */
+  generation?: { model: string; provider: string | null };
   workspaceId?: string;
   /** The run's working directory (its primary mount): scripts and clones run here. */
   workDir: string;
@@ -355,7 +357,7 @@ export class LifecycleSteps {
         repoDir: target.repoDir,
         alias: target.alias,
         request: { ...build(target.alias), hint },
-        context: { hint },
+        context: { hint, ...(ctx.generation ? { model: ctx.generation.model, ...(ctx.generation.provider ? { provider: ctx.generation.provider } : {}) } : {}) },
       });
       results.push(result);
       const skipped = result.status === 'blocked' ? (skip?.(result) ?? null) : null;
@@ -378,7 +380,8 @@ export class LifecycleSteps {
       ctx,
       (alias) => ({
         alias,
-        commit: config.generateMessage ? { generate: true } : { message, generate: false },
+        // Generated, the step's own message is what a failed generation falls back to.
+        commit: config.generateMessage ? { generate: true, fallbackMessage: message } : { message, generate: false },
         push,
         // No `pullRequest` here, so the sync step falls back to the repo's
         // own default branch — which is what a commit-only step wants.
@@ -406,7 +409,7 @@ export class LifecycleSteps {
           alias,
           push: true,
           pullRequest: {
-            ...(config.generateText ? { generate: true } : { title, body, generate: false }),
+            ...(config.generateText ? { generate: true, fallback: { title, body } } : { title, body, generate: false }),
             ...(base ? { base } : {}),
             ...(config.draft !== undefined ? { draft: config.draft } : {}),
           },

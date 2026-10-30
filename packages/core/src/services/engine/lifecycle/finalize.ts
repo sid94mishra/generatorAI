@@ -135,6 +135,20 @@ function runEndStagesOf(deps: RunLifecycleDeps, runId: string): Record<string, u
   return state ? runEndStages(state) : {};
 }
 
+/**
+ * The model that writes a generated commit message / PR text when no app-wide one is set: the run's own — its
+ * last agent stage's, else the workflow default. Without it the text silently fell back to "<workflow> (workflow
+ * run <id>)" and a file list, though every stage had run on a model (evaluation 2026-10-30).
+ */
+export function scmGenerationOf(graph: WorkflowGraph): { model: string; provider: string | null } | undefined {
+  const fallbackProvider = graph.workflow.session?.harnessType ?? null;
+  for (const stage of [...graph.stages].reverse()) {
+    if (stage.kind === 'agent' && stage.session?.model) return { model: stage.session.model, provider: stage.session.harnessType ?? fallbackProvider };
+  }
+  const model = graph.workflow.session?.model;
+  return model ? { model, provider: fallbackProvider } : undefined;
+}
+
 const postProcess: Phase = async (ctx, run) => {
   const { deps, graph, outcome } = ctx;
   if (outcome !== 'completed') return { detail: `skipped (${outcome})` };
@@ -150,6 +164,7 @@ const postProcess: Phase = async (ctx, run) => {
     runId: run.id,
     runName: run.name,
     workflowName: graph.workflow.name,
+    ...(scmGenerationOf(graph) ? { generation: scmGenerationOf(graph) } : {}),
     ...(run.workspaceId ? { workspaceId: run.workspaceId } : {}),
     workDir: run.systemVars?.workingDirectory ?? '',
     variables: { ...run.variables },

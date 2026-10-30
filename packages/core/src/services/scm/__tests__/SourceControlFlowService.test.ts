@@ -272,6 +272,27 @@ describe('SourceControlFlowService (real git)', () => {
     expect(created[0]).toMatchObject({ owner: 'acme', repo: 'web', base: 'main' });
   });
 
+  it("(a2) a generation that cannot run falls back to the caller's own text, not the heuristic", async () => {
+    const { registry, created } = fakeProviderPair();
+    const flow = makeService(registry);
+    await write(work, 'src/a.ts', 'export const a = 1;\n');
+
+    const result = await flow.run({
+      repoDir: work,
+      alias: '.',
+      request: {
+        commit: { generate: true, fallbackMessage: 'feat(api): search the monitor list' },
+        push: true,
+        pullRequest: { generate: true, fallback: { title: 'feat(api): search the monitor list', body: 'The review.' } },
+      },
+      context: { hint: 'Pulse Feature (workflow run 1)' },
+    });
+
+    expect(result.status).toBe('ok');
+    expect(result.commit?.message).toBe('feat(api): search the monitor list');
+    expect(created[0]).toMatchObject({ title: 'feat(api): search the monitor list', body: 'The review.' });
+  });
+
   it('(b) keeps an existing work branch instead of cutting a new one', async () => {
     const { registry } = fakeProviderPair();
     const flow = makeService(registry);

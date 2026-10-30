@@ -187,7 +187,8 @@ export class SourceControlFlowService {
                 files,
                 diffExcerpt: capDiffExcerpt(await this.workingDiff(repoDir)),
               });
-              message = generated.message;
+              const fallback = request.commit.fallbackMessage?.trim();
+              message = generated.source === 'heuristic' && fallback ? fallback : generated.message;
             } else {
               message = heuristicCommitMessage(files, hint);
             }
@@ -719,8 +720,9 @@ export class SourceControlFlowService {
           diffExcerpt,
           ...(template ? { template } : {}),
         });
-        title = title || generated.title;
-        body = body ?? generated.body;
+        const fallback = generated.source === 'heuristic' ? request.pullRequest?.fallback : undefined;
+        title = title || fallback?.title?.trim() || generated.title;
+        body = body ?? (fallback?.body?.trim() ? fallback.body : generated.body);
       } else {
         const fallback = heuristicPullRequestText(files, commits, hint, await readPullRequestTemplate(repoDir));
         title = title || fallback.title;

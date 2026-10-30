@@ -296,7 +296,8 @@ export interface WorkspaceReadinessResponse {
 export interface ScmFlowRequest {
   /** Mount alias (`.` for the root). */
   alias?: string;
-  commit?: { message?: string; generate?: boolean };
+  /** `fallbackMessage`: used instead of the heuristic text when a generation cannot run or fails. */
+  commit?: { message?: string; generate?: boolean; fallbackMessage?: string };
   push?: boolean;
   pullRequest?: {
     title?: string;
@@ -304,6 +305,8 @@ export interface ScmFlowRequest {
     base?: string;
     draft?: boolean;
     generate?: boolean;
+    /** Used instead of the heuristic text when a generation cannot run or fails (a workflow step's own templates). */
+    fallback?: { title?: string; body?: string };
     /** Logins asked to review once the PR is open (the author is skipped by the host). */
     reviewers?: string[];
     assignees?: string[];
