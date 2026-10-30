@@ -9,6 +9,8 @@
 import { _electron as electron } from '@playwright/test';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import os from 'node:os';
+import fs from 'node:fs';
 
 const DESKTOP = path.resolve(process.cwd(), '..', 'apps', 'desktop');
 const requireFromDesktop = createRequire(path.join(DESKTOP, 'package.json'));
@@ -16,7 +18,11 @@ const ELECTRON = requireFromDesktop('electron');
 
 const app = await electron.launch({
   executablePath: ELECTRON,
-  args: ['.'],
+  // Isolated profile, as in desktop-browser-smoke.mjs: the renderer pins the
+  // embedded server's host identity in userData, so sharing the developer's
+  // real profile with a fresh DB_PATH (new identity, same origin) is refused
+  // with HostIdentityChangedError — and would also touch their saved state.
+  args: ['.', `--user-data-dir=${fs.mkdtempSync(path.join(os.tmpdir(), 'gai-diff-'))}`],
   cwd: DESKTOP,
   env: { ...process.env, GENERATORAI_DESKTOP_MODE: 'standalone' },
   timeout: 60000,
@@ -32,6 +38,27 @@ while (Date.now() < deadline && !page) {
 await page.waitForLoadState('domcontentloaded');
 const base = new URL(page.url()).origin;
 console.log('[render] base', base);
+
+// A fresh profile (see --user-data-dir above) pairs with the embedded server
+// on first load; the renderer's fetch rejects with NotPairedError until then.
+// Wait for the paired client to answer before driving the API through it.
+{
+  let paired = false;
+  for (let i = 0; i < 90 && !paired; i++) {
+    paired = await page
+      .evaluate(async (u) => {
+        try { return (await fetch(u)).ok; } catch { return false; }
+      }, base + '/api/health')
+      .catch(() => false); // a pairing reload can destroy the context mid-call
+    if (!paired) await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (!paired) {
+    // A failure, not a warning: every API call below would fail confusingly.
+    console.log('[render] FAIL — renderer never paired with its embedded server');
+    await app.close();
+    process.exit(1);
+  }
+}
 
 const errors = [];
 page.on('pageerror', (e) => errors.push('pageerror: ' + String(e).slice(0, 300)));
@@ -57,7 +84,8 @@ const api = async (p, init) =>
 // Reuse an existing chat that already has changes, else make one.
 const chatsRes = await api('/api/chats');
 const chats = JSON.parse(chatsRes.body);
-const list = Array.isArray(chats) ? chats : (chats.chats ?? []);
+// `/api/chats` answers a page (`{ items, ... }`), not a bare array.
+const list = Array.isArray(chats) ? chats : (chats.items ?? []);
 let target = null;
 for (const c of list) {
   if (!c.workspaceId) continue;
@@ -100,7 +128,7 @@ await page.waitForTimeout(10000);
 // Files render COLLAPSED by default (bodies are fetched lazily), so a mounted
 // host with no <pre><code> only means "not expanded yet" — it is not evidence
 // that the renderer failed. Expand everything before asserting.
-const expandAll = page.getByRole('button', { name: /^Expand all$/ }).first();
+const expandAll = page.getByRole('button', { name: /^Expand all files$/ }).first();
 if (await expandAll.count()) {
   await expandAll.click().catch(() => {});
   await page.waitForTimeout(10000);

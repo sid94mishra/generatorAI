@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent picker</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#0b0b0c}
+.t-dark{--ground:#0b0b0c;--surface:#111113;--raised:#17171a;--overlay:#1d1d21;--sunken:#0d0d0f;--hover:rgba(255,255,255,.035);--selected:rgba(255,255,255,.07);--line:#27272c;--line-soft:#1c1c20;--line-strong:#37373d;--fg:#ededef;--fg-2:#a1a1aa;--fg-3:#80808a;--run:#6aa6ff;--run-bg:rgba(106,166,255,.12);--ok:#4cc38a;--ok-bg:rgba(76,195,138,.12);--warn:#f0b429;--warn-bg:rgba(240,180,41,.12);--err:#ff6369;--err-bg:rgba(255,99,105,.12);--add-bg:rgba(76,195,138,.09);--del-bg:rgba(255,99,105,.09);--shadow-pop:0 16px 40px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06);--scrim:rgba(0,0,0,.62);color-scheme:dark}
+.t-light{--ground:#f1f1ef;--surface:#ffffff;--raised:#fafaf9;--overlay:#ffffff;--sunken:#f6f6f4;--hover:rgba(0,0,0,.03);--selected:rgba(0,0,0,.055);--line:#e2e2de;--line-soft:#ecece9;--line-strong:#d0d0cb;--fg:#18181b;--fg-2:#55555d;--fg-3:#6b6b73;--run:#1d6ae5;--run-bg:rgba(29,106,229,.09);--ok:#16804c;--ok-bg:rgba(22,128,76,.09);--warn:#935f00;--warn-bg:rgba(214,150,0,.13);--err:#d1242f;--err-bg:rgba(209,36,47,.08);--add-bg:rgba(22,128,76,.08);--del-bg:rgba(209,36,47,.07);--shadow-pop:0 16px 40px rgba(20,20,30,.14),0 0 0 1px rgba(0,0,0,.06);--scrim:rgba(20,20,24,.3);color-scheme:light}
+.acc-ink{--accent:var(--fg);--on-accent:var(--surface)}
+.acc-blue{--accent:#2f6fed;--on-accent:#ffffff}
+.acc-violet{--accent:#7152e0;--on-accent:#ffffff}
+.acc-green{--accent:#1b8a52;--on-accent:#ffffff}
+.acc-orange{--accent:#d4561c;--on-accent:#ffffff}
+.acc-rose{--accent:#c8325f;--on-accent:#ffffff}
+.acc-teal{--accent:#0f7f7a;--on-accent:#ffffff}
+.app{font-family:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:13px;line-height:1.45;color:var(--fg);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.app *{box-sizing:border-box}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.i12{width:12px;height:12px}.i14{width:14px;height:14px}.i20{width:20px;height:20px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line);background:var(--raised);color:var(--fg);font-family:inherit;font-size:13px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;text-decoration:none}
+.btn-p{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.btn-g{background:transparent;border-color:transparent;color:var(--fg-2)}
+.btn-d{color:var(--err)}
+.btn-sm{height:24px;padding:0 8px;font-size:12px;border-radius:5px}
+.btn-lg{height:32px;padding:0 12px}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;border:0;background:transparent;color:var(--fg-2);padding:0;cursor:pointer;flex-shrink:0}
+.ib-sm{width:24px;height:24px;border-radius:5px}
+.ib.on{background:var(--selected);color:var(--fg)}
+.kbd{display:inline-flex;align-items:center;justify-content:center;height:18px;min-width:18px;padding:0 4px;border-radius:4px;border:1px solid var(--line);background:var(--sunken);color:var(--fg-3);font-family:"JetBrains Mono",monospace;font-size:11px;line-height:1;font-weight:400}
+.bdg{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border-radius:4px;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.s-run{color:var(--run);background:var(--run-bg)}.s-ok{color:var(--ok);background:var(--ok-bg)}.s-warn{color:var(--warn);background:var(--warn-bg)}.s-err{color:var(--err);background:var(--err-bg)}.s-idle{color:var(--fg-2);background:var(--selected)}
+.c-run{color:var(--run)}.c-ok{color:var(--ok)}.c-warn{color:var(--warn)}.c-err{color:var(--err)}.c-1{color:var(--fg)}.c-2{color:var(--fg-2)}.c-3{color:var(--fg-3)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.inp{display:flex;align-items:center;gap:8px;height:32px;border-radius:6px;border:1px solid var(--line);background:var(--sunken);color:var(--fg);padding:0 10px;font-family:inherit;font-size:13px;width:100%}
+.lbl{font-size:12px;font-weight:500;color:var(--fg-2)}
+.hint{font-size:12px;color:var(--fg-3)}
+.nav{display:flex;align-items:center;gap:10px;height:30px;padding:0 8px;border-radius:6px;color:var(--fg-2);font-size:13px;font-weight:500;text-decoration:none}
+.nav.on{background:var(--selected);color:var(--fg)}
+.cnt{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--fg-3)}
+.sec{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tabs{display:flex;gap:20px;border-bottom:1px solid var(--line-soft)}
+.tab{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0;border:0;background:none;font-family:inherit;font-size:13px;font-weight:500;color:var(--fg-2);text-decoration:none}
+.tab.on{color:var(--fg);box-shadow:inset 0 -2px 0 var(--fg)}
+.seg{display:inline-flex;gap:2px;padding:2px;border-radius:7px;background:var(--sunken);border:1px solid var(--line-soft)}
+.seg button{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:5px;border:0;background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;line-height:1}
+.seg button.on{background:var(--raised);color:var(--fg);box-shadow:0 0 0 1px var(--line)}
+.card{background:var(--raised);border:1px solid var(--line-soft);border-radius:8px}
+.th{display:flex;align-items:center;height:32px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tr{display:flex;align-items:center;gap:16px;height:44px;padding:0 20px;border-bottom:1px solid var(--line-soft);font-size:13px}
+.sw{position:relative;display:inline-block;width:28px;height:16px;border-radius:999px;border:0;padding:0;background:var(--line-strong);flex-shrink:0}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#ffffff}
+.sw.on{background:var(--accent)}
+.sw.on::after{left:14px;background:var(--on-accent)}
+.cb{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:4px;border:1px solid var(--line-strong);flex-shrink:0;color:var(--on-accent)}
+.cb.on{background:var(--accent);border-color:var(--accent)}
+.av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:var(--selected);color:var(--fg-2);font-size:11px;font-weight:600;flex-shrink:0}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.mono span{white-space:pre}
+.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+
+</style>
+</helmet>
+<div class="app {{rootClass}}" style="width: 1440px; height: 900px; position: relative; display: flex; background: var(--ground); overflow: hidden;">
+<div style="flex-grow: 1; min-width: 0; padding: 48px 56px; background: var(--surface); display: flex; flex-direction: column; gap: 24px; overflow: hidden;">
+<header style="display: flex; align-items: flex-end; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.45;">Agent picker</h1>
+<p style="margin: 0; font-size: 13px; color: var(--fg-2);">Chosen once, in New chat. After that the composer shows the agent read-only; capabilities can only be added to it.</p>
+</div>
+<div style="flex-grow: 1;"></div>
+<span class="mono c-3" style="font-size: 11px;">components/agents/AgentPicker.tsx · AgentOverridesEditor.tsx</span>
+</header>
+<div style="display: flex; gap: 32px; align-items: flex-start; min-height: 0;">
+<div style="width: 760px; flex-shrink: 0; display: flex; flex-direction: column;">
+<label class="lbl" style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>Agent</label>
+<button class="inp" style="width: 420px; cursor: pointer; border-color: var(--line-strong); font-family: inherit;" aria-haspopup="listbox" aria-expanded="true"><span class="av" style="width: 20px; height: 20px; font-size: 10px;">BF</span><span>Bug Fixer</span><span style="font-size: 11px; color: var(--fg-3);">Project</span><span style="margin-left: auto; display: flex; align-items: center; gap: 4px; color: var(--fg-3);"><svg class="i i14" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg><svg class="i i14" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"></path></svg></span></button>
+<span style="display: flex; align-items: center; gap: 6px; height: 20px; margin-top: 6px; font-size: 12px; color: var(--fg-3);"><svg class="i i12" viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>3 skills · 1 MCP server · <span class="mono" style="font-size: 11px;">claude-sonnet-5</span></span>
+<div role="listbox" aria-label="Agent" style="display: flex; width: 760px; height: 508px; margin-top: 6px; background: var(--overlay); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-pop); overflow: hidden;">
+<div style="width: 420px; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line-soft);">
+<div style="display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 10px; border-bottom: 1px solid var(--line-soft);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg><span style="display: flex; align-items: center; font-size: 13px; color: var(--fg-3);"><span style="display: inline-block; width: 1px; height: 17px; background: var(--fg); vertical-align: -3px; margin-right: 2px;"></span>Search agents…</span></div>
+<div style="display: flex; align-items: center; height: 40px; padding: 0 8px;"><div class="seg"><button class="on">All<span class="mono c-3" style="font-size: 11px;">6</span></button><button>Global<span class="mono c-3" style="font-size: 11px;">3</span></button><button>Project<span class="mono c-3" style="font-size: 11px;">1</span></button><button>Built-in<span class="mono c-3" style="font-size: 11px;">2</span></button></div></div>
+<div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 0 4px 4px 4px; display: flex; flex-direction: column;">
+<div role="option" aria-selected="false" style="display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 8px; border-radius: 5px;"><span class="av" style="background: transparent; border: 1px dashed var(--line-strong);"><svg class="i i12" viewBox="0 0 24 24"><rect width="16" height="16" x="4" y="4" rx="2"></rect><rect width="6" height="6" x="9" y="9" rx="1"></rect><path d="M15 2v2"></path><path d="M15 20v2"></path><path d="M2 15h2"></path><path d="M2 9h2"></path><path d="M20 15h2"></path><path d="M20 9h2"></path><path d="M9 2v2"></path><path d="M9 20v2"></path></svg></span><span style="display: flex; flex-direction: column; min-width: 0; line-height: 1.35;"><span style="font-size: 13px; font-weight: 500;">No agent — just a model</span><span class="trunc" style="font-size: 12px; color: var(--fg-3);">Uses the model you pick; add skills and MCP yourself.</span></span></div>
+<div style="height: 1px; background: var(--line-soft); margin: 4px 0;"></div>
+<div style="display: flex; align-items: center; height: 24px; padding: 0 8px; font-size: 12px; color: var(--fg-3);">Orchestrators</div>
+<div role="option" aria-selected="false" style="display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 8px; border-radius: 5px; background: var(--selected);">
+<span class="av">OR</span>
+<span style="display: flex; flex-direction: column; min-width: 0; flex-grow: 1; line-height: 1.35;"><span style="display: flex; align-items: center; gap: 6px;"><span style="font-size: 13px; font-weight: 500;">Orchestrator</span><span style="font-size: 11px; color: var(--fg-3);">Global</span></span><span class="trunc" style="font-size: 12px; color: var(--fg-3);">Splits work into subtasks for its team</span></span>
+<span style="display: flex; flex-direction: column; align-items: flex-end; line-height: 1.35; flex-shrink: 0;"><span class="mono" style="font-size: 11px; color: var(--fg-2);">claude-opus-5-5</span><span class="mono" style="font-size: 11px; color: var(--fg-3);">2 skills · 1 MCP</span></span>
+<span style="width: 14px; flex-shrink: 0;"></span>
+</div>
+<div style="display: flex; align-items: center; height: 24px; padding: 0 8px; font-size: 12px; color: var(--fg-3);">Workers</div>
+<div role="option" aria-selected="true" style="display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 8px; border-radius: 5px;">
+<span class="av">BF</span>
+<span style="display: flex; flex-direction: column; min-width: 0; flex-grow: 1; line-height: 1.35;"><span style="display: flex; align-items: center; gap: 6px;"><span style="font-size: 13px; font-weight: 500;">Bug Fixer</span><span style="font-size: 11px; color: var(--fg-3);">Project</span></span><span class="trunc" style="font-size: 12px; color: var(--fg-3);">Fixes failing tests with a minimal diff</span></span>
+<span style="display: flex; flex-direction: column; align-items: flex-end; line-height: 1.35; flex-shrink: 0;"><span class="mono" style="font-size: 11px; color: var(--fg-2);">claude-sonnet-5</span><span class="mono" style="font-size: 11px; color: var(--fg-3);">3 skills · 1 MCP</span></span>
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg);"><path d="M20 6 9 17l-5-5"></path></svg>
+</div>
+<div role="option" aria-selected="false" style="display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 8px; border-radius: 5px;">
+<span class="av">CR</span>
+<span style="display: flex; flex-direction: column; min-width: 0; flex-grow: 1; line-height: 1.35;"><span style="display: flex; align-items: center; gap: 6px;"><span style="font-size: 13px; font-weight: 500;">Code Reviewer</span><span style="font-size: 11px; color: var(--fg-3);">Built-in</span></span><span class="trunc" style="font-size: 12px; color: var(--fg-3);">Reviews diffs for correctness and risk</span></span>
+<span style="display: flex; flex-direction: column; align-items: flex-end; line-height: 1.35; flex-shrink: 0;"><span class="mono" style="font-size: 11px; color: var(--fg-2);">claude-sonnet-5</span><span class="mono" style="font-size: 11px; color: var(--fg-3);">2 skills · 1 MCP</span></span>
+<span style="width: 14px; flex-shrink: 0;"></span>
+</div>
+<div role="option" aria-selected="false" style="display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 8px; border-radius: 5px;">
+<span class="av">TW</span>
+<span style="display: flex; flex-direction: column; min-width: 0; flex-grow: 1; line-height: 1.35;"><span style="display: flex; align-items: center; gap: 6px;"><span style="font-size: 13px; font-weight: 500;">Test Writer</span><span style="font-size: 11px; color: var(--fg-3);">Global</span></span><span class="trunc" style="font-size: 12px; color: var(--fg-3);">Adds the tests a change is missing</span></span>
+<span style="display: flex; flex-direction: column; align-items: flex-end; line-height: 1.35; flex-shrink: 0;"><span class="mono" style="font-size: 11px; color: var(--fg-2);">claude-sonnet-5</span><span class="mono" style="font-size: 11px; color: var(--fg-3);">3 skills · 0 MCP</span></span>
+<span style="width: 14px; flex-shrink: 0;"></span>
+</div>
+<div role="option" aria-selected="false" style="display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 8px; border-radius: 5px;">
+<span class="av">RS</span>
+<span style="display: flex; flex-direction: column; min-width: 0; flex-grow: 1; line-height: 1.35;"><span style="display: flex; align-items: center; gap: 6px;"><span style="font-size: 13px; font-weight: 500;">Release Scribe</span><span style="font-size: 11px; color: var(--fg-3);">Global</span></span><span class="trunc" style="font-size: 12px; color: var(--fg-3);">Drafts release notes from merged PRs</span></span>
+<span style="display: flex; flex-direction: column; align-items: flex-end; line-height: 1.35; flex-shrink: 0;"><span class="mono" style="font-size: 11px; color: var(--fg-2);">claude-haiku-4-5</span><span class="mono" style="font-size: 11px; color: var(--fg-3);">1 skill · 1 MCP</span></span>
+<span style="width: 14px; flex-shrink: 0;"></span>
+</div>
+<div role="option" aria-selected="false" style="display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 8px; border-radius: 5px;">
+<span class="av">SA</span>
+<span style="display: flex; flex-direction: column; min-width: 0; flex-grow: 1; line-height: 1.35;"><span style="display: flex; align-items: center; gap: 6px;"><span style="font-size: 13px; font-weight: 500;">Security Auditor</span><span style="font-size: 11px; color: var(--fg-3);">Built-in</span></span><span class="trunc" style="font-size: 12px; color: var(--fg-3);">Audits IAM, secrets and dependencies</span></span>
+<span style="display: flex; flex-direction: column; align-items: flex-end; line-height: 1.35; flex-shrink: 0;"><span class="mono" style="font-size: 11px; color: var(--fg-2);">claude-opus-5-5</span><span class="mono" style="font-size: 11px; color: var(--fg-3);">4 skills · 2 MCP</span></span>
+<span style="width: 14px; flex-shrink: 0;"></span>
+</div>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; height: 32px; padding: 0 10px; border-top: 1px solid var(--line-soft); font-size: 11px; color: var(--fg-3); flex-shrink: 0;"><span style="display: flex; align-items: center; gap: 4px;"><span class="kbd">↑↓</span>Navigate</span><span style="display: flex; align-items: center; gap: 4px;"><span class="kbd">↵</span>Select</span><span style="display: flex; align-items: center; gap: 4px;"><span class="kbd">Esc</span>Close</span><a href="#" style="margin-left: auto; font-size: 12px; color: var(--fg-2); text-decoration: none;">Manage agents</a></div>
+</div>
+<div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; padding: 14px;">
+<div style="display: flex; align-items: center; gap: 10px;"><span class="av" style="width: 28px; height: 28px; font-size: 11px;">OR</span><span style="display: flex; flex-direction: column; line-height: 1.35;"><span style="font-size: 13px; font-weight: 600;">Orchestrator</span><span style="font-size: 12px; color: var(--fg-3);">Orchestrator · Global · <span class="mono" style="font-size: 11px;">v3</span></span></span></div>
+<p style="margin: 0; font-size: 12px; line-height: 1.45; color: var(--fg-2);">Breaks a task into subtasks, hands each to a team member as a background chat, then reviews and merges their results.</p>
+<div style="display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--line-soft); background: var(--sunken); font-size: 12px; color: var(--fg-2);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M21 12h-8"></path><path d="M21 6H8"></path><path d="M21 18h-8"></path><path d="M3 6v4c0 1.1.9 2 2 2h3"></path><path d="M3 10v6c0 1.1.9 2 2 2h3"></path></svg>Orchestrate mode is enabled by this agent.</div>
+<div style="display: flex; flex-direction: column;"><div style="display: flex; align-items: center; gap: 6px; height: 22px; font-size: 12px; color: var(--fg-3);"><svg class="i i12" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>Team<span class="mono" style="font-size: 11px;">3</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 36px;"><span class="av" style="width: 22px; height: 22px; font-size: 10px;">BF</span><span style="display: flex; flex-direction: column; min-width: 0; flex-grow: 1; line-height: 1.3;"><span style="font-size: 13px; font-weight: 500;">Bug Fixer</span><span class="trunc" style="font-size: 12px; color: var(--fg-3);">Fixes failing tests and bugs</span></span><span class="mono" style="font-size: 11px; color: var(--fg-3); flex-shrink: 0;">claude-sonnet-5</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 36px;"><span class="av" style="width: 22px; height: 22px; font-size: 10px;">CR</span><span style="display: flex; flex-direction: column; min-width: 0; flex-grow: 1; line-height: 1.3;"><span style="font-size: 13px; font-weight: 500;">Code Reviewer</span><span class="trunc" style="font-size: 12px; color: var(--fg-3);">Reviews diffs for correctness</span></span><span class="mono" style="font-size: 11px; color: var(--fg-3); flex-shrink: 0;">claude-sonnet-5</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 36px;"><span class="av" style="width: 22px; height: 22px; font-size: 10px;">TW</span><span style="display: flex; flex-direction: column; min-width: 0; flex-grow: 1; line-height: 1.3;"><span style="font-size: 13px; font-weight: 500;">Test Writer</span><span class="trunc" style="font-size: 12px; color: var(--fg-3);">Adds missing tests</span></span><span class="mono" style="font-size: 11px; color: var(--fg-3); flex-shrink: 0;">claude-sonnet-5</span></div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line-soft);">
+<div style="display: flex; align-items: center; gap: 6px; font-size: 12px;"><span style="color: var(--fg-3); width: 64px;">Runtime</span><span class="mono" style="font-size: 11px;">claude-opus-5-5</span><span style="color: var(--fg-3);">·</span><span style="color: var(--fg-2);">effort high</span></div>
+<div style="display: flex; align-items: center; gap: 6px; font-size: 12px;"><span style="color: var(--fg-3); width: 64px; flex-shrink: 0;">Skills</span><span class="bdg s-idle mono" style="font-size: 11px; font-weight: 400;">plan-decomposition</span><span class="bdg s-idle mono" style="font-size: 11px; font-weight: 400;">review-merge</span></div>
+<div style="display: flex; align-items: center; gap: 6px; font-size: 12px;"><span style="color: var(--fg-3); width: 64px;">MCP</span><span class="bdg s-idle mono" style="font-size: 11px; font-weight: 400;">github</span></div>
+<div style="display: flex; align-items: center; gap: 6px; font-size: 12px;"><span style="color: var(--fg-3); width: 64px; flex-shrink: 0;">Always on</span><span style="color: var(--fg-2);">Orchestration (spawn workers)</span></div>
+</div>
+</div>
+</div>
+</div>
+<div class="card" style="flex-grow: 1; min-width: 0; align-self: flex-start; display: flex; flex-direction: column;">
+<div style="display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line-soft);"><span style="font-size: 13px; font-weight: 600;">Customize capabilities</span><span style="font-size: 12px; color: var(--fg-3);">for Bug Fixer in this chat</span><button class="btn btn-g btn-sm" style="margin-left: auto;">Hide capabilities</button></div>
+<div style="display: flex; flex-direction: column; gap: 10px; padding: 10px 14px 12px 14px;">
+<p style="margin: 0; font-size: 12px; color: var(--fg-3);">Adds to the agent’s own. Switching off an item marked “from agent” records a removal for this chat only.</p>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: center; gap: 8px; height: 28px;"><svg class="i i12" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="m6 9 6 6 6-6"></path></svg><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 7v14"></path><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"></path></svg><span style="font-size: 13px; font-weight: 600;">Skills</span><span style="margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--fg-3);"><span class="mono" style="font-size: 11px;">5/9 enabled</span><a href="#" style="color: var(--fg-2); text-decoration: none;">Turn all on</a></span></div>
+<div class="inp" style="height: 28px; font-size: 12px; color: var(--fg-3); margin: 2px 0 4px 0;"><svg class="i i12" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>Filter…</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 7v14"></path><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"></path></svg><span class="mono trunc" style="font-size: 12px; flex-grow: 1;">triage-flake</span><span class="bdg s-idle" style="height: 18px; font-size: 11px;">from agent</span><span style="width: 48px; font-size: 11px; color: var(--fg-3); text-align: right;">project</span><button class="sw on" role="switch" aria-checked="true" aria-label="triage-flake"></button></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 7v14"></path><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"></path></svg><span class="mono trunc" style="font-size: 12px; flex-grow: 1;">write-tests</span><span class="bdg s-idle" style="height: 18px; font-size: 11px;">from agent</span><span style="width: 48px; font-size: 11px; color: var(--fg-3); text-align: right;">system</span><button class="sw on" role="switch" aria-checked="true" aria-label="write-tests"></button></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 7v14"></path><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"></path></svg><span class="mono trunc" style="font-size: 12px; flex-grow: 1;">git-hygiene</span><span class="bdg s-idle" style="height: 18px; font-size: 11px;">from agent</span><span style="width: 48px; font-size: 11px; color: var(--fg-3); text-align: right;">system</span><button class="sw on" role="switch" aria-checked="true" aria-label="git-hygiene"></button></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 7v14"></path><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"></path></svg><span class="mono trunc" style="font-size: 12px; flex-grow: 1;">browser-verify</span><span style="width: 48px; font-size: 11px; color: var(--fg-3); text-align: right;">system</span><button class="sw on" role="switch" aria-checked="true" aria-label="browser-verify"></button></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 7v14"></path><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"></path></svg><span class="mono trunc" style="font-size: 12px; flex-grow: 1;">coverage-report</span><span style="width: 48px; font-size: 11px; color: var(--fg-3); text-align: right;">project</span><button class="sw on" role="switch" aria-checked="true" aria-label="coverage-report"></button></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px; opacity: .7;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 7v14"></path><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"></path></svg><span class="mono trunc" style="font-size: 12px; flex-grow: 1;">release-notes</span><span style="width: 48px; font-size: 11px; color: var(--fg-3); text-align: right;">system</span><button class="sw" role="switch" aria-checked="false" aria-label="release-notes"></button></div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: center; gap: 8px; height: 28px;"><svg class="i i12" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="m6 9 6 6 6-6"></path></svg><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"></path></svg><span style="font-size: 13px; font-weight: 600;">MCP servers</span><span style="margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--fg-3);"><span class="mono" style="font-size: 11px;">2/4 enabled</span></span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"></path></svg><span class="mono trunc" style="font-size: 12px; flex-grow: 1;">github</span><span class="bdg s-idle" style="height: 18px; font-size: 11px;">from agent</span><span style="width: 48px; font-size: 11px; color: var(--fg-3); text-align: right;">system</span><button class="sw on" role="switch" aria-checked="true" aria-label="github"></button></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"></path></svg><span class="mono trunc" style="font-size: 12px; flex-grow: 1;">playwright</span><span style="width: 48px; font-size: 11px; color: var(--fg-3); text-align: right;">system</span><button class="sw on" role="switch" aria-checked="true" aria-label="playwright"></button></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px; opacity: .7;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"></path></svg><span class="mono trunc" style="font-size: 12px; flex-grow: 1;">sentry</span><span style="width: 48px; font-size: 11px; color: var(--fg-3); text-align: right;">project</span><button class="sw" role="switch" aria-checked="false" aria-label="sentry"></button></div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: center; gap: 8px; height: 28px;"><svg class="i i12" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="m6 9 6 6 6-6"></path></svg><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path><path d="m9 12 2 2 4-4"></path></svg><span style="font-size: 13px; font-weight: 600;">Capabilities</span><span style="margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--fg-3);"><span class="mono" style="font-size: 11px;">5 of 8 on</span></span></div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 12px;">
+<div style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: 6px; min-width: 0;"><span class="trunc" style="font-size: 12px; flex-grow: 1;">Integrated browser</span><button class="ib" style="width: 20px; height: 20px;" aria-label="Reset Integrated browser to inherited" title="Reset to inherited"><svg class="i i12" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"></path><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"></path></svg></button><button class="sw on" role="switch" aria-checked="true" aria-label="Integrated browser"></button></div>
+<div style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: 6px; min-width: 0;"><span class="trunc" style="font-size: 12px; flex-grow: 1;">Read files</span><span class="bdg s-idle" style="height: 18px; font-size: 11px;" title="Not set here; currently from the agent or platform default">inherited</span><button class="sw on" role="switch" aria-checked="true" aria-label="Read files"></button></div>
+<div style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: 6px; min-width: 0;"><span class="trunc" style="font-size: 12px; flex-grow: 1; color: var(--fg-2);">Widgets &amp; canvas</span><span class="bdg s-idle" style="height: 18px; font-size: 11px;" title="Not set here; currently from the agent or platform default">inherited</span><button class="sw" role="switch" aria-checked="false" aria-label="Widgets &amp; canvas"></button></div>
+<div style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: 6px; min-width: 0;"><span class="trunc" style="font-size: 12px; flex-grow: 1;">Write files</span><span class="bdg s-idle" style="height: 18px; font-size: 11px;" title="Not set here; currently from the agent or platform default">inherited</span><button class="sw on" role="switch" aria-checked="true" aria-label="Write files"></button></div>
+<div style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: 6px; min-width: 0;"><span class="trunc" style="font-size: 12px; flex-grow: 1; color: var(--fg-2);">Extension authoring</span><span class="bdg s-idle" style="height: 18px; font-size: 11px;" title="Not set here; currently from the agent or platform default">inherited</span><button class="sw" role="switch" aria-checked="false" aria-label="Extension authoring"></button></div>
+<div style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: 6px; min-width: 0;"><span class="trunc" style="font-size: 12px; flex-grow: 1;">Run shell commands</span><span class="bdg s-idle" style="height: 18px; font-size: 11px;" title="Not set here; currently from the agent or platform default">inherited</span><button class="sw on" role="switch" aria-checked="true" aria-label="Run shell commands"></button></div>
+<div style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: 6px; min-width: 0;"><span class="trunc" style="font-size: 12px; flex-grow: 1; color: var(--fg-2);" title="Orchestration (spawn workers)">Orchestration</span><span class="bdg s-idle" style="height: 18px; font-size: 11px;" title="Not set here; currently from the agent or platform default">inherited</span><button class="sw" role="switch" aria-checked="false" aria-label="Orchestration (spawn workers)"></button></div>
+<div style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: 6px; min-width: 0;"><span class="trunc" style="font-size: 12px; flex-grow: 1;">Web fetch &amp; search</span><button class="ib" style="width: 20px; height: 20px;" aria-label="Reset Web fetch &amp; search to inherited" title="Reset to inherited"><svg class="i i12" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"></path><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"></path></svg></button><button class="sw on" role="switch" aria-checked="true" aria-label="Web fetch &amp; search"></button></div>
+</div>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 28px;"><svg class="i i12" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="m9 18 6-6-6-6"></path></svg><span style="font-size: 13px; font-weight: 600;">Extra instructions</span><span style="margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--fg-3);"><span style="font-size: 12px;">Appended after the agent’s own, for this chat only</span></span></div>
+<div style="display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line-soft); font-size: 12px; color: var(--fg-2);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path><path d="m9 12 2 2 4-4"></path></svg><span class="trunc">Effective: 5 skills (3 from agent + 2 added) · 2 MCP servers · 5 of 8 capabilities</span></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["dark","light"],"default":"dark","section":"Theme"},"accent":{"editor":"enum","options":["ink","blue","violet","green","orange","rose","teal"],"default":"ink","section":"Theme"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+const mode = this.props.mode ?? 'dark';
+const accent = this.props.accent ?? 'ink';
+return { rootClass: 't-' + mode + ' acc-' + accent };
+}
+}
+</script>
+</body>
+</html>

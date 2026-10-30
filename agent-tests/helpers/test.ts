@@ -16,7 +16,7 @@ import {
   seedChat,
   seedProject,
   seedAutomation,
-  createRun,
+  startRun,
   WEB_BASE,
 } from './api';
 
@@ -55,7 +55,7 @@ export const test = base.extend<Fixtures>({
       chat: (opts) => seedChat(tracker, opts),
       project: (opts) => seedProject(tracker, opts),
       automation: (opts) => seedAutomation(tracker, opts),
-      run: (definitionId, variables) => createRun(tracker, definitionId, variables),
+      run: (definitionId, variables) => startRun(tracker, definitionId, variables),
     });
   },
 

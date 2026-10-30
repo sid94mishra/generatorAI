@@ -92,13 +92,13 @@ function makeApp(registry: unknown) {
 describe('GET /api/harness/providers — the composer must not wait on a cold probe', () => {
   it('answers from the cached snapshot without awaiting a probe, even when stale', async () => {
     const { registry, refresh } = makeRegistry({ hasProbed: true, stale: true });
+    // A probe that never finishes: a route that awaited it could not answer at
+    // all, so the response arriving IS the proof — no stopwatch, which a
+    // loaded machine turned into a false failure (1.1 s for a 500 ms bound).
+    refresh.mockImplementation(() => new Promise(() => {}));
 
-    const started = Date.now();
     const res = await request(makeApp(registry)).get('/api/harness/providers').expect(200);
-    const elapsed = Date.now() - started;
 
-    // The whole point: the response beat the probe rather than waiting for it.
-    expect(elapsed).toBeLessThan(COLD_PROBE_MS);
     // Pre-fix this was called and awaited; the response could not arrive first.
     expect(refresh).not.toHaveBeenCalled();
 

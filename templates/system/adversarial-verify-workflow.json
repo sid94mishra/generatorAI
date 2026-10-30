@@ -1,0 +1,215 @@
+{
+  "id": "adversarial-verify",
+  "category": "code-review",
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "Adversarial verification",
+      "description": "Audit a target, then verify every finding independently from three angles; a finding is confirmed when two of three agree.",
+      "session": {},
+      "variables": [
+        {
+          "name": "target",
+          "type": "string",
+          "label": "What to audit",
+          "required": true
+        }
+      ],
+      "hooks": [],
+      "lifecycle": {
+        "codebaseAliases": [],
+        "useWorktree": true,
+        "requiresCodebase": false,
+        "sandbox": "required",
+        "preprocessingSteps": [],
+        "postProcessing": {
+          "autoCommit": false,
+          "autoPush": false,
+          "autoCreatePR": false,
+          "steps": []
+        }
+      },
+      "tags": [
+        "map"
+      ]
+    },
+    "stages": [
+      {
+        "key": "audit",
+        "name": "Audit",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "audit",
+            "text": "Audit {{variables.target}}. List each potential problem as a finding with a short stable id and a precise claim."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "json",
+          "schema": {
+            "type": "object",
+            "required": [
+              "findings"
+            ],
+            "properties": {
+              "findings": {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "claim"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "claim": {
+                      "type": "string"
+                    },
+                    "location": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "extraction": "auto",
+          "rules": [],
+          "summary": "auto"
+        },
+        "hooks": []
+      },
+      {
+        "key": "verify_findings",
+        "name": "Verify findings",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "map",
+        "map": {
+          "items": "stages.audit.output.findings",
+          "itemKey": "item.id",
+          "maxItems": 50,
+          "concurrency": 4,
+          "toleratedFailurePercent": 0,
+          "workspace": "shared",
+          "merge": "none",
+          "output": {
+            "select": {
+              "confirmed": "count(stages.verify_map.output.results, r => r.stages.verify.output.real) >= 2"
+            }
+          }
+        }
+      },
+      {
+        "key": "verify_map",
+        "name": "Verify from each angle",
+        "parentKey": "verify_findings",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "map",
+        "map": {
+          "items": "['correctness', 'security', 'reproducibility']",
+          "maxItems": 3,
+          "concurrency": 3,
+          "toleratedFailurePercent": 0,
+          "workspace": "shared",
+          "merge": "none",
+          "output": {}
+        }
+      },
+      {
+        "key": "verify",
+        "name": "Verify",
+        "parentKey": "verify_map",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "verify",
+            "text": "Independently verify this finding from the {{item}} angle. Default to real=false unless you can demonstrate it:\n{{maps.verify_findings.item | json}}"
+          }
+        ],
+        "session": {
+          "permissionMode": "plan"
+        },
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "json",
+          "schema": {
+            "type": "object",
+            "required": [
+              "real",
+              "evidence"
+            ],
+            "properties": {
+              "real": {
+                "type": "boolean"
+              },
+              "evidence": {
+                "type": "string"
+              }
+            }
+          },
+          "extraction": "auto",
+          "rules": [],
+          "summary": "auto"
+        },
+        "hooks": []
+      },
+      {
+        "key": "report",
+        "name": "Report",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "report",
+            "text": "Write the audit report for {{variables.target}}. Confirmed findings:\n{{ map(filter(stages.verify_findings.output.results, r => r.confirmed), r => r.item) | json }}\nList the rejected ones separately, in one line each."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": [],
+          "summary": "auto"
+        },
+        "hooks": []
+      }
+    ],
+    "edges": [
+      {
+        "from": "audit",
+        "to": "verify_findings",
+        "on": "success"
+      },
+      {
+        "from": "verify_findings",
+        "to": "report",
+        "on": "success"
+      }
+    ]
+  }
+}

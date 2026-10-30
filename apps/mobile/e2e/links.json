@@ -1,0 +1,51 @@
+{
+  "about": "Batch surface smoke (08 §3.2): open each url with `agent-device open \"<url>\"` on the paired sandbox and check `expect` (a testID, or text). Allowed links open their screen; rejected ones land on Home; an unknown server= shows the toast. ${CHAT_ID}, ${WORKFLOW_ID}, ${RUN_ID}, ${PROJECT_ID}, ${CODEBASE_ID}, ${AUTOMATION_ID}, ${SCRIPT_ID}, ${INTERACTION_ID} come from the seeded sandbox (scripts/mobile/sandbox-pair.mjs). Source: 04-screen-map.md §1.6, MD-145.",
+  "allowed": [
+    { "url": "generatorai://", "expect": { "id": "home-new-chat" } },
+    { "url": "generatorai:///", "expect": { "id": "home-new-chat" } },
+    { "url": "generatorai://chats", "expect": { "id": "chats-new" } },
+    { "url": "generatorai://chats/new", "expect": { "text": "New chat" }, "note": "the New chat route sheet (MB-06, M6-05)" },
+    { "url": "generatorai://command/chat.new", "expect": { "text": "New chat" } },
+    { "url": "generatorai://chats/${CHAT_ID}", "expect": { "id": "composer-input" } },
+    { "url": "generatorai://chats/${CHAT_ID}?dock=terminal", "expect": { "id": "pane-tab-terminal" }, "note": "pane opens at the tab" },
+    { "url": "generatorai://chats/${CHAT_ID}/gate/${INTERACTION_ID}", "expect": { "id": "gate-card" } },
+    { "url": "generatorai://projects", "expect": { "text": "Projects" } },
+    { "url": "generatorai://projects/new", "expect": { "text": "New project" } },
+    { "url": "generatorai://projects/${PROJECT_ID}", "expect": { "text": "Codebases" } },
+    { "url": "generatorai://projects/${PROJECT_ID}/pull-requests", "expect": { "text": "Pull requests" } },
+    { "url": "generatorai://projects/${PROJECT_ID}/codebases/${CODEBASE_ID}", "expect": { "text": "Worktrees" } },
+    { "url": "generatorai://projects/${PROJECT_ID}/codebases/${CODEBASE_ID}/files", "expect": { "text": "Files" } },
+    { "url": "generatorai://agents", "expect": { "text": "Agents" } },
+    { "url": "generatorai://agents/new", "expect": { "text": "New agent" } },
+    { "url": "generatorai://workflows", "expect": { "text": "Workflows" } },
+    { "url": "generatorai://workflows/new", "expect": { "text": "New workflow" } },
+    { "url": "generatorai://command/workflow.new", "expect": { "text": "New workflow" } },
+    { "url": "generatorai://workflows/${WORKFLOW_ID}", "expect": { "text": "Recent runs" } },
+    { "url": "generatorai://workflows/${WORKFLOW_ID}/runs/${RUN_ID}", "expect": { "id": "run-screen" } },
+    { "url": "generatorai://workflows/${WORKFLOW_ID}/runs/${RUN_ID}/approval/${STAGE_RUN_ID}", "expect": { "id": "approval-sheet" } },
+    { "url": "generatorai://automations", "expect": { "text": "Automations" } },
+    { "url": "generatorai://automations/${AUTOMATION_ID}", "expect": { "text": "Configuration" } },
+    { "url": "generatorai://scripts", "expect": { "text": "Scripts" } },
+    { "url": "generatorai://scripts/${SCRIPT_ID}", "expect": { "text": "Script" } },
+    { "url": "generatorai://settings", "expect": { "text": "Appearance" } },
+    { "url": "generatorai://settings/appearance", "expect": { "text": "Appearance" } },
+    { "url": "generatorai://settings/nope", "expect": { "text": "Appearance" }, "note": "unknown section → Settings" },
+    { "url": "generatorai://search?kind=workflows", "expect": { "id": "search-palette" } },
+    { "url": "generatorai://needs-you", "expect": { "id": "needs-you" } },
+    { "url": "generatorai://servers", "expect": { "id": "servers-sheet" } },
+    { "url": "generatorai://pair?code=ABCD-EFGH-JKLM", "expect": { "text": "Pair with this server?" }, "note": "pre-fills only; never submits" }
+  ],
+  "rejected": [
+    { "url": "generatorai://runs/${RUN_ID}", "expect": { "id": "home-new-chat" } },
+    { "url": "generatorai://changes/w1", "expect": { "id": "home-new-chat" } },
+    { "url": "generatorai://terminal/w1", "expect": { "id": "home-new-chat" } },
+    { "url": "generatorai://approvals", "expect": { "id": "home-new-chat" } },
+    { "url": "generatorai://share", "expect": { "id": "home-new-chat" } },
+    { "url": "generatorai://command/project.new", "expect": { "id": "home-new-chat" } },
+    { "url": "generatorai://admin", "expect": { "id": "home-new-chat" } },
+    { "url": "generatorai://chats/%2e%2e/settings", "expect": { "id": "home-new-chat" } }
+  ],
+  "unknownServer": [
+    { "url": "generatorai://chats/${CHAT_ID}?server=not-paired", "expect": { "text": "Link is for a server this phone isn't paired with" } }
+  ]
+}

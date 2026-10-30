@@ -1,0 +1,309 @@
+<title>GeneratorAI Setup Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a working plan document — sticky contents rail on wide screens, one reading column, tables in scroll boxes.
+   Palette and type follow GeneratorAI's own Instrument theme (light + dark). */
+:root {
+  --bg: #ffffff; --raised: #fafaf9; --card: #f1f1ef; --sunken: #f6f6f4;
+  --fg: #18181b; --muted: #55555d; --line: #dcdcd7; --line-soft: #ecece9;
+  --blue: #1d6ae5; --green: #16804c; --yellow: #935f00; --red: #d1242f; --purple: #7152e0;
+  --green-bg: #e6f3ec; --yellow-bg: #f8efdc; --red-bg: #fbe7e8; --blue-bg: #e7effc;
+  --sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --measure: 72ch;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0b0b0c; --raised: #17171a; --card: #111113; --sunken: #0d0d0f;
+  --fg: #ededef; --muted: #a1a1aa; --line: #2c2c31; --line-soft: #1c1c20;
+  --blue: #6aa6ff; --green: #4cc38a; --yellow: #f0b429; --red: #ff6369; --purple: #a48cff;
+  --green-bg: #12261c; --yellow-bg: #2a2110; --red-bg: #2c1416; --blue-bg: #142035;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0b0b0c; --raised: #17171a; --card: #111113; --sunken: #0d0d0f;
+  --fg: #ededef; --muted: #a1a1aa; --line: #2c2c31; --line-soft: #1c1c20;
+  --blue: #6aa6ff; --green: #4cc38a; --yellow: #f0b429; --red: #ff6369; --purple: #a48cff;
+  --green-bg: #12261c; --yellow-bg: #2a2110; --red-bg: #2c1416; --blue-bg: #142035;
+  color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.6;
+  padding-inline: 20px; padding-block: 0 64px; -webkit-font-smoothing: antialiased; }
+a { color: var(--blue); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+code { background: var(--card); border: 1px solid var(--line-soft); border-radius: 4px; padding: 0 4px; }
+
+.shell { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 56px; }
+@media (max-width: 960px) { .shell { grid-template-columns: minmax(0, 1fr); gap: 0; } .toc { display: none; } }
+
+.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 28px); align-self: start; padding-top: 40px; font-size: 13px; }
+.toc .label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; border-left: 1px solid var(--line); }
+.toc a { display: block; padding: 4px 0 4px 12px; color: var(--muted); text-decoration: none; margin-left: -1px; border-left: 1px solid transparent; }
+.toc a:hover { color: var(--fg); border-left-color: var(--fg); }
+
+main { min-width: 0; padding-top: 40px; }
+header.top { padding-bottom: 28px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.eyebrow { font-family: var(--mono); font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 14px; }
+h1 { font-size: clamp(30px, 4.4vw, 44px); line-height: 1.1; letter-spacing: -0.02em; font-weight: 600; margin: 14px 0 12px; text-wrap: balance; }
+.lede { font-size: 17px; color: var(--muted); max-width: var(--measure); margin: 0; }
+
+section { padding-top: 44px; scroll-margin-top: 16px; }
+h2 { font-size: 23px; letter-spacing: -0.01em; font-weight: 600; margin: 0 0 6px; text-wrap: balance; display: flex; gap: 12px; align-items: baseline; }
+h2 .n { font-family: var(--mono); font-size: 13px; font-weight: 400; color: var(--muted); }
+h3 { font-size: 16px; font-weight: 600; margin: 26px 0 6px; }
+p, li { max-width: var(--measure); }
+p { margin: 8px 0; }
+ul, ol { padding-left: 20px; margin: 8px 0; }
+li { margin: 4px 0; }
+.muted { color: var(--muted); }
+
+.tablebox { overflow-x: auto; margin: 14px 0; border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line-soft); }
+th { font-weight: 600; font-size: 12px; color: var(--muted); background: var(--raised); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 500; }
+
+.chip { display: inline-block; font-family: var(--mono); font-size: 11px; line-height: 1; padding: 4px 7px; border-radius: 999px; white-space: nowrap; border: 1px solid transparent; }
+.chip.ok { color: var(--green); background: var(--green-bg); }
+.chip.ext { color: var(--yellow); background: var(--yellow-bg); }
+.chip.miss { color: var(--red); background: var(--red-bg); }
+.chip.info { color: var(--blue); background: var(--blue-bg); }
+.chip.plain { color: var(--muted); border-color: var(--line); }
+
+.callout { border: 1px solid var(--line); background: var(--raised); border-radius: 10px; padding: 14px 16px; margin: 16px 0; max-width: 80ch; }
+.callout strong { font-weight: 600; }
+
+/* Three layers */
+.layers { display: grid; gap: 10px; margin: 16px 0; }
+.layer { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 16px; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: var(--raised); }
+.layer .tag { font-family: var(--mono); font-size: 12px; }
+.layer h4 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.layer p { margin: 0; color: var(--muted); font-size: 14px; }
+@media (max-width: 560px) { .layer { grid-template-columns: minmax(0, 1fr); gap: 6px; } }
+
+/* Architecture */
+.arch { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 16px 0; background: var(--sunken); display: grid; gap: 10px; }
+.arch .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.box { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.box b { display: block; font-size: 13.5px; font-weight: 600; }
+.box span { display: block; font-size: 12.5px; color: var(--muted); line-height: 1.45; margin-top: 2px; }
+.box.core { border-color: var(--fg); }
+.arch .lane { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.flow { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: center; }
+
+/* Phases */
+.phases { display: grid; gap: 0; margin: 16px 0; border-left: 1px solid var(--line); }
+.phase { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 14px; padding: 12px 0 12px 16px; position: relative; border-bottom: 1px solid var(--line-soft); }
+.phase::before { content: ""; position: absolute; left: -5px; top: 18px; width: 9px; height: 9px; border-radius: 50%; background: var(--bg); border: 2px solid var(--muted); }
+.phase.first::before { border-color: var(--blue); background: var(--blue); }
+.phase .id { font-family: var(--mono); font-size: 13px; font-weight: 500; padding-top: 1px; }
+.phase h4 { margin: 0; font-size: 15px; font-weight: 600; }
+.phase p { margin: 3px 0 0; font-size: 13.5px; color: var(--muted); }
+.phase .exit { font-size: 13px; margin-top: 6px; }
+.phase .exit em { font-style: normal; font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.05em; text-transform: uppercase; margin-right: 6px; }
+.size { font-family: var(--mono); font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; align-self: start; white-space: nowrap; }
+.release { font-family: var(--mono); font-size: 11px; color: var(--blue); letter-spacing: 0.05em; text-transform: uppercase; padding: 10px 0 2px 16px; }
+@media (max-width: 560px) { .phase { grid-template-columns: 48px minmax(0, 1fr); } .size { grid-column: 2; justify-self: start; } }
+
+/* Slack walkthrough */
+.steps { counter-reset: s; list-style: none; padding: 0; display: grid; gap: 8px; margin: 14px 0; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; max-width: 80ch; }
+.steps li::before { content: counter(s); font-family: var(--mono); font-size: 12px; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; color: var(--muted); }
+
+/* Decisions */
+.decisions { display: grid; gap: 10px; margin: 14px 0; }
+.decision { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; gap: 4px; }
+.decision b { font-weight: 600; }
+.decision .rec { font-size: 13.5px; color: var(--muted); }
+.decision .rec span { color: var(--green); font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 6px; }
+
+/* Prompt */
+.prompt-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-top: 14px; }
+button.copy { font: 500 13px var(--sans); color: var(--bg); background: var(--fg); border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+button.copy:hover { opacity: 0.88; }
+.copied { font-family: var(--mono); font-size: 12px; color: var(--green); }
+pre.prompt { white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; background: var(--sunken); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 10px 0 0; max-height: 560px; overflow: auto; }
+
+.sources { columns: 2 280px; column-gap: 32px; font-size: 13px; padding-left: 18px; }
+.sources li { break-inside: avoid; margin: 0 0 6px; }
+footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+<style>
+.step { display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line-soft); max-width: 82ch; }
+.step:last-child { border-bottom: 0; }
+.step .num { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; font-family: var(--mono); font-size: 13px; color: var(--muted); }
+.step h4 { margin: 3px 0 4px; font-size: 15.5px; font-weight: 600; }
+.step p, .step li { font-size: 14.5px; }
+.step p { margin: 4px 0; }
+.ui { font-weight: 600; }
+kbd { font-family: var(--mono); font-size: 12px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; background: var(--raised); }
+.part { border: 1px solid var(--line); border-radius: 12px; padding: 6px 18px 10px; margin: 16px 0; background: var(--bg); }
+.part > .ph { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; padding: 10px 0 2px; }
+.part > .ph h3 { margin: 0; font-size: 17px; }
+.flowline { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 14px 0; font-size: 13.5px; }
+.flowline .node { border: 1px solid var(--line); background: var(--raised); border-radius: 8px; padding: 8px 12px; }
+.flowline .node b { display: block; font-size: 13.5px; }
+.flowline .node span { color: var(--muted); font-size: 12.5px; }
+.flowline .arrow { color: var(--muted); font-family: var(--mono); }
+</style>
+
+<div class="shell">
+<nav class="toc" aria-label="Contents">
+  <div class="label">Contents</div>
+  <ol>
+    <li><a href="#need">What you need</a></li>
+    <li><a href="#install">1 · Install GeneratorAI</a></li>
+    <li><a href="#setup">2 · First-time setup</a></li>
+    <li><a href="#tailscale">3 · Set up Tailscale once</a></li>
+    <li><a href="#connect">4 · Turn on access</a></li>
+    <li><a href="#device">5 · Connect another device</a></li>
+    <li><a href="#manage">Manage devices</a></li>
+    <li><a href="#trouble">Troubleshooting</a></li>
+    <li><a href="#how">How it works</a></li>
+    <li><a href="#tested">What we tested</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="top">
+  <div class="eyebrow"><span>GeneratorAI</span><span>User guide · October 2026</span><span>alpha</span></div>
+  <h1>Set up GeneratorAI and use it from any device</h1>
+  <p class="lede">Install the desktop app, connect your AI accounts, then reach the same app from your phone or another computer on any network. No certificates and no router changes.</p>
+</header>
+
+<section id="need">
+  <h2><span class="n">00</span>What you need</h2>
+  <ul>
+    <li><strong>A Mac with Apple Silicon</strong> (M1 or later) to run GeneratorAI. This alpha ships as a macOS installer.</li>
+    <li><strong>At least one AI account</strong> GeneratorAI can use: Claude, ChatGPT/Codex or GitHub Copilot.</li>
+    <li><strong>A free Tailscale account</strong>, only if you want to use GeneratorAI from another device. The free plan covers up to 6 people and unlimited devices.</li>
+    <li>About <strong>10 minutes</strong>.</li>
+  </ul>
+</section>
+
+<section id="install">
+  <h2><span class="n">01</span>Install GeneratorAI</h2>
+  <div class="part">
+    <div class="step"><div class="num">1</div><div><h4>Open the installer</h4><p>Double-click <code>GeneratorAI-0.0.1-alpha.1-arm64.dmg</code>, then drag <span class="ui">GeneratorAI</span> into <span class="ui">Applications</span>.</p></div></div>
+    <div class="step"><div class="num">2</div><div><h4>Open it the first time</h4><p>In Applications, <strong>right-click GeneratorAI › Open › Open</strong>. The alpha isn't signed by Apple yet, so a normal double-click is blocked the first time.</p>
+      <p class="muted">Still blocked? In Terminal run <code>xattr -dr com.apple.quarantine /Applications/GeneratorAI.app</code>, then open it again.</p></div></div>
+    <div class="step"><div class="num">3</div><div><h4>Allow keychain access</h4><p>macOS asks: <em>"GeneratorAI wants to use your confidential information stored in 'GeneratorAI Safe Storage'"</em>. Enter your Mac password and click <span class="ui">Always Allow</span>. GeneratorAI keeps its encryption key in your keychain.</p>
+      <p class="muted">Until you answer, the app waits silently. If GeneratorAI seems stuck on launch, look for this dialog behind other windows.</p></div></div>
+    <div class="step"><div class="num">4</div><div><h4>You're in</h4><p>You'll see <span class="ui">Home</span>, with <span class="ui">Connected</span> at the bottom left.</p></div></div>
+  </div>
+</section>
+
+<section id="setup">
+  <h2><span class="n">02</span>First-time setup</h2>
+  <div class="part">
+    <div class="step"><div class="num">1</div><div><h4>Connect an AI account</h4><p>Click the <span class="ui">gear</span> at the bottom left › <span class="ui">Model providers</span>. Sign in to Claude, ChatGPT/Codex or Copilot. If you already use the Claude Code or Codex command-line tools on this Mac, GeneratorAI picks up those sign-ins.</p></div></div>
+    <div class="step"><div class="num">2</div><div><h4>Add a project</h4><p><span class="ui">Projects › New project</span>. Give it a name and add the folder (or Git repository) you want the AI to work in.</p></div></div>
+    <div class="step"><div class="num">3</div><div><h4>Start a chat</h4><p>On <span class="ui">Home</span>, type a task, pick the project, and press <kbd>⌘</kbd> <kbd>↵</kbd>. GeneratorAI asks before risky actions, such as running commands or pushing code.</p></div></div>
+  </div>
+  <p>That's all you need on this Mac. The next steps are only for using GeneratorAI from <strong>another device</strong>.</p>
+</section>
+
+<section id="tailscale">
+  <h2><span class="n">03</span>Set up Tailscale once, on this Mac</h2>
+  <p>Tailscale is a free private network between your own devices. GeneratorAI uses it so your phone or laptop can reach this Mac securely from anywhere, without opening it to the internet.</p>
+  <div class="part">
+    <div class="step"><div class="num">1</div><div><h4>Install Tailscale</h4><p>Download it from <a href="https://tailscale.com/download">tailscale.com/download</a> (or the Mac App Store) and run the installer.</p></div></div>
+    <div class="step"><div class="num">2</div><div><h4>Sign in</h4><p>Open Tailscale. Its icon appears in the menu bar. If macOS asks, click <span class="ui">Allow</span> for the VPN configuration. Choose <span class="ui">Log in</span> and sign in with Google, Microsoft, GitHub or Apple.</p></div></div>
+    <div class="step"><div class="num">3</div><div><h4>Turn on HTTPS (one click, first time only)</h4><p>In GeneratorAI: <span class="ui">gear › Security &amp; devices › Access from other devices</span>. If the Tailscale card says <span class="chip ext">HTTPS off</span>, click <span class="ui">Turn on HTTPS</span>. On the Tailscale page that opens, click <span class="ui">Enable HTTPS</span>. Back in GeneratorAI, click the refresh icon on the card. It should now say <span class="chip ok">Ready</span>.</p></div></div>
+  </div>
+</section>
+
+<section id="connect">
+  <h2><span class="n">04</span>Turn on access from other devices</h2>
+  <div class="part">
+    <div class="step"><div class="num">1</div><div><h4>Click Connect with Tailscale</h4><p>In <span class="ui">Security &amp; devices › Access from other devices</span>, click <span class="ui">Connect with Tailscale</span>. After a few seconds the card shows <span class="chip ok">On</span> and your private address, for example <code>https://your-mac.tailXXXX.ts.net</code>.</p></div></div>
+    <div class="step"><div class="num">2</div><div><h4>It stays on</h4><p>It survives quitting and reopening GeneratorAI, and restarting the Mac. It works only while GeneratorAI is running on this Mac.</p></div></div>
+  </div>
+</section>
+
+<section id="device">
+  <h2><span class="n">05</span>Connect your phone or another computer</h2>
+  <div class="part">
+    <div class="ph"><h3>On the other device</h3><span class="chip info">once per device</span></div>
+    <div class="step"><div class="num">1</div><div><h4>Install Tailscale and sign in with the same account</h4><p>iPhone and iPad: App Store. Android: Play Store. Windows, Mac and Linux: <a href="https://tailscale.com/download">tailscale.com/download</a>. Make sure Tailscale shows <span class="ui">Connected</span>.</p></div></div>
+  </div>
+  <div class="part">
+    <div class="ph"><h3>On the Mac</h3></div>
+    <div class="step"><div class="num">2</div><div><h4>Create a pairing code</h4><p><span class="ui">Security &amp; devices › Pair a new device</span>. Type a name (for example "My phone"), pick the platform (<span class="ui">Web browser</span> for a browser), and click <span class="ui">Generate pairing code</span>. You get the address and a 12-character code, valid for <strong>10 minutes</strong> and usable once.</p></div></div>
+  </div>
+  <div class="part">
+    <div class="ph"><h3>On the other device</h3></div>
+    <div class="step"><div class="num">3</div><div><h4>Open the address</h4><p>In Safari or Chrome, open the <code>https://…ts.net</code> address shown on the Mac. There's no certificate warning, and the page says <span class="ui">Connect to a GeneratorAI server</span> with the address marked <span class="chip ok">Reachable</span>.</p></div></div>
+    <div class="step"><div class="num">4</div><div><h4>Enter the code and connect</h4><p>Type the 12 characters into the code boxes, keep or change the device name, and tap <span class="ui">Connect</span>. You're now using GeneratorAI on that device, with your chats, projects and agents.</p></div></div>
+  </div>
+  <div class="callout"><strong>Keep the code private.</strong> Anyone who sees it can pair a device until it's used or expires. Don't screenshot it or paste it into a chat.</div>
+</section>
+
+<section id="manage">
+  <h2><span class="n">06</span>Manage devices</h2>
+  <ul>
+    <li><strong>See devices:</strong> <span class="ui">Security &amp; devices › Paired devices</span> lists each device, what it may do and when it was last seen.</li>
+    <li><strong>Remove a device:</strong> click <span class="ui">Revoke</span> on its row. It loses access straight away and has to pair again with a new code. Other devices aren't affected.</li>
+    <li><strong>Stop all outside access:</strong> click <span class="ui">Turn off Tailscale access</span>. The address stops working at once. Turn it back on any time with <span class="ui">Connect with Tailscale</span>; paired devices keep working.</li>
+  </ul>
+</section>
+
+<section id="trouble">
+  <h2><span class="n">07</span>Troubleshooting</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>What you see</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td>GeneratorAI opens but nothing loads</td><td>Find the keychain dialog ("GeneratorAI Safe Storage") and click <strong>Always Allow</strong>.</td></tr>
+      <tr><td>"GeneratorAI can't be opened"</td><td>Right-click the app › <strong>Open</strong>, or run the <code>xattr</code> command from step 1.</td></tr>
+      <tr><td>Tailscale card: <strong>Not installed</strong> or <strong>Signed out</strong></td><td>Install Tailscale or sign in from its menu-bar icon, then click the card's refresh icon.</td></tr>
+      <tr><td>Tailscale card: <strong>HTTPS off</strong></td><td>Click <strong>Turn on HTTPS</strong> › <strong>Enable HTTPS</strong> on the Tailscale page, then refresh.</td></tr>
+      <tr><td>The address doesn't open on the other device</td><td>Check Tailscale is <strong>Connected</strong> on both devices with the <strong>same account</strong>, and GeneratorAI is running on the Mac.</td></tr>
+      <tr><td>The address shows "Bad Gateway" (502)</td><td>GeneratorAI on the Mac isn't running or is still starting. Open it (and answer the keychain dialog).</td></tr>
+      <tr><td>"Not paired yet" on a device that used to work</td><td>It was revoked, or the browser's data was cleared. Pair again with a new code.</td></tr>
+      <tr><td>Code rejected</td><td>Codes expire after 10 minutes and work once. Generate a new one.</td></tr>
+      <tr><td>Linux: Tailscale says "Access denied"</td><td>Run <code>sudo tailscale set --operator=$USER</code> once.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="how">
+  <h2><span class="n">08</span>How it works</h2>
+  <div class="flowline" role="img" aria-label="Your phone, through Tailscale's encrypted network, reaches Tailscale on your Mac, which forwards to GeneratorAI on that Mac only.">
+    <div class="node"><b>Your phone or laptop</b><span>a browser, paired with its own key</span></div><span class="arrow">→</span>
+    <div class="node"><b>Tailscale network</b><span>encrypted device to device (WireGuard)</span></div><span class="arrow">→</span>
+    <div class="node"><b>Tailscale on your Mac</b><span>https://your-mac…ts.net · trusted certificate</span></div><span class="arrow">→</span>
+    <div class="node"><b>GeneratorAI</b><span>listens only on this Mac (127.0.0.1)</span></div>
+  </div>
+  <ul>
+    <li><strong>Nothing is opened to the internet.</strong> GeneratorAI only listens on the Mac itself. Tailscale forwards to it, and only devices signed in to <em>your</em> Tailscale account can reach the address.</li>
+    <li><strong>No certificate warnings.</strong> Tailscale gets a real certificate for your private address from Let's Encrypt, the same kind public websites use.</li>
+    <li><strong>Encrypted twice.</strong> Tailscale encrypts traffic between your devices, and the browser adds HTTPS on top.</li>
+    <li><strong>Pairing is still required.</strong> Being on your Tailscale network isn't enough. Each device must pair with a one-time code. It then gets its own key that never leaves the device, every request is signed with it, and you can revoke any device on its own.</li>
+    <li><strong>Risky actions still ask.</strong> Running commands, pushing code and similar actions need your approval, whichever device you use.</li>
+  </ul>
+</section>
+
+<section id="tested">
+  <h2><span class="n">09</span>What we tested (10 Oct 2026)</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>Scenario</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>The app detects Tailscale's state (HTTPS off → Ready) and links to the fix</td><td><span class="chip ok">pass</span></td></tr>
+      <tr><td>Connect with Tailscale sets up the private address</td><td><span class="chip ok">pass</span> <code>https://…ts.net</code> → GeneratorAI</td></tr>
+      <tr><td>Another browser opens it with no warning</td><td><span class="chip ok">pass</span> Let's Encrypt certificate, secure page</td></tr>
+      <tr><td>Pair with a code, then use a chat (Claude replied)</td><td><span class="chip ok">pass</span> reply streamed in seconds</td></tr>
+      <tr><td>Revoke the device</td><td><span class="chip ok">pass</span> it returns to the pairing screen</td></tr>
+      <tr><td>Turn off: the address stops; turn on again</td><td><span class="chip ok">pass</span></td></tr>
+      <tr><td>Quit and reopen GeneratorAI: access comes back</td><td><span class="chip ok">pass</span> after the keychain prompt on this unsigned build</td></tr>
+      <tr><td>A real phone</td><td><span class="chip plain">to do</span> follow section 5 on your phone</td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted">Tested with the packaged app on an isolated profile, real Tailscale 1.102.4 and a real tailnet.</p>
+</section>
+
+<footer>GeneratorAI alpha · user guide · 10 October 2026</footer>
+</main>
+</div>

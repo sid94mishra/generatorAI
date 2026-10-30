@@ -12,9 +12,6 @@ export {
   SELF_EXECUTABLES,
 } from './computerUseBlocklist.js';
 
-/** Default harness model identifier */
-export const DEFAULT_MODEL = 'claude-sonnet-4.6';
-
 /** Default server port */
 export const DEFAULT_PORT = 3100;
 
@@ -90,3 +87,17 @@ export const COMPUTER_USE_SKILL_NAME = 'generatorai-computer-use';
 
 /** Default lifetime of a pending consent prompt. `AppConfig` derives from this. */
 export const COMPUTER_USE_CONSENT_TTL_MS = 120_000;
+
+// ── Provider capability levels (P02) ──
+export {
+  PROVIDER_CAPABILITY_LEVELS,
+  capabilityLevelsFor,
+  sessionCapabilityWarnings,
+  type ApprovalGatingLevel,
+  type HostToolsLevel,
+  type StructuredOutputLevel,
+  type SkillsLevel,
+  type CapabilityLevels,
+  type LevelledProviderId,
+  type SessionCapabilityWarning,
+} from './providerCapabilityLevels.js';

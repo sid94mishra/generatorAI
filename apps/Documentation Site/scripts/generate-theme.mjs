@@ -18,7 +18,7 @@ for (const theme of THEMES) for (const mode of ['light','dark']) {
     const a=resolveAccentTokens(theme,id,mode);
     const sel=`${selector}[data-accent='${id}']`;
     const defaultSel=id===theme.defaultAccent?`${selector}:not([data-accent]),${theme.id===DEFAULT_THEME?`html[data-theme='${mode}']:not([data-palette]),`:''}`:'';
-    css+=`${defaultSel}${sel}{--app-primary:${a.primary};--app-primary-fill:${a.primaryEmphasis};--app-on-primary:${t.primaryForeground};--app-accent:${a.accent};}\n`;
+    css+=`${defaultSel}${sel}{--app-primary:${a.primary};--app-primary-fill:${a.primaryEmphasis};--app-on-primary:${a.onAccent};--app-accent:${a.accent};}\n`;
     checks.push({theme:theme.id,mode,accent:id,background:t.background,foreground:t.foreground,primary:a.primary,fill:a.primaryEmphasis});
   }
 }

@@ -311,6 +311,15 @@ describe('PlanService', () => {
     expect(message).toContain('Also add tests');
   });
 
+  it('frames notes given with an approval as steering for the implementation', () => {
+    const message = service.buildFeedbackMessage({
+      title: 'Add OAuth', revision: 2, comments: [], freeText: 'Implement only WP0 now', approved: true,
+    });
+    expect(message).toContain('approved the plan with these notes');
+    expect(message).toContain('Implement only WP0 now');
+    expect(message).not.toContain('Requested changes');
+  });
+
   it('omits resolved comments from the feedback message', async () => {
     const message = service.buildFeedbackMessage({
       title: 'T', revision: 1, freeText: 'note',

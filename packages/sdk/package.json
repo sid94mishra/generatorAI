@@ -33,10 +33,13 @@
     "lint": "eslint src/"
   },
   "dependencies": {
-    "@generatorai/shared": "workspace:*",
+    "@generatorai/agent-harness-providers": "workspace:*",
     "@generatorai/core": "workspace:*",
     "@generatorai/db": "workspace:*",
-    "@generatorai/agent-harness-providers": "workspace:*"
+    "@generatorai/secrets": "workspace:*",
+    "@generatorai/shared": "workspace:*",
+    "@generatorai/workflow-spec": "workspace:*",
+    "zod": "^3.25.76"
   },
   "engines": {
     "node": ">=22"

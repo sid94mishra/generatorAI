@@ -1,3 +1,4 @@
+import type { FileOpStat } from './AgentEvent.js';
 // ────────────────────────────────────────────────────────────────
 // Chat — First-class top-level domain entity
 // 1 Chat → 1 Session → 1 Harness Conversation
@@ -34,7 +35,9 @@ export type BackgroundTaskStatus =
   | 'needs_review'
   | 'completed'
   | 'failed'
-  | 'cancelled';
+  | 'cancelled'
+  /** D-100: its turn died with the previous server process; Resume continues it from its transcript. */
+  | 'interrupted';
 
 /**
  * Metadata attached to a chat that was spawned as a background agent task by
@@ -49,10 +52,102 @@ export interface BackgroundTaskMeta {
   taskIndex?: number;
   /** Current lifecycle status of this background task. */
   status: BackgroundTaskStatus;
+  /** Who cancelled it (G-20); set only while `status === 'cancelled'`. */
+  cancelledBy?: BackgroundTaskCancelledBy;
+  /** When it was cancelled, epoch ms (G-20); set only while `status === 'cancelled'`. */
+  cancelledAt?: number;
+}
+
+/**
+ * Who cancelled a background task (G-20):
+ * - `user` — someone cancelled THIS task: the Tasks panel's Cancel
+ *   (`POST /chats/:id/background-tasks/:taskId/cancel`) or Stop inside the
+ *   worker chat itself.
+ * - `orchestrator` — it was stopped along with its orchestrator: the
+ *   orchestrator chat was stopped, rewound, archived or deleted.
+ */
+export const BACKGROUND_TASK_CANCELLERS = ['user', 'orchestrator'] as const;
+export type BackgroundTaskCancelledBy = (typeof BACKGROUND_TASK_CANCELLERS)[number];
+
+/** A cancel attribution as stored and emitted (G-20). */
+export interface BackgroundTaskCancellation {
+  cancelledBy: BackgroundTaskCancelledBy;
+  /** Epoch ms. */
+  cancelledAt: number;
+}
+
+/** `POST /chats/:id/background-tasks/:taskId/cancel` → 202. */
+export interface BackgroundTaskCancelResult extends BackgroundTaskCancellation {
+  ok: true;
+  taskId: string;
+}
+
+/** One row of `GET /chats/:id/background-tasks` (`{ tasks }`). */
+export interface BackgroundTaskListItem {
+  taskId: string;
+  taskName: string;
+  status: BackgroundTaskStatus;
+  model?: string;
+  /** The agent the orchestrator bound the worker to (`agentRef` on spawn), and its name — DockTasks rows show it. */
+  agentRef?: string;
+  agentName?: string;
+  /** The first line of the brief's objective — what the orchestrator asked the worker to do (Tasks rows show it). */
+  objective?: string;
+  reviewRounds: number;
+  /** G-20: present while `status === 'cancelled'`. */
+  cancelledBy?: BackgroundTaskCancelledBy;
+  cancelledAt?: number;
+}
+
+/**
+ * `GET /chats/:id/background-tasks/:taskId/detail` (D-89): what the task
+ * detail shows beyond the digest — the brief the orchestrator sent, its review
+ * rounds and the worker's latest steps. Read from the worker chat's persisted
+ * messages, so it survives a restart (the live task record does not).
+ */
+export interface BackgroundTaskDetail {
+  taskId: string;
+  taskName: string;
+  status: BackgroundTaskStatus;
+  model?: string;
+  /** The orchestrator's brief (the worker chat's first message). Null when it is not there. */
+  brief: {
+    /** The whole brief as sent (markdown). */
+    text: string;
+    objective?: string;
+    context?: string;
+    /** "Out of scope" as the orchestrator wrote it. */
+    boundaries?: string;
+  } | null;
+  /** Follow-ups the orchestrator sent after reading a result (rework requests), oldest first. */
+  rounds: Array<{ round: number; at: string; request: string }>;
+  /** `rounds.length`; the orchestrator may send at most `maxReviewRounds`. */
+  reviewRounds: number;
+  maxReviewRounds: number;
+  /**
+   * How the orchestrator's review ended: `accepted` (it read the result and
+   * moved on), `in_review` (it is reading it), `reworking` (a follow-up is
+   * running), else the task's own state.
+   */
+  outcome: 'accepted' | 'in_review' | 'reworking' | 'running' | 'failed' | 'cancelled';
+  /** The worker's most recent tool calls, oldest first (at most 8). */
+  lastSteps: Array<{
+    id: string;
+    tool: string;
+    /** Tool arguments, clipped. */
+    args?: unknown;
+    status: 'running' | 'complete';
+    success?: boolean;
+    fileOp?: Pick<FileOpStat, 'kind' | 'filePath' | 'additions' | 'deletions'>;
+    /** When the message holding it was written. */
+    at: string;
+  }>;
 }
 
 /** Chat domain entity */
 export interface Chat {
+  pinnedAt?: string | null;
+  lastReadAt?: string | null;
   id: string;
   name: string;
   description?: string;
@@ -131,8 +226,24 @@ export interface Chat {
   agentOverrides?: AgentOverrides;
   /** Frozen, redacted projection captured at session creation (audit + replay). */
   agentSnapshot?: ResolvedAgentProjection;
+  /**
+   * The principal that created the chat (v60). The chat's in-process
+   * workflow tools act with its scopes; absent for chats created before v60.
+   */
+  createdByPrincipal?: ChatPrincipal;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * Who created a chat, as the workflow tools act for it (P06 WP-6.2): a
+ * paired device, a service account, the local owner, or the platform itself
+ * (orchestrator workers inherit their orchestrator's).
+ */
+export interface ChatPrincipal {
+  kind: 'device' | 'service_account' | 'local' | 'system';
+  id: string;
+  scopes: string[];
 }
 
 /** Parameters for creating a new Chat */
@@ -188,4 +299,6 @@ export interface CreateChatParams {
   /** Set by `forkChat`: the source chat and turn. Never accepted from the API. */
   forkedFromChatId?: string;
   forkedAtTurnId?: string;
+  /** The creating principal (set by the route from the authenticated caller). Never accepted from the body. */
+  createdByPrincipal?: ChatPrincipal;
 }

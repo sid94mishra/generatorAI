@@ -3,7 +3,7 @@
 // message `EncryptedFileSecretStore` produces.
 
 import { describe, expect, it } from 'vitest';
-import { isVaultIntegrityFailure } from '../server-manager';
+import { isVaultIntegrityFailure, keystoreUnavailableMessage } from '../server-manager';
 
 const realServerOutput =
   'Fatal: Failed to start server: SecretStoreError: Secret system/token-signing-seed ' +
@@ -18,5 +18,16 @@ describe('isVaultIntegrityFailure', () => {
   it('ignores ordinary server output', () => {
     expect(isVaultIntegrityFailure('[Secrets] Using secret backend "env-key"')).toBe(false);
     expect(isVaultIntegrityFailure('Server listening on 127.0.0.1:54387')).toBe(false);
+  });
+});
+
+describe('keystoreUnavailableMessage', () => {
+  it('tells macOS users to allow the keychain prompt', () => {
+    expect(keystoreUnavailableMessage('darwin')).toContain('Always Allow');
+  });
+
+  it('gives Windows and Linux their own fix', () => {
+    expect(keystoreUnavailableMessage('win32')).toContain('Windows');
+    expect(keystoreUnavailableMessage('linux')).toContain('gnome-keyring');
   });
 });

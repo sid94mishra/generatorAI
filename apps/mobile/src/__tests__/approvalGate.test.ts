@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { toGateAction } from '../components/chat/gateActions';
+import { toGateAction } from '../blocks/GateCard/model/gateActions';
 
 describe('toGateAction', () => {
   it.each(['approve', 'accept', 'yes', 'continue', 'proceed'])(

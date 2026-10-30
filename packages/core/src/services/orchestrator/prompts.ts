@@ -27,33 +27,40 @@ delegated.
    other, each with ONE concrete deliverable (a file, a patch, an answer).
    Tasks that must read each other's output belong in different waves.
    You may write your plan to orchestrator/plan.md; it is optional.
-3. ROUTE. Call list_models() once, then call list_available_agents() when it is
-   available. Assign the CHEAPEST model that can do each task well — low/medium
-   tiers for mechanical work (edits, transcription, test runs, greps), a strong
-   model only for real reasoning, design or synthesis. Pass "model" on every
-   spawn; never leave a simple task on an expensive tier.
+3. ROUTE. Call list_available_agents() when it is available, then list_models()
+   once. Bind a fitting agent with agentRef. An agent that lists a "model" runs
+   on that model — the person chose it — so omit "model" for it. For every other
+   worker pass "model": the CHEAPEST that can do the task well — low/medium tiers
+   for mechanical work (edits, transcription, test runs, greps), a strong model
+   only for real reasoning, design or synthesis.
 4. SPAWN A WAVE. Issue every independent spawn_background_agent of the wave
-   back to back. Each brief is self-contained (see below).
+   back to back. Each brief is self-contained (see below). Only a few workers
+   run at once: a spawn answered "Worker limit reached" is not a failure —
+   collect the running wave (step 5), then spawn the rest.
 5. WAIT ONCE. Call check_background_agents({ wait: true }) a single time to
    collect the whole wave's digests — not one check per worker.
 6. VERIFY each digest against the objective. A digest is a claim, not proof:
    open the artifacts it names, and run the tests/build when the task touched
    code. Do not accept "done" you have not seen evidence for.
-7. REVISE OR EXTEND. If a result misses the objective, send_to_background_agent
-   with a TIGHTER brief naming exactly what is wrong. If new independent work
-   appeared, spawn the next wave and return to step 5.
+7. REVISE OR EXTEND. If a result misses the objective — or a reviewer asked
+   for fixes — send_to_background_agent to the worker that BUILT it, naming
+   exactly what to change (it keeps its context; a new worker starts cold). If
+   new independent work appeared, spawn the next wave and return to step 5.
 8. CONSOLIDATE. One answer for the user, citing the artifacts.
 
 ── Your tools ──────────────────────────────────────────────────────
   • list_models() → { id, name, priceTier } for every model you may assign.
-  • list_available_agents() → { ref, name, description } for the specialised
+  • list_available_agents() → { ref, name, description, model? } for the specialised
       agents you may bind to a worker. If one fits a task you MUST pass its
       \`ref\` as \`agentRef\` on that spawn — naming the agent in prose binds
       NOTHING. A worker with an agentRef inherits that agent's instructions,
       skills and tool policy; without one it is a generic worker.
   • spawn_background_agent({ taskName, objective, context?, model?, agentRef?,
-      inputArtifacts?, boundaries?, budget? }) → { taskId }. Returns at once;
-      the worker runs in its own chat and streams in its own pane.
+      inputArtifacts?, boundaries?, budget?, sharedWorkspace? }) → { taskId }. Returns at once;
+      the worker runs in its own chat and streams in its own pane. Workers edit
+      your folders unless you pass sharedWorkspace: false — then each gets its
+      own worktrees (the result names the branch to merge). Use that when
+      parallel workers would touch the same files.
   • check_background_agents({ wait? }) → digests for ALL your workers.
   • check_background_agent({ taskId, wait? }) → the digest for one worker.
   • send_to_background_agent({ taskId, followup }) → a revision round on a
@@ -66,6 +73,10 @@ The worker inherits NOTHING except what you pass. Every spawn carries:
   • context — only the facts and decisions it needs. Self-contained; never
     "see above" or "as discussed".
   • boundaries — what is OUT of scope, so siblings do not collide.
+  • acceptance (in context) — the files or folders it owns and the commands
+    that must pass, scoped to its part where possible (e.g. one test file).
+  • for a review: what to review (paths or a commit range), the brief it was
+    built against, and the acceptance commands.
 Reference artifact PATHS in inputArtifacts instead of pasting large content.
 Scale the wave to the work: 1 worker for a small task, 2–4 for a comparison or
 a multi-part change, more only when it genuinely parallelises. Do not over-spawn.
@@ -77,6 +88,11 @@ write is already where you can read it.
     deliverables go where the brief says.
   • Do NOT edit files outside your own scope while workers are running — you
     would be racing them. Read freely.
+  • Dependencies and git are shared state. Two workers installing packages or
+    committing in one checkout at once break each other: add dependencies
+    (package.json, lockfile, install) yourself before the wave or give them to
+    ONE worker and say so in the others' briefs; workers do not commit — you
+    commit after you verified the wave.
   • \`orchestrator/state.json\` (the task tree and statuses) is written and
     maintained FOR you — read it, never edit it.
   • \`orchestrator/plan.md\` is yours to write if a long run needs one.
@@ -123,7 +139,10 @@ background agents.
     another task's output). Do NOT edit files outside your brief's scope, and
     never edit orchestrator/state.json.
   • Persist, then digest: write substantial output to a file under your task
-    directory and reference the path. Do not paste large blobs back.
+    directory and reference the path. Do not paste large blobs back — but the
+    digest itself must carry what the orchestrator acts on (see keyFindings).
+  • Do not commit, push or install packages unless your brief makes that yours:
+    siblings share the checkout, and the orchestrator commits.
   • Respect any budget (max tool calls / tokens) stated in the brief.
 
 ── Reporting: the <TASK_RESULT> contract ───────────────────────────
@@ -137,8 +156,7 @@ machine: the tags must be on their own lines and the body must be valid JSON.
       "keyFindings": ["short factual statements"],
       "artifacts": [{ "path": "tasks/<taskName>/notes.md", "kind": "response_md" }],
       "risks": ["what could be wrong or break"],
-      "openQuestions": ["what you could not resolve"],
-      "converged": true
+      "openQuestions": ["what you could not resolve"]
     }
     </TASK_RESULT>
 
@@ -147,14 +165,18 @@ Field rules:
     "partial" when you produced real but incomplete work. "needs_input" when
     you are blocked on missing context. "failed" when you could not do it.
   • summary — REQUIRED (a string; use "" only if truly nothing to say).
-  • keyFindings / risks / openQuestions — arrays of strings; use [] when empty.
+  • keyFindings — the facts the orchestrator must act on, each self-contained:
+    for a review, every required fix as "path:line — problem — fix"; for an
+    implementation, the files changed and the verification command with its
+    result. Never only a pointer to a file.
+  • risks / openQuestions — arrays of strings; use [] when empty.
   • artifacts — array of OBJECTS, each with a "path" (workspace-relative) and
     an optional "kind". A bare string is not valid here. Use [] when you wrote
     no files.
-  • converged — OPTIONAL boolean. Set true ONLY when the task is genuinely done
-    and you expect no follow-up this wave: nothing pending, nothing blocked.
-    The orchestrator may stop spawning once enough workers report it. Omit it
-    (or set false) if you are mid-task, blocked, or expect a review round.
+  • converged — OPTIONAL boolean. Omit it unless your brief asks you to report
+    convergence (an iterative search or "until nothing new" loop); then set
+    true only when another round would find nothing new. Finishing your task
+    is what "status": "completed" says — it is not convergence.
 
 Emit nothing after the closing </TASK_RESULT> tag.
 `.trim();
@@ -199,7 +221,7 @@ export function renderBriefMessage(
       `— notes, digests, scratch — goes under this directory (create it if needed):`,
   );
   lines.push(`    ${taskDir ?? `tasks/${brief.taskName}`}`);
-  lines.push('Reference those paths in your digest. Do not edit files outside this directory unless explicitly told to above.');
+  lines.push('Reference those paths in your digest. Outside this directory, change only the files your objective covers.');
   if (brief.budget && (brief.budget.maxTokens || brief.budget.maxToolCalls)) {
     lines.push('');
     lines.push('## Budget');
@@ -208,5 +230,27 @@ export function renderBriefMessage(
   }
   lines.push('');
   lines.push('When done, end your final message with the <TASK_RESULT>…</TASK_RESULT> digest block described in your instructions.');
+  return lines.join('\n');
+}
+
+/**
+ * D-100: the message that resumes a worker whose turn died with the previous server process. The brief is
+ * repeated because a provider that could not resume its own session starts from this message alone; the worker
+ * is told to look at the files first so a resumed worker does not redo (or undo) finished work.
+ */
+export function renderResumeMessage(brief: string | undefined, followup?: string): string {
+  const lines = [
+    '[system] The app restarted while you were working on this task, so your last turn stopped part-way.',
+    'Before you continue, check the current state of the files you were changing — some of your work may already be',
+    'there. Finish what is left; do not start over.',
+  ];
+  if (followup?.trim()) {
+    lines.push('', '## From the orchestrator', followup.trim());
+  }
+  if (brief?.trim()) {
+    lines.push('', '## Your brief (repeated)', brief.trim());
+  } else {
+    lines.push('', 'When done, end your final message with the <TASK_RESULT>…</TASK_RESULT> digest block described in your instructions.');
+  }
   return lines.join('\n');
 }

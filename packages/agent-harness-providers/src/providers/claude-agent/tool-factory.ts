@@ -9,6 +9,19 @@ import { ToolSemaphore } from '../../toolSemaphore.js';
 
 const MCP_SERVER_NAME = 'generatorai-tools';
 
+/**
+ * The model's tool_use id for an in-process MCP call. Claude Code puts it in
+ * the request's `_meta` (`claudecode/toolUseId`); the JSON-RPC request id is
+ * the fallback (unique per call, but not stable across a replay).
+ */
+function toolUseIdOf(extra: unknown): string | undefined {
+  const e = extra as { _meta?: Record<string, unknown>; requestId?: unknown } | undefined;
+  const meta = e?._meta?.['claudecode/toolUseId'];
+  if (typeof meta === 'string' && meta) return meta;
+  if (typeof e?.requestId === 'string' || typeof e?.requestId === 'number') return `rpc-${String(e.requestId)}`;
+  return undefined;
+}
+
 // W13 / X-1 — `ToolSemaphore` moved to `../../toolSemaphore.js` so
 // CopilotProvider's tool factory can share it instead of going without a
 // concurrency bound entirely. Re-exported here so existing imports of
@@ -41,9 +54,11 @@ export function buildClaudeAgentMcpTools(
 ): {
   mcpServerConfig: ReturnType<typeof createSdkMcpServer>;
   toolNames: string[];
+  /** The SDK names of tools that declared `skipPermission` (inherently safe: never gated, U-24). */
+  skipPermissionToolNames: string[];
 } {
   if (toolDefs.length === 0) {
-    return { mcpServerConfig: createSdkMcpServer({ name: MCP_SERVER_NAME, version: '1.0.0', tools: [] }), toolNames: [] };
+    return { mcpServerConfig: createSdkMcpServer({ name: MCP_SERVER_NAME, version: '1.0.0', tools: [] }), toolNames: [], skipPermissionToolNames: [] };
   }
 
   // The SDK's tool() helper (and the underlying @modelcontextprotocol/sdk
@@ -56,13 +71,15 @@ export function buildClaudeAgentMcpTools(
       name: def.name,
       description: def.description,
       inputSchema: jsonSchemaToZodShape(def.parametersSchema),
-      handler: async (args: Record<string, unknown>) => {
+      handler: async (args: Record<string, unknown>, extra?: unknown) => {
         // W13 — the whole ladder, not just the permit. See `runGuarded`.
-        const runHandler = () => def.handler(args);
+        const toolCallId = toolUseIdOf(extra);
+        const runHandler = () => def.handler(args, toolCallId ? { toolCallId } : {});
         try {
           const result = semaphore
             ? await semaphore.runGuarded(def.name, runHandler, {
                 ...(conversationId !== undefined ? { conversationId } : {}),
+                ...(def.timeoutMs !== undefined ? { timeoutMs: def.timeoutMs } : {}),
               })
             : await runHandler();
           // MCP content blocks carry images natively, so an attachment goes on
@@ -119,7 +136,9 @@ export function buildClaudeAgentMcpTools(
     (d) => `mcp__${MCP_SERVER_NAME}__${d.name}`,
   );
 
-  return { mcpServerConfig, toolNames };
+  const skipPermissionToolNames = toolDefs.filter((d) => d.skipPermission === true).map((d) => `mcp__${MCP_SERVER_NAME}__${d.name}`);
+
+  return { mcpServerConfig, toolNames, skipPermissionToolNames };
 }
 
 /**

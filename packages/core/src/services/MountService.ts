@@ -24,6 +24,7 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { statSync, type Dirent } from 'node:fs';
 import type {
   AgentEvent,
   ChatSourceSpec,
@@ -33,13 +34,16 @@ import type {
   ProjectCodebase,
   WorkspaceExposure,
   WorkspaceMount,
+  WorktreeInfo,
+  WorktreeRunType,
 } from '@generatorai/shared';
-import { ConflictError, NotFoundError, ValidationError } from '@generatorai/shared';
+import { ConflictError, NotFoundError, ValidationError, type MountableSourceSpec } from '@generatorai/shared';
 import type { IGitClient } from '@generatorai/git';
 import { shadowGitDirFor } from '@generatorai/changes';
 import type { IWorkspaceMountRepository } from '../domain/ports/IWorkspaceMountRepository.js';
 import type { IExecutionWorkspaceRepository } from '../domain/ports/IExecutionWorkspaceRepository.js';
 import type { IProjectCodebaseRepository } from '../domain/ports/IProjectCodebaseRepository.js';
+import type { IWorktreeRepository } from '../domain/ports/IWorktreeRepository.js';
 import type { EventBus } from '../events/EventBus.js';
 import { buildWorkspaceHint } from './chatSystemHints.js';
 
@@ -54,6 +58,8 @@ export interface PlannedMount {
   mode: WorkspaceMount['mode'];
   /** Absolute directory the agent will edit — known before preparation. */
   path: string;
+  /** Where the agent starts inside `path` (the codebase's subdirectory). */
+  workdir?: string;
   /** Git intent, resolved from the source spec. */
   intent: {
     isRepo: boolean;
@@ -94,6 +100,34 @@ export interface MountServiceDeps {
   workspacesDir: string;
   codebaseRepo?: IProjectCodebaseRepository;
   eventBus?: EventBus;
+  /**
+   * The project `worktrees` table. Every worktree mount of a project codebase
+   * gets a row there (same id as the mount), so a codebase's worktree list,
+   * the project counts and the retention sweep see chat and run worktrees.
+   */
+  worktreeRepo?: IWorktreeRepository;
+  /**
+   * Whether a workflow run is over. A finished run's worktree keeps its branch checked out, so a chat
+   * could not be opened on the branch of the pull request the run opened (to fix its CI, say); a branch
+   * held only by a finished run's clean worktree is released instead (see `releaseFinishedRunWorktree`).
+   */
+  isRunFinished?: (runId: string) => Promise<boolean>;
+}
+
+/**
+ * A map item workspace is owned by `<runId>~<instance>-<index>` (MapEffects);
+ * its worktrees belong to the run.
+ */
+export const MAP_ITEM_OWNER_SEP = '~';
+
+/** Who a workspace's worktrees belong to, as the `worktrees` table records it. */
+export function worktreeOwnerOf(workspace: Pick<ExecutionWorkspace, 'ownerType' | 'ownerId'>): {
+  runId: string;
+  runType: WorktreeRunType;
+} {
+  if (workspace.ownerType === 'chat') return { runId: workspace.ownerId, runType: 'manual' };
+  const sep = workspace.ownerId.indexOf(MAP_ITEM_OWNER_SEP);
+  return { runId: sep > 0 ? workspace.ownerId.slice(0, sep) : workspace.ownerId, runType: 'workflow' };
 }
 
 /** Default alias for a workspace that has no source at all. */
@@ -129,11 +163,22 @@ export class MountService {
   private readonly inflight = new Map<string, Promise<void>>();
   /** Late-wired: capture a baseline once every mount is ready. */
   private baselineCapture?: (workspaceId: string) => Promise<unknown>;
+  /** Late-wired: forget the checkpoints of a mount whose shadow store was deleted. */
+  private storeForgotten?: (workspaceId: string, alias: string) => Promise<unknown>;
 
   constructor(private readonly deps: MountServiceDeps) {}
 
   setBaselineCapture(fn: (workspaceId: string) => Promise<unknown>): void {
     this.baselineCapture = fn;
+  }
+
+  setStoreForgotten(fn: (workspaceId: string, alias: string) => Promise<unknown>): void {
+    this.storeForgotten = fn;
+  }
+
+  /** The git client the mounts are managed with (map snapshots and merges use the same one). */
+  get git(): IGitClient {
+    return this.deps.git;
   }
 
   // ── Plan ────────────────────────────────────────────────────
@@ -172,9 +217,15 @@ export class MountService {
 
     const claimPath = (p: string, label: string): void => {
       const abs = path.resolve(p);
+      const name = (q: string) => path.basename(q) || q;
       for (const other of paths) {
-        if (abs === other || abs.startsWith(other + path.sep) || other.startsWith(abs + path.sep)) {
-          throw new ValidationError(`${label} overlaps another mount (${other})`);
+        // Said the way the person sees their sources: by folder name, and how the two relate.
+        if (abs === other) throw new ValidationError(`${label} is added twice. Keep one of them.`);
+        if (abs.startsWith(other + path.sep)) {
+          throw new ValidationError(`${label} is inside ${name(other)}, which is already a source.`);
+        }
+        if (other.startsWith(abs + path.sep)) {
+          throw new ValidationError(`${label} contains ${path.relative(abs, other)}, which is already a source.`);
         }
       }
       paths.add(abs);
@@ -195,7 +246,25 @@ export class MountService {
       return planned;
     }
 
+    // The chat folder keeps its alias (so its path, so `replace` keeps the
+    // existing directory and its files) whatever the other sources are called.
+    const keepChatFolder = sources.some((s) => s.kind === 'chat-folder');
+    if (keepChatFolder) aliases.add(GENERATED_MOUNT_ALIAS);
+
     for (const source of sources) {
+      if (source.kind === 'chat-folder') {
+        const p = path.join(resolvedRoot, SOURCE_DIR, GENERATED_MOUNT_ALIAS);
+        claimPath(p, 'The chat folder');
+        planned.push({
+          alias: GENERATED_MOUNT_ALIAS,
+          position: planned.length,
+          originKind: 'generated',
+          mode: 'generated',
+          path: p,
+          intent: { isRepo: true },
+        });
+        continue;
+      }
       if (source.kind === 'codebase') {
         const codebase = await this.resolveCodebase(source.codebaseId, projectId);
         if (codebase.status !== 'ready') {
@@ -245,6 +314,7 @@ export class MountService {
           originPath: path.resolve(originPath),
           mode,
           path: mountPath,
+          ...(mountWorkdir(codebase.subdirectory) ? { workdir: mountWorkdir(codebase.subdirectory) } : {}),
           intent: {
             ...intent,
             codebaseType: codebase.type,
@@ -262,7 +332,7 @@ export class MountService {
       const abs = path.resolve(folder);
       await assertDirectory(abs, 'Folder');
       if (abs === managedRoot || abs.startsWith(managedRoot + path.sep)) {
-        throw new ValidationError('Folders inside the managed workspaces directory cannot be mounted');
+        throw new ValidationError('That folder is part of GeneratorAI\'s own workspaces, so it cannot be a source. Pick a folder of yours.');
       }
       if (abs === resolvedRoot || abs.startsWith(resolvedRoot + path.sep)) {
         throw new ValidationError('The workspace root itself cannot be mounted');
@@ -277,7 +347,7 @@ export class MountService {
       }
       const alias = takeAlias(source.alias, path.basename(abs) || 'folder');
       const mountPath = mode === 'worktree' ? path.join(resolvedRoot, SOURCE_DIR, alias) : abs;
-      claimPath(mountPath, `Folder ${abs}`);
+      claimPath(mountPath, `Folder ${path.basename(abs) || abs}`);
 
       const intent = isRepo
         ? await this.resolveGitIntent(abs, source, { mode, branchSlug: opts.branchSlug, isBare: false, mountPath })
@@ -311,7 +381,7 @@ export class MountService {
    */
   private async resolveGitIntent(
     originPath: string,
-    source: ChatSourceSpec,
+    source: MountableSourceSpec,
     ctx: { mode: 'in-place' | 'worktree'; codebase?: ProjectCodebase; branchSlug?: string; isBare: boolean; mountPath: string },
   ): Promise<PlannedMount['intent']> {
     const git = this.deps.git;
@@ -332,11 +402,17 @@ export class MountService {
         ctx.mode === 'worktree'
           ? samePath(await git.worktreeHoldingBranch(originPath, newBranch))
           : (await git.currentBranch(originPath)) === newBranch;
-      if (!ours) {
+      if (ours) {
+        branch = newBranch;
+        newBranch = undefined;
+      } else if (newBranch.startsWith(`${GENERATED_BRANCH_PREFIX}`)) {
+        // Our own namespace: the New chat form fills `generatorai/<chat name>` in when the field is left empty,
+        // so a second chat named like the first ("Use only the Read, Glob…") failed to start on a branch the
+        // person never chose. Take the next free name, as `defaultBranchName` does.
+        newBranch = await this.uniqueBranchName(originPath, newBranch);
+      } else {
         throw new ValidationError(`Branch "${newBranch}" already exists in ${originPath}; pick another name or check it out instead`);
       }
-      branch = newBranch;
-      newBranch = undefined;
     }
     if (baseRef && !(await git.revParse(originPath, baseRef))) {
       throw new ValidationError(`Base ref "${baseRef}" does not resolve in ${originPath}`);
@@ -345,7 +421,7 @@ export class MountService {
     if (ctx.mode === 'worktree') {
       if (branch && !newBranch) {
         const holder = await git.worktreeHoldingBranch(originPath, branch);
-        if (holder && !samePath(holder)) {
+        if (holder && !samePath(holder) && !(await this.releaseFinishedRunWorktree(holder))) {
           throw new ValidationError(
             `Branch "${branch}" is already checked out at ${holder}; a branch can only be checked out in one place. Choose "new branch" instead.`,
           );
@@ -370,14 +446,47 @@ export class MountService {
     }
 
     // in-place
+    const current = await git.currentBranch(originPath);
+    // A switch of the user's own checkout is refused HERE, while the chat is being created, when the folder has
+    // uncommitted work: refused only at prepare, the chat already existed — its first message lost and its header
+    // naming a branch it never got.
+    const switching = !!newBranch || (!!branch && branch !== current);
+    if (switching && !(await git.isClean(originPath))) {
+      const name = path.basename(originPath);
+      throw new ValidationError(
+        `${name} has uncommitted changes, so its branch cannot be switched. Commit or stash them first, or keep its current branch${current ? ` (${current})` : ''}.`,
+      );
+    }
     if (newBranch) return { isRepo: true, newBranch, baseRef: baseRef ?? branch ?? 'HEAD' };
     if (branch) return { isRepo: true, branch };
-    const current = await git.currentBranch(originPath);
     return { isRepo: true, ...(current ? { branch: current } : {}) };
   }
 
+  /**
+   * A branch held by the worktree of a FINISHED workflow run with nothing uncommitted: detach that
+   * worktree (it stays at the same commit — its Changes view is unaffected) so the branch can be checked
+   * out here. Anything else (a live run, a chat, uncommitted work, a folder we do not manage) keeps it.
+   */
+  private async releaseFinishedRunWorktree(holder: string): Promise<boolean> {
+    const finished = this.deps.isRunFinished;
+    if (!finished) return false;
+    const rel = path.relative(path.join(this.deps.workspacesDir, 'executions'), holder);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+    // A map item's workspace is owned by `<runId>~<instance>-<index>`.
+    const runId = rel.split(/[\\/]/)[0]?.split('~')[0];
+    if (!runId || !(await finished(runId).catch(() => false))) return false;
+    if (!(await this.deps.git.isClean(holder).catch(() => false))) return false;
+    await this.deps.git.detachHead(holder);
+    this.deps.logger.info(`[Mounts] Released ${holder} (finished run ${runId}) so its branch can be checked out elsewhere`);
+    return true;
+  }
+
   private async defaultBranchName(originPath: string, slug: string | undefined): Promise<string> {
-    const base = `generatorai/${slug && slug.length > 0 ? slug : 'chat'}`;
+    return this.uniqueBranchName(originPath, `${GENERATED_BRANCH_PREFIX}${slug && slug.length > 0 ? slug : 'chat'}`);
+  }
+
+  /** `base`, or `base-2`, `base-3` … — the first that does not exist yet. */
+  private async uniqueBranchName(originPath: string, base: string): Promise<string> {
     let name = base;
     let n = 2;
     while (await this.deps.git.branchExists(originPath, name)) name = `${base}-${n++}`;
@@ -394,7 +503,7 @@ export class MountService {
     try {
       const cb = await repo.getById(idOrAlias);
       if (projectId && cb.projectId !== projectId) {
-        throw new ValidationError(`Codebase "${idOrAlias}" belongs to a different project`);
+        throw new ValidationError(`Codebase "${cb.alias}" belongs to another project. A chat works with one project.`);
       }
       return cb;
     } catch (err) {
@@ -419,6 +528,7 @@ export class MountService {
       ...(m.originPath ? { originPath: m.originPath } : {}),
       mode: m.mode,
       path: m.path,
+      ...(m.workdir ? { workdir: m.workdir } : {}),
       git: {
         isRepo: m.intent.isRepo,
         ...(m.intent.branch ? { branch: m.intent.branch } : {}),
@@ -486,6 +596,7 @@ export class MountService {
         try {
           const git = await this.prepareMount(workspace, mount);
           await this.deps.mountRepo.update(mount.id, { status: 'ready', error: null, git });
+          await this.recordWorktree(workspace, mount, git);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           failures.push(`${mount.alias}: ${message}`);
@@ -547,10 +658,18 @@ export class MountService {
           // check it out rather than failing on "already exists".
           await git.addWorktree(origin, mount.path, { branch: intent.newBranch });
         } else {
+          // A project codebase cloned from a remote starts from the remote's
+          // CURRENT base (U-7): fetch it, and cut from `origin/<base>` — the
+          // clone's own `refs/heads/<base>` is only as fresh as the clone.
+          let base = intent.baseRef;
+          if (base && intent.codebaseType === 'git-remote' && !/^[0-9a-f]{7,40}$/i.test(base)) {
+            await git.fetchBranch(origin, 'origin', base).catch(() => undefined);
+            if (await git.revParse(origin, `refs/remotes/origin/${base}`)) base = `origin/${base}`;
+          }
           await git.addWorktree(origin, mount.path, {
             ...(intent.newBranch ? { newBranch: intent.newBranch } : {}),
             ...(intent.branch ? { branch: intent.branch } : {}),
-            ...(intent.baseRef ? { base: intent.baseRef } : {}),
+            ...(base ? { base } : {}),
           });
         }
         await this.copyIncludes(origin, mount.path, intent.include, mount.codebaseId);
@@ -610,6 +729,45 @@ export class MountService {
       ...(intent.newBranch ? { createdBranch: true } : {}),
       ...(nested.length ? { nested } : {}),
     };
+  }
+
+  /**
+   * Record a ready worktree mount of a project codebase in the `worktrees`
+   * table (row id = mount id). Idempotent; a failure is logged, never fatal —
+   * the mount itself is what the agent works in.
+   */
+  private async recordWorktree(workspace: ExecutionWorkspace, mount: WorkspaceMount, git: MountGitState): Promise<void> {
+    const repo = this.deps.worktreeRepo;
+    if (!repo || mount.mode !== 'worktree' || !mount.codebaseId || !mount.projectId) return;
+    try {
+      const existing = await repo.getById(mount.id).catch(() => null);
+      if (existing) {
+        if (existing.status !== 'active') await repo.updateStatus(mount.id, 'active');
+        return;
+      }
+      const row: WorktreeInfo = {
+        id: mount.id,
+        projectId: mount.projectId,
+        codebaseId: mount.codebaseId,
+        ...worktreeOwnerOf(workspace),
+        worktreePath: path.resolve(mount.path),
+        branchName: git.branch ?? '',
+        status: 'active',
+        createdAt: new Date(),
+      };
+      await repo.create(row);
+    } catch (err) {
+      this.deps.logger.warn(`[Mounts] Could not record worktree ${mount.alias} of workspace ${workspace.id}: ${err}`);
+    }
+  }
+
+  /** Drop the `worktrees` row of a mount whose directory is gone. */
+  private async forgetWorktree(mountId: string): Promise<void> {
+    try {
+      await this.deps.worktreeRepo?.delete(mountId);
+    } catch (err) {
+      this.deps.logger.warn(`[Mounts] Could not delete the worktree row of mount ${mountId}: ${err}`);
+    }
   }
 
   /**
@@ -731,17 +889,33 @@ export class MountService {
    * parent's own, with every worktree re-pointed at a NEW branch that starts
    * from the commit the parent's worktree is on right now.
    */
-  async sourcesForFork(parentWorkspaceId: string, sources: ChatSourceSpec[]): Promise<ChatSourceSpec[]> {
+  async sourcesForFork(
+    parentWorkspaceId: string,
+    sources: ChatSourceSpec[],
+    opts: {
+      /**
+       * Also give an in-place git mount a worktree of its own (an isolated
+       * orchestrator worker): without it two parallel workers still edit the
+       * one folder. A plain folder has no git to cut a worktree from and stays shared.
+       */
+      isolateInPlace?: boolean;
+    } = {},
+  ): Promise<ChatSourceSpec[]> {
     const mounts = await this.list(parentWorkspaceId);
     const out: ChatSourceSpec[] = [];
     for (const spec of sources) {
+      if (spec.kind === 'chat-folder') {
+        out.push(spec);
+        continue;
+      }
       const mount = mounts.find((m) =>
         spec.kind === 'codebase'
           ? m.codebaseId === spec.codebaseId || (!!spec.alias && m.alias === spec.alias)
           : (!!m.originPath && path.resolve(m.originPath) === path.resolve(spec.path)) ||
             (!!spec.alias && m.alias === spec.alias),
       );
-      if (!mount || mount.mode !== 'worktree' || !mount.git?.isRepo) {
+      const cut = mount?.mode === 'worktree' || (opts.isolateInPlace === true && mount?.mode === 'in-place');
+      if (!mount || !cut || !mount.git?.isRepo) {
         out.push(spec);
         continue;
       }
@@ -807,6 +981,66 @@ export class MountService {
       }
     }
     return copied;
+  }
+
+  // ── Map items: a mount per item cut from a snapshot (P05 §4.1) ───
+  //
+  // A `mount_per_item` map snapshots every run mount into a commit (the
+  // working tree as it is, uncommitted upstream changes included) and gives
+  // each item its own worktrees on new branches cut from those commits.
+  // Unlike `seedFrom` (best effort per file, for chat forks), this is ALL
+  // OR NOTHING: an item either gets every mount, or none and an error.
+
+  /**
+   * Cut the mounts of `item` (a fresh workspace) from `snapshot` (alias →
+   * commit of the run workspace's mounts). Every run mount must be git
+   * backed and have a snapshot commit. On any failure every mount created
+   * so far is removed (branches included) and the error is thrown.
+   */
+  async forkFromSnapshot(
+    runWorkspaceId: string,
+    snapshot: Readonly<Record<string, string>>,
+    item: ExecutionWorkspace,
+    opts: { branchFor: (alias: string) => string },
+  ): Promise<WorkspaceMount[]> {
+    const runMounts = (await this.list(runWorkspaceId)).filter((m) => m.status !== 'removed').sort((a, b) => a.position - b.position);
+    if (runMounts.length === 0) throw new ValidationError('The run has no mounts to cut item mounts from');
+    const planned: PlannedMount[] = runMounts.map((m) => {
+      const sha = snapshot[m.alias];
+      if (!sha) throw new ValidationError(`Mount "${m.alias}" has no snapshot commit`);
+      if (!m.git?.isRepo) throw new ValidationError(`Mount "${m.alias}" is not a git repository: mount_per_item needs git-backed run mounts`);
+      return {
+        alias: m.alias,
+        position: m.position,
+        originKind: m.originKind,
+        ...(m.codebaseId ? { codebaseId: m.codebaseId } : {}),
+        ...(m.projectId ? { projectId: m.projectId } : {}),
+        // Any worktree of a repository can add another: the run mount itself is the origin.
+        originPath: m.path,
+        mode: 'worktree',
+        path: path.join(item.rootPath, SOURCE_DIR, m.alias),
+        intent: { isRepo: true, newBranch: opts.branchFor(m.alias), baseRef: sha, codebaseType: 'git' as ProjectCodebase['type'] },
+      };
+    });
+    const staged = await this.stage(item.id, planned);
+    try {
+      await this.prepare(item.id);
+      const rows = await this.list(item.id);
+      const failed = rows.filter((r) => r.status !== 'ready');
+      if (failed.length > 0 || rows.length !== planned.length) {
+        throw new ConflictError(`Item mounts could not be cut: ${failed.map((f) => `${f.alias}: ${f.error ?? f.status}`).join('; ') || 'missing mounts'}`);
+      }
+      return rows.sort((a, b) => a.position - b.position);
+    } catch (err) {
+      for (const m of staged) await this.remove(m.id, { deleteBranch: true }).catch(() => undefined);
+      throw err;
+    }
+  }
+
+  /** Workspaces that edit `folder` in place right now (the source picker warns before a second chat joins them). */
+  async inPlaceWorkspaces(folder: string): Promise<string[]> {
+    const mounts = await this.deps.mountRepo.findInPlaceByPath(path.resolve(folder));
+    return [...new Set(mounts.map((m) => m.workspaceId))];
   }
 
   async list(workspaceId: string): Promise<WorkspaceMount[]> {
@@ -882,13 +1116,17 @@ export class MountService {
     }
 
     if (workspace) {
-      await fs.rm(shadowGitDirFor(workspace.rootPath, mount.alias), { recursive: true, force: true }).catch(() => undefined);
-      for (const sub of mount.git?.nested ?? []) {
-        await fs
-          .rm(shadowGitDirFor(workspace.rootPath, `${mount.alias}/${sub}`), { recursive: true, force: true })
-          .catch(() => undefined);
+      // The store and its checkpoint rows go together: rows left behind point
+      // at objects that are gone, and a mount re-added under the same alias
+      // (Empty workspace → a folder → Empty workspace again) could then never
+      // capture another checkpoint.
+      const aliases = [mount.alias, ...(mount.git?.nested ?? []).map((sub) => `${mount.alias}/${sub}`)];
+      for (const alias of aliases) {
+        await fs.rm(shadowGitDirFor(workspace.rootPath, alias), { recursive: true, force: true }).catch(() => undefined);
+        await this.storeForgotten?.(workspace.id, alias)?.catch(() => undefined);
       }
     }
+    if (mount.mode === 'worktree') await this.forgetWorktree(mountId);
     await this.deps.mountRepo.delete(mountId);
   }
 
@@ -911,19 +1149,66 @@ export class MountService {
     const mounts = await this.deps.mountRepo.findByWorkspace(workspaceId);
     let released = 0;
     for (const m of mounts) {
-      if (m.mode !== 'worktree' || m.status === 'removed' || !m.originPath) continue;
-      if (!(await pathExists(m.path))) continue;
-      try {
-        await this.deps.git.removeWorktree(m.originPath, m.path);
-        await this.deps.git.pruneWorktrees(m.originPath);
-        await rmWithRetry(m.path);
-        await this.deps.mountRepo.update(m.id, { status: 'removed' });
-        released++;
-      } catch (err) {
-        this.deps.logger.warn(`[Mounts] release failed for ${m.path}: ${err}`);
-      }
+      if (await this.releaseOne(m)) released++;
     }
     return released;
+  }
+
+  /**
+   * Bring back the worktrees `releaseWorktrees` took away (an archived chat
+   * that is reopened): each released mount is prepared again on the branch it
+   * kept, so the chat continues with its folders where they were. Starts the
+   * preparation and returns how many mounts it covers; `ready()` waits for it.
+   */
+  async restoreReleased(workspaceId: string, scope: PrepareScope = {}): Promise<number> {
+    const mounts = await this.deps.mountRepo.findByWorkspace(workspaceId, { includeRemoved: true });
+    const released = mounts.filter((m) => m.mode === 'worktree' && m.status === 'removed' && !!m.originPath && !!m.git?.branch);
+    for (const m of released) await this.deps.mountRepo.update(m.id, { status: 'preparing', error: null });
+    if (released.length > 0) {
+      await this.deps.workspaceRepo.updatePrep(workspaceId, 'pending', null);
+      void this.prepare(workspaceId, scope).catch(() => undefined);
+    }
+    return released.length;
+  }
+
+  /**
+   * Release ONE worktree mount by id (the `worktrees` row of a mount shares
+   * its id): the directory goes, the branch and the mount row (`removed`)
+   * stay. Returns false when `mountId` is not a worktree mount, so a caller
+   * holding a plain `worktrees` row id falls back to its own removal.
+   */
+  async releaseWorktree(mountId: string): Promise<boolean> {
+    const mount = await this.deps.mountRepo.findById(mountId);
+    if (!mount || mount.mode !== 'worktree') return false;
+    if (mount.status !== 'removed') {
+      if (!(await pathExists(mount.path))) {
+        await this.deps.mountRepo.update(mount.id, { status: 'removed' });
+      } else if (!(await this.releaseOne(mount))) {
+        throw new Error(`The worktree directory ${mount.path} could not be removed`);
+      }
+    }
+    await this.forgetWorktree(mountId);
+    return true;
+  }
+
+  private async releaseOne(m: WorkspaceMount): Promise<boolean> {
+    if (m.mode !== 'worktree' || m.status === 'removed' || !m.originPath) return false;
+    if (!(await pathExists(m.path))) {
+      // Nothing on disk to reclaim, and nothing for a worktree list to show.
+      await this.forgetWorktree(m.id);
+      return false;
+    }
+    try {
+      await this.deps.git.removeWorktree(m.originPath, m.path);
+      await this.deps.git.pruneWorktrees(m.originPath);
+      await rmWithRetry(m.path);
+      await this.deps.mountRepo.update(m.id, { status: 'removed' });
+      await this.forgetWorktree(m.id);
+      return true;
+    } catch (err) {
+      this.deps.logger.warn(`[Mounts] release failed for ${m.path}: ${err}`);
+      return false;
+    }
   }
 
   /** Recompute `hasUncommittedChanges` for every git mount (after a turn). */
@@ -982,8 +1267,10 @@ export function buildExposure(workspace: ExecutionWorkspace, mounts: WorkspaceMo
   const ordered = [...mounts].filter((m) => m.status !== 'removed').sort((a, b) => a.position - b.position);
   const scratchDir = path.join(workspace.rootPath, SCRATCH_DIR);
   const primary = ordered[0];
-  const workingDirectory = primary?.path ?? workspace.codeRoot ?? workspace.rootPath;
+  const workingDirectory = primary ? startDirOf(primary) : (workspace.codeRoot ?? workspace.rootPath);
   const extra = new Set<string>();
+  // Started in a subdirectory, the agent still owns the whole repository.
+  if (primary && path.resolve(workingDirectory) !== path.resolve(primary.path)) extra.add(primary.path);
   for (const m of ordered.slice(1)) extra.add(m.path);
   // The managed root carries scratch, plans and screenshots the agent must
   // be able to read and write. It is an additional directory unless it IS
@@ -1009,6 +1296,38 @@ export function buildExposure(workspace: ExecutionWorkspace, mounts: WorkspaceMo
 
 // ── Helpers ───────────────────────────────────────────────────
 
+/**
+ * A codebase `subdirectory` as a mount's `workdir`: relative, normalised to
+ * forward slashes, inside the repository. Undefined for none / `.`; a value
+ * that leaves the repository is a validation error at link time, and is
+ * ignored here.
+ */
+export function mountWorkdir(subdirectory: string | undefined): string | undefined {
+  const raw = subdirectory?.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (!raw) return undefined;
+  const norm = path.posix.normalize(raw);
+  if (norm === '.' || norm.startsWith('..') || path.isAbsolute(raw) || /^[A-Za-z]:/.test(raw)) return undefined;
+  return norm;
+}
+
+/**
+ * Where the agent starts in a mount: its `workdir` when that directory exists
+ * (a branch may not have the package yet), otherwise the mount itself. A mount
+ * still being prepared has no folder yet — its worktree is created after the
+ * conversation is composed — so its `workdir` is trusted until it is ready
+ * (the chat rebinds if the ready mount turns out not to have it).
+ */
+export function startDirOf(mount: Pick<WorkspaceMount, 'path' | 'workdir' | 'status'>): string {
+  if (!mount.workdir) return mount.path;
+  const dir = path.join(mount.path, ...mount.workdir.split('/'));
+  if (mount.status !== 'ready') return dir;
+  try {
+    return statSync(dir).isDirectory() ? dir : mount.path;
+  } catch {
+    return mount.path;
+  }
+}
+
 function sanitizeAlias(raw: string): string {
   const cleaned = raw.trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^[.-]+|[.-]+$/g, '');
   return cleaned.length > 0 ? cleaned.slice(0, 64) : 'mount';
@@ -1028,6 +1347,31 @@ async function assertDirectory(p: string, label: string): Promise<void> {
     if (err instanceof ValidationError) throw err;
     throw new ValidationError(`${label} does not exist: ${p}`);
   }
+}
+
+/**
+ * How many files a directory holds, up to `cap`, not counting `.git` — the
+ * chat folder's "is there work here?" (D-141). Breadth-first and stops at the
+ * cap, so a big tree costs no more than `cap` entries.
+ */
+export async function countFiles(dir: string, cap = 1000): Promise<number> {
+  let count = 0;
+  const queue = [dir];
+  while (queue.length > 0 && count < cap) {
+    const current = queue.shift()!;
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (e.name === '.git') continue;
+      if (e.isDirectory()) queue.push(path.join(current, e.name));
+      else if (++count >= cap) break;
+    }
+  }
+  return count;
 }
 
 async function hasDotGit(dir: string): Promise<boolean> {
@@ -1061,6 +1405,9 @@ async function rmWithRetry(target: string, attempts = 4): Promise<void> {
   }
   throw last;
 }
+
+/** The namespace of the branches GeneratorAI names itself. */
+export const GENERATED_BRANCH_PREFIX = 'generatorai/';
 
 /** `generatorai/<slug>` material from a chat name + short id. */
 export function branchSlugFor(name: string, id: string): string {

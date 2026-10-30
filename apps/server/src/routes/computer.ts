@@ -16,6 +16,12 @@
 // approving.
 // ────────────────────────────────────────────────────────────────
 
+import {
+  COMPUTER_CONTROL_MODES,
+  defaultConsentReach,
+  type ComputerConsentAnswerResult,
+  type ComputerControlState,
+} from '@generatorai/shared';
 import { Router, type Request, type Response } from 'express';
 import { createReadStream, watch as watchPath } from 'node:fs';
 import * as fs from 'node:fs/promises';
@@ -307,7 +313,14 @@ const ConsentBodySchema = z.object({
   requestId: z.string().min(1),
   appIdentity: z.string().min(1),
   decision: z.enum(['allow_once', 'allow_run', 'always_allow', 'deny']),
+  /**
+   * G-07 — "this app only" / "any app". Omitted keeps each decision's own
+   * reach (`defaultConsentReach`): allow_run any app, the rest this app.
+   */
+  scope: z.enum(['app', 'any']).optional(),
 });
+
+const ControlBodySchema = z.object({ mode: z.enum(COMPUTER_CONTROL_MODES) });
 
 const RuntimeActionSchema = z.object({ action: z.enum(['start', 'restart', 'stop']) });
 
@@ -348,8 +361,8 @@ export function createComputerRoutes(container: Container): Router {
       res.status(400).json({ error: { code: 'INVALID_BODY', message: parsed.error.message } });
       return;
     }
-    const { requestId, appIdentity, decision } = parsed.data;
-    const accepted = computerConsentStore.resolve(requestId, decision, appIdentity);
+    const { requestId, appIdentity, decision, scope } = parsed.data;
+    const accepted = computerConsentStore.resolve(requestId, decision, appIdentity, scope);
     if (!accepted) {
       // Expired, already answered, or naming the wrong app. All three are
       // "this prompt is no longer answerable", and the store has already
@@ -359,7 +372,35 @@ export function createComputerRoutes(container: Container): Router {
       });
       return;
     }
-    res.json({ ok: true, requestId, decision });
+    const answer: ComputerConsentAnswerResult = {
+      ok: true,
+      requestId,
+      decision,
+      scope: decision === 'deny' ? 'app' : (scope ?? defaultConsentReach(decision)),
+    };
+    res.json(answer);
+  });
+
+  // GET /workspaces/:id/computer/control — who drives this desktop (G-07).
+  router.get('/control', (req, res) => {
+    const state: ComputerControlState = computerService.getControl(idOf(req as Request<WorkspaceIdParams>));
+    res.json(state);
+  });
+
+  // POST /workspaces/:id/computer/control — Pause agent / Take over / hand back.
+  // `paused` and `user` make every agent desktop operation on this workspace
+  // refuse (agent_paused / user_in_control) until `agent` is set again.
+  router.post('/control', async (req, res, next) => {
+    try {
+      const parsed = ControlBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: { code: 'INVALID_BODY', message: parsed.error.message } });
+        return;
+      }
+      res.json(await computerService.setControl(idOf(req as Request<WorkspaceIdParams>), parsed.data.mode));
+    } catch (err) {
+      next(err);
+    }
   });
 
   // GET /workspaces/:id/computer/grants — standing "always allow" decisions.

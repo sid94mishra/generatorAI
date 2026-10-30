@@ -1,0 +1,66 @@
+{
+  "name": "@generatorai/workflow-spec",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    },
+    "./builders": {
+      "import": "./src/builders/index.ts",
+      "types": "./src/builders/index.ts"
+    },
+    "./jsonschema": {
+      "import": "./src/jsonschema.ts",
+      "types": "./src/jsonschema.ts"
+    },
+    "./workflow.schema.json": "./generated/workflow.schema.json",
+    "./presets": {
+      "import": "./src/presets/index.ts",
+      "types": "./src/presets/index.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "generated"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./builders": {
+        "types": "./dist/builders/index.d.ts",
+        "import": "./dist/builders/index.js"
+      },
+      "./workflow.schema.json": "./generated/workflow.schema.json",
+      "./presets": {
+        "types": "./dist/presets/index.d.ts",
+        "import": "./dist/presets/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --build --force",
+    "test": "vitest run",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "fast-check": "^4.10.2",
+    "zod-to-json-schema": "3.25.2"
+  }
+}

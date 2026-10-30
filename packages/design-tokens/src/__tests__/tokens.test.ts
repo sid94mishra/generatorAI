@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { resolveDesignTokens } from '../design.js';
 
 import {
   contrastRatio,
@@ -143,7 +144,7 @@ describe('theme registry', () => {
     }
   });
 
-  it('exposes the same six accents on every theme', () => {
+  it('exposes the same seven accents on every theme', () => {
     for (const theme of THEMES) {
       const accents = themeAccents(theme);
       expect(accents.map((a) => a.id), theme.id).toEqual([...ACCENT_IDS]);
@@ -173,6 +174,28 @@ describe('theme registry', () => {
     }
   });
 
+  it('gives hue accents the theme onAccent, and ink the foreground with surface-coloured text', () => {
+    for (const theme of THEMES) {
+      for (const appearance of APPEARANCES) {
+        const spec = theme[appearance];
+        for (const accentId of ACCENT_IDS) {
+          const a = resolveAccentTokens(theme, accentId, appearance);
+          if (accentId !== 'ink') {
+            expect(a.onAccent, `${theme.id}/${appearance}/${accentId}`).toBe(spec.onAccent);
+            continue;
+          }
+          const surface =
+            relativeLuminance(parseHex(spec.card)) >= relativeLuminance(parseHex(spec.background))
+              ? spec.card
+              : spec.background;
+          expect(a.primary, `${theme.id}/${appearance}/ink primary`).toBe(spec.foreground);
+          expect(a.primaryEmphasis, `${theme.id}/${appearance}/ink emphasis`).toBe(spec.foreground);
+          expect(a.onAccent, `${theme.id}/${appearance}/ink onAccent`).toBe(surface);
+        }
+      }
+    }
+  });
+
   it('derives tints from emphasis on dark and primary on light', () => {
     for (const theme of THEMES) {
       const dark = resolveAccentTokens(theme, theme.defaultAccent, 'dark');
@@ -190,8 +213,7 @@ describe('WCAG AA compliance — every theme × appearance', () => {
   it('filled buttons clear 4.5:1 for every accent', () => {
     for (const { theme, appearance, label, tokens } of MATRIX) {
       for (const accentId of ACCENT_IDS) {
-        const { primaryEmphasis } = resolveAccentTokens(theme, accentId, appearance);
-        const fg = tokens.primaryForeground;
+        const { primaryEmphasis, onAccent: fg } = resolveAccentTokens(theme, accentId, appearance);
         const ratio = contrastRatio(fg, primaryEmphasis);
         expect(
           ratio,
@@ -382,15 +404,17 @@ describe('derived surfaces', () => {
     }
   });
 
-  it('gives every theme syntax colours that read on its code surface', () => {
-    for (const { theme, appearance, label, tokens } of MATRIX) {
+  it('gives every theme syntax colours that read as body text on every code surface', () => {
+    for (const { theme, appearance, label } of MATRIX) {
       const syntax = resolveSyntaxTokens(theme, appearance);
+      const d = resolveDesignTokens(theme, appearance, theme.defaultAccent);
       for (const [role, colour] of Object.entries(syntax)) {
-        const ratio = contrastRatio(colour, tokens.card);
-        expect(
-          ratio,
-          `${label}: syntax.${role} ${colour} on card = ${ratio.toFixed(2)}:1`,
-        ).toBeGreaterThanOrEqual(3);
+        for (const [name, back] of Object.entries({ ground: d.ground, surface: d.surface, sunken: d.sunken })) {
+          const ratio = contrastRatio(colour, back);
+          expect(ratio, `${label}: syntax.${role} ${colour} on ${name} = ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
+            theme.textContrast ?? 4.5,
+          );
+        }
       }
     }
   });
@@ -506,8 +530,8 @@ describe('the high-contrast theme actually is one', () => {
   });
 });
 
-describe('the default theme is unchanged', () => {
-  // GitHub is what every existing user is already looking at. These are the
+describe('the GitHub theme reproduces its original values', () => {
+  // GitHub was the default before Instrument (D-11). These are the
   // exact values from the hand-authored token table that preceded the theme
   // system, asserted so a refactor of the derivation cannot quietly restyle
   // the whole app.

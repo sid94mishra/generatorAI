@@ -40,8 +40,27 @@ import type {
   AttachmentRef,
   SendPromptOptions,
   ProviderCapabilities,
+  PermissionRequest,
 } from '@generatorai/core';
-import type { AgentEvent } from '@generatorai/shared';
+import type { AgentEvent, AgentQuestion } from '@generatorai/shared';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, relative, resolve as resolvePath } from 'node:path';
+
+// ── Model catalog ────────────────────────────────────────────────
+//
+// P2-00 — extracted to a standalone constant so `HarnessRegistry` can report
+// the same catalog synchronously (it needs a model list before any
+// conversation exists to call `getModels()` on) without duplicating it.
+export const FAUX_MODELS: HarnessModel[] = [
+  {
+    id: 'faux-model',
+    name: 'Faux Model',
+    provider: 'faux',
+    description: 'Deterministic faux model for testing',
+    promptTokenLimit: 200_000,
+    totalContextWindow: 200_000,
+  },
+];
 
 // ── Script entry types ──────────────────────────────────────────
 
@@ -49,6 +68,17 @@ import type { AgentEvent } from '@generatorai/shared';
 export interface FauxTextEntry {
   type: 'text';
   content: string;
+  /**
+   * Pause between tokens, in ms — a long answer then streams over seconds the
+   * way a real provider's does (transcript performance checks). Default 0:
+   * every token is emitted at once.
+   */
+  delayMs?: number;
+  /**
+   * Emit this many words per token event (default 1), pausing `delayMs` per
+   * word between events — the bursty delivery real providers have.
+   */
+  chunkWords?: number;
 }
 
 /** Emit a tool_start event and wait for provideToolResult(). */
@@ -57,6 +87,20 @@ export interface FauxToolCallEntry {
   name: string;
   input: Record<string, unknown>;
   /** Caller may override the callId; defaults to auto-assigned. */
+  callId?: string;
+}
+
+/**
+ * Invoke one of the conversation's REGISTERED tools (the `tools` handed to
+ * `createConversation`, e.g. the orchestrator's `spawn_background_agent`) with
+ * `input`, emitting tool_start / tool_complete around the real handler — so a
+ * scripted chat can drive GeneratorAI's own tools end to end, the way a real
+ * model does. An unknown tool completes with `success: false`.
+ */
+export interface FauxToolInvokeEntry {
+  type: 'tool_invoke';
+  name: string;
+  input: Record<string, unknown>;
   callId?: string;
 }
 
@@ -100,15 +144,96 @@ export interface FauxExhaustedEntry {
   maxTurns: number;
 }
 
+/**
+ * P2-00 — write, overwrite or delete a real file under the conversation's
+ * `workingDirectory`, so a scripted turn produces a REAL diff for the
+ * Changes dock / git status to find (09-verification.md §4.2: "file edits
+ * happen in a seeded dummy repo so the Changes dock has real diffs").
+ *
+ * Emits a `harness.tool_start` / `harness.tool_complete` pair around the
+ * write, with a best-effort `fileOp` line-count stat, so the transcript shows
+ * a tool card exactly like a real Write/Edit tool call would.
+ */
+export interface FauxFileEditEntry {
+  type: 'file_edit';
+  /** Relative to `CreateConversationParams.workingDirectory` (or absolute). */
+  path: string;
+  /** New full file content. Ignored when `op` is 'delete'. */
+  content?: string;
+  /**
+   * Defaults to 'delete' when `content` is omitted, otherwise 'update' when
+   * the file already exists on disk and 'create' when it does not.
+   */
+  op?: 'create' | 'update' | 'delete';
+  /** Tool name shown in the transcript. Defaults to 'Write' (or 'Delete'). */
+  toolName?: string;
+  callId?: string;
+}
+
+/**
+ * P2-00 — drive `CreateConversationParams.onQuestionRequest`, the same
+ * blocking gate a real provider's clarifying-question tool uses
+ * (`ChatManagementService.buildQuestionHandler`). Requires plan mode to be
+ * enabled and the handler to have been installed on this conversation;
+ * otherwise the entry is skipped with a `harness.warning` event rather than
+ * throwing, since not every conversation configures the gate.
+ */
+export interface FauxAskQuestionEntry {
+  type: 'ask_question';
+  questions: AgentQuestion[];
+}
+
+/**
+ * P2-00 — drive `CreateConversationParams.onPermissionRequest`, the same
+ * blocking gate a real provider's tool-permission callback uses
+ * (`ChatManagementService.buildPermissionHandler`). Same "skip with a
+ * warning, don't throw" behaviour as {@link FauxAskQuestionEntry} when no
+ * handler is installed.
+ *
+ * TODO(P2-00): `onPlanReviewRequest` (the plan-mode "review and approve the
+ * plan" gate) and the HKS-01 hook bridge are NOT emulated yet — FauxProvider
+ * never calls either, so a script cannot drive those interaction kinds today.
+ */
+export interface FauxPermissionRequestEntry {
+  type: 'permission_request';
+  request: PermissionRequest;
+}
+
 export type FauxScriptEntry =
   | FauxTextEntry
   | FauxToolCallEntry
+  | FauxToolInvokeEntry
   | FauxToolErrorEntry
   | FauxCompleteEntry
   | FauxCancelledEntry
   | FauxTruncatedEntry
   | FauxErrorEntry
-  | FauxExhaustedEntry;
+  | FauxExhaustedEntry
+  | FauxFileEditEntry
+  | FauxAskQuestionEntry
+  | FauxPermissionRequestEntry;
+
+/**
+ * P2-00 — `GENERATORAI_TEST_FAUX_SCRIPT=<path.json>` file shape: turn-scripts
+ * keyed by conversation NAME (the chat's human-readable name, not its id —
+ * ids don't exist yet when the fixture is authored). Each array is consumed
+ * in order, exactly like repeated calls to {@link FauxProvider.script}.
+ */
+export type FauxScriptFile = Record<string, FauxScriptEntry[][]>;
+
+/** P2-00 — wires `GENERATORAI_TEST_FAUX_SCRIPT` into a `FauxProvider` instance. */
+export interface FauxScriptSource {
+  /** Path to the JSON `FauxScriptFile`. */
+  filePath: string;
+  /**
+   * Resolves a conversation id to the human-readable name
+   * `FauxScriptFile` is keyed by (typically the chat's `name`). Returning
+   * `undefined` means "no script for this conversation" — never throws past
+   * this boundary; a failing resolver is treated the same way.
+   */
+  resolveConversationName: (conversationId: string) => Promise<string | undefined>;
+  logger?: { warn: (message: string) => void };
+}
 
 // ── Internal session state ────────────────────────────────────────
 
@@ -124,6 +249,12 @@ interface FauxConversationState {
   pendingTools: Map<string, (result: unknown) => void>;
   /** Set while a sendPromptAndWait is in flight. */
   inFlight: boolean;
+  /**
+   * P2-00 — whether GENERATORAI_TEST_FAUX_SCRIPT has already been consulted
+   * for this conversation. Applied lazily on the FIRST `sendPromptAndWait`
+   * rather than at `createConversation` — see that method's comment for why.
+   */
+  scriptFileApplied: boolean;
 }
 
 // ── FauxProvider ─────────────────────────────────────────────────
@@ -131,6 +262,18 @@ interface FauxConversationState {
 let callIdSeq = 0;
 function nextCallId(): string {
   return `faux-call-${++callIdSeq}`;
+}
+
+/**
+ * P2-R21(c) — line count for a `fileOp` diff stat. `text.split('\n').length`
+ * over-counts by one whenever `text` ends with a trailing newline (the
+ * common case for a real file): `'a\nb\n'.split('\n')` is `['a', 'b', '']`,
+ * length 3, for what is actually a 2-line file. Empty content is 0 lines.
+ */
+function countLines(text: string): number {
+  if (text === '') return 0;
+  const parts = text.split('\n').length;
+  return text.endsWith('\n') ? parts - 1 : parts;
 }
 
 /**
@@ -144,10 +287,20 @@ export class FauxProvider implements IAgentHarness {
   private readonly clientHandlers: Array<(e: HarnessClientEvent) => void> = [];
   private readonly conversations = new Map<string, FauxConversationState>();
   private readonly capabilitiesOverride: Partial<ProviderCapabilities>;
+  private readonly scriptSource: FauxScriptSource | undefined;
+  private scriptFileCache: Promise<FauxScriptFile> | undefined;
 
-  /** W44 — configurable capabilities so conformance tests can exercise edge cases. */
-  constructor(opts: { capabilities?: Partial<ProviderCapabilities> } = {}) {
+  /**
+   * W44 — configurable capabilities so conformance tests can exercise edge
+   * cases.
+   * P2-00 — `scriptSource` wires `GENERATORAI_TEST_FAUX_SCRIPT`: a fixture
+   * file of turn-scripts keyed by conversation name, applied automatically
+   * (once, lazily, on the conversation's first `sendPromptAndWait`) once the
+   * conversation's name can be resolved.
+   */
+  constructor(opts: { capabilities?: Partial<ProviderCapabilities>; scriptSource?: FauxScriptSource } = {}) {
     this.capabilitiesOverride = opts.capabilities ?? {};
+    this.scriptSource = opts.scriptSource;
   }
 
   // ── IHarnessClientLifecycle ─────────────────────────────────────
@@ -160,8 +313,10 @@ export class FauxProvider implements IAgentHarness {
       maxParallelTools: 8,
       planMode: false,
       mcpServers: false,
-      skillDirectories: false,
-      fullToolGating: true,
+      approvalGating: 'per_call',
+      hostTools: 'full',
+      structuredOutput: 'tool',
+      skills: 'directories',
       sessionPersistence: false,
       budgetTracking: false,
       computerUse: false, // MINOR-4: explicit fail-closed default (L9)
@@ -210,16 +365,7 @@ export class FauxProvider implements IAgentHarness {
   // ── IHarnessModelDiscovery ──────────────────────────────────────
 
   async getModels(): Promise<HarnessModel[]> {
-    return [
-      {
-        id: 'faux-model',
-        name: 'Faux Model',
-        provider: 'faux',
-        description: 'Deterministic faux model for testing',
-        promptTokenLimit: 200_000,
-        totalContextWindow: 200_000,
-      },
-    ];
+    return [...FAUX_MODELS];
   }
 
   // ── IHarnessConversationLifecycle ───────────────────────────────
@@ -234,14 +380,73 @@ export class FauxProvider implements IAgentHarness {
       pendingScript: [],
       pendingTools: new Map(),
       inFlight: false,
+      scriptFileApplied: false,
     };
     this.conversations.set(params.conversationId, conv);
+    // Pre-registered via script(entries) with no conversationId, queued
+    // before this conversation existed. This was previously dead code — the
+    // "apply to the next created conversation" fallback documented on
+    // `script()` never actually ran.
+    this._transferScripts(conv);
+    // P2-00 — GENERATORAI_TEST_FAUX_SCRIPT is applied lazily, on the first
+    // `sendPromptAndWait` (see there), NOT here. Callers that build their
+    // conversation config from a name that only becomes durable (e.g. a
+    // caller-side DB row) AFTER `createConversation` returns — GeneratorAI's
+    // own ChatManagementService.createChat does exactly this, persisting the
+    // chat row only after the harness conversation is created — would
+    // otherwise race a name lookup against a row that does not exist yet.
     return params.conversationId;
   }
 
+  /** P2-00 — load (and cache) the GENERATORAI_TEST_FAUX_SCRIPT fixture file. */
+  private async loadScriptFile(): Promise<FauxScriptFile> {
+    const source = this.scriptSource;
+    if (!source) return {};
+    this.scriptFileCache ??= (async () => {
+      try {
+        const raw = await readFile(source.filePath, 'utf8');
+        const parsed = JSON.parse(raw) as unknown;
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          throw new Error('expected a JSON object keyed by conversation name');
+        }
+        return parsed as FauxScriptFile;
+      } catch (err) {
+        source.logger?.warn(
+          `[FauxProvider] failed to load GENERATORAI_TEST_FAUX_SCRIPT file "${source.filePath}": ${String(err)}`,
+        );
+        return {};
+      }
+    })();
+    return this.scriptFileCache;
+  }
+
+  /** P2-00 — resolve this conversation's name and queue its scripted turns, if any. */
+  private async applyScriptFile(conv: FauxConversationState): Promise<void> {
+    const source = this.scriptSource;
+    if (!source) return;
+    let name: string | undefined;
+    try {
+      name = await source.resolveConversationName(conv.id);
+    } catch {
+      name = undefined; // resolution is best-effort — never block conversation creation on it
+    }
+    if (!name) return;
+    const file = await this.loadScriptFile();
+    const turns = file[name];
+    if (!turns) return;
+    for (const turn of turns) conv.pendingScript.push(turn);
+  }
+
   async resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void> {
-    if (!this.conversations.has(conversationId) && params) {
-      await this.createConversation(params);
+    const live = this.conversations.get(conversationId);
+    if (!live) {
+      if (params) await this.createConversation(params);
+      return;
+    }
+    // Like the real providers (D-137): a rebind after "Edit sources" moves the
+    // roots `file_edit` writes under; the script position is kept.
+    if (params) {
+      live.params = { ...live.params, workingDirectory: params.workingDirectory, additionalDirectories: params.additionalDirectories };
     }
   }
 
@@ -286,8 +491,9 @@ export class FauxProvider implements IAgentHarness {
     attachments?: AttachmentRef[],
     options?: SendPromptOptions,
   ): Promise<void> {
-    // Fire and forget
-    void this.sendPromptAndWait(conversationId, prompt, attachments, undefined, options);
+    // Fire and forget. A scripted `error` rejects after broadcasting error + idle;
+    // the rejection is already reported, so it must not become an unhandled rejection.
+    void this.sendPromptAndWait(conversationId, prompt, attachments, undefined, options).catch(() => undefined);
   }
 
   async sendPromptAndWait(
@@ -300,6 +506,13 @@ export class FauxProvider implements IAgentHarness {
     const conv = this.conversations.get(conversationId);
     if (!conv) throw new Error(`FauxProvider: unknown conversation ${conversationId}`);
     if (conv.inFlight) throw new Error(`FauxProvider: turn already in flight for ${conversationId}`);
+
+    // P2-00 — GENERATORAI_TEST_FAUX_SCRIPT, applied once, lazily, on the
+    // first turn (see createConversation's comment for why not there).
+    if (this.scriptSource && !conv.scriptFileApplied) {
+      conv.scriptFileApplied = true;
+      await this.applyScriptFile(conv);
+    }
 
     conv.inFlight = true;
     conv.messages.push({ role: 'user', content: prompt, timestamp: new Date() });
@@ -346,6 +559,14 @@ export class FauxProvider implements IAgentHarness {
       return { content: assistantText };
     }
 
+    // P2-R21(b) — set when a `permission_request` entry resolves denied, so
+    // the very next `file_edit` entry (the common "propose, ask, apply"
+    // script shape — see fixtures/sandbox.faux.json) is skipped instead of
+    // silently proceeding as if it had been granted. Consumed (reset) by
+    // the next entry regardless of its type, so a later, unrelated
+    // file_edit is never wrongly skipped.
+    let deniedPermissionPending = false;
+
     try {
       for (const entry of script) {
         // Honour abort signal between entries
@@ -358,12 +579,26 @@ export class FauxProvider implements IAgentHarness {
           return { content: assistantText };
         }
 
+        // Consumed by 'file_edit' below; reset for every other entry type so
+        // a denial only ever gates the file_edit immediately following it.
+        const gatedByDeniedPermission = deniedPermissionPending;
+        deniedPermissionPending = false;
+
         switch (entry.type) {
           case 'text': {
             // Emit word-by-word for realism
             const words = entry.content.split(' ');
-            for (const word of words) {
-              const token = words.indexOf(word) === 0 ? word : ` ${word}`;
+            const delayMs = entry.delayMs ?? 0;
+            const chunk = Math.max(1, entry.chunkWords ?? 1);
+            for (let i = 0; i < words.length; i += chunk) {
+              if (delayMs > 0 && i > 0) {
+                await new Promise((resolve) => setTimeout(resolve, delayMs * chunk));
+                if (signal?.aborted) break;
+              }
+              const token = words
+                .slice(i, i + chunk)
+                .map((word, k) => (i + k === 0 ? word : ` ${word}`))
+                .join('');
               this.broadcast(conversationId, { kind: 'harness.token', data: { text: token } });
               assistantText += token;
             }
@@ -387,6 +622,33 @@ export class FauxProvider implements IAgentHarness {
             break;
           }
 
+          case 'tool_invoke': {
+            const callId = entry.callId ?? nextCallId();
+            this.broadcast(conversationId, {
+              kind: 'harness.tool_start',
+              data: { tool: entry.name, args: entry.input, callId },
+            });
+            const tool = conv.params.tools?.find((t) => t.name === entry.name);
+            let result: unknown;
+            let success = true;
+            if (!tool) {
+              result = `FauxProvider: no registered tool named "${entry.name}"`;
+              success = false;
+            } else {
+              try {
+                result = await tool.handler(entry.input);
+              } catch (err) {
+                result = err instanceof Error ? err.message : String(err);
+                success = false;
+              }
+            }
+            this.broadcast(conversationId, {
+              kind: 'harness.tool_complete',
+              data: { tool: entry.name, result, callId, success },
+            });
+            break;
+          }
+
           case 'tool_error': {
             const callId = entry.callId ?? nextCallId();
             this.broadcast(conversationId, {
@@ -397,6 +659,144 @@ export class FauxProvider implements IAgentHarness {
               kind: 'harness.tool_complete',
               data: { tool: entry.name, result: entry.error, callId, success: false },
             });
+            break;
+          }
+
+          case 'file_edit': {
+            const callId = entry.callId ?? nextCallId();
+            const isDelete = entry.op === 'delete' || (entry.op === undefined && entry.content === undefined);
+            const toolName = entry.toolName ?? (isDelete ? 'Delete' : 'Write');
+
+            // P2-R21(a) — no `process.cwd()` fallback. In the sandbox that
+            // resolves to wherever this process happens to have been
+            // started from — e.g. apps/server inside a real checkout, not
+            // a sandboxed workspace — so a relative script path (or `../`)
+            // could write into the real checkout instead of a throwaway
+            // dir. A conversation that scripts file_edit must supply a
+            // workspace; this errors the step rather than guessing one.
+            const workspaceDir = conv.params.workingDirectory;
+            if (!workspaceDir) {
+              const message =
+                'FauxProvider: "file_edit" script entry requires CreateConversationParams.workingDirectory — refusing to fall back to process.cwd().';
+              this.broadcast(conversationId, { kind: 'harness.error', data: { message, provider: 'faux' } });
+              conv.inFlight = false;
+              throw new Error(message);
+            }
+            const workspaceRoot = resolvePath(workspaceDir);
+            const absPath = resolvePath(workspaceRoot, entry.path);
+            const relFromWorkspace = relative(workspaceRoot, absPath);
+            // `isAbsolute` also catches path.relative's cross-drive-letter
+            // case on Windows, where it returns the absolute `to` path
+            // instead of one starting with '..'.
+            if (relFromWorkspace.startsWith('..') || isAbsolute(relFromWorkspace)) {
+              const message = `FauxProvider: "file_edit" path "${entry.path}" resolves outside the conversation's workspace (${workspaceRoot}) — refusing to touch it.`;
+              this.broadcast(conversationId, { kind: 'harness.error', data: { message, provider: 'faux' } });
+              conv.inFlight = false;
+              throw new Error(message);
+            }
+
+            // P2-R21(b) — a permission_request denied immediately before
+            // this entry means whatever it was gating must not happen.
+            // Report it the way a real provider's tool reports a denied
+            // permission (a failed tool_complete), and never touch disk.
+            if (gatedByDeniedPermission) {
+              this.broadcast(conversationId, {
+                kind: 'harness.tool_start',
+                data: { tool: toolName, args: { file_path: entry.path }, callId },
+              });
+              this.broadcast(conversationId, {
+                kind: 'harness.tool_complete',
+                data: {
+                  tool: toolName,
+                  result: 'Permission denied — the preceding permission_request was not granted.',
+                  callId,
+                  success: false,
+                },
+              });
+              break;
+            }
+
+            this.broadcast(conversationId, {
+              kind: 'harness.tool_start',
+              data: { tool: toolName, args: { file_path: entry.path }, callId },
+            });
+
+            let previousContent: string | undefined;
+            try {
+              previousContent = await readFile(absPath, 'utf8');
+            } catch {
+              previousContent = undefined; // file does not exist yet — that's fine
+            }
+            const resolvedOp = entry.op ?? (isDelete ? 'delete' : previousContent === undefined ? 'create' : 'update');
+
+            if (resolvedOp === 'delete') {
+              await rm(absPath, { force: true });
+            } else {
+              await mkdir(dirname(absPath), { recursive: true });
+              await writeFile(absPath, entry.content ?? '', 'utf8');
+            }
+
+            // P2-R21(c) — countLines (not a raw split('\n').length) so a
+            // trailing newline doesn't over-count by one.
+            const oldLines = previousContent === undefined ? 0 : countLines(previousContent);
+            const newLines = resolvedOp === 'delete' ? 0 : countLines(entry.content ?? '');
+            const fileOp = {
+              kind: resolvedOp,
+              filePath: entry.path,
+              additions: resolvedOp === 'delete' ? 0 : newLines,
+              deletions: resolvedOp === 'delete' ? oldLines : previousContent === undefined ? 0 : oldLines,
+            };
+
+            this.broadcast(conversationId, {
+              kind: 'harness.tool_complete',
+              data: { tool: toolName, result: `${resolvedOp} ${entry.path}`, callId, success: true, fileOp },
+            });
+            break;
+          }
+
+          case 'ask_question': {
+            const handler = conv.params.onQuestionRequest;
+            if (!handler) {
+              this.broadcast(conversationId, {
+                kind: 'harness.warning',
+                data: {
+                  message: 'FauxProvider: "ask_question" script entry ignored — this conversation has no onQuestionRequest handler (plan mode may be disabled).',
+                  provider: 'faux',
+                },
+              });
+              break;
+            }
+            await handler({ questions: entry.questions });
+            break;
+          }
+
+          case 'permission_request': {
+            const handler = conv.params.onPermissionRequest;
+            if (!handler) {
+              this.broadcast(conversationId, {
+                kind: 'harness.warning',
+                data: {
+                  message: 'FauxProvider: "permission_request" script entry ignored — this conversation has no onPermissionRequest handler.',
+                  provider: 'faux',
+                },
+              });
+              break;
+            }
+            const decision = await handler(entry.request);
+            // P2-R21(b) — honour the answer instead of discarding it: a
+            // denial must not let the script continue as though it had been
+            // granted. Surface it in the transcript and gate the very next
+            // file_edit entry (see the top of this loop and that case).
+            if (!decision.granted) {
+              deniedPermissionPending = true;
+              this.broadcast(conversationId, {
+                kind: 'harness.warning',
+                data: {
+                  message: `FauxProvider: permission denied for "${entry.request.description}"${decision.reason ? ` (${decision.reason})` : ''}.`,
+                  provider: 'faux',
+                },
+              });
+            }
             break;
           }
 
@@ -421,6 +821,9 @@ export class FauxProvider implements IAgentHarness {
               kind: 'harness.error',
               data: { message: entry.message, provider: 'faux' },
             });
+            // A failed turn still ends (real providers emit error + idle, see Codex's
+            // failTurn): without idle the chat stayed "Running" for good.
+            this.broadcast(conversationId, { kind: 'harness.idle', data: {} });
             conv.inFlight = false;
             throw new Error(entry.message);
           }
@@ -446,6 +849,7 @@ export class FauxProvider implements IAgentHarness {
                   inputTokens: entry.usage.inputTokens ?? 0,
                   outputTokens: entry.usage.outputTokens ?? 0,
                   cost: entry.usage.cost,
+                  ...(entry.usage.cost !== undefined ? { costUsd: entry.usage.cost } : {}),
                   provider: 'faux',
                 },
               });

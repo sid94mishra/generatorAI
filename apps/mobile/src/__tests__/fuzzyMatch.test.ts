@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { fuzzyFilter, fuzzyScore } from '../lib/fuzzyMatch';
+import { fuzzyFilter, fuzzyScore } from '../services/lib/fuzzyMatch';
 
 const MODELS = [
   { id: 'auto', name: 'Auto' },

@@ -10,11 +10,15 @@
 export { createHarnessProvider, getAvailableProviders } from './HarnessFactory.js';
 export { HarnessProxy } from './HarnessProxy.js';
 
+// ── Stage error vocabulary (P03 WP-3.4) ──
+export { HarnessError, toHarnessError, harnessErrorOf, type HarnessErrorProvider } from './errors.js';
+
 // ── Multi-provider (run every installed provider side by side) ──
 export {
   HarnessRegistry,
   ALL_HARNESS_TYPES,
   harnessTypeLabel,
+  ProviderHiddenError,
   type HarnessProviderStatus,
   type HarnessRegistryOptions,
 } from './HarnessRegistry.js';
@@ -81,6 +85,9 @@ export type { WorkspacedCopilotPoolOptions } from './providers/copilot/Workspace
 export type { ClaudeAgentProvider } from './providers/claude-agent/ClaudeAgentProvider.js';
 export type { ClaudeAgentProviderOptions as ClaudeAgentProviderOptionsInternal } from './providers/claude-agent/types.js';
 
+// The Copilot CLI downloaded on first use (node builtins only — no SDK code is loaded by this export).
+export * from './providers/copilot/copilotCli.js';
+
 // W37 — Codex provider (JSON-RPC over stdio to `codex app-server`)
 export type { CodexProvider } from './providers/codex/CodexProvider.js';
 // Codex CLI discovery (config → CODEX_CLI_PATH → PATH → desktop-app bundle).
@@ -113,6 +120,7 @@ export {
   AgentHostSupervisor,
   defaultAgentHostSupervisor,
   type AgentHostSupervisorOptions,
+  type ExecutionGate,
   type AgentHostSnapshot,
 } from './AgentHostSupervisor.js';
 

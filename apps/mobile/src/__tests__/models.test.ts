@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ModelInfo } from '@generatorai/client-core';
 
-import { findModel, groupModels, promptLimit, reasoningEfforts } from '../api/modelCatalogue';
+import { findModel, groupModels, promptLimit, reasoningEfforts } from '../services/api/modelCatalogue';
 
 function model(partial: Partial<ModelInfo>): ModelInfo {
   return { id: 'm', name: 'M', ...partial };
@@ -16,12 +16,6 @@ describe('reasoningEfforts', () => {
         model({ supportsReasoning: true, reasoningEfforts: ['low', 'medium', 'high'] }),
       ),
     ).toEqual(['low', 'medium', 'high']);
-  });
-
-  it('still accepts a space-separated string', () => {
-    expect(
-      reasoningEfforts(model({ supportsReasoning: true, reasoningEfforts: 'low  high' })),
-    ).toEqual(['low', 'high']);
   });
 
   it('offers nothing when the model does not reason', () => {

@@ -99,6 +99,6 @@ The package and SDK are private workspace packages. Document the source/build se
 
 ## Source evidence
 
-`packages/core/src/services/ArtifactCatalog.ts`, `AgentResolver.ts`, `AgentStagingService.ts`, `ExtensionManager.ts`, `ExtensionApi.ts`, `WidgetService.ts`, and `WorkflowScriptLoader.ts`; `packages/core/src/mcp/`; `packages/shared/src/config/ExtensionManifestSchema.ts`; `apps/server/src/routes/extensions.ts`; `apps/web/src/components/widgets/`; `packages/mcp-server/src/`.
+`packages/core/src/services/ArtifactCatalog.ts`, `AgentResolver.ts`, `AgentStagingService.ts`, `ExtensionManager.ts`, `ExtensionApi.ts`, `WidgetService.ts`, and `WorkflowScriptLoader.ts`; `packages/core/src/mcp/`; `packages/shared/src/config/ExtensionManifestSchema.ts`; `apps/server/src/routes/extensions.ts`; `apps/web/src/blocks/widgets/`; `packages/mcp-server/src/`.
 
 Related: [Providers](./providers.md), [Security](./security.md), [Execution](./execution.md), and [Feature guides](../features/index.md).

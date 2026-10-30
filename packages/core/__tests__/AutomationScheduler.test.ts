@@ -13,13 +13,16 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { AutomationService } from '../src/services/AutomationService.js';
+import { createDB, migrateDB, EntryRepository, RegisterRepository } from '@generatorai/db';
+import { AutomationService, MISSED_GRACE_MS, automationRunName, missedRunNote } from '../src/services/AutomationService.js';
+import { DurableExecutionEngine } from '../src/services/DurableExecutionEngine.js';
 import type {
   IAutomationRepository,
   IAutomationExecutionRepository,
 } from '../src/services/AutomationService.js';
 import { EventBus } from '../src/events/EventBus.js';
 import type { WorkflowRunService } from '../src/services/WorkflowRunService.js';
+import type { WorkflowInvocationService } from '../src/services/workflow-invocation/WorkflowInvocationService.js';
 import type { WorkflowDefinitionService } from '../src/services/WorkflowDefinitionService.js';
 import type { IWorkflowRunRepository } from '../src/domain/ports/IWorkflowRunRepository.js';
 import type {
@@ -31,6 +34,14 @@ import type {
   PersistedEvent,
   WorkflowRun,
 } from '@generatorai/shared';
+
+/** Automation iterations are durable slots (P01 WP-1.3) — back them with a real engine. */
+function makeEngine(): DurableExecutionEngine {
+  const db = createDB(':memory:');
+  migrateDB(db);
+  const quiet = { debug() {}, info() {}, warn() {}, error() {} } as never;
+  return new DurableExecutionEngine(new RegisterRepository(db), new EntryRepository(db), quiet);
+}
 
 function mockLogger(): ILogger {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as ILogger;
@@ -56,7 +67,6 @@ function scheduleAutomation(overrides: Partial<Automation> = {}): Automation {
     triggerType: 'schedule',
     cronExpression: '*/5 * * * *',
     workflowIds: ['wf-1'],
-    inputMode: 'single',
     variables: {},
     maxConcurrency: 1,
     onError: 'continue',
@@ -160,6 +170,10 @@ function makeExecutionRepo(calls: string[] = []): {
       executions.set(e.id, { ...e });
       return { ...e };
     },
+    openExecution: async (e) => {
+      calls.push('execution-created');
+      executions.set(e.id, { ...e });
+    },
     getExecutionById: async (id) => {
       const e = executions.get(id);
       if (!e) throw new Error(`execution ${id} not found`);
@@ -226,7 +240,7 @@ function makeWorkflowHarness(
       return run;
     },
     startRun: async () => {},
-    cancelRun: async () => {},
+    command: async () => ({ ok: true }),
   } as unknown as WorkflowRunService;
 
   const workflowRunRepo = {
@@ -238,6 +252,22 @@ function makeWorkflowHarness(
   } as unknown as IWorkflowRunRepository;
 
   return { workflowRunService, workflowRunRepo, createLog };
+}
+
+
+/** The invocation over the fake run service (P04: an automation starts every run through `invoke`, then `waitFor`). */
+function invocationOver(runs: WorkflowRunService, repo: IWorkflowRunRepository): Pick<WorkflowInvocationService, 'invoke' | 'waitFor'> {
+  return {
+    invoke: async (req: { target: { workflowDefinitionId?: string }; variables?: Record<string, unknown> }) => {
+      const run = await (runs as unknown as { createRun: (p: unknown) => Promise<{ id: string }> }).createRun({
+        workflowDefinitionId: req.target.workflowDefinitionId,
+        variables: req.variables ?? {},
+      });
+      await runs.startRun(run.id);
+      return { runId: run.id };
+    },
+    waitFor: async (runId: string) => ({ ...(await repo.getById(runId)), waited: 'finalized' }),
+  } as unknown as Pick<WorkflowInvocationService, 'invoke' | 'waitFor'>;
 }
 
 interface Harness {
@@ -265,14 +295,13 @@ function setup(outcomeFor?: (variables: Record<string, unknown>, defId: string) 
     automationRepo,
     executionRepo,
     workflowRunService,
+    invocationOver(workflowRunService, workflowRunRepo),
     workflowRunRepo,
     {} as unknown as WorkflowDefinitionService,
     eventBus,
     mockLogger(),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+    makeEngine(),
+    undefined, // artifactsDir
     // Item 38 — huge interval: these tests drive `runSchedulerTick()`
     // directly rather than waiting on the real setInterval.
     { pollIntervalMs: 1_000_000, leaseMs: 60_000 },
@@ -353,6 +382,46 @@ describe('Item 38 — DB-backed due-row scheduler', () => {
     expect(data.missedCount).toBeGreaterThan(0);
   });
 
+  it('skips a daily slot reached hours late, though no later slot has passed, and records it in the history (U-77, U-78)', async () => {
+    // 0 2 * * * reached at 09:21: the app was closed at 02:00. No second slot elapsed, but the run was missed.
+    const scheduledFor = new Date(Date.now() - 7 * 60 * 60_000);
+    h.automationRepo.seed(scheduleAutomation({ cronExpression: '0 2 * * *', nextRunAt: scheduledFor, missedRunPolicy: 'skip' }));
+
+    await h.service.runSchedulerTick();
+    await flush();
+
+    expect(h.createLog).toHaveLength(0);
+    const rows = [...h.executions.values()].filter((e) => e.automationId === AUTOMATION_ID);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: 'skipped', triggeredBy: 'schedule', totalIterations: 0, createdAt: scheduledFor });
+    expect(rows[0]!.error).toMatch(/not running at the scheduled time/);
+  });
+
+  it('runs a slot reached within the grace window, and "run once" still runs a late one', async () => {
+    h.automationRepo.seed(scheduleAutomation({ cronExpression: '0 2 * * *', nextRunAt: new Date(Date.now() - MISSED_GRACE_MS / 2) }));
+    await h.service.runSchedulerTick();
+    await flush();
+    expect(h.createLog).toHaveLength(1);
+
+    const late = setup();
+    late.automationRepo.seed(scheduleAutomation({ cronExpression: '0 2 * * *', nextRunAt: new Date(Date.now() - 7 * 60 * 60_000), missedRunPolicy: 'run_once' }));
+    await late.service.runSchedulerTick();
+    await flush();
+    expect(late.createLog).toHaveLength(1);
+  });
+
+  it('says the computer slept when a slot was missed after the server started (U-81)', () => {
+    const started = Date.parse('2026-10-13T17:14:00Z');
+    expect(missedRunNote(1, new Date('2026-10-13T17:08:00Z'), started)).toMatch(/^Skipped: GeneratorAI was not running at the scheduled time/);
+    expect(missedRunNote(16, new Date('2026-10-14T22:30:00Z'), started)).toMatch(/^Skipped 16 scheduled runs: the computer was asleep at their times/);
+  });
+
+  it('names a run for its automation and trigger, not a timestamp (U-79)', () => {
+    expect(automationRunName('Pulse Nightly Health', 'schedule', 'Single run')).toBe('Pulse Nightly Health · scheduled');
+    expect(automationRunName('Pulse Issue Patrol', 'manual')).toBe('Pulse Issue Patrol · run now');
+    expect(automationRunName('Triage', 'webhook', 'issue 42')).toBe('Triage · webhook · issue 42');
+  });
+
   it('overlap policy "skip" does not start a second run while one is active', async () => {
     // Due, but only just — no cron slots were missed, so this exercises
     // the overlap path in isolation from the missed-run path.
@@ -380,16 +449,19 @@ describe('Item 38 — DB-backed due-row scheduler', () => {
   });
 
   it('three-way status: mixed iteration outcomes settle as "partial", not "completed"', async () => {
-    const mixed = setup((variables) => (variables['__iteration_index'] === 0 ? 'completed' : 'failed'));
+    const mixed = setup((variables) => (variables['row'] === 'a' ? 'completed' : 'failed'));
     mixed.automationRepo.seed({
       id: 'auto-mixed',
       name: 'batch',
       enabled: true,
       triggerType: 'manual',
       workflowIds: ['wf-1'],
-      inputMode: 'loop',
-      loopVariable: 'row',
-      loopItems: ['a', 'b'],
+      dataSchema: { version: 1, format: 'json_array', fields: [{ name: 'row', type: 'string' }] },
+      iterationMode: { kind: 'each_row' },
+      defaultDataset: {
+        format: 'json_array',
+        data: JSON.stringify([{ row: 'a' }, { row: 'b' }]),
+      },
       variables: {},
       maxConcurrency: 1,
       onError: 'continue',
@@ -413,5 +485,175 @@ describe('Item 38 — DB-backed due-row scheduler', () => {
 
     // Never emitted as a plain "completed" — that would silence the alert.
     expect(mixed.events.some((e) => e.kind === 'automation_execution.completed')).toBe(false);
+  });
+});
+
+// ── U-85: a run paused for a person pauses its execution ─────────────
+
+type FakeStage = { instanceId: string; key: string; instancePath: string; name: string; status: string; statusReason: string | null; error?: string };
+
+/**
+ * One controllable run: `stage` is its only stage, `finish()` finalizes it. `waitFor` honours its timeout
+ * as a work-clock slice: under `vi.useFakeTimers({ toFake: ['Date'] })` it advances the clock by the slice.
+ */
+function pausableHarness() {
+  const base = setup();
+  const run = { id: 'run-p', status: 'running', error: null as string | null, trigger: { kind: 'automation', executionId: '' } };
+  const stage: FakeStage = { instanceId: 'st-1', key: 'patrol', instancePath: 'patrol', name: 'Patrol', status: 'running', statusReason: null };
+  const finished: Array<() => void> = [];
+  const commands: string[] = [];
+  let sliced = false;
+  const digest = () => ({
+    runId: run.id,
+    status: run.status,
+    statusReason: null,
+    finalized: ['completed', 'failed', 'cancelled'].includes(run.status),
+    error: run.error,
+    stages: [{ ...stage }],
+    pendingApprovals: [],
+    postProcessing: [],
+  });
+  const eventBus = new EventBus();
+  const events: PersistedEvent[] = [];
+  eventBus.subscribeGlobal((e) => events.push(e));
+  const service = new AutomationService(
+    base.automationRepo,
+    base.executionRepo,
+    { command: async (_id: string, c: { command: string }) => { commands.push(c.command); run.status = 'cancelled'; finished.splice(0).forEach((f) => f()); } } as unknown as WorkflowRunService,
+    {
+      invoke: async (_req: unknown, ctx: { trigger: { executionId: string } }) => {
+        run.trigger.executionId = ctx.trigger.executionId;
+        return { runId: run.id };
+      },
+      waitFor: async (_id: string, opts: { timeoutMs: number }) => {
+        if (digest().finalized) return { ...digest(), waited: 'finalized' };
+        if (sliced) {
+          await new Promise((resolve) => setImmediate(resolve));
+          vi.setSystemTime(Date.now() + opts.timeoutMs);
+          return { ...digest(), waited: digest().finalized ? 'finalized' : 'timeout' };
+        }
+        await new Promise<void>((resolve) => finished.push(resolve));
+        return { ...digest(), waited: 'finalized' };
+      },
+      digest: async () => digest(),
+    } as unknown as Pick<WorkflowInvocationService, 'invoke' | 'waitFor' | 'digest'>,
+    { getById: async () => ({ ...run }) } as unknown as IWorkflowRunRepository,
+    {} as unknown as WorkflowDefinitionService,
+    eventBus,
+    mockLogger(),
+    makeEngine(),
+    undefined,
+    { pollIntervalMs: 1_000_000, leaseMs: 60_000 },
+  );
+  base.automationRepo.seed(scheduleAutomation({ triggerType: 'manual' }));
+  return {
+    ...base,
+    service,
+    events,
+    run,
+    stage,
+    commands,
+    useSlices: () => { sliced = true; },
+    finish: (status: 'completed' | 'failed', error?: string) => {
+      run.status = status;
+      run.error = error ?? null;
+      finished.splice(0).forEach((f) => f());
+    },
+  };
+}
+
+describe('U-85 — a paused run pauses its execution', () => {
+  it('names the paused stage and why', async () => {
+    const { runPauseOf } = await import('../src/services/AutomationService.js');
+    const stage = { instanceId: 'i', key: 'k', instancePath: 'k', name: 'Patrol', statusReason: 'retries_exhausted' };
+    expect(runPauseOf({ status: 'waiting', statusReason: null, stages: [{ ...stage, status: 'paused', error: "API Error: Can't reach the API server" }] })).toBe(
+      "Patrol paused: API Error: Can't reach the API server",
+    );
+    expect(runPauseOf({ status: 'running', statusReason: null, stages: [{ ...stage, status: 'running' }] })).toBeNull();
+    expect(runPauseOf({ status: 'paused', statusReason: 'budget_exhausted', stages: [] })).toBe('The run paused (budget_exhausted).');
+  });
+
+  it('shows Paused with the reason while the stage waits, Running once it resumes, and clears the reason when it completes', async () => {
+    const h = pausableHarness();
+    const execution = await h.service.triggerManual(AUTOMATION_ID);
+    await flush();
+
+    Object.assign(h.stage, { status: 'paused', statusReason: 'retries_exhausted', error: "Can't reach the API server (ENOTFOUND)" });
+    await h.service.queueRunPauseProjection(h.run.id);
+    let row = await h.executionRepo.getExecutionById(execution.id);
+    expect(row.status).toBe('paused');
+    expect(row.error).toBe("Patrol paused: Can't reach the API server (ENOTFOUND)");
+    expect((await h.executionRepo.getExecutionRunsByExecutionId(execution.id))[0]!.status).toBe('paused');
+    expect(h.events.some((e) => e.kind === 'automation_execution.paused')).toBe(true);
+
+    Object.assign(h.stage, { status: 'running', statusReason: null, error: undefined });
+    await h.service.queueRunPauseProjection(h.run.id);
+    row = await h.executionRepo.getExecutionById(execution.id);
+    expect(row.status).toBe('running');
+    expect(row.error ?? null).toBeNull();
+
+    Object.assign(h.stage, { status: 'paused', error: 'again' });
+    await h.service.queueRunPauseProjection(h.run.id);
+    h.finish('completed');
+    await flush();
+    row = await h.executionRepo.getExecutionById(execution.id);
+    expect(row.status).toBe('completed');
+    expect(row.error ?? null).toBeNull();
+  });
+
+  it('a scheduled slot that finds it paused says it waits for you', async () => {
+    const h = pausableHarness();
+    const execution = await h.service.triggerManual(AUTOMATION_ID);
+    await flush();
+    Object.assign(h.stage, { status: 'paused', error: 'offline' });
+    await h.service.queueRunPauseProjection(h.run.id);
+    await h.automationRepo.update(AUTOMATION_ID, { triggerType: 'schedule', nextRunAt: new Date(Date.now() - 1_000) } as Partial<Automation>);
+
+    await h.service.runSchedulerTick();
+    await flush();
+
+    const skipped = [...h.executions.values()].find((e) => e.status === 'skipped');
+    expect(skipped?.error).toMatch(/paused and waiting for you/);
+    expect((await h.executionRepo.getExecutionById(execution.id)).status).toBe('paused');
+  });
+
+  it('a failed run gives the execution its reason', async () => {
+    const h = pausableHarness();
+    const execution = await h.service.triggerManual(AUTOMATION_ID);
+    await flush();
+    h.finish('failed', 'Patrol failed: no GitHub token');
+    await flush();
+    const row = await h.executionRepo.getExecutionById(execution.id);
+    expect(row.status).toBe('failed');
+    expect(row.error).toBe('Patrol failed: no GitHub token');
+  });
+
+  it('time paused for a person is not work time; a run still working after the limit is stopped', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const paused = pausableHarness();
+      paused.useSlices();
+      Object.assign(paused.stage, { status: 'paused', error: 'offline' });
+      const waiting = await paused.service.triggerManual(AUTOMATION_ID);
+      // Three hours of one-minute slices go by paused: no timeout, nothing stopped.
+      for (let i = 0; i < 100; i++) await flush();
+      expect(paused.commands).toEqual([]);
+      expect((await paused.executionRepo.getExecutionById(waiting.id)).status).not.toBe('failed');
+      paused.finish('completed');
+      for (let i = 0; i < 3; i++) await flush();
+      expect((await paused.executionRepo.getExecutionById(waiting.id)).status).toBe('completed');
+
+      const working = pausableHarness();
+      working.useSlices();
+      const execution = await working.service.triggerManual(AUTOMATION_ID);
+      for (let i = 0; i < 400 && working.commands.length === 0; i++) await flush();
+      await flush();
+      expect(working.commands).toEqual(['cancel']);
+      const row = await working.executionRepo.getExecutionById(execution.id);
+      expect(row.status).toBe('failed');
+      expect(row.error).toMatch(/still working after 2 hours, so it was stopped/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -39,7 +39,7 @@ The embedded server normally listens on loopback. LAN access and pairing are man
 
 ## Navigation and workbench
 
-The sidebar and command palette expose Dashboard, Projects, Chats, Agents, Workflows, Scripts, Automations and Settings. Detailed route coverage is in the [web client](./web.md), because both clients use `apps/web/src/router.tsx`.
+The sidebar, command palette and native menus expose Home, Chats, Projects, Agents, Workflows, Automations, Scripts and Settings. Detailed route coverage is in the [web client](./web.md), because both clients use the same router: `apps/web/src/app/router.tsx` with one route module per area in `apps/web/src/app/routes/`.
 
 A typical development session is:
 
@@ -114,4 +114,4 @@ The current scripts supersede older README advice describing server dependency s
 - **Native computer actions fail:** review Computer Use status and the OS permissions reported by the desktop driver. Browser permission alone does not grant desktop automation.
 - **Preference disappears across launches:** inspect origin/port changes and native settings persistence before deleting data.
 
-Sources: `apps/desktop/package.json`, `apps/desktop/src/main/{index,server-manager,backend-switcher,menu,window-manager,settings-schema}.ts`, `apps/desktop/src/preload/index.ts`, `apps/desktop/scripts/`, `apps/web/src/components/layout/RightPane.tsx`, `apps/web/src/pages/ChatPage.tsx`.
+Sources: `apps/desktop/package.json`, `apps/desktop/src/main/{index,server-manager,backend-switcher,menu,window-manager,settings-schema}.ts`, `apps/desktop/src/preload/index.ts`, `apps/desktop/scripts/`, `apps/web/src/blocks/dock/Dock.tsx`, `apps/web/src/features/chat/ChatPage.tsx`.

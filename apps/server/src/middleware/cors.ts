@@ -3,10 +3,18 @@
 // ────────────────────────────────────────────────────────────────
 
 import cors from 'cors';
-import type { RequestHandler } from 'express';
+import type { NextFunction, Request, RequestHandler, Response } from 'express';
+
+export const ORIGIN_NOT_ALLOWED_CODE = 'ORIGIN_NOT_ALLOWED';
 
 export interface CorsConfig {
   origins?: string[];
+  /**
+   * Origins that come and go at runtime — the https:// LAN origins follow the
+   * machine's addresses as it changes network (D-110). Consulted per request,
+   * after the static list.
+   */
+  dynamicOrigins?: () => readonly string[];
 }
 
 /**
@@ -83,15 +91,13 @@ export function createCorsMiddleware(config?: CorsConfig): RequestHandler {
     );
   }
 
-  return cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (same-origin, curl, server-to-server).
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error(`CORS: origin ${origin} not allowed`));
-      }
-    },
+  // Requests with no origin (same-origin GETs, curl, native clients) pass.
+  const isAllowed = (origin: string | undefined): boolean =>
+    !origin || allowedOrigins.includes(origin) || Boolean(config?.dynamicOrigins?.().includes(origin));
+
+  const corsHandler = cors({
+    // Only ever reached for an allowed origin — the gate below answers the rest.
+    origin: true,
     // `DPoP` carries the proof-of-possession JWT. It is a non-simple header,
     // so without it here every cross-origin request (a paired browser talking
     // to a remote server, the Vite dev proxy bypass, a mobile web build) fails
@@ -125,4 +131,23 @@ export function createCorsMiddleware(config?: CorsConfig): RequestHandler {
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     maxAge: 86400,
   });
+
+  // Audit F-9: a refused origin is a POLICY decision, answered here as a clean
+  // 403 — it used to be thrown into the generic error handler, which turned
+  // it into a 502 UNKNOWN_ERROR (with a dev stack) that looked like a crash.
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const header = req.headers.origin;
+    const origin = Array.isArray(header) ? header[0] : header;
+    if (isAllowed(origin)) {
+      corsHandler(req, res, next);
+      return;
+    }
+    res.status(403).json({
+      error: {
+        code: ORIGIN_NOT_ALLOWED_CODE,
+        message: `Requests from ${String(origin).slice(0, 200)} are not allowed by this server's CORS policy.`,
+        requestId: req.requestId,
+      },
+    });
+  };
 }

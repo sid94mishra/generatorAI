@@ -97,7 +97,6 @@ export interface ProbeCapabilities {
   authentication?: {
     required?: boolean;
     dpopRequired?: boolean;
-    legacyApiKeyAccepted?: boolean;
   };
   transports?: {
     loopback?: boolean;

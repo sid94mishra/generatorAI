@@ -17,9 +17,8 @@
 // the loss is announced in a `gap` frame; items are queued and never dropped,
 // and a consumer that cannot drain even those is disconnected with a reason.
 //
-// STR-04 web sseManager rewrite is done; legacy per-scope routes
-// (`/api/workflow-runs/:id/stream` etc.) still exist for backward compat
-// but the web SPA now uses this unified endpoint exclusively.
+// This is the only streaming route: the per-scope routes
+// (`/api/workflow-runs/:id/stream` etc.) are gone, and every client uses it.
 // ──────────────────────────────────────────────────────────
 
 import { Router, type Request, type Response } from 'express';
@@ -28,8 +27,10 @@ import type { StreamEventRow, StreamScope } from '@generatorai/core';
 import { canMintDerivedCredentials, type Principal, type Scope } from '@generatorai/auth';
 import { acquireSseSlot } from '../composition/sseConnectionCap.js';
 import { LIFECYCLE_EVENT_KINDS } from '../composition/streamScopes.js';
+import { redactAttentionEventPayload } from '@generatorai/core';
 import { SseConnection, parseCursor } from '../streaming/sseConnection.js';
 import { MuxSseConnection } from '../streaming/muxConnection.js';
+import { endEventStream, liveConnections } from '../streaming/liveConnections.js';
 import {
   EPHEMERAL_SCOPES,
   hasEphemeralProducer,
@@ -149,6 +150,22 @@ function missingStreamScope(principal: Principal, scope: string): Scope | undefi
 }
 
 /**
+ * The scopes an open subscription keeps relying on (F-2): `stream:events`
+ * for the endpoint, the scope's read requirement, and `admin:settings` for an
+ * UNRESTRICTED `global` feed — losing it must not leave a full-feed stream
+ * open where a fresh one would be narrowed to lifecycle kinds.
+ */
+function scopesReliedOn(scope: string, lifecycleRestricted: boolean): Scope[] {
+  const out: Scope[] = ['stream:events'];
+  if (scope === 'global') out.push(lifecycleRestricted ? GLOBAL_ACTIVITY_SCOPE : 'admin:settings');
+  else {
+    const required = STREAM_SCOPE_READ_REQUIREMENTS[scope];
+    if (required) out.push(required);
+  }
+  return out;
+}
+
+/**
  * True when this principal's `global` subscription must be narrowed to
  * lifecycle kinds: it holds `read:activity` but not `admin:settings`.
  *
@@ -212,6 +229,30 @@ function lifecycleOnly<R>(deliver: (row: StreamEventRow) => R): (row: StreamEven
  */
 function lifecycleKindPrefixes(clientFilter: readonly string[] | undefined): readonly string[] {
   return clientFilter && clientFilter.length > 0 ? clientFilter : LIFECYCLE_KIND_FAMILIES;
+}
+
+/**
+ * G-01 scope rule for the attention feed on `global`.
+ *
+ * `attention.upsert` rows carry `ask.detail` and `progress.label`, which can
+ * contain commands and file names. A principal that lacks `read:chats` (chat
+ * items) or `read:workflows` (run and automation items) gets them stripped —
+ * the same rule `GET /api/attention` applies to its snapshot. Returns null
+ * when nothing needs stripping for this principal, so the common case costs
+ * nothing per row. The stored row is never mutated: the broker hands the same
+ * object to every subscriber and memoises its encoding.
+ */
+function attentionRedactor(
+  principal: Principal | undefined,
+): ((row: StreamEventRow) => StreamEventRow) | null {
+  if (!principal) return null;
+  const scopes = principal.scopes;
+  if (scopes.includes('read:chats') && scopes.includes('read:workflows')) return null;
+  return (row) => {
+    if (row.kind !== 'attention.upsert') return row;
+    const payload = redactAttentionEventPayload(row.kind, row.payload, scopes);
+    return payload === row.payload ? row : ({ ...row, payload } as StreamEventRow);
+  };
 }
 
 /** The 403 body for a subscription the principal may not read. */
@@ -673,9 +714,11 @@ export function createUnifiedStreamRoutes(container: Container): Router {
     let unsubscribe: (() => void) | null = null;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
     let released = false;
+    let unregisterLive: () => void = () => undefined;
     const cleanup = (): void => {
       if (released) return;
       released = true;
+      unregisterLive();
       if (heartbeat) clearInterval(heartbeat);
       const { droppedDeltas, shed } = conn.stats;
       conn.close();
@@ -694,6 +737,16 @@ export function createUnifiedStreamRoutes(container: Container): Router {
       }
     };
     res.on('close', cleanup);
+    // F-2 — a revocation, rotation or scope cut ends this stream at once.
+    const reliedOn = scopesReliedOn(scope, lifecycleRestricted);
+    unregisterLive = liveConnections.register(req.principal, {
+      label: 'sse',
+      requiredScopes: () => reliedOn,
+      close: (reason) => {
+        cleanup();
+        endEventStream(res, reason);
+      },
+    });
 
     // Initial comment flush — bypasses some proxies that buffer until first write.
     conn.writeComment(`connected scope=${scope} id=${scopeId}`);
@@ -714,7 +767,9 @@ export function createUnifiedStreamRoutes(container: Container): Router {
     // when an item had to be queued; the broker awaits it, which is how a
     // congested connection actually slows its session's producer rather than
     // only bounding memory.
-    const deliverRaw = (row: StreamEventRow): void | Promise<void> => conn.deliver(row);
+    const redact = scope === 'global' ? attentionRedactor(req.principal) : null;
+    const deliverRaw = (row: StreamEventRow): void | Promise<void> =>
+      conn.deliver(redact ? redact(row) : row);
     const deliver = lifecycleRestricted ? lifecycleOnly(deliverRaw) : deliverRaw;
 
     try {
@@ -840,9 +895,11 @@ export function createUnifiedStreamRoutes(container: Container): Router {
     const active = new Map<string, () => void>();
     let heartbeat: ReturnType<typeof setInterval> | undefined;
     let released = false;
+    let unregisterLive: () => void = () => undefined;
     const cleanup = (): void => {
       if (released) return;
       released = true;
+      unregisterLive();
       if (heartbeat) clearInterval(heartbeat);
       conn.close();
       for (const detach of active.values()) detach();
@@ -853,6 +910,23 @@ export function createUnifiedStreamRoutes(container: Container): Router {
     // Registered before the first await: `subscribe` replays, and a client
     // that aborts inside that window fires 'close' exactly once.
     res.on('close', cleanup);
+    // F-2 — what the stream relies on is read live, because subscriptions
+    // are added and removed after it opens.
+    unregisterLive = liveConnections.register(principal, {
+      label: 'mux',
+      requiredScopes: () => [
+        ...new Set(
+          [...record.subs.values()].flatMap((sub) =>
+            scopesReliedOn(sub.scope, sub.lifecycleOnly === true || restrictsGlobalToLifecycle(principal, sub.scope)),
+          ),
+        ),
+        'stream:events' as const,
+      ],
+      close: (reason) => {
+        cleanup();
+        endEventStream(res, reason);
+      },
+    });
 
     conn.writeComment(`connected c=${connectionId}`);
 
@@ -960,7 +1034,11 @@ export function createUnifiedStreamRoutes(container: Container): Router {
       // re-checked here so a flag lost anywhere between the two requests
       // fails CLOSED. Either says restrict → restricted.
       const restricted = sub.lifecycleOnly === true || restrictsGlobalToLifecycle(principal, sub.scope);
-      const deliverRaw = deliverTo(scopeKey);
+      const redact = sub.scope === 'global' ? attentionRedactor(principal) : null;
+      const deliverScope = deliverTo(scopeKey);
+      const deliverRaw = redact
+        ? (row: StreamEventRow, cls?: 'delta' | 'item') => deliverScope(redact(row), cls)
+        : deliverScope;
       const deliver = restricted
         ? lifecycleOnly((row: StreamEventRow) => deliverRaw(row))
         : deliverRaw;
@@ -1072,6 +1150,29 @@ export function createUnifiedStreamRoutes(container: Container): Router {
   }
 
   /**
+   * GET /api/stream/replay/prelude?id=<chatId>
+   * Opening a chat (U-39): the latest turn's first seq and the earlier rows its transcript still needs, so the client
+   * pages `/replay` from `turnStartSeq` instead of every row of every turn. `turnStartSeq: 0` means replay everything.
+   */
+  router.get('/replay/prelude', async (req, res, next) => {
+    try {
+      const chatId = typeof req.query['id'] === 'string' ? req.query['id'] : '';
+      if (!chatId) {
+        res.status(400).json({ error: { code: 'MISSING_ID', message: 'id required' } });
+        return;
+      }
+      const missingScope = req.principal ? missingStreamScope(req.principal, 'chat') : undefined;
+      if (missingScope) {
+        res.status(403).json(insufficientScopeBody('Reading', { scope: 'chat', id: chatId }, missingScope));
+        return;
+      }
+      res.json(await streamBroker.chatTurnPrelude(chatId));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
    * GET /api/stream/replay?scope=<s>&id=<id>&afterSeq=<n>&limit=<n>
    * REST pagination companion. Use when replay exceeds the SSE sync cap
    * (STR-06) — client calls this with the last seq it saw and continues
@@ -1101,7 +1202,11 @@ export function createUnifiedStreamRoutes(container: Container): Router {
         Math.min(parseInt(String(req.query['limit'] ?? '100'), 10) || 100, MAX_REPLAY_LIMIT),
       );
       const rows = await streamBroker.replay(scope, scopeId, afterSeq, limit);
-      res.json({ rows, nextAfterSeq: rows.length > 0 ? rows[rows.length - 1]!.seq : afterSeq });
+      const redact = scope === 'global' ? attentionRedactor(req.principal) : null;
+      res.json({
+        rows: redact ? rows.map(redact) : rows,
+        nextAfterSeq: rows.length > 0 ? rows[rows.length - 1]!.seq : afterSeq,
+      });
     } catch (err) {
       next(err);
     }

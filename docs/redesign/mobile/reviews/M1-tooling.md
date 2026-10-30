@@ -1,0 +1,43 @@
+# M1 tooling evidence
+
+## M1-05 — lint and design guardrails (2026-09-29)
+
+Task packet: MD-14/15/86, 02 §9.8, 07 M1-05, 08 Done loop. No redesigned surface; no board value changes. Root ESLint imports a mobile-only configuration; existing web/desktop policies are unchanged.
+
+- Boundaries cover kit, blocks, feature domains, services, theme, routes and legacy. Kit cannot reach legacy, services or feature state; feature domains cannot import each other. Router adapters admit Stack/Link presentational exports, not hooks/router.
+- React hooks and compiler rules enabled. Vocabulary checks use the actual Tailwind compiler plus generated shared vocabulary and mobile restrictions. UI component JSX requires a sibling story.
+- Existing violations recorded per file, per diagnostic; `--update` never raises an allowance. `--strict` also requires decreases to be recorded. New files have zero allowance. Existing routes ratchet until ported (MD-108).
+- Ten Node integration tests pass, including deliberate illegal imports/styles/classes, conditional hooks, new-route enforcement, named class string extraction and baseline transfer/growth rejection.
+- Typecheck passes. Lint / strict design audit recorded in `.expo/m1-05-*.log`. No changed TypeScript application code for Vitest-related execution; tooling uses Node integration tests. Jest bootstrap remains M1-06.
+- Fingerprint detects `packageJson:scripts` only. No native/runtime code changed; rebuilding is carried into M1-06 rather than claiming fingerprints match. No changed screen to walk through. Existing native characterization gaps remain MV-01…05.
+- No legacy screen/component is replaced by this task.
+
+## M1-06 — component test and story harness (2026-09-29)
+
+Implementation complete; native acceptance remains pending MV-07.
+
+- Jest 30 + SDK-matched jest-expo 57.0.5 + RNTL 14.0.1 + test-renderer run separate iOS and Android projects. Vitest remains the pure-logic runner (`test` / `test:unit`); Jest is `test:ui` / `test:kit`, per 07's higher-precedence task wording.
+- Installed Worklets' supported Jest resolver is composed with workspace source resolution (including the client-only shared entry). Reanimated setup, keyboard mock and MMKV's built-in in-memory test mode are retained.
+- Six assertions/tests pass across four platform suites: accessible native button activation, disabled behavior, and preview appearance changes that never write the saved app preference. Typecheck, lint and the shrinking design audit pass. Vitest-related reports no matching pure tests for the provider.
+- Storybook RN 10.6 with controls/actions, LiteUI, automatic websocket channel and experimental MCP. Verified installed options and the `deviceAddons` field. `EXPO_PUBLIC_STORYBOOK=1` enables Metro integration; otherwise the route redirects and the wrapper strips Storybook imports. Generated `storybook.requires.ts` is ignored. Without a registered MCP connector, discovery remains `rg --files -g '*.stories.tsx'`.
+- `/storybook?story=ui-verification-nativebutton--enabled&theme=instrument&mode=dark&accent=ink` selects a canvas for capture. `vrt-root` wraps it; `vrt-ready` follows a rendered story and two frames. The current story uses platform fonts. The M3 font loader and native text-scale sweep are still pending before real kit VRT.
+- Legacy `components/ui/gallery.tsx` and its barrel export deleted. The bootstrap NativeButton is story-only, not the production M4 Button.
+- Fingerprint requires rebuild: transitive on-device controls add datetimepicker/slider and pnpm changes native peer paths. iOS prebuild and pods succeed; native build started in `.expo/m1-06-ios-build.log`. Both native story walkthroughs and the dedicated flow remain pending; no device pass is claimed. Android follows iOS sequentially.
+- Existing SDK peer mismatch: Storybook's UI advertises safe-area-context 5.8.0; SDK 57 retains its matched 5.7.0. Verify native behavior and revisit with M3, rather than upgrading the SDK's native peer silently.
+
+## M1-09 — stable service-layer move (2026-09-29)
+
+75 source files moved under `src/services/{api,auth,transport,stream,notifications,native,storage,voice,crypto,prefs,lib}`; 154 import consumers updated by TypeScript syntax traversal. Imports, re-exports, dynamic imports and test mocks keep their same targets. Old directories are removed, not bridged with compatibility barrels. UI-bearing legacy auth wrappers remain mechanically intact for their planned replacement. MD-109 records the finite migrated-file lint debt.
+
+- Typecheck passes. All **107 Vitest files / 1,111 tests pass**, including moved transport/auth/stream/storage/voice tests; all **six Jest tests** pass across both platform projects.
+- Initial unrestricted Vitest concurrency on the 8 GB host caused two 5-second timeouts while native compilation ran. Limiting the runner to two workers fixed both; no timeout threshold or assertion changed.
+- Lint integration tests and strict design audit run again after migration; logs `.expo/m1-09-*.log`. Existing allowances follow their moved file; only the 17 newly exposed, unchanged legacy boundary edges were added (11 files).
+- Both native app walkthroughs / characterization smoke still pending while M1-06 rebuilds complete (MV-07/MV-10). Pure test passes do not establish native acceptance.
+
+## 2026-09-29 native restart repair
+
+The M1-06 iOS native rebuild succeeded, installed and launched; fingerprint recorded. Dev-client Metro connection then failed because Node 26 resolved localhost to IPv6 only (`lsof`: `[::1]:8081`; IPv4 curl refused). Restarted with IPv4-first resolution and added the same behavior to the mobile start script (MD-111). Native Storybook/app verification remains pending until observed.
+
+IPv4 retest passed: Metro now listens on `127.0.0.1:8081` and `/status` returns `packager-status:running`. Rebuilt simulator app had launched successfully; its connection can now be retried against the expected address.
+
+Second startup failure resolved: Expo HMR's pretty-format 29 import was pinned by the workspace resolver to Jest 30's ESM bridge, yielding `Cannot read property default of undefined` before initialization. Resolve this pure-JS dependency from the importing package and its CommonJS entry. After restart the simulator renders the sandbox Home screen (`.expo/m1-hmr-fix.png`). No native rebuild required. Chat Maestro retest running; this establishes startup recovery only.

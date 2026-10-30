@@ -13,7 +13,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { writeFileAtomicRestricted } from './KeyProvider.js';
+import { writeFileAtomicRestricted } from '@generatorai/shared/node';
 import { SecretStoreError, secretRefToString, type SecretRef, type SecretStore } from './SecretStore.js';
 
 /** One plaintext credential living at `jsonPath` inside `file`. */

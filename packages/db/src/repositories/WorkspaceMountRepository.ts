@@ -25,6 +25,7 @@ export class DrizzleWorkspaceMountRepository implements IWorkspaceMountRepositor
         originPath: mount.originPath ?? null,
         mode: mount.mode,
         path: mount.path,
+        workdir: mount.workdir ?? null,
         git: (mount.git as Record<string, unknown> | undefined) ?? null,
         status: mount.status,
         error: mount.error ?? null,
@@ -66,6 +67,14 @@ export class DrizzleWorkspaceMountRepository implements IWorkspaceMountRepositor
     return rows.map((r) => this.mapRow(r));
   }
 
+  async findInPlaceByPath(path: string): Promise<WorkspaceMount[]> {
+    const rows = await this.db
+      .select()
+      .from(workspaceMounts)
+      .where(and(eq(workspaceMounts.path, path), eq(workspaceMounts.mode, 'in-place'), ne(workspaceMounts.status, 'removed')));
+    return rows.map((r) => this.mapRow(r));
+  }
+
   async update(id: string, updates: WorkspaceMountUpdate): Promise<void> {
     const values: Record<string, unknown> = { updatedAt: new Date() };
     if (updates.status !== undefined) values['status'] = updates.status;
@@ -97,6 +106,7 @@ export class DrizzleWorkspaceMountRepository implements IWorkspaceMountRepositor
       originPath: row.originPath ?? undefined,
       mode: row.mode as MountMode,
       path: row.path,
+      ...(row.workdir ? { workdir: row.workdir } : {}),
       git: (row.git as MountGitState | null) ?? undefined,
       status: row.status as MountStatus,
       error: row.error ?? undefined,

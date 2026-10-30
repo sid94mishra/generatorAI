@@ -26,6 +26,7 @@ import {
   hostLabel,
   loadCatalog,
   parsePairingCode,
+  preferEndpoint,
   removeConnection,
   saveCatalog,
   sessionStorageKey,
@@ -205,7 +206,10 @@ export function previewPairingCode(code: string): PairingConsent {
 export async function resolvePairingInput(input: string): Promise<PairingConsent> {
   const trimmed = input.trim();
   if (!isPairingCode(trimmed)) {
-    return parsePairingCode(trimmed);
+    // A page loaded from one of the offer's addresses pairs over that one:
+    // its CSP allows only its own origin (a desktop window pointed at the
+    // LAN address must not pair through the ts.net name, or vice versa).
+    return preferEndpoint(parsePairingCode(trimmed), resolveEndpoint());
   }
 
   const pairingGrant = normalizePairingCode(trimmed);

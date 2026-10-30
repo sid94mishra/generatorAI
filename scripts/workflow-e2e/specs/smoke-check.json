@@ -1,0 +1,60 @@
+{
+  "tag": "SMOKE-check",
+  "description": "credential-free smoke: a v2 graph of check stages is created, published, invoked and waited on (no LLM)",
+  "timeoutMs": 120000,
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "e2e-smoke-check"
+    },
+    "stages": [
+      {
+        "key": "version",
+        "name": "version",
+        "kind": "check",
+        "check": {
+          "command": "node",
+          "args": [
+            "--version"
+          ],
+          "timeoutMs": 60000
+        }
+      },
+      {
+        "key": "again",
+        "name": "again",
+        "kind": "check",
+        "check": {
+          "command": "node",
+          "args": [
+            "--version"
+          ],
+          "timeoutMs": 60000
+        }
+      },
+      {
+        "key": "on_failure",
+        "name": "on_failure",
+        "kind": "check",
+        "check": {
+          "command": "node",
+          "args": [
+            "--version"
+          ],
+          "timeoutMs": 60000
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "version",
+        "to": "again"
+      },
+      {
+        "from": "version",
+        "to": "on_failure",
+        "on": "failure"
+      }
+    ]
+  }
+}

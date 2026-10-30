@@ -163,6 +163,41 @@ describe('computer tool set', () => {
     expect(calls[0]?.args[2]).not.toHaveProperty('element');
   });
 
+  it('G-07: computer_run_steps turns its steps into one actPlan call and reports where it stopped', async () => {
+    const actPlan = vi.fn(async () => ({
+      ok: false,
+      results: [{ ok: true, snapshot: null, screenshot: null, action: { path: 'synthetic' } }],
+      refusal: { code: 'user_in_control', message: 'taken over' },
+      stoppedAt: 1,
+    }));
+    const { ctx } = makeCtx({ actPlan });
+    const run = buildComputerToolSet(ctx).find((t) => t.name === 'computer_run_steps')!;
+    const out = await run.handler({
+      appId: 'com.a',
+      windowId: 9,
+      steps: [
+        { kind: 'click_point', x: 10, y: 20 },
+        { kind: 'type_text', text: 'hi' },
+        { kind: 'press_key', key: 'ctrl+s' },
+        { kind: 'scroll', deltaY: -3 },
+      ],
+    });
+    const [, , steps] = actPlan.mock.calls[0] as unknown as [unknown, unknown, Array<Record<string, unknown>>];
+    expect(steps.map((s) => s['type'])).toEqual(['clickPoint', 'typeText', 'pressKey', 'scroll']);
+    expect(steps[2]).toMatchObject({ key: 's', modifiers: ['Control'] });
+    expect(steps[0]).toMatchObject({ target: { window: { by: 'id', id: 9 } } });
+    expect(out).toMatchObject({ ok: false, completedSteps: 1, totalSteps: 4, refusal: 'user_in_control', stoppedAtStep: 2 });
+  });
+
+  it('G-07: computer_run_steps rejects a malformed step before asking anyone', async () => {
+    const actPlan = vi.fn();
+    const { ctx } = makeCtx({ actPlan });
+    const run = buildComputerToolSet(ctx).find((t) => t.name === 'computer_run_steps')!;
+    const out = await run.handler({ appId: 'com.a', steps: [{ kind: 'type_text', text: 'a' }, { kind: 'click_point', x: 1 }] });
+    expect(out).toMatchObject({ ok: false, error: expect.stringMatching(/Step 2/) });
+    expect(actPlan).not.toHaveBeenCalled();
+  });
+
   it('merges a chord in `key` with modifiers passed separately, without duplicates', async () => {
     const { tool: press, calls } = tool('computer_press_key');
     await press.handler({ appId: 'com.a', key: 'Shift+Meta+p', modifiers: ['Shift'] });

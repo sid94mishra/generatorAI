@@ -21,6 +21,7 @@ import {
   type TerminalAttachPort,
 } from '@generatorai/cli-core';
 import { enterAlternateScreen, ThemeProvider } from '@generatorai/tui-kit';
+import type { AccentId } from '@generatorai/design-tokens';
 import { App } from './App.js';
 import { connectionToast } from './connectionStatus.js';
 import { createKeyPump } from './keyPump.js';
@@ -266,7 +267,7 @@ export async function launchTui(options: LaunchOptions): Promise<void> {
       {...(session.config.tui.appearance !== 'auto'
         ? { appearance: session.config.tui.appearance }
         : {})}
-      accent={session.config.tui.accent}
+      {...(session.config.tui.accent !== 'auto' ? { accent: session.config.tui.accent } : {})}
     >
       <App
         registry={registry}
@@ -331,7 +332,7 @@ function ThemedWorkbench({
 }: {
   capabilities: Session['capabilities'];
   appearance?: 'light' | 'dark';
-  accent?: 'blue' | 'violet' | 'green' | 'orange' | 'rose' | 'teal';
+  accent?: AccentId;
   children: React.ReactNode;
 }): React.JSX.Element {
   const theme = useTui((s) => s.theme);

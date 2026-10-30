@@ -16,6 +16,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import {
   AuthError,
   AuditAction,
+  canonicalApiPath,
   DPOP_NONCE_HEADER,
   hasAllScopes,
   isLoopbackAddress,
@@ -26,6 +27,7 @@ import {
 } from '@generatorai/auth';
 import { redactDeep } from '@generatorai/secrets';
 import type { ILogger } from '@generatorai/shared';
+import { requestAbsoluteUrl } from '../network/requestOrigin.js';
 
 export interface ApiAuthOptions {
   auth: AuthService;
@@ -33,13 +35,6 @@ export interface ApiAuthOptions {
   logger: ILogger;
 }
 
-/** Absolute URL for DPoP `htu` binding. Must match what the client signed. */
-function absoluteUrl(req: Request): string {
-  const forwardedProto = firstValue(req.headers['x-forwarded-proto']);
-  const proto = forwardedProto ?? (req.secure ? 'https' : 'http');
-  const host = firstValue(req.headers['host']) ?? 'localhost';
-  return `${proto}://${host}${req.originalUrl}`;
-}
 
 function firstValue(v: string | string[] | undefined): string | undefined {
   if (Array.isArray(v)) return v[0];
@@ -85,9 +80,25 @@ export function createAuthMiddleware(options: ApiAuthOptions): RequestHandler {
 
   return (req: Request, res: Response, next: NextFunction): void => {
     // `req.path` is already `/api`-relative because the middleware is mounted
-    // on `/api`, and it is query-string free.
+    // on `/api`, and it is query-string free. Policy is resolved on the
+    // CANONICAL path (D-115, audit F-1): Express dispatches `/auth/Devices`
+    // to `/auth/devices`, so the scope check must see it that way too. A path
+    // with no canonical form (dot segments, `//`, malformed escapes) is
+    // refused before anything else — the router could resolve it in a way the
+    // policy did not.
     const apiPath = req.path;
-    const { policy, scopes } = requiredScopesFor(req.method, apiPath);
+    const canonicalPath = canonicalApiPath(apiPath);
+    if (canonicalPath === null) {
+      res.status(400).json({
+        error: {
+          code: 'NON_CANONICAL_PATH',
+          message: 'The request path is not in canonical form (dot segments, empty segments or malformed escapes).',
+          requestId: req.requestId,
+        },
+      });
+      return;
+    }
+    const { policy, scopes } = requiredScopesFor(req.method, canonicalPath);
 
     if (policy.public) {
       next();
@@ -98,7 +109,7 @@ export function createAuthMiddleware(options: ApiAuthOptions): RequestHandler {
       try {
         // `/api/stream` is the only ticket-redeeming endpoint, and the ticket
         // must match the exact subscription it was minted for.
-        const isStreamSubscription = apiPath === '/stream' || apiPath === '/stream/';
+        const isStreamSubscription = canonicalPath === '/stream';
         // W09-a — `?c=` is the multiplexed form. Its ticket is bound to the
         // CONNECTION, not to a scope: the subscriptions are authorised
         // individually as they are added, so the ticket can never widen access
@@ -123,7 +134,9 @@ export function createAuthMiddleware(options: ApiAuthOptions): RequestHandler {
 
         const principal = await auth.authenticate({
           method: req.method,
-          url: absoluteUrl(req),
+          // DPoP `htu` binding: the URL the client signed — `https://` when it
+          // reached us over TLS or through a trusted proxy (D-111, D-114).
+          url: requestAbsoluteUrl(req, req.originalUrl),
           headers: req.headers as Record<string, string | string[] | undefined>,
           query: req.query as Record<string, string | string[] | undefined>,
           remoteAddress: req.socket.remoteAddress,

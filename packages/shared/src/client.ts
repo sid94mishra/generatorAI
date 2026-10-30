@@ -28,6 +28,18 @@
 // state-machine tables, `agentModeDescriptor`, default constants — are pure).
 export * from './types/index.js';
 
+// D-18 status map: pure tables and helpers.
+export * from './status/index.js';
+
+// Diff review intents, their words and the line-range label.
+export * from './review.js';
+// Mobile MG-04 — gate risk verdict
+export * from './security/gateRisk.js';
+// U-16 (D-147) — remembered permission rules
+export * from './security/permissionRules.js';
+export * from './security/approvalProof.js';
+export * from './security/endpointTrust.js';
+
 // Error classes are plain `Error` subclasses.
 export * from './errors/index.js';
 
@@ -37,6 +49,8 @@ export * from './constants/index.js';
 // Pure helpers.
 export { generateId, deepMerge, sleep, interpolateVariables } from './utils/pure.js';
 export * from './utils/pairingCode.js';
+export { CHAT_FOLDER_ALIAS, chatSourceAlias, isMountableSource } from './utils/sourceSpec.js';
+export type { MountableSourceSpec } from './utils/sourceSpec.js';
 export { insertTextAtCaret, CaretInsertionSequencer } from './utils/insertAtCaret.js';
 export type { CaretInsertResult } from './utils/insertAtCaret.js';
 export {

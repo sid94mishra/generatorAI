@@ -22,14 +22,18 @@ import type {
   ScmFlowResult,
   ScmFlowStep,
   ScmFlowStepId,
+  ScmBranchList,
+  ScmCompareFile,
+  ScmCompareResult,
   ScmGenerateRequest,
   ScmGenerateResult,
+  ScmPullRequestOptions,
   PullRequestSummary,
   RepoReadiness,
   SourceControlSettings,
 } from '@generatorai/shared';
 import type { IGitClient } from '@generatorai/git';
-import { parseRepoSlug, type SourceControlRegistry } from '@generatorai/source-control';
+import { ProviderNotConfiguredError, parseRepoSlug, type SourceControlRegistry } from '@generatorai/source-control';
 import type { RepoReadinessService } from './RepoReadinessService.js';
 import { notConnectedReason, REASON_NOTHING_TO_COMMIT } from './RepoReadinessService.js';
 import type { GenerationFallback, ScmTextGenerator } from './ScmTextGenerator.js';
@@ -39,6 +43,7 @@ import {
   heuristicPullRequestText,
 } from './ScmTextGenerator.js';
 import { redactTokens } from './redact.js';
+import { explainScmFailure } from './explainFailure.js';
 
 export { redactTokens };
 
@@ -182,7 +187,8 @@ export class SourceControlFlowService {
                 files,
                 diffExcerpt: capDiffExcerpt(await this.workingDiff(repoDir)),
               });
-              message = generated.message;
+              const fallback = request.commit.fallbackMessage?.trim();
+              message = generated.source === 'heuristic' && fallback ? fallback : generated.message;
             } else {
               message = heuristicCommitMessage(files, hint);
             }
@@ -208,31 +214,36 @@ export class SourceControlFlowService {
       // 4 ── sync
       stepId = 'sync';
       if (wantPush && request.sync !== false && readiness.hasRemote) {
-        if (!base) {
-          steps.push({ id: 'sync', status: 'skipped', detail: 'No base branch could be resolved' });
-        } else if (base === branchNow) {
-          steps.push({ id: 'sync', status: 'skipped', detail: `Already on ${base}` });
-        } else {
-          const conflicts = await this.syncWithBase(repoDir, base, branchNow ?? 'HEAD');
-          if (conflicts) {
-            return {
-              status: 'conflicts',
-              alias,
-              steps: [
-                ...steps,
-                {
-                  id: 'sync',
-                  status: 'failed',
-                  detail: `Merge conflicts with ${REMOTE}/${base}`,
-                },
-              ],
-              conflicts,
-              readiness: await this.refreshReadiness(repoDir, alias, readiness),
-              ...partial,
-            };
-          }
-          steps.push({ id: 'sync', status: 'done', detail: `Merged ${REMOTE}/${base}` });
+        const merged: string[] = [];
+        const conflictResult = async (conflicts: ScmConflictReport): Promise<ScmFlowResult> => ({
+          status: 'conflicts',
+          alias,
+          steps: [...steps, { id: 'sync', status: 'failed', detail: `Merge conflicts with ${REMOTE}/${conflicts.base}` }],
+          conflicts,
+          readiness: await this.refreshReadiness(repoDir, alias, readiness),
+          ...partial,
+        });
+        // The branch's own copy on the remote first: a push on top of commits made there
+        // (another machine, GitHub's "Update branch") is rejected otherwise.
+        if (readiness.hasUpstream && branchNow && !partial.branch && (await this.remoteHasNewCommits(repoDir, branchNow))) {
+          const outcome = await this.syncWithBase(repoDir, branchNow, branchNow);
+          if (typeof outcome === 'object') return conflictResult(outcome);
+          if (outcome === 'merged') merged.push(`${REMOTE}/${branchNow}`);
         }
+        let baseState: string | null = base ? null : 'No base branch could be resolved';
+        if (base && base !== branchNow) {
+          const outcome = await this.syncWithBase(repoDir, base, branchNow ?? 'HEAD');
+          if (typeof outcome === 'object') return conflictResult(outcome);
+          if (outcome === 'merged') merged.push(`${REMOTE}/${base}`);
+          else baseState = `Up to date with ${REMOTE}/${base}`;
+        } else if (base) {
+          baseState = `Already on ${base}`;
+        }
+        steps.push(
+          merged.length > 0
+            ? { id: 'sync', status: 'done', detail: `Merged ${merged.join(' and ')}` }
+            : { id: 'sync', status: 'skipped', detail: baseState ?? 'Nothing to merge' },
+        );
       } else {
         steps.push({
           id: 'sync',
@@ -270,14 +281,19 @@ export class SourceControlFlowService {
           steps,
         });
         partial.pullRequest = pr;
+      } else if (partial.pushed && readiness.openPullRequest) {
+        // The branch's open PR now carries the pushed commits.
+        partial.pullRequest = readiness.openPullRequest;
+        steps.push({ id: 'pull_request', status: 'done', detail: `Updated PR #${readiness.openPullRequest.number}` });
       } else {
         steps.push({ id: 'pull_request', status: 'skipped', detail: 'Not requested' });
       }
 
       return { status: 'ok', alias, steps, readiness: await this.refreshReadiness(repoDir, alias, readiness), ...partial };
     } catch (err) {
-      const detail = messageOf(err);
-      this.deps.logger.warn(`[SCM] Flow failed at ${stepId}: ${detail}`);
+      const raw = messageOf(err);
+      this.deps.logger.warn(`[SCM] Flow failed at ${stepId}: ${raw}`);
+      const detail = explainScmFailure(stepId, raw);
       return {
         status: 'failed',
         alias,
@@ -347,6 +363,141 @@ export class SourceControlFlowService {
   }
 
   // ────────────────────────────────────────────────────────────
+  // The pull-request form: branches, "Comparing changes", sidebar pickers
+  // ────────────────────────────────────────────────────────────
+
+  /**
+   * Branches a PR from this repo can target: the remote's, freshly fetched
+   * (falls back to the last fetched list offline), default first, never the
+   * branch the work is on.
+   */
+  async branches(input: { repoDir: string; alias: string }): Promise<ScmBranchList> {
+    const { repoDir, alias } = input;
+    const git = this.deps.git;
+    let fresh = true;
+    try {
+      await git.fetch(repoDir, REMOTE);
+    } catch {
+      fresh = false;
+    }
+    const prefix = `refs/remotes/${REMOTE}/`;
+    const refs = await safe(() => git.listRefs(repoDir, prefix), []);
+    const current = await safe(() => git.currentBranch(repoDir), null);
+    const defaultBranch = await safe(() => git.defaultBranch(repoDir), null);
+    const names = refs
+      .map((r) => r.ref.slice(prefix.length))
+      .filter((name) => name && name !== 'HEAD' && name !== current);
+    names.sort((a, b) => (a === defaultBranch ? -1 : b === defaultBranch ? 1 : a.localeCompare(b)));
+    return { alias, defaultBranch, current, branches: [...new Set(names)], fresh };
+  }
+
+  /** What a PR from the current branch into `base` would contain (merge base → HEAD), and whether it merges. */
+  async compare(input: { repoDir: string; alias: string; base?: string }): Promise<ScmCompareResult> {
+    const { repoDir, alias } = input;
+    const git = this.deps.git;
+    const base = await this.resolveBase(repoDir, input.base);
+    const head = await safe(() => git.currentBranch(repoDir), null);
+    const uncommittedFiles = (await safe(() => git.changedFilesSummary(repoDir), [])).length;
+    const empty: ScmCompareResult = {
+      alias,
+      base,
+      head,
+      commits: [],
+      files: [],
+      additions: 0,
+      deletions: 0,
+      behind: 0,
+      mergeable: 'unknown',
+      conflictFiles: [],
+      uncommittedFiles,
+    };
+    await safe(() => git.fetchBranch(repoDir, REMOTE, base), undefined);
+    const ref = `${REMOTE}/${base}`;
+    if (!(await safe(() => git.revParse(repoDir, ref), null))) return empty;
+    if (await git.isUnborn(repoDir).catch(() => true)) return empty;
+
+    const range = `${ref}...HEAD`;
+    const [commits, nameStatus, numstat, aheadBehind, probe] = await Promise.all([
+      git.logEntries(repoDir, `${ref}..HEAD`, 100),
+      safe(() => git.diffNameStatusZ(repoDir, range), []),
+      safe(() => git.diffNumstat(repoDir, range), []),
+      safe(() => git.aheadBehind(repoDir, 'HEAD', ref), null),
+      safe(() => git.mergeTreeConflicts(repoDir, 'HEAD', ref), { supported: false, conflicts: [] as string[] }),
+    ]);
+    const counts = new Map(numstat.map((n) => [n.path, n]));
+    const files: ScmCompareFile[] = nameStatus.map((entry) => {
+      const n = counts.get(entry.path);
+      return {
+        path: entry.path,
+        ...(entry.oldPath ? { oldPath: entry.oldPath } : {}),
+        status: compareStatus(entry.code),
+        additions: Math.max(0, n?.additions ?? 0),
+        deletions: Math.max(0, n?.deletions ?? 0),
+      };
+    });
+    return {
+      ...empty,
+      commits,
+      files,
+      additions: files.reduce((sum, f) => sum + f.additions, 0),
+      deletions: files.reduce((sum, f) => sum + f.deletions, 0),
+      behind: aheadBehind?.behind ?? 0,
+      // Without merge-tree (git < 2.38) one case is still certain: a base that has not moved since
+      // the branch was cut is an ancestor of HEAD, so the merge is a fast-forward.
+      mergeable: probe.supported
+        ? probe.conflicts.length > 0
+          ? 'conflicts'
+          : 'clean'
+        : aheadBehind?.behind === 0
+          ? 'clean'
+          : 'unknown',
+      conflictFiles: probe.conflicts,
+    };
+  }
+
+  /** The PR sidebar's pickers: people, labels, open issues — from the host, with the reason when it cannot be asked. */
+  async pullRequestOptions(input: { repoDir: string; alias: string }): Promise<ScmPullRequestOptions> {
+    const { repoDir, alias } = input;
+    const unavailable = (reason: string): ScmPullRequestOptions => ({
+      alias,
+      available: false,
+      reason,
+      viewer: null,
+      people: [],
+      labels: [],
+      issues: [],
+    });
+    const remoteUrl = await safe(() => this.deps.git.getRemoteUrl(repoDir), null);
+    const slug = remoteUrl ? parseRepoSlug(remoteUrl) : null;
+    if (!slug) return unavailable('This repository has no hosted remote');
+    const provider = this.deps.registry.providerFor(slug.host);
+    if (!provider) return unavailable(notConnectedReason(slug.host));
+    try {
+      const [viewer, people, labels, issues] = await Promise.all([
+        provider.getAuthenticatedUser(),
+        provider.listAssignableUsers(slug.owner, slug.repo, slug.host),
+        provider.listLabels(slug.owner, slug.repo, slug.host),
+        safe(() => provider.listIssues({ owner: slug.owner, repo: slug.repo, host: slug.host, state: 'open' }), []),
+      ]);
+      return {
+        alias,
+        available: true,
+        viewer: viewer.login || null,
+        people,
+        labels,
+        issues: issues.map((i) => ({ number: i.number, title: i.title })),
+      };
+    } catch (err) {
+      if (err instanceof ProviderNotConfiguredError) {
+        return unavailable('Reviewers, assignees and labels need a GitHub account connected with a token');
+      }
+      // "Request blocked: getaddrinfo ENOTFOUND …" means nothing to a user; say what could not load, then why.
+      const detail = messageOf(err).replace(/^Request blocked:\s*/i, '').replace(/:\s*getaddrinfo \S+ \S+$/, '');
+      return unavailable(`Could not load reviewers, assignees and labels from ${slug.host}: ${detail}`);
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────
   // Conflicts
   // ────────────────────────────────────────────────────────────
 
@@ -359,13 +510,15 @@ export class SourceControlFlowService {
     const { repoDir } = input;
     const git = this.deps.git;
     const head = (await git.currentBranch(repoDir)) ?? 'HEAD';
-    const base = await this.resolveBase(repoDir, input.base);
 
     if (await git.mergeInProgress(repoDir)) {
+      // The merge already under way names its own source; a caller's guess must not rename it.
+      const base = (await safe(() => git.mergeSource(repoDir), null)) ?? (await this.resolveBase(repoDir, input.base));
       return { base, head, files: await git.unmergedFiles(repoDir), mergeStarted: true };
     }
+    const base = await this.resolveBase(repoDir, input.base);
 
-    await git.fetch(repoDir, REMOTE, base);
+    await git.fetchBranch(repoDir, REMOTE, base);
     await git.merge(repoDir, `${REMOTE}/${base}`, { noCommit: true });
     const files = await git.unmergedFiles(repoDir);
     if (files.length === 0) {
@@ -385,6 +538,8 @@ export class SourceControlFlowService {
     repoDir: string;
     alias: string;
     message?: string;
+    /** The branch the conflicting merge brought in (the conflict report's `base`). */
+    base?: string;
   }): Promise<{ ok: boolean; sha?: string; remaining: string[] }> {
     const { repoDir } = input;
     const git = this.deps.git;
@@ -400,7 +555,7 @@ export class SourceControlFlowService {
     }
 
     const head = (await git.currentBranch(repoDir)) ?? 'HEAD';
-    const base = await this.resolveBase(repoDir, undefined);
+    const base = (await safe(() => git.mergeSource(repoDir), null)) ?? (await this.resolveBase(repoDir, input.base));
     const sha = await git.commitMerge(
       repoDir,
       input.message ?? `Merge ${REMOTE}/${base} into ${head}`,
@@ -423,13 +578,15 @@ export class SourceControlFlowService {
       'Conflicted files:',
       files,
       '',
+      'First find out what each side really changed. The markers show only the two results, not where they started: compare both with the common ancestor using `git show :1:<file>` (ancestor), `git show :2:<file>` (ours) and `git show :3:<file>` (theirs). A line only one side changed keeps that side\'s version; only a line both sides changed is a real choice. Those read-only commands are fine.',
+      '',
       'Rules — follow all of them:',
       '',
       `1. Keep the intent of BOTH sides. \`${report.head}\` is our work; \`${REMOTE}/${report.base}\` is the incoming base branch. Neither side may silently lose a change.`,
       '2. Edit ONLY the files listed above. Do not touch unrelated files, do not reformat, do not "tidy up" while you are in there.',
       '3. Remove every conflict marker — `<<<<<<<`, `=======`, `>>>>>>>`. Leaving one behind breaks the build.',
       '4. Do NOT run `git commit`, `git merge --continue`, `git push` or `git rebase`. The platform commits the merge after the user reviews it; running git yourself takes that review away.',
-      '5. When a choice is genuinely ambiguous, prefer the incoming base-branch change — and say so explicitly in your report.',
+      '5. When a line both sides changed is genuinely ambiguous, prefer the incoming base-branch change — and say so explicitly in your report.',
       '',
       'When you are done, finish with a short report: one line per file saying which side you kept and why, and call out anything you were unsure about so the user can check it.',
     ].join('\n');
@@ -452,14 +609,29 @@ export class SourceControlFlowService {
     }
   }
 
+  /** Whether `origin/<branch>` has commits this checkout lacks (fetched first; a deleted remote branch reads false). */
+  private async remoteHasNewCommits(repoDir: string, branch: string): Promise<boolean> {
+    const git = this.deps.git;
+    const fetched = await safe(async () => {
+      await git.fetchBranch(repoDir, REMOTE, branch);
+      return true;
+    }, false);
+    if (!fetched) return false;
+    const counts = await safe(() => git.aheadBehind(repoDir, branch, `${REMOTE}/${branch}`), null);
+    return (counts?.behind ?? 0) > 0;
+  }
+
   private async syncWithBase(
     repoDir: string,
     base: string,
     head: string,
-  ): Promise<ScmConflictReport | null> {
+  ): Promise<ScmConflictReport | 'merged' | 'up-to-date'> {
     const git = this.deps.git;
     const ref = `${REMOTE}/${base}`;
-    await git.fetch(repoDir, REMOTE, base);
+    await git.fetchBranch(repoDir, REMOTE, base);
+    // Nothing new on the base: no merge, and the step says so instead of "Merged".
+    const counts = await safe(() => git.aheadBehind(repoDir, 'HEAD', ref), null);
+    if (counts && counts.behind === 0) return 'up-to-date';
 
     // Preferred: ask git without touching the working tree (git >= 2.38).
     const probe = await git.mergeTreeConflicts(repoDir, 'HEAD', ref);
@@ -482,7 +654,7 @@ export class SourceControlFlowService {
       // Raced with a push to the base between the probe and the merge.
       return { base, head, files: merged.conflicts, mergeStarted: true };
     }
-    return null;
+    return 'merged';
   }
 
   /** The chat's own model, offered to the text generator as a last resort. */
@@ -548,13 +720,20 @@ export class SourceControlFlowService {
           diffExcerpt,
           ...(template ? { template } : {}),
         });
-        title = title || generated.title;
-        body = body ?? generated.body;
+        const fallback = generated.source === 'heuristic' ? request.pullRequest?.fallback : undefined;
+        title = title || fallback?.title?.trim() || generated.title;
+        body = body ?? (fallback?.body?.trim() ? fallback.body : generated.body);
       } else {
         const fallback = heuristicPullRequestText(files, commits, hint, await readPullRequestTemplate(repoDir));
         title = title || fallback.title;
         body = body ?? fallback.body;
       }
+    }
+
+    const closes = [...new Set(request.pullRequest?.closesIssues ?? [])].filter((n) => Number.isInteger(n) && n > 0);
+    if (closes.length > 0) {
+      const lines = closes.map((n) => `Closes #${n}`).join('\n');
+      body = body?.trim() ? `${body.trimEnd()}\n\n${lines}` : lines;
     }
 
     const pr = await provider.createPullRequest({
@@ -568,7 +747,23 @@ export class SourceControlFlowService {
       ...(request.pullRequest?.draft !== undefined ? { draft: request.pullRequest.draft } : {}),
       repoDir,
     });
-    steps.push({ id: 'pull_request', status: 'done', detail: `Opened PR #${pr.number}` });
+    const meta = request.pullRequest;
+    const problems =
+      meta && (meta.reviewers?.length || meta.assignees?.length || meta.labels?.length)
+        ? await provider.addPullRequestMetadata(
+            { owner: slug.owner, repo: slug.repo, number: pr.number, host: slug.host },
+            {
+              ...(meta.reviewers ? { reviewers: meta.reviewers } : {}),
+              ...(meta.assignees ? { assignees: meta.assignees } : {}),
+              ...(meta.labels ? { labels: meta.labels } : {}),
+            },
+          )
+        : [];
+    steps.push({
+      id: 'pull_request',
+      status: 'done',
+      detail: [`Opened PR #${pr.number}`, ...problems].join(' · '),
+    });
     return pr;
   }
 
@@ -628,6 +823,13 @@ function blockingReason(
     return readiness.reasons.pullRequest ?? 'Cannot open a pull request';
   }
   return null;
+}
+
+function compareStatus(code: string): ScmCompareFile['status'] {
+  if (code.startsWith('A')) return 'added';
+  if (code.startsWith('D')) return 'deleted';
+  if (code.startsWith('R')) return 'renamed';
+  return 'modified';
 }
 
 function firstLine(text: string): string {

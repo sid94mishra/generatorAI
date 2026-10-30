@@ -19,9 +19,10 @@ import {
   ResolvePreviewSchema,
   NotFoundError,
   ValidationError,
+  type AgentImportPreview,
   type ResolvePreviewInput,
 } from '@generatorai/shared';
-import { redactProjection } from '@generatorai/core';
+import { AGENT_MARKDOWN_MAX_BYTES, redactProjection } from '@generatorai/core';
 
 export function createAgentApiRoutes(container: Container): Router {
   const router = Router();
@@ -144,6 +145,50 @@ export function createAgentApiRoutes(container: Container): Router {
       });
       logger.info(`[AgentRoutes] Imported agent ${agent.ref}`, { requestId: req.requestId });
       res.status(201).json({ ...agent, warnings });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /agents/import/preview — what an import WOULD create (mobile
+  // MG-12): parsed fields, unresolved names, and the agent it would replace.
+  // Never writes. Same scope as the import (`admin:settings` via /agents).
+  router.post('/import/preview', async (req, res, next) => {
+    try {
+      const svc = requireService();
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const markdown = body['markdown'];
+      const scope = body['scope'] ?? 'global';
+      const projectId = body['projectId'];
+      if (typeof markdown !== 'string' || !markdown.trim()) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'markdown must be a non-empty string' } });
+        return;
+      }
+      if (scope !== 'global' && scope !== 'project') {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: "scope must be 'global' or 'project'" } });
+        return;
+      }
+      if (projectId !== undefined && typeof projectId !== 'string') {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'projectId must be a string' } });
+        return;
+      }
+      if (Buffer.byteLength(markdown, 'utf-8') > AGENT_MARKDOWN_MAX_BYTES) {
+        res.status(413).json({
+          error: { code: 'TOO_LARGE', message: `Agent document exceeds the ${AGENT_MARKDOWN_MAX_BYTES / 1024} KB limit` },
+        });
+        return;
+      }
+      let preview: AgentImportPreview;
+      try {
+        preview = await svc.previewImport(markdown, { scope, ...(projectId ? { projectId } : {}) });
+      } catch (err) {
+        if (err instanceof ValidationError) {
+          res.status(400).json({ error: { code: 'PARSE_ERROR', message: err.message } });
+          return;
+        }
+        throw err;
+      }
+      res.json(preview);
     } catch (err) {
       next(err);
     }

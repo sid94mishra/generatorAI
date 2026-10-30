@@ -24,6 +24,22 @@ describe('replayEventsIntoStore', () => {
     useStreamStore.setState({ streams: {} });
   });
 
+  it("rebuilds an open plan turn as card → the person's reply → the edits → the next revision", () => {
+    replayEventsIntoStore('s1', [
+      makeEvent('harness.user_message', { content: 'add a helper' }, 1),
+      makeEvent('chat.plan.created', { planId: 'p1', revision: 1, title: 'Plan' }, 2),
+      makeEvent('chat.plan.review_requested', { planId: 'p1', revision: 1, interactionId: 'i1' }, 3),
+      makeEvent('chat.plan.decided', { planId: 'p1', approved: false, note: 'Rename the test file' }, 4),
+      makeEvent('harness.tool_start', { tool: 'Edit', callId: 'e1', args: {} }, 5),
+      makeEvent('harness.tool_complete', { tool: 'Edit', callId: 'e1', result: 'ok' }, 6),
+      makeEvent('chat.plan.review_requested', { planId: 'p1', revision: 2, interactionId: 'i2' }, 7),
+    ]);
+    const blocks = useStreamStore.getState().streams['s1']?.blocks ?? [];
+    expect(blocks.map((b) => b.type)).toEqual(['system', 'tool_call', 'plan']);
+    expect(blocks[0]).toMatchObject({ category: 'operator', message: 'Rename the test file', label: 'Changes requested' });
+    expect(blocks[2]).toMatchObject({ revision: 2, status: 'awaiting_review' });
+  });
+
   it('reconstructs text blocks from token events', () => {
     const events = [
       makeEvent('harness.token', { text: 'Hello ' }, 1),
@@ -39,6 +55,36 @@ describe('replayEventsIntoStore', () => {
     expect(stream?.status).toBe('complete');
     expect(stream?.blocks.length).toBe(1);
     expect(stream?.blocks[0]?.type).toBe('text');
+  });
+
+  it('rebuilds a stream left mid-turn from the history on return (the absence is not lost)', () => {
+    // What the tab had when the view unsubscribed: a partial, still "streaming" turn.
+    replayEventsIntoStore('s1', [makeEvent('harness.token', { text: 'Hel' }, 1)]);
+    expect(useStreamStore.getState().streams['s1']?.text).toBe('Hel');
+
+    // Back on the page while the turn still runs: the history holds what streamed meanwhile.
+    replayEventsIntoStore('s1', [makeEvent('harness.token', { text: 'Hel' }, 1), makeEvent('harness.token', { text: 'lo' }, 2)]);
+    expect(useStreamStore.getState().streams['s1']?.text).toBe('Hello');
+  });
+
+  it('settles a stream whose turn ended while the view was away', () => {
+    replayEventsIntoStore('s1', [makeEvent('harness.token', { text: 'Hel' }, 1)]);
+    replayEventsIntoStore('s1', [
+      makeEvent('copilot.user_message', { content: 'hi' }, 1),
+      makeEvent('harness.token', { text: 'Hello' }, 2),
+      makeEvent('harness.message_complete', { content: 'Hello' }, 3),
+      makeEvent('harness.idle', {}, 4),
+    ]);
+    // Finished turns come from the persisted history; the stream is no longer "streaming".
+    expect(['idle', 'complete']).toContain(useStreamStore.getState().streams['s1']?.status ?? 'idle');
+  });
+
+  it('keeps an optimistic send the server has not answered yet', () => {
+    useStreamStore.getState().startPending('s1', 'hi');
+    replayEventsIntoStore('s1', [makeEvent('harness.token', { text: 'old' }, 1)]);
+    const stream = useStreamStore.getState().streams['s1'];
+    expect(stream?.status).toBe('pending');
+    expect(stream?.text).toBe('');
   });
 
   it('reconstructs thinking blocks from reasoning events', () => {
@@ -140,6 +186,15 @@ describe('replayEventsIntoStore', () => {
     // Stream should be cleared (from clearStream at start of replay)
     expect(stream?.status).toBe('idle');
     expect(stream?.blocks.length).toBe(0);
+  });
+
+  it('keeps a turn live when a reload lands while a tool runs after a finished message', () => {
+    replayEventsIntoStore('s1', [
+      makeEvent('harness.token', { text: 'Let me check.' }, 1),
+      makeEvent('harness.message_complete', { content: 'Let me check.' }, 2),
+      makeEvent('harness.tool_start', { tool: 'Bash', callId: 'c1', args: { command: 'pnpm test' } }, 3),
+    ]);
+    expect(useStreamStore.getState().streams['s1']?.status).not.toBe('complete');
   });
 
   it('leaves stream as streaming when no message_complete or idle (session may still be active)', () => {
@@ -411,5 +466,25 @@ describe('replayEventsIntoStore', () => {
       const tasks = (useStreamStore.getState().streams['s1']?.blocks ?? []).filter((b) => b.type === 'background_task');
       expect(tasks.map((b) => (b as { taskId: string }).taskId)).toEqual(['w-live']);
     });
+  });
+
+  it('rebuilds stage gate cards and operator bubbles; a gate ended by a later lifecycle event is not pending', () => {
+    const perm = (interactionId: string) => ({
+      stageRunId: 'sr1', workflowRunId: 'run-1', interactionId, toolName: 'Bash', type: 'shell',
+      description: 'rm', inputSummary: 'rm -rf', permissionMode: 'default',
+    });
+    replayEventsIntoStore('s1', [
+      makeEvent('stage_run.running', { stageRunId: 'sr1', workflowRunId: 'run-1' }, 1),
+      makeEvent('stage_run.operator_message', { stageRunId: 'sr1', workflowRunId: 'run-1', content: 'hi' }, 2),
+      // Asked before a crash: the resume re-asks under a new id.
+      makeEvent('stage.permission.requested', perm('old'), 3),
+      makeEvent('stage_run.paused', { stageRunId: 'sr1', workflowRunId: 'run-1' }, 4),
+      makeEvent('stage_run.resumed', { stageRunId: 'sr1', workflowRunId: 'run-1' }, 5),
+      makeEvent('stage.permission.requested', perm('new'), 6),
+    ]);
+    const blocks = useStreamStore.getState().streams['stageRun:sr1']?.blocks ?? [];
+    expect(blocks.some((b) => b.type === 'system' && (b as { category?: string }).category === 'operator')).toBe(true);
+    const cards = blocks.filter((b) => b.type === 'permission') as Array<{ interactionId: string; status: string }>;
+    expect(cards.map((c) => [c.interactionId, c.status])).toEqual([['old', 'expired'], ['new', 'pending']]);
   });
 });

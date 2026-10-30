@@ -12,6 +12,9 @@
 // `ActiveProvider`) are declared here.
 
 import type {
+  IssueCloseReason,
+  PullRequestMergeMethod,
+  ScmIssueState,
   ScmChecksSummary,
   ScmCheckConclusion,
   ScmProviderId,
@@ -22,8 +25,14 @@ import type {
 // ── Shared contract re-exports (canonical names) ──
 
 export type {
+  CreateIssueRequest,
   DeviceLoginStart,
   DeviceLoginStatus,
+  IssueCloseReason,
+  IssueComment,
+  IssueSummary,
+  MergePullRequestResult,
+  PullRequestMergeMethod,
   PullRequestComment,
   PullRequestDetail,
   PullRequestFile,
@@ -88,9 +97,44 @@ export interface ListPullRequestsInput {
   host?: string;
 }
 
+export interface MergePullRequestInput {
+  method: PullRequestMergeMethod;
+  commitTitle?: string;
+  commitMessage?: string;
+}
+
+/** A host issue, addressed like a pull request (`owner/repo#number`). */
+export type IssueRef = PullRequestRef;
+
+export interface ListIssuesInput {
+  owner: string;
+  repo: string;
+  state?: ScmIssueState | 'all';
+  /** Only issues carrying every one of these labels. */
+  labels?: string[];
+  host?: string;
+}
+
+export interface CreateIssueInput {
+  owner: string;
+  repo: string;
+  title: string;
+  body?: string;
+  labels?: string[];
+  host?: string;
+}
+
+export interface CloseIssueInput {
+  reason?: IssueCloseReason;
+}
+
 /** The authenticated user behind a provider's credentials (never carries the token). */
 export interface ProviderUser {
   login: string;
+  /** The host's numeric user id (GitHub's noreply commit address carries it). */
+  id?: number;
+  /** The profile's display name, when set. */
+  name?: string;
   avatarUrl?: string;
   scopes?: string[];
 }

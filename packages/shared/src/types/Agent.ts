@@ -50,6 +50,15 @@ export interface AgentToolPolicy {
   shell: boolean;
   /** Web fetch / search. */
   web: boolean;
+  /**
+   * The workflow tools (list, describe, run, check, respond to an approval,
+   * cancel). On for orchestrator chats (set at creation), opt-in for plain
+   * chats (PD-23), off for orchestrator workers, off for stages unless the
+   * stage's agent grants it.
+   */
+  workflows: boolean;
+  /** The workflow authoring tools (guide, validate, plan, create a draft). Granted per agent, never a default. */
+  workflowAuthoring: boolean;
 }
 
 export const AGENT_TOOL_GROUPS: readonly (keyof AgentToolPolicy)[] = [
@@ -61,6 +70,8 @@ export const AGENT_TOOL_GROUPS: readonly (keyof AgentToolPolicy)[] = [
   'fileWrite',
   'shell',
   'web',
+  'workflows',
+  'workflowAuthoring',
 ] as const;
 
 /** Platform defaults (L0) when no level expresses an opinion. */
@@ -77,6 +88,11 @@ export const DEFAULT_AGENT_TOOL_POLICY: AgentToolPolicy = {
   fileWrite: true,
   shell: true,
   web: true,
+  // Opt-in (PD-23): every tool costs every turn tokens and a cached-prefix change.
+  workflows: false,
+  // Like extensionAuthoring: an agent must be granted it. Agent-authored
+  // workflows are drafts a person publishes (PD-14).
+  workflowAuthoring: false,
 };
 
 export interface AgentRuntimePolicy {
@@ -292,3 +308,53 @@ export function slugifyAgentName(name: string): string {
 export const AGENT_INSTRUCTIONS_MAX_BYTES = 32 * 1024;
 /** Soft cap — above this the editor and resolver warn about context cost. */
 export const AGENT_INSTRUCTIONS_WARN_BYTES = 8 * 1024;
+
+// ── Agent import preview (mobile MG-12) ──
+
+/** `POST /api/agents/import/preview` body — the same fields as an import, never written. */
+export interface AgentImportPreviewRequest {
+  /** Raw `.agent.md` document (≤ 256 KB). */
+  markdown: string;
+  scope: 'global' | 'project';
+  projectId?: string;
+}
+
+/** One problem the import would hit, e.g. an MCP server that is not in the registry. */
+export interface AgentImportWarning {
+  /** A `ResolutionWarningCode` (or a future code). */
+  code: string;
+  /** One sentence for the UI. */
+  message: string;
+  params?: Record<string, string | number>;
+}
+
+/**
+ * What `POST /api/agents/import` would create, parsed and resolved without
+ * writing anything. `400 PARSE_ERROR` when the document does not parse,
+ * `413 TOO_LARGE` over 256 KB.
+ */
+export interface AgentImportPreview {
+  parsed: {
+    name: string;
+    slug: string;
+    /** `${scope}:${slug}` — the ref the agent would get. */
+    ref: string;
+    description: string;
+    role: AgentRole;
+    model?: string;
+    effort?: string;
+    /** UTF-8 size of the instructions body. */
+    instructionsBytes: number;
+    /** The first ~600 characters of the instructions body. */
+    instructionsExcerpt: string;
+    /** Skill names declared in the file. */
+    skills: string[];
+    /** MCP server names declared in the file. */
+    mcp: string[];
+    /** Orchestrators only: team agent refs declared in the file. */
+    team: string[];
+  };
+  warnings: AgentImportWarning[];
+  /** An agent with the same ref exists; importing needs `overwrite: true`. */
+  conflict?: { agentId: string; name: string; ref: string; version: number };
+}

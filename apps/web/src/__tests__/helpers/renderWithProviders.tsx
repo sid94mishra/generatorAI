@@ -6,7 +6,7 @@ import React from 'react';
 import type { ReactElement } from 'react';
 import { render, type RenderOptions, type RenderResult } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import { PlatformContext } from '@/providers/PlatformProvider.js';
 import { ThemeProvider } from '@/providers/ThemeProvider.js';
 import { MockPlatformClient } from './MockPlatformClient.js';

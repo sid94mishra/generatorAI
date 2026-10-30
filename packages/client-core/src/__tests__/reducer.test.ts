@@ -295,6 +295,18 @@ describe('stream reducer — plan and question cards', () => {
     expect(blocks(s)[0]).toMatchObject({ revision: 2, title: 'Refactor v2' });
   });
 
+  it('moves the one card after the reply and the edits that produced a newer revision', () => {
+    const s = run(
+      (x) => r.upsertPlan(x, SID, plan),
+      (x) => r.addSystemMessage(x, SID, 'Rename the test file', 'operator', 'Changes requested'),
+      (x) => r.setPlanStatus(x, SID, 'p1', 'awaiting_review', { revision: 2 }),
+      (x) => r.upsertPlan(x, SID, { ...plan, revision: 2, status: 'awaiting_review' }),
+    );
+    expect(blocks(s).map((b) => b.type)).toEqual(['system', 'plan']);
+    expect(blocks(s)[0]).toMatchObject({ category: 'operator', label: 'Changes requested' });
+    expect(blocks(s)[1]).toMatchObject({ revision: 2, status: 'awaiting_review' });
+  });
+
   it('stamps openedAt when a plan starts awaiting review', () => {
     // The timestamp is what stops a poll fired BEFORE the card existed from
     // expiring it — see PlanBlock.openedAt.

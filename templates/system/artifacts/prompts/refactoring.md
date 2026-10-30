@@ -1,3 +1,8 @@
+---
+name: refactoring
+description: Find and plan refactorings in existing code — duplication, long functions, unclear names, tangled modules — without changing behaviour.
+---
+
 # Refactoring Prompt
 
 Analyze the provided code and suggest refactoring improvements:

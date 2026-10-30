@@ -98,6 +98,67 @@ export type StopAction =
   /** Send the cancel again, and tell the user it is a forced reset. */
   | { kind: 'force'; budgetSeconds: number };
 
+// ── Pure transitions ──────────────────────────────────────────────
+// The rules above as functions of (liveness, first-press time, now). The
+// class below and the composer reducer (`../composer/composerMachine.ts`, M-12)
+// both call these, so the 400 ms / 15 s timing and the labels exist once.
+
+/** The phase a live turn is in, `elapsedMs` after the first press. Rules 2 and 3. */
+export function stopPhaseAfterPress(elapsedMs: number): 'arming' | 'stopping' | 'force' {
+  if (elapsedMs >= STOP_FORCE_RESET_MS) return 'force';
+  if (elapsedMs >= STOP_ARMING_MS) return 'stopping';
+  return 'arming';
+}
+
+/**
+ * The phase for a turn's liveness and the time of the first press of the
+ * current stop attempt (`null` before any press). Rule 4: a settled turn is
+ * idle whatever the client thought it was doing.
+ */
+export function stopPhaseAt(liveness: TurnLiveness, pressedAt: number | null, now: number): StopPhase {
+  if (liveness !== 'live') return 'idle';
+  if (pressedAt === null) return 'ready';
+  return stopPhaseAfterPress(now - pressedAt);
+}
+
+/** What the control renders in each phase. */
+export function stopViewForPhase(phase: StopPhase): StopView {
+  switch (phase) {
+    case 'ready':
+      return { phase: 'ready', label: 'Stop', enabled: true, forceAvailable: false };
+    case 'arming':
+      // Visibly disabled for 400 ms. A control that looks pressable and
+      // silently ignores the press teaches people to press harder.
+      return { phase: 'arming', label: 'Stopping…', enabled: false, forceAvailable: false };
+    case 'stopping':
+      return { phase: 'stopping', label: 'Stopping…', enabled: true, forceAvailable: false };
+    case 'force':
+      return { phase: 'force', label: 'Force reset', enabled: true, forceAvailable: true };
+    case 'idle':
+    default:
+      return { phase: 'idle', label: 'Stop', enabled: false, forceAvailable: false };
+  }
+}
+
+/**
+ * Decide a press: what the host should send, and the first-press time the
+ * attempt carries afterwards (set by the first press, kept by later ones).
+ */
+export function decideStopPress(
+  liveness: TurnLiveness,
+  pressedAt: number | null,
+  now: number,
+  budgetSeconds: number = STOP_BUDGET_DEFAULT_SECONDS,
+): { action: StopAction; pressedAt: number | null } {
+  if (liveness !== 'live') return { action: { kind: 'noop', reason: 'no-turn' }, pressedAt };
+  if (pressedAt === null) return { action: { kind: 'cancel', budgetSeconds }, pressedAt: now };
+  const phase = stopPhaseAfterPress(now - pressedAt);
+  // Rule 2 — a double-tap must not reach the destructive path.
+  if (phase === 'arming') return { action: { kind: 'noop', reason: 'arming' }, pressedAt };
+  if (phase === 'force') return { action: { kind: 'force', budgetSeconds }, pressedAt };
+  return { action: { kind: 'cancel', budgetSeconds }, pressedAt };
+}
+
 export interface StopControllerOptions {
   /** Soft budget in seconds. Clamped; see `resolveStopGraceMs`. */
   budgetSeconds?: number;
@@ -161,53 +222,22 @@ export class StopController {
    */
   tick(): void {
     if (this.pressedAt === null || this.liveness !== 'live') return;
-    const elapsed = this.now() - this.pressedAt;
-    if (elapsed >= STOP_FORCE_RESET_MS) this.phase = 'force';
-    else if (elapsed >= STOP_ARMING_MS) this.phase = 'stopping';
-    else this.phase = 'arming';
+    this.phase = stopPhaseAfterPress(this.now() - this.pressedAt);
   }
 
   /** Handle a press. Returns what the host should do about it. */
   press(): StopAction {
-    if (this.liveness !== 'live') return { kind: 'noop', reason: 'no-turn' };
-
-    if (this.pressedAt === null) {
-      this.pressedAt = this.now();
-      this.phase = 'arming';
-      return { kind: 'cancel', budgetSeconds: this.budgetSeconds };
-    }
-
-    const elapsed = this.now() - this.pressedAt;
-    if (elapsed < STOP_ARMING_MS) {
-      // Rule 2 — a double-tap must not reach the destructive path.
-      return { kind: 'noop', reason: 'arming' };
-    }
-    if (elapsed >= STOP_FORCE_RESET_MS) {
-      this.phase = 'force';
-      return { kind: 'force', budgetSeconds: this.budgetSeconds };
-    }
-    this.phase = 'stopping';
-    return { kind: 'cancel', budgetSeconds: this.budgetSeconds };
+    const now = this.now();
+    const { action, pressedAt } = decideStopPress(this.liveness, this.pressedAt, now, this.budgetSeconds);
+    if (action.kind === 'noop') return action;
+    this.pressedAt = pressedAt;
+    this.phase = stopPhaseAt(this.liveness, pressedAt, now);
+    return action;
   }
 
   /** What the control should render right now. */
   view(): StopView {
     this.tick();
-    switch (this.phase) {
-      case 'idle':
-        return { phase: 'idle', label: 'Stop', enabled: false, forceAvailable: false };
-      case 'ready':
-        return { phase: 'ready', label: 'Stop', enabled: true, forceAvailable: false };
-      case 'arming':
-        // Visibly disabled for 400 ms. A control that looks pressable and
-        // silently ignores the press teaches people to press harder.
-        return { phase: 'arming', label: 'Stopping…', enabled: false, forceAvailable: false };
-      case 'stopping':
-        return { phase: 'stopping', label: 'Stopping…', enabled: true, forceAvailable: false };
-      case 'force':
-        return { phase: 'force', label: 'Force reset', enabled: true, forceAvailable: true };
-      default:
-        return { phase: 'idle', label: 'Stop', enabled: false, forceAvailable: false };
-    }
+    return stopViewForPhase(this.phase);
   }
 }

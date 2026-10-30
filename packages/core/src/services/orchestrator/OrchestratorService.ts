@@ -8,7 +8,15 @@
 // See docs/ORCHESTRATOR_MODE_RESEARCH_AND_PLAN.md.
 // ────────────────────────────────────────────────────────────────
 
-import type { AgentEvent, TaskBrief, TaskResultDigest, BackgroundTaskStatus } from '@generatorai/shared';
+import type {
+  AgentEvent,
+  TaskBrief,
+  TaskResultDigest,
+  BackgroundTaskDetail,
+  BackgroundTaskStatus,
+  BackgroundTaskCancellation,
+  BackgroundTaskCancelledBy,
+} from '@generatorai/shared';
 import { TaskResultDigestSchema } from '@generatorai/shared';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
@@ -18,8 +26,9 @@ import type { IAgentHarness, HarnessModel } from '../../domain/ports/IAgentHarne
 import type { EventBus } from '../../events/EventBus.js';
 import type { ChatManagementService } from '../ChatManagementService.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
-import type { Agent, Chat, HarnessConfig } from '@generatorai/shared';
-import { WORKER_SYSTEM_PROMPT, renderBriefMessage } from './prompts.js';
+import type { Agent, AgentOverrides, AgentToolPolicy, Chat, HarnessConfig } from '@generatorai/shared';
+import type { TurnPolicy } from '../session/types.js';
+import { WORKER_SYSTEM_PROMPT, renderBriefMessage, renderResumeMessage } from './prompts.js';
 
 /**
  * Narrow view of AgentService. Structural rather than a direct import so the
@@ -62,7 +71,8 @@ export interface OrchestratorConfig {
    * When `Date.now() - orchestrationStartedAt >= timeBudgetMs` the
    * orchestrator is told to consolidate immediately regardless of wave count.
    *
-   * Default: 30 min. Set to 0 to disable.
+   * Default: 120 min (D-97: a multi-wave build — foundation, parallel packages, reviews, docs — ran past
+   * the old 30 min and every later spawn was refused). Set to 0 to disable.
    */
   timeBudgetMs: number;
 
@@ -74,8 +84,11 @@ export interface OrchestratorConfig {
    * work"), not something finishing a turn implies; a failed or cancelled
    * worker never converges.
    *
-   * Default: 1.0 (every worker in the wave must report it). Set to 0 to
-   * disable the guard entirely.
+   * Default: 0 — off (D-97). Workers report `converged` only when their brief asks for it (iterative,
+   * until-dry loops); with the old default of 1.0 every finished worker of a build wave claimed it and the
+   * next, dependent wave was refused ("Convergence threshold met"), so WP2 could never follow WP1. Set
+   * `GENERATORAI_ORCH_CONVERGENCE_THRESHOLD` to enable it; `maxWaves` and `timeBudgetMs` remain the
+   * runaway guards.
    */
   convergenceThreshold: number;
   /**
@@ -92,7 +105,7 @@ export const DEFAULT_ORCHESTRATOR_CONFIG: OrchestratorConfig = {
   // Each worker is a chat, and on the default (persistent-session) Claude
   // provider each chat is a ~230 MB CLI process. Twelve workers per parent was
   // 2.8 GB of processes per orchestration, three times the turn permit
-  // (`GENERATORAI_MAX_CONCURRENT_AGENT_TURNS`, default 4) — the extra eight
+  // (the `provider:claude-agent` flow key, default 4) — the extra eight
   // could only ever wait for a permit while holding their memory. Four matches
   // the permit; raise `GENERATORAI_ORCH_MAX_WORKERS` on a machine that has the
   // memory for more.
@@ -103,8 +116,8 @@ export const DEFAULT_ORCHESTRATOR_CONFIG: OrchestratorConfig = {
   warmFirst: true,
   // W24 / X-20 termination conditions.
   maxWaves: 10,
-  timeBudgetMs: 30 * 60 * 1000, // 30 min
-  convergenceThreshold: 1.0,
+  timeBudgetMs: 120 * 60 * 1000, // 120 min (D-97)
+  convergenceThreshold: 0, // off by default (D-97)
 };
 
 /** Result of a spawn call, surfaced to the orchestrator as a tool result. */
@@ -115,6 +128,8 @@ export interface SpawnResult {
   status?: BackgroundTaskStatus;
   model?: string;
   error?: string;
+  /** Something the orchestrator should know about how the spawn was resolved (e.g. the agent's own model won). */
+  note?: string;
 }
 
 interface TaskRecord {
@@ -124,6 +139,9 @@ interface TaskRecord {
   parentSessionId: string;
   workerSessionId: string;
   model?: string;
+  /** The agent the worker was bound to, with its display name (the Tasks dock shows it). */
+  agentRef?: string;
+  agentName?: string;
   status: BackgroundTaskStatus;
   /**
    * W24 — the spawn wave this worker belongs to. Convergence is a property of
@@ -164,9 +182,65 @@ interface TaskRecord {
   waveSlot: boolean;
   /** Epoch ms of the last emitted progress event (the throttle's clock). */
   lastProgressAt: number;
+  /**
+   * G-20 — who cancelled this worker and when. Set by the first cancel of an
+   * activation (the route, the orchestrator cascade, or Stop in the worker
+   * chat); cleared by a follow-up turn.
+   */
+  cancellation?: BackgroundTaskCancellation;
+}
+
+/** The attribution fields an event / list row carries while a task is cancelled. */
+function cancellationFields(
+  status: BackgroundTaskStatus,
+  cancellation: BackgroundTaskCancellation | undefined,
+): Partial<BackgroundTaskCancellation> {
+  return status === 'cancelled' && cancellation ? { ...cancellation } : {};
 }
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** A tool call's arguments for the task detail: strings clipped, at most 2 KB of JSON. */
+function clipArgs(args: unknown): unknown {
+  try {
+    const json = JSON.stringify(args);
+    if (json === undefined || json.length <= 2048) return args;
+    return { summary: `${json.slice(0, 2047)}…` };
+  } catch {
+    return undefined;
+  }
+}
+
+/** The sections of a brief rendered by `renderTaskBrief` (`renderBriefMessage`, prompts.ts). */
+export function parseBrief(text: string): NonNullable<BackgroundTaskDetail['brief']> {
+  const section = (title: RegExp): string | undefined => {
+    const lines = text.split('\n');
+    const start = lines.findIndex((l) => title.test(l));
+    if (start < 0) return undefined;
+    const body: string[] = [];
+    for (let i = start + 1; i < lines.length && !/^## /.test(lines[i]!); i += 1) body.push(lines[i]!);
+    const out = body.join('\n').trim();
+    return out || undefined;
+  };
+  const objective = section(/^## Objective\b/);
+  const context = section(/^## Context\b/);
+  const boundaries = section(/^## Out of scope\b/);
+  return {
+    text,
+    ...(objective ? { objective } : {}),
+    ...(context ? { context } : {}),
+    ...(boundaries ? { boundaries } : {}),
+  };
+}
+
+/** The first line of a brief that says something (not a heading), as plain text, clipped for a list row. */
+export function firstBriefLine(text: string): string {
+  const line = text
+    .split('\n')
+    .map((l) => l.replace(/^#+\s*|^[-*]\s+|\*\*/g, '').trim())
+    .find((l) => l.length > 0 && !/^(objective|context|task)\s*:?$/i.test(l)) ?? '';
+  return line.length > 200 ? `${line.slice(0, 199)}…` : line;
+}
 
 /**
  * Minimum gap between two `chat.background_task.progress` events for the SAME
@@ -184,9 +258,21 @@ const PROGRESS_TEXT_TAIL = 240;
 /** What a worker inherits from the orchestrator that spawned it (G15). */
 export interface InheritedWorkerCapabilities {
   harnessConfig: Partial<HarnessConfig>;
+  /**
+   * The clamp as resolver input (C-15): the parent's built-in denials as
+   * `extraDeny` (the resolver turns them into `excludedBuiltinTools`, which
+   * Copilot enforces on built-ins, unlike `excludedTools`), every group the
+   * parent had off, and the workflow groups off (workers never fan out).
+   */
+  agentOverrides: AgentOverrides;
   permissionMode?: Chat['permissionMode'];
   defaultAgentMode?: Chat['defaultAgentMode'];
   browserConfig?: Chat['browserConfig'];
+  /**
+   * PD-5 — the parent's computer-use decision, which the worker is composed
+   * and judged under: a chat's `switch`, a stage's `opted_in` or `off`.
+   */
+  computerUse: TurnPolicy['computerUse'];
 }
 
 /**
@@ -223,8 +309,34 @@ export interface InheritedWorkerCapabilities {
  * already resolved to.
  */
 export function inheritWorkerCapabilities(parent: Chat): InheritedWorkerCapabilities {
-  const parentConfig = parent.harnessConfig ?? {};
-  const snapshotPolicy = parent.agentSnapshot?.toolPolicy;
+  return inheritWorkerCapabilitiesFrom({
+    harnessConfig: parent.harnessConfig ?? {},
+    ...(parent.agentSnapshot?.toolPolicy ? { toolPolicy: parent.agentSnapshot.toolPolicy } : {}),
+    ...(parent.agentOverrides ? { agentOverrides: parent.agentOverrides } : {}),
+    ...(parent.permissionMode ? { permissionMode: parent.permissionMode } : {}),
+    ...(parent.defaultAgentMode ? { defaultAgentMode: parent.defaultAgentMode } : {}),
+    ...(parent.browserConfig ? { browserConfig: parent.browserConfig } : {}),
+    computerUse: 'switch',
+  });
+}
+
+/**
+ * The same ceiling for any parent — a chat, or a stage whose agent is an
+ * orchestrator (the composer builds the stage's view of these fields from its
+ * session spec and resolved projection).
+ */
+export function inheritWorkerCapabilitiesFrom(parent: {
+  harnessConfig: Partial<HarnessConfig>;
+  toolPolicy?: { allow: string[]; deny: string[]; groups?: AgentToolPolicy };
+  /** The parent's own capability delta (a chat's `agentOverrides`). */
+  agentOverrides?: AgentOverrides;
+  permissionMode?: Chat['permissionMode'];
+  defaultAgentMode?: Chat['defaultAgentMode'];
+  browserConfig?: Chat['browserConfig'];
+  computerUse: TurnPolicy['computerUse'];
+}): InheritedWorkerCapabilities {
+  const parentConfig = parent.harnessConfig;
+  const snapshotPolicy = parent.toolPolicy;
 
   const excluded = new Set<string>([
     ...(parentConfig.excludedTools ?? []),
@@ -256,15 +368,62 @@ export function inheritWorkerCapabilities(parent: Chat): InheritedWorkerCapabili
         : {}),
   };
 
+  // C-15 — the same clamp as resolver input, so it lands in the worker's
+  // `excludedBuiltinTools` on every provider.
+  const extraDeny = [...new Set([...(snapshotPolicy?.deny ?? []), ...(parent.agentOverrides?.extraDeny ?? [])])];
+  const off: Partial<AgentToolPolicy> = {};
+  for (const [group, on] of Object.entries({ ...(snapshotPolicy?.groups ?? {}), ...(parent.agentOverrides?.tools ?? {}) })) {
+    if (on === false) off[group as keyof AgentToolPolicy] = false;
+  }
+  const agentOverrides: AgentOverrides = {
+    ...(extraDeny.length > 0 ? { extraDeny } : {}),
+    tools: { ...off, workflows: false, workflowAuthoring: false },
+  };
+
   return {
     harnessConfig,
+    agentOverrides,
     ...(parent.permissionMode ? { permissionMode: parent.permissionMode } : {}),
     ...(parent.defaultAgentMode ? { defaultAgentMode: parent.defaultAgentMode } : {}),
     ...(parent.browserConfig ? { browserConfig: parent.browserConfig } : {}),
+    computerUse: parent.computerUse,
   };
 }
 
+/**
+ * A workflow stage whose bound agent is an orchestrator (T6). Registered by
+ * the session composer when it binds the orchestrator tool set to the stage,
+ * so the stage can spawn workers exactly like an orchestrator chat. Workers
+ * stay chats; their `parentChatId` is the stage run id.
+ */
+export interface StageOrchestratorParent {
+  stageRunId: string;
+  workflowRunId: string;
+  sessionId: string;
+  workspaceId?: string;
+  projectId?: string;
+  model?: string;
+  agentRef?: string;
+  inherited: InheritedWorkerCapabilities;
+}
+
+/** What spawning needs to know about a parent, whichever kind it is. */
+interface ParentView {
+  kind: 'chat' | 'stage';
+  id: string;
+  sessionId: string;
+  projectId?: string;
+  model?: string;
+  workspaceId?: string;
+  codebaseIds?: string[];
+  gitRepositories?: Chat['gitRepositories'];
+  agentRef?: string;
+  inherited: InheritedWorkerCapabilities;
+}
+
 export class OrchestratorService {
+  /** Stage run id → a stage acting as an orchestrator (see `registerStageParent`). */
+  private stageParents = new Map<string, StageOrchestratorParent>();
   /** taskId → record. */
   private tasks = new Map<string, TaskRecord>();
   /** parentChatId → firstOutput promise of the current wave's leader (warm-first). */
@@ -361,9 +520,9 @@ export class OrchestratorService {
    */
   async listAssignableAgents(
     parentChatId: string,
-  ): Promise<Array<{ ref: string; name: string; description: string }>> {
+  ): Promise<Array<{ ref: string; name: string; description: string; model?: string }>> {
     if (!this.agentService) return [];
-    const parent = await this.chatRepo.getById(parentChatId).catch(() => null);
+    const parent = await this.parentView(parentChatId).catch(() => null);
     const selectable = await this.agentService.listSelectable(parent?.projectId);
     const team = parent?.agentRef
       ? (await this.agentService.getByRef(parent.agentRef))?.orchestration?.teamAgentRefs ?? []
@@ -371,11 +530,81 @@ export class OrchestratorService {
     const pool = team.length > 0
       ? selectable.filter((a) => team.includes(a.ref))
       : selectable.filter((a) => a.role !== 'orchestrator');
-    return pool.map((a) => ({ ref: a.ref, name: a.name, description: a.description }));
+    return pool.map((a) => ({
+      ref: a.ref,
+      name: a.name,
+      description: a.description,
+      ...(a.runtime?.model ? { model: a.runtime.model } : {}),
+    }));
   }
 
   getConfig(): OrchestratorConfig {
     return this.config;
+  }
+
+  /** A stage whose agent is an orchestrator can now spawn workers (T6). */
+  registerStageParent(parent: StageOrchestratorParent): void {
+    this.stageParents.set(parent.stageRunId, parent);
+  }
+
+  /**
+   * When an orchestrator's current episode runs out of time (P06 WP-6.3):
+   * the workflow tools cap `waitSeconds` and a child run's `maxDurationMs`
+   * with it. Before the first wave (or after an episode ended) a new
+   * episode would start now.
+   */
+  episodeDeadline(parentChatId: string): number | undefined {
+    if (this.config.timeBudgetMs <= 0) return undefined;
+    const startedAt = this.episodeEnded.has(parentChatId) ? undefined : this.orchestrationStartedAt.get(parentChatId);
+    return (startedAt ?? Date.now()) + this.config.timeBudgetMs;
+  }
+
+  /** The stage's session is gone; its workers keep their records. */
+  unregisterStageParent(stageRunId: string): void {
+    this.stageParents.delete(stageRunId);
+  }
+
+  /**
+   * PD-5 — the computer-use decision a worker of `parentId` runs under: a
+   * registered stage's own, a chat's deployment switch, and none for a parent
+   * that is gone (a stage whose session ended, or not yet re-bound after a
+   * restart). Read at every compose and turn of the worker (review R5).
+   */
+  async workerComputerUse(parentId: string): Promise<TurnPolicy['computerUse']> {
+    const stage = this.stageParents.get(parentId);
+    if (stage) return stage.inherited.computerUse;
+    const chat = await this.chatRepo.getById(parentId).catch(() => null);
+    return chat ? 'switch' : 'off';
+  }
+
+  /** The parent a worker is spawned for: a registered stage, else a chat. */
+  private async parentView(parentId: string): Promise<ParentView> {
+    const stage = this.stageParents.get(parentId);
+    if (stage) {
+      return {
+        kind: 'stage',
+        id: stage.stageRunId,
+        sessionId: stage.sessionId,
+        ...(stage.projectId ? { projectId: stage.projectId } : {}),
+        ...(stage.model ? { model: stage.model } : {}),
+        ...(stage.workspaceId ? { workspaceId: stage.workspaceId } : {}),
+        ...(stage.agentRef ? { agentRef: stage.agentRef } : {}),
+        inherited: stage.inherited,
+      };
+    }
+    const chat = await this.chatRepo.getById(parentId);
+    return {
+      kind: 'chat',
+      id: chat.id,
+      sessionId: chat.sessionId,
+      ...(chat.projectId ? { projectId: chat.projectId } : {}),
+      ...(chat.model ? { model: chat.model } : {}),
+      ...(chat.workspaceId ? { workspaceId: chat.workspaceId } : {}),
+      ...(chat.codebaseIds ? { codebaseIds: chat.codebaseIds } : {}),
+      ...(chat.gitRepositories ? { gitRepositories: chat.gitRepositories } : {}),
+      ...(chat.agentRef ? { agentRef: chat.agentRef } : {}),
+      inherited: inheritWorkerCapabilities(chat),
+    };
   }
 
   // ── Spawn ────────────────────────────────────────────────────
@@ -411,19 +640,47 @@ export class OrchestratorService {
     for (const c of existing) {
       if (isActive(c.backgroundTask?.status)) active.add(c.id);
     }
-    if (active.size >= this.config.maxWorkers) {
+    const parent = await this.parentView(parentChatId);
+    // The orchestrator agent's own settings (agent editor ▸ Team): they were saved and never read.
+    const lead = parent.agentRef && this.agentService ? await this.agentService.getByRef(parent.agentRef).catch(() => null) : null;
+    const maxWorkers = lead?.orchestration?.maxWorkers ?? this.config.maxWorkers;
+    if (active.size >= maxWorkers) {
       return {
         ok: false,
-        error: `Worker limit reached (${this.config.maxWorkers}). Consolidate existing results instead of spawning more.`,
+        error: `Worker limit reached (${maxWorkers}). Wait for running workers (check_background_agents) before spawning more.`,
       };
     }
 
-    const parent = await this.chatRepo.getById(parentChatId);
+    // A worker agent must be one this orchestrator is allowed to spawn.
+    let workerAgentRef: string | undefined;
+    let workerAgentName: string | undefined;
+    let workerAgentModel: string | undefined;
+    if (brief.agentRef) {
+      const assignable = await this.listAssignableAgents(parentChatId);
+      const hit = assignable.find((a) => a.ref === brief.agentRef);
+      if (!hit) {
+        return {
+          ok: false,
+          error:
+            `Agent "${brief.agentRef}" is not assignable from this orchestrator. ` +
+            `Call list_available_agents to see valid refs, or omit agentRef.`,
+        };
+      }
+      workerAgentRef = hit.ref;
+      workerAgentName = hit.name;
+      workerAgentModel = hit.model;
+    }
 
     // Resolve + validate the worker model. When the orchestrator doesn't pick
     // one, this defaults to a CHEAPER tier (not the orchestrator's own model)
     // so background work doesn't silently run on an expensive model.
-    let workerModel = await this.resolveWorkerModel(brief.model, parent.model);
+    // A bound agent that names its model runs on it: the person chose it for that agent ("Frontend Dev runs on
+    // Codex"), and the orchestrator's habit of passing `model` on every spawn silently moved it to its own pick.
+    let workerModel = workerAgentModel ?? (await this.resolveWorkerModel(brief.model, parent.model, lead?.orchestration?.defaultWorkerModel));
+    const modelNote =
+      workerAgentModel && brief.model && brief.model !== workerAgentModel
+        ? `${workerAgentName ?? 'The agent'} runs on its own model "${workerAgentModel}"; the requested "${brief.model}" was not used.`
+        : undefined;
     if (workerModel) {
       const ids = await this.getModelIds();
       if (ids && ids.size > 0 && !ids.has(workerModel)) {
@@ -439,22 +696,6 @@ export class OrchestratorService {
     }
 
     const taskIndex = existing.length;
-
-    // A worker agent must be one this orchestrator is allowed to spawn.
-    let workerAgentRef: string | undefined;
-    if (brief.agentRef) {
-      const assignable = await this.listAssignableAgents(parentChatId);
-      const hit = assignable.find((a) => a.ref === brief.agentRef);
-      if (!hit) {
-        return {
-          ok: false,
-          error:
-            `Agent "${brief.agentRef}" is not assignable from this orchestrator. ` +
-            `Call list_available_agents to see valid refs, or omit agentRef.`,
-        };
-      }
-      workerAgentRef = hit.ref;
-    }
 
     // Warm-first: if a wave leader for this parent is still priming, wait
     // (bounded) for it to start producing before spawning more, so the shared
@@ -474,10 +715,17 @@ export class OrchestratorService {
     // the orchestrator (sharedWorkspace defaults to true).
     const useShared = brief.sharedWorkspace !== false;
     const sharedWorkspaceId = useShared ? parent.workspaceId : undefined;
+    // An isolated worker (sharedWorkspace: false) of a chat gets worktrees of
+    // its own on new branches cut from where the orchestrator is now, so
+    // parallel workers can edit the same files without clobbering each other.
+    const isolatedSources =
+      !useShared && parent.kind === 'chat' && parent.workspaceId
+        ? await this.chatManagementService.isolatedWorkerSources(parentChatId).catch(() => undefined)
+        : undefined;
     // G15 — a worker must never be able to do something its orchestrator
     // could not. Computed before `createChat` so the clamp is part of the
     // creation, not a correction applied afterwards.
-    const inherited = inheritWorkerCapabilities(parent);
+    const inherited = parent.inherited;
     let worker;
     try {
       worker = await this.chatManagementService.createChat({
@@ -496,6 +744,7 @@ export class OrchestratorService {
         // Reuse the orchestrator's workspace when sharing (skips workspace +
         // worktree creation in createChat).
         ...(sharedWorkspaceId ? { workspaceId: sharedWorkspaceId } : {}),
+        ...(isolatedSources ? { sources: isolatedSources } : {}),
         // Explicitly NOT an orchestrator — workers must never get the
         // background-agent tool set (no recursive spawning in v1). The
         // `parentChatId` guard in createChat also enforces this.
@@ -507,7 +756,9 @@ export class OrchestratorService {
         // The agent instructions are appended AFTER the constant worker prompt, so
         // the shared cache prefix survives for workers that share an agent.
         ...(workerAgentRef ? { agentRef: workerAgentRef } : {}),
-        // G15 — capability inheritance (see `inheritWorkerCapabilities`).
+        // G15 — capability inheritance (see `inheritWorkerCapabilities`),
+        // the built-in clamp through the resolver (C-15).
+        agentOverrides: inherited.agentOverrides,
         ...(inherited.permissionMode ? { permissionMode: inherited.permissionMode } : {}),
         ...(inherited.defaultAgentMode ? { defaultAgentMode: inherited.defaultAgentMode } : {}),
         ...(inherited.browserConfig ? { browserConfig: inherited.browserConfig } : {}),
@@ -548,28 +799,17 @@ export class OrchestratorService {
         .catch(() => undefined);
     }
 
-    const record: TaskRecord = {
+    const record = this.newRecord({
       taskId: worker.id,
       taskName: brief.taskName,
       parentChatId,
       parentSessionId: parent.sessionId,
       workerSessionId: worker.sessionId,
       model: workerModel,
-      status: 'running',
+      ...(workerAgentRef ? { agentRef: workerAgentRef } : {}),
+      ...(workerAgentName ? { agentName: workerAgentName } : {}),
       wave: this.waveCount.get(parentChatId) ?? 1,
-      reviewRounds: 0,
-      lastAssistantText: '',
-      startedAt: Date.now(),
-      toolCalls: 0,
-      lastProgressAt: 0,
-      idlePromise: Promise.resolve(),
-      resolveIdle: () => {},
-      firstOutput: Promise.resolve(),
-      resolveFirstOutput: () => {},
-      unsub: undefined,
-      waveSlot: false,
-    };
-    this.armIdle(record);
+    });
     this.tasks.set(record.taskId, record);
     record.waveSlot = true;
     this.activeByParent.set(parentChatId, (this.activeByParent.get(parentChatId) ?? 0) + 1);
@@ -579,26 +819,7 @@ export class OrchestratorService {
       this.waveWarmup.set(parentChatId, record.firstOutput);
     }
 
-    // Subscribe to the worker's event stream to detect first-output + idle.
-    record.unsub = this.eventBus.subscribe(
-      record.workerSessionId,
-      (event) => this.onWorkerEvent(record, event),
-      `orchestrator:${record.taskId}`,
-    );
-
-    // Subscribe once to the PARENT orchestrator session. When the orchestrator's
-    // own turn ends (harness.idle) — i.e. it has finished reading digests and
-    // consolidating — any worker still sitting in `needs_review` (not sent a
-    // follow-up) is implicitly ACCEPTED, so we flip it to `completed`.
-    this.parentSessions.set(parentChatId, record.parentSessionId);
-    if (!this.parentSubs.has(parentChatId)) {
-      const unsub = this.eventBus.subscribe(
-        record.parentSessionId,
-        (event) => this.onParentEvent(parentChatId, event),
-        `orchestrator-parent:${parentChatId}`,
-      );
-      this.parentSubs.set(parentChatId, unsub);
-    }
+    this.attachRecord(record);
 
     // Persist + announce.
     await this.chatRepo.updateBackgroundTaskStatus(record.taskId, 'running').catch(() => {});
@@ -624,6 +845,20 @@ export class OrchestratorService {
       const ws = await this.workspaceManager.getExecutionWorkspace(parent.workspaceId).catch(() => null);
       if (ws) taskDir = path.join(ws.rootPath, 'tasks', brief.taskName);
     }
+    let isolationNote: string | undefined;
+    if (isolatedSources) {
+      // Seeded BEFORE the brief is sent: the worker's first turn must start
+      // from the orchestrator's working tree, uncommitted files included.
+      const own = await this.chatManagementService.seedIsolatedWorker(worker.id, parentChatId).catch(() => []);
+      const where = own
+        .filter((m) => m.mode === 'worktree' && m.git?.branch)
+        .map((m) => `${m.alias}: branch ${m.git!.branch} at ${m.path}`);
+      if (where.length > 0) {
+        isolationNote =
+          `Isolated worker — its edits stay in its own worktrees (${where.join('; ')}). ` +
+          'When you accept its result, merge that branch (or copy the files) into your own mounts.';
+      }
+    }
     const briefMessage = renderBriefMessage(brief, taskDir);
     this.chatManagementService.sendPrompt(record.taskId, briefMessage).catch((err) => {
       record.status = 'failed';
@@ -632,14 +867,16 @@ export class OrchestratorService {
       void this.chatRepo.updateBackgroundTaskStatus(record.taskId, 'failed').catch(() => {});
     });
 
-    return { ok: true, taskId: record.taskId, taskName: record.taskName, status: 'running', model: workerModel };
+    const note = [modelNote, isolationNote].filter(Boolean).join(' ');
+    return { ok: true, taskId: record.taskId, taskName: record.taskName, status: 'running', model: workerModel, ...(note ? { note } : {}) };
   }
 
   // ── Follow-up ────────────────────────────────────────────────
 
   async sendToBackgroundAgent(taskId: string, followup: string): Promise<{ ok: boolean; error?: string }> {
     const record = this.tasks.get(taskId);
-    if (!record) return { ok: false, error: `Unknown task ${taskId}` };
+    // D-100: a worker a restart interrupted has no live record; the follow-up resumes it.
+    if (!record) return this.resumeBackgroundAgent(taskId, { followup });
     if (record.reviewRounds >= this.config.maxReviewRounds) {
       return {
         ok: false,
@@ -649,6 +886,8 @@ export class OrchestratorService {
     record.reviewRounds += 1;
     record.status = 'running';
     record.lastAssistantText = '';
+    record.lastError = undefined;
+    record.cancellation = undefined;
     // Back in the wave: its settlement waits on this turn too.
     if (!record.waveSlot) {
       record.waveSlot = true;
@@ -679,11 +918,127 @@ export class OrchestratorService {
     }
   }
 
+  /**
+   * D-100: continue a worker whose turn died with the previous server process. Its chat, transcript and provider
+   * session are durable, so the worker is re-attached (live record, wave slot, event subscriptions) and prompted to
+   * finish from where it stopped; when it settles, the wave-complete nudge wakes the orchestrator to consolidate.
+   * Only an `interrupted` task resumes — anything else either still runs or already reported.
+   */
+  async resumeBackgroundAgent(
+    taskId: string,
+    opts: { followup?: string; parentChatId?: string } = {},
+  ): Promise<{ ok: boolean; error?: string; notFound?: boolean }> {
+    const { followup } = opts;
+    const worker = await this.chatRepo.getById(taskId).catch(() => null);
+    const meta = worker?.backgroundTask;
+    if (!worker || !meta || !worker.parentChatId || (opts.parentChatId && worker.parentChatId !== opts.parentChatId)) {
+      return { ok: false, notFound: true, error: `Unknown task ${taskId}` };
+    }
+    if (this.tasks.has(taskId)) return { ok: false, error: `Task "${meta.taskName}" is not interrupted` };
+    if (meta.status === 'running' || meta.status === 'spawned') {
+      // Listed before the sweep ran: it is interrupted all the same (nothing in this process drives it).
+      await this.chatRepo.updateBackgroundTaskStatus(taskId, 'interrupted').catch(() => undefined);
+    } else if (meta.status !== 'interrupted') {
+      return { ok: false, error: `Task "${meta.taskName}" is ${meta.status}, not interrupted — spawn a new worker instead.` };
+    }
+    const parentChatId = worker.parentChatId;
+    const parent = await this.chatRepo.getById(parentChatId).catch(() => null);
+    if (!parent?.sessionId || !worker.sessionId) return { ok: false, error: `Task ${taskId} has no session to resume` };
+
+    const record = this.newRecord({
+      taskId,
+      taskName: meta.taskName,
+      parentChatId,
+      parentSessionId: parent.sessionId,
+      workerSessionId: worker.sessionId,
+      ...(worker.model ? { model: worker.model } : {}),
+      ...(worker.agentRef ? { agentRef: worker.agentRef } : {}),
+      ...(worker.agentSnapshot?.driving?.name ? { agentName: worker.agentSnapshot.driving.name } : {}),
+      wave: (await this.getOrInitWaveState(parentChatId)).waveCount || 1,
+    });
+    this.tasks.set(taskId, record);
+    record.waveSlot = true;
+    this.activeByParent.set(parentChatId, (this.activeByParent.get(parentChatId) ?? 0) + 1);
+    // The resumed worker belongs to the wave it was spawned in: no new wave is counted.
+    this.waveOpen.add(parentChatId);
+    this.suppressNudge.delete(parentChatId);
+    this.attachRecord(record);
+
+    await this.chatRepo.updateBackgroundTaskStatus(taskId, 'running').catch(() => undefined);
+    await this.emitToParent(record.parentSessionId, {
+      kind: 'chat.background_task.status',
+      data: { chatId: parentChatId, parentChatId, taskId, taskName: record.taskName, status: 'running' },
+    });
+    void this.writeScratchpad(parentChatId);
+
+    const [first] = await this.messageRepo.getByChatId(taskId, 1, 0).catch(() => []);
+    const brief = first?.role === 'user' ? first.content : undefined;
+    this.chatManagementService.sendPrompt(taskId, renderResumeMessage(brief, followup)).catch((err) => {
+      record.status = 'failed';
+      record.lastError = err instanceof Error ? err.message : String(err);
+      record.resolveIdle();
+      void this.chatRepo.updateBackgroundTaskStatus(taskId, 'failed').catch(() => {});
+    });
+    return { ok: true };
+  }
+
+  /** A live record for a worker (spawned now, or resumed after a restart). */
+  private newRecord(
+    init: Pick<TaskRecord, 'taskId' | 'taskName' | 'parentChatId' | 'parentSessionId' | 'workerSessionId' | 'wave'> &
+      Partial<Pick<TaskRecord, 'model' | 'agentRef' | 'agentName'>>,
+  ): TaskRecord {
+    const record: TaskRecord = {
+      ...init,
+      status: 'running',
+      reviewRounds: 0,
+      lastAssistantText: '',
+      startedAt: Date.now(),
+      toolCalls: 0,
+      lastProgressAt: 0,
+      idlePromise: Promise.resolve(),
+      resolveIdle: () => {},
+      firstOutput: Promise.resolve(),
+      resolveFirstOutput: () => {},
+      unsub: undefined,
+      waveSlot: false,
+    };
+    this.armIdle(record);
+    return record;
+  }
+
+  /**
+   * Subscribe to the worker's stream (first output, idle) and, once per orchestrator, to the parent's: when the
+   * orchestrator's own turn ends, a worker still in `needs_review` (not sent a follow-up) is accepted.
+   */
+  private attachRecord(record: TaskRecord): void {
+    record.unsub = this.eventBus.subscribe(
+      record.workerSessionId,
+      (event) => this.onWorkerEvent(record, event),
+      `orchestrator:${record.taskId}`,
+    );
+    this.parentSessions.set(record.parentChatId, record.parentSessionId);
+    if (!this.parentSubs.has(record.parentChatId)) {
+      const parentChatId = record.parentChatId;
+      const unsub = this.eventBus.subscribe(
+        record.parentSessionId,
+        (event) => this.onParentEvent(parentChatId, event),
+        `orchestrator-parent:${parentChatId}`,
+      );
+      this.parentSubs.set(parentChatId, unsub);
+    }
+  }
+
   // ── Check / list ─────────────────────────────────────────────
 
   async checkBackgroundAgent(taskId: string, opts: { wait?: boolean } = {}): Promise<TaskResultDigest & { taskId: string; taskName: string }> {
     const record = this.tasks.get(taskId);
     if (!record) {
+      // No live record (the server restarted since): the digest is still in the worker chat's messages.
+      const chat = await this.chatRepo.getById(taskId).catch(() => null);
+      if (chat?.backgroundTask) {
+        const persisted = { taskId, status: chat.backgroundTask.status, lastAssistantText: '' } as TaskRecord;
+        return { ...(await this.buildDigest(persisted)), taskId, taskName: chat.backgroundTask.taskName };
+      }
       return { taskId, taskName: taskId, status: 'failed', summary: `Unknown task ${taskId}`, keyFindings: [], artifacts: [], risks: [], openQuestions: [] };
     }
     if (opts.wait && record.status === 'running') {
@@ -713,28 +1068,117 @@ export class OrchestratorService {
     return out;
   }
 
+  /**
+   * D-89 — the task detail beyond the digest: the brief, the orchestrator's
+   * review rounds and the worker's latest steps, read from the worker chat's
+   * persisted messages (durable across restarts, unlike the task record).
+   * Null when `taskId` is not a worker of `parentChatId`.
+   */
+  async getBackgroundTaskDetail(parentChatId: string, taskId: string): Promise<BackgroundTaskDetail | null> {
+    const chat = await this.chatRepo.getById(taskId).catch(() => null);
+    if (!chat || chat.parentChatId !== parentChatId) return null;
+    const total = await this.messageRepo.countByChatId(taskId).catch(() => 0);
+    const WINDOW = 200;
+    const [first] = total > 0 ? await this.messageRepo.getByChatId(taskId, 1, 0) : [];
+    const recent = total > 0 ? await this.messageRepo.getByChatId(taskId, WINDOW, Math.max(0, total - WINDOW)) : [];
+    const messages = first && recent[0]?.id !== first.id ? [first, ...recent] : recent;
+
+    const briefMessage = messages.find((m) => m.role === 'user');
+    const followUps = messages.filter((m) => m.role === 'user' && m !== briefMessage);
+    const rounds = followUps.map((m, i) => ({
+      round: i + 1,
+      at: new Date(m.timestamp).toISOString(),
+      request: m.content.length > 4000 ? `${m.content.slice(0, 3999)}…` : m.content,
+    }));
+
+    const lastSteps: BackgroundTaskDetail['lastSteps'] = [];
+    for (let i = messages.length - 1; i >= 0 && lastSteps.length < 8; i -= 1) {
+      const m = messages[i]!;
+      if (m.role !== 'assistant') continue;
+      const calls = m.metadata?.toolCalls ?? [];
+      for (let j = calls.length - 1; j >= 0 && lastSteps.length < 8; j -= 1) {
+        const c = calls[j]!;
+        lastSteps.unshift({
+          id: c.id,
+          tool: c.tool,
+          ...(c.args !== undefined ? { args: clipArgs(c.args) } : {}),
+          status: c.status,
+          ...(c.success !== undefined ? { success: c.success } : {}),
+          ...(c.fileOp
+            ? { fileOp: { kind: c.fileOp.kind, filePath: c.fileOp.filePath, additions: c.fileOp.additions, deletions: c.fileOp.deletions } }
+            : {}),
+          at: new Date(m.timestamp).toISOString(),
+        });
+      }
+    }
+
+    const record = this.tasks.get(taskId);
+    const status: BackgroundTaskStatus = record?.status ?? chat.backgroundTask?.status ?? 'spawned';
+    const outcome: BackgroundTaskDetail['outcome'] =
+      status === 'completed'
+        ? 'accepted'
+        : status === 'needs_review'
+          ? 'in_review'
+          : status === 'failed' || status === 'cancelled'
+            ? status
+            : rounds.length > 0
+              ? 'reworking'
+              : 'running';
+    const model = record?.model ?? chat.model;
+    return {
+      taskId,
+      taskName: record?.taskName ?? chat.backgroundTask?.taskName ?? chat.name,
+      status,
+      ...(model ? { model } : {}),
+      brief: briefMessage ? parseBrief(briefMessage.content) : null,
+      rounds,
+      reviewRounds: rounds.length,
+      maxReviewRounds: this.config.maxReviewRounds,
+      outcome,
+      lastSteps,
+    };
+  }
+
   async listBackgroundAgents(
     parentChatId: string,
-  ): Promise<Array<{ taskId: string; taskName: string; status: BackgroundTaskStatus; model?: string; reviewRounds: number }>> {
-    // Prefer in-memory records; fall back to DB for durability across restarts.
-    const mem = [...this.tasks.values()].filter((t) => t.parentChatId === parentChatId);
-    if (mem.length > 0) {
-      return mem.map((t) => ({ taskId: t.taskId, taskName: t.taskName, status: t.status, model: t.model, reviewRounds: t.reviewRounds }));
-    }
+  ): Promise<
+    Array<{
+      taskId: string;
+      taskName: string;
+      status: BackgroundTaskStatus;
+      model?: string;
+      agentRef?: string;
+      agentName?: string;
+      objective?: string;
+      reviewRounds: number;
+      cancelledBy?: BackgroundTaskCancelledBy;
+      cancelledAt?: number;
+    }>
+  > {
+    // In-memory records are live; the DB has the rest (workers of an earlier process, durable across restarts).
+    const mem = new Map([...this.tasks.values()].filter((t) => t.parentChatId === parentChatId).map((t) => [t.taskId, t]));
+    const live = (t: TaskRecord) => ({
+      taskId: t.taskId,
+      taskName: t.taskName,
+      status: t.status,
+      model: t.model,
+      ...(t.agentRef ? { agentRef: t.agentRef } : {}),
+      ...(t.agentName ? { agentName: t.agentName } : {}),
+      reviewRounds: t.reviewRounds,
+      ...cancellationFields(t.status, t.cancellation),
+    });
     const rows = await this.chatRepo.listBackgroundTasks(parentChatId).catch(() => []);
-    return Promise.all(rows.map(async (c) => {
+    const persisted = await Promise.all(rows.filter((c) => !mem.has(c.id)).map(async (c) => {
       let status: BackgroundTaskStatus = c.backgroundTask?.status ?? 'spawned';
-      // A worker the DB still calls running has no record in this process, so
-      // nothing is driving it: its turn died with the previous server process
-      // (background turns are fire-and-forget and are not resumed on boot).
-      // Left as "running" it spun in the panel forever and blocked the
-      // concurrency cap. Say what happened instead.
+      // D-100: a worker the DB still calls running has no record in this process, so nothing is driving it — its
+      // turn died with the previous server process. Left as "running" it spun in the panel forever and blocked the
+      // concurrency cap; it is `interrupted`, and Resume (or a follow-up from the orchestrator) continues it.
       if (status === 'running' || status === 'spawned') {
-        status = 'failed';
-        await this.chatRepo.updateBackgroundTaskStatus(c.id, 'failed').catch(() => undefined);
+        status = 'interrupted';
+        await this.chatRepo.updateBackgroundTaskStatus(c.id, 'interrupted').catch(() => undefined);
         void this.emitToParent(this.parentSessions.get(parentChatId) ?? '', {
-          kind: 'chat.background_task.failed',
-          data: { chatId: parentChatId, parentChatId, taskId: c.id, taskName: c.backgroundTask?.taskName ?? c.name, error: 'Interrupted by a server restart' },
+          kind: 'chat.background_task.status',
+          data: { chatId: parentChatId, parentChatId, taskId: c.id, taskName: c.backgroundTask?.taskName ?? c.name, status },
         });
       }
       return {
@@ -742,9 +1186,37 @@ export class OrchestratorService {
         taskName: c.backgroundTask?.taskName ?? c.name,
         status,
         model: c.model,
+        ...(c.agentRef ? { agentRef: c.agentRef } : {}),
+        ...(c.agentSnapshot?.driving?.name ? { agentName: c.agentSnapshot.driving.name } : {}),
         reviewRounds: 0,
+        ...(status === 'cancelled' && c.backgroundTask?.cancelledBy && c.backgroundTask.cancelledAt !== undefined
+          ? { cancelledBy: c.backgroundTask.cancelledBy, cancelledAt: c.backgroundTask.cancelledAt }
+          : {}),
       };
     }));
+    const order = new Map(rows.map((c, i) => [c.id, i]));
+    const all = [...[...mem.values()].map(live), ...persisted].sort(
+      (a, b) => (order.get(a.taskId) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.taskId) ?? Number.MAX_SAFE_INTEGER),
+    );
+    return Promise.all(all.map(async (t) => {
+      const objective = await this.objectiveOf(t.taskId);
+      return objective ? { ...t, objective } : t;
+    }));
+  }
+
+  /** Each worker's brief objective, first line: a brief never changes, so it is read once per process. */
+  private readonly objectives = new Map<string, string>();
+
+  private async objectiveOf(taskId: string): Promise<string | undefined> {
+    const known = this.objectives.get(taskId);
+    if (known !== undefined) return known;
+    const [first] = await this.messageRepo.getByChatId(taskId, 1, 0).catch(() => []);
+    // Not persisted yet (a worker spawning right now): look again on the next listing.
+    if (!first || first.role !== 'user') return undefined;
+    const brief = parseBrief(first.content);
+    const objective = firstBriefLine(brief.objective ?? brief.text);
+    this.objectives.set(taskId, objective);
+    return objective || undefined;
   }
 
   /**
@@ -761,25 +1233,67 @@ export class OrchestratorService {
       if (record.parentChatId !== parentChatId) continue;
       if (record.status !== 'running' && record.status !== 'spawned') continue;
       record.lastError = `cancelled:${reason}`;
-      await this.cancelBackgroundAgent(record.taskId);
+      await this.cancelBackgroundAgent(record.taskId, 'orchestrator');
       cancelled.push(record.taskId);
     }
     return cancelled;
   }
 
-  /** Cancel a running worker (abort its turn). */
-  async cancelBackgroundAgent(taskId: string): Promise<void> {
+  /**
+   * Cancel a running worker (abort its turn), attributed to `by` (G-20):
+   * `user` for the Tasks panel's Cancel, `orchestrator` for the cascade when
+   * the orchestrator chat stops. The attribution is recorded BEFORE the turn
+   * is aborted, so the `harness.cancelled` / `harness.idle` the abort produces
+   * keep it instead of reading as a Stop inside the worker chat. Returns the
+   * attribution, or null for an unknown task.
+   */
+  async cancelBackgroundAgent(
+    taskId: string,
+    by: BackgroundTaskCancelledBy = 'user',
+  ): Promise<BackgroundTaskCancellation | null> {
     const record = this.tasks.get(taskId);
+    // Read before the abort: its `harness.idle` may settle the record first.
+    const alreadyCancelled = record?.status === 'cancelled';
+    const cancellation: BackgroundTaskCancellation = record?.cancellation ?? { cancelledBy: by, cancelledAt: Date.now() };
+    if (record) {
+      record.cancellation = cancellation;
+      // So the idle this abort produces settles as `cancelled` even when the
+      // provider sends no `harness.cancelled` first.
+      if (!record.lastError?.startsWith('cancelled:')) record.lastError = `cancelled:${by}`;
+    }
     try {
       await this.chatManagementService.cancelTurn(taskId);
     } catch {
       // Non-fatal.
     }
-    if (record) {
-      record.status = 'cancelled';
-      record.resolveIdle();
-      await this.chatRepo.updateBackgroundTaskStatus(taskId, 'cancelled').catch(() => {});
+    if (!record) {
+      const chat = await this.chatRepo.getById(taskId).catch(() => null);
+      if (!chat?.backgroundTask) return null;
+      const prior = chat.backgroundTask;
+      if (prior.status === 'cancelled' && prior.cancelledBy && prior.cancelledAt !== undefined) {
+        return { cancelledBy: prior.cancelledBy, cancelledAt: prior.cancelledAt };
+      }
+      await this.chatRepo.updateBackgroundTaskStatus(taskId, 'cancelled', cancellation).catch(() => {});
+      return cancellation;
     }
+    const changed = !alreadyCancelled;
+    record.status = 'cancelled';
+    record.resolveIdle();
+    await this.chatRepo.updateBackgroundTaskStatus(taskId, 'cancelled', cancellation).catch(() => {});
+    if (changed) {
+      await this.emitToParent(record.parentSessionId, {
+        kind: 'chat.background_task.status',
+        data: {
+          chatId: record.parentChatId,
+          parentChatId: record.parentChatId,
+          taskId,
+          taskName: record.taskName,
+          status: 'cancelled',
+          ...cancellation,
+        },
+      });
+    }
+    return cancellation;
   }
 
   /**
@@ -789,6 +1303,10 @@ export class OrchestratorService {
    */
   private async nudgeParentAfterWave(parentChatId: string): Promise<void> {
     if (this.suppressNudge.has(parentChatId)) return;
+    // A stage parent collects its digests through check_* within its own
+    // turn; the stage conversation cannot be prompted from here (P03b posts
+    // the nudge as a stage conversation message).
+    if (this.stageParents.has(parentChatId)) return;
     try {
       const streaming = this.chatManagementService.getStreamingChatIds?.() ?? [];
       if (streaming.includes(parentChatId)) return;
@@ -1028,6 +1546,9 @@ export class OrchestratorService {
       // may continue the DAG into stages that depend on the cancelled output.
       case 'harness.cancelled':
         record.lastError = `cancelled:${(data?.['reason'] as string) ?? 'user_abort'}`;
+        // G-20: nothing attributed it first (the route and the cascade do), so
+        // this is Stop pressed inside the worker chat — the user's.
+        record.cancellation ??= { cancelledBy: 'user', cancelledAt: Date.now() };
         break;
       case 'harness.idle': {
         // A second idle for the same activation (a stop emits one from the
@@ -1035,7 +1556,7 @@ export class OrchestratorService {
         if (!record.waveSlot) break;
         record.waveSlot = false;
         record.resolveFirstOutput();
-        const hasDigest = /<TASK_RESULT>/i.test(record.lastAssistantText);
+        const hasDigest = TASK_RESULT_OPEN.test(record.lastAssistantText);
         // F4 fix: the original condition `record.lastError && !record.lastAssistantText`
         // incorrectly yielded 'needs_review' for cancelled workers that produced partial
         // output before the cancellation — lastAssistantText was non-empty, so the
@@ -1084,7 +1605,13 @@ export class OrchestratorService {
         // through last.
         record.currentStep = undefined;
         this.emitWorkerProgress(record, true);
-        void this.chatRepo.updateBackgroundTaskStatus(record.taskId, finalStatus).catch(() => {});
+        void this.chatRepo
+          .updateBackgroundTaskStatus(
+            record.taskId,
+            finalStatus,
+            finalStatus === 'cancelled' ? record.cancellation : undefined,
+          )
+          .catch(() => {});
         this.scheduleWorkerRelease(record);
         void this.writeScratchpad(record.parentChatId);
         void this.emitToParent(record.parentSessionId, {
@@ -1096,6 +1623,7 @@ export class OrchestratorService {
             taskName: record.taskName,
             status: finalStatus,
             summary: hasDigest ? undefined : this.truncate(record.lastAssistantText, 200),
+            ...cancellationFields(finalStatus, record.cancellation),
           },
         });
         break;
@@ -1144,9 +1672,9 @@ export class OrchestratorService {
 
   private parseDigest(text: string): TaskResultDigest | null {
     if (!text) return null;
-    const m = text.match(/<TASK_RESULT>\s*([\s\S]*?)\s*<\/TASK_RESULT>/i);
-    if (!m || !m[1]) return null;
-    let raw = m[1].trim();
+    const body = taskResultBody(text);
+    if (!body) return null;
+    let raw = body;
     // Tolerate a fenced ```json block inside the tag.
     const fence = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
     if (fence && fence[1]) raw = fence[1].trim();
@@ -1216,6 +1744,13 @@ export class OrchestratorService {
     }
     if (m.category === 'lightweight') return 'low';
     if (m.category === 'powerful') return 'high';
+    // Claude Code reports no cost data at all (D-131: the catalog no longer
+    // carries an invented tier). For ROUTING only — never shown — read the
+    // model family from the canonical id: an Opus/Fable worker for a README is
+    // the expensive mistake this hint exists to avoid.
+    const family = `${m.resolvedModel ?? ''} ${m.id}`.toLowerCase();
+    if (/\b(?:opus|fable)\b/.test(family)) return 'high';
+    if (/\bhaiku\b/.test(family)) return 'low';
     return 'medium';
   }
 
@@ -1228,8 +1763,13 @@ export class OrchestratorService {
    *   4. parent.model (last-resort safety net)
    * Returns undefined when nothing resolves (harness will use its own default).
    */
-  private async resolveWorkerModel(briefModel: string | undefined, parentModel: string | undefined): Promise<string | undefined> {
+  private async resolveWorkerModel(
+    briefModel: string | undefined,
+    parentModel: string | undefined,
+    leadDefault?: string | undefined,
+  ): Promise<string | undefined> {
     if (briefModel) return briefModel;
+    if (leadDefault) return leadDefault;
     if (this.config.defaultWorkerModel) return this.config.defaultWorkerModel;
     const models = await this.getModelsCached();
     if (models.length > 0) {
@@ -1358,7 +1898,7 @@ export class OrchestratorService {
   private async writeScratchpad(parentChatId: string): Promise<void> {
     if (!this.workspaceManager) return;
     try {
-      const parent = await this.chatRepo.getById(parentChatId);
+      const parent = await this.parentView(parentChatId);
       if (!parent.workspaceId) return;
       const ws = await this.workspaceManager.getExecutionWorkspace(parent.workspaceId);
       if (!ws) return;
@@ -1380,4 +1920,18 @@ export class OrchestratorService {
       // Non-fatal — the scratchpad is an optimization, not a correctness dep.
     }
   }
+}
+
+/** `<TASK_RESULT>`, tolerating the stray spaces models emit ("< TASK_RESULT>"). */
+const TASK_RESULT_OPEN = /<\s*TASK_RESULT\s*>/i;
+
+/**
+ * The text inside a worker's `<TASK_RESULT>` block, or null. Tolerates whitespace inside the tags and a missing
+ * closing tag at the end of the message — a reviewer's digest arrived as "< TASK_RESULT>{…}" and the orchestrator
+ * got the raw JSON as an unstructured summary.
+ */
+export function taskResultBody(text: string): string | null {
+  const m = /<\s*TASK_RESULT\s*>\s*([\s\S]*?)\s*(?:<\s*\/\s*TASK_RESULT\s*>|$)/i.exec(text);
+  const body = m?.[1]?.trim();
+  return body ? body : null;
 }

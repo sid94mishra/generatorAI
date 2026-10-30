@@ -5,9 +5,10 @@ import {
   isLastRouteFresh,
   isRestorableRoute,
   isSheetRoute,
+  lastRouteAction,
   resolveLastRoute,
-} from '../prefs/lastRouteRules';
-import { STEP_UP_WINDOW_MS, isStepUpFresh } from '../auth/stepUpRules';
+} from '../services/prefs/lastRouteRules';
+import { STEP_UP_WINDOW_MS, isStepUpFresh } from '../services/auth/stepUpRules';
 
 const NOW = 1_700_000_000_000;
 
@@ -34,7 +35,7 @@ describe('last route — expiry', () => {
   });
 
   it('never restores the entry, pairing, revoked or settings routes', () => {
-    for (const route of ['/', '', '/pair', '/revoked', '/(tabs)', '/settings', '/settings/security']) {
+    for (const route of ['/', '', '/pair', '/paired', '/revoked', '/settings', '/settings/security']) {
       expect(isRestorableRoute(route), route).toBe(false);
       expect(resolveLastRoute({ route, savedAt: NOW - 1000 }, NOW), route).toBeNull();
     }
@@ -44,11 +45,23 @@ describe('last route — expiry', () => {
 
   it('never restores a route-addressable sheet', () => {
     for (const route of [
-      '/approvals',
       '/scope-request',
+      '/servers',
+      '/search',
+      '/chats/new',
       '/scope-request?scope=exec%3Aterminal',
       '/chats/abc/gate/int-1',
       '/chats/abc/plan/plan-1',
+      // Every presented route of the stack: a Turn sheet left open used to come back on every cold start.
+      '/chats/abc/turn',
+      '/pickers/model',
+      '/workflows/w1/run',
+      '/workflows/w1/runs/r1/approval/s1',
+      '/workflows/new',
+      '/workflows/w1/edit/stages/plan',
+      '/agents/a1/edit',
+      '/workspaces/ws1/commit',
+      '/settings/mcp/add',
     ]) {
       expect(isSheetRoute(route), route).toBe(true);
       expect(isRestorableRoute(route), route).toBe(false);
@@ -61,7 +74,7 @@ describe('last route — expiry', () => {
   });
 
   it('restores detail routes', () => {
-    for (const route of ['/chats/abc', '/runs/r1', '/(tabs)/chats', '/terminal/ws1']) {
+    for (const route of ['/chats/abc', '/workflows/w1/runs/r1', '/chats', '/needs-you', '/terminal/ws1']) {
       expect(isRestorableRoute(route), route).toBe(true);
     }
   });
@@ -78,5 +91,13 @@ describe('step-up — cache window', () => {
   it('is never fresh without a success or with a clock step backwards', () => {
     expect(isStepUpFresh(null, NOW)).toBe(false);
     expect(isStepUpFresh(NOW + 1, NOW)).toBe(false);
+  });
+
+  it('clears on Home and Settings, keeps the screen under a sheet', () => {
+    expect(lastRouteAction('/chats/abc')).toBe('record');
+    expect(lastRouteAction('/')).toBe('clear');
+    expect(lastRouteAction('/settings/appearance')).toBe('clear');
+    expect(lastRouteAction('/chats/abc/turn')).toBe('keep');
+    expect(lastRouteAction('/search')).toBe('keep');
   });
 });

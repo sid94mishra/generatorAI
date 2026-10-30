@@ -14,8 +14,13 @@ import { MutationObserver, QueryObserver } from '@tanstack/react-query';
 import { ApiError } from '@/platform/apiFetch.js';
 
 const toastSpy = vi.fn();
-vi.mock('@/components/Toast.js', () => ({
-  toast: (...args: unknown[]) => toastSpy(...args),
+// The kit toast (D-30): record each call as { variant, title, ...options }.
+const record =
+  (variant: string) =>
+  (title: unknown, options: Record<string, unknown> = {}) =>
+    toastSpy({ variant, title, ...options });
+vi.mock('@/ui/primitives/Toast/Toast.js', () => ({
+  toast: { error: record('error'), info: record('info'), done: record('done'), dismiss: vi.fn() },
 }));
 
 const { createAppQueryClient, describeRequestError, shouldReportMutation } = await import(
@@ -145,7 +150,7 @@ describe('queryCache.onError — background refetch failures', () => {
     await observer.refetch();
     expect(toastSpy).toHaveBeenCalledTimes(1);
     expect(toastSpy.mock.calls[0]![0]).toMatchObject({
-      variant: 'warning',
+      variant: 'error',
       title: "Couldn't refresh",
     });
     expect(String(toastSpy.mock.calls[0]![0].description)).toContain('Server restarting');

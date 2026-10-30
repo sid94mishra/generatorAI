@@ -12,7 +12,7 @@
 
 import type { ILogger, RepoReadiness, SourceControlSettings } from '@generatorai/shared';
 import type { IGitClient } from '@generatorai/git';
-import { parseRepoSlug, type SourceControlRegistry } from '@generatorai/source-control';
+import { isLocalRemote, parseRepoSlug, type SourceControlRegistry } from '@generatorai/source-control';
 
 export interface RepoReadinessDeps {
   git: IGitClient;
@@ -28,6 +28,7 @@ export const REASON_NOTHING_TO_COMMIT = 'Nothing to commit';
 export const REASON_MERGE_IN_PROGRESS = 'Merge in progress — resolve conflicts first';
 export const REASON_NO_REMOTE_PUSH = 'No git remote configured';
 export const REASON_NO_REMOTE_PR = 'No git remote';
+export const REASON_LOCAL_REMOTE_PR = 'The remote is a local path — pull requests need a hosted remote';
 export const REASON_DETACHED = 'Detached HEAD';
 export const REASON_NOTHING_TO_PROPOSE =
   'Nothing to open a PR from (branch has no commits ahead of base)';
@@ -39,7 +40,8 @@ export function notConnectedReason(host: string): string {
 export class RepoReadinessService {
   constructor(private readonly deps: RepoReadinessDeps) {}
 
-  async readiness(input: { repoDir: string; alias: string }): Promise<RepoReadiness> {
+  /** `fetch`: refresh `origin` first, so the counts include what landed on the remote since the last fetch. */
+  async readiness(input: { repoDir: string; alias: string; fetch?: boolean }): Promise<RepoReadiness> {
     const { repoDir, alias } = input;
     const { git } = this.deps;
 
@@ -74,12 +76,14 @@ export class RepoReadinessService {
 
     const remoteUrl = await this.safe(() => git.getRemoteUrl(repoDir), null);
     const hasRemote = Boolean(remoteUrl);
+    if (input.fetch && hasRemote) await this.safe(() => git.fetch(repoDir, 'origin'), undefined);
     const slug = remoteUrl ? parseRepoSlug(remoteUrl) : null;
     const account = slug ? this.deps.registry.accountFor(slug.host) : null;
     const connected = slug ? this.deps.registry.providerFor(slug.host) !== null : false;
 
     const branch = await this.safe(() => git.currentBranch(repoDir), null);
     const detached = await this.safe(() => git.isDetached(repoDir), false);
+    const unborn = await this.safe(() => git.isUnborn(repoDir), false);
     const settingsBase = this.deps.settings().defaultBase;
     const defaultBranch =
       (await this.safe(() => git.defaultBranch(repoDir), null)) ?? settingsBase ?? null;
@@ -89,7 +93,10 @@ export class RepoReadinessService {
     const changedFiles = changed.length;
     const dirty = changedFiles > 0;
 
-    const upstream = branch ? await this.safe(() => git.upstreamOf(repoDir, branch), null) : null;
+    // Only the branch's own copy counts: a work branch cut from `origin/develop` tracks it until the
+    // first push, and reading that as "on the remote, up to date" would be wrong.
+    const tracked = branch ? await this.safe(() => git.upstreamOf(repoDir, branch), null) : null;
+    const upstream = tracked && branch && tracked.slice(tracked.indexOf('/') + 1) === branch ? tracked : null;
     const hasUpstream = upstream !== null;
     let ahead: number | null = null;
     let behind: number | null = null;
@@ -112,15 +119,18 @@ export class RepoReadinessService {
     // actually about. `ahead` above is relative to the upstream (an already
     // pushed work branch reads 0/0 there while still being ahead of main).
     let aheadOfBase: number | null = null;
+    let vsBase: RepoReadiness['vsBase'];
     if (branch && defaultBranch && hasRemote && branch !== defaultBranch) {
       const counts = await this.safe(
         () => git.aheadBehind(repoDir, branch, `origin/${defaultBranch}`),
         null,
       );
       aheadOfBase = counts?.ahead ?? null;
+      if (counts) vsBase = { branch: defaultBranch, ahead: counts.ahead, behind: counts.behind };
     }
 
     const mergeInProgress = await this.safe(() => git.mergeInProgress(repoDir), false);
+    const mergingFrom = mergeInProgress ? await this.safe(() => git.mergeSource(repoDir), null) : null;
     const conflictedFiles = await this.safe(() => git.unmergedFiles(repoDir), []);
 
     let openPullRequest: RepoReadiness['openPullRequest'] = null;
@@ -159,6 +169,10 @@ export class RepoReadinessService {
     if (!hasRemote) {
       can.pullRequest = false;
       reasons.pullRequest = REASON_NO_REMOTE_PR;
+    } else if (!connected && remoteUrl && isLocalRemote(remoteUrl)) {
+      // A path remote has no host: "Remote host var is not connected" named a directory.
+      can.pullRequest = false;
+      reasons.pullRequest = REASON_LOCAL_REMOTE_PR;
     } else if (!connected) {
       can.pullRequest = false;
       reasons.pullRequest = notConnectedReason(slug?.host ?? 'unknown');
@@ -181,6 +195,7 @@ export class RepoReadinessService {
       connected,
       branch,
       detached,
+      ...(unborn ? { unborn } : {}),
       defaultBranch,
       onDefaultBranch,
       dirty,
@@ -188,7 +203,9 @@ export class RepoReadinessService {
       ahead,
       behind,
       hasUpstream,
+      ...(vsBase ? { vsBase } : {}),
       mergeInProgress,
+      ...(mergingFrom ? { mergingFrom } : {}),
       conflictedFiles,
       openPullRequest,
       can,

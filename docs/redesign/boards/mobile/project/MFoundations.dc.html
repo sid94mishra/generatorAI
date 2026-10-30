@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mobile foundations</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#0b0b0c}
+.t-dark{--ground:#0b0b0c;--surface:#111113;--raised:#17171a;--overlay:#1d1d21;--sunken:#0d0d0f;--hover:rgba(255,255,255,.035);--selected:rgba(255,255,255,.07);--line:#27272c;--line-soft:#1c1c20;--line-strong:#37373d;--fg:#ededef;--fg-2:#a1a1aa;--fg-3:#80808a;--run:#6aa6ff;--run-bg:rgba(106,166,255,.12);--ok:#4cc38a;--ok-bg:rgba(76,195,138,.12);--warn:#f0b429;--warn-bg:rgba(240,180,41,.12);--err:#ff6369;--err-bg:rgba(255,99,105,.12);--add-bg:rgba(76,195,138,.09);--del-bg:rgba(255,99,105,.09);--shadow-pop:0 16px 40px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06);--scrim:rgba(0,0,0,.62);color-scheme:dark}
+.t-light{--ground:#f1f1ef;--surface:#ffffff;--raised:#fafaf9;--overlay:#ffffff;--sunken:#f6f6f4;--hover:rgba(0,0,0,.03);--selected:rgba(0,0,0,.055);--line:#e2e2de;--line-soft:#ecece9;--line-strong:#d0d0cb;--fg:#18181b;--fg-2:#55555d;--fg-3:#6b6b73;--run:#1d6ae5;--run-bg:rgba(29,106,229,.09);--ok:#16804c;--ok-bg:rgba(22,128,76,.09);--warn:#935f00;--warn-bg:rgba(214,150,0,.13);--err:#d1242f;--err-bg:rgba(209,36,47,.08);--add-bg:rgba(22,128,76,.08);--del-bg:rgba(209,36,47,.07);--shadow-pop:0 16px 40px rgba(20,20,30,.14),0 0 0 1px rgba(0,0,0,.06);--scrim:rgba(20,20,24,.3);color-scheme:light}
+.acc-ink{--accent:var(--fg);--on-accent:var(--surface)}
+.acc-blue{--accent:#2f6fed;--on-accent:#ffffff}
+.acc-violet{--accent:#7152e0;--on-accent:#ffffff}
+.acc-green{--accent:#1b8a52;--on-accent:#ffffff}
+.acc-orange{--accent:#d4561c;--on-accent:#ffffff}
+.acc-rose{--accent:#c8325f;--on-accent:#ffffff}
+.acc-teal{--accent:#0f7f7a;--on-accent:#ffffff}
+.app{font-family:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:13px;line-height:1.45;color:var(--fg);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.app *{box-sizing:border-box}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.i12{width:12px;height:12px}.i14{width:14px;height:14px}.i20{width:20px;height:20px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line);background:var(--raised);color:var(--fg);font-family:inherit;font-size:13px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;text-decoration:none}
+.btn-p{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.btn-g{background:transparent;border-color:transparent;color:var(--fg-2)}
+.btn-d{color:var(--err)}
+.btn-sm{height:24px;padding:0 8px;font-size:12px;border-radius:5px}
+.btn-lg{height:32px;padding:0 12px}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;border:0;background:transparent;color:var(--fg-2);padding:0;cursor:pointer;flex-shrink:0}
+.ib-sm{width:24px;height:24px;border-radius:5px}
+.ib.on{background:var(--selected);color:var(--fg)}
+.kbd{display:inline-flex;align-items:center;justify-content:center;height:18px;min-width:18px;padding:0 4px;border-radius:4px;border:1px solid var(--line);background:var(--sunken);color:var(--fg-3);font-family:"JetBrains Mono",monospace;font-size:11px;line-height:1;font-weight:400}
+.bdg{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border-radius:4px;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.s-run{color:var(--run);background:var(--run-bg)}.s-ok{color:var(--ok);background:var(--ok-bg)}.s-warn{color:var(--warn);background:var(--warn-bg)}.s-err{color:var(--err);background:var(--err-bg)}.s-idle{color:var(--fg-2);background:var(--selected)}
+.c-run{color:var(--run)}.c-ok{color:var(--ok)}.c-warn{color:var(--warn)}.c-err{color:var(--err)}.c-1{color:var(--fg)}.c-2{color:var(--fg-2)}.c-3{color:var(--fg-3)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.inp{display:flex;align-items:center;gap:8px;height:32px;border-radius:6px;border:1px solid var(--line);background:var(--sunken);color:var(--fg);padding:0 10px;font-family:inherit;font-size:13px;width:100%}
+.lbl{font-size:12px;font-weight:500;color:var(--fg-2)}
+.hint{font-size:12px;color:var(--fg-3)}
+.nav{display:flex;align-items:center;gap:10px;height:30px;padding:0 8px;border-radius:6px;color:var(--fg-2);font-size:13px;font-weight:500;text-decoration:none}
+.nav.on{background:var(--selected);color:var(--fg)}
+.cnt{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--fg-3)}
+.sec{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tabs{display:flex;gap:20px;border-bottom:1px solid var(--line-soft)}
+.tab{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0;border:0;background:none;font-family:inherit;font-size:13px;font-weight:500;color:var(--fg-2);text-decoration:none}
+.tab.on{color:var(--fg);box-shadow:inset 0 -2px 0 var(--fg)}
+.seg{display:inline-flex;gap:2px;padding:2px;border-radius:7px;background:var(--sunken);border:1px solid var(--line-soft)}
+.seg button{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:5px;border:0;background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;line-height:1}
+.seg button.on{background:var(--raised);color:var(--fg);box-shadow:0 0 0 1px var(--line)}
+.card{background:var(--raised);border:1px solid var(--line-soft);border-radius:8px}
+.th{display:flex;align-items:center;height:32px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tr{display:flex;align-items:center;gap:16px;height:44px;padding:0 20px;border-bottom:1px solid var(--line-soft);font-size:13px}
+.sw{position:relative;display:inline-block;width:28px;height:16px;border-radius:999px;border:0;padding:0;background:var(--line-strong);flex-shrink:0}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#ffffff}
+.sw.on{background:var(--accent)}
+.sw.on::after{left:14px;background:var(--on-accent)}
+.cb{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:4px;border:1px solid var(--line-strong);flex-shrink:0;color:var(--on-accent)}
+.cb.on{background:var(--accent);border-color:var(--accent)}
+.av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:var(--selected);color:var(--fg-2);font-size:11px;font-weight:600;flex-shrink:0}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.mono span{white-space:pre}
+.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+/* ── Mobile layer (Instrument for iOS + Android). Same colour tokens as desktop. ── */
+.board{flex-grow:1;display:flex;flex-direction:column;gap:14px;padding:36px 44px;background:var(--ground)}
+.pair{display:flex;gap:64px;align-items:flex-start}
+.plabel{display:flex;align-items:center;gap:8px;height:20px;font-size:12px;font-weight:500;color:var(--fg-2)}
+.phone{position:relative;flex-shrink:0;overflow:hidden;display:flex;flex-direction:column;background:var(--surface);color:var(--fg);box-shadow:0 0 0 1px var(--line-strong),0 24px 60px rgba(0,0,0,.35)}
+.ios{width:402px;height:874px;border-radius:56px}
+.and{width:412px;height:915px;border-radius:36px}
+.safe-top-ios{height:62px;flex-shrink:0}.safe-top-and{height:40px;flex-shrink:0}
+.safe-bot-ios{height:34px;flex-shrink:0}.safe-bot-and{height:24px;flex-shrink:0}
+/* type — iOS scale (pt) and Android M3 scale (sp); Instrument Sans on both, JetBrains Mono for machine text */
+.i-lt{font-size:32px;font-weight:600;letter-spacing:-0.02em;line-height:1.15}
+.i-t2{font-size:20px;font-weight:600;letter-spacing:-0.01em}
+.i-hd{font-size:17px;font-weight:600}.i-bd{font-size:17px;line-height:1.4}.i-cb{font-size:16px;line-height:1.5}
+.i-sub{font-size:15px}.i-fn{font-size:13px}.i-cap{font-size:12px}
+.a-hl{font-size:28px;font-weight:600;letter-spacing:-0.01em;line-height:1.2}
+.a-tl{font-size:22px;font-weight:600}.a-tm{font-size:16px;font-weight:600}
+.a-bl{font-size:16px;line-height:1.5}.a-bm{font-size:14px;line-height:1.45}.a-lb{font-size:12px;font-weight:500}
+/* iOS 26 Liquid Glass material — used ONLY for floating chrome (tab bar, nav buttons, composer, sheets' grabber area) */
+.glass{background:color-mix(in srgb,var(--overlay) 68%,transparent);-webkit-backdrop-filter:blur(22px) saturate(1.6);backdrop-filter:blur(22px) saturate(1.6);border:1px solid color-mix(in srgb,var(--fg) 12%,transparent);box-shadow:0 8px 28px rgba(0,0,0,.28)}
+.gbtn{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:22px;color:var(--fg);padding:0;flex-shrink:0;border:0;background:transparent;font-family:inherit}
+.gbtn.glass{background:color-mix(in srgb,var(--overlay) 68%,transparent);border:1px solid color-mix(in srgb,var(--fg) 12%,transparent)}
+.gcap{display:inline-flex;align-items:center;gap:2px;height:44px;border-radius:22px;padding:0 4px;flex-shrink:0}
+/* iOS floating tab bar */
+.itab{position:absolute;left:16px;right:84px;bottom:28px;height:62px;border-radius:31px;display:flex;align-items:center;justify-content:space-around;padding:0 6px}
+.itab a{display:flex;flex-direction:column;align-items:center;gap:2px;width:72px;padding:6px 0;border-radius:24px;color:var(--fg-2);font-size:11px;font-weight:500;text-decoration:none}
+.itab a.on{color:var(--fg);background:color-mix(in srgb,var(--fg) 10%,transparent)}
+.isearch{position:absolute;right:16px;bottom:28px;width:62px;height:62px;border-radius:31px;display:flex;align-items:center;justify-content:center;color:var(--fg)}
+/* Android navigation bar (M3) */
+.anav{height:64px;flex-shrink:0;display:flex;align-items:center;justify-content:space-around;background:var(--raised);border-top:1px solid var(--line-soft)}
+.anav a{display:flex;flex-direction:column;align-items:center;gap:2px;width:80px;color:var(--fg-2);font-size:12px;font-weight:500;text-decoration:none}
+.anav a .pill{display:flex;align-items:center;justify-content:center;width:56px;height:30px;border-radius:15px}
+.anav a.on{color:var(--fg)}.anav a.on .pill{background:var(--selected);color:var(--fg)}
+/* Android top app bar + FAB */
+.atop{height:64px;flex-shrink:0;display:flex;align-items:center;gap:4px;padding:0 4px 0 4px}
+.aib{display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:24px;border:0;background:transparent;color:var(--fg);padding:0;flex-shrink:0}
+.afab{display:inline-flex;align-items:center;gap:10px;height:56px;padding:0 20px 0 16px;border-radius:16px;border:0;background:var(--accent);color:var(--on-accent);font-family:inherit;font-size:14px;font-weight:600;box-shadow:0 6px 16px rgba(0,0,0,.3)}
+/* lists */
+.igroup{background:var(--raised);border-radius:22px;overflow:hidden}
+.irow{display:flex;align-items:center;gap:12px;min-height:52px;padding:10px 16px;border-bottom:1px solid var(--line-soft)}
+.arow{display:flex;align-items:center;gap:16px;min-height:64px;padding:10px 16px}
+/* sheets */
+.sheet-i{position:absolute;left:8px;right:8px;bottom:8px;border-radius:38px;background:var(--overlay);box-shadow:0 -10px 40px rgba(0,0,0,.35);display:flex;flex-direction:column;overflow:hidden}
+.sheet-a{position:absolute;left:0;right:0;bottom:0;border-radius:28px 28px 0 0;background:var(--overlay);box-shadow:0 -10px 40px rgba(0,0,0,.35);display:flex;flex-direction:column;overflow:hidden}
+.grab{width:36px;height:5px;border-radius:3px;background:var(--line-strong);margin:8px auto 4px auto;flex-shrink:0}
+.agrab{width:32px;height:4px;border-radius:2px;background:var(--fg-3);margin:16px auto 8px auto;flex-shrink:0;opacity:.6}
+.scrim{position:absolute;inset:0;background:var(--scrim)}
+/* controls sized for touch */
+.mbtn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 18px;border-radius:22px;border:1px solid var(--line);background:var(--raised);color:var(--fg);font-family:inherit;font-size:15px;font-weight:600;white-space:nowrap}
+.mbtn-p{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.abtn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 20px;border-radius:20px;border:1px solid var(--line-strong);background:transparent;color:var(--fg);font-family:inherit;font-size:14px;font-weight:600;white-space:nowrap}
+.abtn-p{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.mchip{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:16px;border:1px solid var(--line);background:transparent;color:var(--fg-2);font-family:inherit;font-size:13px;font-weight:500;white-space:nowrap;flex-shrink:0}
+.achip{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--line-strong);background:transparent;color:var(--fg-2);font-family:inherit;font-size:14px;font-weight:500;white-space:nowrap;flex-shrink:0}
+.mchip.on,.achip.on{background:var(--selected);color:var(--fg);border-color:transparent}
+.hscroll{display:flex;gap:8px;overflow:hidden;flex-shrink:0}
+.i22{width:22px;height:22px}.i24{width:24px;height:24px}.i18{width:18px;height:18px}
+/* v2: left sidebar (drawer) + right workspace pane */
+.drawer-i{position:absolute;left:0;top:0;bottom:0;width:318px;background:var(--surface);border-right:1px solid var(--line-soft);box-shadow:12px 0 40px rgba(0,0,0,.35);display:flex;flex-direction:column;border-radius:0 28px 28px 0;overflow:hidden}
+.drawer-a{position:absolute;left:0;top:0;bottom:0;width:336px;background:var(--overlay);box-shadow:12px 0 40px rgba(0,0,0,.35);display:flex;flex-direction:column;border-radius:0 16px 16px 0;overflow:hidden}
+.dnav{display:flex;align-items:center;gap:12px;height:44px;padding:0 12px;border-radius:12px;color:var(--fg-2);font-size:16px;font-weight:500;text-decoration:none}
+.dnav.on{background:var(--selected);color:var(--fg)}
+.dnav-a{display:flex;align-items:center;gap:12px;height:48px;padding:0 16px;border-radius:24px;color:var(--fg-2);font-size:15px;font-weight:500;text-decoration:none}
+.dnav-a.on{background:var(--selected);color:var(--fg)}
+.dsec{display:flex;align-items:center;gap:6px;height:30px;padding:0 12px;font-size:13px;font-weight:600;color:var(--fg-3)}
+.pane-i{position:absolute;right:0;top:0;bottom:0;width:356px;background:var(--surface);border-left:1px solid var(--line-soft);box-shadow:-12px 0 40px rgba(0,0,0,.35);display:flex;flex-direction:column;border-radius:28px 0 0 28px;overflow:hidden}
+.pane-a{position:absolute;right:0;top:0;bottom:0;width:364px;background:var(--overlay);box-shadow:-12px 0 40px rgba(0,0,0,.35);display:flex;flex-direction:column;border-radius:16px 0 0 16px;overflow:hidden}
+.ptab-i{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:16px;border:0;background:transparent;color:var(--fg-2);font-family:inherit;font-size:14px;font-weight:500;white-space:nowrap;flex-shrink:0}
+.ptab-i.on{background:var(--selected);color:var(--fg)}
+.ptab-a{display:inline-flex;align-items:center;gap:6px;height:48px;padding:0 12px;border:0;background:transparent;color:var(--fg-2);font-family:inherit;font-size:14px;font-weight:500;white-space:nowrap;flex-shrink:0}
+.ptab-a.on{color:var(--fg);box-shadow:inset 0 -3px 0 var(--fg)}
+div:has(> .ptab-i),div:has(> .ptab-a){-webkit-mask-image:linear-gradient(90deg,#000 88%,transparent);mask-image:linear-gradient(90deg,#000 88%,transparent)}
+
+</style>
+</helmet>
+<div class="app {{rootClass}}" style="width: 1600px; height: 1960px; position: relative; display: flex; background: var(--ground); overflow: hidden;">
+<div class="board" style="width: 1600px; flex-grow: 0; min-width: 0; gap: 22px; padding: 44px 56px;">
+
+<header style="display: flex; align-items: flex-end; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.45;">Mobile foundations</h1>
+<p style="margin: 0; font-size: 13px; color: var(--fg-2);">Desktop tokens, mapped to each platform's type ramp, chrome geometry, targets, radii, motion and haptics. Colour still carries state only.</p>
+</div>
+<div style="flex-grow: 1;"></div>
+<span class="mono c-3" style="font-size: 11px;">packages/design-tokens · apps/mobile</span>
+</header>
+
+<!-- TYPE -->
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 10px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Type</h2><span style="font-size: 12px; color: var(--fg-3);">Instrument Sans for content, JetBrains Mono for machine text. Mapped to platform text styles so it scales with the system setting.</span></div>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+
+<div class="card" style="background: var(--surface); padding: 6px 20px 12px 20px; display: flex; flex-direction: column;">
+<div style="display: flex; align-items: center; gap: 8px; height: 40px; border-bottom: 1px solid var(--line-soft);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"></rect><path d="M12 18h.01"></path></svg><span style="font-size: 13px; font-weight: 600;">iOS 27</span><span class="mono c-3" style="font-size: 11px;">pt · Dynamic Type, default Large</span></div>
+<div style="display: flex; align-items: center; min-height: 52px; border-bottom: 1px solid var(--line-soft);"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">32 / 600 · Large title</span><span class="i-lt">Home</span><span class="c-3" style="margin-left: auto; font-size: 12px;">top-level screens</span></div>
+<div style="display: flex; align-items: center; min-height: 42px; border-bottom: 1px solid var(--line-soft);"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">20 / 600 · Title</span><span class="i-t2">Nightly dependency audit</span></div>
+<div style="display: flex; align-items: center; min-height: 48px; border-bottom: 1px solid var(--line-soft);"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">12 + 16 / 600 · Detail title</span><span style="display: flex; flex-direction: column; line-height: 1.25;"><span style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg-3);">Workflows<svg class="i i12" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></svg>Nightly dependency audit</span><span style="font-size: 16px; font-weight: 600;">Run #248</span></span><span class="c-3" style="margin-left: auto; font-size: 12px;">centred inline</span></div>
+<div style="display: flex; align-items: center; min-height: 38px; border-bottom: 1px solid var(--line-soft);"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">17 / 600 · Headline</span><span class="i-hd">Approve “Apply upgrades”</span></div>
+<div style="display: flex; align-items: center; min-height: 38px; border-bottom: 1px solid var(--line-soft);"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">17 / 400 · Body</span><span class="i-bd">Bug Fixer wants to publish the branch.</span></div>
+<div style="display: flex; align-items: center; min-height: 38px; border-bottom: 1px solid var(--line-soft);"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">16 / 400 / 1.5 · Transcript</span><span class="i-cb">The coupon request and the total recalculation raced.</span></div>
+<div style="display: flex; align-items: center; min-height: 36px; border-bottom: 1px solid var(--line-soft);"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">15 / 400 · Subhead</span><span class="i-sub c-2">payments-service · Bug Fixer · Sonnet 5</span></div>
+<div style="display: flex; align-items: center; min-height: 34px; border-bottom: 1px solid var(--line-soft);"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">13 / 400 · Footnote</span><span class="i-fn c-3">Waiting 3m · stage 3 of 6</span></div>
+<div style="display: flex; align-items: center; min-height: 34px; border-bottom: 1px solid var(--line-soft);"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">12 / 500 · Caption</span><span class="i-cap c-3" style="font-weight: 500;">Updated 14:02 · This computer</span></div>
+<div style="display: flex; align-items: center; min-height: 38px;"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">Mono 14 · 13 · 12</span><span class="mono" style="font-size: 14px;">git push -u origin fix/checkout-flake</span></div>
+<div style="padding-top: 8px; font-size: 12px; color: var(--fg-3);">Minimum 11 pt. Native chrome text (alerts, menus, pickers) stays in the system font.</div>
+</div>
+
+<div class="card" style="background: var(--surface); padding: 6px 20px 12px 20px; display: flex; flex-direction: column;">
+<div style="display: flex; align-items: center; gap: 8px; height: 40px; border-bottom: 1px solid var(--line-soft);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"></rect><path d="M12 18h.01"></path></svg><span style="font-size: 13px; font-weight: 600;">Android 17</span><span class="mono c-3" style="font-size: 11px;">sp · M3 type scale, follows font scale</span></div>
+<div style="display: flex; align-items: center; min-height: 52px; border-bottom: 1px solid var(--line-soft);"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">28 / 600 · Headline M</span><span class="a-hl">3 need you</span><span class="c-3" style="margin-left: auto; font-size: 12px;">Home headline</span></div>
+<div style="display: flex; align-items: center; min-height: 44px; border-bottom: 1px solid var(--line-soft);"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">22 / 600 · Title L</span><span class="a-tl">Home</span><span class="c-3" style="margin-left: auto; font-size: 12px;">top-level screens</span></div>
+<div style="display: flex; align-items: center; min-height: 48px; border-bottom: 1px solid var(--line-soft);"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">12 + 18 / 600 · Detail title</span><span style="display: flex; flex-direction: column; line-height: 1.25;"><span style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--fg-3);">Workflows<svg class="i i12" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></svg>Nightly dependency audit</span><span style="font-size: 18px; font-weight: 600;">Run #248</span></span><span class="c-3" style="margin-left: auto; font-size: 12px;">left-aligned</span></div>
+<div style="display: flex; align-items: center; min-height: 40px; border-bottom: 1px solid var(--line-soft);"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">16 / 600 · Title M</span><span class="a-tm">Approve “Apply upgrades”</span></div>
+<div style="display: flex; align-items: center; min-height: 40px; border-bottom: 1px solid var(--line-soft);"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">16 / 400 / 1.5 · Body L</span><span class="a-bl">The coupon request and the total recalculation raced.</span></div>
+<div style="display: flex; align-items: center; min-height: 38px; border-bottom: 1px solid var(--line-soft);"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">14 / 400 · Body M</span><span class="a-bm c-2">payments-service · Bug Fixer · Sonnet 5</span></div>
+<div style="display: flex; align-items: center; min-height: 36px; border-bottom: 1px solid var(--line-soft);"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">12 / 500 · Label</span><span class="a-lb c-3">Needs you · 3m</span></div>
+<div style="display: flex; align-items: center; min-height: 40px;"><span class="mono c-3" style="width: 220px; flex-shrink: 0; font-size: 12px;">Mono 14 · 13 · 12</span><span class="mono" style="font-size: 14px;">git push -u origin fix/checkout-flake</span></div>
+<div style="flex-grow: 1;"></div>
+<div style="padding-top: 8px; border-top: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--fg-3);">
+<span>Minimum 12 sp in content. Weights 400 / 500 / 600 only on both platforms.</span>
+<span>Desktop's 13 px UI default becomes 16–17 on a phone; mono never drops below 12.</span>
+</div>
+</div>
+
+</div>
+</section>
+
+
+<!-- CHROME GEOMETRY -->
+<div style="display: grid; grid-template-columns: 640px 1fr; gap: 24px;">
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 10px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Sidebar and pane widths</h2><span style="font-size: 12px; color: var(--fg-3);">Both slide over the screen with a scrim; the screen never shrinks. Drawn at 1 : 3.</span></div>
+<div class="card" style="background: var(--surface); padding: 18px 18px 14px 18px; display: flex; flex-direction: column; gap: 14px; flex-grow: 1;">
+<div style="display: flex; justify-content: space-between; align-items: flex-start;">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+<div style="position: relative; width: 134px; height: 291px; border-radius: 19px; background: var(--surface); box-shadow: 0 0 0 1px var(--line-strong); overflow: hidden; flex-shrink: 0;">
+<div style="display: flex; align-items: center; gap: 5px; margin: 21px 7px 0 7px; height: 15px;"><span style="width: 13px; height: 13px; border-radius: 7px; border: 1px solid var(--line-strong);"></span><span style="flex-grow: 1;"></span><span style="width: 13px; height: 13px; border-radius: 7px; border: 1px solid var(--line-strong);"></span></div>
+<div style="display: flex; flex-direction: column; gap: 5px; padding: 8px 7px;"><span style="height: 26px; border-radius: 6px; background: var(--raised);"></span><span style="height: 40px; border-radius: 6px; background: var(--raised);"></span><span style="height: 40px; border-radius: 6px; background: var(--raised);"></span></div>
+<div class="scrim"></div>
+<div style="position: absolute; left: 0; top: 0; bottom: 0; width: 106px; background: var(--surface); border-right: 1px solid var(--line-soft); border-radius: 0 9px 9px 0; display: flex; flex-direction: column; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 4px; margin: 21px 6px 6px 7px;"><span style="width: 9px; height: 9px; border-radius: 3px; background: var(--fg);"></span><span style="width: 40px; height: 5px; border-radius: 3px; background: var(--fg-3);"></span></div>
+<div style="height: 12px; margin: 0 6px 6px 6px; border-radius: 4px; background: var(--sunken); border: 1px solid var(--line-soft);"></div>
+<div style="height: 12px; margin: 0 5px 2px 5px; border-radius: 4px; background: var(--selected); display: flex; align-items: center; padding-left: 5px;"><span style="width: 46px; height: 4px; border-radius: 2px; background: var(--fg);"></span></div><div style="height: 12px; margin: 0 5px 2px 5px; border-radius: 4px;  display: flex; align-items: center; padding-left: 5px;"><span style="width: 38px; height: 4px; border-radius: 2px; background: var(--fg-3);"></span></div><div style="height: 12px; margin: 0 5px 2px 5px; border-radius: 4px;  display: flex; align-items: center; padding-left: 5px;"><span style="width: 38px; height: 4px; border-radius: 2px; background: var(--fg-3);"></span></div><div style="height: 12px; margin: 0 5px 2px 5px; border-radius: 4px;  display: flex; align-items: center; padding-left: 5px;"><span style="width: 38px; height: 4px; border-radius: 2px; background: var(--fg-3);"></span></div><div style="height: 12px; margin: 0 5px 2px 5px; border-radius: 4px;  display: flex; align-items: center; padding-left: 5px;"><span style="width: 38px; height: 4px; border-radius: 2px; background: var(--fg-3);"></span></div><div style="height: 12px; margin: 0 5px 2px 5px; border-radius: 4px;  display: flex; align-items: center; padding-left: 5px;"><span style="width: 38px; height: 4px; border-radius: 2px; background: var(--fg-3);"></span></div><div style="height: 12px; margin: 0 5px 2px 5px; border-radius: 4px;  display: flex; align-items: center; padding-left: 5px;"><span style="width: 38px; height: 4px; border-radius: 2px; background: var(--fg-3);"></span></div>
+<div style="height: 6px; margin: 4px 7px 0 7px; width: 30px; border-radius: 2px; background: var(--warn); opacity: .7;"></div>
+<div style="flex-grow: 1;"></div>
+<div style="height: 1px; background: var(--line-soft);"></div>
+<div style="display: flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px 11px 7px;"><span class="dot" style="width: 4px; height: 4px; background: var(--ok);"></span><span style="width: 30px; height: 4px; border-radius: 2px; background: var(--fg-3);"></span></div>
+</div>
+</div>
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;">iOS · sidebar</span>
+<span class="mono c-2" style="font-size: 12px;">318 pt</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+<div style="position: relative; width: 137px; height: 305px; border-radius: 12px; background: var(--surface); box-shadow: 0 0 0 1px var(--line-strong); overflow: hidden; flex-shrink: 0;">
+<div style="display: flex; align-items: center; gap: 5px; margin: 13px 7px 0 7px; height: 15px;"><span style="width: 13px; height: 13px; border-radius: 7px; "></span><span style="flex-grow: 1;"></span><span style="width: 13px; height: 13px; border-radius: 7px; "></span></div>
+<div style="display: flex; flex-direction: column; gap: 5px; padding: 8px 7px;"><span style="height: 26px; border-radius: 6px; background: var(--raised);"></span><span style="height: 40px; border-radius: 6px; background: var(--raised);"></span><span style="height: 40px; border-radius: 6px; background: var(--raised);"></span></div>
+<div class="scrim"></div>
+<div style="position: absolute; left: 0; top: 0; bottom: 0; width: 112px; background: var(--overlay); border-right: 1px solid var(--line-soft); border-radius: 0 5px 5px 0; display: flex; flex-direction: column; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 4px; margin: 13px 6px 6px 7px;"><span style="width: 9px; height: 9px; border-radius: 3px; background: var(--fg);"></span><span style="width: 40px; height: 5px; border-radius: 3px; background: var(--fg-3);"></span></div>
+<div style="height: 12px; margin: 0 6px 6px 6px; border-radius: 6px; background: var(--sunken); border: 1px solid var(--line-soft);"></div>
+<div style="height: 12px; margin: 0 5px 2px 5px; border-radius: 6px; background: var(--selected); display: flex; align-items: center; padding-left: 5px;"><span style="width: 46px; height: 4px; border-radius: 2px; background: var(--fg);"></span></div><div style="height: 12px; margin: 0 5px 2px 5px; border-radius: 6px;  display: flex; align-items: center; padding-left: 5px;"><span style="width: 38px; height: 4px; border-radius: 2px; background: var(--fg-3);"></span></div><div style="height: 12px; margin: 0 5px 2px 5px; border-radius: 6px;  display: flex; align-items: center; padding-left: 5px;"><span style="width: 38px; height: 4px; border-radius: 2px; background: var(--fg-3);"></span></div><div style="height: 12px; margin: 0 5px 2px 5px; border-radius: 6px;  display: flex; align-items: center; padding-left: 5px;"><span style="width: 38px; height: 4px; border-radius: 2px; background: var(--fg-3);"></span></div><div style="height: 12px; margin: 0 5px 2px 5px; border-radius: 6px;  display: flex; align-items: center; padding-left: 5px;"><span style="width: 38px; height: 4px; border-radius: 2px; background: var(--fg-3);"></span></div><div style="height: 12px; margin: 0 5px 2px 5px; border-radius: 6px;  display: flex; align-items: center; padding-left: 5px;"><span style="width: 38px; height: 4px; border-radius: 2px; background: var(--fg-3);"></span></div><div style="height: 12px; margin: 0 5px 2px 5px; border-radius: 6px;  display: flex; align-items: center; padding-left: 5px;"><span style="width: 38px; height: 4px; border-radius: 2px; background: var(--fg-3);"></span></div>
+<div style="height: 6px; margin: 4px 7px 0 7px; width: 30px; border-radius: 2px; background: var(--warn); opacity: .7;"></div>
+<div style="flex-grow: 1;"></div>
+<div style="height: 1px; background: var(--line-soft);"></div>
+<div style="display: flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px 8px 7px;"><span class="dot" style="width: 4px; height: 4px; background: var(--ok);"></span><span style="width: 30px; height: 4px; border-radius: 2px; background: var(--fg-3);"></span></div>
+</div>
+</div>
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;">Android · sidebar</span>
+<span class="mono c-2" style="font-size: 12px;">336 dp</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+<div style="position: relative; width: 134px; height: 291px; border-radius: 19px; background: var(--surface); box-shadow: 0 0 0 1px var(--line-strong); overflow: hidden; flex-shrink: 0;">
+<div style="display: flex; align-items: center; gap: 5px; margin: 21px 7px 0 7px; height: 15px;"><span style="width: 13px; height: 13px; border-radius: 7px; border: 1px solid var(--line-strong);"></span><span style="flex-grow: 1;"></span><span style="width: 13px; height: 13px; border-radius: 7px; border: 1px solid var(--line-strong);"></span></div>
+<div style="display: flex; flex-direction: column; gap: 5px; padding: 8px 7px;"><span style="height: 26px; border-radius: 6px; background: var(--raised);"></span><span style="height: 40px; border-radius: 6px; background: var(--raised);"></span><span style="height: 40px; border-radius: 6px; background: var(--raised);"></span></div>
+<div class="scrim"></div>
+<div style="position: absolute; right: 0; top: 0; bottom: 0; width: 119px; background: var(--surface); border-left: 1px solid var(--line-soft); border-radius: 9px 0 0 9px; display: flex; flex-direction: column; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 4px; margin: 21px 6px 5px 7px;"><span style="width: 44px; height: 5px; border-radius: 3px; background: var(--fg);"></span><span style="flex-grow: 1;"></span><span style="width: 7px; height: 7px; border: 1px solid var(--fg-3); border-radius: 2px;"></span><span style="width: 7px; height: 7px; border: 1px solid var(--fg-3); border-radius: 2px;"></span></div>
+<div style="display: flex; gap: 3px; padding: 0 6px 5px 6px;"><span style="width: 22px; height: 8px; border-radius: 4px; background: var(--selected);"></span><span style="width: 16px; height: 8px;"></span><span style="width: 20px; height: 8px;"></span><span style="width: 18px; height: 8px;"></span></div>
+<div style="margin: 6px 6px 0 6px; height: 24px; border-radius: 4px; border: 1px solid var(--line-soft);"></div>
+<div style="margin: 4px 6px 0 6px; height: 60px; border-radius: 4px; border: 1px solid var(--line-soft); background: var(--sunken);"></div>
+</div>
+</div>
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;">iOS · pane</span>
+<span class="mono c-2" style="font-size: 12px;">356 pt</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+<div style="position: relative; width: 137px; height: 305px; border-radius: 12px; background: var(--surface); box-shadow: 0 0 0 1px var(--line-strong); overflow: hidden; flex-shrink: 0;">
+<div style="display: flex; align-items: center; gap: 5px; margin: 13px 7px 0 7px; height: 15px;"><span style="width: 13px; height: 13px; border-radius: 7px; "></span><span style="flex-grow: 1;"></span><span style="width: 13px; height: 13px; border-radius: 7px; "></span></div>
+<div style="display: flex; flex-direction: column; gap: 5px; padding: 8px 7px;"><span style="height: 26px; border-radius: 6px; background: var(--raised);"></span><span style="height: 40px; border-radius: 6px; background: var(--raised);"></span><span style="height: 40px; border-radius: 6px; background: var(--raised);"></span></div>
+<div class="scrim"></div>
+<div style="position: absolute; right: 0; top: 0; bottom: 0; width: 121px; background: var(--overlay); border-left: 1px solid var(--line-soft); border-radius: 5px 0 0 5px; display: flex; flex-direction: column; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 4px; margin: 13px 6px 5px 7px;"><span style="width: 44px; height: 5px; border-radius: 3px; background: var(--fg);"></span><span style="flex-grow: 1;"></span><span style="width: 7px; height: 7px; border: 1px solid var(--fg-3); border-radius: 2px;"></span><span style="width: 7px; height: 7px; border: 1px solid var(--fg-3); border-radius: 2px;"></span></div>
+<div style="display: flex; gap: 3px; padding: 0 6px 5px 6px; border-bottom: 1px solid var(--line-soft);"><span style="width: 22px; height: 8px; border-radius: 0px; box-shadow: inset 0 -1px 0 var(--fg);"></span><span style="width: 16px; height: 8px;"></span><span style="width: 20px; height: 8px;"></span><span style="width: 18px; height: 8px;"></span></div>
+<div style="margin: 6px 6px 0 6px; height: 24px; border-radius: 4px; border: 1px solid var(--line-soft);"></div>
+<div style="margin: 4px 6px 0 6px; height: 60px; border-radius: 4px; border: 1px solid var(--line-soft); background: var(--sunken);"></div>
+</div>
+</div>
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;">Android · pane</span>
+<span class="mono c-2" style="font-size: 12px;">364 dp</span>
+</div>
+</div>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding-top: 10px; border-top: 1px solid var(--line-soft); font-size: 12px; color: var(--fg-2);">
+<span><span style="color: var(--fg); font-weight: 500;">Sidebar</span> · 79% / 82% of the phone. iOS <span class="mono">--surface</span>, radius 0 28 28 0; Android <span class="mono">--overlay</span> modal drawer, radius 0 16 16 0, items 48 dp pills.</span>
+<span><span style="color: var(--fg); font-weight: 500;">Pane</span> · 89% of the phone, leaving a strip of the chat visible. iOS pill tabs 32; Android underline tabs 48. Full screen = 100% with back and minimise.</span>
+</div>
+</div>
+</section>
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 10px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Header rules</h2><span style="font-size: 12px; color: var(--fg-3);">Same words and buttons on both; only shape and alignment differ</span></div>
+<div class="card" style="background: var(--surface); overflow: hidden; display: flex; flex-direction: column; flex-grow: 1;">
+<div class="th" style="gap: 14px; padding: 0 16px; border-bottom: 1px solid var(--line-soft);"><span style="width: 118px; flex-shrink: 0;">Rule</span><span style="flex: 1;">iOS 27</span><span style="flex: 1;">Android 17</span></div>
+<div style="display: flex; gap: 14px; align-items: flex-start; padding: 9px 16px; border-bottom: 1px solid var(--line-soft); font-size: 13px;"><span style="width: 118px; flex-shrink: 0; font-weight: 600;">Height</span><span class="c-2" style="flex: 1;">52 pt under the 62 pt safe area</span><span class="c-2" style="flex: 1;">64 dp top app bar under 40 dp</span></div>
+<div style="display: flex; gap: 14px; align-items: flex-start; padding: 9px 16px; border-bottom: 1px solid var(--line-soft); font-size: 13px;"><span style="width: 118px; flex-shrink: 0; font-weight: 600;">Top-level</span><span class="c-2" style="flex: 1;"><span style="display: inline-flex; align-items: center; gap: 4px;"><svg class="i i14" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path></svg>sidebar toggle, glass circle 44</span>; large title 32 / 600 below the bar</span><span class="c-2" style="flex: 1;"><span style="display: inline-flex; align-items: center; gap: 4px;"><svg class="i i14" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path></svg>sidebar toggle, icon button 48</span>; title 22 / 600 in the bar</span></div>
+<div style="display: flex; gap: 14px; align-items: flex-start; padding: 9px 16px; border-bottom: 1px solid var(--line-soft); font-size: 13px;"><span style="width: 118px; flex-shrink: 0; font-weight: 600;">Detail</span><span class="c-2" style="flex: 1;"><span style="display: inline-flex; align-items: center; gap: 4px;"><svg class="i i14" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"></path></svg>back</span>; breadcrumb 12 over title 16 / 600, centred</span><span class="c-2" style="flex: 1;"><span style="display: inline-flex; align-items: center; gap: 4px;"><svg class="i i14" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg>back</span>; breadcrumb 12 over title 18 / 600, left</span></div>
+<div style="display: flex; gap: 14px; align-items: flex-start; padding: 9px 16px; border-bottom: 1px solid var(--line-soft); font-size: 13px;"><span style="width: 118px; flex-shrink: 0; font-weight: 600;">Breadcrumb</span><span class="c-2" style="flex: 1;">12 px <span class="mono">--fg-3</span>, <span style="display: inline-flex; align-items: center;"><svg class="i i12" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></svg></span> separators, each segment tappable; long paths collapse the middle to “…”</span><span class="c-2" style="flex: 1;">Same</span></div>
+<div style="display: flex; gap: 14px; align-items: flex-start; padding: 9px 16px; border-bottom: 1px solid var(--line-soft); font-size: 13px;"><span style="width: 118px; flex-shrink: 0; font-weight: 600;">Chat and run</span><span class="c-2" style="flex: 1;"><span style="display: inline-flex; align-items: center; gap: 4px;"><svg class="i i14" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M15 3v18"></path></svg>pane toggle</span> with a count badge, trailing, in the glass capsule with ⋯</span><span class="c-2" style="flex: 1;"><span style="display: inline-flex; align-items: center; gap: 4px;"><svg class="i i14" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M15 3v18"></path></svg>pane toggle</span> with a count badge, then <span style="display: inline-flex; align-items: center;"><svg class="i i14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg></span></span></div>
+<div style="display: flex; gap: 14px; align-items: flex-start; padding: 9px 16px; border-bottom: 1px solid var(--line-soft); font-size: 13px;"><span style="width: 118px; flex-shrink: 0; font-weight: 600;">Actions</span><span class="c-2" style="flex: 1;">Max 3 trailing, grouped in one glass capsule</span><span class="c-2" style="flex: 1;">Max 2 icons + overflow</span></div>
+<div style="display: flex; gap: 14px; align-items: flex-start; padding: 9px 16px; border-bottom: 1px solid var(--line-soft); font-size: 13px;"><span style="width: 118px; flex-shrink: 0; font-weight: 600;">New</span><span class="c-2" style="flex: 1;">Glass capsule 52 tall, icon + label, 16 from the right edge, above the home indicator</span><span class="c-2" style="flex: 1;">Extended FAB 56 dp, icon + label, 16 dp from the right and bottom edges</span></div>
+<div style="display: flex; gap: 14px; align-items: flex-start; padding: 9px 16px; font-size: 13px;"><span style="width: 118px; flex-shrink: 0; font-weight: 600;">Status</span><span class="c-2" style="flex: 1;">One badge under the title, e.g. “Needs you · Bug Fixer”; never tints the bar</span><span class="c-2" style="flex: 1;">Same, left-aligned with the title</span></div>
+</div>
+</section>
+</div>
+
+<!-- ROW 2 -->
+<div style="display: grid; grid-template-columns: 360px 450px 1fr; gap: 24px;">
+
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 10px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Touch targets</h2><span style="font-size: 12px; color: var(--fg-3);">Hit area, not drawn size</span></div>
+<div class="card" style="background: var(--surface); padding: 16px 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex-grow: 1;">
+<div style="display: flex; flex-direction: column; gap: 12px;">
+<span style="font-size: 13px; font-weight: 600;">iOS · 44 pt</span>
+<div style="display: flex; align-items: center; gap: 10px;"><div style="width: 44px; height: 44px; border: 1px dashed var(--fg-3); border-radius: 22px; display: flex; align-items: center; justify-content: center;"><svg class="i i22" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"></path></svg></div><span class="mono c-3" style="font-size: 11px; white-space: nowrap;">44 × 44<br/>bar button</span></div>
+<div style="display: flex; align-items: center; gap: 10px;"><div style="height: 44px; padding: 0 6px; border: 1px dashed var(--fg-3); border-radius: 22px; display: flex; align-items: center;"><span class="mchip">Auto</span></div><span class="mono c-3" style="font-size: 11px; white-space: nowrap;">32 chip<br/>44 hit</span></div>
+<div style="display: flex; align-items: center; gap: 10px;"><div style="width: 100px; height: 52px; border: 1px dashed var(--fg-3); border-radius: 12px; display: flex; align-items: center; padding: 0 10px; font-size: 15px;">Row</div><span class="mono c-3" style="font-size: 11px; white-space: nowrap;">rows<br/>≥ 52</span></div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 12px;">
+<span style="font-size: 13px; font-weight: 600;">Android · 48 dp</span>
+<div style="display: flex; align-items: center; gap: 10px;"><div style="width: 48px; height: 48px; border: 1px dashed var(--fg-3); border-radius: 24px; display: flex; align-items: center; justify-content: center;"><svg class="i i24" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg></div><span class="mono c-3" style="font-size: 11px; white-space: nowrap;">48 × 48<br/>icon button</span></div>
+<div style="display: flex; align-items: center; gap: 10px;"><div style="height: 48px; padding: 0 6px; border: 1px dashed var(--fg-3); border-radius: 8px; display: flex; align-items: center;"><span class="achip">Auto</span></div><span class="mono c-3" style="font-size: 11px; white-space: nowrap;">32 chip<br/>48 hit</span></div>
+<div style="display: flex; align-items: center; gap: 10px;"><div style="width: 100px; height: 64px; border: 1px dashed var(--fg-3); border-radius: 4px; display: flex; align-items: center; padding: 0 10px; font-size: 16px;">Item</div><span class="mono c-3" style="font-size: 11px; white-space: nowrap;">items<br/>64 / 72</span></div>
+</div>
+</div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 10px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Radius</h2><span style="font-size: 12px; color: var(--fg-3);">Platform chrome keeps platform radii</span></div>
+<div class="card" style="background: var(--surface); padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; flex-grow: 1;">
+<div style="display: flex; gap: 16px; align-items: center;">
+<div style="width: 176px; height: 124px; flex-shrink: 0; border: 1px solid var(--line-strong); border-radius: 44px 44px 0 0; border-bottom: 0; padding: 8px 8px 0 8px; display: flex;">
+<div style="flex-grow: 1; border: 1px solid var(--line-strong); border-radius: 36px 36px 0 0; border-bottom: 0; padding: 12px 12px 0 12px; display: flex; flex-direction: column; gap: 8px; background: var(--overlay);">
+<div style="height: 44px; border-radius: 22px; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--fg-2);">capsule</div>
+<div style="flex-grow: 1; border-radius: 22px 22px 0 0; border: 1px solid var(--line); border-bottom: 0; background: var(--raised);"></div>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 5px; font-size: 13px;">
+<span style="font-weight: 600;">iOS · concentric</span>
+<span class="c-2">Inner radius = outer minus inset</span>
+<span class="mono c-3" style="font-size: 12px;">sheet 38 · drawer 28 · pane 28</span>
+<span class="mono c-3" style="font-size: 12px;">group 22 · card 20</span>
+<span class="mono c-3" style="font-size: 12px;">code 12 · capsule = h / 2</span>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line-soft);">
+<span style="font-size: 13px; font-weight: 600;">Android · M3 shape scale</span>
+<div style="display: flex; gap: 14px;">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px;"><div style="width: 52px; height: 44px; border: 1px solid var(--line-strong); border-radius: 8px;"></div><span class="mono" style="font-size: 11px;">8</span><span style="font-size: 11px; color: var(--fg-3);">chips</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px;"><div style="width: 52px; height: 44px; border: 1px solid var(--line-strong); border-radius: 12px;"></div><span class="mono" style="font-size: 11px;">12</span><span style="font-size: 11px; color: var(--fg-3);">menus</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px;"><div style="width: 52px; height: 44px; border: 1px solid var(--line-strong); border-radius: 16px;"></div><span class="mono" style="font-size: 11px;">16</span><span style="font-size: 11px; color: var(--fg-3);">FAB, drawer</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px;"><div style="width: 64px; height: 44px; border: 1px solid var(--line-strong); border-radius: 28px 28px 0 0; border-bottom: 0;"></div><span class="mono" style="font-size: 11px;">28</span><span style="font-size: 11px; color: var(--fg-3);">sheets</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px;"><div style="width: 72px; height: 44px; border: 1px solid var(--line-strong); border-radius: 22px;"></div><span class="mono" style="font-size: 11px;">full</span><span style="font-size: 11px; color: var(--fg-3);">buttons</span></div>
+</div>
+</div>
+</div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 10px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Colour tokens</h2><span style="font-size: 12px; color: var(--fg-3);">Reused from desktop unchanged</span></div>
+<div style="display: flex; flex-direction: column; gap: 10px; flex-grow: 1;">
+<div class="card" style="background: var(--surface); padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;">
+<div style="display: flex; align-items: baseline; gap: 8px;"><span style="font-size: 13px; font-weight: 600;">Dark</span><span class="mono c-3" style="font-size: 11px;">default</span></div>
+<div style="display: flex; gap: 8px;">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--ground);"></span><span class="mono c-3" style="font-size: 11px;">ground</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface);"></span><span class="mono c-3" style="font-size: 11px;">surface</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised);"></span><span class="mono c-3" style="font-size: 11px;">raised</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--overlay);"></span><span class="mono c-3" style="font-size: 11px;">overlay</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--line-strong);"></span><span class="mono c-3" style="font-size: 11px;">line</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--fg-3);"></span><span class="mono c-3" style="font-size: 11px;">fg-3</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--fg);"></span><span class="mono c-3" style="font-size: 11px;">accent</span></div>
+<div style="width: 1px; background: var(--line-soft); margin: 0 4px;"></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: var(--run);"></span><span class="mono c-3" style="font-size: 11px;">run</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: var(--warn);"></span><span class="mono c-3" style="font-size: 11px;">warn</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: var(--ok);"></span><span class="mono c-3" style="font-size: 11px;">ok</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: var(--err);"></span><span class="mono c-3" style="font-size: 11px;">err</span></div>
+</div>
+</div>
+<div class="t-light acc-ink card" style="background: var(--surface); color: var(--fg); border-color: var(--line); padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;">
+<div style="display: flex; align-items: baseline; gap: 8px;"><span style="font-size: 13px; font-weight: 600;">Light</span><span class="mono c-3" style="font-size: 11px;">t-light</span></div>
+<div style="display: flex; gap: 8px;">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--ground);"></span><span class="mono c-3" style="font-size: 11px;">ground</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface);"></span><span class="mono c-3" style="font-size: 11px;">surface</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised);"></span><span class="mono c-3" style="font-size: 11px;">raised</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--overlay);"></span><span class="mono c-3" style="font-size: 11px;">overlay</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--line-strong);"></span><span class="mono c-3" style="font-size: 11px;">line</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--fg-3);"></span><span class="mono c-3" style="font-size: 11px;">fg-3</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--fg);"></span><span class="mono c-3" style="font-size: 11px;">accent</span></div>
+<div style="width: 1px; background: var(--line-soft); margin: 0 4px;"></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: var(--run);"></span><span class="mono c-3" style="font-size: 11px;">run</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: var(--warn);"></span><span class="mono c-3" style="font-size: 11px;">warn</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: var(--ok);"></span><span class="mono c-3" style="font-size: 11px;">ok</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 4px; width: 44px;"><span style="width: 32px; height: 32px; border-radius: 8px; background: var(--err);"></span><span class="mono c-3" style="font-size: 11px;">err</span></div>
+</div>
+</div>
+<span style="font-size: 12px; color: var(--fg-3);">All 17 themes recolour content. Native chrome follows light / dark only. Android's optional "System" accent never touches status colours. Neutral states take no colour: <span style="display: inline-flex; align-items: center; gap: 3px; vertical-align: -2px;"><svg class="i i12" viewBox="0 0 24 24"><path d="M10.1 2.182a10 10 0 0 1 3.8 0"></path><path d="M13.9 21.818a10 10 0 0 1-3.8 0"></path><path d="M17.609 3.721a10 10 0 0 1 2.69 2.7"></path><path d="M2.182 13.9a10 10 0 0 1 0-3.8"></path><path d="M20.279 17.609a10 10 0 0 1-2.7 2.69"></path><path d="M21.818 10.1a10 10 0 0 1 0 3.8"></path><path d="M3.721 6.391a10 10 0 0 1 2.7-2.69"></path><path d="M6.391 20.279a10 10 0 0 1-2.69-2.7"></path></svg>Queued</span>, <span style="display: inline-flex; align-items: center; gap: 3px; vertical-align: -2px;"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>Waiting</span> (event or timer), <span style="display: inline-flex; align-items: center; gap: 3px; vertical-align: -2px;"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="10" x2="10" y1="15" y2="9"></line><line x1="14" x2="14" y1="15" y2="9"></line></svg>Paused</span>.</span>
+</div>
+</section>
+
+</div>
+
+<!-- ROW 3 -->
+<div style="display: grid; grid-template-columns: 1.25fr 1fr 1.15fr 1fr; gap: 24px; flex-grow: 1; min-height: 0;">
+
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 10px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Glass</h2><span style="font-size: 12px; color: var(--fg-3);">iOS floating chrome only</span></div>
+<div class="card" style="background: var(--surface); padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; flex-grow: 1;">
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="position: relative; height: 136px; border-radius: 16px; border: 1px solid var(--line-soft); overflow: hidden; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;">
+<div style="display: flex; align-items: center; gap: 8px; font-size: 14px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--run);"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg><span class="trunc">Upgrade React Flow</span></div>
+<div style="display: flex; align-items: center; gap: 8px; font-size: 14px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--warn);"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"></path><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg><span class="trunc">Fix flaky checkout</span></div>
+<div style="display: flex; align-items: center; gap: 8px; font-size: 14px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok);"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg><span class="trunc">Draft release notes</span></div>
+<div style="display: flex; align-items: center; gap: 8px; font-size: 14px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--err);"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg><span class="trunc">Refactor pricing</span></div>
+<div class="glass" style="position: absolute; right: 8px; bottom: 8px; height: 40px; border-radius: 20px; display: flex; align-items: center; gap: 6px; padding: 0 14px 0 12px; font-size: 13px; font-weight: 600; color: var(--fg);"><svg class="i i16" viewBox="0 0 24 24"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"></path></svg>New chat</div>
+</div>
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok);"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>Floating chrome</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="height: 136px; border-radius: 16px; border: 1px solid var(--line-soft); padding: 10px; display: flex; flex-direction: column;">
+<div class="glass" style="border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;">
+<span style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--warn);"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"></path><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>Allow command?</span>
+<span class="mono" style="font-size: 12px;">git push -u origin</span>
+<span style="font-size: 12px; color: var(--fg-3);">Card in the content layer</span>
+</div>
+</div>
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--err);"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg>Never on content</span>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--fg-2);">
+<span><span style="color: var(--fg); font-weight: 500;">Allowed</span> · header buttons and capsules, composer, the New capsule, "↓ Latest".</span>
+<span><span style="color: var(--fg); font-weight: 500;">Never</span> · cards, rows, transcript, diffs, sidebar and pane content. Android: nowhere.</span>
+<span><span style="color: var(--fg); font-weight: 500;">Fallback</span> · Reduce Transparency or the iOS 27 tint slider → opaque <span class="mono">--overlay</span> + <span class="mono">--line</span>.</span>
+</div>
+</div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 10px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Motion</h2><span style="font-size: 12px; color: var(--fg-3);">Springs, calm</span></div>
+<div class="card" style="background: var(--surface); padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; flex-grow: 1;">
+<svg width="100%" height="64" viewBox="0 0 260 64" preserveAspectRatio="none" style="fill: none; stroke-width: 1.5;">
+<path d="M0 60 H260" style="stroke: var(--line-soft);"></path>
+<path d="M0 12 H260" style="stroke: var(--line-soft); stroke-dasharray: 3 3;"></path>
+<path d="M0 60 C40 60 50 4 90 8 C120 11 140 12 260 12" style="stroke: var(--fg);"></path>
+<path d="M0 60 C60 60 90 12 150 12 H260" style="stroke: var(--fg-3);"></path>
+</svg>
+<div style="display: flex; gap: 14px; font-size: 12px; color: var(--fg-2);"><span style="display: flex; align-items: center; gap: 6px;"><span style="width: 14px; height: 2px; background: var(--fg);"></span>Spatial, slight settle</span><span style="display: flex; align-items: center; gap: 6px;"><span style="width: 14px; height: 2px; background: var(--fg-3);"></span>Effects, no overshoot</span></div>
+<div style="display: flex; flex-direction: column; gap: 4px; padding-top: 10px; border-top: 1px solid var(--line-soft);">
+<span style="font-size: 13px; font-weight: 600;">iOS</span>
+<span style="font-size: 12px; color: var(--fg-2);">System springs for push, sheets and menus; the sidebar and pane slide on the same spring as a push. Our content uses <span class="mono">.smooth</span>; press scale on buttons only.</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 4px; padding-top: 10px; border-top: 1px solid var(--line-soft);">
+<span style="font-size: 13px; font-weight: 600;">Android · Standard scheme</span>
+<div style="display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; font-size: 12px; color: var(--fg-2);">
+<span>Default spatial</span><span class="mono c-1">0.9 / 700</span>
+<span>Fast spatial</span><span class="mono c-1">0.9 / 1400</span>
+<span>Slow spatial</span><span class="mono c-1">0.9 / 300</span>
+<span>Default effects</span><span class="mono c-1">1.0 / 1600</span>
+</div>
+</div>
+</div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 10px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Haptics</h2><span style="font-size: 12px; color: var(--fg-3);">Small vocabulary, one meaning each</span></div>
+<div class="card" style="background: var(--surface); overflow: hidden; display: flex; flex-direction: column; flex-grow: 1;">
+<div class="th" style="gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line-soft);"><span style="flex: 1.3;">Event</span><span style="flex: 1;">iOS</span><span style="flex: 1;">Android</span></div>
+<div style="display: flex; gap: 10px; align-items: center; min-height: 36px; padding: 0 14px; border-bottom: 1px solid var(--line-soft); font-size: 12px;"><span style="flex: 1.3; font-size: 13px;">Segment, picker, pane tab</span><span class="mono c-2" style="flex: 1; font-size: 11px;">selection</span><span class="mono c-2" style="flex: 1; font-size: 11px;">SEGMENT_TICK</span></div>
+<div style="display: flex; gap: 10px; align-items: center; min-height: 36px; padding: 0 14px; border-bottom: 1px solid var(--line-soft); font-size: 12px;"><span style="flex: 1.3; font-size: 13px;">Swipe threshold, pin</span><span class="mono c-2" style="flex: 1; font-size: 11px;">impact light</span><span class="mono c-2" style="flex: 1; font-size: 11px;">TOGGLE_ON</span></div>
+<div style="display: flex; gap: 10px; align-items: center; min-height: 36px; padding: 0 14px; border-bottom: 1px solid var(--line-soft); font-size: 12px;"><span style="flex: 1.3; font-size: 13px;">Long-press menu</span><span class="mono c-2" style="flex: 1; font-size: 11px;">impact medium</span><span class="mono c-2" style="flex: 1; font-size: 11px;">LONG_PRESS</span></div>
+<div style="display: flex; gap: 10px; align-items: center; min-height: 36px; padding: 0 14px; border-bottom: 1px solid var(--line-soft); font-size: 12px;"><span style="flex: 1.3; font-size: 13px;">Drag to reorder</span><span class="mono c-2" style="flex: 1; font-size: 11px;">impact light</span><span class="mono c-2" style="flex: 1; font-size: 11px;">GESTURE_START</span></div>
+<div style="display: flex; gap: 10px; align-items: center; min-height: 36px; padding: 0 14px; border-bottom: 1px solid var(--line-soft); font-size: 12px;"><span style="flex: 1.3; font-size: 13px; display: flex; align-items: center; gap: 6px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok);"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>Server confirmed</span><span class="mono c-2" style="flex: 1; font-size: 11px;">success</span><span class="mono c-2" style="flex: 1; font-size: 11px;">CONFIRM</span></div>
+<div style="display: flex; gap: 10px; align-items: center; min-height: 36px; padding: 0 14px; border-bottom: 1px solid var(--line-soft); font-size: 12px;"><span style="flex: 1.3; font-size: 13px; display: flex; align-items: center; gap: 6px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--warn);"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"></path><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>Denied, rejected</span><span class="mono c-2" style="flex: 1; font-size: 11px;">warning</span><span class="mono c-2" style="flex: 1; font-size: 11px;">REJECT</span></div>
+<div style="display: flex; gap: 10px; align-items: center; min-height: 36px; padding: 0 14px; border-bottom: 1px solid var(--line-soft); font-size: 12px;"><span style="flex: 1.3; font-size: 13px; display: flex; align-items: center; gap: 6px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--err);"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg>Run failed</span><span class="mono c-2" style="flex: 1; font-size: 11px;">error</span><span class="mono c-2" style="flex: 1; font-size: 11px;">REJECT</span></div>
+<div style="padding: 10px 14px; font-size: 12px; color: var(--fg-3);">Success fires when the server confirms, not on tap. Settings › Haptics turns all of them off.</div>
+</div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 10px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Accessibility</h2></div>
+<div class="card" style="background: var(--surface); padding: 6px 16px; display: flex; flex-direction: column; flex-grow: 1;">
+<div style="display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line-soft);"><svg class="i i16" viewBox="0 0 24 24" style="color: var(--fg-3); margin-top: 1px;"><polyline points="4 7 4 4 20 4 20 7"></polyline><line x1="9" x2="15" y1="20" y2="20"></line><line x1="12" x2="12" y1="4" y2="20"></line></svg><span style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13px; font-weight: 600;">Dynamic Type, font scale</span><span style="font-size: 12px; color: var(--fg-2);">Content scales fully. Dense chrome rows cap at 1.6×; rows grow, never clip.</span></span></div>
+<div style="display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line-soft);"><svg class="i i16" viewBox="0 0 24 24" style="color: var(--fg-3); margin-top: 1px;"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg><span style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13px; font-weight: 600;">Contrast</span><span style="font-size: 12px; color: var(--fg-2);">Text 4.5:1, glyphs 3:1. Status is glyph + word, never colour alone.</span></span></div>
+<div style="display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line-soft);"><svg class="i i16" viewBox="0 0 24 24" style="color: var(--fg-3); margin-top: 1px;"><line x1="21" x2="14" y1="4" y2="4"></line><line x1="10" x2="3" y1="4" y2="4"></line><line x1="21" x2="12" y1="12" y2="12"></line><line x1="8" x2="3" y1="12" y2="12"></line><line x1="21" x2="16" y1="20" y2="20"></line><line x1="12" x2="3" y1="20" y2="20"></line><line x1="14" x2="14" y1="2" y2="6"></line><line x1="8" x2="8" y1="10" y2="14"></line><line x1="16" x2="16" y1="18" y2="22"></line></svg><span style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13px; font-weight: 600;">Reduce Motion</span><span style="font-size: 12px; color: var(--fg-2);">Springs become cross-fades; running glyphs stop turning.</span></span></div>
+<div style="display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line-soft);"><svg class="i i16" viewBox="0 0 24 24" style="color: var(--fg-3); margin-top: 1px;"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"></path><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"></path><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"></path></svg><span style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13px; font-weight: 600;">Reduce Transparency</span><span style="font-size: 12px; color: var(--fg-2);">Glass turns opaque with a visible border.</span></span></div>
+<div style="display: flex; gap: 10px; padding: 9px 0;"><svg class="i i16" viewBox="0 0 24 24" style="color: var(--fg-3); margin-top: 1px;"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg><span style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13px; font-weight: 600;">VoiceOver, TalkBack</span><span style="font-size: 12px; color: var(--fg-2);">Swipe and long-press actions exposed as custom actions.</span></span></div>
+</div>
+</section>
+
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["dark","light"],"default":"dark","section":"Theme"},"accent":{"editor":"enum","options":["ink","blue","violet","green","orange","rose","teal"],"default":"ink","section":"Theme"},"$preview":{"width":1600,"height":1960}}'>
+class Component extends DCLogic {
+renderVals() {
+const mode = this.props.mode ?? 'dark';
+const accent = this.props.accent ?? 'ink';
+return { rootClass: 't-' + mode + ' acc-' + accent };
+}
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+appId: ${APP_ID}
+name: settings · source control, browser & terminal, computer use, audio, extensions, security, storage, diagnostics
+# M7-06 (MSetSourceControl, MSetBrowserTerminal, MSetComputerUse, MSetAudio, MSetExtensions, MSetSecurity(More),
+# MSetPairDevice, MSetStorage, MSetDiagnostics). Writes need admin scopes and a step-up; this flow only reads,
+# except the per-device terminal font size.
+tags: [settings]
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///settings/source-control
+- extendedWaitUntil: {visible: {id: settings-source-control-screen}, timeout: 20000}
+- openLink: generatorai:///settings/browser-terminal
+- extendedWaitUntil: {visible: {id: terminal-shell}, timeout: 15000}
+- assertVisible: {id: capability-exec:terminal}
+- openLink: generatorai:///settings/computer-use
+- extendedWaitUntil: {visible: {id: settings-computer-use-screen}, timeout: 15000}
+- openLink: generatorai:///settings/audio
+- extendedWaitUntil: {visible: {id: audio-model-card}, timeout: 15000}
+- openLink: generatorai:///settings/extensions
+- extendedWaitUntil: {visible: {id: settings-extensions-screen}, timeout: 15000}
+- openLink: generatorai:///settings/security
+- extendedWaitUntil: {visible: {id: security-approval-key}, timeout: 15000}
+- tapOn: {id: security-scopes}
+- extendedWaitUntil: {visible: ".*read:status", timeout: 10000}
+- runFlow: ../_subflows/back.yaml
+- scrollUntilVisible: {element: {id: security-unpair}, direction: DOWN}
+- runFlow:
+    when: {visible: {id: security-pair-device}}
+    commands:
+      - tapOn: {id: security-pair-device}
+      - extendedWaitUntil: {visible: {id: settings-pair-device-screen}, timeout: 15000}
+- openLink: generatorai:///settings/storage
+- extendedWaitUntil: {visible: {id: settings-storage-screen}, timeout: 15000}
+- openLink: generatorai:///settings/diagnostics
+- extendedWaitUntil: {visible: {id: diagnostics-status}, timeout: 15000}

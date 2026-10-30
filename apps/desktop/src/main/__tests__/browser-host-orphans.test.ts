@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Listener = (...args: unknown[]) => unknown;
 
-const { FakeView, views } = vi.hoisted(() => {
+const { FakeView, views, FakeAgentWindow } = vi.hoisted(() => {
   type Listener = (...args: unknown[]) => unknown;
   const views: InstanceType<typeof FakeView>[] = [];
   class FakeTabContents {
@@ -24,8 +24,10 @@ const { FakeView, views } = vi.hoisted(() => {
     on(_e: string, _fn: Listener) { return this; }
     once(_e: string, _fn: Listener) { return this; }
     setWindowOpenHandler() {}
-    loadURL = vi.fn(async (_url: string): Promise<void> => undefined);
-    getURL = () => 'about:blank';
+    /** Like Electron: no URL until the first load commits (a tick after loadURL starts). */
+    url = '';
+    loadURL = vi.fn((url: string): Promise<void> => Promise.resolve().then(() => { this.url = url; }));
+    getURL = () => this.url;
     getTitle = () => '';
     isLoading = () => false;
     isDestroyed = () => this.destroyed;
@@ -41,11 +43,28 @@ const { FakeView, views } = vi.hoisted(() => {
     setBounds = vi.fn((b: { x: number; y: number; width: number; height: number }) => { this.bounds = b; });
     constructor(_opts: unknown) { views.push(this); }
   }
-  return { FakeView, views };
+  /** The hidden window agent tabs live in (D-105). */
+  class FakeAgentWindow {
+    static last: FakeAgentWindow | null = null;
+    children: unknown[] = [];
+    destroyed = false;
+    opts: Record<string, unknown>;
+    contentView = {
+      addChildView: (v: unknown) => { this.children.push(v); },
+      removeChildView: (v: unknown) => { this.children = this.children.filter((c) => c !== v); },
+    };
+    constructor(opts: Record<string, unknown>) { this.opts = opts; FakeAgentWindow.last = this; }
+    on() { return this; }
+    isDestroyed = () => this.destroyed;
+    destroy = vi.fn(() => { this.destroyed = true; });
+    loadURL = vi.fn(async () => undefined);
+  }
+  return { FakeView, views, FakeAgentWindow };
 });
 
 vi.mock('electron', () => ({
   WebContentsView: FakeView,
+  BrowserWindow: FakeAgentWindow,
   session: { fromPartition: () => ({}) },
 }));
 vi.mock('../logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
@@ -54,7 +73,8 @@ vi.mock('../cdp/ScopedCdpProxy', () => ({
   ScopedCdpProxy: class { start = vi.fn(async () => 'ws://x'); stop = vi.fn(async () => undefined); },
 }));
 vi.mock('../cdp/ipc-token', () => ({ getIpcToken: () => 'token' }));
-vi.mock('../server-manager', () => ({ getServerManager: () => ({ getUrl: () => null, getState: () => ({}) }) }));
+const server = vi.hoisted(() => ({ url: null as string | null }));
+vi.mock('../server-manager', () => ({ getServerManager: () => ({ url: server.url, getUrl: () => server.url, getState: () => ({}) }) }));
 
 import { NativeBrowserHost, ORPHAN_GRACE_MS } from '../browser-host';
 
@@ -217,5 +237,69 @@ describe('restoring a page into a tab that was only just created', () => {
     host.destroy('browser-3');
     landed();
     await expect(pending).rejects.toThrow(/No browser tab/);
+  });
+});
+
+describe('the agent tab (D-105)', () => {
+  it('lives in a hidden window at a desktop size, shown there, and is made active when the workspace has no tab', () => {
+    host.ensureAgentTab('ws-9');
+    const view = views[views.length - 1]!;
+    // A view hidden in the app window renders at 0x0; in the never-shown agent window it is shown and laid out.
+    expect(FakeAgentWindow.last!.opts).toMatchObject({ show: false, paintWhenInitiallyHidden: true });
+    expect(FakeAgentWindow.last!.children).toContain(view);
+    expect(win.children).not.toContain(view);
+    expect(view.visible).toBe(true);
+    expect(view.bounds).toEqual({ x: 0, y: 0, width: 1280, height: 800 });
+    expect(host.describe('agent-ws-9').workspaceId).toBe('ws-9');
+  });
+
+  it('is not created when the workspace already has a tab', () => {
+    openTab(host);
+    const count = views.length;
+    host.ensureAgentTab('ws-1');
+    expect(views.length).toBe(count);
+  });
+
+  it('hands its page to the Browser tab the person opens, then goes away', async () => {
+    host.ensureAgentTab('ws-1');
+    const agent = views[views.length - 1]!;
+    agent.webContents.getURL = () => 'https://example.com/';
+    // Opening the Browser dock creates its tab: it takes over at once, before any visibility tick — while the new
+    // tab still reports no URL.
+    host.create('browser-1', 'ws-1', false);
+    const dock = views[views.length - 1]!;
+    await vi.waitFor(() => expect(dock.webContents.loadURL).toHaveBeenCalledWith('https://example.com/'));
+    expect(agent.webContents.close).toHaveBeenCalled();
+    expect(win.children).not.toContain(agent);
+    // No agent tab left: the hidden window goes too (it would keep the app from quitting on Windows / Linux).
+    expect(FakeAgentWindow.last!.destroy).toHaveBeenCalled();
+  });
+
+  it('reports the handed-over page as the new tab\'s URL, so the dock does not restore its old page over it (U-65)', () => {
+    host.ensureAgentTab('ws-1');
+    views[views.length - 1]!.webContents.getURL = () => 'https://github.com/acme/repo/issues';
+    const descriptor = host.create('browser-1', 'ws-1', false);
+    expect(descriptor.currentUrl).toBe('https://github.com/acme/repo/issues');
+  });
+
+  it('clears the server endpoint when it hands over, before the Browser tab pushes its own (U-60)', async () => {
+    server.url = 'http://server';
+    const pushed: Array<string | null> = [];
+    const fetchMock = vi.fn(async (_url: string, init: { body: string }) => {
+      pushed.push((JSON.parse(init.body) as { wsUrl: string | null }).wsUrl);
+      return { ok: true, status: 200 };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      host.ensureAgentTab('ws-1');
+      await vi.waitFor(() => expect(pushed).toEqual(['ws://x']));
+      host.create('browser-1', 'ws-1', false);
+      // Without the clear, the server kept the dead agent tab's endpoint until the new one landed and the dock's
+      // start dialled it: ECONNREFUSED.
+      await vi.waitFor(() => expect(pushed).toEqual(['ws://x', null, 'ws://x']));
+    } finally {
+      vi.unstubAllGlobals();
+      server.url = null;
+    }
   });
 });

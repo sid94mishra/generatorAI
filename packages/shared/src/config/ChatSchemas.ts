@@ -6,28 +6,10 @@ import { z } from 'zod';
 import { HARNESS_PROVIDER_IDS, REASONING_EFFORTS } from '../types/ProviderConfig.js';
 import { BrowserConfigSchema } from './BrowserConfigSchema.js';
 import { McpServerConfigSchema, AgentOverridesSchema } from './AgentSchemas.js';
-import { AGENT_MODES, coerceAgentMode, type AgentMode } from '../types/AgentMode.js';
+import { AGENT_MODES, type AgentMode } from '../types/AgentMode.js';
 
-/**
- * Agent mode, accepting the pre-rename `interactive` alias.
- *
- * Exported workflow definitions and older API clients still send
- * `'interactive'`; `coerceAgentMode` folds it onto `'auto'` so a single
- * boundary handles both without leaking the legacy value into the domain.
- */
-export const AgentModeSchema = z
-  .string()
-  .transform((v, ctx) => {
-    const mode = coerceAgentMode(v);
-    if (!mode) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Invalid agent mode. Allowed: ${AGENT_MODES.join(', ')}`,
-      });
-      return z.NEVER;
-    }
-    return mode;
-  }) as unknown as z.ZodType<AgentMode>;
+/** Agent mode: `auto` or `plan`. */
+export const AgentModeSchema = z.enum(AGENT_MODES as [AgentMode, ...AgentMode[]]);
 
 /** Agent harness configuration — provider-agnostic settings for LLM sessions */
 const AgentHarnessConfigSchema = z.object({
@@ -98,12 +80,20 @@ const sourceCommon = {
 export const ChatSourceSpecSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('codebase'), codebaseId: z.string().min(1).max(200), ...sourceCommon }),
   z.object({ kind: z.literal('folder'), path: z.string().min(1).max(1000), ...sourceCommon }),
+  // The folder the chat owns (what "Empty workspace" grows into) — kept beside other sources (D-141).
+  z.object({ kind: z.literal('chat-folder') }),
 ]);
 
 /** PUT /api/chats/:id/sources — replace the mount plan of an idle chat. */
 export const UpdateChatSourcesSchema = z.object({
   sources: z.array(ChatSourceSpecSchema).max(8),
   primary: z.string().max(64).optional(),
+  /**
+   * Delete the chat folder's files when it is left out of `sources`. Without
+   * it, a chat folder that holds files is kept (D-141): work the agent did
+   * is never deleted by an edit that did not ask to delete it.
+   */
+  discardChatFolder: z.boolean().optional(),
 });
 
 /**
@@ -169,7 +159,7 @@ export const CreateChatSchema = z.object({
     orchestratorChatId: z.string().uuid(),
     taskName: z.string().min(1).max(120),
     taskIndex: z.number().int().min(0).optional(),
-    status: z.enum(['spawned', 'running', 'needs_review', 'completed', 'failed', 'cancelled']).optional(),
+    status: z.enum(['spawned', 'running', 'needs_review', 'completed', 'failed', 'cancelled', 'interrupted']).optional(),
   }).optional(),
   /** Sticky per-chat default agent mode; overridable per turn from the composer. */
   defaultAgentMode: AgentModeSchema.optional(),
@@ -233,11 +223,25 @@ export const SetChatPermissionModeSchema = z.object({
  * tool-permission prompt raised while the chat runs in `default` /
  * `acceptEdits` mode.
  */
-export const ResolveToolPermissionSchema = z.object({
-  behavior: z.enum(['allow', 'deny']),
-  /** Relayed to the agent as the denial reason. */
-  message: z.string().max(2000).optional(),
-});
+export const ResolveToolPermissionSchema = z
+  .object({
+    behavior: z.enum(['allow', 'deny']),
+    /** Relayed to the agent as the denial reason. */
+    message: z.string().max(2000).optional(),
+    /** MG-05 — signed answer from a phone; required for a risky gate answered by a mobile device. */
+    approvalProof: z.unknown().optional(),
+    /**
+     * U-16 (D-147) — allow, and remember the gate's rules (`payload.rememberRules`) so a later request
+     * they cover is allowed without asking: `owner` = for this chat / this run (the route's), `project` =
+     * for every chat and run of its project ("Allow in this project"; 422 when it has none).
+     * Only with `behavior: 'allow'`; refused (422) for a gate that cannot be remembered.
+     */
+    remember: z.enum(['owner', 'project']).optional(),
+  })
+  .refine((b) => !(b.remember && b.behavior !== 'allow'), {
+    message: 'remember is only valid with behavior "allow"',
+    path: ['remember'],
+  });
 
 /**
  * PATCH /api/chats/:id — every field optional, every field validated.
@@ -248,6 +252,8 @@ export const ResolveToolPermissionSchema = z.object({
  * so older clients that PATCH fields the route ignores keep working.
  */
 export const UpdateChatSchema = z.object({
+  pinned: z.boolean().optional(),
+  unread: z.boolean().optional(),
   name: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).optional(),
   model: z.string().max(200).optional(),
@@ -264,24 +270,6 @@ export const UpdateChatSchema = z.object({
   sourceControl: ChatSourceControlInputSchema,
 });
 
-/**
- * POST /api/workflow-runs/:runId/stages/:stageId/approve
- *
- * `outcome` is the modern tri-state verdict. The legacy boolean `approved` is
- * still accepted so existing clients keep working: `true` → approved,
- * `false` → changes_requested (never `rejected`, which must be explicit
- * because it terminates the run).
- */
-export const StageReviewDecisionSchema = z.object({
-  outcome: z.enum(['approved', 'changes_requested', 'rejected']).optional(),
-  approved: z.boolean().optional(),
-  /** Free-text change request sent to the agent as a follow-up prompt. */
-  followUpPrompt: z.string().max(50_000).optional(),
-  /** Why the stage was rejected — surfaced on the failed stage. */
-  reason: z.string().max(10_000).optional(),
-  value: z.unknown().optional(),
-});
-
 /** Zod schema for sending a chat prompt */
 export const SendChatPromptSchema = z.object({
   prompt: z.string().min(1).max(100_000),
@@ -296,3 +284,23 @@ export const SendChatPromptSchema = z.object({
    */
   mode: AgentModeSchema.optional(),
 });
+
+// ────────────────────────────────────────────────────────────────
+// Chat ingest (mobile MG-09): the `target` part of POST /api/chats/ingest
+// ────────────────────────────────────────────────────────────────
+
+export const ChatIngestTargetSchema = z.union([
+  z.object({ chatId: z.string().min(1).max(200) }).strict(),
+  z
+    .object({
+      newChat: z
+        .object({
+          name: z.string().trim().min(1).max(200).optional(),
+          projectId: z.string().uuid().optional(),
+          agentRef: z.string().max(128).optional(),
+          model: z.string().max(200).optional(),
+        })
+        .strict(),
+    })
+    .strict(),
+]);

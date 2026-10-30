@@ -2,24 +2,61 @@
 // Project Routes — CRUD for Projects, Codebases, Configs, Worktrees
 // ────────────────────────────────────────────────────────────────
 
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
 import { Router } from 'express';
 import type { Response } from 'express';
 import multer from 'multer';
-import { McpServerBodySchema, mcpCredentialNamespace } from '@generatorai/shared';
 import {
+  CloseIssueBodySchema,
+  CreateIssueBodySchema,
+  IssueCommentBodySchema,
+  McpServerBodySchema,
+  MergePullRequestBodySchema,
+  mcpCredentialNamespace,
+  shellCommandRules,
+} from '@generatorai/shared';
+import {
+  CodebaseRemoteResolver,
   McpCredentialVault,
+  WorktreeCleanupService,
   buildPullRequestReviewPrompt,
-  parseRepoSlug,
+  codebaseRepoDir,
+  commandSuggestions,
+  mergePullRequest,
+  packageManagerOf,
   redactTokens,
   toMcpServerEntry,
 } from '@generatorai/core';
 import type {
   CatalogMcpServer,
+  CommandSuggestion,
   ISourceControlProvider,
   PullRequestRef,
 } from '@generatorai/core';
-import type { ProjectCodebase, ProjectPullRequest, ScmPullRequestState } from '@generatorai/shared';
+import type {
+  ConfigType,
+  ProjectArtifactPrefEntry,
+  ProjectArtifactPrefs,
+  ProjectCodebase,
+  ProjectIssue,
+  ProjectPullRequest,
+  ProjectRunListItem,
+  ProjectRunListPage,
+  ProjectSummary,
+  ScmIssueState,
+  ScmPullRequestState,
+  WorkflowRun,
+  WorktreeInfo,
+  WorktreeLink,
+  WorktreeListEnriched,
+  WorktreeListItem,
+  WorktreeRetentionPolicy,
+} from '@generatorai/shared';
+import { WORKFLOW_RUN_STATES } from '@generatorai/workflow-spec';
 import type { Container } from '../composition-root.js';
+import { listAllDefinitionSummaries } from './definitionSummaries.js';
+import { chatPrincipalOf } from './permissionScope.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -31,7 +68,9 @@ export function createProjectRoutes(container: Container): Router {
   const {
     projectService,
     codebaseService,
+    codebaseLogService,
     worktreeService,
+    worktreeSizeService,
     worktreeCleanupService,
     projectConfigService,
     systemArtifactService,
@@ -40,11 +79,100 @@ export function createProjectRoutes(container: Container): Router {
     sourceControlRegistry,
     repoReadinessService,
     chatManagementService,
+    chatListInvalidator,
     gitManager,
     logger,
+    chatEntityRepo,
+    workflowDefinitionService,
+    workflowRunRepo,
+    attentionService,
   } = container;
 
   const mcpVault = new McpCredentialVault(security.secretStore);
+
+  /**
+   * G-19 — the project's disabled-artifact prefs, as a `${type}:${id}` set.
+   * Stored on the project's existing JSON `settings` column (no migration,
+   * G-13 precedent). A deleted project reads as "nothing disabled".
+   */
+  async function getDisabledArtifactIds(projectId: string): Promise<Set<string>> {
+    try {
+      const project = await projectService.getProject(projectId);
+      return new Set((project.settings.disabledArtifacts ?? []).map((d) => `${d.type}:${d.id}`));
+    } catch {
+      return new Set();
+    }
+  }
+
+  // G-13 — `?include=summary` on GET /projects and GET /projects/:id.
+  const wantsSummary = (req: { query: Record<string, unknown> }): boolean =>
+    String(req.query['include'] ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .includes('summary');
+
+  /**
+   * Projects columns (Codebases, Active chats + Needs you, Last run, Worktrees)
+   * and the ProjectDetail tab counts. Every source is an existing read-only
+   * repository/service call — no new engine code, no migration (05-gap-matrix
+   * §G-13). `needsYou` / `running` are omitted (not `0`, D-36) while the
+   * attention feed has not produced its first snapshot yet.
+   */
+  async function buildProjectSummary(projectId: string): Promise<ProjectSummary> {
+    const [codebases, chats, worktrees, definitions] = await Promise.all([
+      codebaseService.getByProjectId(projectId),
+      chatEntityRepo.getByProjectId(projectId),
+      worktreeService.listWorktrees(projectId),
+      listAllDefinitionSummaries(workflowDefinitionService, { projectId }),
+    ]);
+
+    // Worker chats (an orchestrator's background tasks) are hidden from every chat
+    // list (`includeWorkers` off), so the count leaves them out too.
+    const activeChats = chats.filter((c) => c.status === 'active' && !c.parentChatId).length;
+
+    let needsYou: number | undefined;
+    let running: number | undefined;
+    if (attentionService.isAvailable()) {
+      const snapshot = attentionService.getSnapshot({ projectId });
+      needsYou = snapshot.needsYou.length;
+      running = snapshot.running.length;
+    }
+
+    const worktreeActive = worktrees.filter((w) => w.status === 'active').length;
+    const worktreeOrphaned = worktrees.filter((w) => w.status === 'orphaned').length;
+
+    // G-10/G-15 note: the Workflow Overhaul's migration drops run history, so
+    // this must tolerate zero definitions / zero runs cleanly (empty arrays
+    // flow straight through to `runs: 0` and no `lastRun`, never invented).
+    const runsByDefinition = await Promise.all(
+      definitions.map((d) => workflowRunRepo.getByDefinitionId(d.id)),
+    );
+    const allRuns: WorkflowRun[] = runsByDefinition.flat();
+    const runAt = (r: WorkflowRun): number => (r.completedAt ?? r.startedAt ?? r.createdAt).getTime();
+
+    let lastRun: ProjectSummary['lastRun'];
+    if (allRuns.length > 0) {
+      const latest = allRuns.reduce((a, b) => (runAt(b) > runAt(a) ? b : a));
+      const definition = definitions.find((d) => d.id === latest.workflowDefinitionId);
+      lastRun = {
+        runId: latest.id,
+        definitionId: latest.workflowDefinitionId,
+        name: definition?.name ?? latest.name,
+        status: latest.status,
+        at: new Date(runAt(latest)).toISOString(),
+      };
+    }
+
+    return {
+      codebases: codebases.length,
+      activeChats,
+      ...(needsYou !== undefined ? { needsYou } : {}),
+      ...(running !== undefined ? { running } : {}),
+      worktrees: { active: worktreeActive, orphaned: worktreeOrphaned },
+      runs: allRuns.length,
+      ...(lastRun ? { lastRun } : {}),
+    };
+  }
 
   // ════════════════════════════════════════════════════════════════
   // Project CRUD
@@ -72,7 +200,14 @@ export function createProjectRoutes(container: Container): Router {
       const status = req.query['status'] as string | undefined;
       const filter = status ? { status: status as 'active' | 'archived' } : undefined;
       const projects = await projectService.listProjects(filter);
-      res.json(projects);
+      if (!wantsSummary(req)) {
+        res.json(projects);
+        return;
+      }
+      const withSummary = await Promise.all(
+        projects.map(async (project) => ({ ...project, summary: await buildProjectSummary(project.id) })),
+      );
+      res.json(withSummary);
     } catch (err) {
       next(err);
     }
@@ -82,7 +217,99 @@ export function createProjectRoutes(container: Container): Router {
   router.get('/:id', async (req, res, next) => {
     try {
       const project = await projectService.getProjectWithCodebases(String(req.params['id']));
-      res.json(project);
+      if (!wantsSummary(req)) {
+        res.json(project);
+        return;
+      }
+      res.json({ ...project, summary: await buildProjectSummary(project.id) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // "Allow in this project" (evaluation action 4) — the project's remembered permission rules, which cover every
+  // chat and run in it: list, revoke one, clear.
+  const projectRuleOwner = async (projectId: string) => {
+    await projectService.getProject(projectId); // 404 for an unknown project
+    return { kind: 'project' as const, id: projectId };
+  };
+  router.get('/:id/permission-rules', async (req, res, next) => {
+    try {
+      const owner = await projectRuleOwner(String(req.params['id']));
+      res.json({ rules: (await container.permissionRuleService?.list(owner)) ?? [] });
+    } catch (err) {
+      next(err);
+    }
+  });
+  router.delete('/:id/permission-rules', async (req, res, next) => {
+    try {
+      const owner = await projectRuleOwner(String(req.params['id']));
+      res.json({ removed: (await container.permissionRuleService?.clear(owner)) ?? 0 });
+    } catch (err) {
+      next(err);
+    }
+  });
+  // D-157 — commands a person allows for the whole project up front ("run without asking"), and the
+  // project's own test / lint / build scripts suggested for it.
+  router.post('/:id/permission-rules', async (req, res, next) => {
+    try {
+      const owner = await projectRuleOwner(String(req.params['id']));
+      const commands: unknown = req.body?.commands;
+      if (!Array.isArray(commands) || commands.length === 0 || commands.length > 20 || !commands.every((c) => typeof c === 'string' && c.trim() && c.length <= 500)) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'commands: 1–20 command lines' } });
+        return;
+      }
+      const rules = [];
+      for (const command of commands as string[]) {
+        const derived = shellCommandRules(command.trim());
+        if (derived.refusal || derived.rules.length === 0) {
+          res.status(422).json({ error: { code: 'NOT_REMEMBERABLE', message: `${command.trim()}: ${derived.refusal ?? 'nothing to allow'}` } });
+          return;
+        }
+        rules.push(...derived.rules);
+      }
+      res.status(201).json({ rules: (await container.permissionRuleService?.remember(owner, rules)) ?? [] });
+    } catch (err) {
+      next(err);
+    }
+  });
+  router.get('/:id/permission-rules/suggestions', async (req, res, next) => {
+    try {
+      const projectId = String(req.params['id']);
+      await projectRuleOwner(projectId);
+      const suggestions: CommandSuggestion[] = [];
+      for (const cb of await codebaseService.getByProjectId(projectId)) {
+        const repoDir = codebaseRepoDir(cb);
+        if (!repoDir) continue;
+        const sub = cb.subdirectory ? `${cb.subdirectory.replace(/\\/g, '/').replace(/\/+$/, '')}/` : '';
+        const ref = cb.defaultBranch ?? 'HEAD';
+        // The committed default branch (a bare clone has no files), else the folder on disk.
+        const read = async (file: string): Promise<string | null> =>
+          gitManager.showFile(repoDir, `${sub}${file}`, ref).catch(() =>
+            fs.readFile(path.join(repoDir, ...sub.split('/').filter(Boolean), file), 'utf-8').catch(() => null),
+          );
+        const pkg = await read('package.json');
+        if (!pkg) continue;
+        const names = await gitManager
+          .lsTree(repoDir, sub, ref)
+          .then((entries) => entries.map((e) => e.name))
+          .catch(() => fs.readdir(path.join(repoDir, ...sub.split('/').filter(Boolean))).catch(() => [] as string[]));
+        suggestions.push(...commandSuggestions(pkg, packageManagerOf(names), `${cb.alias}/${sub}package.json`));
+      }
+      const seen = new Set<string>();
+      res.json({ suggestions: suggestions.filter((s) => !seen.has(s.command) && seen.add(s.command)) });
+    } catch (err) {
+      next(err);
+    }
+  });
+  router.delete('/:id/permission-rules/:ruleId', async (req, res, next) => {
+    try {
+      const owner = await projectRuleOwner(String(req.params['id']));
+      if (!(await container.permissionRuleService?.revoke(owner, String(req.params['ruleId'])))) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such rule on this project' } });
+        return;
+      }
+      res.status(204).end();
     } catch (err) {
       next(err);
     }
@@ -107,7 +334,9 @@ export function createProjectRoutes(container: Container): Router {
       const projectId = String(req.params['id']);
       const force = req.query['force'] === 'true';
       if (force) {
-        await projectService.deleteProject(projectId);
+        // Its chats lose the project with no write of their own: live lists
+        // and the attention feed hear it per chat (P2-R33).
+        await chatListInvalidator.deleteProject(projectId, () => projectService.deleteProject(projectId));
       } else {
         await projectService.archiveProject(projectId);
       }
@@ -235,27 +464,39 @@ export function createProjectRoutes(container: Container): Router {
     }
   });
 
-  // POST /projects/:id/codebases/:cid/fetch — Trigger git fetch
+  // POST /projects/:id/codebases/:cid/fetch — Start a background fetch job (G-16).
+  // Was synchronous (awaited the whole git fetch); now returns as soon as the
+  // job starts. `GET .../logs` tails its progress, and `codebase.status_changed`
+  // (`global` scope) tells a live view when it lands on `ready`/`stale`.
   router.post('/:id/codebases/:cid/fetch', async (req, res, next) => {
     try {
       const codebaseId = String(req.params['cid']);
-      await codebaseService.fetchCodebase(codebaseId);
-      const status = await codebaseService.getCodebaseStatus(codebaseId);
-      res.json({
-        success: true,
-        status: status.status,
-        lastFetchedAt: status.lastFetchedAt,
-      });
+      // Validate up front so a bad id/type answers before a job is started —
+      // `startFetchJob` throws synchronously only for "no log service wired",
+      // never for "codebase not found" (that surfaces asynchronously inside
+      // the job it started, which a 202 response can no longer report).
+      await codebaseService.getCodebaseStatus(codebaseId);
+      const job = codebaseService.startFetchJob(codebaseId);
+      res.status(202).json({ jobId: job.id });
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logger.warn(`[ProjectRoutes] Fetch failed for codebase ${req.params['cid']}: ${errMsg}`);
-      res.status(500).json({
-        error: {
-          code: 'FETCH_FAILED',
-          message: errMsg,
-          details: 'Check if the repository is accessible and there are no authentication issues or conflicts.',
-        },
-      });
+      next(err);
+    }
+  });
+
+  // GET /projects/:id/codebases/:cid/logs — Tail the last N clone/fetch log
+  // lines + the current/last job (G-16). Served from an in-memory ring
+  // buffer (process lifetime); a server restart clears it, which is fine —
+  // there is no in-flight job to resume either.
+  router.get('/:id/codebases/:cid/logs', async (req, res, next) => {
+    try {
+      const codebaseId = String(req.params['cid']);
+      await codebaseService.getCodebaseStatus(codebaseId); // 404s for an unknown codebase
+      const limitParam = Number(req.query['limit']);
+      const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.floor(limitParam) : undefined;
+      const logs = limit ? codebaseLogService.getLogs(codebaseId, limit) : codebaseLogService.getLogs(codebaseId);
+      res.set('Cache-Control', 'no-store').json(logs);
+    } catch (err) {
+      next(err);
     }
   });
 
@@ -483,7 +724,58 @@ export function createProjectRoutes(container: Container): Router {
       const configType = type && validTypes.includes(type) ? type as 'agent' | 'prompt' | 'skill' : undefined;
       const projectConfigs = await projectConfigService.listConfigs(projectId, configType);
       const merged = await systemArtifactService.getAvailableArtifacts(projectConfigs, configType);
-      res.json(merged);
+      // G-19 — a project-disabled entry is hidden from pickers, same as it
+      // is from `ArtifactCatalog` (skills/MCP). 'mcp' is not one of this
+      // route's types, so filtering only needs 'agent' | 'prompt' | 'skill'.
+      const disabled = await getDisabledArtifactIds(projectId);
+      const visible = disabled.size ? merged.filter((a) => !disabled.has(`${a.type}:${a.id}`)) : merged;
+      res.json(visible);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  const ARTIFACT_PREF_TYPES: readonly ConfigType[] = ['skill', 'prompt', 'agent', 'mcp'];
+
+  // GET /projects/:id/artifact-prefs — Per-project artifact enable/disable (G-19).
+  router.get('/:id/artifact-prefs', async (req, res, next) => {
+    try {
+      const project = await projectService.getProject(String(req.params['id']));
+      const body: ProjectArtifactPrefs = { disabled: project.settings.disabledArtifacts ?? [] };
+      res.json(body);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // PUT /projects/:id/artifact-prefs — Replace the disabled set (G-19).
+  router.put('/:id/artifact-prefs', async (req, res, next) => {
+    try {
+      const raw = req.body?.disabled;
+      if (!Array.isArray(raw)) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '`disabled` must be an array' } });
+        return;
+      }
+      const disabled: ProjectArtifactPrefEntry[] = [];
+      for (const entry of raw) {
+        const type = entry?.type;
+        const id = entry?.id;
+        if (typeof id !== 'string' || !id || !ARTIFACT_PREF_TYPES.includes(type)) {
+          res.status(400).json({
+            error: {
+              code: 'VALIDATION_ERROR',
+              message: `Each entry needs a non-empty \`id\` and \`type\` in ${ARTIFACT_PREF_TYPES.join('|')}`,
+            },
+          });
+          return;
+        }
+        disabled.push({ type, id });
+      }
+      const updated = await projectService.updateProject(String(req.params['id']), {
+        settings: { disabledArtifacts: disabled },
+      });
+      const body: ProjectArtifactPrefs = { disabled: updated.settings.disabledArtifacts ?? [] };
+      res.json(body);
     } catch (err) {
       next(err);
     }
@@ -493,11 +785,98 @@ export function createProjectRoutes(container: Container): Router {
   // Codebase-level Worktree Management
   // ════════════════════════════════════════════════════════════════
 
-  // GET /projects/:id/codebases/:cid/worktrees — List worktrees for codebase
+  /**
+   * G-17 — resolve what a worktree is checked out FOR: a chat mount
+   * (`runType: 'manual'`, `runId` is a chatId) or a workflow/automation run
+   * (`runId` is a `WorkflowRun` id — automation-triggered runs are still
+   * `WorkflowRun` rows, so this covers `runType: 'automation'` too).
+   * `undefined` when the owner no longer exists — never invented (D-36).
+   */
+  async function resolveWorktreeLink(wt: WorktreeInfo): Promise<WorktreeLink | undefined> {
+    if (!wt.runId) return undefined;
+    if (wt.runType === 'manual') {
+      try {
+        const chat = await chatEntityRepo.getById(wt.runId);
+        return { entity: 'chat', id: chat.id, title: chat.name || 'Untitled chat', status: chat.status };
+      } catch {
+        return undefined;
+      }
+    }
+    try {
+      const run = await workflowRunRepo.getById(wt.runId);
+      // Prefer the definition's CURRENT name over the run's frozen one (same
+      // "live name wins" rule G-13's `lastRun` uses) — best effort only.
+      let title = run.name;
+      try {
+        const definition = await workflowDefinitionService.get(run.workflowDefinitionId);
+        if (definition.graph.workflow.name) title = definition.graph.workflow.name;
+      } catch {
+        // Definition deleted — the run's own name still stands.
+      }
+      return { entity: 'workflow_run', id: run.id, title: title || 'Workflow run', status: run.status };
+    } catch {
+      return undefined;
+    }
+  }
+
+  // GET /projects/:id/codebases/:cid/worktrees[?include=usage,link] — List
+  // worktrees for a codebase. Bare (no `include`) is UNCHANGED from before
+  // G-17 — the legacy CodebaseDetailPage calls it that way and keeps working
+  // with no changes of its own. `?include=usage,link` (G-17) is the new,
+  // additive shape the P5 CodebaseDetail page will use.
   router.get('/:id/codebases/:cid/worktrees', async (req, res, next) => {
     try {
-      const worktrees = await worktreeService.listWorktreesByCodebase(String(req.params['cid']));
-      res.json(worktrees);
+      const codebaseId = String(req.params['cid']);
+      const worktrees = await worktreeService.listWorktreesByCodebase(codebaseId);
+
+      const include = String(req.query['include'] ?? '').split(',').map((s) => s.trim());
+      const wantUsage = include.includes('usage');
+      const wantLink = include.includes('link');
+      if (!wantUsage && !wantLink) {
+        res.json(worktrees);
+        return;
+      }
+
+      let retention: WorktreeRetentionPolicy | undefined;
+      if (wantUsage) {
+        try {
+          retention = (await projectService.getProject(String(req.params['id']))).settings.worktreeRetention;
+        } catch {
+          // Project gone — expiresAt is simply omitted below.
+        }
+      }
+
+      const items: WorktreeListItem[] = await Promise.all(
+        worktrees.map(async (wt): Promise<WorktreeListItem> => {
+          const item: WorktreeListItem = { ...wt };
+          if (wantUsage) {
+            // Never blocks: returns whatever is cached (possibly nothing yet)
+            // and kicks off a bounded-concurrency remeasurement if stale.
+            worktreeSizeService.requestMeasurement(wt.id, wt.worktreePath);
+            const sizeBytes = worktreeSizeService.getCachedSizeBytes(wt.id);
+            if (sizeBytes !== undefined) item.sizeBytes = sizeBytes;
+            const expiresAt = WorktreeCleanupService.expiresAt(wt, retention);
+            if (expiresAt) item.expiresAt = expiresAt.toISOString();
+          }
+          if (wantLink) {
+            const link = await resolveWorktreeLink(wt);
+            if (link) item.link = link;
+          }
+          return item;
+        }),
+      );
+
+      const response: WorktreeListEnriched = { items };
+      if (wantUsage) {
+        const measured = items.filter((i) => i.sizeBytes !== undefined);
+        if (measured.length > 0) {
+          response.totalBytes = measured.reduce((sum, i) => sum + (i.sizeBytes ?? 0), 0);
+          response.reclaimableBytes = measured
+            .filter((i) => i.status !== 'active')
+            .reduce((sum, i) => sum + (i.sizeBytes ?? 0), 0);
+        }
+      }
+      res.json(response);
     } catch (err) {
       next(err);
     }
@@ -506,7 +885,7 @@ export function createProjectRoutes(container: Container): Router {
   // DELETE /projects/:id/codebases/:cid/worktrees/:wid — Remove worktree
   router.delete('/:id/codebases/:cid/worktrees/:wid', async (req, res, next) => {
     try {
-      await worktreeService.removeWorktree(String(req.params['wid']));
+      await worktreeService.removeWorktree(String(req.params['wid']), { refuseActive: true });
       res.status(204).send();
     } catch (err) {
       next(err);
@@ -560,6 +939,82 @@ export function createProjectRoutes(container: Container): Router {
   });
 
   // ════════════════════════════════════════════════════════════════
+  // Workflow runs (G-15) — ProjectDetail Runs tab
+  // ════════════════════════════════════════════════════════════════
+
+  // The engine v2 run states (workflow-spec `WORKFLOW_RUN_STATES`).
+  const RUN_STATUSES: ReadonlySet<string> = new Set(WORKFLOW_RUN_STATES);
+
+  // GET /projects/:id/runs — paged workflow runs for a project, newest first.
+  //
+  // `WorkflowRun` carries no `projectId` of its own — the project belongs to
+  // the definition — so this joins through `workflowDefinitionService.
+  // listDefinitions(projectId)` and reads each definition's runs with
+  // `workflowRunRepo.getByDefinitionId`, both existing read-only calls.
+  // `workflowRunRepo` is Workflow-Overhaul-owned engine code: no new method
+  // was added to it, and `apps/server/src/routes/workflowRuns.ts` (which
+  // mounts the unrelated `GET /workflow-runs`) is untouched. Tolerates zero
+  // definitions / zero runs cleanly (empty page, `total: 0`) for the Workflow
+  // Overhaul's run-history migration.
+  router.get('/:id/runs', async (req, res, next) => {
+    try {
+      const projectId = String(req.params['id']);
+
+      const statusParam = req.query['status'] as string | undefined;
+      let statusFilter: Set<string> | undefined;
+      if (statusParam) {
+        const statuses = statusParam.split(',').map((s) => s.trim());
+        const invalid = statuses.filter((s) => !RUN_STATUSES.has(s));
+        if (invalid.length > 0) {
+          res.status(400).json({
+            error: { code: 'VALIDATION_ERROR', message: `Invalid status values: ${invalid.join(', ')}` },
+          });
+          return;
+        }
+        statusFilter = new Set(statuses);
+      }
+
+      const limitParam = Number(req.query['limit']);
+      const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(Math.floor(limitParam), 200) : 50;
+      const cursor = req.query['cursor'] as string | undefined;
+
+      const definitions = await listAllDefinitionSummaries(workflowDefinitionService, { projectId });
+      const definitionNameById = new Map(definitions.map((d) => [d.id, d.name]));
+      const runsByDefinition = await Promise.all(
+        definitions.map((d) => workflowRunRepo.getByDefinitionId(d.id)),
+      );
+      let runs: WorkflowRun[] = runsByDefinition.flat();
+      if (statusFilter) runs = runs.filter((r) => statusFilter.has(r.status));
+
+      const sortKey = (r: WorkflowRun): number => (r.startedAt ?? r.createdAt).getTime();
+      runs.sort((a, b) => sortKey(b) - sortKey(a) || (a.id < b.id ? 1 : -1));
+
+      const total = runs.length;
+      let startIndex = 0;
+      if (cursor) {
+        const idx = runs.findIndex((r) => r.id === cursor);
+        if (idx === -1) {
+          res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Unknown cursor' } });
+          return;
+        }
+        startIndex = idx + 1;
+      }
+
+      const page = runs.slice(startIndex, startIndex + limit);
+      const nextCursor = startIndex + limit < total ? page[page.length - 1]?.id ?? null : null;
+      const items: ProjectRunListItem[] = page.map((r) => ({
+        ...r,
+        definitionName: definitionNameById.get(r.workflowDefinitionId) ?? 'Unknown workflow',
+      }));
+
+      const responseBody: ProjectRunListPage = { items, nextCursor, total };
+      res.json(responseBody);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ════════════════════════════════════════════════════════════════
   // Worktree Management (project-level — legacy, kept for compat)
   // ════════════════════════════════════════════════════════════════
 
@@ -576,7 +1031,7 @@ export function createProjectRoutes(container: Container): Router {
   // DELETE /projects/:id/worktrees/:wid — Remove specific worktree
   router.delete('/:id/worktrees/:wid', async (req, res, next) => {
     try {
-      await worktreeService.removeWorktree(String(req.params['wid']));
+      await worktreeService.removeWorktree(String(req.params['wid']), { refuseActive: true });
       res.status(204).send();
     } catch (err) {
       next(err);
@@ -601,46 +1056,38 @@ export function createProjectRoutes(container: Container): Router {
   // Pull requests under a project (doc §6) + codebase readiness (doc §3)
   // ════════════════════════════════════════════════════════════════
 
-  /** Where a codebase's git repository actually lives on this host. */
-  function codebaseRepoDir(codebase: ProjectCodebase): string | null {
-    return codebase.clonePath || codebase.localPath || null;
+  /**
+   * `{ slug, provider }` for a codebase, or the user-facing reason why there
+   * is none (link a remote, connect an account) — never a generic 500. The
+   * same resolution backs the agent's GitHub tools (D-146).
+   */
+  const remotes = new CodebaseRemoteResolver({ git: gitManager, registry: sourceControlRegistry });
+  const resolveCodebaseRemote = (codebase: ProjectCodebase) => remotes.resolve(codebase);
+
+  /** Send the right error for a codebase that cannot reach its host: 409 when connecting the host is the fix. */
+  function sendUnresolved(res: Response, resolved: { reason: string; host?: string }): void {
+    if (resolved.host) {
+      res.status(409).json({ error: { code: 'SCM_NOT_CONNECTED', message: resolved.reason } });
+    } else {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: resolved.reason } });
+    }
   }
 
-  /**
-   * Resolve `{ slug, provider }` for a codebase, or the user-facing reason
-   * why there is none. Every failure mode here is something the user can act
-   * on (link a remote, connect an account), so it is phrased for them and
-   * never swallowed into a generic 500.
-   */
-  async function resolveCodebaseRemote(
-    codebase: ProjectCodebase,
+  /** The codebase + provider + repo slug for a codebase-scoped host route (creating an issue), or null once the error is sent. */
+  async function loadRepoTarget(
+    codebaseId: string,
+    res: Response,
   ): Promise<
-    | { ok: true; repoDir: string; slug: { owner: string; repo: string; host: string }; provider: ISourceControlProvider }
-    | { ok: false; reason: string; host?: string }
+    | { codebase: ProjectCodebase; repoDir: string; provider: ISourceControlProvider; slug: { owner: string; repo: string; host: string } }
+    | null
   > {
-    const repoDir = codebaseRepoDir(codebase);
-    if (!repoDir) return { ok: false, reason: 'This codebase has no local checkout yet' };
-
-    let remoteUrl: string | null = null;
-    try {
-      remoteUrl = await gitManager.getRemoteUrl(repoDir);
-    } catch (err) {
-      return { ok: false, reason: redactTokens(err instanceof Error ? err.message : String(err)) };
+    const codebase = await codebaseService.getCodebaseStatus(codebaseId);
+    const resolved = await resolveCodebaseRemote(codebase);
+    if (!resolved.ok) {
+      sendUnresolved(res, resolved);
+      return null;
     }
-    if (!remoteUrl) return { ok: false, reason: 'No git remote configured' };
-
-    const slug = parseRepoSlug(remoteUrl);
-    if (!slug) return { ok: false, reason: 'The git remote is not a recognisable repository URL' };
-
-    const provider = sourceControlRegistry.providerFor(slug.host);
-    if (!provider) {
-      return {
-        ok: false,
-        host: slug.host,
-        reason: `Remote host ${slug.host} is not connected — connect it in Settings → Source Control`,
-      };
-    }
-    return { ok: true, repoDir, slug, provider };
+    return { codebase, repoDir: resolved.repoDir, provider: resolved.provider, slug: resolved.slug };
   }
 
   /**
@@ -652,6 +1099,7 @@ export function createProjectRoutes(container: Container): Router {
     codebaseId: string,
     numberRaw: string,
     res: Response,
+    noun = 'Pull request',
   ): Promise<
     | { codebase: ProjectCodebase; repoDir: string; provider: ISourceControlProvider; ref: PullRequestRef }
     | null
@@ -659,31 +1107,25 @@ export function createProjectRoutes(container: Container): Router {
     const number = Number(numberRaw);
     if (!Number.isInteger(number) || number <= 0) {
       res.status(400).json({
-        error: { code: 'VALIDATION_ERROR', message: 'Pull request number must be a positive integer' },
+        error: { code: 'VALIDATION_ERROR', message: `${noun} number must be a positive integer` },
       });
       return null;
     }
-    const codebase = await codebaseService.getCodebaseStatus(codebaseId);
-    const resolved = await resolveCodebaseRemote(codebase);
-    if (!resolved.ok) {
-      if (resolved.host) {
-        res.status(409).json({ error: { code: 'SCM_NOT_CONNECTED', message: resolved.reason } });
-      } else {
-        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: resolved.reason } });
-      }
-      return null;
-    }
+    const target = await loadRepoTarget(codebaseId, res);
+    if (!target) return null;
     return {
-      codebase,
-      repoDir: resolved.repoDir,
-      provider: resolved.provider,
-      ref: {
-        owner: resolved.slug.owner,
-        repo: resolved.slug.repo,
-        number,
-        host: resolved.slug.host,
-      },
+      codebase: target.codebase,
+      repoDir: target.repoDir,
+      provider: target.provider,
+      ref: { owner: target.slug.owner, repo: target.slug.repo, number, host: target.slug.host },
     };
+  }
+
+  /** Reject a body that fails its schema with the first issue, phrased as `field: message`. */
+  function invalidBody(res: Response, error: { issues: Array<{ path: PropertyKey[]; message: string }> }): void {
+    const issue = error.issues[0];
+    const message = issue ? (issue.path.length ? `${issue.path.map(String).join('.')}: ${issue.message}` : issue.message) : 'Invalid request body';
+    res.status(400).json({ error: { code: 'VALIDATION_ERROR', message } });
   }
 
   // GET /projects/:id/pull-requests — every codebase's PRs in one list.
@@ -837,6 +1279,7 @@ export function createProjectRoutes(container: Container): Router {
 
       const chat = await chatManagementService.createChat({
         name: `Review PR #${detail.number}: ${detail.title}`,
+        createdByPrincipal: chatPrincipalOf(req),
         projectId,
         sources: [
           {
@@ -870,6 +1313,164 @@ export function createProjectRoutes(container: Container): Router {
       }
 
       res.status(201).json({ chat });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST …/pull-requests/:number/merge — merge with a method, optionally
+  // deleting the head branch (D-146). A PR the host will not merge
+  // (conflicts, required checks, already merged) answers 409
+  // SCM_NOT_MERGEABLE with the host's reason.
+  router.post('/:id/codebases/:cid/pull-requests/:number/merge', async (req, res, next) => {
+    try {
+      const parsed = MergePullRequestBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        invalidBody(res, parsed.error);
+        return;
+      }
+      const target = await loadPullRequestTarget(String(req.params['cid']), String(req.params['number']), res);
+      if (!target) return;
+      const { method, deleteBranch, commitTitle, commitMessage } = parsed.data;
+      res.json(
+        await mergePullRequest(target.provider, target.ref, {
+          method,
+          ...(deleteBranch ? { deleteBranch } : {}),
+          ...(commitTitle ? { commitTitle } : {}),
+          ...(commitMessage ? { commitMessage } : {}),
+        }),
+      );
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ════════════════════════════════════════════════════════════════
+  // Issues under a project (D-146) — the same codebase → repository
+  // resolution as the pull requests above.
+  // ════════════════════════════════════════════════════════════════
+
+  // GET /projects/:id/issues — every codebase's issues in one list; a
+  // codebase that cannot be listed becomes an `unavailable` row.
+  router.get('/:id/issues', async (req, res, next) => {
+    try {
+      const stateRaw = req.query['state'];
+      const state: ScmIssueState | 'all' = stateRaw === 'closed' || stateRaw === 'all' ? stateRaw : 'open';
+      const labelsRaw = typeof req.query['labels'] === 'string' ? req.query['labels'] : '';
+      const labels = labelsRaw.split(',').map((l) => l.trim()).filter(Boolean);
+
+      const codebases = await codebaseService.getByProjectId(String(req.params['id']));
+      const items: ProjectIssue[] = [];
+      const unavailable: Array<{ codebaseId: string; alias: string; reason: string }> = [];
+
+      await Promise.all(
+        codebases.map(async (codebase) => {
+          const resolved = await resolveCodebaseRemote(codebase);
+          if (!resolved.ok) {
+            unavailable.push({ codebaseId: codebase.id, alias: codebase.alias, reason: resolved.reason });
+            return;
+          }
+          try {
+            const issues = await resolved.provider.listIssues({
+              owner: resolved.slug.owner,
+              repo: resolved.slug.repo,
+              state,
+              host: resolved.slug.host,
+              ...(labels.length > 0 ? { labels } : {}),
+            });
+            for (const issue of issues) {
+              items.push({ ...issue, codebaseId: codebase.id, codebaseAlias: codebase.alias });
+            }
+          } catch (err) {
+            unavailable.push({
+              codebaseId: codebase.id,
+              alias: codebase.alias,
+              reason: redactTokens(err instanceof Error ? err.message : String(err)),
+            });
+          }
+        }),
+      );
+
+      items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      res.json({ items, unavailable });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /projects/:id/codebases/:cid/issues — create an issue.
+  router.post('/:id/codebases/:cid/issues', async (req, res, next) => {
+    try {
+      const parsed = CreateIssueBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        invalidBody(res, parsed.error);
+        return;
+      }
+      const target = await loadRepoTarget(String(req.params['cid']), res);
+      if (!target) return;
+      const { title, body, labels } = parsed.data;
+      const issue = await target.provider.createIssue({
+        owner: target.slug.owner,
+        repo: target.slug.repo,
+        host: target.slug.host,
+        title,
+        ...(body ? { body } : {}),
+        ...(labels?.length ? { labels } : {}),
+      });
+      res.status(201).json(issue);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /projects/:id/codebases/:cid/issues/:number — the issue + its comments.
+  router.get('/:id/codebases/:cid/issues/:number', async (req, res, next) => {
+    try {
+      const target = await loadPullRequestTarget(String(req.params['cid']), String(req.params['number']), res, 'Issue');
+      if (!target) return;
+      const issue = await target.provider.getIssue(target.ref);
+      if (!issue) {
+        res.status(404).json({
+          error: { code: 'NOT_FOUND', message: `#${target.ref.number} is not an issue in ${target.ref.owner}/${target.ref.repo}` },
+        });
+        return;
+      }
+      const comments = issue.comments > 0 ? await target.provider.listIssueComments(target.ref) : [];
+      res.json({ issue, comments });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST …/issues/:number/comments — comment on an issue.
+  router.post('/:id/codebases/:cid/issues/:number/comments', async (req, res, next) => {
+    try {
+      const parsed = IssueCommentBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        invalidBody(res, parsed.error);
+        return;
+      }
+      const target = await loadPullRequestTarget(String(req.params['cid']), String(req.params['number']), res, 'Issue');
+      if (!target) return;
+      res.status(201).json(await target.provider.commentOnIssue(target.ref, parsed.data.body));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST …/issues/:number/close — close as completed / not planned, with an
+  // optional comment posted first.
+  router.post('/:id/codebases/:cid/issues/:number/close', async (req, res, next) => {
+    try {
+      const parsed = CloseIssueBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        invalidBody(res, parsed.error);
+        return;
+      }
+      const target = await loadPullRequestTarget(String(req.params['cid']), String(req.params['number']), res, 'Issue');
+      if (!target) return;
+      if (parsed.data.comment) await target.provider.commentOnIssue(target.ref, parsed.data.comment);
+      res.json(await target.provider.closeIssue(target.ref, parsed.data.reason ? { reason: parsed.data.reason } : {}));
     } catch (err) {
       next(err);
     }

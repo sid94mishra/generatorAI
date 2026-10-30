@@ -1,0 +1,35 @@
+appId: ${APP_ID}
+name: agents · new from blank, detail, delete
+# M7-03 (MAgents, MAgentNew, MAgentEdit1–3, MAgentDetail, MAgentDelete). Needs admin:settings on the paired device.
+tags: [agents]
+# The paired device has the default scopes; this flow edits, so it adds the route-policy scope for its run.
+env: {DEVICE_SCOPES: "admin:settings"}
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///agents
+- extendedWaitUntil: {visible: {id: agents-new}, timeout: 20000}
+- tapOn: {id: agents-new}
+- extendedWaitUntil: {visible: {id: agent-new-blank}, timeout: 10000}
+- tapOn: {id: agent-new-blank}
+- tapOn: {id: agent-new-continue}
+- extendedWaitUntil: {visible: {id: agent-editor-name}, timeout: 15000}
+- tapOn: {id: agent-editor-name}
+- inputText: Maestro Agent
+- tapOn: {id: agent-editor-description}
+- inputText: Checks the Maestro flow end to end
+# The keyboard covers the instructions field (a tap "on" it landed in the description): bring it to the centre.
+# Android counts a field under the keyboard as visible: close the keyboard first.
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
+- scrollUntilVisible: {element: {id: agent-editor-instructions}, direction: DOWN, centerElement: true}
+- tapOn: {id: agent-editor-instructions}
+- inputText: Say hello.
+- tapOn: "Create"
+- extendedWaitUntil: {visible: {id: agent-detail}, timeout: 20000}
+- assertVisible: "Maestro Agent"
+- tapOn: {id: agent-delete}
+- extendedWaitUntil: {visible: "Delete agent", timeout: 10000}
+- tapOn: "Delete agent"
+- extendedWaitUntil: {visible: {id: agents-new}, timeout: 20000}

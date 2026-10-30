@@ -105,9 +105,10 @@ export function applyLifecycleEvent(
   }
 
   // ── Workflow runs ──
-  if (kind === 'workflow_run.created' || kind === 'workflow_run.retried') {
-    // A retry creates a NEW run whose id this event does not carry
-    // (`ancestorRunId` names the old one), so both need the server.
+  if (kind === 'workflow_run.created' || kind === 'workflow_run.forked') {
+    // A new run (a fork's `workflowRunId` is the NEW run, `ancestorRunId`
+    // the source): the event cannot supply a full row, so both need the
+    // server.
     return { refetch: 'runs' };
   }
 

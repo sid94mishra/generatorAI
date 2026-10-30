@@ -11,38 +11,6 @@
 // method to keep behaviour identical when running in the browser.
 // ────────────────────────────────────────────────────────────────
 
-interface GeneratorAIDesktopBrowserBounds {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-interface GeneratorAIDesktopNativeBrowserDescriptor {
-  tabId: string;
-  workspaceId: string;
-  currentUrl: string | null;
-  title: string | null;
-  /** Page favicon as a data URL, when one has loaded. */
-  favicon: string | null;
-  isLoading: boolean;
-  canGoBack: boolean;
-  canGoForward: boolean;
-  cdpEndpoint: string | null;
-}
-
-interface GeneratorAIDesktopNativeBrowserEvent {
-  tabId: string;
-  workspaceId: string;
-  url?: string;
-  title?: string;
-  isMainFrame?: boolean;
-  errorCode?: number;
-  errorDescription?: string;
-  favicon?: string;
-  loading?: boolean;
-}
-
 interface GeneratorAIDesktopBrowserApi {
   available: () => Promise<boolean>;
   create: (tabId: string, workspaceId: string, active?: boolean) => Promise<GeneratorAIDesktopNativeBrowserDescriptor>;
@@ -56,66 +24,22 @@ interface GeneratorAIDesktopBrowserApi {
   reload: (tabId: string) => Promise<void>;
   screenshot: (tabId: string) => Promise<string | null>;
   describe: (tabId: string) => Promise<GeneratorAIDesktopNativeBrowserDescriptor>;
-  openDevtools: (tabId: string, panel?: 'elements' | 'network' | 'console' | 'sources') => Promise<void>;
-  setEmulation: (
-    tabId: string,
-    params: { width: number; height: number; deviceScaleFactor?: number; mobile?: boolean } | null,
-  ) => Promise<void>;
+  openDevtools: (tabId: string, panel?: GeneratorAIDesktopBrowserDevtoolsPanel) => Promise<void>;
+  setEmulation: (tabId: string, params: GeneratorAIDesktopBrowserEmulationParams | null) => Promise<void>;
   setZoom: (tabId: string, factor: number) => Promise<void>;
-  pickElement: (tabId: string) => Promise<{
-    url: string;
-    tag: string;
-    id: string | null;
-    classes: string[];
-    label: string;
-    text: string;
-    cssSelector: string;
-    xpath: string;
-    outerHtml: string;
-    boundingBox: { x: number; y: number; width: number; height: number };
-    computedStyle?: Record<string, string>;
-    screenshot?: string | null;
-  } | null>;
-  captureRegion: (tabId: string) => Promise<string | null>;
-  annotateStart: (tabId: string, theme?: 'light' | 'dark') => Promise<void>;
+  /** A PNG of the viewport, or of the whole page ('full' degrades to 'visible'). */
+  capture: (tabId: string, mode: 'visible' | 'full') => Promise<GeneratorAIDesktopBrowserCaptureResult | null>;
+  captureRegion: (tabId: string, palette?: GeneratorAIDesktopAnnotationPalette) => Promise<string | null>;
+  annotateStart: (tabId: string, palette: GeneratorAIDesktopAnnotationPalette) => Promise<void>;
   annotateStop: (tabId: string) => Promise<void>;
-  annotatePoll: (tabId: string) => Promise<{
-    total: number;
-    items: Array<{ key: string; n: number; label: string; tag: string; comment: string; region: boolean }>;
-    sent: Array<{
-      key?: string;
-      url: string;
-      tag: string;
-      id: string | null;
-      classes: string[];
-      label: string;
-      text: string;
-      cssSelector: string;
-      xpath: string;
-      outerHtml: string;
-      boundingBox: { x: number; y: number; width: number; height: number };
-      computedStyle?: Record<string, string>;
-      screenshot?: string | null;
-      comment?: string;
-    }>;
-  }>;
-  annotateSend: (tabId: string, keys?: string[]) => Promise<Array<{
-    key?: string;
-    url: string;
-    tag: string;
-    id: string | null;
-    classes: string[];
-    label: string;
-    text: string;
-    cssSelector: string;
-    xpath: string;
-    outerHtml: string;
-    boundingBox: { x: number; y: number; width: number; height: number };
-    computedStyle?: Record<string, string>;
-    screenshot?: string | null;
-    comment?: string;
-  }>>;
-  annotateRegion: (tabId: string) => Promise<void>;
+  annotatePoll: (tabId: string) => Promise<GeneratorAIDesktopBrowserAnnotatePollResult>;
+  annotateSend: (tabId: string, keys?: string[]) => Promise<GeneratorAIDesktopBrowserPickResult[]>;
+  /** Scroll a comment's element into view and flash its outline. */
+  annotateOpen: (tabId: string, key: string) => Promise<void>;
+  /** Save (or update) the comment on a selection; false when the key is gone. */
+  annotateSave: (tabId: string, key: string, comment: string, intent: string) => Promise<boolean>;
+  /** Drop the pending selection. */
+  annotateCancel: (tabId: string, key: string) => Promise<void>;
   annotateRemove: (tabId: string, key: string) => Promise<void>;
   annotateClear: (tabId: string) => Promise<void>;
   onDidNavigate: (cb: (evt: GeneratorAIDesktopNativeBrowserEvent) => void) => () => void;
@@ -126,48 +50,63 @@ interface GeneratorAIDesktopBrowserApi {
   onLoadingChanged: (cb: (evt: GeneratorAIDesktopNativeBrowserEvent) => void) => () => void;
 }
 
-/** Where the OS paints its window controls, so the SPA can leave room. */
-interface GeneratorAIDesktopWindowChrome {
-  platform: 'darwin' | 'win32' | 'linux';
-  /** `native` = OS draws the title bar; otherwise the SPA draws it. */
-  titleBarStyle: 'native' | 'hidden-inset' | 'overlay';
-  titleBarHeight: number;
-  /** Reserved px on the left (macOS traffic lights). */
-  insetLeft: number;
-  /** Reserved px on the right (Windows/Linux min-max-close). */
-  insetRight: number;
-  isWayland: boolean;
+// The IPC payloads (menu state and attention counts, servers, updates,
+// appearance, window chrome, find-in-page, browser-IPC shapes) are declared
+// once in `@generatorai/shared` (`DesktopShell.ts`) and used by the desktop
+// main process and preload too (P1-review P2-R24, P2-R41 — this file used to
+// hand-declare its own copies of `WindowChrome`, `WindowStateChange`,
+// `FindInPageResult` and every browser-IPC shape, and `WindowChrome.platform`
+// had already drifted from the desktop side's declaration before this fix).
+// This file is ambient (no top-level import/export; an `import type` would
+// make it a module and drop every global it declares), so they are referenced
+// through inline `import()` types. Through the `/client` entry (same types):
+// the root specifier is path-mapped to shared's sources, which the
+// `.storybook` typecheck (it includes this file, without project references)
+// rejects as outside its rootDir.
+/* eslint-disable @typescript-eslint/consistent-type-imports */
+type GeneratorAIDesktopShellStatePush = import('@generatorai/shared/client').DesktopShellStatePush;
+type GeneratorAIDesktopServerEntry = import('@generatorai/shared/client').DesktopServerEntry;
+type GeneratorAIDesktopUpdateState = import('@generatorai/shared/client').DesktopUpdateState;
+type GeneratorAIDesktopAppearancePush = import('@generatorai/shared/client').DesktopAppearancePush;
+type GeneratorAIDesktopAppearanceRequest = import('@generatorai/shared/client').DesktopAppearanceRequest;
+type GeneratorAIDesktopWindowChrome = import('@generatorai/shared/client').WindowChrome;
+type GeneratorAIDesktopWindowStateChange = import('@generatorai/shared/client').WindowStateChange;
+type GeneratorAIDesktopNavHistoryState = import('@generatorai/shared/client').NavHistoryState;
+type GeneratorAIDesktopFindInPageResult = import('@generatorai/shared/client').FindInPageResult;
+type GeneratorAIDesktopBrowserBounds = import('@generatorai/shared/client').BrowserBounds;
+type GeneratorAIDesktopBrowserDevtoolsPanel = import('@generatorai/shared/client').BrowserDevtoolsPanel;
+type GeneratorAIDesktopBrowserEmulationParams = import('@generatorai/shared/client').BrowserEmulationParams;
+type GeneratorAIDesktopNativeBrowserDescriptor = import('@generatorai/shared/client').NativeBrowserDescriptor;
+type GeneratorAIDesktopNativeBrowserEvent = import('@generatorai/shared/client').NativeBrowserEvent;
+type GeneratorAIDesktopBrowserPickResult = import('@generatorai/shared/client').BrowserPickResult;
+type GeneratorAIDesktopBrowserAnnotatePollResult = import('@generatorai/shared/client').BrowserAnnotatePollResult;
+type GeneratorAIDesktopBrowserCaptureResult = import('@generatorai/shared/client').BrowserCaptureResult;
+// The overlay palette is declared next to `annotationPalette()` in design-tokens
+// (a dependency-free leaf shared must not depend on; 06 §4.4).
+type GeneratorAIDesktopAnnotationPalette = import('@generatorai/design-tokens').AnnotationPalette;
+/* eslint-enable @typescript-eslint/consistent-type-imports */
+
+interface GeneratorAIDesktopServersApi {
+  /** Every known server with its reachability, probed by the main process. */
+  list: () => Promise<GeneratorAIDesktopServerEntry[]>;
+  switchTo: (id: string) => Promise<void>;
+  /** Opens the shell's own "Connect to a server" prompt window. */
+  add: () => Promise<void>;
+  onChanged: (cb: () => void) => () => void;
 }
 
-/** Renderer UI state mirrored into the native menu (checkmarks, enablement). */
-interface GeneratorAIDesktopMenuState {
-  sidebarOpen: boolean;
-  rightPaneOpen: boolean;
-  hasUnsavedWork: boolean;
-  theme: 'system' | 'light' | 'dark';
-  recent: Array<{ label: string; route: string }>;
+interface GeneratorAIDesktopUpdatesApi {
+  getState: () => Promise<GeneratorAIDesktopUpdateState>;
+  install: () => Promise<void>;
+  /** Subscribing also tells the shell a renderer can show update state (it then skips its native dialog). */
+  onChange: (cb: (state: GeneratorAIDesktopUpdateState) => void) => () => void;
 }
 
-interface GeneratorAIDesktopWindowStateChange {
-  maximized: boolean;
-  fullScreen: boolean;
-  focused: boolean;
-}
-
-type GeneratorAIDesktopCommand =
-  | 'new-chat'
-  | 'new-workflow'
-  | 'new-project'
-  | 'new-automation'
-  | 'command-palette'
-  | 'focus-search'
-  | 'find-in-page'
-  | 'find-next'
-  | 'find-previous'
-  | 'toggle-sidebar'
-  | 'toggle-right-pane'
-  | 'show-shortcuts'
-  | 'reload-scripts';
+/** The registry's global renderer commands (D-24) — the same union main sends. */
+// This file is ambient (no top-level import/export); an `import type` would make
+// it a module and drop every global it declares, so the inline import() stays.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+type GeneratorAIDesktopCommand = import('@generatorai/shared/ui-contract').RendererCommandId;
 
 interface GeneratorAIDesktopWindowApi {
   toggleMaximize: () => Promise<void>;
@@ -186,16 +125,44 @@ interface GeneratorAIDesktopBridge {
   restartServer?: () => Promise<void>;
 
   // ── Window chrome / native menu integration ──
-  getWindowChrome?: () => Promise<GeneratorAIDesktopWindowChrome>;
+  /**
+   * Static per process: main passes it as a launch argument, so it is readable
+   * before first paint (06 §3.6). Undefined when the argument was missing or
+   * malformed; the web app then uses its native layout.
+   */
+  chrome?: GeneratorAIDesktopWindowChrome;
   window?: GeneratorAIDesktopWindowApi;
-  setMenuState?: (state: Partial<GeneratorAIDesktopMenuState>) => Promise<void>;
+  setMenuState?: (state: Partial<GeneratorAIDesktopShellStatePush>) => Promise<void>;
+  servers?: GeneratorAIDesktopServersApi;
+  updates?: GeneratorAIDesktopUpdatesApi;
   onWindowStateChanged?: (
     cb: (state: GeneratorAIDesktopWindowStateChange) => void,
   ) => () => void;
   onCommand?: (cb: (command: GeneratorAIDesktopCommand) => void) => () => void;
   onNavigate?: (cb: (path: string) => void) => () => void;
-  /** Appearance chosen in the native View ▸ Appearance menu. */
-  onThemePreferenceChanged?: (cb: (mode: 'light' | 'dark' | 'system') => void) => () => void;
+  /** Whether Back / Forward can move (Chromium's session history); called at once with the last value. */
+  onNavHistoryChanged?: (cb: (state: GeneratorAIDesktopNavHistoryState) => void) => () => void;
+  /** A mode picked in the native View ▸ Appearance menu; ThemeProvider applies it. */
+  onAppearanceRequest?: (cb: (request: GeneratorAIDesktopAppearanceRequest) => void) => () => void;
+  /** Mirror the applied appearance into the shell (background, caption glyphs, themeSource). */
+  setAppearance?: (appearance: GeneratorAIDesktopAppearancePush) => Promise<void>;
+
+  /**
+   * App facts. `localServer` is true when this page is the shell's own server
+   * (embedded / local dev) and false for a remote server's page (D-126).
+   * Only the members the SPA reads are declared.
+   */
+  getAppInfo?: () => Promise<{ localServer: boolean; platform: string }>;
+
+  // ── OS dialogs (local-only channels; a remote server's page is refused) ──
+  /** The OS folder picker; the chosen absolute path, or null when cancelled (D-136). */
+  selectDirectory?: (opts?: { defaultPath?: string }) => Promise<string | null>;
+
+  // ── macOS privacy grants for computer use (local-only) ──
+  /** Accessibility + Screen Recording: read, ask macOS (lists the app under both panes), or open settings. Null off macOS. */
+  computerPermissions?: (
+    action?: 'status' | 'request' | 'openSettings',
+  ) => Promise<{ accessibility: boolean; screenRecording: boolean } | null>;
 
   // ── OS file manager ──
   /** Reveals a path in Finder / File Explorer. False when it is not on this machine. */
@@ -205,12 +172,9 @@ interface GeneratorAIDesktopBridge {
   findInPage?: (text: string, opts?: { forward?: boolean; findNext?: boolean }) => Promise<void>;
   stopFindInPage?: () => Promise<void>;
   onFoundInPage?: (
-    cb: (result: { activeMatchOrdinal: number; matches: number }) => void,
+    cb: (result: GeneratorAIDesktopFindInPageResult) => void,
   ) => () => void;
 
-  // Additional bridge methods (getAppInfo, selectDirectory, …) exist at
-  // runtime but are not surfaced here because the SPA already accesses
-  // them via loose optional-chain access.
 }
 
 interface Window {

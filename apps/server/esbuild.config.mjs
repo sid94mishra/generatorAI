@@ -17,6 +17,7 @@
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import * as path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { BUNDLE_EXTERNALS } from './bundle-externals.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -56,3 +57,18 @@ const result = await build({
 const bytes = Object.values(result.metafile.outputs).reduce((sum, o) => sum + o.bytes, 0);
 console.log(`[bundle] server.mjs — ${(bytes / 1024 / 1024).toFixed(2)} MB`);
 console.log(`[bundle] external (shipped separately): ${BUNDLE_EXTERNALS.join(', ')}`);
+
+// Optional packages are not shipped with the app; the code that uses them
+// loads them through a guarded dynamic import. A static top-level import of
+// one makes the whole server fail to start when it is missing — kokoro-js once
+// pulled `@huggingface/transformers` to the top of the bundle exactly so.
+const OPTIONAL_EXTERNALS = ['@huggingface/transformers', 'kokoro-js'];
+const bundled = await readFile(path.join(here, 'dist-bundle', 'server.mjs'), 'utf8');
+const staticImports = OPTIONAL_EXTERNALS.filter((name) =>
+  bundled.split('\n').some((line) => line.startsWith('import ') && (line.includes(`"${name}"`) || line.includes(`'${name}'`))),
+);
+if (staticImports.length > 0) {
+  console.error(`[bundle] optional package(s) imported statically at the top level: ${staticImports.join(', ')}`);
+  console.error('[bundle] mark the package that imports them as external in bundle-externals.mjs.');
+  process.exit(1);
+}

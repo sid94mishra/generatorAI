@@ -8,7 +8,12 @@ function fakeContext(update: ReturnType<typeof vi.fn>): CliContext {
   return {
     api: {
       chats: {
-        list: vi.fn(async () => [CHAT_SUMMARY]),
+        list: vi.fn(async () => ({
+          items: [CHAT_SUMMARY],
+          nextCursor: null,
+          total: 1,
+          counts: { all: 1, active: 1, archived: 0 },
+        })),
         update,
       },
     },

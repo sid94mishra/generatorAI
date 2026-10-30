@@ -1,0 +1,10 @@
+{
+  // Typechecks the Storybook config (and the web sources it imports) as part of
+  // `pnpm --filter @generatorai/web typecheck`; the app tsconfig is rooted at src/.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "types": ["vite/client"]
+  },
+  "include": ["./*.ts", "./*.tsx", "../src/vite-env.d.ts", "../src/**/*.d.ts"]
+}

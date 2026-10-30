@@ -244,6 +244,15 @@ describe('OrchestratorService — W24 termination guards (the arbiter)', () => {
     expect(third.error).toMatch(/Convergence threshold met/);
   });
 
+  it('the shipped default lets a dependent second wave follow a finished, converged first wave (D-97)', async () => {
+    // A build: WP1 (foundation) must finish before WP2… can start. Every finished worker of wave 1 claimed
+    // converged:true, and the old default (1.0) refused the whole second wave.
+    const h = await makeHarness({ convergenceThreshold: DEFAULT_ORCHESTRATOR_CONFIG.convergenceThreshold });
+    await spawnAndFinish(h, 'wp1-foundation', { status: 'completed', converged: true });
+    const wp2 = await h.orchestrator.spawnBackgroundAgent(h.parentChatId, BRIEF('wp2-auth'));
+    expect(wp2.ok).toBe(true);
+  });
+
   it('convergenceThreshold=0 disables the convergence guard entirely', async () => {
     const h = await makeHarness({ convergenceThreshold: 0 });
     await spawnAndFinish(h, 'task-1', { status: 'completed', converged: true });
@@ -380,7 +389,7 @@ describe('OrchestratorService — W24 termination guards (the arbiter)', () => {
     expect(sent[0]).toMatch(/Every background agent in the current wave has finished/);
   }, 15_000);
 
-  it('a worker the DB still calls running after a restart is reported failed, not running forever', async () => {
+  it('a worker the DB still calls running after a restart is reported interrupted, not running forever (D-100)', async () => {
     const chatRepo = new MockChatRepository();
     await chatRepo.create({
       id: 'parent-x', name: 'Orchestrator', sessionId: 'parent-x-session', status: 'active', orchestratorMode: true,
@@ -397,8 +406,8 @@ describe('OrchestratorService — W24 termination guards (the arbiter)', () => {
     );
     fresh.setChatManagementService(fakeChatManagementService());
     const list = await fresh.listBackgroundAgents('parent-x');
-    expect(list).toEqual([expect.objectContaining({ taskId: 'worker-stale', status: 'failed' })]);
-    expect((await chatRepo.getById('worker-stale')).backgroundTask?.status).toBe('failed');
+    expect(list).toEqual([expect.objectContaining({ taskId: 'worker-stale', status: 'interrupted' })]);
+    expect((await chatRepo.getById('worker-stale')).backgroundTask?.status).toBe('interrupted');
   });
 
   it('disposeForParent clears the persisted wave state (archive path)', async () => {

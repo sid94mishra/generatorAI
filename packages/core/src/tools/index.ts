@@ -7,7 +7,10 @@ export {
 } from './gatedTool.js';
 export type { GateOptions } from './gatedTool.js';
 // Re-export `ToolDefinition` from the port for single-import ergonomics.
-export type { ToolDefinition } from '../domain/ports/IAgentHarness.js';
+export type { ToolDefinition, ToolCallContext } from '../domain/ports/IAgentHarness.js';
+
+// Workflow tools (P06) — one implementation for chats, stages and MCP.
+export * from './workflows/index.js';
 
 // Built-in browser tool set — VSCode-parity 10 tools + factory helpers.
 export {
@@ -60,3 +63,6 @@ export type {
   ExtensionAuthorToolName,
 } from './extensionAuthorTools.js';
 
+
+// GitHub issue + merge tools (D-146) — bound into project sessions.
+export * from './github/index.js';

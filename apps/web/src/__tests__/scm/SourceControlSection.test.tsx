@@ -12,13 +12,12 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import { PlatformContext } from '@/providers/PlatformProvider.js';
-import { SourceControlSection } from '@/components/settings/sections/SourceControl.js';
+import { SourceControlSection } from '@/features/settings/source-control/SourceControlSection.js';
 import type { IPlatformClient } from '@generatorai/shared';
 
-// The model picker's catalog comes from `fetch('/api/harness/providers')`,
-// not the platform client; stub it so it never reaches the network.
+// The model picker's catalog comes from `platform.getHarnessProviders()` (G-09).
 const harnessResponse = { providers: [], primary: 'copilot', stale: false };
 
 function makePlatform(overrides: Record<string, unknown> = {}) {
@@ -57,6 +56,7 @@ function makePlatform(overrides: Record<string, unknown> = {}) {
       interval: 5,
     }),
     getSourceControlDeviceLogin: vi.fn().mockResolvedValue({ loginId: 'login-1', status: 'pending' }),
+    getHarnessProviders: vi.fn().mockResolvedValue(harnessResponse),
     ...overrides,
   };
 }

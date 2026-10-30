@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dock panel · Browser</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#0b0b0c}
+.t-dark{--ground:#0b0b0c;--surface:#111113;--raised:#17171a;--overlay:#1d1d21;--sunken:#0d0d0f;--hover:rgba(255,255,255,.035);--selected:rgba(255,255,255,.07);--line:#27272c;--line-soft:#1c1c20;--line-strong:#37373d;--fg:#ededef;--fg-2:#a1a1aa;--fg-3:#80808a;--run:#6aa6ff;--run-bg:rgba(106,166,255,.12);--ok:#4cc38a;--ok-bg:rgba(76,195,138,.12);--warn:#f0b429;--warn-bg:rgba(240,180,41,.12);--err:#ff6369;--err-bg:rgba(255,99,105,.12);--add-bg:rgba(76,195,138,.09);--del-bg:rgba(255,99,105,.09);--shadow-pop:0 16px 40px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06);--scrim:rgba(0,0,0,.62);color-scheme:dark}
+.t-light{--ground:#f1f1ef;--surface:#ffffff;--raised:#fafaf9;--overlay:#ffffff;--sunken:#f6f6f4;--hover:rgba(0,0,0,.03);--selected:rgba(0,0,0,.055);--line:#e2e2de;--line-soft:#ecece9;--line-strong:#d0d0cb;--fg:#18181b;--fg-2:#55555d;--fg-3:#6b6b73;--run:#1d6ae5;--run-bg:rgba(29,106,229,.09);--ok:#16804c;--ok-bg:rgba(22,128,76,.09);--warn:#935f00;--warn-bg:rgba(214,150,0,.13);--err:#d1242f;--err-bg:rgba(209,36,47,.08);--add-bg:rgba(22,128,76,.08);--del-bg:rgba(209,36,47,.07);--shadow-pop:0 16px 40px rgba(20,20,30,.14),0 0 0 1px rgba(0,0,0,.06);--scrim:rgba(20,20,24,.3);color-scheme:light}
+.acc-ink{--accent:var(--fg);--on-accent:var(--surface)}
+.acc-blue{--accent:#2f6fed;--on-accent:#ffffff}
+.acc-violet{--accent:#7152e0;--on-accent:#ffffff}
+.acc-green{--accent:#1b8a52;--on-accent:#ffffff}
+.acc-orange{--accent:#d4561c;--on-accent:#ffffff}
+.acc-rose{--accent:#c8325f;--on-accent:#ffffff}
+.acc-teal{--accent:#0f7f7a;--on-accent:#ffffff}
+.app{font-family:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:13px;line-height:1.45;color:var(--fg);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.app *{box-sizing:border-box}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.i12{width:12px;height:12px}.i14{width:14px;height:14px}.i20{width:20px;height:20px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line);background:var(--raised);color:var(--fg);font-family:inherit;font-size:13px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;text-decoration:none}
+.btn-p{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.btn-g{background:transparent;border-color:transparent;color:var(--fg-2)}
+.btn-d{color:var(--err)}
+.btn-sm{height:24px;padding:0 8px;font-size:12px;border-radius:5px}
+.btn-lg{height:32px;padding:0 12px}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;border:0;background:transparent;color:var(--fg-2);padding:0;cursor:pointer;flex-shrink:0}
+.ib-sm{width:24px;height:24px;border-radius:5px}
+.ib.on{background:var(--selected);color:var(--fg)}
+.kbd{display:inline-flex;align-items:center;justify-content:center;height:18px;min-width:18px;padding:0 4px;border-radius:4px;border:1px solid var(--line);background:var(--sunken);color:var(--fg-3);font-family:"JetBrains Mono",monospace;font-size:11px;line-height:1;font-weight:400}
+.bdg{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border-radius:4px;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.s-run{color:var(--run);background:var(--run-bg)}.s-ok{color:var(--ok);background:var(--ok-bg)}.s-warn{color:var(--warn);background:var(--warn-bg)}.s-err{color:var(--err);background:var(--err-bg)}.s-idle{color:var(--fg-2);background:var(--selected)}
+.c-run{color:var(--run)}.c-ok{color:var(--ok)}.c-warn{color:var(--warn)}.c-err{color:var(--err)}.c-1{color:var(--fg)}.c-2{color:var(--fg-2)}.c-3{color:var(--fg-3)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.inp{display:flex;align-items:center;gap:8px;height:32px;border-radius:6px;border:1px solid var(--line);background:var(--sunken);color:var(--fg);padding:0 10px;font-family:inherit;font-size:13px;width:100%}
+.lbl{font-size:12px;font-weight:500;color:var(--fg-2)}
+.hint{font-size:12px;color:var(--fg-3)}
+.nav{display:flex;align-items:center;gap:10px;height:30px;padding:0 8px;border-radius:6px;color:var(--fg-2);font-size:13px;font-weight:500;text-decoration:none}
+.nav.on{background:var(--selected);color:var(--fg)}
+.cnt{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--fg-3)}
+.sec{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tabs{display:flex;gap:20px;border-bottom:1px solid var(--line-soft)}
+.tab{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0;border:0;background:none;font-family:inherit;font-size:13px;font-weight:500;color:var(--fg-2);text-decoration:none}
+.tab.on{color:var(--fg);box-shadow:inset 0 -2px 0 var(--fg)}
+.seg{display:inline-flex;gap:2px;padding:2px;border-radius:7px;background:var(--sunken);border:1px solid var(--line-soft)}
+.seg button{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:5px;border:0;background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;line-height:1}
+.seg button.on{background:var(--raised);color:var(--fg);box-shadow:0 0 0 1px var(--line)}
+.card{background:var(--raised);border:1px solid var(--line-soft);border-radius:8px}
+.th{display:flex;align-items:center;height:32px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tr{display:flex;align-items:center;gap:16px;height:44px;padding:0 20px;border-bottom:1px solid var(--line-soft);font-size:13px}
+.sw{position:relative;display:inline-block;width:28px;height:16px;border-radius:999px;border:0;padding:0;background:var(--line-strong);flex-shrink:0}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#ffffff}
+.sw.on{background:var(--accent)}
+.sw.on::after{left:14px;background:var(--on-accent)}
+.cb{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:4px;border:1px solid var(--line-strong);flex-shrink:0;color:var(--on-accent)}
+.cb.on{background:var(--accent);border-color:var(--accent)}
+.av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:var(--selected);color:var(--fg-2);font-size:11px;font-weight:600;flex-shrink:0}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.mono span{white-space:pre}
+.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+
+</style>
+</helmet>
+<div class="app {{rootClass}}" style="width: 1600px; height: 1024px; position: relative; display: flex; background: var(--ground); overflow: hidden;">
+<div style="flex-grow: 1; display: flex; flex-direction: column; gap: 20px; padding: 48px; min-width: 0;">
+<div style="display: flex; align-items: baseline; gap: 14px; height: 29px;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em;">Browser</h1>
+<p style="margin: 0; font-size: 13px; color: var(--fg-2);">The live Chromium page a chat shares with its agent: watch it browse, point at elements, capture regions, emulate devices.</p>
+</div>
+<div style="display: flex; gap: 62px;">
+<section style="width: 460px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px;">
+<div style="font-size: 13px; font-weight: 600; height: 19px; line-height: 19px;">Browsing</div>
+<div style="width: 460px; height: 790px; flex-shrink: 0; position: relative; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;" role="tablist" aria-label="Side dock">
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><path d="M11 18H8a2 2 0 0 1-2-2V9"></path></svg>Changes<span class="mono c-3" style="font-size: 11px;">2</span></button>
+<div style="display: flex; align-items: center; height: 28px; border-radius: 5px; background: var(--selected);"><button class="btn btn-sm" style="height: 28px; padding: 0 4px 0 8px; background: transparent; border-color: transparent;" role="tab" aria-selected="true"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--run);"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg><span class="trunc" style="max-width: 96px;">Checkout</span></button><button class="ib ib-sm" style="width: 20px; height: 20px; margin-right: 4px;" aria-label="Close Checkout tab"><svg class="i i12" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button></div>
+<div style="display: flex; align-items: center; height: 28px; border-radius: 5px;"><button class="btn btn-sm" style="height: 28px; padding: 0 4px 0 8px; background: transparent; border-color: transparent; color: var(--fg-2);" role="tab"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg><span class="trunc" style="max-width: 96px;">Coupon admin</span></button><button class="ib ib-sm" style="width: 20px; height: 20px; margin-right: 4px;" aria-label="Close Coupon admin tab"><svg class="i i12" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button></div>
+<button class="ib ib-sm" aria-label="Open another panel"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="ib ib-sm" aria-label="Maximize dock"><svg class="i i14" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" x2="14" y1="3" y2="10"></line><line x1="3" x2="10" y1="21" y2="14"></line></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px; flex-shrink: 0;">
+<button class="ib ib-sm" aria-label="Back"><svg class="i i14" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg></button>
+<button class="ib ib-sm" aria-label="Forward" style="color: var(--fg-3);"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg></button>
+<button class="ib ib-sm" aria-label="Reload"><svg class="i i14" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg></button>
+<div class="inp mono" style="height: 28px; flex-grow: 1; min-width: 0; margin: 0 4px; font-size: 12px; padding: 0 8px;"><span class="trunc"><span class="c-3">localhost:5173</span>/checkout</span></div>
+<button class="btn btn-sm" style="background: var(--selected); border-color: transparent; color: var(--fg-2);" aria-pressed="true" disabled title="Can’t stop sharing while the agent is streaming"><svg class="i i12" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>Sharing<svg class="i i12" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 2px; height: 36px; padding: 0 8px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;">
+<button class="btn btn-sm btn-g" style="" aria-pressed="false"><svg class="i i12" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><path d="M13 8H7"></path><path d="M17 12H7"></path></svg>Comment</button>
+<button class="btn btn-g btn-sm" aria-label="Comments (0)">Comments<span class="mono c-3" style="font-size: 11px;">0</span><svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<div style="width: 1px; height: 16px; background: var(--line-soft); margin: 0 4px;"></div>
+<button class="ib ib-sm" aria-label="Capture region" aria-pressed="false"><svg class="i i14" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path><circle cx="12" cy="13" r="3"></circle></svg></button>
+<button class="ib ib-sm" aria-label="Device toolbar" aria-pressed="false"><svg class="i i14" viewBox="0 0 24 24"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"></rect><path d="M12 18h.01"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="ib ib-sm" aria-label="Browser options"><svg class="i i14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg></button>
+<button class="ib ib-sm" aria-label="Stop browser"><svg class="i i14" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"></rect></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; background: var(--run-bg); border-bottom: 1px solid var(--line-soft); flex-shrink: 0; font-size: 12px;">
+<svg class="i i12" viewBox="0 0 24 24" style="color: var(--run);"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+<span style="font-weight: 500; white-space: nowrap; flex-shrink: 0;">Bug Fixer is browsing</span>
+<span class="mono c-3 trunc" style="font-size: 11px;">click · button “Apply”</span>
+<span style="margin-left: auto; color: var(--fg-2); white-space: nowrap;">Your clicks still work</span>
+</div>
+<div style="flex-grow: 1; min-height: 0; display: flex; padding: 12px; background: var(--sunken);">
+<div style="flex-grow: 1; position: relative; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; display: flex; flex-direction: column;">
+<div style="display: flex; align-items: center; gap: 14px; height: 34px; padding: 0 12px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;">
+<span style="display: block; width: 48px; height: 10px; border-radius: 3px; background: var(--line-strong);"></span><span style="display: block; width: 26px; height: 6px; border-radius: 3px; background: var(--line);"></span><span style="display: block; width: 32px; height: 6px; border-radius: 3px; background: var(--line);"></span><span style="display: block; width: 22px; height: 6px; border-radius: 3px; background: var(--line);"></span>
+<span style="margin-left: auto; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line);"></span>
+</div>
+<div style="padding: 14px 12px; display: flex; flex-direction: column; gap: 12px;">
+<span style="display: block; width: 112px; height: 12px; border-radius: 3px; background: var(--line-strong);"></span>
+<div style="display: flex; gap: 12px; align-items: flex-start;">
+<div style="flex-grow: 1; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-direction: column; gap: 5px; width: 100%;"><span style="display: block; width: 42px; height: 5px; border-radius: 3px; background: var(--line);"></span><span style="display: block; height: 24px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface);"></span></div><div style="display: flex; flex-direction: column; gap: 5px; width: 100%;"><span style="display: block; width: 42px; height: 5px; border-radius: 3px; background: var(--line);"></span><span style="display: block; height: 24px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface);"></span></div>
+<div style="display: flex; gap: 8px;"><div style="display: flex; flex-direction: column; gap: 5px; width: 50%;"><span style="display: block; width: 42px; height: 5px; border-radius: 3px; background: var(--line);"></span><span style="display: block; height: 24px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface);"></span></div><div style="display: flex; flex-direction: column; gap: 5px; width: 50%;"><span style="display: block; width: 42px; height: 5px; border-radius: 3px; background: var(--line);"></span><span style="display: block; height: 24px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface);"></span></div></div>
+<span style="display: block; height: 28px; border-radius: 4px; background: var(--line-strong);"></span>
+</div>
+<div style="width: 150px; flex-shrink: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 10px; display: flex; flex-direction: column; gap: 9px;">
+<span style="display: block; width: 64px; height: 7px; border-radius: 3px; background: var(--line-strong);"></span>
+<div style="display: flex; justify-content: space-between;"><span style="display: block; width: 50px; height: 6px; border-radius: 3px; background: var(--line);"></span><span style="display: block; width: 28px; height: 6px; border-radius: 3px; background: var(--line);"></span></div>
+<div style="display: flex; justify-content: space-between;"><span style="display: block; width: 62px; height: 6px; border-radius: 3px; background: var(--line);"></span><span style="display: block; width: 24px; height: 6px; border-radius: 3px; background: var(--line);"></span></div>
+<span style="display: block; height: 1px; background: var(--line-soft);"></span>
+<div style="position: relative; display: flex; justify-content: space-between; align-items: center; padding: 3px 4px; margin: 0 -4px; border-radius: 4px;"><span style="display: block; width: 36px; height: 8px; border-radius: 3px; background: var(--line-strong);"></span><span style="display: block; width: 34px; height: 8px; border-radius: 3px; background: var(--line-strong);"></span></div>
+<div style="display: flex; gap: 6px; margin-top: 2px;">
+<span style="flex-grow: 1; height: 22px; border-radius: 4px; border: 1px solid var(--line);"></span>
+<span style="position: relative; width: 40px; height: 22px; border-radius: 4px; border: 1px solid var(--line-strong);"></span>
+</div>
+</div>
+</div>
+<span style="display: block; width: 72%; height: 6px; border-radius: 3px; background: var(--line);"></span><span style="display: block; width: 58%; height: 6px; border-radius: 3px; background: var(--line);"></span><span style="display: block; width: 64%; height: 6px; border-radius: 3px; background: var(--line);"></span>
+</div>
+</div>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-top: 1px solid var(--line-soft); flex-shrink: 0; font-size: 12px;">
+<span class="dot" style="background: var(--ok); width: 6px; height: 6px;"></span>
+<span style="color: var(--fg-2);">Active</span>
+<span class="mono c-3" style="font-size: 11px;">live view · 1280×800 · 100%</span>
+<span class="mono c-3" style="font-size: 11px; margin-left: auto;">visible</span>
+</div>
+<div style="position: absolute; top: 122px; right: 8px; width: 214px; background: var(--overlay); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-pop); padding: 4px; z-index: 2;" role="menu">
+<div style="height: 26px; display: flex; align-items: center; padding: 0 8px; font-size: 12px; color: var(--fg-3);">Developer tools</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px; background: var(--selected);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg><span class="trunc">Open DevTools</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"></path></svg><span class="trunc">Open Network tab</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg><span class="trunc">Open Console tab</span></div>
+<div style="height: 1px; background: var(--line-soft); margin: 4px 0;"></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z"></path></svg><span class="trunc">Inspect elements</span></div>
+</div>
+</div>
+<p style="margin: 0; font-size: 12px; line-height: 1.45; color: var(--fg-3);">Each page is its own dock tab (up to 5), named by its title; a spinner means it is loading. While the agent’s turn streams, sharing is locked but your clicks still reach the page. DevTools, Console and Network sit under More (desktop app).</p>
+</section>
+<section style="width: 460px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px;">
+<div style="font-size: 13px; font-weight: 600; height: 19px; line-height: 19px;">Comment &amp; capture</div>
+<div style="width: 460px; height: 790px; flex-shrink: 0; position: relative; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;" role="tablist" aria-label="Side dock">
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><path d="M11 18H8a2 2 0 0 1-2-2V9"></path></svg>Changes<span class="mono c-3" style="font-size: 11px;">2</span></button>
+<div style="display: flex; align-items: center; height: 28px; border-radius: 5px; background: var(--selected);"><button class="btn btn-sm" style="height: 28px; padding: 0 4px 0 8px; background: transparent; border-color: transparent;" role="tab" aria-selected="true"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg><span class="trunc" style="max-width: 96px;">Checkout</span></button><button class="ib ib-sm" style="width: 20px; height: 20px; margin-right: 4px;" aria-label="Close Checkout tab"><svg class="i i12" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button></div>
+<div style="display: flex; align-items: center; height: 28px; border-radius: 5px;"><button class="btn btn-sm" style="height: 28px; padding: 0 4px 0 8px; background: transparent; border-color: transparent; color: var(--fg-2);" role="tab"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg><span class="trunc" style="max-width: 96px;">Coupon admin</span></button><button class="ib ib-sm" style="width: 20px; height: 20px; margin-right: 4px;" aria-label="Close Coupon admin tab"><svg class="i i12" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button></div>
+<button class="ib ib-sm" aria-label="Open another panel"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="ib ib-sm" aria-label="Maximize dock"><svg class="i i14" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" x2="14" y1="3" y2="10"></line><line x1="3" x2="10" y1="21" y2="14"></line></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px; flex-shrink: 0;">
+<button class="ib ib-sm" aria-label="Back"><svg class="i i14" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg></button>
+<button class="ib ib-sm" aria-label="Forward" style="color: var(--fg-3);"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg></button>
+<button class="ib ib-sm" aria-label="Reload"><svg class="i i14" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg></button>
+<div class="inp mono" style="height: 28px; flex-grow: 1; min-width: 0; margin: 0 4px; font-size: 12px; padding: 0 8px;"><span class="trunc"><span class="c-3">localhost:5173</span>/checkout</span></div>
+<button class="btn btn-sm" style="background: var(--selected); border-color: transparent;" aria-pressed="true" title="Sharing with the agent — click to stop sharing"><svg class="i i12" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>Sharing</button>
+</div>
+<div style="display: flex; align-items: center; gap: 2px; height: 36px; padding: 0 8px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;">
+<button class="btn btn-sm" style="background: var(--selected); border-color: transparent;" aria-pressed="true"><svg class="i i12" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><path d="M13 8H7"></path><path d="M17 12H7"></path></svg>Comment</button>
+<button class="btn btn-g btn-sm" aria-label="Comments (1)">Comments<span class="mono c-3" style="font-size: 11px;">1</span><svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<div style="width: 1px; height: 16px; background: var(--line-soft); margin: 0 4px;"></div>
+<button class="ib ib-sm on" aria-label="Capture region" aria-pressed="true"><svg class="i i14" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path><circle cx="12" cy="13" r="3"></circle></svg></button>
+<button class="ib ib-sm on" aria-label="Device toolbar" aria-pressed="true"><svg class="i i14" viewBox="0 0 24 24"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"></rect><path d="M12 18h.01"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="ib ib-sm" aria-label="Browser options"><svg class="i i14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg></button>
+<button class="ib ib-sm" aria-label="Stop browser"><svg class="i i14" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"></rect></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 6px 0 12px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0; font-size: 12px;">
+<svg class="i i12" viewBox="0 0 24 24" style="color: var(--fg-2);"><path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z"></path></svg>
+<span style="color: var(--fg-2);">1 comment · click an element or drag a region</span>
+<button class="btn btn-g btn-sm" style="margin-left: auto; color: var(--fg);"><svg class="i i12" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg>Send all to chat</button>
+</div>
+<div style="display: flex; align-items: center; gap: 4px; height: 36px; padding: 0 8px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;">
+<button class="chip" style="background: var(--selected); border-color: transparent; color: var(--fg);" aria-haspopup="menu" aria-expanded="true"><svg class="i i12" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg>Responsive<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<div class="inp mono" style="width: 50px; height: 24px; padding: 0 6px; font-size: 11px;" aria-label="Width in pixels">1280</div>
+<span class="c-3" style="font-size: 11px;">×</span>
+<div class="inp mono" style="width: 50px; height: 24px; padding: 0 6px; font-size: 11px;" aria-label="Height in pixels">800</div>
+<button class="ib ib-sm" aria-label="Rotate viewport"><svg class="i i14" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg></button>
+<button class="chip mono" style="font-size: 11px;" aria-label="Device pixel ratio">1×<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-2); margin-left: 4px;"><span class="cb"></span>Mobile</label>
+<button class="chip mono" style="font-size: 11px; margin-left: auto;" aria-label="Page zoom">100%<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+</div>
+<div style="flex-grow: 1; min-height: 0; display: flex; padding: 12px; background: var(--sunken); position: relative;">
+<div style="flex-grow: 1; position: relative; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; display: flex; flex-direction: column;">
+<div style="display: flex; align-items: center; gap: 14px; height: 34px; padding: 0 12px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;">
+<span style="display: block; width: 48px; height: 10px; border-radius: 3px; background: var(--line-strong);"></span><span style="display: block; width: 26px; height: 6px; border-radius: 3px; background: var(--line);"></span><span style="display: block; width: 32px; height: 6px; border-radius: 3px; background: var(--line);"></span><span style="display: block; width: 22px; height: 6px; border-radius: 3px; background: var(--line);"></span>
+<span style="margin-left: auto; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line);"></span>
+</div>
+<div style="padding: 14px 12px; display: flex; flex-direction: column; gap: 12px;">
+<span style="display: block; width: 112px; height: 12px; border-radius: 3px; background: var(--line-strong);"></span>
+<div style="display: flex; gap: 12px; align-items: flex-start;">
+<div style="flex-grow: 1; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-direction: column; gap: 5px; width: 100%;"><span style="display: block; width: 42px; height: 5px; border-radius: 3px; background: var(--line);"></span><span style="display: block; height: 24px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface);"></span></div><div style="display: flex; flex-direction: column; gap: 5px; width: 100%;"><span style="display: block; width: 42px; height: 5px; border-radius: 3px; background: var(--line);"></span><span style="display: block; height: 24px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface);"></span></div>
+<div style="display: flex; gap: 8px;"><div style="display: flex; flex-direction: column; gap: 5px; width: 50%;"><span style="display: block; width: 42px; height: 5px; border-radius: 3px; background: var(--line);"></span><span style="display: block; height: 24px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface);"></span></div><div style="display: flex; flex-direction: column; gap: 5px; width: 50%;"><span style="display: block; width: 42px; height: 5px; border-radius: 3px; background: var(--line);"></span><span style="display: block; height: 24px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface);"></span></div></div>
+<span style="display: block; height: 28px; border-radius: 4px; background: var(--line-strong);"></span>
+</div>
+<div style="width: 150px; flex-shrink: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 10px; display: flex; flex-direction: column; gap: 9px;">
+<span style="display: block; width: 64px; height: 7px; border-radius: 3px; background: var(--line-strong);"></span>
+<div style="display: flex; justify-content: space-between;"><span style="display: block; width: 50px; height: 6px; border-radius: 3px; background: var(--line);"></span><span style="display: block; width: 28px; height: 6px; border-radius: 3px; background: var(--line);"></span></div>
+<div style="display: flex; justify-content: space-between;"><span style="display: block; width: 62px; height: 6px; border-radius: 3px; background: var(--line);"></span><span style="display: block; width: 24px; height: 6px; border-radius: 3px; background: var(--line);"></span></div>
+<span style="display: block; height: 1px; background: var(--line-soft);"></span>
+<div style="position: relative; display: flex; justify-content: space-between; align-items: center; padding: 3px 4px; margin: 0 -4px; border-radius: 4px; outline: 1.5px solid var(--fg-2); outline-offset: 1px;"><span style="display: block; width: 36px; height: 8px; border-radius: 3px; background: var(--line-strong);"></span><span style="display: block; width: 34px; height: 8px; border-radius: 3px; background: var(--line-strong);"></span>
+<span style="position: absolute; left: -12px; top: -12px; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: var(--on-accent); border: 2px solid var(--surface); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600;">1</span></div>
+<div style="display: flex; gap: 6px; margin-top: 2px;">
+<span style="flex-grow: 1; height: 22px; border-radius: 4px; border: 1px solid var(--line);"></span>
+<span style="position: relative; width: 40px; height: 22px; border-radius: 4px; border: 1px solid var(--line-strong); outline: 1.5px dashed var(--fg); outline-offset: 2px;"><span class="mono" style="position: absolute; right: -4px; top: -26px; height: 18px; padding: 0 5px; border-radius: 4px; background: var(--fg); color: var(--surface); font-size: 11px; line-height: 18px; white-space: nowrap;">button.apply 40×22</span></span>
+</div>
+</div>
+</div>
+<span style="display: block; width: 72%; height: 6px; border-radius: 3px; background: var(--line);"></span><span style="display: block; width: 58%; height: 6px; border-radius: 3px; background: var(--line);"></span><span style="display: block; width: 64%; height: 6px; border-radius: 3px; background: var(--line);"></span>
+</div>
+</div>
+<div style="position: absolute; left: 24px; top: 336px; width: 170px; height: 80px; border: 1.5px dashed var(--fg); background: var(--selected); border-radius: 2px;">
+<span class="mono" style="position: absolute; right: -1px; bottom: -22px; height: 18px; padding: 0 5px; border-radius: 4px; background: var(--fg); color: var(--surface); font-size: 11px; line-height: 18px;">170×80</span>
+</div>
+<div style="position: absolute; right: 14px; top: 236px; width: 186px; background: var(--overlay); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-pop); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;">
+<div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-3);">
+<span style="width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex-shrink: 0;">1</span>
+<span class="mono trunc" style="font-size: 11px;">div.summary › .total</span>
+</div>
+<div class="inp" style="height: auto; min-height: 52px; align-items: flex-start; padding: 7px 8px; font-size: 13px; line-height: 1.45; background: var(--surface);">Total still shows 100.00 after the coupon applies</div>
+<div style="display: flex; align-items: center; gap: 6px;">
+<button class="btn btn-g btn-sm">Delete</button>
+<div style="flex-grow: 1;"></div>
+<button class="btn btn-sm btn-p"><svg class="i i12" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg>Send to chat</button>
+</div>
+</div>
+</div>
+<div style="display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 12px; border-top: 1px solid var(--line-soft); flex-shrink: 0;">
+<span style="font-size: 12px; color: var(--fg-2); white-space: nowrap;">Next message</span>
+<div style="display: flex; gap: 6px; margin-left: auto; min-width: 0;">
+<span style="display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px 0 4px; border-radius: 6px; border: 1px solid var(--line); background: var(--raised); min-width: 0;"><span style="width: 28px; height: 24px; border-radius: 3px; background: var(--sunken); border: 1px solid var(--line-soft); flex-shrink: 0; display: flex; flex-direction: column; gap: 3px; padding: 4px;"><span style="display: block; width: 70%; height: 3px; border-radius: 3px; background: var(--line-strong);"></span><span style="display: block; width: 50%; height: 3px; border-radius: 3px; background: var(--line);"></span></span><span class="mono trunc" style="font-size: 11px; max-width: 116px;">element-total.png</span></span>
+<span style="display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px 0 4px; border-radius: 6px; border: 1px solid var(--line); background: var(--raised); min-width: 0;"><span style="width: 28px; height: 24px; border-radius: 3px; background: var(--sunken); border: 1px solid var(--line-soft); flex-shrink: 0; display: flex; flex-direction: column; gap: 3px; padding: 4px;"><span style="display: block; width: 80%; height: 3px; border-radius: 3px; background: var(--line);"></span><span style="display: block; width: 60%; height: 3px; border-radius: 3px; background: var(--line);"></span></span><span class="mono trunc" style="font-size: 11px; max-width: 116px;">region-170x80.png</span></span>
+</div>
+</div>
+<div style="position: absolute; top: 190px; left: 8px; width: 246px; background: var(--overlay); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-pop); padding: 4px; z-index: 2;" role="menu">
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;"><span style="width: 14px; display: inline-flex; color: var(--fg-2);"><svg class="i i14" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path></svg></span><span class="trunc">Responsive</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;"><span style="width: 14px; display: inline-flex; color: var(--fg-2);"></span><span class="trunc">Mobile S</span><span class="mono c-3" style="font-size: 11px; margin-left: auto;">360×640</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px; background: var(--selected);"><span style="width: 14px; display: inline-flex; color: var(--fg-2);"></span><span class="trunc">iPhone 12/13</span><span class="mono c-3" style="font-size: 11px; margin-left: auto;">390×844</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;"><span style="width: 14px; display: inline-flex; color: var(--fg-2);"></span><span class="trunc">Mobile L</span><span class="mono c-3" style="font-size: 11px; margin-left: auto;">414×896</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;"><span style="width: 14px; display: inline-flex; color: var(--fg-2);"></span><span class="trunc">Pixel 7</span><span class="mono c-3" style="font-size: 11px; margin-left: auto;">412×915</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;"><span style="width: 14px; display: inline-flex; color: var(--fg-2);"></span><span class="trunc">Tablet</span><span class="mono c-3" style="font-size: 11px; margin-left: auto;">768×1024</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;"><span style="width: 14px; display: inline-flex; color: var(--fg-2);"></span><span class="trunc">iPad Pro</span><span class="mono c-3" style="font-size: 11px; margin-left: auto;">1024×1366</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;"><span style="width: 14px; display: inline-flex; color: var(--fg-2);"></span><span class="trunc">Laptop</span><span class="mono c-3" style="font-size: 11px; margin-left: auto;">1366×768</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;"><span style="width: 14px; display: inline-flex; color: var(--fg-2);"></span><span class="trunc">Desktop</span><span class="mono c-3" style="font-size: 11px; margin-left: auto;">1920×1080</span></div>
+<div style="height: 1px; background: var(--line-soft); margin: 4px 0;"></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; font-size: 12px; color: var(--fg-3);"><span style="width: 14px;"></span>Custom — edit width or height</div>
+</div>
+</div>
+<p style="margin: 0; font-size: 12px; line-height: 1.45; color: var(--fg-3);">Comment mode outlines the hovered element and pins a numbered note; Send to chat posts one, Send all posts every note. A dragged region or picked element attaches to your next message. Custom appears once width or height is edited.</p>
+</section>
+<section style="width: 460px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px;">
+<div style="font-size: 13px; font-weight: 600; height: 19px; line-height: 19px;">States</div>
+<div style="height: 790px; display: flex; flex-direction: column; gap: 10px;">
+<div style="font-size: 12px; color: var(--fg-3); height: 17px; line-height: 17px;">Pool full</div>
+<div style="width: 460px; height: 268px; flex-shrink: 0; position: relative; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;" role="tablist" aria-label="Side dock">
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><path d="M11 18H8a2 2 0 0 1-2-2V9"></path></svg>Changes<span class="mono c-3" style="font-size: 11px;">2</span></button>
+<div style="display: flex; align-items: center; height: 28px; border-radius: 5px; background: var(--selected);"><button class="btn btn-sm" style="height: 28px; padding: 0 4px 0 8px; background: transparent; border-color: transparent;" role="tab" aria-selected="true"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg><span class="trunc" style="max-width: 96px;">Checkout</span></button><button class="ib ib-sm" style="width: 20px; height: 20px; margin-right: 4px;" aria-label="Close Checkout tab"><svg class="i i12" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button></div>
+<button class="ib ib-sm" aria-label="Open another panel"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="ib ib-sm" aria-label="Maximize dock"><svg class="i i14" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" x2="14" y1="3" y2="10"></line><line x1="3" x2="10" y1="21" y2="14"></line></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px; flex-shrink: 0;">
+<button class="ib ib-sm" aria-label="Back" style="color: var(--fg-3);"><svg class="i i14" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg></button>
+<button class="ib ib-sm" aria-label="Forward" style="color: var(--fg-3);"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg></button>
+<button class="ib ib-sm" aria-label="Reload" style="color: var(--fg-3);"><svg class="i i14" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg></button>
+<div class="inp mono" style="height: 28px; flex-grow: 1; min-width: 0; margin: 0 4px; font-size: 12px; padding: 0 8px;"><span class="trunc"><span class="c-3">localhost:5173</span>/checkout</span></div>
+<button class="btn btn-sm btn-p"><svg class="i i12" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>Start</button>
+</div>
+<div style="flex-grow: 1; min-height: 0; padding: 12px; border-top: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; gap: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--err-bg);">
+<svg class="i" viewBox="0 0 24 24" style="color: var(--err); margin-top: 1px;"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg>
+<div style="display: flex; flex-direction: column; gap: 6px; min-width: 0; flex-grow: 1;">
+<span style="font-size: 13px; font-weight: 600;">All 5 browser sessions are in use</span>
+<span style="font-size: 13px; line-height: 1.45; color: var(--fg-2);">This server runs up to 5 at once, one per chat workspace. Headless sessions stop on their own after 5 minutes idle; stopping the browser in another chat frees one now.</span>
+<span class="mono" style="font-size: 11px; color: var(--fg-3);">Cannot start browser session: max concurrent (5) reached</span>
+<div style="display: flex; align-items: center; gap: 6px; margin-top: 2px;"><button class="btn btn-sm"><svg class="i i12" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>Retry</button><span style="font-size: 12px; color: var(--fg-3);">Limit: <span class="mono" style="font-size: 11px;">GENERATORAI_BROWSER_MAX_CONCURRENT</span></span></div>
+</div>
+</div>
+</div>
+</div>
+<div style="font-size: 12px; color: var(--fg-3); height: 17px; line-height: 17px;">Page failed to load</div>
+<div style="width: 460px; height: 250px; flex-shrink: 0; position: relative; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;" role="tablist" aria-label="Side dock">
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><path d="M11 18H8a2 2 0 0 1-2-2V9"></path></svg>Changes<span class="mono c-3" style="font-size: 11px;">2</span></button>
+<div style="display: flex; align-items: center; height: 28px; border-radius: 5px; background: var(--selected);"><button class="btn btn-sm" style="height: 28px; padding: 0 4px 0 8px; background: transparent; border-color: transparent;" role="tab" aria-selected="true"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg><span class="trunc" style="max-width: 96px;">localhost:5173</span></button><button class="ib ib-sm" style="width: 20px; height: 20px; margin-right: 4px;" aria-label="Close localhost:5173 tab"><svg class="i i12" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button></div>
+<button class="ib ib-sm" aria-label="Open another panel"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="ib ib-sm" aria-label="Maximize dock"><svg class="i i14" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" x2="14" y1="3" y2="10"></line><line x1="3" x2="10" y1="21" y2="14"></line></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px; flex-shrink: 0;">
+<button class="ib ib-sm" aria-label="Back"><svg class="i i14" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg></button>
+<button class="ib ib-sm" aria-label="Forward" style="color: var(--fg-3);"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg></button>
+<button class="ib ib-sm" aria-label="Reload"><svg class="i i14" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg></button>
+<div class="inp mono" style="height: 28px; flex-grow: 1; min-width: 0; margin: 0 4px; font-size: 12px; padding: 0 8px;"><span class="trunc"><span class="c-3">localhost:5173</span>/checkout</span></div>
+<button class="btn btn-sm" style="background: var(--selected); border-color: transparent;" aria-pressed="true" title="Sharing with the agent — click to stop sharing"><svg class="i i12" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>Sharing</button>
+</div>
+<div style="flex-grow: 1; min-height: 0; padding: 12px; border-top: 1px solid var(--line-soft); background: var(--sunken); display: flex; flex-direction: column;">
+<div style="display: flex; gap: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--err-bg);">
+<svg class="i" viewBox="0 0 24 24" style="color: var(--err); margin-top: 1px;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>
+<div style="display: flex; flex-direction: column; gap: 6px; min-width: 0; flex-grow: 1;">
+<span style="font-size: 13px; font-weight: 600;">This page didn’t load</span>
+<span style="font-size: 13px; line-height: 1.45; color: var(--fg-2);">Nothing is listening on <span class="mono" style="font-size: 12px;">localhost:5173</span>. Start the dev server in Terminal, then retry.</span>
+<span class="mono" style="font-size: 11px; color: var(--fg-3);">net::ERR_CONNECTION_REFUSED</span>
+<div style="display: flex; align-items: center; gap: 6px; margin-top: 2px;"><button class="btn btn-sm"><svg class="i i12" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>Retry</button><button class="btn btn-g btn-sm"><svg class="i i12" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg>Open Terminal</button></div>
+</div>
+</div>
+</div>
+</div>
+<div style="font-size: 12px; color: var(--fg-3); height: 17px; line-height: 17px;">Empty</div>
+<div style="width: 460px; height: 171px; flex-shrink: 0; position: relative; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;" role="tablist" aria-label="Side dock">
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><path d="M11 18H8a2 2 0 0 1-2-2V9"></path></svg>Changes<span class="mono c-3" style="font-size: 11px;">2</span></button>
+<div style="display: flex; align-items: center; height: 28px; border-radius: 5px; background: var(--selected);"><button class="btn btn-sm" style="height: 28px; padding: 0 4px 0 8px; background: transparent; border-color: transparent;" role="tab" aria-selected="true"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg><span class="trunc" style="max-width: 96px;">Browser</span></button><button class="ib ib-sm" style="width: 20px; height: 20px; margin-right: 4px;" aria-label="Close Browser tab"><svg class="i i12" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button></div>
+<button class="ib ib-sm" aria-label="Open another panel"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="ib ib-sm" aria-label="Maximize dock"><svg class="i i14" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" x2="14" y1="3" y2="10"></line><line x1="3" x2="10" y1="21" y2="14"></line></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px; flex-shrink: 0;">
+<button class="ib ib-sm" aria-label="Back" style="color: var(--fg-3);"><svg class="i i14" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg></button>
+<button class="ib ib-sm" aria-label="Forward" style="color: var(--fg-3);"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg></button>
+<button class="ib ib-sm" aria-label="Reload" style="color: var(--fg-3);"><svg class="i i14" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg></button>
+<div class="inp mono" style="height: 28px; flex-grow: 1; min-width: 0; margin: 0 4px; font-size: 12px; padding: 0 8px;"><span class="trunc"><span class="c-3" style="font-family: 'Instrument Sans', sans-serif; font-size: 13px;">Search or enter address</span></span></div>
+<button class="btn btn-sm btn-p"><svg class="i i12" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>Start</button>
+</div>
+<div style="flex-grow: 1; min-height: 0; border-top: 1px solid var(--line-soft); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 0 40px; text-align: center;">
+<svg class="i" viewBox="0 0 24 24" style="color: var(--fg-3);"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>
+<span style="font-size: 13px; font-weight: 600;">No page open</span>
+<span style="font-size: 12px; color: var(--fg-3); line-height: 1.45;">The agent opens pages here, or enter a URL above and press Start.</span>
+</div>
+</div>
+</div>
+<p style="margin: 0; font-size: 12px; line-height: 1.45; color: var(--fg-3);">Pool full: the server-wide session cap (default 5), with the real error and Retry. Load failure: the navigation error with Retry. Empty: Start launches Chromium, or the agent opens a page itself.</p>
+</section>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["dark","light"],"default":"dark","section":"Theme"},"accent":{"editor":"enum","options":["ink","blue","violet","green","orange","rose","teal"],"default":"ink","section":"Theme"},"$preview":{"width":1600,"height":1024}}'>
+class Component extends DCLogic {
+renderVals() {
+const mode = this.props.mode ?? 'dark';
+const accent = this.props.accent ?? 'ink';
+return { rootClass: 't-' + mode + ' acc-' + accent };
+}
+}
+</script>
+</body>
+</html>

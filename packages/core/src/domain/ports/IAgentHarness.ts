@@ -36,13 +36,30 @@ export interface HarnessClientEvent {
   data?: { message?: string };
 }
 
+/**
+ * One model as the PROVIDER reports it for the signed-in account (D-131).
+ *
+ * Every field comes from the provider's own listing call (Claude Agent SDK
+ * `supportedModels()`, Codex `model/list`, Copilot `listModels()`, OpenCode
+ * `/config/providers`, ACP `session/new`) or from limits the provider reported
+ * at runtime. An adapter never fills a field the provider did not return —
+ * no inferred tiers, no assumed context windows.
+ */
 export interface HarnessModel {
   id: string;
   name: string;
   provider?: string;
-  /** Provider-supplied blurb describing the model's strengths. */
+  /** The provider's own blurb. */
   description?: string;
-  /** Capability grouping for the model picker: 'lightweight' | 'versatile' | 'powerful'. */
+  /** The provider marks this model as the account's default (Codex `isDefault`, Claude's `default` alias target). */
+  isDefault?: boolean;
+  /** Canonical wire id an alias resolves to (Claude: `opus` → `claude-opus-5-5`). */
+  resolvedModel?: string;
+  /** Input kinds the model accepts, as the provider names them (Codex `inputModalities`). */
+  inputModalities?: string[];
+  /** Provider-reported capability flags, named for display ("Fast mode", "Adaptive thinking"). */
+  features?: string[];
+  /** The provider's own picker category label, when it sends one (Copilot `modelPickerCategory`). */
   category?: string;
   /**
    * Maximum PROMPT tokens for the default tier — the number the context gauge
@@ -97,6 +114,12 @@ export interface HarnessModel {
 export interface ConversationResponse {
   content: string;
   toolCalls?: { tool: string; args: unknown; result: unknown }[];
+  /**
+   * RV-9 — the turn's structured output, when the turn asked for one with
+   * `SendPromptOptions.outputSchema` and the provider produces it natively
+   * (claude-agent `structured_output`, Codex's schema-constrained final message).
+   */
+  structuredOutput?: unknown;
 }
 
 export interface ConversationMessage {
@@ -156,7 +179,14 @@ export interface ConversationWarning {
      * the copy is "its tools are unavailable", not "this provider ignores it".
      * `params.server` names it; `params.status` / `params.reason` say why.
      */
-    | 'MCP_SERVER_FAILED';
+    | 'MCP_SERVER_FAILED'
+    /**
+     * The provider could not carry the conversation into its rebound session
+     * (e.g. its working directory moved and the provider's sessions cannot
+     * move with it): the session is new and remembers nothing of the chat.
+     * The caller hands it the transcript once.
+     */
+    | 'CONVERSATION_RESTARTED';
   params: Record<string, string | number>;
 }
 
@@ -243,6 +273,22 @@ export interface SendPromptOptions {
    * mode derived from `agentMode` and over the stored conversation default.
    */
   permissionMode?: HarnessPermissionMode;
+  /**
+   * RV-9 — constrain THIS turn's final answer to a JSON Schema, for a
+   * provider whose `capabilities().structuredOutput` is `native`
+   * (claude-agent `outputFormat`, Codex `turn/start.outputSchema`). The
+   * workflow engine sends it on a stage's final prompt turn only: on Claude
+   * the format is session-scoped. The value comes back as
+   * `ConversationResponse.structuredOutput`. Other providers ignore it.
+   */
+  outputSchema?: Record<string, unknown>;
+  /**
+   * P07 WP-7.2 — the caller already holds this turn's `provider:<id>` flow
+   * key (a workflow stage attempt, admitted by the AdmissionController for
+   * its whole attempt): the provider takes no per-turn execution permit of
+   * its own, so the one limit is not counted twice.
+   */
+  admitted?: boolean;
 }
 
 /** What the adapter hands the host when the agent finishes planning. */
@@ -263,7 +309,7 @@ export interface PlanReviewRequest {
 export interface PlanReviewDecision {
   approved: boolean;
   action?: PlanAction;
-  /** Free-form “request changes” text handed back to the model. */
+  /** Review text handed back to the model: the requested changes, or the notes given with an approval. */
   feedback?: string;
   /** User-edited plan content, when the user edited before approving. */
   editedContent?: string;
@@ -329,11 +375,22 @@ export function takeToolBinaries(result: unknown): { text: unknown; binaries: To
   return { text: rest, binaries: raw as ToolBinaryAttachment[] };
 }
 
+/**
+ * What a provider knows about one tool call (P06 WP-6.1), passed as the
+ * handler's second argument. `toolCallId` is the provider's own id for the
+ * call (Claude's tool_use id, Copilot's toolCallId, Codex's callId) when it
+ * gives one: a replayed call carries the same id, so handlers that start
+ * work key their idempotency on it.
+ */
+export interface ToolCallContext {
+  toolCallId?: string;
+}
+
 export interface ToolDefinition {
   name: string;
   description: string;
   parametersSchema: Record<string, unknown>;
-  handler: (args: Record<string, unknown>) => Promise<unknown>;
+  handler: (args: Record<string, unknown>, ctx?: ToolCallContext) => Promise<unknown>;
   /**
    * TOL-02 — if true, the harness skips its permission prompt for this
    * tool (use for inherently safe tools). Copilot SDK honours this
@@ -341,6 +398,11 @@ export interface ToolDefinition {
    * should still skip the domain-side gate (`evaluateToolPermissions`).
    */
   skipPermission?: boolean;
+  /**
+   * The tool's own run budget (ms) when it legitimately blocks longer than the provider's per-tool default
+   * (`GENERATORAI_TOOL_TIMEOUT_MS`, 120 s) — e.g. waiting for background workers. Omitted: the default.
+   */
+  timeoutMs?: number;
   /**
    * TOL-02 — declarative list of permissions the tool may exercise.
    * Evaluated by the domain `PermissionPolicy` before execution; also
@@ -449,6 +511,13 @@ export interface CreateConversationParams {
    * way to turn skills on there; Copilot derives `disabledSkills` from it.
    */
   skills?: string[];
+  /**
+   * Local plugin roots (claude-agent `Options.plugins`). The composer stages a
+   * session's skills into one plugin root for providers whose skills level is
+   * `plugin` (RV-7): no SDK option takes skill directories, and loading them
+   * as a project setting source would also load the repository's hooks.
+   */
+  plugins?: Array<{ type: 'local'; path: string }>;
   /**
    * Tool names hidden from the DEFAULT agent while staying available to
    * sub-agents that name them. Copilot `defaultAgent.excludedTools`.
@@ -563,6 +632,21 @@ export interface IHarnessClientLifecycle {
    * other does not). Optional: single-provider adapters need not implement it.
    */
   capabilitiesFor?(conversationId: string): ProviderCapabilities;
+  /**
+   * The provider id that WOULD run a conversation with these params (an
+   * existing conversation's owner, an explicit `harnessType`, or the model's
+   * catalog owner), without creating anything. `undefined` when it cannot be
+   * told. The session composer plans capability levels with it.
+   */
+  resolveProvider?(params: { conversationId?: string; harnessType?: string; model?: string }): Promise<string | undefined>;
+  /**
+   * Give back the provider turn permit the turn in flight holds while one of
+   * its tools blocks on other work (a workflow tool waiting for a run that
+   * needs the same provider, ECON-R7). The returned function takes a permit
+   * again (it may wait). `undefined` when the turn holds none (an admitted
+   * workflow stage turn, or no gate).
+   */
+  yieldTurnPermit?(conversationId: string): (() => Promise<void>) | undefined;
 }
 
 /** Model discovery. */
@@ -685,6 +769,15 @@ export interface IHarnessConversationLifecycle {
    * callers must treat the move as a cold start rather than assume continuity.
    */
   getProviderSessionId?(conversationId: string): string | undefined;
+  /**
+   * The provider that actually runs `conversationId` — the router's answer,
+   * which may differ from the configured `harnessType` (unset, or picked by
+   * model). Callers that record which harness produced something (plans) read
+   * this instead of guessing. Optional: a single-provider harness may omit it.
+   * `'faux'` is the registry-only synthetic provider of isolated test servers
+   * (GENERATORAI_TEST_FAUX_HARNESS, agent-harness-providers `HarnessType`).
+   */
+  conversationHarness?(conversationId: string): HarnessType | 'faux' | undefined;
   /**
    * Branch `conversationId` into a NEW conversation whose provider-side
    * history is a copy of the source through `throughAnchor`. OPTIONAL —

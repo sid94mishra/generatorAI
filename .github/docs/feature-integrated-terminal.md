@@ -314,7 +314,7 @@ There is no `generatorai terminal …` CLI command. The terminal is a graphical 
 - **REST**: [apps/server/src/routes/terminals.ts](../../apps/server/src/routes/terminals.ts)
 - **WS**: [apps/server/src/terminal-ws.ts](../../apps/server/src/terminal-ws.ts)
 - **SPA panel**: [apps/web/src/components/terminal/TerminalPanel.tsx](../../apps/web/src/components/terminal/TerminalPanel.tsx)
-- **Right-pane wiring**: `terminal` tab kind in [apps/web/src/pages/ChatPage.tsx](../../apps/web/src/pages/ChatPage.tsx) + [apps/web/src/pages/WorkflowRunPageV2.tsx](../../apps/web/src/pages/WorkflowRunPageV2.tsx)
+- **Right-pane wiring**: `terminal` tab kind in [apps/web/src/pages/ChatPage.tsx](../../apps/web/src/pages/ChatPage.tsx) + [apps/web/src/pages/WorkflowRunPage.tsx](../../apps/web/src/pages/WorkflowRunPage.tsx)
 - **Composition root wiring**: [apps/server/src/composition-root.ts](../../apps/server/src/composition-root.ts) (search for `terminalService`)
 - **Smoke tests**: `agent-tests/terminal-ws-smoke.mjs`, `agent-tests/terminal-desktop-smoke.mjs`
 - **Phase 2 plan**: tracked internally; not part of the published docs.

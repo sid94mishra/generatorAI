@@ -1,0 +1,27 @@
+appId: ${APP_ID}
+---
+- launchApp: {stopApp: true}
+- runFlow:
+    when:
+      true: ${BUILD == 'dev'}
+    commands:
+      - runFlow:
+          when: {platform: Android}
+          commands:
+            - openLink: exp+generatorai://expo-development-client/?url=${METRO_URL}&disableFab=1&disableOnboarding=1&disableAutoLaunch=1
+      # sandbox-pair established this recent server. Opening a second URL
+      # while Expo auto-loads can tear down its native AppContext on iOS.
+      - runFlow:
+          when: {platform: iOS, visible: Development Build}
+          commands:
+            - tapOn: ".*http://127.0.0.1:8081.*"
+# Expo may restore the preceding product link across a native relaunch. A dev build re-fetches its bundle on every
+# cold launch, which takes over a minute on a loaded machine.
+- extendedWaitUntil:
+    visible: "Open sidebar|Back.*"
+    timeout: 120000
+- openLink: generatorai:///
+# Home is up when its New chat action is (the sidebar toggle has no testID on iOS, MD-133).
+- extendedWaitUntil:
+    visible: {id: home-new-chat}
+    timeout: 120000

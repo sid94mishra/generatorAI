@@ -11,7 +11,8 @@ import type { Scope } from './scopes.js';
 
 // ── Devices ──────────────────────────────────────────────────────
 
-export type DevicePlatform = 'web' | 'desktop' | 'cli' | 'mobile' | 'other';
+/** `mcp`: an MCP server in remote mode, paired as a device (PD-22). */
+export type DevicePlatform = 'web' | 'desktop' | 'cli' | 'mobile' | 'mcp' | 'other';
 export type DeviceConnectionMode = 'loopback' | 'lan' | 'ssh' | 'relay' | 'auto';
 
 export interface DeviceRecord {
@@ -35,6 +36,10 @@ export interface DeviceRecord {
   previousCredentialGraceUntil: number | null;
   connectionMode: DeviceConnectionMode;
   relayBinding: string | null;
+  /** MG-05 — the biometric-gated approval key (canonical P-256 JWK JSON); null until registered. */
+  approvalPublicJwk?: string | null;
+  approvalKeyCreatedAt?: number | null;
+  approvalKeyPresence?: 'biometry' | 'passcode' | null;
 }
 
 export interface DeviceCredentialRecord {
@@ -160,7 +165,8 @@ export interface IReplayStore {
 }
 
 export interface INonceStore {
-  issue(expiresAt: number): Promise<string>;
+  /** `prefix` binds a nonce to a purpose/holder (approval nonces: `appr.<deviceId>.`). */
+  issue(expiresAt: number, prefix?: string): Promise<string>;
   /** Consumes a nonce. Returns false when unknown or expired. */
   verify(nonce: string, now: number): Promise<boolean>;
   purge(before: number): Promise<number>;

@@ -1,0 +1,30 @@
+appId: ${APP_ID}
+name: terminal · open and type
+tags: [characterization, full]
+env: {FRESH_CHAT: stream, DEVICE_SCOPES: "exec:terminal"}
+# MD-103: New terminal has no allowed M1 testID.
+# xterm text exposure is checked during native verification (08 §5.5).
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///chats/${CHAT_STREAM_ID}
+- extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- runFlow: ../_subflows/pane-closed.yaml
+- runFlow: ../_subflows/open-pane.yaml
+- tapOn: {id: pane-tab-terminal}
+- extendedWaitUntil: {visible: New terminal, timeout: 30000}
+- tapOn: New terminal
+- extendedWaitUntil: {visible: {id: terminal-view}, timeout: 30000}
+- tapOn: {id: terminal-view}
+# xterm's rows are not in the accessibility tree, so the output is checked through Find in scrollback: the shell
+# prints 42gai, which the typed command line does not contain (a dropped key would change both).
+- inputText: echo $((6*7))gai-characterization-ok
+- pressKey: Enter
+- tapOn: {id: terminal-find}
+- inputText: 42gai-characterization-ok
+- waitForAnimationToEnd
+- assertNotVisible: {id: terminal-find-status}
+- eraseText: 30
+- inputText: 42gai-not-printed
+- extendedWaitUntil: {visible: {id: terminal-find-status}, timeout: 10000}
+- tapOn: "Close find"
+- tapOn: {id: terminal-key-esc}

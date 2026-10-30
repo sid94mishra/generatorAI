@@ -162,3 +162,31 @@ describe('resolveTarget', () => {
     expect(resolveTarget(DEFAULT_CONNECTION_STATE, null)).toBeNull();
   });
 });
+
+// ── G-4 (D-126): a pinned CA per server ──
+import { readFileSync as readFixture } from 'node:fs';
+import { join as joinPath } from 'node:path';
+import { PinMismatchError } from '../serverConnections';
+import { pinForCa } from '../pinnedTrust';
+
+describe('pinned CA per connection', () => {
+  const pinA = pinForCa(readFixture(joinPath(__dirname, 'fixtures', 'pinned', 'ca-a.crt'), 'utf8'), 1);
+  const pinB = pinForCa(readFixture(joinPath(__dirname, 'fixtures', 'pinned', 'ca-b.crt'), 'utf8'), 1);
+
+  it('keeps a well-formed pin and drops a malformed one', () => {
+    const state = sanitizeConnectionState({
+      connections: [
+        { id: 'a', url: 'https://192.168.1.20:3100', pinnedCa: pinA },
+        { id: 'b', url: 'https://192.168.1.21:3100', pinnedCa: { sha256: 'short', pem: 'x' } },
+      ],
+    });
+    expect(state.connections[0]?.pinnedCa?.sha256).toBe(pinA.sha256);
+    expect(state.connections[1]?.pinnedCa).toBeUndefined();
+  });
+
+  it('never swaps the CA of a saved server', () => {
+    const { state } = addConnection(DEFAULT_CONNECTION_STATE, { url: 'https://192.168.1.20:3100', pinnedCa: pinA });
+    expect(() => addConnection(state, { url: 'https://192.168.1.20:3100', pinnedCa: pinB })).toThrow(PinMismatchError);
+    expect(addConnection(state, { url: 'https://192.168.1.20:3100', pinnedCa: pinA }).connection.pinnedCa?.sha256).toBe(pinA.sha256);
+  });
+});

@@ -5,7 +5,8 @@
 // approve a gate. This file covers what an operator needs: create and mutate
 // definitions, drive runs, manage projects and codebases, and reach the
 // feature areas (extensions, widgets, browser, computer use, webhooks,
-// hooks, scripts, orchestrator) that no client previously exposed.
+// hooks, scripts) that no client previously exposed. A run starts through
+// ONE method, `workflows.invoke` (P04).
 //
 // It lives in client-core rather than in the CLI because the CLI is the
 // third client to need most of it, and the first two each grew their own
@@ -17,15 +18,28 @@
 // ────────────────────────────────────────────────────────────────
 
 import type {
+  ComputerConsentAnswer,
+  ComputerConsentAnswerResult,
+  ComputerControlMode,
+  ComputerControlState,
+  ComputerGrant,
+  ComputerPendingConsent,
+} from '@generatorai/shared';
+import type {
   Agent,
+  AgentImportPreview,
+  AgentImportPreviewRequest,
+  AudioModelStatus,
+  AudioSettingsUpdate,
+  AudioSettingsView,
+  McpServerBody,
+  SystemMcpPrefsBody,
   AgentOverrides,
   Automation,
   AutomationExecution,
   AutomationExecutionWithRuns,
   CreateAgentParams,
   CreateAutomationParams,
-  CreateEdgeParams,
-  CreateStageParams,
   HookDefinition,
   HookFailurePolicy,
   HookType,
@@ -33,16 +47,35 @@ import type {
   Project,
   ProjectCodebase,
   ProjectConfig,
-  StageDefinition,
-  StageEdge,
   StageRun,
+  LoopIteration,
+  PendingDecisionView,
   TerminalSessionDescriptor,
   UpdateAgentParams,
   UpdateAutomationParams,
-  WorkflowDefinition,
   WorktreeDetail,
   WorktreeInfo,
 } from '@generatorai/shared';
+import type {
+  AuthoringPlan,
+  AuthoringSkillIndex,
+  AuthoringValidation,
+  WorkflowSchemaInfo,
+  WorkflowToolAdvert,
+  WorkflowDefinitionRecord,
+  WorkflowDefinitionSummary,
+  WorkflowDefinitionVersionRecord,
+  WorkflowDefinitionVersionSummary,
+  WorkflowGraph,
+  WorkflowGraphInput,
+  RunProfile,
+  WorkflowTemplate,
+  InvocationPlan,
+  InvocationRequest,
+  InvocationResult,
+  RunCommand,
+  RunDigest,
+} from '@generatorai/workflow-spec';
 import {
   json,
   jsonWith,
@@ -50,33 +83,44 @@ import {
   request,
   requestAllowing,
   requestText,
+  runListQuery,
+  type RunListParams,
   type ApiFetch,
   type DeviceScopeRequest,
 } from './client.js';
 
-/**
- * One finding from `definitions.validate`, carrying the graph element it is
- * about — mirrors `DAGValidationIssue` in `@generatorai/core`'s DAG domain
- * (`packages/core/src/domain/dag/types.ts`), redeclared here rather than
- * imported because `client-core` must not depend on the server-side core
- * package. Optional on the wire: an older server sends only the flat
- * `errors`/`warnings` strings.
- */
-export interface WorkflowValidationIssue {
-  severity: 'error' | 'warning';
-  code: string;
-  message: string;
-  stageIds: string[];
-  edge?: { fromStageId: string; toStageId: string; edgeType?: string };
-  field?: string;
+/** Upload categories of a run start. */
+/** `POST …/browser/input` (the server's `BrowserInputEvent`); coordinates are in page space. */
+export type BrowserInputEvent =
+  | { type: 'mouse.move'; x: number; y: number }
+  | { type: 'mouse.click'; x: number; y: number; button?: 'left' | 'right' | 'middle'; clickCount?: number }
+  | { type: 'mouse.wheel'; x?: number; y?: number; deltaX: number; deltaY: number }
+  | { type: 'key.press'; key: string; modifiers?: readonly ('Alt' | 'Control' | 'Meta' | 'Shift')[] }
+  | { type: 'key.type'; text: string };
+
+export type InvocationUploadCategory = 'skills' | 'agents' | 'prompts';
+
+/** Files a run start uploads before invoking, by category. */
+export type InvocationUploadFiles = Partial<Record<InvocationUploadCategory, Array<{ name: string; data: Uint8Array; mimeType?: string }>>>;
+
+/** A page of `GET /workflow-definitions`. */
+export interface DefinitionPage {
+  items: WorkflowDefinitionSummary[];
+  nextCursor?: string;
 }
 
-export interface WorkflowValidationResult {
-  valid: boolean;
-  errors?: string[];
-  warnings?: string[];
-  issues?: WorkflowValidationIssue[];
+/** `GET /workflow-definitions` filters. `projectId: 'global'` lists definitions without a project. */
+export interface DefinitionListParams {
+  projectId?: string;
+  status?: 'draft' | 'published';
+  q?: string;
+  cursor?: string;
+  limit?: number;
+  includeArchived?: boolean;
 }
+
+/** `DELETE /workflow-definitions/:id`: deleted, or archived because runs pin it. */
+export type DefinitionDeleteOutcome = { deleted: true } | { archived: true; runs: number };
 
 /** A workflow run as the run routes serialise it. */
 export interface RunSummary {
@@ -151,12 +195,23 @@ export interface FileEntryRecord {
   modifiedAt?: string | number;
 }
 
+/** A loaded workflow script (`GET /api/workflow-scripts`). */
 export interface ScriptSummary {
   id: string;
   name: string;
   description?: string;
-  path?: string;
-  profiles?: string[];
+  filePath: string;
+  lastModified: string;
+  variables: Array<{ name: string; type: string; label: string; required: boolean }>;
+  stageCount: number;
+  profileCount: number;
+  tags: string[];
+}
+
+/** `GET /api/workflow-scripts/:id`: the metadata and the graph the script builds. */
+export interface ScriptDetail {
+  metadata: ScriptSummary;
+  graph: WorkflowGraph;
 }
 
 export interface ExtensionSummary {
@@ -183,22 +238,6 @@ export interface HookPhaseInfo {
   description?: string;
 }
 
-/**
- * `GET /hooks/sessions/:id/hooks` — grouped by where the hook is defined, not
- * a flat list. A workflow's entry is keyed by hook id and holds only the
- * fields that workflow OVERRIDES (`hookOverrides` is `Record<string,
- * Partial<HookDefinition>>`); the base definition lives in `globalHooks`.
- */
-export interface SessionHooks {
-  sessionId: string;
-  workflowHooks: Array<{
-    workflowId: string;
-    workflowName: string;
-    hooks: Record<string, Partial<HookDefinition>>;
-  }>;
-  globalHooks: HookDefinition[];
-}
-
 export interface DeviceRecord {
   deviceId: string;
   name: string;
@@ -223,137 +262,154 @@ export interface DeviceRecord {
  * Grouped by server route module so a reader can hold one file open beside
  * one namespace and check them off.
  */
+/** `GET /api/fs/dirs?path=` (MG-22). An empty path lists `roots` (home + drives). */
+export interface FsDirListing {
+  path: string;
+  parent: string | null;
+  entries: { name: string; path: string; isGit: boolean }[];
+  roots?: string[];
+  /** Empty-path listing only: the server user's home and the common folders under it that exist. */
+  home?: string;
+  places?: { name: string; path: string }[];
+  isGit?: boolean;
+}
+
+/** `GET /api/fs/git-info?path=` (MG-22). */
+export interface FsGitInfo {
+  path: string;
+  isRepo: boolean;
+  currentBranch: string | null;
+  branches: string[];
+  dirty: boolean;
+  nestedRepos: string[];
+}
+
 export function createAdminApi(fetchImpl: ApiFetch) {
   const req = <T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init);
   const reqText = (path: string, init?: RequestInit) => requestText(fetchImpl, path, init);
 
   return {
     // ── workflowDefinitions.ts ──────────────────────────────────
+    // Definitions are whole v2 documents (P01 WP-1.7): read a graph, save the
+    // whole graph back with the revision you edited (409 on a stale one).
     definitions: {
-      list: (projectId?: string) =>
-        req<WorkflowDefinition[]>(`/api/workflow-definitions${qs({ projectId })}`),
-
-      get: (id: string) =>
-        req<WorkflowDefinition & { stages: StageDefinition[]; edges: StageEdge[] }>(
-          `/api/workflow-definitions/${id}`,
+      list: (params?: DefinitionListParams) =>
+        req<DefinitionPage>(
+          `/api/workflow-definitions${qs({
+            ...params,
+            limit: params?.limit !== undefined ? String(params.limit) : undefined,
+            includeArchived: params?.includeArchived ? 'true' : undefined,
+          })}`,
         ),
 
-      create: (body: Record<string, unknown>) =>
-        req<WorkflowDefinition>('/api/workflow-definitions', json(body)),
+      get: (id: string) => req<WorkflowDefinitionRecord>(`/api/workflow-definitions/${id}`),
 
-      update: (id: string, body: Record<string, unknown>) =>
-        req<WorkflowDefinition>(`/api/workflow-definitions/${id}`, jsonWith('PATCH', body)),
+      /** A new draft from a graph. */
+      create: (graph: WorkflowGraphInput) => req<WorkflowDefinitionRecord>('/api/workflow-definitions', json(graph)),
 
-      /**
-       * 409 when runs still reference the definition, unless `force` — which
-       * deletes those runs too.
-       */
-      remove: (id: string, force?: boolean) =>
-        req<void>(`/api/workflow-definitions/${id}${qs({ force: force ? 'true' : undefined })}`, {
-          method: 'DELETE',
-        }),
+      /** Replace the whole graph. A stale `expectedRevision` is a 409 whose body carries the current record. */
+      saveGraph: (id: string, graph: WorkflowGraphInput, expectedRevision: number) =>
+        req<WorkflowDefinitionRecord>(`/api/workflow-definitions/${id}/graph`, jsonWith('PUT', { graph, expectedRevision })),
 
-      // 422 is this route's way of saying "not valid", with the findings in
-      // the body — not a transport failure. Plain `request` threw it away
-      // (see `requestAllowing`'s doc comment), so an invalid definition
-      // surfaced as "422 Unprocessable Entity" with no errors at all.
-      validate: (id: string) =>
-        requestAllowing<WorkflowValidationResult>(
-          fetchImpl,
-          `/api/workflow-definitions/${id}/validate`,
-          [422],
-          json({}),
+      publish: (id: string) => req<WorkflowDefinitionRecord>(`/api/workflow-definitions/${id}/publish`, json({})),
+
+      versions: (id: string) => req<WorkflowDefinitionVersionSummary[]>(`/api/workflow-definitions/${id}/versions`),
+
+      version: (id: string, versionId: string) =>
+        req<WorkflowDefinitionVersionRecord>(`/api/workflow-definitions/${id}/versions/${versionId}`),
+
+      /** Stateless validation of a document: the spec's rules plus the server's (agents, models, capabilities, commands). */
+      validate: (graph: unknown) => req<AuthoringValidation>('/api/workflow-definitions/validate', json(graph)),
+
+      /** What a run of a graph (unsaved) or a saved definition would do; nothing is written (P06). */
+      plan: (body: {
+        graph?: unknown;
+        workflowId?: string;
+        variables?: Record<string, unknown>;
+        stageOverrides?: unknown[];
+        codebases?: Array<{ alias: string; baseRef?: string; mode?: 'worktree' | 'in_place' }>;
+        projectId?: string;
+      }) =>
+        req<AuthoringPlan>('/api/workflow-definitions/plan', json(body)),
+
+      /** The workflow JSON Schema and its hash (a skill compares its `schemaHash`). */
+      schema: () => req<WorkflowSchemaInfo>('/api/workflow-definitions/schema'),
+
+      /** The generated authoring skill bundle: its files, and one file's text. */
+      skill: () => req<AuthoringSkillIndex>('/api/workflow-definitions/authoring/skill'),
+      skillFile: (path: string) => reqText(`/api/workflow-definitions/authoring/skill/file${qs({ path })}`),
+
+      /** Import a canonical document; `publish` (people only) publishes it at once. */
+      import: (graph: unknown, opts: { publish?: boolean } = {}) =>
+        req<WorkflowDefinitionRecord>(
+          `/api/workflow-definitions/import${qs({ publish: opts.publish ? 'true' : undefined })}`,
+          json(graph),
         ),
 
-      /** Instantiate a system template by id. */
-      importTemplate: (templateId: string, name?: string) =>
-        req<WorkflowDefinition>(
-          '/api/workflow-definitions/import',
-          json({ templateId, ...(name ? { name } : {}) }),
+      /** Instantiate a template by id. */
+      importTemplate: (templateId: string, opts: { name?: string; projectId?: string; publish?: boolean } = {}) =>
+        req<WorkflowDefinitionRecord>(
+          `/api/workflow-definitions/import${qs({ publish: opts.publish ? 'true' : undefined })}`,
+          json({ templateId, ...(opts.name ? { name: opts.name } : {}), ...(opts.projectId ? { projectId: opts.projectId } : {}) }),
         ),
 
-      importJson: (body: unknown) =>
-        req<WorkflowDefinition & { stages: StageDefinition[] }>(
-          '/api/workflow-definitions/import-json',
-          json(body),
-        ),
+      /** The canonical document text (`import(export(g))` gives back `g`). */
+      export: (id: string) => reqText(`/api/workflow-definitions/${id}/export`),
 
-      export: (id: string) =>
-        req<Record<string, unknown>>(`/api/workflow-definitions/${id}/export`),
-
-      addStage: (id: string, body: Omit<CreateStageParams, 'workflowDefinitionId'>) =>
-        req<StageDefinition>(`/api/workflow-definitions/${id}/stages`, json(body)),
-
-      // Same schema as `addStage`, partial — `Record<string, unknown>` here
-      // let every call site send client-shaped field names (`prompt`,
-      // `timeoutSeconds`, `maxRetries`) that the route's schema silently
-      // dropped instead of a type error at the call site.
-      updateStage: (id: string, stageId: string, body: Partial<Omit<CreateStageParams, 'workflowDefinitionId'>>) =>
-        req<StageDefinition>(
-          `/api/workflow-definitions/${id}/stages/${stageId}`,
-          jsonWith('PUT', body),
-        ),
-
-      deleteStage: (id: string, stageId: string) =>
-        req<void>(`/api/workflow-definitions/${id}/stages/${stageId}`, { method: 'DELETE' }),
-
-      addEdge: (id: string, body: Omit<CreateEdgeParams, 'workflowDefinitionId'>) =>
-        req<StageEdge>(`/api/workflow-definitions/${id}/edges`, json(body)),
-
-      deleteEdge: (id: string, edgeId: string) =>
-        req<void>(`/api/workflow-definitions/${id}/edges/${edgeId}`, { method: 'DELETE' }),
+      /** Hard delete when nothing ran it; otherwise the definition is archived. */
+      remove: (id: string) => req<DefinitionDeleteOutcome>(`/api/workflow-definitions/${id}`, { method: 'DELETE' }),
     },
 
     // ── workflowRuns.ts ─────────────────────────────────────────
     runs: {
-      list: (params?: { definitionId?: string; status?: string; limit?: number }) =>
-        req<RunSummary[]>(`/api/workflow-runs${qs({ ...params })}`),
+      list: (params?: RunListParams) =>
+        req<RunSummary[]>(`/api/workflow-runs${runListQuery(params)}`),
 
-      get: (id: string) => req<RunSummary>(`/api/workflow-runs/${id}`),
+      /** The run with its stage runs (instances). */
+      get: (id: string) => req<RunSummary & { stageRuns: StageRun[] }>(`/api/workflow-runs/${id}`),
 
       /**
-       * Creates a run in `pending`. It does NOT begin executing — the server
-       * models creation and start as two steps so variables can be validated
-       * and a profile applied before any stage is scheduled. Callers that
-       * want "run it now" must follow with `start`.
+       * Every operator action on a run or one of its instances (P03 commands
+       * API): pause, resume, cancel, retry, skip, fail, approve. The server
+       * answers 202; a refused command throws its 409/400/404.
        */
-      create: (body: Record<string, unknown>) =>
-        req<RunSummary>('/api/workflow-runs', json(body)),
+      command: (id: string, body: RunCommand) =>
+        req<{ runId: string; command: string }>(`/api/workflow-runs/${id}/commands`, json(body)),
+      /** The run's workspace: the managed root, artifacts, uploads and every mount with its files. */
+      workspace: (id: string) => req<Record<string, unknown>>(`/api/workflow-runs/${id}/workspace`),
+      workspaceContent: (id: string, path: string, source?: string, worktreeAlias?: string) =>
+        req<{ path: string; content: string | null; truncated: boolean; size: number }>(
+          `/api/workflow-runs/${id}/workspace/content${qs({ path, source, worktreeAlias })}`,
+        ),
+      /** Each mount's change set. */
+      workspaceDiff: (id: string) =>
+        req<{ hasGit: boolean; repos: Array<{ alias: string; files: Array<{ path: string; status: string; diff?: string }> }> }>(
+          `/api/workflow-runs/${id}/workspace/diff`,
+        ),
 
-      start: (id: string) => req<RunSummary>(`/api/workflow-runs/${id}/start`, json({})),
-      pause: (id: string) => req<RunSummary>(`/api/workflow-runs/${id}/pause`, json({})),
-      resume: (id: string) => req<RunSummary>(`/api/workflow-runs/${id}/resume`, json({})),
-      retry: (id: string) => req<RunSummary>(`/api/workflow-runs/${id}/retry`, json({})),
-      cancel: (id: string) => req<RunSummary>(`/api/workflow-runs/${id}/cancel`, json({})),
       remove: (id: string) => req<void>(`/api/workflow-runs/${id}`, { method: 'DELETE' }),
 
       stages: (id: string) => req<StageRun[]>(`/api/workflow-runs/${id}/stages`),
-      scratchpad: (id: string) =>
-        req<Record<string, unknown>>(`/api/workflow-runs/${id}/scratchpad`),
-
-      stage: {
-        pause: (runId: string, stageId: string) =>
-          req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/pause`, json({})),
-        resume: (runId: string, stageId: string) =>
-          req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/resume`, json({})),
-        /** Wake a `sleeping` stage early. 409 when it is not parked. */
-        wake: (runId: string, stageId: string) =>
-          req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/wake`, json({})),
-        retry: (runId: string, stageId: string) =>
-          req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/retry`, json({})),
-        cancel: (runId: string, stageId: string) =>
-          req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/cancel`, json({})),
-        interrupt: (runId: string, stageId: string, body: Record<string, unknown>) =>
-          req<Record<string, unknown>>(
-            `/api/workflow-runs/${runId}/stages/${stageId}/interrupt`,
-            json(body),
-          ),
-        approve: (runId: string, stageId: string, body: Record<string, unknown>) =>
-          req<Record<string, unknown>>(
-            `/api/workflow-runs/${runId}/stages/${stageId}/approve`,
-            json(body),
-          ),
-      },
+      /** A loop instance's finished iterations, oldest first (P05). */
+      iterations: (id: string, instanceId: string) =>
+        req<LoopIteration[]>(`/api/workflow-runs/${id}/instances/${encodeURIComponent(instanceId)}/iterations`),
+      /**
+       * Every decision the run waits on (completion reviews, gates, parked
+       * loops, approval and event waits), its sub-workflow children's
+       * mirrored with the chain they came through (P05). Answer them with
+       * THIS run's `command` (an approval reaches the owning child).
+       */
+      pendingDecisions: (id: string) => req<PendingDecisionView[]>(`/api/workflow-runs/${id}/pending-decisions`),
+      /**
+       * Deliver an external event to the run (P05 §4.3): the oldest waiting
+       * event wait with the key takes it. A replay (same key and data) answers
+       * `{replayed: true}`; the same key with other data is refused (409).
+       */
+      deliverEvent: (id: string, e: { eventKey: string; idempotencyKey: string; data?: unknown }) =>
+        req<{ runId: string; command: string; replayed?: boolean }>(
+          `/api/workflow-runs/${id}/commands`,
+          json({ command: 'deliver_event', eventKey: e.eventKey, idempotencyKey: e.idempotencyKey, ...(e.data !== undefined ? { data: e.data } : {}) }),
+        ),
 
       permissionMode: {
         get: (id: string) =>
@@ -365,9 +421,6 @@ export function createAdminApi(fetchImpl: ApiFetch) {
             jsonWith('PATCH', { mode }),
           ),
       },
-
-      pendingInterrupts: (id: string) =>
-        req<Array<Record<string, unknown>>>(`/api/workflow-runs/${id}/pending-interrupts`),
     },
 
     // ── automations.ts ──────────────────────────────────────────
@@ -382,8 +435,6 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       disable: (id: string) => req<Automation>(`/api/automations/${id}/disable`, json({})),
       rotateWebhookToken: (id: string) =>
         req<{ token: string }>(`/api/automations/${id}/rotate-webhook-token`, json({})),
-      testDataSource: (config: Record<string, unknown>) =>
-        req<Record<string, unknown>>('/api/automations/test-data-source', json(config)),
       executions: (id: string) =>
         req<AutomationExecution[]>(`/api/automations/${id}/executions`),
       /**
@@ -453,6 +504,10 @@ export function createAdminApi(fetchImpl: ApiFetch) {
         ),
 
       codebases: {
+        removeWorktree: (projectId: string, cid: string, worktreeId: string) =>
+          req<void>(`/api/projects/${encodeURIComponent(projectId)}/codebases/${encodeURIComponent(cid)}/worktrees/${encodeURIComponent(worktreeId)}`, { method: 'DELETE' }),
+        cleanupWorktrees: (projectId: string, cid: string) =>
+          req<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/codebases/${encodeURIComponent(cid)}/worktrees/cleanup`, json({})),
         list: (projectId: string) =>
           req<ProjectCodebase[]>(`/api/projects/${projectId}/codebases`),
         link: (projectId: string, body: Record<string, unknown>) =>
@@ -486,6 +541,8 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       },
 
       configs: {
+        content: (projectId: string, cid: string) =>
+          req<{ content: string }>(`/api/projects/${encodeURIComponent(projectId)}/configs/${encodeURIComponent(cid)}`),
         list: (projectId: string, type?: string) =>
           req<ProjectConfig[]>(`/api/projects/${projectId}/configs${qs({ type })}`),
         get: (projectId: string, cid: string) =>
@@ -694,6 +751,13 @@ export function createAdminApi(fetchImpl: ApiFetch) {
         req<void>(`/api/workspaces/${workspaceId}/browser/detach`, json({})),
       resize: (workspaceId: string, width: number, height: number) =>
         req<void>(`/api/workspaces/${workspaceId}/browser/resize`, json({ width, height })),
+      /**
+       * One pointer / keyboard event in PAGE coordinates (`POST …/browser/input`). With the inspector on
+       * (`actions {kind:'inspector', on:true}`), a `mouse.click` picks the element under it and every client
+       * receives `browser.selection` (mobile MG-24 / MD-114).
+       */
+      input: (workspaceId: string, event: BrowserInputEvent) =>
+        req<{ ok?: boolean }>(`/api/workspaces/${workspaceId}/browser/input`, json(event)),
       scroll: (workspaceId: string) =>
         req<Record<string, unknown>>(`/api/workspaces/${workspaceId}/browser/scroll`),
       /** Absolute path of the single-frame JPEG endpoint, for image rendering. */
@@ -703,13 +767,20 @@ export function createAdminApi(fetchImpl: ApiFetch) {
 
     // ── computer.ts ─────────────────────────────────────────────
     computer: {
+      /** Prompts awaiting an answer (G-07 adds `plan` for a batched request). */
       consent: (workspaceId: string) =>
-        req<Record<string, unknown>>(`/api/workspaces/${workspaceId}/computer/consent`),
-      setConsent: (workspaceId: string, body: Record<string, unknown>) =>
-        req<Record<string, unknown>>(
+        req<{ pending: ComputerPendingConsent[] }>(`/api/workspaces/${workspaceId}/computer/consent`),
+      /** Answer one; `scope: 'app' | 'any'` (G-07) — omitted keeps the decision's own reach. */
+      setConsent: (workspaceId: string, body: ComputerConsentAnswer) =>
+        req<ComputerConsentAnswerResult>(
           `/api/workspaces/${workspaceId}/computer/consent`,
           json(body),
         ),
+      /** Who drives the desktop: `agent | paused | user` (G-07 Pause agent / Take over). */
+      control: (workspaceId: string) =>
+        req<ComputerControlState>(`/api/workspaces/${workspaceId}/computer/control`),
+      setControl: (workspaceId: string, mode: ComputerControlMode) =>
+        req<ComputerControlState>(`/api/workspaces/${workspaceId}/computer/control`, json({ mode })),
       // Every list route in this namespace answers an ENVELOPE, not a bare
       // array (`computer.ts`: `res.json({ grants })`, `res.json({ entries })`,
       // `res.json({ enabled, frames })`). Typed as arrays, all three rendered
@@ -717,7 +788,7 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       // `computer activity` and `computer frames` each printed "no rows"
       // regardless of what the server held.
       grants: (workspaceId: string) =>
-        req<{ grants: Array<Record<string, unknown>> }>(
+        req<{ grants: ComputerGrant[] }>(
           `/api/workspaces/${workspaceId}/computer/grants`,
         ).then((body) => body.grants ?? []),
       revokeGrant: (workspaceId: string, appIdentity: string) =>
@@ -804,87 +875,104 @@ export function createAdminApi(fetchImpl: ApiFetch) {
     // ── workflowScripts.ts ──────────────────────────────────────
     scripts: {
       list: () => req<ScriptSummary[]>('/api/workflow-scripts'),
-      get: (id: string) => req<ScriptSummary>(`/api/workflow-scripts/${id}`),
-      profiles: (id: string) =>
-        req<Array<Record<string, unknown>>>(`/api/workflow-scripts/${id}/profiles`),
-      materialize: (id: string, body?: Record<string, unknown>) =>
-        req<WorkflowDefinition>(`/api/workflow-scripts/${id}/materialize`, json(body ?? {})),
-      run: (id: string, body?: Record<string, unknown>) =>
-        req<RunSummary>(`/api/workflow-scripts/${id}/run`, json(body ?? {})),
-      validate: (body: Record<string, unknown>) =>
-        req<{ valid: boolean; errors?: string[] }>('/api/workflow-scripts/validate', json(body)),
+      get: (id: string) => req<ScriptDetail>(`/api/workflow-scripts/${id}`),
+      profiles: (id: string) => req<RunProfile[]>(`/api/workflow-scripts/${id}/profiles`),
+      materialize: (id: string, body?: { name?: string; projectId?: string }) =>
+        req<{ definitionId: string; definition: WorkflowDefinitionRecord; stageCount: number; edgeCount: number }>(
+          `/api/workflow-scripts/${id}/materialize`,
+          json(body ?? {}),
+        ),
+      validate: (body: { path: string }) =>
+        req<{ valid: boolean; errors: string[] }>('/api/workflow-scripts/validate', json(body)),
       reloadAll: () => req<Record<string, unknown>>('/api/workflow-scripts/reload', json({})),
       reload: (id: string) =>
         req<Record<string, unknown>>(`/api/workflow-scripts/${id}/reload`, json({})),
     },
 
-    // ── orchestrator.ts ─────────────────────────────────────────
-    orchestrator: {
-      templates: () => req<Array<Record<string, unknown>>>('/api/orchestrator/system-workflows'),
-      template: (id: string) =>
-        req<Record<string, unknown>>(`/api/orchestrator/system-workflows/${id}`),
-      fromTemplate: (body: Record<string, unknown>) =>
-        req<WorkflowDefinition>('/api/orchestrator/from-template', json(body)),
-      startRun: (body: Record<string, unknown>) =>
-        req<Record<string, unknown>>('/api/orchestrator/runs', json(body)),
-      context: (runId: string) =>
-        req<Record<string, unknown>>(`/api/orchestrator/runs/${runId}/context`),
-      cancel: (runId: string) =>
-        req<void>(`/api/orchestrator/runs/${runId}/cancel`, json({})),
-      /**
-       * `POST /orchestrator/runs/:id/uploads` — custom prompts, skills or
-       * agent definitions for one run (multipart, field `files`, max 20).
-       * The server checks extensions and rejects path-like names itself.
-       */
-      uploadRunFiles: (
-        runId: string,
-        category: 'prompts' | 'skills' | 'agents',
-        files: Array<{ name: string; data: Uint8Array; mimeType?: string }>,
-      ) => {
+    // ── workflowTools.ts (P06) ──────────────────────────────────
+    //
+    // The workflow tools of an agent outside the server (the MCP server):
+    // the same handlers the in-app tools run. A refusal is a normal result
+    // `{ok: false, code, error}`; `idempotencyKey` replays the same run.
+    workflowTools: {
+      list: () => req<{ tools: WorkflowToolAdvert[] }>('/api/workflow-tools'),
+      call: (name: string, args: Record<string, unknown>, opts: { idempotencyKey?: string; clientName?: string } = {}) =>
+        req<{ result: unknown }>(
+          `/api/workflow-tools/${encodeURIComponent(name)}`,
+          json({ arguments: args, ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}), ...(opts.clientName ? { clientName: opts.clientName } : {}) }),
+        ),
+    },
+
+    // ── workflowInvocations.ts ──────────────────────────────────
+    //
+    // THE way a run starts (P04): a definition, a script or a fork of a
+    // terminal run, one request, one route. The server derives the trigger;
+    // `client` is a label. Every "Start" press sends its own idempotency
+    // key, so a double click or a network retry does not start two runs.
+    workflows: {
+      invoke: async (
+        body: InvocationRequest,
+        opts: { idempotencyKey?: string; files?: InvocationUploadFiles } = {},
+      ): Promise<InvocationResult> => {
+        const files = Object.entries(opts.files ?? {}).flatMap(([category, list]) =>
+          (list ?? []).map((f) => ({ category: category as InvocationUploadCategory, ...f })),
+        );
+        const headers: Record<string, string> = opts.idempotencyKey ? { 'Idempotency-Key': opts.idempotencyKey } : {};
+        if (files.length === 0) {
+          return req<InvocationResult>('/api/workflow-invocations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...headers },
+            body: JSON.stringify(body),
+          });
+        }
         const form = new FormData();
-        form.set('category', category);
-        for (const file of files) {
-          form.append(
-            'files',
-            // Same harmless `Uint8Array<ArrayBufferLike>` typings mismatch as
-            // `chats.sendWithAttachments`.
-            new Blob([file.data as unknown as ArrayBuffer], {
-              type: file.mimeType || 'application/octet-stream',
-            }),
-            file.name,
-          );
+        form.set('request', JSON.stringify(body));
+        for (const f of files) {
+          // Same harmless `Uint8Array<ArrayBufferLike>` typings mismatch as
+          // `chats.sendWithAttachments`.
+          form.append(f.category, new Blob([f.data as unknown as ArrayBuffer], { type: f.mimeType || 'application/octet-stream' }), f.name);
         }
         // No content-type: fetch sets the multipart boundary from the body.
-        return req<{ files?: Array<{ name: string; path: string }> }>(
-          `/api/orchestrator/runs/${runId}/uploads`,
+        return req<InvocationResult>('/api/workflow-invocations', { method: 'POST', headers, body: form });
+      },
+      /** What `invoke` would do: stages by layer, skips, codebases, phases, post-processing, permission mode. */
+      plan: (body: InvocationRequest) => req<InvocationPlan>('/api/workflow-invocations/plan', json(body)),
+      /** Stage files before invoking (TTL 1 h); send the ids in `invoke`'s `uploads`. */
+      /** Native clients supply a platform FormData with URI-backed files. */
+      uploadMultipart: (form: FormData) =>
+        req<{ uploads: Array<{ uploadId: string; category: InvocationUploadCategory; name: string }> }>('/api/workflow-invocations/uploads', { method: 'POST', body: form }),
+      uploads: (files: Array<{ category: InvocationUploadCategory; name: string; data: Uint8Array; mimeType?: string }>) => {
+        const form = new FormData();
+        for (const f of files) {
+          form.append(f.category, new Blob([f.data as unknown as ArrayBuffer], { type: f.mimeType || 'application/octet-stream' }), f.name);
+        }
+        return req<{ uploads: Array<{ uploadId: string; category: InvocationUploadCategory; name: string }> }>(
+          '/api/workflow-invocations/uploads',
           { method: 'POST', body: form },
         );
       },
-      runWorkspace: (runId: string) =>
-        req<Record<string, unknown>>(`/api/orchestrator/runs/${runId}/workspace`),
-      runWorkspaceContent: (runId: string, path: string, source?: string) =>
-        req<{ content: string }>(
-          `/api/orchestrator/runs/${runId}/workspace/content${qs({ path, source })}`,
+      /** The run's digest; `waitSeconds` long-polls (≤ 60) until it finalizes (or waits for an approval). */
+      digest: (runId: string, opts: { waitSeconds?: number; stopOnApproval?: boolean; detail?: 'brief' | 'full' } = {}) =>
+        req<RunDigest>(
+          `/api/workflow-invocations/${runId}/digest${qs({
+            ...(opts.waitSeconds ? { wait: String(opts.waitSeconds) } : {}),
+            ...(opts.stopOnApproval ? { stopOnApproval: 'true' } : {}),
+            ...(opts.detail ? { detail: opts.detail } : {}),
+          })}`,
         ),
-      runDiff: (runId: string) =>
-        req<{ diff: string } | string>(`/api/orchestrator/runs/${runId}/workspace/diff`),
-      workflowFiles: (defId: string) =>
-        req<FileEntryRecord[]>(`/api/orchestrator/workflows/${defId}/files`),
     },
 
     // ── templates.ts ────────────────────────────────────────────
     templates: {
-      list: () => req<Array<Record<string, unknown>>>('/api/templates'),
-      get: (id: string) => req<Record<string, unknown>>(`/api/templates/${id}`),
+      list: () => req<WorkflowTemplate[]>('/api/templates'),
+      get: (id: string) => req<WorkflowTemplate>(`/api/templates/${id}`),
     },
 
-    // ── webhooks.ts ─────────────────────────────────────────────
-    webhooks: {
-      list: () => req<Array<Record<string, unknown>>>('/api/webhooks/registrations'),
-      create: (body: Record<string, unknown>) =>
-        req<Record<string, unknown>>('/api/webhooks/registrations', json(body)),
-      remove: (id: string) =>
-        req<void>(`/api/webhooks/registrations/${id}`, { method: 'DELETE' }),
+    // ── settings.ts ─────────────────────────────────────────────
+    settings: {
+      /** The commands a check stage may run: the defaults plus the operator's extras (P05). */
+      scriptAllowlist: () =>
+        req<{ commands: string[]; defaults: string[]; extras: string[] }>('/api/settings/script-allowlist'),
     },
 
     // ── hooks.ts ────────────────────────────────────────────────
@@ -910,8 +998,6 @@ export function createAdminApi(fetchImpl: ApiFetch) {
         }
         return out;
       },
-      sessionHooks: (sessionId: string) =>
-        req<SessionHooks>(`/api/hooks/sessions/${sessionId}/hooks`),
       /**
        * Dry-runs one hook. The route reads the WHOLE body as a
        * `HookDefinition` and dispatches on `config.type` — `phase` and
@@ -953,18 +1039,33 @@ export function createAdminApi(fetchImpl: ApiFetch) {
         ),
     },
 
+    // ── fs.ts — server folders (MG-22). Local or administrative sessions
+    //    only: anything else is 403 FORBIDDEN, the S state (MD-30). ─────
+    fs: {
+      dirs: (path = '') => req<FsDirListing>(`/api/fs/dirs${qs({ path })}`),
+      gitInfo: (path: string) => req<FsGitInfo>(`/api/fs/git-info${qs({ path })}`),
+    },
+
     // ── agents.ts (write half; reads live in client.ts) ─────────
     agents: {
       create: (body: CreateAgentParams) => req<Agent>('/api/agents', json(body)),
       update: (id: string, body: UpdateAgentParams) =>
         req<Agent>(`/api/agents/${id}`, jsonWith('PUT', body)),
+      /** `force` disables an agent that is in use (soft delete); the route reads `?force=1`. */
       remove: (id: string, force?: boolean) =>
-        req<{ deleted: boolean; soft: boolean }>(`/api/agents/${id}${qs({ force })}`, {
+        req<{ deleted: boolean; soft: boolean }>(`/api/agents/${id}${qs({ force: force ? 1 : undefined })}`, {
           method: 'DELETE',
         }),
       usage: (id: string) => req<Record<string, unknown>>(`/api/agents/${id}/usage`),
       export: (id: string) => req<{ markdown: string } | string>(`/api/agents/${id}/export`, json({})),
       import: (body: Record<string, unknown>) => req<Agent>('/api/agents/import', json(body)),
+      /**
+       * MG-12 — what `import` would create, without writing: parsed fields,
+       * unresolved names, the agent it would replace. 400 `PARSE_ERROR`,
+       * 413 `TOO_LARGE` (over 256 KB).
+       */
+      importPreview: (body: AgentImportPreviewRequest) =>
+        req<AgentImportPreview>('/api/agents/import/preview', json(body)),
       resolvePreview: (body: {
         agentRef?: string;
         overrides?: AgentOverrides;
@@ -990,6 +1091,9 @@ export function createAdminApi(fetchImpl: ApiFetch) {
 
     // ── auth.ts (device administration) ─────────────────────────
     devices: {
+      revokeWithReason: (id: string, reason: string) =>
+        req<void>(`/api/auth/devices/${encodeURIComponent(id)}`, jsonWith('DELETE', { reason })),
+      rotate: (id: string) => req<void>(`/api/auth/devices/${encodeURIComponent(id)}/rotate`, json({})),
       // The route answers `{ devices: [...] }`, not a bare array.
       list: async () =>
         (await req<{ devices: DeviceRecord[] }>('/api/auth/devices')).devices ?? [],
@@ -1032,6 +1136,24 @@ export function createAdminApi(fetchImpl: ApiFetch) {
 
     // ── system.ts / copilot.ts ──────────────────────────────────
     systemAdmin: {
+      setAudio: (body: { sttEngine?: string; textFormatter?: string; endpointSilenceMs?: number; ttsEnabled?: boolean; ttsSpeed?: number } & AudioSettingsUpdate) =>
+        req<Record<string, unknown>>('/api/system/audio', jsonWith('PUT', body)),
+      // MG-22 (settings rows) — typed Settings › Audio and MCP writes.
+      audio: () => req<AudioSettingsView>('/api/system/audio'),
+      updateAudio: (body: AudioSettingsUpdate) => req<AudioSettingsView>('/api/system/audio', jsonWith('PUT', body)),
+      audioModel: () => req<AudioModelStatus>('/api/system/audio/model'),
+      /** 202 while the download runs; poll `audioModel()` for progress. */
+      downloadAudioModel: () => req<AudioModelStatus>('/api/system/audio/model', json({})),
+      deleteAudioModel: () => req<AudioModelStatus>('/api/system/audio/model', { method: 'DELETE' }),
+      setSystemMcp: (id: string, body: SystemMcpPrefsBody) =>
+        req<void>(`/api/system/mcp-servers/system/${encodeURIComponent(id)}`, jsonWith('PUT', body)),
+      addCustomMcp: (body: McpServerBody) => req<McpServerEntry>('/api/system/mcp-servers/custom', json(body)),
+      updateCustomMcp: (id: string, body: McpServerBody) =>
+        req<void>(`/api/system/mcp-servers/custom/${encodeURIComponent(id)}`, jsonWith('PUT', body)),
+      removeCustomMcp: (id: string) =>
+        req<void>(`/api/system/mcp-servers/custom/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+      updateMcp: (source: 'system' | 'custom', id: string, body: Record<string, unknown>) =>
+        req<void>(`/api/system/mcp-servers/${source}/${encodeURIComponent(id)}`, jsonWith('PUT', body)),
       computerUse: () => req<Record<string, unknown>>('/api/system/computer-use'),
       setComputerUse: (body: Record<string, unknown>) =>
         req<Record<string, unknown>>('/api/system/computer-use', jsonWith('PUT', body)),

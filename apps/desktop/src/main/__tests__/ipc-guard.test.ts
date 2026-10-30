@@ -13,6 +13,9 @@ vi.mock('electron', () => ({
 }));
 
 import { createIpcGuard, rejectionReason, UntrustedIpcSenderError, type GuardableEvent } from '../ipc-guard';
+import { isLocalOnlyChannel, isSameOrigin, REMOTE_ALLOWED_CHANNELS } from '../ipc-scope';
+import { IPC } from '../../shared/ipc';
+import { BROWSER_IPC } from '../../shared/browser-ipc';
 
 const APP = 'http://127.0.0.1:3100';
 
@@ -129,7 +132,90 @@ describe('ipc.ts registers every channel through the guard', () => {
     const src = readFileSync(join(__dirname, '..', 'ipc.ts'), 'utf8');
     expect(src).not.toMatch(/ipcMain\.(handle|on)\(/);
     const guarded = src.match(/guardedHandle\(/g) ?? [];
-    // All 45 bridge channels (IPC.* + BROWSER_IPC.*) from the preload contract.
-    expect(guarded.length).toBe(45);
+    // All 49 bridge channels (IPC.* + BROWSER_IPC.*) from the preload contract —
+    // 45 at P0, minus getTheme/setTheme plus setAppearance (P1-T8, D-25), plus
+    // G-03's getServers/switchServer/addServer, G-04's
+    // getUpdateState/installUpdate (P2-03) and watchUpdates (P1-review P2-R3),
+    // minus getWindowChrome (P3-04: a preload launch argument now, 06 §3.6).
+    // D-140/D-145: browser comments drop pickElement + annotateRegion and add
+    // capture, annotateOpen, annotateSave, annotateCancel (net +2).
+    // U-67: computerPermissions (macOS privacy grants for computer use).
+    expect(guarded.length).toBe(52);
+  });
+});
+
+// The window can show ANOTHER machine's server (remote mode, D-126). Its page is
+// the main window's top frame on the window's current origin, so it passes the
+// checks above; channels that act on this computer must still refuse it.
+describe('local-only channels refuse a remote server page', () => {
+  const LOCAL = 'http://127.0.0.1:3100';
+  const REMOTE = 'https://studio.tail1234.ts.net';
+
+  function windowShowing(url: string) {
+    const mainFrame = { url: `${url}/chats` };
+    const win = { isDestroyed: () => false, webContents: { id: 1, mainFrame } };
+    const log = { warn: vi.fn() };
+    const d = {
+      getMainWindow: () => win as never,
+      getAppUrl: () => url,
+      fromWebContents: () => win as never,
+      log,
+      isLocalOnlyChannel,
+      isLocalOrigin: (frameUrl: string | undefined) => isSameOrigin(frameUrl, LOCAL),
+    };
+    const event: GuardableEvent = { sender: { id: 1, mainFrame }, senderFrame: mainFrame };
+    return { d, event, log };
+  }
+
+  it('lets this computer\'s server call a local-only channel and refuses the remote page', () => {
+    const local = windowShowing(LOCAL);
+    expect(rejectionReason(local.event, local.d, { localOnly: true })).toBeNull();
+    const remote = windowShowing(REMOTE);
+    expect(rejectionReason(remote.event, remote.d)).toBeNull(); // window-level calls stay open
+    expect(rejectionReason(remote.event, remote.d, { localOnly: true })).toMatch(/is not this computer's server/);
+  });
+
+  it('fails closed when no local-origin check is wired or the frame URL is missing', () => {
+    const { d, event } = windowShowing(LOCAL);
+    expect(rejectionReason(event, { ...d, isLocalOrigin: undefined }, { localOnly: true })).not.toBeNull();
+    expect(rejectionReason({ sender: event.sender, senderFrame: null }, d, { localOnly: true })).not.toBeNull();
+  });
+
+  it('guardedHandle applies the default-deny scope: a remote page reaches find, not restart or the settings file', () => {
+    const remote = windowShowing(REMOTE);
+    const registered = new Map<string, (...args: unknown[]) => unknown>();
+    const guard = createIpcGuard(remote.d, (channel, listener) => registered.set(channel, listener as never));
+    for (const channel of [IPC.findInPage, IPC.restartServer, IPC.setSetting, BROWSER_IPC.navigate]) {
+      guard.guardedHandle(channel, () => 'ran');
+    }
+    expect(registered.get(IPC.findInPage)!(remote.event)).toBe('ran');
+    for (const channel of [IPC.restartServer, IPC.setSetting, BROWSER_IPC.navigate]) {
+      expect(() => registered.get(channel)!(remote.event)).toThrow(UntrustedIpcSenderError);
+    }
+    expect(guard.localOnlyChannels()).toEqual([IPC.restartServer, IPC.setSetting, BROWSER_IPC.navigate]);
+    expect(guard.isLocalSender(remote.event)).toBe(false);
+    const local = windowShowing(LOCAL);
+    expect(createIpcGuard(local.d, () => undefined).isLocalSender(local.event)).toBe(true);
+  });
+
+  it('classifies every bridge channel: what acts on this computer is local-only', () => {
+    const localOnly = [
+      IPC.getServerStatus,
+      IPC.restartServer,
+      IPC.selectDirectory,
+      IPC.selectFile,
+      IPC.saveFile,
+      IPC.showItemInFolder,
+      IPC.getSetting,
+      IPC.setSetting,
+      IPC.installUpdate,
+      IPC.requestPairingCode,
+      ...Object.values(BROWSER_IPC).filter((c) => c !== BROWSER_IPC.available),
+    ];
+    for (const channel of localOnly) expect(isLocalOnlyChannel(channel), channel).toBe(true);
+    // The remote allowlist names real channels only, and nothing sensitive.
+    const all = new Set<string>([...Object.values(IPC), ...Object.values(BROWSER_IPC)]);
+    for (const channel of REMOTE_ALLOWED_CHANNELS) expect(all.has(channel), channel).toBe(true);
+    expect([...REMOTE_ALLOWED_CHANNELS].filter((c) => (localOnly as readonly string[]).includes(c))).toEqual([]);
   });
 });

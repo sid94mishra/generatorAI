@@ -1,65 +1,91 @@
 import { test, expect } from '../helpers/test';
+import { apiRequest } from '../helpers/api';
 
-// Phase W1 — Settings, Dashboard, Templates.
+// Phase W1 — Settings, Home, Templates.
 // Authored from a playwright-cli exploration session (codegen + trace).
 // Fully deterministic: no AI runs, no seeded data required.
 
+// Settings is a modal addressed by URL (`/settings/:section`, D-26): the
+// dialog is named "Settings", its section nav is
+// `nav[aria-label="Settings sections"]` (labels from SETTINGS_NAV in
+// @generatorai/shared/ui-contract) and it closes with the `settings-modal-close` button.
+function settingsDialog(page: import('@playwright/test').Page) {
+  return page.getByRole('dialog', { name: 'Settings' });
+}
+
+function settingsNav(page: import('@playwright/test').Page) {
+  return settingsDialog(page).getByRole('navigation', { name: 'Settings sections' });
+}
+
+async function openSection(page: import('@playwright/test').Page, label: string) {
+  const entry = settingsNav(page).getByRole('link', { name: label, exact: true });
+  await entry.click();
+  await expect(entry).toHaveAttribute('aria-current', 'page');
+}
+
 test.describe('Settings', () => {
-  // These tab names come from SettingsModal's own section list. The spec used
-  // to iterate ['General', 'Provider', 'Copilot', 'Advanced'] — of which only
-  // 'General' has ever existed — so three quarters of it asserted against a UI
-  // that was never shipped.
+  // These section names and ids come from SETTINGS_NAV
+  // (packages/shared/src/ui-contract/settings.ts). The spec used to iterate ['General', 'Provider', 'Copilot',
+  // 'Advanced'] — of which only 'General' has ever existed.
   test('switches between every settings tab', async ({ page, gotoApp }) => {
     await gotoApp('/settings');
-    // Two elements render the text "Settings" (the dialog's sr-only title and
-    // the visible banner heading), so an unqualified name match is a strict
-    // mode violation. Pin the visible one.
-    await expect(page.getByRole('banner').getByRole('heading', { name: 'Settings' })).toBeVisible();
+    await expect(settingsDialog(page)).toBeVisible();
 
-    for (const tab of [
-      'General',
-      'Appearance',
-      'Model Providers',
-      'Agents',
-      'Skills',
-      'MCP Servers',
-      'Templates',
-      'Source Control',
-      'Browser & Terminal',
-      'Computer Use',
-      'Extensions',
-      'Security & Devices',
-      'Diagnostics',
+    for (const [tab, id] of [
+      ['General', 'general'],
+      ['Appearance', 'appearance'],
+      ['Model providers', 'providers'],
+      ['Agents', 'agents'],
+      ['Skills', 'skills'],
+      ['MCP servers', 'mcp'],
+      ['Templates', 'templates'],
+      ['Source control', 'source-control'],
+      ['Browser & terminal', 'browser-terminal'],
+      ['Computer use', 'computer-use'],
+      ['Audio', 'audio'],
+      ['Extensions', 'extensions'],
+      ['Security & devices', 'security'],
+      ['Storage', 'storage'],
+      ['Diagnostics', 'diagnostics'],
     ]) {
-      await page.getByRole('button', { name: tab, exact: true }).click();
-      // Each tab keeps the tab bar; assert the clicked tab is present/active.
-      await expect(page.getByRole('button', { name: tab, exact: true })).toBeVisible();
+      // The clicked entry becomes the current one and the URL addresses it.
+      // Bare `/settings` already IS General (settingsSectionFromPath), so clicking the
+      // current entry is a no-op and the URL may stay bare.
+      await openSection(page, tab);
+      await expect(page).toHaveURL(new RegExp(id === 'general' ? '/settings(/general)?$' : `/settings/${id}$`));
     }
+    // Exactly one section is current at a time.
+    await expect(settingsNav(page).locator('[aria-current="page"]')).toHaveCount(1);
   });
 
   test('Appearance tab: mode, theme and accent all apply and persist', async ({ page, gotoApp }) => {
     await gotoApp('/settings');
-    await page.getByRole('button', { name: 'Appearance', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible();
+    await openSection(page, 'Appearance');
+    await expect(page.getByRole('heading', { name: 'Appearance', exact: true, level: 2 })).toBeVisible();
 
-    // ── Mode ──
+    // ── Mode ── (Dark is the default, and a radio already selected fires no change: Light first.)
+    await page.getByRole('radio', { name: 'Light', exact: true }).click();
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
+    expect(await page.evaluate(() => localStorage.getItem('generatorai-theme'))).toBe('light');
+
     await page.getByRole('radio', { name: 'Dark', exact: true }).click();
     await expect(page.locator('html')).toHaveClass(/dark/);
     expect(await page.evaluate(() => localStorage.getItem('generatorai-theme'))).toBe('dark');
 
     await page.getByRole('radio', { name: 'Light', exact: true }).click();
     await expect(page.locator('html')).not.toHaveClass(/dark/);
-    expect(await page.evaluate(() => localStorage.getItem('generatorai-theme'))).toBe('light');
 
     // ── Theme ──
     // Asserted on a resolved CSS variable, not on the attribute alone: the
     // attribute proves the provider ran, the variable proves the generated
     // CSS actually matched the selector it emitted.
+    // The gallery shows one group at a time (Product / Editor / Low glare tabs).
+    await page.getByRole('tab', { name: /^Editor/ }).click();
     await page.getByRole('radio', { name: /^Catppuccin/ }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'catppuccin');
     expect(
       await page.evaluate(() =>
-        getComputedStyle(document.documentElement).getPropertyValue('--background').trim(),
+        getComputedStyle(document.documentElement).getPropertyValue('--gai-surface').trim(),
       ),
     ).toBe('#eff1f5'); // Latte base — i.e. the LIGHT variant of the theme we picked
 
@@ -68,9 +94,9 @@ test.describe('Settings', () => {
     await expect(page.locator('html')).toHaveAttribute('data-accent', 'green');
     expect(
       await page.evaluate(() =>
-        getComputedStyle(document.documentElement).getPropertyValue('--primary').trim(),
+        getComputedStyle(document.documentElement).getPropertyValue('--gai-accent').trim(),
       ),
-    ).toBe('#3c9528'); // Catppuccin's green, not GitHub's
+    ).toBe('#368624'); // Catppuccin's green, not GitHub's
 
     // Survives a reload, and without a flash of the default theme.
     await page.reload();
@@ -80,16 +106,23 @@ test.describe('Settings', () => {
 
   test('Appearance tab: every registered theme is reachable and readable', async ({ page, gotoApp }) => {
     await gotoApp('/settings');
-    await page.getByRole('button', { name: 'Appearance', exact: true }).click();
+    await openSection(page, 'Appearance');
 
     // The picker renders from the registry, so this count is the contract:
     // adding a theme without it appearing here means the group metadata is
     // wrong and the theme is invisible to users.
-    const cards = page.locator('[role="radiogroup"][aria-label="Theme"] [role="radio"]');
-    expect(await cards.count()).toBeGreaterThanOrEqual(17);
+    // Wait for the picker before counting: `count()` does not auto-wait, and
+    // the routed section can still be mounting right after the click.
+    // The gallery shows one group at a time: sum the tiles across the three tabs.
+    const themeGroup = page.getByRole('radiogroup', { name: 'Theme', exact: true });
+    await expect(themeGroup).toBeVisible();
+    let tiles = 0;
     for (const group of ['Product', 'Editor', 'Low glare']) {
-      await expect(page.getByText(group, { exact: true })).toBeVisible();
+      await page.getByRole('tab', { name: new RegExp(`^${group}`) }).click();
+      await expect(themeGroup.getByRole('radio').first()).toBeVisible();
+      tiles += await themeGroup.getByRole('radio').count();
     }
+    expect(tiles).toBeGreaterThanOrEqual(17);
 
     // Walk every theme in both modes and measure the SHIPPED CSS. Contrast is
     // already unit-tested against the token data; what this adds is proof that
@@ -125,22 +158,23 @@ test.describe('Settings', () => {
       const failures: string[] = [];
       for (const theme of themes) {
         for (const mode of ['dark', 'light']) {
-          for (const accent of ['blue', 'violet', 'green', 'orange', 'rose', 'teal']) {
+          for (const accent of ['ink', 'blue', 'violet', 'green', 'orange', 'rose', 'teal']) {
             root.className = mode;
             root.setAttribute('data-theme', theme);
             root.setAttribute('data-accent', accent);
             const cs = getComputedStyle(root);
             const g = (n: string) => cs.getPropertyValue(n).trim();
             const id = `${theme}/${mode}/${accent}`;
-            if (!g('--background')) failures.push(`${id} produced no tokens`);
-            const body = ratio(g('--foreground'), g('--background'));
-            const muted = ratio(g('--muted-foreground'), g('--card'));
-            const button = ratio(g('--primary-foreground'), g('--primary-emphasis'));
-            const link = ratio(g('--primary'), g('--background'));
+            if (!g('--gai-ground')) failures.push(`${id} produced no tokens`);
+            const body = ratio(g('--gai-fg'), g('--gai-ground'));
+            const muted = ratio(g('--gai-fg-2'), g('--gai-surface'));
+            const button = ratio(g('--gai-on-accent'), g('--gai-accent'));
+            // The accent is a fill (links use fg); what must stand off the page is the focus ring (D-12).
+            const focus = ratio(g('--gai-focus'), g('--gai-ground'));
             if (body < 4.5) failures.push(`${id} body ${body.toFixed(2)}`);
             if (muted < 4.5) failures.push(`${id} muted ${muted.toFixed(2)}`);
             if (button < 4.5) failures.push(`${id} button ${button.toFixed(2)}`);
-            if (link < 3) failures.push(`${id} link ${link.toFixed(2)}`);
+            if (focus < 3) failures.push(`${id} focus ${focus.toFixed(2)}`);
           }
         }
       }
@@ -156,70 +190,84 @@ test.describe('Settings', () => {
   // 'Advanced' either), so it was asserting against an imagined UI.
   test('Diagnostics tab shows server health info', async ({ page, gotoApp }) => {
     await gotoApp('/settings');
-    await page.getByRole('button', { name: 'Diagnostics', exact: true }).click();
+    await openSection(page, 'Diagnostics');
     await expect(page.getByText(/Server Health|Database|Uptime|Sandbox/i).first()).toBeVisible({ timeout: 10_000 });
   });
 
-  test('Model Providers tab shows the active provider', async ({ page, gotoApp }) => {
+  // The section no longer says "Active": every connected provider is usable at
+  // once, and the server's primary is marked with a "Default" badge next to a
+  // live connection pill. Asserted against the registry the page renders from,
+  // so it holds whichever provider is primary and whichever ones this machine
+  // has signed in to.
+  test('Model Providers tab marks the default provider and the connected count', async ({ page, gotoApp }) => {
+    const reg = await apiRequest<{ primary: string; providers: Array<{ type: string; label: string; ready: boolean }> }>(
+      'GET',
+      '/harness/providers',
+    );
+    expect(reg.ok).toBe(true);
+    const primary = reg.data.providers.find((p) => p.type === reg.data.primary);
+    expect(primary, 'the primary provider must be listed in the registry').toBeTruthy();
+    const readyCount = reg.data.providers.filter((p) => p.ready).length;
+
     await gotoApp('/settings');
-    await page.getByRole('button', { name: 'Model Providers', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Model Providers' })).toBeVisible();
-    // Both providers this build knows are listed here regardless of which one
-    // is primary, so asserting on Copilot's presence is safe under
-    // HARNESS_TYPE=claude-agent too.
-    await expect(page.getByText(/GitHub Copilot/i).first()).toBeVisible();
-    await expect(page.getByText('Active', { exact: true }).first()).toBeVisible();
+    await openSection(page, 'Model providers');
+    await expect(page.getByRole('heading', { name: 'Model providers', exact: true, level: 2 })).toBeVisible();
+
+    const main = settingsDialog(page);
+    for (const p of reg.data.providers) {
+      await expect(main.getByText(p.label, { exact: true })).toBeVisible();
+    }
+    await expect(main.getByText(`${readyCount} of ${reg.data.providers.length} connected`, { exact: true })).toBeVisible();
+    // Exactly one "Default" badge, on the primary provider's row.
+    await expect(main.getByText('Default', { exact: true })).toHaveCount(1);
+    const esc = primary!.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    await expect(main.getByRole('button', { name: new RegExp(`^${esc} Default `) })).toBeVisible();
   });
 });
 
-test.describe('Dashboard', () => {
-  // The dashboard's own heading is 'Mission Control' — 'Dashboard' is only the
-  // sidebar entry and the header breadcrumb (a <span>, not a heading). The
-  // shipped page has no 'Recent Chats' / 'Recent Runs' panels either: the two
-  // lists were replaced by a single 'Activity' panel with Today / Running /
-  // Needs attention tabs. All three names were asserting a UI that never
-  // shipped, so they are retargeted at what actually renders.
-  test('renders header, quick actions, stat cards and the activity panel', async ({ page, gotoApp }) => {
+test.describe('Home', () => {
+  // `/` is Home (P5-10, L-01) — it replaced the Dashboard "Mission Control".
+  // Its H1 is the live attention headline ("2 need you · 1 running",
+  // "Nothing needs you"); sections without items are not drawn (D-36), so
+  // only the always-present parts are asserted here.
+  const HOME_HEADING = /^(Nothing needs you|\d+ needs? you)( · \d+ running)?$/;
+
+  test('renders the headline, the quick-start row and the aside cards', async ({ page, gotoApp }) => {
     await gotoApp('/');
     const main = page.getByRole('main');
-    await expect(main.getByRole('heading', { name: 'Mission Control', exact: true, level: 1 })).toBeVisible();
+    await expect(main.getByRole('heading', { name: HOME_HEADING, level: 1 })).toBeVisible();
 
-    await expect(main.getByRole('button', { name: /New Chat/ })).toBeVisible();
-    await expect(main.getByRole('button', { name: /New Workflow/ })).toBeVisible();
-
-    // Stat cards — the row that replaced the old "Browse …" quick actions.
-    // Matched on the label <p> specifically so a chat in the activity feed
-    // that happens to be called "Workflows" can't satisfy (or break) this.
-    for (const label of ['Chats', 'Workflows', 'Automations', 'System Health']) {
-      await expect(main.locator('p').filter({ hasText: new RegExp(`^${label}$`) })).toBeVisible();
+    // D-134: the quick-start row replaced the quick composer and the header buttons.
+    const start = main.getByRole('group', { name: 'Start' });
+    for (const name of [/New chat/, /Run workflow/, /New workflow/, /New agent/]) {
+      await expect(start.getByRole('button', { name })).toBeVisible();
     }
+    await start.getByRole('button', { name: /New chat/ }).click();
+    await expect(page.getByRole('dialog', { name: 'New chat' })).toBeVisible();
+    await page.keyboard.press('Escape');
 
-    await expect(main.getByRole('heading', { name: 'Activity', exact: true, level: 2 })).toBeVisible();
-    const tabs = main.getByRole('tablist').getByRole('tab');
-    await expect(tabs).toHaveCount(3);
-    for (const t of ['Today', 'Running', 'Needs attention']) {
-      await expect(main.getByRole('tab', { name: new RegExp(`^${t}`) })).toBeVisible();
+    const system = page.getByTestId('home-system');
+    await expect(system.getByText('System', { exact: true })).toBeVisible();
+    await expect(system.getByRole('button', { name: 'Diagnostics', exact: true })).toBeVisible();
+    await expect(page.getByTestId('home-this-week').getByText('This week', { exact: true })).toBeVisible();
+
+    const shortcuts = main.getByRole('navigation', { name: 'Shortcuts' });
+    for (const label of ['Projects', 'Agents', 'Automations', 'Scripts']) {
+      await expect(shortcuts.getByRole('link', { name: new RegExp(`^${label}`) })).toBeVisible();
     }
   });
 
-  test('quick action "New Workflow" navigates to the builder', async ({ page, gotoApp }) => {
+  test('header action "New workflow" navigates to the new-workflow page', async ({ page, gotoApp }) => {
     await gotoApp('/');
-    await page.getByRole('button', { name: /New Workflow/ }).click();
+    await page.getByRole('main').getByRole('button', { name: 'New workflow', exact: true }).click();
     await expect(page).toHaveURL(/\/workflows\/new/);
   });
 
-  // There is no 'Browse Workflows' button — that quick action was never built.
-  // The dashboard affordance that actually reaches the workflow list is the
-  // 'Workflows' stat card (DashboardPage.tsx -> navigate('/workflows')), so
-  // the test is retargeted there rather than dropped.
-  //
-  // NOTE (app issue, not fixed here): StatCard renders a plain <div> with an
-  // onClick — no role="button", no tabindex, no key handler — so the card is
-  // unreachable by role and by keyboard. Hence the click goes through the
-  // label text, which bubbles to the card's handler.
-  test('the "Workflows" stat card navigates to the workflow list', async ({ page, gotoApp }) => {
+  // "Run workflow" opens the workflow list until the Workflow Overhaul's
+  // RunDialog exists (F-home-01, 04 R-5).
+  test('header action "Run workflow" navigates to the workflow list', async ({ page, gotoApp }) => {
     await gotoApp('/');
-    await page.getByRole('main').locator('p').filter({ hasText: /^Workflows$/ }).click();
+    await page.getByRole('main').getByRole('button', { name: 'Run workflow', exact: true }).click();
     await expect(page).toHaveURL(/\/workflows$/);
     await expect(page.getByRole('main').getByRole('heading', { name: 'Workflows', exact: true, level: 1 })).toBeVisible();
   });
@@ -227,15 +275,16 @@ test.describe('Dashboard', () => {
 
 // ── Templates ──
 // /templates is a 404: that route does not exist and never did (see
-// apps/web/src/router.tsx). Templates ship as a tab inside the Settings modal
-// (Catalogs.tsx -> TemplatesSection). Every test below is retargeted at that
+// apps/web/src/app/routes). Templates ship as a section of the Settings
+// modal, `/settings/templates` (Catalogs.tsx -> TemplatesSection). Every test below is retargeted at that
 // real surface, which preserves the original intent — list, search, and
 // create-from-template — instead of skipping it.
 test.describe('Templates (Settings → Templates tab)', () => {
   async function openTemplatesTab(page: import('@playwright/test').Page, gotoApp: (p: string) => Promise<void>) {
     await gotoApp('/settings');
-    await page.getByRole('button', { name: 'Templates', exact: true }).click();
-    const dialog = page.getByRole('dialog');
+    await openSection(page, 'Templates');
+    await expect(page).toHaveURL(/\/settings\/templates$/);
+    const dialog = settingsDialog(page);
     await expect(dialog.getByRole('heading', { name: 'Templates', exact: true, level: 2 })).toBeVisible();
     // Wait for the list itself, not just the section header. The list header
     // reads "Workflow templates" while `useTemplates()` has no data and only
@@ -284,13 +333,13 @@ test.describe('Templates (Settings → Templates tab)', () => {
     const dialog = await openTemplatesTab(page, gotoApp);
     await dialog.getByRole('button', { name: 'Use', exact: true }).first().click();
 
-    // from-template creates a definition, closes settings and navigates to the
+    // from-template creates a definition, leaves Settings and navigates to the
     // new definition's detail page.
     await expect(page).toHaveURL(/\/workflows\/[0-9a-f-]{36}$/, { timeout: 15_000 });
     const id = page.url().split('/workflows/')[1];
     if (id) tracker.track('definition', id);
 
-    await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect(page.getByTestId('rf__wrapper')).toBeVisible({ timeout: 10_000 });
+    await expect(settingsDialog(page)).toHaveCount(0);
+    await expect(page.getByTestId('workflow-stages')).toBeVisible({ timeout: 10_000 });
   });
 });

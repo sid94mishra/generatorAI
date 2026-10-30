@@ -10,3 +10,4 @@
 
 export { readBuildStamp, makeHostHello } from './protocol/buildStamp.js';
 export { hashWebhookToken } from './security/webhookToken.js';
+export { writeFileAtomicRestricted, renameWithRetry } from './security/atomicWrite.js';

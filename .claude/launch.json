@@ -2,10 +2,22 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "web",
+      "name": "dev",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["start:web"],
+      "runtimeArgs": ["dev"],
       "port": 5173
+    },
+    {
+      "name": "sandbox",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/redesign/sandbox.mjs"],
+      "port": 5197
+    },
+    {
+      "name": "storybook",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@generatorai/web", "storybook"],
+      "port": 6006
     }
   ]
 }

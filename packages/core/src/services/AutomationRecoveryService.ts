@@ -82,7 +82,7 @@ export class AutomationRecoveryService {
         automation.id,
       );
       for (const exec of executions) {
-        if (exec.status !== 'running' && exec.status !== 'pending') continue;
+        if (exec.status !== 'running' && exec.status !== 'pending' && exec.status !== 'paused') continue;
         scanned++;
         const recoveredExec = await this.recoverOne(exec);
         if (recoveredExec) recovered++;
@@ -107,7 +107,7 @@ export class AutomationRecoveryService {
    * Finalising an execution that still has unclaimed iteration slots is the
    * data loss: it reports success for work that was never attempted.
    */
-  private async recoverOne(exec: AutomationExecution): Promise<boolean> {
+  private async recoverOne(exec: AutomationExecution, opts: { resume?: boolean } = {}): Promise<boolean> {
     const runs = await this.executionRepo.getExecutionRunsByExecutionId(exec.id);
 
     // Consult the *current* workflow_run status for each execution-run.
@@ -120,9 +120,9 @@ export class AutomationRecoveryService {
     const anyActive = statuses.some((s) => s === 'pending' || s === 'running');
 
     // ── P0-b: re-drive whatever is left before finalising anything ──
-    if (this.onResumeExecution) {
-      // Iterations whose workflow run is still live. StartupRecoveryService
-      // re-drives those, so their slots must keep their claim — reclaiming
+    if (this.onResumeExecution && opts.resume !== false) {
+      // Iterations whose workflow run is still live. The workflow engine's
+      // recovery drives those, so their slots must keep their claim — reclaiming
       // them here would run the same iteration twice.
       const activeIterationIndexes = runs
         .filter((_run, idx) => statuses[idx] === 'pending' || statuses[idx] === 'running')
@@ -160,11 +160,13 @@ export class AutomationRecoveryService {
     }
 
     if (anyActive) {
-      // Still have live children — leave `exec.status` alone. The
-      // WorkflowRunService's own recovery will drive completions and
-      // subsequent boots will pick this execution up when it settles.
+      // Still have live children — leave `exec.status` alone. The workflow engine's own recovery drives
+      // them; nothing in this process awaits them any more (the driver that started them died with the
+      // last one), so watch them and settle the execution when the last one ends. Without the watch it
+      // stayed "running" — in the sidebar, the activity feed, its concurrency slot — until the NEXT boot.
+      this.watchUntilSettled(exec, runs.filter((_run, idx) => statuses[idx] === 'pending' || statuses[idx] === 'running'));
       this.logger.debug(
-        `[AutomationRecoveryService] Execution ${exec.id} has active children; leaving 'running'`,
+        `[AutomationRecoveryService] Execution ${exec.id} has active children; leaving 'running' until they end`,
       );
       return false;
     }
@@ -212,12 +214,48 @@ export class AutomationRecoveryService {
       status: finalStatus,
       completedIterations: completed,
       failedIterations: failed,
-      error: errorMsg,
+      // `null` clears a paused execution's reason (U-85).
+      error: errorMsg ?? null,
       completedAt: new Date(),
     });
 
     this.emitTerminal(exec, finalStatus, errorMsg);
     return true;
+  }
+
+  /** Executions with a settle watch on their live runs (one per execution). */
+  private watched = new Map<string, Array<() => void>>();
+
+  private watchUntilSettled(exec: AutomationExecution, live: AutomationExecutionRun[]): void {
+    if (this.watched.has(exec.id)) return;
+    const unsubscribes: Array<() => void> = [];
+    this.watched.set(exec.id, unsubscribes);
+    const settle = (): void => {
+      void (async () => {
+        const current = await this.executionRepo.getExecutionById(exec.id).catch(() => null);
+        if (!current || (current.status !== 'running' && current.status !== 'pending' && current.status !== 'paused')) return this.unwatch(exec.id);
+        // No re-drive: the boot pass already offered the execution to the resume hook.
+        const done = await this.recoverOne(current, { resume: false });
+        if (done) this.unwatch(exec.id);
+      })().catch((err: unknown) => {
+        this.logger.warn(`[AutomationRecoveryService] Settling execution ${exec.id} failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    };
+    for (const run of live) {
+      if (!run.workflowRunId) continue;
+      unsubscribes.push(
+        this.eventBus.subscribeToWorkflowRun(run.workflowRunId, (event) => {
+          if (event.kind === 'workflow_run.completed' || event.kind === 'workflow_run.failed' || event.kind === 'workflow_run.cancelled') settle();
+        }),
+      );
+    }
+    // A run that ended between the status read and the subscription: check once now.
+    settle();
+  }
+
+  private unwatch(executionId: string): void {
+    for (const unsubscribe of this.watched.get(executionId) ?? []) unsubscribe();
+    this.watched.delete(executionId);
   }
 
   /**
@@ -229,6 +267,7 @@ export class AutomationRecoveryService {
     run: AutomationExecutionRun,
   ): Promise<'completed' | 'failed' | 'cancelled' | 'pending' | 'running'> {
     try {
+      if (!run.workflowRunId) throw new Error('workflow run deleted');
       const wfr = await this.workflowRunRepo.getById(run.workflowRunId);
       switch (wfr.status) {
         case 'completed':
@@ -291,6 +330,7 @@ export class AutomationRecoveryService {
   }
 
   stopIdempotencySweeper(): void {
+    for (const id of [...this.watched.keys()]) this.unwatch(id);
     if (this.idempotencyTimer) {
       clearInterval(this.idempotencyTimer);
       this.idempotencyTimer = null;

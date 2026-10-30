@@ -1,0 +1,51 @@
+{
+  "E2E Composer Faux": [
+    [
+      { "type": "text", "content": "Let me check with you before I use the terminal." },
+      {
+        "type": "ask_question",
+        "questions": [
+          {
+            "id": "confirm-terminal",
+            "header": "Confirm",
+            "question": "Should I go ahead and run this in the terminal?",
+            "options": [{ "label": "Yes" }, { "label": "No" }],
+            "multiSelect": false,
+            "allowFreeform": false
+          }
+        ]
+      },
+      { "type": "text", "content": "Thanks — I'll continue once you've answered." },
+      { "type": "complete" }
+    ]
+  ],
+  "E2E Composer Running Faux": [
+    [
+      { "type": "text", "content": "Running the checkout suite now." },
+      { "type": "tool_call", "name": "Bash", "input": { "command": "pnpm test checkout --repeat 50" } },
+      { "type": "text", "content": "Done." },
+      { "type": "complete" }
+    ]
+  ],
+  "E2E Changes Faux": [
+    [
+      {
+        "type": "file_edit",
+        "path": "src/app.ts",
+        "content": "import { greet } from './util';\n\nexport function main(): string {\n  return greet('e2e');\n}\n"
+      },
+      {
+        "type": "file_edit",
+        "path": "src/util.ts",
+        "content": "export function greet(name: string): string {\n  return `Hello, ${name}! (e2e)`;\n}\n"
+      },
+      {
+        "type": "file_edit",
+        "path": "notes/e2e-notes.md",
+        "content": "# E2E notes\n\nAdded by the changes-dock e2e spec (09-verification.md §5.3).\n"
+      },
+      { "type": "text", "content": "Updated app.ts and util.ts, and added a notes file." },
+      { "type": "complete" }
+    ]
+  ]
+}

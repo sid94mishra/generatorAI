@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mobile audit · today</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#0b0b0c}
+.t-dark{--ground:#0b0b0c;--surface:#111113;--raised:#17171a;--overlay:#1d1d21;--sunken:#0d0d0f;--hover:rgba(255,255,255,.035);--selected:rgba(255,255,255,.07);--line:#27272c;--line-soft:#1c1c20;--line-strong:#37373d;--fg:#ededef;--fg-2:#a1a1aa;--fg-3:#80808a;--run:#6aa6ff;--run-bg:rgba(106,166,255,.12);--ok:#4cc38a;--ok-bg:rgba(76,195,138,.12);--warn:#f0b429;--warn-bg:rgba(240,180,41,.12);--err:#ff6369;--err-bg:rgba(255,99,105,.12);--add-bg:rgba(76,195,138,.09);--del-bg:rgba(255,99,105,.09);--shadow-pop:0 16px 40px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06);--scrim:rgba(0,0,0,.62);color-scheme:dark}
+.t-light{--ground:#f1f1ef;--surface:#ffffff;--raised:#fafaf9;--overlay:#ffffff;--sunken:#f6f6f4;--hover:rgba(0,0,0,.03);--selected:rgba(0,0,0,.055);--line:#e2e2de;--line-soft:#ecece9;--line-strong:#d0d0cb;--fg:#18181b;--fg-2:#55555d;--fg-3:#6b6b73;--run:#1d6ae5;--run-bg:rgba(29,106,229,.09);--ok:#16804c;--ok-bg:rgba(22,128,76,.09);--warn:#935f00;--warn-bg:rgba(214,150,0,.13);--err:#d1242f;--err-bg:rgba(209,36,47,.08);--add-bg:rgba(22,128,76,.08);--del-bg:rgba(209,36,47,.07);--shadow-pop:0 16px 40px rgba(20,20,30,.14),0 0 0 1px rgba(0,0,0,.06);--scrim:rgba(20,20,24,.3);color-scheme:light}
+.acc-ink{--accent:var(--fg);--on-accent:var(--surface)}
+.acc-blue{--accent:#2f6fed;--on-accent:#ffffff}
+.acc-violet{--accent:#7152e0;--on-accent:#ffffff}
+.acc-green{--accent:#1b8a52;--on-accent:#ffffff}
+.acc-orange{--accent:#d4561c;--on-accent:#ffffff}
+.acc-rose{--accent:#c8325f;--on-accent:#ffffff}
+.acc-teal{--accent:#0f7f7a;--on-accent:#ffffff}
+.app{font-family:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:13px;line-height:1.45;color:var(--fg);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.app *{box-sizing:border-box}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.i12{width:12px;height:12px}.i14{width:14px;height:14px}.i20{width:20px;height:20px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line);background:var(--raised);color:var(--fg);font-family:inherit;font-size:13px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;text-decoration:none}
+.btn-p{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.btn-g{background:transparent;border-color:transparent;color:var(--fg-2)}
+.btn-d{color:var(--err)}
+.btn-sm{height:24px;padding:0 8px;font-size:12px;border-radius:5px}
+.btn-lg{height:32px;padding:0 12px}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;border:0;background:transparent;color:var(--fg-2);padding:0;cursor:pointer;flex-shrink:0}
+.ib-sm{width:24px;height:24px;border-radius:5px}
+.ib.on{background:var(--selected);color:var(--fg)}
+.kbd{display:inline-flex;align-items:center;justify-content:center;height:18px;min-width:18px;padding:0 4px;border-radius:4px;border:1px solid var(--line);background:var(--sunken);color:var(--fg-3);font-family:"JetBrains Mono",monospace;font-size:11px;line-height:1;font-weight:400}
+.bdg{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border-radius:4px;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.s-run{color:var(--run);background:var(--run-bg)}.s-ok{color:var(--ok);background:var(--ok-bg)}.s-warn{color:var(--warn);background:var(--warn-bg)}.s-err{color:var(--err);background:var(--err-bg)}.s-idle{color:var(--fg-2);background:var(--selected)}
+.c-run{color:var(--run)}.c-ok{color:var(--ok)}.c-warn{color:var(--warn)}.c-err{color:var(--err)}.c-1{color:var(--fg)}.c-2{color:var(--fg-2)}.c-3{color:var(--fg-3)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.inp{display:flex;align-items:center;gap:8px;height:32px;border-radius:6px;border:1px solid var(--line);background:var(--sunken);color:var(--fg);padding:0 10px;font-family:inherit;font-size:13px;width:100%}
+.lbl{font-size:12px;font-weight:500;color:var(--fg-2)}
+.hint{font-size:12px;color:var(--fg-3)}
+.nav{display:flex;align-items:center;gap:10px;height:30px;padding:0 8px;border-radius:6px;color:var(--fg-2);font-size:13px;font-weight:500;text-decoration:none}
+.nav.on{background:var(--selected);color:var(--fg)}
+.cnt{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--fg-3)}
+.sec{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tabs{display:flex;gap:20px;border-bottom:1px solid var(--line-soft)}
+.tab{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0;border:0;background:none;font-family:inherit;font-size:13px;font-weight:500;color:var(--fg-2);text-decoration:none}
+.tab.on{color:var(--fg);box-shadow:inset 0 -2px 0 var(--fg)}
+.seg{display:inline-flex;gap:2px;padding:2px;border-radius:7px;background:var(--sunken);border:1px solid var(--line-soft)}
+.seg button{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:5px;border:0;background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;line-height:1}
+.seg button.on{background:var(--raised);color:var(--fg);box-shadow:0 0 0 1px var(--line)}
+.card{background:var(--raised);border:1px solid var(--line-soft);border-radius:8px}
+.th{display:flex;align-items:center;height:32px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tr{display:flex;align-items:center;gap:16px;height:44px;padding:0 20px;border-bottom:1px solid var(--line-soft);font-size:13px}
+.sw{position:relative;display:inline-block;width:28px;height:16px;border-radius:999px;border:0;padding:0;background:var(--line-strong);flex-shrink:0}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#ffffff}
+.sw.on{background:var(--accent)}
+.sw.on::after{left:14px;background:var(--on-accent)}
+.cb{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:4px;border:1px solid var(--line-strong);flex-shrink:0;color:var(--on-accent)}
+.cb.on{background:var(--accent);border-color:var(--accent)}
+.av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:var(--selected);color:var(--fg-2);font-size:11px;font-weight:600;flex-shrink:0}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.mono span{white-space:pre}
+.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+/* ── Mobile layer (Instrument for iOS + Android). Same colour tokens as desktop. ── */
+.board{flex-grow:1;display:flex;flex-direction:column;gap:14px;padding:36px 44px;background:var(--ground)}
+.pair{display:flex;gap:64px;align-items:flex-start}
+.plabel{display:flex;align-items:center;gap:8px;height:20px;font-size:12px;font-weight:500;color:var(--fg-2)}
+.phone{position:relative;flex-shrink:0;overflow:hidden;display:flex;flex-direction:column;background:var(--surface);color:var(--fg);box-shadow:0 0 0 1px var(--line-strong),0 24px 60px rgba(0,0,0,.35)}
+.ios{width:402px;height:874px;border-radius:56px}
+.and{width:412px;height:915px;border-radius:36px}
+.safe-top-ios{height:62px;flex-shrink:0}.safe-top-and{height:40px;flex-shrink:0}
+.safe-bot-ios{height:34px;flex-shrink:0}.safe-bot-and{height:24px;flex-shrink:0}
+/* type — iOS scale (pt) and Android M3 scale (sp); Instrument Sans on both, JetBrains Mono for machine text */
+.i-lt{font-size:32px;font-weight:600;letter-spacing:-0.02em;line-height:1.15}
+.i-t2{font-size:20px;font-weight:600;letter-spacing:-0.01em}
+.i-hd{font-size:17px;font-weight:600}.i-bd{font-size:17px;line-height:1.4}.i-cb{font-size:16px;line-height:1.5}
+.i-sub{font-size:15px}.i-fn{font-size:13px}.i-cap{font-size:12px}
+.a-hl{font-size:28px;font-weight:600;letter-spacing:-0.01em;line-height:1.2}
+.a-tl{font-size:22px;font-weight:600}.a-tm{font-size:16px;font-weight:600}
+.a-bl{font-size:16px;line-height:1.5}.a-bm{font-size:14px;line-height:1.45}.a-lb{font-size:12px;font-weight:500}
+/* iOS 26 Liquid Glass material — used ONLY for floating chrome (tab bar, nav buttons, composer, sheets' grabber area) */
+.glass{background:color-mix(in srgb,var(--overlay) 68%,transparent);-webkit-backdrop-filter:blur(22px) saturate(1.6);backdrop-filter:blur(22px) saturate(1.6);border:1px solid color-mix(in srgb,var(--fg) 12%,transparent);box-shadow:0 8px 28px rgba(0,0,0,.28)}
+.gbtn{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:22px;color:var(--fg);padding:0;flex-shrink:0;border:0;background:transparent;font-family:inherit}
+.gbtn.glass{background:color-mix(in srgb,var(--overlay) 68%,transparent);border:1px solid color-mix(in srgb,var(--fg) 12%,transparent)}
+.gcap{display:inline-flex;align-items:center;gap:2px;height:44px;border-radius:22px;padding:0 4px;flex-shrink:0}
+/* iOS floating tab bar */
+.itab{position:absolute;left:16px;right:84px;bottom:28px;height:62px;border-radius:31px;display:flex;align-items:center;justify-content:space-around;padding:0 6px}
+.itab a{display:flex;flex-direction:column;align-items:center;gap:2px;width:72px;padding:6px 0;border-radius:24px;color:var(--fg-2);font-size:11px;font-weight:500;text-decoration:none}
+.itab a.on{color:var(--fg);background:color-mix(in srgb,var(--fg) 10%,transparent)}
+.isearch{position:absolute;right:16px;bottom:28px;width:62px;height:62px;border-radius:31px;display:flex;align-items:center;justify-content:center;color:var(--fg)}
+/* Android navigation bar (M3) */
+.anav{height:64px;flex-shrink:0;display:flex;align-items:center;justify-content:space-around;background:var(--raised);border-top:1px solid var(--line-soft)}
+.anav a{display:flex;flex-direction:column;align-items:center;gap:2px;width:80px;color:var(--fg-2);font-size:12px;font-weight:500;text-decoration:none}
+.anav a .pill{display:flex;align-items:center;justify-content:center;width:56px;height:30px;border-radius:15px}
+.anav a.on{color:var(--fg)}.anav a.on .pill{background:var(--selected);color:var(--fg)}
+/* Android top app bar + FAB */
+.atop{height:64px;flex-shrink:0;display:flex;align-items:center;gap:4px;padding:0 4px 0 4px}
+.aib{display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:24px;border:0;background:transparent;color:var(--fg);padding:0;flex-shrink:0}
+.afab{display:inline-flex;align-items:center;gap:10px;height:56px;padding:0 20px 0 16px;border-radius:16px;border:0;background:var(--accent);color:var(--on-accent);font-family:inherit;font-size:14px;font-weight:600;box-shadow:0 6px 16px rgba(0,0,0,.3)}
+/* lists */
+.igroup{background:var(--raised);border-radius:22px;overflow:hidden}
+.irow{display:flex;align-items:center;gap:12px;min-height:52px;padding:10px 16px;border-bottom:1px solid var(--line-soft)}
+.arow{display:flex;align-items:center;gap:16px;min-height:64px;padding:10px 16px}
+/* sheets */
+.sheet-i{position:absolute;left:8px;right:8px;bottom:8px;border-radius:38px;background:var(--overlay);box-shadow:0 -10px 40px rgba(0,0,0,.35);display:flex;flex-direction:column;overflow:hidden}
+.sheet-a{position:absolute;left:0;right:0;bottom:0;border-radius:28px 28px 0 0;background:var(--overlay);box-shadow:0 -10px 40px rgba(0,0,0,.35);display:flex;flex-direction:column;overflow:hidden}
+.grab{width:36px;height:5px;border-radius:3px;background:var(--line-strong);margin:8px auto 4px auto;flex-shrink:0}
+.agrab{width:32px;height:4px;border-radius:2px;background:var(--fg-3);margin:16px auto 8px auto;flex-shrink:0;opacity:.6}
+.scrim{position:absolute;inset:0;background:var(--scrim)}
+/* controls sized for touch */
+.mbtn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 18px;border-radius:22px;border:1px solid var(--line);background:var(--raised);color:var(--fg);font-family:inherit;font-size:15px;font-weight:600;white-space:nowrap}
+.mbtn-p{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.abtn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 20px;border-radius:20px;border:1px solid var(--line-strong);background:transparent;color:var(--fg);font-family:inherit;font-size:14px;font-weight:600;white-space:nowrap}
+.abtn-p{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.mchip{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:16px;border:1px solid var(--line);background:transparent;color:var(--fg-2);font-family:inherit;font-size:13px;font-weight:500;white-space:nowrap;flex-shrink:0}
+.achip{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--line-strong);background:transparent;color:var(--fg-2);font-family:inherit;font-size:14px;font-weight:500;white-space:nowrap;flex-shrink:0}
+.mchip.on,.achip.on{background:var(--selected);color:var(--fg);border-color:transparent}
+.hscroll{display:flex;gap:8px;overflow:hidden;flex-shrink:0}
+.i22{width:22px;height:22px}.i24{width:24px;height:24px}.i18{width:18px;height:18px}
+/* v2: left sidebar (drawer) + right workspace pane */
+.drawer-i{position:absolute;left:0;top:0;bottom:0;width:318px;background:var(--surface);border-right:1px solid var(--line-soft);box-shadow:12px 0 40px rgba(0,0,0,.35);display:flex;flex-direction:column;border-radius:0 28px 28px 0;overflow:hidden}
+.drawer-a{position:absolute;left:0;top:0;bottom:0;width:336px;background:var(--overlay);box-shadow:12px 0 40px rgba(0,0,0,.35);display:flex;flex-direction:column;border-radius:0 16px 16px 0;overflow:hidden}
+.dnav{display:flex;align-items:center;gap:12px;height:44px;padding:0 12px;border-radius:12px;color:var(--fg-2);font-size:16px;font-weight:500;text-decoration:none}
+.dnav.on{background:var(--selected);color:var(--fg)}
+.dnav-a{display:flex;align-items:center;gap:12px;height:48px;padding:0 16px;border-radius:24px;color:var(--fg-2);font-size:15px;font-weight:500;text-decoration:none}
+.dnav-a.on{background:var(--selected);color:var(--fg)}
+.dsec{display:flex;align-items:center;gap:6px;height:30px;padding:0 12px;font-size:13px;font-weight:600;color:var(--fg-3)}
+.pane-i{position:absolute;right:0;top:0;bottom:0;width:356px;background:var(--surface);border-left:1px solid var(--line-soft);box-shadow:-12px 0 40px rgba(0,0,0,.35);display:flex;flex-direction:column;border-radius:28px 0 0 28px;overflow:hidden}
+.pane-a{position:absolute;right:0;top:0;bottom:0;width:364px;background:var(--overlay);box-shadow:-12px 0 40px rgba(0,0,0,.35);display:flex;flex-direction:column;border-radius:16px 0 0 16px;overflow:hidden}
+.ptab-i{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:16px;border:0;background:transparent;color:var(--fg-2);font-family:inherit;font-size:14px;font-weight:500;white-space:nowrap;flex-shrink:0}
+.ptab-i.on{background:var(--selected);color:var(--fg)}
+.ptab-a{display:inline-flex;align-items:center;gap:6px;height:48px;padding:0 12px;border:0;background:transparent;color:var(--fg-2);font-family:inherit;font-size:14px;font-weight:500;white-space:nowrap;flex-shrink:0}
+.ptab-a.on{color:var(--fg);box-shadow:inset 0 -3px 0 var(--fg)}
+div:has(> .ptab-i),div:has(> .ptab-a){-webkit-mask-image:linear-gradient(90deg,#000 88%,transparent);mask-image:linear-gradient(90deg,#000 88%,transparent)}
+
+</style>
+</helmet>
+<div class="app {{rootClass}}" style="width: 1600px; height: 1250px; position: relative; display: flex; background: var(--ground); overflow: hidden;">
+<div class="board" style="width: 1600px; flex-grow: 0; min-width: 0; gap: 22px; padding: 44px 56px;">
+
+<header style="display: flex; align-items: flex-end; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.45;">The mobile app today</h1>
+<p style="margin: 0; font-size: 13px; color: var(--fg-2);">Read from <span class="mono">apps/mobile</span> (Expo 57, React Native 0.86, expo-router). Every figure below has a file reference in <span class="mono">mobile/01-current-mobile-audit.md</span>.</p>
+</div>
+<div style="flex-grow: 1;"></div>
+<span class="mono c-3" style="font-size: 11px;">arch-redesign · Sep 23</span>
+</header>
+
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 10px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Measured</h2><span style="font-size: 12px; color: var(--fg-3);">iOS and Android builds share one React Native codebase</span></div>
+<div class="card" style="display: flex; padding: 14px 0; background: var(--surface);">
+<div style="flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 0 18px;"><span class="mono" style="font-size: 20px; font-weight: 600; line-height: 1.3;">4</span><span style="font-size: 12px; color: var(--fg-3);">JS tabs; the native Liquid Glass / M3 tab bar is switched off</span></div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 0 18px; border-left: 1px solid var(--line-soft);"><span class="mono" style="font-size: 20px; font-weight: 600; line-height: 1.3;">6 of 15</span><span style="font-size: 12px; color: var(--fg-3);">desktop settings sections missing</span></div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 0 18px; border-left: 1px solid var(--line-soft);"><span class="mono" style="font-size: 20px; font-weight: 600; line-height: 1.3;">0</span><span style="font-size: 12px; color: var(--fg-3);">authoring screens: no builder, run control, automation create or agent editor</span></div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 0 18px; border-left: 1px solid var(--line-soft);"><span class="mono" style="font-size: 20px; font-weight: 600; line-height: 1.3;">0</span><span style="font-size: 12px; color: var(--fg-3);">command search or quick switcher</span></div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 0 18px; border-left: 1px solid var(--line-soft);"><span class="mono" style="font-size: 20px; font-weight: 600; line-height: 1.3;">0</span><span style="font-size: 12px; color: var(--fg-3);">widgets, Live Activities, app shortcuts or share extension</span></div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 0 18px; border-left: 1px solid var(--line-soft);"><span class="mono" style="font-size: 20px; font-weight: 600; line-height: 1.3;">0</span><span style="font-size: 12px; color: var(--fg-3);">mono font files bundled; code in 25 files falls back to proportional</span></div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 0 18px; border-left: 1px solid var(--line-soft);"><span class="mono" style="font-size: 20px; font-weight: 600; line-height: 1.3;">0</span><span style="font-size: 12px; color: var(--fg-3);">tablet or landscape layouts; only the diff splits at 700 pt</span></div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 0 18px; border-left: 1px solid var(--line-soft);"><span class="mono" style="font-size: 20px; font-weight: 600; line-height: 1.3;">1</span><span style="font-size: 12px; color: var(--fg-3);">server at a time; re-pairing replaces it</span></div>
+</div>
+</section>
+
+<div style="display: flex; gap: 28px; flex-shrink: 0;">
+
+<!-- Gap table -->
+<section style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 10px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Gap table</h2><span style="font-size: 12px; color: var(--fg-3);">Desktop module, what the phone has today, and where it lives in the round 2 layout</span></div>
+<div class="card" style="background: var(--surface); overflow: hidden;">
+<div class="th" style="gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--line-soft);"><span style="width: 180px; flex-shrink: 0;">Desktop module</span><span style="width: 330px; flex-shrink: 0;">On mobile today</span><span style="width: 84px; flex-shrink: 0;">Status</span><span style="flex-grow: 1;">In the redesign · sidebar module, pane or section</span></div>
+
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Home</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">Approvals queue, 2 stat tiles, 3 segments</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg s-idle">Partial</span></span><span class="trunc" style="flex-grow: 1;">Home: three counts, then Needs you · Running · Finished lists</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Command palette</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">No global search or quick switcher</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg" style="border: 1px solid var(--line); color: var(--fg-2);">Missing</span></span><span class="trunc" style="flex-grow: 1;">Search field at the top of the sidebar drawer</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Chats list</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">Search, Active / Archived, swipe Archive / Delete</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg s-idle">Partial</span></span><span class="trunc" style="flex-grow: 1;">Chats: status-glyph rows, All / Active / Archived, swipe</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Chat + composer</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">Tool rows, gates, turn setup, voice, two-phase Stop</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg s-ok">Present</span></span><span class="trunc" style="flex-grow: 1;">Chat: breadcrumb header, grouped tool block, turn sheet</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Dock panes</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">Swipe panes plus a More sheet</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg s-ok">Present</span></span><span class="trunc" style="flex-grow: 1;">Right pane tabs: Changes · Files · Terminal · Tasks · Plan</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Dock: Browser</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">Polled frames, view-only, URL and reload</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg s-idle">Partial</span></span><span class="trunc" style="flex-grow: 1;">Right pane › Browser: frame, address bar, capture</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Dock: Computer, Widgets</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">Computer behind a flag; Widgets is an empty state</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg" style="border: 1px solid var(--line); color: var(--fg-2);">Missing</span></span><span class="trunc" style="flex-grow: 1;">Right pane › Computer; widget rows open on desktop</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Workflows</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">List and a read-only stage list; no Run, no Edit</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg s-idle">Partial</span></span><span class="trunc" style="flex-grow: 1;">Workflows module: Run, stage list, graph toggle</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Workflow builder</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">"New" opens a Coming soon sheet</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg" style="border: 1px solid var(--line); color: var(--fg-2);">Missing</span></span><span class="trunc" style="flex-grow: 1;">Workflows › builder (full-screen), stage editor pushed</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Run page</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">Gate actions only; no Pause, Cancel, Retry</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg s-idle">Partial</span></span><span class="trunc" style="flex-grow: 1;">Workflows › Run #248: timeline, gate, run pane</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Automations</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">On/Off badge, executions list; no toggle, run or create</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg s-idle">Partial</span></span><span class="trunc" style="flex-grow: 1;">Automations module: switch, Run now, stepped create</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Scripts</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">Segment removed (no client endpoint)</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg" style="border: 1px solid var(--line); color: var(--fg-2);">Missing</span></span><span class="trunc" style="flex-grow: 1;">Scripts module: list, run profiles, Run script</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Projects, codebases</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">Read-only codebase list with sync status</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg s-idle">Partial</span></span><span class="trunc" style="flex-grow: 1;">Projects module › project › codebase › worktrees</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Agents</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">Read-only detail sheet; no editor, import or export</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg s-idle">Partial</span></span><span class="trunc" style="flex-grow: 1;">Agents module: detail, full-screen editor</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Skills, MCP, templates</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">Read-only list in Settings › Capabilities</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg s-idle">Partial</span></span><span class="trunc" style="flex-grow: 1;">Settings › Agents &amp; models: Skills, MCP, Templates</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Settings</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">10 screens; 6 desktop sections absent</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg s-idle">Partial</span></span><span class="trunc" style="flex-grow: 1;">Sidebar footer › Settings: 4 groups, 15 + 4 sections</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">Pairing, servers</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">QR or pasted link; deep-link code ignored</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg s-idle">Partial</span></span><span class="trunc" style="flex-grow: 1;">Sidebar server switcher; Settings › Security &amp; devices</span></div>
+<div class="tr" style="height: 36px; padding: 0 16px; border-bottom: 0;"><span style="width: 180px; flex-shrink: 0; font-weight: 500;">System surfaces</span><span class="trunc c-2" style="width: 330px; flex-shrink: 0;">Push with lock-screen Allow / Deny only</span><span style="width: 84px; flex-shrink: 0;"><span class="bdg s-idle">Partial</span></span><span class="trunc" style="flex-grow: 1;">Live Activity / Update, widgets, shortcuts, share</span></div>
+</div>
+</section>
+
+<!-- Right column -->
+<div style="width: 380px; flex-shrink: 0; display: flex; flex-direction: column; gap: 22px;">
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 10px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Already works, keep it</h2></div>
+<div class="card" style="background: var(--surface); padding: 6px 16px;">
+<div style="display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg><span style="font-size: 13px;">Lock-screen <b style="font-weight: 600;">Allow / Deny</b> on permission pushes, without opening the app</span></div>
+<div style="display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg><span style="font-size: 13px;">Face ID app lock and a 10-minute step-up before Terminal and Browser</span></div>
+<div style="display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg><span style="font-size: 13px;">xterm.js terminal, 4 sessions, key bar, pinch font 10–20</span></div>
+<div style="display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg><span style="font-size: 13px;">Changes: diff, line comments, checkpoints, Commit and Create PR</span></div>
+<div style="display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg><span style="font-size: 13px;">New chat sheet at full desktop parity, including orchestrator mode</span></div>
+<div style="display: flex; gap: 10px; padding: 8px 0;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg><span style="font-size: 13px;">Dictation, read-aloud, 44 / 48 targets, Reduce Motion in two layers</span></div>
+</div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 10px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Known defects</h2><span style="font-size: 12px; color: var(--fg-3);">Fixed by the redesign</span></div>
+<div class="card" style="background: var(--surface); padding: 6px 16px;">
+<div style="display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--err); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg><span style="font-size: 13px;">Bound-agent chip in the composer does nothing when tapped</span></div>
+<div style="display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--err); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg><span style="font-size: 13px;">"Pair a device" lands on a screen that cannot pair anything</span></div>
+<div style="display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--err); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg><span style="font-size: 13px;">Approvals probe checks only the 12 most likely chats</span></div>
+<div style="display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--err); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg><span style="font-size: 13px;">The live socket closes in the background; push is the only channel</span></div>
+<div style="display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--err); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg><span style="font-size: 13px;">About says review and commit are desktop-only; both ship today</span></div>
+<div style="display: flex; gap: 10px; padding: 8px 0;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--err); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg><span style="font-size: 13px;">No app icon or splash image; splash is a flat colour</span></div>
+</div>
+</section>
+</div>
+
+</div>
+
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 10px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600;">Where things live now</h2><span style="font-size: 12px; color: var(--fg-3);">Round 2: the tab bar is gone. The desktop sidebar becomes a left drawer, the dock becomes a right pane. Same on iOS and Android.</span></div>
+<div class="card" style="background: var(--surface); display: flex; align-items: stretch; padding: 14px 0;">
+<div style="flex: 1.6; display: flex; flex-direction: column; gap: 8px; padding: 0 18px;"><span style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path></svg>Left sidebar</span><div style="display: flex; flex-wrap: wrap; gap: 6px;"><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"></path><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>Home</span><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>Chats</span><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg>Projects</span><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>Agents</span><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></svg>Workflows</span><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"></path><path d="M16 2v4"></path><path d="M8 2v4"></path><path d="M3 10h5"></path><path d="M17.5 17.5 16 16.3V14"></path><circle cx="16" cy="16" r="6"></circle></svg>Automations</span><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="m5 12-3 3 3 3"></path><path d="m9 18 3-3-3-3"></path></svg>Scripts</span></div><span style="font-size: 12px; color: var(--fg-3);">Plus Needs you and Running lists, search, server switcher, New chat</span></div>
+<div style="flex: 1.25; display: flex; flex-direction: column; gap: 8px; padding: 0 18px; border-left: 1px solid var(--line-soft);"><span style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M15 3v18"></path></svg>Right workspace pane</span><div style="display: flex; flex-wrap: wrap; gap: 6px;"><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><path d="M11 18H8a2 2 0 0 1-2-2V9"></path></svg>Changes</span><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M20 7h-3a2 2 0 0 1-2-2V2"></path><path d="M9 18a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h7l4 4v10a2 2 0 0 1-2 2Z"></path><path d="M3 7.6v12.8A1.6 1.6 0 0 0 4.6 22h9.8"></path></svg>Files</span><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg>Terminal</span><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>Browser</span><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M21 12h-8"></path><path d="M21 6H8"></path><path d="M21 18h-8"></path><path d="M3 6v4c0 1.1.9 2 2 2h3"></path><path d="M3 10v6c0 1.1.9 2 2 2h3"></path></svg>Tasks</span><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="m3 17 2 2 4-4"></path><path d="m3 7 2 2 4-4"></path><path d="M13 6h8"></path><path d="M13 12h8"></path><path d="M13 18h8"></path></svg>Plan</span><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg>Computer</span></div><span style="font-size: 12px; color: var(--fg-3);">A run's pane: Output · Files · Hooks · Variables · Changes · Terminal · Browser</span></div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 0 18px; border-left: 1px solid var(--line-soft);"><span style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>Settings</span><div style="display: flex; flex-wrap: wrap; gap: 6px;"><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><line x1="21" x2="14" y1="4" y2="4"></line><line x1="10" x2="3" y1="4" y2="4"></line><line x1="21" x2="12" y1="12" y2="12"></line><line x1="8" x2="3" y1="12" y2="12"></line><line x1="21" x2="16" y1="20" y2="20"></line><line x1="12" x2="3" y1="20" y2="20"></line><line x1="14" x2="14" y1="2" y2="6"></line><line x1="8" x2="8" y1="10" y2="14"></line><line x1="16" x2="16" y1="18" y2="22"></line></svg>App</span><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>Agents &amp; models</span><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>Integrations</span><span style="display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); font-size: 12px; font-weight: 500; white-space: nowrap;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"></rect><rect width="20" height="8" x="2" y="14" rx="2" ry="2"></rect><line x1="6" x2="6.01" y1="6" y2="6"></line><line x1="6" x2="6.01" y1="18" y2="18"></line></svg>System</span></div><span style="font-size: 12px; color: var(--fg-3);">+ Notifications, App lock, Haptics, Widgets &amp; Live Updates</span></div>
+</div>
+</section>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["dark","light"],"default":"dark","section":"Theme"},"accent":{"editor":"enum","options":["ink","blue","violet","green","orange","rose","teal"],"default":"ink","section":"Theme"},"$preview":{"width":1600,"height":1250}}'>
+class Component extends DCLogic {
+renderVals() {
+const mode = this.props.mode ?? 'dark';
+const accent = this.props.accent ?? 'ink';
+return { rootClass: 't-' + mode + ' acc-' + accent };
+}
+}
+</script>
+</body>
+</html>

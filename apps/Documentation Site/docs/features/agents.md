@@ -49,7 +49,7 @@ Agent records are versioned on mutation, and source-synchronized agents can iden
 
 ## Source evidence
 
-`apps/web/src/pages/AgentsListPage.tsx`, `apps/web/src/pages/AgentEditorPage.tsx`, `apps/web/src/components/agents`, `packages/shared/src/types/Agent.ts`, `packages/shared/src/config/AgentSchemas.ts`, and the agent-resolution services under `packages/core/src`.
+`apps/web/src/features/agents/AgentsListPage.tsx`, `apps/web/src/features/agents/AgentEditorPage.tsx`, `apps/web/src/features/agents`, `packages/shared/src/types/Agent.ts`, `packages/shared/src/config/AgentSchemas.ts`, and the agent-resolution services under `packages/core/src`.
 
 ## Configuration and worked examples
 

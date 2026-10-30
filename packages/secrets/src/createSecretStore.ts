@@ -2,7 +2,7 @@
 // createSecretStore — chooses the strongest available backend.
 //
 // Selection order:
-//   1. Explicit operator key/passphrase   (GENERATORAI_SECRET_KEY / …PASSPHRASE)
+//   1. Explicit operator key/passphrase   (handed-over key, GENERATORAI_SECRET_KEY / …PASSPHRASE)
 //   2. OS-protected key hooks             (Electron desktop passes safeStorage)
 //   3. Local mode-0600 key file           (secure: false — dev/loopback only)
 //
@@ -28,6 +28,11 @@ export interface CreateSecretStoreOptions {
   dataDir: string;
   /** Supplied by the Electron desktop shell; omitted for headless servers. */
   osHooks?: OsProtectedKeyHooks | undefined;
+  /**
+   * The operator key handed over in memory (the desktop app's channel, F-8)
+   * instead of `GENERATORAI_SECRET_KEY`. Same encoding; wins over the env.
+   */
+  suppliedKey?: string | undefined;
   /** Throw rather than fall back to a `secure: false` backend. */
   requireSecure?: boolean;
   logger?: { warn(msg: string, meta?: unknown): void; info(msg: string, meta?: unknown): void };
@@ -38,8 +43,8 @@ export function createSecretStore(options: CreateSecretStoreOptions): SecretStor
   const vaultPath = path.join(dir, 'secrets.vault.json');
 
   let keyProvider: KeyProvider;
-  if (EnvKeyProvider.isConfigured()) {
-    keyProvider = new EnvKeyProvider(path.join(dir, 'kdf.salt'));
+  if (options.suppliedKey || EnvKeyProvider.isConfigured()) {
+    keyProvider = new EnvKeyProvider(path.join(dir, 'kdf.salt'), options.suppliedKey);
   } else if (options.osHooks) {
     keyProvider = new OsProtectedKeyProvider(options.osHooks, path.join(dir, 'kek.enc'));
   } else {

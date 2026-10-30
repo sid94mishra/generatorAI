@@ -447,6 +447,8 @@ export function upsertBackgroundTask(
       ...(task.lastText ? { lastText: task.lastText } : {}),
       ...(task.endedAt ? { endedAt: task.endedAt } : {}),
       ...(task.summary ? { summary: task.summary } : {}),
+      ...(task.cancelledBy ? { cancelledBy: task.cancelledBy } : {}),
+      ...(task.cancelledAt ? { cancelledAt: task.cancelledAt } : {}),
       ...(task.parentCallId ? { parentCallId: task.parentCallId } : {}),
     };
     return put(streams, sessionId, {
@@ -470,7 +472,7 @@ export function upsertBackgroundTask(
   let changed = false;
   for (const key of [
     'taskName', 'model', 'status', 'currentStep', 'lastText',
-    'toolCalls', 'startedAt', 'endedAt', 'summary', 'parentCallId',
+    'toolCalls', 'startedAt', 'endedAt', 'summary', 'parentCallId', 'cancelledBy', 'cancelledAt',
   ] as const) {
     const value = task[key];
     if (value === undefined) continue;
@@ -481,6 +483,12 @@ export function upsertBackgroundTask(
   // A settled worker never goes back to a live step line.
   if (task.status && task.status !== 'running' && task.status !== 'spawned' && prior.currentStep) {
     delete (merged as { currentStep?: string }).currentStep;
+    changed = true;
+  }
+  // G-20: the attribution belongs to the cancelled state; a follow-up turn drops it.
+  if (merged.status !== 'cancelled' && (merged.cancelledBy !== undefined || merged.cancelledAt !== undefined)) {
+    delete merged.cancelledBy;
+    delete merged.cancelledAt;
     changed = true;
   }
   if (!changed) return streams;
@@ -547,6 +555,7 @@ export function addSystemMessage(
   sessionId: string,
   message: string,
   category: SystemCategory = 'system',
+  label?: string,
 ): StreamsRecord {
   if (!message?.trim()) return streams;
 
@@ -556,6 +565,7 @@ export function addSystemMessage(
     blockId: existing._nextBlockId,
     message,
     category,
+    ...(label ? { label } : {}),
   };
 
   return put(streams, sessionId, {
@@ -997,14 +1007,16 @@ export function upsertPlan(
   now: number = Date.now(),
 ): StreamsRecord {
   const existing = existingOrDefault(streams, sessionId);
-  // De-dup by planId — a revision updates the card in place, so "request
-  // changes" does not stack a new card on every review round.
+  // De-dup by planId — "request changes" does not stack a new card on every
+  // review round: the one card follows the plan, and a newer revision moves it
+  // to the end, after the reply and the edits that produced it.
   const idx = existing.blocks.findIndex((b) => b.type === 'plan' && b.planId === plan.planId);
   const openedAt = plan.status === 'awaiting_review' ? { openedAt: now } : {};
 
   if (idx >= 0) {
     const blocks = existing.blocks.slice();
-    blocks[idx] = { ...(blocks[idx] as PlanBlock), ...plan, ...openedAt };
+    const next: PlanBlock = { ...(blocks[idx] as PlanBlock), ...plan, ...openedAt };
+    placeRevision(blocks, idx, next, (blocks[idx] as PlanBlock).revision);
     return put(streams, sessionId, { ...existing, blocks });
   }
 
@@ -1029,18 +1041,29 @@ export function setPlanStatus(
   extra?: { interactionId?: string; revision?: number },
   now: number = Date.now(),
 ): StreamsRecord {
-  return replaceBlock(
-    streams,
-    sessionId,
-    (b) => b.type === 'plan' && b.planId === planId,
-    (b) => ({
-      ...(b as PlanBlock),
-      status,
-      ...(status === 'awaiting_review' ? { openedAt: now } : {}),
-      ...(extra?.interactionId ? { interactionId: extra.interactionId } : {}),
-      ...(extra?.revision !== undefined ? { revision: extra.revision } : {}),
-    }),
-  );
+  const existing = streams[sessionId];
+  const idx = existing ? existing.blocks.findIndex((b) => b.type === 'plan' && b.planId === planId) : -1;
+  if (!existing || idx < 0) return streams;
+  const prior = existing.blocks[idx] as PlanBlock;
+  const blocks = existing.blocks.slice();
+  placeRevision(blocks, idx, {
+    ...prior,
+    status,
+    ...(status === 'awaiting_review' ? { openedAt: now } : {}),
+    ...(extra?.interactionId ? { interactionId: extra.interactionId } : {}),
+    ...(extra?.revision !== undefined ? { revision: extra.revision } : {}),
+  }, prior.revision);
+  return put(streams, sessionId, { ...existing, blocks });
+}
+
+/** Writes `next` over `blocks[idx]`; a newer revision than `priorRevision` moves it to the end instead. */
+function placeRevision(blocks: StreamBlock[], idx: number, next: PlanBlock, priorRevision: number): void {
+  if (next.revision > priorRevision) {
+    blocks.splice(idx, 1);
+    blocks.push(next);
+  } else {
+    blocks[idx] = next;
+  }
 }
 
 export function upsertQuestion(
@@ -1160,6 +1183,8 @@ export function resolvePermission(
   interactionId: string,
   behavior: 'allow' | 'deny',
   message?: string,
+  /** U-16: the rules an "Allow for this chat / run" answer remembered. */
+  remembered?: PermissionBlock['remembered'],
 ): StreamsRecord {
   return replaceBlock(
     streams,
@@ -1169,6 +1194,7 @@ export function resolvePermission(
       ...(b as PermissionBlock),
       status: behavior === 'allow' ? 'allowed' : 'denied',
       ...(message ? { message } : {}),
+      ...(remembered?.length ? { remembered } : {}),
     }),
   );
 }

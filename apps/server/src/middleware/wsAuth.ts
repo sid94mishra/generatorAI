@@ -14,7 +14,9 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import {
   AuthError,
+  canonicalApiPath,
   hasAllScopes,
+  requiredScopesFor,
   isLoopbackAddress,
   missingScopes,
   type Principal,
@@ -22,6 +24,9 @@ import {
 } from '@generatorai/auth';
 import type { Container } from '../composition-root.js';
 import { reachableOrigins } from '../network/reachableOrigins.js';
+import { requestAbsoluteUrl, type OriginRequest } from '../network/requestOrigin.js';
+import { classifyTransport } from './transportPolicy.js';
+import { hostCheck, serverHostAllowlist } from './hostAllowlist.js';
 
 export interface UpgradeAuthResult {
   ok: boolean;
@@ -47,8 +52,44 @@ export interface AuthorizeUpgradeParams {
 export async function authorizeWebSocketUpgrade(
   params: AuthorizeUpgradeParams,
 ): Promise<UpgradeAuthResult> {
-  const { container, req, socket, requiredScopes, ticketScope, label } = params;
+  const { container, req, socket, ticketScope, label } = params;
   const { auth, audit } = container.security;
+
+  // D-119 — a rebinding page reaches the upgrade too; refuse a foreign Host first.
+  const host = hostCheck(req as unknown as Parameters<typeof hostCheck>[0], serverHostAllowlist(container));
+  if (!host.ok) {
+    container.logger.warn(`[${label}] upgrade rejected: Host is not one of this server's names`, {
+      host: host.host.slice(0, 200),
+    });
+    reject(socket, 421, 'Misdirected Request');
+    return { ok: false };
+  }
+
+  // D-115 (audit F-1) — the upgrade obeys the same canonical route policy as
+  // REST: a non-canonical path is refused, and the stream's own scopes are
+  // widened by whatever the policy table demands for that path, so a stream
+  // handler can never ask for less than its route entry.
+  const pathname = (req.url ?? '/').split('?')[0] ?? '/';
+  const canonical = canonicalApiPath(pathname);
+  if (canonical === null) {
+    container.logger.warn(`[${label}] upgrade rejected: non-canonical path`);
+    reject(socket, 400, 'Bad Request');
+    return { ok: false };
+  }
+  const policyScopes = canonical.startsWith('/api/')
+    ? requiredScopesFor('GET', canonical.slice('/api'.length)).scopes
+    : [];
+  const requiredScopes = [...new Set<Scope>([...params.requiredScopes, ...policyScopes])];
+
+  // D-111, D-127 — another device must upgrade over https:// (wss://); plain
+  // HTTP is for this machine only.
+  if (container.security.tls && classifyTransport(req as OriginRequest) === 'lan-http') {
+    container.logger.warn(`[${label}] upgrade rejected: plain HTTP from another device`, {
+      origin: req.headers.origin ?? '(none)',
+    });
+    reject(socket, 403, 'Forbidden');
+    return { ok: false };
+  }
 
   if (!isOriginAllowed(req, container)) {
     container.logger.warn(`[${label}] upgrade rejected: origin not allowed`, {
@@ -61,7 +102,7 @@ export async function authorizeWebSocketUpgrade(
   try {
     const principal = await auth.authenticate({
       method: 'GET',
-      url: absoluteUrl(req),
+      url: requestAbsoluteUrl(req as OriginRequest, req.url ?? '/'),
       headers: req.headers as Record<string, string | string[] | undefined>,
       query: parseQuery(req.url),
       remoteAddress: req.socket.remoteAddress,
@@ -107,11 +148,6 @@ function reject(socket: Duplex, status: number, text: string): void {
   socket.destroy();
 }
 
-function absoluteUrl(req: IncomingMessage): string {
-  const host = firstValue(req.headers['host']) ?? 'localhost';
-  const proto = firstValue(req.headers['x-forwarded-proto']) ?? 'http';
-  return `${proto}://${host}${req.url ?? '/'}`;
-}
 
 function parseQuery(url: string | undefined): Record<string, string | string[] | undefined> {
   const out: Record<string, string | string[] | undefined> = {};

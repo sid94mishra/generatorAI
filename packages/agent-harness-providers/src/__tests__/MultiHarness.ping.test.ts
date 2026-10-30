@@ -113,4 +113,15 @@ describe('MultiHarness.ping', () => {
 
     expect(get).not.toHaveBeenCalled();
   });
+
+  it('is alive as soon as one adapter answers, without waiting for a slow one', async () => {
+    const { registry } = makeRegistry({
+      readyTypes: ['claude-agent', 'codex'] as HarnessType[],
+      adapters: {
+        'claude-agent': { ping: async () => true },
+        codex: { ping: () => new Promise<boolean>(() => {}) }, // a model/list that never answers
+      },
+    });
+    await expect(new MultiHarness(registry).ping()).resolves.toBe(true);
+  });
 });

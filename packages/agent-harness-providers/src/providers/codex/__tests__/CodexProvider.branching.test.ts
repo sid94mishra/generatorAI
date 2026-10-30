@@ -2,9 +2,9 @@
 // CodexProvider — conversation branching over the fake app-server.
 //
 // `thread/fork { lastTurnId }` branches a thread through a turn; `thread/revert
-// { beforeTurnId }` drops a turn and everything after it in place, with the
-// deprecated `thread/rollback { numTurns }` as the fallback when revert is not
-// served. The fixture records every call so the anchors sent are asserted.
+// { beforeTurnId }` drops a turn and everything after it in place; a rewind
+// with no turn anchor finds the first dropped turn with `thread/turns/list`
+// (Codex 0.162 removed `thread/rollback`). The fixture records every call.
 // ────────────────────────────────────────────────────────────────
 
 import { describe, expect, it, afterEach } from 'vitest';
@@ -43,7 +43,7 @@ async function branchingCalls(p: CodexProvider) {
   return (p as unknown as Internals).rpc('__test/branching') as Promise<{
     forkCalls: Array<{ threadId: string; params: Record<string, unknown> }>;
     revertCalls: Array<Record<string, unknown>>;
-    rollbackCalls: Array<Record<string, unknown>>;
+    turnsListCalls: Array<Record<string, unknown>>;
   }>;
 }
 
@@ -112,32 +112,32 @@ describe('CodexProvider — rewind', () => {
     });
     const calls = await branchingCalls(p);
     expect(calls.revertCalls).toEqual([{ threadId: thread, beforeTurnId: 'turn_2' }]);
-    expect(calls.rollbackCalls).toHaveLength(0);
+    expect(calls.turnsListCalls).toHaveLength(0);
     expect(r.providerSessionId).toBe(thread);
     expect(p.getProviderSessionId('c')).toBe(thread);
   });
 
-  it('falls back to thread/rollback by count when revert is not served', async () => {
+  it('fails when the server refuses thread/revert (no count-based fallback exists)', async () => {
     const p = await started({ env: { FAKE_CODEX_REVERT_UNSUPPORTED: '1' } });
     await p.createConversation(CONV('c'));
-    const thread = p.getProviderSessionId('c');
-    await p.rewindConversation('c', {
-      keepThrough: { kind: 'turn', id: 'turn_1' },
-      dropFrom: { kind: 'turn', id: 'turn_2' },
-      droppedTurns: 3,
-      params: CONV('c'),
-    });
-    const calls = await branchingCalls(p);
-    expect(calls.rollbackCalls).toEqual([{ threadId: thread, numTurns: 3 }]);
+    await expect(
+      p.rewindConversation('c', {
+        keepThrough: { kind: 'turn', id: 'turn_1' },
+        dropFrom: { kind: 'turn', id: 'turn_2' },
+        droppedTurns: 3,
+        params: CONV('c'),
+      }),
+    ).rejects.toThrow(/method not found/);
   });
 
-  it('uses rollback by count when the dropped turn has no anchor', async () => {
+  it('finds the first dropped turn by count when the caller has no anchor', async () => {
     const p = await started();
     await p.createConversation(CONV('c'));
-    await p.rewindConversation('c', { keepThrough: { kind: 'turn', id: 'turn_1' }, droppedTurns: 1, params: CONV('c') });
+    const thread = p.getProviderSessionId('c');
+    await p.rewindConversation('c', { keepThrough: { kind: 'turn', id: 'turn_1' }, droppedTurns: 2, params: CONV('c') });
     const calls = await branchingCalls(p);
-    expect(calls.revertCalls).toHaveLength(0);
-    expect(calls.rollbackCalls).toEqual([{ threadId: p.getProviderSessionId('c'), numTurns: 1 }]);
+    expect(calls.turnsListCalls).toEqual([{ threadId: thread, sortDirection: 'desc', limit: 2 }]);
+    expect(calls.revertCalls).toEqual([{ threadId: thread, beforeTurnId: 'turn_2' }]);
   });
 
   it('rewinding to before the first turn starts a fresh thread', async () => {
@@ -150,7 +150,7 @@ describe('CodexProvider — rewind', () => {
     expect(p.getProviderSessionId('c')).toBe(r.providerSessionId);
     const calls = await branchingCalls(p);
     expect(calls.revertCalls).toHaveLength(0);
-    expect(calls.rollbackCalls).toHaveLength(0);
+    expect(calls.turnsListCalls).toHaveLength(0);
   });
 
   it('loads a thread it does not hold from the persisted id before reverting', async () => {

@@ -7,7 +7,62 @@
 import { useStreamStore } from '../stores/streamStore.js';
 import type { PersistedEvent, ScmFlowResult } from '@generatorai/shared';
 import type { SystemCategory, QuestionBlock } from '../stores/streamStore.js';
+import { StreamEventRouter, partitionEffects } from '@generatorai/client-core';
+import { PERMISSION_GATE_COPY, PLAN_GATE_COPY } from '@generatorai/shared/ui-contract';
 import type { ContextUsageSnapshot, StreamEffect, ToolFileOp } from '@generatorai/client-core';
+
+/**
+ * Stage-conversation kinds replayed through the live router (CONVINV-R10):
+ * the in-turn gate cards (`stage.*`), the operator's bubbles and the
+ * turn-stopped / amended notices. Folding them with the router itself keeps a
+ * reload rendering exactly what the live stream rendered.
+ */
+const STAGE_ROUTED_KINDS: ReadonlySet<string> = new Set([
+  'stage.plan.created',
+  'stage.plan.review_requested',
+  'stage.plan.decided',
+  'stage.question.asked',
+  'stage.question.answered',
+  'stage.question.expired',
+  'stage.permission.requested',
+  'stage.permission.resolved',
+  'stage.permission.expired',
+  'stage.permission.auto_allowed',
+  'stage_run.operator_message',
+  'stage_run.operator_message_dropped',
+  'stage_run.turn_cancelled',
+  'stage_run.amended',
+  'stage_run.amend_failed',
+]);
+
+/**
+ * Stage lifecycle kinds that end any gate still open in the replayed history.
+ * A gate whose frame died with the process never gets a resolved/expired
+ * event (the resume re-asks under a new id), so without this its old card
+ * would come back as pending on every reload.
+ */
+const STAGE_GATE_ENDING_KINDS: ReadonlySet<string> = new Set([
+  'stage_run.running',
+  'stage_run.paused',
+  'stage_run.resumed',
+  'stage_run.retrying',
+  'stage_run.completed',
+  'stage_run.failed',
+  'stage_run.cancelled',
+  'stage_run.skipped',
+  'stage_run.turn_cancelled',
+]);
+
+/** The well-formed remembered-permission rules of a persisted event (U-16). */
+function replayRules(value: unknown): Array<{ kind: 'command' | 'tool'; match: string; scope?: 'project' }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((r) => {
+    const rule = (r ?? {}) as { kind?: unknown; match?: unknown; scope?: unknown };
+    return (rule.kind === 'command' || rule.kind === 'tool') && typeof rule.match === 'string' && rule.match
+      ? [{ kind: rule.kind, match: rule.match, ...(rule.scope === 'project' ? { scope: 'project' as const } : {}) }]
+      : [];
+  });
+}
 
 /** Apply a persisted `harness.context_usage` payload to the stream store. */
 function applyContextUsage(
@@ -252,15 +307,20 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
   }
   const streamKey = activeStageRunId ? `stageRun:${activeStageRunId}` : sessionId;
 
-  // Guard: if the stream is already in an active state (user just sent a
-  // message via ChatInput.startPending), skip replay to avoid wiping the
-  // pending state. The live SSE events will continue filling in the response.
+  // Guard: the composer just sent a message (`startPending`) and nothing came
+  // back from the server yet — keep that optimistic state; the live events
+  // fill in the response.
+  //
+  // A stream that already HAS server content is not protected. It is what this
+  // tab had when the view last unsubscribed: leaving a chat or a run page
+  // mid-turn closes its subscription but leaves the entry "streaming", so the
+  // events of the absence were never applied. Skipping the replay on return
+  // dropped all of them (and a turn that ended meanwhile stayed on
+  // "Generating" until the stall watchdog called it interrupted). The history
+  // is authoritative: rebuild from it; live frames that arrived during the
+  // fetch are buffered and flushed after it with sequence dedup.
   const existingStream = store.streams[streamKey];
-  if (existingStream && (
-    existingStream.status === 'pending' ||
-    existingStream.status === 'streaming' ||
-    existingStream.status === 'thinking'
-  )) {
+  if (existingStream && existingStream.status === 'pending' && existingStream.blocks.length === 0) {
     return;
   }
 
@@ -320,6 +380,7 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
           cacheReadTokens: (d['cacheReadTokens'] as number) ?? undefined,
           cacheWriteTokens: (d['cacheWriteTokens'] as number) ?? undefined,
           cost: (d['cost'] as number) ?? undefined,
+          costUsd: (d['costUsd'] as number) ?? undefined,
           provider: (d['provider'] as string) ?? undefined,
         });
         break;
@@ -362,7 +423,10 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
   // Track the last meaningful copilot event in the current turn
   // so we know whether to auto-complete at the end of replay.
   let sawIdleInCurrentTurn = false;
+  // The current turn's LAST activity was a finished message: a provider emits one before every
+  // tool call, so it only suggests a finished turn when nothing (a tool, more text) followed it.
   let sawMessageCompleteInCurrentTurn = false;
+  let openToolCalls = 0;
 
   const flushTokens = () => {
     if (tokenBuf) {
@@ -384,6 +448,12 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
     flushTokens();
   };
 
+  // Stage gates and conversation notices: a throwaway router (none of the
+  // live router's buffering is shared) whose block-model effects are applied.
+  let stageRouter: StreamEventRouter | undefined;
+  // Stage gates still open at this point of the history, by interaction id.
+  const openStageGates = new Map<string, { key: string; gate: 'permission' | 'question' | 'plan'; planId?: string }>();
+
   for (const event of replayEvents) {
     const data = (event.data ?? {}) as Record<string, unknown>;
 
@@ -391,10 +461,43 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
     // These should not affect the stream blocks during replay either.
     const isInternal = !!data['__isInternalTurn'];
 
+    if (STAGE_GATE_ENDING_KINDS.has(event.kind) && openStageGates.size > 0) {
+      const ended: StreamEffect[] = [];
+      for (const [interactionId, g] of openStageGates) {
+        if (g.gate === 'permission') ended.push({ op: 'expirePermission', key: g.key, interactionId });
+        else if (g.gate === 'question') ended.push({ op: 'expireQuestion', key: g.key, interactionId });
+        else if (g.planId) ended.push({ op: 'setPlanStatus', key: g.key, planId: g.planId, status: 'expired' });
+      }
+      openStageGates.clear();
+      flushAll();
+      store.applyEffects(ended);
+    }
+
+    if (STAGE_ROUTED_KINDS.has(event.kind)) {
+      flushAll();
+      stageRouter ??= new StreamEventRouter();
+      const effects = partitionEffects(stageRouter.handle(event.sessionId, { kind: event.kind, data })).store;
+      store.applyEffects(effects);
+      const interactionId = typeof data['interactionId'] === 'string' ? data['interactionId'] : '';
+      const key = typeof data['stageRunId'] === 'string' && data['stageRunId'] ? `stageRun:${data['stageRunId']}` : streamKey;
+      if (interactionId) {
+        if (event.kind === 'stage.permission.requested') openStageGates.set(interactionId, { key, gate: 'permission' });
+        else if (event.kind === 'stage.question.asked') openStageGates.set(interactionId, { key, gate: 'question' });
+        else if (event.kind === 'stage.plan.review_requested') {
+          openStageGates.set(interactionId, {
+            key,
+            gate: 'plan',
+            ...(typeof data['planId'] === 'string' ? { planId: data['planId'] } : {}),
+          });
+        } else openStageGates.delete(interactionId);
+      }
+    }
+
     switch (event.kind) {
       // ── Streaming tokens (batched) ──
       case 'harness.token':
         if (isInternal) break;
+        sawMessageCompleteInCurrentTurn = false;
         // If we had thinking buffered, flush it before switching to text
         if (thinkingBuf) flushThinking();
         {
@@ -405,6 +508,7 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
 
       case 'harness.reasoning_delta':
         if (isInternal) break;
+        sawMessageCompleteInCurrentTurn = false;
         // If we had text buffered, flush it before switching to thinking
         if (tokenBuf) flushTokens();
         {
@@ -422,6 +526,8 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
       // ── Tool calls ──
       case 'harness.tool_start':
         if (isInternal) break;
+        sawMessageCompleteInCurrentTurn = false;
+        openToolCalls += 1;
         flushAll();
         store.addToolCall(
           streamKey,
@@ -434,6 +540,7 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
 
       case 'harness.tool_complete':
         if (isInternal) break;
+        openToolCalls = Math.max(0, openToolCalls - 1);
         flushAll();
         store.completeToolCall(
           streamKey,
@@ -513,6 +620,7 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
           cacheReadTokens: (data['cacheReadTokens'] as number) ?? undefined,
           cacheWriteTokens: (data['cacheWriteTokens'] as number) ?? undefined,
           cost: (data['cost'] as number) ?? undefined,
+          costUsd: (data['costUsd'] as number) ?? undefined,
           provider: (data['provider'] as string) ?? undefined,
         });
         break;
@@ -604,6 +712,16 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
         flushAll();
         const approved = data['approved'] === true;
         const action = typeof data['action'] === 'string' ? data['action'] : undefined;
+        // The person's reply to the revision, where they sent it (the live router emits the same note).
+        if (typeof data['note'] === 'string' && data['note'].trim()) {
+          store.applyEffects([{
+            op: 'addSystemMessage',
+            key: streamKey,
+            message: data['note'],
+            category: 'operator',
+            label: PLAN_GATE_COPY.note[approved ? 'approved' : 'changes_requested'],
+          }]);
+        }
         store.setPlanStatus(
           streamKey,
           String(data['planId'] ?? ''),
@@ -650,6 +768,11 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
           inputSummary: String(data['inputSummary'] ?? ''),
           permissionMode: String(data['permissionMode'] ?? ''),
           status: 'pending',
+          // MG-04 — the Risky badge survives a reload (same rule as the live router).
+          ...(data['risk'] === 'risky' || data['risk'] === 'standard' ? { risk: data['risk'] } : {}),
+          // U-16 — what "Allow for this chat" would remember, or why it never may.
+          rememberRules: replayRules(data['rememberRules']),
+          ...(typeof data['rememberRefusal'] === 'string' && data['rememberRefusal'] ? { rememberRefusal: data['rememberRefusal'] } : {}),
         });
         break;
       case 'chat.permission.resolved':
@@ -659,8 +782,23 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
           String(data['interactionId'] ?? ''),
           data['behavior'] === 'deny' ? 'deny' : 'allow',
           typeof data['message'] === 'string' ? data['message'] : undefined,
+          replayRules(data['remembered']),
         );
         break;
+      case 'chat.permission.auto_allowed': {
+        // U-16 (D-147): the transcript note a rule-allowed request leaves (same words as the live router).
+        flushAll();
+        const rules = replayRules(data['rules']);
+        store.addSystemMessage(
+          streamKey,
+          PERMISSION_GATE_COPY.autoAllowed(
+            rules.map((r) => r.match).join(', ') || String(data['toolName'] ?? ''),
+            rules.length > 0 && rules.every((r) => r.scope === 'project') ? 'project' : 'chat',
+          ),
+          'permission',
+        );
+        break;
+      }
       case 'chat.permission.expired':
         flushAll();
         store.expirePermission(streamKey, String(data['interactionId'] ?? ''));
@@ -677,6 +815,7 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
         // Reset per-turn tracking
         sawIdleInCurrentTurn = false;
         sawMessageCompleteInCurrentTurn = false;
+        openToolCalls = 0;
         // Use startPending directly (NOT clearStream + startPending).
         // startPending already resets all stream fields via ...DEFAULT_STREAM
         // and crucially preserves _nextBlockId so React keys don't collide
@@ -739,7 +878,9 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
         store.completeStream(streamKey);
       }
     }
-  } else if (sawMessageCompleteInCurrentTurn) {
+  } else if (sawMessageCompleteInCurrentTurn && openToolCalls === 0) {
+    // A reload while a tool runs (or after more activity) is a live turn: completing it hid Stop
+    // and the next message was refused as CHAT_BUSY.
     const stream = useStreamStore.getState().streams[streamKey];
     if (
       stream &&

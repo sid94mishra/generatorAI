@@ -36,13 +36,14 @@ import type {
   ProviderCapabilities,
 } from '@generatorai/core';
 import type { AgentEvent } from '@generatorai/shared';
-import { HarnessSessionError, withSpan, getMeter } from '@generatorai/shared';
+import { HarnessSessionError, withSpan, getMeter, GenAiTurnSpans } from '@generatorai/shared';
 import { mapSdkEventToAgentEvent } from './event-mapper.js';
 // W41 — `./tool-factory.js` value-imports `defineTool` from the Copilot SDK,
 // so a static import here would defeat the lazy load above. Imported
 // dynamically at its two call sites (createConversation / resumeConversation).
 import { mapPermissionKind } from './permissionMap.js';
 import { buildHarnessEnv } from '../../childEnv.js';
+import { rootsOf, sameRoots, type ConversationRoots } from '../../conversationRoots.js';
 import { ToolSemaphore, MAX_PARALLEL_TOOLS } from '../../toolSemaphore.js';
 import {
   flattenAnswer,
@@ -140,7 +141,7 @@ const listenerLeakWarnings = meter.createCounter('copilot.listeners.leak_warning
  * ORC-05 — warn threshold above which we log "listener leak suspected" and
  * bump the `copilot.listeners.leak_warnings` metric. 50 is chosen because
  * a single conversation realistically needs ~3-5 listeners (one per
- * consumer: route SSE, RunLogger, hook phases). Anything north of 50
+ * consumer: route SSE, hook phases). Anything north of 50
  * almost always indicates a subscription without a matching cleanup.
  */
 const LISTENER_LEAK_THRESHOLD = 50;
@@ -306,6 +307,14 @@ export class CopilotProvider implements IAgentHarness {
    * and must rebuild the session instead of short-circuiting.
    */
   private conversationModels = new Map<string, string>();
+  /**
+   * Roots (cwd + extra directories) each live session was last bound with, so
+   * `resumeConversation` sees "Edit sources" on a live chat (D-137) and moves
+   * the session instead of short-circuiting.
+   */
+  private conversationRoots = new Map<string, ConversationRoots>();
+  /** P07 WP-7.4 — a `chat <model>` span per turn (GenAI conventions). */
+  private readonly genai = new GenAiTurnSpans('copilot-bridge', 'copilot');
   private clientEventHandlers = new Set<(event: HarnessClientEvent) => void>();
   private clientStatePollingInterval?: ReturnType<typeof setInterval>;
   /** Tracks active event listener cleanup functions per conversation.
@@ -635,6 +644,39 @@ export class CopilotProvider implements IAgentHarness {
     }
   }
 
+  /**
+   * W36 — The client to resume `conversationId` on. A conversation that has no
+   * owning client yet (cold resume, or a rebind after its roots moved) is bound
+   * to the client for `params.workingDirectory`, exactly as
+   * {@link createConversation} binds a new one.
+   */
+  private async bindResumeClient(
+    conversationId: string,
+    params: CreateConversationParams | undefined,
+  ): Promise<CopilotClient> {
+    if (!params || this.conversationClientKey.has(conversationId)) return this.clientForConversation(conversationId);
+    const entry = await this.getOrCreateWorkspaceEntry(params.workingDirectory);
+    this.conversationClientKey.set(conversationId, entry && params.workingDirectory ? params.workingDirectory : '__default__');
+    if (!entry) return this.ensureClient(); /* W41 */
+    entry.refCount++;
+    entry.lastUsedAt = Date.now();
+    return entry.client;
+  }
+
+  /**
+   * Disconnect a live SDK session handle and forget it. The SDK keeps the
+   * persisted session, so a later `resumeSession` by id restores its history.
+   */
+  private async dropLiveSession(conversationId: string, session: CopilotSession): Promise<void> {
+    try {
+      await session.disconnect();
+    } catch {
+      // Already gone — a resume still rebuilds it.
+    }
+    this.conversations.delete(conversationId);
+    activeSessions.add(-1);
+  }
+
   // ── Client Lifecycle ──
 
   async initialize(): Promise<void> {
@@ -701,6 +743,7 @@ export class CopilotProvider implements IAgentHarness {
     this.conversationListenerCleanups.clear();
     this.conversationLeakWarned.clear();
     this.conversations.clear();
+    this.conversationRoots.clear();
     this.conversationClientKey.clear(); /* W36 */
   }
 
@@ -799,7 +842,7 @@ export class CopilotProvider implements IAgentHarness {
       const model: HarnessModel = {
         id: m.id,
         name: m.name,
-        provider: undefined,
+        provider: 'copilot',
       };
       if (raw.modelPickerCategory) model.category = raw.modelPickerCategory;
       if (raw.modelPickerPriceCategory) model.priceCategory = raw.modelPickerPriceCategory;
@@ -955,16 +998,10 @@ export class CopilotProvider implements IAgentHarness {
       });
     }
 
-    // `SessionConfig` has exactly one root — `workingDirectory`. There is no
-    // field for extra readable/writable directories, so a chat's other mounts
-    // and its managed workspace root reach the model only through the
-    // `[Workspace]` block the caller puts in the system prompt.
-    if (params.additionalDirectories?.length) {
-      warnings.push({
-        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
-        params: { field: 'additionalDirectories', provider: 'copilot' },
-      });
-    }
+    // `SessionConfig` has exactly one root — `workingDirectory`. The extra
+    // directories (a chat's other mounts and its managed root) are added to
+    // the session's path allow-list right after create / resume instead
+    // (`allowExtraDirectories`).
 
     // The CLI's environment is fixed when the workspace client spawns it, and
     // `WorkspacedCopilotPool` keys those clients by cwd — one process serves
@@ -1264,6 +1301,7 @@ export class CopilotProvider implements IAgentHarness {
       }
       throw err;
     }
+    await this.allowExtraDirectories(params.conversationId, session, params.additionalDirectories, warnings);
     // W36 — record which workspace owns this conversation
     const wsKey = params.workingDirectory && workspaceEntry ? params.workingDirectory : '__default__'; /* W36 */
     this.conversationClientKey.set(params.conversationId, wsKey); /* W36 */
@@ -1271,6 +1309,7 @@ export class CopilotProvider implements IAgentHarness {
     this.attachTurnTextTracker(params.conversationId, session);
     this.conversations.set(params.conversationId, session);
     this.conversationModels.set(params.conversationId, resolvedModel);
+    this.conversationRoots.set(params.conversationId, rootsOf(params, this.options.defaultCwd));
     this.conversationWarnings.set(params.conversationId, warnings);
     this.conversationAgents.set(params.conversationId, registeredAgents);
     activeSessions.add(1);
@@ -1301,13 +1340,32 @@ export class CopilotProvider implements IAgentHarness {
     const liveSession = this.conversations.get(conversationId);
     const currentModel = this.conversationModels.get(conversationId);
     const modelChanged = !!params?.model && !!currentModel && params.model !== currentModel;
+    // "Edit sources" on a live chat (D-137) moves its cwd and extra directories.
+    // A session's cwd is fixed by create/resume, and the extra directories
+    // reach the model only through the `[Workspace]` block in the system
+    // message, so both need the session rebound.
+    const recordedRoots = this.conversationRoots.get(conversationId);
+    const rootsChanged =
+      !!liveSession && !!params && !!recordedRoots && !sameRoots(recordedRoots, params, this.options.defaultCwd);
 
-    if (liveSession && !modelChanged) {
+    if (liveSession && !modelChanged && !rootsChanged) {
       if (this.verbose) console.log(`[CopilotAdapter] Session ${conversationId} already in memory, skipping resume`);
       return;
     }
 
-    if (liveSession && modelChanged) {
+    if (liveSession && rootsChanged) {
+      // Disconnect the handle (the SDK keeps the persisted session) and resume
+      // it below by id with the new `workingDirectory`, system message and
+      // tools — on the client for the new cwd. The history is kept, and the
+      // resume config carries a changed model too (re-asserted via setModel).
+      if (this.verbose) {
+        console.log(
+          `[CopilotAdapter] Session ${conversationId} cwd ${recordedRoots?.workingDirectory ?? '(default)'} → ${params!.workingDirectory ?? '(default)'}; rebinding`,
+        );
+      }
+      await this.dropLiveSession(conversationId, liveSession);
+      this.releaseWorkspaceRef(conversationId);
+    } else if (liveSession && modelChanged) {
       // Switch the model IN PLACE via the SDK's dedicated `setModel`.
       //
       // Do NOT try to do this by disconnecting and calling `resumeSession`
@@ -1336,13 +1394,7 @@ export class CopilotProvider implements IAgentHarness {
           `[CopilotAdapter] setModel(${params!.model}) failed for ${conversationId}; falling back to session rebuild:`,
           err,
         );
-        try {
-          await liveSession.disconnect();
-        } catch {
-          // Already gone — the resume below still rebuilds it.
-        }
-        this.conversations.delete(conversationId);
-        activeSessions.add(-1);
+        await this.dropLiveSession(conversationId, liveSession);
       }
     }
 
@@ -1399,11 +1451,33 @@ export class CopilotProvider implements IAgentHarness {
     }
     // PLN-01 — reinstall the plan-mode gates on resume (see installPlanGates).
     if (params) this.installPlanGates(resumeConfig, params);
-    // W36 — resume on the same workspace client that owns this conversation
-    const resumeClient = await this.clientForConversation(conversationId); /* W36 */
-    const session = await resumeClient.resumeSession(conversationId, resumeConfig);
+    // W36 — resume on the workspace client that owns this conversation (bound
+    // to the cwd in `params` when it has none yet, e.g. after a rebind).
+    const resumeClient = await this.bindResumeClient(conversationId, params); /* W36 */
+    let session: CopilotSession;
+    try {
+      session = await resumeClient.resumeSession(conversationId, resumeConfig);
+    } catch (err) {
+      if (!rootsChanged || !params) throw err;
+      // The live session was already disconnected for the move; never leave
+      // the chat with no session. A fresh one in the new roots keeps the turn
+      // going — only the SDK-side context restarts, our history is in the DB.
+      console.warn(
+        `[CopilotAdapter] resume of ${conversationId} in ${params.workingDirectory ?? '(default)'} failed; starting a fresh session:`,
+        err,
+      );
+      this.releaseWorkspaceRef(conversationId);
+      await this.createConversation(params);
+      this.conversationWarnings.get(conversationId)?.push({
+        code: 'CONVERSATION_RESTARTED',
+        params: { provider: 'copilot', reason: 'resume in the new working directory failed' },
+      });
+      return;
+    }
+    if (params) await this.allowExtraDirectories(conversationId, session, params.additionalDirectories, warnings);
     this.attachTurnTextTracker(conversationId, session);
     this.conversations.set(conversationId, session);
+    if (params) this.conversationRoots.set(conversationId, rootsOf(params, this.options.defaultCwd));
     if (params?.model) {
       // `resumeSession` rehydrates the session from the SDK's persistent
       // store, which carries the model the session was CREATED with — the
@@ -1425,6 +1499,32 @@ export class CopilotProvider implements IAgentHarness {
     }
     this.conversationWarnings.set(conversationId, warnings);
     this.conversationAgents.set(conversationId, registeredAgents);
+  }
+
+  /**
+   * The SDK session has one root (`workingDirectory`); every other directory
+   * the chat mounts is added to the session's path allow-list, so file tools
+   * reach them as they reach the cwd instead of knowing them only from the
+   * `[Workspace]` text. The RPC is `@experimental`: a failure is a warning on
+   * the conversation, never a failed turn.
+   */
+  private async allowExtraDirectories(
+    conversationId: string,
+    session: CopilotSession,
+    directories: readonly string[] | undefined,
+    warnings: ConversationWarning[],
+  ): Promise<void> {
+    for (const dir of new Set(directories ?? [])) {
+      try {
+        await session.rpc.permissions.paths.add({ path: dir });
+      } catch (err) {
+        console.warn(`[CopilotAdapter] could not allow ${dir} on ${conversationId}: ${String(err)}`);
+        warnings.push({
+          code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+          params: { field: 'additionalDirectories', provider: 'copilot', reason: String(err) },
+        });
+      }
+    }
   }
 
   getConversationWarnings(conversationId: string): ConversationWarning[] {
@@ -1645,7 +1745,7 @@ export class CopilotProvider implements IAgentHarness {
    * L9: Capability discovery is by declaration, not by exception.
    * W42 — N-2 fix: no runtime probe required.
    *
-   * Copilot does not support the PreToolUse hook (N-5), so fullToolGating
+   * Copilot does not support the PreToolUse hook (N-5), so its gating level
    * is false — permission checking can fall through to the SDK's canUseTool.
    * vision / reasoning are model-specific; declare conservatively as false;
    * the model catalogue already surfaces per-model limits.
@@ -1657,13 +1757,16 @@ export class CopilotProvider implements IAgentHarness {
       reasoningEfforts: [],   // query the live model for supported efforts
       planMode: true,         // Copilot has plan/normal mode switching
       mcpServers: false,      // Copilot SDK does not support MCP servers
-      skillDirectories: false,
-      // Finding-9 fix: the Copilot SDK DOES wire onPreToolUse (SessionConfig.hooks)
-      // which fires before every tool call — identical in semantics to Claude's
-      // PreToolUse hook. The original 'false' was wrong (the code at
-      // createConversation line ~686 explicitly maps HookBridge.onPreToolUse to
-      // sessionConfig.hooks.onPreToolUse). fullToolGating is therefore true.
-      fullToolGating: true,
+      // The SDK routes onPermissionRequest for every tool it does not
+      // auto-approve (and SessionConfig.hooks.onPreToolUse fires before every
+      // call), so a run's permission mode is enforceable per call.
+      approvalGating: 'per_call',
+      hostTools: 'full',
+      // No output-schema option: structured output is a host tool.
+      structuredOutput: 'tool',
+      // `skillDirectories` IS passed to the SDK (RV-8); it used to be declared
+      // unsupported while `createConversation` forwarded it.
+      skills: 'directories',
       sessionPersistence: true,
       budgetTracking: false,
       // MINOR-4 fix: computerUse must be explicitly declared (L9 fail-closed).
@@ -1690,6 +1793,7 @@ export class CopilotProvider implements IAgentHarness {
     this.turnTextTrackers.delete(conversationId);
     this.turnText.delete(conversationId);
     this.sessionModes.delete(conversationId);
+    this.conversationRoots.delete(conversationId);
     const session = this.conversations.get(conversationId);
     if (session) {
       await session.disconnect();
@@ -1713,6 +1817,7 @@ export class CopilotProvider implements IAgentHarness {
     this.sessionModes.delete(conversationId);
     this.conversationWarnings.delete(conversationId);
     this.conversationAgents.delete(conversationId);
+    this.conversationRoots.delete(conversationId);
     const session = this.conversations.get(conversationId);
     if (session) {
       await session.disconnect();
@@ -1732,9 +1837,7 @@ export class CopilotProvider implements IAgentHarness {
     turnOptions?: SendPromptOptions,
   ): Promise<void> {
     const start = Date.now();
-    return withSpan('copilot-bridge', 'copilot.sendPrompt', async (span) => {
-      span.setAttribute('copilot.conversation_id', conversationId);
-      span.setAttribute('copilot.prompt.length', prompt.length);
+    return this.genai.chat(conversationId, this.conversationModels.get(conversationId), prompt, async () => {
       promptCounter.add(1, { conversation_id: conversationId });
 
       const session = this.getSession(conversationId);
@@ -1765,9 +1868,7 @@ export class CopilotProvider implements IAgentHarness {
     turnOptions?: SendPromptOptions,
   ): Promise<ConversationResponse> {
     const start = Date.now();
-    return withSpan('copilot-bridge', 'copilot.sendPromptAndWait', async (span) => {
-      span.setAttribute('copilot.conversation_id', conversationId);
-      span.setAttribute('copilot.prompt.length', prompt.length);
+    return this.genai.chat(conversationId, this.conversationModels.get(conversationId), prompt, async (span) => {
       promptCounter.add(1, { conversation_id: conversationId });
 
     // W13-B1 — a turn starts un-truncated. Without this the latch set by a
@@ -1836,7 +1937,7 @@ export class CopilotProvider implements IAgentHarness {
 
     // Phase 2, 2.23 + 2.25 — adapter-level `defaultTimeoutMs` is a last-ditch
     // guard so a stuck SDK session can't hang indefinitely. The callers
-    // (StageExecutionService, HookExecutor) drive their own timeouts via
+    // (the engine's StageExecutor, HookExecutor) drive their own timeouts via
     // `signal`; this fires only when nothing else bounds the wait.
     //
     // HITL-07: the watchdog is a rolling interval instead of a single

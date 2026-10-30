@@ -135,6 +135,29 @@ export function narrowHint(hint: string | undefined): string | undefined {
   return extractSummaryLine(trimmed) ?? trimmed;
 }
 
+/** A line that reports a verification outcome: tests, lint, typecheck, build — with a result. */
+const EVIDENCE_LINE =
+  /\b(tests?|specs?|vitest|jest|pytest|lint|eslint|typecheck|tsc|build|pnpm|npm|yarn|cargo|go test|check[s]?)\b.*\b(pass(ed|es|ing)?|green|fail(ed|s|ing)?|ok|succeeded|clean|\d+\s*(passed|failed))\b|[✓✔✗✘]\s*\S/i;
+
+/**
+ * The verification a session reported (U-10): up to 8 lines of the hint that state what was
+ * tested and how it came out. `narrowHint` keeps only the Summary line, so without this a PR
+ * written from a chat that ran its tests says "Not verified".
+ */
+export function verificationEvidence(hint: string | undefined): string[] {
+  if (!hint) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of hint.split('\n')) {
+    const line = raw.replace(/^\s*(?:[-*•]|\d+\.)\s*/, '').replace(/\*\*/g, '').trim();
+    if (line.length < 6 || line.length > 220 || !EVIDENCE_LINE.test(line) || seen.has(line)) continue;
+    seen.add(line);
+    out.push(line);
+    if (out.length === 8) break;
+  }
+  return out;
+}
+
 export function buildCommitPrompt(input: CommitPromptInput): string {
   const parts: string[] = [
     'Write a git commit message for the change below.',
@@ -193,6 +216,11 @@ export function buildPullRequestPrompt(input: PullRequestPromptInput): string {
       'Structure the description as a `## Summary` section with 2 to 5 bullets, then a `## Test plan` section.',
       '',
     );
+  }
+
+  const evidence = verificationEvidence(input.hint);
+  if (evidence.length > 0) {
+    parts.push('Verification the author reported in the session (base the test plan on it):', evidence.map((e) => `- ${e}`).join('\n'), '');
   }
 
   parts.push(
@@ -311,6 +339,8 @@ export function heuristicPullRequestText(
   const summary = narrowHint(hint) ?? subject;
   const extra = commits.slice(0, 5).map((c) => `- ${c}`);
   const summaryBullets = [`- ${summary}`, ...extra.filter((b) => b !== `- ${summary}`)].join('\n');
+  const evidence = verificationEvidence(hint);
+  const testPlan = evidence.length > 0 ? evidence.map((e) => `- ${e}`).join('\n') : '- Not verified';
   const headings = (template ?? '')
     .split('\n')
     .map((l) => l.trim())
@@ -319,14 +349,14 @@ export function heuristicPullRequestText(
     // Honour the repository's PR template: keep its headings, fill what we
     // know (summary under the first, test plan under a test-ish heading).
     const sections = headings.map((h, i) => {
-      const content = i === 0 ? summaryBullets : /test|verif|check/i.test(h) ? '- Not verified' : '';
+      const content = i === 0 ? summaryBullets : /test|verif|check/i.test(h) ? testPlan : '';
       return content ? `${h}\n\n${content}` : h;
     });
     return { title: subject, body: sections.join('\n\n') };
   }
   return {
     title: subject,
-    body: `## Summary\n\n${summaryBullets}\n\n## Test plan\n\n- Not verified`,
+    body: `## Summary\n\n${summaryBullets}\n\n## Test plan\n\n${testPlan}`,
   };
 }
 

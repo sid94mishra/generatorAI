@@ -8,6 +8,7 @@
 export { redactTokens } from './redact.js';
 
 export { SourceControlConfigService } from './SourceControlConfigService.js';
+export { GitGlobalConfig, githubCommitIdentity, type CommitIdentity } from './gitIdentity.js';
 export type {
   SourceControlConfigDeps,
   SafeSourceControlConfig,
@@ -79,3 +80,9 @@ export type { ScmMountTarget } from './workspaceMounts.js';
 
 export { buildTurnHint, extractSummaryLine, TURN_HINT_MAX_CHARS } from './turnHint.js';
 export type { TurnHintInput } from './turnHint.js';
+
+export { CodebaseRemoteResolver, codebaseRepoDir } from './CodebaseRemoteResolver.js';
+export type { CodebaseRemoteDeps, RepoSlugRef, ResolvedCodebaseRemote } from './CodebaseRemoteResolver.js';
+
+export { mergePullRequest } from './mergePullRequest.js';
+export type { MergePullRequestOptions } from './mergePullRequest.js';

@@ -3,15 +3,55 @@
 // Web uses HTTP+SSE, CLI uses in-process direct calls, Desktop uses IPC
 // ────────────────────────────────────────────────────────────────
 
-import type { Session, SessionWithWorkflows } from './Session.js';
-import type { Workflow } from './Workflow.js';
 import type { ChatMessage } from './ChatMessage.js';
 import type { Artifact } from './Artifact.js';
-import type { CreateSessionParams } from './CreateSessionParams.js';
 import type { AgentEvent, PersistedEvent } from './AgentEvent.js';
 import type { Chat, CreateChatParams } from './Chat.js';
-import type { WorkflowDefinition, WorkflowDefinitionWithStages, CreateWorkflowDefinitionParams } from './WorkflowDefinition.js';
-import type { WorkflowRun, WorkflowRunWithStages, CreateWorkflowRunParams, StageRun } from './WorkflowRun.js';
+import type {
+  WorkflowDefinitionRecord,
+  WorkflowDefinitionSummary,
+  WorkflowGraphInput,
+  WorkflowTemplate,
+} from '@generatorai/workflow-spec';
+import type { InvocationPlan, InvocationRequest, InvocationResult, RunCommand } from '@generatorai/workflow-spec';
+import type { LoopIteration, PendingDecisionView, WorkflowRun, WorkflowRunWithStages } from './WorkflowRun.js';
+import type { AttentionFilter, AttentionSnapshot } from './Attention.js';
+import type { ChatBulkResult, ChatListPage, ChatListQuery } from './ChatList.js';
+import type {
+  HarnessLoginResult,
+  HarnessProvidersResponse,
+  HarnessSetDefaultResult,
+  HarnessVisibilityResponse,
+  HarnessVisibilityUpdate,
+} from './HarnessCatalog.js';
+import type {
+  ComputerConsentAnswer,
+  ComputerConsentAnswerResult,
+  ComputerControlMode,
+  ComputerControlState,
+  ComputerGrant,
+  ComputerPendingConsent,
+} from './ComputerUse.js';
+
+/** Files a run start uploads before invoking, by category. */
+export type InvocationFiles = Partial<Record<'skills' | 'agents' | 'prompts', Array<Blob & { readonly name: string }>>>;
+
+/**
+ * A run search (`GET /workflow-runs`); every filter narrows. `status` and
+ * `trigger` match any entry (a run without a trigger is `user`), `from`/`to`
+ * bound the creation time, `q` matches part of the name or the start of the
+ * id, `variables` are `name=value` pairs, `limit` keeps the newest matches.
+ */
+export interface WorkflowRunListFilter {
+  definitionId?: string;
+  status?: string | readonly string[];
+  trigger?: readonly string[];
+  from?: string | number | Date;
+  to?: string | number | Date;
+  q?: string;
+  variables?: Readonly<Record<string, string>>;
+  limit?: number;
+}
 
 /** Platform type discriminator */
 export type PlatformType = 'web' | 'cli' | 'desktop';
@@ -32,25 +72,6 @@ export interface EventSubscriptionOptions {
   kindPrefixes?: string[];
 }
 
-/** Workflow template summary for listing */
-export interface WorkflowTemplateSummary {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  version: string;
-  requiresCodebase: boolean;
-  variables: Array<{
-    name: string;
-    label: string;
-    type: string;
-    required: boolean;
-    default?: unknown;
-    description?: string;
-    options?: string[];
-  }>;
-}
-
 /**
  * Platform-agnostic client interface.
  *
@@ -60,6 +81,17 @@ export interface WorkflowTemplateSummary {
  * - Web → HttpPlatformClient (REST + SSE)
  * - Desktop → IpcPlatformClient (Electron IPC bridge)
  */
+/** The commands a command stage may run: defaults, the operator's config extras and those allowed in the app (D-174). */
+export interface ScriptAllowlist {
+  /** Everything allowed (defaults ∪ extras). */
+  commands: string[];
+  defaults: string[];
+  /** Allowed beyond the defaults: config extras and the app's. */
+  extras: string[];
+  /** Allowed in the app by an administrator: the set `setAllowedCommands` replaces. */
+  allowed: string[];
+}
+
 export interface IPlatformClient {
   /** Which platform this client targets */
   readonly platform: PlatformType;
@@ -68,29 +100,12 @@ export interface IPlatformClient {
   initialize(): Promise<void>;
   shutdown(): Promise<void>;
 
-  // ── Session CRUD ──
-  createSession(params: CreateSessionParams): Promise<Session>;
-  getSession(sessionId: string): Promise<SessionWithWorkflows>;
-  getSessions(filter?: { status?: string }): Promise<Session[]>;
-  deleteSession(sessionId: string): Promise<void>;
-
-  // ── Session Control ──
-  startSession(sessionId: string): Promise<void>;
-  pauseSession(sessionId: string): Promise<void>;
-  resumeSession(sessionId: string): Promise<void>;
-  cancelSession(sessionId: string): Promise<void>;
-
-  // ── Workflow Control ──
-  getWorkflows(sessionId: string): Promise<Workflow[]>;
-  pauseWorkflow(workflowId: string): Promise<void>;
-  resumeWorkflow(workflowId: string): Promise<void>;
-
   // ── Chat ──
   sendPrompt(sessionId: string, prompt: string, attachments?: Array<{ type: 'file'; path: string; displayName?: string }>): Promise<void>;
   getChatHistory(sessionId: string, limit?: number, offset?: number, stageRunId?: string): Promise<ChatMessage[]>;
 
   // ── Templates ──
-  getWorkflowTemplates(): Promise<WorkflowTemplateSummary[]>;
+  getWorkflowTemplates(): Promise<WorkflowTemplate[]>;
 
   // ── Artifacts ──
   getArtifacts(sessionId: string): Promise<Artifact[]>;
@@ -107,55 +122,64 @@ export interface IPlatformClient {
     options?: EventSubscriptionOptions,
   ): () => void;
 
-  // ── Platform-specific ──
-  /**
-   * Open a directory picker (CLI: returns cwd, Web: no-op, Desktop: native dialog)
-   */
-  selectDirectory(): Promise<string | null>;
-
   // ── v2: Chat Operations ──
   createChat(params: CreateChatParams): Promise<Chat>;
-  listChats(filter?: { status?: string }): Promise<Chat[]>;
+  /** One page of chats with row summaries (chat list v2, G-02). Pass `nextCursor` back as `cursor`. */
+  listChats(query?: ChatListQuery): Promise<ChatListPage>;
   getChat(chatId: string): Promise<Chat>;
-  updateChat(chatId: string, updates: Partial<Pick<Chat, 'model' | 'harnessConfig'>>): Promise<Chat>;
+  updateChat(chatId: string, updates: Partial<Pick<Chat, 'name' | 'model' | 'harnessConfig'>>): Promise<Chat>;
+  /** A chat's tool-approval policy (`PATCH /chats/:id/permission-mode`); applies from the next turn. */
+  setChatPermissionMode(
+    chatId: string,
+    mode: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan',
+  ): Promise<{ chatId: string; mode: string }>;
   archiveChat(chatId: string): Promise<void>;
+  /** Restore an archived chat to Active (`PATCH { status: 'active' }`; P3-07 row action). */
+  unarchiveChat(chatId: string): Promise<void>;
   deleteChat(chatId: string): Promise<void>;
   sendChatPrompt(chatId: string, prompt: string, attachments?: Array<{ type: 'file'; path: string; displayName?: string }>): Promise<void>;
   getChatMessages(chatId: string, limit?: number, offset?: number): Promise<ChatMessage[]>;
 
-  // ── v2: Workflow Definition Operations ──
-  createDefinition(params: CreateWorkflowDefinitionParams): Promise<WorkflowDefinition>;
-  listDefinitions(): Promise<WorkflowDefinition[]>;
-  getDefinition(id: string): Promise<WorkflowDefinitionWithStages>;
-  updateDefinition(id: string, params: Partial<CreateWorkflowDefinitionParams>): Promise<WorkflowDefinition>;
-  deleteDefinition(id: string): Promise<void>;
+  // ── Workflow definitions (v2 documents, P01 WP-1.7) ──
+  /** Create a draft from a graph. */
+  createDefinition(graph: WorkflowGraphInput): Promise<WorkflowDefinitionRecord>;
+  listDefinitions(): Promise<WorkflowDefinitionSummary[]>;
+  getDefinition(id: string): Promise<WorkflowDefinitionRecord>;
+  /** Replace the whole graph; 409 REVISION_CONFLICT when `expectedRevision` is stale. */
+  saveDefinitionGraph(id: string, graph: WorkflowGraphInput, expectedRevision: number): Promise<WorkflowDefinitionRecord>;
+  /** Hard delete, or archive when runs pinned the definition. */
+  deleteDefinition(id: string): Promise<{ deleted: true } | { archived: true; runs: number }>;
 
-  // ── v2: Workflow Run Operations ──
-  createRun(params: CreateWorkflowRunParams): Promise<WorkflowRun>;
-  listRuns(filter?: { definitionId?: string; status?: string }): Promise<WorkflowRun[]>;
+  // ── Workflow runs ──
+  /**
+   * THE way a run starts (P04): `POST /workflow-invocations`. A definition,
+   * a script or a fork of an earlier run; the server derives the trigger.
+   * `files` are uploaded first and sent as upload ids.
+   */
+  invokeWorkflow(
+    request: InvocationRequest,
+    opts?: { idempotencyKey?: string; files?: InvocationFiles },
+  ): Promise<InvocationResult>;
+  /** What `invokeWorkflow` would do, without writing anything. */
+  planWorkflowInvocation(request: InvocationRequest): Promise<InvocationPlan>;
+  listRuns(filter?: WorkflowRunListFilter): Promise<WorkflowRun[]>;
   getRun(id: string): Promise<WorkflowRunWithStages>;
-  startRun(id: string): Promise<void>;
-  pauseRun(id: string): Promise<void>;
-  resumeRun(id: string): Promise<void>;
-  cancelRun(id: string): Promise<void>;
   /**
-   * PARITY-1: run-level retry. Creates and starts a NEW run that inherits
-   * the failed run's definition, variables and already-successful stages,
-   * and resolves with that new run's id — the ancestor stays terminal.
+   * Every operator action on a run or one of its instances (P03 commands
+   * API): pause, resume, cancel, retry, skip, fail and approve (which also
+   * answers an in-turn tool permission, question or plan review). A refused
+   * command rejects with the server's 409/400/404 error.
    */
-  retryRun(id: string): Promise<{ runId: string }>;
+  runCommand(runId: string, command: RunCommand): Promise<void>;
+  /** A loop instance's finished iterations, oldest first (P05). */
+  listLoopIterations(runId: string, instanceId: string): Promise<LoopIteration[]>;
+  /** Every decision the run waits on, its sub-workflow children's mirrored (P05). */
+  listPendingDecisions(runId: string): Promise<PendingDecisionView[]>;
+  /** The commands a check stage may run: the defaults plus the operator's extras (P05). */
+  getScriptAllowlist(): Promise<ScriptAllowlist>;
+  /** Replace the commands an administrator allowed in the app (admin:settings, D-174). */
+  setAllowedCommands(allowed: string[]): Promise<ScriptAllowlist>;
   deleteRun(id: string): Promise<void>;
-
-  // ── PARITY-2: per-stage controls (dedicated /stages/:id/* endpoints) ──
-  pauseStageRun(runId: string, stageId: string): Promise<void>;
-  resumeStageRun(runId: string, stageId: string): Promise<void>;
-  /**
-   * Wake a stage parked by `step.sleep` ahead of its scheduled time. Rejects
-   * with a 409 when the stage is not actually sleeping.
-   */
-  wakeStageRun(runId: string, stageId: string): Promise<void>;
-  retryStageRun(runId: string, stageId: string): Promise<void>;
-  cancelStageRun(runId: string, stageId: string): Promise<void>;
 
   // ── HITL — permission mode + interrupt resume (HITL-04) ──
   getPermissionMode(runId: string): Promise<{
@@ -166,10 +190,53 @@ export interface IPlatformClient {
     runId: string,
     mode: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan',
   ): Promise<void>;
-  listPendingInterrupts(runId: string): Promise<StageRun[]>;
-  resumeStage(
-    runId: string,
-    stageId: string,
-    resolution: { approved: boolean; value?: unknown; reason?: string },
-  ): Promise<{ ok: boolean; reason?: string }>;
+  // ── Attention feed (G-01) ──
+  /**
+   * Needs you + Running across chats, workflow runs and automation
+   * executions (`GET /api/attention`). Live deltas arrive on the `global`
+   * stream scope as `attention.*`; fold them in with client-core's
+   * `attentionReducer`.
+   */
+  getAttention(filter?: AttentionFilter): Promise<AttentionSnapshot>;
+
+  // ── Chat list v2 (G-02): bulk actions for the list's bulk bar ──
+  /** Archive several chats in one request; the outcome is per id. */
+  archiveChats(chatIds: string[]): Promise<ChatBulkResult>;
+  /** Permanently delete several chats in one request; the outcome is per id. */
+  deleteChats(chatIds: string[]): Promise<ChatBulkResult>;
+
+  // ── Agent providers / model picker (G-09) ──
+  /**
+   * Every provider's readiness and model catalog (`GET /api/harness/providers`).
+   * Answered from the server's snapshot (`stale: true` while it re-probes);
+   * `refresh: true` forces a blocking re-probe that spawns each provider's CLI,
+   * so pass it only on an explicit user action. Build the picker's view with
+   * client-core's `buildModelPickerCatalog` (ready providers first).
+   */
+  getHarnessProviders(options?: { refresh?: boolean }): Promise<HarnessProvidersResponse>;
+  /** Start the provider's own sign-in; open `authUrl` when present, then re-probe. */
+  loginProvider(type: string): Promise<HarnessLoginResult>;
+  /** Sign the provider's account out. */
+  logoutProvider(type: string): Promise<void>;
+  /** Start downloading a provider's CLI (Copilot, on first use); `installing` on the providers list tracks it. */
+  installProvider(type: string): Promise<void>;
+  /** Make a READY provider the default for requests that name none (409 otherwise). */
+  setDefaultProvider(type: string): Promise<HarnessSetDefaultResult>;
+  /** Which providers this server serves (`GET /api/harness/visibility`, D-131). */
+  getHarnessVisibility(): Promise<HarnessVisibilityResponse>;
+  /** Reveal or hide providers (`PUT /api/harness/visibility`, admin:harnesses); `null` = back to the default. */
+  setHarnessVisibility(update: HarnessVisibilityUpdate): Promise<HarnessVisibilityResponse>;
+
+  // ── Computer consent, grants and control (G-07) ──
+  /** Prompts still awaiting an answer on a workspace (with `plan` for a batched request). */
+  getComputerConsent(workspaceId: string): Promise<ComputerPendingConsent[]>;
+  /** Answer a prompt; `scope: 'app' | 'any'` picks "this app only" or "any app". */
+  answerComputerConsent(workspaceId: string, answer: ComputerConsentAnswer): Promise<ComputerConsentAnswerResult>;
+  /** Standing grants; `appIdentity: '*'` covers any app. */
+  listComputerGrants(workspaceId: string): Promise<ComputerGrant[]>;
+  revokeComputerGrant(workspaceId: string, appIdentity: string): Promise<void>;
+  /** Who drives the desktop (`agent | paused | user`). */
+  getComputerControl(workspaceId: string): Promise<ComputerControlState>;
+  /** Pause agent (`paused`), Take over (`user`) or hand back (`agent`). */
+  setComputerControl(workspaceId: string, mode: ComputerControlMode): Promise<ComputerControlState>;
 }

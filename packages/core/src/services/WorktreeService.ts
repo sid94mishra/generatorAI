@@ -13,10 +13,22 @@ import type {
   ProjectCodebase,
   ILogger,
 } from '@generatorai/shared';
+import { ConflictError } from '@generatorai/shared';
 import type { GitManager } from '../infrastructure/GitManager.js';
 import type { ProjectService } from './ProjectService.js';
 
 export class WorktreeService {
+  /**
+   * Late-wired: releases a row that belongs to a workspace mount (the row
+   * shares the mount's id) through the mount service, so the mount row
+   * follows its directory. Resolves false for a row that is not a mount's.
+   */
+  private mountReleaser?: (worktreeId: string) => Promise<boolean>;
+
+  setMountReleaser(fn: (worktreeId: string) => Promise<boolean>): void {
+    this.mountReleaser = fn;
+  }
+
   constructor(
     private readonly worktreeRepo: IWorktreeRepository,
     private readonly codebaseRepo: IProjectCodebaseRepository,
@@ -109,43 +121,6 @@ export class WorktreeService {
   }
 
   /**
-   * Create worktrees for all selected repos in a run.
-   * @param targetDir When provided, worktrees are placed at `{targetDir}/{alias}` (workspace source/).
-   */
-  async createRunWorktrees(
-    projectId: string,
-    runId: string,
-    selectedAliases: string[],
-    runType: WorktreeRunType = 'workflow',
-    targetDir?: string,
-  ): Promise<WorktreeInfo[]> {
-    const results: WorktreeInfo[] = [];
-
-    for (const aliasOrId of selectedAliases) {
-      // Try by alias first, then by ID (chat frontend sends IDs, workflows send aliases)
-      let codebase = await this.codebaseRepo.getByAlias(projectId, aliasOrId);
-      if (!codebase) {
-        try {
-          codebase = await this.codebaseRepo.getById(aliasOrId);
-          // Verify it belongs to the same project
-          if (codebase && codebase.projectId !== projectId) {
-            codebase = undefined;
-          }
-        } catch {
-          // getById may throw if not found
-        }
-      }
-      if (!codebase) {
-        throw new Error(`Codebase "${aliasOrId}" not found in project ${projectId}`);
-      }
-      const worktree = await this.createWorktree(codebase.id, runId, { runType, targetDir });
-      results.push(worktree);
-    }
-
-    return results;
-  }
-
-  /**
    * Remove a specific worktree: unregister it from the parent clone, delete
    * the directory, then drop the row.
    *
@@ -154,8 +129,19 @@ export class WorktreeService {
    * best-effort version did) orphans the directory AND leaves the parent clone
    * with a worktree entry nothing will ever prune.
    */
-  async removeWorktree(worktreeId: string): Promise<void> {
+  async removeWorktree(worktreeId: string, opts: { refuseActive?: boolean } = {}): Promise<void> {
     const worktree = await this.worktreeRepo.getById(worktreeId);
+    // A person removing one by hand never pulls the tree out from under a
+    // live chat or run; the owner's own teardown and codebase removal may.
+    if (opts.refuseActive && worktree.status === 'active') {
+      throw new ConflictError('This worktree is in use by an active chat or run');
+    }
+    // A chat's or run's worktree mount: released by the mount service (the
+    // directory goes, the branch stays, the mount is marked removed).
+    if (this.mountReleaser && (await this.mountReleaser(worktreeId))) {
+      this.logger.info(`[Worktree] Released mount worktree ${worktreeId}`);
+      return;
+    }
     // The codebase may already be gone — a stale row outliving its codebase is
     // precisely what `cleanupOrphanedWorktrees` sweeps, and that must not be
     // the thing that stops the sweep. No codebase simply means there is no

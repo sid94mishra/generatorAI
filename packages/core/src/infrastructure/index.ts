@@ -97,6 +97,7 @@ export {
   GitHubProvider,
   SourceControlRegistry,
   ProviderNotConfiguredError,
+  PullRequestNotMergeableError,
   SourceControlError,
   parseRepoSlug,
 } from '@generatorai/source-control';
@@ -108,6 +109,8 @@ export type {
   PullRequestRef,
   PullRequestState,
   CreatePullRequestInput,
+  IssueRef,
+  MergePullRequestInput,
   ListPullRequestsInput,
   ChecksSummary,
   SourceControlConfig,

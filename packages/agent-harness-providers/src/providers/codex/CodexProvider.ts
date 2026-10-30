@@ -69,6 +69,7 @@ import type {
 import type { AgentEvent, AgentQuestion } from '@generatorai/shared';
 import { HarnessSessionError } from '@generatorai/shared';
 import { buildHarnessEnv } from '../../childEnv.js';
+import { dropOptionalNulls, toStrictSchema } from './strictSchema.js';
 import type { CodexProviderOptions } from '../../types.js';
 import type {
   JSONRPCErrorError,
@@ -122,7 +123,8 @@ import type {
   V2ThreadForkParams,
   V2ThreadForkResponse,
   V2ThreadRevertParams,
-  V2ThreadRollbackParams,
+  V2ThreadTurnsListParams,
+  V2ThreadTurnsListResponse,
   V2ThreadStartParams,
   V2ThreadStartResponse,
   V2ThreadItem,
@@ -307,6 +309,25 @@ function jitter(ms: number): number {
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * RV-9 — a turn sent with `outputSchema` ends in a schema-constrained final
+ * message: its JSON is the turn's structured output. Text that does not
+ * parse leaves the output unset (the engine's extractor then repairs).
+ */
+/** How long a `systemError` waits for the error that explains it before failing the turn generically. */
+const SYSTEM_ERROR_GRACE_MS = 1_500;
+
+function withStructuredOutput(content: string, options: SendPromptOptions | undefined): ConversationResponse {
+  if (!options?.outputSchema) return { content };
+  try {
+    // Strict mode answered null for the properties the stage left optional (see strictSchema.ts).
+    const structuredOutput = dropOptionalNulls(JSON.parse(content.trim()) as unknown, options.outputSchema);
+    return { content: JSON.stringify(structuredOutput), structuredOutput };
+  } catch {
+    return { content };
+  }
 }
 
 /** Thread items that represent a tool the model invoked. */
@@ -774,6 +795,7 @@ export class CodexProvider implements IAgentHarness {
       defaultCwd: opts.defaultCwd ?? process.cwd(),
       approvalPolicy: opts.approvalPolicy ?? 'never',
       sandboxMode: opts.sandboxMode ?? 'workspace-write',
+      networkAccess: opts.networkAccess ?? true,
       baseBackoffMs: opts.baseBackoffMs ?? 1_000,
       maxBackoffRetries: opts.maxBackoffRetries ?? 4,
       rpcTimeoutMs: opts.rpcTimeoutMs ?? 30_000,
@@ -980,15 +1002,20 @@ export class CodexProvider implements IAgentHarness {
       // `mcpServerStatus/list`, `mcpServer/tool/call` and MCP elicitation
       // requests are all in the protocol.
       mcpServers: true,
-      // `skills/list` and `skills/extraRoots/set` exist upstream.
-      skillDirectories: true,
+      // `skills/extraRoots/set` takes directories, scoped to the app-server
+      // process rather than a thread (the composer warns, C-19).
+      skills: 'directories',
       // Approvals are per-command/patch and only fire under an approval policy
-      // that asks for them — not a PreToolUse gate on every call.
-      fullToolGating: false,
+      // that asks for them — not a gate on every tool call (PD-17).
+      approvalGating: 'exec_and_patch',
+      // `dynamicTools` are accepted on `thread/start` only.
+      hostTools: 'start_only',
+      // `outputSchema` on `turn/start`.
+      structuredOutput: 'native',
       // Threads are persisted server-side and rejoinable via `thread/resume`.
       sessionPersistence: true,
       // `thread/fork { lastTurnId }` and `thread/revert { beforeTurnId }` are
-      // in the protocol (0.154); `thread/rollback` is the deprecated fallback.
+      // in the protocol (0.162; `thread/rollback` is gone).
       conversationFork: true,
       conversationRewind: true,
       // `account/login/start` (ChatGPT browser flow) + `account/logout`.
@@ -1000,12 +1027,18 @@ export class CodexProvider implements IAgentHarness {
 
   // ── Model discovery ───────────────────────────────────────────────
 
+  /**
+   * The account's models, from Codex's own `model/list` (paginated). The list
+   * is the one Codex's own picker shows: the backend filters it by plan and by
+   * CLIENT VERSION (an older pinned binary is offered an older catalog — the
+   * "only two models" report, D-131), and rows flagged `hidden` (internal or
+   * retired models such as `codex-auto-review`) are left out exactly as Codex
+   * leaves them out. Each field below is copied from the response; nothing is
+   * inferred.
+   */
   async getModels(): Promise<HarnessModel[]> {
     const models: HarnessModel[] = [];
     try {
-      // `model/list` is paginated. The previous version read a single
-      // unpaginated `models` array that the protocol does not have, so it
-      // always returned nothing.
       let cursor: string | undefined;
       do {
         const page = await this.rpc<V2ModelListResponse>('model/list', {
@@ -1019,24 +1052,42 @@ export class CodexProvider implements IAgentHarness {
         }
         cursor = page.nextCursor ?? undefined;
       } while (cursor);
-    } catch {
+      this.lastModelProbeError = undefined;
+    } catch (err) {
       // Binary not running or not authenticated — an empty list is the
-      // contract here (W41: getModels never throws).
-      return models;
+      // contract here (W41: getModels never throws); the reason is kept.
+      this.lastModelProbeError = err instanceof Error ? err.message : String(err);
+      return [];
     }
     return models;
   }
 
+  private lastModelProbeError: string | undefined;
+
+  /** W41 — why the last `getModels()` returned `[]`, if it did. */
+  getLastModelProbeError(): string | undefined {
+    return this.lastModelProbeError;
+  }
+
   private toHarnessModel(m: V2Model): HarnessModel {
     const efforts = (m.supportedReasoningEfforts ?? []).map((e) => e.reasoningEffort).filter(Boolean);
+    const features: string[] = [];
+    if (m.supportsPersonality) features.push('Personality');
+    for (const tier of m.serviceTiers ?? []) if (tier.name) features.push(`${tier.name} tier`);
     return {
       id: m.id,
       name: m.displayName || m.model || m.id,
       provider: 'codex',
-      description: m.description || undefined,
-      supportsReasoning: efforts.length > 0,
-      ...(efforts.length ? { reasoningEfforts: efforts, defaultReasoningEffort: m.defaultReasoningEffort } : {}),
-      ...(m.inputModalities ? { supportsVision: m.inputModalities.includes('image') } : {}),
+      ...(m.description ? { description: m.description } : {}),
+      ...(m.isDefault ? { isDefault: true } : {}),
+      ...(m.model && m.model !== m.id ? { resolvedModel: m.model } : {}),
+      ...(efforts.length
+        ? { supportsReasoning: true, reasoningEfforts: efforts, defaultReasoningEffort: m.defaultReasoningEffort }
+        : {}),
+      ...(m.inputModalities?.length
+        ? { inputModalities: [...m.inputModalities], supportsVision: m.inputModalities.includes('image') }
+        : {}),
+      ...(features.length ? { features } : {}),
     };
   }
 
@@ -1272,6 +1323,11 @@ export class CodexProvider implements IAgentHarness {
       const cwd = params.workingDirectory ?? this.opts.defaultCwd;
       config['projects'] = { [cwd]: { trust_level: 'trusted' } };
     }
+    // Codex's workspace sandbox denies every socket by default, so a test that listens on localhost failed with
+    // EPERM; see `CodexProviderOptions.networkAccess`.
+    if (this.opts.sandboxMode === 'workspace-write') {
+      config['sandbox_workspace_write'] = { network_access: this.opts.networkAccess };
+    }
     config['plugins'] = Object.fromEntries(CODEX_DEVICE_CONTROL_PLUGINS.map((id) => [id, { enabled: false }]));
     // The chat's own servers are listed after, so one it names explicitly wins.
     config['mcp_servers'] = {
@@ -1283,10 +1339,15 @@ export class CodexProvider implements IAgentHarness {
     // through `spawn_background_agent`). Codex's equivalent is its multi-agent
     // feature; left on, an orchestrator handed work to Codex-internal
     // sub-agents that never appear as Background Tasks.
+    const features: Record<string, boolean> = {};
     const excluded = params.excludedBuiltinTools ?? [];
-    if (excluded.includes('Agent') || excluded.includes('Task')) {
-      config['features'] = { multi_agent: false };
-    }
+    if (excluded.includes('Agent') || excluded.includes('Task')) features['multi_agent'] = false;
+    // Codex offers `request_user_input` only in its plan collaboration mode, so
+    // a chat that asked it to stop and ask got a numbered list in prose instead
+    // of a question card. Where someone can answer, offer it in every turn, as
+    // Claude's AskUserQuestion is (verified against codex 0.162).
+    if (params.onQuestionRequest) features['default_mode_request_user_input'] = true;
+    if (Object.keys(features).length) config['features'] = features;
     return {
       ...this.buildInstructions(params, warnings),
       ...(Object.keys(config).length ? { config } : {}),
@@ -1361,14 +1422,31 @@ export class CodexProvider implements IAgentHarness {
       });
       return {};
     }
-    return { sandboxPolicy: { type: 'workspaceWrite', writableRoots: dirs } };
+    return { sandboxPolicy: { type: 'workspaceWrite', writableRoots: dirs, networkAccess: this.opts.networkAccess } };
   }
 
   async resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void> {
-    if (!this.conversations.has(conversationId) && params) {
-      await this.createConversation(params);
+    const live = this.conversations.get(conversationId);
+    if (!live) {
+      if (params) await this.createConversation(params);
+      return;
     }
-    // Codex threads are server-side and stateful; a live one needs no resume.
+    // Codex threads are server-side and stateful; a live one needs no resume —
+    // but "Edit sources" may have moved its roots (D-137), and the user may have
+    // picked another model or effort. `turn/start` takes the cwd, the writable
+    // roots, the model and the effort per turn, so adopting them here is enough
+    // for the next turn to run with them.
+    if (params) {
+      live.params = {
+        ...live.params,
+        workingDirectory: params.workingDirectory,
+        additionalDirectories: params.additionalDirectories,
+        ...(params.model ? { model: params.model } : {}),
+        ...(params.reasoningEffort ? { reasoningEffort: params.reasoningEffort } : {}),
+      };
+      const { sandboxPolicy } = this.buildSandboxPolicy(live.params, live.warnings);
+      live.sandboxPolicy = sandboxPolicy;
+    }
   }
 
   hasLiveConversation(conversationId: string): boolean {
@@ -1432,10 +1510,13 @@ export class CodexProvider implements IAgentHarness {
   }
 
   /**
-   * Drop the tail of a thread's history in place. `thread/revert` needs the
-   * first DROPPED turn; when the caller could not name it (a turn recorded
-   * before anchors were captured) the deprecated `thread/rollback` drops by
-   * count instead. Rewinding to before the first turn starts a fresh thread.
+   * Drop the tail of a thread's history in place with `thread/revert`, which
+   * takes the first DROPPED turn. When the caller could not name it (a turn
+   * recorded before anchors were captured) it is looked up by count with
+   * `thread/turns/list` (newest first). Codex 0.162 removed the old
+   * `thread/rollback { numTurns }`, so there is no count-based fallback left:
+   * a revert the server refuses is an error. Rewinding to before the first
+   * turn starts a fresh thread.
    */
   async rewindConversation(
     conversationId: string,
@@ -1459,7 +1540,7 @@ export class CodexProvider implements IAgentHarness {
       throw new HarnessSessionError(`Conversation ${conversationId} has no Codex thread to rewind`);
     }
     if (!conv) {
-      // Load the thread first: revert/rollback act on a loaded thread.
+      // Load the thread first: revert acts on a loaded thread.
       await this.createConversation({
         ...options.params,
         conversationId,
@@ -1467,22 +1548,21 @@ export class CodexProvider implements IAgentHarness {
       });
       conv = this.conversations.get(conversationId);
     }
-    const dropFrom = options.dropFrom;
-    let reverted = false;
-    if (dropFrom?.kind === 'turn') {
-      try {
-        await this.rpc('thread/revert', { threadId, beforeTurnId: dropFrom.id } satisfies V2ThreadRevertParams);
-        reverted = true;
-      } catch (err) {
-        this.opts.logger?.warn?.(
-          `[CodexProvider] thread/revert failed, falling back to thread/rollback: ${err instanceof Error ? err.message : String(err)}`,
-        );
+    let beforeTurnId = options.dropFrom?.kind === 'turn' ? options.dropFrom.id : undefined;
+    if (!beforeTurnId) {
+      if (options.droppedTurns < 1) return { providerSessionId: threadId };
+      const page = await this.rpc<V2ThreadTurnsListResponse>('thread/turns/list', {
+        threadId,
+        sortDirection: 'desc',
+        limit: options.droppedTurns,
+      } satisfies V2ThreadTurnsListParams);
+      // Newest first: the last of the `droppedTurns` newest is the first one dropped.
+      beforeTurnId = page.data?.[Math.min(options.droppedTurns, page.data.length) - 1]?.id;
+      if (!beforeTurnId) {
+        throw new HarnessSessionError(`Codex thread ${threadId} has no turn to rewind`);
       }
     }
-    if (!reverted) {
-      if (options.droppedTurns < 1) return { providerSessionId: threadId };
-      await this.rpc('thread/rollback', { threadId, numTurns: options.droppedTurns } satisfies V2ThreadRollbackParams);
-    }
+    await this.rpc('thread/revert', { threadId, beforeTurnId } satisfies V2ThreadRevertParams);
     return { providerSessionId: threadId };
   }
 
@@ -1650,6 +1730,9 @@ export class CodexProvider implements IAgentHarness {
     const turnParams: V2TurnStartParams = {
       threadId: conv.threadId,
       input: this.buildInput(prompt, attachments),
+      // The chat's primary mount, re-sent every turn so a source change between
+      // turns (D-137) moves the agent; the thread's own cwd is the start value.
+      cwd: conv.params.workingDirectory ?? this.opts.defaultCwd,
       // `SendPromptOptions` carries only `agentMode` / `permissionMode`. Codex
       // has no per-turn agent mode, and its per-turn approval policy is the
       // nearest analogue of a permission mode: a caller asking for `plan` or
@@ -1659,8 +1742,16 @@ export class CodexProvider implements IAgentHarness {
       // every turn re-asserts the policy (see `ConversationState.sandboxPolicy`).
       ...this.sandboxPolicyForTurn(conv, options),
       // "This turn and subsequent turns" — re-sent each turn so a change made
-      // between turns (or a resumed thread) always takes the chat's effort.
+      // between turns (or a resumed thread) always takes the chat's model and effort.
+      // Without the model a switch mid-chat kept running the thread's first model.
+      ...(conv.params.model ? { model: conv.params.model } : {}),
       ...(conv.params.reasoningEffort ? { effort: conv.params.reasoningEffort } : {}),
+      // Left unset, Codex streams no reasoning at all (verified against codex
+      // 0.162), so a Codex chat never showed what the model thought.
+      summary: 'auto',
+      // RV-9 — a workflow stage's final prompt turn asks for its structured output.
+      // Codex runs it in OpenAI's strict mode, which refuses open objects and optional properties.
+      ...(options?.outputSchema ? { outputSchema: toStrictSchema(options.outputSchema) as V2TurnStartParams['outputSchema'] } : {}),
     };
 
     let assistantText = '';
@@ -2261,7 +2352,7 @@ export class CodexProvider implements IAgentHarness {
               // `providerTurnId` is the anchor `thread/fork` / `thread/revert` take.
               if (turn?.id) this.broadcast(conv, { kind: 'harness.turn_end', data: { turnId: turn.id, providerTurnId: turn.id } });
               this.broadcast(conv, { kind: 'harness.idle', data: {} });
-              resolve({ content: finalAnswer ?? assistantText });
+              resolve(withStructuredOutput(finalAnswer ?? assistantText, options));
             });
             break;
           }
@@ -2351,9 +2442,9 @@ export class CodexProvider implements IAgentHarness {
       case 'danger-full-access':
         return { sandboxPolicy: { type: 'dangerFullAccess' } };
       case 'read-only':
-        return { sandboxPolicy: { type: 'readOnly' } };
+        return { sandboxPolicy: { type: 'readOnly', networkAccess: this.opts.networkAccess } };
       default:
-        return { sandboxPolicy: { type: 'workspaceWrite' } };
+        return { sandboxPolicy: { type: 'workspaceWrite', networkAccess: this.opts.networkAccess } };
     }
   }
 
@@ -2580,7 +2671,11 @@ export class CodexProvider implements IAgentHarness {
           );
           return;
         }
-        conv.failTurn?.('The Codex thread entered a system error state.');
+        // Codex announces `systemError` BEFORE the `error` that says why ("Invalid schema for response_format …",
+        // "Selected model is at capacity"): failing the turn here showed only this generic line, and a retryable
+        // capacity error was treated as fatal. The error (or `turn/completed`) settles the turn first when it
+        // comes; this line is the fallback for a thread that dies without one.
+        setTimeout(() => conv.failTurn?.('The Codex thread entered a system error state.'), SYSTEM_ERROR_GRACE_MS);
         return;
       }
 
@@ -2802,12 +2897,15 @@ export class CodexProvider implements IAgentHarness {
     conv: ConversationState | undefined,
     params: unknown,
   ): Promise<{ success: boolean; contentItems: Array<{ type: 'inputText'; text: string }> }> {
-    const { tool, arguments: args } = (params ?? {}) as { tool?: string; arguments?: unknown };
+    const { tool, arguments: args, callId } = (params ?? {}) as { tool?: string; arguments?: unknown; callId?: unknown };
     const text = (v: string) => [{ type: 'inputText' as const, text: v }];
     const def = conv?.params.tools?.find((t) => t.name === tool);
     if (!def) return { success: false, contentItems: text(`Tool "${String(tool)}" is not available in this conversation.`) };
     try {
-      const out = await def.handler((args && typeof args === 'object' ? args : {}) as Record<string, unknown>);
+      const out = await def.handler(
+        (args && typeof args === 'object' ? args : {}) as Record<string, unknown>,
+        typeof callId === 'string' && callId ? { toolCallId: callId } : {},
+      );
       return { success: true, contentItems: text(typeof out === 'string' ? out : JSON.stringify(out ?? null)) };
     } catch (err) {
       return { success: false, contentItems: text(err instanceof Error ? err.message : String(err)) };

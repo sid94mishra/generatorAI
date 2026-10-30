@@ -1,0 +1,22 @@
+appId: ${APP_ID}
+name: settings · theme and mode persist
+tags: [characterization, full]
+# Inspect the real provider (MD-103). Theme group and mode segments carry glyphs / counts, so they take the drawn
+# segmented path with per-segment ids (MD-130).
+---
+- runFlow: ../_subflows/launch.yaml
+- runFlow: ../_subflows/open-sidebar.yaml
+- tapOn: {id: drawer-settings}
+- tapOn: {id: settings-appearance}
+- tapOn: {id: appearance-theme-group-reading}
+- tapOn: {id: theme-option-solarized}
+- tapOn: {id: appearance-mode-light}
+- openLink: generatorai:///theme?inspect=1
+- extendedWaitUntil: {visible: "Theme: solarized", timeout: 15000}
+- assertVisible: "Mode: light"
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///theme?inspect=1
+- extendedWaitUntil: {visible: "Theme: solarized", timeout: 15000}
+- assertVisible: "Mode: light"
+- openLink: generatorai:///theme?theme=instrument&mode=system
+- extendedWaitUntil: {visible: {id: home-new-chat}, timeout: 15000}

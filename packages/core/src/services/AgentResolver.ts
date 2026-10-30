@@ -1,4 +1,5 @@
 import type { HarnessProviderId } from '@generatorai/shared';
+import { isMcpSecretRef, MCP_REDACTED_VALUE } from '@generatorai/shared';
 // ────────────────────────────────────────────────────────────────
 // AgentResolver — the ONE place capability sets are combined.
 //
@@ -40,8 +41,6 @@ import type { ArtifactCatalog } from './ArtifactCatalog.js';
 export interface ResolveAgentInput {
   /** Portable `scope:slug` ref of the driving agent. */
   agentRef?: string | undefined;
-  /** Legacy `stage.agentName` fallback, matched against agent slug/name. */
-  agentName?: string | undefined;
   overrides?: AgentOverrides | undefined;
   baseHarnessConfig?: Partial<HarnessConfig> | undefined;
   runtimeOverrides?: Partial<HarnessConfig> | undefined;
@@ -94,6 +93,9 @@ const GROUP_TOOL_NAMES: Record<keyof AgentToolPolicy, { copilot: string[]; claud
     copilot: ['fetch', 'web_search', 'web_fetch'],
     claude: ['WebFetch', 'WebSearch'],
   },
+  // Platform tool sets: bound by the session composer, never built-ins.
+  workflows: { copilot: [], claude: [] },
+  workflowAuthoring: { copilot: [], claude: [] },
 };
 
 export class AgentResolver {
@@ -282,15 +284,6 @@ export class AgentResolver {
       }
       return found;
     }
-    if (input.agentName) {
-      // Legacy `stage.agentName`: match by slug across project → global → system.
-      const candidates = await this.agentRepo.list({ enabledOnly: true });
-      const byName = candidates.find(
-        (a) => a.slug === input.agentName || a.name === input.agentName,
-      );
-      if (byName) return byName;
-      warnings.push({ code: 'AGENT_NOT_FOUND', params: { ref: input.agentName } });
-    }
     return null;
   }
 
@@ -410,7 +403,11 @@ export class AgentResolver {
         if (typeof v === 'boolean') out[group] = v;
       }
     }
-    if (forceOrchestration) out.orchestration = true;
+    if (forceOrchestration) {
+      out.orchestration = true;
+      // An orchestrator runs workflows by default (PD-23) unless a level says no.
+      if (!levels.some((l) => typeof l?.workflows === 'boolean')) out.workflows = true;
+    }
     return out;
   }
 
@@ -444,12 +441,19 @@ export class AgentResolver {
  * returned from the preview endpoint, or serialised to `.agent.md`.
  */
 export function redactProjection(p: ResolvedAgentProjection): ResolvedAgentProjection {
+  // Keep the maps' shape and their `secretref:` pointers (they name a
+  // secret, they are not one), so a session resumed from the snapshot still
+  // gets its credentials injected; only literal values are masked (P02
+  // review R2). A server whose map still holds the mask is dropped with a
+  // warning at injection rather than started with a bogus value.
+  const mask = (map: Record<string, string>): Record<string, string> =>
+    Object.fromEntries(Object.entries(map).map(([k, v]) => [k, isMcpSecretRef(v) ? v : MCP_REDACTED_VALUE]));
   const mcpServers: Record<string, unknown> = {};
   for (const [name, raw] of Object.entries(p.mcpServers)) {
     const cfg = raw as McpServerConfig;
     const clone: Record<string, unknown> = { ...cfg };
-    if (cfg.env && Object.keys(cfg.env).length > 0) clone['env'] = '<redacted>';
-    if (cfg.headers && Object.keys(cfg.headers).length > 0) clone['headers'] = '<redacted>';
+    if (cfg.env && Object.keys(cfg.env).length > 0) clone['env'] = mask(cfg.env);
+    if (cfg.headers && Object.keys(cfg.headers).length > 0) clone['headers'] = mask(cfg.headers);
     mcpServers[name] = clone;
   }
   return { ...p, mcpServers };

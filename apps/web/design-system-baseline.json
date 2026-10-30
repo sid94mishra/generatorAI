@@ -1,9 +1,26 @@
 {
-  "hardcodedPaletteClass": 314,
-  "handRolledOverlay": 1,
-  "legacyGlassClass": 0,
-  "rawButtonElement": 44,
-  "rawInputElement": 40,
-  "adHocSpinner": 6,
-  "nativeConfirm": 0
+  "counts": {},
+  "locked": [
+    "hardcodedPaletteClass",
+    "handRolledOverlay",
+    "legacyGlassClass",
+    "rawButtonElement",
+    "rawInputElement",
+    "adHocSpinner",
+    "nativeConfirm",
+    "defaultTextSize",
+    "whiteBlackClass",
+    "defaultRadius",
+    "defaultShadow",
+    "arbitraryValue",
+    "varInClassString",
+    "legacyColorVar",
+    "legacyTokenUtility",
+    "hexOrRgbInTs",
+    "lucideDirectImport",
+    "rawHeadlessImport",
+    "unstyledVariant",
+    "literalInlineStyle",
+    "radixOverlaySelector"
+  ]
 }

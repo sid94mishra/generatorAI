@@ -25,6 +25,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
+import { globFiles } from './lib/globFiles.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const baselineFile = join(repoRoot, 'scripts', 'sync-io-baseline.json');
@@ -54,6 +55,26 @@ function isZeroTolerance(message) {
   return message.startsWith(ZERO_TOLERANCE);
 }
 
+/**
+ * Lint only the files the governed rule applies to — the `files` of the
+ * eslint.config.mjs block that carries these messages — not the whole repo.
+ * `eslint .` built one report for every package (web, mobile, docs site…) in a
+ * single process and ran out of memory at Node's default heap; the governed
+ * paths are ~580 files (~450 MB peak, ~25 s). Read from the config so the two
+ * can never drift: a path added to the rule's block is counted here at once.
+ */
+const eslintConfig = (await import(new URL('../eslint.config.mjs', import.meta.url).href)).default;
+const governedBlock = eslintConfig.find((block) =>
+  (block.rules?.['no-restricted-syntax'] ?? [])
+    .slice(1)
+    .some((entry) => typeof entry?.message === 'string' && isGoverned(entry.message)),
+);
+if (!governedBlock || !Array.isArray(governedBlock.files) || governedBlock.files.length === 0) {
+  console.error('❌ No eslint.config.mjs block carries the synchronous-IO rule — nothing to count.');
+  process.exit(1);
+}
+const lintPatterns = governedBlock.files;
+
 let raw;
 try {
   // `--format json` so we count structurally rather than by scraping text.
@@ -64,7 +85,7 @@ try {
   // a shell is used, and using a shell would mean quoting this path.
   raw = execFileSync(
     process.execPath,
-    [join(repoRoot, 'node_modules', 'eslint', 'bin', 'eslint.js'), '.', '--format', 'json'],
+    [join(repoRoot, 'node_modules', 'eslint', 'bin', 'eslint.js'), ...lintPatterns, '--format', 'json'],
     { cwd: repoRoot, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 /* the JSON report exceeded 64 MB once (68 MB) and was silently truncated */, stdio: ['ignore', 'pipe', 'pipe'] },
   );
 } catch (err) {
@@ -91,10 +112,18 @@ try {
 // which happens when something else is writing to the tree. In the failure
 // case `stdout` can be empty or cover a handful of files, and this script
 // would then record a baseline of ~0 — silently deleting the ratchet it
-// exists to hold. A repo this size always lints thousands of files, so a tiny
-// result set is proof the run did not complete.
-const MIN_EXPECTED_FILES = 500;
-if (!Array.isArray(results) || results.length < MIN_EXPECTED_FILES) {
+// exists to hold. ESLint lints every file the patterns match, so a result set
+// smaller than the files on disk is proof the run did not complete.
+// Each pattern is walked from its literal prefix (`apps/server/src/` for
+// `apps/server/src/**/*.ts`), not from the repo root.
+function filesMatching(pattern) {
+  const parts = pattern.split('/');
+  const firstGlob = parts.findIndex((part) => /[*{]/.test(part));
+  const base = parts.slice(0, firstGlob).join('/');
+  return globFiles(parts.slice(firstGlob).join('/'), join(repoRoot, base)).map((f) => `${base}/${f}`);
+}
+const MIN_EXPECTED_FILES = new Set(lintPatterns.flatMap(filesMatching)).size;
+if (!Array.isArray(results) || MIN_EXPECTED_FILES === 0 || results.length < MIN_EXPECTED_FILES) {
   console.error(
     `❌ ESLint reported only ${Array.isArray(results) ? results.length : 0} files ` +
       `(expected at least ${MIN_EXPECTED_FILES}). The run did not complete, so its\n` +

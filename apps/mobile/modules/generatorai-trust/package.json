@@ -1,0 +1,9 @@
+{
+  "name": "generatorai-trust",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local Expo module: per-server TLS trust anchors (the pairing QR's local-CA fingerprint) for React Native fetch, expo/fetch and WebSocket on iOS (URLSession / SocketRocket challenge hooks) and Android (OkHttp trust manager). Autolinked from apps/mobile/modules by expo prebuild.",
+  "license": "UNLICENSED",
+  "author": "GeneratorAI",
+  "homepage": "https://github.com/generatorai"
+}

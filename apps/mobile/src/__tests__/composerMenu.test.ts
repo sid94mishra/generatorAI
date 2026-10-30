@@ -5,7 +5,7 @@ import {
   detectMenu,
   filterCommands,
   filterPaths,
-} from '../components/chat/composerMenu';
+} from '../blocks/Composer/model/composerMenu';
 
 describe('detectMenu — slash', () => {
   it('opens for a command at the start of the message', () => {

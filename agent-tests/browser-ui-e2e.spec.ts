@@ -2,7 +2,7 @@
 // Browser UI End-to-End Tests — Playwright
 //
 // Tests ALL web UI pages and user interactions:
-//   - Dashboard, Sidebar navigation
+//   - Home, Sidebar navigation
 //   - Workflow builder (create, edit, stages, edges, canvas)
 //   - Workflow run page (streaming, messages, timeline)
 //   - Chat page (create, send, streaming, history)
@@ -31,6 +31,28 @@ async function api(method: string, path: string, body?: unknown) {
   return { status: res.status, data };
 }
 
+/** A published one-stage workflow (a v2 graph, formatVersion 2); returns its id. */
+async function createWorkflow(name: string, stageName: string, prompt: string): Promise<string> {
+  const { data } = await api('POST', '/api/workflow-definitions', {
+    formatVersion: 2,
+    workflow: { name },
+    stages: [{ key: 'only', name: stageName, kind: 'agent', prompts: [{ label: 'P', text: prompt }] }],
+    edges: [],
+  });
+  const defId = (data as { id: string }).id;
+  await api('POST', `/api/workflow-definitions/${defId}/publish`);
+  return defId;
+}
+
+/** Start a run through the invocation (created and started in one request); returns its id. */
+async function invoke(defId: string): Promise<string> {
+  const { data } = await api('POST', '/api/workflow-invocations', {
+    target: { kind: 'definition', workflowDefinitionId: defId },
+    client: 'http',
+  });
+  return (data as { runId: string }).runId;
+}
+
 async function waitForRunComplete(runId: string, timeoutMs = 90_000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -47,62 +69,59 @@ async function waitForRunComplete(runId: string, timeoutMs = 90_000) {
 // ═══════════════════════════════════════════════════════════════
 
 test.describe('1. Navigation & Layout', () => {
-  test('dashboard loads', async ({ page }) => {
+  // P3 shell: the sidebar <nav> (`sidebar-nav`) holds React Router links
+  // (Home … Scripts); Settings is the footer gear (`sidebar-settings`); there
+  // is no Templates entry or /templates route (Settings ▸ Templates).
+  test('home loads', async ({ page }) => {
     await page.goto(WEB_URL);
-    await page.waitForLoadState('networkidle');
-    // Scope to the sidebar nav to avoid matching quick-action cards
-    const nav = page.getByRole('navigation');
-    await expect(nav.getByRole('button', { name: 'Dashboard', exact: true })).toBeVisible();
-    await expect(nav.getByRole('button', { name: 'Workflows', exact: true })).toBeVisible();
-    await expect(nav.getByRole('button', { name: 'Chats', exact: true })).toBeVisible();
-    await expect(nav.getByRole('button', { name: 'Automations', exact: true })).toBeVisible();
+    await page.waitForLoadState('load');
+    const nav = page.getByTestId('sidebar-nav');
+    await expect(nav.getByRole('link', { name: 'Home', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Workflows', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Chats', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Automations', exact: true })).toBeVisible();
   });
 
   test('navigate to every main page', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(WEB_URL);
-    await page.waitForLoadState('networkidle');
-    const nav = page.getByRole('navigation');
+    await page.waitForLoadState('load');
+    const nav = page.getByTestId('sidebar-nav');
 
     // Workflows
-    await nav.getByRole('button', { name: 'Workflows', exact: true }).click();
+    await nav.getByRole('link', { name: 'Workflows', exact: true }).click();
     await expect(page).toHaveURL(/\/workflows/);
 
     // Chats
-    await nav.getByRole('button', { name: 'Chats', exact: true }).click();
+    await nav.getByRole('link', { name: 'Chats', exact: true }).click();
     await expect(page).toHaveURL(/\/chats/);
 
     // Automations
-    await nav.getByRole('button', { name: 'Automations', exact: true }).click();
+    await nav.getByRole('link', { name: 'Automations', exact: true }).click();
     await expect(page).toHaveURL(/\/automations/);
 
-    // Templates + Settings live below <nav> in a separate section of the sidebar aside
-    const sidebar = page.getByRole('complementary');
-    await sidebar.getByRole('button', { name: 'Templates', exact: true }).click();
-    await expect(page).toHaveURL(/\/templates/);
-
-    await sidebar.getByRole('button', { name: 'Settings', exact: true }).click();
+    // Settings is the sidebar footer gear, outside the <nav>
+    await page.getByTestId('sidebar-settings').click();
     await expect(page).toHaveURL(/\/settings/);
 
     // Projects
-    await nav.getByRole('button', { name: 'Projects', exact: true }).click();
+    await nav.getByRole('link', { name: 'Projects', exact: true }).click();
     await expect(page).toHaveURL(/\/projects/);
 
-    // Dashboard
-    await nav.getByRole('button', { name: 'Dashboard', exact: true }).click();
-    await expect(page).toHaveURL(/\//);
+    // Home
+    await nav.getByRole('link', { name: 'Home', exact: true }).click();
+    await expect(page).toHaveURL(/\/$/);
   });
 
   test('sidebar collapse/expand', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(WEB_URL);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('load');
 
-    // Click collapse button
-    const collapseBtn = page.locator('button:has-text("Collapse sidebar")');
-    if (await collapseBtn.isVisible()) {
-      await collapseBtn.click();
-      // Sidebar text should be hidden
-      await page.waitForTimeout(500);
-    }
+    await page.getByRole('button', { name: 'Hide sidebar', exact: true }).click();
+    await expect(page.locator('[data-testid="app-sidebar"][data-collapsed="rail"]')).toBeVisible();
+    await page.getByRole('button', { name: 'Show sidebar', exact: true }).click();
+    await expect(page.locator('[data-testid="app-sidebar"][data-collapsed="full"]')).toBeVisible();
   });
 });
 
@@ -146,18 +165,7 @@ test.describe('3. Workflow Builder', () => {
 
   test.beforeAll(async () => {
     // Create workflow via API
-    const { data } = await api('POST', '/api/workflow-definitions', {
-      name: `Browser Builder Test ${Date.now()}`,
-      sessionMode: 'single',
-    });
-    defId = (data as { id: string }).id;
-
-    // Add stages
-    await api('POST', `/api/workflow-definitions/${defId}/stages`, {
-      name: 'First Stage',
-      order: 0,
-      prompts: [{ label: 'Test', text: 'Say hello', waitForCompletion: true }],
-    });
+    defId = await createWorkflow(`Browser Builder Test ${Date.now()}`, 'First Stage', 'Say hello');
   });
 
   test('builder page loads with canvas', async ({ page }) => {
@@ -203,24 +211,10 @@ test.describe('4. Workflow Run Page', () => {
 
   test.beforeAll(async () => {
     // Create definition
-    const { data: def } = await api('POST', '/api/workflow-definitions', {
-      name: `Browser Run Test ${Date.now()}`,
-      sessionMode: 'single',
-    });
-    defId = (def as { id: string }).id;
+    defId = await createWorkflow(`Browser Run Test ${Date.now()}`, 'Streamed Stage', 'Say "Hello World" exactly and nothing else.');
 
-    await api('POST', `/api/workflow-definitions/${defId}/stages`, {
-      name: 'Streamed Stage',
-      order: 0,
-      prompts: [{ label: 'Test', text: 'Say "Hello World" exactly and nothing else.', waitForCompletion: true }],
-    });
-
-    // Create and start run
-    const { data: run } = await api('POST', '/api/workflow-runs', {
-      workflowDefinitionId: defId,
-    });
-    runId = (run as { id: string }).id;
-    await api('POST', `/api/workflow-runs/${runId}/start`);
+    // Start a run
+    runId = await invoke(defId);
   });
 
   test('run page shows running state', async ({ page }) => {
@@ -425,22 +419,10 @@ test.describe('10. Full Workflow Lifecycle (Browser)', () => {
 
   test('create workflow, run it, verify messages, cleanup', async ({ page }) => {
     // 1. Create workflow via API
-    const { data: def } = await api('POST', '/api/workflow-definitions', {
-      name: `Full Lifecycle ${Date.now()}`,
-      sessionMode: 'single',
-    });
-    defId = (def as { id: string }).id;
+    defId = await createWorkflow(`Full Lifecycle ${Date.now()}`, 'Lifecycle Stage', 'Say "lifecycle complete" and nothing else.');
 
-    await api('POST', `/api/workflow-definitions/${defId}/stages`, {
-      name: 'Lifecycle Stage',
-      order: 0,
-      prompts: [{ label: 'LC', text: 'Say "lifecycle complete" and nothing else.', waitForCompletion: true }],
-    });
-
-    // 2. Create and start run
-    const { data: run } = await api('POST', '/api/workflow-runs', { workflowDefinitionId: defId });
-    runId = (run as { id: string }).id;
-    await api('POST', `/api/workflow-runs/${runId}/start`);
+    // 2. Start a run
+    runId = await invoke(defId);
 
     // 3. Navigate to run page
     await page.goto(`${WEB_URL}/workflows/${defId}/runs/${runId}`);

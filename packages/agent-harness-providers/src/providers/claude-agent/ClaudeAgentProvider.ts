@@ -65,8 +65,9 @@ import type {
 } from '@generatorai/core';
 import type { HookBridge } from '@generatorai/core';
 import type { AgentEvent, AgentEventKind } from '@generatorai/shared';
-import { HarnessSessionError, withSpan, getMeter, createAgentEvent } from '@generatorai/shared';
+import { HarnessSessionError, withSpan, getMeter, createAgentEvent, GenAiTurnSpans } from '@generatorai/shared';
 import { lastIterationUsage, mapClaudeAgentMessageToAgentEvents } from './event-mapper.js';
+import { sessionTotalsOf, usageSince, type SessionUsageTotals } from './sessionUsage.js';
 // W41 — `./tool-factory.js` value-imports `createSdkMcpServer` from the Claude
 // SDK (and `zod`), so importing it statically here would defeat the lazy load
 // above. It is imported dynamically at its single call site in
@@ -99,6 +100,8 @@ import {
   normaliseClaudeQuestions,
 } from './plan-gate.js';
 import { buildHarnessEnv, filterDelegatedHarnessEnv } from '../../childEnv.js';
+import { sameRoots } from '../../conversationRoots.js';
+import { toHarnessError } from '../../errors.js';
 
 // ── W41 — lazy SDK module singleton ──────────────────────────────
 //
@@ -212,7 +215,20 @@ interface PersistentSession {
   sdkSessionId: string | undefined;
   closed: boolean;
   reader: Promise<void>;
+  /** Live background tasks that report back to the model (sub-agents, workflows), from `background_tasks_changed`. */
+  backgroundAgents: Set<string>;
+  /** The process's running cost and token totals, from its latest `result` (see `sessionUsage.ts`). */
+  usageTotals?: SessionUsageTotals;
 }
+
+/**
+ * Background task types whose completion the CLI hands back to the model, which then answers in a new model turn.
+ * A background shell (`local_bash`) is not one: a dev server can run for hours and must never hold a turn open.
+ */
+const REPORTING_TASK_TYPES: ReadonlySet<string> = new Set(['local_agent', 'remote_agent', 'in_process_teammate', 'local_workflow']);
+
+/** How long a held turn waits, once its background agents are gone, for the CLI to continue before it ends anyway. */
+const BACKGROUND_RELEASE_MS = 120_000;
 
 /**
  * Per-turn bookkeeping shared by the persistent and one-shot paths, so the
@@ -222,6 +238,13 @@ interface PersistentSession {
 /** The events that end a turn for everything downstream of the provider. */
 function isTerminalEvent(event: { kind: string }): boolean {
   return event.kind === 'harness.idle' || event.kind === 'harness.error';
+}
+
+/** The live background task set a `background_tasks_changed` message carries (REPLACE semantics), else null. */
+function backgroundTasksOf(message: SDKMessage): Array<{ task_id: string; task_type: string }> | null {
+  const m = message as { type?: string; subtype?: string; tasks?: unknown };
+  if (m.type !== 'system' || m.subtype !== 'background_tasks_changed' || !Array.isArray(m.tasks)) return null;
+  return m.tasks as Array<{ task_id: string; task_type: string }>;
 }
 
 /**
@@ -275,8 +298,19 @@ interface TurnState {
    * with a zero-turn result and no assistant message, legitimately.
    */
   localCommand: boolean;
+  /**
+   * Persistent mode: the session's totals when this turn's first message arrived (absent — the key unset — until
+   * then; `undefined` for a fresh process). `harness.usage` reports what the turn added on top of them.
+   */
+  usageBase?: SessionUsageTotals | undefined;
   truncationStopReason?: string;
   releaseExecution?: () => void;
+  /**
+   * Whether the turn holds a real `provider:claude-agent` permit (`held`), gave
+   * it back while a tool blocks (`yielded`, see `yieldTurnPermit`), or never had
+   * one (undefined: an admitted workflow-stage turn, or no supervisor).
+   */
+  permit?: 'held' | 'yielded';
   /** Set by Stop. Everything the runtime sends afterwards is discarded. */
   aborted: boolean;
   cancellation?: CancellationInFlight;
@@ -288,6 +322,12 @@ interface TurnState {
    */
   session?: PersistentSession;
   settled: boolean;
+  /**
+   * The terminal events of a `result` that arrived while background agents were still out: the model will answer
+   * again when they report, so the turn stays open and these are published at its real end.
+   */
+  heldTerminal?: AgentEvent[];
+  heldTimer?: ReturnType<typeof setTimeout>;
   /** Resolves when the turn has reached a terminal state, however it got there. */
   done: Promise<void>;
   settle: () => void;
@@ -303,6 +343,9 @@ interface TurnState {
 /** Above this an image costs more than it informs; the model reads the file instead. */
 const MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024;
 
+/** The built-in search tools the CLI keeps only when a session names them (U-46). */
+const SEARCH_TOOLS: readonly string[] = ['Glob', 'Grep'];
+
 /**
  * How long a speculative pre-warm waits for the CLI's initialize handshake
  * before giving up. The SDK's own default is 60 s, which is far too patient
@@ -315,7 +358,7 @@ const PREWARM_INITIALIZE_TIMEOUT_MS = 30_000;
  * `claude` CLI process, so these defaults ARE the memory budget:
  *
  *   - `DEFAULT_MAX_LIVE_SESSIONS` was 32 (= 7.4 GB of processes) while the
- *     turn permit (`GENERATORAI_MAX_CONCURRENT_AGENT_TURNS`) defaults to 4.
+ *     turn permit (the `provider:claude-agent` flow key) defaults to 4.
  *     Eight is twice the permit: enough that a user flipping between a few
  *     chats keeps them warm, small enough that a busy server tops out near
  *     1.8 GB of CLI processes.
@@ -358,6 +401,7 @@ export function sessionFingerprint(options: ClaudeOptions): string {
     allowedTools: o['allowedTools'],
     disallowedTools: o['disallowedTools'],
     skills: o['skills'],
+    plugins: o['plugins'],
     agent: o['agent'],
     agents: o['agents'],
     effort: o['effort'],
@@ -459,49 +503,19 @@ export interface ClaudeAccountInfo {
   apiProvider?: string;
 }
 
-/** The subset of the SDK's `ModelInfo` we consume (kept local to avoid a hard type dep). */
+/** The SDK's `ModelInfo` (0.3.x `supportedModels()`), kept local to avoid a hard type dep. */
 interface ClaudeModelInfo {
   value: string;
+  resolvedModel?: string;
   displayName?: string;
   description?: string;
   supportsEffort?: boolean;
   supportedEffortLevels?: string[];
+  supportsAdaptiveThinking?: boolean;
+  supportsFastMode?: boolean;
+  supportsAutoMode?: boolean;
 }
 
-/**
- * Fold the concrete model version into the display name.
- *
- * The CLI's `value` is an *alias* (`opus[1m]`, `sonnet`) and `displayName` is
- * just the family ("Opus", "Sonnet"), so on their own they never tell you
- * whether you're getting Opus 4.8 or Opus 5. The real version only appears in
- * the prose `description` ("Opus 4.8 with 1M context · …"), so we lift it out
- * and splice it in:
- *
- *   "Opus"               + "Opus 4.8 with 1M context…"  → "Opus 4.8"
- *   "Sonnet (1M context)"+ "Sonnet 4.6 for long…"       → "Sonnet 4.6 (1M context)"
- *
- * Aliases whose family doesn't appear in their own description (notably
- * `default`, described as "…currently Opus 4.8…") are left alone, because the
- * version there belongs to whatever the alias resolves to today.
- */
-function versionedModelName(displayName: string, description?: string): string {
-  if (!description) return displayName;
-  const base = displayName.split(/[\s(]/)[0];
-  if (!base) return displayName;
-  const match = new RegExp(`\\b${base}\\s+(\\d+(?:\\.\\d+)?)\\b`, 'i').exec(description);
-  const version = match?.[1];
-  if (!version || displayName.includes(version)) return displayName;
-  return displayName.replace(new RegExp(`^${base}`, 'i'), `${base} ${version}`);
-}
-
-/**
- * Map the CLI's live `ModelInfo` onto our provider-neutral `HarnessModel`.
- *
- * The CLI reports capability flags and a prose description but no structured
- * context/pricing numbers, so we infer the context window from the tier
- * encoded in the alias (`sonnet[1m]` → 1M) and leave anything we can't know
- * undefined rather than inventing values.
- */
 /**
  * The reasoning effort of a chat that never chose one. One constant, used for
  * what runs AND for what the model list advertises as the default, so the two
@@ -510,57 +524,42 @@ function versionedModelName(displayName: string, description?: string): string {
  */
 const DEFAULT_EFFORT = 'medium';
 
-function mapClaudeModelInfo(m: ClaudeModelInfo, runtimeDefaultEffort?: string): HarnessModel {
-  const id = m.value;
-  const longContext = /\[1m\]/i.test(id);
+/** The CLI's alias for "whatever Anthropic recommends for this account". */
+const DEFAULT_ALIAS = 'default';
+
+/**
+ * Map one row of the CLI's `supportedModels()` onto the provider-neutral
+ * `HarnessModel` (D-131). Only what the CLI returned: the display name as
+ * given (the CLI already names the version, "Opus 5.5"), its description,
+ * the canonical id the alias resolves to, the effort levels and its
+ * capability flags. The CLI reports no context window, output limit or tier,
+ * so none is set here; real limits arrive with the first turn's `modelUsage`
+ * (see `applyObservedLimits`).
+ */
+export function mapClaudeModelInfo(m: ClaudeModelInfo, runtimeDefaultEffort?: string): HarnessModel {
   const model: HarnessModel = {
-    id,
-    name: versionedModelName(m.displayName || id, m.description),
+    id: m.value,
+    name: m.displayName || m.value,
     provider: 'claude-agent',
   };
   if (m.description) model.description = m.description;
-  if (/opus|fable/i.test(id)) model.category = 'powerful';
-  else if (/haiku/i.test(id)) model.category = 'lightweight';
-  else model.category = 'versatile';
-
-  if (longContext) {
-    // Anthropic's advertised window covers prompt + completion. Until a real
-    // turn tells us the account's actual output reserve we treat the whole
-    // window as the prompt budget rather than inventing a reserve.
-    model.totalContextWindow = 1_000_000;
-    model.promptTokenLimit = 1_000_000;
-    model.contextWindow = 1_000_000;
-    model.standardContextWindow = 200_000;
-    model.supportsLongContext = true;
-    model.longContext = { promptTokenLimit: 1_000_000, totalContextWindow: 1_000_000 };
-  } else if (id !== 'default') {
-    model.totalContextWindow = 200_000;
-    model.promptTokenLimit = 200_000;
-    model.contextWindow = 200_000;
-  } else {
-    // The `default` alias resolves to whichever model Anthropic currently
-    // recommends. Every first-party Claude model ships a 200K standard window,
-    // so seed that instead of leaving it blank (which used to drop the gauge
-    // onto a 128K hardcoded guess). Corrected from `modelUsage` after one turn.
-    model.totalContextWindow = 200_000;
-    model.promptTokenLimit = 200_000;
-    model.contextWindow = 200_000;
-  }
+  if (m.resolvedModel && m.resolvedModel !== m.value) model.resolvedModel = m.resolvedModel;
+  const features: string[] = [];
+  if (m.supportsAdaptiveThinking) features.push('Adaptive thinking');
+  if (m.supportsFastMode) features.push('Fast mode');
+  if (m.supportsAutoMode) features.push('Auto mode');
+  if (features.length) model.features = features;
 
   if (m.supportsEffort) {
     model.supportsReasoning = true;
     if (m.supportedEffortLevels?.length) {
       model.reasoningEfforts = [...m.supportedEffortLevels];
-      // Prefer a mid level so we never default a model to its most expensive tier.
-      //
-      // This is what the composer DISPLAYS for a chat that has never touched
-      // the control, so it has to be the level such a chat actually runs at.
-      // It was not: the list advertised "medium" while the runtime fell back
-      // to "high", and every chat showing "Medium" was billed and paced as
-      // High. The runtime default comes first; "medium" is only the answer
-      // when the model cannot do that level.
+      // What a chat that never touched the control actually runs at: the
+      // runtime default when the model accepts it, else "medium", else the
+      // model's first level. (The list once said "medium" while the runtime
+      // ran "high".)
       model.defaultReasoningEffort =
-        runtimeDefaultEffort && m.supportedEffortLevels.includes(runtimeDefaultEffort as never)
+        runtimeDefaultEffort && m.supportedEffortLevels.includes(runtimeDefaultEffort)
           ? runtimeDefaultEffort
           : m.supportedEffortLevels.includes('medium')
             ? 'medium'
@@ -568,6 +567,26 @@ function mapClaudeModelInfo(m: ClaudeModelInfo, runtimeDefaultEffort?: string): 
     }
   }
   return model;
+}
+
+/**
+ * The CLI's catalog as the picker lists it: the `default` alias is not a
+ * model of its own but a pointer, so it is folded into the row it resolves to
+ * — that row is flagged `isDefault`. When no other row resolves to the same
+ * model (an organization whose default is not otherwise listed) the alias row
+ * stays, flagged as the default.
+ */
+export function claudeCatalog<R extends { info: ClaudeModelInfo; model: HarnessModel }>(rows: readonly R[]): R[] {
+  const alias = rows.find((r) => r.info.value === DEFAULT_ALIAS);
+  if (!alias) return [...rows];
+  const target = alias.info.resolvedModel;
+  const owner = target
+    ? rows.find((r) => r !== alias && (r.info.resolvedModel ?? r.info.value) === target)
+    : undefined;
+  if (!owner) return rows.map((r) => (r === alias ? { ...r, model: { ...r.model, isDefault: true } } : r));
+  return rows
+    .filter((r) => r !== alias)
+    .map((r) => (r === owner ? { ...r, model: { ...r.model, isDefault: true } } : r));
 }
 
 // ── OTel Metrics ──
@@ -670,6 +689,16 @@ export function isTruncationStopReason(reason: string): boolean {
   return r === 'max_tokens' || r === 'length' || r.includes('max_token') || r.includes('context_length');
 }
 
+/** Empty `ExitPlanMode` calls in a row before the person is told the agent is stuck (fewer are self-corrected). */
+const PLAN_CAPTURE_MISSES_WORTH_A_WARNING = 3;
+
+/** Count an `ExitPlanMode` call that carried no plan; true exactly when the run of misses is worth a warning. */
+export function notePlanCaptureMiss(phase: PlanPhaseState | undefined): boolean {
+  if (!phase) return false;
+  phase.captureMisses = (phase.captureMisses ?? 0) + 1;
+  return phase.captureMisses === PLAN_CAPTURE_MISSES_WORTH_A_WARNING;
+}
+
 export class ClaudeAgentProvider implements IAgentHarness {
   // ── Internal State ──
   private conversations = new Map<string, StoredConversationConfig>();
@@ -687,6 +716,12 @@ export class ClaudeAgentProvider implements IAgentHarness {
   private readonly sessions = new Map<string, PersistentSession>();
   /** The turn in flight per conversation, for BOTH runtime modes. */
   private readonly turns = new Map<string, TurnState>();
+  /**
+   * Turns still waiting for their execution permit, per conversation. A stop
+   * while queued aborts these, which withdraws the wait: the turn never
+   * starts (ECON-R6).
+   */
+  private readonly queuedTurns = new Map<string, Set<AbortController>>();
   /**
    * Item 16 — SDK session ids of conversations the sweep or the LRU cap
    * evicted. `createConversation` for such a conversation resumes from here
@@ -755,6 +790,9 @@ export class ClaudeAgentProvider implements IAgentHarness {
    */
   private readonly toolSemaphore = new ToolSemaphore(MAX_PARALLEL_TOOLS);
 
+  /** P07 WP-7.4 — `chat <model>` spans per turn and `execute_tool` spans per tool call (GenAI conventions). */
+  private readonly genai = new GenAiTurnSpans('claude-agent-bridge', 'claude-agent');
+
   /**
    * W12 / P0-14 / item 4 — optional supervisor gating concurrent turns.
    * When set, EVERY turn (`sendPrompt` and `sendPromptAndWait`) acquires one
@@ -770,6 +808,18 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * why the transition is realised here rather than via `setPermissionMode`.
    */
   private planPhases = new Map<string, PlanPhaseState>();
+  /** Per conversation: domain tools that declared `skipPermission` — allowed without the domain gate (U-24; Copilot honours it natively). */
+  private skipPermissionTools = new Map<string, Set<string>>();
+  /** Builds a fresh `generatorai-tools` server per Claude process (see `withFreshToolServer`). */
+  private toolServerFactories = new Map<string, () => unknown>();
+
+  /** `options` with a newly built in-process tool server, so no two processes share one MCP transport. */
+  private withFreshToolServer(conversationId: string, options: ClaudeOptions): ClaudeOptions {
+    const make = this.toolServerFactories.get(conversationId);
+    const servers = options.mcpServers as Record<string, unknown> | undefined;
+    if (!make || !servers?.['generatorai-tools']) return options;
+    return { ...options, mcpServers: { ...servers, 'generatorai-tools': make() } as ClaudeOptions['mcpServers'] };
+  }
 
   // Accumulated messages per conversation for getMessages()
   private conversationMessages = new Map<string, ConversationMessage[]>();
@@ -785,19 +835,19 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * but a hook with nothing to ask is not a boundary. This is the one place a
    * host can attach a policy that applies to EVERY conversation this provider
    * creates, including the ones that pass no `hooks` of their own —
-   * `acp-entry.ts` and `StageExecutionService`, both of which currently rely
+   * `acp-entry.ts` and the workflow engine's stage sessions, both of which rely
    * solely on `canUseTool` and are therefore ungated.
    *
    * Left `undefined` deliberately: see `DEFER` in `preToolUseHandler` for why
    * the no-policy default cannot be "deny", and `capabilities()` for why the
-   * ledger reports `fullToolGating: false` until this is set.
+   * `preToolUseGated()` reports false until this is set.
    */
   private defaultToolGate: PreToolUseGate | undefined;
 
   /**
    * W35 — install (or clear) the provider-level default tool gate.
    *
-   * Setting this flips `capabilities().fullToolGating` to `true`, because it
+   * Setting this flips `preToolUseGated()` to `true`, because it
    * is then true: every conversation, hooks or no hooks, is evaluated by a
    * fail-closed `PreToolUse` policy. Callers that do NOT set it get an honest
    * `false` rather than the unconditional `true` this provider used to claim.
@@ -947,13 +997,13 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * L9: Capability discovery is by declaration, not by exception.
    * W42 — N-2 fix: no runtime probe required.
    *
-   * W35 — `fullToolGating` is NO LONGER an unconditional `true`.
+   * W35 — PreToolUse gating is NO LONGER claimed unconditionally (see `preToolUseGated`).
    *
    * It used to be, on the strength of a comment asserting "the PreToolUse hook
    * fires on EVERY tool call". The hook did fire on every tool call — of the
    * conversations that supplied a `HookBridge` with an `onPreToolUse`. Two
    * production callers supply none (`apps/server/src/acp-entry.ts`, and
-   * `StageExecutionService`, which passes `onPermissionRequest` but no
+   * the workflow engine's stage sessions, which pass `onPermissionRequest` but no
    * `hooks`), so for them nothing was installed and the only gate was
    * `canUseTool` — which Anthropic documents as "invoked only when the
    * permission evaluation flow resolves to a prompt … To gate every tool call,
@@ -964,10 +1014,13 @@ export class ClaudeAgentProvider implements IAgentHarness {
    *   1. The `PreToolUse` hook is now installed on EVERY conversation
    *      (`buildConversationHooks`), so a policy always has somewhere to land
    *      and no caller has to remember to opt in.
-   *   2. This flag reports whether a POLICY is actually attached. Provider-wide
-   *      that means `setDefaultToolGate()` has been called; per conversation,
-   *      ask `conversationCapabilities()`, which also counts a conversation's
-   *      own `hooks.onPreToolUse`.
+   *   2. `preToolUseGated()` reports whether a POLICY is actually attached.
+   *      Provider-wide that means `setDefaultToolGate()` has been called; per
+   *      conversation it also counts the conversation's own `hooks.onPreToolUse`.
+   *
+   * The capability ledger itself declares `approvalGating: 'per_call'`: with
+   * the session's permission handler attached, canUseTool reaches it for
+   * every call the turn's permission mode does not auto-allow (PD-17).
    */
   capabilities(): ProviderCapabilities {
     return {
@@ -977,19 +1030,15 @@ export class ClaudeAgentProvider implements IAgentHarness {
       maxParallelTools: MAX_PARALLEL_TOOLS > 0 ? MAX_PARALLEL_TOOLS : undefined,
       planMode: true,
       mcpServers: true,
-      // The installed SDK (0.3.220) has NO option that takes skill
-      // DIRECTORIES. `Options.skills` filters by name and `Options.plugins`
-      // loads plugin roots (a plugin is not a skill directory); neither
-      // accepts the staged directories `AgentStagingService` produces. This
-      // used to read `true` while `params.skillDirectories` was dropped on
-      // the floor — declaring a capability the adapter did not have. It is
-      // now declared honestly and the drop is reported as a warning.
-      skillDirectories: false,
-      // W35 / N-5 — true only when a policy is genuinely attached to every
-      // conversation. The hook itself is always installed; a hook with no
-      // policy behind it defers to the SDK's own permission evaluation and
-      // must not be advertised as a gate.
-      fullToolGating: this.hasDefaultToolGate(),
+      // No SDK option takes skill DIRECTORIES; skills load from a local
+      // plugin root (`Options.plugins`) filtered by `Options.skills` (RV-7).
+      skills: 'plugin',
+      // With the session's permission handler attached, canUseTool reaches it
+      // for every call the mode does not auto-allow (PD-17). The PreToolUse
+      // hook is a separate, optional policy (W35: `hasDefaultToolGate`).
+      approvalGating: 'per_call',
+      hostTools: 'full',
+      structuredOutput: 'native',
       sessionPersistence: true,
       budgetTracking: true,
       // `forkSession(id, { upToMessageId })` copies the transcript file up to
@@ -1019,12 +1068,19 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * An unknown conversation id reports the floor — fail-closed: we never
    * claim gating for a conversation we cannot see.
    */
-  conversationCapabilities(conversationId: string): ProviderCapabilities {
-    const bridge = this.conversations.get(conversationId)?.hooks as HookBridge | undefined;
-    return {
-      ...this.capabilities(),
-      fullToolGating: !!bridge?.onPreToolUse || this.hasDefaultToolGate(),
-    };
+  conversationCapabilities(_conversationId: string): ProviderCapabilities {
+    return this.capabilities();
+  }
+
+  /**
+   * W35 — whether a PreToolUse POLICY applies to a conversation: its own
+   * hook bridge, or the provider-wide default gate. The hook is always
+   * installed; without a policy it defers to the SDK's own permission
+   * evaluation. Unknown conversations report the provider-wide answer.
+   */
+  preToolUseGated(conversationId?: string): boolean {
+    const bridge = conversationId ? (this.conversations.get(conversationId)?.hooks as HookBridge | undefined) : undefined;
+    return !!bridge?.onPreToolUse || this.hasDefaultToolGate();
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -1165,6 +1221,25 @@ export class ClaudeAgentProvider implements IAgentHarness {
     }
   }
 
+  /**
+   * Drop the cached catalog so the next `getModels()` asks the CLI again. The
+   * registry calls this on an explicit refresh and after a sign-in / sign-out,
+   * so a changed account is never answered from the previous one's list.
+   */
+  invalidateModelCache(): void {
+    this.modelCache = null;
+  }
+
+  /**
+   * The model the catalog flags as the default — what the picker shows a chat with no model of its own.
+   * A conversation created without a model used to run the SDK's built-in default instead (Sonnet, while
+   * the picker and the chat said "Opus 5.5"): the SDK sessions do not read the user's CLI settings, which
+   * is where the `default` alias the catalog resolved comes from. Undefined until the catalog was probed.
+   */
+  private catalogDefaultModel(): string | undefined {
+    return this.modelCache?.rows.find((r) => r.model.isDefault)?.model.id;
+  }
+
   /** The real probe. May throw; only {@link getModels} calls it. */
   private async probeModels(): Promise<HarnessModel[]> {
     // The cache holds the CLI's catalog as probed; observed limits are laid
@@ -1182,11 +1257,12 @@ export class ClaudeAgentProvider implements IAgentHarness {
     if (this.modelProbeInFlight) return this.modelProbeInFlight;
 
     this.modelProbeInFlight = this.withControlSession(async (q) => {
-      const sdkModels = await q.supportedModels();
-      return sdkModels.map((m) => ({
-        model: mapClaudeModelInfo(m, this.options.defaultEffort ?? DEFAULT_EFFORT),
-        resolvedModel: (m as unknown as { resolvedModel?: string }).resolvedModel,
+      const sdkModels = (await q.supportedModels()) as ClaudeModelInfo[];
+      const rows = sdkModels.map((info) => ({
+        info,
+        model: mapClaudeModelInfo(info, this.options.defaultEffort ?? DEFAULT_EFFORT),
       }));
+      return claudeCatalog(rows).map(({ info, model }) => ({ model, resolvedModel: info.resolvedModel }));
     })
       .then((rows) => {
         this.modelCache = { rows, at: Date.now() };
@@ -1236,13 +1312,22 @@ export class ClaudeAgentProvider implements IAgentHarness {
         // W13-B1 — the conversationId is what lets the semaphore refuse to run
         // a tool for a turn already marked truncated. Without it the latch has
         // no key and every tool executes regardless of stop reason.
-        const { mcpServerConfig, toolNames } = buildClaudeAgentMcpTools(
+        const { mcpServerConfig, toolNames, skipPermissionToolNames } = buildClaudeAgentMcpTools(
           params.tools,
           this.toolSemaphore,
           params.conversationId,
         );
         mcpConfig = { 'generatorai-tools': mcpServerConfig };
+        // An in-process MCP server connects to ONE transport for its life: a second Claude process handed the same
+        // instance (a discarded warm-up, a rebuild after a sources or options change) reported it as "failed to
+        // start" and ran without its tools. Every spawn takes a fresh instance from here.
+        const tools = params.tools;
+        const conversationId = params.conversationId;
+        this.toolServerFactories.set(conversationId, () =>
+          buildClaudeAgentMcpTools(tools, this.toolSemaphore, conversationId).mcpServerConfig,
+        );
         domainToolNames = toolNames;
+        this.skipPermissionTools.set(params.conversationId, new Set(skipPermissionToolNames));
       }
 
       // Resolve system prompt
@@ -1278,6 +1363,14 @@ export class ClaudeAgentProvider implements IAgentHarness {
       const resolvedAllowedTools: string[] = [];
       if (!hasNoToolRestriction && params.availableTools) {
         resolvedAllowedTools.push(...params.availableTools);
+      }
+      // U-46: the native CLI drops Glob and Grep — pointing the model at `find` / `grep` through Bash, which
+      // asks in the asking modes — unless the session names them in `tools` or `allowedTools`. A restricted
+      // session names them in both; an unrestricted one named neither, so whether a chat could search without
+      // a prompt depended on whether its agent happened to list tools.
+      if (hasNoToolRestriction) {
+        const excluded = new Set([...(params.excludedTools ?? []), ...(params.excludedBuiltinTools ?? [])]);
+        resolvedAllowedTools.push(...SEARCH_TOOLS.filter((t) => !excluded.has(t)));
       }
       // Add domain MCP tool names to allowed list
       resolvedAllowedTools.push(...domainToolNames);
@@ -1365,7 +1458,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       // left its session id in `evictedSessionIds`, so a caller that simply
       // re-creates it gets its history back without knowing anything happened.
       const previous = this.conversations.get(params.conversationId);
-      const nextModel = params.model ?? this.options.defaultModel;
+      const nextModel = params.model ?? this.options.defaultModel ?? this.catalogDefaultModel();
       const modelChanged = !!previous && previous.model !== nextModel;
       const remembered = this.evictedSessionIds.get(params.conversationId);
       this.evictedSessionIds.delete(params.conversationId);
@@ -1411,6 +1504,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
         mcpServers: Object.keys(mergedMcpServers).length > 0 ? mergedMcpServers : undefined,
         agents: Object.keys(agents).length > 0 ? agents : undefined,
         ...(params.skills?.length ? { skills: params.skills } : {}),
+        ...(params.plugins?.length ? { plugins: params.plugins } : {}),
         ...(params.defaultAgent && params.agentProjection === 'native' && agents[params.defaultAgent]
           ? { agent: params.defaultAgent }
           : {}),
@@ -1458,15 +1552,23 @@ export class ClaudeAgentProvider implements IAgentHarness {
     // DIFFERENT model must fall through and rebuild it. Without this the user
     // changes the model in the composer and every later turn silently keeps
     // running the original one.
+    //
+    // The same holds for the roots (D-137): "Edit sources" on a live chat moves
+    // its cwd and extra directories, and a skipped resume kept the agent in the
+    // old folder. The rebuilt config changes `sessionFingerprint`, so the next
+    // turn rebuilds the CLI session with `resume` (history kept).
     const existing = this.conversations.get(conversationId);
     if (existing) {
-      const requestedModel = params?.model ?? this.options.defaultModel;
-      if (!params || requestedModel === existing.model) {
+      const requestedModel = params?.model ?? this.options.defaultModel ?? this.catalogDefaultModel();
+      const rootsChanged = !!params && !sameRoots(existing, params, this.options.defaultCwd);
+      if (!params || (requestedModel === existing.model && !rootsChanged)) {
         if (this.verbose) console.log(`[ClaudeAgentAdapter] Conversation ${conversationId} already in memory, skipping resume`);
         return;
       }
       if (this.verbose) {
-        console.log(`[ClaudeAgentAdapter] Conversation ${conversationId} model ${existing.model ?? '(default)'} → ${requestedModel ?? '(default)'}; rebinding`);
+        console.log(
+          `[ClaudeAgentAdapter] Conversation ${conversationId} ${rootsChanged ? `cwd ${existing.workingDirectory ?? '(default)'} → ${params.workingDirectory ?? '(default)'}` : `model ${existing.model ?? '(default)'} → ${requestedModel ?? '(default)'}`}; rebinding`,
+        );
       }
     }
 
@@ -1494,7 +1596,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
     this.evictedSessionIds.delete(conversationId);
     this.conversations.set(conversationId, {
       conversationId,
-      model: this.options.defaultModel,
+      model: this.options.defaultModel ?? this.catalogDefaultModel(),
       workingDirectory: this.options.defaultCwd,
       permissionMode: this.options.defaultPermissionMode ?? 'bypassPermissions',
       sdkSessionId: remembered ?? conversationId,
@@ -1732,75 +1834,112 @@ export class ClaudeAgentProvider implements IAgentHarness {
     turnOptions?: SendPromptOptions,
   ): Promise<void> {
     const start = Date.now();
-    return withSpan('claude-agent-bridge', 'claude_agent.sendPrompt', async (span) => {
-      span.setAttribute('claude_agent.conversation_id', conversationId);
-      span.setAttribute('claude_agent.prompt.length', prompt.length);
-      promptCounter.add(1, { conversation_id: conversationId });
+    // One turn at a time per conversation. A persistent session would
+    // happily queue a second user message behind the first, but the turn
+    // bookkeeping (permit, plan phase, transcript accumulation) is per
+    // conversation, so a second turn waits for the first to settle.
+    const inFlight = this.turns.get(conversationId);
+    if (inFlight) await inFlight.done;
 
-      const config = this.getConversationConfig(conversationId);
-      config.lastUsedAt = Date.now();
-
-      // One turn at a time per conversation. A persistent session would
-      // happily queue a second user message behind the first, but the turn
-      // bookkeeping (permit, plan phase, transcript accumulation) is per
-      // conversation, so a second turn waits for the first to settle.
-      const inFlight = this.turns.get(conversationId);
-      if (inFlight) await inFlight.done;
-
-      await this.emitToHandlers(conversationId, 'harness.user_message', { content: prompt });
-      this.pushMessage(conversationId, { role: 'user', content: prompt, timestamp: new Date() });
-
-      const persistent = this.persistentSessions;
-      const options = this.buildQueryOptions(config, turnOptions, { persistent });
-
-      // PLN-01 — arm the plan phase for this turn.
-      this.beginPlanTurn(conversationId, turnOptions);
-
-      // Item 4 — the chat path holds an execution permit for the whole turn,
-      // exactly like `sendPromptAndWait` always did. Acquired BEFORE anything
-      // is spawned or pushed, and announced to the user if it has to wait.
-      const releaseExecution = await this.acquireTurnPermit(conversationId);
-
-      // W13-B1 — a turn starts un-truncated. Without this the latch set by a
-      // previous truncated turn would persist and refuse every tool for the
-      // rest of the conversation.
-      this.toolSemaphore.beginTurn(conversationId);
-      // Likewise for the context breakdown: last turn's describes a window
-      // that no longer exists, and publishing it against this turn's token
-      // total would report a split that does not add up.
-      this.resetContextUsageProbe(conversationId);
-
-      const activeQuery: ActiveQuery = {
-        queryId: crypto.randomUUID(),
-        conversationId,
-        abortController: new AbortController(),
-        status: 'running',
-      };
-      this.activeQueries.set(conversationId, activeQuery);
-      const turn = this.beginTurn(conversationId, activeQuery, start, releaseExecution, prompt);
-
-      if (!persistent) {
-        // One-shot fallback: a string prompt cannot carry content blocks, so
-        // attachments are referenced by path (the model has file tools).
-        const oneShotPrompt = this.describeAttachmentsInline(prompt, attachments);
-        this.runQueryInBackground(conversationId, oneShotPrompt, options, turn).catch((err) => {
-          if (this.verbose) console.error(`[ClaudeAgentAdapter] Background query error for ${conversationId}:`, err);
-        });
-        return;
-      }
-
-      try {
-        const session = await this.ensureSession(conversationId, config, options);
-        turn.session = session;
-        // `closeHandle` is what stop()/cleanup reach for to kill the process.
-        activeQuery.closeHandle = () => {
-          void this.closeSession(session, 'turn handle closed');
-        };
-        session.input.push(await this.buildUserMessage(prompt, attachments, session.sdkSessionId));
-      } catch (err) {
-        await this.failTurn(turn, err);
-      }
+    // The `chat` span covers the whole turn (ECON-R10): it ends when the turn
+    // settles, while this method still resolves as soon as the turn is handed off.
+    return new Promise<void>((handedOff, failed) => {
+      void this.genai.chat(conversationId, this.conversations.get(conversationId)?.model ?? this.options.defaultModel, prompt, async () => {
+        let turn: TurnState | undefined;
+        try {
+          turn = await this.startPromptTurn(conversationId, prompt, start, attachments, turnOptions);
+        } catch (err) {
+          failed(err);
+          throw err;
+        }
+        handedOff();
+        if (!turn) return;
+        await turn.done;
+        if (turn.activeQuery.status === 'failed') throw new Error('turn failed');
+      }).catch(() => {
+        // The span recorded the failure; the caller already has the hand-off outcome.
+      });
     });
+  }
+
+  /**
+   * Start one `sendPrompt` turn and return its bookkeeping once it is handed to
+   * the runtime; `undefined` when a stop withdrew it while it waited for its
+   * execution permit.
+   */
+  private async startPromptTurn(
+    conversationId: string,
+    prompt: string,
+    start: number,
+    attachments?: AttachmentRef[],
+    turnOptions?: SendPromptOptions,
+  ): Promise<TurnState | undefined> {
+    promptCounter.add(1, { conversation_id: conversationId });
+
+    const config = this.getConversationConfig(conversationId);
+    config.lastUsedAt = Date.now();
+
+    await this.emitToHandlers(conversationId, 'harness.user_message', { content: prompt });
+    this.pushMessage(conversationId, { role: 'user', content: prompt, timestamp: new Date() });
+
+    const persistent = this.persistentSessions;
+    const options = this.buildQueryOptions(config, turnOptions, { persistent });
+
+    // PLN-01 — arm the plan phase for this turn.
+    this.beginPlanTurn(conversationId, turnOptions);
+
+    // Item 4 — the chat path holds an execution permit for the whole turn,
+    // exactly like `sendPromptAndWait` always did. Acquired BEFORE anything
+    // is spawned or pushed, and announced to the user if it has to wait.
+    // Withdrawn by a stop while queued: `abortConversation` already emitted
+    // `harness.cancelled` + `harness.idle`, so the turn just never starts.
+    const releaseExecution = await this.acquireTurnPermit(conversationId, turnOptions?.admitted === true);
+    if (!releaseExecution) {
+      this.planPhases.delete(conversationId);
+      return undefined;
+    }
+
+    // W13-B1 — a turn starts un-truncated. Without this the latch set by a
+    // previous truncated turn would persist and refuse every tool for the
+    // rest of the conversation.
+    this.toolSemaphore.beginTurn(conversationId);
+    // Likewise for the context breakdown: last turn's describes a window
+    // that no longer exists, and publishing it against this turn's token
+    // total would report a split that does not add up.
+    this.resetContextUsageProbe(conversationId);
+
+    const activeQuery: ActiveQuery = {
+      queryId: crypto.randomUUID(),
+      conversationId,
+      abortController: new AbortController(),
+      status: 'running',
+    };
+    this.activeQueries.set(conversationId, activeQuery);
+    const turn = this.beginTurn(conversationId, activeQuery, start, releaseExecution, prompt);
+    if (this.supervisor && turnOptions?.admitted !== true) turn.permit = 'held';
+
+    if (!persistent) {
+      // One-shot fallback: a string prompt cannot carry content blocks, so
+      // attachments are referenced by path (the model has file tools).
+      const oneShotPrompt = this.describeAttachmentsInline(prompt, attachments);
+      this.runQueryInBackground(conversationId, oneShotPrompt, options, turn).catch((err) => {
+        if (this.verbose) console.error(`[ClaudeAgentAdapter] Background query error for ${conversationId}:`, err);
+      });
+      return turn;
+    }
+
+    try {
+      const session = await this.ensureSession(conversationId, config, options);
+      turn.session = session;
+      // `closeHandle` is what stop()/cleanup reach for to kill the process.
+      activeQuery.closeHandle = () => {
+        void this.closeSession(session, 'turn handle closed');
+      };
+      session.input.push(await this.buildUserMessage(prompt, attachments, session.sdkSessionId));
+    } catch (err) {
+      await this.failTurn(turn, err);
+    }
+    return turn;
   }
 
   /**
@@ -1817,9 +1956,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
     turnOptions?: SendPromptOptions,
   ): Promise<ConversationResponse> {
     const start = Date.now();
-    return withSpan('claude-agent-bridge', 'claude_agent.sendPromptAndWait', async (span) => {
-      span.setAttribute('claude_agent.conversation_id', conversationId);
-      span.setAttribute('claude_agent.prompt.length', rawPrompt.length);
+    return this.genai.chat(conversationId, this.conversations.get(conversationId)?.model ?? this.options.defaultModel, rawPrompt, async (span) => {
       promptCounter.add(1, { conversation_id: conversationId });
 
       const config = this.getConversationConfig(conversationId);
@@ -1908,16 +2045,26 @@ export class ClaudeAgentProvider implements IAgentHarness {
       this.activeQueries.set(conversationId, activeQuery);
 
       // W12 / P0-14 — acquire one execution slot from the supervisor before
-      // spawning the query() process. This caps concurrent CLI spawns to
-      // `maxConcurrentExecutions` (default 4). When the semaphore is full the
-      // turn queues here — visibly, via `harness.session_info`/`queued`.
-      const releaseExecution = await this.acquireTurnPermit(conversationId);
+      // spawning the query() process: the `provider:claude-agent` flow key
+      // (default 4, P07 WP-7.2). When it is full the turn queues here —
+      // visibly, via `harness.warning`/`execution_queued`. A workflow stage
+      // admitted for its whole attempt already holds it (`admitted`). A stop
+      // while queued withdraws the wait (ECON-R6): nothing is spawned.
+      const releaseExecution = await this.acquireTurnPermit(conversationId, turnOptions?.admitted === true);
+      if (!releaseExecution) {
+        activeQuery.status = 'aborted';
+        if (this.activeQueries.get(conversationId) === activeQuery) this.activeQueries.delete(conversationId);
+        this.planPhases.delete(conversationId);
+        if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
+        if (timeoutHandle) clearInterval(timeoutHandle);
+        throw new Error('sendPromptAndWait aborted by caller');
+      }
 
       try {
         if (this.verbose) console.log(`[ClaudeAgentAdapter] Sending prompt to ${conversationId} (${prompt.length} chars)`);
 
         const { query: claudeQuery } = await loadClaudeSdk(); // W41
-        const queryHandle = claudeQuery({ prompt, options });
+        const queryHandle = claudeQuery({ prompt, options: this.withFreshToolServer(conversationId, options) });
         activeQuery.closeHandle = () => queryHandle.close();
 
         let fullContent = '';
@@ -1925,6 +2072,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
         let sessionId: string | undefined;
         // W13-B1: track truncation so we can fail all in-flight tool calls.
         let truncationStopReason: string | undefined;
+        let structuredOutput: unknown;
+        let structuredOutputFailure: Error | undefined;
 
         for await (const message of queryHandle) {
           // Idle-watchdog: every SDK message resets the inactivity clock,
@@ -1934,8 +2083,10 @@ export class ClaudeAgentProvider implements IAgentHarness {
           // Map to domain events and emit to handlers. AWAITED (item 19): a
           // slow consumer pauses this loop, and the SDK's reader behind it.
           const events = mapClaudeAgentMessageToAgentEvents(message);
+          let snapshotSent = false;
           for (const event of events) {
-            if (message.type === 'result' && isTerminalEvent(event)) {
+            if (message.type === 'result' && isTerminalEvent(event) && !snapshotSent) {
+              snapshotSent = true;
               // Ahead of the terminal event — see `applyMessageToTurn`.
               this.recordObservedLimits(message);
               await this.emitContextUsageSnapshot(conversationId, message);
@@ -1985,9 +2136,16 @@ export class ClaudeAgentProvider implements IAgentHarness {
               if (!fullContent && message.result) {
                 fullContent = message.result;
               }
+              if (turnOptions?.outputSchema && message.structured_output !== undefined) {
+                structuredOutput = message.structured_output;
+              }
+            } else if (message.subtype === 'error_max_structured_output_retries' && turnOptions?.outputSchema) {
+              // RV-9 — the model could not satisfy the schema: repairable, not a crash.
+              structuredOutputFailure = toHarnessError('claude-agent', message);
             }
           }
         }
+        if (structuredOutputFailure) throw structuredOutputFailure;
 
         // W13-B1: If the response was truncated and contains tool calls, fail
         // ALL of them rather than executing potentially-incomplete arguments.
@@ -2032,6 +2190,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
         return {
           content: fullContent,
           toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          ...(structuredOutput !== undefined ? { structuredOutput } : {}),
         };
       } catch (err) {
         activeQuery.status = 'failed';
@@ -2053,7 +2212,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
         if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
         if (timeoutHandle) clearInterval(timeoutHandle);
         // W12 / P0-14 — release the execution slot so the next queued turn can start.
-        releaseExecution?.();
+        releaseExecution();
       }
     });
   }
@@ -2082,6 +2241,28 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * acknowledgement that keeps the session alive.
    */
   async abortConversation(conversationId: string): Promise<void> {
+    // A turn still queued for its execution permit is withdrawn: it never
+    // starts, and the stop is reported exactly like a running turn's.
+    const queued = this.queuedTurns.get(conversationId);
+    if (queued && queued.size > 0) {
+      this.queuedTurns.delete(conversationId);
+      for (const withdraw of queued) withdraw.abort();
+      if (!this.turns.has(conversationId)) {
+        // `sendPromptAndWait` registers its query before it queues.
+        const aq = this.activeQueries.get(conversationId);
+        if (aq) {
+          aq.abortController.abort();
+          aq.status = 'aborted';
+        }
+        await this.emitToHandlers(conversationId, 'harness.cancelled', {
+          reason: 'user_abort',
+          provider: 'claude-agent',
+        });
+        await this.emitEventToHandlers(conversationId, createAgentEvent('harness.idle', {} as Record<string, never>));
+        return;
+      }
+    }
+
     const turn = this.turns.get(conversationId);
     const aq = turn?.activeQuery ?? this.activeQueries.get(conversationId);
     if (!aq) return;
@@ -2269,7 +2450,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
    *           rather than merely asserted.
    *
    * DEFER is honest, not sufficient — which is why `capabilities()` reports
-   * `fullToolGating: false` while it is the operative policy.
+   * `preToolUseGated()` false while it is the operative policy.
    */
   private preToolUseHandler(
     gate: PreToolUseGate | undefined,
@@ -2583,6 +2764,13 @@ export class ClaudeAgentProvider implements IAgentHarness {
       (options as Record<string, unknown>)['settings'] = { autoMemoryEnabled: false };
     }
 
+    // RV-9 — native structured output for THIS turn (a workflow stage's final
+    // prompt turn). The format is session-scoped in the SDK, so it is only
+    // ever set per turn, never on the conversation.
+    if (turnOptions?.outputSchema) {
+      options.outputFormat = { type: 'json_schema', schema: turnOptions.outputSchema };
+    }
+
     // PLN-01 — Claude-native custom plan-mode workflow body. Only meaningful
     // while `permissionMode: 'plan'`; the CLI still wraps it with the
     // read-only enforcement preamble and the ExitPlanMode protocol footer.
@@ -2630,6 +2818,13 @@ export class ClaudeAgentProvider implements IAgentHarness {
       options.skills = config.skills;
     }
 
+    // RV-7 — the session's skills, staged by the composer as ONE local plugin
+    // root. `settingSources` stays `[]`: a plugin loads its own skills only,
+    // never the repository's `.claude/settings.json` (hooks included).
+    if (config.plugins && config.plugins.length > 0) {
+      (options as Record<string, unknown>)['plugins'] = config.plugins;
+    }
+
     // Main-thread agent. Replaces the base system prompt, so callers opt in
     // explicitly (`agentProjection: 'native'`).
     if (config.agent) {
@@ -2640,7 +2835,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
     //
     // W35: UNCONDITIONAL. This used to be `if (config.hooks)`, so a caller that
     // passed no hooks got no `PreToolUse` hook and therefore no tool gate,
-    // while `capabilities()` claimed `fullToolGating: true` regardless.
+    // while the capability ledger claimed full tool gating regardless.
     // `buildConversationHooks` always installs the gate; see there for the
     // no-policy default and `capabilities()` for the (now honest) ledger.
     options.hooks = this.buildConversationHooks(config, persistent);
@@ -2717,13 +2912,16 @@ export class ClaudeAgentProvider implements IAgentHarness {
             const phase = this.planPhases.get(capturedConvId);
             const planContent = extractPlanContent(args, phase?.planText ?? '');
             if (!planContent) {
-              // Fail loudly rather than opening a gate on an empty plan.
-              await this.emitToHandlers(capturedConvId, 'harness.error', {
-                message:
-                  'Plan mode: could not capture the plan text from the model. ' +
-                  'Ask the agent to restate its plan in the reply.',
-                provider: 'claude-agent',
-              });
+              // Never open a gate on an empty plan. The model called ExitPlanMode before writing one (it often
+              // does, then writes the plan file and calls again): the denial tells it so, and the turn carries on.
+              // Not `harness.error` — that settled the turn as failed mid-stream and asked the person to fix
+              // what the agent fixes itself. Only an agent stuck in that loop is worth a word.
+              if (notePlanCaptureMiss(phase)) {
+                await this.emitToHandlers(capturedConvId, 'harness.warning', {
+                  message: 'Plan mode: the agent keeps finishing its plan without writing it out. Ask it to write the plan in its reply.',
+                  provider: 'claude-agent',
+                });
+              }
               return {
                 behavior: 'deny',
                 message:
@@ -2733,6 +2931,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
               };
             }
 
+            if (phase) phase.captureMisses = 0;
             const decision = await planReviewHandler({
               summary: derivePlanSummary(planContent),
               planContent,
@@ -2749,7 +2948,13 @@ export class ClaudeAgentProvider implements IAgentHarness {
                   decision.action === 'implement_autopilot' ? 'bypassPermissions' : 'acceptEdits',
                 planText: '',
               });
-              return { behavior: 'allow', updatedInput: input };
+              // The approved tool result echoes `plan` ("## Approved Plan: …"): carry the reviewer's edited plan
+              // and the notes given with the approval there, or the model never sees them.
+              const approvedPlan = approvedPlanText(decision.editedContent ?? planContent, decision.feedback);
+              return {
+                behavior: 'allow',
+                updatedInput: approvedPlan !== planContent || decision.editedContent ? { ...input, plan: approvedPlan } : input,
+              };
             }
 
             return {
@@ -2777,6 +2982,11 @@ export class ClaudeAgentProvider implements IAgentHarness {
               return { behavior: 'allow', updatedInput: input };
             }
             // acceptEdits: everything else still goes through the domain gate.
+          }
+
+          // ── Inherently safe domain tools (`skipPermission`, e.g. github_get_issue) ──
+          if (this.skipPermissionTools.get(capturedConvId)?.has(toolName)) {
+            return { behavior: 'allow', updatedInput: input };
           }
 
           // ── Ordinary permission path ──
@@ -3056,26 +3266,95 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * the workflow path acquired — so the limit bounded workflow steps and
    * nothing else. Now both paths acquire. A turn that has to wait says so:
    * blocking silently is what turns "too busy" into "the prompt hangs with no
-   * explanation".
+   * explanation". `undefined` when a stop withdrew the wait (`queuedTurns`).
    */
-  private async acquireTurnPermit(conversationId: string): Promise<() => void> {
+  private async acquireTurnPermit(conversationId: string, admitted = false): Promise<(() => void) | undefined> {
     const supervisor = this.supervisor;
     // No supervisor wired (embedded and test use): nothing to bound against.
-    if (!supervisor) return () => {};
+    // An admitted turn (a workflow stage) already holds the flow key.
+    if (!supervisor || admitted) return () => {};
 
     const immediate = supervisor.tryAcquireExecution();
     if (immediate) return immediate;
 
-    const ahead = supervisor.snapshot?.().executionQueueDepth ?? 0;
+    const snap = supervisor.snapshot?.();
+    const ahead = snap?.executionQueueDepth ?? 0;
     await this.emitToHandlers(conversationId, 'harness.warning', {
       code: 'execution_queued',
       message:
-        ahead > 0
-          ? `Waiting for a free agent slot — ${ahead} turn${ahead === 1 ? '' : 's'} ahead.`
-          : 'Waiting for a free agent slot.',
+        (ahead > 0
+          ? `Waiting for a free agent slot — ${ahead} turn${ahead === 1 ? '' : 's'} ahead`
+          : 'Waiting for a free agent slot') +
+        (snap ? ` (provider claude-agent ${snap.activeExecutions}/${snap.maxConcurrentExecutions}; Settings → Workflow engine).` : '.'),
       provider: 'claude-agent',
+      flowKey: 'provider:claude-agent',
     });
-    return supervisor.acquireExecution();
+    const withdraw = new AbortController();
+    let queued = this.queuedTurns.get(conversationId);
+    if (!queued) {
+      queued = new Set();
+      this.queuedTurns.set(conversationId, queued);
+    }
+    queued.add(withdraw);
+    try {
+      const release = await supervisor.acquireExecution(withdraw.signal);
+      // A gate that granted the permit as the stop landed: hand it straight back.
+      if (withdraw.signal.aborted) {
+        release();
+        return undefined;
+      }
+      return release;
+    } catch (err) {
+      if (withdraw.signal.aborted) return undefined;
+      throw err;
+    } finally {
+      queued.delete(withdraw);
+      if (queued.size === 0 && this.queuedTurns.get(conversationId) === queued) this.queuedTurns.delete(conversationId);
+    }
+  }
+
+  /**
+   * ECON-R7 — give back the permit the turn in flight holds while one of its
+   * tools blocks on other work (a workflow tool waiting for a run that needs
+   * this same provider key). The returned function takes a permit again (it
+   * may wait; a stop withdraws the wait) and puts it back on the turn, so the
+   * turn's settle releases it. `undefined` when the turn holds none, or has
+   * already yielded it.
+   */
+  yieldTurnPermit(conversationId: string): (() => Promise<void>) | undefined {
+    const turn = this.turns.get(conversationId);
+    const supervisor = this.supervisor;
+    if (!turn || turn.settled || turn.permit !== 'held' || !supervisor) return undefined;
+    turn.permit = 'yielded';
+    const release = turn.releaseExecution;
+    turn.releaseExecution = undefined;
+    release?.();
+
+    return async () => {
+      const current = () => !turn.settled && this.turns.get(conversationId) === turn;
+      if (turn.permit !== 'yielded' || !current()) return;
+      const stopSignal = turn.activeQuery.abortController.signal;
+      if (stopSignal.aborted) return;
+      // Withdrawn by a stop, or by the turn settling while it waits.
+      const withdraw = new AbortController();
+      const onEnd = () => withdraw.abort();
+      stopSignal.addEventListener('abort', onEnd, { once: true });
+      void turn.done.then(onEnd);
+      try {
+        const retaken = await supervisor.acquireExecution(withdraw.signal);
+        if (withdraw.signal.aborted || !current()) {
+          retaken();
+          return;
+        }
+        turn.releaseExecution = retaken;
+        turn.permit = 'held';
+      } catch (err) {
+        if (withdraw.signal.aborted) return;
+        throw err;
+      } finally {
+        stopSignal.removeEventListener('abort', onEnd);
+      }
+    };
   }
 
   /** Register per-turn bookkeeping and return it. */
@@ -3146,6 +3425,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[ClaudeAgentAdapter] Turn failed for ${turn.conversationId}: ${message}`);
     await this.emitToHandlers(turn.conversationId, 'harness.error', { message, provider: 'claude-agent' });
+    // Error, then idle: the chat service ends a turn only on idle (see the event mapper's failed `result`).
+    await this.emitEventToHandlers(turn.conversationId, createAgentEvent('harness.idle', {} as Record<string, never>));
     this.completeTurn(turn, 'failed');
   }
 
@@ -3278,7 +3559,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       // minute when the CLI is missing or wedged — an unreachable executable
       // otherwise hangs here for the full default. Measured initialize is
       // ~14 s, so this is generous and still bounded.
-      const warm = await startup({ options, initializeTimeoutMs: PREWARM_INITIALIZE_TIMEOUT_MS });
+      const warm = await startup({ options: this.withFreshToolServer(conversationId, options), initializeTimeoutMs: PREWARM_INITIALIZE_TIMEOUT_MS });
 
       // A turn may have started, or another warm may have won, while we were
       // spawning. Losing that race must not leak the process.
@@ -3380,7 +3661,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       queryHandle = warmed.warm.query(input);
     } else {
       if (warmed) this.discardWarmSession(conversationId, 'options changed before first use');
-      queryHandle = claudeQuery({ prompt: input, options });
+      queryHandle = claudeQuery({ prompt: input, options: this.withFreshToolServer(conversationId, options) });
     }
 
     const session: PersistentSession = {
@@ -3394,6 +3675,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       sdkSessionId: config.sdkSessionId,
       closed: false,
       reader: Promise.resolve(),
+      backgroundAgents: new Set(),
     };
     session.reader = this.readSession(session);
     this.sessions.set(conversationId, session);
@@ -3413,7 +3695,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       }
       const mcpKey = mcpFingerprint(options.mcpServers as Record<string, unknown> | undefined);
       if (mcpKey !== session.liveMcpKey) {
-        await session.query.setMcpServers(options.mcpServers ?? {});
+        await session.query.setMcpServers(this.withFreshToolServer(session.conversationId, options).mcpServers ?? {});
         session.liveMcpKey = mcpKey;
       }
     } catch (err) {
@@ -3435,6 +3717,15 @@ export class ClaudeAgentProvider implements IAgentHarness {
     const { conversationId } = session;
     try {
       for await (const message of session.query) {
+        // Record the SDK session id before the message is applied: applying a `result` publishes
+        // `harness.idle`, and the chat persists the provider session from that handler — it read nothing,
+        // so a Claude chat never stored a resumable session and lost its context on every restart.
+        this.rememberSdkSessionId(session, message as { session_id?: string });
+        // The session's totals before this message, then after it: a turn's usage is what it added.
+        const totalsBefore = session.usageTotals;
+        if (message.type === 'result') session.usageTotals = sessionTotalsOf(message);
+        const tasks = backgroundTasksOf(message);
+        if (tasks) session.backgroundAgents = new Set(tasks.filter((t) => REPORTING_TASK_TYPES.has(t.task_type)).map((t) => t.task_id));
         const turn = this.turns.get(conversationId);
         if (!turn || turn.aborted) {
           // Nothing is waiting for this (a cancelled turn, or output that
@@ -3460,10 +3751,28 @@ export class ClaudeAgentProvider implements IAgentHarness {
           this.rememberSdkSessionId(session, message);
           continue;
         }
-        await this.applyMessageToTurn(turn, message, session.query);
+        // Background sub-agents report back after the turn's `result`: the model answers them in a new model turn.
+        // That answer used to arrive with no turn in flight and was dropped — a chat that fanned work out to
+        // background agents showed "I'll put it together once they report" and never the result (E-3). While any
+        // are out, a `result` keeps the turn open and its end is published when the model is really done.
+        if (turn.heldTimer) {
+          clearTimeout(turn.heldTimer);
+          turn.heldTimer = undefined;
+        }
+        const hold = message.type === 'result' && session.backgroundAgents.size > 0;
+        // Fixed at the turn's first message, so every `result` of a held turn reports the turn to date.
+        if (!('usageBase' in turn)) turn.usageBase = totalsBefore;
+        const applied = message.type === 'result' ? usageSince(message, turn.usageBase) : message;
+        await this.applyMessageToTurn(turn, applied, session.query, hold);
         if (message.type === 'result') {
           this.rememberSdkSessionId(session, message);
-          this.finishTurnFromResult(turn);
+          if (!hold) {
+            turn.heldTerminal = undefined;
+            this.finishTurnFromResult(turn);
+          }
+        } else if (turn.heldTerminal && session.backgroundAgents.size === 0) {
+          // The agents are done; the CLI continues on its own. If it never does, end the turn rather than hang.
+          turn.heldTimer = setTimeout(() => void this.releaseHeldTurn(turn), BACKGROUND_RELEASE_MS);
         }
       }
     } catch (err) {
@@ -3482,6 +3791,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       if (turn && !turn.settled && turn.session === session) {
         turn.cancellation?.acknowledgeTerminal();
         if (turn.aborted) this.completeTurn(turn, 'aborted');
+        else if (turn.heldTerminal) await this.releaseHeldTurn(turn);
         else await this.failTurn(turn, new Error('The agent session ended before the turn produced a result'));
       }
     }
@@ -3523,7 +3833,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       if (this.verbose) console.log(`[ClaudeAgentAdapter] Starting background query for ${conversationId}`);
 
       const { query: claudeQuery } = await loadClaudeSdk(); // W41
-      const queryHandle = claudeQuery({ prompt, options });
+      const queryHandle = claudeQuery({ prompt, options: this.withFreshToolServer(conversationId, options) });
       activeQuery.closeHandle = () => queryHandle.close();
 
       for await (const message of queryHandle) {
@@ -3546,11 +3856,19 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * is a fix applied to one copy of duplicated logic and not the other, and
    * this is the logic that maps every provider message to a domain event.
    */
-  private async applyMessageToTurn(turn: TurnState, message: SDKMessage, queryHandle: Query): Promise<void> {
+  private async applyMessageToTurn(turn: TurnState, message: SDKMessage, queryHandle: Query, hold = false): Promise<void> {
     const { conversationId } = turn;
 
+    let snapshotSent = false;
     for (const event of mapClaudeAgentMessageToAgentEvents(message)) {
-      if (message.type === 'result' && isTerminalEvent(event)) {
+      if (hold && isTerminalEvent(event)) {
+        // Background agents are still out (see `readSession`): the turn is not over yet.
+        (turn.heldTerminal ??= []).push(event);
+        continue;
+      }
+      // A failed result carries two terminal events (error, idle); the snapshot goes once, ahead of the first.
+      if (message.type === 'result' && isTerminalEvent(event) && !snapshotSent) {
+        snapshotSent = true;
         // BEFORE the terminal event, not after it: the chat service drops its
         // subscription the moment it sees `harness.idle`, so a snapshot sent
         // afterwards reaches nobody. It did exactly that — the breakdown was
@@ -3598,6 +3916,17 @@ export class ClaudeAgentProvider implements IAgentHarness {
     }
   }
 
+  /** End a held turn: publish the terminal events its last `result` carried, then settle it. */
+  private async releaseHeldTurn(turn: TurnState): Promise<void> {
+    if (turn.heldTimer) clearTimeout(turn.heldTimer);
+    turn.heldTimer = undefined;
+    if (turn.settled || !turn.heldTerminal) return;
+    const events = turn.heldTerminal;
+    turn.heldTerminal = undefined;
+    for (const event of events) await this.emitEventToHandlers(turn.conversationId, event);
+    this.finishTurnFromResult(turn);
+  }
+
   /**
    * Settle a turn that reached its own end: report cancelled tool calls if the
    * response was truncated, store the assistant text, then complete.
@@ -3642,6 +3971,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * genuinely pauses reading the next message instead of piling events up.
    */
   private async emitEventToHandlers(conversationId: string, event: AgentEvent): Promise<void> {
+    this.genai.observe(conversationId, event);
     const handlers = this.conversationEventHandlers.get(conversationId);
     if (!handlers) return;
     for (const handler of handlers) {
@@ -3762,6 +4092,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
   }
 
   private cleanupConversation(conversationId: string): void {
+    this.skipPermissionTools.delete(conversationId);
+    this.toolServerFactories.delete(conversationId);
     // A conversation deleted or swept before its first prompt still owns a
     // spawned CLI process if it was pre-warmed.
     this.discardWarmSession(conversationId, 'conversation cleaned up');
@@ -3805,3 +4137,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
   }
 }
 
+/** The plan the model is told was approved: the (possibly edited) plan, then the reviewer's approval notes. */
+export function approvedPlanText(plan: string, notes: string | undefined): string {
+  const trimmed = notes?.trim();
+  return trimmed ? `${plan.trimEnd()}\n\n${trimmed}\n` : plan;
+}

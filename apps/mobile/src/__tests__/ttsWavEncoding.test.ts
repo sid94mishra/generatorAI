@@ -6,7 +6,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect } from 'vitest';
-import { assembleWavBytes, buildWavHeader, floatChunksToInt16 } from '../voice/wavEncoding';
+import { assembleWavBytes, buildWavHeader, floatChunksToInt16 } from '../services/voice/wavEncoding';
 
 describe('assembleWavBytes', () => {
   it('concatenates the header and PCM payload in order, with no gap or overlap', () => {

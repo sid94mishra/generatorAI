@@ -58,7 +58,7 @@ export function applyStreamEffect(streams: StreamsRecord, effect: StreamEffect):
         effect.success,
       );
     case 'addSystemMessage':
-      return r.addSystemMessage(streams, effect.key, effect.message, effect.category);
+      return r.addSystemMessage(streams, effect.key, effect.message, effect.category, effect.label);
     case 'upsertBackgroundTask':
       return r.upsertBackgroundTask(streams, effect.key, effect.task);
     case 'upsertScmResult':
@@ -109,7 +109,7 @@ export function applyStreamEffect(streams: StreamsRecord, effect: StreamEffect):
     case 'upsertPermission':
       return r.upsertPermission(streams, effect.key, effect.permission);
     case 'resolvePermission':
-      return r.resolvePermission(streams, effect.key, effect.interactionId, effect.behavior, effect.message);
+      return r.resolvePermission(streams, effect.key, effect.interactionId, effect.behavior, effect.message, effect.remembered);
     case 'expirePermission':
       return r.expirePermission(streams, effect.key, effect.interactionId);
     case 'addWidget':
@@ -128,15 +128,16 @@ export function applyStreamEffect(streams: StreamsRecord, effect: StreamEffect):
     case 'scheduleTranscriptCleanup':
     case 'cancelTranscriptCleanup':
     case 'runStatus':
-    case 'runTimeline':
     case 'stageStatus':
-    case 'stageTimeline':
+    case 'stageAdmission':
+    case 'stageOutput':
     case 'registerStageSession':
-    case 'stageAwaitingInput':
     case 'selectStageRun':
     case 'stageSettled':
     case 'widgetInvoke':
     case 'widgetTeardown':
+    // A chat's workflow run cards live in the host's query cache.
+    case 'workflowRunCard':
     // A rewind moves what the SERVER holds; the host refetches history, drops
     // the local turn state and offers the prompt back. Nothing here to fold.
     case 'chatRewound':
@@ -172,15 +173,15 @@ const HOST_OPS: ReadonlySet<StreamEffect['op']> = new Set<StreamEffect['op']>([
   'scheduleTranscriptCleanup',
   'cancelTranscriptCleanup',
   'runStatus',
-  'runTimeline',
   'stageStatus',
-  'stageTimeline',
+  'stageAdmission',
+  'stageOutput',
   'registerStageSession',
-  'stageAwaitingInput',
   'selectStageRun',
   'stageSettled',
   'widgetInvoke',
   'widgetTeardown',
+  'workflowRunCard',
   'chatRewound',
 ]);
 

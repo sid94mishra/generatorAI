@@ -11,7 +11,7 @@ GeneratorAI contains several process-host implementations. Their presence in `ap
 
 | Resource | Default/live path | Alternative or incomplete path |
 | --- | --- | --- |
-| API and domain services | Node server; desktop manages its embedded server lifecycle | Headless server or ACP entry point |
+| API and domain services | Node server; desktop manages its embedded server lifecycle (packaged: an Electron utility process; unpackaged: a Node child) | Headless server or ACP entry point |
 | Agent adapter routing | In-process `MultiHarness` with external provider runtimes as needed | `GENERATORAI_AGENT_HOST=true` plus built agent-host; currently bypasses full multi-provider routing |
 | Desktop browser | Electron `NativeBrowserHost` owns WebContentsViews; server `ElectronBridgeAdapter` drives the attached tab | Server Playwright fallback |
 | Browser without desktop | `ServerPlaywrightHost` in the server's capability layer | Standalone `apps/browser-host` implementation is not selected by the current composition root |

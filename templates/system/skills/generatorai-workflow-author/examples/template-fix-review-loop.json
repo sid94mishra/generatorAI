@@ -1,0 +1,315 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Fix and review until approved",
+    "description": "Triage an issue, then fix and review in a loop until the reviewer approves, then open a pull request.",
+    "session": {},
+    "variables": [
+      {
+        "name": "issue_url",
+        "type": "string",
+        "label": "Issue",
+        "required": true
+      }
+    ],
+    "hooks": [],
+    "lifecycle": {
+      "codebaseAliases": [],
+      "useWorktree": true,
+      "requiresCodebase": false,
+      "sandbox": "required",
+      "preprocessingSteps": [],
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": false,
+        "autoCreatePR": false,
+        "steps": []
+      }
+    },
+    "tags": [
+      "loop"
+    ]
+  },
+  "stages": [
+    {
+      "key": "triage",
+      "name": "Triage",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "triage",
+          "text": "Triage the issue {{variables.issue_url}} in the working directory: read the code involved and do not edit anything. In `summary` state the root cause with file:line. In `plan` give the steps, including the exact test command(s) that will prove the fix. List the files to change in `files`."
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "summary",
+            "plan"
+          ],
+          "properties": {
+            "summary": {
+              "type": "string"
+            },
+            "plan": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "hooks": []
+    },
+    {
+      "key": "fix_review",
+      "name": "Fix and review",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "loop",
+      "loop": {
+        "maxIterations": 5,
+        "exits": [
+          {
+            "when": "stages.review.output.verdict == 'approve'",
+            "action": "complete",
+            "consecutive": 1,
+            "reason": "approved"
+          },
+          {
+            "when": "not loop.last.signals.workspaceChanged",
+            "action": "exhaust",
+            "consecutive": 2,
+            "reason": "no_changes"
+          }
+        ],
+        "carry": {
+          "openComments": "stages.review.output.comments"
+        },
+        "onLimit": {
+          "mode": "pause"
+        },
+        "onBodyFailure": "fail",
+        "output": {
+          "select": {
+            "summary": "loop.last.stages.review.output.summary"
+          }
+        }
+      },
+      "budget": {
+        "maxTurns": 250,
+        "maxCostUsd": 12
+      }
+    },
+    {
+      "key": "fix",
+      "name": "Fix",
+      "parentKey": "fix_review",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "fix",
+          "text": "Fix issue {{variables.issue_url}}.\nTriage: {{stages.triage.output.summary}}\nPlan:\n{{stages.triage.output.plan | bullets}}\n\n1. First write a test that reproduces the bug and run it: it must FAIL on the current code. Quote the failure in `changes`.\n2. Fix the root cause, not the symptom, and run the test again: it must pass.\n3. Run the affected packages' tests and lint and make them pass.\nChange only what the fix needs, edit files with your edit tool rather than shell scripts, and name any existing behaviour you changed."
+        }
+      ],
+      "followUpPrompts": [
+        {
+          "label": "address",
+          "text": "The reviewer requested changes:\n{{loop.carry.openComments | bullets}}\nAddress each one (a test the reviewer says does not fail without the fix must be rewritten until it does), re-run the tests and lint, and report per comment id in `addressed`."
+        }
+      ],
+      "sessionReuse": "continue",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "changes",
+            "addressed"
+          ],
+          "properties": {
+            "changes": {
+              "type": "string"
+            },
+            "addressed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "resolution"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "resolution": {
+                    "enum": [
+                      "fixed",
+                      "wontfix"
+                    ]
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "hooks": []
+    },
+    {
+      "key": "review",
+      "name": "Review",
+      "parentKey": "fix_review",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "review",
+          "text": "Review the change for {{variables.issue_url}}: run git diff (include untracked files). Approve only when ALL of these hold; otherwise request changes with one comment per problem (file, line, what to do):\n- the root cause is fixed, not a symptom, and nothing unrelated changed;\n- the new test FAILS without the fix: save the source part of the fix with `git diff -- <changed source files> > <scratch dir>/fix.patch`, undo it with `git apply -R`, run the test and see it fail, then restore it with `git apply` and see it pass (never stash, checkout or reset);\n- the affected tests and lint pass.{{#if loop.previous}}\nVerify these earlier comments were addressed: {{loop.carry.openComments | json}}. Fix report: {{stages.fix.output.addressed | json}}{{/if}}"
+        }
+      ],
+      "sessionReuse": "fresh",
+      "reviewOf": "fix",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "verdict",
+            "comments",
+            "summary"
+          ],
+          "properties": {
+            "verdict": {
+              "enum": [
+                "approve",
+                "changes_requested"
+              ]
+            },
+            "summary": {
+              "type": "string"
+            },
+            "comments": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "severity",
+                  "body"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "severity": {
+                    "enum": [
+                      "blocker",
+                      "major",
+                      "minor",
+                      "nit"
+                    ]
+                  },
+                  "file": {
+                    "type": "string"
+                  },
+                  "line": {
+                    "type": "integer"
+                  },
+                  "body": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "hooks": []
+    },
+    {
+      "key": "open_pr",
+      "name": "Open pull request",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "pr",
+          "text": "Open a pull request for {{variables.issue_url}}. Review summary: {{stages.fix_review.output.summary}}"
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "hooks": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "fix",
+      "to": "review",
+      "on": "success"
+    },
+    {
+      "from": "triage",
+      "to": "fix_review",
+      "on": "success"
+    },
+    {
+      "from": "fix_review",
+      "to": "open_pr",
+      "on": "success"
+    }
+  ]
+}

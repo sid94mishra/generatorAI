@@ -1,9 +1,9 @@
 // AUTO-GENERATED — do not edit. Run `pnpm generate:schemas` to update.
 // Protocol:        codex
-// Source artifact: schemas/codex/codex_app_server_protocol.schemas.json@0.154.0
+// Source artifact: schemas/codex/codex_app_server_protocol.schemas.json@0.162.1
 // Captured by:     node packages/agent-harness-providers/node_modules/@openai/codex/bin/codex.js app-server generate-json-schema --out <dir>  →  codex_app_server_protocol.schemas.json (the @openai/codex optionalDependency pinned in packages/agent-harness-providers/package.json)
-// Artifact sha256: d71ddf3bf5484f8de2799f7a4793c2e66808a9ec1a330e2307accb088ab5948a
-// Definitions:     700
+// Artifact sha256: 71a94eab0d0b27f2aab30993097bc13d78314eb386801c105280b53f0963af44
+// Definitions:     732
 //
 // The sha256 above is of the upstream file itself. If the pinned dependency
 // changes, this hash and the types below change with it, and CI's
@@ -126,6 +126,22 @@ export type ClientRequest = {
   params: V2ThreadMetadataUpdateParams;
 } | {
   id: V2RequestId;
+  method: "thread/attachment/add";
+  params: V2ThreadAttachmentAddParams;
+} | {
+  id: V2RequestId;
+  method: "thread/attachment/list";
+  params: V2ThreadAttachmentListParams;
+} | {
+  id: V2RequestId;
+  method: "thread/attachmentOwner/list";
+  params: V2ThreadAttachmentOwnerListParams;
+} | {
+  id: V2RequestId;
+  method: "thread/attachment/remove";
+  params: V2ThreadAttachmentRemoveParams;
+} | {
+  id: V2RequestId;
   method: "thread/section/move";
   params: V2ThreadSectionMoveParams;
 } | {
@@ -144,10 +160,6 @@ export type ClientRequest = {
   id: V2RequestId;
   method: "thread/approveGuardianDeniedAction";
   params: V2ThreadApproveGuardianDeniedActionParams;
-} | {
-  id: V2RequestId;
-  method: "thread/rollback";
-  params: V2ThreadRollbackParams;
 } | {
   id: V2RequestId;
   method: "thread/revert";
@@ -336,6 +348,18 @@ export type ClientRequest = {
   id: V2RequestId;
   method: "model/list";
   params: V2ModelListParams;
+} | {
+  id: V2RequestId;
+  method: "account/gatewayOAuth/read";
+  params?: null;
+} | {
+  id: V2RequestId;
+  method: "account/gatewayOAuth/login";
+  params?: null;
+} | {
+  id: V2RequestId;
+  method: "account/gatewayOAuth/cancel";
+  params?: null;
 } | {
   id: V2RequestId;
   method: "modelProvider/capabilities/read";
@@ -626,6 +650,8 @@ export type GrantedPermissionProfile = {
 export type InitializeCapabilities = {
   /** Opt into receiving experimental API methods and fields. */
   experimentalApi?: boolean;
+  /** Use explicit gateway OAuth login instead of automatic browser authorization. Applies to this app-server's gateway runtime; later connections cannot undo it. */
+  explicitGatewayOauth?: boolean;
   /** MCP extension settings declared by the app-server client. */
   extensions?: Record<string, unknown> | null;
   /**
@@ -947,8 +973,14 @@ export type ServerNotification = {
   method: "thread/name/updated";
   params: V2ThreadNameUpdatedNotification;
 } | {
+  method: "thread/attachment/updated";
+  params: V2ThreadAttachmentUpdatedNotification;
+} | {
   method: "thread/goal/updated";
   params: V2ThreadGoalUpdatedNotification;
+} | {
+  method: "thread/prediction/updated";
+  params: V2ThreadPredictionUpdatedNotification;
 } | {
   method: "thread/goal/cleared";
   params: V2ThreadGoalClearedNotification;
@@ -1051,6 +1083,9 @@ export type ServerNotification = {
 } | {
   method: "account/updated";
   params: V2AccountUpdatedNotification;
+} | {
+  method: "account/gatewayOAuth/changed";
+  params: V2GatewayOAuthChangedNotification;
 } | {
   method: "account/rateLimits/updated";
   params: V2AccountRateLimitsUpdatedNotification;
@@ -1280,6 +1315,9 @@ export type V2AccountRateLimitsUpdatedNotification = {
   rateLimits: V2RateLimitSnapshot;
 };
 
+/** Backend routing policy. Wire values match the accounts/check contract. */
+export type V2AccountRoutingOverride = "NO_CONSTRAINT" | "us" | "us_cr";
+
 export type V2AccountTokenUsageDailyBucket = {
   startDate: string;
   tokens: number;
@@ -1372,6 +1410,8 @@ export type V2AppConfig = {
   enabled?: boolean;
   /** Per-account approval settings keyed by link ID. */
   links?: V2AppLinksConfig | null;
+  /** Additional model-facing surfaces omitted for this connector's tools. */
+  omit_tools_from?: Array<V2ToolExposureSurface> | null;
   open_world_enabled?: boolean | null;
   tools?: V2AppToolsConfig | null;
 };
@@ -1593,6 +1633,10 @@ export type V2BrowserUseConfig = {
   origins?: Record<string, V2BrowserUseOriginPolicyConfig> | null;
 };
 
+export type V2BrowserUseExtensionRequirements = {
+  requestHeaders?: Array<V2RequestHeader> | null;
+};
+
 export type V2BrowserUseOriginPolicy = {
   access?: V2AllowDenyRequirement | null;
   accessApprovalLifetime?: V2BrowserUseAccessApprovalLifetime | null;
@@ -1616,6 +1660,7 @@ export type V2BrowserUseRequirements = {
   allowWebmcp?: boolean | null;
   defaultOriginPolicy?: V2BrowserUseOriginPolicy | null;
   disableAutoReview?: boolean | null;
+  extension?: V2BrowserUseExtensionRequirements | null;
   origins?: Record<string, V2BrowserUseOriginPolicy> | null;
 };
 
@@ -1649,7 +1694,7 @@ export type V2CliAuthCredentialsStoreMode = "file" | "keyring" | "auto" | "ephem
  *
  * When an upstream HTTP status is available (for example, from the Responses API or a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant.
  */
-export type V2CodexErrorInfo = ("contextWindowExceeded" | "sessionBudgetExceeded" | "usageLimitExceeded" | "rateLimitExceeded" | "serverOverloaded" | "cyberPolicy" | "misalignmentPolicyViolation" | "internalServerError" | "unauthorized" | "badRequest" | "threadRollbackFailed" | "sandboxError" | "other") | ({
+export type V2CodexErrorInfo = ("contextWindowExceeded" | "sessionBudgetExceeded" | "usageLimitExceeded" | "rateLimitExceeded" | "flexUnavailable" | "serverOverloaded" | "cyberPolicy" | "misalignmentPolicyViolation" | "tooManyDenials" | "internalServerError" | "unauthorized" | "badRequest" | "threadRollbackFailed" | "sandboxError" | "other") | ({
   httpConnectionFailed: {
     httpStatusCode?: number | null;
   };
@@ -1669,7 +1714,7 @@ export type V2CodexErrorInfo = ("contextWindowExceeded" | "sessionBudgetExceeded
   activeTurnNotSteerable: {
     turnKind: V2NonSteerableTurnKind;
   };
-};
+} | (string | Record<string, unknown>);
 
 export type V2CodexResponseHandoffMode = "thinking" | "commentary" | "bemTags";
 
@@ -1964,7 +2009,7 @@ export type V2ConfigBatchWriteParams = {
   expectedVersion?: string | null;
   /** Path to the config file to write; defaults to the user's `config.toml` when omitted. */
   filePath?: string | null;
-  /** When true, hot-reload updated runtime settings into loaded threads after writing. Session-static model, reasoning-effort, Plan-mode reasoning-effort, service-tier, and personality defaults are not reloaded. */
+  /** When true, hot-reload updated runtime settings into loaded threads after writing. Session-static model, reasoning-effort, Plan-mode reasoning-effort, and service-tier defaults are not reloaded. The deprecated personality setting is also not reloaded. */
   reloadUserConfig?: boolean;
 };
 
@@ -2042,10 +2087,12 @@ export type V2ConfigRequirements = {
   allowManagedHooksOnly?: boolean | null;
   allowRemoteControl?: boolean | null;
   allowedApprovalPolicies?: Array<V2AskForApproval> | null;
+  /** Effective login methods after managed, forced-login, and workspace restrictions. An empty list permits no login method. Older servers may omit this field. */
+  allowedLoginMethods?: Array<V2ForcedLoginMethod> | null;
   allowedPermissionProfiles?: Record<string, boolean> | null;
   allowedSandboxModes?: Array<V2SandboxMode> | null;
   allowedWebSearchModes?: Array<V2WebSearchMode> | null;
-  allowedWindowsSandboxImplementations?: Array<V2WindowsSandboxSetupMode> | null;
+  allowedWindowsSandboxImplementations?: Array<V2WindowsSandboxImplementation> | null;
   autoReview?: V2AutoReviewRequirements | null;
   browserUse?: V2BrowserUseRequirements | null;
   chatgptBaseUrl?: string | null;
@@ -2059,14 +2106,19 @@ export type V2ConfigRequirements = {
   inAppBrowser?: V2InAppBrowserRequirements | null;
   logDir?: string | null;
   modelCatalogJson?: string | null;
+  /** Exact provider selection required by managed policy. */
+  modelProvider?: string | null;
+  /** Complete required provider definitions, using config.toml field names. */
+  modelProviders?: Record<string, unknown> | null;
   models?: V2ModelsRequirements | null;
   sqliteHome?: string | null;
-  windowsSandboxPrivateDesktop?: boolean | null;
 };
 
 export type V2ConfigRequirementsReadResponse = {
   /** Null if no requirements are configured (e.g. no requirements.toml/MDM entries). */
   requirements?: V2ConfigRequirements | null;
+  /** Whether Fast and Ultra Fast requirements are enforced independently. Older servers omit this field and use Fast mode as a shared speed gate. */
+  supportsIndependentSpeedModes?: boolean | null;
 };
 
 export type V2ConfigValueWriteParams = {
@@ -2159,9 +2211,9 @@ export type V2ContentItem = {
   text: string;
   type: "input_text";
 } | ({
-  detail?: V2ImageDetail | null;
   image_url: string;
-  type: "input_image";
+} | {
+  file_id: string;
 }) | {
   audio_url: string;
   type: "input_audio";
@@ -2184,7 +2236,7 @@ export type V2CreditsSnapshot = {
   unlimited: boolean;
 };
 
-/** Requested cyber treatment for a ChatGPT-authenticated Codex turn. Authorization and model-tier restrictions remain server-owned. */
+/** Requested cyber treatment for an OpenAI model turn. Authorization and model-tier restrictions remain server-owned. */
 export type V2CyberAccessProgram = "standard" | "daybreakBlue" | "daybreakRed";
 
 export type V2DeprecationNoticeNotification = {
@@ -2233,6 +2285,11 @@ export type V2DynamicToolSpec = {
 export type V2EnvironmentConnectionNotification = {
   environmentId: string;
   threadId: string;
+};
+
+export type V2EnvironmentSkillsParams = {
+  /** Exact catalog names that must be available from this environment. */
+  required?: Array<string> | null;
 };
 
 export type V2ErrorNotification = {
@@ -2438,6 +2495,8 @@ export type V2FeedbackUploadParams = {
 };
 
 export type V2FeedbackUploadResponse = {
+  /** Whitespace-normalized SHA-256 of the session base instructions, matching the uploaded `prompt_hash` tag. Does not include later developer messages. Null when the reported rollout has no prompt metadata. */
+  promptHash?: string | null;
   threadId: string;
 };
 
@@ -2646,9 +2705,9 @@ export type V2FunctionCallOutputContentItem = {
   text: string;
   type: "input_text";
 } | ({
-  detail?: V2ImageDetail | null;
   image_url: string;
-  type: "input_image";
+} | {
+  file_id: string;
 }) | {
   audio_url: string;
   type: "input_audio";
@@ -2656,6 +2715,31 @@ export type V2FunctionCallOutputContentItem = {
   encrypted_content: string;
   type: "encrypted_content";
 };
+
+export type V2GatewayOAuthCancelResponse = Record<string, unknown>;
+
+export type V2GatewayOAuthChangedNotification = {
+  /** Authorization handoff, sent only to the connection that started login. */
+  authUrl?: string | null;
+  error?: string | null;
+  providerId: string;
+  status: V2GatewayOAuthStatus;
+};
+
+export type V2GatewayOAuthLoginResponse = Record<string, unknown>;
+
+/** Current effective gateway policy and credential readiness; never contains credentials. */
+export type V2GatewayOAuthReadResponse = {
+  error?: string | null;
+  providerId: string;
+  providerName: string;
+  /** Whether the selected provider uses gateway OAuth, even when already signed in. */
+  required: boolean;
+  /** Null when the effective provider does not use gateway OAuth. */
+  status?: V2GatewayOAuthStatus | null;
+};
+
+export type V2GatewayOAuthStatus = "notReady" | "started" | "succeeded" | "failed";
 
 export type V2GetAccountParams = {
   /**
@@ -2981,6 +3065,8 @@ export type V2ListMcpServerStatusParams = {
   detail?: V2McpServerStatusDetail | null;
   /** Optional page size; defaults to a server-defined value. */
   limit?: number | null;
+  /** Limit discovery to one server. With a thread ID, reuse that thread's MCP connection. */
+  serverName?: string | null;
   threadId?: string | null;
 };
 
@@ -3121,6 +3207,14 @@ export type V2MarketplaceUpgradeResponse = {
   upgradedRoots: Array<V2AbsolutePathBuf>;
 };
 
+export type V2McpAppDisplayMode = "inline" | "fullscreen";
+
+/** UI resource and display preference for model invocations, captured from the tool descriptor. */
+export type V2McpAppUi = {
+  preferredModelDisplayMode: V2McpAppDisplayMode;
+  resourceUri: string;
+};
+
 export type V2McpAuthStatus = "unknown" | "unsupported" | "notLoggedIn" | "bearerToken" | "oAuth";
 
 export type V2McpResourceReadParams = {
@@ -3128,6 +3222,8 @@ export type V2McpResourceReadParams = {
   /** Originating MCP tool call used to select the resource's app. */
   originCallId?: string | null;
   server: string;
+  /** Explicit hosted app/account. Omit to retain legacy resource discovery. */
+  target?: V2McpResourceReadTarget | null;
   threadId?: string | null;
   uri: string;
 };
@@ -3136,6 +3232,12 @@ export type V2McpResourceReadResponse = {
   contents: Array<V2ResourceContent>;
   /** Originating call when the server applied app-specific resource scoping. */
   originCallId?: string | null;
+};
+
+export type V2McpResourceReadTarget = {
+  connectorId: string;
+  /** Null explicitly requests no-auth access, subject to the app's resource policy. */
+  linkId: string | null;
 };
 
 export type V2McpServerConnectionStatus = "notStarted" | "starting" | "connected" | "authenticationRequired" | "failed" | "cancelled" | "disabled";
@@ -3168,6 +3270,8 @@ export type V2McpServerOauthClientRegistration = "auto" | "cimd" | "dcr";
 
 export type V2McpServerOauthLoginCompletedNotification = {
   error?: string | null;
+  /** Identifies the explicit login attempt. Older servers omit this field. */
+  loginId?: string | null;
   name: string;
   success: boolean;
   threadId?: string | null;
@@ -3184,6 +3288,8 @@ export type V2McpServerOauthLoginParams = {
 
 export type V2McpServerOauthLoginResponse = {
   authorizationUrl: string;
+  /** Identifies this login attempt across the response and completion notification. Older servers omit this field; current servers always return it. */
+  loginId?: string | null;
 };
 
 export type V2McpServerRefreshResponse = Record<string, unknown>;
@@ -3194,12 +3300,16 @@ export type V2McpServerStartupState = "starting" | "ready" | "failed" | "cancell
 
 export type V2McpServerStatus = {
   authStatus: V2McpAuthStatus;
+  /** HTTP origin of the effective configured endpoint, including plugin servers. Excludes credentials, path, query, and fragment; null for non-HTTP transports. */
+  httpOrigin?: string | null;
   name: string;
   pluginId?: string | null;
   resourceTemplates: Array<V2ResourceTemplate>;
   resources: Array<V2Resource>;
   /** Current thread-runtime connection state; null when unavailable or the configuration changed. */
   runtimeStatus?: V2McpServerConnectionStatus | null;
+  /** Capabilities advertised by the initialized MCP server; null when unavailable. */
+  serverCapabilities?: unknown;
   serverInfo?: V2McpServerInfo | null;
   tools: Record<string, V2Tool>;
   /** Tool discovery failed and no catalog was returned. Null when a catalog is returned, including cached or empty catalogs. */
@@ -3273,11 +3383,11 @@ export type V2MemoryCitationEntry = {
 export type V2MergeStrategy = "replace" | "upsert";
 
 /**
- * Classifies an assistant message as interim commentary or final answer text.
+ * Classifies assistant text as commentary, a partial answer, or a terminal answer.
  *
  * Providers do not emit this consistently, so callers must treat `None` as "phase unknown" and keep compatibility behavior for legacy models.
  */
-export type V2MessagePhase = "commentary" | "final_answer";
+export type V2MessagePhase = "commentary" | "partial_answer" | "final_answer";
 
 export type V2MigrationDetails = {
   commands?: Array<V2CommandMigration>;
@@ -3295,6 +3405,8 @@ export type V2MisalignmentErrorDetails = {
   detailedExplanation?: string | null;
   /** Open-ended classification; clients must accept categories added by Responses. */
   errorType?: string | null;
+  /** Opaque server-issued block target. Presence alone does not enable target-based continuation. */
+  reviewTarget?: string | null;
   /** Instruction to submit as the next turn's user input if continuation is confirmed. */
   steer?: V2MisalignmentSteer | null;
 };
@@ -3310,6 +3422,8 @@ export type V2Model = {
   /** Deprecated: use `serviceTiers` instead. */
   additionalSpeedTiers?: Array<string>;
   availabilityNux?: V2ModelAvailabilityNux | null;
+  /** Null when the catalog does not provide access-program metadata. */
+  availableAccessPrograms?: V2ModelAccessPrograms | null;
   defaultReasoningEffort: V2ReasoningEffort;
   /** Catalog default service tier id for this model, when one is configured. */
   defaultServiceTier?: string | null;
@@ -3325,9 +3439,16 @@ export type V2Model = {
   multiAgentVersion?: V2MultiAgentVersion | null;
   serviceTiers?: Array<V2ModelServiceTier>;
   supportedReasoningEfforts: Array<V2ReasoningEffortOption>;
+  /** @deprecated Always false; models no longer support personality selection. */
   supportsPersonality?: boolean;
   upgrade?: string | null;
   upgradeInfo?: V2ModelUpgradeInfo | null;
+};
+
+/** Caller-specific explicit access programs advertised by model discovery. */
+export type V2ModelAccessPrograms = {
+  /** Accepted explicit selections. */
+  cyber: Array<V2CyberAccessProgram>;
 };
 
 export type V2ModelAvailabilityNux = {
@@ -3353,7 +3474,6 @@ export type V2ModelProviderCapabilitiesReadParams = Record<string, unknown>;
 
 export type V2ModelProviderCapabilitiesReadResponse = {
   imageGeneration: boolean;
-  namespaceTools: boolean;
   webSearch: boolean;
 };
 
@@ -3497,6 +3617,7 @@ export type V2PermissionProfileSummary = {
   id: string;
 };
 
+/** Deprecated: `friendly` and `pragmatic` no longer select a style. */
 export type V2Personality = "none" | "friendly" | "pragmatic";
 
 /** EXPERIMENTAL - proposed plan streaming deltas for plan items. Clients should not assume concatenated deltas match the completed plan item content. */
@@ -3507,7 +3628,7 @@ export type V2PlanDeltaNotification = {
   turnId: string;
 };
 
-export type V2PlanType = "free" | "go" | "plus" | "pro" | "prolite" | "team" | "self_serve_business_prolite" | "self_serve_business_usage_based" | "business" | "ent26" | "enterprise_cbp_automation" | "enterprise_cbp_usage_based" | "enterprise" | "edu" | "edu_plus" | "edu_pro" | "unknown";
+export type V2PlanType = "free" | "go" | "plus" | "pro" | "prolite" | "promax" | "team" | "self_serve_business_prolite" | "self_serve_business_usage_based" | "business" | "ent26" | "enterprise_cbp_automation" | "enterprise_cbp_usage_based" | "enterprise" | "edu" | "edu_plus" | "edu_pro" | "unknown";
 
 export type V2PluginAuthPolicy = "ON_INSTALL" | "ON_USE";
 
@@ -3521,6 +3642,8 @@ export type V2PluginDetail = {
   marketplaceName: string;
   marketplacePath?: V2AbsolutePathBuf | null;
   mcpServers: Array<string>;
+  /** The declared onboarding skill, when the plugin and visible skill are enabled. */
+  onboardingSkill?: V2SkillSummary | null;
   scheduledTasks?: Array<V2ScheduledTaskSummary> | null;
   shareUrl?: string | null;
   skills: Array<V2SkillSummary>;
@@ -4055,6 +4178,11 @@ export type V2RemoteControlStatusChangedNotification = {
   status: V2RemoteControlConnectionStatus;
 };
 
+export type V2RequestHeader = {
+  name: string;
+  value: string;
+};
+
 export type V2RequestId = string | number;
 
 export type V2RequestPermissionProfile = {
@@ -4103,6 +4231,11 @@ export type V2ResourceTemplate = {
 };
 
 export type V2ResponseItem = ({
+  id?: string | null;
+  role: string;
+  tools: Array<unknown>;
+  type: "additional_tools";
+}) | ({
   content: Array<V2ContentItem>;
   id?: string | null;
   internal_chat_message_metadata_passthrough?: V2InternalChatMessageMetadataPassthrough | null;
@@ -4397,7 +4530,7 @@ export type V2SkillMetadata = {
   enabled: boolean;
   interface?: V2SkillInterface | null;
   name: string;
-  path: V2AbsolutePathBuf;
+  path: V2LegacyAppPathString;
   /** Owning plugin ID, matching `PluginSummary.id`, when known. */
   pluginId?: string | null;
   scope: V2SkillScope;
@@ -4416,7 +4549,7 @@ export type V2SkillSummary = {
   enabled: boolean;
   interface?: V2SkillInterface | null;
   name: string;
-  path?: V2AbsolutePathBuf | null;
+  path?: V2LegacyAppPathString | null;
   shortDescription?: string | null;
 };
 
@@ -4585,7 +4718,7 @@ export type V2Thread = {
   status: V2ThreadStatus;
   /** Optional analytics source classification for this thread. */
   threadSource?: V2ThreadSource | null;
-  /** Only populated on `thread/resume`, `thread/rollback`, `thread/fork`, and `thread/read` (when `includeTurns` is true) responses. For all other responses and notifications returning a Thread, the turns field will be an empty list. */
+  /** Only populated on `thread/resume`, `thread/fork`, and `thread/read` (when `includeTurns` is true) responses. For all other responses and notifications returning a Thread, the turns field will be an empty list. */
   turns: Array<V2Turn>;
   /** Unix timestamp (in seconds) when the thread was last updated. */
   updatedAt: number;
@@ -4608,6 +4741,90 @@ export type V2ThreadArchiveParams = {
 export type V2ThreadArchiveResponse = Record<string, unknown>;
 
 export type V2ThreadArchivedNotification = {
+  threadId: string;
+};
+
+/** An independently persisted attachment associated with a thread. */
+export type V2ThreadAttachment = {
+  attachmentType: string;
+  createdAt: number;
+  id: string;
+  identityKey: string;
+  payload: unknown;
+};
+
+/** Result of attempting to associate an attachment with a thread. */
+export type V2ThreadAttachmentAddOutcome = "created" | "existing";
+
+/** Parameters for creating or locating an attachment on its owning thread. */
+export type V2ThreadAttachmentAddParams = {
+  attachmentType: string;
+  identityKey: string;
+  payload: unknown;
+  threadId: string;
+};
+
+/** The created or existing attachment. */
+export type V2ThreadAttachmentAddResponse = {
+  attachment: V2ThreadAttachment;
+  outcome: V2ThreadAttachmentAddOutcome;
+};
+
+/** Parameters for listing attachments from one thread. */
+export type V2ThreadAttachmentListParams = {
+  cursor?: string | null;
+  limit?: number | null;
+  threadId: string;
+};
+
+/** One page of attachments associated with the requested thread. */
+export type V2ThreadAttachmentListResponse = {
+  data: Array<V2ThreadAttachment>;
+  nextCursor?: string | null;
+};
+
+/** The persisted attachment change represented by a notification. */
+export type V2ThreadAttachmentOperation = "created" | "deleted";
+
+/** A thread that currently owns an attachment with the requested identity. */
+export type V2ThreadAttachmentOwner = {
+  /** Whether the owning thread is archived, not whether it is currently executing a turn. */
+  archived: boolean;
+  threadId: string;
+};
+
+/** Parameters for reverse lookup by attachment identity within this server's store. */
+export type V2ThreadAttachmentOwnerListParams = {
+  /** Omitted or null returns all matches; false returns non-archived threads only. */
+  archived?: boolean | null;
+  attachmentType: string;
+  cursor?: string | null;
+  identityKey: string;
+  limit?: number | null;
+};
+
+/** One page of matching owners, including threads without their own user messages. */
+export type V2ThreadAttachmentOwnerListResponse = {
+  data: Array<V2ThreadAttachmentOwner>;
+  nextCursor?: string | null;
+};
+
+/** Parameters for deleting an attachment by its stable thread-local identity. */
+export type V2ThreadAttachmentRemoveParams = {
+  attachmentType: string;
+  identityKey: string;
+  threadId: string;
+};
+
+/** Successful deletion does not return additional attachment data. */
+export type V2ThreadAttachmentRemoveResponse = Record<string, unknown>;
+
+/** Notification published after a thread attachment is created or deleted. */
+export type V2ThreadAttachmentUpdatedNotification = {
+  attachmentId: string;
+  attachmentType: string;
+  identityKey: string;
+  operation: V2ThreadAttachmentOperation;
   threadId: string;
 };
 
@@ -4680,6 +4897,8 @@ export type V2ThreadForkResponse = {
   /** Reviewer currently used for approval requests on this thread. */
   approvalsReviewer: V2ApprovalsReviewer;
   cwd: V2AbsolutePathBuf;
+  /** Saved list of disabled plugin IDs. Does not yet filter plugin capabilities. */
+  disabledPluginIds?: Array<string>;
   /** Environment-native paths to instruction source files currently loaded for this thread. */
   instructionSources?: Array<V2LegacyAppPathString>;
   model: string;
@@ -4703,6 +4922,8 @@ export type V2ThreadGoal = {
 };
 
 export type V2ThreadGoalClearParams = {
+  /** Missing provenance does not supply user authorization. */
+  origin?: V2ThreadGoalMutationOrigin | null;
   threadId: string;
 };
 
@@ -4722,8 +4943,13 @@ export type V2ThreadGoalGetResponse = {
   goal?: V2ThreadGoal | null;
 };
 
+/** Distinguishes explicit user actions from automatic goal lifecycle mutations. */
+export type V2ThreadGoalMutationOrigin = "user" | "automatic";
+
 export type V2ThreadGoalSetParams = {
   objective?: string | null;
+  /** Missing provenance does not supply user authorization. */
+  origin?: V2ThreadGoalMutationOrigin | null;
   status?: V2ThreadGoalStatus | null;
   threadId: string;
   tokenBudget?: number | null;
@@ -4820,8 +5046,10 @@ export type V2ThreadItem = ({
   durationMs?: number | null;
   error?: V2McpToolCallError | null;
   id: string;
-  /** Deprecated: use `appContext.resourceUri` instead. */
+  /** Legacy compatibility field; prefer `mcpAppUi.resourceUri` when available. */
   mcpAppResourceUri?: string | null;
+  /** Presentation captured from the invoked descriptor; absent in older history. */
+  mcpAppUi?: V2McpAppUi | null;
   pluginId?: string | null;
   readOnlyHint?: boolean | null;
   result?: V2McpToolCallResult | null;
@@ -4860,13 +5088,17 @@ export type V2ThreadItem = ({
   /** Name of the collab tool that was invoked. */
   tool: V2CollabAgentTool;
   type: "collabAgentToolCall";
-}) | {
+}) | ({
   agentPath: string;
   agentThreadId: string;
   id: string;
   kind: V2SubAgentActivityKind;
+  /** Resolved model at sub-agent creation; absent from older records and other activities. */
+  model?: string | null;
+  /** Resolved reasoning effort at sub-agent creation, when known. */
+  reasoningEffort?: V2ReasoningEffort | null;
   type: "subAgentActivity";
-} | ({
+}) | ({
   action?: V2WebSearchAction | null;
   id: string;
   query: string;
@@ -4908,14 +5140,27 @@ export type V2ThreadItem = ({
 };
 
 export type V2ThreadItemEntry = {
+  /** Unix timestamp (milliseconds) when the item completed, if recorded by the producer. */
+  completedAtMs?: number | null;
   item: V2ThreadItem;
+  /** Unix timestamp (milliseconds) when the item started, if recorded by the producer. */
+  startedAtMs?: number | null;
   /** Turn containing this item. */
   turnId: string;
 };
 
+/** An exclusive item position within the requested visible turn. */
+export type V2ThreadItemsListAnchor = {
+  itemId: string;
+  type: "item";
+};
+
+/** Starting position for an item-history page. */
+export type V2ThreadItemsListCursor = string | V2ThreadItemsListAnchor;
+
 export type V2ThreadItemsListParams = {
-  /** Opaque cursor to pass to the next call to continue after the last item. */
-  cursor?: string | null;
+  /** Opaque continuation cursor or an exclusive item anchor in the requested visible turn. An item anchor requires a non-empty `turnId`; ascending (the default) returns items after it, and descending returns items before it. Continue with the returned string cursor. */
+  cursor?: V2ThreadItemsListCursor | null;
   /** Optional item page size. */
   limit?: number | null;
   /** Optional item pagination direction; defaults to ascending. */
@@ -5008,6 +5253,19 @@ export type V2ThreadMetadataUpdateResponse = {
 export type V2ThreadNameUpdatedNotification = {
   threadId: string;
   threadName?: string | null;
+};
+
+export type V2ThreadPredictionResult = ({
+  text?: string | null;
+  type: "completed";
+}) | {
+  type: "failed";
+};
+
+export type V2ThreadPredictionUpdatedNotification = {
+  result: V2ThreadPredictionResult;
+  sourceTurnId: string;
+  threadId: string;
 };
 
 export type V2ThreadProjectUpdatedNotification = {
@@ -5191,6 +5449,7 @@ export type V2ThreadResumeParams = {
   /** Configuration overrides for the resumed thread, if any. */
   model?: string | null;
   modelProvider?: string | null;
+  /** @deprecated `friendly` and `pragmatic` no longer select a style. Changing this does not rewrite the thread's existing instructions. */
   personality?: V2Personality | null;
   sandbox?: V2SandboxMode | null;
   serviceTier?: string | null;
@@ -5201,7 +5460,11 @@ export type V2ThreadResumeResponse = {
   approvalPolicy: V2AskForApproval;
   /** Reviewer currently used for approval requests on this thread. */
   approvalsReviewer: V2ApprovalsReviewer;
+  /** Effective collaboration mode. Absent when resuming from an older server. */
+  collaborationMode?: V2CollaborationMode | null;
   cwd: V2AbsolutePathBuf;
+  /** Saved list of disabled plugin IDs. Does not yet filter plugin capabilities. */
+  disabledPluginIds?: Array<string>;
   /** Environment-native paths to instruction source files currently loaded for this thread. */
   instructionSources?: Array<V2LegacyAppPathString>;
   /**
@@ -5255,26 +5518,6 @@ export type V2ThreadRevertResponse = {
 
 export type V2ThreadRevertedNotification = {
   threadId: string;
-};
-
-/** DEPRECATED: `thread/rollback` will be removed soon. */
-export type V2ThreadRollbackParams = {
-  /**
-   * The number of turns to drop from the end of the thread. Must be >= 1.
-   *
-   * This only modifies the thread's history and does not revert local file changes that have been made by the agent. Clients are responsible for reverting these changes.
-   */
-  numTurns: number;
-  threadId: string;
-};
-
-export type V2ThreadRollbackResponse = {
-  /**
-   * The updated thread after applying the rollback, with `turns` populated.
-   *
-   * The ThreadItems stored in each Turn are lossy since we explicitly do not persist all agent interactions, such as command executions. This is the same behavior as `thread/resume`.
-   */
-  thread: V2Thread;
 };
 
 export type V2ThreadSearchResult = {
@@ -5376,9 +5619,12 @@ export type V2ThreadSettings = {
   approvalsReviewer: V2ApprovalsReviewer;
   collaborationMode: V2CollaborationMode;
   cwd: V2AbsolutePathBuf;
+  /** Saved list of disabled plugin IDs. Does not yet filter plugin capabilities. */
+  disabledPluginIds?: Array<string>;
   effort?: V2ReasoningEffort | null;
   model: string;
   modelProvider: string;
+  /** @deprecated Reports the saved setting; `friendly` and `pragmatic` no longer select a style. */
   personality?: V2Personality | null;
   sandboxPolicy: V2SandboxPolicy;
   serviceTier?: string | null;
@@ -5417,6 +5663,7 @@ export type V2ThreadStartParams = {
   ephemeral?: boolean | null;
   model?: string | null;
   modelProvider?: string | null;
+  /** @deprecated `friendly` and `pragmatic` no longer select a style. */
   personality?: V2Personality | null;
   sandbox?: V2SandboxMode | null;
   serviceName?: string | null;
@@ -5431,6 +5678,8 @@ export type V2ThreadStartResponse = {
   /** Reviewer currently used for approval requests on this thread. */
   approvalsReviewer: V2ApprovalsReviewer;
   cwd: V2AbsolutePathBuf;
+  /** Saved list of disabled plugin IDs. Does not yet filter plugin capabilities. */
+  disabledPluginIds?: Array<string>;
   /** Environment-native paths to instruction source files currently loaded for this thread. */
   instructionSources?: Array<V2LegacyAppPathString>;
   model: string;
@@ -5584,6 +5833,9 @@ export type V2Tool = {
   title?: string | null;
 };
 
+/** A model-facing surface on which a tool can be exposed. */
+export type V2ToolExposureSurface = "code_mode" | "deferred" | "direct";
+
 export type V2ToolsV2 = {
   web_search?: V2WebSearchToolConfig | null;
 };
@@ -5593,7 +5845,7 @@ export type V2Turn = {
   completedAt?: number | null;
   /** Duration between turn start and completion in milliseconds, if known. */
   durationMs?: number | null;
-  /** Only populated when the Turn's status is failed. */
+  /** Error associated with a failed or interrupted turn. */
   error?: V2TurnError | null;
   /** Identifier for this turn. Codex-generated turn IDs are UUIDv7. */
   id: string;
@@ -5601,6 +5853,8 @@ export type V2Turn = {
   items: Array<V2ThreadItem>;
   /** Describes how much of `items` has been loaded for this turn. */
   itemsView?: V2TurnItemsView;
+  /** ID of the first turn in the chain of work that led to this turn. Pass this as `rootTurnId` when starting work on behalf of this turn. May be null in older history or a `review/start` response. */
+  rootTurnId?: string | null;
   /** Unix timestamp (in seconds) when the turn started. */
   startedAt?: number | null;
   status: V2TurnStatus;
@@ -5670,6 +5924,8 @@ export type V2TurnStartParams = {
   clientUserMessageId?: string | null;
   /** Override the working directory for this turn and subsequent turns. */
   cwd?: string | null;
+  /** Replace this thread's disabled plugin IDs. Omitted/null preserves the list; [] clears it. */
+  disabledPluginIds?: Array<string> | null;
   /** Override the reasoning effort for this turn and subsequent turns. */
   effort?: V2ReasoningEffort | null;
   input: Array<V2UserInput>;
@@ -5677,8 +5933,20 @@ export type V2TurnStartParams = {
   model?: string | null;
   /** Optional JSON Schema used to constrain the final assistant message for this turn. */
   outputSchema?: unknown;
-  /** Override the personality for this turn and subsequent turns. */
+  /**
+   * ID of the turn that caused this new turn to start.
+   *
+   * Set this when starting work on behalf of another turn, such as delegated work in a different thread. Leave unset for work started directly by the user. Ignored when this request adds input to an active turn.
+   */
+  parentTurnId?: string | null;
+  /** @deprecated `friendly` and `pragmatic` no longer select a style. Changing this does not rewrite the thread's existing instructions. */
   personality?: V2Personality | null;
+  /**
+   * ID of the first turn in the chain of work that led to this new turn.
+   *
+   * When setting `parentTurnId`, set this to the parent turn's `rootTurnId` when known. This keeps descendant work attributed to the original turn. If omitted, the new turn becomes its own root. Ignored when this request adds input to an active turn.
+   */
+  rootTurnId?: string | null;
   /** Override the sandbox policy for this turn and subsequent turns. */
   sandboxPolicy?: V2SandboxPolicy | null;
   /** Override the service tier for this turn and subsequent turns. */
@@ -5734,9 +6002,9 @@ export type V2UserInput = {
   text_elements?: Array<V2TextElement>;
   type: "text";
 } | ({
-  detail?: V2ImageDetail | null;
-  type: "image";
   url: string;
+} | {
+  fileId: string;
 }) | ({
   detail?: V2ImageDetail | null;
   path: string;
@@ -5799,6 +6067,8 @@ export type V2WebSearchToolConfig = {
   location?: V2WebSearchLocation | null;
 };
 
+export type V2WindowsSandboxImplementation = "elevated" | "unelevated" | "mxc";
+
 export type V2WindowsSandboxReadiness = "ready" | "notConfigured" | "updateRequired";
 
 export type V2WindowsSandboxReadinessResponse = {
@@ -5840,6 +6110,12 @@ export type V2WorkspaceMessage = {
 
 export type V2WorkspaceMessageType = "headline" | "announcement" | "unknown";
 
+export type V2WorkspaceRouting = {
+  accountRoutingOverride: V2AccountRoutingOverride;
+  backendOrigin: string;
+  chatgptAccountId: string;
+};
+
 export type V2WriteStatus = "ok" | "okOverridden";
 
 /**
@@ -5852,6 +6128,9 @@ export const CODEX_METHODS = {
     "initialized",
   ],
   ClientRequest: [
+    "account/gatewayOAuth/cancel",
+    "account/gatewayOAuth/login",
+    "account/gatewayOAuth/read",
     "account/login/cancel",
     "account/login/start",
     "account/logout",
@@ -5920,6 +6199,10 @@ export const CODEX_METHODS = {
     "skills/list",
     "thread/approveGuardianDeniedAction",
     "thread/archive",
+    "thread/attachment/add",
+    "thread/attachment/list",
+    "thread/attachment/remove",
+    "thread/attachmentOwner/list",
     "thread/compact/start",
     "thread/delete",
     "thread/fork",
@@ -5935,7 +6218,6 @@ export const CODEX_METHODS = {
     "thread/read",
     "thread/resume",
     "thread/revert",
-    "thread/rollback",
     "thread/section/move",
     "thread/shellCommand",
     "thread/start",
@@ -5953,6 +6235,7 @@ export const CODEX_METHODS = {
     "windowsSandbox/setupStart",
   ],
   ServerNotification: [
+    "account/gatewayOAuth/changed",
     "account/login/completed",
     "account/rateLimits/updated",
     "account/updated",
@@ -5999,6 +6282,7 @@ export const CODEX_METHODS = {
     "serverRequest/resolved",
     "skills/changed",
     "thread/archived",
+    "thread/attachment/updated",
     "thread/closed",
     "thread/compacted",
     "thread/deleted",
@@ -6007,6 +6291,7 @@ export const CODEX_METHODS = {
     "thread/goal/cleared",
     "thread/goal/updated",
     "thread/name/updated",
+    "thread/prediction/updated",
     "thread/project/updated",
     "thread/queue/changed",
     "thread/realtime/closed",

@@ -6,6 +6,8 @@
 // lost the widget instructions and diverged from the prompt-cache prefix.
 // ────────────────────────────────────────────────────────────────
 
+import { statSync } from 'node:fs';
+import * as path from 'node:path';
 export const BROWSER_SYSTEM_HINT =
   `\n\n[Integrated Browser]\nUse the browser tools (open_browser_page, ` +
   `read_page, click_element, type_in_page, screenshot_page, ` +
@@ -237,6 +239,13 @@ export interface WorkspaceHintInput {
   scratchDir: string;
   rootPath: string;
   mounts: WorkspaceMount[];
+  /**
+   * The session can write files (file-write or shell tools). The rules on
+   * where files go are only for such sessions: a read-only stage gets the
+   * directories alone (P07 WP-7.1, F O-6: the file-creation boilerplate
+   * provoked refusals on stages that never write). Default true.
+   */
+  writes?: boolean;
 }
 
 function describeMount(m: WorkspaceMount): string {
@@ -248,18 +257,62 @@ function describeMount(m: WorkspaceMount): string {
   if (m.git?.branch) bits.push(`branch ${m.git.branch}`);
   if (m.git?.baseRef && m.git.baseRef !== m.git.branch && m.git.baseRef !== 'HEAD') bits.push(`from ${m.git.baseRef}`);
   if (m.git?.nested?.length) bits.push(`contains repos: ${m.git.nested.join(', ')}`);
+  if (m.workdir) bits.push(`work in its ${m.workdir} directory`);
   return bits.join(', ');
+}
+
+/**
+ * Evaluation: writing replies ran ~60% over a requested length (2,396 words for a 1,500-word runbook). Told to
+ * every session, so it is kept to two short lines: it is paid for on every request.
+ */
+export const REPLY_LENGTH_HINT =
+  '\n\n[Replies]\n' +
+  '- When the request names a length (words, lines, pages, items), stay within about 10% of it. If the content truly ' +
+  'needs more, deliver the requested length and say in one line what you left out.';
+
+/**
+ * A read-only stage runs in permission mode `plan` without the plan tool (E-6), yet Claude's plan mode still tells
+ * the model to finish with ExitPlanMode: it went looking for the tool, loaded it, and closed with "I couldn't call
+ * ExitPlanMode here" (evaluation, 2026-10-20). Told to such stages only.
+ */
+export const READ_ONLY_STAGE_HINT =
+  '\n\n[Read-only stage]\n' +
+  '- This stage only reads. There is no plan to approve and no ExitPlanMode tool: do not look for it. When the work is ' +
+  'done, give your answer (or submit your output) directly.';
+
+/** Repository rule files the agents in use read, in the order a mount is checked. */
+export const PROJECT_RULE_FILES = ['AGENTS.md', 'CLAUDE.md', path.join('.github', 'copilot-instructions.md')] as const;
+
+function ruleFilesOf(dir: string): string[] {
+  return PROJECT_RULE_FILES.map((f) => path.join(dir, f)).filter((f) => {
+    try {
+      return statSync(f).isFile();
+    } catch {
+      return false;
+    }
+  });
 }
 
 export function buildWorkspaceHint(input: WorkspaceHintInput): string {
   const [primary, ...rest] = input.mounts;
   const lines: string[] = ['', '', '[Workspace]'];
   if (primary) {
-    lines.push(`Working directory: ${primary.path}  (${describeMount(primary)})`);
+    // A codebase subdirectory (a monorepo package) is the cwd; the mount is still the whole repository.
+    const inside = input.workingDirectory.startsWith(primary.path + path.sep) ? `, repository root ${primary.path}` : '';
+    lines.push(`Working directory: ${input.workingDirectory}  (${describeMount(primary)}${inside})`);
   } else {
     lines.push(`Working directory: ${input.workingDirectory}`);
   }
   for (const m of rest) lines.push(`Also mounted: ${m.path}  (${describeMount(m)})`);
+  // D-168: one policy for every provider. Each provider loads a different file (or none — Claude runs without
+  // setting sources, so a repo's hooks and settings never execute), and none of them reads a non-primary mount's.
+  // So the rule files of every mount are named here and the agent reads them itself.
+  const rules = (primary ? input.mounts : []).flatMap((m) => ruleFilesOf(m.path));
+  if (rules.length > 0) {
+    lines.push(`Project rules: ${rules.join(', ')}`);
+    lines.push('- Read the rule files of a mount before you change it, and follow them.');
+  }
+  if (input.writes === false) return lines.join('\n');
   lines.push(`Scratch directory: ${input.scratchDir}`);
   lines.push('Rules:');
   lines.push(
@@ -278,6 +331,23 @@ export function buildWorkspaceHint(input: WorkspaceHintInput): string {
       'restore, clean) in a mount; the user controls branches and the Changes tab handles undo.',
   );
   lines.push(`- Do not create files in ${input.rootPath} outside scratch/ and plans/.`);
+  // Evaluation: agents edited files through `python3 - <<EOF` and `sed -i` scripts, which every approval policy treats
+  // as an arbitrary shell command (a card each time even in Accept edits), where the edit tool is allowed outright.
+  lines.push('- Edit files with your file-edit tools, not with shell scripts, heredocs or sed; keep the shell for running commands.');
+  // Evaluation W1: QA added a root `typecheck` script because the spec named a command the repo did not have.
+  lines.push("- If a command you were told to run does not exist (no such script), say so; don't add scripts, dependencies or config the task did not ask for.");
+  // Asked for an exact response shape, an agent deleted an endpoint's existing latency fields to fit it and never
+  // said so; told to say so, the next one did — and still left the web client unwrapping the envelope it removed.
+  // Disclosure alone is not enough: the callers have to be looked up.
+  lines.push(
+    '- Before changing a shared contract (an endpoint\'s request or response, a schema or type other code imports, ' +
+      'an exported function\'s signature or behaviour), search the repository for everything that uses it and ' +
+      'update those callers in the same change.',
+  );
+  lines.push(
+    '- In your reply, name any existing behaviour you removed or altered and any caller you left as it was, ' +
+      'even when the request implied the change.',
+  );
   return lines.join('\n');
 }
 

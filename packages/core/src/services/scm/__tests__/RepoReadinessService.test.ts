@@ -13,6 +13,7 @@ type GitOverrides = Partial<{
   getRemoteUrl: (dir: string) => Promise<string | null>;
   currentBranch: (dir: string) => Promise<string | null>;
   isDetached: (dir: string) => Promise<boolean>;
+  isUnborn: (dir: string) => Promise<boolean>;
   defaultBranch: (dir: string) => Promise<string | null>;
   changedFilesSummary: (dir: string) => Promise<Array<{ code: string; path: string }>>;
   upstreamOf: (dir: string, branch: string) => Promise<string | null>;
@@ -23,6 +24,7 @@ type GitOverrides = Partial<{
   ) => Promise<{ ahead: number; behind: number } | null>;
   mergeInProgress: (dir: string) => Promise<boolean>;
   unmergedFiles: (dir: string) => Promise<string[]>;
+  fetch: (dir: string, remote?: string) => Promise<void>;
 }>;
 
 function fakeGit(overrides: GitOverrides = {}): IGitClient {
@@ -31,6 +33,7 @@ function fakeGit(overrides: GitOverrides = {}): IGitClient {
     getRemoteUrl: async () => 'https://github.com/acme/web.git',
     currentBranch: async () => 'feature/x',
     isDetached: async () => false,
+    isUnborn: async () => false,
     defaultBranch: async () => 'main',
     changedFilesSummary: async () => [{ code: 'M', path: 'src/a.ts' }],
     upstreamOf: async () => null,
@@ -123,6 +126,34 @@ describe('RepoReadinessService', () => {
     expect(r.accountId).toBeUndefined();
   });
 
+  it('says a local-path remote cannot host a PR (no bogus host name), on every OS form', async () => {
+    for (const remote of ['/var/tmp/origin.git', 'C:\\repos\\origin.git', 'file:///srv/origin.git']) {
+      const svc = service(fakeGit({ getRemoteUrl: async () => remote }), fakeRegistry({ connected: false }));
+      const r = await svc.readiness({ repoDir: '/repo', alias: '.' });
+      expect(r.hasRemote).toBe(true);
+      expect(r.can.pullRequest).toBe(false);
+      expect(r.reasons.pullRequest).toBe('The remote is a local path — pull requests need a hosted remote');
+    }
+  });
+
+  it('an unborn branch keeps its name, is not detached, and can commit new files', async () => {
+    const svc = service(
+      fakeGit({
+        getRemoteUrl: async () => null,
+        currentBranch: async () => 'main',
+        defaultBranch: async () => null,
+        isUnborn: async () => true,
+        changedFilesSummary: async () => [{ code: 'A', path: 'b.txt' }],
+      }),
+      fakeRegistry(),
+    );
+    const r = await svc.readiness({ repoDir: '/repo', alias: 'main' });
+    expect(r).toMatchObject({ branch: 'main', detached: false, unborn: true, dirty: true });
+    expect(r.can.commit).toBe(true);
+    expect(r.reasons.commit).toBeUndefined();
+  });
+
+
   it('blocks the PR on a detached HEAD', async () => {
     const svc = service(fakeGit({ isDetached: async () => true }), fakeRegistry());
     const r = await svc.readiness({ repoDir: '/repo', alias: '.' });
@@ -147,6 +178,25 @@ describe('RepoReadinessService', () => {
     expect(r.reasons.pullRequest).toBe(
       'Nothing to open a PR from (branch has no commits ahead of base)',
     );
+  });
+
+  it('reports a pushed branch against the default branch too, and fetches first when asked', async () => {
+    const fetch = vi.fn(async () => undefined);
+    const svc = service(
+      fakeGit({
+        fetch,
+        upstreamOf: async () => 'origin/feature/x',
+        aheadBehind: async (_dir, _ref, against) =>
+          against === 'origin/feature/x' ? { ahead: 0, behind: 0 } : { ahead: 3, behind: 1 },
+      }),
+      fakeRegistry(),
+    );
+    const r = await svc.readiness({ repoDir: '/repo', alias: '.', fetch: true });
+    expect(fetch).toHaveBeenCalledWith('/repo', 'origin');
+    expect([r.ahead, r.behind]).toEqual([0, 0]);
+    expect(r.vsBase).toEqual({ branch: 'main', ahead: 3, behind: 1 });
+    await svc.readiness({ repoDir: '/repo', alias: '.' });
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it('gives a merge in progress priority over "Nothing to commit"', async () => {

@@ -1,0 +1,56 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Triage with a typed handoff",
+    "description": "A triage stage returns typed JSON; a guard reads it to decide whether the fix runs; the report reads fields of both.",
+    "variables": [
+      { "name": "bug_report", "type": "text", "label": "Bug report", "required": true }
+    ],
+    "session": { "permissionMode": "acceptEdits" },
+    "lifecycle": { "requiresCodebase": true },
+    "tags": ["example"]
+  },
+  "stages": [
+    {
+      "key": "triage",
+      "name": "Triage",
+      "kind": "agent",
+      "session": { "permissionMode": "plan" },
+      "prompts": [{ "label": "triage", "text": "Triage this bug report. Find the files involved.\n{{variables.bug_report}}" }],
+      "output": {
+        "format": "json",
+        "schema": {
+          "type": "object",
+          "required": ["severity", "summary", "files"],
+          "properties": {
+            "severity": { "enum": ["low", "medium", "high", "critical"] },
+            "summary": { "type": "string" },
+            "files": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "instructions": "severity: how bad it is for users; files: repository-relative paths."
+      }
+    },
+    {
+      "key": "fix",
+      "name": "Fix",
+      "kind": "agent",
+      "guard": "stages.triage.output.severity in ['high', 'critical']",
+      "context": { "mode": "structured" },
+      "prompts": [{ "label": "fix", "text": "Fix this bug: {{stages.triage.output.summary}}\nStart with these files:\n{{stages.triage.output.files | bullets}}" }]
+    },
+    {
+      "key": "report",
+      "name": "Report",
+      "kind": "agent",
+      "session": { "permissionMode": "plan" },
+      "context": { "from": ["triage"], "mode": "structured" },
+      "prompts": [{ "label": "report", "text": "Report on the bug ({{stages.triage.output.severity}}): {{stages.triage.output.summary}}\n{{#if stages.fix.summary}}Fix: {{stages.fix.summary}}{{else}}No fix was attempted (severity below high).{{/if}}" }]
+    }
+  ],
+  "edges": [
+    { "from": "triage", "to": "fix" },
+    { "from": "triage", "to": "report" },
+    { "from": "fix", "to": "report", "on": "always" }
+  ]
+}

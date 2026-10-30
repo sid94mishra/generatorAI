@@ -1,0 +1,31 @@
+appId: ${APP_ID}
+name: projects · create, tabs, settings and delete
+# M7-02 (MProjects, MProjectCreate, MProjectDetail, MProjectSettings). Needs write:projects on the paired device.
+tags: [projects]
+# The paired device has the default scopes; this flow edits, so it adds the route-policy scope for its run.
+env: {DEVICE_SCOPES: "write:projects"}
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///projects
+- extendedWaitUntil: {visible: {id: projects-new}, timeout: 20000}
+- tapOn: {id: projects-new}
+- extendedWaitUntil: {visible: {id: project-create-name}, timeout: 10000}
+- tapOn: {id: project-create-name}
+- inputText: maestro-project
+- tapOn: "Create"
+- extendedWaitUntil: {visible: {id: project-detail}, timeout: 20000}
+- assertVisible: "maestro-project"
+- tapOn: {id: project-tab-chats}
+- extendedWaitUntil: {visible: {id: project-new-chat}, timeout: 10000}
+- tapOn: {id: project-tab-runs}
+- tapOn: {id: project-tab-pull-requests}
+- extendedWaitUntil: {visible: {id: project-prs-state}, timeout: 10000}
+- tapOn: {id: project-tab-customization}
+- extendedWaitUntil: {visible: {id: customization-kind}, timeout: 10000}
+- tapOn: {id: project-tab-settings}
+- extendedWaitUntil: {visible: {id: project-settings-delete}, timeout: 10000}
+- tapOn: {id: project-settings-delete}
+- extendedWaitUntil: {visible: "Delete project", timeout: 10000}
+- tapOn: "Delete project"
+- extendedWaitUntil: {visible: {id: projects-new}, timeout: 20000}
+- assertNotVisible: "maestro-project"

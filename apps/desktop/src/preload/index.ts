@@ -1,8 +1,8 @@
 // ────────────────────────────────────────────────────────────────
 // Preload — runs in the renderer (the GeneratorAI web app) before page
 // scripts. Exposes a minimal, safe `window.generatoraiDesktop` bridge via
-// contextBridge and shims a couple of browser APIs so the *unmodified* web
-// app transparently uses native dialogs when running inside the desktop shell.
+// contextBridge. The SPA reaches it only through apps/web/src/lib/desktop.ts
+// (the native folder picker: `getAppInfo().localServer` + `selectDirectory`, D-136).
 // ────────────────────────────────────────────────────────────────
 
 import { contextBridge, ipcRenderer } from 'electron';
@@ -11,24 +11,42 @@ import {
   IPC_EVENT,
   type AppInfo,
   type ServerStatus,
-  type ThemePreference,
+  type DesktopAppearancePush,
+  type DesktopAppearanceRequest,
   type SaveFileOptions,
   type DesktopCommand,
   type DesktopPairingCode,
-  type ShellState,
+  type DesktopServerEntry,
+  type DesktopShellStatePush,
   type FindInPageResult,
+  type DesktopUpdateState,
+  type NavHistoryState,
   type WindowChrome,
   type WindowStateChange,
 } from '../shared/ipc';
+import { parseWindowChromeArg } from '../shared/window-chrome-arg';
 import {
   BROWSER_IPC,
   BROWSER_IPC_EVENT,
+  type AnnotationPalette,
   type BrowserBounds,
   type NativeBrowserDescriptor,
   type NativeBrowserEvent,
 } from '../shared/browser-ipc';
 
 type Unsubscribe = () => void;
+
+/**
+ * The last Back / Forward state main reported for this document. Main sends it
+ * on every navigation and when the page finishes loading, which can be before
+ * a component subscribes (the strip, or a sidebar row mounted later), so each
+ * new subscriber is handed the current value at once. Registered before any
+ * subscriber, so it is always current when theirs runs.
+ */
+let navHistory: NavHistoryState | undefined;
+ipcRenderer.on(IPC_EVENT.navHistoryChanged, (_e: unknown, state: NavHistoryState) => {
+  navHistory = state;
+});
 
 const api = {
   isDesktop: true as const,
@@ -45,7 +63,8 @@ const api = {
   requestPairingCode: (deviceName?: string): Promise<DesktopPairingCode | null> =>
     ipcRenderer.invoke(IPC.requestPairingCode, deviceName),
 
-  selectDirectory: (): Promise<string | null> => ipcRenderer.invoke(IPC.selectDirectory),
+  selectDirectory: (opts?: { defaultPath?: string }): Promise<string | null> =>
+    ipcRenderer.invoke(IPC.selectDirectory, opts),
   selectFile: (filters?: { name: string; extensions: string[] }[]): Promise<string | null> =>
     ipcRenderer.invoke(IPC.selectFile, filters),
   saveFile: (opts: SaveFileOptions): Promise<string | null> =>
@@ -62,19 +81,26 @@ const api = {
     return () => ipcRenderer.removeListener(IPC_EVENT.foundInPage, handler);
   },
 
-  onThemePreferenceChanged: (cb: (theme: ThemePreference) => void): (() => void) => {
-    const handler = (_e: unknown, t: ThemePreference) => cb(t);
-    ipcRenderer.on(IPC_EVENT.themePreferenceChanged, handler);
-    return () => ipcRenderer.removeListener(IPC_EVENT.themePreferenceChanged, handler);
+  /** A mode picked in the native View ▸ Appearance menu; ThemeProvider applies it (D-25). */
+  onAppearanceRequest: (cb: (request: DesktopAppearanceRequest) => void): (() => void) => {
+    const handler = (_e: unknown, r: DesktopAppearanceRequest) => cb(r);
+    ipcRenderer.on(IPC_EVENT.appearanceRequest, handler);
+    return () => ipcRenderer.removeListener(IPC_EVENT.appearanceRequest, handler);
   },
+
+  /** The renderer's appearance, mirrored by main (background, caption glyphs, themeSource). */
+  setAppearance: (appearance: DesktopAppearancePush): Promise<void> =>
+    ipcRenderer.invoke(IPC.setAppearance, appearance),
 
   showItemInFolder: (fullPath: string): Promise<boolean> =>
     ipcRenderer.invoke(IPC.showItemInFolder, fullPath),
 
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.openExternal, url),
 
-  getTheme: (): Promise<ThemePreference> => ipcRenderer.invoke(IPC.getTheme),
-  setTheme: (theme: ThemePreference): Promise<void> => ipcRenderer.invoke(IPC.setTheme, theme),
+  computerPermissions: (
+    action?: 'status' | 'request' | 'openSettings',
+  ): Promise<{ accessibility: boolean; screenRecording: boolean } | null> =>
+    ipcRenderer.invoke(IPC.computerPermissions, action),
 
   getSetting: <T = unknown>(key: string): Promise<T | undefined> =>
     ipcRenderer.invoke(IPC.getSetting, key),
@@ -88,8 +114,11 @@ const api = {
   //
   // The app draws its own title bar, so the renderer must know how much room
   // the OS window controls occupy — traffic lights sit top-LEFT on macOS,
-  // min/max/close sit top-RIGHT everywhere else.
-  getWindowChrome: (): Promise<WindowChrome> => ipcRenderer.invoke(IPC.getWindowChrome),
+  // min/max/close sit top-RIGHT everywhere else. Static per process, so main
+  // passes it as a launch argument and it is a plain value here, readable
+  // before first paint (06 §3.6). `undefined` when the argument is missing or
+  // malformed: the web app then uses its native layout.
+  chrome: parseWindowChromeArg(process.argv) as WindowChrome | undefined,
 
   window: {
     toggleMaximize: (): Promise<void> => ipcRenderer.invoke(IPC.windowMaximizeToggle),
@@ -100,8 +129,45 @@ const api = {
    * Mirrors renderer UI state into the native menu, so `View ▸ Toggle
    * Sidebar` shows a real checkmark and `Back` greys out when it would no-op.
    */
-  setMenuState: (state: Partial<ShellState>): Promise<void> =>
+  setMenuState: (state: Partial<DesktopShellStatePush>): Promise<void> =>
     ipcRenderer.invoke(IPC.setMenuState, state),
+
+  // ── Server switcher (G-03) ──
+  servers: {
+    list: (): Promise<DesktopServerEntry[]> => ipcRenderer.invoke(IPC.getServers),
+    switchTo: (id: string): Promise<void> => ipcRenderer.invoke(IPC.switchServer, id),
+    add: (): Promise<void> => ipcRenderer.invoke(IPC.addServer),
+    onChanged: (cb: () => void): Unsubscribe => {
+      const handler = () => cb();
+      ipcRenderer.on(IPC_EVENT.serversChanged, handler);
+      return () => ipcRenderer.removeListener(IPC_EVENT.serversChanged, handler);
+    },
+  },
+
+  // ── Updater (G-04) ──
+  updates: {
+    getState: (): Promise<DesktopUpdateState> => ipcRenderer.invoke(IPC.getUpdateState),
+    install: (): Promise<void> => ipcRenderer.invoke(IPC.installUpdate),
+    /**
+     * Also tells main someone is listening: main skips its native "update
+     * ready" dialog only while a renderer has subscribed and the window is
+     * visible (P1-review P2-R3).
+     */
+    onChange: (cb: (state: DesktopUpdateState) => void): Unsubscribe => {
+      const handler = (_e: unknown, state: DesktopUpdateState) => cb(state);
+      ipcRenderer.on(IPC_EVENT.updateStateChanged, handler);
+      void ipcRenderer.invoke(IPC.watchUpdates, true).catch(() => undefined);
+      // Idempotent: main counts subscriptions, so a second call must not
+      // report a second unsubscribe (P1-review P2-R39).
+      let subscribed = true;
+      return () => {
+        if (!subscribed) return;
+        subscribed = false;
+        ipcRenderer.removeListener(IPC_EVENT.updateStateChanged, handler);
+        void ipcRenderer.invoke(IPC.watchUpdates, false).catch(() => undefined);
+      };
+    },
+  },
 
   // Subscriptions (main → renderer)
   onNavigate: (cb: (path: string) => void): Unsubscribe => {
@@ -119,10 +185,16 @@ const api = {
     ipcRenderer.on(IPC_EVENT.command, handler);
     return () => ipcRenderer.removeListener(IPC_EVENT.command, handler);
   },
-  onThemeChanged: (cb: (resolved: 'light' | 'dark') => void): Unsubscribe => {
-    const handler = (_e: unknown, resolved: 'light' | 'dark') => cb(resolved);
-    ipcRenderer.on(IPC_EVENT.themeChanged, handler);
-    return () => ipcRenderer.removeListener(IPC_EVENT.themeChanged, handler);
+  /**
+   * Whether Back / Forward can move, from Chromium's session history (06 §3.4).
+   * Calls `cb` at once with the current value when main has reported one for
+   * this document, then on every change.
+   */
+  onNavHistoryChanged: (cb: (state: NavHistoryState) => void): Unsubscribe => {
+    const handler = (_e: unknown, state: NavHistoryState) => cb(state);
+    ipcRenderer.on(IPC_EVENT.navHistoryChanged, handler);
+    if (navHistory) cb(navHistory);
+    return () => ipcRenderer.removeListener(IPC_EVENT.navHistoryChanged, handler);
   },
   /** Maximise/fullscreen/focus changes, so a custom title bar can restyle. */
   onWindowStateChanged: (cb: (state: WindowStateChange) => void): Unsubscribe => {
@@ -164,20 +236,24 @@ const api = {
       ipcRenderer.invoke(BROWSER_IPC.setEmulation, tabId, params),
     setZoom: (tabId: string, factor: number): Promise<void> =>
       ipcRenderer.invoke(BROWSER_IPC.setZoom, tabId, factor),
-    pickElement: (tabId: string): Promise<unknown> =>
-      ipcRenderer.invoke(BROWSER_IPC.pickElement, tabId),
-    captureRegion: (tabId: string): Promise<string | null> =>
-      ipcRenderer.invoke(BROWSER_IPC.captureRegion, tabId),
-    annotateStart: (tabId: string, theme?: string): Promise<void> =>
-      ipcRenderer.invoke(BROWSER_IPC.annotateStart, tabId, theme),
+    capture: (tabId: string, mode: 'visible' | 'full'): Promise<unknown> =>
+      ipcRenderer.invoke(BROWSER_IPC.capture, tabId, mode),
+    captureRegion: (tabId: string, palette?: AnnotationPalette): Promise<string | null> =>
+      ipcRenderer.invoke(BROWSER_IPC.captureRegion, tabId, palette),
+    annotateStart: (tabId: string, palette: AnnotationPalette): Promise<void> =>
+      ipcRenderer.invoke(BROWSER_IPC.annotateStart, tabId, palette),
     annotateStop: (tabId: string): Promise<void> =>
       ipcRenderer.invoke(BROWSER_IPC.annotateStop, tabId),
     annotatePoll: (tabId: string): Promise<unknown> =>
       ipcRenderer.invoke(BROWSER_IPC.annotatePoll, tabId),
     annotateSend: (tabId: string, keys?: string[]): Promise<unknown> =>
       ipcRenderer.invoke(BROWSER_IPC.annotateSend, tabId, keys),
-    annotateRegion: (tabId: string): Promise<void> =>
-      ipcRenderer.invoke(BROWSER_IPC.annotateRegion, tabId),
+    annotateOpen: (tabId: string, key: string): Promise<void> =>
+      ipcRenderer.invoke(BROWSER_IPC.annotateOpen, tabId, key),
+    annotateSave: (tabId: string, key: string, comment: string, intent: string): Promise<boolean> =>
+      ipcRenderer.invoke(BROWSER_IPC.annotateSave, tabId, key, comment, intent),
+    annotateCancel: (tabId: string, key: string): Promise<void> =>
+      ipcRenderer.invoke(BROWSER_IPC.annotateCancel, tabId, key),
     annotateRemove: (tabId: string, key: string): Promise<void> =>
       ipcRenderer.invoke(BROWSER_IPC.annotateRemove, tabId, key),
     annotateClear: (tabId: string): Promise<void> =>
@@ -217,20 +293,3 @@ const api = {
 };
 
 contextBridge.exposeInMainWorld('generatoraiDesktop', api);
-
-// ── Native dialog shims ─────────────────────────────────────────────────────
-// The web app already feature-detects `window.showDirectoryPicker`. We expose a
-// shim that resolves to a minimal FileSystemDirectoryHandle-like object whose
-// `name` carries the chosen absolute path — which is exactly what the web's
-// `HttpPlatformClient.selectDirectory()` consumes. This means the existing web
-// code uses the OS-native folder picker with no changes.
-contextBridge.exposeInMainWorld('__generatoraiNativePickers', {
-  showDirectoryPicker: async () => {
-    const dir = await ipcRenderer.invoke(IPC.selectDirectory);
-    if (!dir) {
-      // Match the browser's behaviour: an AbortError when the user cancels.
-      throw new DOMException('The user aborted a request.', 'AbortError');
-    }
-    return { name: dir, kind: 'directory' as const };
-  },
-});

@@ -171,3 +171,88 @@ export function ensureContrast(
   }
   return toward;
 }
+
+// ── OKLab ───────────────────────────────────────────────────────
+//
+// Perceptual mixing for the design layer (02 §2.1). A linear sRGB blend of a
+// grey toward a surface moves lightness unevenly; OKLab keeps a text tier
+// (`fg-3`) at a perceptually even step between `fg-2` and the surface.
+
+const toLinear = (v: number): number => {
+  const s = v / 255;
+  return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+};
+
+const fromLinear = (v: number): number => {
+  const s = v <= 0.0031308 ? 12.92 * v : 1.055 * Math.max(0, v) ** (1 / 2.4) - 0.055;
+  return s * 255;
+};
+
+function toOklab({ r, g, b }: Rgba): [number, number, number] {
+  const lr = toLinear(r);
+  const lg = toLinear(g);
+  const lb = toLinear(b);
+  const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ];
+}
+
+function fromOklab([L, A, B]: [number, number, number]): Rgba {
+  const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
+  const m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
+  const s = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
+  return {
+    r: fromLinear(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+    g: fromLinear(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+    b: fromLinear(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s),
+    a: 1,
+  };
+}
+
+/**
+ * Blend two opaque colours in OKLab, `amount` = share of `to` (0..1).
+ *
+ * The result is clamped to sRGB and round-tripped through hex, for the same
+ * reason as `ensureContrast`: what is measured must be what is emitted.
+ */
+export function oklabMix(from: string | Rgba, to: string | Rgba, amount: number): Rgba {
+  const a = toOklab(typeof from === 'string' ? parseHex(from) : from);
+  const b = toOklab(typeof to === 'string' ? parseHex(to) : to);
+  const t = Math.max(0, Math.min(1, amount));
+  return parseHex(
+    toHex(fromOklab([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t])),
+  );
+}
+
+/**
+ * `ensureContrast` against several backdrops at once.
+ *
+ * Returns `colour` (opaque) when its lowest ratio over `backs` already clears
+ * `minRatio`; otherwise steps it toward `toward` in 1 % increments (each step
+ * round-tripped through hex) and returns the first candidate that clears every
+ * backdrop, falling back to `toward` itself. `toward` is the theme foreground
+ * for text and strokes: moving toward the text colour raises contrast against
+ * every surface of the same appearance at once, which a black/white target
+ * chosen per backdrop cannot promise.
+ */
+export function ensureContrastAll(
+  colour: string | Rgba,
+  backs: ReadonlyArray<string | Rgba>,
+  minRatio: number,
+  toward: string | Rgba,
+): Rgba {
+  const start: Rgba = { ...(typeof colour === 'string' ? parseHex(colour) : colour), a: 1 };
+  const target: Rgba = { ...(typeof toward === 'string' ? parseHex(toward) : toward), a: 1 };
+  const clears = (c: Rgba): boolean => backs.every((b) => contrastRatio(c, b) >= minRatio);
+  if (clears(start)) return start;
+  for (let step = 1; step <= 100; step += 1) {
+    const candidate = parseHex(toHex(mix(start, target, step / 100)));
+    if (clears(candidate)) return candidate;
+  }
+  return target;
+}

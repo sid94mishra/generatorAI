@@ -255,6 +255,43 @@ const SHARED_RESOURCE_EXCLUSIONS = ['!**/*.map', '!**/stats.html'];
  * @param {{provider:string,[k:string]:unknown}} [input.publish]  overrides the derived target
  * @param {Record<string,string|undefined>} [input.env]
  */
+/**
+ * Electron fuses for the shipped binary (F-4, D-128). electron-builder flips
+ * them with @electron/fuses right after the afterPack hook and before signing,
+ * which is the one point where it is valid.
+ *
+ *   runAsNode off               the embedded server runs in a utility process
+ *                               (src/main/server-child.ts), so nothing needs
+ *                               ELECTRON_RUN_AS_NODE; with it on, anyone able
+ *                               to set the app's environment runs Node as us.
+ *   nodeOptions / inspect off   NODE_OPTIONS and --inspect/SIGUSR1 are the same
+ *                               code-injection door.
+ *   asar integrity + only asar  the app code is the signed app.asar, checked on
+ *                               load (macOS Info.plist / Windows resource hash
+ *                               written by electron-builder; no-op on Linux).
+ *   cookie encryption on        the cookie store uses the OS key like Chrome's;
+ *                               existing plaintext cookies are re-encrypted on
+ *                               write.
+ *   file-protocol privileges off the splash / error / prompt pages are plain
+ *                               file:// documents with same-directory fonts,
+ *                               which load without the extra privileges.
+ *
+ * Flipping a fuse rewrites the binary, so an unsigned macOS build needs its
+ * ad-hoc signature reset or Apple Silicon refuses to launch it.
+ */
+export function electronFuses({ platform, signed }) {
+  return {
+    runAsNode: false,
+    enableNodeOptionsEnvironmentVariable: false,
+    enableNodeCliInspectArguments: false,
+    enableEmbeddedAsarIntegrityValidation: true,
+    onlyLoadAppFromAsar: true,
+    enableCookieEncryption: true,
+    grantFileProtocolExtraPrivileges: false,
+    resetAdHocDarwinSignature: platform === 'mac' && !signed,
+  };
+}
+
 export function createBuildConfig({ platform, arch, channel, signed, publish, env = {} }) {
   if (!CHANNELS.includes(channel)) {
     throw new Error(`Unknown channel '${channel}' (expected one of ${CHANNELS.join(', ')}).`);
@@ -321,6 +358,7 @@ export function createBuildConfig({ platform, arch, channel, signed, publish, en
     ],
     asarUnpack: ['**/*.node'],
     protocols: [{ name: PRODUCT_NAME, schemes: ['generatorai'] }],
+    electronFuses: electronFuses({ platform, signed }),
   };
 
   if (platform === 'win') config.win = winConfig(arch);
@@ -416,6 +454,23 @@ function macConfig(arch, signed) {
   };
 }
 
+/**
+ * Launcher actions (the right-click menu of the app in a Linux dock or
+ * launcher): the same entries as the macOS Dock menu and the Windows JumpList
+ * (`src/main/launcher-actions.ts`), from the registry's `LAUNCHER_ACTIONS` in
+ * `@generatorai/shared/ui-contract` — this script cannot import that
+ * TypeScript, so build-config.test.mjs pins the two together. Each opens the
+ * action's deep link through the registered `generatorai://` handler, so it
+ * takes the same path as any link on every desktop: the running app receives
+ * it through `second-instance`, a cold start picks it out of argv, and only
+ * allowlisted commands run (06 §8, P3-06).
+ */
+export const LINUX_DESKTOP_ACTIONS = {
+  NewChat: { Name: 'New Chat', Exec: 'xdg-open generatorai://command/chat.new' },
+  NewWorkflow: { Name: 'New Workflow', Exec: 'xdg-open generatorai://command/workflow.new' },
+  Home: { Name: 'Home', Exec: 'xdg-open generatorai://' },
+};
+
 function linuxConfig(arch, maintainer) {
   return {
     linux: {
@@ -446,7 +501,9 @@ function linuxConfig(arch, maintainer) {
           StartupWMClass: LINUX_EXECUTABLE,
           MimeType: 'x-scheme-handler/generatorai;',
           Keywords: 'ai;agent;developer;automation;',
+          Actions: `${Object.keys(LINUX_DESKTOP_ACTIONS).join(';')};`,
         },
+        desktopActions: LINUX_DESKTOP_ACTIONS,
       },
     },
     deb: {

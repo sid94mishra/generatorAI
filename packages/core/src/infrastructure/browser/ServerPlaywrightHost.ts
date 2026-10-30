@@ -22,6 +22,7 @@ import type {
   Page,
 } from 'playwright';
 import { chromium } from 'playwright';
+import { reloadFresh } from './reloadFresh.js';
 import type { ILogger } from '@generatorai/shared';
 import type { ImportedCookie } from '@generatorai/shared';
 import { matchesAnyHostPattern, isLoopbackHost, readBoundedInt } from '@generatorai/shared';
@@ -725,7 +726,7 @@ export class ServerPlaywrightHost implements IBrowserBridge {
     const entry = this.mustEntry(handle);
     const started = Date.now();
     try {
-      await entry.page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await reloadFresh(entry.page);
       return { ok: true, url: entry.page.url(), durationMs: Date.now() - started };
     } catch (err) {
       return { ok: false, error: (err as Error).message, durationMs: Date.now() - started };

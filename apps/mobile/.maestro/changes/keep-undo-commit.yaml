@@ -1,0 +1,76 @@
+appId: ${APP_ID}
+name: changes · keep, undo and commit
+tags: [characterization, full]
+env: {FRESH_CHAT: edits, DEVICE_SCOPES: "write:files,write:workspaces", EXPECT_COMMIT: "Mobile characterization commit"}
+# M6-07: the composer's changes strip (changes-tray-toggle / -review) opens the pane on the Changes tab (MB-22):
+# Keep is in the row menu (keep-file), Keep all / Undo all in the tab (changes-tray-keep-all / -undo-all, MD-07),
+# "Commit…" (changes-commit) opens the commit sheet (MB-23). The host verifies the dummy repo commit.
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///chats/${CHAT_EDITS_ID}
+- extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- runFlow: ../_subflows/pane-closed.yaml
+- tapOn: {id: composer-input}
+- inputText: Make the edits
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
+- waitForAnimationToEnd
+- extendedWaitUntil: {visible: {id: composer-send}, timeout: 10000}
+- tapOn: {id: composer-send}
+- extendedWaitUntil: {visible: {id: changes-tray-review}, timeout: 60000}
+- tapOn: {id: changes-tray-review}
+- extendedWaitUntil: {visible: {id: changes-file-row}, timeout: 15000}
+- assertVisible: ".*app.ts.*"
+- assertVisible: ".*mobile-new.ts.*"
+- assertVisible: ".*util.ts.*"
+# Keep one file from its row menu; it moves to the Kept group.
+- tapOn: {id: changes-file-menu, index: 0}
+- tapOn: "Keep"
+- extendedWaitUntil: {visible: "Kept", timeout: 15000}
+# Undo all (confirmed) reverts everything, the kept file included.
+- tapOn: {id: changes-tray-undo-all}
+# The tray's own "Undo all" stays in the iOS tree under the alert; the alert's button is the second match there.
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: {text: "Undo all", index: 1}
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: "Undo all"
+- extendedWaitUntil: {notVisible: {id: changes-file-row}, timeout: 15000}
+- tapOn: {id: pane-close}
+- tapOn: {id: composer-input}
+- inputText: Again
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
+- waitForAnimationToEnd
+- extendedWaitUntil: {visible: {id: composer-send}, timeout: 10000}
+- tapOn: {id: composer-send}
+- extendedWaitUntil: {visible: {id: changes-tray-review}, timeout: 60000}
+- tapOn: {id: changes-tray-review}
+- extendedWaitUntil: {visible: {id: changes-tray-keep-all}, timeout: 15000}
+- tapOn: {id: changes-tray-keep-all}
+- extendedWaitUntil: {visible: {id: changes-tray-keep-all, enabled: false}, timeout: 15000}
+- tapOn: {id: changes-commit}
+- extendedWaitUntil: {visible: {id: commit-message}, timeout: 15000}
+- tapOn: {id: commit-message}
+- inputText: ${EXPECT_COMMIT}
+# No hideKeyboard: on iOS 27 it does nothing, on Android its Back press can close the sheet. The rows are reached by
+# id and scrolled to while the keyboard is up.
+- scrollUntilVisible: {element: {id: commit-push}, direction: DOWN, timeout: 15000}
+- runFlow:
+    when: {visible: {id: commit-push, checked: true}}
+    commands:
+      - tapOn: {id: commit-push}
+- assertVisible: {id: commit-push, checked: false}
+- assertNotVisible: {id: commit-pr, checked: true}
+- assertVisible: {id: commit-submit, text: Commit}
+- tapOn: {id: commit-submit}
+- extendedWaitUntil: {visible: {id: commit-done}, timeout: 30000}
+- assertVisible: "Committed.*"
+- tapOn: {id: commit-done}

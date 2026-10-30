@@ -18,6 +18,7 @@ import {
   statusTone,
   type ColumnSpec,
   type PaneContent,
+  type PendingChatInteraction,
   type SettingRow,
   type TimelineItem,
 } from '@generatorai/cli-core';
@@ -42,6 +43,17 @@ import {
 import { dashboardRows, NO_ROWS, useActions, useTui, type DataKey } from './store.js';
 import { TerminalScreen, useTerminalScreen, type TerminalLine } from './terminalRender.js';
 import { buildWorkspaceTree, type TreeRow } from './workspaceTree.js';
+import type { WorkflowPaneState } from './open.js';
+import {
+  decisionHeadline,
+  hasControlFlow,
+  parkedLoop,
+  stageLines,
+  waitingApproval,
+  type LoopStage,
+  type MirroredDecision,
+  type StageLine,
+} from './loopRows.js';
 
 export interface PaneProps {
   paneId: string;
@@ -62,8 +74,9 @@ const COLUMNS: Partial<Record<DataKey, ColumnSpec[]>> = {
   ],
   workflows: [
     { key: 'name', header: 'Name', priority: 0 },
-    { key: 'version', header: 'Ver', format: 'number', priority: 3 },
-    { key: 'sessionMode', header: 'Session', priority: 2 },
+    { key: 'status', header: 'Status', format: 'status', priority: 1 },
+    { key: 'stageCount', header: 'Stages', format: 'number', priority: 2 },
+    { key: 'revision', header: 'Rev', format: 'number', priority: 3 },
     { key: 'updatedAt', header: 'Updated', format: 'relative', priority: 1 },
     { key: 'id', header: 'ID', format: 'id', priority: 4 },
   ],
@@ -77,7 +90,6 @@ const COLUMNS: Partial<Record<DataKey, ColumnSpec[]>> = {
   automations: [
     { key: 'name', header: 'Name', priority: 0 },
     { key: 'triggerType', header: 'Trigger', priority: 1 },
-    { key: 'inputMode', header: 'Input', priority: 2 },
     { key: 'enabled', header: 'On', format: 'boolean', priority: 0 },
     { key: 'schedule', header: 'Schedule', priority: 3 },
   ],
@@ -386,44 +398,10 @@ function ChatPane({ paneId, content, focused, height }: PaneProps): React.JSX.El
       flexGrow={1}
     >
       {pendingInteraction ? (
-        <Box
-          borderStyle={theme.borderStyle}
-          borderColor={theme.c('warning')}
-          paddingX={1}
-          marginBottom={1}
-          flexDirection="column"
-        >
-          {pendingInteraction.kind === 'plan' ? (
-            <>
-              <Text bold color={theme.c('warning')}>
-                {theme.glyphs.warning} Plan review: {pendingInteraction.title}
-              </Text>
-              <Text wrap="wrap">{pendingInteraction.summary}</Text>
-            </>
-          ) : pendingInteraction.kind === 'permission' ? (
-            <>
-              <Text bold color={theme.c('warning')}>
-                {theme.glyphs.warning} Allow {pendingInteraction.toolName}?
-              </Text>
-              <Text wrap="wrap">{pendingInteraction.description}</Text>
-              {pendingInteraction.inputSummary ? (
-                <Text color={theme.c('muted')} wrap="truncate-end">
-                  {pendingInteraction.inputSummary}
-                </Text>
-              ) : null}
-            </>
-          ) : (
-            <>
-              <Text bold color={theme.c('warning')}>
-                {theme.glyphs.warning}{' '}
-                {pendingInteraction.questions.length === 1
-                  ? pendingInteraction.questions[0]?.question
-                  : `${pendingInteraction.questions.length} questions`}
-              </Text>
-            </>
-          )}
-          <Text color={theme.c('muted')}>{`${prettyChord('alt+g')} to answer ${theme.glyphs.neutral} waiting for you`}</Text>
-        </Box>
+        <PendingInteractionBanner
+          pending={pendingInteraction}
+          hint={`${prettyChord('alt+g')} to answer ${theme.glyphs.neutral} waiting for you`}
+        />
       ) : null}
 
       {items.length === 0 ? (
@@ -690,6 +668,55 @@ export function TimelineRow({
   }
 }
 
+/**
+ * A chat-shaped gate waiting for the user — a chat's, or one a workflow
+ * stage raised inside its turn (P03b): a plan review, a clarifying question
+ * or a tool permission.
+ */
+function PendingInteractionBanner({ pending, hint }: { pending: PendingChatInteraction; hint: string }): React.JSX.Element {
+  const theme = useTheme();
+  return (
+    <Box
+      borderStyle={theme.borderStyle}
+      borderColor={theme.c('warning')}
+      paddingX={1}
+      marginBottom={1}
+      flexDirection="column"
+    >
+      {pending.kind === 'plan' ? (
+        <>
+          <Text bold color={theme.c('warning')}>
+            {theme.glyphs.warning} Plan review: {pending.title}
+          </Text>
+          <Text wrap="wrap">{pending.summary}</Text>
+        </>
+      ) : pending.kind === 'permission' ? (
+        <>
+          <Text bold color={theme.c('warning')}>
+            {theme.glyphs.warning} Allow {pending.toolName}?
+          </Text>
+          <Text wrap="wrap">{pending.description}</Text>
+          {pending.inputSummary ? (
+            <Text color={theme.c('muted')} wrap="truncate-end">
+              {pending.inputSummary}
+            </Text>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <Text bold color={theme.c('warning')}>
+            {theme.glyphs.warning}{' '}
+            {pending.questions.length === 1
+              ? pending.questions[0]?.question
+              : `${pending.questions.length} questions`}
+          </Text>
+        </>
+      )}
+      <Text color={theme.c('muted')}>{hint}</Text>
+    </Box>
+  );
+}
+
 // ── Run ───────────────────────────────────────────────────────────
 
 function RunPane({ paneId, content, focused, height }: PaneProps): React.JSX.Element {
@@ -699,7 +726,32 @@ function RunPane({ paneId, content, focused, height }: PaneProps): React.JSX.Ele
   const run = runs.find((r) => r['id'] === content.entityId);
 
   const items = timeline?.items ?? [];
-  const pending = timeline?.pendingApproval;
+  // Loops and checks (P05): the pane's fetched stage list (`App.tsx`
+  // refreshes it as the run's stage and loop events arrive).
+  const paneState = (content.state ?? {}) as { loopStages?: LoopStage[]; childDecisions?: MirroredDecision[] };
+  const loopStages = paneState.loopStages ?? [];
+  const parked = parkedLoop(loopStages);
+  // An approval wait of this run, else the decisions of its sub-workflow children (P05).
+  const approvalWait = waitingApproval(loopStages);
+  const childDecisions = paneState.childDecisions ?? [];
+  const lines = hasControlFlow(loopStages) ? stageLines(loopStages) : [];
+  const maxLines = Math.max(3, Math.floor(height / 3));
+  const shownLines = lines.length > maxLines ? lines.slice(0, maxLines - 1) : lines;
+  const hiddenLines = lines.length - shownLines.length;
+  const stageRows = lines.length === 0 ? 0 : shownLines.length + (hiddenLines > 0 ? 1 : 0) + 3;
+  // A parked loop is answered with the loop decisions, never approve/reject:
+  // the generic banner is for any other stage gate.
+  const loopIds = new Set(loopStages.filter((s) => s.kind === 'loop').map((s) => s.id));
+  const pending =
+    timeline?.pendingApproval && !loopIds.has(timeline.pendingApproval.stageId)
+      ? timeline.pendingApproval
+      : approvalWait
+        ? { stageId: approvalWait.id, stageName: approvalWait.name || approvalWait.stageKey, ...(approvalWait.wait?.prompt ? { prompt: approvalWait.wait.prompt } : {}) }
+        : null;
+  // A tool permission, question or plan inside a stage's turn (P03b).
+  const stageGate = timeline?.pendingInteraction ?? null;
+  // Parallel stages can each park a gate; they are answered oldest first.
+  const moreGates = Math.max(0, (timeline?.pendingInteractions.length ?? 0) - 1);
 
   return (
     <Panel
@@ -723,11 +775,57 @@ function RunPane({ paneId, content, focused, height }: PaneProps): React.JSX.Ele
           <Text color={theme.c('muted')}>a approve {theme.glyphs.neutral} x reject</Text>
         </Box>
       ) : null}
+      {!pending && childDecisions.length > 0 ? (
+        <Box borderStyle={theme.borderStyle} borderColor={theme.c('warning')} paddingX={1} marginBottom={1} flexDirection="column">
+          <Text bold color={theme.c('warning')}>
+            {theme.glyphs.warning} {childDecisions.length} decision(s) in a sub-workflow
+          </Text>
+          {childDecisions.slice(0, 3).map((d) => (
+            <Text key={`${d.runId}:${d.instanceId}`} wrap="truncate-end">
+              {d.name} · {d.kind === 'wait' ? `${d.waitType ?? 'approval'} wait` : d.kind.replace(/_/g, ' ')} · via {d.via}
+            </Text>
+          ))}
+          <Text color={theme.c('muted')}>a approve {theme.glyphs.neutral} x reject (approvals; other decisions: generatorai run pending)</Text>
+        </Box>
+      ) : null}
+      {parked?.decision ? (
+        <Box
+          borderStyle={theme.borderStyle}
+          borderColor={theme.c('warning')}
+          paddingX={1}
+          marginBottom={1}
+          flexDirection="column"
+        >
+          <Text bold color={theme.c('warning')}>
+            {theme.glyphs.warning} Loop {parked.name || parked.stageKey} needs a decision
+          </Text>
+          <Text wrap="wrap">
+            {`${decisionHeadline(parked.decision)} · ${parked.decision.iterations}${
+              parked.decision.maxIterations !== null ? `/${parked.decision.maxIterations}` : ''
+            } iterations`}
+          </Text>
+          <Text color={theme.c('muted')}>a decide (grant, input, accept) {theme.glyphs.neutral} x fail</Text>
+        </Box>
+      ) : null}
+      {stageGate ? (
+        <PendingInteractionBanner
+          pending={stageGate}
+          hint={`a answer ${theme.glyphs.neutral} the stage is waiting for you${moreGates > 0 ? ` ${theme.glyphs.neutral} ${moreGates} more waiting` : ''}`}
+        />
+      ) : null}
+      {lines.length > 0 ? (
+        <Box borderStyle={theme.borderStyle} borderColor={theme.c('border')} paddingX={1} marginBottom={1} flexDirection="column">
+          {shownLines.map((line) => (
+            <StageLineRow key={line.id} line={line} />
+          ))}
+          {hiddenLines > 0 ? <Text color={theme.c('muted')}>{`… ${hiddenLines} more (s stage detail)`}</Text> : null}
+        </Box>
+      ) : null}
 
       <VirtualList
         items={items}
         selectedIndex={items.length - 1}
-        height={Math.max(1, height - (pending ? 8 : 4))}
+        height={Math.max(1, height - (pending ? 8 : 4) - (stageGate ? 5 : 0) - (parked?.decision ? 5 : 0) - stageRows)}
         emptyMessage="Waiting for events…"
         renderItem={(item) => <TimelineRow item={item} />}
       />
@@ -757,6 +855,31 @@ function RunPane({ paneId, content, focused, height }: PaneProps): React.JSX.Ele
         ) : null}
       </Box>
     </Panel>
+  );
+}
+
+/** One line of the run pane's loop/stage tree: indent, status glyph, name, what it is doing. */
+function StageLineRow({ line }: { line: StageLine }): React.JSX.Element {
+  const theme = useTheme();
+  const color =
+    line.tone === 'default' ? undefined : line.tone === 'muted' ? theme.c('muted') : theme.c(line.tone);
+  const glyph =
+    line.status === 'completed'
+      ? theme.glyphs.success
+      : line.status === 'failed'
+        ? theme.glyphs.failure
+        : line.status === 'awaiting_input' || line.status === 'paused'
+          ? theme.glyphs.warning
+          : line.status === 'running' || line.status === 'starting' || line.status === 'validating'
+            ? theme.glyphs.running
+            : theme.glyphs.neutral;
+  return (
+    <Text wrap="truncate-end">
+      {'  '.repeat(line.depth)}
+      <Text color={color}>{glyph}</Text>
+      {` ${line.label}`}
+      {line.detail ? <Text color={color ?? theme.c('muted')}>{`  ${line.detail}`}</Text> : null}
+    </Text>
   );
 }
 
@@ -843,14 +966,7 @@ function AutomationPane({ paneId, content, focused, height }: PaneProps): React.
 
 function WorkflowPane({ content, focused, height }: PaneProps): React.JSX.Element {
   const theme = useTheme();
-  const detail = (content.state ?? {}) as {
-    stages?: Array<
-      Record<string, unknown> & { id: string; name: string; status?: string | null }
-    >;
-    edges?: Array<{ id?: string; fromStageId: string; toStageId: string; edgeType?: string }>;
-    variables?: Record<string, unknown>;
-    selectedStageId?: string | null;
-  };
+  const detail = (content.state ?? {}) as WorkflowPaneState;
 
   if (!detail.stages) {
     return (
@@ -861,19 +977,14 @@ function WorkflowPane({ content, focused, height }: PaneProps): React.JSX.Elemen
   }
 
   const stages = detail.stages;
-  const selected = stages.find((stage) => stage.id === detail.selectedStageId) ?? stages[0];
-  // Phase 7 item 5 — the graph already had a wide/narrow split (`Dag` falls
-  // back to an indented dependency tree under 100 columns); what it never
-  // had was a CURSOR, so nothing could act on "the selected stage" and every
-  // authoring command was unreachable from here.
-  const edgesOnSelected = (detail.edges ?? []).filter(
-    (edge) => edge.fromStageId === selected?.id || edge.toStageId === selected?.id,
-  );
-  const variableCount = Object.keys(
-    (selected?.['variables'] as Record<string, unknown> | undefined) ?? {},
-  ).length;
-  const hookCount = ((selected?.['hooks'] as unknown[] | undefined) ?? []).length;
-  const condition = selected?.['condition'] as { type?: string; expression?: string } | undefined;
+  const edges = detail.edges ?? [];
+  const selected = stages.find((stage) => stage.key === detail.selectedStageKey) ?? stages[0];
+  // The graph has a wide/narrow split (`Dag` falls back to an indented
+  // dependency tree under 100 columns) and a cursor, so the authoring
+  // commands act on "the selected stage".
+  const edgesOnSelected = edges.filter((edge) => edge.from === selected?.key || edge.to === selected?.key);
+  const agent = selected?.kind === 'agent' ? selected : undefined;
+  const hookCount = agent?.hooks.length ?? 0;
 
   // The detail strip and the hint line are real rows — budgeting only the
   // graph overflows the panel and paints across the border, the same
@@ -883,27 +994,28 @@ function WorkflowPane({ content, focused, height }: PaneProps): React.JSX.Elemen
   return (
     <Panel
       title={content.title}
-      subtitle={`${stages.length} stages ${theme.glyphs.neutral} ${(detail.edges ?? []).length} edges`}
+      subtitle={`${detail.status ?? ''} r${detail.revision ?? 0} ${theme.glyphs.neutral} ${stages.length} stages ${theme.glyphs.neutral} ${edges.length} edges`}
       focused={focused}
       flexGrow={1}
     >
       <Dag
-        stages={stages}
-        edges={detail.edges ?? []}
+        stages={stages.map((stage) => ({ id: stage.key, name: stage.name }))}
+        edges={edges}
         height={Math.max(1, height - 5 - detailRows)}
-        {...(selected ? { selectedId: selected.id } : {})}
+        {...(selected ? { selectedId: selected.key } : {})}
       />
 
       {selected ? (
         <Box flexDirection="column" marginTop={1} flexShrink={0}>
           <Text bold color={theme.c('primary')} wrap="truncate-end">
             {selected.name}
-            <Text color={theme.c('muted')}>{`  ${shortId(selected.id)}`}</Text>
+            <Text color={theme.c('muted')}>{`  ${selected.key}`}</Text>
           </Text>
           <Text color={theme.c('muted')} wrap="truncate-end">
-            {`${edgesOnSelected.length} edge(s) ${theme.glyphs.neutral} ${variableCount} variable(s) ${theme.glyphs.neutral} ${hookCount} hook(s)`}
-            {condition?.type ? ` ${theme.glyphs.neutral} runs ${condition.type}` : ''}
-            {selected['agentRef'] ? ` ${theme.glyphs.neutral} agent ${String(selected['agentRef'])}` : ''}
+            {`${edgesOnSelected.length} edge(s) ${theme.glyphs.neutral} ${agent ? `${agent.prompts.length} prompt(s)` : selected.kind} ${theme.glyphs.neutral} ${hookCount} hook(s)`}
+            {selected.guard ? ` ${theme.glyphs.neutral} if ${selected.guard}` : ''}
+            {agent?.session?.agentRef ? ` ${theme.glyphs.neutral} agent ${agent.session.agentRef}` : ''}
+            {agent?.session?.model ? ` ${theme.glyphs.neutral} ${agent.session.model}` : ''}
           </Text>
         </Box>
       ) : (

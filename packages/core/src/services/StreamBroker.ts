@@ -23,9 +23,10 @@ import type {
   StreamEventRow,
   StreamScope,
 } from '@generatorai/db';
-import { classifyEvent, type ILogger } from '@generatorai/shared';
+import { CHAT_TURN_PRELUDE, classifyEvent, isChatTurnStart, type ILogger } from '@generatorai/shared';
 import { isNoiseEventKind } from '../events/EventBus.js';
 import type { DeltaLog } from './DeltaLog.js';
+import { foldTurnRows } from './streamTurnFold.js';
 import { StreamWriteBatcher, type StreamWriteBatcherOptions } from './StreamWriteBatcher.js';
 
 export type { StreamEventRow, StreamScope } from '@generatorai/db';
@@ -86,6 +87,8 @@ export interface StreamResumeStatus {
 
 /** Hard ceiling on synchronous replay to prevent a client asking for 10k events at once. */
 const MAX_SYNC_REPLAY = 1000;
+/** A latest turn longer than this is paged as before rather than read whole into one prelude response. */
+const PRELUDE_TURN_MAX_ROWS = 20_000;
 /** Hard ceiling on filter prefix count — STR-06 says 10. */
 const MAX_KIND_PREFIXES = 10;
 
@@ -172,10 +175,11 @@ export class StreamBroker {
     // from the caller's perspective: the delta log buffers and flushes on its
     // own schedule (see `DeltaLog.append`) and must never be awaited on the
     // token path.
-    if (this.deltaLog && classifyEvent(kind, data) === 'delta') {
-      this.deltaLog.append(scope, scopeId, { seq: row.seq, kind, payload: data, ts: row.ts });
+    if (this.deltaLog && !row.coalesced && classifyEvent(kind, data) === 'delta') {
+      this.deltaLog.append(scope, scopeId, { seq: row.seq, kind, payload: row.payload, ts: row.ts });
     }
-    await this.fanOut(row);
+    // U-39: a delta folded into a later event's row is broadcast with that row, not twice.
+    if (!row.coalesced) await this.fanOut(row);
     return { seq: row.seq, id: row.id, ts: row.ts };
   }
 
@@ -392,6 +396,22 @@ export class StreamBroker {
   ): Promise<StreamEventRow[]> {
     const clamped = Math.max(1, Math.min(limit, MAX_SYNC_REPLAY));
     return this.repo.replayAfter(scope, scopeId, afterSeq, clamped);
+  }
+
+  /**
+   * What a client opening a chat replays before paging (U-39): the earlier rows its transcript still needs (see
+   * `CHAT_TURN_PRELUDE`) and the latest turn itself, deltas folded (`foldTurnRows`), so a chat that is one long
+   * turn opens in one response instead of paging it 500 rows at a time. `turnStartSeq` is where paging resumes:
+   * one past the last row returned, or the turn's first seq when the turn is too long to inline.
+   */
+  async chatTurnPrelude(chatId: string): Promise<{ turnStartSeq: number; rows: StreamEventRow[] }> {
+    const prelude = await this.repo.turnPrelude('chat', chatId, { ...CHAT_TURN_PRELUDE, isTurnStart: isChatTurnStart });
+    // 0: no earlier turn to skip (a single-turn worker starts at seq 1) — the "turn" is the whole chat.
+    const from = Math.max(0, prelude.turnStartSeq - 1);
+    const turn = await this.repo.replayAfter('chat', chatId, from, PRELUDE_TURN_MAX_ROWS);
+    const last = turn[turn.length - 1];
+    if (!last || turn.length >= PRELUDE_TURN_MAX_ROWS) return prelude;
+    return { turnStartSeq: last.seq + 1, rows: [...prelude.rows, ...foldTurnRows(turn)] };
   }
 
   /** Current live-subscriber count for (scope, scopeId). */

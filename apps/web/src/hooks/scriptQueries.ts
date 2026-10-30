@@ -10,6 +10,8 @@ export const scriptKeys = {
   scripts: ['scripts'] as const,
   script: (id: string) => ['script', id] as const,
   profiles: (id: string) => ['script-profiles', id] as const,
+  allowlist: ['script-allowlist'] as const,
+  status: ['scripts-status'] as const,
 };
 
 // ── Queries ──
@@ -19,6 +21,16 @@ export function useScripts() {
   return useQuery({
     queryKey: scriptKeys.scripts,
     queryFn: () => platform.listScripts(),
+    staleTime: 30_000,
+  });
+}
+
+/** Whether the server loads workflow scripts at all, and how many files it found. */
+export function useScriptsStatus() {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: scriptKeys.status,
+    queryFn: () => platform.getScriptsStatus(),
     staleTime: 30_000,
   });
 }
@@ -41,7 +53,34 @@ export function useScriptProfiles(id: string | undefined) {
   });
 }
 
+/**
+ * The server's effective command allow-list (`GET /settings/script-allowlist`):
+ * the commands a check stage (or a script hook) may run. The builder's
+ * command picker offers it and validates against it like the server does.
+ */
+export function useScriptAllowlist() {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: scriptKeys.allowlist,
+    queryFn: () => platform.getScriptAllowlist(),
+    staleTime: 5 * 60_000,
+  });
+}
+
 // ── Mutations ──
+
+/** Allow one more command in the app (an administrator, D-174): the allow-list query takes the server's answer. */
+export function useAllowCommand() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (command: string) => {
+      const current = await platform.getScriptAllowlist();
+      return platform.setAllowedCommands([...new Set([...current.allowed, command.toLowerCase()])]);
+    },
+    onSuccess: (allowlist) => queryClient.setQueryData(scriptKeys.allowlist, allowlist),
+  });
+}
 
 export function useMaterializeScript() {
   const platform = usePlatform();
@@ -51,18 +90,6 @@ export function useMaterializeScript() {
       platform.materializeScript(id, options),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['definitions'] });
-    },
-  });
-}
-
-export function useRunScript() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, options }: { id: string; options?: { profileName?: string; variables?: Record<string, unknown>; projectId?: string } }) =>
-      platform.runScript(id, options),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['runs'] });
     },
   });
 }

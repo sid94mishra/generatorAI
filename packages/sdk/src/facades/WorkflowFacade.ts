@@ -1,271 +1,252 @@
 // ────────────────────────────────────────────────────────────────
 // WorkflowFacade — ai.workflows.*
+//
+// A run starts through THE invocation (P04): `invoke`, and its shorthands
+// `run` (a definition) and `fork` (a terminal run). The trigger is
+// `external_agent via sdk`; the run goes through the same lifecycle as every
+// other entry point.
 // ────────────────────────────────────────────────────────────────
 
-import type { CoreServices, WorkflowScriptLoader, IWorkflowRunRepository, WorkflowOrchestrator } from '@generatorai/core';
+import {
+  RunCommandRefusedError,
+  type CoreServices,
+  type IEventRepository,
+  type InvocationContext,
+  type WorkflowScriptLoader,
+  type IWorkflowRunRepository,
+  type StageGateAnswer,
+  type StageMessage,
+  type StageSendOutcome,
+} from '@generatorai/core';
+import type { PersistedEvent, WorkflowRun } from '@generatorai/shared';
 import type {
-  PersistedEvent,
-  WorkflowDefinition,
-  WorkflowDefinitionWithStages,
-  WorkflowRun,
-  StageDefinition,
-  StageEdge,
-} from '@generatorai/shared';
+  InvocationPlan,
+  InvocationRequest,
+  InvocationResult,
+  RunCommand,
+  RunDigest,
+  ValidationResult,
+  WorkflowDefinitionRecord,
+  WorkflowDefinitionSummary,
+  WorkflowGraph,
+  WorkflowGraphInput,
+} from '@generatorai/workflow-spec';
 
-export interface CreateWorkflowInput {
-  name: string;
-  description?: string;
-  stages: Array<{
-    localId: string;
-    name: string;
-    prompt: string;
-    systemPrompt?: string;
-    condition?: string;
-    variables?: Record<string, unknown>;
-    hooks?: Array<{
-      phase: string;
-      config: Record<string, unknown>;
-    }>;
-    harnessOverrides?: Record<string, unknown>;
-  }>;
-  // SDK-7: edges carry only an `edgeType` because the platform evaluates
-  // CONDITIONS on the TARGET STAGE, not on edges. To make an edge conditional,
-  // set the target stage's `condition` (an expression like
-  // `variables.env == 'prod'`) on its stage input above — it is evaluated for
-  // each inbound edge during routing. There is intentionally no per-edge
-  // condition field (the data model has none).
-  edges: Array<{
-    fromStageLocalId: string;
-    toStageLocalId: string;
-    edgeType: 'on_success' | 'on_failure' | 'on_completion' | 'always';
-  }>;
-  variables?: Record<string, unknown>;
-  sessionMode?: 'single' | 'per-stage' | 'auto';
-  tags?: string[];
-  projectId?: string;
+/** Anything with a `build()` that yields a graph — a `WorkflowBuilder` from `@generatorai/workflow-spec/builders`. */
+export interface GraphSource {
+  build(): WorkflowGraph;
 }
 
-export interface RunOptions {
-  variables?: Record<string, unknown>;
-  projectId?: string;
+export interface CreateWorkflowOptions {
+  /**
+   * Publish at once so it can run (default true). The SDK is an in-process
+   * embedder; a draft can still start a test run (`run(id, { testRun: true })`).
+   */
+  publish?: boolean;
 }
 
-export interface OrchestrateOptions {
-  variables?: Record<string, unknown>;
-  projectId?: string;
-  selectedCodebases?: string[];
-  stageOverrides?: Array<Record<string, unknown>>;
-}
+/** `run()`'s options: everything an invocation takes but its target. */
+export type RunOptions = Partial<Omit<InvocationRequest, 'target' | 'client'>> & {
+  /** Run the working graph as a test version (the only way to run a draft). */
+  testRun?: boolean;
+};
 
 export interface StreamOptions {
   fromSequence?: number;
 }
 
-const TERMINAL_KINDS = new Set([
-  'workflow_run.completed',
-  'workflow_run.failed',
-  'workflow_run.cancelled',
-]);
+/** The in-process SDK caller: an external agent over the SDK, trusted like the local owner. */
+export const SDK_INVOCATION_CONTEXT: InvocationContext = {
+  principal: { kind: 'local', id: 'sdk', scopes: ['exec:agent', 'read:workflows', 'write:workflows', 'admin:settings'] },
+  trigger: { kind: 'external_agent', via: 'sdk', principalId: 'sdk' },
+  loopback: true,
+};
+
+const isGraphSource = (v: unknown): v is GraphSource => !!v && typeof (v as { build?: unknown }).build === 'function';
 
 export class WorkflowFacade {
   constructor(
     private services: CoreServices,
     private runRepo: IWorkflowRunRepository,
-    private orchestrator: WorkflowOrchestrator,
+    private eventRepo: IEventRepository,
     private scriptLoader?: WorkflowScriptLoader,
   ) {}
 
   /**
-   * Create a workflow definition with stages and edges in one call.
-   * Stages are connected by `localId` references in edges.
+   * Create a workflow definition from a whole graph (or a builder), through
+   * the one materializer. Invalid graphs throw `WorkflowValidationError`
+   * with the validator's issues.
    */
-  async create(input: CreateWorkflowInput): Promise<WorkflowDefinitionWithStages> {
-    // 1. Create definition (no stages/edges)
-    const definition = await this.services.workflowDefinitionService.createDefinition({
-      name: input.name,
-      description: input.description,
-      sessionMode: input.sessionMode,
-      tags: input.tags,
-      projectId: input.projectId,
-    });
-
-    // 2. Create stages, building localId → realId map
-    const stageIdMap = new Map<string, string>();
-    const stages: StageDefinition[] = [];
-    for (const stageInput of input.stages) {
-      const stage = await this.services.workflowDefinitionService.addStage({
-        workflowDefinitionId: definition.id,
-        name: stageInput.name,
-        prompts: [{
-          label: stageInput.name,
-          text: stageInput.prompt,
-          waitForCompletion: true,
-          ...(stageInput.systemPrompt ? { systemPrompt: stageInput.systemPrompt } : {}),
-        }],
-        variables: stageInput.variables,
-        hooks: stageInput.hooks as never,
-        condition: stageInput.condition
-          ? { type: 'expression' as const, expression: stageInput.condition }
-          : undefined,
-      });
-      stageIdMap.set(stageInput.localId, stage.id);
-      stages.push(stage);
-    }
-
-    // 3. Create edges using the real stage IDs
-    const edges: StageEdge[] = [];
-    for (const edgeInput of input.edges) {
-      const fromStageId = stageIdMap.get(edgeInput.fromStageLocalId);
-      const toStageId = stageIdMap.get(edgeInput.toStageLocalId);
-      if (!fromStageId) throw new Error(`Unknown stage localId: ${edgeInput.fromStageLocalId}`);
-      if (!toStageId) throw new Error(`Unknown stage localId: ${edgeInput.toStageLocalId}`);
-
-      const edge = await this.services.workflowDefinitionService.addEdge({
-        workflowDefinitionId: definition.id,
-        fromStageId,
-        toStageId,
-        edgeType: edgeInput.edgeType,
-      });
-      edges.push(edge);
-    }
-
-    return { ...definition, stages, edges };
-  }
-
-  /** List all workflow definitions */
-  async list(): Promise<WorkflowDefinition[]> {
-    return this.services.workflowDefinitionService.listDefinitions();
-  }
-
-  /** Get a workflow definition by ID (with stages and edges) */
-  async get(definitionId: string): Promise<WorkflowDefinitionWithStages> {
-    return this.services.workflowDefinitionService.getDefinitionWithStages(definitionId);
-  }
-
-  /**
-   * Create a workflow run record WITHOUT executing it. Use this when you want
-   * to stage a run and start it later. To create AND execute in one call, use
-   * `run()`.
-   */
-  async createRun(definitionId: string, options?: RunOptions): Promise<WorkflowRun> {
-    return this.services.workflowRunService.createRun({
-      workflowDefinitionId: definitionId,
-      variables: options?.variables,
-      projectId: options?.projectId,
+  async create(graph: WorkflowGraphInput | GraphSource, options: CreateWorkflowOptions = {}): Promise<WorkflowDefinitionRecord> {
+    return this.services.workflowDefinitionService.createFromSpec(isGraphSource(graph) ? graph.build() : graph, {
+      canEditCommands: true,
+      status: options.publish === false ? 'draft' : 'published',
     });
   }
 
+  /** Replace a definition's whole graph (409 `RevisionConflictError` on a stale revision). */
+  async save(definitionId: string, graph: WorkflowGraphInput, expectedRevision: number): Promise<WorkflowDefinitionRecord> {
+    return this.services.workflowDefinitionService.saveGraph(definitionId, graph, expectedRevision, { canEditCommands: true });
+  }
+
+  /** Publish the working graph as the version runs use. */
+  async publish(definitionId: string): Promise<WorkflowDefinitionRecord> {
+    return this.services.workflowDefinitionService.publish(definitionId);
+  }
+
+  /** Validate a document without storing it. */
+  validate(graph: unknown): Promise<ValidationResult> {
+    return this.services.workflowDefinitionService.validate(graph);
+  }
+
+  /** List workflow definitions (first page, up to 200). */
+  async list(): Promise<WorkflowDefinitionSummary[]> {
+    return (await this.services.workflowDefinitionService.list()).items;
+  }
+
+  /** Get a workflow definition (its whole graph). */
+  async get(definitionId: string): Promise<WorkflowDefinitionRecord> {
+    return this.services.workflowDefinitionService.get(definitionId);
+  }
+
+  // ── Starting runs (one invocation path) ──────────────────────
+
   /**
-   * SDK-6: Create a run AND start executing the DAG (PATH B).
-   *
-   * Previously `run()` only created the record and never executed — a foot-gun
-   * next to `orchestrate()`. It now creates the run then calls `startRun`, so
-   * `run()` does what its name implies. For the heavier envelope (clone /
-   * worktrees / preprocessing / post-processing) use `orchestrate()`. To create
-   * a run without starting it, use `createRun()`.
-   *
-   * Returns the run record; execution proceeds in the background — use
-   * `stream(runId)` to observe progress.
+   * Start a run: a definition, a script or a fork of a terminal run. Throws
+   * `InvocationError` (a code and the issues behind it). Resolves once the
+   * run is starting; follow it with `waitFor`, `digest` or `stream`.
    */
-  async run(definitionId: string, options?: RunOptions): Promise<WorkflowRun> {
-    const run = await this.services.workflowRunService.createRun({
-      workflowDefinitionId: definitionId,
-      variables: options?.variables,
-      projectId: options?.projectId,
+  async invoke(request: InvocationRequest): Promise<InvocationResult> {
+    return this.services.workflowInvocationService.invoke({ ...request, client: 'sdk' }, SDK_INVOCATION_CONTEXT);
+  }
+
+  /** Run a definition: `invoke({target: {kind: 'definition', …}, …options})`. */
+  async run(definitionId: string, options: RunOptions = {}): Promise<InvocationResult> {
+    const { testRun, variables, ...rest } = options;
+    return this.invoke({
+      target: { kind: 'definition', workflowDefinitionId: definitionId, ...(testRun ? { testRun: true } : {}) },
+      variables: variables ?? {},
+      ...rest,
     });
-    await this.services.workflowRunService.startRun(run.id);
-    return run;
+  }
+
+  /** What an invocation would do, without writing anything. */
+  async plan(request: InvocationRequest): Promise<InvocationPlan> {
+    return this.services.workflowInvocationService.plan({ ...request, client: 'sdk' }, SDK_INVOCATION_CONTEXT);
   }
 
   /**
-   * Start an orchestrated workflow run (full DAG execution).
-   *
-   * Unlike `run()` which only creates the record, `orchestrate()` triggers
-   * the complete pipeline: preprocessing → DAG scheduling → stage execution →
-   * result validation → hooks. Events are emitted throughout.
-   *
-   * Returns the run ID immediately; execution happens in the background.
-   * Use `stream(runId)` to observe progress.
+   * Re-run a terminal run as a NEW run (the source stays as it ended): an
+   * invocation with a fork target. By default every instance that did not
+   * complete runs again; completed ones are copied with their results.
    */
-  async orchestrate(definitionId: string, options?: OrchestrateOptions): Promise<{ workflowRunId: string }> {
-    const result = await this.orchestrator.startOrchestratedRun({
-      workflowDefinitionId: definitionId,
-      variables: options?.variables,
-      projectId: options?.projectId,
-      selectedCodebases: options?.selectedCodebases,
-      stageOverrides: options?.stageOverrides,
-    } as never);
-    return { workflowRunId: result.workflowRunId };
+  async fork(
+    runId: string,
+    request: {
+      rerunFrom?: string[];
+      definition?: 'pinned' | 'latest';
+      workspace?: 'restore_checkpoint' | 'reuse' | 'fresh';
+      variables?: Record<string, unknown>;
+    } = {},
+  ): Promise<InvocationResult> {
+    return this.invoke({
+      target: {
+        kind: 'fork',
+        sourceRunId: runId,
+        ...(request.rerunFrom ? { rerunFrom: request.rerunFrom } : {}),
+        definition: request.definition ?? 'pinned',
+        workspace: request.workspace ?? 'fresh',
+      },
+      variables: request.variables ?? {},
+    });
+  }
+
+  /** Wait for the run to finalize (post-processing done), an approval (`stopOnApproval`) or the timeout. */
+  async waitFor(runId: string, opts: { timeoutMs: number; stopOnApproval?: boolean; signal?: AbortSignal }): Promise<RunDigest> {
+    return this.services.workflowInvocationService.waitFor(runId, opts);
+  }
+
+  /** The run's compact state (status, stages, pending approvals, post-processing). */
+  async digest(runId: string, opts?: { detail?: 'brief' | 'full' }): Promise<RunDigest> {
+    return this.services.workflowInvocationService.digest(runId, opts);
   }
 
   /**
-   * Stream events from a running workflow (AsyncIterable).
-   *
-   * Replays historical events first, then subscribes for live events.
-   * Completes when the run reaches a terminal state.
+   * The run's events (AsyncIterable): the run scope replayed from the event
+   * log (from `fromSequence` on), then live events, until
+   * `workflow_run.finalized`. It subscribes before it reads, so an event in
+   * between is not lost.
    */
   async *stream(runId: string, options?: StreamOptions): AsyncGenerator<PersistedEvent> {
     const fromSeq = options?.fromSequence ?? 0;
-
-    // Check if run is already in a terminal state
-    const run = await this.runRepo.getById(runId);
-    if (!run) throw new Error(`Workflow run not found: ${runId}`);
-
-    // If already terminal, replay historical events and return
-    if (['completed', 'failed', 'cancelled'].includes(run.status)) {
-      if (run.masterSessionId) {
-        const events = await this.services.eventBus.getSessionEvents(run.masterSessionId, fromSeq > 0 ? fromSeq - 1 : undefined);
-        for (const event of events) {
-          if (event.sequenceId >= fromSeq) yield event;
-        }
-      }
-      return;
-    }
-
-    // Subscribe for live events
+    await this.runRepo.getById(runId);
     const queue: PersistedEvent[] = [];
-    let resolve: (() => void) | null = null;
-    let done = false;
-
+    let wake: (() => void) | null = null;
     const unsub = this.services.eventBus.subscribeToWorkflowRun(runId, (persisted) => {
-      if (persisted.sequenceId < fromSeq) return;
       queue.push(persisted);
-      if (resolve) {
-        resolve();
-        resolve = null;
-      }
+      const w = wake;
+      wake = null;
+      w?.();
     });
-
+    const seen = new Set<string>();
+    const keyOf = (e: PersistedEvent) => `${e.sessionId}:${e.sequenceId}:${e.kind}`;
     try {
-      while (!done) {
-        if (queue.length > 0) {
-          const event = queue.shift()!;
-          yield event;
-          if (TERMINAL_KINDS.has(event.kind)) {
-            done = true;
-          }
-        } else {
-          await new Promise<void>((r) => { resolve = r; });
+      for (const event of await this.eventRepo.getByWorkflowRunId(runId)) {
+        if (event.sequenceId < fromSeq) continue;
+        seen.add(keyOf(event));
+        yield event;
+        if (event.kind === 'workflow_run.finalized') return;
+      }
+      const run = await this.runRepo.getById(runId);
+      if (['completed', 'failed', 'cancelled'].includes(run.status) && queue.every((e) => seen.has(keyOf(e)))) return;
+      for (;;) {
+        const event = queue.shift();
+        if (!event) {
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+          });
+          continue;
         }
+        if (seen.has(keyOf(event)) || event.sequenceId < fromSeq) continue;
+        yield event;
+        if (event.kind === 'workflow_run.finalized') return;
       }
     } finally {
       unsub();
     }
   }
 
-  /** Pause a running workflow */
-  async pause(runId: string): Promise<void> {
-    return this.services.workflowRunService.pauseRun(runId);
+  // ── A run in flight ──────────────────────────────────────────
+
+  /**
+   * An operator command on the run or one of its instances: pause, resume,
+   * cancel, retry, skip, fail, approve (the engine's commands API). Throws
+   * when the engine refuses it.
+   */
+  async command(runId: string, command: RunCommand): Promise<void> {
+    const r = await this.services.workflowRunService.command(runId, command);
+    if (!r.ok) throw new RunCommandRefusedError(r);
   }
 
-  /** Resume a paused workflow */
-  async resume(runId: string): Promise<void> {
-    return this.services.workflowRunService.resumeRun(runId);
+  /**
+   * Send an operator message to a stage instance (a stage is a compact
+   * chat): queued between turns, an amendment of a completed stage (its
+   * output replaced; successors are not re-run), a retry of a paused one.
+   * Throws `StageConversationError` (`STAGE_BUSY` mid-turn,
+   * `INTERACTION_PENDING` on an open gate, …).
+   */
+  async sendToStage(runId: string, instanceId: string, message: StageMessage): Promise<StageSendOutcome> {
+    return (await this.services.stageConversationService.send(runId, instanceId, message)).outcome;
   }
 
-  /** Cancel a workflow */
-  async cancel(runId: string): Promise<void> {
-    return this.services.workflowRunService.cancelRun(runId);
+  /** Stop a stage's turn in flight without failing the stage. */
+  stopStageTurn(runId: string, instanceId: string, opts?: { force?: boolean }): void {
+    this.services.stageConversationService.cancelTurn(runId, instanceId, opts);
+  }
+
+  /** Answer the in-turn gate (tool permission, question, plan review) a stage is waiting on. */
+  async answerStageGate(runId: string, instanceId: string, interactionId: string, answer: StageGateAnswer): Promise<void> {
+    await this.services.stageConversationService.resolveInteraction(runId, instanceId, interactionId, answer);
   }
 
   /** Get current status of a run */
@@ -273,13 +254,13 @@ export class WorkflowFacade {
     return this.runRepo.getById(runId);
   }
 
-  /** Retry a failed run */
-  async retry(runId: string): Promise<WorkflowRun> {
-    return this.services.workflowRunService.retryRun(runId);
-  }
-
   /** Delete a run */
   async deleteRun(runId: string): Promise<void> {
     return this.services.workflowRunService.deleteRun(runId);
+  }
+
+  /** The loaded script loader, if the SDK discovered scripts. */
+  get scripts(): WorkflowScriptLoader | undefined {
+    return this.scriptLoader;
   }
 }

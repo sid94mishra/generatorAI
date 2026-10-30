@@ -117,8 +117,16 @@ export function createPairingOfferSchema(now: () => number = () => Date.now()) {
       serverId: z.string().regex(BASE64URL_43),
       /** Host's long-term X25519 public key (base64url, 32 bytes). */
       serverPublicKey: z.string().regex(BASE64URL_32BYTE).refine(isCanonicalKey, 'Non-canonical key'),
-      /** Fingerprint of a self-signed TLS certificate, when one is in use. */
+      /**
+       * The server's local CA (base64url SHA-256 of its DER, D-110): native clients anchor the
+       * server's LAN https:// addresses to it (MV-44). Absent for a custom certificate.
+       */
       certificateFingerprint: z.string().max(128).optional(),
+      /**
+       * The standby CA the server rotates to (D-127): pinned alongside, so a rotation does not
+       * force every device to pair again. Absent when there is no standby (custom certificate).
+       */
+      backupCertificateFingerprint: z.string().max(128).optional(),
       /** Single-use pairing grant. */
       // Lower bound is 12 to admit the human-typeable pairing code
       // (`@generatorai/shared` -> PAIRING_CODE_LENGTH). The upper bound still

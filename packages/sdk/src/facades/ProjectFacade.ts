@@ -139,11 +139,6 @@ export class ProjectFacade {
     return this.worktreeService.createWorktree(codebaseId, runId, options as never);
   }
 
-  /** Create worktrees for multiple codebases at once */
-  async createRunWorktrees(projectId: string, runId: string, selectedAliases: string[], targetDir?: string) {
-    return this.worktreeService.createRunWorktrees(projectId, runId, selectedAliases, undefined, targetDir);
-  }
-
   /** Remove a worktree */
   async removeWorktree(worktreeId: string) {
     return this.worktreeService.removeWorktree(worktreeId);

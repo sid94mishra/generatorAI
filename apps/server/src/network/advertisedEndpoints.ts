@@ -9,7 +9,12 @@ export interface AdvertisedEndpointCandidate {
   origin: string;
   reachability: 'loopback' | 'lan' | 'private-network' | 'public';
   secure: boolean;
-  source: 'configured' | 'interface' | 'bind';
+  /**
+   * `hostname`: `<host>.local` or a name from an admin-supplied certificate,
+   * advertised only over HTTPS because only a certificate makes a name worth
+   * more than the address it resolves to (D-110).
+   */
+  source: 'configured' | 'interface' | 'bind' | 'hostname' | 'tailscale';
   /**
    * True when this address belongs to a hypervisor/container adapter (WSL,
    * Hyper-V, Docker, VirtualBox, VMware).
@@ -30,6 +35,21 @@ export interface ResolveAdvertisedEndpointsInput {
   bindHost: string;
   configuredOrigins?: readonly string[];
   networkInterfaces: NetworkInterfaces;
+  /**
+   * Scheme for addresses on this machine's network adapters. `https` once the
+   * server terminates TLS on its network-facing listener (D-110, for every
+   * client — D-127); `http` only when TLS is off. Loopback is always
+   * `http://127.0.0.1` — the same machine is a secure context without TLS.
+   */
+  lanScheme?: 'http' | 'https';
+  /** Names that resolve to this machine (`<host>.local`), advertised after its addresses. */
+  hostnames?: readonly string[];
+  /**
+   * `https://<machine>.<tailnet>.ts.net` while "Connect with Tailscale" serves
+   * this server (D-123). Listed FIRST: it works on any network where the
+   * device is signed in to the tailnet, with a publicly trusted certificate.
+   */
+  tailscaleOrigin?: string | null;
 }
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
@@ -64,6 +84,8 @@ function reachabilityOf(origin: string): AdvertisedEndpointCandidate['reachabili
   const url = new URL(origin);
   if (LOOPBACK_HOSTS.has(url.hostname)) return 'loopback';
   if (isPrivateIpv4(url.hostname) || url.hostname.endsWith('.local')) return 'lan';
+  // A Tailscale MagicDNS name, from `tailscale cert` (D-113).
+  if (url.hostname.endsWith('.ts.net')) return 'private-network';
   if (/^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(url.hostname)) {
     return 'private-network';
   }
@@ -116,7 +138,9 @@ export function resolveAdvertisedEndpoints(
     result.push(candidate(normalized, source, interfaceName));
   };
 
+  if (input.tailscaleOrigin) add(input.tailscaleOrigin, 'tailscale');
   for (const configured of input.configuredOrigins ?? []) add(configured, 'configured');
+  const scheme = input.lanScheme ?? 'http';
 
   if (WILDCARD_HOSTS.has(input.bindHost)) {
     // Interface NAME is retained (rather than iterating values alone) purely so
@@ -125,16 +149,17 @@ export function resolveAdvertisedEndpoints(
     for (const [name, addresses] of Object.entries(input.networkInterfaces)) {
       for (const address of addresses ?? []) {
         if (address.internal || address.family !== 'IPv4' || !isPrivateIpv4(address.address)) continue;
-        scanned.push({ origin: `http://${address.address}:${input.port}`, name });
+        scanned.push({ origin: `${scheme}://${address.address}:${input.port}`, name });
       }
     }
     // Real adapters first, so `selectPairingEndpoint` cannot hand a phone a
     // host-only virtual address just because the OS enumerated it first.
     scanned.sort((a, b) => Number(isVirtualAdapter(a.name)) - Number(isVirtualAdapter(b.name)));
     for (const entry of scanned) add(entry.origin, 'interface', entry.name);
+    for (const hostname of input.hostnames ?? []) add(`${scheme}://${hostname}:${input.port}`, 'hostname');
   } else if (!LOOPBACK_HOSTS.has(input.bindHost)) {
     const host = input.bindHost.includes(':') ? `[${input.bindHost}]` : input.bindHost;
-    add(`http://${host}:${input.port}`, 'bind');
+    add(`${scheme}://${host}:${input.port}`, 'bind');
   }
 
   add(`http://127.0.0.1:${input.port}`, 'bind');
@@ -143,7 +168,7 @@ export function resolveAdvertisedEndpoints(
 
 export function selectPairingEndpoint(
   endpoints: readonly AdvertisedEndpointCandidate[],
-  platform: 'web' | 'desktop' | 'cli' | 'mobile' | 'other',
+  platform: 'web' | 'desktop' | 'cli' | 'mobile' | 'mcp' | 'other',
 ): AdvertisedEndpointCandidate | null {
   // A phone can reach neither loopback (that would be the phone itself) nor a
   // host-only virtual switch, so both are excluded rather than merely ranked.

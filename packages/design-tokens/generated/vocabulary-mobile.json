@@ -1,0 +1,163 @@
+{
+  "namespaces": [
+    {
+      "id": "m-text",
+      "prefixes": [
+        "text"
+      ],
+      "names": [
+        "detail-title",
+        "transcript",
+        "mono-lg",
+        "mono",
+        "mono-sm"
+      ]
+    },
+    {
+      "id": "m-radius",
+      "prefixes": [
+        "rounded",
+        "rounded-s",
+        "rounded-e",
+        "rounded-t",
+        "rounded-r",
+        "rounded-b",
+        "rounded-l",
+        "rounded-ss",
+        "rounded-se",
+        "rounded-ee",
+        "rounded-es",
+        "rounded-tl",
+        "rounded-tr",
+        "rounded-br",
+        "rounded-bl"
+      ],
+      "names": [
+        "seg-item",
+        "card-lg",
+        "group",
+        "nav",
+        "field",
+        "code",
+        "composer",
+        "new",
+        "toast"
+      ]
+    },
+    {
+      "id": "m-height",
+      "prefixes": [
+        "h",
+        "min-h",
+        "max-h"
+      ],
+      "names": [
+        "chip",
+        "seg",
+        "field",
+        "search",
+        "search-sm",
+        "row-2",
+        "bar-lg",
+        "hit",
+        "icon-button",
+        "icon-button-sm",
+        "new",
+        "toast",
+        "badge-sm"
+      ]
+    },
+    {
+      "id": "m-size",
+      "prefixes": [
+        "size"
+      ],
+      "names": [
+        "hit",
+        "icon-button",
+        "icon-button-sm"
+      ]
+    },
+    {
+      "id": "m-width",
+      "prefixes": [
+        "min-w"
+      ],
+      "names": [
+        "hit"
+      ]
+    },
+    {
+      "id": "m-container",
+      "prefixes": [
+        "w",
+        "min-w",
+        "max-w"
+      ],
+      "names": [
+        "drawer",
+        "pane"
+      ]
+    },
+    {
+      "id": "m-spacing",
+      "prefixes": [
+        "p",
+        "px",
+        "py",
+        "ps",
+        "pe",
+        "pt",
+        "pb",
+        "m",
+        "mx",
+        "my",
+        "ms",
+        "me",
+        "mt",
+        "mb",
+        "gap",
+        "gap-x",
+        "gap-y",
+        "inset",
+        "start",
+        "end",
+        "top",
+        "bottom"
+      ],
+      "names": [
+        "gutter",
+        "gutter-title"
+      ]
+    },
+    {
+      "id": "m-shadow",
+      "prefixes": [
+        "shadow"
+      ],
+      "names": [
+        "float"
+      ]
+    }
+  ],
+  "bannedSharedUtilities": [
+    "h-strip",
+    "min-h-strip",
+    "max-h-strip",
+    "w-rail",
+    "min-w-rail",
+    "max-w-rail",
+    "z-rail",
+    "w-aside",
+    "max-w-aside",
+    "w-side-rail",
+    "max-w-side-rail",
+    "w-inspector",
+    "max-w-inspector",
+    "h-th"
+  ],
+  "breakpoints": {
+    "medium": 600,
+    "expanded": 840
+  }
+}

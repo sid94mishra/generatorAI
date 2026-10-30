@@ -1,0 +1,44 @@
+appId: ${APP_ID}
+name: workflows · workflow settings (sections, variable editor, reserved name)
+# M8-07 (MWorkflowSettings; MDF-89). Adds a variable to the sandbox's "Sandbox Workflow.*" in the builder draft,
+# then cancels the builder — nothing is saved.
+tags: [workflows]
+# The paired device has the default scopes; this flow edits, so it adds the route-policy scope for its run.
+env: {DEVICE_SCOPES: "write:workflows"}
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///workflows
+- extendedWaitUntil: {visible: {id: "workflow-row-.*"}, timeout: 20000}
+- tapOn: {id: "workflow-row-.*", index: 0}
+- extendedWaitUntil: {visible: {id: workflow-detail}, timeout: 15000}
+# A header action: by testID on Android, by its label on iOS (native toolbar items take no testID, MD-133).
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: {id: workflow-more}
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: "Workflow actions"
+- tapOn: "Edit in builder"
+- extendedWaitUntil: {visible: {id: builder-list}, timeout: 15000}
+# A native menu's trigger is matched by its label (the menu, not the hosted button, is the element on iOS).
+- tapOn: "More builder actions"
+- tapOn: "Workflow settings"
+- extendedWaitUntil: {visible: {id: workflow-settings-variables}, timeout: 5000}
+- assertVisible: ".*Saved with the workflow draft.*"
+- tapOn: {id: workflow-settings-variables}
+- tapOn: "Add variable"
+- tapOn: {id: variable-name}
+- inputText: "run"
+- assertVisible: "run is reserved. Pick another name."
+- eraseText: 3
+- inputText: "risk_level"
+- tapOn: {id: variable-editor-done}
+- assertVisible: {id: workflow-variable-risk_level}
+- runFlow: ../_subflows/back.yaml
+- runFlow: ../_subflows/back.yaml
+- assertVisible: "● Unsaved changes"
+- tapOn: "Cancel"
+- tapOn: "Discard"
+- extendedWaitUntil: {visible: {id: workflow-detail}, timeout: 10000}

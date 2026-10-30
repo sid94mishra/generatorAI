@@ -81,7 +81,17 @@ export type NavigationVerdict = { ok: true } | { ok: false; reason: string };
  *     `localhost`, `127.0.0.1`) in `allowedHosts` is how a user opts a local
  *     dev server in.
  */
-export function isNavigationAllowed(url: string, allowedHosts: string[] | undefined): NavigationVerdict {
+export function isNavigationAllowed(
+  url: string,
+  allowedHosts: string[] | undefined,
+  /**
+   * `allowLoopback`: the server runs on the user's own machine (bound to
+   * loopback), so `localhost` is the user's own dev server — the main reason
+   * to open the in-app browser — not someone else's internal service (D-143).
+   * Link-local and cloud-metadata hosts stay blocked either way.
+   */
+  opts: { allowLoopback?: boolean } = {},
+): NavigationVerdict {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -99,6 +109,7 @@ export function isNavigationAllowed(url: string, allowedHosts: string[] | undefi
   if (explicit.length > 0) {
     return { ok: false, reason: `host "${host}" is not in browserConfig.allowedHosts` };
   }
+  if (opts.allowLoopback && isLoopbackHost(host)) return { ok: true };
   if (isDefaultBlockedHost(host)) {
     return {
       ok: false,

@@ -1,3 +1,7 @@
+import { artifactDownloadName } from './artifactDownload.js';
+import { createResourceMethods, type BinaryResource } from './resources.js';
+import { createPlanMethods, createReviewMethods, type TaskDigest, type ReviewSubmitTarget } from './reviewDetails.js';
+import { createScmMethods } from './scm.js';
 // ────────────────────────────────────────────────────────────────
 // Typed API client.
 //
@@ -5,6 +9,56 @@
 // every client speaks to the same endpoints with the same shapes. No auth,
 // no transport, no retries live here — those belong to the layers below.
 // ────────────────────────────────────────────────────────────────
+
+import {
+  type ApprovalKeyRegistration,
+  type ApprovalProof,
+  type PermissionRule,
+  type Agent,
+  type RepoReadiness,
+  chatListSearchParams,
+  runChatBulk,
+  type AttentionFilter,
+  type BackgroundTaskCancelResult,
+  type BackgroundTaskDetail,
+  type BackgroundTaskListItem,
+  type AttentionSnapshot,
+  type ChatBulkResult,
+  type ChatIngestInput,
+  type ChatIngestResult,
+  type ChatListPage,
+  type ChatListQuery,
+  type ChatListSummary,
+  type HarnessLoginResult,
+  type HarnessProvidersResponse,
+  type HarnessSetDefaultResult,
+  type HarnessVisibilityResponse,
+  type HarnessVisibilityUpdate,
+  type HarnessCatalogModel,
+  type RunStatus,
+  type StageRunStatus,
+  type SystemInfo,
+  type ProjectSummary as ProjectSummaryDetail,
+  type ProjectRunListPage,
+  type StatsSummary,
+  type RecentActivityPage,
+  type CodebaseLogsResponse,
+  type FetchCodebaseResult,
+  type WorktreeInfo,
+  type WorktreeListEnriched,
+  type ProjectArtifactPrefs,
+  type SearchQuery,
+  type SearchResponse,
+} from '@generatorai/shared';
+import type {
+  ChatWorkflowRunCard,
+  RunCommand,
+  StageRunState,
+  WorkflowDefinitionRecord,
+  WorkflowRunState,
+} from '@generatorai/workflow-spec';
+import type { LoopStateView } from '@generatorai/shared';
+import type { RemoteRefs, RemoteRefsRequest, SelfDeviceView } from '@generatorai/shared';
 
 export interface ApiFetch {
   (path: string, init?: RequestInit): Promise<Response>;
@@ -15,6 +69,8 @@ export class ApiError extends Error {
     readonly status: number,
     readonly path: string,
     message: string,
+    /** The parsed JSON error body, when there was one (e.g. `error.issues` on a 422, `error.current` on a 409). */
+    readonly body?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -36,13 +92,9 @@ export class ApiError extends Error {
  * rather than an error.
  *
  * Needed for routes that answer a legitimate question with a non-2xx status
- * and a meaningful JSON body — `POST /api/workflow-definitions/:id/validate`
- * answers 422 with `{valid:false, errors, warnings, issues}`, which is the
- * ANSWER, not a failure to deliver one. Routed through plain `request` it
- * threw `ApiError("422 Unprocessable Entity")` and the findings were
- * discarded entirely, so `generatorai workflow validate` on a genuinely
- * invalid definition reported the status line and nothing else — its own
- * `if (!result.valid)` branch was unreachable.
+ * and a meaningful JSON body, which is the ANSWER, not a failure to deliver
+ * one. Routed through plain `request`, such a response throws `ApiError`
+ * with the status line and the body's findings are discarded.
  *
  * Deliberately narrow: only the exact statuses a caller names are tolerated,
  * so a 500 or a 401 on the same route still throws like everywhere else.
@@ -56,12 +108,14 @@ export async function requestAllowing<T>(
   const res = await fetchImpl(path, init);
   if (!res.ok && !allowedStatuses.includes(res.status)) {
     let detail = `${res.status} ${res.statusText}`;
+    let body: unknown;
     try {
-      detail = describeErrorBody(await res.json()) ?? detail;
+      body = await res.json();
+      detail = describeErrorBody(body) ?? detail;
     } catch {
       // Non-JSON error body; the status line is all we have.
     }
-    throw new ApiError(res.status, path, detail);
+    throw new ApiError(res.status, path, detail, body);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -84,15 +138,27 @@ export async function requestText(
   const res = await fetchImpl(path, init);
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`;
+    let body: unknown;
     try {
-      detail = describeErrorBody(await res.json()) ?? detail;
+      body = await res.json();
+      detail = describeErrorBody(body) ?? detail;
     } catch {
       // Non-JSON error body; the status line is all we have.
     }
-    throw new ApiError(res.status, path, detail);
+    throw new ApiError(res.status, path, detail, body);
   }
   if (res.status === 204) return '';
   return res.text();
+}
+
+/** Binary endpoints preserve content type and the same server error contract as JSON. */
+export async function requestBinary(fetchImpl: ApiFetch, path: string, init?: RequestInit): Promise<BinaryResource> {
+  const res = await fetchImpl(path, init);
+  if (!res.ok) {
+    const body: unknown = await res.json().catch(() => undefined);
+    throw new ApiError(res.status, path, describeErrorBody(body) ?? `${res.status} ${res.statusText}`, body);
+  }
+  return { data: new Uint8Array(await res.arrayBuffer()), contentType: res.headers.get('content-type')?.split(';')[0] ?? 'application/octet-stream' };
 }
 
 export async function request<T>(fetchImpl: ApiFetch, path: string, init?: RequestInit): Promise<T> {
@@ -101,12 +167,14 @@ export async function request<T>(fetchImpl: ApiFetch, path: string, init?: Reque
     // Prefer the server's message: it distinguishes "missing scope" from
     // "not found", which the status code alone does not.
     let detail = `${res.status} ${res.statusText}`;
+    let body: unknown;
     try {
-      detail = describeErrorBody(await res.json()) ?? detail;
+      body = await res.json();
+      detail = describeErrorBody(body) ?? detail;
     } catch {
       // Non-JSON error body; the status line is all we have.
     }
-    throw new ApiError(res.status, path, detail);
+    throw new ApiError(res.status, path, detail, body);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -156,6 +224,12 @@ function summariseIssues(issues: unknown[]): string {
       return `${where}${i.message ?? 'invalid'}`;
     })
     .join('; ');
+}
+
+/** A remembered permission rule as the rules endpoints return it (U-16, D-147). */
+export interface StoredPermissionRuleView extends PermissionRule {
+  id: string;
+  createdAt: string;
 }
 
 export const json = (body: unknown): RequestInit => ({
@@ -257,14 +331,18 @@ export interface ChatSummary {
   /** Conversation-branch provenance (a fork stays in the sidebar; workers do not). */
   forkedFromChatId?: string | null;
   forkedAtTurnId?: string | null;
-  /**
-   * One line of the newest message, for a catalogue row. Present on the LIST
-   * response only — a single chat is fetched with its messages anyway.
-   */
-  preview?: string;
-  previewRole?: 'user' | 'assistant' | 'system' | 'tool';
-  previewAt?: Timestamp;
+  /** Portable `scope:slug` ref of the bound agent. */
+  agentRef?: string | null;
+  /** Set on orchestrator WORKER chats. */
+  parentChatId?: string | null;
 }
+
+/**
+ * One row of `GET /api/chats` (chat list v2, G-02): the chat plus the summary
+ * a list row needs — last activity, last turn outcome, "Changes ±", agent and
+ * a one-line preview. Only list responses carry `summary`.
+ */
+export type ChatListRow = ChatSummary & { summary: ChatListSummary };
 
 /** True when a chat has been archived. */
 export function isArchived(chat: Pick<ChatSummary, 'status'>): boolean {
@@ -364,43 +442,13 @@ export interface ForkChatResponse {
   conversation: 'native' | 'synthetic';
 }
 
-export interface BackgroundTaskSummary {
-  taskId: string;
-  taskName: string;
-  status: string;
-  model?: string;
-  reviewRounds: number;
-}
 
-export interface ModelInfo {
-  id: string;
-  name: string;
-  provider?: string;
-  description?: string;
-  category?: string;
-  contextWindow?: number;
-  /** The context-gauge denominator. Prefer this over `contextWindow`. */
-  promptTokenLimit?: number;
-  totalContextWindow?: number;
-  maxOutputTokens?: number;
-  supportsReasoning?: boolean;
-  /**
-   * The effort levels this model accepts.
-   *
-   * An ARRAY (`["low","medium","high","xhigh","max"]`) — verified against a
-   * live `/api/harness/models`. This was declared as a space-separated
-   * string, so calling `.trim()` on it threw and took the entire app down
-   * the moment a reasoning-capable model was selected. The union keeps the
-   * older shape parseable rather than trading one hard assumption for
-   * another.
-   */
-  reasoningEfforts?: string[] | string;
-  defaultReasoningEffort?: string;
-  /** Present when the model offers a long-context tier. */
-  supportsLongContext?: boolean;
-  standardContextWindow?: number;
-  longContext?: { promptTokenLimit?: number; totalContextWindow?: number };
-}
+/**
+ * One model of `/api/harness/models` — the shared wire shape (`HarnessCatalogModel`):
+ * only what the provider's own listing returned (D-131). `reasoningEfforts` is an
+ * array; read it through `modelReasoningEfforts`.
+ */
+export type ModelInfo = HarnessCatalogModel;
 
 /** Per-turn agent mode. Mirrors `AGENT_MODES` in @generatorai/shared. */
 export type AgentMode = 'auto' | 'plan';
@@ -413,31 +461,30 @@ export interface SendMessageInput {
 
 // ── Runs ────────────────────────────────────────────────────────
 
+/** One row of the definition list (`WorkflowDefinitionSummary` of @generatorai/workflow-spec). */
 export interface WorkflowSummary {
   id: string;
   name: string;
   description?: string;
   projectId?: string | null;
+  status?: 'draft' | 'published';
+  stageCount?: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
   tags?: string[];
 }
 
-export type RunStatus =
-  | 'created'
-  | 'pending'
-  | 'starting'
-  | 'running'
-  | 'paused'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+// Shared with the status map (D-18): a server status added there is a type
+// error until it is mapped, so client-core must not redeclare these unions.
+export type { RunStatus, StageRunStatus };
 
 export interface WorkflowRunSummary {
   id: string;
   workflowDefinitionId: string;
-  /** Run inputs. A run started for a project carries it as `__projectId`. */
+  /** Run inputs (user variables only; engine values live in `systemVars`). */
   variables?: Record<string, unknown>;
+  /** The project the run was started for. */
+  projectId?: string | null;
   name?: string;
   status: RunStatus;
   createdAt: Timestamp;
@@ -446,67 +493,115 @@ export interface WorkflowRunSummary {
   completedAt?: Timestamp | null;
   error?: string | null;
   workspaceId?: string | null;
-  /** Set on a retry: the failed or cancelled run it replaced. */
+  /** Set on a fork: the terminal run it re-runs. */
   ancestorRunId?: string | null;
+  /** Why the run is in its status (`budget_exhausted`, …). */
+  statusReason?: string | null;
+  /** CAS version (`expectedVersion` on run commands). */
+  version?: number;
+  /** The effective run budget (`maxTurns`, `maxCostUsd`, `maxTokens`, `maxWallClockMs`). */
+  budget?: Record<string, unknown> | null;
+  /** Rolled-up usage; `costUsd` only when a provider reported cost. */
+  usage?: { turns?: number; costUsd?: number; inputTokens?: number; outputTokens?: number; unpricedTokens?: number; toolCalls?: number } | null;
 }
-
-export type StageRunStatus =
-  | 'pending'
-  | 'queued'
-  | 'running'
-  | 'paused'
-  | 'sleeping'
-  | 'awaiting_input'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'skipped';
 
 export interface StageRunSummary {
   id: string;
   workflowRunId: string;
-  stageDefinitionId: string;
+  /** The stage key in the run's pinned graph. */
+  stageKey: string;
   name?: string;
   status: StageRunStatus;
   sessionId?: string | null;
   startedAt?: Timestamp | null;
   completedAt?: Timestamp | null;
   error?: string | null;
-  retryCount?: number;
-  currentStep?: number;
-  totalSteps?: number;
+  /** `triage`, `review_loop#2/fix`: unique per run; the stage key at the top level. */
+  instancePath?: string;
+  /** The latest attempt number (0 before the first attempt); retries are attempts beyond the first. */
+  currentAttempt?: number;
+  /** Why the instance is in its status (`retry:resume`, `aborted:pause`, …). */
+  statusReason?: string | null;
+  /** Why a skipped instance was skipped (`guard`, `operator`, `unreachable`, …). */
+  skipReason?: string | null;
   /** Harness-produced summary of what the stage did. */
   summary?: string | null;
   /** Full raw output of the stage's main prompt(s). */
   outputText?: string | null;
   outputData?: Record<string, unknown> | null;
   artifactManifest?: Array<{ path: string; language: string; action: string; sizeBytes: number }> | null;
-  /** The parked payload while `awaiting_input` — shape varies by gate kind. */
+  /**
+   * The parked payload while `awaiting_input` — `kind` is
+   * `stage_completion_review`, `tool_permission`, `question` or `plan_review`.
+   * Pending approvals are the run's `awaiting_input` stage runs; there is no
+   * separate pending-approvals endpoint.
+   */
   interruptData?: unknown;
-  wakeAt?: Timestamp | null;
+  /** When an operator follow-up last amended this completed stage (PD-4). */
+  amendedAt?: Timestamp | null;
+  /** Monotonic CAS version: a poll merges an instance only when it is not older than what the stream applied. */
+  version?: number;
+  /** The node kind: agent, check, loop (P05). */
+  kind?: string;
+  /** The enclosing container instance (a loop body stage). */
+  scopeId?: string;
+  /** The iteration of the enclosing loop this instance belongs to. */
+  iterationIndex?: number;
+  /** A loop instance's state (P05 §2.6). */
+  loopState?: LoopStateView;
 }
 
 /**
- * One entry of `GET /workflow-runs/:id/pending-interrupts`.
- *
- * The server returns the parked STAGE RUN rows themselves
- * (`HitlService.listPending` → `StageRun[]`), so `id` is the stage-run id —
- * the id the approve/interrupt routes take — and the prompt, when there is
- * one, lives inside `interruptData`. This previously declared a
- * `{ stageId, prompt }` shape the server never sent, which is how a client
- * ended up matching on a field that was always undefined.
+ * A run search (`GET /workflow-runs`); every filter narrows. `status` and
+ * `trigger` match any of their entries (a run without a trigger is `user`);
+ * `from`/`to` bound the creation time; `q` matches part of the name or the
+ * start of the id; `variables` are `name=value` pairs; `limit` keeps the
+ * newest matches.
  */
-export interface PendingInterrupt {
-  id: string;
-  workflowRunId: string;
-  stageDefinitionId: string;
-  name?: string;
-  status: StageRunStatus;
-  sessionId?: string | null;
-  interruptData?: unknown;
+export interface RunListParams {
+  definitionId?: string;
+  status?: string | readonly string[];
+  trigger?: readonly string[];
+  from?: string | number | Date;
+  to?: string | number | Date;
+  q?: string;
+  variables?: Readonly<Record<string, string>>;
+  limit?: number;
 }
 
-/** Outcomes the HITL approve endpoint accepts. */
+/** The query string of a run search. */
+export function runListQuery(params: RunListParams = {}): string {
+  const q = new URLSearchParams();
+  const time = (t: string | number | Date) => (t instanceof Date ? t.toISOString() : String(t));
+  if (params.definitionId) q.set('definitionId', params.definitionId);
+  const status = typeof params.status === 'string' ? params.status : params.status?.join(',');
+  if (status) q.set('status', status);
+  if (params.trigger?.length) q.set('trigger', params.trigger.join(','));
+  if (params.from !== undefined) q.set('from', time(params.from));
+  if (params.to !== undefined) q.set('to', time(params.to));
+  if (params.q?.trim()) q.set('q', params.q.trim());
+  for (const [name, value] of Object.entries(params.variables ?? {})) q.append('var', `${name}=${value}`);
+  if (params.limit !== undefined) q.set('limit', String(params.limit));
+  const s = q.toString();
+  return s ? `?${s}` : '';
+}
+
+/** One execution of a stage across the definition's runs (`GET /workflow-runs/stage-history`). */
+export interface StageHistoryEntry {
+  stageRun: StageRunSummary & { usage?: Record<string, unknown> | null; createdAt?: Timestamp };
+  run: { id: string; name: string; status: RunStatus; createdAt: Timestamp };
+}
+
+/** How a stage took an operator message (`POST …/instances/:id/messages`). */
+export interface StageMessageResult {
+  runId: string;
+  instanceId: string;
+  /** queued: the next turn; amending: a completed stage's output is being amended; retrying: a paused stage restarted with it. */
+  outcome: 'queued' | 'amending' | 'retrying';
+  attachmentIds: string[];
+}
+
+/** Outcomes the `approve` run command accepts. */
 export type ApprovalOutcome = 'approved' | 'changes_requested' | 'rejected';
 
 // ── Automations ─────────────────────────────────────────────────
@@ -517,8 +612,7 @@ export interface AutomationSummary {
   description?: string;
   enabled: boolean;
   triggerType: 'manual' | 'schedule' | 'webhook';
-  workflowDefinitionId: string;
-  workflowIds?: string[];
+  workflowIds: string[];
   cronExpression?: string;
   timezone?: string;
   nextRunAt?: Timestamp | null;
@@ -530,10 +624,6 @@ export interface AutomationExecutionSummary {
   id: string;
   automationId: string;
   status: string;
-  /** @deprecated The server sends the `*Iterations` counts below; kept for older callers. */
-  totalRuns?: number;
-  completedRuns?: number;
-  failedRuns?: number;
   totalIterations?: number;
   completedIterations?: number;
   failedIterations?: number;
@@ -585,7 +675,15 @@ export interface ChangeRepoEntry {
   keptCount?: number;
 }
 
+export interface ChangeRevisionInfo {
+  kind: 'baseline' | 'checkpoint' | 'working' | 'ref';
+  id?: string;
+  label?: string;
+}
+
 export interface ChangeSummary {
+  base?: ChangeRevisionInfo;
+  head?: ChangeRevisionInfo;
   workspaceId: string;
   hasGit: boolean;
   repos: ChangeRepoEntry[];
@@ -661,14 +759,23 @@ export interface ReviewThread {
 // ── Projects ────────────────────────────────────────────────────
 
 export interface ProjectSummary {
+  rootPath?: string;
+  settings?: { worktreeRetention?: string; maxCodebases?: number; [key: string]: unknown };
   id: string;
   name: string;
   description?: string;
   status?: string;
   createdAt: Timestamp;
+  /**
+   * G-13 — Codebases, Active chats + Needs you, Last run, Worktrees. Present
+   * only when the call passed `includeSummary: true`; absent otherwise, and
+   * absent (never `0`) on fields the server could not answer (D-36).
+   */
+  summary?: ProjectSummaryDetail;
 }
 
 export interface CodebaseSummary {
+  lastError?: string;
   id: string;
   projectId: string;
   alias: string;
@@ -751,6 +858,13 @@ export interface WorkspaceFile {
 // ── Checkpoints ─────────────────────────────────────────────────
 
 export interface WorkspaceCheckpoint {
+  seq?: number;
+  turnId?: string;
+  phase?: 'before' | 'after';
+  promptExcerpt?: string;
+  additions?: number;
+  deletions?: number;
+  chatId?: string;
   id: string;
   workspaceId: string;
   repoAlias: string;
@@ -797,24 +911,6 @@ export interface TerminalDescriptor {
 }
 
 // ── Providers / health ──────────────────────────────────────────
-
-export interface ProviderStatus {
-  type: string;
-  label: string;
-  installed: boolean;
-  connected: boolean;
-  authenticated: boolean;
-  ready: boolean;
-  error?: string | null;
-  checkedAt?: number;
-  modelCount: number;
-  models?: ModelInfo[];
-}
-
-export interface ProvidersResponse {
-  primary: string;
-  providers: ProviderStatus[];
-}
 
 /** The full `/api/health` body, not just `{ status }`. */
 export interface HealthSnapshot {
@@ -895,8 +991,12 @@ export const queryKeys = {
   chatPlans: (id: string) => ['chats', id, 'plans'] as const,
   chatInteractions: (id: string) => ['chats', id, 'interactions'] as const,
   chatTasks: (id: string) => ['chats', id, 'background-tasks'] as const,
+  chatTaskDetail: (id: string, taskId: string) => ['chats', id, 'background-tasks', taskId, 'detail'] as const,
+  /** The runs a chat started (`GET /chats/:id/workflow-runs`), patched live by `chat.workflow_run.*`. */
+  chatWorkflowRuns: (id: string) => ['chats', id, 'workflow-runs'] as const,
   models: () => ['models'] as const,
   providers: () => ['harness', 'providers'] as const,
+  harnessVisibility: () => ['harness', 'visibility'] as const,
   health: () => ['health'] as const,
   devices: () => ['auth', 'devices'] as const,
   /** This device's own scope requests. */
@@ -916,8 +1016,6 @@ export const queryKeys = {
     workflowId ? (['runs', 'by-workflow', workflowId] as const) : (['runs'] as const),
   run: (runId: string) => ['runs', 'detail', runId] as const,
   runStages: (runId: string) => ['runs', 'detail', runId, 'stages'] as const,
-  runInterrupts: (runId: string) => ['runs', 'detail', runId, 'interrupts'] as const,
-  runScratchpad: (runId: string) => ['runs', 'detail', runId, 'scratchpad'] as const,
   /** One stage session's persisted transcript. */
   stageTranscript: (runId: string, stageRunId: string) =>
     ['runs', 'detail', runId, 'stage', stageRunId, 'transcript'] as const,
@@ -961,7 +1059,29 @@ export const queryKeys = {
 
 export function createApiClient(fetchImpl: ApiFetch) {
   return {
+    artifacts: {
+      async download(id: string): Promise<{ bytes: Uint8Array; mimeType: string; name: string }> {
+        let name = id;
+        const result = await requestBinary(async (path, init) => {
+          const response = await fetchImpl(path, init);
+          name = artifactDownloadName(response.headers.get('content-disposition'), id);
+          return response;
+        }, `/api/artifacts/${encodeURIComponent(id)}/download`);
+        return { bytes: result.data, mimeType: result.contentType, name };
+      },
+    },
+    resources: createResourceMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init), (path, init) => requestBinary(fetchImpl, path, init)),
+    plans: createPlanMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init)),
+    scm: createScmMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init)),
     health: () => request<HealthSnapshot>(fetchImpl, '/api/health'),
+
+    /**
+     * G-01 — Needs you + Running across chats, runs and automation
+     * executions. Named like `IPlatformClient.getAttention` so this client
+     * satisfies `createAttentionStore`'s snapshot source directly.
+     */
+    getAttention: (filter?: AttentionFilter) =>
+      request<AttentionSnapshot>(fetchImpl, `/api/attention${qs({ projectId: filter?.projectId })}`),
 
     harness: {
       /**
@@ -971,38 +1091,60 @@ export function createApiClient(fetchImpl: ApiFetch) {
        * take seconds — so it is only ever passed on an explicit user action.
        */
       providers: (refresh = false) =>
-        request<ProvidersResponse>(
+        request<HarnessProvidersResponse>(
           fetchImpl,
           `/api/harness/providers${refresh ? '?refresh=1' : ''}`,
         ),
 
-      /** Change the DEFAULT provider. Existing chats keep their own. */
+      /** Start the provider's own sign-in; open `authUrl` when present, then re-probe with `providers(true)`. */
+      login: (type: string) =>
+        request<HarnessLoginResult>(fetchImpl, `/api/harness/providers/${encodeURIComponent(type)}/login`, {
+          method: 'POST',
+        }),
+
+      /** Sign the provider's account out. */
+      logout: (type: string) =>
+        request<{ ok: true }>(fetchImpl, `/api/harness/providers/${encodeURIComponent(type)}/logout`, {
+          method: 'POST',
+        }),
+
+      /** Change the DEFAULT provider (must be ready). Existing chats keep their own. */
       setDefault: (type: string) =>
-        request<{ message: string; type: string; switched: boolean }>(
-          fetchImpl,
-          '/api/harness/switch',
-          json({ type }),
-        ),
+        request<HarnessSetDefaultResult>(fetchImpl, '/api/harness/switch', json({ type })),
+
+      /** Which providers this server serves (D-131). */
+      visibility: () => request<HarnessVisibilityResponse>(fetchImpl, '/api/harness/visibility'),
+
+      /** Reveal or hide providers (admin:harnesses); `null` returns one to its default. */
+      setVisibility: (update: HarnessVisibilityUpdate) =>
+        request<HarnessVisibilityResponse>(fetchImpl, '/api/harness/visibility', { ...json(update), method: 'PUT' }),
     },
 
     chats: {
-      // NOTE ON LIST SHAPES
-      //
-      // Every list endpoint on this server responds with a BARE ARRAY, not a
-      // `{ chats: [...] }` envelope. These signatures previously declared an
-      // envelope, which type-checked fine (nothing validates the wire at
-      // runtime) and then silently produced `undefined` at every call site —
-      // the mobile Chats tab rendered "No chats yet" against a server holding
-      // 128 chats. Verified against the live API; keep these in step with
-      // `apps/server/src/routes/chats.ts`, which does `res.json(chats)`.
-      list: (params?: { archived?: boolean; limit?: number; projectId?: string }) => {
-        const q = new URLSearchParams();
-        if (params?.archived !== undefined) q.set('archived', String(params.archived));
-        if (params?.projectId) q.set('projectId', params.projectId);
-        if (params?.limit !== undefined) q.set('limit', String(params.limit));
-        const suffix = q.toString() ? `?${q}` : '';
-        return request<ChatSummary[]>(fetchImpl, `/api/chats${suffix}`);
+      setPinned: (id: string, pinned: boolean) => request<ChatSummary>(fetchImpl, `/api/chats/${encodeURIComponent(id)}`, { ...json({ pinned }), method: 'PATCH' }),
+      setUnread: (id: string, unread: boolean) => request<ChatSummary>(fetchImpl, `/api/chats/${encodeURIComponent(id)}`, { ...json({ unread }), method: 'PATCH' }),
+      /**
+       * One page of chats (chat list v2, G-02): `{ items, nextCursor, total,
+       * counts }`. Unlike most list endpoints this one is paged — pass
+       * `nextCursor` back as `cursor` (with the same query) for the next page.
+       * Worker chats are left out unless `workers: true`.
+       */
+      list: (query: ChatListQuery = {}) => {
+        const suffix = chatListSearchParams(query);
+        return request<ChatListPage<ChatListRow>>(fetchImpl, `/api/chats${suffix ? `?${suffix}` : ''}`);
       },
+
+      /**
+       * Archive any number of chats; the result is per id. Split into
+       * requests of at most `CHAT_BULK_MAX_IDS` (the server's cap) by the
+       * shared `runChatBulk` contract.
+       */
+      archiveMany: (ids: string[]) =>
+        runChatBulk(ids, (batch) => request<ChatBulkResult>(fetchImpl, '/api/chats/archive', json({ ids: batch }))),
+
+      /** Permanently delete any number of chats; batched like `archiveMany`. */
+      removeMany: (ids: string[]) =>
+        runChatBulk(ids, (batch) => request<ChatBulkResult>(fetchImpl, '/api/chats/delete', json({ ids: batch }))),
 
       get: (id: string) => request<ChatSummary>(fetchImpl, `/api/chats/${id}`),
 
@@ -1067,6 +1209,10 @@ export function createApiClient(fetchImpl: ApiFetch) {
        * both the field (`attachments`) and the 10-file cap; anything past
        * that the server rejects, so callers should not silently truncate.
        */
+      /** Caller-built multipart supports native URI-backed files without a byte Blob. */
+      sendMultipart: (id: string, form: FormData) =>
+        request<{ sessionId: string }>(fetchImpl, `/api/chats/${encodeURIComponent(id)}/prompt`, { method: 'POST', body: form }),
+
       sendWithAttachments: (
         id: string,
         input: SendMessageInput,
@@ -1098,6 +1244,28 @@ export function createApiClient(fetchImpl: ApiFetch) {
       },
 
       /**
+       * "Send to agent" from the OS share sheet (mobile MG-09): an existing chat or a new one, the note / text / URL
+       * and up to five files in ONE multipart request, so a share is sent once. `idempotencyKey` is required: a
+       * retry with the same key answers the first chat (`created: false`) without sending again.
+       */
+      ingest: (input: ChatIngestInput, options: { idempotencyKey: string }) => {
+        const form = new FormData();
+        form.set('target', JSON.stringify(input.target));
+        if (input.note) form.set('note', input.note);
+        if (input.text) form.set('text', input.text);
+        if (input.url) form.set('url', input.url);
+        for (const file of input.attachments ?? []) {
+          form.append('attachments', new Blob([file.data as unknown as ArrayBuffer], { type: file.mimeType || 'application/octet-stream' }), file.name);
+        }
+        // No content-type: fetch writes the multipart boundary itself.
+        return request<ChatIngestResult>(fetchImpl, '/api/chats/ingest', {
+          method: 'POST',
+          headers: { 'idempotency-key': options.idempotencyKey },
+          body: form,
+        });
+      },
+
+      /**
        * Stop the in-flight turn. `options` is what `StopController` computes
        * for the press — the first, graceful press and the forced second press
        * differ only here — and was previously dropped on the floor by every
@@ -1121,6 +1289,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
       update: (
         id: string,
         patch: {
+          pinned?: boolean;
+          unread?: boolean;
           name?: string;
           description?: string;
           model?: string;
@@ -1151,6 +1321,18 @@ export function createApiClient(fetchImpl: ApiFetch) {
         }),
 
       remove: (id: string) => request<void>(fetchImpl, `/api/chats/${id}`, { method: 'DELETE' }),
+
+      backgroundTaskDigest: (id: string, taskId: string) =>
+        request<TaskDigest>(fetchImpl, `/api/chats/${encodeURIComponent(id)}/background-tasks/${encodeURIComponent(taskId)}`),
+
+      /** D-89: the brief, review rounds and latest steps of one worker. */
+      backgroundTaskDetail: (id: string, taskId: string) =>
+        request<BackgroundTaskDetail>(
+          fetchImpl,
+          `/api/chats/${encodeURIComponent(id)}/background-tasks/${encodeURIComponent(taskId)}/detail`,
+        ),
+
+      prepareWorkspace: (id: string) => request<unknown>(fetchImpl, `/api/chats/${encodeURIComponent(id)}/workspace/prepare`, { method: 'POST' }),
 
       plans: (id: string) => request<PlanSummary[]>(fetchImpl, `/api/chats/${id}/plans`),
 
@@ -1188,10 +1370,31 @@ export function createApiClient(fetchImpl: ApiFetch) {
        * bare arrays the other chat list routes return.
        */
       backgroundTasks: (id: string) =>
-        request<{ tasks: BackgroundTaskSummary[] }>(
+        request<{ tasks: BackgroundTaskListItem[] }>(
           fetchImpl,
           `/api/chats/${id}/background-tasks`,
         ),
+
+      /**
+       * Cancel one worker (G-20). The server attributes it to the user and
+       * answers `{ ok, taskId, cancelledBy, cancelledAt }`; the orchestrator's
+       * chat stream carries the same attribution on `chat.background_task.status`.
+       */
+      cancelBackgroundTask: (id: string, taskId: string) =>
+        request<BackgroundTaskCancelResult>(
+          fetchImpl,
+          `/api/chats/${encodeURIComponent(id)}/background-tasks/${encodeURIComponent(taskId)}/cancel`,
+          { method: 'POST' },
+        ),
+      /** D-100: continue a worker a server restart interrupted. */
+      resumeBackgroundTask: (id: string, taskId: string) =>
+        request<{ ok: true; taskId: string }>(
+          fetchImpl,
+          `/api/chats/${encodeURIComponent(id)}/background-tasks/${encodeURIComponent(taskId)}/resume`,
+          { method: 'POST' },
+        ),
+      /** The runs this chat started through its workflow tools, as run cards (P06). */
+      workflowRuns: (id: string) => request<{ runs: ChatWorkflowRunCard[] }>(fetchImpl, `/api/chats/${id}/workflow-runs`),
 
       respond: (
         id: string,
@@ -1213,7 +1416,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
       respondPermission: (
         id: string,
         interactionId: string,
-        response: { behavior: 'allow' | 'deny'; message?: string },
+        /** `approvalProof` (MG-05) is required for a risky gate answered from a phone; `remember` = "Allow for this chat" (U-16). */
+        response: { behavior: 'allow' | 'deny'; message?: string; approvalProof?: ApprovalProof; remember?: 'owner' | 'project' },
       ) =>
         request<void>(
           fetchImpl,
@@ -1246,32 +1450,46 @@ export function createApiClient(fetchImpl: ApiFetch) {
           // `SetChatPermissionModeSchema` names this `mode`.
           body: JSON.stringify({ mode }),
         }),
+
+      /** U-16 (D-147): the permission rules this chat remembered ("Allow for this chat"). */
+      permissionRules: (id: string) => request<{ rules: StoredPermissionRuleView[] }>(fetchImpl, `/api/chats/${id}/permission-rules`),
+      clearPermissionRules: (id: string) =>
+        request<{ removed: number }>(fetchImpl, `/api/chats/${id}/permission-rules`, { method: 'DELETE' }),
+      revokePermissionRule: (id: string, ruleId: string) =>
+        request<void>(fetchImpl, `/api/chats/${id}/permission-rules/${ruleId}`, { method: 'DELETE' }),
     },
 
     models: () => request<ModelInfo[]>(fetchImpl, '/api/harness/models'),
 
     workflows: {
-      list: (projectId?: string) =>
-        request<WorkflowSummary[]>(
-          fetchImpl,
-          `/api/workflow-definitions${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
-        ),
+      /** Every definition (all pages, following `nextCursor`), newest first. */
+      list: async (projectId?: string): Promise<WorkflowSummary[]> => {
+        const items: WorkflowSummary[] = [];
+        let cursor: string | undefined;
+        do {
+          const qs = new URLSearchParams({ limit: '200' });
+          if (projectId) qs.set('projectId', projectId);
+          if (cursor) qs.set('cursor', cursor);
+          const page = await request<{ items: WorkflowSummary[]; nextCursor?: string }>(
+            fetchImpl,
+            `/api/workflow-definitions?${qs.toString()}`,
+          );
+          items.push(...page.items);
+          cursor = page.nextCursor;
+        } while (cursor);
+        return items;
+      },
 
-      get: (id: string) =>
-        request<WorkflowSummary & { stages: unknown[]; edges: unknown[] }>(
-          fetchImpl,
-          `/api/workflow-definitions/${id}`,
-        ),
+      get: (id: string) => request<WorkflowDefinitionRecord>(fetchImpl, `/api/workflow-definitions/${id}`),
     },
 
     runs: {
-      list: (params?: { definitionId?: string; status?: string }) => {
-        const q = new URLSearchParams();
-        if (params?.definitionId) q.set('definitionId', params.definitionId);
-        if (params?.status) q.set('status', params.status);
-        const suffix = q.toString() ? `?${q}` : '';
-        return request<WorkflowRunSummary[]>(fetchImpl, `/api/workflow-runs${suffix}`);
-      },
+      list: (params?: RunListParams) =>
+        request<WorkflowRunSummary[]>(fetchImpl, `/api/workflow-runs${runListQuery(params)}`),
+
+      /** One stage's newest executions across a definition's runs, newest first. */
+      stageHistory: (definitionId: string, stageKey: string, limit?: number) =>
+        request<StageHistoryEntry[]>(fetchImpl, `/api/workflow-runs/stage-history${qs({ definitionId, stageKey, limit })}`),
 
       get: (id: string) =>
         request<WorkflowRunSummary & { stageRuns: StageRunSummary[] }>(
@@ -1282,40 +1500,125 @@ export function createApiClient(fetchImpl: ApiFetch) {
       stages: (id: string) =>
         request<StageRunSummary[]>(fetchImpl, `/api/workflow-runs/${id}/stages`),
 
-      pendingInterrupts: (id: string) =>
-        request<PendingInterrupt[]>(fetchImpl, `/api/workflow-runs/${id}/pending-interrupts`),
-
       /**
-       * Answer a stage's HITL gate.
+       * Send a run command (`POST /workflow-runs/:id/commands`).
        *
-       * This is the ONE mutating run operation a mobile device can perform:
-       * the route policy classifies it as `exec:agent` (answering the agent)
-       * rather than `write:workflows` (editing the workflow). Everything else
-       * below is intentionally absent from the mobile surface.
+       * `approve` (answering a stage's HITL gate) is the ONE mutating run
+       * operation a mobile device can perform without `write:workflows`: the
+       * route policy classifies the commands route as `exec:agent` (answering
+       * the agent), and the route itself demands `write:workflows` for every
+       * other command. The pending gates are the run's `awaiting_input` stage
+       * runs (`runs.get(id).stageRuns`).
        */
-      approve: (
-        runId: string,
-        stageId: string,
-        body: {
-          outcome?: ApprovalOutcome;
-          approved?: boolean;
-          reason?: string;
-          followUpPrompt?: string;
-          value?: unknown;
-        },
-      ) =>
-        request<{ message: string; outcome: string; approved: boolean }>(
+      command: (runId: string, body: RunCommand) =>
+        request<{ runId: string; command: string }>(
           fetchImpl,
-          `/api/workflow-runs/${runId}/stages/${stageId}/approve`,
+          `/api/workflow-runs/${runId}/commands`,
           json(body),
         ),
 
-      /** Supply data to a stage waiting on input. Also `exec:agent`. */
-      interrupt: (runId: string, stageId: string, body: { data?: unknown; prompt?: string }) =>
-        request<{ message: string }>(
+      /**
+       * Answer a stage's gate with the `approve` command (a completion review, an approval wait, an in-turn gate).
+       * A phone sends `approvalProof` beside the command (mobile MG-05): its approval key signs
+       * `{kind: 'stage_approval', id: instanceId, entityId: runId}` and `STAGE_APPROVAL_DECISION[outcome]`.
+       */
+      approveStage: (
+        runId: string,
+        input: { instanceId: string; outcome: ApprovalOutcome; feedback?: string; data?: Record<string, unknown>; expectedVersion?: number; approvalProof?: ApprovalProof },
+      ) =>
+        request<{ runId: string; command: string }>(fetchImpl, `/api/workflow-runs/${runId}/commands`, json({ command: 'approve', ...input })),
+
+      // ── A stage is a compact chat (P03b) ──────────────────────────
+
+      /**
+       * Send an operator message to a stage instance. Between turns it is
+       * queued as the next turn, a completed stage is AMENDED (its output
+       * replaced; later stages keep what they used), a paused stage is
+       * retried with it. 409 `STAGE_BUSY` mid-turn, `INTERACTION_PENDING`
+       * while a gate waits.
+       */
+      stageMessage: (runId: string, instanceId: string, input: SendMessageInput) =>
+        request<StageMessageResult>(
           fetchImpl,
-          `/api/workflow-runs/${runId}/stages/${stageId}/interrupt`,
-          json(body),
+          `/api/workflow-runs/${runId}/instances/${instanceId}/messages`,
+          json({ prompt: input.message, ...(input.mode ? { mode: input.mode } : {}) }),
+        ),
+
+      /** {@link stageMessage} with files (multipart; the server caps at 10). */
+      stageMessageMultipart: (runId: string, instanceId: string, form: FormData) =>
+        request<StageMessageResult>(fetchImpl, `/api/workflow-runs/${encodeURIComponent(runId)}/instances/${encodeURIComponent(instanceId)}/messages`, { method: 'POST', body: form }),
+
+      stageMessageWithAttachments: (
+        runId: string,
+        instanceId: string,
+        input: SendMessageInput,
+        attachments: Array<{ name: string; data: Uint8Array; mimeType?: string }>,
+      ) => {
+        const form = new FormData();
+        form.set('prompt', input.message);
+        if (input.mode) form.set('mode', input.mode);
+        for (const file of attachments) {
+          form.append('attachments', new Blob([file.data as unknown as ArrayBuffer], { type: file.mimeType || 'application/octet-stream' }), file.name);
+        }
+        return request<StageMessageResult>(fetchImpl, `/api/workflow-runs/${runId}/instances/${instanceId}/messages`, {
+          method: 'POST',
+          body: form,
+        });
+      },
+
+      /** Stop the stage's turn in flight; the stage continues (a stage cancel is the `cancel` command). */
+      /** U-16 (D-147): the permission rules this run remembered ("Allow for this run"), shared by all its stages. */
+      permissionRules: (runId: string) => request<{ rules: StoredPermissionRuleView[] }>(fetchImpl, `/api/workflow-runs/${runId}/permission-rules`),
+      clearPermissionRules: (runId: string) =>
+        request<{ removed: number }>(fetchImpl, `/api/workflow-runs/${runId}/permission-rules`, { method: 'DELETE' }),
+      revokePermissionRule: (runId: string, ruleId: string) =>
+        request<void>(fetchImpl, `/api/workflow-runs/${runId}/permission-rules/${ruleId}`, { method: 'DELETE' }),
+
+      cancelStageTurn: (runId: string, instanceId: string, options?: { force?: boolean }) =>
+        request<{ status: string; force: boolean }>(
+          fetchImpl,
+          `/api/workflow-runs/${runId}/instances/${instanceId}/turn/cancel`,
+          json(options ?? {}),
+        ),
+
+      /** Answer a stage's tool-permission gate (the chat's body shape; `approvalProof` for a risky gate from a phone, MG-05). */
+      stagePermission: (
+        runId: string,
+        instanceId: string,
+        interactionId: string,
+        /** `remember` = "Allow for this run" (U-16): the gate's rules then cover every stage of the run. */
+        response: { behavior: 'allow' | 'deny'; message?: string; approvalProof?: ApprovalProof; remember?: 'owner' | 'project' },
+      ) =>
+        request<void>(
+          fetchImpl,
+          `/api/workflow-runs/${runId}/instances/${instanceId}/interactions/${interactionId}/permission`,
+          json(response),
+        ),
+
+      /** Answer a stage's question gate (the chat's body shape). */
+      stageAnswer: (
+        runId: string,
+        instanceId: string,
+        interactionId: string,
+        response: { answers: Record<string, string[]>; freeformResponse?: string },
+      ) =>
+        request<void>(
+          fetchImpl,
+          `/api/workflow-runs/${runId}/instances/${instanceId}/interactions/${interactionId}/answer`,
+          json(response),
+        ),
+
+      /** Decide a stage's plan review. */
+      stagePlan: (
+        runId: string,
+        instanceId: string,
+        interactionId: string,
+        decision: { approved: boolean; action?: 'exit_only' | 'implement_interactive' | 'implement_autopilot'; feedback?: string },
+      ) =>
+        request<void>(
+          fetchImpl,
+          `/api/workflow-runs/${runId}/instances/${instanceId}/interactions/${interactionId}/plan`,
+          json(decision),
         ),
     },
 
@@ -1337,6 +1640,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
     },
 
     workspaces: {
+      createCheckpoint: (id: string, label?: string) =>
+        request<{ checkpoints: WorkspaceCheckpoint[] }>(fetchImpl, `/api/workspaces/${encodeURIComponent(id)}/checkpoints`, json(label ? { label } : {})),
       list: (params?: { projectId?: string; limit?: number }) => {
         const q = new URLSearchParams();
         if (params?.projectId) q.set('projectId', params.projectId);
@@ -1454,7 +1759,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
      * the session id is the thing the socket URL is built from.
      */
     terminals: {
-      create: (workspaceId: string, body: { cols: number; rows: number }) =>
+      /** `shell` (optional): the executable to spawn instead of the server's default (the route accepts it). */
+      create: (workspaceId: string, body: { cols: number; rows: number; shell?: string }) =>
         request<TerminalDescriptor>(
           fetchImpl,
           `/api/workspaces/${workspaceId}/terminals`,
@@ -1474,6 +1780,7 @@ export function createApiClient(fetchImpl: ApiFetch) {
     },
 
     review: {
+      ...createReviewMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init)),
       threads: (workspaceId: string, params?: { path?: string; status?: string }) => {
         const q = new URLSearchParams();
         if (params?.path) q.set('path', params.path);
@@ -1530,7 +1837,7 @@ export function createApiClient(fetchImpl: ApiFetch) {
           },
         ),
 
-      submit: (workspaceId: string, body: { threadIds: string[]; note?: string; preview?: boolean }) =>
+      submit: (workspaceId: string, body: { threadIds: string[]; target?: ReviewSubmitTarget; note?: string; preview?: boolean }) =>
         request<{ prompt: string; threadIds: string[]; reviewRound: number; delivered: boolean }>(
           fetchImpl,
           `/api/workspaces/${workspaceId}/review/submit`,
@@ -1539,16 +1846,75 @@ export function createApiClient(fetchImpl: ApiFetch) {
     },
 
     projects: {
-      list: () => request<ProjectSummary[]>(fetchImpl, '/api/projects'),
+      codebaseReadiness: (id: string, cid: string) => request<RepoReadiness>(fetchImpl, `/api/projects/${encodeURIComponent(id)}/codebases/${encodeURIComponent(cid)}/readiness`),
+      availableArtifacts: (id: string, type?: 'agent' | 'prompt' | 'skill') => request<SystemArtifact[]>(fetchImpl, `/api/projects/${encodeURIComponent(id)}/available-artifacts${type ? `?type=${type}` : ''}`),
+      /** `includeSummary` (G-13) adds each project's `summary` for a Projects list screen. */
+      list: (params?: { includeSummary?: boolean }) =>
+        request<ProjectSummary[]>(
+          fetchImpl,
+          `/api/projects${params?.includeSummary ? '?include=summary' : ''}`,
+        ),
 
-      get: (id: string) =>
+      get: (id: string, params?: { includeSummary?: boolean }) =>
         request<ProjectSummary & { codebases: CodebaseSummary[] }>(
           fetchImpl,
-          `/api/projects/${id}`,
+          `/api/projects/${id}${params?.includeSummary ? '?include=summary' : ''}`,
         ),
 
       codebases: (id: string) =>
         request<CodebaseSummary[]>(fetchImpl, `/api/projects/${id}/codebases`),
+
+      /**
+       * G-15 — ProjectDetail Runs tab. `WorkflowRun` carries no `projectId`
+       * of its own, so this is `/projects/:id/runs`, not `/workflow-runs?
+       * projectId=` (that route is Workflow-Overhaul-owned engine code).
+       * Newest first; paged the same way `chats.list` is (`nextCursor` back
+       * as `cursor`).
+       */
+      runs: (id: string, params?: { status?: string | string[]; cursor?: string; limit?: number }) => {
+        const q = new URLSearchParams();
+        if (params?.status) q.set('status', Array.isArray(params.status) ? params.status.join(',') : params.status);
+        if (params?.cursor) q.set('cursor', params.cursor);
+        if (params?.limit !== undefined) q.set('limit', String(params.limit));
+        const suffix = q.toString() ? `?${q}` : '';
+        return request<ProjectRunListPage>(fetchImpl, `/api/projects/${id}/runs${suffix}`);
+      },
+
+      /**
+       * G-16 — was synchronous; now starts a background job and answers
+       * `202 { jobId }` almost immediately. Tail progress with `codebaseLogs`
+       * below, or the `codebase.status_changed` stream event.
+       */
+      fetchCodebase: (id: string, codebaseId: string) =>
+        request<FetchCodebaseResult>(fetchImpl, `/api/projects/${id}/codebases/${codebaseId}/fetch`, {
+          method: 'POST',
+        }),
+
+      /** G-16 — the last N clone/fetch log lines + the current/last job. */
+      codebaseLogs: (id: string, codebaseId: string, params?: { limit?: number }) => {
+        const suffix = params?.limit ? `?limit=${params.limit}` : '';
+        return request<CodebaseLogsResponse>(fetchImpl, `/api/projects/${id}/codebases/${codebaseId}/logs${suffix}`);
+      },
+
+      /**
+       * G-17 — bare (no `include`) is the plain array, unchanged. Pass
+       * `include` for `sizeBytes`/`link`/`expiresAt` per item plus the
+       * `totalBytes`/`reclaimableBytes` summary.
+       */
+      codebaseWorktrees: (id: string, codebaseId: string, params?: { include?: Array<'usage' | 'link'> }) => {
+        const suffix = params?.include?.length ? `?include=${params.include.join(',')}` : '';
+        return request<WorktreeInfo[] | WorktreeListEnriched>(
+          fetchImpl,
+          `/api/projects/${id}/codebases/${codebaseId}/worktrees${suffix}`,
+        );
+      },
+
+      /** G-19 — per-project skill/prompt/agent/MCP enable-disable, server-side. */
+      artifactPrefs: {
+        get: (id: string) => request<ProjectArtifactPrefs>(fetchImpl, `/api/projects/${id}/artifact-prefs`),
+        update: (id: string, prefs: ProjectArtifactPrefs) =>
+          request<ProjectArtifactPrefs>(fetchImpl, `/api/projects/${id}/artifact-prefs`, jsonWith('PUT', prefs)),
+      },
     },
 
     /**
@@ -1557,6 +1923,7 @@ export function createApiClient(fetchImpl: ApiFetch) {
      * full capability policy is visible.
      */
     agents: {
+      get: (id: string) => request<Agent>(fetchImpl, `/api/agents/${encodeURIComponent(id)}`),
       /** Picker list — project agents shadow global, global shadows system. */
       selectable: (projectId?: string) =>
         request<AgentSummary[]>(
@@ -1603,6 +1970,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
      * does, which is the part worth checking away from a desk.
      */
     system: {
+      computerUse: () => request<{ enabled: boolean; skillId?: string }>(fetchImpl, '/api/system/computer-use'),
+      audio: () => request<Record<string, unknown>>(fetchImpl, '/api/system/audio'),
       artifacts: (type?: 'agent' | 'prompt' | 'skill') =>
         request<SystemArtifact[]>(
           fetchImpl,
@@ -1613,6 +1982,57 @@ export function createApiClient(fetchImpl: ApiFetch) {
         request<{ content: string }>(fetchImpl, `/api/system/artifacts/${id}`),
 
       mcpServers: () => request<McpServerEntry[]>(fetchImpl, '/api/system/mcp-servers'),
+
+      /**
+       * G-12 — Home "System" card + Settings › Diagnostics: server name/
+       * version, platform, uptime, agent capacity, database and disk usage.
+       * `database.sizeBytes` and `disk` are absent (not `0`) when the server
+       * could not measure them.
+       */
+      info: () => request<SystemInfo>(fetchImpl, '/api/system/info'),
+    },
+
+    /**
+     * G-10 — Home "This week", the Workflows stat strip, AutomationDetail's
+     * stat row, WorkflowDetail's rail. `from`/`to` are computed by the
+     * CALLER in its own local time zone; the server never guesses a range.
+     * `successRate` / `avgDurationMs` / `medianDurationMs` are absent, not
+     * `0`, whenever their denominator is zero (D-36). No SSE: invalidate on
+     * the `global` scope's `attention.remove` and lifecycle events.
+     */
+    stats: {
+      summary: (query: {
+        from: string;
+        to: string;
+        projectId?: string;
+        definitionId?: string;
+        automationId?: string;
+        groupBy?: 'definition';
+      }) => {
+        const q = new URLSearchParams({ from: query.from, to: query.to });
+        if (query.projectId) q.set('projectId', query.projectId);
+        if (query.definitionId) q.set('definitionId', query.definitionId);
+        if (query.automationId) q.set('automationId', query.automationId);
+        if (query.groupBy) q.set('groupBy', query.groupBy);
+        return request<StatsSummary>(fetchImpl, `/api/stats/summary?${q}`);
+      },
+    },
+
+    /**
+     * G-11 — Home "Recently finished". Merges chats' finished turns,
+     * terminal workflow runs and terminal automation executions into one
+     * feed, newest first. Pull-request-/commit-derived items are not built
+     * in this pass (see `packages/shared/src/types/RecentActivity.ts`).
+     */
+    activity: {
+      recent: (query?: { since?: string; limit?: number; projectId?: string }) => {
+        const q = new URLSearchParams();
+        if (query?.since) q.set('since', query.since);
+        if (query?.limit !== undefined) q.set('limit', String(query.limit));
+        if (query?.projectId) q.set('projectId', query.projectId);
+        const suffix = q.toString() ? `?${q}` : '';
+        return request<RecentActivityPage>(fetchImpl, `/api/activity/recent${suffix}`);
+      },
     },
 
     /**
@@ -1622,6 +2042,26 @@ export function createApiClient(fetchImpl: ApiFetch) {
      * `createAdminApi().devices.scopeRequests`.
      */
     auth: {
+      registerPush: (body: { token: string; provider: 'expo'; platform: string }) =>
+        request<void>(fetchImpl, '/api/auth/push-token', jsonWith('PUT', body)),
+      mutePush: (mutedUntil: number | null) =>
+        request<void>(fetchImpl, '/api/auth/push-token/mute', jsonWith('PUT', { mutedUntil })),
+      /** Forget this device's push token on the server (mobile "Unpair this device"). */
+      unregisterPush: () => request<void>(fetchImpl, '/api/auth/push-token', { method: 'DELETE' }),
+      /** MG-05 — a single-use nonce (60 s) bound to this device, for an approval or a key registration. */
+      approvalNonce: () => request<{ nonce: string; expiresAt: number }>(fetchImpl, '/api/auth/approval-nonce', json({})),
+      /** MG-05 — register this device's biometric-gated approval key (the body proves possession). */
+      setApprovalKey: (body: ApprovalKeyRegistration) =>
+        request<void>(fetchImpl, '/api/auth/devices/me/approval-key', jsonWith('PUT', body)),
+      removeApprovalKey: () => request<void>(fetchImpl, '/api/auth/devices/me/approval-key', { method: 'DELETE' }),
+      devices: {
+        /**
+         * MG-01 — this device's own record (name, current scopes, approval
+         * key) with only `read:status`. 404 `NOT_A_DEVICE` for a session that
+         * is not a paired device (e.g. the local desktop).
+         */
+        me: () => request<SelfDeviceView>(fetchImpl, '/api/auth/devices/me'),
+      },
       scopeRequests: {
         /**
          * Ask for scopes this device does not hold. 403 `SCOPE_NOT_REQUESTABLE`
@@ -1646,6 +2086,26 @@ export function createApiClient(fetchImpl: ApiFetch) {
     sourceControl: {
       config: () => request<SourceControlConfig>(fetchImpl, '/api/source-control/config'),
       status: () => request<SourceControlStatus>(fetchImpl, '/api/source-control/status'),
+      /**
+       * MG-11 — the branches a Git remote advertises, before any codebase
+       * exists. Needs `write:projects`. Errors: 400 `INVALID_URL`,
+       * 401 `AUTH_REQUIRED`, 404 `NOT_FOUND`, 504 `TIMEOUT`.
+       */
+      remoteRefs: (body: RemoteRefsRequest) =>
+        request<RemoteRefs>(fetchImpl, '/api/source-control/remote-refs', json(body)),
+    },
+
+    /**
+     * G-18 — CommandPalette entity search across chats, projects, agents,
+     * workflows, automations and scripts, ranked and merged server-side.
+     * Each type is simply dropped from the results (never a 403) when the
+     * caller lacks its read scope.
+     */
+    search: (query: SearchQuery) => {
+      const q = new URLSearchParams({ q: query.q });
+      if (query.types?.length) q.set('types', query.types.join(','));
+      if (query.limit !== undefined) q.set('limit', String(query.limit));
+      return request<SearchResponse>(fetchImpl, `/api/search?${q}`);
     },
   };
 }

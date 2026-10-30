@@ -17,6 +17,8 @@ const AUTOMATION_KINDS = new Set([
   'automation_execution.completed',
   'automation_execution.failed',
   'automation_execution.cancelled',
+  'automation_execution.paused',
+  'automation_execution.resumed',
   'automation_execution.recovered',
   'automation_execution.iteration_started',
   'automation_execution.iteration_completed',

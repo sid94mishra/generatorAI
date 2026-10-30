@@ -84,8 +84,12 @@ export class DrizzleWorktreeRepository implements IWorktreeRepository {
 
   async updateStatus(id: string, status: WorktreeStatus): Promise<void> {
     const values: Record<string, unknown> = { status };
-    if (status === 'completed' || status === 'cleanup-pending') {
+    // `cleanedUpAt` is when the worktree stopped being live — the retention
+    // clock. Back to `active` (a restored chat) clears it.
+    if (status === 'completed' || status === 'cleanup-pending' || status === 'orphaned') {
       values['cleanedUpAt'] = new Date();
+    } else if (status === 'active') {
+      values['cleanedUpAt'] = null;
     }
     await this.db.update(worktrees).set(values).where(eq(worktrees.id, id));
   }

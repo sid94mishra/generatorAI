@@ -1,0 +1,10 @@
+{
+  "deviceType": "iPhone 18 Pro",
+  "runtime": "iOS 27.0",
+  "fontScaleMap": {
+    "default": "large",
+    "ax": "accessibility-extra-extra-extra-large"
+  },
+  "recordedAt": "2026-10-04T00:16:06.369Z",
+  "commit": "c84d754a"
+}

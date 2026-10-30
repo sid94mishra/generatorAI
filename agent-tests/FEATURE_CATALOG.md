@@ -37,7 +37,7 @@ Drag to reposition · drag handle→handle to connect (default edge `on_success`
 
 ## 2. Stage Config (`StagePropertiesPanel.tsx`) — Properties + Execution tabs
 
-**Properties tab:** Name, Description · Template dropdown · Model override (`Workflow default` + list) · Reasoning effort (`low\|medium\|high\|xhigh`) · Prompts sub-tabs **Inline / Files / Agent** (inline: label, text, waitForCompletion) · Skills toggles · MCP server toggles · Variables key-value.
+**Properties tab:** Name, Description · Template dropdown · Model override (`Workflow default` + list) · Reasoning effort (`low\|medium\|high\|xhigh`) · Prompts sub-tabs **Inline / Files / Agent** (inline: label, text) · Skills toggles · MCP server toggles · Variables key-value.
 
 **Execution tab:**
 | Field | Values |

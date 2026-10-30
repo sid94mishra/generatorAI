@@ -20,12 +20,18 @@
 //    approval is how users disable notifications permanently.
 // ────────────────────────────────────────────────────────────────
 
-import type { ILogger } from '@generatorai/shared';
+import { pushRouting } from './pushRouting.js';
+import type { ILogger, PushData } from '@generatorai/shared';
+import {
+  NOTIFICATION_CATEGORIES,
+  NOTIFICATION_REDACTED_BODY,
+  type NotificationCategoryId,
+  type NotificationInterruption,
+} from '@generatorai/shared/ui-contract';
 
 import {
   isMutable,
   planNotification,
-  type InteractionKind,
   type NotificationPlan,
 } from './notificationPolicy.js';
 
@@ -48,15 +54,7 @@ export interface PushTarget {
  * without opening the UI; `actions` is present ONLY for tool-permission
  * prompts (the one gate with a closed allow/deny answer).
  */
-export interface PushData {
-  route: string;
-  category: string;
-  threadId: string;
-  chatId?: string;
-  interactionId?: string;
-  kind?: InteractionKind;
-  actions?: readonly string[];
-}
+export type { PushData } from '@generatorai/shared';
 
 export interface PushMessage {
   target: PushTarget;
@@ -65,13 +63,13 @@ export interface PushMessage {
   /** Consumed by the app to deep-link on tap and to act from the lock screen. */
   data: PushData;
   threadId: string;
-  interruption: 'active' | 'timeSensitive';
+  interruption: NotificationInterruption;
   /**
-   * Expo/UNNotification category identifier. The app registers an
-   * `approval` category with Allow/Deny buttons at startup, so every
-   * approval notification names it — the OS then renders the buttons.
+   * Expo/UNNotification category identifier (shared NOTIFICATION_CATEGORIES,
+   * registered by the app at startup). Only `approval` carries Allow / Deny;
+   * a risky gate is `approval.risky`, whose one action opens the app (MG-04).
    */
-  categoryId?: string;
+  categoryId: NotificationCategoryId;
 }
 
 /** Pluggable delivery, so Expo Push / APNs / FCM can be swapped or faked. */
@@ -80,6 +78,10 @@ export interface PushProviderClient {
 }
 
 export interface PushDispatcherPorts {
+  serverId?: string;
+  workflowDefinitionId?(runId: string): Promise<string | null>;
+  /** The server's attention counts at send time (badge, MG-06 part B); null while the feed is unavailable. */
+  attentionCounts?(): { needsYou: number; running: number } | null;
   listTargets(): PushTarget[];
   recordSuccess(deviceId: string): void;
   recordFailure(deviceId: string, error: string): void;
@@ -114,7 +116,19 @@ export class PushDispatcher {
    * Returns the messages it decided to send, so tests can assert the decision
    * without a provider. Delivery itself is not awaited by the caller.
    */
-  handleEvent(event: EventLike): PushMessage[] {
+  /** Async metadata lookup is isolated from the event bus and the legacy synchronous API. */
+  async dispatchEvent(event: EventLike): Promise<PushMessage[]> {
+    const plan = planNotification({ kind: event.kind, data: isRecord(event.data) ? event.data : undefined });
+    if (!plan) return [];
+    let definitionId: string | null = null;
+    if (plan.threadId.startsWith('run:') && this.ports.workflowDefinitionId) {
+      try { definitionId = await this.ports.workflowDefinitionId(plan.threadId.slice(4)); }
+      catch { /* Deleted/unavailable run: open the workflow list, never an invented target. */ }
+    }
+    return this.handleEvent(event, definitionId);
+  }
+
+  handleEvent(event: EventLike, workflowDefinitionId?: string | null): PushMessage[] {
     const plan = planNotification({
       kind: event.kind,
       data: isRecord(event.data) ? event.data : undefined,
@@ -123,6 +137,12 @@ export class PushDispatcher {
 
     const now = this.clock();
     const messages: PushMessage[] = [];
+    let counts: { needsYou: number; running: number } | null = null;
+    try {
+      counts = this.ports.attentionCounts?.() ?? null;
+    } catch {
+      // The badge is a nicety; a feed that cannot answer never blocks a notification.
+    }
 
     for (const target of this.ports.listTargets()) {
       if (!this.shouldDeliver(target, plan, now)) continue;
@@ -131,10 +151,14 @@ export class PushDispatcher {
         target,
         title: plan.title,
         body: plan.body,
-        data: buildData(plan),
+        data: {
+          ...buildData(plan),
+          ...(counts ? { counts: { needsYou: counts.needsYou, running: counts.running } } : {}),
+          ...(this.ports.serverId ? pushRouting(plan, this.ports.serverId, workflowDefinitionId) : {}),
+        },
         threadId: plan.threadId,
         interruption: plan.interruption,
-        ...(plan.category === 'approval' ? { categoryId: APPROVAL_CATEGORY_ID } : {}),
+        categoryId: plan.categoryId,
       });
       this.recentlySent.set(dedupeKey(target.deviceId, plan), now);
     }
@@ -197,13 +221,22 @@ export class PushDispatcher {
 export const APPROVAL_CATEGORY_ID = 'approval';
 
 function buildData(plan: NotificationPlan): PushData {
-  const data: PushData = { route: plan.route, category: plan.category, threadId: plan.threadId };
+  const data: PushData = {
+    route: plan.route,
+    category: plan.categoryId,
+    threadId: plan.threadId,
+    redacted: { title: NOTIFICATION_CATEGORIES[plan.categoryId].redactedTitle, body: NOTIFICATION_REDACTED_BODY },
+  };
+  if (plan.runId) data.runId = plan.runId;
+  if (plan.stageRunId) data.stageRunId = plan.stageRunId;
+  if (plan.question) data.question = plan.question;
   const gate = plan.interaction;
   if (gate) {
     data.chatId = gate.chatId;
     data.interactionId = gate.interactionId;
     data.kind = gate.kind;
     if (gate.actions && gate.actions.length > 0) data.actions = [...gate.actions];
+    if (gate.risk) data.risk = gate.risk;
   }
   return data;
 }

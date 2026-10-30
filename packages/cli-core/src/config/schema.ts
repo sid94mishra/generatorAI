@@ -49,11 +49,23 @@ export const CliBehaviourSchema = z.object({
   pageSize: z.number().int().min(1).max(500).default(50),
 });
 
+/**
+ * Accent ids the TUI accepts. cli-core does not depend on design-tokens, so the
+ * list is duplicated here; `apps/cli/src/__tests__/accentIds.test.ts` asserts it
+ * equals design-tokens' `ACCENT_IDS`.
+ */
+export const TUI_ACCENT_IDS = ['ink', 'blue', 'violet', 'green', 'orange', 'rose', 'teal'] as const;
+
 export const TuiConfigSchema = z.object({
   /** Theme id from @generatorai/design-tokens, or 'auto'. */
   theme: z.string().default('auto'),
   appearance: z.enum(['auto', 'light', 'dark']).default('auto'),
-  accent: z.enum(['blue', 'violet', 'green', 'orange', 'rose', 'teal']).default('blue'),
+  /**
+   * 'auto' = the theme's own default accent (ink for Instrument), like `theme`
+   * and `appearance`. A literal default here would override every theme's
+   * choice; `.optional()` would drop the key from the settings editor.
+   */
+  accent: z.enum(['auto', ...TUI_ACCENT_IDS]).default('auto'),
   /** Render cap. Lower reduces CPU on high-token-rate streams. */
   maxFps: z.number().int().min(5).max(120).default(30),
   /**

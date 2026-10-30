@@ -56,7 +56,7 @@ Agents need an explicit extension-authoring capability to write and hot-load ext
 
 ## Source evidence
 
-`apps/web/src/components/settings/sections/Extensions.tsx`, `apps/web/src/components/widgets/WidgetFrame.tsx`, `apps/web/src/components/widgets/WidgetHost.tsx`, `apps/web/src/lib/widgetBridge.ts`, `packages/shared/src/config/ExtensionManifestSchema.ts`, `packages/shared/src/types/Extension.ts`, `packages/shared/src/types/Widget.ts`, and `packages/core/src/services/ExtensionManager.ts`.
+`apps/web/src/features/settings/sections/ExtensionsSection.tsx`, `apps/web/src/blocks/widgets/WidgetFrame.tsx`, `apps/web/src/blocks/widgets/WidgetHost.tsx`, `apps/web/src/lib/widgetBridge.ts`, `packages/shared/src/config/ExtensionManifestSchema.ts`, `packages/shared/src/types/Extension.ts`, `packages/shared/src/types/Widget.ts`, and `packages/core/src/services/ExtensionManager.ts`.
 
 ## Configuration and worked examples
 

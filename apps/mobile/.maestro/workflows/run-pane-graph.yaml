@@ -1,0 +1,32 @@
+appId: ${APP_ID}
+name: workflows · run pane tabs and the runtime graph
+# M8-04 (MWorkflowRunPane, MRunGraph; MG-28). Starts a run of "Sandbox Workflow.*", opens the run pane (Output, Hooks,
+# Variables beside the workspace tabs) and the runtime graph.
+tags: [workflows, pane]
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///workflows
+- extendedWaitUntil: {visible: {id: "workflow-row-.*"}, timeout: 20000}
+- tapOn: {id: "workflow-row-.*", index: 0}
+- extendedWaitUntil: {visible: {id: workflow-run}, timeout: 15000}
+- tapOn: {id: workflow-run}
+- extendedWaitUntil: {visible: {id: run-sheet-run}, timeout: 10000}
+- tapOn: {id: run-sheet-run}
+- extendedWaitUntil: {visible: {id: run-screen}, timeout: 30000}
+- runFlow: ../_subflows/open-pane.yaml
+- extendedWaitUntil: {visible: {id: pane-tab-output}, timeout: 10000}
+- tapOn: {id: pane-tab-output}
+- extendedWaitUntil: {visible: {id: run-pane-output}, timeout: 10000}
+- tapOn: {id: pane-tab-hooks}
+- tapOn: {id: pane-tab-variables}
+- extendedWaitUntil: {visible: {id: run-pane-variables}, timeout: 10000}
+- tapOn: {id: pane-tab-changes}
+- extendedWaitUntil: {visible: {id: changes-panel}, timeout: 15000}
+- tapOn: {id: pane-close}
+- extendedWaitUntil: {visible: {id: run-timeline}, timeout: 30000}
+- tapOn: "Graph"
+- extendedWaitUntil: {visible: {id: run-graph-canvas}, timeout: 15000}
+- tapOn: {id: graph-zoom-in}
+- tapOn: {id: graph-fit}
+- tapOn: {id: graph-list}
+- extendedWaitUntil: {visible: {id: run-screen}, timeout: 10000}

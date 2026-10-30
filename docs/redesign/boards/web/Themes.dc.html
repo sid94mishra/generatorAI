@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Themes</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#0b0b0c}
+.t-dark{--ground:#0b0b0c;--surface:#111113;--raised:#17171a;--overlay:#1d1d21;--sunken:#0d0d0f;--hover:rgba(255,255,255,.035);--selected:rgba(255,255,255,.07);--line:#27272c;--line-soft:#1c1c20;--line-strong:#37373d;--fg:#ededef;--fg-2:#a1a1aa;--fg-3:#80808a;--run:#6aa6ff;--run-bg:rgba(106,166,255,.12);--ok:#4cc38a;--ok-bg:rgba(76,195,138,.12);--warn:#f0b429;--warn-bg:rgba(240,180,41,.12);--err:#ff6369;--err-bg:rgba(255,99,105,.12);--add-bg:rgba(76,195,138,.09);--del-bg:rgba(255,99,105,.09);--shadow-pop:0 16px 40px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06);--scrim:rgba(0,0,0,.62);color-scheme:dark}
+.t-light{--ground:#f1f1ef;--surface:#ffffff;--raised:#fafaf9;--overlay:#ffffff;--sunken:#f6f6f4;--hover:rgba(0,0,0,.03);--selected:rgba(0,0,0,.055);--line:#e2e2de;--line-soft:#ecece9;--line-strong:#d0d0cb;--fg:#18181b;--fg-2:#55555d;--fg-3:#6b6b73;--run:#1d6ae5;--run-bg:rgba(29,106,229,.09);--ok:#16804c;--ok-bg:rgba(22,128,76,.09);--warn:#935f00;--warn-bg:rgba(214,150,0,.13);--err:#d1242f;--err-bg:rgba(209,36,47,.08);--add-bg:rgba(22,128,76,.08);--del-bg:rgba(209,36,47,.07);--shadow-pop:0 16px 40px rgba(20,20,30,.14),0 0 0 1px rgba(0,0,0,.06);--scrim:rgba(20,20,24,.3);color-scheme:light}
+.acc-ink{--accent:var(--fg);--on-accent:var(--surface)}
+.acc-blue{--accent:#2f6fed;--on-accent:#ffffff}
+.acc-violet{--accent:#7152e0;--on-accent:#ffffff}
+.acc-green{--accent:#1b8a52;--on-accent:#ffffff}
+.acc-orange{--accent:#d4561c;--on-accent:#ffffff}
+.acc-rose{--accent:#c8325f;--on-accent:#ffffff}
+.acc-teal{--accent:#0f7f7a;--on-accent:#ffffff}
+.app{font-family:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:13px;line-height:1.45;color:var(--fg);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.app *{box-sizing:border-box}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.i12{width:12px;height:12px}.i14{width:14px;height:14px}.i20{width:20px;height:20px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line);background:var(--raised);color:var(--fg);font-family:inherit;font-size:13px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;text-decoration:none}
+.btn-p{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.btn-g{background:transparent;border-color:transparent;color:var(--fg-2)}
+.btn-d{color:var(--err)}
+.btn-sm{height:24px;padding:0 8px;font-size:12px;border-radius:5px}
+.btn-lg{height:32px;padding:0 12px}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;border:0;background:transparent;color:var(--fg-2);padding:0;cursor:pointer;flex-shrink:0}
+.ib-sm{width:24px;height:24px;border-radius:5px}
+.ib.on{background:var(--selected);color:var(--fg)}
+.kbd{display:inline-flex;align-items:center;justify-content:center;height:18px;min-width:18px;padding:0 4px;border-radius:4px;border:1px solid var(--line);background:var(--sunken);color:var(--fg-3);font-family:"JetBrains Mono",monospace;font-size:11px;line-height:1;font-weight:400}
+.bdg{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border-radius:4px;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.s-run{color:var(--run);background:var(--run-bg)}.s-ok{color:var(--ok);background:var(--ok-bg)}.s-warn{color:var(--warn);background:var(--warn-bg)}.s-err{color:var(--err);background:var(--err-bg)}.s-idle{color:var(--fg-2);background:var(--selected)}
+.c-run{color:var(--run)}.c-ok{color:var(--ok)}.c-warn{color:var(--warn)}.c-err{color:var(--err)}.c-1{color:var(--fg)}.c-2{color:var(--fg-2)}.c-3{color:var(--fg-3)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.inp{display:flex;align-items:center;gap:8px;height:32px;border-radius:6px;border:1px solid var(--line);background:var(--sunken);color:var(--fg);padding:0 10px;font-family:inherit;font-size:13px;width:100%}
+.lbl{font-size:12px;font-weight:500;color:var(--fg-2)}
+.hint{font-size:12px;color:var(--fg-3)}
+.nav{display:flex;align-items:center;gap:10px;height:30px;padding:0 8px;border-radius:6px;color:var(--fg-2);font-size:13px;font-weight:500;text-decoration:none}
+.nav.on{background:var(--selected);color:var(--fg)}
+.cnt{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--fg-3)}
+.sec{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tabs{display:flex;gap:20px;border-bottom:1px solid var(--line-soft)}
+.tab{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0;border:0;background:none;font-family:inherit;font-size:13px;font-weight:500;color:var(--fg-2);text-decoration:none}
+.tab.on{color:var(--fg);box-shadow:inset 0 -2px 0 var(--fg)}
+.seg{display:inline-flex;gap:2px;padding:2px;border-radius:7px;background:var(--sunken);border:1px solid var(--line-soft)}
+.seg button{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:5px;border:0;background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;line-height:1}
+.seg button.on{background:var(--raised);color:var(--fg);box-shadow:0 0 0 1px var(--line)}
+.card{background:var(--raised);border:1px solid var(--line-soft);border-radius:8px}
+.th{display:flex;align-items:center;height:32px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tr{display:flex;align-items:center;gap:16px;height:44px;padding:0 20px;border-bottom:1px solid var(--line-soft);font-size:13px}
+.sw{position:relative;display:inline-block;width:28px;height:16px;border-radius:999px;border:0;padding:0;background:var(--line-strong);flex-shrink:0}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#ffffff}
+.sw.on{background:var(--accent)}
+.sw.on::after{left:14px;background:var(--on-accent)}
+.cb{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:4px;border:1px solid var(--line-strong);flex-shrink:0;color:var(--on-accent)}
+.cb.on{background:var(--accent);border-color:var(--accent)}
+.av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:var(--selected);color:var(--fg-2);font-size:11px;font-weight:600;flex-shrink:0}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.mono span{white-space:pre}
+.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+
+</style>
+</helmet>
+<div class="app {{rootClass}}" style="width: 1440px; height: 900px; position: relative; display: flex; background: var(--ground); overflow: hidden;">
+<div style="flex-grow: 1; min-width: 0; padding: 56px; background: var(--surface); display: flex; flex-direction: column; gap: 28px; overflow: hidden;">
+<header style="display: flex; align-items: flex-end; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.45;">Every theme, same system</h1>
+<p style="margin: 0; font-size: 13px; color: var(--fg-2);">The redesign replaces components, not the theme engine. Every theme ships a light and a dark variant; one mode of each is shown. Previews use the real values from <span class="mono" style="font-size: 12px; white-space: nowrap;">packages/design-tokens/src/themes</span>.</p>
+</div>
+<div style="flex-grow: 1;"></div>
+<span class="mono c-3" style="font-size: 11px; white-space: nowrap;">Instrument + 17 themes · light and dark · 7 accents</span>
+</header>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px 24px;">
+<div style="display: flex; flex-direction: column; gap: 10px; min-width: 0;">
+<div style="height: 200px; display: flex; overflow: hidden; border-radius: 8px; border: 1px solid #27272c; background: #0b0b0c; color: #ededef; font-family: 'Instrument Sans', sans-serif;" role="img" aria-label="Instrument dark preview">
+<div style="width: 72px; flex-shrink: 0; display: flex; flex-direction: column; gap: 5px; padding: 10px 6px 10px 8px;">
+<span style="display: block; width: 14px; height: 14px; margin: 0 0 6px 4px; border-radius: 4px; background: #ededef;"></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 6px;"><span style="display: block; width: 22px; height: 4px; border-radius: 3px; background: #80808a;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 6px; background: #1d1d21;"><span style="display: block; width: 30px; height: 4px; border-radius: 3px; background: #ededef;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 6px;"><span style="display: block; width: 34px; height: 4px; border-radius: 3px; background: #80808a;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 6px;"><span style="display: block; width: 26px; height: 4px; border-radius: 3px; background: #80808a;"></span></span>
+<span style="flex-grow: 1;"></span>
+<span style="display: flex; align-items: center; gap: 5px; padding: 0 6px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #f0b429; flex-shrink: 0;"></span><span style="display: block; width: 30px; height: 4px; border-radius: 3px; background: #80808a;"></span></span>
+</div>
+<div style="flex-grow: 1; min-width: 0; margin: 6px 6px 6px 0; display: flex; flex-direction: column; background: #111113; border: 1px solid #1c1c20; border-radius: 8px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px 0 10px; border-bottom: 1px solid #1c1c20; flex-shrink: 0;">
+<span style="font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Fix flaky checkout test</span>
+<span style="flex-grow: 1;"></span>
+<span style="display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 6px; background: #ededef; color: #111113; font-size: 11px; font-weight: 500; line-height: 1;">Commit</span>
+</div>
+<div style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column; gap: 7px; padding: 9px 10px 0 10px;">
+<div style="display: flex; flex-direction: column; gap: 4px; padding: 6px 7px; border-radius: 6px; background: #17171a; border: 1px solid #1c1c20;"><span style="display: block; width: 88%; height: 5px; border-radius: 3px; background: #ededef;"></span><span style="display: block; width: 52%; height: 5px; border-radius: 3px; background: #ededef;"></span></div>
+<div style="display: flex; align-items: center; gap: 6px; height: 14px;"><svg class="i i12" viewBox="0 0 24 24" style="color: #4cc38a;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg><span style="font-size: 11px; font-weight: 500;">Edited</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #80808a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">applyCoupon.ts</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #4cc38a; margin-left: auto;">+14</span></div>
+<div style="display: flex; flex-direction: column; gap: 4px;"><span style="display: block; width: 94%; height: 5px; border-radius: 3px; background: #80808a;"></span><span style="display: block; width: 70%; height: 5px; border-radius: 3px; background: #80808a;"></span></div>
+</div>
+<div style="display: flex; align-items: center; gap: 6px; height: 28px; margin: 0 8px 8px 8px; padding: 0 4px 0 8px; border: 1px solid #27272c; border-radius: 8px; background: #17171a; flex-shrink: 0;"><span style="display: block; width: 40%; height: 4px; border-radius: 3px; background: #80808a;"></span><span style="flex-grow: 1;"></span><span style="display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 6px; background: #ededef; color: #111113;"><svg class="i i12" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg></span></div>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: baseline; gap: 6px;"><span style="font-size: 13px; font-weight: 600;">Instrument</span><span style="font-size: 12px; color: var(--fg-3);">dark · new default</span></div>
+<span class="mono c-3" style="font-size: 11px;">Instrument Sans · JetBrains Mono · r8</span>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px; min-width: 0;">
+<div style="height: 200px; display: flex; overflow: hidden; border-radius: 8px; border: 1px solid #e2e2de; background: #f1f1ef; color: #18181b; font-family: 'Instrument Sans', sans-serif;" role="img" aria-label="Instrument light preview">
+<div style="width: 72px; flex-shrink: 0; display: flex; flex-direction: column; gap: 5px; padding: 10px 6px 10px 8px;">
+<span style="display: block; width: 14px; height: 14px; margin: 0 0 6px 4px; border-radius: 4px; background: #18181b;"></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 6px;"><span style="display: block; width: 22px; height: 4px; border-radius: 3px; background: #6b6b73;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 6px; background: #e5e5e2;"><span style="display: block; width: 30px; height: 4px; border-radius: 3px; background: #18181b;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 6px;"><span style="display: block; width: 34px; height: 4px; border-radius: 3px; background: #6b6b73;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 6px;"><span style="display: block; width: 26px; height: 4px; border-radius: 3px; background: #6b6b73;"></span></span>
+<span style="flex-grow: 1;"></span>
+<span style="display: flex; align-items: center; gap: 5px; padding: 0 6px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #935f00; flex-shrink: 0;"></span><span style="display: block; width: 30px; height: 4px; border-radius: 3px; background: #6b6b73;"></span></span>
+</div>
+<div style="flex-grow: 1; min-width: 0; margin: 6px 6px 6px 0; display: flex; flex-direction: column; background: #ffffff; border: 1px solid #ecece9; border-radius: 8px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px 0 10px; border-bottom: 1px solid #ecece9; flex-shrink: 0;">
+<span style="font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Fix flaky checkout test</span>
+<span style="flex-grow: 1;"></span>
+<span style="display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 6px; background: #18181b; color: #ffffff; font-size: 11px; font-weight: 500; line-height: 1;">Commit</span>
+</div>
+<div style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column; gap: 7px; padding: 9px 10px 0 10px;">
+<div style="display: flex; flex-direction: column; gap: 4px; padding: 6px 7px; border-radius: 6px; background: #fafaf9; border: 1px solid #ecece9;"><span style="display: block; width: 88%; height: 5px; border-radius: 3px; background: #18181b;"></span><span style="display: block; width: 52%; height: 5px; border-radius: 3px; background: #18181b;"></span></div>
+<div style="display: flex; align-items: center; gap: 6px; height: 14px;"><svg class="i i12" viewBox="0 0 24 24" style="color: #16804c;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg><span style="font-size: 11px; font-weight: 500;">Edited</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #6b6b73; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">applyCoupon.ts</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #16804c; margin-left: auto;">+14</span></div>
+<div style="display: flex; flex-direction: column; gap: 4px;"><span style="display: block; width: 94%; height: 5px; border-radius: 3px; background: #6b6b73;"></span><span style="display: block; width: 70%; height: 5px; border-radius: 3px; background: #6b6b73;"></span></div>
+</div>
+<div style="display: flex; align-items: center; gap: 6px; height: 28px; margin: 0 8px 8px 8px; padding: 0 4px 0 8px; border: 1px solid #e2e2de; border-radius: 8px; background: #fafaf9; flex-shrink: 0;"><span style="display: block; width: 40%; height: 4px; border-radius: 3px; background: #6b6b73;"></span><span style="flex-grow: 1;"></span><span style="display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 6px; background: #18181b; color: #ffffff;"><svg class="i i12" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg></span></div>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: baseline; gap: 6px;"><span style="font-size: 13px; font-weight: 600;">Instrument</span><span style="font-size: 12px; color: var(--fg-3);">light · new default</span></div>
+<span class="mono c-3" style="font-size: 11px;">Instrument Sans · JetBrains Mono · r8</span>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px; min-width: 0;">
+<div style="height: 200px; display: flex; overflow: hidden; border-radius: 8px; border: 1px solid #30363d; background: #0d1117; color: #e6edf3; font-family: -apple-system, 'Segoe UI', sans-serif;" role="img" aria-label="GitHub dark preview">
+<div style="width: 72px; flex-shrink: 0; display: flex; flex-direction: column; gap: 5px; padding: 10px 6px 10px 8px;">
+<span style="display: block; width: 14px; height: 14px; margin: 0 0 6px 4px; border-radius: 4px; background: #e6edf3;"></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 4px;"><span style="display: block; width: 22px; height: 4px; border-radius: 3px; background: #8b949e;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 4px; background: #21262d;"><span style="display: block; width: 30px; height: 4px; border-radius: 3px; background: #e6edf3;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 4px;"><span style="display: block; width: 34px; height: 4px; border-radius: 3px; background: #8b949e;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 4px;"><span style="display: block; width: 26px; height: 4px; border-radius: 3px; background: #8b949e;"></span></span>
+<span style="flex-grow: 1;"></span>
+<span style="display: flex; align-items: center; gap: 5px; padding: 0 6px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #d29922; flex-shrink: 0;"></span><span style="display: block; width: 30px; height: 4px; border-radius: 3px; background: #8b949e;"></span></span>
+</div>
+<div style="flex-grow: 1; min-width: 0; margin: 6px 6px 6px 0; display: flex; flex-direction: column; background: #161b22; border: 1px solid #21262d; border-radius: 6px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px 0 10px; border-bottom: 1px solid #21262d; flex-shrink: 0;">
+<span style="font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Fix flaky checkout test</span>
+<span style="flex-grow: 1;"></span>
+<span style="display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 4px; background: #1f6feb; color: #ffffff; font-size: 11px; font-weight: 500; line-height: 1;">Commit</span>
+</div>
+<div style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column; gap: 7px; padding: 9px 10px 0 10px;">
+<div style="display: flex; flex-direction: column; gap: 4px; padding: 6px 7px; border-radius: 4px; background: #161b22; border: 1px solid #21262d;"><span style="display: block; width: 88%; height: 5px; border-radius: 3px; background: #e6edf3;"></span><span style="display: block; width: 52%; height: 5px; border-radius: 3px; background: #e6edf3;"></span></div>
+<div style="display: flex; align-items: center; gap: 6px; height: 14px;"><svg class="i i12" viewBox="0 0 24 24" style="color: #3fb950;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg><span style="font-size: 11px; font-weight: 500;">Edited</span><span style="font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: #8b949e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">applyCoupon.ts</span><span style="font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: #3fb950; margin-left: auto;">+14</span></div>
+<div style="display: flex; flex-direction: column; gap: 4px;"><span style="display: block; width: 94%; height: 5px; border-radius: 3px; background: #8b949e;"></span><span style="display: block; width: 70%; height: 5px; border-radius: 3px; background: #8b949e;"></span></div>
+</div>
+<div style="display: flex; align-items: center; gap: 6px; height: 28px; margin: 0 8px 8px 8px; padding: 0 4px 0 8px; border: 1px solid #30363d; border-radius: 6px; background: #161b22; flex-shrink: 0;"><span style="display: block; width: 40%; height: 4px; border-radius: 3px; background: #8b949e;"></span><span style="flex-grow: 1;"></span><span style="display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; background: #1f6feb; color: #ffffff;"><svg class="i i12" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg></span></div>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: baseline; gap: 6px;"><span style="font-size: 13px; font-weight: 600;">GitHub</span><span style="font-size: 12px; color: var(--fg-3);">dark shown</span></div>
+<span class="mono c-3" style="font-size: 11px;">System UI · ui-monospace · r6</span>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px; min-width: 0;">
+<div style="height: 200px; display: flex; overflow: hidden; border-radius: 8px; border: 1px solid #4c566a; background: #2e3440; color: #eceff4; font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;" role="img" aria-label="Nord dark preview">
+<div style="width: 72px; flex-shrink: 0; display: flex; flex-direction: column; gap: 5px; padding: 10px 6px 10px 8px;">
+<span style="display: block; width: 14px; height: 14px; margin: 0 0 6px 4px; border-radius: 4px; background: #eceff4;"></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 3px;"><span style="display: block; width: 22px; height: 4px; border-radius: 3px; background: #aeb8c8;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 3px; background: #3b4252;"><span style="display: block; width: 30px; height: 4px; border-radius: 3px; background: #eceff4;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 3px;"><span style="display: block; width: 34px; height: 4px; border-radius: 3px; background: #aeb8c8;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 3px;"><span style="display: block; width: 26px; height: 4px; border-radius: 3px; background: #aeb8c8;"></span></span>
+<span style="flex-grow: 1;"></span>
+<span style="display: flex; align-items: center; gap: 5px; padding: 0 6px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #ebcb8b; flex-shrink: 0;"></span><span style="display: block; width: 30px; height: 4px; border-radius: 3px; background: #aeb8c8;"></span></span>
+</div>
+<div style="flex-grow: 1; min-width: 0; margin: 6px 6px 6px 0; display: flex; flex-direction: column; background: #2b303b; border: 1px solid #434c5e; border-radius: 4px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px 0 10px; border-bottom: 1px solid #434c5e; flex-shrink: 0;">
+<span style="font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Fix flaky checkout test</span>
+<span style="flex-grow: 1;"></span>
+<span style="display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 3px; background: #8fbcbb; color: #2e3440; font-size: 11px; font-weight: 500; line-height: 1;">Commit</span>
+</div>
+<div style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column; gap: 7px; padding: 9px 10px 0 10px;">
+<div style="display: flex; flex-direction: column; gap: 4px; padding: 6px 7px; border-radius: 3px; background: #343b48; border: 1px solid #434c5e;"><span style="display: block; width: 88%; height: 5px; border-radius: 3px; background: #eceff4;"></span><span style="display: block; width: 52%; height: 5px; border-radius: 3px; background: #eceff4;"></span></div>
+<div style="display: flex; align-items: center; gap: 6px; height: 14px;"><svg class="i i12" viewBox="0 0 24 24" style="color: #a3be8c;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg><span style="font-size: 11px; font-weight: 500;">Edited</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #aeb8c8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">applyCoupon.ts</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #a3be8c; margin-left: auto;">+14</span></div>
+<div style="display: flex; flex-direction: column; gap: 4px;"><span style="display: block; width: 94%; height: 5px; border-radius: 3px; background: #aeb8c8;"></span><span style="display: block; width: 70%; height: 5px; border-radius: 3px; background: #aeb8c8;"></span></div>
+</div>
+<div style="display: flex; align-items: center; gap: 6px; height: 28px; margin: 0 8px 8px 8px; padding: 0 4px 0 8px; border: 1px solid #4c566a; border-radius: 4px; background: #343b48; flex-shrink: 0;"><span style="display: block; width: 40%; height: 4px; border-radius: 3px; background: #aeb8c8;"></span><span style="flex-grow: 1;"></span><span style="display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 3px; background: #8fbcbb; color: #2e3440;"><svg class="i i12" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg></span></div>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: baseline; gap: 6px;"><span style="font-size: 13px; font-weight: 600;">Nord</span><span style="font-size: 12px; color: var(--fg-3);">dark shown</span></div>
+<span class="mono c-3" style="font-size: 11px;">IBM Plex Sans · IBM Plex Mono · r4</span>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px; min-width: 0;">
+<div style="height: 200px; display: flex; overflow: hidden; border-radius: 8px; border: 1px solid #403d52; background: #191724; color: #e0def4; font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;" role="img" aria-label="Rosé Pine dark preview">
+<div style="width: 72px; flex-shrink: 0; display: flex; flex-direction: column; gap: 5px; padding: 10px 6px 10px 8px;">
+<span style="display: block; width: 14px; height: 14px; margin: 0 0 6px 4px; border-radius: 4px; background: #e0def4;"></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 8px;"><span style="display: block; width: 22px; height: 4px; border-radius: 3px; background: #908caa;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 8px; background: #21202e;"><span style="display: block; width: 30px; height: 4px; border-radius: 3px; background: #e0def4;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 8px;"><span style="display: block; width: 34px; height: 4px; border-radius: 3px; background: #908caa;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 8px;"><span style="display: block; width: 26px; height: 4px; border-radius: 3px; background: #908caa;"></span></span>
+<span style="flex-grow: 1;"></span>
+<span style="display: flex; align-items: center; gap: 5px; padding: 0 6px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #f6c177; flex-shrink: 0;"></span><span style="display: block; width: 30px; height: 4px; border-radius: 3px; background: #908caa;"></span></span>
+</div>
+<div style="flex-grow: 1; min-width: 0; margin: 6px 6px 6px 0; display: flex; flex-direction: column; background: #1f1d2e; border: 1px solid #26233a; border-radius: 10px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px 0 10px; border-bottom: 1px solid #26233a; flex-shrink: 0;">
+<span style="font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Fix flaky checkout test</span>
+<span style="flex-grow: 1;"></span>
+<span style="display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 8px; background: #c4a7e7; color: #191724; font-size: 11px; font-weight: 500; line-height: 1;">Commit</span>
+</div>
+<div style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column; gap: 7px; padding: 9px 10px 0 10px;">
+<div style="display: flex; flex-direction: column; gap: 4px; padding: 6px 7px; border-radius: 8px; background: #1f1d2e; border: 1px solid #26233a;"><span style="display: block; width: 88%; height: 5px; border-radius: 3px; background: #e0def4;"></span><span style="display: block; width: 52%; height: 5px; border-radius: 3px; background: #e0def4;"></span></div>
+<div style="display: flex; align-items: center; gap: 6px; height: 14px;"><svg class="i i12" viewBox="0 0 24 24" style="color: #9ccfae;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg><span style="font-size: 11px; font-weight: 500;">Edited</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #908caa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">applyCoupon.ts</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #9ccfae; margin-left: auto;">+14</span></div>
+<div style="display: flex; flex-direction: column; gap: 4px;"><span style="display: block; width: 94%; height: 5px; border-radius: 3px; background: #908caa;"></span><span style="display: block; width: 70%; height: 5px; border-radius: 3px; background: #908caa;"></span></div>
+</div>
+<div style="display: flex; align-items: center; gap: 6px; height: 28px; margin: 0 8px 8px 8px; padding: 0 4px 0 8px; border: 1px solid #403d52; border-radius: 10px; background: #1f1d2e; flex-shrink: 0;"><span style="display: block; width: 40%; height: 4px; border-radius: 3px; background: #908caa;"></span><span style="flex-grow: 1;"></span><span style="display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 8px; background: #c4a7e7; color: #191724;"><svg class="i i12" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg></span></div>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: baseline; gap: 6px;"><span style="font-size: 13px; font-weight: 600;">Rosé Pine</span><span style="font-size: 12px; color: var(--fg-3);">dark shown</span></div>
+<span class="mono c-3" style="font-size: 11px;">IBM Plex Sans · JetBrains Mono · r10</span>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px; min-width: 0;">
+<div style="height: 200px; display: flex; overflow: hidden; border-radius: 8px; border: 1px solid #c9c1a8; background: #fdf6e3; color: #073642; font-family: -apple-system, 'Segoe UI', sans-serif;" role="img" aria-label="Solarized light preview">
+<div style="width: 72px; flex-shrink: 0; display: flex; flex-direction: column; gap: 5px; padding: 10px 6px 10px 8px;">
+<span style="display: block; width: 14px; height: 14px; margin: 0 0 6px 4px; border-radius: 4px; background: #073642;"></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 3px;"><span style="display: block; width: 22px; height: 4px; border-radius: 3px; background: #4a6068;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 3px; background: #e8e1cb;"><span style="display: block; width: 30px; height: 4px; border-radius: 3px; background: #073642;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 3px;"><span style="display: block; width: 34px; height: 4px; border-radius: 3px; background: #4a6068;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 3px;"><span style="display: block; width: 26px; height: 4px; border-radius: 3px; background: #4a6068;"></span></span>
+<span style="flex-grow: 1;"></span>
+<span style="display: flex; align-items: center; gap: 5px; padding: 0 6px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #96730b; flex-shrink: 0;"></span><span style="display: block; width: 30px; height: 4px; border-radius: 3px; background: #4a6068;"></span></span>
+</div>
+<div style="flex-grow: 1; min-width: 0; margin: 6px 6px 6px 0; display: flex; flex-direction: column; background: #eee8d5; border: 1px solid #ded7c0; border-radius: 4px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px 0 10px; border-bottom: 1px solid #ded7c0; flex-shrink: 0;">
+<span style="font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Fix flaky checkout test</span>
+<span style="flex-grow: 1;"></span>
+<span style="display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 3px; background: #20729f; color: #fdf6e3; font-size: 11px; font-weight: 500; line-height: 1;">Commit</span>
+</div>
+<div style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column; gap: 7px; padding: 9px 10px 0 10px;">
+<div style="display: flex; flex-direction: column; gap: 4px; padding: 6px 7px; border-radius: 3px; background: #eee8d5; border: 1px solid #ded7c0;"><span style="display: block; width: 88%; height: 5px; border-radius: 3px; background: #073642;"></span><span style="display: block; width: 52%; height: 5px; border-radius: 3px; background: #073642;"></span></div>
+<div style="display: flex; align-items: center; gap: 6px; height: 14px;"><svg class="i i12" viewBox="0 0 24 24" style="color: #4d7a1f;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg><span style="font-size: 11px; font-weight: 500;">Edited</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #4a6068; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">applyCoupon.ts</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #4d7a1f; margin-left: auto;">+14</span></div>
+<div style="display: flex; flex-direction: column; gap: 4px;"><span style="display: block; width: 94%; height: 5px; border-radius: 3px; background: #4a6068;"></span><span style="display: block; width: 70%; height: 5px; border-radius: 3px; background: #4a6068;"></span></div>
+</div>
+<div style="display: flex; align-items: center; gap: 6px; height: 28px; margin: 0 8px 8px 8px; padding: 0 4px 0 8px; border: 1px solid #c9c1a8; border-radius: 4px; background: #eee8d5; flex-shrink: 0;"><span style="display: block; width: 40%; height: 4px; border-radius: 3px; background: #4a6068;"></span><span style="flex-grow: 1;"></span><span style="display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 3px; background: #20729f; color: #fdf6e3;"><svg class="i i12" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg></span></div>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: baseline; gap: 6px;"><span style="font-size: 13px; font-weight: 600;">Solarized</span><span style="font-size: 12px; color: var(--fg-3);">light shown</span></div>
+<span class="mono c-3" style="font-size: 11px;">System UI · IBM Plex Mono · r4</span>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px; min-width: 0;">
+<div style="height: 200px; display: flex; overflow: hidden; border-radius: 8px; border: 1px solid #3b4261; background: #1a1b26; color: #c0caf5; font-family: 'Geist', 'Inter', 'Segoe UI', sans-serif;" role="img" aria-label="Tokyo Night dark preview">
+<div style="width: 72px; flex-shrink: 0; display: flex; flex-direction: column; gap: 5px; padding: 10px 6px 10px 8px;">
+<span style="display: block; width: 14px; height: 14px; margin: 0 0 6px 4px; border-radius: 4px; background: #c0caf5;"></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 4px;"><span style="display: block; width: 22px; height: 4px; border-radius: 3px; background: #9aa5ce;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 4px; background: #24283b;"><span style="display: block; width: 30px; height: 4px; border-radius: 3px; background: #c0caf5;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 4px;"><span style="display: block; width: 34px; height: 4px; border-radius: 3px; background: #9aa5ce;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 4px;"><span style="display: block; width: 26px; height: 4px; border-radius: 3px; background: #9aa5ce;"></span></span>
+<span style="flex-grow: 1;"></span>
+<span style="display: flex; align-items: center; gap: 5px; padding: 0 6px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #e0af68; flex-shrink: 0;"></span><span style="display: block; width: 30px; height: 4px; border-radius: 3px; background: #9aa5ce;"></span></span>
+</div>
+<div style="flex-grow: 1; min-width: 0; margin: 6px 6px 6px 0; display: flex; flex-direction: column; background: #16161e; border: 1px solid #292e42; border-radius: 6px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px 0 10px; border-bottom: 1px solid #292e42; flex-shrink: 0;">
+<span style="font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Fix flaky checkout test</span>
+<span style="flex-grow: 1;"></span>
+<span style="display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 4px; background: #3d59a1; color: #ffffff; font-size: 11px; font-weight: 500; line-height: 1;">Commit</span>
+</div>
+<div style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column; gap: 7px; padding: 9px 10px 0 10px;">
+<div style="display: flex; flex-direction: column; gap: 4px; padding: 6px 7px; border-radius: 4px; background: #1f2335; border: 1px solid #292e42;"><span style="display: block; width: 88%; height: 5px; border-radius: 3px; background: #c0caf5;"></span><span style="display: block; width: 52%; height: 5px; border-radius: 3px; background: #c0caf5;"></span></div>
+<div style="display: flex; align-items: center; gap: 6px; height: 14px;"><svg class="i i12" viewBox="0 0 24 24" style="color: #9ece6a;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg><span style="font-size: 11px; font-weight: 500;">Edited</span><span style="font-family: 'Cascadia Code', Consolas, monospace; font-size: 11px; color: #9aa5ce; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">applyCoupon.ts</span><span style="font-family: 'Cascadia Code', Consolas, monospace; font-size: 11px; color: #9ece6a; margin-left: auto;">+14</span></div>
+<div style="display: flex; flex-direction: column; gap: 4px;"><span style="display: block; width: 94%; height: 5px; border-radius: 3px; background: #9aa5ce;"></span><span style="display: block; width: 70%; height: 5px; border-radius: 3px; background: #9aa5ce;"></span></div>
+</div>
+<div style="display: flex; align-items: center; gap: 6px; height: 28px; margin: 0 8px 8px 8px; padding: 0 4px 0 8px; border: 1px solid #3b4261; border-radius: 6px; background: #1f2335; flex-shrink: 0;"><span style="display: block; width: 40%; height: 4px; border-radius: 3px; background: #9aa5ce;"></span><span style="flex-grow: 1;"></span><span style="display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 4px; background: #3d59a1; color: #ffffff;"><svg class="i i12" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg></span></div>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: baseline; gap: 6px;"><span style="font-size: 13px; font-weight: 600;">Tokyo Night</span><span style="font-size: 12px; color: var(--fg-3);">dark shown</span></div>
+<span class="mono c-3" style="font-size: 11px;">Geist / Inter · Cascadia Code · r6</span>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px; min-width: 0;">
+<div style="height: 200px; display: flex; overflow: hidden; border-radius: 8px; border: 1px solid #cecdc3; background: #fffcf0; color: #100f0f; font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;" role="img" aria-label="Flexoki light preview">
+<div style="width: 72px; flex-shrink: 0; display: flex; flex-direction: column; gap: 5px; padding: 10px 6px 10px 8px;">
+<span style="display: block; width: 14px; height: 14px; margin: 0 0 6px 4px; border-radius: 4px; background: #100f0f;"></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 3px;"><span style="display: block; width: 22px; height: 4px; border-radius: 3px; background: #575653;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 3px; background: #e6e4d9;"><span style="display: block; width: 30px; height: 4px; border-radius: 3px; background: #100f0f;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 3px;"><span style="display: block; width: 34px; height: 4px; border-radius: 3px; background: #575653;"></span></span>
+<span style="display: flex; align-items: center; height: 16px; padding: 0 6px; border-radius: 3px;"><span style="display: block; width: 26px; height: 4px; border-radius: 3px; background: #575653;"></span></span>
+<span style="flex-grow: 1;"></span>
+<span style="display: flex; align-items: center; gap: 5px; padding: 0 6px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #ad8301; flex-shrink: 0;"></span><span style="display: block; width: 30px; height: 4px; border-radius: 3px; background: #575653;"></span></span>
+</div>
+<div style="flex-grow: 1; min-width: 0; margin: 6px 6px 6px 0; display: flex; flex-direction: column; background: #f2f0e5; border: 1px solid #dad8ce; border-radius: 4px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px 0 10px; border-bottom: 1px solid #dad8ce; flex-shrink: 0;">
+<span style="font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Fix flaky checkout test</span>
+<span style="flex-grow: 1;"></span>
+<span style="display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 3px; background: #205ea6; color: #fffcf0; font-size: 11px; font-weight: 500; line-height: 1;">Commit</span>
+</div>
+<div style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column; gap: 7px; padding: 9px 10px 0 10px;">
+<div style="display: flex; flex-direction: column; gap: 4px; padding: 6px 7px; border-radius: 3px; background: #f2f0e5; border: 1px solid #dad8ce;"><span style="display: block; width: 88%; height: 5px; border-radius: 3px; background: #100f0f;"></span><span style="display: block; width: 52%; height: 5px; border-radius: 3px; background: #100f0f;"></span></div>
+<div style="display: flex; align-items: center; gap: 6px; height: 14px;"><svg class="i i12" viewBox="0 0 24 24" style="color: #66800b;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg><span style="font-size: 11px; font-weight: 500;">Edited</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #575653; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">applyCoupon.ts</span><span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #66800b; margin-left: auto;">+14</span></div>
+<div style="display: flex; flex-direction: column; gap: 4px;"><span style="display: block; width: 94%; height: 5px; border-radius: 3px; background: #575653;"></span><span style="display: block; width: 70%; height: 5px; border-radius: 3px; background: #575653;"></span></div>
+</div>
+<div style="display: flex; align-items: center; gap: 6px; height: 28px; margin: 0 8px 8px 8px; padding: 0 4px 0 8px; border: 1px solid #cecdc3; border-radius: 4px; background: #f2f0e5; flex-shrink: 0;"><span style="display: block; width: 40%; height: 4px; border-radius: 3px; background: #575653;"></span><span style="flex-grow: 1;"></span><span style="display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 3px; background: #205ea6; color: #fffcf0;"><svg class="i i12" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg></span></div>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<div style="display: flex; align-items: baseline; gap: 6px;"><span style="font-size: 13px; font-weight: 600;">Flexoki</span><span style="font-size: 12px; color: var(--fg-3);">light shown</span></div>
+<span class="mono c-3" style="font-size: 11px;">IBM Plex Sans · IBM Plex Mono · r4</span>
+</div>
+</div>
+</div>
+<div class="card" style="display: flex; padding: 16px 0;">
+<div style="flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 0 20px;"><span style="font-size: 13px; font-weight: 600;">A theme changes</span><span style="font-size: 12px; color: var(--fg-3);">Ground, surfaces, lines, text, status hues, font stack and radius.</span></div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 0 20px; border-left: 1px solid var(--line-soft);"><span style="font-size: 13px; font-weight: 600;">A theme never changes</span><span style="font-size: 12px; color: var(--fg-3);">Layout, type scale, spacing, the status map, icons and components.</span></div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 0 20px; border-left: 1px solid var(--line-soft);"><span style="font-size: 13px; font-weight: 600;">What has to go</span><span style="font-size: 12px; color: var(--fg-3);">344 hardcoded palette classes and the literal <span class="mono" style="font-size: 11px;">#a855f7</span> streaming colour, so stage nodes and the thinking cue follow every theme.</span></div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 4px; padding: 0 20px; border-left: 1px solid var(--line-soft);"><span style="font-size: 13px; font-weight: 600;">Also available</span><span style="font-size: 12px; color: var(--fg-3);">Ayu, Carbon, Catppuccin, Clay, Dracula, Everforest, Graphite, Gruvbox, High Contrast, Night Owl, One. All in light and dark.</span></div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["dark","light"],"default":"dark","section":"Theme"},"accent":{"editor":"enum","options":["ink","blue","violet","green","orange","rose","teal"],"default":"ink","section":"Theme"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+const mode = this.props.mode ?? 'dark';
+const accent = this.props.accent ?? 'ink';
+return { rootClass: 't-' + mode + ' acc-' + accent };
+}
+}
+</script>
+</body>
+</html>

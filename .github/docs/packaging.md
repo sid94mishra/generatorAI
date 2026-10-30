@@ -283,6 +283,12 @@ The packaged app will poll `http://localhost:8770` on launch. Bump the version
 and rebuild to see an update offered, and check `app-update.yml` inside
 `release/<platform>-unpacked/resources/` to confirm the feed was baked in.
 
+The server lives in `agent-tests/mock-update-server.mjs`, which also checks a
+feed (`check --dir <release> --installed <version>`) and reads the app's main
+log after an install (`verify-log --expect-version <version>`). Its header is
+the step-by-step per-OS install run: the "Restart to update" pill, the ordinary
+quit, and what each OS needs (signing on macOS, `$APPIMAGE` / pkexec on Linux).
+
 ---
 
 ## 11. Publishing a release

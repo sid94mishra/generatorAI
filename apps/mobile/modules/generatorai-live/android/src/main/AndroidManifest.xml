@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Merged into the app manifest by Gradle (no config plugin needed). 06 §7.3, §7.9 (MD-187). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <!-- The Live Update runs from a foreground service while a followed run is live (MD-32). `specialUse`, not
+       `dataSync`: dataSync has Android 15 time limits, and this is neither sync nor media. -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+  <!-- Android 16: lets the ongoing progress notification be promoted (status bar chip, top of the shade). -->
+  <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+
+  <application>
+    <!-- stopWithTask: swiping the app away ends the service and its notification, so no progress is left frozen
+         without the app that updates it (phase 1 is local updates only). -->
+    <service
+        android:name="dev.generatorai.live.LiveUpdateService"
+        android:exported="false"
+        android:stopWithTask="true"
+        android:foregroundServiceType="specialUse">
+      <property
+          android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+          android:value="Shows live progress of an agent run the user started" />
+    </service>
+
+    <!-- Quick Settings tile "New chat" (MX-06). Exported for the system UI, guarded by its bind permission. -->
+    <service
+        android:name="dev.generatorai.live.NewChatTileService"
+        android:exported="true"
+        android:icon="@drawable/generatorai_tile_new_chat"
+        android:label="New chat"
+        android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+      <intent-filter>
+        <action android:name="android.service.quicksettings.action.QS_TILE" />
+      </intent-filter>
+    </service>
+  </application>
+</manifest>

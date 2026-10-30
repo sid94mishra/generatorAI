@@ -30,7 +30,7 @@ This guide describes the current implementation in this repository. It is a sour
 
 | Module | Included surfaces and controls |
 | --- | --- |
-| Home | Mission Control, live activity, running chat/workflow/automation summaries, system health, quick creation |
+| Home | Quick-start composer, Needs you with inline answers, Running with Stop, Recently finished with Retry, this week's stats, system card |
 | Projects | Creation, linked remote Git/local Git/local directories, aliases, branch selection, clone/fetch status, worktrees, file preview, project customization, pull requests, retention |
 | Chats | Create, name/tag search, active/archived filters, bulk deletion, source selection, model and reasoning choice, Auto/Plan modes, attachments, slash commands, mentions, dictation, streaming, stop/reset, message actions, fork and rewind |
 | Human interaction | Durable permission requests, structured questions, plan revisions/editing/comments/approval, stage approval and changes requested |
@@ -53,4 +53,4 @@ The application has three related layers of configuration: server-wide defaults,
 
 ## Source evidence
 
-The feature inventory was checked against `apps/web/src/pages`, `apps/web/src/components/settings/sectionRegistry.tsx`, `apps/web/src/pages/ChatPage.tsx`, `apps/web/src/pages/WorkflowRunPageV2.tsx`, and the contracts in `packages/shared/src/types` and `packages/shared/src/config`.
+The feature inventory was checked against `apps/web/src/features`, `packages/shared/src/ui-contract/settings.ts` (`SETTINGS_NAV`), `apps/web/src/features/chat/ChatPage.tsx`, `apps/web/src/features/workflows/run/WorkflowRunPage.tsx`, and the contracts in `packages/shared/src/types` and `packages/shared/src/config`.

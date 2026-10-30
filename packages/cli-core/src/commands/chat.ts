@@ -3,7 +3,8 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
-import type { SendMessageInput } from '@generatorai/client-core';
+import type { ChatListRow, SendMessageInput } from '@generatorai/client-core';
+import { CHAT_LIST_MAX_LIMIT, type ChatListQuery } from '@generatorai/shared';
 import { defineCommand, type CommandResult, type CommandSpec } from '../registry/CommandSpec.js';
 import { CliError, EXIT_CODES } from '../errors/CliError.js';
 import { resolveRef } from '../refs/resolveRef.js';
@@ -31,12 +32,87 @@ export const CHAT_GROUP = {
   order: 10,
 };
 
-/** Resolves a chat reference against the full list. */
+/**
+ * Pages through a chat query until at least `count` rows are in hand or the
+ * list ends (the server caps one page at CHAT_LIST_MAX_LIMIT). Rows keep the
+ * server's order: newest activity first unless the query sorts otherwise.
+ */
+async function listChatsUpTo(ctx: CliContext, query: ChatListQuery, count: number): Promise<ChatListRow[]> {
+  const items: ChatListRow[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await ctx.api.chats.list({ ...query, limit: CHAT_LIST_MAX_LIMIT, ...(cursor ? { cursor } : {}) });
+    items.push(...page.items);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor && items.length < count);
+  return items;
+}
+
+/** Every page of a chat query. */
+function listAllChats(ctx: CliContext, query: ChatListQuery): Promise<ChatListRow[]> {
+  return listChatsUpTo(ctx, query, Number.POSITIVE_INFINITY);
+}
+
+/** A ref that can only be matched by id prefix, which the server cannot filter on. */
+const ID_PREFIX = /^[0-9a-f][0-9a-f-]{3,}$/i;
+
+/**
+ * A name `resolveRef` takes as an exact match: identical, or equal ignoring
+ * case. JS case folding covers every script; the server's `q=` (SQLite
+ * `lower()`) folds only ASCII, so "Über plan" can be missing from its answer
+ * (P2-R35).
+ */
+function isExactNameMatch(name: string | null | undefined, ref: string): boolean {
+  return !!name && (name === ref || name.toLowerCase() === ref.toLowerCase());
+}
+
+/**
+ * Resolves a chat reference, asking the server for as little as it can
+ * (P2-R9): listing every chat also schedules a "Changes ±" backfill for each
+ * row that never had one.
+ *
+ *   exact id      one `GET /chats/:id`
+ *   #n            the first n chats, newest activity first (as many pages as
+ *                 that takes)
+ *   @active       every active chat (`status=active`)
+ *   @last         every chat: "most recently created or updated" is not a
+ *                 server sort
+ *   a name        the server's `q=` search, every page of it; when that holds
+ *                 no exact (any-script case-insensitive) name match, every
+ *                 chat, matched here (P2-R35)
+ *   an id prefix  every chat: the server cannot filter on it
+ *
+ * `workers: true` so a ref can still resolve an orchestrator worker chat.
+ */
 async function findChat(ctx: CliContext, ref: string) {
-  const chats = await ctx.api.chats.list();
+  const trimmed = ref.trim();
+  if (/^[A-Za-z0-9_-]+$/.test(trimmed)) {
+    try {
+      const chat = await ctx.api.chats.get(trimmed);
+      if (chat?.id === trimmed) {
+        return { id: chat.id, name: chat.name, status: chat.status, createdAt: chat.createdAt, updatedAt: chat.updatedAt };
+      }
+    } catch {
+      // Not an id (or not visible): fall through to the list-based match.
+    }
+  }
+  let items: ChatListRow[];
+  // False when `items` is pre-filtered, so an empty list does not mean "no chats".
+  let complete = true;
+  if (/^#\d+$/.test(trimmed)) {
+    items = await listChatsUpTo(ctx, { workers: true }, Number(trimmed.slice(1)));
+  } else if (trimmed === '@active') {
+    items = await listAllChats(ctx, { workers: true, status: 'active' });
+    complete = false;
+  } else if (trimmed === '@last' || ID_PREFIX.test(trimmed)) {
+    items = await listAllChats(ctx, { workers: true });
+  } else {
+    items = await listAllChats(ctx, { workers: true, q: trimmed });
+    if (!items.some((c) => isExactNameMatch(c.name, trimmed))) items = await listAllChats(ctx, { workers: true });
+  }
   return resolveRef(ref, {
     kind: 'chat',
-    candidates: chats.map((c) => ({
+    candidates: items.map((c) => ({
       id: c.id,
       name: c.name,
       status: c.status,
@@ -44,6 +120,7 @@ async function findChat(ctx: CliContext, ref: string) {
       updatedAt: c.updatedAt,
     })),
     activeStatuses: ['running', 'active'],
+    complete,
   });
 }
 
@@ -160,7 +237,9 @@ export function chatCommands(): CommandSpec[] {
           default: 'active',
         },
         projectFlag,
-        { name: 'limit', description: 'Maximum rows', type: 'number' },
+        { name: 'limit', description: 'Rows per page (default 50, max 200)', type: 'number' },
+        { name: 'cursor', description: 'Continue from the cursor a previous page printed', type: 'string' },
+        { name: 'all', description: 'Every matching chat, all pages', type: 'boolean' },
       ],
       schema: inputSchema(
         {},
@@ -168,6 +247,8 @@ export function chatCommands(): CommandSpec[] {
           status: z.enum(['active', 'archived', 'all']).default('active'),
           project: z.string().optional(),
           limit: z.coerce.number().int().positive().optional(),
+          cursor: z.string().min(1).optional(),
+          all: z.boolean().optional(),
         },
       ),
       output: {
@@ -182,18 +263,31 @@ export function chatCommands(): CommandSpec[] {
         ],
       },
       async handler(ctx, { flags }) {
-        const params: { archived?: boolean; limit?: number } = {};
-        if (flags.status === 'archived') params.archived = true;
-        if (flags.status === 'active') params.archived = false;
+        const params: { status?: 'active' | 'archived'; limit?: number; projectId?: string } = {};
+        if (flags.status === 'archived') params.status = 'archived';
+        if (flags.status === 'active') params.status = 'active';
         if (flags.limit) params.limit = flags.limit;
 
-        let rows = await ctx.api.chats.list(params);
         if (flags.project) {
           const projects = await ctx.api.projects.list();
           const project = resolveRef(flags.project, { kind: 'project', candidates: projects });
-          rows = rows.filter((c) => c.projectId === project.id);
+          params.projectId = project.id;
         }
-        return list(rows);
+
+        if (flags.all) return list(await listAllChats(ctx, params));
+
+        // One page; say so when there is more, instead of silently stopping
+        // at the server's default of 50 (P2-R26). The note goes to stderr as
+        // a warning, so piped JSON stays the rows.
+        const page = await ctx.api.chats.list({ ...params, ...(flags.cursor ? { cursor: flags.cursor } : {}) });
+        if (!page.nextCursor) return list(page.items);
+        return {
+          data: page.items,
+          warnings: [
+            `Showing ${page.items.length} of ${page.total} chats. ` +
+              `Next page: --cursor ${page.nextCursor}  (or --all for every page)`,
+          ],
+        };
       },
     }),
 
@@ -761,7 +855,7 @@ export function chatCommands(): CommandSpec[] {
  * fast with a usable message instead of hanging with no output, which is what
  * a naive read does and is indistinguishable from a broken command.
  */
-async function readStdin(): Promise<string> {
+export async function readStdin(): Promise<string> {
   if (process.stdin.isTTY) {
     throw CliError.usage('Reading the prompt from stdin, but stdin is a terminal.', {
       hint: 'Pipe the prompt in, or pass it as an argument.',
@@ -780,7 +874,7 @@ async function readStdin(): Promise<string> {
  * set — a typo'd filename should not turn into "sent the message with one
  * fewer attachment than asked for" with no indication anything was dropped.
  */
-async function readAttachments(
+export async function readAttachments(
   paths: string[],
 ): Promise<Array<{ name: string; data: Uint8Array }>> {
   return Promise.all(

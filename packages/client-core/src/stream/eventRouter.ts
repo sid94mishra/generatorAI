@@ -22,6 +22,8 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ScmFlowResult, TransportCapabilitySet } from '@generatorai/shared';
+import { isSpawnWorkerTool, permissionWording, PERMISSION_GATE_COPY, PLAN_GATE_COPY } from '@generatorai/shared/ui-contract';
+import type { WorkflowRunCardEvent } from './workflowRuns.js';
 
 import type {
   BackgroundTaskBlock,
@@ -108,7 +110,7 @@ export type StreamEffect =
   | { op: 'appendTokenIfNoText'; key: string; text: string }
   | { op: 'addToolCall'; key: string; tool: string; args: unknown; callId?: string; parentCallId?: string }
   | { op: 'completeToolCall'; key: string; toolOrCallId: string; result: unknown; fileOp?: ToolFileOp; success?: boolean }
-  | { op: 'addSystemMessage'; key: string; message: string; category: SystemCategory }
+  | { op: 'addSystemMessage'; key: string; message: string; category: SystemCategory; label?: string }
   /**
    * Insert or merge one orchestrator background worker, keyed by `taskId`.
    * Fields the patch omits keep their previous value — the five
@@ -180,6 +182,8 @@ export type StreamEffect =
       interactionId: string;
       behavior: 'allow' | 'deny';
       message?: string;
+      /** U-16: the rules an "Allow for this chat / run" answer remembered. */
+      remembered?: PermissionRuleView[];
     }
   | { op: 'expirePermission'; key: string; interactionId: string; reason?: string }
   | {
@@ -216,29 +220,22 @@ export type StreamEffect =
 
   // ── Workflow-run store ops ───────────────────────────────────────
   //
-  // `message` on the timeline ops contains `{stage}` where the stage's
-  // display NAME belongs. The router cannot know it — the name lives in the
-  // host's run store, keyed by `stageRunId` — so the host substitutes. Every
-  // other surface simply drops these ops.
+  // Only the web run store consumes these; every other surface drops them.
   | { op: 'runStatus'; runId?: string; status: string; data: Record<string, unknown> }
-  | {
-      op: 'runTimeline';
-      runId?: string;
-      status: string;
-      message: string;
-      data: Record<string, unknown>;
-    }
   | { op: 'stageStatus'; stageRunId: string; status: string; data: Record<string, unknown> }
+  /**
+   * A `ready` instance waits for an admission slot on a flow key (`wait`),
+   * or got it (`wait: null`). `label` names the key (`provider claude-agent`).
+   */
   | {
-      op: 'stageTimeline';
+      op: 'stageAdmission';
       stageRunId: string;
-      status: string;
-      message: string;
-      data: Record<string, unknown>;
+      runId?: string;
+      wait: { flowKey: string; label: string; running: number; limit: number | null; queued: number } | null;
     }
+  /** A running check's output as it prints (D-173): appended to the stage's live view. */
+  | { op: 'stageOutput'; stageRunId: string; runId?: string; text: string }
   | { op: 'registerStageSession'; stageRunId: string; sessionId: string }
-  /** `data: null` clears the HITL prompt rather than raising one. */
-  | { op: 'stageAwaitingInput'; stageRunId: string; data: Record<string, unknown> | null }
   | { op: 'selectStageRun'; stageRunId: string }
   /** Terminal stage: settle its stream and refetch the history it produced. */
   | { op: 'stageSettled'; stageRunId: string }
@@ -249,6 +246,13 @@ export type StreamEffect =
   // with no widget runtime drops both.
   | { op: 'widgetInvoke'; instanceId: string; invokeId: string; action: string; args: unknown }
   | { op: 'widgetTeardown'; instanceId: string; teardownId: string }
+
+  /**
+   * A `chat.workflow_run.*` event (P06 WP-6.2): the host folds it into the
+   * chat's run cards (`foldWorkflowRunEvent`) and refetches the REST list,
+   * which is what survives a reload.
+   */
+  | { op: 'workflowRunCard'; chatId: string; event: WorkflowRunCardEvent }
 
   /**
    * The transcript was rewound to the start of `turnId`: the host refetches
@@ -389,9 +393,6 @@ export interface StreamEventRouterOptions {
  */
 /** How many spawn tool calls one stream key remembers for worker nesting. */
 const SPAWN_CALL_MEMORY = 64;
-
-/** The orchestrator tool whose call a background worker nests under. */
-const SPAWN_TOOL = 'spawn_background_agent';
 
 /** Minimum gap between two sub-agent progress notes on one stream key. */
 const SUBAGENT_PROGRESS_THROTTLE_MS = 1500;
@@ -759,7 +760,7 @@ export class StreamEventRouter {
         const tool = str(data['tool'], 'tool');
         const callId = optStr(data['callId']);
         // The spawn call is the anchor a background worker's step nests under.
-        if (tool === SPAWN_TOOL && callId) {
+        if (isSpawnWorkerTool(tool) && callId) {
           this.rememberSpawnCall(key, spawnTaskNameOf(data['args']), callId);
         }
         out.push({
@@ -779,7 +780,7 @@ export class StreamEventRouter {
         this.flushKey(key, out);
         if (internal) break;
         const id = optStr(data['callId']) ?? optStr(data['tool']);
-        if (str(data['tool']) === SPAWN_TOOL && optStr(data['callId'])) {
+        if (isSpawnWorkerTool(str(data['tool'])) && optStr(data['callId'])) {
           // The result names the worker chat; index the call by that id too so
           // later progress events nest even if their taskName drifted.
           const result = data['result'];
@@ -888,6 +889,7 @@ export class StreamEventRouter {
       // state against, so refreshing it here keeps the two views from
       // disagreeing for up to a full poll period.
       case 'chat.plan.created':
+      case 'stage.plan.created':
         this.flushKey(key, out);
         out.push({
           op: 'upsertPlan',
@@ -928,6 +930,7 @@ export class StreamEventRouter {
         break;
 
       case 'chat.plan.review_requested':
+      case 'stage.plan.review_requested':
         this.flushKey(key, out);
         // `upsertPlan` merges onto the card from `chat.plan.created`, so
         // absent fields must be omitted rather than blanked.
@@ -957,10 +960,22 @@ export class StreamEventRouter {
         out.push({ op: 'invalidate', resource: 'interactions', ...chatId() });
         break;
 
-      case 'chat.plan.decided': {
+      case 'chat.plan.decided':
+      case 'stage.plan.decided': {
         this.flushKey(key, out);
         const approved = data['approved'] === true;
         const action = optStr(data['action']);
+        // The person's reply, where they sent it: under the card, before the revision or work it leads to.
+        const note = optStr(data['note']);
+        if (note) {
+          out.push({
+            op: 'addSystemMessage',
+            key,
+            message: note,
+            category: 'operator',
+            label: PLAN_GATE_COPY.note[approved ? 'approved' : 'changes_requested'],
+          });
+        }
         out.push({
           op: 'setPlanStatus',
           key,
@@ -1004,6 +1019,7 @@ export class StreamEventRouter {
       // NEVER saw a clarifying question; both are accepted now so a rename in
       // either direction cannot silently break the gate again.
       case 'chat.question.asked':
+      case 'stage.question.asked':
       case 'chat.question_asked':
         this.flushKey(key, out);
         out.push({
@@ -1021,6 +1037,7 @@ export class StreamEventRouter {
         break;
 
       case 'chat.question.answered':
+      case 'stage.question.answered':
       case 'chat.question_answered':
         this.flushKey(key, out);
         out.push({
@@ -1036,6 +1053,7 @@ export class StreamEventRouter {
         break;
 
       case 'chat.question.expired':
+      case 'stage.question.expired':
       case 'chat.question_expired':
         this.flushKey(key, out);
         out.push({ op: 'expireQuestion', key, interactionId: str(data['interactionId']) });
@@ -1055,6 +1073,7 @@ export class StreamEventRouter {
       // pending → resolved/expired lifecycle, same pending-interaction
       // invalidation so the poll-based reconciliation in ChatPage sees it.
       case 'chat.permission.requested':
+      case 'stage.permission.requested':
         this.flushKey(key, out);
         out.push({
           op: 'upsertPermission',
@@ -1067,24 +1086,55 @@ export class StreamEventRouter {
             inputSummary: str(data['inputSummary']),
             permissionMode: str(data['permissionMode']),
             status: 'pending',
+            ...(data['risk'] === 'risky' || data['risk'] === 'standard' ? { risk: data['risk'] } : {}),
+            ...wordingOf(data),
+            // U-16 (D-147): what "Allow for this chat / run" would remember, or why it never may.
+            rememberRules: rulesOf(data['rememberRules']),
+            ...(optStr(data['rememberRefusal']) ? { rememberRefusal: str(data['rememberRefusal']) } : {}),
           },
         });
         out.push({ op: 'invalidate', resource: 'interactions', ...chatId() });
         break;
 
       case 'chat.permission.resolved':
+      case 'stage.permission.resolved': {
         this.flushKey(key, out);
+        const remembered = rulesOf(data['remembered']);
         out.push({
           op: 'resolvePermission',
           key,
           interactionId: str(data['interactionId']),
           behavior: data['behavior'] === 'deny' ? 'deny' : 'allow',
           ...(optStr(data['message']) ? { message: str(data['message']) } : {}),
+          ...(remembered.length > 0 ? { remembered } : {}),
         });
         out.push({ op: 'invalidate', resource: 'interactions', ...chatId() });
         break;
+      }
+
+      // U-16 (D-147): a request a remembered rule allowed — no card, a transcript note that says so.
+      case 'chat.permission.auto_allowed':
+      case 'stage.permission.auto_allowed': {
+        this.flushKey(key, out);
+        const rules = rulesOf(data['rules']);
+        out.push({
+          op: 'addSystemMessage',
+          key,
+          message: PERMISSION_GATE_COPY.autoAllowed(
+            rules.map((r) => r.match).join(', ') || str(data['toolName']),
+            rules.length > 0 && rules.every((r) => r.scope === 'project')
+              ? 'project'
+              : kind === 'stage.permission.auto_allowed'
+                ? 'run'
+                : 'chat',
+          ),
+          category: 'permission',
+        });
+        break;
+      }
 
       case 'chat.permission.expired':
+      case 'stage.permission.expired':
         this.flushKey(key, out);
         out.push({
           op: 'expirePermission',
@@ -1521,9 +1571,30 @@ export class StreamEventRouter {
             ...(terminal ? { endedAt: Date.now() } : {}),
             ...(optStr(data['summary']) ? { summary: str(data['summary']) } : {}),
             ...(optStr(data['error']) ? { summary: str(data['error']) } : {}),
+            ...(status === 'cancelled' && (data['cancelledBy'] === 'user' || data['cancelledBy'] === 'orchestrator')
+              ? { cancelledBy: data['cancelledBy'] }
+              : {}),
+            ...(status === 'cancelled' && typeof data['cancelledAt'] === 'number'
+              ? { cancelledAt: data['cancelledAt'] }
+              : {}),
             ...(parentCallId ? { parentCallId } : {}),
           },
         });
+        break;
+      }
+
+      // ── Runs this chat started (P06 WP-6.2) ──────────────────────
+      //
+      // Mirrored onto the chat's session scope by the server's
+      // ChatWorkflowRunBridge. The card lives in the host's query cache (the
+      // REST list survives a reload); the stream only nudges it.
+      case 'chat.workflow_run.linked':
+      case 'chat.workflow_run.progress':
+      case 'chat.workflow_run.awaiting_approval':
+      case 'chat.workflow_run.finalized': {
+        const cid = optStr(data['chatId']);
+        if (!cid || !optStr(data['runId'])) break;
+        out.push({ op: 'workflowRunCard', chatId: cid, event: { kind: kind as WorkflowRunCardEvent['kind'], data } });
         break;
       }
 
@@ -1542,18 +1613,7 @@ export class StreamEventRouter {
         const status =
           kind === 'workflow_run.resumed' ? 'running' : kind.replace('workflow_run.', '');
         const runId = optStr(data['runId']) ?? optStr(data['workflowRunId']);
-        const verb = kind === 'workflow_run.resumed' ? 'resumed' : status;
         out.push({ op: 'runStatus', ...(runId ? { runId } : {}), status, data });
-        out.push({
-          op: 'runTimeline',
-          ...(runId ? { runId } : {}),
-          status,
-          message:
-            status === 'cancelling'
-              ? 'Workflow run cancelling...'
-              : `Workflow run ${verb}${optStr(data['error']) ? `: ${str(data['error'])}` : ''}`,
-          data,
-        });
         if (runId) out.push({ op: 'invalidate', resource: 'run', id: runId });
         // `cancelling` is a transient state the LIST does not render, so it
         // does not earn a refetch of every run.
@@ -1563,29 +1623,29 @@ export class StreamEventRouter {
         break;
       }
 
-      // Orchestration / pre- and post-processing progress. Narration for the
-      // RUN, so it goes on the session key rather than into a stage.
-      case 'workflow_run.orchestration_started':
-        note('Orchestration started — preparing workflow execution');
+      // A fork is a NEW run (`workflowRunId`); its ancestor stays terminal.
+      case 'workflow_run.forked':
+        out.push({ op: 'invalidate', resource: 'runs' });
         break;
-      case 'workflow_run.orchestration_completed':
-        note('Orchestration completed');
+
+      // Lifecycle phases (P04: `starting` and `finalizing`) and their steps.
+      // Narration for the RUN, so it goes on the session key rather than
+      // into a stage.
+      case 'workflow_run.phase_started':
+        note(`${str(data['stage']) === 'finalize' ? 'Finalizing' : 'Preparing'}: ${str(data['phase'], 'phase')}`);
         break;
-      case 'workflow_run.orchestration_failed':
-        note(`Orchestration failed: ${str(data['error'], 'Unknown error')}`, 'error');
+      case 'workflow_run.phase_completed':
+        note(`${str(data['phase'], 'phase')} done`);
         break;
-      case 'workflow_run.worktree_creating':
-        note('Creating worktree...');
+      case 'workflow_run.phase_failed':
+        note(`${str(data['phase'], 'phase')} failed: ${str(data['error'], 'Unknown error')}`, 'error');
         break;
-      case 'workflow_run.worktree_created':
-        note(`Worktree created: ${str(data['path'])}`);
+      // Waiters key on this: the lifecycle is done, post-processing included.
+      case 'workflow_run.finalized': {
+        const runId = optStr(data['workflowRunId']);
+        if (runId) out.push({ op: 'invalidate', resource: 'run', id: runId });
         break;
-      case 'workflow_run.preprocessing_started':
-        note('Preprocessing started');
-        break;
-      case 'workflow_run.preprocessing_completed':
-        note('Preprocessing completed');
-        break;
+      }
       case 'workflow_run.preprocessing_step_started':
         note(`Preprocessing: ${str(data['stepName'] ?? data['step'], 'step')} started`);
         break;
@@ -1594,12 +1654,6 @@ export class StreamEventRouter {
         break;
       case 'workflow_run.preprocessing_step_failed':
         note(`Preprocessing step failed: ${str(data['error'], 'Unknown')}`, 'error');
-        break;
-      case 'workflow_run.postprocessing_started':
-        note('Post-processing started');
-        break;
-      case 'workflow_run.postprocessing_completed':
-        note('Post-processing completed');
         break;
       case 'workflow_run.postprocessing_step_started':
         note(`Post-processing: ${str(data['stepName'] ?? data['step'], 'step')} started`);
@@ -1611,13 +1665,10 @@ export class StreamEventRouter {
         note(`Post-processing step failed: ${str(data['error'], 'Unknown')}`, 'error');
         break;
       case 'workflow_run.sandbox_created':
-        note(`Sandbox created: ${str(data['sandboxId'])}`);
+        note(`Sandbox created: ${str(data['sandboxName'])}`);
         break;
       case 'workflow_run.sandbox_destroyed':
         note('Sandbox destroyed');
-        break;
-      case 'workflow_run.stage_validation':
-        note(`Stage validation: ${str(data['message'], 'validating stages')}`);
         break;
       case 'workflow_run.permission_mode_changed':
         note(`Permission mode changed to: ${str(data['mode'], 'unknown')}`);
@@ -1625,7 +1676,6 @@ export class StreamEventRouter {
 
       // ── Stage run lifecycle ──────────────────────────────────────
       case 'stage_run.pending':
-      case 'stage_run.queued':
       case 'stage_run.running':
       case 'stage_run.paused':
       case 'stage_run.completed':
@@ -1633,7 +1683,9 @@ export class StreamEventRouter {
       case 'stage_run.cancelled':
       case 'stage_run.skipped':
       case 'stage_run.resumed': {
-        const status = kind === 'stage_run.resumed' ? 'running' : kind.replace('stage_run.', '');
+        // A resumed instance is `ready` (or back in `retry_wait`): the engine
+        // says which; its executor's claim then reports `running` (CONVINV-R20).
+        const status = kind === 'stage_run.resumed' ? (optStr(data['status']) ?? 'ready') : kind.replace('stage_run.', '');
         const stageRunId = stageRunIdOf();
         if (stageRunId) {
           out.push({ op: 'stageStatus', stageRunId, status, data });
@@ -1644,15 +1696,6 @@ export class StreamEventRouter {
           if (stageSessionId) {
             out.push({ op: 'registerStageSession', stageRunId, sessionId: stageSessionId });
           }
-          out.push({
-            op: 'stageTimeline',
-            stageRunId,
-            status,
-            message: `Stage "{stage}" ${status}${
-              optStr(data['error']) ? `: ${str(data['error'])}` : ''
-            }`,
-            data,
-          });
           if (status === 'running') {
             out.push({ op: 'selectStageRun', stageRunId });
             // Not an unconditional reset: after a reload the replay has
@@ -1681,30 +1724,38 @@ export class StreamEventRouter {
         break;
       }
 
-      case 'stage_run.step_started':
-      case 'stage_run.step_completed': {
-        // Flush BEFORE recording the transition so the step boundary keeps
-        // its place in the transcript.
-        this.flushKey(key, out);
+      // ── Admission (P07 WP-7.2): a launch waiting on a flow key ───
+      case 'stage_run.admission_queued':
+      case 'stage_run.admission_granted': {
         const stageRunId = stageRunIdOf();
         if (!stageRunId) break;
-        const started = kind === 'stage_run.step_started';
-        const label = optStr(data['label']) ?? `Step ${str(data['step'])}`;
+        const runId = optStr(data['workflowRunId']);
+        const flowKey = str(data['flowKey']);
         out.push({
-          op: 'stageTimeline',
+          op: 'stageAdmission',
           stageRunId,
-          status: started ? 'running' : 'completed',
-          message: `{stage}: ${label} ${started ? 'started' : 'completed'}`,
-          data,
+          ...(runId ? { runId } : {}),
+          wait:
+            kind === 'stage_run.admission_queued'
+              ? {
+                  flowKey,
+                  label: str(data['label'], flowKey),
+                  running: Number(data['running'] ?? 0),
+                  limit: typeof data['limit'] === 'number' ? data['limit'] : null,
+                  queued: Number(data['queued'] ?? 0),
+                }
+              : null,
         });
-        if (started && data['step'] !== undefined) {
-          out.push({
-            op: 'stageStatus',
-            stageRunId,
-            status: 'running',
-            data: { currentStep: data['step'], totalSteps: data['totalSteps'] },
-          });
-        }
+        break;
+      }
+
+      // ── A running check's output (D-173) ─────────────────────────
+      case 'stage_run.output': {
+        const stageRunId = stageRunIdOf();
+        const text = optStr(data['text']);
+        if (!stageRunId || !text) break;
+        const runId = optStr(data['workflowRunId']);
+        out.push({ op: 'stageOutput', stageRunId, ...(runId ? { runId } : {}), text });
         break;
       }
 
@@ -1715,19 +1766,11 @@ export class StreamEventRouter {
         const stageKey = stageRunId ? `stageRun:${stageRunId}` : key;
         if (stageRunId) {
           out.push({ op: 'stageStatus', stageRunId, status: 'awaiting_input', data });
-          out.push({
-            op: 'stageTimeline',
-            stageRunId,
-            status: 'awaiting_input',
-            message: 'Stage "{stage}" awaiting input',
-            data,
-          });
-          out.push({ op: 'stageAwaitingInput', stageRunId, data });
         }
         out.push({
           op: 'addSystemMessage',
           key: stageKey,
-          message: '⏸ Awaiting human input — check the HITL panel to approve or reject',
+          message: '⏸ Awaiting your input — answer it below to continue',
           category: 'system',
         });
         break;
@@ -1739,14 +1782,6 @@ export class StreamEventRouter {
         const stageKey = stageRunId ? `stageRun:${stageRunId}` : key;
         if (stageRunId) {
           out.push({ op: 'stageStatus', stageRunId, status: 'running', data });
-          out.push({
-            op: 'stageTimeline',
-            stageRunId,
-            status: 'running',
-            message: 'Stage "{stage}" input received — resuming',
-            data,
-          });
-          out.push({ op: 'stageAwaitingInput', stageRunId, data: null });
         }
         out.push({
           op: 'addSystemMessage',
@@ -1757,53 +1792,62 @@ export class StreamEventRouter {
         break;
       }
 
-      case 'stage_run.sleeping': {
+      // ── The stage conversation (P03b) ─────────────────────────────
+      case 'stage_run.operator_message': {
         this.flushKey(key, out);
         const stageRunId = stageRunIdOf();
-        const stageKey = stageRunId ? `stageRun:${stageRunId}` : key;
-        const wake =
-          typeof data['wakeAt'] === 'number'
-            ? new Date(data['wakeAt']).toLocaleTimeString()
-            : null;
-        if (stageRunId) {
-          out.push({ op: 'stageStatus', stageRunId, status: 'sleeping', data });
-          out.push({
-            op: 'stageTimeline',
-            stageRunId,
-            status: 'sleeping',
-            message: `Stage "{stage}" sleeping${wake ? ` until ${wake}` : ''}`,
-            data,
-          });
-        }
+        const files = Array.isArray(data['attachments']) ? (data['attachments'] as unknown[]).filter((f): f is string => typeof f === 'string') : [];
         out.push({
           op: 'addSystemMessage',
-          key: stageKey,
-          message: `💤 Stage sleeping${wake ? ` — wake at ${wake}` : ''}`,
+          key: stageRunId ? `stageRun:${stageRunId}` : key,
+          message: `${str(data['content'])}${files.length ? `
+
+📎 ${files.join(', ')}` : ''}`,
+          category: 'operator',
+        });
+        break;
+      }
+
+      case 'stage_run.operator_message_dropped': {
+        const stageRunId = stageRunIdOf();
+        const n = Number(data['count'] ?? 1);
+        out.push({
+          op: 'addSystemMessage',
+          key: stageRunId ? `stageRun:${stageRunId}` : key,
+          message: `${n === 1 ? 'A queued message was' : `${n} queued messages were`} not sent: the stage attempt ended (${str(data['outcome'], 'stopped')}) before its next turn.`,
+          category: 'warning',
+        });
+        break;
+      }
+
+      case 'stage_run.turn_cancelled': {
+        this.flushKey(key, out);
+        const stageRunId = stageRunIdOf();
+        out.push({
+          op: 'addSystemMessage',
+          key: stageRunId ? `stageRun:${stageRunId}` : key,
+          message: 'Turn stopped — the stage continues from its next step',
           category: 'system',
         });
         break;
       }
 
-      case 'stage_run.woken': {
+      case 'stage_run.amended':
+      case 'stage_run.amend_failed': {
         this.flushKey(key, out);
         const stageRunId = stageRunIdOf();
-        const stageKey = stageRunId ? `stageRun:${stageRunId}` : key;
-        if (stageRunId) {
-          out.push({ op: 'stageStatus', stageRunId, status: 'running', data });
-          out.push({
-            op: 'stageTimeline',
-            stageRunId,
-            status: 'running',
-            message: 'Stage "{stage}" woken — resuming',
-            data,
-          });
-        }
         out.push({
           op: 'addSystemMessage',
-          key: stageKey,
-          message: '⏰ Stage woken — resuming execution',
-          category: 'system',
+          key: stageRunId ? `stageRun:${stageRunId}` : key,
+          message:
+            kind === 'stage_run.amended'
+              ? 'Output amended — later stages keep the output they already used; re-run from here to update them'
+              : `The amendment failed: ${str(data['error'], 'unknown error')} (the previous output is kept)`,
+          category: kind === 'stage_run.amended' ? 'system' : 'error',
         });
+        if (stageRunId) out.push({ op: 'stageSettled', stageRunId });
+        const parentRunId = optStr(data['workflowRunId']);
+        if (parentRunId) out.push({ op: 'invalidate', resource: 'run', id: parentRunId });
         break;
       }
 
@@ -1811,16 +1855,9 @@ export class StreamEventRouter {
         this.flushKey(key, out);
         const stageRunId = stageRunIdOf();
         const stageKey = stageRunId ? `stageRun:${stageRunId}` : key;
+        // A retry makes the instance `ready` for its next attempt, not `running`.
+        if (stageRunId) out.push({ op: 'stageStatus', stageRunId, status: 'ready', data });
         const attempt = str(data['attempt'], '?');
-        if (stageRunId) {
-          out.push({
-            op: 'stageTimeline',
-            stageRunId,
-            status: 'running',
-            message: `Stage "{stage}" retrying (attempt ${attempt})`,
-            data,
-          });
-        }
         out.push({
           op: 'addSystemMessage',
           key: stageKey,
@@ -1847,4 +1884,26 @@ export class StreamEventRouter {
 
     return out;
   }
+}
+
+/** D-107: the server-stamped question and kind label, worded here for gates raised before they existed. */
+/** A remembered-rule list of an event (U-16), keeping only well-formed rules. */
+type PermissionRuleView = { kind: 'command' | 'tool'; match: string; scope?: 'project' };
+function rulesOf(value: unknown): PermissionRuleView[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((r): PermissionRuleView[] => {
+    const rule = (r ?? {}) as { kind?: unknown; match?: unknown; scope?: unknown };
+    return (rule.kind === 'command' || rule.kind === 'tool') && typeof rule.match === 'string' && rule.match
+      ? [{ kind: rule.kind, match: rule.match, ...(rule.scope === 'project' ? { scope: 'project' as const } : {}) }]
+      : [];
+  });
+}
+
+function wordingOf(data: Record<string, unknown>): { title: string; kindLabel: string } {
+  const text = (v: unknown) => (typeof v === 'string' ? v : '');
+  const fallback = permissionWording(text(data['toolName']), text(data['type']));
+  return {
+    title: typeof data['title'] === 'string' && data['title'] ? data['title'] : fallback.title,
+    kindLabel: typeof data['kindLabel'] === 'string' && data['kindLabel'] ? data['kindLabel'] : fallback.kindLabel,
+  };
 }

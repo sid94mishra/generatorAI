@@ -37,6 +37,7 @@ import type {
   Page,
 } from 'playwright';
 import { chromium } from 'playwright';
+import { reloadFresh } from './reloadFresh.js';
 import type { ILogger } from '@generatorai/shared';
 import type { ImportedCookie } from '@generatorai/shared';
 import { matchesAnyHostPattern } from '@generatorai/shared';
@@ -98,6 +99,13 @@ export interface ElectronBridgeAdapterOptions {
   /** How long to wait for a workspace's scoped proxy endpoint to be
    *  registered before failing. */
   discoveryTimeoutMs?: number;
+  /**
+   * D-105: ask the desktop app for a tab when a workspace has none (no Browser dock tab is open). The desktop main
+   * process creates a hidden agent tab, makes it the workspace's active tab and pushes its scoped endpoint; the dock
+   * adopts it when the person opens a Browser tab. Without it an agent's first browser call failed unless the person
+   * had opened the Browser dock first.
+   */
+  requestTab?: (workspaceId: string) => void;
 }
 
 export class ElectronBridgeAdapter implements IBrowserBridge {
@@ -112,7 +120,7 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
    *  `setEndpoint()` (routes/internal-browser.ts). Populated lazily — a
    *  workspace has no entry until its desktop tab starts a proxy. */
   private endpoints = new Map<string, string>();
-  private readonly opts: Required<ElectronBridgeAdapterOptions>;
+  private readonly opts: Required<Omit<ElectronBridgeAdapterOptions, 'requestTab'>> & Pick<ElectronBridgeAdapterOptions, 'requestTab'>;
 
   constructor(
     private readonly logger: ILogger,
@@ -121,6 +129,7 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
     this.opts = {
       cdpEndpoint: opts?.cdpEndpoint ?? '',
       discoveryTimeoutMs: opts?.discoveryTimeoutMs ?? 10_000,
+      ...(opts?.requestTab ? { requestTab: opts.requestTab } : {}),
     };
   }
 
@@ -136,6 +145,13 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
 
   private async waitForEndpoint(workspaceId: string): Promise<string> {
     if (this.opts.cdpEndpoint) return this.opts.cdpEndpoint;
+    if (!this.endpoints.has(workspaceId) && this.opts.requestTab) {
+      try {
+        this.opts.requestTab(workspaceId);
+      } catch (err) {
+        this.logger.warn(`[ElectronBridgeAdapter] could not ask the desktop app for a browser tab: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     const deadline = Date.now() + this.opts.discoveryTimeoutMs;
     while (Date.now() < deadline) {
       const ep = this.endpoints.get(workspaceId);
@@ -165,16 +181,22 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
 
   private async startOnce(opts: BrowserStartOptions, observer?: BrowserHostObserver): Promise<BrowserHandle> {
 
-    const ep = await this.waitForEndpoint(opts.workspaceId);
+    let ep = await this.waitForEndpoint(opts.workspaceId);
     this.logger.info(`[ElectronBridgeAdapter] Connecting over CDP to scoped proxy for workspace ${opts.workspaceId}`);
     let browser: Browser;
     try {
       browser = await chromium.connectOverCDP(ep);
     } catch (err) {
-      throw new Error(
-        `[ElectronBridgeAdapter] connectOverCDP failed: ${(err as Error).message}. ` +
-          `Ensure the desktop app was started with GENERATORAI_DESKTOP_NATIVE_BROWSER=1.`,
-      );
+      // The tab behind `ep` went away while we dialled it (the Browser dock took over the hidden agent tab, U-60):
+      // its endpoint has been replaced or cleared by now, so connect once more to whichever tab carries it next.
+      if (this.opts.cdpEndpoint || this.endpoints.get(opts.workspaceId) === ep) throw connectError(err);
+      ep = await this.waitForEndpoint(opts.workspaceId);
+      this.logger.info(`[ElectronBridgeAdapter] Endpoint changed mid-connect; reconnecting for workspace ${opts.workspaceId}`);
+      try {
+        browser = await chromium.connectOverCDP(ep);
+      } catch (retryErr) {
+        throw connectError(retryErr);
+      }
     }
     const context = browser.contexts()[0];
     const page = context?.pages()[0];
@@ -280,7 +302,7 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
   async reload(handle: BrowserHandle): Promise<PageOutcome> {
     const entry = await this.entryFor(handle);
     try {
-      await entry.page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await reloadFresh(entry.page);
       return { ok: true, url: entry.page.url() };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
@@ -927,4 +949,11 @@ export class ElectronBridgeAdapter implements IBrowserBridge {
     void page.evaluate(INSPECTOR_SCRIPT).catch(() => undefined);
     void page.evaluate(ANTI_DETECTION_SCRIPT).catch(() => undefined);
   }
+}
+
+function connectError(err: unknown): Error {
+  return new Error(
+    `[ElectronBridgeAdapter] connectOverCDP failed: ${(err as Error).message}. ` +
+      `Ensure the desktop app was started with GENERATORAI_DESKTOP_NATIVE_BROWSER=1.`,
+  );
 }

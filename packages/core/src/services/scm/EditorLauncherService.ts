@@ -81,19 +81,6 @@ export const EDITOR_TABLE: readonly EditorEntry[] = [
     },
   },
   {
-    id: 'vscode-insiders',
-    name: 'VS Code Insiders',
-    command: 'code-insiders',
-    scheme: 'vscode-insiders',
-    appDirs: {
-      darwin: [
-        '/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code-insiders',
-      ],
-      win32: windowsPaths('Microsoft VS Code Insiders', 'code-insiders'),
-      linux: linuxPaths('code-insiders'),
-    },
-  },
-  {
     id: 'cursor',
     name: 'Cursor',
     command: 'cursor',
@@ -102,17 +89,6 @@ export const EDITOR_TABLE: readonly EditorEntry[] = [
       darwin: ['/Applications/Cursor.app/Contents/Resources/app/bin/cursor'],
       win32: windowsPaths('Cursor', 'cursor'),
       linux: linuxPaths('cursor'),
-    },
-  },
-  {
-    id: 'windsurf',
-    name: 'Windsurf',
-    command: 'windsurf',
-    scheme: 'windsurf',
-    appDirs: {
-      darwin: ['/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf'],
-      win32: windowsPaths('Windsurf', 'windsurf'),
-      linux: linuxPaths('windsurf'),
     },
   },
 ];

@@ -15,7 +15,7 @@
 //     itself). Security.framework returns DER; `derToRaw` converts it to the
 //     raw `r || s` (64 bytes) JOSE form that `createDpopProof` base64url-encodes.
 //   • Usable after first unlock. Lock-screen Allow/Deny actions
-//     (src/auth/backgroundFetch.ts) sign a request while the phone is locked,
+//     (src/services/auth/backgroundFetch.ts) sign a request while the phone is locked,
 //     so the access control is `AfterFirstUnlockThisDeviceOnly`, NOT
 //     `WhenUnlocked`. `ThisDeviceOnly` also keeps the reference out of
 //     iCloud Keychain / restores, matching an enclave key that cannot leave
@@ -24,7 +24,10 @@
 //     enforced in JS (`AppLockGate`, `requireStepUp`); binding the key to
 //     biometrics would make every background signature prompt for Face ID.
 //
-// JS facade: apps/mobile/src/native/deviceKeyModule.ts.
+// JS facade: apps/mobile/src/services/native/deviceKeyModule.ts; the key
+// commands of M5-09 (KeyCommands.swift) are driven from
+// apps/mobile/src/services/native/keyCommands.ts; the approval key of M6-03
+// (ApprovalKey.swift) from apps/mobile/src/services/native/approvalKey.ts.
 // ────────────────────────────────────────────────────────────────
 
 import CryptoKit
@@ -56,9 +59,49 @@ internal final class DeviceKeySignatureFormatException: Exception {
   }
 }
 
+/// One hardware shortcut from JS (src/services/native/keyCommandMap.ts `NativeKeyCommand`).
+internal struct KeyCommandRecord: Record {
+  @Field var id: String = ""
+  @Field var input: String = ""
+  @Field var modifiers: [String] = []
+  @Field var title: String = ""
+}
+
 public final class GeneratorAIDeviceKeyModule: Module {
   public func definition() -> ModuleDefinition {
     Name("GeneratorAIDeviceKey")
+
+    // ── Hardware keyboard shortcuts (M5-09; KeyCommands.swift) ──────
+    Events("onKeyCommand", "onHardwareKeyboardChange")
+
+    OnCreate {
+      KeyCommandCenter.shared.emit = { [weak self] id in
+        self?.sendEvent("onKeyCommand", ["id": id])
+      }
+      KeyboardPresence.shared.onChange = { [weak self] attached in
+        self?.sendEvent("onHardwareKeyboardChange", ["attached": attached])
+      }
+      DispatchQueue.main.async {
+        KeyboardPresence.shared.start()
+      }
+    }
+
+    Function("setKeyCommands") { (commands: [KeyCommandRecord]) in
+      let specs = commands.map { KeyCommandSpec(id: $0.id, input: $0.input, modifiers: $0.modifiers, title: $0.title) }
+      DispatchQueue.main.async {
+        KeyCommandCenter.shared.install(specs)
+      }
+    }
+
+    Function("setKeyCommandsSuspended") { (suspended: Bool) in
+      DispatchQueue.main.async {
+        KeyCommandCenter.shared.setSuspended(suspended)
+      }
+    }
+
+    Function("isHardwareKeyboardAttached") { () -> Bool in
+      return KeyboardPresence.shared.attached
+    }
 
     AsyncFunction("isSupported") { () -> Bool in
       return SecureEnclave.isAvailable
@@ -109,6 +152,33 @@ public final class GeneratorAIDeviceKeyModule: Module {
 
     AsyncFunction("remove") { (alias: String) -> Void in
       Self.deleteKey(alias: alias)
+    }
+
+    // ── Approval key (M6-03, MG-05 / MD-31; ApprovalKey.swift) ──────
+    // A presence-bound enclave key per server that signs risky approvals. Every use prompts; nothing caches it.
+
+    AsyncFunction("generateApprovalKey") { (alias: String) -> [String: Any] in
+      return try ApprovalKey.generate(alias: alias)
+    }
+
+    AsyncFunction("approvalKeyStatus") { (alias: String) -> String in
+      return ApprovalKey.status(alias: alias)
+    }
+
+    AsyncFunction("signWithPrompt") { (alias: String, dataBase64: String, prompt: ApprovalPromptRecord) -> String in
+      guard let message = Data(base64Encoded: dataBase64, options: [.ignoreUnknownCharacters]) else {
+        throw ApprovalKeyFailedException("input is not valid base64")
+      }
+      return try ApprovalKey.sign(alias: alias, message: message, prompt: prompt).base64EncodedString()
+    }
+
+    AsyncFunction("removeApprovalKey") { (alias: String) -> Void in
+      ApprovalKey.remove(alias: alias)
+    }
+
+    // Ends a prompt that is still up (the JS timeout, MD-155); `signWithPrompt` then rejects as cancelled.
+    Function("cancelApprovalPrompt") { () -> Void in
+      ApprovalKey.cancelPrompt()
     }
   }
 

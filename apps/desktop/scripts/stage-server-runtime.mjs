@@ -51,6 +51,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 import { RUNTIME_PACKAGES, ABI_SENSITIVE_PACKAGES, NATIVE_PACKAGES, driverPlatformPackage } from '../../server/bundle-externals.mjs';
+import { nonExecutableNodePtyHelpers, restoreNodePtyExecBits } from '../../../scripts/lib/nativeExecBits.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(here, '..');
@@ -120,7 +121,8 @@ fs.writeFileSync(
   `${JSON.stringify(
     {
       name: 'generatorai-server-runtime',
-      version: '0.0.0',
+      // The server reports the nearest package.json's version (Diagnostics, Home): make it the app's own.
+      version: JSON.parse(fs.readFileSync(path.join(desktopRoot, 'package.json'), 'utf8')).version,
       private: true,
       description: 'Runtime dependencies for the packaged GeneratorAI server bundle.',
       // Read back by the packaging step, which refuses to build an installer
@@ -180,6 +182,15 @@ if (install.status !== 0) {
   fail(`pnpm install failed in ${stageDir} (exit ${install.status}).`);
 }
 
+// The Copilot CLI is downloaded on first use (apps/server settings/copilotCli.ts): only its loader package ships —
+// it pins the version to fetch — and its per-platform binaries (~308 MB) are dropped from the bundle.
+for (const entry of fs.readdirSync(path.join(nodeModules, '@github'), { withFileTypes: true })) {
+  if (entry.isDirectory() && /^copilot-(linux|linuxmusl|darwin|win32)-/.test(entry.name)) {
+    fs.rmSync(path.join(nodeModules, '@github', entry.name), { recursive: true, force: true });
+    console.log(`[stage] dropped @github/${entry.name} (downloaded on first use)`);
+  }
+}
+
 // ── Verify ───────────────────────────────────────────────────────
 // A mis-staged tree installs cleanly and fails on first use inside the packaged
 // app, which is a long way from here. Check the invariants while it is cheap.
@@ -228,6 +239,23 @@ for (const name of NATIVE_PACKAGES) {
         `        node-pty ships no Linux prebuild, so a Linux build needs python3 and a C++ toolchain.`,
     );
   }
+}
+
+// node-pty exec's `spawn-helper` on macOS/Linux, and this install is a fresh
+// unpack of the tarball that the root postinstall's exec-bit fix never sees —
+// a 0644 helper installs cleanly and fails the first terminal with
+// `posix_spawnp failed`. Restore the bit here, then refuse to continue if any
+// helper is still not executable. Windows (ConPTY) has no helper: no-op.
+const restored = restoreNodePtyExecBits(nodeModules, { platform: targetPlatform });
+if (restored.length > 0) {
+  console.log(`[stage] restored the exec bit on ${restored.map((f) => path.relative(stageDir, f)).join(', ')}`);
+}
+const notExecutable = nonExecutableNodePtyHelpers(nodeModules, { platform: targetPlatform });
+if (notExecutable.length > 0) {
+  fail(
+    `node-pty spawn-helper is not executable: ${notExecutable.map((f) => path.relative(stageDir, f)).join(', ')}.\n` +
+      '        Terminals in the packaged app would fail with posix_spawnp.',
+  );
 }
 
 // The driver's library lives in a per-target optional dependency, so the loop

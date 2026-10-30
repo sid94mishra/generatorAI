@@ -43,7 +43,7 @@ The approve action does not treat text in the feedback box as an instruction to 
 
 ## Source evidence
 
-`packages/shared/src/types/AgentMode.ts`, `apps/web/src/components/chat/PlanDocumentPanel.tsx`, `apps/web/src/components/chat/PlanCard.tsx`, `apps/web/src/components/chat/QuestionCard.tsx`, `apps/web/src/components/chat/PermissionCard.tsx`, and `apps/web/src/components/workflow/redesign/InlineHitlControls.tsx`.
+`packages/shared/src/types/AgentMode.ts`, `apps/web/src/blocks/plan/PlanPanel.tsx`, `apps/web/src/blocks/transcript/gates/PlanReadyCard.tsx`, `apps/web/src/blocks/transcript/gates/QuestionCard.tsx`, `apps/web/src/blocks/transcript/gates/PermissionCard.tsx`, and `apps/web/src/features/workflows/run/stages/StageRow.tsx`.
 
 ## Configuration and worked examples
 

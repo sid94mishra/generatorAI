@@ -13,6 +13,7 @@
 
 import type { ToolDefinition } from '../../domain/ports/IAgentHarness.js';
 import { TOOL_BINARY_KEY } from '../../domain/ports/IAgentHarness.js';
+import type { ActionRequest } from '../../domain/ports/IComputerBridge.js';
 import type { ComputerToolContext, ComputerToolFactory } from './computerToolTypes.js';
 import {
   APP_TARGET_PROPERTIES,
@@ -820,6 +821,119 @@ const createBringToFrontTool: ComputerToolFactory = (ctx): ToolDefinition => ({
   },
 });
 
+
+/** One step of `computer_run_steps`, as the model writes it. */
+function planStep(
+  raw: unknown,
+  target: ReturnType<typeof windowTarget>,
+): { step: ActionRequest } | { error: string } {
+  if (!raw || typeof raw !== 'object') return { error: 'Each step must be an object.' };
+  const step = raw as Record<string, unknown>;
+  switch (step['kind']) {
+    case 'click_point': {
+      const x = coerceInt(step['x']);
+      const y = coerceInt(step['y']);
+      if (x === undefined || y === undefined) return { error: 'click_point needs `x` and `y`.' };
+      return { step: { type: 'clickPoint', target, x, y, button: step['button'] === 'right' ? 'right' : 'left' } };
+    }
+    case 'type_text':
+    case 'paste_text': {
+      const text = typeof step['text'] === 'string' ? step['text'] : undefined;
+      if (text === undefined) return { error: `${String(step['kind'])} needs \`text\`.` };
+      return { step: step['kind'] === 'type_text' ? { type: 'typeText', target, text } : { type: 'pasteText', target, text } };
+    }
+    case 'press_key': {
+      const rawKey = coerceString(step['key']);
+      if (!rawKey) return { error: 'press_key needs `key`.' };
+      const chord = parseKeyChord(rawKey);
+      return {
+        step: {
+          type: 'pressKey',
+          target,
+          key: chord.key,
+          modifiers: chord.modifiers.length > 0 ? chord.modifiers : undefined,
+        },
+      };
+    }
+    case 'scroll':
+      return {
+        step: {
+          type: 'scroll',
+          target,
+          deltaX: coerceInt(step['deltaX']) ?? 0,
+          deltaY: coerceInt(step['deltaY']) ?? 0,
+          x: coerceInt(step['x']),
+          y: coerceInt(step['y']),
+        },
+      };
+    default:
+      return { error: `Unknown step kind ${JSON.stringify(step['kind'])}.` };
+  }
+}
+
+const createRunStepsTool: ComputerToolFactory = (ctx): ToolDefinition => ({
+  name: 'computer_run_steps',
+  description:
+    'Run a short, fixed sequence of coordinate/keyboard steps against ONE window (for example: click a field, type, ' +
+    'press Enter), approved by the user with ONE prompt that lists every step. Stops at the first step that fails ' +
+    `or is refused, and whenever the user pauses you or takes over. ${SYNTHETIC_WARNING}`,
+  owner: ctx.owner ?? 'computer-tools',
+  requiredPermissions: permission('Run several keyboard and mouse steps in a desktop application'),
+  parametersSchema: {
+    type: 'object',
+    properties: {
+      ...APP_TARGET_PROPERTIES,
+      windowId: { type: 'number', description: 'Target window. Defaults to the focused window.' },
+      steps: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 10,
+        description: 'The steps, in order (1 to 10).',
+        items: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string', enum: ['click_point', 'type_text', 'paste_text', 'press_key', 'scroll'] },
+            x: { type: 'number' },
+            y: { type: 'number' },
+            button: { type: 'string', enum: ['left', 'right'] },
+            text: { type: 'string' },
+            key: { type: 'string', description: 'Key name or chord, e.g. "Enter" or "Control+S".' },
+            deltaX: { type: 'number' },
+            deltaY: { type: 'number' },
+          },
+          required: ['kind'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['steps'],
+    additionalProperties: false,
+  },
+  handler: async (args) => {
+    const ref = toAppRef(args);
+    if ('error' in ref) return { ok: false, error: ref.error };
+    const rawSteps = Array.isArray(args['steps']) ? args['steps'] : [];
+    if (rawSteps.length === 0) return { ok: false, error: '`steps` needs at least one step.' };
+    const target = windowTarget(args);
+    const steps: ActionRequest[] = [];
+    for (const [index, raw] of rawSteps.entries()) {
+      const parsed = planStep(raw, target);
+      if ('error' in parsed) return { ok: false, error: `Step ${index + 1}: ${parsed.error}` };
+      steps.push(parsed.step);
+    }
+    const result = await ctx.computerService.actPlan(callContext(ctx), ref, steps);
+    return {
+      ok: result.ok,
+      completedSteps: result.results.filter((r) => r.ok).length,
+      totalSteps: steps.length,
+      steps: result.results.map((r) => actionPayload(r)),
+      ...(result.refusal
+        ? { refusal: result.refusal.code, message: result.refusal.message, stoppedAtStep: (result.stoppedAt ?? 0) + 1 }
+        : {}),
+    };
+  },
+});
+
 const FACTORIES: readonly ComputerToolFactory[] = [
   createCapabilitiesTool,
   createListAppsTool,
@@ -837,6 +951,7 @@ const FACTORIES: readonly ComputerToolFactory[] = [
   createScrollTool,
   createDragTool,
   createClickPointTool,
+  createRunStepsTool,
 ];
 
 export function buildComputerToolSet(ctx: ComputerToolContext): ToolDefinition[] {
@@ -864,6 +979,7 @@ export const COMPUTER_TOOL_NAMES = [
   'computer_scroll',
   'computer_drag',
   'computer_click_point',
+  'computer_run_steps',
 ] as const;
 
 export type ComputerToolName = (typeof COMPUTER_TOOL_NAMES)[number];

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, desktop_redesign, arch-redesign, 'redesign/**']
     # Editing prose that no gate reads should not start a three-system build.
     # Deliberately a short list rather than `**.md`: the doc-drift, CLI-docs
     # and surface-snapshot gates all compare generated markdown against the
@@ -16,7 +16,7 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/PULL_REQUEST_TEMPLATE.md'
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, desktop_redesign, arch-redesign, 'redesign/**']
     paths-ignore:
       - 'README.md'
       - 'CONTRIBUTING.md'
@@ -103,18 +103,32 @@ jobs:
       # despite being written specifically to be CI guards.
       - run: pnpm lint
 
-      # Web design-system ratchet. Counts raw <button>/<select>/Loader2 uses
-      # against a committed baseline and fails when the count goes UP. The
-      # baseline file and its shrink-only rules are owned by the web UI
-      # overhaul (WS-F2) in apps/web/scripts/check-design-system.mjs — this
-      # step only wires it into CI. Ubuntu-only: it reads source, not builds.
+      # Web design-system ratchet + stories-present check
+      # (docs/redesign/09-verification.md §2.1–2.2, §3.6). `--strict` fails when
+      # any count rises AND when a count fell without the PR lowering the
+      # baseline (`check:design --update`), so every improvement is locked in.
+      # The redesign folders src/{ui,blocks,features,app} are hard-zero.
+      # Ubuntu-only: it reads source, not builds.
       - name: Check web design-system ratchet
         if: matrix.os == 'ubuntu-latest'
-        run: pnpm --filter @generatorai/web check:design
+        run: pnpm --filter @generatorai/web check:design --strict
+
+      # The kit index in apps/web/DESIGN_SYSTEM.md is generated from src/ (P7-03).
+      - name: Check the design-system kit index
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm --filter @generatorai/web docs:design-index --check
 
       - run: pnpm turbo typecheck
 
       - run: pnpm turbo test
+
+      # Root-package script tests (scripts/__tests__), which `turbo test` never
+      # reaches: it runs package suites only. Includes the redesign rails
+      # fixtures (ratchet, stories-present, board flattener, ESLint layer
+      # rules — P0 review R4). All three OSes: the layer rules and path
+      # handling are exactly what differs on Windows.
+      - name: Root script tests (redesign rails)
+        run: pnpm exec vitest run --project node scripts/__tests__
 
       # WEB-03: enforce 800 KB gzipped budget on the web bundle.
       # `pnpm turbo build` above already produced dist/ — this just checks it.
@@ -122,6 +136,14 @@ jobs:
       - name: Check web bundle size
         if: matrix.os == 'ubuntu-latest'
         run: pnpm --filter @generatorai/web check:bundle
+
+      # Tailwind emits nothing (and reports nothing) for a broken `@theme` /
+      # `@source` — this reads the same dist/ and checks that the CSS parses
+      # and that the design utilities were emitted (09-verification.md §2.4;
+      # P0 skeleton, fully active from P1).
+      - name: Check web CSS emission
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm --filter @generatorai/web check:css
 
       # CLI_TUI_POST_OVERHAUL_PARITY_AUDIT_2026.md §5.6 — the CLI's declared
       # `bin` was never actually produced or exercised by CI: `pnpm turbo
@@ -347,18 +369,28 @@ jobs:
         run: |
           set -euo pipefail
           state="$RUNNER_TEMP/e2e-state"
-          mkdir -p "$state/artifacts" "$state/logs"
+          mkdir -p "$state/artifacts" "$state/workspaces" "$state/extensions" "$state/logs"
           echo "E2E_STATE=$state" >> "$GITHUB_ENV"
 
           # Server: same env shape as agent-tests/concurrent-load-1q.mjs.
+          # The server reads the BARE names (apps/server/src/index.ts); the
+          # GENERATORAI_-prefixed ones used here before were ignored, so e2e
+          # ran against the default database instead of this temp one.
+          # No comment lines inside the continuation below: a `#` there ends
+          # the command and turns the variables above it into unexported
+          # shell assignments.
           (
             cd apps/server
             PORT="$SERVER_PORT" \
             WIDGET_PORT="$((SERVER_PORT + 1))" \
-            GENERATORAI_DB_PATH="$state/e2e.db" \
-            GENERATORAI_ARTIFACTS_DIR="$state/artifacts" \
+            DB_PATH="$state/e2e.db" \
+            ARTIFACTS_DIR="$state/artifacts" \
+            WORKSPACES_DIR="$state/workspaces" \
+            EXTENSIONS_DIR="$state/extensions" \
+            GENERATORAI_BIND_HOST=127.0.0.1 \
             GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK=1 \
             NODE_ENV=test \
+            GENERATORAI_TEST_FAUX_HARNESS=true \
             nohup node dist-bundle/server.mjs > "$state/logs/server.log" 2>&1 &
             echo $! > "$state/server.pid"
           )
@@ -385,6 +417,21 @@ jobs:
             echo "$name is up: $url"
           }
           wait_for "http://127.0.0.1:$SERVER_PORT/api/health" server
+
+          # D-44: the server must be on the temp DB, never a default one. The
+          # startup line is pino JSON: {"…","dbPath":"<path>",…,"msg":"[Server] … listening …"}.
+          # Polled briefly: /api/health can answer before the logger flushes.
+          db_deadline=$((SECONDS + 15))
+          until grep -qF "\"dbPath\":\"$state/e2e.db\"" "$state/logs/server.log"; do
+            if (( SECONDS >= db_deadline )); then
+              echo "::error::server is not on the temp DB ($state/e2e.db); startup log:"
+              grep -F '"dbPath"' "$state/logs/server.log" || tail -n 50 "$state/logs/server.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "server is on the temp DB: $state/e2e.db"
+
           wait_for "http://127.0.0.1:$WEB_PORT/" web
 
       - name: Run Playwright e2e suite
@@ -427,6 +474,90 @@ jobs:
           path: ${{ env.E2E_STATE }}/logs/
           if-no-files-found: ignore
           retention-days: 14
+
+  # ── Storybook stories: render + play + axe (D-10, 09-verification.md §3.4) ─
+  # Every story rendered in headless Chromium through addon-vitest: its play
+  # function runs and axe runs with `a11y.test: 'error'`, in Instrument dark,
+  # plus Instrument light and Solarized light for `vrt-themes` stories (§9.1).
+  # Chromium comes from Playwright's download (CI has no Chrome channel).
+  storybook:
+    name: Storybook stories (render + axe)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      # Same browser cache the e2e job uses (see the load-test job for why the
+      # install runs through @generatorai/core).
+      - run: pnpm --filter @generatorai/core exec playwright install --with-deps chromium
+
+      # Workspace packages the stories import resolve to their built dist/.
+      - run: pnpm turbo run build --filter='@generatorai/web^...'
+
+      - run: pnpm --filter @generatorai/web test:stories
+
+      - run: pnpm --filter @generatorai/web build-storybook
+
+  # ── Visual regression: stories (D-34, 09-verification.md §4) ─────────────
+  # Runs the pinned container (docker/vrt.Dockerfile) through the same wrapper
+  # developers use. `--update-missing` writes a baseline only for a story that
+  # has none (existing baselines are compared strictly, threshold never tuned);
+  # the last step then FAILS if any baseline was written, so a new story cannot
+  # pass without its PNGs committed, and the artifact holds the exact files to
+  # commit (the only way to get them on a host without Docker).
+  vrt:
+    name: Visual regression (stories)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      # Only agent-tests' installed @playwright/test is needed on the host, for
+      # the wrapper's image-tag check; everything else happens in the image.
+      - run: pnpm install --frozen-lockfile --filter @generatorai/agent-tests
+
+      - run: pnpm vrt --project stories --update-missing
+
+      - name: Upload baselines and results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vrt-stories
+          path: |
+            agent-tests/vrt/__screenshots__/
+            agent-tests/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Fail on baselines that are not committed
+        shell: bash
+        run: |
+          new=$(git status --porcelain --untracked-files=all -- agent-tests/vrt/__screenshots__)
+          if [ -n "$new" ]; then
+            echo "::error::VRT wrote baselines that are not committed. Download the vrt-stories artifact, open each PNG, and commit them:"
+            echo "$new"
+            exit 1
+          fi
 
   # ── Phone bundle hygiene ─────────────────────────────────────────────────
   # The phone app's unit tests and lint already run inside the turbo sweep

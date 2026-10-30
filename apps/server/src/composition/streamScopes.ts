@@ -40,6 +40,8 @@ export const LIFECYCLE_EVENT_KINDS: ReadonlySet<string> = new Set([
   'chat.created',
   'chat.archived',
   'chat.deleted',
+  // Chat list v2 (G-02): a row's summary columns moved.
+  'chat.updated',
   'chat.mode_changed',
   'chat.agent_changed',
   // Workflow runs
@@ -52,18 +54,31 @@ export const LIFECYCLE_EVENT_KINDS: ReadonlySet<string> = new Set([
   'workflow_run.completed',
   'workflow_run.failed',
   'workflow_run.cancelled',
-  'workflow_run.retried',
+  'workflow_run.forked',
   // Automations
   'automation_execution.started',
   'automation_execution.completed',
   'automation_execution.failed',
   'automation_execution.cancelled',
+  'automation_execution.paused',
+  'automation_execution.resumed',
   'automation_execution.recovered',
   // Device scope requests (plan S2). An admin phone's "Access requests" list
   // is wrong until it hears a request was opened; the requesting phone's
   // "Pending since …" row is wrong until it hears the answer.
   'device.scope_requested',
   'device.scope_request_resolved',
+  // Attention feed (G-01). The sidebar's Needs you / Running lists and every
+  // badge counting them are wrong until they hear these. `ask.detail` and
+  // `progress.label` are stripped per principal on delivery
+  // (`routes/stream.ts`), so a `read:activity` device sees the row, not the
+  // command inside it.
+  'attention.upsert',
+  'attention.remove',
+  'attention.counts',
+  // Codebase fetch/clone (G-16): ProjectDetail/CodebaseDetail's status pill
+  // and "Last fetched" are wrong until they hear this.
+  'codebase.status_changed',
 ]);
 
 function readString(obj: unknown, key: string): string | undefined {
@@ -93,8 +108,12 @@ export function deriveStreamScopes(event: {
 }): ScopeTarget[] {
   const targets: ScopeTarget[] = [];
 
+  // An engine event from the outbox carries its `runSeq`: the outbox
+  // publisher already put it on its run scope, awaited (G5 §5.8), so the
+  // bridge must not publish it there a second time.
   const runId = readString(event.data, 'workflowRunId');
-  if (runId) targets.push({ scope: 'run', id: runId });
+  const fromOutbox = !!event.data && typeof (event.data as { runSeq?: unknown }).runSeq === 'number';
+  if (runId && !fromOutbox) targets.push({ scope: 'run', id: runId });
 
   const chatId = readString(event.data, 'chatId');
   if (chatId) targets.push({ scope: 'chat', id: chatId });
@@ -124,4 +143,17 @@ export function deriveStreamScopes(event: {
   }
 
   return targets;
+}
+
+/**
+ * P07 WP-7.5 (W-42) — how many `stream_cursors` rows one event costs: its
+ * primary scope (session or global, written by the event store), plus every
+ * secondary scope above, plus the run scope an outbox event was already
+ * published to (it carries `runSeq`). The server records it per workflow
+ * event as `workflow.stream.rows_per_event`; the testkit measurement
+ * (`bench/stream-rows.bench.ts`) applies it to a whole T1 run.
+ */
+export function streamRowsFor(event: { sessionId: string; kind: string; data: unknown }, targets = deriveStreamScopes(event)): number {
+  const fromOutbox = !!event.data && typeof (event.data as { runSeq?: unknown }).runSeq === 'number';
+  return 1 + targets.length + (fromOutbox ? 1 : 0);
 }

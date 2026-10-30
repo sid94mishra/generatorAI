@@ -3,8 +3,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { Server } from 'node:http';
+import type { Server as NetServer } from 'node:net';
 import { randomUUID } from 'node:crypto';
-import { homedir, hostname, networkInterfaces } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { resolve, dirname } from 'node:path';
 import { mkdirSync, readFileSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -36,6 +37,7 @@ import { StartupSecurityError } from './composition/security.js';
 import { ensureBootstrapPairing } from './composition/bootstrapPairing.js';
 import { RelayStreamBridge } from './relay/RelayStreamBridge.js';
 import { createContainer } from './composition-root.js';
+import { parentChannel, receiveSecretKey, SECRET_KEY_HANDOFF_ENV, watchParentExit } from './parentChannel.js';
 import type { Container } from './composition-root.js';
 import type { WedgeDetector, LoopTurnProber } from '@generatorai/core';
 import { createApp } from './app.js';
@@ -44,8 +46,9 @@ import { attachBrowserWebSocket } from './browser-ws.js';
 import { attachTerminalWebSocket } from './terminal-ws.js';
 import { attachSttWebSocket } from './stt-ws.js';
 import { attachTtsWebSocket } from './tts-ws.js';
-import { resolveAdvertisedEndpoints } from './network/advertisedEndpoints.js';
 import { readExposureMode, resolveBindHost } from './network/exposure.js';
+import { serverEndpoints } from './network/serverEndpoints.js';
+import { createDualProtocolListener } from './network/tls/dualProtocolListener.js';
 import { readComputerUsePreferences } from './settings/computerUse.js';
 import { publishLocalAdminToken, removeLocalAdminToken } from './composition/localAdminToken.js';
 import { exitAfterBoundedFlush } from './boundedFlush.js';
@@ -55,6 +58,7 @@ import {
   startChildReaperHeartbeat,
   stopChildReaperHeartbeat,
 } from '@generatorai/agent-harness-providers';
+import { createHostAllowlistMiddleware, serverHostAllowlist } from './middleware/hostAllowlist.js';
 
 // ── Process-level failure policy (P0-40) ────────────────────────────────────
 //
@@ -241,11 +245,6 @@ async function startServer(): Promise<void> {
     process.env['GENERATORAI_EXTENSIONS_DIR'] ?? process.env['EXTENSIONS_DIR'] ?? '~/.generatorai/extensions',
   );
 
-  // Compute the monorepo project root (three levels up from apps/server/src/)
-  const __filename_idx = fileURLToPath(import.meta.url);
-  const __dirname_idx = dirname(__filename_idx);
-  const projectRoot = resolve(__dirname_idx, '..', '..', '..');
-
   // Ensure directories exist (mkdirSync is safe with { recursive: true })
   for (const dir of [workspacesDir, artifactsDir, extensionsDir]) {
     mkdirSync(dir, { recursive: true });
@@ -257,7 +256,7 @@ async function startServer(): Promise<void> {
   // W20 / X-18 — server.lock: identity file written on startup and removed on
   // clean shutdown. If a lock from a previous process (different PID) exists we
   // log a warning — the previous server may not have exited cleanly (e.g. SIGKILL).
-  // We do NOT refuse to start; StartupRecoveryService handles in-flight state.
+  // We do NOT refuse to start; the workflow engine's recovery handles in-flight runs.
   const lockPath = resolve(dbDataDir, 'server.lock');
   const instanceId = randomUUID();
   const lockPort = parseInt(process.env['PORT'] ?? '3100', 10);
@@ -270,7 +269,7 @@ async function startServer(): Promise<void> {
       if (prev.pid && prev.pid !== process.pid) {
         console.warn(
           `[Server] server.lock (pid=${prev.pid}, id=${prev.instanceId ?? '?'}) found from a prior instance — ` +
-          'it may not have exited cleanly. Proceeding; StartupRecoveryService will reconcile in-flight state.',
+          'it may not have exited cleanly. Proceeding; the workflow engine will recover in-flight runs.',
         );
       }
     }
@@ -287,7 +286,6 @@ async function startServer(): Promise<void> {
     artifactsDir,
     templatesDir,
     extensionsDir,
-    projectRoot,
     // Bounded: this feeds a concurrency cap, and `NaN` from a typo makes
     // every `>=` check against it false — removing the bound silently.
     maxConcurrentSessions: readBoundedInt('MAX_CONCURRENT_SESSIONS', {
@@ -322,11 +320,6 @@ async function startServer(): Promise<void> {
       heartbeatIntervalMs: parseInt(process.env['SSE_HEARTBEAT_MS'] ?? '15000', 10),
       maxReplayEvents: parseInt(process.env['SSE_MAX_REPLAY'] ?? '10000', 10),
       bufferCleanupDelayMs: parseInt(process.env['SSE_BUFFER_CLEANUP_DELAY_MS'] ?? '300000', 10),
-    },
-    webhooks: {
-      enabled: process.env['WEBHOOKS_ENABLED'] === 'true',
-      githubSecret: process.env['GITHUB_WEBHOOK_SECRET'],
-      webhookToken: process.env['WEBHOOK_TOKEN'],
     },
     security: {
       corsOrigins: process.env['CORS_ORIGINS']
@@ -394,6 +387,9 @@ async function startServer(): Promise<void> {
         .map((s) => s.trim())
         .filter(Boolean),
     },
+    workflows: {
+      allowAgentPublish: process.env['GENERATORAI_ALLOW_AGENT_PUBLISH'] === 'true',
+    },
     otel: {
       enabled: process.env['OTEL_ENABLED'] === 'true',
       ...(process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] ? { endpoint: process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] } : {}),
@@ -434,7 +430,16 @@ async function startServer(): Promise<void> {
   const config = AppConfigSchema.parse(rawConfig);
 
   // 2. Create DI container
-  const container: Container = await createContainer(config);
+  // F-8 (D-128) — the desktop app hands the vault key over the parent channel
+  // rather than the environment, so it never appears in `ps eww` or in what
+  // this process spawns. A headless server keeps GENERATORAI_SECRET_KEY.
+  let handedSecretKey: string | undefined;
+  if (process.env[SECRET_KEY_HANDOFF_ENV] === 'parent') {
+    const channel = parentChannel();
+    if (!channel) throw new Error(`${SECRET_KEY_HANDOFF_ENV}=parent but this process has no parent channel`);
+    handedSecretKey = (await receiveSecretKey(channel)) ?? undefined;
+  }
+  const container: Container = await createContainer(config, { secretKey: handedSecretKey });
   // From here on a fault exit gets one bounded chance to commit queued writes.
   faultFlush = () => Promise.all([container.eventBus.flush(), container.streamBroker.flushWrites()]);
 
@@ -573,16 +578,41 @@ async function startServer(): Promise<void> {
     }
   };
 
+  // D-110/D-111 — with Network exposure on, the same port answers HTTPS and
+  // plain HTTP: the socket is accepted by a small TCP listener that looks at
+  // the first byte and hands the connection, decrypted or not, to ONE
+  // http.Server. Everything below that (`upgrade` handlers, timeouts,
+  // `closeAllConnections`) is unchanged; `tlsListener` is only what accepts.
+  const tls = container.security.tls;
+  let tlsListener: NetServer | undefined;
+
   const listenOn = (port: number): Promise<Server> =>
     new Promise<Server>((resolvePort, rejectPort) => {
-      const candidate = app.listen(port, bindHost);
+      let httpServer: Server | undefined;
+      const candidate: NetServer = tls
+        ? createDualProtocolListener({
+            httpServer: (httpServer = createServer(app)),
+            secureContext: () => tls.secureContext(),
+            onTlsError: (err, remoteAddress) => {
+              // Every visit before the user accepts the certificate ends in an
+              // aborted handshake; debug, not warn.
+              container.logger.debug?.('[TLS] handshake failed', { remoteAddress, error: err.message });
+            },
+          })
+        : app.listen(port, bindHost);
+      if (tls) candidate.listen(port, bindHost);
       const onError = (err: Error): void => {
         candidate.removeListener('listening', onListening);
         rejectPort(err);
       };
       const onListening = (): void => {
         candidate.removeListener('error', onError);
-        resolvePort(candidate);
+        if (httpServer) {
+          tlsListener = candidate;
+          resolvePort(httpServer);
+        } else {
+          resolvePort(candidate as Server);
+        }
       };
       candidate.once('error', onError);
       candidate.once('listening', onListening);
@@ -637,6 +667,10 @@ async function startServer(): Promise<void> {
         dbPath: config.dbPath,
         authenticationRequired: container.security.posture.authenticationRequired,
         secretBackend: container.security.posture.secretBackend.kind,
+        // D-110 — what other devices use, and the fingerprint to compare.
+        https: tls
+          ? { fingerprintSha256: tls.status().fingerprintSha256, source: tls.status().source }
+          : container.security.posture.tlsUnavailableReason,
         streaming: {
           enabled: config.streaming.enabled,
           heartbeatMs: config.streaming.heartbeatIntervalMs,
@@ -648,6 +682,17 @@ async function startServer(): Promise<void> {
       },
     );
   }
+
+  // 5a-1b. "Connect with Tailscale" (D-123): point `tailscale serve` at the
+  //        port this process actually bound (it moves past a busy one) and
+  //        trust the persisted ts.net name. Never blocks startup: the CLI
+  //        may be slow, absent or signed out.
+  container.tailscale.setListenPort(listenPort);
+  void container.tailscale.start().catch((err: unknown) => {
+    container.logger.warn('[Tailscale] could not re-apply access at startup', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 
   // 5a-2. W21 — start the loop-turn prober now that the bound port is known.
   //       It probes an endpoint answered FROM the event loop, so a slow or
@@ -706,6 +751,8 @@ async function startServer(): Promise<void> {
   //     isolated origin — never the host. NO auth/cookies/SPA here.
   const widgetPort = parseInt(process.env['WIDGET_PORT'] ?? '3101', 10);
   const widgetApp = express();
+  // D-119 — same DNS-rebinding guard as the main app.
+  widgetApp.use(createHostAllowlistMiddleware({ allowlist: () => serverHostAllowlist(container) }));
   widgetApp.use('/api/widget-assets', createWidgetAssetRoutes(container));
   const widgetServer = createServer(widgetApp);
   widgetServer.listen(widgetPort, '127.0.0.1', () => {
@@ -730,14 +777,10 @@ async function startServer(): Promise<void> {
   //     unclaimed (no device, no service account), so a normal restart is a
   //     no-op. Deliberately AFTER `listen` because the pairing offer has to
   //     advertise a reachable endpoint.
-  const bootstrapEndpoints = resolveAdvertisedEndpoints({
+  const bootstrapEndpoints = serverEndpoints({
     port: listenPort,
     bindHost,
-    configuredOrigins: [
-      ...(process.env['GENERATORAI_ADVERTISED_URLS']?.split(',') ?? []),
-      ...(process.env['GENERATORAI_ADVERTISED_URL'] ? [process.env['GENERATORAI_ADVERTISED_URL']] : []),
-    ],
-    networkInterfaces: networkInterfaces(),
+    tls,
   });
   const advertisedEndpoint = bootstrapEndpoints[0]?.origin ?? `http://127.0.0.1:${listenPort}`;
   try {
@@ -822,7 +865,18 @@ async function startServer(): Promise<void> {
     // Don't keep the event loop alive just for this timer.
     forceExit.unref?.();
 
-    server.close(async () => {
+    // In dual-protocol mode the http.Server never listened itself — the TCP
+    // listener accepted every socket — so that is what has to stop accepting,
+    // and its close callback is the one that waits for connections to end.
+    const closeListener = (done: () => void): void => {
+      if (tlsListener) {
+        tlsListener.close(() => done());
+      } else {
+        server.close(() => done());
+      }
+    };
+
+    closeListener(async () => {
       timings.httpCloseMs = Date.now() - shutdownStart;
 
       try {
@@ -880,7 +934,10 @@ async function startServer(): Promise<void> {
   // has no way to deliver SIGTERM — Node maps `kill('SIGTERM')` there to
   // TerminateProcess, which no handler can observe. Without this the graceful
   // path never ran on the primary distribution's primary platform.
-  process.on('message', (msg: unknown) => {
+  // The packaged app forks this server as an Electron utility process (F-4),
+  // whose channel is `process.parentPort`; `parentChannel()` speaks either.
+  const channel = parentChannel();
+  channel?.onMessage((msg: unknown) => {
     if (msg && typeof msg === 'object' && (msg as { type?: unknown }).type === 'shutdown') {
       void shutdown('ipc');
     }
@@ -890,8 +947,10 @@ async function startServer(): Promise<void> {
   // a crash, a force-quit, a SIGKILL. Nothing else tells us: we are reparented
   // and would keep running, holding the database and every agent CLI (and
   // their MCP servers) we spawned. Only a process started with an IPC channel
-  // ever sees this event, so a standalone server is unaffected.
+  // ever sees this event, so a standalone server is unaffected. A utility
+  // process gets no such event, so it watches its parent instead.
   process.on('disconnect', () => { void shutdown('parent-disconnect'); });
+  if (channel?.kind === 'utility') watchParentExit(() => { void shutdown('parent-disconnect'); });
 
   // A fatal fault now unwinds through the same path as a signal, so it closes
   // the DB, flushes the event queues and reaps child processes instead of

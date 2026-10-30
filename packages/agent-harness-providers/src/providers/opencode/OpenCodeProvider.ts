@@ -46,6 +46,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import * as path from 'node:path';
 import type {
   IAgentHarness,
   CreateConversationParams,
@@ -69,6 +70,7 @@ import type {
   Event as OpenCodeEvent,
   Model as OpenCodeModel,
   Part as OpenCodePart,
+  PermissionRule,
   Provider as OpenCodeProviderInfo,
   Session as OpenCodeSession,
 } from '../../protocol/opencode.generated.js';
@@ -416,10 +418,12 @@ export class OpenCodeProvider implements IAgentHarness {
       planMode: false,
       mcpServers: true,  // OpenCode has native MCP support (`/mcp` routes)
       // `GET /skill` exists; there is no way to point it at our directories.
-      skillDirectories: false,
-      // Permissions are asked per request via `/session/{id}/permissions`, not
-      // as a gate on every tool call.
-      fullToolGating: false,
+      skills: 'none',
+      // Nothing routes OpenCode's own permission requests to the session's
+      // gate, so a run cannot be held to `default` or `plan` (PD-17).
+      approvalGating: 'none',
+      hostTools: 'none',
+      structuredOutput: 'none',
       sessionPersistence: true, // opencode persists sessions server-side
       // Assistant messages carry `cost`; there is no budget ceiling to set.
       budgetTracking: false,
@@ -442,14 +446,15 @@ export class OpenCodeProvider implements IAgentHarness {
       const out: HarnessModel[] = [];
       for (const provider of body.providers ?? []) {
         for (const model of Object.values(provider.models ?? {})) {
-          out.push(this.toHarnessModel(provider, model as OpenCodeModel));
+          out.push(this.toHarnessModel(provider, model as OpenCodeModel, body.default?.[provider.id]));
         }
       }
       return out;
     } catch { return []; }
   }
 
-  private toHarnessModel(provider: OpenCodeProviderInfo, model: OpenCodeModel): HarnessModel {
+  /** One `/config/providers` model, copying only the fields OpenCode returned (D-131). */
+  private toHarnessModel(provider: OpenCodeProviderInfo, model: OpenCodeModel, providerDefault?: string): HarnessModel {
     const limit = model.limit as { context?: number; output?: number } | undefined;
     const capabilities = model.capabilities as
       | { reasoning?: boolean; input?: { image?: boolean } }
@@ -460,11 +465,14 @@ export class OpenCodeProvider implements IAgentHarness {
       id: `${provider.id}/${model.id}`,
       name: model.name ?? model.id,
       provider: 'opencode',
-      supportsReasoning: capabilities?.reasoning ?? false,
+      ...(providerDefault === model.id ? { isDefault: true } : {}),
+      ...(typeof capabilities?.reasoning === 'boolean' ? { supportsReasoning: capabilities.reasoning } : {}),
+      ...(typeof capabilities?.input?.image === 'boolean' ? { supportsVision: capabilities.input.image } : {}),
       ...(limit?.context ? { promptTokenLimit: limit.context } : {}),
       ...(limit?.context && limit?.output
         ? { totalContextWindow: limit.context + limit.output }
         : {}),
+      ...(limit?.output ? { maxOutputTokens: limit.output } : {}),
     };
   }
 
@@ -504,21 +512,12 @@ export class OpenCodeProvider implements IAgentHarness {
       });
     }
 
-    // The chat's primary mount. `opencode serve` has no notion of extra
-    // roots — `Session` carries a single `directory`, and no endpoint in the
-    // pinned OpenAPI document accepts a list — so the other mounts and the
-    // managed workspace root cannot be granted here.
+    // The chat's primary mount. A session has a single project `directory`;
+    // the other mounts and the managed workspace root are granted through the
+    // session's own permission ruleset (`external_directory` → allow), set on
+    // create and re-set on every rebind.
     const directory = params.workingDirectory ?? this.opts.defaultCwd;
-    if (params.additionalDirectories?.length) {
-      warnings.push({
-        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
-        params: {
-          field: 'additionalDirectories',
-          provider: 'opencode',
-          reason: 'a session has exactly one project directory',
-        },
-      });
-    }
+    const permission = externalDirectoryRules(params.additionalDirectories);
     // The server process is shared by every conversation and is spawned before
     // any of them exists, so per-conversation variables cannot reach it.
     if (params.env && Object.keys(params.env).length > 0) {
@@ -544,13 +543,14 @@ export class OpenCodeProvider implements IAgentHarness {
           `OpenCodeProvider: cannot resume session "${sessionId}" (HTTP ${resp.status}).`,
         );
       }
+      await this.setSessionPermission(sessionId, permission, directory, warnings);
     } else {
       // `POST /session` accepts only `{ parentID?, title? }`. Sending `model`
       // or `systemPrompt` here — as the previous version did — is silently
       // ignored; both belong on each prompt instead.
       const resp = await this.fetch(
         OPENCODE_OPERATIONS['session.create'].path,
-        { method: 'POST', body: JSON.stringify({ title: params.conversationId }) },
+        { method: 'POST', body: JSON.stringify({ title: params.conversationId, ...(permission.length ? { permission } : {}) }) },
         directory,
       );
       if (!resp.ok) {
@@ -575,8 +575,61 @@ export class OpenCodeProvider implements IAgentHarness {
   }
 
   async resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void> {
-    if (!this.conversations.has(conversationId) && params) {
-      await this.createConversation(params);
+    const live = this.conversations.get(conversationId);
+    if (!live) {
+      if (params) await this.createConversation(params);
+      return;
+    }
+    if (!params || live.turn) return;
+    // "Edit sources" on a live chat (D-137) rebinds with new roots and a new
+    // `[Workspace]` system prompt. The system prompt and model ride on every
+    // prompt, so they take effect from the stored state; the extra directories
+    // are the session's permission ruleset, re-set in place. A session's
+    // project directory cannot move, so a new working directory needs a new
+    // session there — reported as CONVERSATION_RESTARTED so the caller hands
+    // it the transcript.
+    const directory = params.workingDirectory ?? this.opts.defaultCwd;
+    if (directory !== live.directory) {
+      this.sessionIndex.delete(live.sessionId);
+      this.conversations.delete(conversationId);
+      await this.createConversation({ ...params, resumeProviderSessionId: undefined });
+      const fresh = this.conversations.get(conversationId);
+      fresh?.warnings.push({
+        code: 'CONVERSATION_RESTARTED',
+        params: { provider: 'opencode', reason: 'working directory moved' },
+      });
+      return;
+    }
+    const warnings: ConversationWarning[] = [];
+    const model = this.parseModelRef(params.model ?? this.opts.defaultModel);
+    await this.setSessionPermission(live.sessionId, externalDirectoryRules(params.additionalDirectories), directory, warnings);
+    live.params = params;
+    live.system = this.extractSystemPrompt(params);
+    if (model) live.model = model;
+    live.warnings = warnings;
+  }
+
+  /** `PATCH /session/{id}` with the session's permission ruleset; a failure is a warning, never a failed turn. */
+  private async setSessionPermission(
+    sessionId: string,
+    permission: PermissionRule[],
+    directory: string | undefined,
+    warnings: ConversationWarning[],
+  ): Promise<void> {
+    if (permission.length === 0) return;
+    try {
+      const resp = await this.fetch(
+        this.route(OPENCODE_OPERATIONS['session.update'].path, { sessionID: sessionId }),
+        { method: 'PATCH', body: JSON.stringify({ permission }) },
+        directory,
+      );
+      await resp.arrayBuffer().catch(() => undefined);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    } catch (err) {
+      warnings.push({
+        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+        params: { field: 'additionalDirectories', provider: 'opencode', reason: String(err) },
+      });
     }
   }
 
@@ -1288,4 +1341,18 @@ export class OpenCodeProvider implements IAgentHarness {
       headers: { ...headers, ...((init?.headers ?? {}) as Record<string, string>) },
     });
   }
+}
+
+/**
+ * The session rules that open a chat's extra directories (other mounts, the
+ * managed root) to OpenCode's file tools: `external_directory` is the
+ * permission its tools ask before touching a path outside the session's
+ * project directory, and a pattern is matched against the directory itself
+ * and everything under it.
+ */
+export function externalDirectoryRules(directories: readonly string[] | undefined): PermissionRule[] {
+  return [...new Set(directories ?? [])].flatMap((dir) => [
+    { permission: 'external_directory', pattern: dir, action: 'allow' as const },
+    { permission: 'external_directory', pattern: path.join(dir, '*'), action: 'allow' as const },
+  ]);
 }

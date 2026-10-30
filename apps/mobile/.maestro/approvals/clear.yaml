@@ -1,0 +1,20 @@
+appId: ${APP_ID}
+name: approvals · deny every pending gate from Home
+# Replaces the web-preview e2e/clear.mjs (08 §6.3, M7). Home's Needs-you rows never answer inline (MD-21): "Review"
+# opens the approval sheet (MB-50), which denies without the approval key (only approving a risky gate signs).
+tags: [approvals]
+---
+- runFlow: ../_subflows/launch.yaml
+- extendedWaitUntil: {visible: {id: home-needs}, timeout: 30000}
+# A row's Review button is announced as "Review <title>" (the row title disambiguates it for VoiceOver).
+- repeat:
+    while: {visible: "Review .+"}
+    times: 6
+    commands:
+      - tapOn: "Review .+"
+      - extendedWaitUntil: {visible: {id: gate-card}, timeout: 20000}
+      - tapOn: {id: gate-permission-deny}
+      - tapOn: {id: gate-permission-confirm_deny}
+      - waitForAnimationToEnd
+      - extendedWaitUntil: {visible: {id: home-needs}, timeout: 20000}
+- assertVisible: "Nothing needs you"

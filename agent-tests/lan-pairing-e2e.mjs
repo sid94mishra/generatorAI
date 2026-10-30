@@ -1,10 +1,17 @@
 // Real LAN multi-device pairing probe.
 // Run: node --import tsx agent-tests/lan-pairing-e2e.mjs
+//
+// Once Network exposure is on (D-110, D-111, D-127) every other device talks
+// HTTPS: the native app pairs over https:// with the local CA from the offer
+// pinned (MV-44) — its DPoP proofs are bound to https:// URLs — and so does a
+// browser-class client. Plain HTTP from the LAN is refused for everyone; this
+// machine (loopback) keeps plain HTTP.
 
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { X509Certificate } from 'node:crypto';
 import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -86,8 +93,10 @@ if (!lan) {
 
 const port = await freePort();
 const widgetPort = await freePort();
-const liveOrigin = `http://${lan.address}:${port}`;
-const deadOrigin = `http://10.255.255.1:${port}`;
+const liveOrigin = `https://${lan.address}:${port}`;
+const plainLanOrigin = `http://${lan.address}:${port}`;
+const loopbackOrigin = `http://127.0.0.1:${port}`;
+const deadOrigin = `https://10.255.255.1:${port}`;
 const dataDir = mkdtempSync(join(tmpdir(), 'generatorai-lan-'));
 const logs = [];
 const child = spawn(process.execPath, ['--import', 'tsx', 'apps/server/src/index.ts'], {
@@ -116,11 +125,20 @@ child.stderr.on('data', (data) => logs.push(String(data)));
 
 try {
   console.log(`\n  LAN pairing via ${lan.name} (${lan.address})\n`);
-  const healthy = await waitFor(`${liveOrigin}/api/health`, child);
-  check('server is reachable through its LAN interface', healthy, logs.join('').slice(-500));
-  if (!healthy) throw new Error('LAN server did not become reachable');
+  const healthy = await waitFor(`${loopbackOrigin}/api/health`, child);
+  check('server is up (loopback)', healthy, logs.join('').slice(-500));
+  if (!healthy) throw new Error('LAN server did not start');
 
-  const info = await fetch(`${liveOrigin}/api/auth/server-info`).then((response) => response.json());
+  // The local CA, read from this machine (plain HTTP is loopback-only now).
+  const caPem = await fetch(`${loopbackOrigin}/api/auth/tls/ca.crt`).then((response) => response.text());
+  check('the local CA certificate is served (public)', caPem.includes('BEGIN CERTIFICATE'));
+  const caFingerprint = new X509Certificate(caPem).fingerprint256;
+  const { Agent, WebSocket: UndiciWebSocket, fetch: undiciFetch } = await import('undici');
+  // What the app's native trust module does: trust exactly this CA for the LAN address.
+  const pinnedCa = new Agent({ connect: { ca: caPem } });
+  const httpsFetch = (url, init) => undiciFetch(url, { ...init, dispatcher: pinnedCa });
+
+  const info = await httpsFetch(`${liveOrigin}/api/auth/server-info`).then((response) => response.json());
   check('server-info publishes protocol version 2', info.protocolVersion === 2);
   check(
     'server-info includes the live LAN endpoint',
@@ -128,7 +146,7 @@ try {
   );
   check('server-info does not claim relay client support', info.transports?.relay === false);
 
-  const pairResponse = await fetch(`${liveOrigin}/api/auth/pair`, {
+  const pairResponse = await fetch(`${loopbackOrigin}/api/auth/pair`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${API_KEY}` },
     body: JSON.stringify({ deviceName: 'LAN E2E Phone', platform: 'mobile' }),
@@ -149,12 +167,28 @@ try {
     'offer retains the live LAN fallback',
     consent.endpoints.some((endpoint) => endpoint.origin === liveOrigin),
   );
+  check(
+    'a mobile offer lists only https:// network addresses (no plain-HTTP lane)',
+    consent.endpoints.every((endpoint) => endpoint.origin.startsWith('https://') || endpoint.origin.startsWith('http://127.0.0.1')),
+    JSON.stringify(consent.endpoints),
+  );
+  check(
+    'the mobile offer carries the CA fingerprint for pinning (base64url)',
+    consent.offer.certificateFingerprint ===
+      Buffer.from(caFingerprint.replace(/:/g, ''), 'hex').toString('base64url'),
+  );
+  check(
+    'the mobile offer carries a different standby CA fingerprint (D-127)',
+    /^[A-Za-z0-9_-]{43}$/.test(consent.offer.backupCertificateFingerprint ?? '') &&
+      consent.offer.backupCertificateFingerprint !== consent.offer.certificateFingerprint,
+  );
 
   const runtime = new AuthenticatedClientRuntime({
     endpoint: consent.endpoint,
     keyStore: new MemoryDeviceKeyStore(),
     sessionStore: new MemorySessionStore(),
     identityProbeTimeoutMs: 500,
+    fetchImpl: httpsFetch,
   });
   const startedAt = Date.now();
   const session = await runtime.completePairing({
@@ -170,13 +204,79 @@ try {
   check('dead endpoint fallback is bounded', Date.now() - startedAt < 5_000);
 
   const projects = await runtime.fetch('/api/projects');
-  check('DPoP-authenticated API request succeeds over LAN', projects.ok, `status=${projects.status}`);
+  check('DPoP-authenticated API request succeeds over pinned LAN HTTPS', projects.ok, `status=${projects.status}`);
 
   const streamUrl = await runtime.buildStreamUrl('global', null);
   check('stream ticket URL uses the selected LAN endpoint', streamUrl.startsWith(`${liveOrigin}/`));
   const streamTicket = new URL(streamUrl).searchParams.get('ticket');
   check('stream ticket was minted', typeof streamTicket === 'string' && streamTicket.length > 0);
   check('stream ticket is not exposed in logs', Boolean(streamTicket) && !logs.join('').includes(streamTicket));
+
+  // A WebSocket upgrade over wss:// with the pinned CA (React Native's Origin is the server's own https origin).
+  const ttsUrl = new URL(await runtime.buildSocketUrl('/api/tts/stream', 'tts', null));
+  check('socket URL is wss:// on the LAN address', ttsUrl.protocol === 'wss:' && ttsUrl.host === `${lan.address}:${port}`, ttsUrl.href);
+
+  // ── Built-in HTTPS (D-110, D-111) ──
+  const httpsOrigin = liveOrigin;
+  const secureInfo = await httpsFetch(`${httpsOrigin}/api/auth/server-info`).then((response) => response.json());
+  check('the LAN port answers HTTPS with a certificate the local CA issued', secureInfo.tls?.enabled === true);
+  check(
+    'browser endpoints are https://',
+    secureInfo.endpoints?.some((endpoint) => endpoint.origin === httpsOrigin),
+    JSON.stringify(secureInfo.endpoints),
+  );
+  check('the CA fingerprint is published', secureInfo.tls?.caFingerprintSha256 === caFingerprint);
+
+  const webPair = await fetch(`${loopbackOrigin}/api/auth/pair`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${API_KEY}` },
+    body: JSON.stringify({ deviceName: 'LAN E2E Browser', platform: 'web' }),
+  }).then((response) => response.json());
+  check('web pairing response describes the certificate', webPair.tls?.fingerprintSha256 === secureInfo.tls?.fingerprintSha256);
+  const webRuntime = new AuthenticatedClientRuntime({
+    endpoint: httpsOrigin,
+    keyStore: new MemoryDeviceKeyStore(),
+    sessionStore: new MemorySessionStore(),
+    fetchImpl: httpsFetch,
+  });
+  const webSession = await webRuntime.completePairing({
+    endpoint: httpsOrigin,
+    serverId: secureInfo.serverId,
+    pairingToken: webPair.shortCode.replace(/-/g, ''),
+    deviceName: 'LAN E2E Browser',
+    platform: 'web',
+    connectionMode: 'auto',
+  });
+  check('a browser-class client pairs over https:// (DPoP htu https)', webSession.endpoint === httpsOrigin);
+  const secureProjects = await webRuntime.fetch('/api/projects');
+  check('DPoP-authenticated request succeeds over HTTPS', secureProjects.ok, `status=${secureProjects.status}`);
+
+  const browserOverHttp = await fetch(`${plainLanOrigin}/api/projects`, { headers: { origin: 'http://evil.example' } });
+  const refusal = await browserOverHttp.json().catch(() => ({}));
+  check('a browser request over plain HTTP from the LAN is refused', browserOverHttp.status === 403 && refusal.error?.code === 'HTTPS_REQUIRED');
+  // The native plain-HTTP lane is gone (D-127): no Origin, or the server's own http origin, is refused too.
+  for (const headers of [{}, { origin: plainLanOrigin }]) {
+    const nativeOverHttp = await fetch(`${plainLanOrigin}/api/auth/server-info`, { headers });
+    const body = await nativeOverHttp.json().catch(() => ({}));
+    check(
+      `a native request over plain HTTP from the LAN is refused (${headers.origin ? 'own Origin' : 'no Origin'})`,
+      nativeOverHttp.status === 403 && body.error?.code === 'HTTPS_REQUIRED',
+      `${nativeOverHttp.status}`,
+    );
+  }
+  const plainSocket = await new Promise((resolve) => {
+    const socket = new UndiciWebSocket(`ws://${lan.address}:${port}/api/tts/stream`);
+    socket.addEventListener('open', () => { socket.close(); resolve('open'); });
+    socket.addEventListener('error', () => resolve('refused'));
+  });
+  check('a plain ws:// upgrade from the LAN is refused', plainSocket === 'refused', String(plainSocket));
+  const page = await fetch(`${plainLanOrigin}/settings`, { redirect: 'manual' });
+  check(
+    'a page request over plain HTTP is redirected to https://',
+    page.status === 308 && page.headers.get('location') === `${httpsOrigin}/settings`,
+    `${page.status} ${page.headers.get('location')}`,
+  );
+  await pinnedCa.close();
 } finally {
   await stop(child);
   rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });

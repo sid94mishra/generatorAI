@@ -26,7 +26,7 @@ import type { IWorktreeRepository } from '../domain/ports/IWorktreeRepository.js
 import { PathResolver } from './PathResolver.js';
 import type { IGitClient } from '@generatorai/git';
 import { shadowGitDirFor, type MountRef } from '@generatorai/changes';
-import { buildExposure, SCRATCH_DIR } from './MountService.js';
+import { buildExposure, countFiles, SCRATCH_DIR } from './MountService.js';
 
 export interface WorkspaceManagerConfig {
   workspacesDir: string;
@@ -125,8 +125,8 @@ export class WorkspaceManager {
     /** Optional git client — when provided, commits go through it. */
     private readonly gitClient?: IGitClient,
     /**
-     * The legacy `worktrees` table, keyed by runId. Still written by
-     * `WorktreeService` for workflow runs, and read here to (a) back-fill
+     * The `worktrees` table, keyed by runId. Written by `MountService` for
+     * every codebase worktree mount (chats and runs), and read here to (a) back-fill
      * mounts for workspaces created before mounts existed and (b) unregister
      * those worktrees on delete. Optional for embedders without worktrees.
      */
@@ -411,11 +411,15 @@ export class WorkspaceManager {
     return out;
   }
 
-  /** Mounts as the change/checkpoint engines see them (with shadow dirs). */
+  /**
+   * Mounts as the change/checkpoint engines see them (with shadow dirs). Only prepared ones: a mount still
+   * preparing has no worktree or shadow store yet, and the Changes read a new chat makes while its repo is
+   * still being fetched ran git in a directory that did not exist ("spawn git ENOENT", every new chat).
+   */
   async toMountRefs(workspace: ExecutionWorkspace): Promise<MountRef[]> {
     const mounts = await this.listMounts(workspace);
     return mounts
-      .filter((m) => m.status === 'ready' || m.status === 'preparing')
+      .filter((m) => m.status === 'ready')
       .map((m) => {
         const shadow = m.git?.shadow !== false;
         return {
@@ -522,6 +526,13 @@ export class WorkspaceManager {
     return null; // Physical archival (tar.gz) deferred to Phase 6
   }
 
+  /** An archived workspace whose owner was reopened is in use again. No-op unless it is archived. */
+  async reactivateWorkspace(workspaceId: string): Promise<void> {
+    const workspace = await this.workspaceRepo.findById(workspaceId);
+    if (!workspace || workspace.status !== 'archived') return;
+    await this.workspaceRepo.updateStatus(workspaceId, 'active', { updatedAt: new Date() });
+  }
+
   /**
    * Delete a workspace and all its contents.
    *
@@ -617,6 +628,8 @@ export class WorkspaceManager {
    *    workspace root in the old project worktrees dir.
    *  - `mountRepo` — worktree mounts (`mode === 'worktree'`). In-place mounts
    *    are the user's own directories and are never candidates for removal.
+   *    `MountService` records a codebase worktree mount in the same table
+   *    under the mount's id.
    */
   private async collectWorktreeTargets(
     workspace: ExecutionWorkspace,
@@ -651,7 +664,11 @@ export class WorkspaceManager {
         this.logger.warn(`[WorkspaceManager] Skipping worktree mount ${mount.id}: ${mount.path} is outside workspace ${workspace.id}`);
         continue;
       }
-      if (!byPath.has(resolved)) byPath.set(resolved, { worktreePath: resolved });
+      // A codebase worktree mount's `worktrees` row shares the mount's id; a
+      // map item's row is keyed by the run, not this workspace's owner.
+      if (!byPath.has(resolved)) {
+        byPath.set(resolved, { worktreePath: resolved, ...(mount.codebaseId ? { runWorktreeId: mount.id } : {}) });
+      }
     }
 
     return [...byPath.values()];
@@ -809,6 +826,11 @@ export class WorkspaceManager {
   private async toInfo(ws: ExecutionWorkspace): Promise<WorkspaceInfo> {
     const mounts = await this.listMounts(ws);
     const exposure = buildExposure(ws, mounts);
+    // The chat folder reports how much work is in it, so the UI can say so
+    // and keep it when a folder is linked (D-141).
+    const withCounts = await Promise.all(
+      exposure.mounts.map(async (m) => (m.mode === 'generated' ? { ...m, fileCount: await countFiles(m.path) } : m)),
+    );
     return {
       id: ws.id,
       ownerType: ws.ownerType,
@@ -821,7 +843,7 @@ export class WorkspaceManager {
       status: ws.status,
       prepStatus: ws.prepStatus ?? 'ready',
       ...(ws.prepError ? { prepError: ws.prepError } : {}),
-      mounts: exposure.mounts,
+      mounts: withCounts,
       scratchPath: exposure.scratchDir,
       worktrees: this.worktreeDetailsFromMounts(ws, mounts),
       createdAt: ws.createdAt,
@@ -870,9 +892,7 @@ export class WorkspaceManager {
       const expiredAt = ws.completedAt ?? (policy.includeStaleActive ? ws.updatedAt : undefined);
       if (expiredAt && expiredAt.getTime() < cutoff) {
         if (policy.protectUnpushed) {
-          const mounts = await this.mountRepo.findByWorkspace(ws.id);
-          const hasUnpushed = mounts.some((m) => m.status === 'ready' && m.hasUncommittedChanges);
-          if (hasUnpushed) {
+          if (await this.holdsUnsavedWork(ws.id)) {
             if (policy.archiveIfDirty) {
               await this.archiveWorkspace(ws.id);
             }
@@ -898,6 +918,26 @@ export class WorkspaceManager {
       this.logger.info(`[WorkspaceManager] Cleaned up ${deleted} expired workspaces`);
     }
     return deleted;
+  }
+
+  /**
+   * Whether deleting this workspace would lose work that exists nowhere else:
+   * uncommitted changes in any mount, or ANY commit in a chat folder — its
+   * repository lives inside the workspace and has no remote, so "committed"
+   * there is not "saved". A worktree's commits live on its branch in the
+   * origin repository, which deleting the workspace keeps.
+   */
+  private async holdsUnsavedWork(workspaceId: string): Promise<boolean> {
+    const mounts = (await this.mountRepo.findByWorkspace(workspaceId)).filter((m) => m.status === 'ready');
+    if (mounts.some((m) => m.hasUncommittedChanges)) return true;
+    for (const m of mounts) {
+      if (m.mode !== 'generated') continue;
+      // Unknown means kept: a cleanup must never guess its way into deleting work.
+      if (!this.gitClient) return true;
+      const head = await this.gitClient.revParse(m.path, 'HEAD').catch(() => 'unknown');
+      if (head) return true;
+    }
+    return false;
   }
 
   /**
@@ -1051,8 +1091,12 @@ export class WorkspaceManager {
       const opts = { cwd: rootPath, timeout: 15_000 };
 
       await execFileAsync('git', ['init'], opts);
-      await execFileAsync('git', ['config', 'user.email', 'generatorai@local'], opts);
-      await execFileAsync('git', ['config', 'user.name', 'GeneratorAI'], opts);
+      // A placeholder identity only where git has none at all (see GitClient.initIfNeeded, U-83).
+      const email = await execFileAsync('git', ['config', 'user.email'], opts).then((r) => String(r.stdout).trim(), () => '');
+      if (!email) {
+        await execFileAsync('git', ['config', 'user.email', 'generatorai@local'], opts);
+        await execFileAsync('git', ['config', 'user.name', 'GeneratorAI'], opts);
+      }
 
       // Create .gitignore that excludes workflow-runtime metadata so the
       // diff view only shows real source-code changes, not the agent's
@@ -1064,7 +1108,6 @@ export class WorkspaceManager {
         'uploads/',
         '.workspace.json',
         'scratchpad.json',
-        'stream-log.jsonl',
         '',
         '# Integrated browser: persistent Chromium profile (cache, cookies,',
         '# service-worker state). Hundreds of binary files that churn on every',

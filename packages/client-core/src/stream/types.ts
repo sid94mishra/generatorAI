@@ -9,11 +9,21 @@
 // Every client (web, desktop, mobile) renders exactly this model.
 // ────────────────────────────────────────────────────────────────
 
-import type { PlanStatus, ScmFlowResult } from '@generatorai/shared';
+import type {
+  HookInvocationStatus,
+  PermissionStatus,
+  PlanStatus,
+  QuestionStatus,
+  ScmFlowResult,
+  StreamStatus,
+  ToolCallStatus,
+  WidgetBlockStatus,
+} from '@generatorai/shared';
 
 import type { ContextUsageSnapshot } from './contextUsage.js';
 
-export type StreamStatus = 'idle' | 'pending' | 'streaming' | 'thinking' | 'complete' | 'error';
+// Status unions live in shared next to the status map (D-18).
+export type { StreamStatus };
 
 export interface ThinkingBlock {
   type: 'thinking';
@@ -55,7 +65,7 @@ export interface ToolCallBlock {
   tool: string;
   args: unknown;
   result?: unknown;
-  status: 'running' | 'complete';
+  status: ToolCallStatus;
   /** +/− line stats for file write/edit tools, set on completion. */
   fileOp?: ToolFileOp;
   /** callId of the Agent tool call this ran inside (SDK subagent nesting). */
@@ -75,13 +85,21 @@ export interface ToolCallBlock {
  * dropped by the timeline, which is where a plan update used to go to die. The
  * message is "Plan: 2/5 done" on the first line, one `[x] step` per line after.
  */
-export type SystemCategory = 'system' | 'subagent' | 'error' | 'warning' | 'plan';
+/**
+ * `operator`: a message an operator sent into a workflow stage (the stage
+ * conversation API); the message is the text they sent. Renderers show it
+ * as the user's bubble inside the stage transcript.
+ */
+/** `permission` (U-16): a request a remembered "Allow for this chat / run" rule allowed without asking. */
+export type SystemCategory = 'system' | 'subagent' | 'error' | 'warning' | 'plan' | 'operator' | 'permission';
 
 export interface SystemBlock {
   type: 'system';
   blockId: number;
   message: string;
   category: SystemCategory;
+  /** A heading over the note (an `operator` reply to a plan revision: "Changes requested"). */
+  label?: string;
 }
 
 /**
@@ -109,7 +127,7 @@ export interface WidgetBlock {
   props: unknown;
   /** Latest state received from a `harness.widget.state` event. */
   state?: unknown;
-  status: 'active' | 'closed' | 'error';
+  status: WidgetBlockStatus;
   /** Optional error message when status='error'. */
   error?: string;
 }
@@ -161,7 +179,7 @@ export interface QuestionBlock {
     multiSelect: boolean;
     allowFreeform: boolean;
   }>;
-  status: 'pending' | 'answered' | 'expired';
+  status: QuestionStatus;
   answers?: Record<string, string[]>;
   freeformResponse?: string;
   /** See {@link PlanBlock.openedAt}. */
@@ -191,9 +209,22 @@ export interface PermissionBlock {
   inputSummary: string;
   /** Effective permission mode of the turn that raised the prompt. */
   permissionMode: string;
-  status: 'pending' | 'allowed' | 'denied' | 'expired';
+  status: PermissionStatus;
   /** Optional reason the user gave when denying. */
   message?: string;
+  /** MG-04 — the server's verdict; absent on gates raised before it existed. */
+  risk?: 'standard' | 'risky';
+  /** D-107 — the card's question and kind label in words (`permissionWording`); absent on hand-built blocks. */
+  title?: string;
+  kindLabel?: string;
+  /**
+   * U-16 (D-147) — what "Allow for this chat / run" would remember (from the gate payload). Empty or absent: the
+   * gate cannot be remembered, and `rememberRefusal` says why.
+   */
+  rememberRules?: Array<{ kind: 'command' | 'tool'; match: string }>;
+  rememberRefusal?: string;
+  /** U-16 — the rules the answer remembered (a settled "Allow for this chat / run"). */
+  remembered?: Array<{ kind: 'command' | 'tool'; match: string; scope?: 'project' }>;
   /** See {@link PlanBlock.openedAt}. */
   openedAt?: number;
 }
@@ -236,6 +267,10 @@ export interface BackgroundTaskBlock {
   endedAt?: number;
   /** Digest summary, when the completion event carried one. */
   summary?: string;
+  /** G-20: who cancelled the worker ('user' | 'orchestrator'); only while `status === 'cancelled'`. */
+  cancelledBy?: 'user' | 'orchestrator';
+  /** G-20: when it was cancelled, epoch ms. */
+  cancelledAt?: number;
   /** See {@link ToolCallBlock.parentCallId}. */
   parentCallId?: string;
 }
@@ -282,6 +317,8 @@ export interface StreamUsage {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   cost?: number;
+  /** USD, set only by a provider that reports one (`cost` may be a multiplier). */
+  costUsd?: number;
   provider?: string;
 }
 
@@ -290,7 +327,7 @@ export interface StreamToolCall {
   tool: string;
   args: unknown;
   result?: unknown;
-  status: 'running' | 'complete';
+  status: ToolCallStatus;
   fileOp?: ToolFileOp;
   parentCallId?: string;
   error?: boolean;
@@ -310,7 +347,7 @@ export interface StreamHookInvocation {
   /** Present when the event carried one — lets consumers attribute the
    *  invocation to a stage rather than the run as a whole. */
   stageRunId?: string;
-  status: 'running' | 'ok' | 'failed';
+  status: HookInvocationStatus;
   durationMs?: number;
 }
 

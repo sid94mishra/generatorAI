@@ -21,6 +21,9 @@
  * See docs/PLAN_MODE_RESEARCH_AND_ARCHITECTURE.md
  */
 
+import type { GateRisk } from '../security/gateRisk.js';
+import type { PermissionRule } from '../security/permissionRules.js';
+
 // ────────────────────────────────────────────────────────────────
 // Agent mode
 // ────────────────────────────────────────────────────────────────
@@ -115,33 +118,10 @@ export const DEFAULT_AGENT_MODE: AgentMode = 'auto';
 
 export const AGENT_MODES: readonly AgentMode[] = ['auto', 'plan'] as const;
 
-/**
- * Legacy value accepted at every boundary.
- *
- * `interactive` was the v1 name for what is now `auto`. Persisted rows are
- * migrated (v22), but API clients, workflow definitions exported before the
- * rename, and in-flight requests may still send it.
- */
-const LEGACY_MODE_ALIASES: Readonly<Record<string, AgentMode>> = {
-  interactive: 'auto',
-};
-
 export function isAgentMode(value: unknown): value is AgentMode {
   return value === 'auto' || value === 'plan';
 }
 
-/**
- * Coerces any inbound value to a valid mode, resolving legacy aliases.
- * Returns `undefined` for unrecognised input so callers can fall back to
- * their own default rather than being handed a silent wrong answer.
- */
-export function coerceAgentMode(value: unknown): AgentMode | undefined {
-  if (isAgentMode(value)) return value;
-  if (typeof value === 'string' && value in LEGACY_MODE_ALIASES) {
-    return LEGACY_MODE_ALIASES[value];
-  }
-  return undefined;
-}
 
 /** The behavioural contract for a mode. Unknown input falls back to the default. */
 export function agentModeDescriptor(mode: AgentMode | undefined): AgentModeDescriptor {
@@ -275,6 +255,20 @@ export interface PlanCardSummary {
    * ordinal existed.
    */
   sequence?: number;
+  /**
+   * What the person said when deciding a revision ("Request changes", or approving with notes), each at its own
+   * ordinal: the transcript shows it as their reply under the card, before the work it led to.
+   */
+  notes?: PlanCardNote[];
+}
+
+/** One decision on a plan revision that carried words for the agent. */
+export interface PlanCardNote {
+  revision: number;
+  decision: 'changes_requested' | 'approved';
+  /** The person's own feedback (or a count of their inline comments), not the composed message the agent receives. */
+  text: string;
+  sequence?: number;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -391,6 +385,19 @@ export interface ToolPermissionRequestPayload {
   inputSummary: string;
   /** Effective permission mode of the turn that raised the prompt. */
   permissionMode: AgentPermissionMode;
+  /** Server verdict (MG-04): a risky gate needs a signed approval from a phone (MG-05). */
+  risk?: GateRisk;
+  riskReasons?: string[];
+  /** D-107: the card's question in plain words ("Run this command?", "Open a page in the browser?"). */
+  title?: string;
+  /** D-107: the kind of access for the card's corner ("Shell command", "Browser", "MCP · github"). */
+  kindLabel?: string;
+  /**
+   * U-16 (D-147): the rules "Allow for this chat / run" adds — derived on the server from the FULL request
+   * (`rememberablePermission`). Absent or empty: the gate cannot be remembered (`rememberRefusal` says why).
+   */
+  rememberRules?: PermissionRule[];
+  rememberRefusal?: string;
 }
 
 /** What the user posts back to `POST /chats/:id/interactions/:interactionId/permission`. */
@@ -398,6 +405,8 @@ export interface ToolPermissionResolution {
   behavior: 'allow' | 'deny';
   /** Optional reason relayed to the agent when denying. */
   message?: string;
+  /** U-16 (D-147): allow, and remember the gate's rules for its owner (the chat, or the whole run), or its project. */
+  remember?: 'owner' | 'project';
 }
 
 /** Compact projection embedded in the chat transcript. */
@@ -411,6 +420,13 @@ export interface PermissionCardSummary {
   message?: string;
   /** See {@link PlanCardSummary.sequence}. */
   sequence?: number;
+  /** MG-04 — copied from the gate's payload. */
+  risk?: GateRisk;
+  riskReasons?: string[];
+  /** U-16 (D-147): the rules "Allow for this chat" remembered with this answer — or, with `autoAllowed`, the rules that allowed it. */
+  remembered?: PermissionRule[];
+  /** U-16: allowed by remembered rules without asking (no gate was shown); the transcript shows a note, not a card. */
+  autoAllowed?: boolean;
 }
 
 /** Resolution the UI posts back for a plan review gate. */

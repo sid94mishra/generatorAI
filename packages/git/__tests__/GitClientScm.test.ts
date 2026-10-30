@@ -13,7 +13,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { GitClient } from '../src/GitClient.js';
+import { GitClient, parseLegacyMergeTree, parseMergeSource } from '../src/GitClient.js';
 import type {
   IGitProcessRunner,
   GitProcessRunOptions,
@@ -158,12 +158,9 @@ describe('GitClient.mergeTreeConflicts', () => {
 
     const result = await git.mergeTreeConflicts(dir, 'main', 'feature');
 
-    if (result.supported) {
-      expect(result.conflicts).toContain('conflict.txt');
-    } else {
-      // git < 2.38 has no `--write-tree`; callers must fall back to `merge`.
-      expect(result.conflicts).toEqual([]);
-    }
+    // git >= 2.38 answers with `--write-tree`; older git through the three-way form.
+    expect(result.supported).toBe(true);
+    expect(result.conflicts).toContain('conflict.txt');
 
     // Whatever the answer, the probe must be side-effect free.
     expect(await fs.readFile(path.join(dir, 'conflict.txt'), 'utf-8')).toBe('from main\n');
@@ -235,6 +232,34 @@ describe('GitClient.mergeTreeConflicts', () => {
     expect(result.conflicts).toEqual(['src/a.ts', 'src/b.ts']);
   });
 
+  it('reads the pre-2.38 three-way output: only blocks with conflict markers count', () => {
+    const stdout = [
+      'added in both',
+      '  our    100644 aabe3d2c65c32dbec693e8b9e74ea671122f2fca packages/shared/src/truncate.ts',
+      '  their  100644 843dfe4fec8874488128987f2a524fa9fcf0300c packages/shared/src/truncate.ts',
+      '@@ -1,4 +1,8 @@',
+      '+<<<<<<< .our',
+      ' export function truncate(text: string, limit: number): string {',
+      '+=======',
+      '+export function truncate(value: string, max: number): string {',
+      '+>>>>>>> .their',
+      '\\ No newline at end of file',
+      'changed in both',
+      '  base   100644 1111111111111111111111111111111111111111 src/index.ts',
+      '  our    100644 2222222222222222222222222222222222222222 src/index.ts',
+      '  their  100644 3333333333333333333333333333333333333333 src/index.ts',
+      '@@ -1,2 +1,3 @@',
+      ' export * from "./a.js";',
+      '+export * from "./b.js";',
+      'added in remote',
+      '  their  100644 4444444444444444444444444444444444444444 test/truncate.test.ts',
+      '@@ -0,0 +1,1 @@',
+      "+import { describe } from 'vitest';",
+      '',
+    ].join('\n');
+    expect(parseLegacyMergeTree(stdout)).toEqual(['packages/shared/src/truncate.ts']);
+  });
+
   it('treats a clean exit as a clean merge', async () => {
     const stub: IGitProcessRunner = {
       async run() {
@@ -251,6 +276,15 @@ describe('GitClient.mergeTreeConflicts', () => {
       supported: true,
       conflicts: [],
     });
+  });
+});
+
+describe('parseMergeSource', () => {
+  it("names the branch git's merge message brings in, without origin/", () => {
+    expect(parseMergeSource("Merge remote-tracking branch 'origin/feature/x' into work\n\n# Conflicts:\n")).toBe('feature/x');
+    expect(parseMergeSource("Merge branch 'release/2.0'\n")).toBe('release/2.0');
+    expect(parseMergeSource('Merge origin/develop into generatorai/v-1\n')).toBe('develop');
+    expect(parseMergeSource('feat: not a merge\n')).toBeNull();
   });
 });
 
@@ -440,6 +474,48 @@ describe('GitClient.aheadBehind / upstreamOf / isDetached', () => {
     const head = await git.revParse(work, 'HEAD');
     await runGit(work, ['checkout', '--detach', head!]);
     expect(await git.isDetached(work)).toBe(true);
+  });
+});
+
+describe('GitClient on an unborn branch (no commits yet)', () => {
+  async function makeUnborn(name: string): Promise<string> {
+    const dir = path.join(tmpRoot, name);
+    await fs.mkdir(dir, { recursive: true });
+    await runGit(dir, ['init', '-b', 'main']);
+    return dir;
+  }
+
+  it('names the branch, flags it unborn, and is not detached', async () => {
+    const dir = await makeUnborn('unborn-name');
+    expect(await git.currentBranch(dir)).toBe('main');
+    expect(await git.isUnborn(dir)).toBe(true);
+    expect(await git.isDetached(dir)).toBe(false);
+  });
+
+  it('counts an untracked file as a committable change', async () => {
+    const dir = await makeUnborn('unborn-changes');
+    expect(await git.changedFilesSummary(dir)).toEqual([]);
+    await writeFile(dir, 'b.txt', 'hi\n');
+    expect(await git.changedFilesSummary(dir)).toEqual([{ code: 'A', path: 'b.txt' }]);
+  });
+
+  it('the first commit lands on main and ends the unborn state', async () => {
+    const dir = await makeUnborn('unborn-commit');
+    await writeFile(dir, 'b.txt', 'hi\n');
+    const result = await git.commitWithSha(dir, 'first');
+    expect(result?.sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(await git.currentBranch(dir)).toBe('main');
+    expect(await git.isUnborn(dir)).toBe(false);
+  });
+
+  it('a detached HEAD still has no branch name', async () => {
+    const dir = await makeUnborn('detached-still');
+    await writeFile(dir, 'a.txt', 'a\n');
+    await git.commit(dir, 'init');
+    await runGit(dir, ['checkout', '--detach', (await git.revParse(dir, 'HEAD'))!]);
+    expect(await git.currentBranch(dir)).toBeNull();
+    expect(await git.isDetached(dir)).toBe(true);
+    expect(await git.isUnborn(dir)).toBe(false);
   });
 });
 
@@ -693,5 +769,93 @@ describe('snapshots that share an index file', () => {
     );
     expect(trees.every((t) => typeof t === 'string' && t.length >= 40)).toBe(true);
     expect(new Set(trees).size).toBe(1);
+  });
+});
+
+// ── Bare clones track their remote (U-6 / U-7) ───────────────────
+
+describe('bare clone of a remote codebase', () => {
+  let root: string;
+  let upstream: string;
+  let client: GitClient;
+
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'generatorai-bare-'));
+    upstream = path.join(root, 'upstream');
+    await fs.mkdir(upstream);
+    await runGit(upstream, ['init', '-q', '-b', 'develop']);
+    await writeFile(upstream, 'README.md', 'v1\n');
+    await runGit(upstream, ['add', '.']);
+    await runGit(upstream, ['commit', '-q', '-m', 'v1']);
+    client = makeClient(root);
+  });
+  afterEach(async () => removeDirWithRetry(root));
+
+  it('gets the tracking refspec, so origin/<branch> exists and later fetches update it', async () => {
+    const bare = path.join(root, 'cache.git');
+    await client.bareClone(upstream, bare);
+    expect((await runGit(bare, ['config', '--get-all', 'remote.origin.fetch'])).trim()).toBe('+refs/heads/*:refs/remotes/origin/*');
+    const v1 = (await runGit(bare, ['rev-parse', 'refs/remotes/origin/develop'])).trim();
+
+    await writeFile(upstream, 'README.md', 'v2\n');
+    await runGit(upstream, ['commit', '-q', '-am', 'v2']);
+    await client.fetchAll(bare);
+    const v2 = (await runGit(bare, ['rev-parse', 'refs/remotes/origin/develop'])).trim();
+    expect(v2).not.toBe(v1);
+    expect(v2).toBe((await runGit(upstream, ['rev-parse', 'HEAD'])).trim());
+  });
+
+  it('fetchAll repairs an older bare clone made without a refspec', async () => {
+    const bare = path.join(root, 'old.git');
+    await runGit(root, ['clone', '-q', '--bare', upstream, bare]);
+    await expect(runGit(bare, ['config', '--get-all', 'remote.origin.fetch'])).rejects.toThrow();
+    await client.fetchAll(bare);
+    expect((await runGit(bare, ['rev-parse', 'refs/remotes/origin/develop'])).trim()).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it('fetchBranch works inside a worktree of the bare clone (the sync step)', async () => {
+    const bare = path.join(root, 'old.git');
+    await runGit(root, ['clone', '-q', '--bare', upstream, bare]);
+    const wt = path.join(root, 'wt');
+    await client.addWorktree(bare, wt, { newBranch: 'feature', base: 'develop' });
+    await writeFile(upstream, 'NEW.md', 'new\n');
+    await runGit(upstream, ['add', '.']);
+    await runGit(upstream, ['commit', '-q', '-m', 'upstream moved']);
+    await client.fetchBranch(wt, 'origin', 'develop');
+    await client.merge(wt, 'origin/develop', { noCommit: true });
+    await expect(fs.readFile(path.join(wt, 'NEW.md'), 'utf-8')).resolves.toBe('new\n');
+  });
+
+  it('fetchBranch fast-forwards the local base branch, so `git diff develop` sees the real base (U-28)', async () => {
+    const bare = path.join(root, 'ff.git');
+    await client.bareClone(upstream, bare);
+    const wt = path.join(root, 'wt-ff');
+    await client.addWorktree(bare, wt, { newBranch: 'feature', base: 'develop' });
+    await writeFile(upstream, 'NEW.md', 'new\n');
+    await runGit(upstream, ['add', '.']);
+    await runGit(upstream, ['commit', '-q', '-m', 'upstream moved']);
+    await client.fetchBranch(wt, 'origin', 'develop');
+    const head = (await runGit(upstream, ['rev-parse', 'HEAD'])).trim();
+    expect((await runGit(bare, ['rev-parse', 'refs/heads/develop'])).trim()).toBe(head);
+  });
+
+  it('fetchBranch leaves a diverged local branch alone', async () => {
+    const bare = path.join(root, 'div.git');
+    await client.bareClone(upstream, bare);
+    const wt = path.join(root, 'wt-div');
+    await client.addWorktree(bare, wt, { newBranch: 'feature', base: 'develop' });
+    // A local-only commit on develop (via a second worktree), then upstream moves too.
+    const wt2 = path.join(root, 'wt-dev');
+    await runGit(bare, ['worktree', 'add', '-q', wt2, 'develop']);
+    await writeFile(wt2, 'LOCAL.md', 'local\n');
+    await runGit(wt2, ['add', '.']);
+    await runGit(wt2, ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'local']);
+    const localSha = (await runGit(bare, ['rev-parse', 'refs/heads/develop'])).trim();
+    await runGit(bare, ['worktree', 'remove', '--force', wt2]);
+    await writeFile(upstream, 'NEW.md', 'new\n');
+    await runGit(upstream, ['add', '.']);
+    await runGit(upstream, ['commit', '-q', '-m', 'upstream moved']);
+    await client.fetchBranch(wt, 'origin', 'develop');
+    expect((await runGit(bare, ['rev-parse', 'refs/heads/develop'])).trim()).toBe(localSha);
   });
 });

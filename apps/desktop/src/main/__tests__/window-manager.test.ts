@@ -38,10 +38,19 @@ const { FakeBrowserWindow, openExternal } = vi.hoisted(() => {
       this.windowOpenHandler = fn;
     }
     send = vi.fn();
+    url = '';
+    getURL = () => this.url;
     loadURL = vi.fn(async () => undefined);
     executeJavaScript = vi.fn(async (_code: string): Promise<unknown> => undefined);
     reload = vi.fn();
     isDevToolsOpened = () => false;
+    history = { back: false, forward: false };
+    navigationHistory = {
+      canGoBack: () => this.history.back,
+      canGoForward: () => this.history.forward,
+      goBack: vi.fn(),
+      goForward: vi.fn(),
+    };
     emit(event: string, ...args: unknown[]) {
       for (const fn of this.listeners.get(event) ?? []) fn(...args);
     }
@@ -70,7 +79,10 @@ const { FakeBrowserWindow, openExternal } = vi.hoisted(() => {
     isFocused = () => true;
     getBounds = () => ({ x: 0, y: 0, width: 1440, height: 900 });
     setTitleBarOverlay = vi.fn();
-    constructor(_opts: unknown) {
+    setBackgroundColor = vi.fn();
+    opts: Record<string, unknown>;
+    constructor(opts: Record<string, unknown>) {
+      this.opts = opts;
       FakeBrowserWindow.instances.push(this);
     }
     on(event: string, fn: Listener) {
@@ -89,7 +101,14 @@ const { FakeBrowserWindow, openExternal } = vi.hoisted(() => {
 });
 
 const settings = {
-  theme: 'system',
+  appearance: {
+    mode: 'system',
+    themeId: 'solarized',
+    groundLight: '#eee8d5',
+    groundDark: '#002b36',
+    fgLight: '#586e75',
+    fgDark: '#93a1a1',
+  } as Record<string, string>,
   window: { width: 1440, height: 900 },
   serverPort: 0,
   harnessType: 'copilot',
@@ -104,6 +123,7 @@ vi.mock('electron', () => ({
   screen: { getAllDisplays: () => [] },
   app: { getPath: () => 'C:/tmp' },
   ipcMain: { handle: vi.fn() },
+  dialog: { showMessageBox: (...a: unknown[]) => showMessageBox(...a) },
 }));
 vi.mock('../config', () => ({
   loadSettings: () => settings,
@@ -117,20 +137,50 @@ vi.mock('../platform', () => ({
   isWayland: true,
   titleBarOptions: () => ({}),
   titleBarSymbolColor: () => '#000',
-  TITLE_BAR_HEIGHT: 36,
   useCustomTitleBar: () => false,
+  windowChrome: () => ({
+    platform: 'win32',
+    titleBarStyle: 'overlay',
+    titleBarHeight: 36,
+    insetLeft: 0,
+    insetRight: 138,
+    isWayland: false,
+  }),
 }));
 
+const showMessageBox = vi.hoisted(() => vi.fn(async (..._a: unknown[]) => ({ response: 1 })));
+
 import { WindowManager, shouldHideOnClose } from '../window-manager';
+import { setUnsavedWork } from '../unsaved-work';
+import { IPC_EVENT } from '../../shared/ipc';
 
 const APP = 'http://127.0.0.1:3100';
 
-function makeWindow(url = APP, opts?: { cspFloor?: boolean }) {
+/** The main window's document finished loading `url`. */
+function finishLoad(win: InstanceType<typeof FakeBrowserWindow>, url: string) {
+  win.webContents.url = url;
+  win.webContents.emit('did-finish-load');
+}
+
+/** A main window whose app page has loaded (`loaded: false` = still loading). */
+function makeWindow(url = APP, opts?: { cspFloor?: boolean; loaded?: boolean }) {
   FakeBrowserWindow.instances.length = 0;
   const wm = new WindowManager();
   wm.createMainWindow(url, opts);
   const win = FakeBrowserWindow.instances[0]!;
+  if (opts?.loaded !== false) {
+    finishLoad(win, `${url}/`);
+    win.webContents.executeJavaScript.mockClear();
+  }
   return { wm, win };
+}
+
+/** Routes the window manager pushed into the page, in order. */
+function pushedRoutes(win: InstanceType<typeof FakeBrowserWindow>): string[] {
+  return win.webContents.executeJavaScript.mock.calls
+    .map((c) => String(c[0]))
+    .filter((code) => code.includes('pushState'))
+    .map((code) => JSON.parse(/pushState\(\{\}, '', ("[^"]*")\)/.exec(code)?.[1] ?? '""') as string);
 }
 
 beforeEach(() => {
@@ -274,6 +324,97 @@ describe('close → tray', () => {
   });
 });
 
+describe('menu and tray commands bring the window forward (P1-R2)', () => {
+  it('sendCommand (e.g. Settings… / Cmd+,) shows a window hidden to the tray, then focuses it', () => {
+    settings.minimizeToTray = true;
+    const { wm, win } = makeWindow();
+    wm.markRendererReady();
+    win.emit('close', { preventDefault: vi.fn() });
+    expect(win.visible).toBe(false);
+    wm.sendCommand('app.settings');
+    expect(win.webContents.send).toHaveBeenCalledWith(IPC_EVENT.command, 'app.settings');
+    expect(win.visible).toBe(true);
+    expect(win.focus).toHaveBeenCalled();
+  });
+
+  it('sendCommand restores a minimised window', () => {
+    const { wm, win } = makeWindow();
+    wm.markRendererReady();
+    win.minimized = true;
+    wm.sendCommand('chat.new');
+    expect(win.restore).toHaveBeenCalled();
+    expect(win.minimized).toBe(false);
+    expect(win.show).toHaveBeenCalled();
+  });
+
+  it('navigateTo restores a minimised window too', () => {
+    const { wm, win } = makeWindow();
+    win.minimized = true;
+    wm.navigateTo('/chats');
+    expect(win.restore).toHaveBeenCalled();
+    expect(win.focus).toHaveBeenCalled();
+  });
+
+  it('sendCommand without a live window sends nothing now', () => {
+    const { wm, win } = makeWindow();
+    wm.markRendererReady();
+    win.destroyed = true;
+    expect(() => wm.sendCommand('app.settings')).not.toThrow();
+    expect(win.webContents.send).not.toHaveBeenCalledWith(IPC_EVENT.command, 'app.settings');
+  });
+});
+
+describe('held commands (generatorai://command/<id>, dock and JumpList; 06 §8, P3-06)', () => {
+  const commandsSent = (win: InstanceType<typeof FakeBrowserWindow>) =>
+    win.webContents.send.mock.calls.filter((c) => c[0] === IPC_EVENT.command).map((c) => c[1]);
+
+  it('cold start: a command before any window exists runs once the app page reports in', () => {
+    FakeBrowserWindow.instances.length = 0;
+    const wm = new WindowManager();
+    wm.sendCommand('chat.new');
+    wm.createMainWindow(APP);
+    const win = FakeBrowserWindow.instances[0]!;
+    finishLoad(win, `${APP}/`);
+    // Loaded is not enough: the command host subscribes with the shell.
+    expect(commandsSent(win)).toEqual([]);
+    wm.markRendererReady();
+    expect(commandsSent(win)).toEqual(['chat.new']);
+    // Delivered once: later pushes do not replay it.
+    wm.markRendererReady();
+    expect(commandsSent(win)).toEqual(['chat.new']);
+  });
+
+  it('while the window loads (or shows the pairing screen) the command waits, and the last one wins', () => {
+    const { wm, win } = makeWindow(APP, { loaded: false });
+    win.visible = false;
+    wm.sendCommand('workflow.new');
+    wm.sendCommand('chat.new');
+    expect(commandsSent(win)).toEqual([]);
+    expect(win.visible).toBe(true);
+    finishLoad(win, `${APP}/`);
+    wm.markRendererReady();
+    expect(commandsSent(win)).toEqual(['chat.new']);
+  });
+
+  it('warm start: a ready renderer gets the command at once', () => {
+    const { wm, win } = makeWindow();
+    wm.markRendererReady();
+    wm.sendCommand('chat.new');
+    expect(commandsSent(win)).toEqual(['chat.new']);
+  });
+
+  it('after a renderer reset (reload, backend switch) commands wait for the new document', () => {
+    const { wm, win } = makeWindow();
+    wm.markRendererReady();
+    win.webContents.emit('did-navigate');
+    wm.sendCommand('chat.new');
+    expect(commandsSent(win)).toEqual([]);
+    finishLoad(win, `${APP}/`);
+    wm.markRendererReady();
+    expect(commandsSent(win)).toEqual(['chat.new']);
+  });
+});
+
 describe('repointMainWindow', () => {
   it('loads the new URL in the existing window and updates getAppUrl()', () => {
     const { wm, win } = makeWindow();
@@ -291,5 +432,251 @@ describe('repointMainWindow', () => {
     wm.repointMainWindow('http://127.0.0.1:4200');
     expect(FakeBrowserWindow.instances).toHaveLength(2);
     expect(FakeBrowserWindow.instances[1]!.loadURL).toHaveBeenCalledWith('http://127.0.0.1:4200');
+  });
+});
+
+describe('appearance mirror (D-25)', () => {
+  beforeEach(() => {
+    settings.appearance.mode = 'system';
+  });
+
+  it('a cold start paints the persisted ground of the theme, not a GitHub literal', () => {
+    // mode=system and the (mocked) OS is light → Solarized light's ground.
+    const { win } = makeWindow();
+    expect(win.opts['backgroundColor']).toBe('#eee8d5');
+  });
+
+  it('a pinned mode ignores the OS', () => {
+    settings.appearance.mode = 'dark';
+    const { win } = makeWindow();
+    expect(win.opts['backgroundColor']).toBe('#002b36');
+  });
+
+  it('applyAppearance repaints the window background from the latest push', () => {
+    const { wm, win } = makeWindow();
+    settings.appearance.mode = 'dark';
+    wm.applyAppearance();
+    expect(win.setBackgroundColor).toHaveBeenCalledWith('#002b36');
+  });
+
+  it('View ▸ Appearance only ASKS the renderer (appearanceRequest)', () => {
+    const { wm, win } = makeWindow();
+    wm.sendAppearanceRequest('light');
+    expect(win.webContents.send).toHaveBeenCalledWith('desktop:appearance-request', { mode: 'light' });
+  });
+});
+
+describe('onRendererReset (P1-review P2-R8)', () => {
+  function watch(wm: WindowManager) {
+    const reset = vi.fn();
+    wm.onRendererReset(reset);
+    return reset;
+  }
+
+  it('fires when the main window closes', () => {
+    const { wm, win } = makeWindow();
+    const reset = watch(wm);
+    win.emit('closed');
+    expect(reset).toHaveBeenCalledTimes(1);
+    expect(wm.getMainWindow()).toBeNull();
+  });
+
+  it('fires when the renderer process dies', () => {
+    const { wm, win } = makeWindow();
+    const reset = watch(wm);
+    win.webContents.emit('render-process-gone', {}, { reason: 'crashed' });
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it('fires on a repoint, including one that has to create the window', () => {
+    const { wm, win } = makeWindow();
+    const reset = watch(wm);
+    wm.repointMainWindow('http://127.0.0.1:4200');
+    expect(reset).toHaveBeenCalledTimes(1);
+    win.destroyed = true;
+    win.emit('closed');
+    reset.mockClear();
+    wm.repointMainWindow('http://127.0.0.1:4300');
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it('fires once a new top-level document commits, not on SPA route changes or navigations that never commit (P2-R39)', () => {
+    const { wm, win } = makeWindow();
+    const reset = watch(wm);
+    // A blocked external link, a download or a 204 starts a navigation that
+    // never commits; the page and its pushed state live on.
+    win.webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+    win.webContents.emit('did-navigate-in-page', {}, 'http://127.0.0.1:4100/chats', true);
+    expect(reset).not.toHaveBeenCalled();
+    win.webContents.emit('did-navigate', {}, 'http://127.0.0.1:4100/');
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it('a throwing listener does not stop the others', () => {
+    const { wm, win } = makeWindow();
+    wm.onRendererReset(() => {
+      throw new Error('boom');
+    });
+    const reset = watch(wm);
+    win.emit('closed');
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it('sendAppearanceRequest reports whether a window was there to ask', () => {
+    const { wm, win } = makeWindow();
+    expect(wm.sendAppearanceRequest('dark')).toBe(true);
+    win.destroyed = true;
+    win.emit('closed');
+    expect(wm.sendAppearanceRequest('dark')).toBe(false);
+  });
+});
+
+describe('confirmDiscard (P2-R37)', () => {
+  beforeEach(() => {
+    showMessageBox.mockReset().mockResolvedValue({ response: 1 });
+    setUnsavedWork(false);
+  });
+
+  it('is answered once per quit, even when there was nothing to lose the first time', async () => {
+    const { wm } = makeWindow();
+    expect(await wm.confirmDiscard()).toBe(true);
+    // Work opened between the updater's question and before-quit's: not asked again.
+    setUnsavedWork(true);
+    expect(await wm.confirmDiscard()).toBe(true);
+    expect(showMessageBox).not.toHaveBeenCalled();
+  });
+
+  it('an abandoned quit forgets the answer', async () => {
+    const { wm } = makeWindow();
+    expect(await wm.confirmDiscard()).toBe(true);
+    wm.setQuitting(false);
+    setUnsavedWork(true);
+    expect(await wm.confirmDiscard()).toBe(false);
+    expect(showMessageBox).toHaveBeenCalledTimes(1);
+  });
+
+  it('a window closed without quitting forgets it too', async () => {
+    const { wm, win } = makeWindow();
+    expect(await wm.confirmDiscard()).toBe(true);
+    win.destroyed = true;
+    win.emit('closed');
+    setUnsavedWork(true);
+    expect(await wm.confirmDiscard()).toBe(false);
+    expect(showMessageBox).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('navigateTo before the app page is ready (deep-link cold start)', () => {
+  it('holds a route asked for during the first load and applies it once on did-finish-load', () => {
+    const { wm, win } = makeWindow(APP, { loaded: false });
+    wm.navigateTo('/?pair=ABCD-EFGH-JKLM');
+    expect(pushedRoutes(win)).toEqual([]);
+    finishLoad(win, `${APP}/`);
+    expect(pushedRoutes(win)).toEqual(['/?pair=ABCD-EFGH-JKLM']);
+    // Applied once: a later reload does not replay it.
+    win.webContents.executeJavaScript.mockClear();
+    finishLoad(win, `${APP}/`);
+    expect(pushedRoutes(win)).toEqual([]);
+  });
+
+  it('holds a route asked for before any window exists (macOS open-url before ready)', () => {
+    FakeBrowserWindow.instances.length = 0;
+    const wm = new WindowManager();
+    wm.navigateTo('/chats/c1?dock=changes');
+    wm.createMainWindow(APP);
+    const win = FakeBrowserWindow.instances[0]!;
+    finishLoad(win, `${APP}/`);
+    expect(pushedRoutes(win)).toEqual(['/chats/c1?dock=changes']);
+  });
+
+  it('keeps holding the route while the window shows the error page, not the app', () => {
+    const { wm, win } = makeWindow(APP, { loaded: false });
+    wm.navigateTo('/workflows');
+    finishLoad(win, 'file:///resources/error.html?message=x');
+    expect(pushedRoutes(win)).toEqual([]);
+    finishLoad(win, `${APP}/`);
+    expect(pushedRoutes(win)).toEqual(['/workflows']);
+  });
+
+  it('holds routes again after a committed cross-document navigation until it finishes', () => {
+    const { wm, win } = makeWindow();
+    win.webContents.emit('did-navigate');
+    wm.navigateTo('/projects');
+    expect(pushedRoutes(win)).toEqual([]);
+    finishLoad(win, `${APP}/`);
+    expect(pushedRoutes(win)).toEqual(['/projects']);
+  });
+
+  it('navigates at once on a loaded page (warm start) and reveals the window', () => {
+    const { wm, win } = makeWindow();
+    win.visible = false;
+    wm.navigateTo('/chats/c1?dock=tasks');
+    expect(pushedRoutes(win)).toEqual(['/chats/c1?dock=tasks']);
+    expect(win.visible).toBe(true);
+  });
+});
+
+describe('navigateTo once the renderer has reported in (06 §3.4)', () => {
+  function sentRoutes(win: InstanceType<typeof FakeBrowserWindow>): string[] {
+    return win.webContents.send.mock.calls
+      .filter((c) => c[0] === IPC_EVENT.navigate)
+      .map((c) => String(c[1]));
+  }
+
+  it('sends routes over IPC_EVENT.navigate instead of injecting pushState', () => {
+    const { wm, win } = makeWindow();
+    wm.markRendererReady();
+    wm.navigateTo('/agents');
+    expect(sentRoutes(win)).toEqual(['/agents']);
+    expect(pushedRoutes(win)).toEqual([]);
+  });
+
+  it('falls back to pushState after a renderer reset until the new document reports in', () => {
+    const { wm, win } = makeWindow();
+    wm.markRendererReady();
+    win.webContents.emit('did-navigate');
+    finishLoad(win, `${APP}/`);
+    win.webContents.executeJavaScript.mockClear();
+    wm.navigateTo('/scripts');
+    expect(pushedRoutes(win)).toEqual(['/scripts']);
+    expect(sentRoutes(win)).toEqual([]);
+    wm.markRendererReady();
+    wm.navigateTo('/projects');
+    expect(sentRoutes(win)).toEqual(['/projects']);
+  });
+});
+
+describe('nav history push (06 §3.4)', () => {
+  function historyPushes(win: InstanceType<typeof FakeBrowserWindow>): unknown[] {
+    return win.webContents.send.mock.calls.filter((c) => c[0] === IPC_EVENT.navHistoryChanged).map((c) => c[1]);
+  }
+
+  it('reports Chromium back/forward on in-page navigation and after a load', () => {
+    const { win } = makeWindow();
+    const wc = win.webContents as unknown as { history: { back: boolean; forward: boolean } };
+    wc.history.back = true;
+    win.webContents.emit('did-navigate-in-page');
+    expect(historyPushes(win).at(-1)).toEqual({ back: true, forward: false });
+    wc.history.forward = true;
+    finishLoad(win, `${APP}/`);
+    expect(historyPushes(win).at(-1)).toEqual({ back: true, forward: true });
+  });
+});
+
+describe('D-93: mouse buttons, Browser keys and swipe move through the session history', () => {
+  it('app-command browser-backward / -forward and swipe left / right step back / forward, only where history can move', () => {
+    const { win } = makeWindow();
+    const history = win.webContents.navigationHistory;
+    win.emit('app-command', {}, 'browser-backward');
+    expect(history.goBack).not.toHaveBeenCalled();
+    win.webContents.history = { back: true, forward: true };
+    win.emit('app-command', {}, 'browser-backward');
+    win.emit('app-command', {}, 'browser-forward');
+    win.emit('swipe', {}, 'left');
+    win.emit('swipe', {}, 'right');
+    win.emit('app-command', {}, 'media-play-pause');
+    win.emit('swipe', {}, 'up');
+    expect(history.goBack).toHaveBeenCalledTimes(2);
+    expect(history.goForward).toHaveBeenCalledTimes(2);
   });
 });

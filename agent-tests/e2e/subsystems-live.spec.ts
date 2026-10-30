@@ -24,13 +24,13 @@ import { apiRequest, API_BASE } from '../helpers/api';
 // ── Gateway & architecture ──────────────────────────────────────
 
 test.describe('Gateway', () => {
-  test('health reports harness, db and the W18 admission lanes', async () => {
+  test('health reports harness, db and the scheduler flow slots', async () => {
     const res = await apiRequest<{
       status: string;
       db: boolean;
       harness: { type: string; healthy: boolean };
       memory: { rss: number };
-      admission: Array<{ lane: string; running: number; queued: number; parked: number; concurrencyLimit: number }>;
+      flows: Array<{ flowKey: string; running: number; queued: number; limit: number }>;
       configCorrections: Array<{ name: string; action: string }>;
     }>('GET', '/health');
 
@@ -40,15 +40,15 @@ test.describe('Gateway', () => {
     expect(res.data.harness.type).toBeTruthy();
     expect(res.data.memory.rss).toBeGreaterThan(0);
 
-    // W18 acceptance: "health endpoint shows cap/running/waiting".
-    const lanes = res.data.admission;
-    expect(lanes.map((l) => l.lane).sort()).toEqual(['bulk', 'interactive', 'ordinary']);
-    for (const lane of lanes) {
-      expect(lane.concurrencyLimit).toBeGreaterThan(0);
-      expect(Number.isFinite(lane.concurrencyLimit)).toBe(true);
-      expect(lane.running).toBeGreaterThanOrEqual(0);
-      expect(lane.queued).toBeGreaterThanOrEqual(0);
-      expect(lane.parked).toBeGreaterThanOrEqual(0);
+    // Health shows each scheduler flow key's cap / running / queued (the
+    // Workflow Overhaul's flow slots replaced the W18 admission lanes).
+    const flows = res.data.flows;
+    expect(flows.map((f) => f.flowKey)).toContain('global');
+    for (const flow of flows) {
+      expect(flow.limit).toBeGreaterThan(0);
+      expect(Number.isFinite(flow.limit)).toBe(true);
+      expect(flow.running).toBeGreaterThanOrEqual(0);
+      expect(flow.queued).toBeGreaterThanOrEqual(0);
     }
 
     // A correctly configured process clamps nothing. A non-empty list here
@@ -112,8 +112,27 @@ test.describe('Harness providers', () => {
 
     const primary = res.data.providers.find((p) => p.type === res.data.primary);
     expect(primary, 'the primary provider must appear in its own registry').toBeTruthy();
-    expect(primary!.ready).toBe(true);
-    expect(primary!.modelCount ?? 0).toBeGreaterThan(0);
+  });
+
+  // Readiness depends on which optional provider CLIs this machine has
+  // installed and signed in to — the primary (HARNESS_TYPE, default copilot)
+  // is not guaranteed to be one of them, on any OS or in CI. What must hold
+  // everywhere: every READY provider serves a non-empty model catalog. With
+  // no provider ready there is nothing to check, so the test skips (visibly)
+  // instead of failing on a missing login.
+  test('every ready provider publishes a non-empty model catalog', async () => {
+    const res = await apiRequest<{
+      primary: string;
+      providers: Array<{ type: string; ready: boolean; modelCount?: number }>;
+    }>('GET', '/harness/providers');
+    expect(res.ok).toBe(true);
+
+    const ready = res.data.providers.filter((p) => p.ready);
+    test.skip(ready.length === 0, 'no harness provider is installed and signed in on this machine');
+
+    for (const p of ready) {
+      expect(p.modelCount ?? 0, `${p.type} is ready but publishes no models`).toBeGreaterThan(0);
+    }
   });
 
   test('the model catalog is served without a cold provider probe per request', async () => {
@@ -401,25 +420,8 @@ test.describe('Computer use integration', () => {
 // ── Orchestration & background tasks ────────────────────────────
 
 test.describe('Orchestration', () => {
-  test('system workflows are registered and individually retrievable', async () => {
-    const list = await apiRequest<Array<{ id: string; name?: string }>>(
-      'GET',
-      '/orchestrator/system-workflows',
-    );
-    expect(list.ok).toBe(true);
-    expect(Array.isArray(list.data)).toBe(true);
-
-    if (list.data.length > 0) {
-      const one = await apiRequest(
-        'GET',
-        `/orchestrator/system-workflows/${encodeURIComponent(list.data[0]!.id)}`,
-      );
-      expect(one.ok).toBe(true);
-    }
-  });
-
   test('cancelling an unknown run is refused cleanly, not with a 500', async () => {
-    const res = await apiRequest('POST', '/orchestrator/runs/does-not-exist/cancel', {});
+    const res = await apiRequest('POST', '/workflow-runs/does-not-exist/commands', { command: 'cancel' });
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect(res.status).toBeLessThan(500);
   });
@@ -440,11 +442,12 @@ test.describe('Workflows', () => {
 
     await gotoApp(`/workflows/${wfId}`);
     await expect(page.getByRole('heading', { name: /e2e-live-wf/ })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText('analyse')).toBeVisible();
-    await expect(page.getByText('report')).toBeVisible();
+    const stages = page.getByTestId('workflow-stages');
+    await expect(stages.getByText('analyse', { exact: true }).first()).toBeVisible();
+    await expect(stages.getByText('report', { exact: true }).first()).toBeVisible();
   });
 
-  test('a run is created in a schedulable state with its stages materialised', async ({ seed }) => {
+  test('an invoked run is live (not terminal) with its stages materialised', async ({ seed }) => {
     const wfId = await seed.workflow({
       name: `e2e-live-run-${Date.now()}`,
       stages: [{ localId: 'only', name: 'only', prompt: 'do the thing' }],
@@ -454,20 +457,22 @@ test.describe('Workflows', () => {
 
     const run = await apiRequest<{ status: string; id: string }>('GET', `/workflow-runs/${runId}`);
     expect(run.ok).toBe(true);
-    // A freshly created run must be in a state the scheduler can pick up —
-    // never already-terminal, which is how P0-41-class bugs present.
-    expect(['pending', 'created', 'starting', 'queued']).toContain(run.data.status);
+    // A freshly invoked run must be live — never already-terminal, which is
+    // how P0-41-class bugs present.
+    expect(['created', 'starting', 'running']).toContain(run.data.status);
 
-    const stages = await apiRequest<Array<{ status: string }>>(
-      'GET',
-      `/workflow-runs/${runId}/stages`,
-    );
-    if (stages.ok && Array.isArray(stages.data)) {
-      expect(stages.data.length).toBeGreaterThan(0);
-      for (const s of stages.data) {
-        expect(['pending', 'created', 'queued']).toContain(s.status);
-      }
-    }
+    // The scheduler materialises stage instances asynchronously after the
+    // invoke, and the Faux harness can finish a one-prompt stage quickly, so
+    // poll for the instance and accept any status it has reached by then.
+    await expect
+      .poll(
+        async () => {
+          const stages = await apiRequest<Array<{ status: string }>>('GET', `/workflow-runs/${runId}/stages`);
+          return stages.ok && Array.isArray(stages.data) ? stages.data.length : 0;
+        },
+        { timeout: 15_000 },
+      )
+      .toBeGreaterThan(0);
   });
 });
 
@@ -510,6 +515,9 @@ test.describe('Stream spine', () => {
   test('the UI holds exactly one event stream open for the whole app', async ({ gotoApp, page }) => {
     // W26's acceptance criterion, observed from the client side: navigating
     // between pages must not accumulate one SSE connection per surface.
+    // The navigation is client-side (sidebar links), as a user moves around:
+    // a full reload starts a new document, which rightly opens its own stream,
+    // so reloads would count documents rather than the invariant.
     const streamRequests: string[] = [];
     page.on('request', (r) => {
       const url = r.url();
@@ -517,14 +525,31 @@ test.describe('Stream spine', () => {
     });
 
     await gotoApp('/');
+    // Marks this document; a full reload would drop it.
+    await page.evaluate(() => ((window as { __e2eOneDocument?: boolean }).__e2eOneDocument = true));
     await page.waitForTimeout(2500);
-    await gotoApp('/workflows');
-    await page.waitForTimeout(1500);
-    await gotoApp('/chats');
-    await page.waitForTimeout(1500);
+
+    // The shell's main nav (P3: `sidebar-nav`); other <nav> landmarks
+    // (breadcrumbs, settings sections) must not be able to satisfy this.
+    const nav = page.getByTestId('sidebar-nav');
+    for (const [name, path] of [
+      ['Workflows', /\/workflows$/],
+      ['Chats', /\/chats$/],
+      ['Projects', /\/projects$/],
+    ] as const) {
+      await nav.getByRole('link', { name, exact: true }).click();
+      await expect(page).toHaveURL(path);
+      await page.waitForTimeout(1500);
+    }
+
+    const sameDocument = await page.evaluate(() => (window as { __e2eOneDocument?: boolean }).__e2eOneDocument === true);
+    expect(sameDocument, 'navigation must stay client-side (no full reload)').toBe(true);
 
     const opens = streamRequests.filter((u) => /\/api\/stream(\?|$)/.test(u));
-    // One connection, plus at most one reconnect if the dev server blipped.
+    // The app opens its stream at boot (the attention feed subscribes on every
+    // page), so zero means the stream never connected: fail rather than pass
+    // vacuously. One connection, plus at most one reconnect if the server blipped.
+    expect(opens.length, 'no event stream opened at all').toBeGreaterThanOrEqual(1);
     expect(opens.length, `opened ${opens.length} event streams: ${opens.join(', ')}`).toBeLessThanOrEqual(2);
   });
 });
@@ -532,20 +557,18 @@ test.describe('Stream spine', () => {
 // ── Charts / context-usage instrumentation ──────────────────────
 
 test.describe('Charts and usage instrumentation', () => {
-  test('the dashboard renders its live metric tiles', async ({ gotoApp, page }) => {
+  test('Home renders its live System card', async ({ gotoApp, page }) => {
     await gotoApp('/');
-    await expect(page.getByRole('heading', { name: /Mission Control/i })).toBeVisible();
-    // These are fed by /api/health + list endpoints; a broken gateway shows
-    // as blank tiles rather than an error, so assert on the values.
-    //
-    // Case-insensitive on purpose: the tiles render as "CHATS" via CSS
-    // `text-transform: uppercase`, but the DOM text — which is what Playwright
-    // matches — is "Chats". An exact 'CHATS' matcher fails against a page that
-    // is working perfectly.
-    for (const label of [/^chats$/i, /^workflows$/i, /^automations$/i]) {
-      await expect(page.getByText(label).first()).toBeVisible();
-    }
-    await expect(page.getByText(/Connected|Degraded/i).first()).toBeVisible();
+    const main = page.getByRole('main');
+    await expect(main.getByRole('heading', { name: /^(Nothing needs you|\d+ needs? you)( · \d+ running)?$/, level: 1 })).toBeVisible();
+    // Fed by /api/system/info (G-12) and the stream's connection state; a
+    // broken gateway shows as missing rows rather than an error, so assert
+    // on the values.
+    const system = page.getByTestId('home-system');
+    await expect(system.getByText(/^(Connected|Reconnecting…)$/)).toBeVisible();
+    await expect(system.getByText(/^\d+ running$/)).toBeVisible();
+    await expect(system.getByText(/^max \d+$/)).toBeVisible();
+    await expect(system.getByText('Version', { exact: true })).toBeVisible();
   });
 
   test('the context-usage gauge renders and opens its breakdown', async ({ seed, gotoApp, page }) => {

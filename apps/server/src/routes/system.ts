@@ -4,6 +4,7 @@
 
 import { Router } from 'express';
 import { dirname, resolve } from 'node:path';
+import * as fs from 'node:fs';
 import { z } from 'zod';
 import {
   COMPUTER_USE_DISABLE_TOKENS,
@@ -12,9 +13,12 @@ import {
   McpServerBodySchema,
   SystemMcpPrefsBodySchema,
   mcpCredentialNamespace,
+  type SystemInfo,
 } from '@generatorai/shared';
+import { readBuildStamp } from '@generatorai/shared/node';
 import { toMcpServerEntry } from '@generatorai/core';
 import type { Container } from '../composition-root.js';
+import { serverDisplayName } from './auth.js';
 import { readComputerUsePreferences, writeComputerUsePreferences } from '../settings/computerUse.js';
 import {
   readAudioPreferences,
@@ -23,6 +27,7 @@ import {
   TEXT_FORMATTER_CHOICES,
   MIN_ENDPOINT_MS,
   MAX_ENDPOINT_MS,
+  STT_LANGUAGE_PATTERN,
 } from '../settings/audio.js';
 import {
   nemotronModelStatus,
@@ -48,10 +53,81 @@ function killSwitchEngaged(): boolean {
   return raw !== undefined && COMPUTER_USE_DISABLE_TOKENS.includes(raw.trim().toLowerCase());
 }
 
+/** A file's byte size, or `0` when it does not exist (the `-wal`/`-shm` companions are absent between checkpoints). */
+async function fileSizeOrZero(path: string): Promise<number> {
+  try {
+    return (await fs.promises.stat(path)).size;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * G-12 — the database file plus its `-wal` and `-shm` companions. `undefined`
+ * (never `0`, D-36) when the main file itself could not be read.
+ */
+async function readDatabaseSize(dbPath: string): Promise<number | undefined> {
+  try {
+    const [main, wal, shm] = await Promise.all([
+      fs.promises.stat(dbPath).then((stat) => stat.size),
+      fileSizeOrZero(`${dbPath}-wal`),
+      fileSizeOrZero(`${dbPath}-shm`),
+    ]);
+    return main + wal + shm;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * G-12 — disk usage for the data directory. The same `fs.promises.statfs`
+ * call on Windows, macOS and Linux. `usedBytes` excludes space reserved for
+ * privileged processes (`bavail`, not `bfree`) — the same number `df` shows
+ * as available to this process. `undefined` when unsupported or unreadable,
+ * never an invented value.
+ */
+async function readDiskUsage(dataDir: string): Promise<{ usedBytes: number; totalBytes: number } | undefined> {
+  try {
+    const stats = await fs.promises.statfs(dataDir);
+    const totalBytes = stats.blocks * stats.bsize;
+    const availBytes = stats.bavail * stats.bsize;
+    return { usedBytes: Math.max(0, totalBytes - availBytes), totalBytes };
+  } catch {
+    return undefined;
+  }
+}
+
 export function createSystemRoutes(container: Container): Router {
   const router = Router();
   const { systemArtifactService, artifactCatalog, mcpSettingsStore, mcpCredentialVault } = container;
   const dataDir = dirname(resolve(container.config.dbPath));
+
+  // GET /system/info — Home "System" card + Settings › Diagnostics (G-12).
+  // Same low-sensitivity tier as `GET /health/config` (version, disk and DB
+  // size are informational, not secret), but this stays behind the `/system`
+  // prefix's ordinary `read:status` scope rather than the public `/health`
+  // prefix: it is shown inside the authenticated app, not to an
+  // unauthenticated health probe (D-56, `01-decisions.md`).
+  router.get('/info', async (_req, res, next) => {
+    try {
+      const dbPath = resolve(container.config.dbPath);
+      const [sizeBytes, disk] = await Promise.all([readDatabaseSize(dbPath), readDiskUsage(dataDir)]);
+      const info: SystemInfo = {
+        serverName: serverDisplayName(),
+        serverVersion: readBuildStamp(import.meta.url),
+        platform: process.platform,
+        uptimeSec: Math.floor(process.uptime()),
+        // "N running" is the attention feed's count (what Home's Running list
+        // shows), not a second definition here.
+        agents: { max: container.config.maxConcurrentSessions },
+        database: { kind: 'sqlite', ...(sizeBytes !== undefined ? { sizeBytes } : {}) },
+        ...(disk ? { disk } : {}),
+      };
+      res.set('Cache-Control', 'no-store').json(info);
+    } catch (err) {
+      next(err);
+    }
+  });
 
   // GET /system/artifacts — List all system artifacts
   router.get('/artifacts', async (req, res, next) => {
@@ -194,6 +270,7 @@ export function createSystemRoutes(container: Container): Router {
     ttsEnabled: z.boolean().optional(),
     ttsVoice: z.string().min(1).max(64).optional(),
     ttsSpeed: z.number().min(0.5).max(2).optional(),
+    sttLanguage: z.string().max(35).regex(STT_LANGUAGE_PATTERN).optional(),
   });
 
   // A download runs in the server, not in the request that started it: it is
@@ -262,6 +339,10 @@ export function createSystemRoutes(container: Container): Router {
       const status = await nemotronModelStatus();
       res.json({
         ...status,
+        // MG-17: the multilingual Nemotron ONNX build only auto-detects (its
+        // 40 locales have no published id mapping), so it offers no forced
+        // language. A model that can be told one lists its BCP-47 tags here.
+        languages: [],
         downloading: modelDownload !== null,
         progress: modelDownload?.progress ?? (status.present ? 1 : 0),
         ...(modelDownload?.error ? { error: modelDownload.error } : {}),

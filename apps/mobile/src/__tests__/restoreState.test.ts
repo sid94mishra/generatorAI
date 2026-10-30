@@ -5,7 +5,7 @@ import {
   isStorageUnavailableError,
   nextRestorePhase,
   shouldRetryRestore,
-} from '../auth/restoreState';
+} from '../services/auth/restoreState';
 
 describe('restore phase', () => {
   it('a storage failure locks instead of settling as unpaired', () => {

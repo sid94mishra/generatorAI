@@ -8,7 +8,8 @@
 //
 // Responsibilities:
 //   - Bounded spawn concurrency via two semaphores:
-//       executionSemaphore — caps concurrent turns across ALL sessions
+//       execution gate     — caps concurrent turns across ALL sessions
+//                            (the server's provider:claude-agent flow key)
 //       coldStartSemaphore — caps concurrent new provider startups
 //   - Instance lifecycle: start, health-check, recycle by age/RSS
 //   - Single-reader demux: each session is assigned to one instance;
@@ -29,6 +30,13 @@
 
 // ── Semaphore ──────────────────────────────────────────────────────
 
+/** The rejection of a permit wait withdrawn by its abort signal. */
+function abortError(): Error {
+  const err = new Error('The permit wait was aborted');
+  err.name = 'AbortError';
+  return err;
+}
+
 /**
  * W12 — minimal FIFO counting semaphore shared across supervisor operations.
  * Re-declared here (vs. importing from tool-factory) so AgentHostSupervisor
@@ -44,10 +52,25 @@ class BoundedSemaphore {
     this.available = permits > 0 ? permits : Number.POSITIVE_INFINITY;
   }
 
-  async acquire(): Promise<void> {
+  /**
+   * Wait for a permit. An abort of `signal` while waiting removes the waiter
+   * (so no permit is ever handed to it) and rejects with an `AbortError`.
+   */
+  async acquire(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw abortError();
     if (this.tryAcquire()) return;
-    await new Promise<void>((resolve) => {
-      this.waiters.push(resolve);
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        const i = this.waiters.indexOf(grant);
+        if (i >= 0) this.waiters.splice(i, 1);
+        reject(abortError());
+      };
+      const grant = () => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      };
+      this.waiters.push(grant);
+      signal?.addEventListener('abort', onAbort, { once: true });
     });
   }
 
@@ -86,21 +109,57 @@ class BoundedSemaphore {
 }
 
 /**
- * Default cap on concurrent agent turns. See `maxConcurrentExecutions`.
- * Exported so the docs (`.github/docs/operations.md`) and the out-of-process
- * agent host can quote the same number.
+ * Default cap on concurrent agent turns when no execution gate is set (the
+ * SDK, tests). The server sets the gate to its `provider:claude-agent` flow
+ * key (P07 WP-7.2), whose default is the same 4.
  */
 export const DEFAULT_MAX_CONCURRENT_AGENT_TURNS = 4;
+
+/**
+ * Where turn permits come from (P07 WP-7.2): by default a semaphore of the
+ * supervisor's own; the server hands it the admission controller's
+ * `provider:<id>` flow gate, so chat turns and workflow stages count
+ * against the one configurable limit (no hidden cap).
+ */
+export interface ExecutionGate {
+  /** A permit only if one is free right now (never waits). */
+  tryAcquire(): (() => void) | undefined;
+  /** Wait for a permit; an abort of `signal` withdraws the wait and rejects (`AbortError`). */
+  acquire(signal?: AbortSignal): Promise<() => void>;
+  state(): { running: number; queued: number; limit: number | undefined };
+}
+
+function semaphoreGate(sem: BoundedSemaphore): ExecutionGate {
+  const permit = (): (() => void) => {
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      sem.release();
+    };
+  };
+  return {
+    tryAcquire: () => (sem.tryAcquire() ? permit() : undefined),
+    acquire: async (signal) => {
+      await sem.acquire(signal);
+      return permit();
+    },
+    state: () => ({
+      running: Math.max(0, sem.permits - (sem as unknown as { available: number }).available),
+      queued: sem.queueDepth,
+      limit: sem.permits,
+    }),
+  };
+}
 
 // ── Options ────────────────────────────────────────────────────────
 
 export interface AgentHostSupervisorOptions {
   /**
-   * Maximum concurrent agent turns across all sessions (default: 4).
-   * When this limit is reached, new turns queue rather than reject — the
-   * admission controller (W18) decides whether to reject upstream — and the
-   * provider announces the wait (`harness.session_info` / `queued`).
-   * Set via `GENERATORAI_MAX_CONCURRENT_AGENT_TURNS`.
+   * Maximum concurrent agent turns across all sessions when no execution
+   * gate is set (default: 4). The server replaces it with its
+   * `provider:claude-agent` flow key (`useExecutionGate`), configured in
+   * Settings → Workflow engine.
    *
    * Why 4: each Claude turn is a CLI process of ~250 MB RSS. The previous
    * default of 16 meant a worst case around 4 GB for what is, by default, a
@@ -196,7 +255,7 @@ interface InstanceRecord {
 export class AgentHostSupervisor {
   // ── Concurrency semaphores ─────────────────────────────────────
 
-  private readonly executionSemaphore: BoundedSemaphore;
+  private executionGate: ExecutionGate;
   private readonly coldStartSemaphore: BoundedSemaphore;
 
   // ── Instance tracking ──────────────────────────────────────────
@@ -216,12 +275,11 @@ export class AgentHostSupervisor {
   readonly rssProbeMinAgeMs: number;
 
   constructor(opts?: AgentHostSupervisorOptions) {
-    const maxExec = opts?.maxConcurrentExecutions
-      ?? Number(process.env['GENERATORAI_MAX_CONCURRENT_AGENT_TURNS'] ?? DEFAULT_MAX_CONCURRENT_AGENT_TURNS);
+    const maxExec = opts?.maxConcurrentExecutions ?? DEFAULT_MAX_CONCURRENT_AGENT_TURNS;
     const maxCold = opts?.maxConcurrentColdStarts
       ?? Number(process.env['GENERATORAI_MAX_CONCURRENT_COLD_STARTS'] ?? 4);
 
-    this.executionSemaphore = new BoundedSemaphore(maxExec);
+    this.executionGate = semaphoreGate(new BoundedSemaphore(maxExec));
     this.coldStartSemaphore = new BoundedSemaphore(maxCold);
 
     this.maxAgeMs        = opts?.instanceMaxAgeMs     ?? 6 * 60 * 60_000;   // 6 h
@@ -236,17 +294,21 @@ export class AgentHostSupervisor {
    * Call this BEFORE spawning a new agent turn (before `query()`).
    *
    * Callers must always call the release function — typically via
-   * `try { return await fn(); } finally { release(); }`.
+   * `try { return await fn(); } finally { release(); }`. An abort of `signal`
+   * before the permit arrives withdraws the wait: it rejects (`AbortError`)
+   * and no permit is held.
    */
-  async acquireExecution(): Promise<() => void> {
-    await this.executionSemaphore.acquire();
-    let released = false;
-    return () => {
-      if (!released) {
-        released = true;
-        this.executionSemaphore.release();
-      }
-    };
+  async acquireExecution(signal?: AbortSignal): Promise<() => void> {
+    return this.executionGate.acquire(signal);
+  }
+
+  /**
+   * Take turn permits from `gate` from now on (P07 WP-7.2: the server's
+   * `provider:claude-agent` flow key). Permits already handed out are
+   * released to the gate that issued them.
+   */
+  useExecutionGate(gate: ExecutionGate): void {
+    this.executionGate = gate;
   }
 
   /**
@@ -256,14 +318,7 @@ export class AgentHostSupervisor {
    * falling back to `acquireExecution()`.
    */
   tryAcquireExecution(): (() => void) | undefined {
-    if (!this.executionSemaphore.tryAcquire()) return undefined;
-    let released = false;
-    return () => {
-      if (!released) {
-        released = true;
-        this.executionSemaphore.release();
-      }
-    };
+    return this.executionGate.tryAcquire();
   }
 
   /**
@@ -341,14 +396,12 @@ export class AgentHostSupervisor {
    * Never triggers a refresh — safe to call on the hot path.
    */
   snapshot(): AgentHostSnapshot {
-    const exec = this.executionSemaphore;
+    const exec = this.executionGate.state();
     const cold = this.coldStartSemaphore;
     return {
-      maxConcurrentExecutions:  exec.permits,
-      activeExecutions:         exec.permits - (exec as unknown as { available: number }).available > 0
-                                  ? exec.permits - (exec as unknown as { available: number }).available
-                                  : 0,
-      executionQueueDepth:      exec.queueDepth,
+      maxConcurrentExecutions:  exec.limit ?? 0,
+      activeExecutions:         exec.running,
+      executionQueueDepth:      exec.queued,
       maxConcurrentColdStarts:  cold.permits,
       // M7-fix: mirror the same formula used for activeExecutions — derive from
       // available count rather than queue depth (queue depth counts waiters,

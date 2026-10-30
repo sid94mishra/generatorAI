@@ -291,7 +291,7 @@ export const DEFAULT_KEYMAP: KeyBinding[] = [
   // shares its mnemonic with the stage it connects.
   { id: 'workflow.addEdge', context: 'workflow', keys: 'E', description: 'Connect this stage to another', category: 'Workflow' },
   { id: 'workflow.deleteEdge', context: 'workflow', keys: 'D', description: 'Delete an edge on this stage', category: 'Workflow' },
-  { id: 'workflow.variables', context: 'workflow', keys: 'v', description: "Edit the stage's variables", category: 'Workflow' },
+  { id: 'workflow.variables', context: 'workflow', keys: 'v', description: "Show the workflow's input variables", category: 'Workflow' },
   { id: 'workflow.hooks', context: 'workflow', keys: 'h', description: "Manage the stage's hooks", category: 'Workflow' },
   { id: 'workflow.validate', context: 'workflow', keys: 'V', description: 'Validate — jump from a finding to its stage', category: 'Workflow' },
   { id: 'workflow.run', context: 'workflow', keys: 'r', description: 'Start a run of this workflow', category: 'Workflow' },

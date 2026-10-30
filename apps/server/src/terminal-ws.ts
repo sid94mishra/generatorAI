@@ -47,6 +47,7 @@ import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
 import type { Container } from './composition-root.js';
 import { authorizeWebSocketUpgrade } from './middleware/wsAuth.js';
+import { trackWebSocket } from './streaming/liveConnections.js';
 import type { TerminalInputFrame, TerminalOutputFrame } from '@generatorai/shared';
 
 const PATH_RE = /^\/api\/workspaces\/([^/]+)\/terminals\/([^/]+)\/stream$/;
@@ -220,6 +221,7 @@ export function attachTerminalWebSocket(server: HttpServer, container: Container
         severity: 'warn',
       });
       wss.handleUpgrade(req, socket, head, (ws) => {
+        trackWebSocket(authResult.principal, ws, 'terminal-ws', ['exec:terminal']);
         handleConnection(ws, workspaceId, sessionId);
       });
     })().catch((err: unknown) => {

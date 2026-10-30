@@ -1,0 +1,313 @@
+{
+  "requiredUtilities": [
+    "bg-ground",
+    "bg-surface",
+    "bg-raised",
+    "bg-overlay",
+    "bg-sunken",
+    "bg-hover",
+    "bg-selected",
+    "border-line",
+    "border-line-soft",
+    "border-line-strong",
+    "text-fg",
+    "text-fg-2",
+    "text-fg-3",
+    "bg-accent",
+    "text-on-accent",
+    "outline-focus",
+    "bg-run",
+    "text-run",
+    "bg-run-bg",
+    "text-ok",
+    "text-warn",
+    "text-err",
+    "bg-add-bg",
+    "bg-del-bg",
+    "shadow-pop",
+    "bg-scrim",
+    "text-micro",
+    "text-small",
+    "text-ui",
+    "text-body",
+    "text-title",
+    "text-heading",
+    "text-display",
+    "rounded-badge",
+    "rounded-control-sm",
+    "rounded-control",
+    "rounded-seg",
+    "rounded-card",
+    "rounded-panel",
+    "rounded-dialog",
+    "h-control-sm",
+    "h-control",
+    "h-control-lg",
+    "h-bar",
+    "h-tab",
+    "h-row",
+    "h-nav",
+    "size-control",
+    "z-dialog",
+    "z-tooltip",
+    "w-sidebar",
+    "max-w-dialog",
+    "ease-standard",
+    "ease-in-out",
+    "duration-normal"
+  ],
+  "legacyUtilityNames": [
+    "background",
+    "foreground",
+    "card",
+    "card-foreground",
+    "popover",
+    "popover-foreground",
+    "subtle",
+    "emphasis",
+    "primary",
+    "primary-emphasis",
+    "primary-foreground",
+    "secondary",
+    "secondary-foreground",
+    "muted",
+    "muted-foreground",
+    "accent-tint",
+    "destructive",
+    "destructive-foreground",
+    "border",
+    "border-muted",
+    "input",
+    "ring",
+    "success",
+    "success-muted",
+    "warning",
+    "warning-muted",
+    "info",
+    "info-muted",
+    "danger",
+    "danger-muted",
+    "done",
+    "sidebar",
+    "sidebar-foreground",
+    "sidebar-border",
+    "sidebar-accent",
+    "sidebar-accent-foreground"
+  ],
+  "namespaces": [
+    {
+      "id": "color",
+      "prefixes": [
+        "bg",
+        "text",
+        "border",
+        "ring",
+        "outline",
+        "fill",
+        "stroke",
+        "divide",
+        "from",
+        "via",
+        "to",
+        "shadow",
+        "accent",
+        "caret",
+        "decoration",
+        "placeholder"
+      ],
+      "names": [
+        "ground",
+        "surface",
+        "raised",
+        "overlay",
+        "sunken",
+        "hover",
+        "selected",
+        "line-soft",
+        "line",
+        "line-strong",
+        "fg",
+        "fg-2",
+        "fg-3",
+        "accent",
+        "on-accent",
+        "focus",
+        "run",
+        "run-bg",
+        "ok",
+        "ok-bg",
+        "warn",
+        "warn-bg",
+        "err",
+        "err-bg",
+        "add-bg",
+        "del-bg",
+        "scrim"
+      ]
+    },
+    {
+      "id": "text-color",
+      "prefixes": [
+        "text"
+      ],
+      "names": [
+        "run",
+        "ok",
+        "warn",
+        "err"
+      ]
+    },
+    {
+      "id": "shadow",
+      "prefixes": [
+        "shadow"
+      ],
+      "names": [
+        "pop"
+      ]
+    },
+    {
+      "id": "text",
+      "prefixes": [
+        "text"
+      ],
+      "names": [
+        "micro",
+        "small",
+        "ui",
+        "body",
+        "title",
+        "heading",
+        "display"
+      ]
+    },
+    {
+      "id": "radius",
+      "prefixes": [
+        "rounded",
+        "rounded-s",
+        "rounded-e",
+        "rounded-t",
+        "rounded-r",
+        "rounded-b",
+        "rounded-l",
+        "rounded-ss",
+        "rounded-se",
+        "rounded-ee",
+        "rounded-es",
+        "rounded-tl",
+        "rounded-tr",
+        "rounded-br",
+        "rounded-bl"
+      ],
+      "names": [
+        "badge",
+        "control-sm",
+        "control",
+        "seg",
+        "card",
+        "panel",
+        "dialog"
+      ]
+    },
+    {
+      "id": "height",
+      "prefixes": [
+        "h",
+        "min-h",
+        "max-h"
+      ],
+      "names": [
+        "control-sm",
+        "control",
+        "control-lg",
+        "nav",
+        "item",
+        "step",
+        "th",
+        "row",
+        "tab",
+        "bar",
+        "badge",
+        "kbd",
+        "panel-bar",
+        "dialog-bar",
+        "footer",
+        "strip",
+        "meter",
+        "tile"
+      ]
+    },
+    {
+      "id": "size",
+      "prefixes": [
+        "size"
+      ],
+      "names": [
+        "control-sm",
+        "control",
+        "control-lg"
+      ]
+    },
+    {
+      "id": "z",
+      "prefixes": [
+        "z"
+      ],
+      "names": [
+        "base",
+        "sticky",
+        "dock",
+        "rail",
+        "sidebar",
+        "dialog",
+        "dropdown",
+        "popover",
+        "toast",
+        "tooltip"
+      ]
+    },
+    {
+      "id": "container",
+      "prefixes": [
+        "w",
+        "min-w",
+        "max-w"
+      ],
+      "names": [
+        "sidebar",
+        "rail",
+        "dock",
+        "dock-run",
+        "sheet",
+        "aside",
+        "side-rail",
+        "inspector",
+        "dialog-sm",
+        "dialog",
+        "dialog-lg"
+      ]
+    },
+    {
+      "id": "ease",
+      "prefixes": [
+        "ease"
+      ],
+      "names": [
+        "standard",
+        "in-out"
+      ]
+    },
+    {
+      "id": "duration",
+      "prefixes": [
+        "duration"
+      ],
+      "names": [
+        "fast",
+        "normal",
+        "slow"
+      ]
+    }
+  ]
+}

@@ -8,6 +8,9 @@ import { getConfigCorrections, fallbackReport } from '@generatorai/shared';
 import type { Container } from '../composition-root.js';
 import { getSlowStatementStats } from '@generatorai/db';
 
+/** How long /health waits on the harness ping before reporting `degraded`. */
+const HARNESS_PING_BUDGET_MS = 1500;
+
 export function createHealthRoutes(container: Container): Router {
   const router = Router();
   const { harness, config, templateRegistry, logger } = container;
@@ -18,10 +21,21 @@ export function createHealthRoutes(container: Container): Router {
     let harnessAlive = false;
     let dbOk = true; // If we got this far, DB is serving requests
 
+    // Bounded: this is the liveness probe (the desktop shell waits on it with a
+    // 2 s timeout). A provider that is slow to answer makes the server
+    // `degraded`, never unreachable.
+    let budget: NodeJS.Timeout | undefined;
     try {
-      harnessAlive = await harness.ping();
+      harnessAlive = await Promise.race([
+        harness.ping(),
+        new Promise<boolean>((resolve) => {
+          budget = setTimeout(() => resolve(false), HARNESS_PING_BUDGET_MS);
+        }),
+      ]);
     } catch {
       harnessAlive = false;
+    } finally {
+      clearTimeout(budget);
     }
 
     // v2: Gather workflow run and chat counts
@@ -88,12 +102,10 @@ export function createHealthRoutes(container: Container): Router {
       // stalling" that the RSS number above cannot give.
       slowStatements: getSlowStatementStats(),
       // W18 — "Publish depth in the health endpoint: makes throttling visible
-      // instead of mysterious." Each lane reports its cap alongside running,
-      // queued and parked counts. `parked` is the load-bearing one: work
-      // waiting on a human approval has given its permit back, so a lane
-      // showing `parked: 8, running: 0` is idle and healthy, whereas the same
-      // number under `running` would mean genuinely saturated.
-      admission: container.admissionController?.snapshot() ?? [],
+      // instead of mysterious."
+      // P07 WP-7.2 — the flow keys (the engine's one gate and the providers'
+      // turn permits): running, queued and limit per key.
+      flows: container.admissionController?.flowSnapshot() ?? [],
       // W18 — anything the numeric-config loader had to clamp or reject at
       // boot. Empty in a correctly configured process; non-empty means an env
       // var is being ignored or capped, which is otherwise invisible.

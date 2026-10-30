@@ -1,0 +1,267 @@
+// ────────────────────────────────────────────────────────────────
+// chatMessageToBlocks — Adapter: persisted ChatMessage → StreamBlock[].
+//
+// Produces the same block shapes streamStore emits so a replayed
+// assistant turn renders through the exact same pipeline as a live
+// one: chatMessageToBlocks → deriveStreamView → <StreamPanel>.
+//
+// Block ORDER is the contract — `deriveSegments` walks the array and
+// renders what it finds, in place — so this adapter owns the job of
+// restoring the turn's true chronology.
+//
+// Sources, in render order (matches the old AssistantMessage):
+//  1. metadata.thinkingText   → one completed ThinkingBlock, for a turn saved
+//     without `thinkingSegments`
+//  2. thinking and text segments, tool calls and plan/question cards,
+//     interleaved by the turn ordinal the server stamped on each (`sequence`)
+//  3. message.content         → TextBlock, or interleaved text/tool_call
+//     blocks when the model embedded <tool_calls>/<function_calls> XML
+//     (parsed by the same utils/parseInlineToolCalls streamStore uses).
+//
+// `content` is the turn's FINAL assistant text. When `metadata.textSegments`
+// is present it already ends with that text, so step 3 is skipped to avoid
+// printing the closing paragraph twice.
+// ────────────────────────────────────────────────────────────────
+
+import type { ChatMessage } from '@generatorai/shared';
+import { PERMISSION_GATE_COPY, PLAN_GATE_COPY, permissionWording } from '@generatorai/shared/ui-contract';
+import type { TranscriptMessageInput } from './messageInput.js';
+import type { StreamBlock } from '../stream/types.js';
+import { parseInlineToolCalls } from '../stream/parseInlineToolCalls.js';
+
+/** A block awaiting its blockId, tagged with the turn ordinal it sorts on. */
+interface OrderedBlock {
+  sequence: number | undefined;
+  make: (blockId: number) => StreamBlock;
+}
+
+export function chatMessageToBlocks(message: ChatMessage): StreamBlock[];
+export function chatMessageToBlocks(message: TranscriptMessageInput): StreamBlock[];
+export function chatMessageToBlocks(message: TranscriptMessageInput): StreamBlock[] {
+  const blocks: StreamBlock[] = [];
+  let nextId = 0;
+
+  const metadata = message.metadata;
+
+  // 1. Persisted thinking — always complete in history. Placed by its ordinals when the turn kept them (below).
+  const thoughts = metadata?.thinkingSegments ?? [];
+  if (metadata?.thinkingText && thoughts.length === 0) {
+    blocks.push({
+      type: 'thinking',
+      blockId: nextId++,
+      text: metadata.thinkingText,
+      isComplete: true,
+    });
+  }
+
+  // 2. Everything the agent DID, in the order it happened.
+  const ordered: OrderedBlock[] = [];
+
+  for (const thought of thoughts) {
+    ordered.push({
+      sequence: thought.sequence,
+      make: (blockId) => ({ type: 'thinking', blockId, text: thought.text, isComplete: true }),
+    });
+  }
+
+  // Assistant narration between tool waves. Present only on turns that said
+  // more than their closing paragraph.
+  const textSegments = metadata?.textSegments ?? [];
+  let closingIndex = -1;
+  for (const seg of textSegments) {
+    if (!seg.content?.trim()) continue;
+    closingIndex = ordered.length;
+    ordered.push({
+      sequence: seg.sequence,
+      make: (blockId) => ({ type: 'text', blockId, content: seg.content }),
+    });
+  }
+
+  // Tool calls. Status is coerced to 'complete': a persisted message can carry
+  // status 'running' when a turn was paused/aborted mid-call, but rendering
+  // that as running would show a spinner forever.
+  let toolCounter = 0;
+  for (const tc of metadata?.toolCalls ?? []) {
+    const fallbackId = `meta_tc_${toolCounter++}`;
+    ordered.push({
+      sequence: tc.sequence,
+      make: (blockId) => ({
+        type: 'tool_call',
+        blockId,
+        callId: tc.id ?? fallbackId,
+        tool: tc.tool,
+        args: tc.args,
+        result: tc.result,
+        status: 'complete',
+        ...(tc.fileOp ? { fileOp: tc.fileOp } : {}),
+        ...(tc.parentId ? { parentCallId: tc.parentId } : {}),
+        ...(tc.success === false ? { error: true } : {}),
+      }),
+    });
+  }
+
+  // PLN-01 — plan and question cards.
+  //
+  // These MUST come from message metadata rather than event replay: for a
+  // completed chat, replayEvents.ts takes its fast path and never processes
+  // the `chat.plan.*` / `chat.question.*` events, so the metadata is the only
+  // surviving record of the cards.
+  for (const card of metadata?.planCards ?? []) {
+    // The person's replies to its revisions, each where they sent it (before the revision it led to).
+    for (const note of card.notes ?? []) {
+      ordered.push({
+        sequence: note.sequence,
+        make: (blockId) => ({
+          type: 'system',
+          blockId,
+          message: note.text,
+          category: 'operator',
+          label: PLAN_GATE_COPY.note[note.decision],
+        }),
+      });
+    }
+    ordered.push({
+      sequence: card.sequence,
+      make: (blockId) => ({
+        type: 'plan',
+        blockId,
+        planId: card.planId,
+        revision: card.revision,
+        title: card.title,
+        fileName: card.fileName,
+        summary: card.summary,
+        // Mirror the question-card rule below: a card persisted while still
+        // awaiting review is not actionable from history — the gate it was
+        // blocking has since been resolved or expired (turns only persist
+        // after they settle). Rendering it as "Needs review" produced an
+        // approvable-looking card whose click 409s (seen after a mid-review
+        // server restart).
+        status: card.status === 'awaiting_review' || card.status === 'drafting'
+          ? 'expired'
+          : card.status,
+        actions: [],
+      }),
+    });
+  }
+
+  for (const card of metadata?.questionCards ?? []) {
+    ordered.push({
+      sequence: card.sequence,
+      make: (blockId) => ({
+        type: 'question',
+        blockId,
+        interactionId: card.interactionId,
+        questions: card.questions,
+        // A card persisted as 'pending' can never become answerable again —
+        // the SDK callback it was blocking is gone. Show it as expired.
+        status: card.status === 'pending' ? 'expired' : card.status,
+        ...(card.response?.answers ? { answers: card.response.answers } : {}),
+        ...(card.response?.freeformResponse
+          ? { freeformResponse: card.response.freeformResponse }
+          : {}),
+      }),
+    });
+  }
+
+  // Review finding 5.1 — tool-permission cards, same replay rule as
+  // plan/question above: a card persisted as 'pending' has long since had
+  // its blocking SDK callback torn down (turns only persist after they
+  // settle), so it renders as expired rather than a clickable-looking dead
+  // end.
+  for (const card of metadata?.permissionCards ?? []) {
+    // U-16 (D-147): a request remembered rules allowed without asking is a note, not a card.
+    if (card.autoAllowed) {
+      ordered.push({
+        sequence: card.sequence,
+        make: (blockId) => ({
+          type: 'system',
+          blockId,
+          message: PERMISSION_GATE_COPY.autoAllowed(
+            (card.remembered ?? []).map((r) => r.match).join(', ') || card.toolName,
+            card.remembered?.length && card.remembered.every((r) => r.scope === 'project') ? 'project' : 'chat',
+          ),
+          category: 'permission',
+        }),
+      });
+      continue;
+    }
+    ordered.push({
+      sequence: card.sequence,
+      make: (blockId) => ({
+        type: 'permission',
+        blockId,
+        interactionId: card.interactionId,
+        toolName: card.toolName,
+        permissionType: card.type,
+        description: card.description,
+        inputSummary: card.inputSummary,
+        permissionMode: '',
+        status: card.status === 'pending' ? 'expired' : card.status,
+        ...(card.message ? { message: card.message } : {}),
+        ...(card.risk ? { risk: card.risk } : {}),
+        ...(card.remembered?.length ? { remembered: card.remembered } : {}),
+        ...permissionWording(card.toolName, card.type),
+      }),
+    });
+  }
+
+  // Messages persisted before the ordinal existed carry no sequence at all.
+  // Array#sort is stable, so those keep their append order (text, tools, then
+  // plans, then questions) and simply trail the ones that do carry an ordinal.
+  ordered.sort(
+    (a, b) => (a.sequence ?? Number.MAX_SAFE_INTEGER) - (b.sequence ?? Number.MAX_SAFE_INTEGER),
+  );
+  // Such a turn (a stage turn before U-42) cannot place its narration between
+  // its steps, but its last text segment is the closing answer: it goes after
+  // them, not above the tool call it reports on.
+  if (closingIndex >= 0 && ordered.every((item) => item.sequence === undefined)) {
+    ordered.push(...ordered.splice(closingIndex, 1));
+  }
+  for (const item of ordered) {
+    blocks.push(item.make(nextId++));
+  }
+
+  // 3. Content — either plain markdown or text interleaved with inline
+  //    <tool_calls>/<function_calls> XML.
+  //    Skipped when ordered segments already carried the narration, which
+  //    ends with this same closing text.
+  if (textSegments.length > 0) return withErrorNotes(blocks);
+
+  const content = message.content ?? '';
+  const segments = parseInlineToolCalls(content);
+  if (segments) {
+    let inlineCounter = 0;
+    for (const seg of segments) {
+      if (seg.type === 'text' && seg.content) {
+        blocks.push({ type: 'text', blockId: nextId++, content: seg.content });
+      } else if (seg.type === 'tool_call' && seg.toolCall) {
+        blocks.push({
+          type: 'tool_call',
+          blockId: nextId++,
+          callId: `inline_tc_${inlineCounter++}`,
+          tool: seg.toolCall.name,
+          args: seg.toolCall.args,
+          result: seg.toolCall.result,
+          status: 'complete',
+        });
+      }
+    }
+  } else if (content) {
+    blocks.push({ type: 'text', blockId: nextId++, content });
+  }
+
+  return withErrorNotes(blocks);
+
+  /**
+   * 4. The turn's provider errors (`systemMessages` "Error: …", recorded by the
+   *    server's TurnRecorder) close the turn, as the live stream's error block
+   *    does — otherwise a failed turn reloads as if nothing went wrong.
+   */
+  function withErrorNotes(out: StreamBlock[]): StreamBlock[] {
+    for (const note of metadata?.systemMessages ?? []) {
+      if (!note.startsWith('Error: ')) continue;
+      out.push({ type: 'system', blockId: nextId++, message: note, category: 'error' });
+    }
+    return out;
+  }
+}

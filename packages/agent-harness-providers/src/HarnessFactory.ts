@@ -166,6 +166,19 @@ export async function createHarnessProvider(
       return new mod.AcpProvider(config.acp);
     }
 
+    // P2-00 — 'faux' never reaches here. `HarnessRegistry` reports it as a
+    // synthetic, always-ready status without ever calling `get('faux')`
+    // (it isn't in `ALL_HARNESS_TYPES`/`entries`), and the FauxProvider
+    // instance real conversations run on is constructed directly by
+    // composition-root, bypassing this factory entirely.
+    case 'faux': {
+      throw new Error(
+        'Harness type "faux" has no factory-constructed adapter — it is a registry-only synthetic status ' +
+        '(see HarnessType in types.ts). Conversations run on FauxProvider only via ' +
+        'GENERATORAI_TEST_FAUX_HARNESS in composition-root.ts.',
+      );
+    }
+
     default: {
       const _exhaustive: never = type;
       throw new Error(`Unknown harness type: "${type}". Available: copilot, claude-agent, codex, opencode, acp`);

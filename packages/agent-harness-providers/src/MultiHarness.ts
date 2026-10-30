@@ -252,6 +252,16 @@ export class MultiHarness implements IAgentHarness {
   }
 
   /**
+   * Params for a FRESH session on `target` after the conversation left another provider (or a deleted account). The
+   * caller's `resumeProviderSessionId` is the old provider's handle — a Codex thread id handed to Claude failed the
+   * turn with "No conversation found with session ID" (E-4, 2026-10-17) — so it never crosses over.
+   */
+  private freshParamsFor(target: HarnessType, params: CreateConversationParams | undefined): Partial<CreateConversationParams> {
+    const { resumeProviderSessionId: _foreign, ...rest } = this.withModelSupportedBy(target, params) ?? {};
+    return rest;
+  }
+
+  /**
    * The provider already bound to `conversationId`, or `undefined` for a
    * genuinely new conversation. Unlike `ownerOf` this does NOT fall back to
    * the primary — routing has to be able to tell "bound to the primary" apart
@@ -381,13 +391,15 @@ export class MultiHarness implements IAgentHarness {
     // every provider looks unready, and demoting `primary` there would route
     // the first conversation somewhere the user never asked for. Trust the
     // configured provider until a probe actually contradicts it.
-    if (primaryStatus?.ready || primaryStatus?.checkedAt == null) return primary;
+    // D-131 — a hidden primary is never routed to, probed or not.
+    const primaryHidden = this.registry.isHidden?.(primary) === true;
+    if (!primaryHidden && (primaryStatus?.ready || primaryStatus?.checkedAt == null)) return primary;
 
     const [fallback] = this.registry.readyTypes ?? [];
     if (fallback) {
       this.logger?.warn(
         `[MultiHarness] primary provider '${primary}' is not ready` +
-          `${primaryStatus.error ? ` (${primaryStatus.error})` : ''} — routing to '${fallback}' instead. ` +
+          `${primaryStatus?.error ? ` (${primaryStatus.error})` : ''} — routing to '${fallback}' instead. ` +
           `Sign in to '${primary}' or set a default model to silence this.`,
       );
       return fallback;
@@ -554,7 +566,7 @@ export class MultiHarness implements IAgentHarness {
       );
       const freshAdapter = await this.registry.get(target);
       await freshAdapter.createConversation({
-        ...(this.withModelSupportedBy(target, params) ?? {}),
+        ...this.freshParamsFor(target, params),
         conversationId,
       } as CreateConversationParams);
       return;
@@ -581,15 +593,19 @@ export class MultiHarness implements IAgentHarness {
       );
       const adapter = await this.registry.get(target);
       await adapter.createConversation({
-        ...(this.withModelSupportedBy(target, params) as CreateConversationParams),
+        ...this.freshParamsFor(target, params),
         conversationId,
-      });
+      } as CreateConversationParams);
       return;
     }
 
     this.owners.set(conversationId, target);
     const adapter = await this.registry.get(target);
     return adapter.resumeConversation(conversationId, this.withModelSupportedBy(target, params));
+  }
+
+  conversationHarness(conversationId: string): HarnessType {
+    return this.ownerOf(conversationId);
   }
 
   getProviderSessionId(conversationId: string): string | undefined {
@@ -599,6 +615,16 @@ export class MultiHarness implements IAgentHarness {
       ? this.registry.peekInstance(instanceId)
       : this.registry.peek(this.ownerOf(conversationId));
     return adapter?.getProviderSessionId?.(conversationId);
+  }
+
+  /** ECON-R7 — the owning provider gives back the turn permit while a tool blocks. */
+  yieldTurnPermit(conversationId: string): (() => Promise<void>) | undefined {
+    if (this.orphanedInstanceFor(conversationId)) return undefined;
+    const instanceId = this.resolveInstance(conversationId);
+    const adapter = instanceId
+      ? this.registry.peekInstance(instanceId)
+      : this.registry.peek(this.ownerOf(conversationId));
+    return adapter?.yieldTurnPermit?.(conversationId);
   }
 
   /**
@@ -842,14 +868,26 @@ export class MultiHarness implements IAgentHarness {
       ? this.registry.readyTypes
       : ALL_HARNESS_TYPES.filter((t) => this.registry.peek(t) !== null);
 
-    const results = await Promise.all(
-      candidates.map(async (t) => {
+    // Alive as soon as ANY adapter answers yes: Codex's ping is a real
+    // `model/list` round-trip (~3 s cold, far longer offline), and waiting for
+    // every adapter made /api/health as slow as the slowest one — the desktop
+    // shell's 2 s probe then timed out for a minute and reported a healthy
+    // server as failed.
+    return new Promise<boolean>((resolve) => {
+      let pending = candidates.length;
+      if (pending === 0) return resolve(false);
+      for (const t of candidates) {
         const adapter = this.registry.peek(t);
-        if (!adapter) return false;
-        try { return await adapter.ping(); } catch { return false; }
-      }),
-    );
-    return results.some(Boolean);
+        void Promise.resolve()
+          .then(() => (adapter ? adapter.ping() : false))
+          .catch(() => false)
+          .then((alive) => {
+            pending -= 1;
+            if (alive) resolve(true);
+            else if (pending === 0) resolve(false);
+          });
+      }
+    });
   }
 
   runtimeDiagnostics(): HarnessRuntimeDiagnostics {
@@ -920,8 +958,10 @@ export class MultiHarness implements IAgentHarness {
         reasoningEfforts: [],
         planMode: false,
         mcpServers: false,
-        skillDirectories: false,
-        fullToolGating: false,
+        approvalGating: 'none',
+        hostTools: 'none',
+        structuredOutput: 'none',
+        skills: 'none',
         sessionPersistence: false,
         budgetTracking: false,
       };
@@ -941,8 +981,11 @@ export class MultiHarness implements IAgentHarness {
       maxParallelTools: Math.min(...caps.map((c) => c.maxParallelTools ?? 8)),
       planMode: caps.every((c) => c.planMode),
       mcpServers: caps.every((c) => c.mcpServers),
-      skillDirectories: caps.every((c) => c.skillDirectories),
-      fullToolGating: caps.every((c) => c.fullToolGating),
+      // Levels: the weakest level any ready provider declares.
+      approvalGating: weakest(caps.map((c) => c.approvalGating), ['per_call', 'exec_and_patch', 'none']),
+      hostTools: weakest(caps.map((c) => c.hostTools), ['full', 'start_only', 'none']),
+      structuredOutput: weakest(caps.map((c) => c.structuredOutput), ['native', 'tool', 'none']),
+      skills: caps.every((c) => c.skills === caps[0]!.skills) ? caps[0]!.skills : 'none',
       sessionPersistence: caps.every((c) => c.sessionPersistence),
       budgetTracking: caps.every((c) => c.budgetTracking),
       conversationFork: caps.every((c) => c.conversationFork === true),
@@ -963,6 +1006,22 @@ export class MultiHarness implements IAgentHarness {
    * Falls back to `capabilities()` if the conversation has no owner yet
    * (e.g. during construction before `createConversation` is called).
    */
+  /** The provider a conversation with these params routes to; never throws. */
+  async resolveProvider(params: { conversationId?: string; harnessType?: string; model?: string }): Promise<string | undefined> {
+    try {
+      return await this.resolveTarget(
+        {
+          conversationId: params.conversationId ?? '',
+          ...(params.harnessType ? { harnessType: params.harnessType } : {}),
+          ...(params.model ? { model: params.model } : {}),
+        } as CreateConversationParams,
+        this.existingOwnerFor(params.conversationId),
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
   capabilitiesFor(conversationId: string): ProviderCapabilities {
     const harnessType = this.owners.get(conversationId);
     if (!harnessType) return this.capabilities();
@@ -972,4 +1031,11 @@ export class MultiHarness implements IAgentHarness {
     }
     return (adapter as IAgentHarness).capabilities();
   }
+}
+
+/** The weakest of `levels`, where `order` runs strongest → weakest. */
+function weakest<T extends string>(levels: T[], order: readonly T[]): T {
+  let worst = 0;
+  for (const l of levels) worst = Math.max(worst, order.indexOf(l));
+  return order[worst] ?? order[order.length - 1]!;
 }

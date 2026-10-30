@@ -48,6 +48,12 @@ export interface AudioPreferences {
   ttsVoice: string;
   /** 0.5–2.0. */
   ttsSpeed: number;
+  /**
+   * Dictation language (mobile MG-17): `'auto'` lets the engine detect it,
+   * otherwise a BCP-47 tag handed to the engine when a dictation session
+   * does not name its own. Engines that cannot force a language ignore it.
+   */
+  sttLanguage: string;
 }
 
 export const AUDIO_DEFAULTS: AudioPreferences = {
@@ -58,7 +64,11 @@ export const AUDIO_DEFAULTS: AudioPreferences = {
   ttsEnabled: true,
   ttsVoice: 'af_heart',
   ttsSpeed: 1.0,
+  sttLanguage: 'auto',
 };
+
+/** `'auto'` or a BCP-47 tag (`en`, `pt-BR`, `zh-Hant`). */
+export const STT_LANGUAGE_PATTERN = /^(auto|[a-z]{2,3}(-[A-Za-z0-9]{2,8})*)$/;
 
 export const MIN_ENDPOINT_MS = 200;
 export const MAX_ENDPOINT_MS = 3000;
@@ -93,6 +103,10 @@ function normalize(raw: Partial<AudioPreferences> | null): AudioPreferences {
     ttsEnabled: raw?.ttsEnabled !== false,
     ttsVoice: typeof raw?.ttsVoice === 'string' && raw.ttsVoice ? raw.ttsVoice : AUDIO_DEFAULTS.ttsVoice,
     ttsSpeed: clampNumber(raw?.ttsSpeed, 0.5, 2.0, AUDIO_DEFAULTS.ttsSpeed),
+    sttLanguage:
+      typeof raw?.sttLanguage === 'string' && STT_LANGUAGE_PATTERN.test(raw.sttLanguage)
+        ? raw.sttLanguage
+        : AUDIO_DEFAULTS.sttLanguage,
   };
 }
 
@@ -125,4 +139,9 @@ export async function writeAudioPreferences(
     { mode: 0o600 },
   );
   return merged;
+}
+
+/** The language a session uses when its client names none: `undefined` for auto-detect. */
+export function defaultSttLanguage(prefs: Pick<AudioPreferences, 'sttLanguage'>): string | undefined {
+  return prefs.sttLanguage === 'auto' ? undefined : prefs.sttLanguage;
 }

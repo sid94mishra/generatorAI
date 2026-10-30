@@ -1,0 +1,310 @@
+// ────────────────────────────────────────────────────────────────
+// F-chat-02 TranscriptHost — the chat's transcript on the transcript kit
+// (B-24 TranscriptView): persisted turns, the optimistic bubble and the live
+// turn, the empty state, paging, stick-to-bottom, view mode (G-06), rewind
+// and the response actions.
+//
+// Render isolation (W27) is kept: the live stream record is replaced on every
+// token, and `ChatLiveTurn` below is the ONLY component that subscribes to the
+// whole record. Everything else reads the narrow selectors of
+// `useChatStreamState` handed down by the page.
+// ────────────────────────────────────────────────────────────────
+
+import { memo, useCallback, useDeferredValue, useMemo, useRef, type ReactNode } from 'react';
+import {
+  buildTranscriptTurns,
+  deriveSegments,
+  turnChangedFiles,
+  type ScmResultBlock,
+  type UsageInfo,
+  type WidgetBlock,
+} from '@generatorai/client-core';
+import type { ChatMessage } from '@generatorai/shared';
+import { TRANSCRIPT_COPY } from '@generatorai/shared/ui-contract';
+import { useStreamStore } from '@/stores/streamStore.js';
+import { useTranscriptPrefsStore, useTranscriptViewMode } from '@/stores/transcriptPrefsStore.js';
+import {
+  LiveTurn,
+  TranscriptProvider,
+  TranscriptView,
+  UsageChip,
+  type TranscriptActions,
+} from '@/blocks/transcript/index.js';
+import { EmptyState } from '@/ui/primitives/EmptyState/EmptyState.js';
+import { useModelLabel } from '@/blocks/model-picker/useModelLabel.js';
+import type { ChatView } from '../hooks/useChatView.js';
+import { MessageActions } from './MessageActions.js';
+import { RewindMenu } from './RewindMenu.js';
+
+export interface ChatTranscriptProps {
+  view: ChatView;
+  /** Name the agent's responses are signed with. */
+  agentName: string;
+  /** The harness label for the "… is thinking" placeholder; null when unknown. */
+  harnessLabel: string | null;
+  /** The chat's provider when it answers as itself (no named agent): its logo heads each response. */
+  harnessProvider?: string | undefined;
+  canRewind: boolean;
+  /** Skeleton while the message page loads. */
+  loadingFallback?: ReactNode;
+  /** Host slots for blocks rendered by legacy parts until their ports land. */
+  renderWidget?: (block: WidgetBlock, sessionId: string) => ReactNode;
+  renderScmResult?: (block: ScmResultBlock) => ReactNode;
+  /** Focus a dock tab (browser, background tasks). */
+  focusDockTab?: (type: 'browser' | 'tasks') => void;
+  /** "Review with <model>" under the newest Codex turn that changed files; absent while a turn runs. */
+  review?: { model: string; run: () => void; busy: boolean } | undefined;
+}
+
+/** D-33 fallback: finished turns before the last N start collapsed. */
+const TRANSCRIPT_EXPANDED_TURNS = 20;
+
+interface ChatLiveTurnProps {
+  sessionId: string;
+  agentName: string;
+  harnessProvider: string | undefined;
+  harnessLabel: string | null;
+  prevUsage: UsageInfo | null;
+  prevCompletedAt: number | null;
+  /** The turn is pending and has produced nothing of its own yet. */
+  thinking: boolean;
+}
+
+/**
+ * The one place that subscribes to the FULL live stream record (W27): a token
+ * re-renders this leaf only.
+ */
+const ChatLiveTurn = memo(function ChatLiveTurn({ sessionId, agentName, harnessProvider, harnessLabel, prevUsage, prevCompletedAt, thinking }: ChatLiveTurnProps) {
+  const current = useStreamStore((state) => state.streams[sessionId]);
+  // The transcript swaps a finished live turn for its persisted message in a
+  // deferred render (D-88). The stream is cleared as soon as history holds the
+  // turn, which can be a few frames before that render commits: keep showing
+  // the finished turn meanwhile instead of an empty gap.
+  const lastFinished = useRef<typeof current>(undefined);
+  if (current?.status === 'complete' && (current.blocks?.length ?? 0) > 0) lastFinished.current = current;
+  else if (current && current.status !== 'idle') lastFinished.current = undefined;
+  const cleared = !current || (current.status === 'idle' && (current.blocks?.length ?? 0) === 0);
+  const stream = cleared && lastFinished.current ? lastFinished.current : current;
+  const status = stream?.status;
+  const active = status === 'streaming' || status === 'thinking';
+  const blocks = stream?.blocks;
+  const segments = useMemo(() => deriveSegments(blocks, { active }), [blocks, active]);
+  const hasContent = (blocks?.length ?? 0) > 0;
+  const stopped = !!stream?.cancelRequested && !active;
+  const usage: UsageInfo | undefined = useMemo(() => {
+    const u = stream?.usage;
+    if (!u || status !== 'complete') return undefined;
+    return {
+      model: u.model,
+      inputTokens: u.inputTokens,
+      outputTokens: u.outputTokens,
+      durationMs: u.durationMs ?? 0,
+      ...(u.cacheReadTokens != null ? { cacheReadTokens: u.cacheReadTokens } : {}),
+      ...(u.cacheWriteTokens != null ? { cacheWriteTokens: u.cacheWriteTokens } : {}),
+      ...(u.cost != null ? { cost: u.cost } : {}),
+      ...(u.costUsd != null ? { costUsd: u.costUsd } : {}),
+      ...(u.provider ? { provider: u.provider } : {}),
+    };
+  }, [stream?.usage, status]);
+
+  const modelName = useModelLabel(usage?.model);
+
+  return (
+    <LiveTurn
+      agentName={agentName}
+      avatarProvider={harnessProvider ? (usage?.provider ?? harnessProvider) : undefined}
+      model={usage?.model ? (modelName ?? usage.model) : undefined}
+      provider={usage?.provider}
+      usage={usage ? <UsageChip usage={usage} prevUsage={prevUsage} prevCompletedAt={prevCompletedAt} scopeId={sessionId} /> : undefined}
+      segments={hasContent ? segments : undefined}
+      streamKey={sessionId}
+      active={active}
+      answerStreaming={status === 'streaming'}
+      stopped={stopped}
+      thinking={thinking}
+      thinkingLabel={TRANSCRIPT_COPY.agentThinking(harnessLabel ?? 'Agent')}
+    />
+  );
+});
+
+/** The chat page's transcript. */
+export function ChatTranscript({
+  view,
+  agentName,
+  harnessLabel,
+  harnessProvider,
+  canRewind,
+  loadingFallback,
+  renderWidget,
+  renderScmResult,
+  focusDockTab,
+  review,
+}: ChatTranscriptProps) {
+  const { chat, chatId, sessionId, stream, transcript, gates, dock } = { ...view, chatId: view.chat?.id };
+  const workspaceId = chat?.workspaceId;
+  const { displayMessages, messagesLoading, hasMoreMessages, loadEarlier, showOptimisticUserMessage, scrollRef, showJumpToLatest, jumpToLatest } =
+    transcript;
+  const viewMode = useTranscriptViewMode(chatId);
+  // The segmented control answers the click at once; the transcript re-renders for the new mode in a
+  // deferred, interruptible render (D-88), so a long transcript never blocks the frame after the click.
+  const renderedViewMode = useDeferredValue(viewMode);
+  const setViewMode = useTranscriptPrefsStore((s) => s.setViewMode);
+
+  const thinking = stream.isPending && !stream.hasNewTurnContent;
+  const live = stream.showStreamingMessage || thinking;
+  const turns = useMemo(
+    () =>
+      buildTranscriptTurns(displayMessages, {
+        pendingUserText: showOptimisticUserMessage ? stream.turnUserMessage : null,
+        live: live && !!sessionId,
+      }),
+    [displayMessages, showOptimisticUserMessage, stream.turnUserMessage, live, sessionId],
+  );
+
+  // A boundary (a new user message, the live turn becoming its persisted message)
+  // re-renders the transcript in a deferred, interruptible render (D-88): the
+  // persisted answer is parsed in time slices while the live one stays on screen.
+  const shownTurns = useDeferredValue(turns);
+
+  const prevUsage = stream.prevUsageRef.current;
+  const renderLive = useCallback(
+    () =>
+      sessionId ? (
+        <ChatLiveTurn
+          sessionId={sessionId}
+          agentName={agentName}
+          harnessProvider={harnessProvider}
+          harnessLabel={harnessLabel}
+          prevUsage={prevUsage?.usage ?? null}
+          prevCompletedAt={prevUsage?.completedAt ?? null}
+          thinking={thinking}
+        />
+      ) : null,
+    [sessionId, agentName, harnessProvider, harnessLabel, prevUsage, thinking],
+  );
+
+  const renderUserActions = useCallback(
+    (message: ChatMessage) => {
+      const turnId = message.metadata?.turnId;
+      const owner = message.chatId ?? chatId;
+      return owner && turnId ? <RewindMenu chatId={owner} turnId={turnId} workspaceId={workspaceId} canRewind={canRewind} /> : null;
+    },
+    [chatId, workspaceId, canRewind],
+  );
+
+  const latestAssistantId = useMemo(() => {
+    for (let i = displayMessages.length - 1; i >= 0; i -= 1) {
+      if (displayMessages[i]?.role === 'assistant') return displayMessages[i]!.id;
+    }
+    return undefined;
+  }, [displayMessages]);
+  const renderResponseActions = useCallback(
+    (message: ChatMessage, engaged: boolean) => {
+      const owner = message.chatId ?? chatId;
+      if (!owner || message.role !== 'assistant') return null;
+      const latest = message.id === latestAssistantId;
+      // Hover-only actions mount once the response is hovered or focused (a
+      // long transcript would otherwise mount two mutations per message).
+      if (!latest && !engaged) return <div className="h-control-sm" aria-hidden />;
+      const reviewable = latest && review && message.metadata?.provider === 'codex' && turnChangedFiles(message.metadata?.toolCalls);
+      return (
+        <MessageActions
+          chatId={owner}
+          turnId={message.metadata?.turnId}
+          alwaysVisible={latest}
+          {...(reviewable ? { review } : {})}
+        />
+      );
+    },
+    [chatId, latestAssistantId, review],
+  );
+
+  // Built from the individual (stable) callbacks, never from the `dock` /
+  // `gates` objects: those are new every page render, and a new context value
+  // re-renders every turn of the transcript.
+  const { openChangesTab, openAgentShell, openPlanTab } = dock;
+  const { approvePlan, requestPlanChanges, answerQuestion, answerPermission, decisionBusy } = gates;
+  const actions = useMemo<TranscriptActions>(
+    () => ({
+      onOpenChanges: openChangesTab,
+      onOpenShell: openAgentShell,
+      onOpenPlan: openPlanTab,
+      ...(focusDockTab
+        ? { onOpenBrowser: () => focusDockTab('browser'), onOpenTasks: () => focusDockTab('tasks') }
+        : {}),
+      onApprovePlan: approvePlan,
+      onRequestPlanChanges: requestPlanChanges,
+      onAnswerQuestion: answerQuestion,
+      onAnswerPermission: answerPermission,
+      // U-16: "Allow for this chat" remembers the gate's rules for this chat — or, in a project, for the project.
+      permissionScope: 'chat',
+      permissionProjectScope: !!chat?.projectId,
+      gateBusy: decisionBusy,
+      ...(workspaceId ? { workspaceId } : {}),
+      ...(chatId ? { chatId } : {}),
+      ...(renderWidget && sessionId ? { renderWidget: (block: WidgetBlock) => renderWidget(block, sessionId) } : {}),
+      ...(renderScmResult ? { renderScmResult } : {}),
+      viewMode: renderedViewMode,
+      // Not following the latest text (scrolled away): show it as it arrives, nothing to animate (D-91).
+      pacing: !showJumpToLatest,
+    }),
+    [
+      openChangesTab,
+      openAgentShell,
+      openPlanTab,
+      focusDockTab,
+      approvePlan,
+      requestPlanChanges,
+      answerQuestion,
+      answerPermission,
+      decisionBusy,
+      workspaceId,
+      chatId,
+      renderWidget,
+      renderScmResult,
+      sessionId,
+      renderedViewMode,
+      showJumpToLatest,
+    ],
+  );
+
+  const showEmpty =
+    !messagesLoading && displayMessages.length === 0 && !stream.showStreamingMessage && !stream.isPending && !stream.pendingUserMessage;
+
+  return (
+    <TranscriptProvider value={actions}>
+      <TranscriptView
+        turns={shownTurns}
+        scrollRef={scrollRef}
+        agentName={agentName}
+        harnessProvider={harnessProvider}
+        loading={messagesLoading}
+        loadingFallback={loadingFallback}
+        hasMore={hasMoreMessages}
+        onLoadEarlier={loadEarlier}
+        empty={
+          showEmpty ? (
+            <EmptyState
+              icon="agents"
+              title={TRANSCRIPT_COPY.emptyTitle}
+              description={TRANSCRIPT_COPY.emptyBody}
+              className="mt-24"
+            />
+          ) : null
+        }
+        showJumpToLatest={showJumpToLatest}
+        onJumpToLatest={jumpToLatest}
+        viewMode={viewMode}
+        {...(chatId ? { onViewModeChange: (mode) => setViewMode(chatId, mode) } : {})}
+        renderUserActions={renderUserActions}
+        renderResponseActions={renderResponseActions}
+        renderLive={renderLive}
+        // D-33 spike: no-go recorded in docs/redesign/reviews/P4-07-virtualization-spike.md —
+        // every turn stays in the DOM (find, selection, a11y) and finished
+        // responses before the last 20 turns start collapsed.
+        virtualize="never"
+        collapseBeyond={TRANSCRIPT_EXPANDED_TURNS}
+      />
+    </TranscriptProvider>
+  );
+}

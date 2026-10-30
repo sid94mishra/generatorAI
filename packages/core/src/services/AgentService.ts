@@ -13,6 +13,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import type {
   Agent,
+  AgentImportPreview,
   AgentRole,
   AgentScope,
   CreateAgentParams,
@@ -23,6 +24,7 @@ import type {
 } from '@generatorai/shared';
 import {
   AGENT_INSTRUCTIONS_MAX_BYTES,
+  AGENT_INSTRUCTIONS_WARN_BYTES,
   AGENT_SLUG_PATTERN,
   ConflictError,
   NotFoundError,
@@ -432,6 +434,78 @@ export class AgentService {
     }
     const result = await this.create(params);
     return { agent: result.agent, warnings: [...warnings, ...result.warnings] };
+  }
+
+  /**
+   * What `importFromMarkdown` would do, without writing (mobile MG-12): the
+   * parsed fields, the names it cannot resolve, and the agent it would
+   * replace. Throws the same `ValidationError`s the import throws for a
+   * document it could never store.
+   */
+  async previewImport(
+    markdown: string,
+    opts: { scope: 'global' | 'project'; projectId?: string },
+  ): Promise<AgentImportPreview> {
+    const parsed = parseAgentMarkdown(markdown);
+    const projectId = opts.scope === 'project' ? opts.projectId : undefined;
+    const slug = parsed.slug ?? slugifyAgentName(parsed.name);
+    if (!AGENT_SLUG_PATTERN.test(slug)) {
+      throw new ValidationError(`Invalid slug '${slug}'. Use 2-64 lowercase letters, digits and hyphens.`);
+    }
+    if (parsed.description.length < 10) {
+      throw new ValidationError('Description must be at least 10 characters — it is what tells the model when to use this agent');
+    }
+    const instructionsBytes = Buffer.byteLength(parsed.instructions, 'utf-8');
+    if (instructionsBytes > AGENT_INSTRUCTIONS_MAX_BYTES) {
+      throw new ValidationError(`Instructions exceed the ${AGENT_INSTRUCTIONS_MAX_BYTES / 1024} KB limit`);
+    }
+
+    const warnings: AgentImportPreview['warnings'] = [];
+    const skills = new Set((await this.deps.catalog.listSkills(projectId)).map((s) => s.name.toLowerCase()));
+    for (const name of parsed.skillNames) {
+      if (!skills.has(name.toLowerCase())) {
+        warnings.push({ code: 'SKILL_NOT_FOUND', message: `Skill ${name} isn't installed — it will be skipped.`, params: { id: name } });
+      }
+    }
+    const servers = new Set((await this.deps.catalog.listMcpServers(projectId)).map((s) => s.name.toLowerCase()));
+    for (const name of parsed.mcpServerNames) {
+      if (!servers.has(name.toLowerCase())) {
+        warnings.push({ code: 'MCP_SERVER_NOT_FOUND', message: `MCP server ${name} isn't in the registry — it will be skipped.`, params: { id: name } });
+      }
+    }
+    for (const ref of parsed.teamAgentRefs) {
+      if (!(await this.deps.agentRepo.getByRef(ref))) {
+        warnings.push({ code: 'AGENT_NOT_FOUND', message: `Team agent ${ref} doesn't exist on this server.`, params: { id: ref } });
+      }
+    }
+    if (instructionsBytes > AGENT_INSTRUCTIONS_WARN_BYTES) {
+      warnings.push({
+        code: 'INSTRUCTIONS_LARGE',
+        message: `Instructions are ${Math.round(instructionsBytes / 1024)} KB — long instructions cost context on every turn.`,
+        params: { bytes: instructionsBytes },
+      });
+    }
+
+    const ref = buildRef(opts.scope, slug);
+    const existing = await this.deps.agentRepo.getByRef(ref);
+    return {
+      parsed: {
+        name: parsed.name,
+        slug,
+        ref,
+        description: parsed.description,
+        role: parsed.role,
+        ...(parsed.runtime.model ? { model: parsed.runtime.model } : {}),
+        ...(parsed.runtime.reasoningEffort ? { effort: parsed.runtime.reasoningEffort } : {}),
+        instructionsBytes,
+        instructionsExcerpt: parsed.instructions.slice(0, 600),
+        skills: parsed.skillNames,
+        mcp: parsed.mcpServerNames,
+        team: parsed.teamAgentRefs,
+      },
+      warnings,
+      ...(existing ? { conflict: { agentId: existing.id, name: existing.name, ref: existing.ref, version: existing.version } } : {}),
+    };
   }
 
   async exportToMarkdown(idOrRef: string): Promise<string> {

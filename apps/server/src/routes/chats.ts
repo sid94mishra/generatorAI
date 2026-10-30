@@ -4,11 +4,16 @@
 // ────────────────────────────────────────────────────────────────
 
 import { Router } from 'express';
+import { canBypassPermissions, canSetSessionProvider, chatPrincipalOf } from './permissionScope.js';
 import multer from 'multer';
 import { z } from 'zod';
 import type { Container } from '../composition-root.js';
 import { validate } from '../middleware/validate.js';
 import {
+  ChatIngestTargetSchema,
+  CHAT_INGEST_MAX_FILES,
+  chatIngestName,
+  chatIngestPrompt,
   CreateChatSchema,
   SendChatPromptSchema,
   UpdatePlanContentSchema,
@@ -19,9 +24,28 @@ import {
   UpdateChatSchema,
   UpdateChatSourcesSchema,
   SetChatPermissionModeSchema,
-  coerceAgentMode,
+  isAgentMode,
 } from '@generatorai/shared';
-import type { ChatMessage, ChatSourceControlOptions, PlanDocument } from '@generatorai/shared';
+import {
+  CHAT_BULK_MAX_IDS,
+  CHAT_LIST_DEFAULT_LIMIT,
+  CHAT_LIST_MAX_LIMIT,
+  CHAT_LIST_SORTS,
+  CHAT_LIST_STATES,
+  NotFoundError,
+} from '@generatorai/shared';
+import type {
+  ChatIngestResult,
+  ChatBulkFailure,
+  ChatBulkResult,
+  ChatListSort,
+  ChatListState,
+  ChatMessage,
+  ChatSourceControlOptions,
+  PlanDocument,
+} from '@generatorai/shared';
+import { chatModelSummary, type ChatListRequest } from '@generatorai/core';
+import { checkApprovalProof } from '../middleware/approvalProof.js';
 
 /**
  * Body of `POST /chats/:id/cancel`. The budget is clamped, not rejected: the
@@ -178,42 +202,144 @@ const upload = multer({
 // unified `/api/stream?scope=chat&id=<chatId>` endpoint backed by the
 // persistent `stream_cursors` log.
 
-/**
- * May this caller turn a chat's tool approvals OFF?
- *
- * `write:chats` is the default grant for every paired device, and until the
- * approval gate existed it was already equivalent to running code on the host
- * (review 5.2). Now that the gate is real, dropping it is the privileged act
- * and needs an administrative scope; entering a gated mode does not.
- */
-function canBypassPermissions(req: { principal?: { scopes?: readonly string[] } }): boolean {
-  const scopes = req.principal?.scopes;
-  // No principal at all is unauthenticated-loopback development mode, which
-  // is already fully trusted by design.
-  if (!scopes) return true;
-  return scopes.includes('admin:settings');
-}
 
 /**
  * Attach `workspacePrep` (mount readiness) to a chat DTO. The composer gates
  * Send on it and shows the preparation error, so it travels with the chat
  * rather than requiring a second request.
  */
+// ── Chat list v2 (G-02) ─────────────────────────────────────────
+
+/** Most values one repeated filter may carry, and the longest one. */
+const MAX_FILTER_VALUES = 50;
+const MAX_FILTER_VALUE_LENGTH = 200;
+
+type Parsed<T> = { ok: true; value: T } | { ok: false; message: string };
+
+/** A query parameter that may repeat (`?tag=a&tag=b`), as a list of strings. */
+function listParam(query: Record<string, unknown>, key: string): Parsed<string[]> {
+  const raw = query[key];
+  if (raw === undefined) return { ok: true, value: [] };
+  const values = Array.isArray(raw) ? raw : [raw];
+  if (values.some((v) => typeof v !== 'string' || v.length === 0 || v.length > MAX_FILTER_VALUE_LENGTH)) {
+    return { ok: false, message: `\`${key}\` must be non-empty strings of at most ${MAX_FILTER_VALUE_LENGTH} characters` };
+  }
+  if (values.length > MAX_FILTER_VALUES) {
+    return { ok: false, message: `\`${key}\` may repeat at most ${MAX_FILTER_VALUES} times` };
+  }
+  return { ok: true, value: [...new Set(values as string[])] };
+}
+
+function singleParam(query: Record<string, unknown>, key: string): Parsed<string | undefined> {
+  const raw = query[key];
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (typeof raw !== 'string') return { ok: false, message: `\`${key}\` must be given once` };
+  return { ok: true, value: raw };
+}
+
+/** The wire query of `GET /chats`, validated. Exported for the route tests. */
+export function parseChatListQuery(query: Record<string, unknown>): Parsed<ChatListRequest> {
+  const pinned = singleParam(query, 'pinned');
+  if (!pinned.ok) return pinned;
+  if (pinned.value !== undefined && pinned.value !== 'only' && pinned.value !== 'exclude') return { ok: false, message: '`pinned` must be only or exclude' };
+  const status = singleParam(query, 'status');
+  if (!status.ok) return status;
+  if (status.value !== undefined && status.value !== 'active' && status.value !== 'archived') {
+    return { ok: false, message: '`status` must be "active" or "archived"' };
+  }
+
+  const lists: Record<'projectId' | 'agentRef' | 'tag' | 'state', string[]> = {
+    projectId: [],
+    agentRef: [],
+    tag: [],
+    state: [],
+  };
+  for (const key of Object.keys(lists) as Array<keyof typeof lists>) {
+    const parsed = listParam(query, key);
+    if (!parsed.ok) return parsed;
+    lists[key] = parsed.value;
+  }
+  const badState = lists.state.find((s) => !(CHAT_LIST_STATES as readonly string[]).includes(s));
+  if (badState) {
+    return { ok: false, message: `\`state\` must be one of ${CHAT_LIST_STATES.join(', ')}` };
+  }
+
+  const sort = singleParam(query, 'sort');
+  if (!sort.ok) return sort;
+  if (sort.value !== undefined && !(CHAT_LIST_SORTS as readonly string[]).includes(sort.value)) {
+    return { ok: false, message: `\`sort\` must be one of ${CHAT_LIST_SORTS.join(', ')}` };
+  }
+
+  const q = singleParam(query, 'q');
+  if (!q.ok) return q;
+  if (q.value !== undefined && q.value.length > MAX_FILTER_VALUE_LENGTH) {
+    return { ok: false, message: `\`q\` must be at most ${MAX_FILTER_VALUE_LENGTH} characters` };
+  }
+
+  const cursor = singleParam(query, 'cursor');
+  if (!cursor.ok) return cursor;
+  if (cursor.value !== undefined && (cursor.value.length === 0 || cursor.value.length > 1_000)) {
+    return { ok: false, message: '`cursor` is not a cursor this server issued' };
+  }
+
+  const limitRaw = singleParam(query, 'limit');
+  if (!limitRaw.ok) return limitRaw;
+  let limit = CHAT_LIST_DEFAULT_LIMIT;
+  if (limitRaw.value !== undefined) {
+    const n = Number(limitRaw.value);
+    if (!Number.isInteger(n) || n < 1) return { ok: false, message: '`limit` must be a positive integer' };
+    limit = Math.min(n, CHAT_LIST_MAX_LIMIT);
+  }
+
+  const workers = singleParam(query, 'workers');
+  if (!workers.ok) return workers;
+  if (workers.value !== undefined && workers.value !== 'true' && workers.value !== 'false') {
+    return { ok: false, message: '`workers` must be "true" or "false"' };
+  }
+
+  const text = q.value?.trim();
+  return {
+    ok: true,
+    value: {
+      ...(status.value ? { status: status.value as 'active' | 'archived' } : {}),
+      projectIds: lists.projectId,
+      agentRefs: lists.agentRef,
+      tags: lists.tag,
+      states: lists.state as ChatListState[],
+      ...(text ? { q: text } : {}),
+      ...(pinned.value ? { pinned: pinned.value as 'only' | 'exclude' } : {}),
+      sort: (sort.value as ChatListSort | undefined) ?? 'activity',
+      ...(cursor.value ? { cursor: cursor.value } : {}),
+      limit,
+      workers: workers.value === 'true',
+    },
+  };
+}
+
 /**
- * A message rendered as one line of catalogue text.
- *
- * Fenced code, images and long tool output all collapse: the row has ~40
- * characters of usable width on a phone, and a preview that starts with
- * ```ts tells the reader nothing about the conversation.
+ * `PATCH /chats/:id` fields a chat list row or an attention item shows. A
+ * change to any of them emits `chat.updated` (archive has its own
+ * `chat.archived`).
  */
-function previewText(content: string): string {
-  const flat = content
-    .replace(/```[\s\S]*?```/g, ' [code] ')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' [image] ')
-    .replace(/[*_`#>]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return flat.length > 160 ? `${flat.slice(0, 159)}…` : flat;
+const LIST_VISIBLE_CHAT_FIELDS = ['pinnedAt', 'lastReadAt', 'name', 'description', 'tags', 'status', 'projectId', 'agentRef', 'model'] as const;
+
+/** Body of `POST /chats/archive` and `POST /chats/delete`. */
+const ChatBulkSchema = z.object({
+  ids: z.array(z.string().min(1).max(MAX_FILTER_VALUE_LENGTH)).min(1).max(CHAT_BULK_MAX_IDS),
+});
+
+function uniqueIds(ids: readonly string[]): string[] {
+  return [...new Set(ids)];
+}
+
+function bulkFailure(id: string, err: unknown): ChatBulkFailure {
+  if (err instanceof NotFoundError) return { id, code: 'NOT_FOUND', message: `Chat not found: ${id}` };
+  const code = (err as { code?: unknown })?.code;
+  return {
+    id,
+    code: typeof code === 'string' ? code : 'INTERNAL_ERROR',
+    message: err instanceof Error ? err.message : String(err),
+  };
 }
 
 async function withWorkspacePrep<T extends { workspaceId?: string; conversationSeed?: string }>(
@@ -238,6 +364,60 @@ async function withWorkspacePrep<T extends { workspaceId?: string; conversationS
   } catch {
     return chat;
   }
+}
+
+/** A retried share within a day answers the first chat (the invocations' window). */
+const CHAT_INGEST_IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+/** A claim left pending this long by a crashed request is freed. */
+const CHAT_INGEST_STALE_CLAIM_MS = 5 * 60 * 1000;
+
+type CreateParams = Record<string, unknown> & { harnessConfig?: Record<string, unknown>; permissionMode?: string; sourceControl?: unknown };
+type PrepareResult =
+  | { ok: true; params: CreateParams }
+  | { ok: false; status: number; error: { code: string; message: string } };
+
+/**
+ * The defaults and permission gates of chat creation, shared by POST /chats and POST /chats/ingest: all tools,
+ * streaming, normalised source control; a provider needs admin:settings; approvals-off needs admin:settings both
+ * when asked for and as the default (without the scope a chat starts in the gated `default` mode).
+ */
+function prepareCreateParams(req: Parameters<typeof canBypassPermissions>[0] & Parameters<typeof canSetSessionProvider>[0], input: Record<string, unknown>): PrepareResult {
+  const params: CreateParams = { ...input };
+  const harness: Record<string, unknown> = { ...((params.harnessConfig as Record<string, unknown> | undefined) ?? {}) };
+  // Ensure all tools available and session stays open indefinitely
+  if (!harness['availableTools']) harness['availableTools'] = ['*'];
+  if (harness['streaming'] === undefined) harness['streaming'] = true;
+  params.harnessConfig = harness;
+
+  if (params.sourceControl !== undefined) {
+    const sc = normaliseSourceControl(params.sourceControl);
+    if (!sc.ok) return { ok: false, status: 400, error: { code: 'VALIDATION_ERROR', message: sc.message } };
+    params.sourceControl = sc.value;
+  }
+
+  // R1 — a BYOK provider sends a stored key to a caller-chosen endpoint.
+  if (harness['provider'] && !canSetSessionProvider(req)) {
+    return { ok: false, status: 403, error: { code: 'FORBIDDEN', message: 'Setting a chat provider requires the admin:settings scope.' } };
+  }
+
+  // Creation is the front door, and it takes `permissionMode` directly.
+  // Gating only the two update routes left a caller free to ask for
+  // approvals-off on the way in, which is the same escalation by another
+  // name. Same rule: raising needs the admin scope, lowering is free.
+  if (params.permissionMode === 'bypassPermissions' && !canBypassPermissions(req)) {
+    return {
+      ok: false,
+      status: 403,
+      error: { code: 'FORBIDDEN', message: 'Creating a chat with tool approvals off requires the admin:settings scope.' },
+    };
+  }
+  // No mode asked for: choose the gated default rather than inheriting
+  // the service's historical `bypassPermissions`. A caller that wants
+  // unattended execution has to say so, and hold the scope to say it.
+  if (params.permissionMode === undefined && !canBypassPermissions(req)) {
+    params.permissionMode = 'default';
+  }
+  return { ok: true, params };
 }
 
 export function createChatApiRoutes(container: Container): Router {
@@ -273,50 +453,12 @@ export function createChatApiRoutes(container: Container): Router {
   // POST /chats — Create a new chat
   router.post('/', validate(CreateChatSchema), async (req, res, next) => {
     try {
-      // Apply default harness config: all tools enabled, no session timeout
-      const params = { ...req.body };
-      if (!params.harnessConfig) {
-        params.harnessConfig = {};
-      }
-      // Ensure all tools available and session stays open indefinitely
-      if (!params.harnessConfig.availableTools) {
-        params.harnessConfig.availableTools = ['*'];
-      }
-      if (params.harnessConfig.streaming === undefined) {
-        params.harnessConfig.streaming = true;
-      }
-
-      if (params.sourceControl !== undefined) {
-        const sc = normaliseSourceControl(params.sourceControl);
-        if (!sc.ok) {
-          res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: sc.message } });
-          return;
-        }
-        params.sourceControl = sc.value;
-      }
-
-      // Creation is the front door, and it takes `permissionMode` directly.
-      // Gating only the two update routes left a caller free to ask for
-      // approvals-off on the way in, which is the same escalation by another
-      // name. Same rule: raising needs the admin scope, lowering is free.
-      if (params.permissionMode === 'bypassPermissions' && !canBypassPermissions(req)) {
-        res.status(403).json({
-          error: {
-            code: 'FORBIDDEN',
-            message:
-              'Creating a chat with tool approvals off requires the admin:settings scope.',
-          },
-        });
+      const prepared = prepareCreateParams(req, req.body);
+      if (!prepared.ok) {
+        res.status(prepared.status).json({ error: prepared.error });
         return;
       }
-      // No mode asked for: choose the gated default rather than inheriting
-      // the service's historical `bypassPermissions`. A caller that wants
-      // unattended execution has to say so, and hold the scope to say it.
-      if (params.permissionMode === undefined && !canBypassPermissions(req)) {
-        params.permissionMode = 'default';
-      }
-
-      const chat = await chatManagementService.createChat(params);
+      const chat = await chatManagementService.createChat({ ...prepared.params, createdByPrincipal: chatPrincipalOf(req) } as Parameters<typeof chatManagementService.createChat>[0]);
       logger.info(`[ChatRoutes] Created chat ${chat.id}`, { requestId: req.requestId });
       res.status(201).json(await withWorkspacePrep(container, chat));
     } catch (err) {
@@ -324,78 +466,183 @@ export function createChatApiRoutes(container: Container): Router {
     }
   });
 
-  // GET /chats — List chats with optional ?status and ?projectId filter
-  router.get('/', async (req, res, next) => {
+  // POST /chats/ingest — "Send to agent" from the OS share sheet (mobile MG-09, M9-08).
+  //
+  // multipart: `target` (JSON: { chatId } | { newChat: { name?, projectId?, agentRef?, model? } }), `note?`, `text?`,
+  // `url?`, `attachments[]` (≤ 5 × 10 MB, the prompt route's limits); header `Idempotency-Key` required.
+  // → 201 { chatId, created }. One request so a share is sent exactly once: a new chat is created (with the same
+  // defaults and permission gates as POST /chats) and the prompt dispatched like POST /chats/:id/prompt; a retry with
+  // the same key answers the first chat without sending again. The URL is prompt text — never fetched.
+  router.post('/ingest', upload.array('attachments', CHAT_INGEST_MAX_FILES), async (req, res, next) => {
     try {
-      const projectId = req.query['projectId'] as string | undefined;
-
-      // Two spellings of the same filter reach this route. The shared client
-      // (web, mobile, CLI) sends `archived=true|false`; older callers and the
-      // OpenAPI surface send `status=active|archived`. The route understood
-      // only `status`, so every `--status` filter from the terminal was
-      // silently ignored and the full list came back regardless.
-      let statusFilter = req.query['status'] as string | undefined;
-      const archivedParam = req.query['archived'];
-      if (statusFilter === undefined && archivedParam !== undefined) {
-        statusFilter = String(archivedParam) === 'true' ? 'archived' : 'active';
+      const key = String(req.header('idempotency-key') ?? '').trim();
+      if (!key) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'An Idempotency-Key header is required' } });
+        return;
       }
-      if (statusFilter && !['active', 'archived'].includes(statusFilter)) {
-        res.status(400).json({
-          error: { code: 'VALIDATION_ERROR', message: 'Invalid status. Must be "active" or "archived"' },
-        });
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      let rawTarget: unknown;
+      try {
+        rawTarget = typeof body['target'] === 'string' ? JSON.parse(body['target']) : body['target'];
+      } catch {
+        rawTarget = undefined;
+      }
+      const target = ChatIngestTargetSchema.safeParse(rawTarget);
+      if (!target.success) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '`target` must be {"chatId"} or {"newChat"}', fields: target.error.flatten().fieldErrors } });
+        return;
+      }
+      const field = (name: string): string | undefined => (typeof body[name] === 'string' ? (body[name] as string) : undefined);
+      const files = (req.files ?? []) as Express.Multer.File[];
+      const prompt = chatIngestPrompt({ note: field('note'), text: field('text'), url: field('url'), fileNames: files.map((f) => f.originalname) });
+      const validation = SendChatPromptSchema.safeParse({ prompt });
+      if (!validation.success) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: prompt ? 'The shared content is too long' : 'Nothing to send: add a note, text, a link or a file' } });
         return;
       }
 
-      // `limit` was documented on the terminal's `chat list`, accepted by the
-      // client, and dropped here — so "give me 3" returned all 343, and every
-      // client paid for the whole table on every list.
-      const limitParam = req.query['limit'];
-      let limit: number | undefined;
-      if (limitParam !== undefined) {
-        const parsed = Number(limitParam);
-        if (!Number.isInteger(parsed) || parsed < 1) {
-          res.status(400).json({
-            error: { code: 'VALIDATION_ERROR', message: '`limit` must be a positive integer' },
-          });
+      const existingId = 'chatId' in target.data ? target.data.chatId : undefined;
+      let prepared: ReturnType<typeof prepareCreateParams> | null = null;
+      if (!existingId) {
+        const spec = 'newChat' in target.data ? target.data.newChat : {};
+        prepared = prepareCreateParams(req, {
+          name: spec.name ?? chatIngestName(prompt),
+          tags: [],
+          ...(spec.projectId ? { projectId: spec.projectId } : {}),
+          ...(spec.agentRef ? { agentRef: spec.agentRef } : {}),
+          ...(spec.model ? { model: spec.model } : {}),
+        });
+        if (!prepared.ok) {
+          res.status(prepared.status).json({ error: prepared.error });
           return;
         }
-        limit = Math.min(parsed, 500);
+      } else {
+        // Same refusals as POST /chats/:id/prompt, before anything is stored.
+        const pendingGates = agentInteractionService ? await agentInteractionService.listPendingByChat(existingId) : [];
+        if (pendingGates[0]) {
+          res.status(409).json({ error: { code: 'INTERACTION_PENDING', message: 'This chat is waiting on your response. Resolve it before sending more.', details: { interactionId: pendingGates[0].id, kind: pendingGates[0].kind } } });
+          return;
+        }
+        if (chatManagementService.isTurnActive(existingId)) {
+          res.status(409).json({ error: { code: 'CHAT_BUSY', message: 'This chat is still generating a response. Wait for it to finish, or stop it first.' } });
+          return;
+        }
       }
 
-      const chats = await chatManagementService.listChats(
-        statusFilter as 'active' | 'archived' | undefined,
-        projectId,
-      );
-      const page = limit === undefined ? chats : chats.slice(0, limit);
-      // One-line preview per row, in ONE extra query for the whole page. The
-      // catalogue is the phone's main navigation surface and a title plus a
-      // relative time is not enough to tell two chats apart.
-      //
-      // Best-effort: a preview is a nicety, and a catalogue that fails
-      // outright because the preview query did is worse than one without.
-      let previews = new Map<string, ChatMessage>();
-      try {
-        previews = await container.chatMessageRepo.latestBySessionIds(
-          page.map((c) => c.sessionId).filter((id): id is string => Boolean(id)),
-        );
-      } catch (previewErr) {
-        logger.warn(
-          `[ChatRoutes] Could not load list previews: ${
-            previewErr instanceof Error ? previewErr.message : String(previewErr)
-          }`,
-        );
+      const send = async (): Promise<{ executionId: string; value: ChatIngestResult }> => {
+        let chatId = existingId;
+        let sessionId: string;
+        if (!chatId) {
+          const params = (prepared as { ok: true; params: CreateParams }).params;
+          const chat = await chatManagementService.createChat({ ...params, createdByPrincipal: chatPrincipalOf(req) } as Parameters<typeof chatManagementService.createChat>[0]);
+          chatId = chat.id;
+          sessionId = chat.sessionId;
+        } else {
+          sessionId = (await container.chatEntityRepo.getById(chatId)).sessionId;
+        }
+        const attachmentRefs: Array<{ type: 'file'; path: string; displayName?: string; artifactId?: string; mimeType?: string }> = [];
+        for (const file of files) {
+          const artifact = await artifactService.createArtifact({ sessionId, name: file.originalname, mimeType: file.mimetype, content: file.buffer });
+          attachmentRefs.push({ type: 'file', path: artifact.path, displayName: file.originalname, artifactId: artifact.id, mimeType: file.mimetype });
+        }
+        const id = chatId;
+        chatManagementService.sendPrompt(id, prompt, attachmentRefs).catch((err) => {
+          logger.error(`[ChatRoutes] Ingest prompt failed for chat ${id}`, { error: err instanceof Error ? err.message : String(err) });
+          eventBus.emitGlobal({ kind: 'chat.prompt_failed', data: { chatId: id, error: err instanceof Error ? err.message : String(err) } });
+        });
+        return { executionId: id, value: { chatId: id, created: !existingId } };
+      };
+
+      const result = container.idempotencyService
+        ? await container.idempotencyService.run(
+            { key, scope: `chat-ingest:${chatPrincipalOf(req).id}`, ttlMs: CHAT_INGEST_IDEMPOTENCY_TTL_MS, staleAfterMs: CHAT_INGEST_STALE_CLAIM_MS },
+            send,
+          )
+        : { replayed: false, ...(await send()) };
+      if (result.replayed) {
+        res.setHeader('X-Idempotent-Replay', 'true');
+        res.status(200).json({ chatId: result.executionId, created: false } satisfies ChatIngestResult);
+        return;
       }
-      const withPreview = page.map((c) => {
-        const last = c.sessionId ? previews.get(c.sessionId) : undefined;
-        if (!last) return c;
-        return {
-          ...c,
-          preview: previewText(last.content),
-          previewRole: last.role,
-          previewAt: last.timestamp,
-        };
+      logger.info(`[ChatRoutes] Ingested a share into chat ${result.executionId}`, { requestId: req.requestId });
+      res.status(201).json(result.value ?? { chatId: result.executionId, created: !existingId });
+    } catch (err) {
+      if (sendCodedError(res, err)) return;
+      next(err);
+    }
+  });
+
+  // GET /chats — chat list v2 (G-02 / G-14, docs/redesign/05-gap-matrix.md)
+  //
+  //   ?status=active|archived  &projectId=  &agentRef=  &tag=  &state=needs_you|running|done|failed
+  //   &q=  &sort=activity|created|name  &cursor=  &limit=50  &workers=false
+  //
+  // → { items: ChatListItem[], nextCursor, total, counts: { all, active, archived } }
+  //
+  // projectId / agentRef / tag / state repeat for "any of". Keyset paging:
+  // `nextCursor` is opaque and only valid for the same sort. Worker chats are
+  // left out unless `workers=true`.
+  router.get('/', async (req, res, next) => {
+    try {
+      const parsed = parseChatListQuery(req.query as Record<string, unknown>);
+      if (!parsed.ok) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: parsed.message } });
+        return;
+      }
+      const page = await container.chatListService.list(parsed.value);
+      const items = await Promise.all(
+        page.items.map(async ({ chat, summary }) => ({
+          ...(await withWorkspacePrep(container, chat)),
+          summary,
+        })),
+      );
+      res.json({ ...page, items });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /chats/archive { ids } — archive several chats (the list's bulk bar).
+  // Per-id outcome; an already archived chat counts as archived.
+  router.post('/archive', validate(ChatBulkSchema), async (req, res, next) => {
+    try {
+      const ids = uniqueIds((req.body as { ids: string[] }).ids);
+      const result: ChatBulkResult = { succeeded: [], failed: [] };
+      for (const id of ids) {
+        try {
+          const chat = await container.chatEntityRepo.getById(id);
+          if (chat.status !== 'archived') await chatManagementService.archiveChat(id);
+          result.succeeded.push(id);
+        } catch (err) {
+          result.failed.push(bulkFailure(id, err));
+        }
+      }
+      logger.info(`[ChatRoutes] Bulk archive: ${result.succeeded.length} archived, ${result.failed.length} failed`, {
+        requestId: req.requestId,
       });
-      res.json(await Promise.all(withPreview.map((c) => withWorkspacePrep(container, c))));
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /chats/delete { ids } — permanently delete several chats.
+  router.post('/delete', validate(ChatBulkSchema), async (req, res, next) => {
+    try {
+      const ids = uniqueIds((req.body as { ids: string[] }).ids);
+      const result: ChatBulkResult = { succeeded: [], failed: [] };
+      for (const id of ids) {
+        try {
+          await chatManagementService.deleteChat(id);
+          result.succeeded.push(id);
+        } catch (err) {
+          result.failed.push(bulkFailure(id, err));
+        }
+      }
+      logger.info(`[ChatRoutes] Bulk delete: ${result.succeeded.length} deleted, ${result.failed.length} failed`, {
+        requestId: req.requestId,
+      });
+      res.json(result);
     } catch (err) {
       next(err);
     }
@@ -406,7 +653,21 @@ export function createChatApiRoutes(container: Container): Router {
     try {
       const chatId = String(req.params['id']);
       const chat = await container.chatEntityRepo.getById(chatId);
-      res.json(await withWorkspacePrep(container, chat));
+      const models = Object.values(container.harnessRegistry?.statusSnapshot ?? {}).flatMap((provider) => provider.models.map((model) => ({ ...model, provider: model.provider ?? provider.type })));
+      res.json({ ...(await withWorkspacePrep(container, chat)), summary: { model: chatModelSummary(chat, models) } });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /chats/:id/workflow-runs — the runs this chat started through its
+  // workflow tools, as run cards (P06 WP-6.2): a reload or another device
+  // draws them from here, then follows `chat.workflow_run.*` on the stream.
+  router.get('/:id/workflow-runs', async (req, res, next) => {
+    try {
+      const chatId = String(req.params['id']);
+      await container.chatEntityRepo.getById(chatId);
+      res.json({ runs: (await container.chatWorkflowRunBridge?.cards(chatId)) ?? [] });
     } catch (err) {
       next(err);
     }
@@ -420,8 +681,12 @@ export function createChatApiRoutes(container: Container): Router {
   router.put('/:id/sources', validate(UpdateChatSourcesSchema), async (req, res, next) => {
     try {
       const chatId = String(req.params['id']);
-      const { sources, primary } = req.body as { sources: Parameters<typeof chatManagementService.updateChatSources>[1]; primary?: string };
-      const chat = await chatManagementService.updateChatSources(chatId, sources, primary);
+      const { sources, primary, discardChatFolder } = req.body as {
+        sources: Parameters<typeof chatManagementService.updateChatSources>[1];
+        primary?: string;
+        discardChatFolder?: boolean;
+      };
+      const chat = await chatManagementService.updateChatSources(chatId, sources, primary, { discardChatFolder: discardChatFolder === true });
       res.json(await withWorkspacePrep(container, chat));
     } catch (err) {
       const code = (err as { code?: string }).code;
@@ -482,28 +747,47 @@ export function createChatApiRoutes(container: Container): Router {
         sourceControl,
       } = req.body ?? {};
 
+      const pinState: Record<string, unknown> = {};
+      if (req.body.pinned !== undefined) pinState.pinnedAt = req.body.pinned ? new Date().toISOString() : null;
+      if (req.body.unread !== undefined) pinState.lastReadAt = req.body.unread ? new Date(0).toISOString() : new Date().toISOString();
+
       // Archive via PATCH { status: 'archived' }
       if (status === 'archived') {
         await chatManagementService.archiveChat(chatId);
         logger.info(`[ChatRoutes] Archived chat ${chatId}`, { requestId: req.requestId });
-        const updated = await container.chatEntityRepo.getById(chatId);
+        const updated = Object.keys(pinState).length ? await container.chatEntityRepo.update(chatId, pinState) : await container.chatEntityRepo.getById(chatId);
+        if (Object.keys(pinState).length) await eventBus.emit(updated.sessionId, { kind: 'chat.updated', data: { chatId, pinnedAt: updated.pinnedAt, unread: req.body.unread } });
         res.json(updated);
         return;
       }
 
-      const updates: Record<string, unknown> = {};
+      const updates: Record<string, unknown> = { ...pinState };
       if (name !== undefined) updates.name = name;
       if (description !== undefined) updates.description = description;
       if (model !== undefined) updates.model = model;
       if (tags !== undefined) updates.tags = tags;
       if (projectId !== undefined) updates.projectId = projectId;
-      if (harnessConfig !== undefined) updates.harnessConfig = harnessConfig;
+      if (harnessConfig !== undefined) {
+        // R1 — setting or changing the BYOK provider needs admin:settings;
+        // keeping or removing it does not.
+        const nextProvider = (harnessConfig as { provider?: unknown } | null)?.provider;
+        if (nextProvider !== undefined && !canSetSessionProvider(req)) {
+          const current = await container.chatEntityRepo.getById(chatId);
+          if (JSON.stringify(current.harnessConfig?.provider ?? null) !== JSON.stringify(nextProvider)) {
+            res.status(403).json({
+              error: { code: 'FORBIDDEN', message: 'Changing a chat provider requires the admin:settings scope.' },
+            });
+            return;
+          }
+        }
+        updates.harnessConfig = harnessConfig;
+      }
+      // Reopening an archived chat also brings its workspace and released worktrees back.
+      if (status === 'active') await chatManagementService.unarchiveChat(chatId);
       if (status !== undefined && status !== 'archived') updates.status = status;
-      // PLN-01 — sticky per-chat composer defaults. `coerceAgentMode` also
-      // folds the pre-rename `interactive` alias onto `auto`.
-      const coercedMode = coerceAgentMode(defaultAgentMode);
-      if (coercedMode) {
-        updates.defaultAgentMode = coercedMode;
+      // PLN-01 — sticky per-chat composer defaults.
+      if (isAgentMode(defaultAgentMode)) {
+        updates.defaultAgentMode = defaultAgentMode;
       }
       if (permissionMode !== undefined) {
         // Raising a chat to `bypassPermissions` turns the approval gate OFF
@@ -556,6 +840,12 @@ export function createChatApiRoutes(container: Container): Router {
       }
 
       const updated = await container.chatEntityRepo.update(chatId, updates);
+      // Every live list (other tabs, a paired phone) and the attention feed's
+      // titles re-read on `chat.updated`; a rename, unarchive, tag, project,
+      // description or agent change is otherwise invisible to them (P2-R2).
+      if (LIST_VISIBLE_CHAT_FIELDS.some((field) => field in updates)) {
+        await eventBus.emit(updated.sessionId, { kind: 'chat.updated', data: { chatId, ...(req.body.pinned !== undefined ? { pinnedAt: updated.pinnedAt } : {}), ...(req.body.unread !== undefined ? { unread: req.body.unread } : {}) } });
+      }
       if (agentRef !== undefined || agentOverrides !== undefined) {
         // Other clients (a second tab, a paired phone) must see the rebind.
         await eventBus.emit(updated.sessionId, {
@@ -884,12 +1174,55 @@ export function createChatApiRoutes(container: Container): Router {
     }
   });
 
+  // GET /chats/:id/background-tasks/:taskId/detail — brief, review rounds and
+  // latest steps of one worker (D-89), from its persisted messages.
+  router.get('/:id/background-tasks/:taskId/detail', async (req, res, next) => {
+    try {
+      const detail = await container.orchestratorService.getBackgroundTaskDetail(
+        String(req.params['id']),
+        String(req.params['taskId']),
+      );
+      if (!detail) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such background task in this chat' } });
+        return;
+      }
+      res.json(detail);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // POST /chats/:id/background-tasks/:taskId/cancel — abort a running worker.
   router.post('/:id/background-tasks/:taskId/cancel', async (req, res, next) => {
     try {
       const taskId = String(req.params['taskId']);
-      await container.orchestratorService.cancelBackgroundAgent(taskId);
-      res.status(202).json({ ok: true });
+      // G-20: cancelled from the Tasks panel — attributed to the user.
+      const cancellation = await container.orchestratorService.cancelBackgroundAgent(taskId, 'user');
+      if (!cancellation) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: `Background task ${taskId} not found` } });
+        return;
+      }
+      res.status(202).json({ ok: true, taskId, ...cancellation });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /chats/:id/background-tasks/:taskId/resume — continue a worker a restart interrupted (D-100).
+  router.post('/:id/background-tasks/:taskId/resume', async (req, res, next) => {
+    try {
+      const chatId = String(req.params['id']);
+      const taskId = String(req.params['taskId']);
+      const result = await container.orchestratorService.resumeBackgroundAgent(taskId, { parentChatId: chatId });
+      if (result.notFound) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: `Background task ${taskId} not found` } });
+        return;
+      }
+      if (!result.ok) {
+        res.status(409).json({ error: { code: 'CONFLICT', message: result.error ?? 'The task is not interrupted' } });
+        return;
+      }
+      res.status(202).json({ ok: true, taskId });
     } catch (err) {
       next(err);
     }
@@ -1202,16 +1535,37 @@ export function createChatApiRoutes(container: Container): Router {
     validate(ResolveToolPermissionSchema),
     async (req, res, next) => {
       try {
+        const chatId = String(req.params['id']);
+        const interactionId = String(req.params['interactionId']);
+        const { behavior, message, remember } = req.body as { behavior: 'allow' | 'deny'; message?: string; remember?: 'owner' | 'project' };
+        // MG-05: a risky gate answered from a phone must be signed there.
+        const interaction = await container.agentInteractionService?.findById(interactionId);
+        if (interaction && interaction.kind === 'tool_permission') {
+          const payload = interaction.payload as { risk?: unknown } | null;
+          const signed = await checkApprovalProof(container.security, req, {
+            risk: payload?.risk,
+            expect: { kind: 'tool_permission', id: interactionId, entityId: chatId, decision: behavior },
+          });
+          if (!signed.ok) {
+            res.status(signed.status).json({ error: { code: signed.code, message: signed.message } });
+            return;
+          }
+        }
         // Delegated for the same reason as the question gate: the service owns
         // the ownership check and emits the resolution event, so a reconnecting
         // client replays a settled card rather than a pending one.
-        const result = await chatManagementService.resolveToolPermission(
-          String(req.params['id']),
-          String(req.params['interactionId']),
-          req.body as { behavior: 'allow' | 'deny'; message?: string },
-        );
+        const result = await chatManagementService.resolveToolPermission(chatId, interactionId, {
+          behavior,
+          ...(message !== undefined ? { message } : {}),
+          ...(remember ? { remember } : {}),
+        });
         if (!result.ok) {
           const reason = result.reason ?? 'Already resolved';
+          // U-16 (D-147): "Allow for this chat" on a gate that always asks (risky, never-list, always-ask tool).
+          if (result.code === 'NOT_REMEMBERABLE') {
+            res.status(422).json({ error: { code: 'NOT_REMEMBERABLE', message: reason } });
+            return;
+          }
           if (/not enabled/i.test(reason)) {
             res.status(503).json({ error: { code: 'UNAVAILABLE', message: reason } });
             return;
@@ -1228,6 +1582,40 @@ export function createChatApiRoutes(container: Container): Router {
       }
     },
   );
+
+  // U-16 (D-147) — the chat's remembered permission rules ("Allow for this chat"): list, revoke one, clear.
+  const chatRuleOwner = async (chatId: string) => {
+    await container.chatEntityRepo.getById(chatId); // 404 for an unknown chat
+    return { kind: 'chat' as const, id: chatId };
+  };
+  router.get('/:id/permission-rules', async (req, res, next) => {
+    try {
+      const owner = await chatRuleOwner(String(req.params['id']));
+      res.json({ rules: (await container.permissionRuleService?.list(owner)) ?? [] });
+    } catch (err) {
+      next(err);
+    }
+  });
+  router.delete('/:id/permission-rules', async (req, res, next) => {
+    try {
+      const owner = await chatRuleOwner(String(req.params['id']));
+      res.json({ removed: (await container.permissionRuleService?.clear(owner)) ?? 0 });
+    } catch (err) {
+      next(err);
+    }
+  });
+  router.delete('/:id/permission-rules/:ruleId', async (req, res, next) => {
+    try {
+      const owner = await chatRuleOwner(String(req.params['id']));
+      if (!(await container.permissionRuleService?.revoke(owner, String(req.params['ruleId'])))) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such rule on this chat' } });
+        return;
+      }
+      res.status(204).end();
+    } catch (err) {
+      next(err);
+    }
+  });
 
   // PATCH /chats/:id/permission-mode — change the chat's permission policy.
   router.patch('/:id/permission-mode', validate(SetChatPermissionModeSchema), async (req, res, next) => {

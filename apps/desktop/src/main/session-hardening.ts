@@ -33,9 +33,9 @@ import { isAppOriginForPermission } from './navigation-guard';
  */
 export const DESKTOP_CSP = [
   "default-src 'self'",
-  "script-src 'self' 'sha256-eMFruOxq9rBnZocnEAOZp+Z+m20i9sL8vOW+Ch9Xk9U='",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' https://fonts.gstatic.com",
+  "script-src 'self' 'sha256-IblxeDWlQWTI/gpcAeYkMn7J4Eak0638qcgFDEGF/z4='",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self'",
   "img-src 'self' data: blob:",
   "connect-src 'self'",
   "frame-src 'self'",

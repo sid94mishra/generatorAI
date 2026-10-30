@@ -1,0 +1,841 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "AgentEditor.dc.html": {
+      "h": 1960,
+      "page": "library",
+      "title": "Agent · editor (full page)",
+      "w": 1440,
+      "x": 1520,
+      "y": 1020
+    },
+    "AgentPickerBoard.dc.html": {
+      "h": 900,
+      "page": "compose",
+      "title": "Agent picker",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "Agents.dc.html": {
+      "h": 900,
+      "page": "library",
+      "title": "Agents · catalog",
+      "w": 1440,
+      "x": 0,
+      "y": 1020
+    },
+    "Audit.dc.html": {
+      "h": 1500,
+      "page": "overview",
+      "title": "Design audit · today",
+      "w": 1440,
+      "x": 80,
+      "y": -2026
+    },
+    "AutomationCreate.dc.html": {
+      "h": 900,
+      "page": "workflows",
+      "title": "Automation · create (stepped)",
+      "w": 1440,
+      "x": 3040,
+      "y": 1020
+    },
+    "AutomationDetail.dc.html": {
+      "h": 900,
+      "page": "workflows",
+      "title": "Automation · detail",
+      "w": 1440,
+      "x": 1520,
+      "y": 1020
+    },
+    "Automations.dc.html": {
+      "h": 900,
+      "page": "workflows",
+      "title": "Automations · list",
+      "w": 1440,
+      "x": 0,
+      "y": 1020
+    },
+    "ChatBrowser.dc.html": {
+      "h": 900,
+      "page": "chat",
+      "title": "Chat · Browser dock",
+      "w": 1440,
+      "x": 3040,
+      "y": 1020
+    },
+    "ChatComputer.dc.html": {
+      "h": 900,
+      "page": "chat",
+      "title": "Chat · Computer use dock",
+      "w": 1440,
+      "x": 1520,
+      "y": 2040
+    },
+    "ChatCreate.dc.html": {
+      "h": 1340,
+      "page": "compose",
+      "title": "Chats · Create chat (agent)",
+      "w": 1440,
+      "x": 0,
+      "y": 2040
+    },
+    "ChatCreateModel.dc.html": {
+      "h": 900,
+      "page": "compose",
+      "title": "Chats · Create chat (model + orchestrate, invalid)",
+      "w": 1440,
+      "x": 1520,
+      "y": 1020
+    },
+    "ChatCreateOrchestrator.dc.html": {
+      "h": 900,
+      "page": "compose",
+      "title": "Chats · Create chat (orchestrator)",
+      "w": 1440,
+      "x": 0,
+      "y": 1020
+    },
+    "ChatFiles.dc.html": {
+      "h": 900,
+      "page": "chat",
+      "title": "Chat · Files dock",
+      "w": 1440,
+      "x": 0,
+      "y": 1020
+    },
+    "ChatLight.dc.html": {
+      "h": 900,
+      "page": "chat",
+      "title": "Chat · running (light)",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "ChatNarrow.dc.html": {
+      "h": 760,
+      "page": "chat",
+      "title": "Chat · narrow window (1100)",
+      "w": 1100,
+      "x": 4560,
+      "y": 0
+    },
+    "ChatPlan.dc.html": {
+      "h": 900,
+      "page": "chat",
+      "title": "Chat · Plan dock",
+      "w": 1440,
+      "x": 3040,
+      "y": 2040
+    },
+    "ChatTasks.dc.html": {
+      "h": 900,
+      "page": "chat",
+      "title": "Chat · Background tasks dock",
+      "w": 1440,
+      "x": 0,
+      "y": 2040
+    },
+    "ChatTerminal.dc.html": {
+      "h": 900,
+      "page": "chat",
+      "title": "Chat · Terminal dock",
+      "w": 1440,
+      "x": 1520,
+      "y": 1020
+    },
+    "ChatsList.dc.html": {
+      "h": 900,
+      "page": "chat",
+      "title": "Chats · list",
+      "w": 1440,
+      "x": 0,
+      "y": 3060
+    },
+    "CodebaseDetail.dc.html": {
+      "h": 900,
+      "page": "library",
+      "title": "Codebase · Worktrees",
+      "w": 1440,
+      "x": 4560,
+      "y": 0
+    },
+    "CommandPalette.dc.html": {
+      "h": 900,
+      "page": "system",
+      "title": "Command palette",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "Components.dc.html": {
+      "h": 1700,
+      "page": "overview",
+      "title": "Components",
+      "w": 1440,
+      "x": 3120,
+      "y": -2000
+    },
+    "ComposerModelPicker.dc.html": {
+      "h": 900,
+      "page": "compose",
+      "title": "Chat · Model picker",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "ComposerStates.dc.html": {
+      "h": 2780,
+      "page": "compose",
+      "title": "Composer · states",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "DesktopMac.dc.html": {
+      "h": 800,
+      "page": "system",
+      "title": "Desktop · macOS",
+      "w": 1280,
+      "x": 1520,
+      "y": 1020
+    },
+    "DesktopWindows.dc.html": {
+      "h": 900,
+      "page": "system",
+      "title": "Desktop · Windows title strip",
+      "w": 1440,
+      "x": 0,
+      "y": 1020
+    },
+    "DockBrowser.dc.html": {
+      "h": 1024,
+      "page": "dock",
+      "title": "Dock panel · Browser",
+      "w": 1600,
+      "x": 0,
+      "y": 1120
+    },
+    "DockChanges.dc.html": {
+      "h": 1024,
+      "page": "dock",
+      "title": "Dock · Changes",
+      "w": 1600,
+      "x": 0,
+      "y": 0
+    },
+    "DockFiles.dc.html": {
+      "h": 1024,
+      "page": "dock",
+      "title": "Dock · Files",
+      "w": 1600,
+      "x": 1680,
+      "y": 0
+    },
+    "DockTasks.dc.html": {
+      "h": 1024,
+      "page": "dock",
+      "title": "Dock panel · Background tasks",
+      "w": 1600,
+      "x": 1680,
+      "y": 1120
+    },
+    "DockTerminal.dc.html": {
+      "h": 1024,
+      "page": "dock",
+      "title": "Dock · Terminal",
+      "w": 1600,
+      "x": 3360,
+      "y": 0
+    },
+    "Foundations.dc.html": {
+      "h": 1540,
+      "page": "overview",
+      "title": "Foundations",
+      "w": 1440,
+      "x": 1600,
+      "y": -2026
+    },
+    "Home.dc.html": {
+      "h": 900,
+      "page": "chat",
+      "title": "Home",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "Main.dc.html": {
+      "h": 900,
+      "page": "chat",
+      "title": "Chat · Changes dock",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "NewChat.dc.html": {
+      "h": 900,
+      "page": "chat",
+      "title": "Chats · New chat dialog",
+      "w": 1440,
+      "x": 1520,
+      "y": 3060
+    },
+    "Pairing.dc.html": {
+      "h": 900,
+      "page": "system",
+      "title": "Pairing gate",
+      "w": 1440,
+      "x": 2880,
+      "y": 1020
+    },
+    "ProjectCustomization.dc.html": {
+      "h": 900,
+      "page": "library",
+      "title": "Project · Customization",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "ProjectDetail.dc.html": {
+      "h": 900,
+      "page": "library",
+      "title": "Project · Codebases",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "Projects.dc.html": {
+      "h": 900,
+      "page": "library",
+      "title": "Projects · list",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "Scripts.dc.html": {
+      "h": 900,
+      "page": "workflows",
+      "title": "Scripts · list + detail",
+      "w": 1440,
+      "x": 4560,
+      "y": 1020
+    },
+    "SettingsAppearance.dc.html": {
+      "h": 900,
+      "page": "system",
+      "title": "Settings · Appearance",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "SettingsSecurity.dc.html": {
+      "h": 900,
+      "page": "system",
+      "title": "Settings · Security & devices",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "ThemeAyu.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · Ayu",
+      "w": 1600,
+      "x": 0,
+      "y": 4140
+    },
+    "ThemeCarbon.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · Carbon",
+      "w": 1600,
+      "x": 0,
+      "y": 2540
+    },
+    "ThemeCatppuccin.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · Catppuccin",
+      "w": 1600,
+      "x": 3360,
+      "y": 3340
+    },
+    "ThemeClay.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · Clay",
+      "w": 1600,
+      "x": 1680,
+      "y": 2540
+    },
+    "ThemeContrast.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · High Contrast",
+      "w": 1600,
+      "x": 3360,
+      "y": 5740
+    },
+    "ThemeDracula.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · Dracula",
+      "w": 1600,
+      "x": 0,
+      "y": 3340
+    },
+    "ThemeEverforest.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · Everforest",
+      "w": 1600,
+      "x": 1680,
+      "y": 4940
+    },
+    "ThemeFlexoki.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · Flexoki",
+      "w": 1600,
+      "x": 1680,
+      "y": 5740
+    },
+    "ThemeGallery.dc.html": {
+      "h": 1620,
+      "page": "themes",
+      "title": "All themes · dark and light",
+      "w": 1960,
+      "x": 0,
+      "y": 0
+    },
+    "ThemeGithub.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · GitHub",
+      "w": 1600,
+      "x": 1680,
+      "y": 1740
+    },
+    "ThemeGraphite.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · Graphite",
+      "w": 1600,
+      "x": 3360,
+      "y": 1740
+    },
+    "ThemeGruvbox.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · Gruvbox",
+      "w": 1600,
+      "x": 3360,
+      "y": 4940
+    },
+    "ThemeInstrument.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · Instrument",
+      "w": 1600,
+      "x": 0,
+      "y": 1740
+    },
+    "ThemeNightOwl.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · Night Owl",
+      "w": 1600,
+      "x": 1680,
+      "y": 4140
+    },
+    "ThemeNord.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · Nord",
+      "w": 1600,
+      "x": 0,
+      "y": 4940
+    },
+    "ThemeOne.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · One",
+      "w": 1600,
+      "x": 3360,
+      "y": 2540
+    },
+    "ThemeRosePine.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · Rosé Pine",
+      "w": 1600,
+      "x": 3360,
+      "y": 4140
+    },
+    "ThemeSolarized.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · Solarized",
+      "w": 1600,
+      "x": 0,
+      "y": 5740
+    },
+    "ThemeTokyoNight.dc.html": {
+      "h": 680,
+      "page": "themes",
+      "title": "Theme · Tokyo Night",
+      "w": 1600,
+      "x": 1680,
+      "y": 3340
+    },
+    "Themes.dc.html": {
+      "h": 900,
+      "page": "overview",
+      "title": "Themes",
+      "w": 1440,
+      "x": 4744,
+      "y": -2000
+    },
+    "WorkflowBuilder.dc.html": {
+      "h": 900,
+      "page": "workflows",
+      "title": "Workflow · builder",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "WorkflowDetail.dc.html": {
+      "h": 900,
+      "page": "workflows",
+      "title": "Workflow · definition",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "WorkflowNew.dc.html": {
+      "h": 900,
+      "page": "wfcreate",
+      "title": "Workflows · new workflow",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "WorkflowRun.dc.html": {
+      "h": 900,
+      "page": "workflows",
+      "title": "Workflow · run #248 needs approval",
+      "w": 1440,
+      "x": 4560,
+      "y": 0
+    },
+    "WorkflowSettingsPanel.dc.html": {
+      "h": 900,
+      "page": "wfcreate",
+      "title": "Workflow · settings, Variables",
+      "w": 1440,
+      "x": 1936,
+      "y": 1020
+    },
+    "WorkflowStageHooks.dc.html": {
+      "h": 900,
+      "page": "wfcreate",
+      "title": "Workflow · stage Hooks + Output",
+      "w": 1848,
+      "x": 0,
+      "y": 1020
+    },
+    "WorkflowStageModel.dc.html": {
+      "h": 900,
+      "page": "wfcreate",
+      "title": "Workflow · stage Session",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "WorkflowStagePrompt.dc.html": {
+      "h": 900,
+      "page": "wfcreate",
+      "title": "Workflow · stage Prompt",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "WorkflowStageTools.dc.html": {
+      "h": 900,
+      "page": "wfcreate",
+      "title": "Workflow · stage Tools",
+      "w": 1440,
+      "x": 4560,
+      "y": 0
+    },
+    "WorkflowValidate.dc.html": {
+      "h": 900,
+      "page": "wfcreate",
+      "title": "Workflow · validation problems",
+      "w": 1440,
+      "x": 3456,
+      "y": 1020
+    },
+    "Workflows.dc.html": {
+      "h": 900,
+      "page": "workflows",
+      "title": "Workflows · list",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "WorkflowRunDialog.dc.html": {
+      "h": 900,
+      "page": "workflows",
+      "title": "Workflow · Run dialog",
+      "w": 1440,
+      "x": 0,
+      "y": 2040
+    },
+    "WorkflowRunLoop.dc.html": {
+      "h": 900,
+      "page": "workflows",
+      "title": "Workflow · run with a loop",
+      "w": 1440,
+      "x": 1520,
+      "y": 2040
+    },
+    "ChatWorkflowRun.dc.html": {
+      "h": 900,
+      "page": "workflows",
+      "title": "Chat · workflow run, approval and draft cards",
+      "w": 1440,
+      "x": 3040,
+      "y": 2040
+    },
+    "WorkflowLoopBuilder.dc.html": {
+      "h": 900,
+      "page": "wfcreate",
+      "title": "Workflow · loop builder",
+      "w": 1440,
+      "x": 0,
+      "y": 2040
+    },
+    "WorkflowAgentDraft.dc.html": {
+      "h": 900,
+      "page": "wfcreate",
+      "title": "Workflow · agent draft + version history",
+      "w": 1440,
+      "x": 1520,
+      "y": 2040
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-09-23T06:06:08Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "page": "overview",
+    "view": "canvas"
+  },
+  "notes": {
+    "t_chat": {
+      "kind": "title1",
+      "maxW": 5660,
+      "page": "chat",
+      "text": "Home and chat",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_compose": {
+      "kind": "title1",
+      "maxW": 4480,
+      "page": "compose",
+      "text": "Composer, model picker & creating a chat",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_dock": {
+      "kind": "title1",
+      "maxW": 4960,
+      "page": "dock",
+      "text": "Side panel tabs, close up",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_library": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "library",
+      "text": "Projects, codebases & agents",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_overview": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "overview",
+      "text": "Audit, foundations & components",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_system": {
+      "kind": "title1",
+      "maxW": 4480,
+      "page": "system",
+      "text": "Settings, command palette & desktop app",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_themes": {
+      "kind": "title1",
+      "maxW": 4960,
+      "page": "themes",
+      "text": "Every theme in light and dark",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_wfcreate": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "wfcreate",
+      "text": "Creating a workflow & filling in stages",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "t_workflows": {
+      "kind": "title1",
+      "maxW": 6000,
+      "page": "workflows",
+      "text": "Workflows, automations & scripts",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    }
+  },
+  "order": [
+    "Home.dc.html",
+    "Main.dc.html",
+    "ChatLight.dc.html",
+    "ChatNarrow.dc.html",
+    "ChatFiles.dc.html",
+    "ChatTerminal.dc.html",
+    "ChatBrowser.dc.html",
+    "ChatTasks.dc.html",
+    "ChatComputer.dc.html",
+    "ChatPlan.dc.html",
+    "ChatsList.dc.html",
+    "NewChat.dc.html",
+    "Workflows.dc.html",
+    "WorkflowDetail.dc.html",
+    "WorkflowBuilder.dc.html",
+    "WorkflowRun.dc.html",
+    "Automations.dc.html",
+    "AutomationDetail.dc.html",
+    "AutomationCreate.dc.html",
+    "Scripts.dc.html",
+    "Projects.dc.html",
+    "ProjectDetail.dc.html",
+    "ProjectCustomization.dc.html",
+    "CodebaseDetail.dc.html",
+    "Agents.dc.html",
+    "AgentEditor.dc.html",
+    "SettingsAppearance.dc.html",
+    "SettingsSecurity.dc.html",
+    "CommandPalette.dc.html",
+    "DesktopWindows.dc.html",
+    "DesktopMac.dc.html",
+    "Pairing.dc.html",
+    "ComposerModelPicker.dc.html",
+    "AgentPickerBoard.dc.html",
+    "ChatCreateOrchestrator.dc.html",
+    "ChatCreateModel.dc.html",
+    "ChatCreate.dc.html",
+    "ComposerStates.dc.html",
+    "WorkflowNew.dc.html",
+    "WorkflowStagePrompt.dc.html",
+    "WorkflowStageModel.dc.html",
+    "WorkflowStageTools.dc.html",
+    "WorkflowStageHooks.dc.html",
+    "WorkflowSettingsPanel.dc.html",
+    "WorkflowValidate.dc.html",
+    "DockChanges.dc.html",
+    "DockFiles.dc.html",
+    "DockTerminal.dc.html",
+    "DockBrowser.dc.html",
+    "DockTasks.dc.html",
+    "Audit.dc.html",
+    "Foundations.dc.html",
+    "Components.dc.html",
+    "Themes.dc.html",
+    "ThemeGallery.dc.html",
+    "ThemeInstrument.dc.html",
+    "ThemeGithub.dc.html",
+    "ThemeGraphite.dc.html",
+    "ThemeCarbon.dc.html",
+    "ThemeClay.dc.html",
+    "ThemeOne.dc.html",
+    "ThemeDracula.dc.html",
+    "ThemeTokyoNight.dc.html",
+    "ThemeCatppuccin.dc.html",
+    "ThemeAyu.dc.html",
+    "ThemeNightOwl.dc.html",
+    "ThemeRosePine.dc.html",
+    "ThemeNord.dc.html",
+    "ThemeEverforest.dc.html",
+    "ThemeGruvbox.dc.html",
+    "ThemeSolarized.dc.html",
+    "ThemeFlexoki.dc.html",
+    "ThemeContrast.dc.html",
+    "WorkflowRunDialog.dc.html",
+    "WorkflowRunLoop.dc.html",
+    "ChatWorkflowRun.dc.html",
+    "WorkflowLoopBuilder.dc.html",
+    "WorkflowAgentDraft.dc.html"
+  ],
+  "pages": [
+    {
+      "id": "overview",
+      "name": "Audit & system"
+    },
+    {
+      "id": "chat",
+      "name": "Home & chat"
+    },
+    {
+      "id": "compose",
+      "name": "Composer & new chat"
+    },
+    {
+      "id": "dock",
+      "name": "Side panel close-ups"
+    },
+    {
+      "id": "workflows",
+      "name": "Workflows & automations"
+    },
+    {
+      "id": "wfcreate",
+      "name": "Creating workflows"
+    },
+    {
+      "id": "library",
+      "name": "Projects & agents"
+    },
+    {
+      "id": "system",
+      "name": "Settings & desktop"
+    },
+    {
+      "id": "themes",
+      "name": "Themes · light & dark"
+    }
+  ],
+  "title": "GeneratorAI Redesign – Desktop & Web"
+}

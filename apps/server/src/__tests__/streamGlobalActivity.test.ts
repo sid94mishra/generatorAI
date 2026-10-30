@@ -378,3 +378,74 @@ describe('read:activity opens the global lifecycle feed', () => {
     await vi.waitFor(() => expect(dataFrames(stream.frames).length).toBe(LIFECYCLE_EVENT_KINDS.size));
   });
 });
+
+// ── G-01: attention deltas on `global` obey the scope rule ──────────
+//
+// `attention.upsert` rides the lifecycle feed, so a `read:activity` phone
+// receives it — but `ask.detail` / `progress.label` can hold a command or a
+// file name, and are stripped unless the principal may read the entity:
+// `read:chats` for chat items, `read:workflows` for run items.
+describe('attention deltas are redacted per principal', () => {
+  const runItem = {
+    key: 'workflow_run:r1:s1',
+    entity: 'workflow_run',
+    entityId: 'r1',
+    title: 'Upgrade deps',
+    href: '/workflows/d1/runs/r1',
+    state: 'needs_you',
+    since: '2026-09-26T10:00:00.000Z',
+    ask: {
+      kind: 'stage_approval',
+      id: 's1',
+      summary: 'Approve “Apply upgrades”',
+      detail: 'Stage 3 of 6 · rm -rf node_modules',
+      actions: ['approve', 'reject', 'open'],
+    },
+    stoppable: true,
+  };
+  const chatItem = {
+    key: 'chat:c1',
+    entity: 'chat',
+    entityId: 'c1',
+    title: 'Fix the build',
+    href: '/chats/c1',
+    state: 'running',
+    since: '2026-09-26T10:00:00.000Z',
+    progress: { label: 'Running pnpm build' },
+    stoppable: true,
+  };
+
+  it('strips run detail for a phone without read:workflows but keeps chat labels it may read', async () => {
+    // PHONE holds read:chats and read:activity, not read:workflows.
+    const app = makeApp(principal([...PHONE]));
+    const base = await listen(app);
+    const created = await request(app).post('/api/stream/connections').send({ subs: [{ scope: 'global' }] });
+    const stream = await attach(base, created.body.connectionId as string);
+    await vi.waitFor(() => expect(hello(stream.frames)).toBeDefined());
+
+    broker.emit('global', 'all', 'attention.upsert', { seq: 11, item: runItem });
+    broker.emit('global', 'all', 'attention.upsert', { seq: 12, item: chatItem });
+    broker.emit('global', 'all', 'attention.remove', { seq: 13, key: 'chat:c1' });
+    await vi.waitFor(() => expect(dataFrames(stream.frames).length).toBe(3));
+
+    const [run, chat, removed] = dataFrames(stream.frames).map((f) => f.data['p'] as Record<string, unknown>);
+    const runAsk = (run!['item'] as { ask: Record<string, unknown> }).ask;
+    expect(runAsk['summary']).toBe('Approve “Apply upgrades”');
+    expect(runAsk).not.toHaveProperty('detail');
+    expect(JSON.stringify(stream.frames)).not.toContain('rm -rf');
+    expect((chat!['item'] as { progress: { label: string } }).progress.label).toBe('Running pnpm build');
+    expect(removed).toEqual({ seq: 13, key: 'chat:c1' });
+  });
+
+  it('leaves the payload untouched for a principal holding both read scopes', async () => {
+    const app = makeApp(principal(['read:chats', 'read:workflows', 'read:activity', 'stream:events']));
+    const base = await listen(app);
+    const created = await request(app).post('/api/stream/connections').send({ subs: [{ scope: 'global' }] });
+    const stream = await attach(base, created.body.connectionId as string);
+    await vi.waitFor(() => expect(hello(stream.frames)).toBeDefined());
+
+    broker.emit('global', 'all', 'attention.upsert', { seq: 21, item: runItem });
+    await vi.waitFor(() => expect(dataFrames(stream.frames).length).toBe(1));
+    expect(JSON.stringify(stream.frames)).toContain('rm -rf node_modules');
+  });
+});

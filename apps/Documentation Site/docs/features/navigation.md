@@ -1,21 +1,21 @@
 ---
-description: Navigate Mission Control, entity lists, command actions, and the application workspace.
+description: Navigate Home, entity lists, command actions, and the application workspace.
 ---
-# Dashboard and navigation
+# Home and navigation
 
-The home page is **Mission Control**: an overview of activity across agents, workflows, and automations. Use it to identify work that is running or needs attention, then open the relevant chat or run for detailed interaction.
+The start page is **Home**: its headline counts what needs you and what is running across chats, workflow runs and automations. Start a chat from the quick composer, answer a tool permission, plan review or stage approval inline from **Needs you**, stop work from **Running**, and retry a failure from **Recently finished**; open any row for detailed interaction.
 
 ## Application areas
 
-The navigation shell links to Dashboard, Projects, Chats, Agents, Workflows, Scripts, Automations, and Settings. On desktop the shell also provides native window integration. The web layout adapts its sidebar and workspace panels to narrower windows; the mobile client has its own navigation implementation.
+The navigation shell links to Home, Chats, Projects, Agents, Workflows, Automations, Scripts, and Settings. On desktop the shell also provides native window integration. The web layout adapts its sidebar and workspace panels to narrower windows; the mobile client has its own navigation implementation.
 
-The dashboard provides quick creation, activity, counts for chat/workflow/automation work, and system health. Health is useful before troubleshooting a run: a provider that is not ready or a disconnected server can explain why a model or capability is absent.
+Home's side column shows this week's numbers (chats, workflow runs, run success rate, average run time), a System card (connection, running agents, database size, disk, uptime, version — **Diagnostics** opens Settings › Diagnostics) and shortcut counts. System health is useful before troubleshooting a run: a provider that is not ready or a disconnected server can explain why a model or capability is absent.
 
 ## Find an item
 
 Lists provide search and module-specific filters rather than a single full-text index over all stored content. For example, the Chats page searches names and tags and filters All, Active, or Archived. It sorts by the latest update and virtualizes large lists. Do not interpret this search as a transcript-wide server search.
 
-The command palette groups navigation, creation actions, and settings destinations. Use it to jump to a page or begin a new project, chat, agent, workflow, or automation. The page Find control is separate: it locates rendered page text rather than querying all project files or historical chats.
+The command palette groups navigation, creation actions, recent chats and — as you type — matching chats, projects, agents, workflows, automations and scripts from the server. Use it to jump to a page or an item, or begin a new chat or workflow; Tab lists a row's actions. The page Find control is separate: it locates rendered page text rather than querying all project files or historical chats.
 
 ## Manage list actions
 
@@ -31,7 +31,7 @@ Navigation state, appearance preferences, and some panel preferences are local t
 
 ## Source evidence
 
-`apps/web/src/pages/DashboardPage.tsx`, `apps/web/src/components/dashboard`, `apps/web/src/components/layout/AppLayout.tsx`, `apps/web/src/components/layout/CommandPalette.tsx`, `apps/web/src/components/layout/FindBar.tsx`, `apps/web/src/pages/ChatsListPage.tsx`, and `apps/web/src/components/layout/RightPane.tsx`.
+`apps/web/src/features/home`, `apps/web/src/features/palette`, `apps/web/src/app/shell/ShellRoute.tsx`, `apps/web/src/features/palette/CommandPalette.tsx`, `apps/web/src/app/shell/FindBar.tsx`, `apps/web/src/features/chats/ChatsListPage.tsx`, and `apps/web/src/blocks/dock/Dock.tsx`.
 
 ## Configuration and worked examples
 

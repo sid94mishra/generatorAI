@@ -1,3 +1,4 @@
+import { createArtifactRoutes } from './artifacts.js';
 // ────────────────────────────────────────────────────────────────
 // API Router — mounts all sub-routers under /api
 // ────────────────────────────────────────────────────────────────
@@ -5,13 +6,13 @@
 import { Router } from 'express';
 import type { Container } from '../composition-root.js';
 import { createTemplateRoutes } from './templates.js';
-import { createWebhookRoutes } from './webhooks.js';
 import { createHealthRoutes } from './health.js';
 import { createAuthRoutes } from './auth.js';
 import { createScopeRequestRoutes } from './scopeRequests.js';
 import { createSecurityRoutes } from './security.js';
 import { createCopilotRoutes } from './copilot.js';
 import { createHooksRoutes } from './hooks.js';
+import { createSettingsRoutes } from './settings.js';
 // Phase 4 streaming — unified /api/stream endpoint (STR-03). Replaces the
 // legacy `/events/global` and `/events/stream` multiplexed routes
 // (deleted in CLN-12).
@@ -21,8 +22,11 @@ import { createChatApiRoutes } from './chats.js';
 import { createAgentApiRoutes } from './agents.js';
 import { createWorkflowDefinitionRoutes } from './workflowDefinitions.js';
 import { createWorkflowRunRoutes } from './workflowRuns.js';
-import { createOrchestratorRoutes } from './orchestrator.js';
+import { createWorkflowInvocationRoutes } from './workflowInvocations.js';
+import { createWorkflowRunWorkspaceRoutes } from './workflowRunWorkspace.js';
 import { createAutomationRoutes } from './automations.js';
+import { createWorkflowCallbackRoutes } from './workflowCallbacks.js';
+import { createWorkflowToolRoutes } from './workflowTools.js';
 import { createSessionRoutes } from './sessions.js';
 import { createOpenApiRoutes } from './openapi.js';
 import { createProjectRoutes } from './projects.js';
@@ -37,6 +41,10 @@ import { createWorkflowScriptRoutes } from './workflowScripts.js';
 import { createBrowserRoutes } from './browser.js';
 import { createComputerRoutes } from './computer.js';
 import { createTerminalRoutes } from './terminals.js';
+import { createAttentionRoutes } from './attention.js';
+import { createStatsRoutes } from './stats.js';
+import { createActivityRoutes } from './activity.js';
+import { createSearchRoutes } from './search.js';
 
 // Widgets & Extensions
 import { createExtensionRoutes } from './extensions.js';
@@ -60,11 +68,16 @@ export function createApiRouter(container: Container): Router {
   // Workflow definitions (v2) — CRUD + stages + edges
   router.use('/workflow-definitions', createWorkflowDefinitionRoutes(container));
 
-  // Workflow runs (v2) — run lifecycle + stage controls + SSE
+  // Workflow runs (v2) — runs, instances, the commands API, the run workspace
   router.use('/workflow-runs', createWorkflowRunRoutes(container));
+  router.use('/workflow-runs', createWorkflowRunWorkspaceRoutes(container));
 
-  // Orchestrator (v2) — system workflows + orchestrated runs
-  router.use('/orchestrator', createOrchestratorRoutes(container));
+  // THE way a run starts (P04): one route for every client
+  router.use('/workflow-invocations', createWorkflowInvocationRoutes(container));
+  // P05 §4.3 — an event wait's callback: public, authenticated by its token.
+  router.use('/workflow-callbacks', createWorkflowCallbackRoutes(container));
+  // P06 — the workflow tools for agents outside the server (the MCP server in remote mode).
+  router.use('/workflow-tools', createWorkflowToolRoutes(container));
 
   // Projects — CRUD + codebases + configs + worktrees
   router.use('/projects', createProjectRoutes(container));
@@ -106,9 +119,6 @@ export function createApiRouter(container: Container): Router {
   // Templates (2 endpoints)
   router.use('/templates', createTemplateRoutes(container));
 
-  // Webhooks (5 endpoints)
-  router.use('/webhooks', createWebhookRoutes(container));
-
   // Health check and config (2 endpoints)
   router.use('/health', createHealthRoutes(container));
 
@@ -126,6 +136,25 @@ export function createApiRouter(container: Container): Router {
 
   // Hooks — phases, session hooks, test (3 endpoints)
   router.use('/hooks', createHooksRoutes(container));
+
+  // Attention feed (G-01) — Needs you + Running across chats, runs and
+  // automation executions. Live deltas ride the `global` stream scope.
+  router.use('/attention', createAttentionRoutes(container));
+  router.use('/artifacts', createArtifactRoutes(container));
+
+  // Stats summary (G-10) — Home "This week", Workflows stat strip,
+  // AutomationDetail stat row, WorkflowDetail rail. Read-only; no SSE.
+  router.use('/stats', createStatsRoutes(container));
+
+  // Recently finished activity (G-11) — Home "Recently finished" + retry.
+  router.use('/activity', createActivityRoutes(container));
+
+  // Palette entity search (G-18) — chats, projects, agents, workflows,
+  // automations, scripts, ranked and merged into one list.
+  router.use('/search', createSearchRoutes(container));
+
+  // Settings the builder reads (P05: the check stage's command picker)
+  router.use('/settings', createSettingsRoutes(container));
 
   // Harness — runtime AI provider switching (PRV-02)
   router.use('/harness', createHarnessRoutes(container));

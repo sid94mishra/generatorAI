@@ -1,16 +1,17 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Mobile styling entry (mobile 02 §9.4; MD-10, MD-115). Order matters: Tailwind, Uniwind,
+   the class vocabularies, then the values. Never add a namespace reset (`--color-*: initial` …)
+   after `@import 'uniwind'` — Uniwind issue #623 silently drops theme utilities. */
+@import 'tailwindcss';
+@import 'uniwind';
+@import '@generatorai/design-tokens/css/vocabulary.css';
+@import '@generatorai/design-tokens/css/vocabulary-mobile.css';
+@import './uniwind-themes.css';
 
-/*
- * react-native-web renders TextInput as a real <input>/<textarea>, so it
- * inherits the browser's focus ring — a heavy amber outline that belongs to
- * no part of this design system. Every field already signals focus with its
- * own border colour, so the ring is removed rather than restyled.
- *
- * Scoped to text entry only: buttons and links keep their focus ring, which
- * is the one keyboard users actually navigate by.
- */
+@source '../../app';
+@source '../';
+
+/* react-native-web preview only: TextInput is a real <input>/<textarea> there and would inherit the
+   browser's focus ring; every field signals focus with its own border, so the ring is removed. */
 @layer base {
   input:focus,
   input:focus-visible,

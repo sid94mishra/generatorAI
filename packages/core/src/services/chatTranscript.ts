@@ -139,8 +139,10 @@ function renderTurnForSeed(turn: ChatTurn): string {
     if (tools.length > SEED_TOOL_MAX) toolLines.push(`  - …and ${tools.length - SEED_TOOL_MAX} more tool calls`);
     const body = clip(a.content, SEED_TEXT_MAX);
     const partial = a.metadata?.partial ? ' (stopped before finishing)' : '';
+    // A chat moved between providers: the new one was asked "which model did what" and could only say "not recorded".
+    const by = [a.metadata?.model, a.metadata?.provider].filter((v): v is string => typeof v === 'string' && v.length > 0);
     parts.push(
-      `Assistant${partial}:` +
+      `Assistant${by.length ? ` [${by.join(' · ')}]` : ''}${partial}:` +
         (toolLines.length ? `\n[actions]\n${toolLines.join('\n')}` : '') +
         (body ? `\n${body}` : ''),
     );
@@ -165,7 +167,7 @@ export function buildConversationSeed(messages: readonly ChatMessage[]): string 
     dropped += 1;
   }
   const header =
-    '[Conversation history — restored after the conversation was rewound or branched. ' +
+    '[Conversation history — this chat continues in a fresh agent session (it was rewound, branched, or moved to another model provider). ' +
     'This is what was said so far in this chat; treat it as your own memory and continue from here. ' +
     'Files on disk reflect the current state, not necessarily every action below.]';
   const omitted = dropped > 0 ? `\n[${dropped} earlier turn${dropped === 1 ? '' : 's'} omitted]` : '';
@@ -177,4 +179,29 @@ export function applyConversationSeed(seed: string, prompt: string): string {
   const s = seed.trim();
   if (!s) return prompt;
   return `${s}\n\n[New message from the user]\n${prompt}`;
+}
+
+/** How much of an interrupted reply goes back to the agent: its tail is what it continues from. */
+const INTERRUPTED_REPLY_MAX_CHARS = 8_000;
+
+/**
+ * When the chat's last reply was cut off before it finished (`metadata.partial`) and nothing has been said since,
+ * the notice that tells the agent what it had written (E-5); otherwise ''.
+ */
+export function interruptedReplyNotice(messages: readonly ChatMessage[]): string {
+  let last = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]!.role === 'assistant') {
+      last = i;
+      break;
+    }
+  }
+  if (last < 0) return '';
+  const reply = messages[last]!;
+  // The prompt being sent may already be saved; any earlier user message means a later turn answered already.
+  if (messages.slice(last + 1).filter((m) => m.role === 'user').length > 1) return '';
+  const text = typeof reply.content === 'string' ? reply.content.trim() : '';
+  if (!(reply.metadata as { partial?: boolean } | undefined)?.partial || !text) return '';
+  const shown = text.length > INTERRUPTED_REPLY_MAX_CHARS ? `…${text.slice(-INTERRUPTED_REPLY_MAX_CHARS)}` : text;
+  return `[Your previous reply was cut off before it finished. The user saw this much of it:]\n${shown}\n[End of the interrupted reply]\n\n`;
 }

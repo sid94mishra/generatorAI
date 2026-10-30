@@ -1,0 +1,504 @@
+<title>GeneratorAI Security Analysis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a working plan document — sticky contents rail on wide screens, one reading column, tables in scroll boxes.
+   Palette and type follow GeneratorAI's own Instrument theme (light + dark). */
+:root {
+  --bg: #ffffff; --raised: #fafaf9; --card: #f1f1ef; --sunken: #f6f6f4;
+  --fg: #18181b; --muted: #55555d; --line: #dcdcd7; --line-soft: #ecece9;
+  --blue: #1d6ae5; --green: #16804c; --yellow: #935f00; --red: #d1242f; --purple: #7152e0;
+  --green-bg: #e6f3ec; --yellow-bg: #f8efdc; --red-bg: #fbe7e8; --blue-bg: #e7effc;
+  --sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --measure: 72ch;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0b0b0c; --raised: #17171a; --card: #111113; --sunken: #0d0d0f;
+  --fg: #ededef; --muted: #a1a1aa; --line: #2c2c31; --line-soft: #1c1c20;
+  --blue: #6aa6ff; --green: #4cc38a; --yellow: #f0b429; --red: #ff6369; --purple: #a48cff;
+  --green-bg: #12261c; --yellow-bg: #2a2110; --red-bg: #2c1416; --blue-bg: #142035;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0b0b0c; --raised: #17171a; --card: #111113; --sunken: #0d0d0f;
+  --fg: #ededef; --muted: #a1a1aa; --line: #2c2c31; --line-soft: #1c1c20;
+  --blue: #6aa6ff; --green: #4cc38a; --yellow: #f0b429; --red: #ff6369; --purple: #a48cff;
+  --green-bg: #12261c; --yellow-bg: #2a2110; --red-bg: #2c1416; --blue-bg: #142035;
+  color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.6;
+  padding-inline: 20px; padding-block: 0 64px; -webkit-font-smoothing: antialiased; }
+a { color: var(--blue); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+code { background: var(--card); border: 1px solid var(--line-soft); border-radius: 4px; padding: 0 4px; }
+
+.shell { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 56px; }
+@media (max-width: 960px) { .shell { grid-template-columns: minmax(0, 1fr); gap: 0; } .toc { display: none; } }
+
+.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 28px); align-self: start; padding-top: 40px; font-size: 13px; }
+.toc .label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; border-left: 1px solid var(--line); }
+.toc a { display: block; padding: 4px 0 4px 12px; color: var(--muted); text-decoration: none; margin-left: -1px; border-left: 1px solid transparent; }
+.toc a:hover { color: var(--fg); border-left-color: var(--fg); }
+
+main { min-width: 0; padding-top: 40px; }
+header.top { padding-bottom: 28px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.eyebrow { font-family: var(--mono); font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 14px; }
+h1 { font-size: clamp(30px, 4.4vw, 44px); line-height: 1.1; letter-spacing: -0.02em; font-weight: 600; margin: 14px 0 12px; text-wrap: balance; }
+.lede { font-size: 17px; color: var(--muted); max-width: var(--measure); margin: 0; }
+
+section { padding-top: 44px; scroll-margin-top: 16px; }
+h2 { font-size: 23px; letter-spacing: -0.01em; font-weight: 600; margin: 0 0 6px; text-wrap: balance; display: flex; gap: 12px; align-items: baseline; }
+h2 .n { font-family: var(--mono); font-size: 13px; font-weight: 400; color: var(--muted); }
+h3 { font-size: 16px; font-weight: 600; margin: 26px 0 6px; }
+p, li { max-width: var(--measure); }
+p { margin: 8px 0; }
+ul, ol { padding-left: 20px; margin: 8px 0; }
+li { margin: 4px 0; }
+.muted { color: var(--muted); }
+
+.tablebox { overflow-x: auto; margin: 14px 0; border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line-soft); }
+th { font-weight: 600; font-size: 12px; color: var(--muted); background: var(--raised); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 500; }
+
+.chip { display: inline-block; font-family: var(--mono); font-size: 11px; line-height: 1; padding: 4px 7px; border-radius: 999px; white-space: nowrap; border: 1px solid transparent; }
+.chip.ok { color: var(--green); background: var(--green-bg); }
+.chip.ext { color: var(--yellow); background: var(--yellow-bg); }
+.chip.miss { color: var(--red); background: var(--red-bg); }
+.chip.info { color: var(--blue); background: var(--blue-bg); }
+.chip.plain { color: var(--muted); border-color: var(--line); }
+
+.callout { border: 1px solid var(--line); background: var(--raised); border-radius: 10px; padding: 14px 16px; margin: 16px 0; max-width: 80ch; }
+.callout strong { font-weight: 600; }
+
+/* Three layers */
+.layers { display: grid; gap: 10px; margin: 16px 0; }
+.layer { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 16px; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: var(--raised); }
+.layer .tag { font-family: var(--mono); font-size: 12px; }
+.layer h4 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.layer p { margin: 0; color: var(--muted); font-size: 14px; }
+@media (max-width: 560px) { .layer { grid-template-columns: minmax(0, 1fr); gap: 6px; } }
+
+/* Architecture */
+.arch { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 16px 0; background: var(--sunken); display: grid; gap: 10px; }
+.arch .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.box { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.box b { display: block; font-size: 13.5px; font-weight: 600; }
+.box span { display: block; font-size: 12.5px; color: var(--muted); line-height: 1.45; margin-top: 2px; }
+.box.core { border-color: var(--fg); }
+.arch .lane { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.flow { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: center; }
+
+/* Phases */
+.phases { display: grid; gap: 0; margin: 16px 0; border-left: 1px solid var(--line); }
+.phase { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 14px; padding: 12px 0 12px 16px; position: relative; border-bottom: 1px solid var(--line-soft); }
+.phase::before { content: ""; position: absolute; left: -5px; top: 18px; width: 9px; height: 9px; border-radius: 50%; background: var(--bg); border: 2px solid var(--muted); }
+.phase.first::before { border-color: var(--blue); background: var(--blue); }
+.phase .id { font-family: var(--mono); font-size: 13px; font-weight: 500; padding-top: 1px; }
+.phase h4 { margin: 0; font-size: 15px; font-weight: 600; }
+.phase p { margin: 3px 0 0; font-size: 13.5px; color: var(--muted); }
+.phase .exit { font-size: 13px; margin-top: 6px; }
+.phase .exit em { font-style: normal; font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.05em; text-transform: uppercase; margin-right: 6px; }
+.size { font-family: var(--mono); font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; align-self: start; white-space: nowrap; }
+.release { font-family: var(--mono); font-size: 11px; color: var(--blue); letter-spacing: 0.05em; text-transform: uppercase; padding: 10px 0 2px 16px; }
+@media (max-width: 560px) { .phase { grid-template-columns: 48px minmax(0, 1fr); } .size { grid-column: 2; justify-self: start; } }
+
+/* Slack walkthrough */
+.steps { counter-reset: s; list-style: none; padding: 0; display: grid; gap: 8px; margin: 14px 0; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; max-width: 80ch; }
+.steps li::before { content: counter(s); font-family: var(--mono); font-size: 12px; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; color: var(--muted); }
+
+/* Decisions */
+.decisions { display: grid; gap: 10px; margin: 14px 0; }
+.decision { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; gap: 4px; }
+.decision b { font-weight: 600; }
+.decision .rec { font-size: 13.5px; color: var(--muted); }
+.decision .rec span { color: var(--green); font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 6px; }
+
+/* Prompt */
+.prompt-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-top: 14px; }
+button.copy { font: 500 13px var(--sans); color: var(--bg); background: var(--fg); border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+button.copy:hover { opacity: 0.88; }
+.copied { font-family: var(--mono); font-size: 12px; color: var(--green); }
+pre.prompt { white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; background: var(--sunken); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 10px 0 0; max-height: 560px; overflow: auto; }
+
+.sources { columns: 2 280px; column-gap: 32px; font-size: 13px; padding-left: 18px; }
+.sources li { break-inside: avoid; margin: 0 0 6px; }
+footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+<style>
+.issue { border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin: 14px 0; background: var(--bg); max-width: 90ch; }
+.issue header { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: baseline; margin-bottom: 6px; }
+.issue .iid { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.issue h3 { margin: 0; font-size: 16px; }
+.issue dl { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 6px 14px; margin: 10px 0 0; font-size: 14px; }
+.issue dt { font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); padding-top: 3px; }
+.issue dd { margin: 0; min-width: 0; }
+.issue dd p { margin: 0 0 6px; }
+@media (max-width: 560px) { .issue dl { grid-template-columns: minmax(0, 1fr); } .issue dt { padding-top: 6px; } }
+.sev-crit { color: var(--red); background: var(--red-bg); }
+.sev-high { color: var(--red); background: var(--red-bg); }
+.sev-med { color: var(--yellow); background: var(--yellow-bg); }
+.sev-low { color: var(--muted); border-color: var(--line); }
+.status-fix { color: var(--blue); background: var(--blue-bg); }
+.status-dec { color: var(--purple); background: var(--blue-bg); }
+</style>
+
+<div class="shell">
+<nav class="toc" aria-label="Contents">
+  <div class="label">Contents</div>
+  <ol>
+    <li><a href="#verdict">Verdict</a></li>
+    <li><a href="#matrix">Every scenario today</a></li>
+    <li><a href="#bugs">Bugs, being fixed</a></li>
+    <li><a href="#gaps">Design gaps</a></li>
+    <li><a href="#solid">What is solid</a></li>
+    <li><a href="#target">The seamless target</a></li>
+    <li><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#decisions">Decisions needed</a></li>
+    <li><a href="#sources">Sources</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="top">
+  <div class="eyebrow"><span>GeneratorAI</span><span>Security analysis · 9 Oct 2026</span><span>docs/security/</span></div>
+  <h1>Connections and security: every client, every network</h1>
+  <p class="lede">How the desktop app, browsers, the mobile app, the CLI and agents connect to a GeneratorAI server, what is broken or unsafe today, how modern agent products solve the same problems, and the fixes that make every scenario secure and seamless.</p>
+</header>
+
+<section id="verdict">
+  <h2><span class="n">01</span>Verdict</h2>
+  <p>The cryptographic core is strong: device keys that never leave the device, standards-correct DPoP-bound tokens, fail-closed startup, a name-constrained private CA, and solid Electron renderer hardening. The problems are at the edges.</p>
+  <ul>
+    <li><strong>One critical authorization bypass.</strong> Changing the case of a URL (<code>/auth/Devices</code>) skipped the permission check, so any paired device, even a read-only agent, could manage devices, read the audit log, mint an all-access pairing code and open terminals. Reproduced. Being fixed now.</li>
+    <li><strong>Three more confirmed bugs.</strong>
+      <ul>
+        <li><strong>Revoking a device doesn't cut its live streams.</strong></li>
+        <li><strong>Pairing can be locked out.</strong> One attacker on the Wi-Fi can block pairing for everyone.</li>
+        <li><strong>An agent device can relabel itself</strong> to become eligible for terminal and admin rights.</li>
+      </ul>
+      Being fixed now.</li>
+    <li><strong>Remote access is not usable yet.</strong>
+      <ul>
+        <li><strong>The relay is turned off for clients</strong> and isn't end-to-end encrypted.</li>
+        <li><strong>The mobile app's home-network connection is unencrypted.</strong></li>
+        <li><strong>Browsers on another device face a certificate warning</strong> and a fingerprint comparison most people will skip.</li>
+        <li><strong>The desktop app can't connect to another machine's server.</strong></li>
+      </ul>
+    </li>
+  </ul>
+  <div class="callout"><strong>Recommended direction:</strong> pin the server's own certificate authority from the pairing QR on every native client. That one change secures the home network and the relay at the same time. Then make "connect anywhere" the default: relay first, home network when it's reachable. This is the pattern Plex, Home Assistant Cloud, JetBrains Code With Me and OpenAI Codex use. It needs no vendor certificate infrastructure.</div>
+</section>
+
+<section id="matrix">
+  <h2><span class="n">02</span>Every scenario today</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>Client</th><th>Same machine</th><th>Same network</th><th>Different network</th><th>Security today</th></tr></thead>
+    <tbody>
+      <tr><td>Desktop window</td><td><span class="chip ok">works</span> silent</td><td>—</td><td>—</td><td>Loopback, per-launch admin token</td></tr>
+      <tr><td>Browser</td><td><span class="chip ok">works</span> pair once</td><td><span class="chip ext">works, friction</span> warning + fingerprint check</td><td><span class="chip miss">no</span> relay off</td><td>HTTPS with private CA on the LAN; first connect relies on the user comparing a fingerprint</td></tr>
+      <tr><td>Mobile app</td><td>—</td><td><span class="chip ext">works, unencrypted</span></td><td><span class="chip miss">no</span> relay off</td><td>Signed requests, but content readable and pairing interceptable on the Wi-Fi</td></tr>
+      <tr><td>Desktop app → another machine's server</td><td>—</td><td><span class="chip miss">fails</span> self-signed refused</td><td><span class="chip miss">no</span></td><td>Only trusts certificates on localhost</td></tr>
+      <tr><td>CLI and MCP agent</td><td><span class="chip ok">works</span></td><td><span class="chip ok">works</span></td><td><span class="chip miss">no</span></td><td>Device-paired; MCP agents limited to safe scopes (bypassable today, see B-4)</td></tr>
+      <tr><td>Widgets in chat</td><td><span class="chip ok">works</span></td><td><span class="chip miss">no</span> loopback only</td><td><span class="chip miss">no</span></td><td>Isolated origin</td></tr>
+      <tr><td>Webhooks</td><td colspan="3"><span class="chip ok">works</span> wherever the server is reachable</td><td>Secret path token plus optional HMAC</td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted">From the hands-on audit against isolated servers. Full matrix including headless hosts, proxies and lifecycle in <code>audit-connection-security.md</code>.</p>
+</section>
+
+<section id="bugs">
+  <h2><span class="n">03</span>Bugs, being fixed now</h2>
+  <p>All reproduced against isolated servers. An agent is fixing them now, each with a regression test that fails before the fix and passes after.</p>
+
+  <article class="issue">
+    <header><span class="iid">B-1 · F-1</span><h3>Changing URL case skips the permission check</h3><span class="chip sev-crit">critical</span><span class="chip status-fix">fixing</span></header>
+    <dl>
+      <dt>Evidence</dt><dd>
+        <p>A read-only agent device got <code>403</code> on <code>GET /api/auth/devices</code> but <code>200</code> on <code>/api/auth/Devices</code>. It also:</p>
+        <ul>
+          <li>read the full audit log via <code>/Audit</code>;</li>
+          <li>minted an all-access pairing grant via <code>POST /Pair</code>;</li>
+          <li>revoked another device;</li>
+          <li>reached terminal and computer-use routes.</li>
+        </ul>
+        <p>The policy compares path segments case-sensitively (<code>packages/auth/src/routePolicy.ts:276</code>), while Express 5 routes case-insensitively by default. A mismatched path falls to a shorter, weaker rule instead of failing closed.</p>
+      </dd>
+      <dt>Why it matters</dt><dd><p>Complete privilege escalation from any paired device. This is OWASP's number-one class, Broken Access Control. DPoP doesn't help, because the attacker signs the URL they are attacking (RFC 9449 works as designed).</p></dd>
+      <dt>Fix</dt><dd><p>Normalise the path once, for both REST and WebSocket upgrades, and compare canonically. Any path that doesn't match its real rule fails closed to the admin default. A test checks every policy entry under mixed case, trailing and double slashes.</p></dd>
+      <dt>Why this fix</dt><dd><p>Patching only the router (case-sensitive routing) would leave the policy logic fragile. Normalising at the policy and failing closed fixes the class of bug, not just this instance.</p></dd>
+    </dl>
+  </article>
+
+  <article class="issue">
+    <header><span class="iid">B-2 · F-2</span><h3>A revoked device keeps receiving live events</h3><span class="chip sev-high">high</span><span class="chip status-fix">fixing</span></header>
+    <dl>
+      <dt>Evidence</dt><dd><p>After revoke, the device's already-open stream received <code>chat.created</code> and <code>chat.updated</code> for 35 s and more. Revocation is checked only on the next request or ticket; nothing closes live connections.</p></dd>
+      <dt>Why it matters</dt><dd><p>Revoke exists for lost phones and compromised laptops. "Cut off now" must mean now. The audit log records revocation as critical, implying an immediacy the data path didn't honour.</p></dd>
+      <dt>Fix</dt><dd><p>Index live SSE, WebSocket and relay streams by device, and close them on revoke, credential rotation and loss of stream scope.</p></dd>
+      <dt>Why this fix</dt><dd><p>Re-checking on each heartbeat would still leave a window and add load. Closing on the event is immediate and costs nothing at rest. Claude's Trusted Devices and Codex host lists both treat revoke as immediate.</p></dd>
+    </dl>
+  </article>
+
+  <article class="issue">
+    <header><span class="iid">B-3 · F-3</span><h3>One attacker on the Wi-Fi can lock out pairing</h3><span class="chip sev-high">high</span><span class="chip status-fix">fixing</span></header>
+    <dl>
+      <dt>Evidence</dt><dd><p>70 bogus previews from one address filled the single global limit (60/min). A genuine code from another address then got <code>429</code>.</p></dd>
+      <dt>Why it matters</dt><dd><p>Pairing is how you recover access with a replacement device. Its availability was controlled by any unauthenticated peer on the network.</p></dd>
+      <dt>Fix</dt><dd><p>Make the per-address limit the primary one, so no single address can spend the global budget. Owner-initiated pairing is exempt. The UI gets a clear message ("too many attempts from this network, try again in N s").</p></dd>
+      <dt>Why this fix</dt><dd><p>It keeps brute-force protection (per-address and per-code limits stay) while removing the denial-of-service lever.</p></dd>
+    </dl>
+  </article>
+
+  <article class="issue">
+    <header><span class="iid">B-4 · F-5</span><h3>An agent device can relabel itself to gain terminal and admin rights</h3><span class="chip sev-med">medium</span><span class="chip status-fix">fixing</span></header>
+    <dl>
+      <dt>Evidence</dt><dd><p>A grant minted for an MCP agent was completed with <code>platform: "cli"</code>. The device was then granted <code>exec:terminal</code> and <code>admin:settings</code> successfully (<code>DeviceService.ts:485</code> lets the body's platform win).</p></dd>
+      <dt>Why it matters</dt><dd><p>It breaks the rule that agents never hold terminal or admin rights. It can also make an agent count as a person for approval decisions.</p></dd>
+      <dt>Fix</dt><dd><p>Pin the platform at grant time, never allow an agent to become something else, check every later scope change against the grant, and log mismatches.</p></dd>
+      <dt>Why this fix</dt><dd><p>The grant is minted by the owner, so it is the trustworthy source. The joining client is not.</p></dd>
+    </dl>
+  </article>
+
+  <article class="issue">
+    <header><span class="iid">B-5</span><h3>Host-header check against DNS rebinding</h3><span class="chip sev-high">verify</span><span class="chip status-fix">fixing if missing</span></header>
+    <dl>
+      <dt>Evidence</dt><dd><p>The research found DNS rebinding is the recurring way local AI servers get attacked from a web page (Ollama CVE-2024-28224). The audit's list of solid parts doesn't include a <code>Host</code> allow-list.</p></dd>
+      <dt>Why it matters</dt><dd><p>Without it, a malicious website can point its own domain at <code>127.0.0.1</code> and talk to the local server as a "same-origin" page. Public routes like pairing preview are exposed first.</p></dd>
+      <dt>Fix</dt><dd><p>Accept only known names: loopback, the advertised network addresses and <code>.local</code> name, a custom certificate's names, and trusted-proxy hosts. Anything else gets a clear rejection, before authentication, on REST and WebSocket alike.</p></dd>
+      <dt>Why this fix</dt><dd><p>It is the standard mitigation (NCC's Ollama advisory, MCP security guidance). Origin checks alone don't stop rebinding, because the rebound page is same-origin.</p></dd>
+    </dl>
+  </article>
+
+  <article class="issue">
+    <header><span class="iid">B-6 · F-6, F-9, F-7</span><h3>Smaller hardening</h3><span class="chip sev-med">medium–low</span><span class="chip status-fix">fixing</span></header>
+    <dl>
+      <dt>Evidence</dt><dd>
+        <ul>
+          <li><strong>Pre-pairing exposure:</strong> the public server info gives anyone on the network the machine's real hostname and every interface. Low-privilege devices can read the secret-store backend and bind address.</li>
+          <li><strong>Misleading CORS errors:</strong> a blocked origin returns <code>502 UNKNOWN_ERROR</code> with a stack trace in dev.</li>
+          <li><strong>DPoP URL canonicalisation:</strong> it doesn't lower-case the host.</li>
+        </ul>
+      </dd>
+      <dt>Fix</dt><dd><p>Show the display name instead of the hostname, and only the addresses pairing needs. Move security-posture details behind admin. Return <code>403 ORIGIN_NOT_ALLOWED</code> and never put stacks in responses. Normalise the host in DPoP.</p></dd>
+    </dl>
+  </article>
+</section>
+
+<section id="gaps">
+  <h2><span class="n">04</span>Design gaps that need your decision</h2>
+
+  <article class="issue">
+    <header><span class="iid">G-1</span><h3>Mobile app uses plain HTTP on the home network</h3><span class="chip sev-high">high</span><span class="chip status-dec">decide</span></header>
+    <dl>
+      <dt>Evidence</dt><dd><p>D-112 deliberately kept a plain-HTTP lane for the native app (MV-44). Signatures stop token replay, but anyone on the Wi-Fi can read chats, code and diffs, and can intercept first pairing.</p></dd>
+      <dt>Why it matters</dt><dd><p>Hotel, office and café networks are shared. Nothing tells the user this hop is unencrypted.</p></dd>
+      <dt>Fix</dt><dd>
+        <p>Carry the server's CA fingerprint in the pairing QR (it already does). Then add small native trust modules that accept exactly that CA, loaded at runtime, then delete the plain-HTTP lane:</p>
+        <ul>
+          <li>an iOS <code>URLSession</code> delegate using <code>SecTrustSetAnchorCertificates</code>;</li>
+          <li>an Android OkHttp <code>HandshakeCertificates</code>.</li>
+        </ul>
+        <p>They cover fetch, streaming and WebSocket. The QR also includes a backup key hash, so a future CA rotation doesn't force re-pairing.</p>
+      </dd>
+      <dt>Why this fix</dt><dd>
+        <p>The off-the-shelf React Native pinning libraries (TrustKit, react-native-ssl-public-key-pinning) pin on top of system trust, so they still reject a private CA. Build-time pins (<code>NSPinnedDomains</code>, Android <code>&lt;pin-set&gt;</code>) can't express a CA that is different for every install.</p>
+        <p>Runtime anchors are the only correct mechanism, and they are what Code With Me does by putting the host fingerprint in the join link. This is also the foundation for G-2.</p>
+      </dd>
+    </dl>
+  </article>
+
+  <article class="issue">
+    <header><span class="iid">G-2</span><h3>Remote access: the relay is off for clients and not end-to-end encrypted</h3><span class="chip sev-high">high</span><span class="chip status-dec">decide</span></header>
+    <dl>
+      <dt>Evidence</dt><dd><p>Asking for relay access returns <code>409 RELAY_CLIENT_UNAVAILABLE</code>, so phones and other machines can't reach the server from outside the home network today. The relay forwards raw bytes but can read them; the docs say so honestly.</p></dd>
+      <dt>Why it matters</dt><dd><p>"Use my agent from my phone anywhere" is the headline feature of 2026 agent apps: Claude Code Remote Control, Codex remote, Warp, Cursor. Most of them route through a relay that can read everything. Codex is the exception, with Noise-encrypted relay channels and one-to-one QR pairing per phone and host.</p></dd>
+      <dt>Fix</dt><dd><p>Run the client's TLS session, pinned to the install's CA as in G-1, end to end through the existing relay. The host bridge targets the TLS listener, and the relay sees only timing and volume. Then enable the relay client transport.</p></dd>
+      <dt>Why this fix</dt><dd><p>Plex Relay, Home Assistant's SniTun and JetBrains Code With Me all carry the endpoint's own TLS through a blind relay rather than inventing new crypto. We get one crypto stack, already pinned by G-1, and the existing NaCl framing (<code>e2ee.ts</code>) stays as a fallback. A Codex-style Noise channel is equally secure but adds a second protocol to maintain.</p></dd>
+    </dl>
+  </article>
+
+  <article class="issue">
+    <header><span class="iid">G-3</span><h3>Browsers on another device: warning plus a fingerprint check</h3><span class="chip sev-med">medium</span><span class="chip status-dec">decide</span></header>
+    <dl>
+      <dt>Evidence</dt><dd><p>Today a user clicks through "Your connection is not private" and is meant to compare a SHA-256 prefix. That comparison is the only protection on first connect, and it is exactly the step people skip. The browser also shows "Not secure", and it can't install as an app.</p></dd>
+      <dt>Why it matters</dt><dd><p>No public certificate authority will issue for a private IP or a <code>.local</code> name (CA/Browser Forum rules; Let's Encrypt's IP certificates need a public address). Without help, a browser on the LAN always sees a warning.</p></dd>
+      <dt>Fix, now</dt><dd><p>Guide a one-time CA install first. The pairing screen gets a QR to the CA download, with step-by-step instructions per OS (including the iOS "full trust" toggle). After that, no warnings or fingerprint check ever. Promote the Tailscale route (<code>tailscale cert</code> or Serve), which already works with a trusted certificate.</p></dd>
+      <dt>Option, later</dt><dd><p>Per-install public certificates, the plex.direct / <code>*.ts.net</code> pattern: a vendor domain whose names resolve to the LAN IP, plus a wildcard certificate per install via DNS-01. This gives zero-warning browsers anywhere and true end-to-end browser sessions through the relay. It costs vendor DNS and certificate infrastructure, Let's Encrypt rate limits, names in public certificate logs, and some routers block it. It's worth it only if browser access from anywhere is a priority.</p></dd>
+      <dt>Why</dt><dd><p>The guided CA install removes the risky manual step with no infrastructure. The public-certificate route is the only way to zero warnings, and it is a strategic decision.</p></dd>
+    </dl>
+  </article>
+
+  <article class="issue">
+    <header><span class="iid">G-4</span><h3>The desktop app can't connect to another machine's server</h3><span class="chip sev-med">medium</span><span class="chip status-dec">decide</span></header>
+    <dl>
+      <dt>Evidence</dt><dd><p>Remote mode only trusts certificates on localhost (<code>certificate-error</code> handler), so another GeneratorAI's built-in HTTPS fails with a dead page.</p></dd>
+      <dt>Fix</dt><dd><p>Pair the desktop app like any client, by QR or code with the fingerprint. Then accept exactly that server's CA via <code>session.setCertificateVerifyProc</code>, returning accept only on an exact CA key match and Chromium's own verdict otherwise. Show a clear "trust this server?" step with the fingerprint.</p></dd>
+      <dt>Why this fix</dt><dd><p>Electron's documented safe pattern. Accepting per hostname would let anyone on that address impersonate the server.</p></dd>
+    </dl>
+  </article>
+
+  <article class="issue">
+    <header><span class="iid">G-5 · F-4</span><h3>Desktop app hardening fuses are off</h3><span class="chip sev-med">medium</span><span class="chip status-dec">before release</span></header>
+    <dl>
+      <dt>Evidence</dt><dd><p>The packaged app ships these settings:</p>
+        <ul>
+          <li><code>RunAsNode</code>, <code>NODE_OPTIONS</code> and <code>--inspect</code>: enabled;</li>
+          <li>ASAR integrity: off;</li>
+          <li>signing: ad-hoc.</li>
+        </ul></dd>
+      <dt>Why it matters</dt><dd><p>Any process that can launch the app with an environment variable can run code inside it, and it holds the unlocked vault key. These are Electron's standard local-escalation and supply-chain protections.</p></dd>
+      <dt>Fix</dt><dd><p>Start the embedded server with <code>utilityProcess.fork</code> instead of <code>ELECTRON_RUN_AS_NODE</code>, so <code>RunAsNode</code> can be disabled. Disable the other two, enable ASAR integrity and app-only loading, and sign and notarize. Check the Windows and Linux builds too.</p></dd>
+    </dl>
+  </article>
+
+  <article class="issue">
+    <header><span class="iid">G-6</span><h3>Connect anywhere: route choice and OS network permissions</h3><span class="chip sev-med">UX</span><span class="chip status-dec">decide</span></header>
+    <dl>
+      <dt>Evidence</dt><dd><p>Every OS now gates local-network access:</p>
+        <ul>
+          <li><strong>iOS 14+:</strong> the Local Network prompt.</li>
+          <li><strong>Android 17:</strong> <code>ACCESS_LOCAL_NETWORK</code>, required when targeting SDK 37.</li>
+          <li><strong>Chrome 142+:</strong> Local Network Access, extended to WebSockets in 147.</li>
+        </ul>
+        <p>Products that feel seamless (Claude Code, Codex, Tailscale, Plex) connect through the relay first and upgrade to a direct path when it's reachable.</p></dd>
+      <dt>Fix</dt><dd><p>After G-2, native clients start on the relay. They probe the LAN address with a pinned TLS handshake and switch when it answers. They handle "Local Network denied" with a clear "allow in Settings" message, and add the iOS usage string and the Android permission.</p></dd>
+    </dl>
+  </article>
+
+  <article class="issue">
+    <header><span class="iid">G-7</span><h3>Device lifecycle and recovery</h3><span class="chip sev-low">UX</span><span class="chip status-dec">decide</span></header>
+    <dl>
+      <dt>Fix</dt><dd>
+        <p>Add the controls modern products have:</p>
+        <ul>
+          <li>idle expiry and a "last seen" for each device;</li>
+          <li>"sign out everywhere";</li>
+          <li>a notice on every device when a new one pairs;</li>
+          <li>approvals that time out and fail closed (Dispatch auto-denies after 10 min);</li>
+          <li>a recency-based Face ID step-up for risky approvals;</li>
+          <li>a documented in-app path for "I lost all my devices". It exists today only as a file or CLI step.</li>
+        </ul>
+        <p>If pairing by typed code without the QR stays, move it to a password-authenticated exchange (CPace), so an interceptor gets one guess instead of an offline brute force.</p>
+      </dd>
+    </dl>
+  </article>
+
+  <article class="issue">
+    <header><span class="iid">G-8</span><h3>Smaller known gaps</h3><span class="chip sev-low">low</span></header>
+    <dl>
+      <dt>Items</dt><dd>
+        <ul>
+          <li><strong>Widgets:</strong> they load only on the host machine. Serve their isolated origin through the same TLS listener on its own port.</li>
+          <li><strong>Vault key handoff:</strong> it goes to the server through an environment variable, which a same-user process can read. Hand it over through a pipe instead (optional under the single-user model).</li>
+        </ul>
+      </dd>
+    </dl>
+  </article>
+</section>
+
+<section id="solid">
+  <h2><span class="n">05</span>What is solid — keep it</h2>
+  <ul>
+    <li><strong>DPoP implementation:</strong> strict algorithms, replay and nonce handling, thumbprint binding, matching RFC 9449.</li>
+    <li><strong>Token model:</strong>
+      <ul>
+        <li>short access tokens bound to the device key;</li>
+        <li>hashed rotating resume credentials;</li>
+        <li>single-use stream tickets;</li>
+        <li>signed links that can't carry exec or admin rights;</li>
+        <li>scope cuts take effect live on REST.</li>
+      </ul>
+    </li>
+    <li><strong>Fail-closed startup:</strong> no vault key, no production server, and no unauthenticated mode off loopback.</li>
+    <li><strong>LAN transport:</strong>
+      <ul>
+        <li>plain-HTTP pages redirect to HTTPS, and plain-HTTP API calls from browsers are refused;</li>
+        <li>the CA is name-constrained to private addresses and <code>.local</code>, so trusting it can't vouch for any public site;</li>
+        <li>custom certificates are validated;</li>
+        <li>forwarded headers are trusted only from named proxies.</li>
+      </ul>
+    </li>
+    <li><strong>Electron renderer hardening:</strong> isolation, sandbox, navigation and IPC guards, the scoped CDP proxy and widget origin isolation.</li>
+    <li><strong>Pairing grants:</strong> single-use, 10 minutes, 5 attempts, proof of key on completion. Preview gives away nothing.</li>
+  </ul>
+</section>
+
+<section id="target">
+  <h2><span class="n">06</span>The seamless target</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>Scenario</th><th>After the roadmap</th></tr></thead>
+    <tbody>
+      <tr><td>Desktop window</td><td>Unchanged: opens and works.</td></tr>
+      <tr><td>Phone, anywhere</td><td>Scan one QR. The app connects through the encrypted relay, switches to the home network automatically when it's there, and pins the server's identity from the QR. No warnings or settings.</td></tr>
+      <tr><td>Browser on another laptop or phone</td><td>Scan or open the address from the QR. A one-time guided certificate install, then no warnings. Or use the Tailscale address with a trusted certificate. Later option: zero-touch via per-install public certificates.</td></tr>
+      <tr><td>Desktop app → another machine</td><td>Pair it like a phone. The fingerprint is trusted exactly and remembered.</td></tr>
+      <tr><td>Lost or stolen device</td><td>Revoke it, and every connection drops instantly. Other devices are told. "Sign out everywhere" is available.</td></tr>
+      <tr><td>Someone on the same Wi-Fi</td><td>Can't read traffic, can't block pairing, can't reach the server through a malicious web page, and gets one guess at a code.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="roadmap">
+  <h2><span class="n">07</span>Roadmap</h2>
+  <div class="phases">
+    <div class="phase first"><div class="id">S1</div><div><h4>Fix the confirmed bugs</h4><p>B-1 to B-6. In progress now.</p></div><span class="size">small</span></div>
+    <div class="phase"><div class="id">S2</div><div><h4>Pin the server's identity on native clients</h4><p>G-1 on iOS and Android, and G-4 on desktop. Then remove the plain-HTTP lane.</p></div><span class="size">medium</span></div>
+    <div class="phase"><div class="id">S3</div><div><h4>Encrypted relay and connect anywhere</h4><p>G-2 TLS through the relay, enable the relay client, and G-6 relay-first with automatic home-network upgrade, plus OS permissions.</p></div><span class="size">medium</span></div>
+    <div class="phase"><div class="id">S4</div><div><h4>Browser on other devices</h4><p>G-3 guided CA install and Tailscale guidance.</p></div><span class="size">small</span></div>
+    <div class="phase"><div class="id">S5</div><div><h4>Device lifecycle</h4><p>G-7: expiry, notices, sign out everywhere, approval timeouts, recovery UX, CPace for typed codes.</p></div><span class="size">small–medium</span></div>
+    <div class="phase"><div class="id">S6</div><div><h4>Release hardening</h4><p>G-5 fuses, <code>utilityProcess</code>, signing and notarization on all three OSes.</p></div><span class="size">medium</span></div>
+    <div class="phase"><div class="id">S7</div><div><h4>Optional: per-install public certificates</h4><p>Zero-warning browsers anywhere and end-to-end browser sessions via the relay. Needs vendor DNS and certificate infrastructure.</p></div><span class="size">large</span></div>
+  </div>
+</section>
+
+<section id="decisions">
+  <h2><span class="n">08</span>Decisions needed</h2>
+  <div class="decisions">
+    <div class="decision"><b>Approve S2 + S3 as the next security work</b><div class="rec"><span>Recommended</span>It secures the home network and the relay with one mechanism, and makes remote access actually work.</div></div>
+    <div class="decision"><b>Relay crypto</b><div class="rec"><span>Recommended</span>TLS pinned to the install's CA, carried end to end through the relay (Plex, Home Assistant, Code With Me). The alternative is a Noise channel (Codex).</div></div>
+    <div class="decision"><b>Browser access from anywhere</b><div class="rec"><span>Recommended</span>For now, a guided CA install plus Tailscale, and a clear statement that browser sessions over the relay trust the relay. Decide later on per-install public certificates.</div></div>
+    <div class="decision"><b>Release hardening timing</b><div class="rec"><span>Recommended</span>S6 before the first public build, together with signing.</div></div>
+  </div>
+</section>
+
+<section id="sources">
+  <h2><span class="n">09</span>Sources</h2>
+  <p class="muted">Full evidence:</p>
+  <ul>
+    <li><code>docs/security/audit-connection-security.md</code>: reproductions with <code>file:line</code>.</li>
+    <li><code>docs/security/research-remote-access.md</code>: every claim linked.</li>
+  </ul>
+  <ul class="sources">
+    <li><a href="https://owasp.org/Top10/A01_2021-Broken_Access_Control/">OWASP A01 Broken Access Control</a></li>
+    <li><a href="https://expressjs.com/en/5x/api.html#app.settings.table">Express 5 routing settings</a></li>
+    <li><a href="https://www.rfc-editor.org/rfc/rfc9449">RFC 9449 DPoP</a></li>
+    <li><a href="https://www.nccgroup.com/research/technical-advisory-ollama-dns-rebinding-attack-cve-2024-28224/">Ollama DNS rebinding (NCC)</a></li>
+    <li><a href="https://advisories.gitlab.com/pkg/npm/clawdbot/CVE-2026-25253/">OpenClaw CVE-2026-25253</a></li>
+    <li><a href="https://code.claude.com/docs/en/remote-control">Claude Code Remote Control</a></li>
+    <li><a href="https://claude.com/docs/cowork/guide/dispatch">Claude Dispatch</a></li>
+    <li><a href="https://github.com/openai/codex/releases/tag/rust-v0.141.0">Codex v0.141.0 (Noise relay)</a></li>
+    <li><a href="https://support.plex.tv/articles/206225077-how-to-use-secure-server-connections/">Plex secure connections</a></li>
+    <li><a href="https://support.nabucasa.com/hc/en-us/articles/25619268678557-Remote-UI-Deep-dive">Home Assistant Cloud remote UI</a></li>
+    <li><a href="https://github.com/NabuCasa/snitun">SniTun</a></li>
+    <li><a href="https://www.jetbrains.com/help/idea/2023.3/code-with-me-security-overview.html">Code With Me security</a></li>
+    <li><a href="https://tailscale.com/kb/1153/enabling-https/">Tailscale HTTPS certificates</a></li>
+    <li><a href="https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability">Let's Encrypt IP certificates</a></li>
+    <li><a href="https://developer.chrome.com/blog/local-network-access">Chrome Local Network Access</a></li>
+    <li><a href="https://developer.android.com/privacy-and-security/local-network-permission">Android local network permission</a></li>
+    <li><a href="https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy">Apple TN3179 local network privacy</a></li>
+    <li><a href="https://www.electronjs.org/docs/latest/api/session">Electron setCertificateVerifyProc</a></li>
+    <li><a href="https://www.electronjs.org/docs/latest/tutorial/fuses">Electron fuses</a></li>
+    <li><a href="https://datatracker.ietf.org/doc/draft-irtf-cfrg-cpace/">CPace (IRTF draft)</a></li>
+  </ul>
+</section>
+
+<footer>Security analysis for GeneratorAI · 9 October 2026 · branch <code>desktop_redesign</code></footer>
+</main>
+</div>

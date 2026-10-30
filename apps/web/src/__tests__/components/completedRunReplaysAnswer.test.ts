@@ -20,7 +20,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { deriveRunView, type DeriveRunViewInput } from '@/components/workflow/redesign/deriveRunView.js';
+import { deriveRunView, type DeriveRunViewInput } from '@/features/workflows/run/model/deriveRunView.js';
 
 const PERSISTED = 'The persisted answer that was written when the stage finished.';
 const STREAMED = 'The answer as it arrived over SSE.';
@@ -28,7 +28,7 @@ const STREAMED = 'The answer as it arrived over SSE.';
 function stageRun(overrides: Record<string, unknown> = {}) {
   return {
     id: 'sr-1',
-    stageDefinitionId: 'sd-1',
+    stageKey: 'only_stage',
     name: 'Only Stage',
     status: 'completed',
     totalSteps: 1,
@@ -45,7 +45,7 @@ function input(overrides: Partial<DeriveRunViewInput> = {}): DeriveRunViewInput 
       status: 'completed',
       stageRuns: [stageRun()],
     },
-    stageDefs: [{ id: 'sd-1', name: 'Only Stage', order: 0 }],
+    stageDefs: [{ kind: 'agent', key: 'only_stage', name: 'Only Stage', prompts: [] }],
     edges: [],
     elapsedMs: 0,
     // The reload case: the stream store is empty.
@@ -132,5 +132,25 @@ describe('deriveRunView — a finished run replays its answer without the live s
     // A failed stage's partial output is often the most useful thing on the
     // page for working out why it failed.
     expect(view.stages[0]!.answer).toBe(PERSISTED);
+  });
+});
+
+describe('deriveRunView — a follow-up on a completed stage', () => {
+  const live = (status: string) => ({ 'stageRun:sr-1': { status, blocks: [{ type: 'text', content: STREAMED }] } }) as unknown as DeriveRunViewInput['streams'];
+
+  it('streams the amendment of a completed agent stage', () => {
+    const view = deriveRunView(input({
+      run: { id: 'run-1', status: 'completed', stageRuns: [stageRun({ sessionId: 's-1', outputText: PERSISTED })] } as never,
+      streams: live('streaming'),
+    }));
+    expect(view.stages[0]!.streaming).toBe(true);
+  });
+
+  it('never leaves a finished stage without an agent session (a check) streaming', () => {
+    const view = deriveRunView(input({
+      run: { id: 'run-1', status: 'completed', stageRuns: [stageRun({ outputText: PERSISTED })] } as never,
+      streams: live('streaming'),
+    }));
+    expect(view.stages[0]!.streaming).toBe(false);
   });
 });

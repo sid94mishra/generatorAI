@@ -1,0 +1,140 @@
+// ────────────────────────────────────────────────────────────────
+// Automation detail — pure view logic.
+//
+// Kept free of React Native (and of runtime imports from client-core) so
+// vitest can exercise it in node: next-run wording, execution activity and
+// order, and the tap-intent idempotency key. The M7-04 screens' rules are in
+// model/automationsModel.ts and model/scheduleModel.ts.
+//
+// Tested in src/__tests__/automationModel.test.ts.
+// ────────────────────────────────────────────────────────────────
+
+import type {
+  AutomationExecutionStatus,
+  AutomationRunItemStatus,
+  AutomationTriggerType,
+} from '@generatorai/shared';
+
+/** What the wire actually carries for a timestamp (ISO string or epoch ms). */
+export type WireTime = string | number | null | undefined;
+
+export interface ExecutionView {
+  id: string;
+  automationId?: string;
+  status: AutomationExecutionStatus | string;
+  triggeredBy?: AutomationTriggerType | string;
+  totalIterations?: number;
+  completedIterations?: number;
+  failedIterations?: number;
+  error?: string | null;
+  startedAt?: WireTime;
+  completedAt?: WireTime;
+  createdAt?: WireTime;
+}
+
+export function toMs(value: WireTime): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+// ── Next run ───────────────────────────────────────────────────
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+function startOfLocalDay(ms: number): number {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * Wall-clock time of a future instant, in the phone's local zone. Written by
+ * hand rather than with `toLocaleString` so the width does not change across
+ * Hermes versions and the output is testable.
+ */
+export function absoluteLabel(at: number, now: number): string {
+  const d = new Date(at);
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const dayDiff = Math.round((startOfLocalDay(at) - startOfLocalDay(now)) / 86_400_000);
+  if (dayDiff === 0) return `today ${time}`;
+  if (dayDiff === 1) return `tomorrow ${time}`;
+  if (dayDiff > 1 && dayDiff < 7) return `${WEEKDAYS[d.getDay()]} ${time}`;
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${time}`;
+}
+
+/** "Next run in 25m · today 14:30", or null when there is nothing scheduled. */
+export function nextRunLabel(nextRunAt: WireTime, now: number = Date.now()): string | null {
+  const at = toMs(nextRunAt);
+  if (at === null) return null;
+  const delta = at - now;
+  // The scheduler polls; a slot a few seconds overdue is simply about to fire.
+  if (delta < 60_000) return 'Next run due now';
+  const minutes = Math.floor(delta / 60_000);
+  let relative: string;
+  if (minutes < 60) relative = `${minutes}m`;
+  else if (minutes < 24 * 60) {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    relative = m ? `${h}h ${m}m` : `${h}h`;
+  } else relative = `${Math.floor(minutes / (24 * 60))}d`;
+  return `Next run in ${relative} · ${absoluteLabel(at, now)}`;
+}
+
+// ── Trigger ────────────────────────────────────────────────────
+
+export function triggeredByLabel(source: string | undefined | null): string {
+  if (source === 'schedule') return 'Schedule';
+  if (source === 'webhook') return 'Webhook';
+  if (source === 'manual') return 'Manual';
+  return 'Unknown';
+}
+
+// ── Executions ─────────────────────────────────────────────────
+
+/** Still in flight — worth polling for. `pending` counts: it is about to run. */
+export function isExecutionActive(status: string | undefined | null): boolean {
+  return status === 'pending' || status === 'running';
+}
+
+export function executionTime(e: Pick<ExecutionView, 'startedAt' | 'createdAt'>): number | null {
+  return toMs(e.startedAt) ?? toMs(e.createdAt);
+}
+
+/** Newest first; executions without any time sink to the bottom. */
+export function sortExecutions<T extends ExecutionView>(list: readonly T[]): T[] {
+  return [...list].sort((a, b) => (executionTime(b) ?? -Infinity) - (executionTime(a) ?? -Infinity));
+}
+
+export function executionPollInterval(list: readonly Pick<ExecutionView, 'status'>[] | undefined, ms = 5_000): number | false {
+  return (list ?? []).some((e) => isExecutionActive(e.status)) ? ms : false;
+}
+
+/** The execution id a trigger response names (a fresh execution or an idempotent replay). */
+export function executionIdOf(response: unknown): string | null {
+  if (!response || typeof response !== 'object') return null;
+  const id = (response as { id?: unknown }).id;
+  return typeof id === 'string' && id.length > 0 ? id : null;
+}
+
+// ── Idempotency ────────────────────────────────────────────────
+
+/**
+ * Key for ONE tap intent. The screen keeps it until the mutation settles so
+ * a double tap (or a retry after a dropped response) replays instead of
+ * starting a second execution.
+ */
+export function makeIdempotencyKey(
+  automationId: string,
+  now: () => number = Date.now,
+  random: () => number = Math.random,
+): string {
+  const suffix = Math.floor(random() * 0x100000000)
+    .toString(36)
+    .padStart(7, '0');
+  return `${automationId}:${now()}:${suffix}`;
+}

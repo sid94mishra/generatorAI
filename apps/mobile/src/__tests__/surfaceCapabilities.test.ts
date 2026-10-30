@@ -31,26 +31,20 @@ const read = (rel: string): string => readFileSync(resolve(APP_ROOT, rel), 'utf8
 
 describe('W29 — mobile fileAttachment', () => {
   //   @capability-proof mobile/fileAttachment
-  const chatScreen = read('app/chats/[id].tsx');
-  const composer = read('src/components/chat/Composer.tsx');
+  const chatScreen = read('src/features/chat/ChatScreen.tsx');
+  const composer = read('src/blocks/Composer/Composer.tsx');
+  const composerTypes = read('src/blocks/Composer/Composer.types.ts');
+  const plusMenu = read('src/blocks/Composer/model/composerView.ts');
 
   it('the composer only has an attach path when a handler is supplied', () => {
-    // The control itself is real, which is what made the ledger's claim
-    // plausible: there IS an "Add attachment" button. Composer v2 (D2) takes
-    // `onAttachFrom` (the picker menu) with `onAttach` kept for v1 callers;
-    // whichever the screen supplies decides whether pressing it can attach.
-    expect(composer).toContain('accessibilityLabel="Add attachment"');
-    expect(
-      /onAttach\?:/.test(composer) && /onAttachFrom\?:/.test(composer),
-      'Composer no longer takes optional onAttach / onAttachFrom — re-derive this probe',
-    ).toBe(true);
-    // The mechanism that keeps a withheld scope from becoming a DEAD control:
-    // the press explains itself and offers "Request access" instead of
-    // silently doing nothing (plan D2).
-    expect(composer).toContain("'Attachments are off for this device'");
-    expect(composer).toContain("text: 'Request access'");
-    // With the scope held, the press opens the picker menu rather than a noop.
-    expect(composer).toContain("setSheet('attach')");
+    // M6-04 (MB-01, MD-63): the "+" menu holds the pickers; its file items call the controller's `onAttachFrom`.
+    expect(composer).toContain('testID="composer-options"');
+    expect(composerTypes, 'Composer no longer takes an optional onAttachFrom — re-derive this probe').toMatch(/onAttachFrom\?:/);
+    expect(composer).toContain('props.onAttachFrom?.(id as AttachmentSource)');
+    // A withheld scope never becomes a DEAD control: the file items are disabled with the reason and
+    // "Request file access" is offered instead (plan D2).
+    expect(plusMenu).toContain("'Attachments are not permitted on this device.'");
+    expect(plusMenu).toContain("'Request file access'");
   });
 
   it('declares fileAttachment exactly when the chat screen wires an attach handler', () => {
@@ -67,9 +61,9 @@ describe('W29 — mobile fileAttachment', () => {
     expect(
       MOBILE_CAPABILITIES.fileAttachment.supported,
       wired
-        ? 'app/chats/[id].tsx now passes onAttach, so mobile can attach — set ' +
+        ? 'features/chat/ChatScreen.tsx now passes onAttach, so mobile can attach — set ' +
           'MOBILE_CAPABILITIES.fileAttachment to supported.'
-        : 'app/chats/[id].tsx passes no onAttach, so the attach button is inert — ' +
+        : 'features/chat/ChatScreen.tsx passes no onAttach, so the attach button is inert — ' +
           'MOBILE_CAPABILITIES.fileAttachment must not claim the capability.',
     ).toBe(wired);
   });

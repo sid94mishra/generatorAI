@@ -361,3 +361,25 @@ describe('ScmTextGenerator', () => {
     });
   });
 });
+
+describe('verificationEvidence (U-10)', () => {
+  it('keeps the lines that report test, lint and build outcomes', async () => {
+    const { verificationEvidence, heuristicPullRequestText } = await import('../ScmTextGenerator.js');
+    const hint = [
+      'Add the scheduler',
+      'I wired the scheduler into the API and added tests.',
+      '- **Tests:** 101 passed (shared 37, checker 27, web 18, api 19)',
+      '- pnpm lint and pnpm -r build are green',
+      'Summary: add the monitor scheduler',
+    ].join('\n');
+    expect(verificationEvidence(hint)).toEqual(['Tests: 101 passed (shared 37, checker 27, web 18, api 19)', 'pnpm lint and pnpm -r build are green']);
+    const pr = heuristicPullRequestText(['a.ts'], [], hint);
+    expect(pr.body).toContain('## Test plan\n\n- Tests: 101 passed');
+    expect(pr.body).not.toContain('Not verified');
+  });
+
+  it('says Not verified when nothing was reported', async () => {
+    const { heuristicPullRequestText } = await import('../ScmTextGenerator.js');
+    expect(heuristicPullRequestText(['a.ts'], [], 'Summary: rename a helper').body).toContain('- Not verified');
+  });
+});

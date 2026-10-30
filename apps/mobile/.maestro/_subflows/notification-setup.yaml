@@ -1,0 +1,12 @@
+appId: ${APP_ID}
+---
+- runFlow: launch.yaml
+- openLink: generatorai:///notify?case=setup
+- runFlow:
+    when: {visible: Allow}
+    commands:
+      # Maestro may accept this native prompt between the condition and tap.
+      # Notifications ready below still requires an actual granted permission.
+      - tapOn: {text: Allow, optional: true}
+- extendedWaitUntil: {visible: Notifications ready, timeout: 30000}
+- pressKey: Home

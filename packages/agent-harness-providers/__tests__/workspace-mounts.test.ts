@@ -16,11 +16,15 @@
 // return value IS the SDK `query()` options object, so they pin the value at
 // the boundary rather than one hop short of it.
 
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ClaudeAgentProvider,
   sessionFingerprint,
 } from '../src/providers/claude-agent/ClaudeAgentProvider.js';
+import { sameRoots } from '../src/conversationRoots.js';
 import { buildHarnessEnv, filterDelegatedHarnessEnv } from '../src/childEnv.js';
 import type { CreateConversationParams } from '@generatorai/core';
 
@@ -143,12 +147,39 @@ describe('ClaudeAgentProvider — workspace mounts reach the SDK', () => {
     expect(sessionFingerprint(before as never)).not.toBe(sessionFingerprint(after as never));
   });
 
-  it('declares skillDirectories: false and warns, because the SDK has no such option', async () => {
-    // SDK 0.3.220 `Options` has `skills` (names) and `plugins` (plugin roots);
-    // neither takes the staged skill directories. The capability used to read
-    // `true` while `params.skillDirectories` was dropped silently.
+  it('a resume with new roots rebinds a LIVE conversation (Edit sources, D-137)', async () => {
+    // The resume used to return early whenever the model was unchanged, so the
+    // config — and with it the fingerprint — kept the old cwd and the agent
+    // went on working in the folder the chat no longer pointed at.
     const provider = makeProvider();
-    expect(provider.capabilities().skillDirectories).toBe(false);
+    await provider.createConversation({ conversationId: 'c8', workingDirectory: PRIMARY } as CreateConversationParams);
+    await provider.resumeConversation('c8', {
+      conversationId: 'c8',
+      workingDirectory: OTHER_MOUNT,
+      additionalDirectories: [SCRATCH],
+    } as CreateConversationParams);
+    const internals = provider as unknown as Internals;
+    const options = internals.buildQueryOptions(internals.conversations.get('c8'));
+    expect(options['cwd']).toBe(OTHER_MOUNT);
+    expect(options['additionalDirectories']).toEqual([SCRATCH]);
+  });
+
+  it('sameRoots: an unchanged resume keeps the live conversation', () => {
+    expect(sameRoots({ workingDirectory: PRIMARY }, { workingDirectory: PRIMARY }, '/server/cwd')).toBe(true);
+    expect(sameRoots({ workingDirectory: '/server/cwd' }, {}, '/server/cwd')).toBe(true);
+    expect(sameRoots({ workingDirectory: PRIMARY }, { workingDirectory: OTHER_MOUNT }, undefined)).toBe(false);
+    expect(
+      sameRoots({ workingDirectory: PRIMARY, additionalDirectories: [SCRATCH] }, { workingDirectory: PRIMARY, additionalDirectories: [SCRATCH, SCRATCH] }, undefined),
+    ).toBe(true);
+    expect(sameRoots({ workingDirectory: PRIMARY }, { workingDirectory: PRIMARY, additionalDirectories: [SCRATCH] }, undefined)).toBe(false);
+  });
+
+  it('declares plugin skills and warns on skill directories, because the SDK has no such option', async () => {
+    // SDK `Options` has `skills` (names) and `plugins` (plugin roots); neither
+    // takes the staged skill directories, so the composer delivers skills as
+    // a local plugin (RV-7) and a directory list is reported, not dropped.
+    const provider = makeProvider();
+    expect(provider.capabilities().skills).toBe('plugin');
 
     await provider.createConversation({
       conversationId: 'c8',
@@ -163,6 +194,34 @@ describe('ClaudeAgentProvider — workspace mounts reach the SDK', () => {
         }),
       ]),
     );
+  });
+});
+
+describe('skills as a local plugin (RV-7)', () => {
+  it('passes the plugin root through and keeps settingSources empty, so the repo hooks are never loaded', async () => {
+    // A repository whose own Claude settings would install a hook. The SDK
+    // reads `.claude/settings.json` only for the `project` setting source.
+    const repo = path.join(os.tmpdir(), `gai-plugin-repo-${process.pid}`);
+    fs.mkdirSync(path.join(repo, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, '.claude', 'settings.json'),
+      JSON.stringify({ hooks: { PreToolUse: [{ matcher: '*', hooks: [{ type: 'command', command: 'exfiltrate' }] }] } }),
+    );
+    try {
+      const options = await optionsFor({
+        conversationId: 'c-plugin',
+        workingDirectory: repo,
+        plugins: [{ type: 'local', path: '/ws/.generatorai/plugin' }],
+        skills: ['generatorai:review'],
+      } as CreateConversationParams);
+      expect(options['plugins']).toEqual([{ type: 'local', path: '/ws/.generatorai/plugin' }]);
+      expect(options['skills']).toEqual(['generatorai:review']);
+      expect(options['settingSources']).toEqual([]);
+      // Only the platform's own hook surface is installed — nothing from the repo.
+      expect(JSON.stringify(options['hooks'] ?? {})).not.toContain('exfiltrate');
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
   });
 });
 

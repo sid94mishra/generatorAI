@@ -1,0 +1,71 @@
+appId: ${APP_ID}
+name: workflows · builder (reorder, add stage, validate, versions, cancel)
+# M8-05 (MBuilderList, MBuilderGraph, MWorkflowValidate, MWorkflowAgentDraft). Edits the sandbox's "Sandbox
+# Workflow" in the builder and cancels — nothing is saved. Needs admin:workflows.
+tags: [workflows]
+# The paired device has the default scopes; this flow edits, so it adds the route-policy scope for its run.
+env: {DEVICE_SCOPES: "write:workflows"}
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///workflows
+- extendedWaitUntil: {visible: {id: "workflow-row-.*"}, timeout: 20000}
+- tapOn: {id: "workflow-row-.*", index: 0}
+- extendedWaitUntil: {visible: {id: workflow-detail}, timeout: 15000}
+# A header action: by testID on Android, by its label on iOS (native toolbar items take no testID, MD-133).
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: {id: workflow-more}
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: "Workflow actions"
+- tapOn: "Edit in builder"
+- extendedWaitUntil: {visible: {id: builder-list}, timeout: 15000}
+- assertVisible: {id: builder-stage-plan}
+- assertVisible: {id: builder-stage-apply}
+- longPressOn: {id: builder-stage-plan}
+- tapOn: "Move down"
+- assertVisible: "● Unsaved changes"
+- tapOn: {id: builder-undo}
+- assertVisible: "Saved"
+# A stage row opens the stage editor (the stage-editor flow covers it); Add stage appends.
+- tapOn: {id: builder-add-stage}
+# The sheet is an RN Modal presented inside the editor's native modal. On iOS it sits below XCTest's snapshot depth
+# limit — Maestro sees nothing in it (VoiceOver does) — so iOS taps the Agent card by position.
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - extendedWaitUntil: {visible: "At the end", timeout: 10000}
+      - tapOn: "Agent.*An agent turn.*"
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - waitForAnimationToEnd
+      - tapOn: {point: "50%, 69%"}
+- extendedWaitUntil: {visible: {id: builder-stage-stage_3}, timeout: 5000}
+- tapOn: {id: builder-validate}
+# Editor sheets are below the iOS snapshot depth (see above): asserted on Android, opened and closed on iOS.
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - extendedWaitUntil: {visible: {id: validate-sheet}, timeout: 5000}
+      - extendedWaitUntil: {visible: {id: validation-recheck}, timeout: 15000}
+- waitForAnimationToEnd
+- swipe: {direction: DOWN}
+- tapOn: {id: builder-view}
+- tapOn: "Graph"
+- extendedWaitUntil: {visible: {id: graph-fit}, timeout: 5000}
+- tapOn: {id: graph-list}
+# A native menu's trigger is matched by its label (the menu, not the hosted button, is the element on iOS).
+- tapOn: "More builder actions"
+- tapOn: "Version history"
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - extendedWaitUntil: {visible: {id: versions-sheet}, timeout: 5000}
+- waitForAnimationToEnd
+- swipe: {direction: DOWN}
+- tapOn: "Cancel"
+- tapOn: "Discard"
+- extendedWaitUntil: {visible: {id: workflow-detail}, timeout: 10000}

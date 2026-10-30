@@ -25,7 +25,7 @@ This documentation describes the checked-out source. A screen or command existin
 
 | Capability | Desktop / web | Mobile | CLI / TUI |
 | --- | --- | --- | --- |
-| Dashboard and current activity | Dashboard with navigation and summaries | Home with attention queue and active work | Dashboard pane and diagnostic commands |
+| Home and current activity | Home: quick-start composer, Needs you with inline answers, Running, Recently finished, this week's stats, system card | Home with attention queue and active work | Dashboard pane and diagnostic commands |
 | Projects and codebases | Create/edit projects; local paths or Git remotes; repository detail | Create/edit with `write:projects`; add Git URL; cannot browse a host folder picker | Project/codebase commands and panes |
 | Agent definitions | Dedicated list/editor and settings catalogue | Agent detail/catalogue; selected administration requires `admin:settings` | List/show/import/export/delete/resolve/usage; administration views |
 | Chat | Streaming composer, configuration, attachments, questions and plans | Streaming composer, model/options sheets, captures, voice, attachments with scope | Chat commands and interactive transcript/composer |
@@ -50,6 +50,6 @@ The mobile bundle deliberately resolves the browser-safe shared entry and exclud
 
 ## Evidence and maintenance
 
-Primary sources: `apps/web/src/router.tsx`, `apps/desktop/src/main/index.ts`, `apps/mobile/app/`, `apps/mobile/src/auth/featureGate.ts`, `apps/mobile/src/components/chat/panes/paneModel.ts`, `apps/cli/src/index.tsx`, `packages/cli-core/src/commands/index.ts`, `packages/sdk/src/index.ts`, and `packages/mcp-server/src/cli.ts`.
+Primary sources: `apps/web/src/app/router.tsx` and `apps/web/src/app/routes/`, `apps/desktop/src/main/index.ts`, `apps/mobile/app/`, `apps/mobile/src/auth/featureGate.ts`, `apps/mobile/src/components/chat/panes/paneModel.ts`, `apps/cli/src/index.tsx`, `packages/cli-core/src/commands/index.ts`, `packages/sdk/src/index.ts`, and `packages/mcp-server/src/cli.ts`.
 
 The old mobile About screen and some repository READMEs understate newer review/source-control features or describe older packaging. This matrix follows the implemented screens and current package scripts. Re-check those sources when a capability changes.

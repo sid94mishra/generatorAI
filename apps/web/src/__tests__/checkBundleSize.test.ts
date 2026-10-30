@@ -145,6 +145,61 @@ describe('check-bundle-size.mjs', () => {
     }
   }, 20_000);
 
+  describe('font budget (D-16, 09 §8.1)', () => {
+    const face = (url: string) =>
+      `@font-face{font-family:X;src:url(${url}) format("woff2-variations")}`;
+    const run = (css: string, assets: Record<string, Buffer | string>) => {
+      const root = makeFixture({
+        indexHtml: `<!doctype html><html><head>
+          <script type="module" crossorigin src="/assets/entry.js"></script>
+          <link rel="stylesheet" crossorigin href="/assets/entry.css">
+        </head><body></body></html>`,
+        assets: { 'entry.js': 'console.log(1);', 'entry.css': css, ...assets },
+      });
+      try {
+        return runScript(root);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    };
+
+    it('sums the bundled woff2 files and passes under budget', () => {
+      const { status, stdout } = run(face('/assets/a.woff2') + face('/assets/b.woff2'), {
+        'a.woff2': randomBytes(30 * 1024),
+        'b.woff2': randomBytes(20 * 1024),
+      });
+      expect(status).toBe(0);
+      expect(stdout).toContain('fonts total: 50.0 KB in 2 file(s)');
+      expect(stdout).toContain('initial CSS gzip');
+    });
+
+    it('fails over the font budget', () => {
+      const { status, stdout } = run(face('/assets/big.woff2'), { 'big.woff2': randomBytes(150 * 1024) });
+      expect(status).toBe(1);
+      expect(stdout).toContain('fonts exceed budget');
+    });
+
+    it('fails on a CDN font', () => {
+      const { status, stdout } = run(face('https://fonts.gstatic.com/s/x.woff2'), {});
+      expect(status).toBe(1);
+      expect(stdout).toContain('not served from dist/assets');
+    });
+
+    it('fails on a font that is not woff2', () => {
+      const { status, stdout } = run(face('/assets/a.ttf'), { 'a.ttf': 'x' });
+      expect(status).toBe(1);
+      expect(stdout).toContain('not .woff2');
+    });
+
+    it('fails on more than 6 font files', () => {
+      const files = Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`f${i}.woff2`, 'x']));
+      const css = Object.keys(files).map((f) => face(`/assets/${f}`)).join('');
+      const { status, stdout } = run(css, files);
+      expect(status).toBe(1);
+      expect(stdout).toContain('7 font files (max 6)');
+    });
+  });
+
   it('exits with a diagnostic when dist/index.html is missing', () => {
     const root = mkdtempSync(join(tmpdir(), 'check-bundle-size-'));
     try {

@@ -4,11 +4,19 @@
 // Not named *.spec.ts on purpose so the Playwright test runner does not auto-run it.
 
 import { _electron as electron } from '@playwright/test';
+import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { DESKTOP_DIR as DESKTOP, isolatedProfile } from './helpers/desktop-profile.mjs';
 
-const OUT = process.env.OUT || '.';
-const DESKTOP = path.resolve(process.cwd(), '..', 'apps', 'desktop');
+// Both paths come from this file, not the cwd, so the smoke runs the same from
+// the repo root (09 §6.5) or from agent-tests/.
+const OUT = process.env.OUT || path.join(path.dirname(fileURLToPath(import.meta.url)), 'test-results', 'desktop-smoke');
+fs.mkdirSync(OUT, { recursive: true });
+// A fresh profile: never the developer's userData or vault key.
+const profile = isolatedProfile('gai-desktop-smoke-');
+process.on('exit', profile.cleanup);
 const requireFromDesktop = createRequire(path.join(DESKTOP, 'package.json'));
 const ELECTRON = requireFromDesktop('electron'); // resolves to the electron.exe path
 
@@ -21,11 +29,15 @@ const log = (...a) => console.log('[smoke]', ...a);
 
 const app = await electron.launch({
   executablePath: ELECTRON,
-  args: ['.'],
+  args: ['.', profile.arg],
   cwd: DESKTOP,
   env: { ...process.env, GENERATORAI_DESKTOP_MODE: 'standalone' },
   timeout: 60000,
 });
+// P2-R44 — hand the launched app to the profile helper so a SIGINT/SIGTERM
+// that lands after this point can close Electron before removing the
+// directory it may still hold files in.
+profile.attach(app);
 app.process().stdout?.on('data', (d) => {
   const s = d.toString();
   if (s.includes('[ERROR]') || s.includes('ready') || s.includes('Loading app URL')) process.stdout.write('  [main] ' + s);
@@ -179,6 +191,9 @@ async function navigate(p, route) {
 
 async function finish() {
   await app.close().catch(() => {});
+  // P2-R44 — close before cleanup: the directory is only removed once
+  // Electron (and the embedded server it spawned) has released its files.
+  profile.cleanup();
   const passed = results.filter((r) => r.ok).length;
   console.log(`\n[smoke] ${passed}/${results.length} checks passed`);
   process.exit(passed === results.length ? 0 : 2);

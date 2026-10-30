@@ -1,0 +1,19 @@
+[
+  { "name": "Home", "route": "", "ready": "home-new-chat" },
+  { "name": "Needs you", "route": "needs-you", "ready": "needs-you" },
+  { "name": "Chats", "route": "chats", "ready": "chats-new" },
+  { "name": "Projects", "route": "projects", "ready": "projects" },
+  { "name": "Agents", "route": "agents", "ready": "agents-search" },
+  { "name": "Workflows", "route": "workflows", "ready": "workflows-search" },
+  { "name": "Automations", "route": "automations", "ready": "automations" },
+  { "name": "Scripts", "route": "scripts", "ready": "scripts" },
+  { "name": "Search", "route": "search", "ready": "search-palette" },
+  { "name": "Settings", "route": "settings", "ready": "settings" },
+  { "name": "Settings › General", "route": "settings/general", "ready": "settings-general-screen" },
+  { "name": "Settings › Appearance", "route": "settings/appearance", "ready": "settings-appearance-screen" },
+  { "name": "Settings › Security & devices", "route": "settings/security", "ready": "security-approval-key" },
+  { "name": "Settings › Notifications", "route": "settings/notifications", "ready": "settings-notifications-screen" },
+  { "name": "Settings › App lock & privacy", "route": "settings/app-lock", "ready": "settings-app-lock-screen" },
+  { "name": "Settings › Widgets", "route": "settings/widgets", "ready": "settings-widgets-screen" },
+  { "name": "New workflow", "route": "workflows/new", "ready": "workflow-new" }
+]

@@ -1,4 +1,4 @@
-import type { HarnessProviderId } from '@generatorai/shared';
+import type { HarnessProviderId, ScriptAllowlist } from '@generatorai/shared';
 // ────────────────────────────────────────────────────────────────
 // HttpPlatformClient — Web platform IPlatformClient implementation
 // Communicates with the server via REST + SSE
@@ -6,12 +6,34 @@ import type { HarnessProviderId } from '@generatorai/shared';
 
 import type {
   IPlatformClient,
+  InvocationFiles,
   PlatformType,
-  WorkflowTemplateSummary,
   EventSubscriptionOptions,
+  WorkflowRunListFilter,
 } from '@generatorai/shared';
-import type { Session, SessionWithWorkflows } from '@generatorai/shared';
-import type { Workflow } from '@generatorai/shared';
+import type {
+  ChatWorkflowRunCard,
+  InvocationPlan,
+  InvocationRequest,
+  InvocationResult,
+  RunCommand,
+  WorkflowDefinitionRecord,
+  WorkflowDefinitionSummary,
+  WorkflowDefinitionVersionRecord,
+  WorkflowDefinitionVersionSummary,
+  AuthoringValidation,
+  WorkflowGraphInput,
+  WorkflowTemplate,
+} from '@generatorai/workflow-spec';
+import {
+  ApiError as CoreApiError,
+  createAdminApi,
+  runListQuery,
+  type DefinitionDeleteOutcome,
+  type StageHistoryEntry,
+  type InvocationUploadCategory,
+  type InvocationUploadFiles,
+} from '@generatorai/client-core';
 import type { ChatMessage } from '@generatorai/shared';
 // PLN-01 — plan mode
 import type {
@@ -22,6 +44,34 @@ import type {
   PlanRevision,
 } from '@generatorai/shared';
 import type { Artifact } from '@generatorai/shared';
+import type { AttentionFilter, AttentionSnapshot } from '@generatorai/shared';
+import type { SystemInfo } from '@generatorai/shared';
+import type { ProjectRunListPage } from '@generatorai/shared';
+import type { StatsSummary } from '@generatorai/shared';
+import type { RecentActivityPage } from '@generatorai/shared';
+import type { InstalledExtension, InstallExtensionParams } from '@generatorai/shared';
+import {
+  chatListSearchParams,
+  runChatBulk,
+  type ChatBulkResult,
+  type ChatListPage,
+  type ChatListQuery,
+  type BackgroundTaskCancelResult,
+  type BackgroundTaskDetail,
+  type ComputerConsentAnswer,
+  type ComputerConsentAnswerResult,
+  type ComputerControlMode,
+  type ComputerControlState,
+  type ComputerGrant,
+  type ComputerPendingConsent,
+  type BackgroundTaskListItem,
+  type HarnessCatalogModel,
+  type HarnessLoginResult,
+  type HarnessProvidersResponse,
+  type HarnessSetDefaultResult,
+  type HarnessVisibilityResponse,
+  type HarnessVisibilityUpdate,
+} from '@generatorai/shared';
 // AGT-01 — first-class agents
 import type {
   Agent,
@@ -46,6 +96,9 @@ import type {
   EditorInfo as ScmEditorInfo,
   RepoReadiness as ScmRepoReadiness,
   WorkspaceReadinessResponse as ScmWorkspaceReadiness,
+  ScmBranchList,
+  ScmCompareResult,
+  ScmPullRequestOptions,
   ScmFlowRequest,
   ScmFlowResult,
   ScmGenerateRequest,
@@ -54,6 +107,14 @@ import type {
   PullRequestDetail as ScmPullRequestDetail,
   PullRequestFile as ScmPullRequestFile,
   PullRequestComment as ScmPullRequestComment,
+  MergePullRequestRequest as ScmMergePullRequestRequest,
+  MergePullRequestResult as ScmMergePullRequestResult,
+  ProjectIssuesResponse as ScmProjectIssues,
+  IssueSummary as ScmIssue,
+  IssueComment as ScmIssueComment,
+  IssueDetailResponse as ScmIssueDetail,
+  CreateIssueRequest as ScmCreateIssueRequest,
+  CloseIssueRequest as ScmCloseIssueRequest,
   OpenInEditorRequest as ScmOpenInEditorRequest,
   OpenInEditorResult as ScmOpenInEditorResult,
   ChatSourceControlOptions,
@@ -143,6 +204,10 @@ export interface FsDirListing {
   entries: FsDirEntry[];
   /** Only for the empty-path listing: home + drive roots. */
   roots?: string[];
+  /** Only for the empty-path listing: the server user's home directory. */
+  home?: string;
+  /** Only for the empty-path listing: common folders under home that exist (Desktop, Documents, Projects…). */
+  places?: Array<{ name: string; path: string }>;
   /** Whether `path` itself is a repository. */
   isGit?: boolean;
 }
@@ -155,6 +220,8 @@ export interface FsGitInfo {
   branches: string[];
   dirty: boolean;
   nestedRepos: string[];
+  /** Active chats that already edit this folder in place. */
+  usedInPlaceBy?: Array<{ id: string; name: string }>;
 }
 
 /** `GET /api/workspaces/:id` — the mount plan as it was actually realised. */
@@ -201,6 +268,48 @@ export interface ComputerRuntime {
   checks?: Array<{ name: string; status: 'pass' | 'fail' | 'skip'; message: string }>;
   enabled: boolean;
   sessionActive: boolean;
+}
+
+/** `POST /api/workspaces/:id/computer/recording` (start | stop | status). */
+export interface ComputerRecordingState {
+  recording: boolean;
+  outputDir?: string;
+  videoPath?: string;
+  detail?: string;
+  turnCount?: number;
+  hasCast?: boolean;
+  cast?: { active: boolean; startedAt?: number; detail?: string };
+  refusal?: { code: string; message: string };
+}
+
+export type ComputerReplayFrameKind = 'before' | 'click' | 'after';
+
+/** One entry of `GET …/computer/recording/turns`: a turn and the captures taken during it. */
+export interface ComputerReplayTurn {
+  turn: string;
+  tool: string | null;
+  at: string;
+  frames: string[];
+}
+
+/** One row of `GET …/computer/activity` (oldest first). */
+export interface ComputerActivityRow {
+  action: string;
+  appLabel: string;
+  target: string | null;
+  path: string | null;
+  verified: boolean;
+  refusalCode: string | null;
+  artifactId: string | null;
+  createdAt: string;
+}
+
+/** One row of `GET …/computer/frames` (newest first). */
+export interface ComputerFrameSummary {
+  id: string;
+  createdAt: string;
+  width?: number;
+  height?: number;
 }
 
 /** Response of `GET|PUT /api/system/computer-use`. */
@@ -258,28 +367,46 @@ export interface WorkspaceRetentionRunResult {
   orphans: number;
   failed: number;
 }
-import type { CreateSessionParams } from '@generatorai/shared';
+
+/**
+ * A flow key of the workflow engine's admission (P07 WP-7.2): `global`,
+ * `provider:<id>`, `model:<id>`, `check:global`, `worktree:<mountId>` (a
+ * map's leases) and `run:<id>` (a run's `maxParallel`), with its live
+ * counts. `limit` is null when the key has none.
+ */
+export interface WorkflowEngineFlow {
+  flowKey: string;
+  kind: 'global' | 'provider' | 'model' | 'check' | 'worktree' | 'run';
+  running: number;
+  queued: number;
+  limit: number | null;
+  /** Whether the limit is a setting (the worktree and run keys are read-only). */
+  configurable: boolean;
+  detail?: string;
+}
+
+/** The workflow engine's settings (`/api/settings/workflow-engine`) and its live flows. */
+export interface WorkflowEngineSettings {
+  settings: { flowLimits: Record<string, number>; summaryModel: string | null; triggerDebounceMs: number };
+  defaults: { flowLimits: Record<string, number>; triggerDebounceMs: number };
+  flows: WorkflowEngineFlow[];
+}
+
+/** A change of the engine settings; `flowLimits` replaces the configured limits. */
+export interface WorkflowEngineSettingsUpdate {
+  flowLimits?: Record<string, number>;
+  summaryModel?: string | null;
+  triggerDebounceMs?: number;
+}
 import type { PersistedEvent, AgentEventKind } from '@generatorai/shared';
 import type {
   Chat,
   CreateChatParams,
-  WorkflowDefinition,
-  WorkflowDefinitionWithStages,
-  CreateWorkflowDefinitionParams,
   WorkflowRun,
   WorkflowRunWithStages,
-  CreateWorkflowRunParams,
-  StageDefinition,
-  StageEdge,
-  StageRun,
-  CreateStageParams,
-  CreateEdgeParams,
-  ImportWorkflowJson,
-  WorkflowTemplate,
-  OrchestratorContext,
+  LoopIteration,
+  PendingDecisionView,
   RunWorkspaceInfo,
-  RunUploadResult,
-  RunScratchpad,
   Automation,
   AutomationWithExecutions,
   AutomationExecution,
@@ -291,10 +418,16 @@ import type {
   ProjectCodebase,
   ProjectConfig,
   WorktreeInfo,
+  WorktreeListEnriched,
   ProjectSettings,
+  ProjectArtifactPrefs,
   CodebaseType,
   CodebaseSettings,
+  CodebaseLogsResponse,
+  FetchCodebaseResult,
   ConfigType,
+  SearchQuery,
+  SearchResponse,
 } from '@generatorai/shared';
 import { apiFetch, ApiError } from './apiFetch.js';
 import { getAuthRuntime } from './authRuntime.js';
@@ -319,46 +452,6 @@ import type {
   ReviewSubmitTarget,
   ReviewSubmitResult,
 } from '../types/review.js';
-import { downloadBlobAsFile } from '../utils/downloadBlobAsFile.js';
-
-/**
- * Model metadata surfaced by the agent harness provider via
- * `GET /api/copilot/models`. Mirrors `HarnessModel` in
- * `@generatorai/core` — capability/billing fields drive the model picker
- * UI so nothing is hardcoded on the client.
- */
-export interface ChatModel {
-  id: string;
-  name: string;
-  provider?: string;
-  /** Provider blurb — for Claude Code this carries the concrete version + pricing. */
-  description?: string;
-  category?: string;
-  /** Maximum PROMPT tokens (default tier) — the context-gauge denominator. */
-  promptTokenLimit?: number;
-  /** Advertised total window = promptTokenLimit + maxOutputTokens. Display only. */
-  totalContextWindow?: number;
-  /** Long-context tier limits, when the model offers one. */
-  longContext?: { promptTokenLimit?: number; totalContextWindow?: number };
-  /** @deprecated Use `totalContextWindow` / `promptTokenLimit`. */
-  contextWindow?: number;
-  /** @deprecated Use `promptTokenLimit`. */
-  standardContextWindow?: number;
-  maxOutputTokens?: number;
-  supportsVision?: boolean;
-  supportsReasoning?: boolean;
-  reasoningEfforts?: string[];
-  defaultReasoningEffort?: string;
-  priceCategory?: string;
-  billingMultiplier?: number;
-  pricing?: {
-    input?: number;
-    output?: number;
-    cached?: number;
-    batchSize?: number;
-  };
-  supportsLongContext?: boolean;
-}
 
 /**
  * System health snapshot returned by `GET /api/health`. Drives the
@@ -382,6 +475,14 @@ export interface SystemHealth {
   /** IDs of chats currently streaming a response (in-flight turn). */
   runningChatIds: string[];
   otel: { enabled: boolean; endpoint?: string; serviceName?: string };
+}
+
+/**
+ * Public (non-sensitive) server configuration returned by `GET
+ * /api/health/config` — Settings › Diagnostics' sandbox-execution readout.
+ */
+export interface HealthConfig {
+  sandbox: { enabled: boolean; provider?: string; image?: string; autoDestroy?: boolean };
 }
 
 /**
@@ -413,9 +514,53 @@ export interface PlanSummary {
   fileName?: string;
 }
 
+/**
+ * A client-core call, with its failure re-thrown as this app's `ApiError`:
+ * the global error toast, the retry policy and the inline error views all
+ * read `code`, `status` and the envelope's `issues` from that one class.
+ */
+async function viaClientCore<T>(call: Promise<T>): Promise<T> {
+  try {
+    return await call;
+  } catch (err) {
+    if (!(err instanceof CoreApiError)) throw err;
+    const envelope = (err.body as { error?: { code?: string; message?: string; issues?: unknown } } | undefined)?.error;
+    throw new ApiError(
+      err.status,
+      envelope?.code ?? `HTTP_${String(err.status)}`,
+      envelope?.message ?? err.message,
+      envelope?.issues !== undefined ? { issues: envelope.issues } : undefined,
+    );
+  }
+}
+
+/** Browser files → the bytes client-core uploads. */
+async function uploadFiles(files: InvocationFiles | undefined): Promise<InvocationUploadFiles | undefined> {
+  if (!files) return undefined;
+  const out: InvocationUploadFiles = {};
+  for (const [category, list] of Object.entries(files) as Array<[InvocationUploadCategory, InvocationFiles[InvocationUploadCategory]]>) {
+    if (!list?.length) continue;
+    out[category] = await Promise.all(
+      list.map(async (file) => ({
+        name: file.name,
+        data: new Uint8Array(await file.arrayBuffer()),
+        ...(file.type ? { mimeType: file.type } : {}),
+      })),
+    );
+  }
+  return out;
+}
+
 export class HttpPlatformClient implements IPlatformClient {
   readonly platform: PlatformType = 'web';
   readonly baseUrl: string;
+
+  /**
+   * client-core's typed API over this app's authenticated fetch. Workflow
+   * runs start and are read through it, so the web keeps no second
+   * hand-written client for them (G3 5.13).
+   */
+  private readonly admin = createAdminApi((path, init) => getAuthRuntime().fetch(`${this.baseUrl}${path}`, init));
 
   constructor(baseUrl = '') {
     this.baseUrl = baseUrl;
@@ -430,63 +575,6 @@ export class HttpPlatformClient implements IPlatformClient {
 
   async shutdown(): Promise<void> {
     // No-op for web client
-  }
-
-  // ── Session CRUD ──
-
-  async createSession(params: CreateSessionParams): Promise<Session> {
-    return apiFetch<Session>(`${this.baseUrl}/api/sessions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-  }
-
-  async getSession(sessionId: string): Promise<SessionWithWorkflows> {
-    return apiFetch<SessionWithWorkflows>(`${this.baseUrl}/api/sessions/${sessionId}`);
-  }
-
-  async getSessions(filter?: { status?: string }): Promise<Session[]> {
-    const params = new URLSearchParams();
-    if (filter?.status) params.set('status', filter.status);
-    const qs = params.toString();
-    return apiFetch<Session[]>(`${this.baseUrl}/api/sessions${qs ? `?${qs}` : ''}`);
-  }
-
-  async deleteSession(sessionId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/sessions/${sessionId}`, { method: 'DELETE' });
-  }
-
-  // ── Session Control ──
-
-  async startSession(sessionId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/sessions/${sessionId}/start`, { method: 'POST' });
-  }
-
-  async pauseSession(sessionId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/sessions/${sessionId}/pause`, { method: 'POST' });
-  }
-
-  async resumeSession(sessionId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/sessions/${sessionId}/resume`, { method: 'POST' });
-  }
-
-  async cancelSession(sessionId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/sessions/${sessionId}/cancel`, { method: 'POST' });
-  }
-
-  // ── Workflow Control ──
-
-  async getWorkflows(sessionId: string): Promise<Workflow[]> {
-    return apiFetch<Workflow[]>(`${this.baseUrl}/api/sessions/${sessionId}/workflows`);
-  }
-
-  async pauseWorkflow(workflowId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflows/${workflowId}/pause`, { method: 'POST' });
-  }
-
-  async resumeWorkflow(workflowId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflows/${workflowId}/resume`, { method: 'POST' });
   }
 
   // ── Chat ──
@@ -546,8 +634,8 @@ export class HttpPlatformClient implements IPlatformClient {
 
   // ── Templates ──
 
-  async getWorkflowTemplates(): Promise<WorkflowTemplateSummary[]> {
-    return apiFetch<WorkflowTemplateSummary[]>(`${this.baseUrl}/api/templates`);
+  async getWorkflowTemplates(): Promise<WorkflowTemplate[]> {
+    return apiFetch<WorkflowTemplate[]>(`${this.baseUrl}/api/templates`);
   }
 
   // ── Artifacts ──
@@ -627,45 +715,6 @@ export class HttpPlatformClient implements IPlatformClient {
     };
   }
 
-  // ── Platform-specific ──
-
-  /**
-   * CLN-05 — Previously returned `null` silently, which callers could not
-   * distinguish from "user cancelled the picker". Now:
-   *
-   *   - If the browser supports the File System Access API
-   *     (`window.showDirectoryPicker`), open the native picker and return
-   *     the chosen directory name. Returns `null` ONLY when the user
-   *     explicitly cancels the picker.
-   *   - Otherwise throws `NotSupportedError` so the UI can show a clear
-   *     "paste a path instead" fallback rather than silently misbehaving.
-   *
-   * Note: the File System Access API only exposes the directory's *name*
-   * (not its absolute path) due to browser sandboxing — server-side APIs
-   * that need a real filesystem path must still accept user-typed input.
-   */
-  async selectDirectory(): Promise<string | null> {
-    const picker = (window as unknown as {
-      showDirectoryPicker?: (opts?: { mode?: 'read' | 'readwrite' }) => Promise<{ name: string }>;
-    }).showDirectoryPicker;
-    if (typeof picker !== 'function') {
-      const err = new Error(
-        'Directory picker is not supported in this browser. Type the path manually or use a Chromium-based browser.',
-      );
-      err.name = 'NotSupportedError';
-      throw err;
-    }
-    try {
-      const handle = await picker({ mode: 'read' });
-      return handle.name;
-    } catch (e) {
-      // User-cancelled pickers reject with AbortError in all browsers that
-      // implement the spec. Treat as "no selection" (null); re-throw anything else.
-      if (e instanceof DOMException && e.name === 'AbortError') return null;
-      throw e;
-    }
-  }
-
   /**
    * STR-04 — REST replay against the new unified stream. Mirrors the
    * `/api/stream/replay` endpoint. Returns raw broker rows; the caller
@@ -707,6 +756,17 @@ export class HttpPlatformClient implements IPlatformClient {
     return response.rows;
   }
 
+  /**
+   * Opening a chat (U-39): the rows its transcript needs (earlier kept rows, the latest turn with deltas folded) and
+   * `turnStartSeq`, where paging resumes. Rows have the `streamReplay` shape; `turnStartSeq: 0` means replay from the start.
+   */
+  async streamChatPrelude(chatId: string): Promise<{
+    turnStartSeq: number;
+    rows: Awaited<ReturnType<HttpPlatformClient['streamReplay']>>;
+  }> {
+    return apiFetch(`${this.baseUrl}/api/stream/replay/prelude?${new URLSearchParams({ id: chatId }).toString()}`);
+  }
+
   // ── v2: Chat Operations ──
 
   async createChat(params: CreateChatParams): Promise<Chat> {
@@ -717,11 +777,9 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
-  async listChats(filter?: { status?: string }): Promise<Chat[]> {
-    const params = new URLSearchParams();
-    if (filter?.status) params.set('status', filter.status);
-    const qs = params.toString();
-    return apiFetch<Chat[]>(`${this.baseUrl}/api/chats${qs ? `?${qs}` : ''}`);
+  async listChats(query?: ChatListQuery): Promise<ChatListPage> {
+    const qs = chatListSearchParams(query);
+    return apiFetch<ChatListPage>(`${this.baseUrl}/api/chats${qs ? `?${qs}` : ''}`);
   }
 
   async getChat(chatId: string): Promise<Chat> {
@@ -736,13 +794,16 @@ export class HttpPlatformClient implements IPlatformClient {
    */
   async updateChatSources(
     chatId: string,
-    sources: ChatSourceSpec[],
-    primary?: string,
+    params: { sources: ChatSourceSpec[]; primary?: string; discardChatFolder?: boolean },
   ): Promise<Chat> {
     return apiFetch<Chat>(`${this.baseUrl}/api/chats/${chatId}/sources`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sources, ...(primary ? { primary } : {}) }),
+      body: JSON.stringify({
+        sources: params.sources,
+        ...(params.primary ? { primary: params.primary } : {}),
+        ...(params.discardChatFolder ? { discardChatFolder: true } : {}),
+      }),
     });
   }
 
@@ -767,9 +828,7 @@ export class HttpPlatformClient implements IPlatformClient {
 
   // ── Orchestrator background tasks ──
 
-  async getBackgroundTasks(chatId: string): Promise<{
-    tasks: Array<{ taskId: string; taskName: string; status: string; model?: string; reviewRounds: number }>;
-  }> {
+  async getBackgroundTasks(chatId: string): Promise<{ tasks: BackgroundTaskListItem[] }> {
     return apiFetch(`${this.baseUrl}/api/chats/${chatId}/background-tasks`);
   }
 
@@ -777,13 +836,35 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch(`${this.baseUrl}/api/chats/${chatId}/background-tasks/${taskId}`);
   }
 
-  async cancelBackgroundTask(chatId: string, taskId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/chats/${chatId}/background-tasks/${taskId}/cancel`, {
-      method: 'POST',
-    });
+  /** D-89: the brief, review rounds and latest steps of one worker. */
+  async getBackgroundTaskDetail(chatId: string, taskId: string): Promise<BackgroundTaskDetail> {
+    return apiFetch<BackgroundTaskDetail>(`${this.baseUrl}/api/chats/${chatId}/background-tasks/${taskId}/detail`);
   }
 
-  async updateChat(chatId: string, updates: { model?: string; gitRepositories?: unknown; codebaseIds?: string[]; harnessConfig?: Record<string, unknown>; defaultAgentMode?: AgentMode; permissionMode?: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan' }): Promise<Chat> {
+  /** G-20: the server attributes this cancel to the user and answers who/when. */
+  async cancelBackgroundTask(chatId: string, taskId: string): Promise<BackgroundTaskCancelResult> {
+    return apiFetch<BackgroundTaskCancelResult>(
+      `${this.baseUrl}/api/chats/${chatId}/background-tasks/${taskId}/cancel`,
+      { method: 'POST' },
+    );
+  }
+
+  /** D-100: continue a worker a server restart interrupted. */
+  async resumeBackgroundTask(chatId: string, taskId: string): Promise<{ ok: true; taskId: string }> {
+    return apiFetch<{ ok: true; taskId: string }>(
+      `${this.baseUrl}/api/chats/${chatId}/background-tasks/${taskId}/resume`,
+      { method: 'POST' },
+    );
+  }
+
+  // ── Workflow runs a chat started (P06 WP-6.2) ──
+
+  /** The chat's run cards: status, stage progress, parked decisions. */
+  async getChatWorkflowRuns(chatId: string): Promise<{ runs: ChatWorkflowRunCard[] }> {
+    return apiFetch(`${this.baseUrl}/api/chats/${chatId}/workflow-runs`);
+  }
+
+  async updateChat(chatId: string, updates: { pinned?: boolean; unread?: boolean; name?: string; model?: string; gitRepositories?: unknown; codebaseIds?: string[]; harnessConfig?: Record<string, unknown>; defaultAgentMode?: AgentMode; permissionMode?: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan' }): Promise<Chat> {
     return apiFetch<Chat>(`${this.baseUrl}/api/chats/${chatId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -796,6 +877,15 @@ export class HttpPlatformClient implements IPlatformClient {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'archived' }),
+    });
+  }
+
+  /** Restore an archived chat to Active (P3-07 row action; the server has always accepted this PATCH). */
+  async unarchiveChat(chatId: string): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/chats/${chatId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'active' }),
     });
   }
 
@@ -1015,7 +1105,8 @@ export class HttpPlatformClient implements IPlatformClient {
   async respondToChatPermission(
     chatId: string,
     interactionId: string,
-    response: { behavior: 'allow' | 'deny'; message?: string },
+    /** `remember` = "Allow for this chat" (U-16, D-147). */
+    response: { behavior: 'allow' | 'deny'; message?: string; remember?: 'owner' | 'project' },
   ): Promise<void> {
     await apiFetch(`${this.baseUrl}/api/chats/${chatId}/interactions/${interactionId}/permission`, {
       method: 'POST',
@@ -1035,137 +1126,255 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
-  // ── v2: Workflow Definition Operations ──
+  // ── Workflow definitions (v2 documents) ──
 
-  async createDefinition(params: CreateWorkflowDefinitionParams): Promise<WorkflowDefinition> {
-    return apiFetch<WorkflowDefinition>(`${this.baseUrl}/api/workflow-definitions`, {
+  async createDefinition(graph: WorkflowGraphInput): Promise<WorkflowDefinitionRecord> {
+    return apiFetch<WorkflowDefinitionRecord>(`${this.baseUrl}/api/workflow-definitions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify(graph),
     });
   }
 
-  async listDefinitions(): Promise<WorkflowDefinition[]> {
-    return apiFetch<WorkflowDefinition[]>(`${this.baseUrl}/api/workflow-definitions`);
+  /** Every definition: follows `nextCursor` across pages. */
+  async listDefinitions(): Promise<WorkflowDefinitionSummary[]> {
+    const items: WorkflowDefinitionSummary[] = [];
+    let cursor: string | undefined;
+    do {
+      const qs = new URLSearchParams({ limit: '200' });
+      if (cursor) qs.set('cursor', cursor);
+      const page = await apiFetch<{ items: WorkflowDefinitionSummary[]; nextCursor?: string }>(
+        `${this.baseUrl}/api/workflow-definitions?${qs.toString()}`,
+      );
+      items.push(...page.items);
+      cursor = page.nextCursor;
+    } while (cursor);
+    return items;
   }
 
-  async getDefinition(id: string): Promise<WorkflowDefinitionWithStages> {
-    return apiFetch<WorkflowDefinitionWithStages>(`${this.baseUrl}/api/workflow-definitions/${id}`);
+  async getDefinition(id: string): Promise<WorkflowDefinitionRecord> {
+    return apiFetch<WorkflowDefinitionRecord>(`${this.baseUrl}/api/workflow-definitions/${id}`);
   }
 
-  async updateDefinition(id: string, params: Partial<CreateWorkflowDefinitionParams>): Promise<WorkflowDefinition> {
-    return apiFetch<WorkflowDefinition>(`${this.baseUrl}/api/workflow-definitions/${id}`, {
-      method: 'PATCH',
+  /** Replace the whole graph. A stale `expectedRevision` is a 409 `REVISION_CONFLICT` carrying the current record. */
+  async saveDefinitionGraph(
+    id: string,
+    graph: WorkflowGraphInput,
+    expectedRevision: number,
+  ): Promise<WorkflowDefinitionRecord> {
+    return apiFetch<WorkflowDefinitionRecord>(`${this.baseUrl}/api/workflow-definitions/${id}/graph`, {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify({ graph, expectedRevision }),
     });
   }
 
-  async deleteDefinition(id: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-definitions/${id}`, { method: 'DELETE' });
+  async publishDefinition(id: string): Promise<WorkflowDefinitionRecord> {
+    return apiFetch<WorkflowDefinitionRecord>(`${this.baseUrl}/api/workflow-definitions/${id}/publish`, {
+      method: 'POST',
+    });
   }
 
-  async validateDefinition(id: string): Promise<{ valid: boolean; errors: string[] }> {
-    return apiFetch<{ valid: boolean; errors: string[] }>(
-      `${this.baseUrl}/api/workflow-definitions/${id}/validate`,
-      { method: 'POST' },
+  /** The immutable version a run pinned (`run.definitionVersionId`). */
+  async getDefinitionVersion(id: string, versionId: string): Promise<WorkflowDefinitionVersionRecord> {
+    return apiFetch<WorkflowDefinitionVersionRecord>(
+      `${this.baseUrl}/api/workflow-definitions/${id}/versions/${versionId}`,
     );
   }
 
-  async importFromTemplate(templateId: string): Promise<WorkflowDefinition> {
-    return apiFetch<WorkflowDefinition>(`${this.baseUrl}/api/workflow-definitions/import`, {
+  /** Every published and test version of a definition. */
+  async listDefinitionVersions(id: string): Promise<WorkflowDefinitionVersionSummary[]> {
+    return viaClientCore(this.admin.definitions.versions(id));
+  }
+
+  /** The server's validation of an unsaved graph: the spec's rules plus agents, models, capabilities and child workflows. */
+  async validateDefinitionGraph(graph: WorkflowGraphInput): Promise<AuthoringValidation> {
+    return viaClientCore(this.admin.definitions.validate(graph));
+  }
+
+  /** Hard delete, or archive when runs exist (their history stays readable). */
+  async deleteDefinition(id: string): Promise<DefinitionDeleteOutcome> {
+    return apiFetch<DefinitionDeleteOutcome>(`${this.baseUrl}/api/workflow-definitions/${id}`, { method: 'DELETE' });
+  }
+
+  /** Create a draft from a registered template. */
+  async importTemplate(templateId: string, name?: string): Promise<WorkflowDefinitionRecord> {
+    return apiFetch<WorkflowDefinitionRecord>(`${this.baseUrl}/api/workflow-definitions/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ templateId }),
+      body: JSON.stringify({ templateId, ...(name ? { name } : {}) }),
     });
   }
 
-  async importFromJSON(data: ImportWorkflowJson): Promise<WorkflowDefinitionWithStages> {
-    return apiFetch<WorkflowDefinitionWithStages>(`${this.baseUrl}/api/workflow-definitions/import-json`, {
+  /** Create a draft from a canonical workflow document (the export format). */
+  async importDefinition(document: unknown): Promise<WorkflowDefinitionRecord> {
+    return apiFetch<WorkflowDefinitionRecord>(`${this.baseUrl}/api/workflow-definitions/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+      body: JSON.stringify(document),
     });
+  }
+
+  /** The canonical document text (`GET /:id/export`), exactly as the server wrote it. */
+  async exportDefinition(id: string): Promise<string> {
+    const resp = await getAuthRuntime().fetch(`${this.baseUrl}/api/workflow-definitions/${id}/export`);
+    if (!resp.ok) throw new ApiError(resp.status, 'EXPORT_FAILED', `Export failed: ${resp.statusText}`);
+    return resp.text();
   }
 
   // ── v2: Workflow Run Operations ──
 
-  async createRun(params: CreateWorkflowRunParams): Promise<WorkflowRun> {
-    return apiFetch<WorkflowRun>(`${this.baseUrl}/api/workflow-runs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
+  /**
+   * THE way a run starts (P04): a definition, a script or a fork of an
+   * earlier run. Files ride in the same request (multipart) and become the
+   * run's uploads; the idempotency key makes a double click one run.
+   */
+  async invokeWorkflow(
+    request: InvocationRequest,
+    opts: { idempotencyKey?: string; files?: InvocationFiles } = {},
+  ): Promise<InvocationResult> {
+    const files = await uploadFiles(opts.files);
+    return viaClientCore(
+      this.admin.workflows.invoke(request, {
+        ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
+        ...(files ? { files } : {}),
+      }),
+    );
   }
 
-  async listRuns(filter?: { definitionId?: string; status?: string }): Promise<WorkflowRun[]> {
-    const params = new URLSearchParams();
-    if (filter?.definitionId) params.set('definitionId', filter.definitionId);
-    if (filter?.status) params.set('status', filter.status);
-    const qs = params.toString();
-    return apiFetch<WorkflowRun[]>(`${this.baseUrl}/api/workflow-runs${qs ? `?${qs}` : ''}`);
+  /** What `invokeWorkflow` would do (stages by layer, skips, codebases, phases), without writing anything. */
+  async planWorkflowInvocation(request: InvocationRequest): Promise<InvocationPlan> {
+    return viaClientCore(this.admin.workflows.plan(request));
+  }
+
+  async listRuns(filter?: WorkflowRunListFilter): Promise<WorkflowRun[]> {
+    return apiFetch<WorkflowRun[]>(`${this.baseUrl}/api/workflow-runs${runListQuery(filter)}`);
+  }
+
+  /** One stage's newest executions across a definition's runs, newest first. */
+  async getStageHistory(definitionId: string, stageKey: string, limit?: number): Promise<StageHistoryEntry[]> {
+    const qs = new URLSearchParams({ definitionId, stageKey, ...(limit !== undefined ? { limit: String(limit) } : {}) });
+    return apiFetch<StageHistoryEntry[]>(`${this.baseUrl}/api/workflow-runs/stage-history?${qs.toString()}`);
   }
 
   async getRun(id: string): Promise<WorkflowRunWithStages> {
     return apiFetch<WorkflowRunWithStages>(`${this.baseUrl}/api/workflow-runs/${id}`);
   }
 
-  async startRun(id: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${id}/start`, { method: 'POST' });
+  async runCommand(runId: string, command: RunCommand): Promise<void> {
+    // 202 `{runId, command}`; a refused command (409 invalid_state /
+    // version_conflict, 404, 400) throws an ApiError the caller surfaces.
+    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/commands`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(command),
+    });
   }
 
-  async pauseRun(id: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${id}/pause`, { method: 'POST' });
+  async listLoopIterations(runId: string, instanceId: string): Promise<LoopIteration[]> {
+    return apiFetch<LoopIteration[]>(`${this.baseUrl}/api/workflow-runs/${runId}/instances/${encodeURIComponent(instanceId)}/iterations`);
   }
 
-  async resumeRun(id: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${id}/resume`, { method: 'POST' });
+  async listPendingDecisions(runId: string): Promise<PendingDecisionView[]> {
+    return apiFetch<PendingDecisionView[]>(`${this.baseUrl}/api/workflow-runs/${runId}/pending-decisions`);
   }
 
-  async cancelRun(id: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${id}/cancel`, { method: 'POST' });
+  async getScriptAllowlist(): Promise<ScriptAllowlist> {
+    return apiFetch<ScriptAllowlist>(`${this.baseUrl}/api/settings/script-allowlist`);
+  }
+
+  async setAllowedCommands(allowed: string[]): Promise<ScriptAllowlist> {
+    return apiFetch<ScriptAllowlist>(`${this.baseUrl}/api/settings/script-allowlist`, {
+      method: 'PUT',
+      body: JSON.stringify({ allowed }),
+    });
+  }
+
+  // ── A stage is a compact chat (P03b, the stage conversation API) ──
+
+  /**
+   * An operator message to a stage instance: queued between turns, an
+   * amendment of a completed stage, a retry of a paused one. 409
+   * `STAGE_BUSY` mid-turn and `INTERACTION_PENDING` on an open gate throw
+   * an ApiError the caller surfaces.
+   */
+  async sendStageMessage(
+    runId: string,
+    instanceId: string,
+    prompt: string,
+    files?: File[],
+    mode?: 'auto' | 'plan',
+  ): Promise<{ outcome: 'queued' | 'amending' | 'retrying'; attachmentIds: string[] }> {
+    const formData = new FormData();
+    formData.append('prompt', prompt);
+    if (mode) formData.append('mode', mode);
+    for (const file of files ?? []) formData.append('attachments', file, file.name);
+    return apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/instances/${instanceId}/messages`, {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  /** Stop the stage's turn in flight; the stage carries on. */
+  async cancelStageTurn(runId: string, instanceId: string, options: { force?: boolean } = {}): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/instances/${instanceId}/turn/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options),
+    });
+  }
+
+  /** Answer a stage's in-turn gate, in the chat's body shapes. */
+  async resolveStageInteraction(
+    runId: string,
+    instanceId: string,
+    interactionId: string,
+    answer:
+      | { kind: 'permission'; behavior: 'allow' | 'deny'; message?: string; remember?: 'owner' | 'project' }
+      | { kind: 'answer'; answers: Record<string, string[]>; freeformResponse?: string }
+      | { kind: 'plan'; approved: boolean; action?: 'exit_only' | 'implement_interactive' | 'implement_autopilot'; feedback?: string },
+  ): Promise<void> {
+    const { kind, ...body } = answer;
+    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/instances/${instanceId}/interactions/${interactionId}/${kind}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  // ── U-16 (D-147) — remembered permission rules ("Allow for this chat / run") ──
+
+  async listPermissionRules(owner: { kind: 'chat' | 'run' | 'project'; id: string }): Promise<{ rules: StoredPermissionRuleView[] }> {
+    return apiFetch(`${this.baseUrl}${permissionRulesPath(owner)}`);
+  }
+
+  async clearPermissionRules(owner: { kind: 'chat' | 'run' | 'project'; id: string }): Promise<{ removed: number }> {
+    return apiFetch(`${this.baseUrl}${permissionRulesPath(owner)}`, { method: 'DELETE' });
+  }
+
+  async revokePermissionRule(owner: { kind: 'chat' | 'run' | 'project'; id: string }, ruleId: string): Promise<void> {
+    await apiFetch(`${this.baseUrl}${permissionRulesPath(owner)}/${encodeURIComponent(ruleId)}`, { method: 'DELETE' });
+  }
+
+  /** D-157 — commands a project's chats and runs run without asking. */
+  async addProjectCommandRules(projectId: string, commands: readonly string[]): Promise<{ rules: Array<{ kind: 'command' | 'tool'; match: string }> }> {
+    return apiFetch(`${this.baseUrl}${permissionRulesPath({ kind: 'project', id: projectId })}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commands }),
+    });
+  }
+
+  /** The project's own test / lint / build scripts, suggested for "run without asking". */
+  async projectCommandSuggestions(projectId: string): Promise<{ suggestions: Array<{ command: string; source: string }> }> {
+    return apiFetch(`${this.baseUrl}${permissionRulesPath({ kind: 'project', id: projectId })}/suggestions`);
   }
 
   async deleteRun(id: string): Promise<void> {
     await apiFetch(`${this.baseUrl}/api/workflow-runs/${id}`, { method: 'DELETE' });
   }
 
-  // PARITY-1: run-level retry (re-runs a failed run from `failed → created`).
-  async retryRun(id: string): Promise<{ runId: string }> {
-    // The response carries the NEW run's id; callers navigate to it.
-    const res = await apiFetch<{ runId: string }>(
-      `${this.baseUrl}/api/workflow-runs/${id}/retry`,
-      { method: 'POST' },
-    );
-    return { runId: res?.runId ?? id };
-  }
-
-  // ── PARITY-2: true per-stage controls ──
-  // These hit the dedicated /stages/:stageId/{pause,resume,retry,cancel}
-  // endpoints (handled by StageExecutionService), so pausing/retrying ONE
-  // stage no longer cascades to the whole run (the prior web behaviour wired
-  // these to run-level mutations). Matches the CLI's stage controls.
-  async pauseStageRun(runId: string, stageId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/stages/${stageId}/pause`, { method: 'POST' });
-  }
-
-  async resumeStageRun(runId: string, stageId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/stages/${stageId}/resume`, { method: 'POST' });
-  }
-
-  async wakeStageRun(runId: string, stageId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/stages/${stageId}/wake`, { method: 'POST' });
-  }
-
-  async retryStageRun(runId: string, stageId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/stages/${stageId}/retry`, { method: 'POST' });
-  }
-
-  async cancelStageRun(runId: string, stageId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/stages/${stageId}/cancel`, { method: 'POST' });
-  }
-
-  // ── HITL — permission mode + resume (HITL-04/05) ──
+  // ── HITL — permission mode (HITL-04) ──
 
   async getPermissionMode(
     runId: string,
@@ -1184,108 +1393,24 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
-  async listPendingInterrupts(runId: string): Promise<StageRun[]> {
-    return apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/pending-interrupts`);
-  }
-
-  /**
-   * Read the on-disk scratchpad for a run. This is where each stage's
-   * full output text (or structured JSON) is aggregated, keyed by
-   * `stageRunId`. Returns `{ entries: [] }` for runs that haven't
-   * written any output yet.
-   */
-  async getRunScratchpad(runId: string): Promise<RunScratchpad> {
-    return apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/scratchpad`);
-  }
-
-  async resumeStage(
-    runId: string,
-    stageId: string,
-    resolution: {
-      /**
-       * Tri-state verdict. `rejected` is terminal — it fails the stage and
-       * blocks every downstream stage. Omit to fall back to `approved`.
-       */
-      outcome?: 'approved' | 'changes_requested' | 'rejected';
-      approved: boolean;
-      value?: unknown;
-      reason?: string;
-      followUpPrompt?: string;
-    },
-  ): Promise<{ ok: boolean; reason?: string }> {
-    // Server returns 200 `{ok:true}` on success and 409 on lost races.
-    // Catch the 409 and surface it as a business outcome so the HitlPanel
-    // can display the reason rather than a generic error toast.
-    //
-    // NB: Uses /approve (HITL approval) rather than /resume (pause/resume).
-    // Two routes existed at the same path; HITL was renamed to /approve
-    // so Express routing picks the correct handler unambiguously.
-    try {
-      const body = await apiFetch<{ ok?: boolean; reason?: string } | undefined>(
-        `${this.baseUrl}/api/workflow-runs/${runId}/stages/${stageId}/approve`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(resolution),
-        },
-      );
-      return { ok: body?.ok ?? true, reason: body?.reason };
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        return { ok: false, reason: err.message };
-      }
-      throw err;
-    }
-  }
-
-  // ── v2: Stage CRUD (nested under workflow definitions) ──
-
-  async addStage(definitionId: string, params: Omit<CreateStageParams, 'workflowDefinitionId'>): Promise<StageDefinition> {
-    return apiFetch<StageDefinition>(`${this.baseUrl}/api/workflow-definitions/${definitionId}/stages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-  }
-
-  async updateStage(definitionId: string, stageId: string, params: Partial<Omit<CreateStageParams, 'workflowDefinitionId'>>): Promise<StageDefinition> {
-    return apiFetch<StageDefinition>(`${this.baseUrl}/api/workflow-definitions/${definitionId}/stages/${stageId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-  }
-
-  async deleteStage(definitionId: string, stageId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-definitions/${definitionId}/stages/${stageId}`, { method: 'DELETE' });
-  }
-
-  // ── v2: Edge CRUD (nested under workflow definitions) ──
-
-  async addEdge(definitionId: string, params: Omit<CreateEdgeParams, 'workflowDefinitionId'>): Promise<StageEdge> {
-    return apiFetch<StageEdge>(`${this.baseUrl}/api/workflow-definitions/${definitionId}/edges`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-  }
-
-  async deleteEdge(definitionId: string, edgeId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-definitions/${definitionId}/edges/${edgeId}`, { method: 'DELETE' });
-  }
 
   // ── Copilot-specific API calls (not in IPlatformClient but useful for web) ──
 
-  async getModels(): Promise<ChatModel[]> {
+  async getModels(): Promise<HarnessCatalogModel[]> {
     // Canonical catalog endpoint — provider-tagged, with prompt/total token
     // limits and reasoning-effort metadata. (`/api/copilot/models` is a
     // deprecated alias that returns the same merged list.)
-    return apiFetch<ChatModel[]>(`${this.baseUrl}/api/harness/models`);
+    return apiFetch<HarnessCatalogModel[]>(`${this.baseUrl}/api/harness/models`);
   }
 
   /** Active harness/agent provider. */
   async getHarnessConfig(): Promise<{ harness: { type: string } }> {
     return apiFetch<{ harness: { type: string } }>(`${this.baseUrl}/api/health/config`);
+  }
+
+  /** Public server configuration — Settings › Diagnostics (telemetry lives on `SystemHealth.otel`). */
+  async getHealthConfig(): Promise<HealthConfig> {
+    return apiFetch<HealthConfig>(`${this.baseUrl}/api/health/config`);
   }
 
   /** System health snapshot — connection heartbeat + live component status. */
@@ -1297,61 +1422,10 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch<{ state: string }>(`${this.baseUrl}/api/copilot/state`);
   }
 
-  // ── Orchestrator API ──
-
-  async getOrchestratorTemplates(): Promise<WorkflowTemplate[]> {
-    return apiFetch<WorkflowTemplate[]>(`${this.baseUrl}/api/orchestrator/system-workflows`);
-  }
-
-  async getOrchestratorTemplate(id: string): Promise<WorkflowTemplate> {
-    return apiFetch<WorkflowTemplate>(`${this.baseUrl}/api/orchestrator/system-workflows/${id}`);
-  }
-
-  async createFromTemplate(
-    templateId: string,
-    params?: { name?: string; variables?: Record<string, unknown>; projectId?: string },
-  ): Promise<WorkflowDefinition> {
-    return apiFetch<WorkflowDefinition>(`${this.baseUrl}/api/orchestrator/from-template`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ templateId, ...params }),
-    });
-  }
-
-  async startOrchestratedRun(params: {
-    workflowDefinitionId: string;
-    variables?: Record<string, unknown>;
-    projectId?: string;
-    selectedCodebases?: string[];
-    uploads?: { prompts: File[]; skills: File[]; agents: File[] };
-    stageOverrides?: Array<{ stageName?: string; stageIndex?: number; agentName?: string; contextFilter?: string; timeoutMs?: number; variables?: Record<string, unknown>; skip?: boolean }>;
-  }): Promise<OrchestratorContext> {
-    const { uploads, ...config } = params;
-    if (uploads && Object.values(uploads).some((files) => files.length > 0)) {
-      const body = new FormData();
-      body.append('config', JSON.stringify(config));
-      for (const category of ['prompts', 'skills', 'agents'] as const) {
-        for (const file of uploads[category]) body.append(category, file);
-      }
-      return apiFetch<OrchestratorContext>(`${this.baseUrl}/api/orchestrator/runs`, { method: 'POST', body });
-    }
-    return apiFetch<OrchestratorContext>(`${this.baseUrl}/api/orchestrator/runs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config),
-    });
-  }
-
-  async getOrchestratorContext(runId: string): Promise<OrchestratorContext> {
-    return apiFetch<OrchestratorContext>(`${this.baseUrl}/api/orchestrator/runs/${runId}/context`);
-  }
-
-  async cancelOrchestratedRun(runId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/orchestrator/runs/${runId}/cancel`, { method: 'POST' });
-  }
+  // ── Run workspace: the managed root, artifacts, uploads and every mount ──
 
   async getRunWorkspace(runId: string): Promise<RunWorkspaceInfo> {
-    return apiFetch<RunWorkspaceInfo>(`${this.baseUrl}/api/orchestrator/runs/${runId}/workspace`);
+    return (await viaClientCore(this.admin.runs.workspace(runId))) as unknown as RunWorkspaceInfo;
   }
 
   /**
@@ -1370,42 +1444,10 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/files/content?${params}`);
   }
 
-  async uploadRunFiles(runId: string, category: 'skills' | 'agents' | 'prompts', files: File[]): Promise<RunUploadResult> {
-    const formData = new FormData();
-    formData.append('category', category);
-    for (const file of files) {
-      formData.append('files', file);
-    }
-    return apiFetch<RunUploadResult>(`${this.baseUrl}/api/orchestrator/runs/${runId}/uploads`, {
-      method: 'POST',
-      body: formData,
-    });
-  }
-
-  async downloadRunFile(runId: string, filePath: string, source: 'workspace' | 'artifacts' | 'uploads' | 'worktree', worktreeAlias?: string): Promise<void> {
-    const params = new URLSearchParams({ path: filePath, source });
-    if (source === 'worktree' && worktreeAlias) params.set('worktreeAlias', worktreeAlias);
-    const url = `${this.baseUrl}/api/orchestrator/runs/${runId}/workspace/download?${params}`;
-    const resp = await getAuthRuntime().fetch(url);
-    if (!resp.ok) throw new ApiError(resp.status, 'DOWNLOAD_FAILED', `Download failed: ${resp.statusText}`);
-    const blob = await resp.blob();
-    await downloadBlobAsFile(blob, filePath.split(/[/\\]/).pop() ?? 'download');
-  }
-
   async getRunFileContent(runId: string, filePath: string, source: 'workspace' | 'artifacts' | 'uploads' | 'worktree', worktreeAlias?: string): Promise<{ path: string; content: string | null; truncated: boolean; size: number }> {
-    const params = new URLSearchParams({ path: filePath, source });
-    if (source === 'worktree' && worktreeAlias) params.set('worktreeAlias', worktreeAlias);
-    return apiFetch(`${this.baseUrl}/api/orchestrator/runs/${runId}/workspace/content?${params}`);
-  }
-
-  async getRunDiff(runId: string): Promise<{
-    hasGit: boolean;
-    repos: Array<{
-      alias: string;
-      files: Array<{ path: string; status: string; diff: string }>;
-    }>;
-  }> {
-    return apiFetch(`${this.baseUrl}/api/orchestrator/runs/${runId}/workspace/diff`);
+    return viaClientCore(
+      this.admin.runs.workspaceContent(runId, filePath, source, source === 'worktree' ? worktreeAlias : undefined),
+    );
   }
 
   // ── Centralized change set + source control (workspace-scoped) ──
@@ -1468,7 +1510,7 @@ export class HttpPlatformClient implements IPlatformClient {
    */
   async discardWorkspaceChanges(
     workspaceId: string,
-    body: { files?: ChangeFileRef[]; all?: boolean },
+    body: { files?: ChangeFileRef[]; all?: boolean; base?: string },
   ): Promise<DiscardChangesResult> {
     return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/changes/discard`, {
       method: 'POST',
@@ -1830,8 +1872,10 @@ export class HttpPlatformClient implements IPlatformClient {
   async getWorkspaceScmReadiness(
     workspaceId: string,
     alias?: string,
+    opts?: { fetch?: boolean },
   ): Promise<ScmWorkspaceReadiness> {
-    const qs = alias ? `?${new URLSearchParams({ alias })}` : '';
+    const params = new URLSearchParams({ ...(alias ? { alias } : {}), ...(opts?.fetch ? { fetch: '1' } : {}) });
+    const qs = params.size > 0 ? `?${params}` : '';
     return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/readiness${qs}`);
   }
 
@@ -1859,10 +1903,31 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
+  /** The remote's branches, for the pull-request base picker. */
+  async getScmBranches(workspaceId: string, alias?: string): Promise<ScmBranchList> {
+    const qs = alias ? `?${new URLSearchParams({ alias })}` : '';
+    return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/branches${qs}`);
+  }
+
+  /** What a PR from the current branch into `base` would contain. */
+  async getScmCompare(workspaceId: string, input: { alias?: string; base?: string }): Promise<ScmCompareResult> {
+    const params = new URLSearchParams();
+    if (input.alias) params.set('alias', input.alias);
+    if (input.base) params.set('base', input.base);
+    const qs = params.size > 0 ? `?${params}` : '';
+    return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/compare${qs}`);
+  }
+
+  /** Reviewers, assignees, labels and issues for the PR form's sidebar. */
+  async getScmPullRequestOptions(workspaceId: string, alias?: string): Promise<ScmPullRequestOptions> {
+    const qs = alias ? `?${new URLSearchParams({ alias })}` : '';
+    return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/pull-request-options${qs}`);
+  }
+
   /** Apply the conflicting merge to the working tree so it can be edited. */
   async startScmConflictResolution(
     workspaceId: string,
-    input: { alias?: string },
+    input: { alias?: string; base?: string },
   ): Promise<ScmConflictActionResult> {
     // The server answers with the conflict report (no `ok` field); an HTTP
     // error is thrown by apiFetch, so reaching here means the merge started.
@@ -1876,18 +1941,24 @@ export class HttpPlatformClient implements IPlatformClient {
   /** Verify nothing is unmerged and commit the merge. */
   async continueScmConflictResolution(
     workspaceId: string,
-    input: { alias?: string },
+    input: { alias?: string; base?: string },
   ): Promise<ScmConflictActionResult> {
-    return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/conflicts/continue`, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    });
+    // The server names the files still carrying markers `remaining`.
+    const result = await apiFetch<{ ok: boolean; sha?: string; remaining?: string[] }>(
+      `${this.baseUrl}/api/workspaces/${workspaceId}/scm/conflicts/continue`,
+      { method: 'POST', body: JSON.stringify(input) },
+    );
+    return {
+      ok: result.ok,
+      ...(result.remaining?.length ? { unmerged: result.remaining } : {}),
+      ...(result.ok ? { committed: true } : {}),
+    };
   }
 
   /** Hand the conflict to the chat's agent as a normal, watchable turn. */
   async resolveScmConflictWithAgent(
     workspaceId: string,
-    input: { alias?: string; chatId: string },
+    input: { alias?: string; chatId: string; base?: string },
   ): Promise<ScmConflictActionResult> {
     const sent = await apiFetch<{ chatId: string; files: string[] }>(
       `${this.baseUrl}/api/workspaces/${workspaceId}/scm/conflicts/resolve-with-agent`,
@@ -1899,7 +1970,7 @@ export class HttpPlatformClient implements IPlatformClient {
   /** `git merge --abort`. */
   async abortScmConflictResolution(
     workspaceId: string,
-    input: { alias?: string },
+    input: { alias?: string; base?: string },
   ): Promise<ScmConflictActionResult> {
     await apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/scm/conflicts/abort`, {
       method: 'POST',
@@ -1961,6 +2032,54 @@ export class HttpPlatformClient implements IPlatformClient {
     );
   }
 
+  /** Merge a PR (D-146); 409 SCM_NOT_MERGEABLE carries the host's reason. */
+  async mergePullRequest(
+    projectId: string,
+    codebaseId: string,
+    number: number,
+    input: ScmMergePullRequestRequest,
+  ): Promise<ScmMergePullRequestResult> {
+    return apiFetch(
+      `${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/pull-requests/${number}/merge`,
+      { method: 'POST', body: JSON.stringify(input) },
+    );
+  }
+
+  /** Every open/closed issue across a project's codebases, plus the ones we
+   *  could not reach and why (D-146). */
+  async listProjectIssues(
+    projectId: string,
+    state: 'open' | 'closed' | 'all' = 'open',
+  ): Promise<ScmProjectIssues> {
+    const params = new URLSearchParams({ state });
+    return apiFetch(`${this.baseUrl}/api/projects/${projectId}/issues?${params}`);
+  }
+
+  async getIssue(projectId: string, codebaseId: string, number: number): Promise<ScmIssueDetail> {
+    return apiFetch(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/issues/${number}`);
+  }
+
+  async createIssue(projectId: string, codebaseId: string, input: ScmCreateIssueRequest): Promise<ScmIssue> {
+    return apiFetch(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/issues`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }
+
+  async commentOnIssue(projectId: string, codebaseId: string, number: number, body: string): Promise<ScmIssueComment> {
+    return apiFetch(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/issues/${number}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ body }),
+    });
+  }
+
+  async closeIssue(projectId: string, codebaseId: string, number: number, input: ScmCloseIssueRequest = {}): Promise<ScmIssue> {
+    return apiFetch(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/issues/${number}/close`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  }
+
   /** Editors the SERVER host can launch, plus their URL scheme for the
    *  browser-side fallback when it cannot. */
   async listEditors(): Promise<ScmEditorInfo[]> {
@@ -1983,40 +2102,6 @@ export class HttpPlatformClient implements IPlatformClient {
       method: 'PATCH',
       body: JSON.stringify({ sourceControl }),
     });
-  }
-
-  // ── Workflow-Level File Management ──
-
-  async getWorkflowFiles(definitionId: string): Promise<{ definitionId: string; uploadsDir: string; files: string[] }> {
-    return apiFetch(`${this.baseUrl}/api/orchestrator/workflows/${definitionId}/files`);
-  }
-
-  async uploadWorkflowFiles(definitionId: string, category: 'skills' | 'agents' | 'prompts', files: File[]): Promise<void> {
-    const formData = new FormData();
-    formData.append('category', category);
-    for (const file of files) {
-      formData.append('files', file);
-    }
-    await apiFetch(`${this.baseUrl}/api/orchestrator/workflows/${definitionId}/uploads`, {
-      method: 'POST',
-      body: formData,
-    });
-  }
-
-  async deleteWorkflowFile(definitionId: string, filePath: string): Promise<void> {
-    const params = new URLSearchParams({ path: filePath });
-    await apiFetch(`${this.baseUrl}/api/orchestrator/workflows/${definitionId}/files?${params}`, {
-      method: 'DELETE',
-    });
-  }
-
-  async downloadWorkflowFile(definitionId: string, filePath: string): Promise<void> {
-    const params = new URLSearchParams({ path: filePath });
-    const url = `${this.baseUrl}/api/orchestrator/workflows/${definitionId}/files/download?${params}`;
-    const resp = await getAuthRuntime().fetch(url);
-    if (!resp.ok) throw new ApiError(resp.status, 'DOWNLOAD_FAILED', `Download failed: ${resp.statusText}`);
-    const blob = await resp.blob();
-    await downloadBlobAsFile(blob, filePath.split(/[/\\]/).pop() ?? 'download');
   }
 
   // ── Automation API ──
@@ -2111,15 +2196,19 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
-  async listProjects(): Promise<Project[]> {
+  async listProjects(params?: { includeSummary?: boolean }): Promise<Project[]> {
     // Return every project (active + archived). Consumers that only allow
     // active projects (pickers, chat/workflow/automation) filter client-side;
     // the Projects list shows all so archived ones can be re-activated.
-    return apiFetch<Project[]>(`${this.baseUrl}/api/projects`);
+    // `includeSummary` (G-13) adds each project's `summary` — Codebases,
+    // Active chats, Needs you, Last run, Worktrees — for the Projects columns.
+    const qs = params?.includeSummary ? '?include=summary' : '';
+    return apiFetch<Project[]>(`${this.baseUrl}/api/projects${qs}`);
   }
 
-  async getProject(id: string): Promise<Project> {
-    return apiFetch<Project>(`${this.baseUrl}/api/projects/${id}`);
+  async getProject(id: string, params?: { includeSummary?: boolean }): Promise<Project> {
+    const qs = params?.includeSummary ? '?include=summary' : '';
+    return apiFetch<Project>(`${this.baseUrl}/api/projects/${id}${qs}`);
   }
 
   async updateProject(id: string, params: { name?: string; description?: string; settings?: Partial<ProjectSettings>; status?: 'active' | 'archived' }): Promise<Project> {
@@ -2132,6 +2221,19 @@ export class HttpPlatformClient implements IPlatformClient {
 
   async deleteProject(id: string): Promise<void> {
     await apiFetch(`${this.baseUrl}/api/projects/${id}?force=true`, { method: 'DELETE' });
+  }
+
+  /** G-19 — per-project skill/prompt/agent/MCP enable-disable, server-side. */
+  async getProjectArtifactPrefs(projectId: string): Promise<ProjectArtifactPrefs> {
+    return apiFetch<ProjectArtifactPrefs>(`${this.baseUrl}/api/projects/${projectId}/artifact-prefs`);
+  }
+
+  async updateProjectArtifactPrefs(projectId: string, prefs: ProjectArtifactPrefs): Promise<ProjectArtifactPrefs> {
+    return apiFetch<ProjectArtifactPrefs>(`${this.baseUrl}/api/projects/${projectId}/artifact-prefs`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(prefs),
+    });
   }
 
   // ── Project Codebase API ──
@@ -2172,8 +2274,22 @@ export class HttpPlatformClient implements IPlatformClient {
     await apiFetch(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}`, { method: 'DELETE' });
   }
 
-  async fetchCodebase(projectId: string, codebaseId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/fetch`, { method: 'POST' });
+  /**
+   * G-16 — now starts a background job instead of waiting for the whole
+   * fetch: answers `202 { jobId }` almost immediately. `useFetchCodebase`
+   * ignores the resolved value (it only invalidated queries on success
+   * before), so this is a compatible change for the legacy page; poll
+   * `getCodebaseLogs` or the `codebase.status_changed` stream event for
+   * the outcome.
+   */
+  async fetchCodebase(projectId: string, codebaseId: string): Promise<FetchCodebaseResult> {
+    return apiFetch<FetchCodebaseResult>(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/fetch`, { method: 'POST' });
+  }
+
+  /** G-16 — the last N clone/fetch log lines + the current/last job. */
+  async getCodebaseLogs(projectId: string, codebaseId: string, params?: { limit?: number }): Promise<CodebaseLogsResponse> {
+    const qs = params?.limit ? `?limit=${params.limit}` : '';
+    return apiFetch<CodebaseLogsResponse>(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/logs${qs}`);
   }
 
   async getCodebaseBranches(projectId: string, codebaseId: string): Promise<string[]> {
@@ -2406,6 +2522,55 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch<{ cleaned: number }>(`${this.baseUrl}/api/projects/${projectId}/worktrees/cleanup`, { method: 'POST' });
   }
 
+  // ── Project workflow runs (G-15): ProjectDetail Runs tab ──
+  async listProjectRuns(
+    projectId: string,
+    filter?: { status?: string | string[]; cursor?: string; limit?: number },
+  ): Promise<ProjectRunListPage> {
+    const params = new URLSearchParams();
+    if (filter?.status) {
+      const status = Array.isArray(filter.status) ? filter.status.join(',') : filter.status;
+      params.set('status', status);
+    }
+    if (filter?.cursor) params.set('cursor', filter.cursor);
+    if (filter?.limit !== undefined) params.set('limit', String(filter.limit));
+    const qs = params.toString();
+    return apiFetch<ProjectRunListPage>(`${this.baseUrl}/api/projects/${projectId}/runs${qs ? `?${qs}` : ''}`);
+  }
+
+  // ── Stats summary (G-10): Home "This week", Workflows stat strip,
+  // AutomationDetail stat row, WorkflowDetail rail ──
+  async getStatsSummary(query: {
+    from: string;
+    to: string;
+    projectId?: string;
+    definitionId?: string;
+    automationId?: string;
+    groupBy?: 'definition';
+  }): Promise<StatsSummary> {
+    const params = new URLSearchParams({ from: query.from, to: query.to });
+    if (query.projectId) params.set('projectId', query.projectId);
+    if (query.definitionId) params.set('definitionId', query.definitionId);
+    if (query.automationId) params.set('automationId', query.automationId);
+    if (query.groupBy) params.set('groupBy', query.groupBy);
+    return apiFetch<StatsSummary>(`${this.baseUrl}/api/stats/summary?${params}`);
+  }
+
+  // ── Recently finished activity (G-11): Home "Recently finished" ──
+  async getRecentActivity(query?: { since?: string; limit?: number; projectId?: string }): Promise<RecentActivityPage> {
+    const params = new URLSearchParams();
+    if (query?.since) params.set('since', query.since);
+    if (query?.limit !== undefined) params.set('limit', String(query.limit));
+    if (query?.projectId) params.set('projectId', query.projectId);
+    const qs = params.toString();
+    return apiFetch<RecentActivityPage>(`${this.baseUrl}/api/activity/recent${qs ? `?${qs}` : ''}`);
+  }
+
+  // ── System info (G-12): Home "System" card + Settings › Diagnostics ──
+  async getSystemInfo(): Promise<SystemInfo> {
+    return apiFetch<SystemInfo>(`${this.baseUrl}/api/system/info`);
+  }
+
   // ── System Artifacts API ──
   async listSystemArtifacts(type?: string): Promise<any[]> {
     const params = new URLSearchParams();
@@ -2480,6 +2645,48 @@ export class HttpPlatformClient implements IPlatformClient {
     );
   }
 
+  // ── Workflow engine (flow keys, summary model, trigger debounce) ──
+  async getWorkflowEngineSettings(): Promise<WorkflowEngineSettings> {
+    return apiFetch<WorkflowEngineSettings>(`${this.baseUrl}/api/settings/workflow-engine`);
+  }
+
+  async setWorkflowEngineSettings(update: WorkflowEngineSettingsUpdate): Promise<WorkflowEngineSettings> {
+    return apiFetch<WorkflowEngineSettings>(`${this.baseUrl}/api/settings/workflow-engine`, {
+      method: 'PUT',
+      body: JSON.stringify(update),
+    });
+  }
+
+  // ── Extensions (F-settings-13) ──
+  async getExtensions(): Promise<InstalledExtension[]> {
+    const body = await apiFetch<{ extensions: InstalledExtension[] }>(`${this.baseUrl}/api/extensions`);
+    return body.extensions;
+  }
+
+  async installExtension(params: InstallExtensionParams): Promise<InstalledExtension> {
+    const body = await apiFetch<{ extension: InstalledExtension }>(`${this.baseUrl}/api/extensions`, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+    return body.extension;
+  }
+
+  async setExtensionEnabled(id: string, enabled: boolean): Promise<InstalledExtension> {
+    const body = await apiFetch<{ extension: InstalledExtension }>(
+      `${this.baseUrl}/api/extensions/${encodeURIComponent(id)}`,
+      { method: 'PATCH', body: JSON.stringify({ enabled }) },
+    );
+    return body.extension;
+  }
+
+  async uninstallExtension(id: string): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/extensions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  async reloadExtensions(): Promise<{ ok: boolean; count: number }> {
+    return apiFetch<{ ok: boolean; count: number }>(`${this.baseUrl}/api/extensions/reload`, { method: 'POST' });
+  }
+
   async getComputerRuntime(workspaceId: string): Promise<ComputerRuntime> {
     return apiFetch<ComputerRuntime>(
       `${this.baseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/computer/runtime`,
@@ -2496,6 +2703,59 @@ export class HttpPlatformClient implements IPlatformClient {
     );
   }
 
+  // ── Computer preview: recording, replay, activity, frames (P4-11) ──
+  async computerRecording(
+    workspaceId: string,
+    action: 'start' | 'stop' | 'status',
+    opts: { windowTitle?: string; screenVideo?: boolean } = {},
+  ): Promise<ComputerRecordingState> {
+    return apiFetch<ComputerRecordingState>(this.computerUrl(workspaceId, 'recording'), {
+      method: 'POST',
+      body: JSON.stringify({ action, ...opts }),
+    });
+  }
+
+  async listComputerRecordingTurns(workspaceId: string): Promise<ComputerReplayTurn[]> {
+    const body = await apiFetch<{ turns?: ComputerReplayTurn[] }>(this.computerUrl(workspaceId, 'recording/turns'), {
+      cache: 'no-store',
+    });
+    return body?.turns ?? [];
+  }
+
+  async listComputerActivity(workspaceId: string): Promise<ComputerActivityRow[]> {
+    const body = await apiFetch<{ entries?: ComputerActivityRow[] }>(this.computerUrl(workspaceId, 'activity'), {
+      cache: 'no-store',
+    });
+    return body?.entries ?? [];
+  }
+
+  async listComputerFrames(workspaceId: string): Promise<ComputerFrameSummary[]> {
+    const body = await apiFetch<{ frames?: ComputerFrameSummary[] }>(this.computerUrl(workspaceId, 'frames'), {
+      cache: 'no-store',
+    });
+    return body?.frames ?? [];
+  }
+
+  /** One window capture (PNG) by artifact id. */
+  async getComputerFrame(workspaceId: string, artifactId: string): Promise<Blob> {
+    const response = await getAuthRuntime().fetch(
+      this.computerUrl(workspaceId, `frames/${encodeURIComponent(artifactId)}`),
+      { cache: 'no-store' },
+    );
+    if (!response.ok) throw new ApiError(response.status, `HTTP_${String(response.status)}`, 'Frame not available');
+    return response.blob();
+  }
+
+  /** `src` for a replay turn frame or the screen-cast video (media elements load it themselves). */
+  computerMediaUrl(
+    workspaceId: string,
+    media: { turn: string; kind: ComputerReplayFrameKind } | { video: number },
+  ): string {
+    return 'video' in media
+      ? this.computerUrl(workspaceId, `recording/video?v=${String(media.video)}`)
+      : this.computerUrl(workspaceId, `recording/turns/${encodeURIComponent(media.turn)}/${media.kind}`);
+  }
+
   // ── Available Artifacts (system + project merged) ──
   async listAvailableArtifacts(projectId: string, type?: string): Promise<any[]> {
     const params = new URLSearchParams();
@@ -2505,8 +2765,27 @@ export class HttpPlatformClient implements IPlatformClient {
   }
 
   // ── Codebase-level Worktree API ──
-  async listCodebaseWorktrees(projectId: string, codebaseId: string): Promise<any[]> {
-    return apiFetch<any[]>(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/worktrees`);
+  /**
+   * Bare (no `include`) is UNCHANGED — the legacy CodebaseDetailPage calls it
+   * this way and keeps getting the plain array it always got. Pass `include`
+   * (G-17) to get `sizeBytes`/`link`/`expiresAt` per item plus the
+   * `totalBytes`/`reclaimableBytes` summary.
+   */
+  listCodebaseWorktrees(projectId: string, codebaseId: string): Promise<WorktreeInfo[]>;
+  listCodebaseWorktrees(
+    projectId: string,
+    codebaseId: string,
+    opts: { include: Array<'usage' | 'link'> },
+  ): Promise<WorktreeListEnriched>;
+  async listCodebaseWorktrees(
+    projectId: string,
+    codebaseId: string,
+    opts?: { include: Array<'usage' | 'link'> },
+  ): Promise<WorktreeInfo[] | WorktreeListEnriched> {
+    const qs = opts?.include.length ? `?include=${opts.include.join(',')}` : '';
+    return apiFetch<WorktreeInfo[] | WorktreeListEnriched>(
+      `${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/worktrees${qs}`,
+    );
   }
 
   async removeCodebaseWorktree(projectId: string, codebaseId: string, worktreeId: string): Promise<void> {
@@ -2537,6 +2816,10 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch<any[]>(`${this.baseUrl}/api/workflow-scripts`);
   }
 
+  async getScriptsStatus(): Promise<{ enabled: boolean; found: number; loaded: number }> {
+    return apiFetch(`${this.baseUrl}/api/workflow-scripts/status`);
+  }
+
   async getScript(id: string): Promise<any> {
     return apiFetch<any>(`${this.baseUrl}/api/workflow-scripts/${id}`);
   }
@@ -2547,14 +2830,6 @@ export class HttpPlatformClient implements IPlatformClient {
 
   async materializeScript(id: string, options?: { name?: string; projectId?: string; variables?: Record<string, unknown> }): Promise<any> {
     return apiFetch<any>(`${this.baseUrl}/api/workflow-scripts/${id}/materialize`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(options ?? {}),
-    });
-  }
-
-  async runScript(id: string, options?: { profileName?: string; variables?: Record<string, unknown>; projectId?: string }): Promise<any> {
-    return apiFetch<any>(`${this.baseUrl}/api/workflow-scripts/${id}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(options ?? {}),
@@ -2593,12 +2868,6 @@ export class HttpPlatformClient implements IPlatformClient {
   // above) so the web client has feature parity at the client layer.
   // ════════════════════════════════════════════════════════════════
 
-  // PARITY-12: export a definition as portable JSON (web could re-derive, but
-  // the dedicated endpoint preserves the canonical export shape).
-  async exportDefinition(id: string): Promise<Record<string, unknown>> {
-    return apiFetch<Record<string, unknown>>(`${this.baseUrl}/api/workflow-definitions/${id}/export`);
-  }
-
   // PARITY-3: workspace lifecycle management (archive / commit / delete / cleanup).
   async listWorkspaces(filters?: Record<string, string>): Promise<any[]> {
     const qs = filters && Object.keys(filters).length ? `?${new URLSearchParams(filters)}` : '';
@@ -2629,19 +2898,6 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
-  // PARITY-4: webhook registration management.
-  async listWebhookRegistrations(): Promise<any[]> {
-    return apiFetch<any[]>(`${this.baseUrl}/api/webhooks/registrations`);
-  }
-  async createWebhookRegistration(params: Record<string, unknown>): Promise<any> {
-    return apiFetch<any>(`${this.baseUrl}/api/webhooks/registrations`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params),
-    });
-  }
-  async deleteWebhookRegistration(id: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/webhooks/registrations/${id}`, { method: 'DELETE' });
-  }
-
   // PARITY-8: hook phase listing + dry-run hook testing.
   async listHookPhases(): Promise<any[]> {
     return apiFetch<any[]>(`${this.baseUrl}/api/hooks/phases`);
@@ -2658,4 +2914,141 @@ export class HttpPlatformClient implements IPlatformClient {
       method: 'POST',
     });
   }
+
+  // G-01: the attention feed snapshot (Needs you + Running). Live deltas
+  // arrive on the `global` scope; `hooks/attentionQueries.ts` folds them in.
+  async getAttention(filter?: AttentionFilter): Promise<AttentionSnapshot> {
+    const query = filter?.projectId ? `?projectId=${encodeURIComponent(filter.projectId)}` : '';
+    return apiFetch<AttentionSnapshot>(`${this.baseUrl}/api/attention${query}`);
+  }
+
+  // G-02: bulk actions for the chat list's bulk bar. The server answers per
+  // id, so a partial failure is reported, not thrown; any number of ids is
+  // split into requests of at most CHAT_BULK_MAX_IDS (`runChatBulk`, P2-R1).
+  async archiveChats(chatIds: string[]): Promise<ChatBulkResult> {
+    return runChatBulk(chatIds, (ids) => this.postChatBulk('archive', ids));
+  }
+
+  async deleteChats(chatIds: string[]): Promise<ChatBulkResult> {
+    return runChatBulk(chatIds, (ids) => this.postChatBulk('delete', ids));
+  }
+
+  // G-09: agent providers for the model picker and Settings > Providers.
+  async getHarnessProviders(options?: { refresh?: boolean }): Promise<HarnessProvidersResponse> {
+    return apiFetch<HarnessProvidersResponse>(
+      `${this.baseUrl}/api/harness/providers${options?.refresh ? '?refresh=1' : ''}`,
+    );
+  }
+
+  async installProvider(type: string): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/harness/providers/${encodeURIComponent(type)}/install`, { method: 'POST' });
+  }
+
+  async loginProvider(type: string): Promise<HarnessLoginResult> {
+    return apiFetch<HarnessLoginResult>(
+      `${this.baseUrl}/api/harness/providers/${encodeURIComponent(type)}/login`,
+      { method: 'POST' },
+    );
+  }
+
+  async logoutProvider(type: string): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/harness/providers/${encodeURIComponent(type)}/logout`, { method: 'POST' });
+  }
+
+  async setDefaultProvider(type: string): Promise<HarnessSetDefaultResult> {
+    return apiFetch<HarnessSetDefaultResult>(`${this.baseUrl}/api/harness/switch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type }),
+    });
+  }
+
+  // D-131: which providers this server serves (Settings › Model providers).
+  async getHarnessVisibility(): Promise<HarnessVisibilityResponse> {
+    return apiFetch<HarnessVisibilityResponse>(`${this.baseUrl}/api/harness/visibility`);
+  }
+
+  async setHarnessVisibility(update: HarnessVisibilityUpdate): Promise<HarnessVisibilityResponse> {
+    return apiFetch<HarnessVisibilityResponse>(`${this.baseUrl}/api/harness/visibility`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(update),
+    });
+  }
+
+  // G-07: computer consent, grants and control.
+  private computerUrl(workspaceId: string, rest: string): string {
+    return `${this.baseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/computer/${rest}`;
+  }
+
+  async getComputerConsent(workspaceId: string): Promise<ComputerPendingConsent[]> {
+    const body = await apiFetch<{ pending: ComputerPendingConsent[] }>(this.computerUrl(workspaceId, 'consent'), {
+      cache: 'no-store',
+    });
+    return body.pending;
+  }
+
+  async answerComputerConsent(workspaceId: string, answer: ComputerConsentAnswer): Promise<ComputerConsentAnswerResult> {
+    return apiFetch<ComputerConsentAnswerResult>(this.computerUrl(workspaceId, 'consent'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(answer),
+    });
+  }
+
+  async listComputerGrants(workspaceId: string): Promise<ComputerGrant[]> {
+    const body = await apiFetch<{ grants: ComputerGrant[] }>(this.computerUrl(workspaceId, 'grants'), {
+      cache: 'no-store',
+    });
+    return body.grants;
+  }
+
+  async revokeComputerGrant(workspaceId: string, appIdentity: string): Promise<void> {
+    await apiFetch(this.computerUrl(workspaceId, `grants/${encodeURIComponent(appIdentity)}`), { method: 'DELETE' });
+  }
+
+  async getComputerControl(workspaceId: string): Promise<ComputerControlState> {
+    return apiFetch<ComputerControlState>(this.computerUrl(workspaceId, 'control'), { cache: 'no-store' });
+  }
+
+  async setComputerControl(workspaceId: string, mode: ComputerControlMode): Promise<ComputerControlState> {
+    return apiFetch<ComputerControlState>(this.computerUrl(workspaceId, 'control'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    });
+  }
+
+  private postChatBulk(action: 'archive' | 'delete', ids: string[]): Promise<ChatBulkResult> {
+    return apiFetch<ChatBulkResult>(`${this.baseUrl}/api/chats/${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
+  }
+
+  /**
+   * G-18 — CommandPalette entity search across chats, projects, agents,
+   * workflows, automations and scripts, ranked and merged server-side.
+   */
+  async search(query: SearchQuery): Promise<SearchResponse> {
+    const q = new URLSearchParams({ q: query.q });
+    if (query.types?.length) q.set('types', query.types.join(','));
+    if (query.limit !== undefined) q.set('limit', String(query.limit));
+    return apiFetch<SearchResponse>(`${this.baseUrl}/api/search?${q}`, { cache: 'no-store' });
+  }
+}
+
+/** A remembered permission rule as the rules endpoints return it (U-16, D-147). */
+export interface StoredPermissionRuleView {
+  id: string;
+  kind: 'command' | 'tool';
+  match: string;
+  createdAt: string;
+}
+
+/** The rules resource of a chat, a run or a project. */
+function permissionRulesPath(owner: { kind: 'chat' | 'run' | 'project'; id: string }): string {
+  const base = { chat: '/api/chats', run: '/api/workflow-runs', project: '/api/projects' }[owner.kind];
+  return `${base}/${encodeURIComponent(owner.id)}/permission-rules`;
 }

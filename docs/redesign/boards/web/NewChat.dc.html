@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chats · New chat dialog</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#0b0b0c}
+.t-dark{--ground:#0b0b0c;--surface:#111113;--raised:#17171a;--overlay:#1d1d21;--sunken:#0d0d0f;--hover:rgba(255,255,255,.035);--selected:rgba(255,255,255,.07);--line:#27272c;--line-soft:#1c1c20;--line-strong:#37373d;--fg:#ededef;--fg-2:#a1a1aa;--fg-3:#80808a;--run:#6aa6ff;--run-bg:rgba(106,166,255,.12);--ok:#4cc38a;--ok-bg:rgba(76,195,138,.12);--warn:#f0b429;--warn-bg:rgba(240,180,41,.12);--err:#ff6369;--err-bg:rgba(255,99,105,.12);--add-bg:rgba(76,195,138,.09);--del-bg:rgba(255,99,105,.09);--shadow-pop:0 16px 40px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06);--scrim:rgba(0,0,0,.62);color-scheme:dark}
+.t-light{--ground:#f1f1ef;--surface:#ffffff;--raised:#fafaf9;--overlay:#ffffff;--sunken:#f6f6f4;--hover:rgba(0,0,0,.03);--selected:rgba(0,0,0,.055);--line:#e2e2de;--line-soft:#ecece9;--line-strong:#d0d0cb;--fg:#18181b;--fg-2:#55555d;--fg-3:#6b6b73;--run:#1d6ae5;--run-bg:rgba(29,106,229,.09);--ok:#16804c;--ok-bg:rgba(22,128,76,.09);--warn:#935f00;--warn-bg:rgba(214,150,0,.13);--err:#d1242f;--err-bg:rgba(209,36,47,.08);--add-bg:rgba(22,128,76,.08);--del-bg:rgba(209,36,47,.07);--shadow-pop:0 16px 40px rgba(20,20,30,.14),0 0 0 1px rgba(0,0,0,.06);--scrim:rgba(20,20,24,.3);color-scheme:light}
+.acc-ink{--accent:var(--fg);--on-accent:var(--surface)}
+.acc-blue{--accent:#2f6fed;--on-accent:#ffffff}
+.acc-violet{--accent:#7152e0;--on-accent:#ffffff}
+.acc-green{--accent:#1b8a52;--on-accent:#ffffff}
+.acc-orange{--accent:#d4561c;--on-accent:#ffffff}
+.acc-rose{--accent:#c8325f;--on-accent:#ffffff}
+.acc-teal{--accent:#0f7f7a;--on-accent:#ffffff}
+.app{font-family:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:13px;line-height:1.45;color:var(--fg);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.app *{box-sizing:border-box}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.i12{width:12px;height:12px}.i14{width:14px;height:14px}.i20{width:20px;height:20px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line);background:var(--raised);color:var(--fg);font-family:inherit;font-size:13px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;text-decoration:none}
+.btn-p{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.btn-g{background:transparent;border-color:transparent;color:var(--fg-2)}
+.btn-d{color:var(--err)}
+.btn-sm{height:24px;padding:0 8px;font-size:12px;border-radius:5px}
+.btn-lg{height:32px;padding:0 12px}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;border:0;background:transparent;color:var(--fg-2);padding:0;cursor:pointer;flex-shrink:0}
+.ib-sm{width:24px;height:24px;border-radius:5px}
+.ib.on{background:var(--selected);color:var(--fg)}
+.kbd{display:inline-flex;align-items:center;justify-content:center;height:18px;min-width:18px;padding:0 4px;border-radius:4px;border:1px solid var(--line);background:var(--sunken);color:var(--fg-3);font-family:"JetBrains Mono",monospace;font-size:11px;line-height:1;font-weight:400}
+.bdg{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border-radius:4px;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.s-run{color:var(--run);background:var(--run-bg)}.s-ok{color:var(--ok);background:var(--ok-bg)}.s-warn{color:var(--warn);background:var(--warn-bg)}.s-err{color:var(--err);background:var(--err-bg)}.s-idle{color:var(--fg-2);background:var(--selected)}
+.c-run{color:var(--run)}.c-ok{color:var(--ok)}.c-warn{color:var(--warn)}.c-err{color:var(--err)}.c-1{color:var(--fg)}.c-2{color:var(--fg-2)}.c-3{color:var(--fg-3)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.inp{display:flex;align-items:center;gap:8px;height:32px;border-radius:6px;border:1px solid var(--line);background:var(--sunken);color:var(--fg);padding:0 10px;font-family:inherit;font-size:13px;width:100%}
+.lbl{font-size:12px;font-weight:500;color:var(--fg-2)}
+.hint{font-size:12px;color:var(--fg-3)}
+.nav{display:flex;align-items:center;gap:10px;height:30px;padding:0 8px;border-radius:6px;color:var(--fg-2);font-size:13px;font-weight:500;text-decoration:none}
+.nav.on{background:var(--selected);color:var(--fg)}
+.cnt{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--fg-3)}
+.sec{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tabs{display:flex;gap:20px;border-bottom:1px solid var(--line-soft)}
+.tab{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0;border:0;background:none;font-family:inherit;font-size:13px;font-weight:500;color:var(--fg-2);text-decoration:none}
+.tab.on{color:var(--fg);box-shadow:inset 0 -2px 0 var(--fg)}
+.seg{display:inline-flex;gap:2px;padding:2px;border-radius:7px;background:var(--sunken);border:1px solid var(--line-soft)}
+.seg button{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:5px;border:0;background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;line-height:1}
+.seg button.on{background:var(--raised);color:var(--fg);box-shadow:0 0 0 1px var(--line)}
+.card{background:var(--raised);border:1px solid var(--line-soft);border-radius:8px}
+.th{display:flex;align-items:center;height:32px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tr{display:flex;align-items:center;gap:16px;height:44px;padding:0 20px;border-bottom:1px solid var(--line-soft);font-size:13px}
+.sw{position:relative;display:inline-block;width:28px;height:16px;border-radius:999px;border:0;padding:0;background:var(--line-strong);flex-shrink:0}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#ffffff}
+.sw.on{background:var(--accent)}
+.sw.on::after{left:14px;background:var(--on-accent)}
+.cb{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:4px;border:1px solid var(--line-strong);flex-shrink:0;color:var(--on-accent)}
+.cb.on{background:var(--accent);border-color:var(--accent)}
+.av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:var(--selected);color:var(--fg-2);font-size:11px;font-weight:600;flex-shrink:0}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.mono span{white-space:pre}
+.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+
+</style>
+</helmet>
+<div class="app {{rootClass}}" style="width: 1440px; height: 900px; position: relative; display: flex; background: var(--ground); overflow: hidden;">
+<aside style="width: 232px; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; padding: 10px 8px 8px 8px;">
+<div style="display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 4px 0 6px;">
+<button style="display: flex; align-items: center; gap: 10px; flex-grow: 1; min-width: 0; height: 36px; padding: 0 6px 0 2px; border: 0; background: transparent; border-radius: 6px; color: var(--fg); font-family: inherit; text-align: left;" aria-label="Switch server">
+<svg viewBox="0 0 20 20" style="width: 22px; height: 22px; flex-shrink: 0;"><rect width="20" height="20" rx="5" style="fill: var(--fg);"></rect><circle cx="6.5" cy="6.5" r="2.1" style="fill: var(--ground);"></circle><circle cx="13.5" cy="13.5" r="2.1" style="fill: var(--ground);"></circle><path d="M6.5 8.8v2.4a2.3 2.3 0 0 0 2.3 2.3h2.4" style="fill: none; stroke: var(--ground); stroke-width: 1.6; stroke-linecap: round;"></path></svg>
+<span style="display: flex; flex-direction: column; min-width: 0; line-height: 1.2;">
+<span style="font-size: 13px; font-weight: 600;">GeneratorAI</span>
+<span style="font-size: 11px; color: var(--fg-3);">This computer</span>
+</span>
+<svg class="i i12" viewBox="0 0 24 24" style="color: var(--fg-3); margin-left: 2px;"><path d="m6 9 6 6 6-6"></path></svg>
+</button>
+<button class="ib" aria-label="Collapse sidebar"><svg class="i" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path></svg></button>
+</div>
+<div style="display: flex; gap: 6px; padding: 4px 0 8px 0;">
+<button class="btn" style="flex-grow: 1; justify-content: flex-start; height: 30px; background: var(--surface); color: var(--fg-3); font-weight: 400;"><svg class="i i14" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>Search<span class="kbd" style="margin-left: auto;">Ctrl K</span></button>
+<button class="btn" style="width: 30px; height: 30px; padding: 0; background: var(--surface);" aria-label="New chat"><svg class="i i14" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button>
+</div>
+<nav style="display: flex; flex-direction: column; gap: 1px;">
+<a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"></path><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>Home</a>
+<a class="nav on" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>Chats</a>
+<a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg>Projects</a>
+<a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>Agents</a>
+<a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></svg>Workflows</a>
+<a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"></path><path d="M16 2v4"></path><path d="M8 2v4"></path><path d="M3 10h5"></path><path d="M17.5 17.5 16 16.3V14"></path><circle cx="16" cy="16" r="6"></circle></svg>Automations</a>
+<a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="m5 12-3 3 3 3"></path><path d="m9 18 3-3-3-3"></path></svg>Scripts</a>
+</nav>
+<div class="sec" style="margin-top: 14px;">Needs you<span class="cnt" style="color: var(--warn);">2</span></div>
+<a class="nav" href="#" style="height: 44px; align-items: flex-start; padding-top: 6px;">
+<span class="dot" style="background: var(--warn); margin: 5px 4px 0 4px;"></span>
+<span style="display: flex; flex-direction: column; min-width: 0; line-height: 1.3;"><span class="trunc" style="color: var(--fg);">Nightly dependency audit</span><span class="trunc" style="font-size: 12px; font-weight: 400; color: var(--fg-3);">Approve “Apply upgrades”</span></span>
+</a>
+<a class="nav" href="#" style="height: 44px; align-items: flex-start; padding-top: 6px;">
+<span class="dot" style="background: var(--warn); margin: 5px 4px 0 4px;"></span>
+<span style="display: flex; flex-direction: column; min-width: 0; line-height: 1.3;"><span class="trunc" style="color: var(--fg);">Fix flaky checkout test</span><span class="trunc" style="font-size: 12px; font-weight: 400; color: var(--fg-3);">Allow git push?</span></span>
+</a>
+<div class="sec" style="margin-top: 10px;">Running<span class="cnt">3</span></div>
+<a class="nav" href="#"><svg class="i i12" viewBox="0 0 24 24" style="color: var(--run); margin: 0 2px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg><span class="trunc">Upgrade React Flow to v12</span><span class="cnt">4:12</span></a>
+<a class="nav" href="#"><svg class="i i12" viewBox="0 0 24 24" style="color: var(--run); margin: 0 2px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg><span class="trunc">PR review pipeline #311</span><span class="cnt">1:05</span></a>
+<a class="nav" href="#"><svg class="i i12" viewBox="0 0 24 24" style="color: var(--run); margin: 0 2px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg><span class="trunc">Memory leak in worker</span><span class="cnt">0:38</span></a>
+<div style="flex-grow: 1;"></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 44px; padding: 8px 4px 0 10px; border-top: 1px solid var(--line-soft); margin-top: 8px;">
+<span class="dot" style="background: var(--ok); width: 6px; height: 6px;"></span>
+<span style="font-size: 12px; color: var(--fg-2);">Connected</span>
+<span class="mono" style="font-size: 11px; color: var(--fg-3);">local:3100</span>
+<button class="ib" style="margin-left: auto;" aria-label="Settings"><svg class="i" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+</div>
+</aside>
+<main style="flex-grow: 1; min-width: 0; margin: 8px 8px 8px 0; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden;">
+<header style="display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 10px 0 16px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;">
+<span style="font-size: 13px; font-weight: 600;">Chats</span>
+<div style="flex-grow: 1;"></div>
+<button class="ib" aria-label="More"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg></button>
+</header>
+<div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 24px 28px; display: flex; flex-direction: column; gap: 16px;">
+<div style="display: flex; align-items: center; gap: 10px; height: 32px;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em;">Chats</h1>
+<span class="mono" style="font-size: 12px; color: var(--fg-3);">48</span>
+<div style="flex-grow: 1;"></div>
+<button class="btn btn-p"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>New chat<span class="kbd" style="background: transparent; border-color: currentColor; color: inherit; opacity: .7;">Ctrl N</span></button>
+</div>
+
+<div style="display: flex; align-items: center; gap: 8px;">
+<label class="inp" style="width: 264px; color: var(--fg-3);"><svg class="i i14" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg><input type="text" placeholder="Search chats" aria-label="Search chats" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; color: var(--fg); font-family: inherit; font-size: 13px; outline: none; padding: 0;"><span class="kbd">/</span></label>
+<div class="seg" role="tablist" aria-label="Chat state">
+<button class="on" role="tab" aria-selected="true">All<span class="mono c-3" style="font-size: 11px;">48</span></button>
+<button role="tab">Active<span class="mono c-3" style="font-size: 11px;">41</span></button>
+<button role="tab">Archived<span class="mono c-3" style="font-size: 11px;">7</span></button>
+</div>
+<button class="chip">Project<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<button class="chip">Agent<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<button class="chip">Status<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<button class="chip">Tags<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="btn btn-g btn-sm"><svg class="i i12" viewBox="0 0 24 24"><path d="m21 16-4 4-4-4"></path><path d="M17 20V4"></path><path d="m3 8 4-4 4 4"></path><path d="M7 4v16"></path></svg>Last activity</button>
+</div>
+
+<div style="border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden;">
+<div class="th" style="gap: 16px; padding: 0 20px; border-bottom: 1px solid var(--line-soft);">
+<span class="cb" role="checkbox" aria-checked="false" aria-label="Select all chats"></span>
+<span style="flex-grow: 1;">Title</span>
+<span style="width: 140px;">Project</span>
+<span style="width: 150px;">Agent</span>
+<span style="width: 96px;">Status</span>
+<span style="width: 88px; text-align: right;">Changes</span>
+<span style="width: 72px; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 4px;">Activity<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></span>
+<span style="width: 56px;"></span>
+</div>
+<div class="tr" style="">
+<span class="cb" role="checkbox" aria-checked="false" aria-label="Select Fix flaky checkout test"></span>
+<a href="#" class="trunc" style="flex-grow: 1; font-weight: 500; color: var(--fg); text-decoration: none;">Fix flaky checkout test</a>
+<span class="mono trunc" style="width: 140px; font-size: 12px; color: var(--fg-2);">payments-service</span>
+<span style="width: 150px; display: flex; align-items: center; gap: 8px; min-width: 0;"><span class="av" style="width: 20px; height: 20px; font-size: 10px;">BF</span><span class="trunc" style="color: var(--fg-2);">Bug Fixer</span></span>
+<span style="width: 96px; display: flex;"><span class="bdg s-warn"><svg class="i i12" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"></path><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>Needs you</span></span>
+<span class="mono" style="width: 88px; text-align: right; font-size: 11px;"><span class="c-ok">+18</span> <span class="c-err">−8</span></span>
+<span class="mono" style="width: 72px; text-align: right; font-size: 11px; color: var(--fg-3);">3m</span>
+<span style="width: 56px;"></span>
+</div>
+<div class="tr" style="">
+<span class="cb" role="checkbox" aria-checked="false" aria-label="Select Upgrade React Flow to v12"></span>
+<a href="#" class="trunc" style="flex-grow: 1; font-weight: 500; color: var(--fg); text-decoration: none;">Upgrade React Flow to v12</a>
+<span class="mono trunc" style="width: 140px; font-size: 12px; color: var(--fg-2);">web-dashboard</span>
+<span style="width: 150px; display: flex; align-items: center; gap: 8px; min-width: 0;"><span class="av" style="width: 20px; height: 20px; font-size: 10px;">OR</span><span class="trunc" style="color: var(--fg-2);">Orchestrator</span></span>
+<span style="width: 96px; display: flex;"><span class="bdg s-run"><svg class="i i12" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>Running</span></span>
+<span class="mono" style="width: 88px; text-align: right; font-size: 11px;"><span class="c-ok">+146</span> <span class="c-err">−92</span></span>
+<span class="mono" style="width: 72px; text-align: right; font-size: 11px; color: var(--fg-3);">now</span>
+<span style="width: 56px;"></span>
+</div>
+<div class="tr" style="">
+<span class="cb" role="checkbox" aria-checked="false" aria-label="Select Memory leak in worker"></span>
+<a href="#" class="trunc" style="flex-grow: 1; font-weight: 500; color: var(--fg); text-decoration: none;">Memory leak in worker</a>
+<span class="mono trunc" style="width: 140px; font-size: 12px; color: var(--fg-2);">payments-service</span>
+<span style="width: 150px; display: flex; align-items: center; gap: 8px; min-width: 0;"><span class="av" style="width: 20px; height: 20px; font-size: 10px;">BF</span><span class="trunc" style="color: var(--fg-2);">Bug Fixer</span></span>
+<span style="width: 96px; display: flex;"><span class="bdg s-run"><svg class="i i12" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>Running</span></span>
+<span class="mono" style="width: 88px; text-align: right; font-size: 11px;"><span class="c-ok">+6</span> <span class="c-err">−1</span></span>
+<span class="mono" style="width: 72px; text-align: right; font-size: 11px; color: var(--fg-3);">now</span>
+<span style="width: 56px;"></span>
+</div>
+<div class="tr" style="">
+<span class="cb" role="checkbox" aria-checked="false" aria-label="Select Audit IAM policies"></span>
+<a href="#" class="trunc" style="flex-grow: 1; font-weight: 500; color: var(--fg); text-decoration: none;">Audit IAM policies</a>
+<span class="mono trunc" style="width: 140px; font-size: 12px; color: var(--fg-2);">infra-terraform</span>
+<span style="width: 150px; display: flex; align-items: center; gap: 8px; min-width: 0;"><span class="av" style="width: 20px; height: 20px; font-size: 10px;">SA</span><span class="trunc" style="color: var(--fg-2);">Security Auditor</span></span>
+<span style="width: 96px; display: flex;"><span class="bdg s-ok"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>Done</span></span>
+<span class="mono" style="width: 88px; text-align: right; font-size: 11px;"><span class="c-ok">+212</span> <span class="c-err">−48</span></span>
+<span class="mono" style="width: 72px; text-align: right; font-size: 11px; color: var(--fg-3);">1h</span>
+<span style="width: 56px;"></span>
+</div>
+<div class="tr" style="">
+<span class="cb" role="checkbox" aria-checked="false" aria-label="Select Draft release notes 2.4"></span>
+<a href="#" class="trunc" style="flex-grow: 1; font-weight: 500; color: var(--fg); text-decoration: none;">Draft release notes 2.4</a>
+<span class="mono trunc" style="width: 140px; font-size: 12px; color: var(--fg-2);">docs-site</span>
+<span style="width: 150px; display: flex; align-items: center; gap: 8px; min-width: 0;"><span class="av" style="width: 20px; height: 20px; font-size: 10px;">RS</span><span class="trunc" style="color: var(--fg-2);">Release Scribe</span></span>
+<span style="width: 96px; display: flex;"><span class="bdg s-ok"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>Done</span></span>
+<span class="mono" style="width: 88px; text-align: right; font-size: 11px;"><span class="c-ok">+96</span> <span class="c-err">−12</span></span>
+<span class="mono" style="width: 72px; text-align: right; font-size: 11px; color: var(--fg-3);">2h</span>
+<span style="width: 56px;"></span>
+</div>
+<div class="tr" style="">
+<span class="cb" role="checkbox" aria-checked="false" aria-label="Select Refactor pricing module"></span>
+<a href="#" class="trunc" style="flex-grow: 1; font-weight: 500; color: var(--fg); text-decoration: none;">Refactor pricing module</a>
+<span class="mono trunc" style="width: 140px; font-size: 12px; color: var(--fg-2);">payments-service</span>
+<span style="width: 150px; display: flex; align-items: center; gap: 8px; min-width: 0;"><span class="av" style="width: 20px; height: 20px; font-size: 10px;">BF</span><span class="trunc" style="color: var(--fg-2);">Bug Fixer</span></span>
+<span style="width: 96px; display: flex;"><span class="bdg s-err"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg>Failed</span></span>
+<span class="mono" style="width: 88px; text-align: right; font-size: 11px;"><span class="c-ok">+38</span> <span class="c-err">−4</span></span>
+<span class="mono" style="width: 72px; text-align: right; font-size: 11px; color: var(--fg-3);">2h</span>
+<span style="width: 56px;"></span>
+</div>
+<div class="tr" style="">
+<span class="cb" role="checkbox" aria-checked="false" aria-label="Select Write tests for currency rounding"></span>
+<a href="#" class="trunc" style="flex-grow: 1; font-weight: 500; color: var(--fg); text-decoration: none;">Write tests for currency rounding</a>
+<span class="mono trunc" style="width: 140px; font-size: 12px; color: var(--fg-2);">payments-service</span>
+<span style="width: 150px; display: flex; align-items: center; gap: 8px; min-width: 0;"><span class="av" style="width: 20px; height: 20px; font-size: 10px;">TW</span><span class="trunc" style="color: var(--fg-2);">Test Writer</span></span>
+<span style="width: 96px; display: flex;"><span class="bdg s-ok"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>Done</span></span>
+<span class="mono" style="width: 88px; text-align: right; font-size: 11px;"><span class="c-ok">+120</span> <span class="c-err">−0</span></span>
+<span class="mono" style="width: 72px; text-align: right; font-size: 11px; color: var(--fg-3);">4h</span>
+<span style="width: 56px;"></span>
+</div>
+<div class="tr" style="">
+<span class="cb" role="checkbox" aria-checked="false" aria-label="Select Review dark-mode token PR #1176"></span>
+<a href="#" class="trunc" style="flex-grow: 1; font-weight: 500; color: var(--fg); text-decoration: none;">Review dark-mode token PR #1176</a>
+<span class="mono trunc" style="width: 140px; font-size: 12px; color: var(--fg-2);">web-dashboard</span>
+<span style="width: 150px; display: flex; align-items: center; gap: 8px; min-width: 0;"><span class="av" style="width: 20px; height: 20px; font-size: 10px;">CR</span><span class="trunc" style="color: var(--fg-2);">Code Reviewer</span></span>
+<span style="width: 96px; display: flex;"><span class="bdg s-ok"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>Done</span></span>
+<span class="mono" style="width: 88px; text-align: right; font-size: 11px; color: var(--fg-3);">—</span>
+<span class="mono" style="width: 72px; text-align: right; font-size: 11px; color: var(--fg-3);">5h</span>
+<span style="width: 56px;"></span>
+</div>
+<div class="tr" style="">
+<span class="cb" role="checkbox" aria-checked="false" aria-label="Select Bump terraform aws provider to 6.x"></span>
+<a href="#" class="trunc" style="flex-grow: 1; font-weight: 500; color: var(--fg); text-decoration: none;">Bump terraform aws provider to 6.x</a>
+<span class="mono trunc" style="width: 140px; font-size: 12px; color: var(--fg-2);">infra-terraform</span>
+<span style="width: 150px; display: flex; align-items: center; gap: 8px; min-width: 0;"><span class="av" style="width: 20px; height: 20px; font-size: 10px;">BF</span><span class="trunc" style="color: var(--fg-2);">Bug Fixer</span></span>
+<span style="width: 96px; display: flex;"><span class="bdg s-ok"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>Done</span></span>
+<span class="mono" style="width: 88px; text-align: right; font-size: 11px;"><span class="c-ok">+14</span> <span class="c-err">−14</span></span>
+<span class="mono" style="width: 72px; text-align: right; font-size: 11px; color: var(--fg-3);">Yesterday</span>
+<span style="width: 56px;"></span>
+</div>
+<div class="tr" style="">
+<span class="cb" role="checkbox" aria-checked="false" aria-label="Select Explain checkout state machine"></span>
+<a href="#" class="trunc" style="flex-grow: 1; font-weight: 500; color: var(--fg); text-decoration: none;">Explain checkout state machine</a>
+<span class="mono trunc" style="width: 140px; font-size: 12px; color: var(--fg-2);">payments-service</span>
+<span style="width: 150px; display: flex; align-items: center; gap: 8px; min-width: 0;"><span class="av" style="width: 20px; height: 20px; font-size: 10px;">OR</span><span class="trunc" style="color: var(--fg-2);">Orchestrator</span></span>
+<span style="width: 96px; display: flex;"><span class="bdg s-ok"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>Done</span></span>
+<span class="mono" style="width: 88px; text-align: right; font-size: 11px; color: var(--fg-3);">—</span>
+<span class="mono" style="width: 72px; text-align: right; font-size: 11px; color: var(--fg-3);">Yesterday</span>
+<span style="width: 56px;"></span>
+</div>
+<div class="tr" style="">
+<span class="cb" role="checkbox" aria-checked="false" aria-label="Select Add retry budget to webhooks"></span>
+<a href="#" class="trunc" style="flex-grow: 1; font-weight: 500; color: var(--fg); text-decoration: none;">Add retry budget to webhooks</a>
+<span class="mono trunc" style="width: 140px; font-size: 12px; color: var(--fg-2);">payments-service</span>
+<span style="width: 150px; display: flex; align-items: center; gap: 8px; min-width: 0;"><span class="av" style="width: 20px; height: 20px; font-size: 10px;">BF</span><span class="trunc" style="color: var(--fg-2);">Bug Fixer</span></span>
+<span style="width: 96px; display: flex;"><span class="bdg s-ok"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>Done</span></span>
+<span class="mono" style="width: 88px; text-align: right; font-size: 11px;"><span class="c-ok">+54</span> <span class="c-err">−9</span></span>
+<span class="mono" style="width: 72px; text-align: right; font-size: 11px; color: var(--fg-3);">Sep 21</span>
+<span style="width: 56px;"></span>
+</div>
+<div class="tr" style="border-bottom: 0; ">
+<span class="cb" role="checkbox" aria-checked="false" aria-label="Select Docs search indexing"></span>
+<a href="#" class="trunc" style="flex-grow: 1; font-weight: 500; color: var(--fg); text-decoration: none;">Docs search indexing</a>
+<span class="mono trunc" style="width: 140px; font-size: 12px; color: var(--fg-2);">docs-site</span>
+<span style="width: 150px; display: flex; align-items: center; gap: 8px; min-width: 0;"><span class="av" style="width: 20px; height: 20px; font-size: 10px;">TW</span><span class="trunc" style="color: var(--fg-2);">Test Writer</span></span>
+<span style="width: 96px; display: flex;"><span class="bdg s-idle"><svg class="i i12" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>Archived</span></span>
+<span class="mono" style="width: 88px; text-align: right; font-size: 11px;"><span class="c-ok">+31</span> <span class="c-err">−2</span></span>
+<span class="mono" style="width: 72px; text-align: right; font-size: 11px; color: var(--fg-3);">Sep 19</span>
+<span style="width: 56px;"></span>
+</div>
+</div>
+</div>
+</main>
+
+<!-- scrim -->
+<div style="position: absolute; inset: 0; background: var(--scrim);"></div>
+
+<!-- dialog -->
+<div role="dialog" aria-modal="true" aria-labelledby="nc-title" style="position: absolute; left: 400px; top: 78px; width: 640px; display: flex; flex-direction: column; background: var(--overlay); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow-pop); overflow: hidden;">
+<header style="display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 10px 0 20px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;">
+<h2 id="nc-title" style="margin: 0; font-size: 16px; font-weight: 600;">New chat</h2>
+<div style="flex-grow: 1;"></div>
+<button class="ib" aria-label="Close"><svg class="i" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button>
+</header>
+
+<div style="display: flex; flex-direction: column; gap: 20px; padding: 20px;">
+
+<!-- task -->
+<div style="display: flex; flex-direction: column; gap: 10px;">
+<div role="textbox" aria-multiline="true" aria-label="Task" style="height: 112px; display: flex; flex-direction: column; padding: 10px 8px 6px 12px; border-radius: 8px; border: 1px solid var(--fg-3); box-shadow: 0 0 0 3px var(--selected); background: var(--sunken);">
+<div style="display: flex; align-items: flex-start; gap: 1px; font-size: 14px; line-height: 1.6;"><span style="display: inline-block; width: 2px; height: 19px; margin-top: 2px; background: var(--fg); flex-shrink: 0;"></span><span style="color: var(--fg-3);">Describe the task — what should the agent do, and how will you know it is done?</span></div>
+<div style="flex-grow: 1;"></div>
+<div style="display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--fg-3);">
+<button class="ib ib-sm" aria-label="Attach files"><svg class="i i14" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<span style="display: flex; align-items: center; gap: 4px;"><span class="kbd">@</span>Files</span>
+<span style="display: flex; align-items: center; gap: 4px; margin-right: 4px;"><span class="kbd">/</span>Skills</span>
+</div>
+</div>
+<div style="display: flex; align-items: center; gap: 12px;">
+<label for="nc-name" class="lbl" style="width: 64px; flex-shrink: 0;">Name</label>
+<input id="nc-name" class="inp" type="text" placeholder="Named from the task if left empty">
+</div>
+</div>
+
+<!-- where -->
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 8px;"><h3 style="margin: 0; font-size: 13px; font-weight: 600;">Where</h3><span class="hint">What the agent works on. The first source is its working directory.</span></div>
+<div style="display: flex; align-items: center; gap: 12px;">
+<span class="lbl" style="width: 64px; flex-shrink: 0;">Project</span>
+<button class="inp" style="cursor: pointer; text-align: left;" aria-label="Project"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg><span class="mono">payments-service</span><span style="font-size: 12px; color: var(--fg-3);">2 codebases</span><svg class="i i14" viewBox="0 0 24 24" style="margin-left: auto; color: var(--fg-3);"><path d="m6 9 6 6 6-6"></path></svg></button>
+</div>
+<div style="margin-left: 76px; border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden;">
+<div style="display: flex; flex-direction: column; gap: 6px; padding: 10px 10px 10px 12px; border-bottom: 1px solid var(--line-soft);">
+<div style="display: flex; align-items: center; gap: 10px;">
+<span class="cb on" role="checkbox" aria-checked="true" aria-label="Include payments-api"><svg class="i" viewBox="0 0 24 24" style="width: 10px; height: 10px; stroke-width: 3;"><path d="M20 6 9 17l-5-5"></path></svg></span>
+<span class="mono" style="font-size: 13px; font-weight: 500;">payments-api</span>
+<span class="bdg s-idle">Working directory</span>
+<div style="flex-grow: 1;"></div>
+<div class="seg" role="radiogroup" aria-label="Mode for payments-api"><button class="on" role="radio" aria-checked="true">Worktree</button><button role="radio" aria-checked="false">In place</button></div>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; padding-left: 24px;">
+<button class="chip"><svg class="i i12" viewBox="0 0 24 24"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>New branch<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<span class="mono trunc" style="font-size: 11px; color: var(--fg-2);">generatorai/&lt;chat-name&gt;</span>
+<span style="font-size: 12px; color: var(--fg-3);">from</span>
+<button class="chip mono" style="font-size: 11px;" aria-label="Base branch for payments-api">main<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+</div>
+</div>
+<div style="display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 10px 0 12px; border-bottom: 1px solid var(--line-soft);">
+<span class="cb" role="checkbox" aria-checked="false" aria-label="Include checkout-web"></span>
+<span class="mono" style="font-size: 13px; color: var(--fg-2);">checkout-web</span>
+<span class="mono trunc" style="font-size: 11px; color: var(--fg-3);">github.com/acme/checkout-web</span>
+<div style="flex-grow: 1;"></div>
+<span style="font-size: 12px; color: var(--fg-3);">Not included</span>
+</div>
+<div style="display: flex; align-items: center; height: 36px; padding: 0 6px;">
+<button class="btn btn-g btn-sm"><svg class="i i12" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>Add local folder</button>
+</div>
+</div>
+</section>
+
+<!-- who -->
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: baseline; gap: 8px;"><h3 style="margin: 0; font-size: 13px; font-weight: 600;">Who</h3><span class="hint">The agent brings its own instructions, skills and MCP servers.</span></div>
+<div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end;">
+<div style="display: flex; flex-direction: column; gap: 6px;"><span class="lbl">Agent</span><button class="inp" style="cursor: pointer;" aria-label="Agent"><span class="av" style="width: 20px; height: 20px; font-size: 10px;">BF</span>Bug Fixer<svg class="i i14" viewBox="0 0 24 24" style="margin-left: auto; color: var(--fg-3);"><path d="m6 9 6 6 6-6"></path></svg></button></div>
+<div style="display: flex; flex-direction: column; gap: 6px;"><span class="lbl">Model</span><button class="inp" style="cursor: pointer;" aria-label="Model">Claude Sonnet 5<span class="mono" style="font-size: 11px; color: var(--fg-3);">200K</span><svg class="i i14" viewBox="0 0 24 24" style="margin-left: auto; color: var(--fg-3);"><path d="m6 9 6 6 6-6"></path></svg></button></div>
+<div style="display: flex; flex-direction: column; gap: 6px;"><span class="lbl">Effort</span><div class="seg" role="radiogroup" aria-label="Reasoning effort" style="height: 32px; align-items: center;"><button role="radio" aria-checked="false">Low</button><button class="on" role="radio" aria-checked="true">Medium</button><button role="radio" aria-checked="false">High</button></div></div>
+</div>
+<div style="display: flex; align-items: center; gap: 8px;">
+<button class="btn btn-g btn-sm" style="padding-left: 0; color: var(--fg);">Customize capabilities</button>
+<span class="hint">14 skills · 3 MCP servers · from Bug Fixer</span>
+</div>
+</section>
+
+<button style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px; border: 1px solid var(--line-soft); border-radius: 8px; background: transparent; color: var(--fg); font-family: inherit; font-size: 13px; font-weight: 500; text-align: left;" aria-expanded="false"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="m9 18 6-6-6-6"></path></svg>Options<span class="trunc" style="font-size: 12px; font-weight: 400; color: var(--fg-3);">Description · tags · orchestrate mode off · browser headless</span></button>
+</div>
+
+<footer style="display: flex; align-items: center; gap: 8px; height: 56px; padding: 0 16px 0 20px; border-top: 1px solid var(--line-soft);">
+<span style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-3);"><span class="kbd">Esc</span>to close</span>
+<div style="flex-grow: 1;"></div>
+<button class="btn">Cancel</button>
+<button class="btn btn-p">Start chat<span class="kbd" style="background: transparent; border-color: currentColor; color: inherit; opacity: .7;">Ctrl ↵</span></button>
+</footer>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["dark","light"],"default":"dark","section":"Theme"},"accent":{"editor":"enum","options":["ink","blue","violet","green","orange","rose","teal"],"default":"ink","section":"Theme"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+const mode = this.props.mode ?? 'dark';
+const accent = this.props.accent ?? 'ink';
+return { rootClass: 't-' + mode + ' acc-' + accent };
+}
+}
+</script>
+</body>
+</html>

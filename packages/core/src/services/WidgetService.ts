@@ -175,6 +175,9 @@ export class WidgetService {
         // needed here).
         ...(params.chatId ? { chatId: params.chatId } : {}),
         ...(params.workflowRunId ? { workflowRunId: params.workflowRunId } : {}),
+        // A stage's widget is routed to that stage's stream, not whichever
+        // stage spoke last (parallel stages share the run scope).
+        ...(params.stageRunId ? { stageRunId: params.stageRunId } : {}),
       },
     });
     return instance;
@@ -294,6 +297,7 @@ export class WidgetService {
         patch,
         ...(existing.chatId ? { chatId: existing.chatId } : {}),
         ...(existing.workflowRunId ? { workflowRunId: existing.workflowRunId } : {}),
+        ...(existing.stageRunId ? { stageRunId: existing.stageRunId } : {}),
       },
     });
     return next;
@@ -325,6 +329,7 @@ export class WidgetService {
         from,
         ...(existing.chatId ? { chatId: existing.chatId } : {}),
         ...(existing.workflowRunId ? { workflowRunId: existing.workflowRunId } : {}),
+        ...(existing.stageRunId ? { stageRunId: existing.stageRunId } : {}),
       },
     });
     return existing;
@@ -415,6 +420,7 @@ export class WidgetService {
         args: args ?? {},
         ...(existing.chatId ? { chatId: existing.chatId } : {}),
         ...(existing.workflowRunId ? { workflowRunId: existing.workflowRunId } : {}),
+        ...(existing.stageRunId ? { stageRunId: existing.stageRunId } : {}),
       },
     } as never);
 
@@ -531,6 +537,7 @@ export class WidgetService {
         reason,
         ...(existing.chatId ? { chatId: existing.chatId } : {}),
         ...(existing.workflowRunId ? { workflowRunId: existing.workflowRunId } : {}),
+        ...(existing.stageRunId ? { stageRunId: existing.stageRunId } : {}),
       },
     });
     return true;
@@ -554,6 +561,7 @@ export class WidgetService {
         reason,
         ...(inst.chatId ? { chatId: inst.chatId } : {}),
         ...(inst.workflowRunId ? { workflowRunId: inst.workflowRunId } : {}),
+        ...(inst.stageRunId ? { stageRunId: inst.stageRunId } : {}),
       },
     } as never);
     await ackPromise;

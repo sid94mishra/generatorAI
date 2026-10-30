@@ -13,8 +13,17 @@ import type { AgentHostSupervisor } from './AgentHostSupervisor.js';
  * W37: 'codex'    — Codex app-server (JSON-RPC over stdio).
  * W38: 'opencode' — OpenCode serve (HTTP + SSE).
  * W39: 'acp'      — ACP breadth client (long-tail agents, @agentclientprotocol/sdk).
+ *
+ * P2-00: 'faux' — registry-only synthetic type for `HarnessRegistry`'s
+ * `GENERATORAI_TEST_FAUX_HARNESS` status entry. Deliberately NOT part of
+ * `HarnessProviderId` (`@generatorai/shared`) — that union is persisted in
+ * chat/workflow/agent configs in production and must stay real-provider-only.
+ * `createHarnessProvider` never constructs a 'faux' adapter (see
+ * `HarnessFactory.ts`); the actual FauxProvider instance conversations run
+ * on is wired directly in `apps/server/src/composition-root.ts`, entirely
+ * outside `HarnessRegistry`.
  */
-export type HarnessType = HarnessProviderId;
+export type HarnessType = HarnessProviderId | 'faux';
 
 /**
  * Union of all provider-specific configuration options.
@@ -155,6 +164,13 @@ export interface CodexProviderOptions {
    * inside its working directory but not the wider filesystem.
    */
   sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access';
+  /**
+   * Whether commands in a `workspace-write` / `read-only` sandbox may use the network. Default `true`: a test that
+   * starts a server on localhost needs it, and Codex's sandbox has no loopback-only setting (an agent that may not
+   * write files — a reviewer — could otherwise not run the HTTP tests it reviews). Network access never widens what
+   * may be written; the bound agent's tool groups still gate network requests the provider asks about.
+   */
+  networkAccess?: boolean;
   /**
    * Decides server-initiated approvals (command execution, file changes, MCP
    * elicitations). Omit to decline everything, which is the fail-closed

@@ -5,6 +5,13 @@
 // does not match falls through to `DEFAULT_POLICY`, which requires admin
 // authority: an un-classified route fails closed rather than open.
 //
+// Matching is done on the CANONICAL path (D-115, audit F-1): Express routes
+// case-insensitively, tolerates a trailing slash and does not decode literal
+// segments, so the policy lower-cases, decodes percent-escaped unreserved
+// characters and compares segment by segment. A path that is ambiguous in a
+// way the router could resolve differently (dot segments, empty interior
+// segments, malformed escapes) has no canonical form and gets DEFAULT_POLICY.
+//
 // `scripts/check-route-scopes.mjs` asserts that every router mounted in
 // `apps/server/src/routes/index.ts` is represented here.
 // ────────────────────────────────────────────────────────────────
@@ -22,7 +29,7 @@ export interface RoutePolicy {
   write: Scope[];
   /** Extra scopes required regardless of method. */
   always?: Scope[];
-  /** Reachable without any credential (health, webhooks with their own HMAC). */
+  /** Reachable without any credential (health, automation webhook triggers with their own token). */
   public?: boolean;
   riskLevel?: 'low' | 'medium' | 'high';
 }
@@ -35,9 +42,10 @@ export const DEFAULT_POLICY: RoutePolicy = {
 };
 
 export const ROUTE_POLICIES: RoutePolicy[] = [
-  // Public — health probes and webhook receivers (own HMAC verification).
+  // Registered artifact bytes; the route additionally checks its owning session's read scope.
+  { prefix: '/artifacts', read: ['read:files'], write: ['admin:settings'] },
+  // Public — health probes.
   { prefix: '/health', read: [], write: [], public: true },
-  { prefix: '/webhooks', read: [], write: [], public: true },
   // Auth bootstrap. Pairing completion is deliberately public: the caller has
   // no credential yet, and the single-use pairing grant IS the credential.
   { prefix: '/auth/pair/complete', read: [], write: [], public: true },
@@ -49,6 +57,9 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   { prefix: '/auth/token/refresh', read: [], write: [], public: true },
   { prefix: '/auth/nonce', read: [], write: [], public: true },
   { prefix: '/auth/server-info', read: [], write: [], public: true },
+  // The local CA certificate (D-110): public material a user downloads to
+  // trust this server's generated certificate. Only GET is routed.
+  { prefix: '/auth/tls/ca.crt', read: [], write: [], public: true },
   // A device asking for MORE scopes for ITSELF (plan S2). `read:status`
   // rather than `admin:devices` for the same reason as `/auth/push-token`
   // below: the device id comes from the authenticated principal, never from
@@ -60,6 +71,22 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
     read: ['read:status'],
     write: ['read:status'],
   },
+  // A device registering its OWN approval key (mobile MG-05): the device id
+  // comes from the DPoP principal and the body must prove possession of the
+  // new key, so it is the same carve-out as scope requests and push tokens.
+  {
+    prefix: '/auth/devices/me/approval-key',
+    read: ['read:status'],
+    write: ['read:status'],
+    riskLevel: 'high',
+  },
+  // A device reading its OWN record (mobile MG-01): name, scopes, approval
+  // key. The route takes the id from the principal, so the read is the same
+  // carve-out as above. Writes stay admin: this prefix also covers
+  // `/auth/devices/:deviceId/...` for a device literally named `me`, and no
+  // self-service write lives here (the approval key and scope requests have
+  // their own, longer entries).
+  { prefix: '/auth/devices/me', read: ['read:status'], write: ['admin:devices'], riskLevel: 'high' },
   { prefix: '/auth/devices', read: ['admin:devices'], write: ['admin:devices'], riskLevel: 'high' },
   // Reviewing and resolving scope requests grants authority, so it is the
   // same bar as editing a device's scopes directly.
@@ -79,6 +106,26 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   { prefix: '/relay', read: ['admin:relay'], write: ['admin:relay'], riskLevel: 'high' },
 
   { prefix: '/stream', read: ['stream:events'], write: ['stream:events'] },
+  // Attention feed (G-01): the Needs you + Running snapshot. `read:activity`
+  // is the scope that opens the lifecycle-only `global` stream carrying its
+  // deltas; commands and file names inside it are stripped per principal by
+  // the route (`read:chats` / `read:workflows`). Read-only: quick actions use
+  // the existing chat, run and consent endpoints.
+  { prefix: '/attention', read: ['read:activity'], write: ['admin:settings'] },
+  // Stats summary (G-10): read-only aggregates over chats, runs and
+  // automation executions — same bar as the attention feed above.
+  { prefix: '/stats', read: ['read:activity'], write: ['admin:settings'] },
+  // Recently finished activity (G-11): read-only, same bar as /attention
+  // and /stats. Retry uses the existing /chats and /workflow-runs
+  // endpoints, each under their own write scope.
+  { prefix: '/activity', read: ['read:activity'], write: ['admin:settings'] },
+  // Palette entity search (G-18): the route itself is gated at the same low
+  // bar as /attention, /stats and /activity above, then filters `types`
+  // down to what the calling principal can actually read per-type
+  // (`read:chats` for chat, `read:projects` for project, `read:workflows`
+  // for agent/workflow/automation/script) before running any query — see
+  // `apps/server/src/routes/search.ts`.
+  { prefix: '/search', read: ['read:activity'], write: ['admin:settings'] },
 
   { prefix: '/chats', read: ['read:chats'], write: ['write:chats'] },
   // Authoring an agent GRANTS capability (skills, MCP servers, tool policy), so
@@ -86,9 +133,12 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // to list agents to pick one, and BINDING an agent happens through
   // PATCH /chats/:id under `write:chats`.
   { prefix: '/agents', read: ['read:workflows'], write: ['admin:settings'], riskLevel: 'high' },
-  { prefix: '/orchestrator', read: ['read:chats'], write: ['write:chats', 'exec:agent'] },
   { prefix: '/sessions', read: ['read:chats'], write: ['write:chats'] },
 
+  // Validating and planning a document write nothing (P06): any reader may,
+  // an agent included, before it submits a draft (which needs write:workflows).
+  { prefix: '/workflow-definitions/validate', read: ['read:workflows'], write: ['read:workflows'] },
+  { prefix: '/workflow-definitions/plan', read: ['read:workflows'], write: ['read:workflows'] },
   { prefix: '/workflow-definitions', read: ['read:workflows'], write: ['write:workflows'] },
   // Answering a stage's Human-In-The-Loop gate is a RUN-TIME act — it is
   // literally "answer the agent's question", which is what `exec:agent`
@@ -98,29 +148,47 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // whose default grant includes `exec:agent` but deliberately excludes
   // `write:workflows` (see DEFAULT_MOBILE_SCOPES).
   //
-  // Longest-prefix matching means these two entries win over `/workflow-runs`
-  // for their own paths only; everything else about a run (start, pause,
-  // cancel, retry, delete) still needs the full write grant.
+  // Every run command (pause, resume, cancel, retry, skip, fail, approve, the
+  // loop decisions, deliver_event) goes through one route, so this entry
+  // admits the route on `exec:agent` and the route itself demands
+  // `write:workflows` for the run-control commands. The operator DECISIONS —
+  // approve, the loop decisions (grant_iterations, raise_budget,
+  // continue_with_input, accept, accept_iteration) and deliver_event — are
+  // run-time acts on a run the caller may start, so `exec:agent` suffices. Longest-prefix matching means this entry wins over
+  // `/workflow-runs` for its own path only; everything else about a run
+  // (delete, the permission mode) still needs the full write grant.
   {
-    prefix: '/workflow-runs/:id/stages/:stageId/approve',
+    prefix: '/workflow-runs/:id/commands',
     read: ['read:workflows'],
     write: ['exec:agent'],
   },
+  // Answering a stage's in-turn gate (tool permission, question, plan) is the
+  // same run-time act as `approve` (the stage conversation API, P03b).
+  // Sending a message or stopping a turn steers the run: the full write grant.
   {
-    prefix: '/workflow-runs/:id/stages/:stageId/interrupt',
+    prefix: '/workflow-runs/:id/instances/:instanceId/interactions',
     read: ['read:workflows'],
     write: ['exec:agent'],
   },
   { prefix: '/workflow-runs', read: ['read:workflows'], write: ['write:workflows', 'exec:agent'] },
-  // Running a script materialises a definition AND starts a run — agents
-  // execute, exactly like `POST /workflow-runs/:id/start`. Authoring scripts
-  // (validate, reload, materialize) stays a design-time write, but running
-  // one must carry `exec:agent` too or `write:workflows` alone would launch
-  // agents that the `/workflow-runs` policy deliberately withholds.
+  // THE way a run starts (P04, PD-6): starting a run is a run-time act, so a
+  // default paired phone may do it (`exec:agent` + `read:workflows`; W-60).
+  // The service demands more for what the body asks: `write:workflows` for a
+  // script target (it materializes a definition), `admin:settings` for a
+  // bypass run off loopback or an in-place codebase.
+  { prefix: '/workflow-invocations', read: ['read:workflows'], write: ['exec:agent', 'read:workflows'] },
+  // The workflow tools of an external agent (P06, the MCP server in remote
+  // mode): each tool checks its own scope in the handler — running,
+  // answering and cancelling need `exec:agent`, a draft `write:workflows`;
+  // listing, describing, validating and planning only read.
+  { prefix: '/workflow-tools', read: ['read:workflows'], write: ['read:workflows'] },
+  // Uploading a script installs code that runs in-process with the server's
+  // privileges (A-19): admin only, on top of the operator opt-in flags.
   {
-    prefix: '/workflow-scripts/:id/run',
+    prefix: '/workflow-scripts/upload',
     read: ['read:workflows'],
-    write: ['write:workflows', 'exec:agent'],
+    write: ['admin:settings'],
+    riskLevel: 'high',
   },
   { prefix: '/workflow-scripts', read: ['read:workflows'], write: ['write:workflows'] },
   // Webhook deliveries are the whole point of this trigger type: GitHub,
@@ -132,9 +200,20 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // admin-scoped '/automations' below, the same precedent as
   // '/auth/pair/preview' ahead of '/auth/pair'.
   { prefix: '/automations/webhooks', read: [], write: [], public: true },
+  // An event wait's callback (P05 §4.3): CI and other external systems hold
+  // no credential; the per-wait HMAC token in the path authenticates the one
+  // event it may deliver (routes/workflowCallbacks.ts), rate-limited there.
+  { prefix: '/workflow-callbacks', read: [], write: [], public: true },
   { prefix: '/automations', read: ['read:workflows'], write: ['write:workflows', 'exec:agent'] },
   { prefix: '/templates', read: ['read:workflows'], write: ['write:workflows'] },
   { prefix: '/hooks', read: ['read:workflows'], write: ['write:workflows'] },
+  // The commands a check stage may run (the builder's picker, P05 §1.2):
+  // reading it is authoring; the list itself is operator configuration.
+  { prefix: '/settings/script-allowlist', read: ['read:workflows'], write: ['admin:settings'] },
+  // The engine's flow key limits, summary model and trigger debounce (P07
+  // WP-7.2): anyone who reads workflows may see why a stage waits; changing
+  // a limit is operator configuration.
+  { prefix: '/settings/workflow-engine', read: ['read:workflows'], write: ['admin:settings'] },
 
   { prefix: '/projects', read: ['read:projects'], write: ['write:projects'] },
   { prefix: '/source-control', read: ['read:projects'], write: ['write:projects'] },
@@ -172,16 +251,70 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
 
 const SAFE_METHODS = new Set<string>(['GET', 'HEAD', 'OPTIONS']);
 
+/** RFC 3986 §2.3 unreserved characters — the only escapes that are equivalent to their literal form. */
+const UNRESERVED = /^[A-Za-z0-9\-._~]$/;
+
+/**
+ * The canonical segments of an `/api`-relative path, or `null` when the path
+ * has no single canonical form and must be refused (D-115).
+ *
+ * - Lower-cased, because Express matches routes case-insensitively: the
+ *   policy must see `/auth/Devices` as the `/auth/devices` the router
+ *   dispatches it to (audit F-1).
+ * - Percent-escapes of unreserved characters are decoded (`%64evices` is
+ *   `devices`); every other escape (`%2F`, `%3B` …) stays encoded, because it
+ *   is NOT equivalent to the literal character and may legitimately appear in
+ *   an id segment.
+ * - One trailing slash is tolerated (Express's non-strict routing treats
+ *   `/x/` as `/x`).
+ * - `.`/`..` segments (literal or escaped), empty interior segments (`//`) and
+ *   malformed escapes yield `null`.
+ */
+export function canonicalApiPathSegments(apiPath: string): string[] | null {
+  const path = apiPath.startsWith('/') ? apiPath : `/${apiPath}`;
+  const raw = path.split('/').slice(1);
+  if (raw.length > 0 && raw[raw.length - 1] === '') raw.pop();
+  const out: string[] = [];
+  for (const segment of raw) {
+    if (segment === '') return null;
+    let decoded = '';
+    for (let i = 0; i < segment.length; i += 1) {
+      const ch = segment[i]!;
+      if (ch !== '%') {
+        decoded += ch;
+        continue;
+      }
+      const hex = segment.slice(i + 1, i + 3);
+      if (!/^[0-9A-Fa-f]{2}$/.test(hex)) return null;
+      const literal = String.fromCharCode(parseInt(hex, 16));
+      decoded += UNRESERVED.test(literal) ? literal : `%${hex}`;
+      i += 2;
+    }
+    const lower = decoded.toLowerCase();
+    if (lower === '.' || lower === '..') return null;
+    out.push(lower);
+  }
+  return out;
+}
+
+/** The canonical `/api`-relative path (see {@link canonicalApiPathSegments}), or `null` if it has none. */
+export function canonicalApiPath(apiPath: string): string | null {
+  const segments = canonicalApiPathSegments(apiPath);
+  return segments ? `/${segments.join('/')}` : null;
+}
+
 /**
  * Resolves the policy for an `/api`-relative path, preferring the longest
- * matching prefix so `/workspaces/x/terminals` beats `/workspaces`.
+ * matching prefix so `/workspaces/x/terminals` beats `/workspaces`. A path
+ * with no canonical form resolves to {@link DEFAULT_POLICY} (fail closed).
  */
 export function resolveRoutePolicy(apiPath: string): RoutePolicy {
-  const normalized = apiPath.startsWith('/') ? apiPath : `/${apiPath}`;
+  const segments = canonicalApiPathSegments(apiPath);
+  if (!segments) return DEFAULT_POLICY;
   let best: RoutePolicy | null = null;
   let bestScore = -1;
   for (const policy of ROUTE_POLICIES) {
-    const score = matchScore(normalized, policy.prefix);
+    const score = matchScore(segments, policy.prefix);
     if (score > bestScore) {
       bestScore = score;
       best = policy;
@@ -191,17 +324,16 @@ export function resolveRoutePolicy(apiPath: string): RoutePolicy {
 }
 
 /**
- * Segment-aware prefix match supporting `:param` wildcards.
- * Returns the number of matched segments, or -1 for no match.
+ * Segment-aware prefix match supporting `:param` wildcards, on canonical
+ * (lower-cased) segments. Returns the number of matched segments, or -1.
  */
-function matchScore(path: string, prefix: string): number {
-  const pathSegments = path.split('/').filter(Boolean);
+function matchScore(pathSegments: readonly string[], prefix: string): number {
   const prefixSegments = prefix.split('/').filter(Boolean);
   if (prefixSegments.length > pathSegments.length) return -1;
   for (let i = 0; i < prefixSegments.length; i += 1) {
     const expected = prefixSegments[i]!;
     if (expected.startsWith(':')) continue;
-    if (expected !== pathSegments[i]) return -1;
+    if (expected.toLowerCase() !== pathSegments[i]) return -1;
   }
   return prefixSegments.length;
 }

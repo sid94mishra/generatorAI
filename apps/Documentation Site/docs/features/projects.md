@@ -45,7 +45,7 @@ The **Pull requests** tab lists source-control work for linked repositories. Rep
 
 ## Source evidence
 
-`apps/web/src/pages/CreateProjectPage.tsx`, `apps/web/src/pages/ProjectDetailPage.tsx`, `apps/web/src/pages/CodebaseDetailPage.tsx`, `apps/web/src/components/codebase/CodebaseFileBrowser.tsx`, `apps/web/src/components/scm/ProjectPullRequestsTab.tsx`, and `packages/shared/src/types/Project.ts`.
+`apps/web/src/features/projects/CreateProjectPage.tsx`, `apps/web/src/features/projects/ProjectDetailPage.tsx`, `apps/web/src/features/projects/CodebaseDetailPage.tsx`, `apps/web/src/features/projects/codebase/FilesTab.tsx`, `apps/web/src/features/projects/detail/PullRequestsTab.tsx`, and `packages/shared/src/types/Project.ts`.
 
 ## Configuration and worked examples
 

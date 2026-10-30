@@ -125,4 +125,4 @@ The Electron shell separately persists theme mode, server port, harness bootstra
 
 ## Source map
 
-Section definitions: `apps/web/src/components/settings/sectionRegistry.tsx`. Controls: `apps/web/src/components/settings/sections/`. Local keys: `apps/web/src/lib/appPreferences.ts`, `packages/design-tokens/src/registry.ts`, `apps/web/src/stores/`. Mobile: `apps/mobile/app/settings/`, `apps/mobile/src/prefs/`, `apps/mobile/src/auth/featureGate.ts`. Native shell: `apps/desktop/src/main/{config,settings-schema}.ts`. CLI: `packages/cli-core/src/config/schema.ts`.
+Section definitions: `SETTINGS_NAV` in `packages/shared/src/ui-contract/settings.ts`; renderers registered in `apps/web/src/app/registries/settingsSections.tsx`. Controls: `apps/web/src/features/settings/`. Local keys: `apps/web/src/lib/appPreferences.ts`, `packages/design-tokens/src/registry.ts`, `apps/web/src/stores/`. Mobile: `apps/mobile/app/settings/`, `apps/mobile/src/prefs/`, `apps/mobile/src/auth/featureGate.ts`. Native shell: `apps/desktop/src/main/{config,settings-schema}.ts`. CLI: `packages/cli-core/src/config/schema.ts`.

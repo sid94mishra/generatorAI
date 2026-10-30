@@ -91,6 +91,29 @@ describe('chat.background_task.* → background_task blocks', () => {
     expect(tasksOf(streams)[0]?.parentCallId).toBe('call-9');
   });
 
+  it('nests under an MCP-namespaced spawn call (the Claude provider calls the platform tools over MCP)', () => {
+    const router = new StreamEventRouter();
+    const tool = 'mcp__generatorai-tools__spawn_background_agent';
+    let streams = applyStreamEffects({}, route(router, 'harness.tool_start', {
+      tool,
+      args: { taskName: 'docs', objective: 'write docs' },
+      callId: 'toolu_1',
+    }));
+    streams = applyStreamEffects(streams, route(router, 'chat.background_task.spawned', { taskId: 'chat-d', taskName: 'docs' }));
+    expect(tasksOf(streams)[0]?.parentCallId).toBe('toolu_1');
+    // Learned from the result too, by taskId.
+    streams = applyStreamEffects(streams, route(router, 'harness.tool_complete', {
+      tool,
+      callId: 'toolu_1',
+      result: { ok: true, taskId: 'chat-d', taskName: 'docs-renamed' },
+      success: true,
+    }));
+    streams = applyStreamEffects(streams, route(router, 'chat.background_task.progress', {
+      taskId: 'chat-d', taskName: 'docs-renamed', status: 'running',
+    }));
+    expect(tasksOf(streams)[0]?.parentCallId).toBe('toolu_1');
+  });
+
   it('falls back to a top-level step when the spawn call is outside the window', () => {
     const router = new StreamEventRouter();
     const streams = applyStreamEffects({}, route(router, 'chat.background_task.spawned', {
@@ -251,5 +274,38 @@ describe('sub-agent progress notes', () => {
     }));
     streams = clearStream(streams, KEY);
     expect(tasksOf(streams).map((t) => t.taskId)).toEqual(['chat-live']);
+  });
+
+  it('G-20: carries who cancelled a worker and when, and drops it when the worker runs again', () => {
+    const router = new StreamEventRouter();
+    let streams: StreamsRecord = {};
+    streams = applyStreamEffects(streams, route(router, 'chat.background_task.progress', {
+      chatId: 'chat-parent', taskId: 'chat-w1', taskName: 'w', status: 'running', toolCalls: 0, startedAt: 1,
+    }));
+    streams = applyStreamEffects(streams, route(router, 'chat.background_task.status', {
+      chatId: 'chat-parent', taskId: 'chat-w1', taskName: 'w', status: 'cancelled', cancelledBy: 'user', cancelledAt: 1_700,
+    }));
+    expect(tasksOf(streams)[0]).toMatchObject({ status: 'cancelled', cancelledBy: 'user', cancelledAt: 1_700 });
+
+    // A completion with the same attribution changes nothing; garbage is ignored.
+    streams = applyStreamEffects(streams, route(router, 'chat.background_task.completed', {
+      chatId: 'chat-parent', taskId: 'chat-w1', taskName: 'w', status: 'cancelled', cancelledBy: 'robot', cancelledAt: 1_700,
+    }));
+    expect(tasksOf(streams)[0]).toMatchObject({ cancelledBy: 'user', cancelledAt: 1_700 });
+
+    // A follow-up turn: the attribution belonged to the cancelled state.
+    streams = applyStreamEffects(streams, route(router, 'chat.background_task.status', {
+      chatId: 'chat-parent', taskId: 'chat-w1', taskName: 'w', status: 'running',
+    }));
+    expect(tasksOf(streams)[0]).not.toHaveProperty('cancelledBy');
+    expect(tasksOf(streams)[0]).not.toHaveProperty('cancelledAt');
+  });
+
+  it('G-20: a first event that is already a cancellation creates the block with its attribution', () => {
+    const router = new StreamEventRouter();
+    const streams = applyStreamEffects({}, route(router, 'chat.background_task.completed', {
+      chatId: 'chat-parent', taskId: 'chat-w2', taskName: 'w2', status: 'cancelled', cancelledBy: 'orchestrator', cancelledAt: 42,
+    }));
+    expect(tasksOf(streams)[0]).toMatchObject({ status: 'cancelled', cancelledBy: 'orchestrator', cancelledAt: 42 });
   });
 });

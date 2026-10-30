@@ -49,8 +49,6 @@ function automation(id: string, tokenHash: string) {
     triggerType: 'webhook' as const,
     webhookTokenHash: tokenHash,
     workflowIds: ['wf-1'],
-    inputMode: 'single' as const,
-    loopItems: [],
     createdAt: new Date(),
     updatedAt: new Date(),
   };

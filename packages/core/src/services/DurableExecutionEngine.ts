@@ -112,7 +112,7 @@ export type ReplayPolicy = 'never' | 'safe';
 // policy its caller invented on the spot. This table is the declaration the
 // plan asked for, and `replayPolicyForToolGroups` below is what folds it into
 // the one decision the stage turn path can actually make (see
-// `StageExecutionService.executeStage` — a turn is the coarsest unit we can
+// `StageExecutor.turn` — a turn is the coarsest unit we can
 // journal, because the individual tool calls happen inside the provider SDK
 // and never cross our process boundary).
 //
@@ -915,8 +915,7 @@ export class DurableExecutionEngine {
    * is what actually grows without bound) and keeps the artifacts, which are
    * the stage's durable output (X-25) and are read after it completes.
    *
-   * This is the variant `StageExecutionService` calls at every terminal stage
-   * transition. `releaseScope` above is the full teardown for a scope that is
+   * This is the variant for a scope's terminal transition. `releaseScope` above is the full teardown for a scope that is
    * being deleted outright.
    */
   releaseJournal(ctx: DurableContext): void {

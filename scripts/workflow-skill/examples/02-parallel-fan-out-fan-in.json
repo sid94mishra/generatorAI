@@ -1,0 +1,54 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Parallel review, one report",
+    "description": "Three read-only reviews run in parallel after a shared analysis; a report stage waits for all three.",
+    "variables": [
+      { "name": "target", "type": "string", "label": "What to review (path or PR)", "required": true }
+    ],
+    "session": { "permissionMode": "plan" },
+    "maxParallel": 3,
+    "tags": ["example"]
+  },
+  "stages": [
+    {
+      "key": "analyze",
+      "name": "Analyze",
+      "kind": "agent",
+      "prompts": [{ "label": "analyze", "text": "Map the architecture of {{variables.target}}: modules, entry points, data flow." }]
+    },
+    {
+      "key": "security",
+      "name": "Security review",
+      "kind": "agent",
+      "prompts": [{ "label": "security", "text": "Review {{variables.target}} for security problems. Use the analysis you were given." }]
+    },
+    {
+      "key": "performance",
+      "name": "Performance review",
+      "kind": "agent",
+      "prompts": [{ "label": "performance", "text": "Review {{variables.target}} for performance problems. Use the analysis you were given." }]
+    },
+    {
+      "key": "quality",
+      "name": "Code quality review",
+      "kind": "agent",
+      "prompts": [{ "label": "quality", "text": "Review {{variables.target}} for readability and maintainability. Use the analysis you were given." }]
+    },
+    {
+      "key": "report",
+      "name": "Report",
+      "kind": "agent",
+      "context": { "from": ["security", "performance", "quality"], "mode": "output" },
+      "prompts": [{ "label": "report", "text": "Merge the three reviews of {{variables.target}} into one report: deduplicate, rank by severity, one recommendation per finding." }]
+    }
+  ],
+  "edges": [
+    { "from": "analyze", "to": "security" },
+    { "from": "analyze", "to": "performance" },
+    { "from": "analyze", "to": "quality" },
+    { "from": "security", "to": "report" },
+    { "from": "performance", "to": "report" },
+    { "from": "quality", "to": "report" }
+  ]
+}

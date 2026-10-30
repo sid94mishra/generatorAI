@@ -91,9 +91,20 @@ if (totalGzip > BUDGET_BYTES) {
 // this large on its own; if one legitimately is, split it or raise the cap
 // with the measurement that justifies it.
 const LAZY_CHUNK_BUDGET_BYTES = 300 * 1024; // 300 KB gzipped, per chunk
+// Named chunks with a tighter cap of their own, which must stay lazy.
+// `lazy-codemirror`: the workflow builder's expression editor (P05 WP-5B.5,
+// P5-39) — CodeMirror is an allowed dependency only as a lazy chunk.
+const NAMED_LAZY_BUDGETS = [{ prefix: 'lazy-codemirror-', bytes: 250 * 1024 }];
 const initialFiles = new Set(report.map((r) => r.file.replace(/^\/+/, '')));
 const assetsDir = join(distDir, 'assets');
 let lazyViolations = [];
+for (const r of report) {
+  const name = r.file.replace(/^.*\//, '');
+  if (NAMED_LAZY_BUDGETS.some((b) => name.startsWith(b.prefix))) {
+    console.error(`[check-bundle-size] FAIL — ${r.file} must be lazy, but the initial load fetches it`);
+    process.exit(1);
+  }
+}
 let largestLazy = { file: '', gzip: 0 };
 try {
   for (const name of readdirSync(assetsDir)) {
@@ -102,7 +113,9 @@ try {
     if (initialFiles.has(rel)) continue;
     const gzip = gzipSync(readFileSync(join(assetsDir, name))).length;
     if (gzip > largestLazy.gzip) largestLazy = { file: rel, gzip };
-    if (gzip > LAZY_CHUNK_BUDGET_BYTES) lazyViolations.push({ file: rel, gzip });
+    const named = NAMED_LAZY_BUDGETS.find((b) => name.startsWith(b.prefix));
+    if (named) console.log(`[check-bundle-size] ${name}: ${fmt(gzip)} gzip (budget ${fmt(named.bytes)})`);
+    if (gzip > (named ? named.bytes : LAZY_CHUNK_BUDGET_BYTES)) lazyViolations.push({ file: rel, gzip });
   }
 } catch (err) {
   console.error(`[check-bundle-size] could not scan ${assetsDir}: ${err instanceof Error ? err.message : String(err)}`);
@@ -117,6 +130,83 @@ if (lazyViolations.length > 0) {
     `
 [check-bundle-size] FAIL — ${lazyViolations.length} lazy chunk(s) exceed ${fmt(LAZY_CHUNK_BUDGET_BYTES)}. ` +
       `Split the chunk (usually a manualChunks rule collapsing dynamic imports) or raise LAZY_CHUNK_BUDGET_BYTES with justification.`,
+  );
+  process.exit(1);
+}
+
+// ── Fonts (D-16, 09 §8.1) ──────────────────────────────────────────────────
+//
+// Separate from the JS budget: the bundled Instrument Sans + JetBrains Mono
+// (variable wght, latin + latin-ext) are what every page pays for text.
+// Collect every url() inside @font-face in the initial stylesheets and sum the
+// raw bytes of the referenced files (woff2 is already compressed). Also fail
+// on a non-woff2 font, on more than MAX_FONT_FILES faces, and on any font that
+// does not come from dist/assets — the desktop shell must work offline, so no
+// CDN (fonts.googleapis.com …) may ever appear here.
+//
+// Budget = measured total at P1-T7 (96,836 B = 94.6 KB for 4 files) + 10 %,
+// capped at 200 KB (09 §8.1). A new face or subset has to raise it with the
+// measurement that justifies it.
+const FONT_BUDGET_BYTES = 104 * 1024;
+const MAX_FONT_FILES = 6;
+const FONT_EXTENSIONS = /\.(woff2?|ttf|otf|eot)(?:[?#].*)?$/i;
+const initialCss = report.map((r) => r.file).filter((f) => f.endsWith('.css'));
+const fontFiles = new Map(); // href → bytes
+const fontViolations = [];
+let initialCssGzip = 0;
+for (const href of initialCss) {
+  const css = readFileSync(join(distDir, href.replace(/^\//, '')), 'utf8');
+  initialCssGzip += gzipSync(css).length;
+  for (const face of css.matchAll(/@font-face\s*\{[^}]*\}/g)) {
+    for (const m of face[0].matchAll(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g)) {
+      const url = m[2];
+      if (url.startsWith('data:')) {
+        fontViolations.push(`inline data: font in ${href} (bundle a .woff2 file instead)`);
+        continue;
+      }
+      if (/^(?:[a-z]+:)?\/\//i.test(url) || !/^\/?assets\//.test(url.replace(/^\.\//, ''))) {
+        fontViolations.push(`font not served from dist/assets: ${url} (no CDN fonts, D-16)`);
+        continue;
+      }
+      if (!/\.woff2$/i.test(url)) fontViolations.push(`font is not .woff2: ${url}`);
+      const rel = url.replace(/^\.?\//, '');
+      const file = join(distDir, rel);
+      if (!existsSync(file)) {
+        fontViolations.push(`font referenced but missing from dist: ${url}`);
+        continue;
+      }
+      fontFiles.set(`/${rel}`, statSync(file).size);
+    }
+  }
+}
+// A font emitted into dist/assets but not referenced by the initial CSS is
+// still a font this build ships (a lazy stylesheet, a stray import): count it.
+for (const name of readdirSync(assetsDir)) {
+  if (!FONT_EXTENSIONS.test(name)) continue;
+  const href = `/assets/${name}`;
+  if (!fontFiles.has(href)) {
+    if (!/\.woff2$/i.test(name)) fontViolations.push(`font is not .woff2: ${href}`);
+    fontFiles.set(href, statSync(join(assetsDir, name)).size);
+  }
+}
+if (fontFiles.size > MAX_FONT_FILES) {
+  fontViolations.push(`${fontFiles.size} font files (max ${MAX_FONT_FILES}): latin + latin-ext of two variable families is 4`);
+}
+const fontBytes = [...fontFiles.values()].reduce((a, b) => a + b, 0);
+console.log('[check-bundle-size] font files (raw bytes):');
+for (const [href, bytes] of [...fontFiles].sort((a, b) => b[1] - a[1])) {
+  console.log(`  ${fmt(bytes).padStart(10)}  ${href}`);
+}
+console.log(`[check-bundle-size] fonts total: ${fmt(fontBytes)} in ${fontFiles.size} file(s)  (budget ${fmt(FONT_BUDGET_BYTES)})`);
+console.log(`[check-bundle-size] initial CSS gzip: ${fmt(initialCssGzip)}  (report only)`);
+if (fontBytes > FONT_BUDGET_BYTES) {
+  fontViolations.push(`fonts exceed budget by ${fmt(fontBytes - FONT_BUDGET_BYTES)}`);
+}
+if (fontViolations.length > 0) {
+  for (const v of fontViolations) console.error(`  ${v}`);
+  console.error(
+    `\n[check-bundle-size] FAIL — font check: ${fontViolations.length} problem(s). ` +
+      'Only bundled .woff2 files from dist/assets, at most 6, within FONT_BUDGET_BYTES (D-16, 09 §8.1).',
   );
   process.exit(1);
 }

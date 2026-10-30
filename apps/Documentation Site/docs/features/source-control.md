@@ -56,7 +56,7 @@ The displayed checks and mergeability are retrieved state, not a local guarantee
 
 ## Source evidence
 
-`apps/web/src/components/diff/ChangesSurface.tsx`, `apps/web/src/components/diff/CheckpointTimeline.tsx`, `apps/web/src/components/diff/review`, `apps/web/src/components/chat/RewindMenu.tsx`, `apps/web/src/components/scm/SourceControlPanel.tsx`, `apps/web/src/components/scm/ScmConflictActions.tsx`, `apps/web/src/pages/PullRequestPage.tsx`, and `packages/shared/src/types/SourceControl.ts`.
+`apps/web/src/blocks/changes/ChangesPanel.tsx`, `apps/web/src/blocks/changes/checkpoints/CheckpointScrubber.tsx`, `apps/web/src/blocks/changes/review`, `apps/web/src/features/chat/components/RewindMenu.tsx`, `apps/web/src/blocks/scm/CommitBar.tsx`, `apps/web/src/blocks/scm/ScmConflictActions.tsx`, `apps/web/src/features/projects/PullRequestPage.tsx`, and `packages/shared/src/types/SourceControl.ts`.
 
 ## Configuration and worked examples
 

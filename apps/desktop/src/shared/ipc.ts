@@ -4,7 +4,22 @@
 // drift between the two sides.
 // ────────────────────────────────────────────────────────────────
 
-export type ThemePreference = 'light' | 'dark' | 'system';
+// The payloads that cross the bridge live in `@generatorai/shared`
+// (`types/DesktopShell.ts`), so the renderer's `desktop-bridge.d.ts` uses the
+// same declarations (P1-review P2-R24, P2-R41). Type-only: erased from both bundles.
+export type {
+  DesktopAppearancePush,
+  DesktopAppearanceRequest,
+  DesktopServerEntry,
+  DesktopShellStatePush,
+  DesktopThemePreference,
+  DesktopUpdateState,
+  NavHistoryState,
+  WindowChrome,
+  WindowStateChange,
+  FindInPageResult,
+} from '@generatorai/shared';
+import type { DesktopShellStatePush, DesktopThemePreference } from '@generatorai/shared';
 
 export type ServerState =
   | 'idle'
@@ -38,6 +53,13 @@ export interface AppInfo {
   dataDir: string;
   logFile: string;
   serverUrl: string | null;
+  /**
+   * True when the asking page is this computer's own server (embedded, or the
+   * dev server the shell was started against) — the case where a path picked
+   * in a native dialog means something to the server. False for a remote
+   * server's page (D-126/D-130), which also cannot call the local-only dialogs.
+   */
+  localServer: boolean;
 }
 
 export interface SaveFileOptions {
@@ -49,51 +71,18 @@ export interface SaveFileOptions {
 }
 
 /**
- * How the window frame is drawn, so the renderer can lay out its header to
- * match. The web app is served in a browser too, where this is simply absent.
- */
-export interface WindowChrome {
-  platform: NodeJS.Platform;
-  /**
-   * `native` — the OS draws a full title bar above our content (fallback).
-   * `hidden-inset` — macOS: traffic lights float over our header.
-   * `overlay` — Windows/Linux: the OS paints min/max/close INTO our header.
-   */
-  titleBarStyle: 'native' | 'hidden-inset' | 'overlay';
-  /** Height in px the app must reserve for the draggable strip. */
-  titleBarHeight: number;
-  /** Space to keep clear on the LEFT (macOS traffic lights). */
-  insetLeft: number;
-  /** Space to keep clear on the RIGHT (Windows/Linux window controls). */
-  insetRight: number;
-  /** Wayland forbids programmatic move/resize — the UI should not offer it. */
-  isWayland: boolean;
-}
-
-/**
  * Renderer-owned UI state mirrored into the native menu.
  *
  * A native menu that never reflects the app is decoration; this is what makes
- * `View ▸ Toggle Sidebar` show a real checkmark and `Back` grey out.
+ * `View ▸ Toggle Sidebar` show a real checkmark and `Back` grey out. Back and
+ * Forward are deliberately absent: Chromium's own navigation history is the
+ * authority for those (see `menu.ts`). The attention counts are not menu
+ * state either: they feed the tray and the badge (`attention-state.ts`), and
+ * the menu does not show them.
  */
-export interface MenuState {
-  sidebarOpen: boolean;
-  rightPaneOpen: boolean;
-  theme: ThemePreference;
-  /** Most recently visited routes, newest first. */
-  recent: { label: string; route: string }[];
-}
-
-/**
- * Everything the renderer mirrors into the native shell.
- *
- * Back/Forward are deliberately absent: Chromium's own navigation history is
- * the authority for those (see `menu.ts`), and the renderer's guess left
- * `View ▸ Forward` permanently disabled.
- */
-export interface ShellState extends MenuState {
-  /** True while the renderer holds edits that closing would discard. */
-  hasUnsavedWork: boolean;
+export interface MenuState extends Pick<DesktopShellStatePush, 'sidebarOpen' | 'rightPaneOpen' | 'recent'> {
+  /** Radio state of View ▸ Appearance; set from the renderer's appearance push only. */
+  mode: DesktopThemePreference;
 }
 
 // Renderer → main (invoke/handle)
@@ -105,8 +94,18 @@ export const IPC = {
   selectFile: 'desktop:selectFile',
   saveFile: 'desktop:saveFile',
   openExternal: 'desktop:openExternal',
-  getTheme: 'desktop:getTheme',
-  setTheme: 'desktop:setTheme',
+  /**
+   * macOS Accessibility + Screen Recording for computer use (U-67): `status` reads them, `request` asks macOS
+   * (listing GeneratorAI under both Privacy panes), `openSettings` opens Screen Recording settings. Null off macOS.
+   * Local-only: a remote server's page must not prompt for this computer's grants.
+   */
+  computerPermissions: 'desktop:computerPermissions',
+  /**
+   * The renderer's appearance ({@link DesktopAppearancePush}). Main persists it,
+   * mirrors `nativeTheme.themeSource`, repaints the window background and the
+   * caption glyphs, and updates the View ▸ Appearance radio.
+   */
+  setAppearance: 'desktop:setAppearance',
   getSetting: 'desktop:getSetting',
   setSetting: 'desktop:setSetting',
   reload: 'desktop:reload',
@@ -124,13 +123,29 @@ export const IPC = {
    * itself as a device. Returns null when the server is not running.
    */
   requestPairingCode: 'desktop:requestPairingCode',
-  /** Window chrome geometry so the renderer can lay out its header. */
-  getWindowChrome: 'desktop:getWindowChrome',
-  /** Renderer pushes UI state up so the native menu can mirror it. */
+  /**
+   * Renderer pushes UI state up so the native menu can mirror it. The first
+   * push from a document also tells main that document's bridge listeners are
+   * up, so routes can go over {@link IPC_EVENT.navigate} (06 §3.4).
+   */
   setMenuState: 'desktop:setMenuState',
   /** Native window controls, used only when we draw our own title bar. */
   windowMaximizeToggle: 'desktop:windowMaximizeToggle',
   windowIsMaximized: 'desktop:windowIsMaximized',
+  /** Known servers (this machine + paired remotes), for the switcher (G-03). */
+  getServers: 'desktop:getServers',
+  switchServer: 'desktop:switchServer',
+  addServer: 'desktop:addServer',
+  /** Updater state, for the renderer's "Restart to update" pill (G-04). */
+  getUpdateState: 'desktop:getUpdateState',
+  installUpdate: 'desktop:installUpdate',
+  /**
+   * The preload's `updates.onChange` reports each subscribe (`true`) and
+   * unsubscribe (`false`). Main suppresses the native "update ready" dialog
+   * only while a renderer is actually listening and the window is visible
+   * (P1-review P2-R3).
+   */
+  watchUpdates: 'desktop:watchUpdates',
 } as const;
 
 /** Result of {@link IPC.requestPairingCode}. */
@@ -154,46 +169,33 @@ export const IPC_EVENT = {
   navigate: 'desktop:navigate',
   serverStatus: 'desktop:server-status',
   command: 'desktop:command',
-  themeChanged: 'desktop:theme-changed',
   /** Window maximize/unmaximize/fullscreen, so a custom bar can restyle. */
   windowStateChanged: 'desktop:window-state-changed',
   /** Match count for the current find-in-page query. */
   foundInPage: 'desktop:found-in-page',
   /**
-   * The user picked an appearance in the native View ▸ Appearance menu.
-   * Distinct from `themeChanged`, which reports the RESOLVED colour after an
-   * OS change: this one carries the preference itself, so the renderer adopts
-   * light/dark/system rather than a colour it may be pinned against.
+   * The user picked a mode in the native View ▸ Appearance menu
+   * ({@link DesktopAppearanceRequest}). Main does not apply it: the renderer's
+   * ThemeProvider is the only appearance writer (D-25), applies the mode and
+   * pushes the result back through {@link IPC.setAppearance}.
    */
-  themePreferenceChanged: 'desktop:theme-preference-changed',
+  appearanceRequest: 'desktop:appearance-request',
+  /** The known-servers list changed (switched, added, forgotten) — G-03. */
+  serversChanged: 'desktop:servers-changed',
+  /** Updater state changed (checking/downloading/ready/installing) — G-04. */
+  updateStateChanged: 'desktop:update-state-changed',
+  /**
+   * Whether the window's session history can go back / forward
+   * ({@link NavHistoryState}), from Chromium's own history. Sent on every
+   * navigation and when a document finishes loading (06 §3.4); drives the
+   * title strip's and the native-frame sidebar row's Back / Forward buttons.
+   */
+  navHistoryChanged: 'desktop:nav-history-changed',
 } as const;
 
-/** Payload of {@link IPC_EVENT.windowStateChanged}. */
-export interface WindowStateChange {
-  maximized: boolean;
-  fullScreen: boolean;
-  focused: boolean;
-}
-
-/** Result of one find-in-page pass, as Chromium reports it. */
-export interface FindInPageResult {
-  activeMatchOrdinal: number;
-  matches: number;
-}
-
-/** High-level commands dispatched from native menus / shortcuts to the renderer. */
-export type DesktopCommand =
-  | 'new-chat'
-  | 'new-workflow'
-  | 'new-project'
-  | 'new-automation'
-  | 'command-palette'
-  | 'focus-search'
-  /** Open the find bar (Edit ▸ Find). */
-  | 'find-in-page'
-  | 'find-next'
-  | 'find-previous'
-  | 'toggle-sidebar'
-  | 'toggle-right-pane'
-  | 'show-shortcuts'
-  | 'reload-scripts';
+/**
+ * Commands main sends to the renderer (menu items, accelerators, tray): the
+ * registry's global renderer commands (`@generatorai/shared/ui-contract`, D-24).
+ * The renderer handles every one of them exhaustively (useCommandHost).
+ */
+export type { RendererCommandId as DesktopCommand } from '@generatorai/shared/ui-contract';

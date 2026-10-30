@@ -5,11 +5,13 @@ Expo / React Native companion app (SDK 57, Continuous Native Generation — `ios
 
 ## Build pipeline (EAS)
 
-`eas.json` defines three profiles:
+`eas.json` defines these profiles:
 
 | Profile | Purpose | Distribution |
 |---|---|---|
 | `development` | dev client with hot reload (`developmentClient: true`) | internal APK / iOS simulator |
+| `development-device` | dev client for a physical phone | internal APK / signed iOS |
+| `e2e` | bundled characterization build (`EXPO_PUBLIC_E2E=1`) | internal APK / iOS simulator |
 | `preview` | installable test build for a physical phone | internal APK |
 | `production` | store build, `autoIncrement` on | store |
 
@@ -54,28 +56,26 @@ tokens register against the sandbox gateway and pushes are silently dropped. `ea
 APS_ENVIRONMENT=production npx expo config --type introspect | grep aps-environment
 ```
 
-## Android cleartext (LAN pairing in release builds)
+## LAN HTTPS and certificate pinning (MV-44)
 
-The pairing offer for a server on the same network is `http://<lan-ip>:<port>`. Android 9+
-blocks cleartext by default, so a release build that does not opt in rejects every request after
-a QR scan that looked successful. SDK 57 removed the `android.usesCleartextTraffic` config key, so
-`plugins/withCleartextTraffic.js` sets `android:usesCleartextTraffic="true"` on the generated
-manifest directly (`plugins/androidManifestCleartext.js` is the unit-tested transform).
+The app talks to a server on the same network over `https://`, never plain HTTP (MD-201): the
+server's leaf is issued by its own per-install CA (D-110), and the pairing QR names that CA
+(`certificateFingerprint`, plus `backupCertificateFingerprint`). `modules/generatorai-trust`
+anchors each paired server's LAN `host:port` to that CA alone, natively, for every stack the app
+uses — React Native `fetch` / XHR / images and `WebSocket`, and `expo/fetch` (the stream):
+iOS through `URLSession` challenge hooks and SocketRocket's security policy, Android through one
+`OkHttpClientFactory` with a pinning `X509ExtendedTrustManager`. Public names (a `*.ts.net`
+certificate) keep the system trust. A typed code reads the CA from the handshake and the person
+compares the certificate with the one their computer shows (MD-200). Rules:
+`src/services/transport/trust.ts`; storage: `src/services/auth/serverTrust.ts`; decisions
+MD-199…MD-202; evidence `docs/redesign/mobile/reviews/mv44-pinning.md`.
 
-Android's `network_security_config.xml` can only allow-list exact hosts and domain
-suffixes — not CIDR ranges — so the "loopback / RFC1918 / `.local` only" rule is enforced at
-the **application layer** instead: `PairingEndpointSchema` (`@generatorai/relay-protocol`)
-refuses an `http:` endpoint that is not private, and the app only ever talks to a paired
-endpoint. `src/__tests__/cleartextEndpointPolicy.test.ts` pins that rule; if it ever loosens,
-the cleartext flag loses its justification.
-
-Note: there is **no** message-level encryption above the transport (the relay-protocol
-`e2ee.ts` module is unwired). LAN requests are DPoP-signed — authenticated, not confidential.
+Release builds keep Android's default refusal of cleartext; debug builds allow it for Metro.
 
 ## Notification preferences
 
 Settings › Notifications stores three per-device switches (`notify.gates`, `notify.runs`,
-`notify.chats`). They take effect in two places (`src/notifications/notificationFilter.ts`):
+`notify.chats`). They take effect in two places (`src/services/notifications/notificationFilter.ts`):
 
 - **Foreground** — `setNotificationHandler` suppresses a switched-off category.
 - **Background** — the server has no per-category field, only `PUT /api/auth/push-token/mute`
@@ -91,66 +91,59 @@ Two mechanisms keep it out, both enforced:
   `metro.config.js`): the server's app-config schema, child-process env, host IPC, OpenTelemetry
   and the pino logger never enter the bundle. `src/__tests__/sharedClientEntry.test.ts` fails if a
   client package imports a value the entry does not export.
-- `plugins/babel-plugin-lucide-icons.js` rewrites icon imports to per-icon modules (the barrel is
-  1.29 MB of source for ~60 icons).
+- Icons import lucide per icon (`lucide-react-native/icons/*` in `src/ui/primitives/Icon/lucide.ts`); the barrel
+  (1.29 MB of source for ~60 icons) fails `bundle:check`.
 
 ```powershell
 pnpm --filter @generatorai/mobile bundle:analyze   # expo export + size table + forbidden-module gate
 pnpm --filter @generatorai/mobile bundle:check     # gate only (needs a previous export)
-pnpm --filter @generatorai/mobile terminal:bundle  # regenerate src/terminal/xtermBundle.generated.ts
+pnpm --filter @generatorai/mobile terminal:bundle  # regenerate src/blocks/TerminalView/engine/xtermBundle.generated.ts
 ```
 
 ## End-to-end harness
 
-`e2e/` drives the Expo web preview at a phone viewport against an isolated server with Playwright
-(pair, chat, live gate, Changes, Stop, scope request, admin approve). See `e2e/README.md`.
-It complements, not replaces, a device build: WebView, biometrics, push actions and native gestures
-still need `eas build`.
+The mobile overhaul uses native `agent-device` walkthroughs and Maestro flows against the isolated
+sandbox. The older web-preview scripts in `e2e/` are frozen and deleted as their native flows land;
+do not use them to verify native UI. The protocol and task sequence are in
+`../../docs/redesign/mobile/08-verification.md`.
 
 ## Native testing on an Android emulator
 
-The web preview cannot catch native-only defects. Every one of these reproduced only on a
-device build:
+Install JDK 17, the Android SDK and the named test devices reported by doctor. From the repository root:
 
-- NativeWind dropping `className` on Reanimated components.
-- The native header double-paying the status bar.
-- Predictive back swallowing every back press.
-- The keyboard covering the composer under edge-to-edge.
-- `AbortSignal.throwIfAborted` missing in Hermes.
-
-Run a real build before calling UI work done.
-
-```bash
-# One-time: JDK 17, Android SDK (platform 36, build-tools 36, NDK 27.1, cmake 3.22), an arm64 AVD
-npx expo prebuild --platform android --no-install
-cd android && ./gradlew assembleRelease           # Hermes bytecode, starts in seconds; JS-only rebuilds ~1 min
-adb install -r app/build/outputs/apk/release/app-release.apk
-adb reverse tcp:3100 tcp:3100                     # the phone reaches the host's loopback server
-adb shell am start -a android.intent.action.VIEW -d "'<pairingUrl>'" dev.generatorai.app   # opens consent
+```sh
+node scripts/mobile/doctor.mjs --create
+pnpm --filter @generatorai/mobile exec expo run:android --device gai-phone
+node scripts/mobile/fingerprint.mjs --platform=android --record
+node scripts/mobile/sandbox-pair.mjs --platform=android
 ```
 
-- **Pairing.** Mint the link with `POST /api/auth/pair` (`platform: "web"` while the server only
-  advertises loopback). Opening it deep-links into the pairing consent screen.
-- **Loopback server.** `adb reverse` connects to `localhost`, which resolves to `::1` first. A
-  server bound only to `127.0.0.1` needs an IPv6 listener or forwarder on `[::1]:3100`.
-- **Debug build.** A debug build through Metro works for hot reload, but it is slow on an 8 GB
-  machine. Use the release build for walking through flows.
+Keep the development client's Metro server on port 8081. If Node resolves localhost to IPv6 first,
+start Metro with `NODE_OPTIONS=--dns-result-order=ipv4first`; the emulator reaches the host through
+`10.0.2.2`. The pairing helper advertises that sandbox endpoint and preserves the pairing offer's
+identity and consent fields. Physical Android devices selected with `--serial` use `adb reverse`.
+Use release builds for performance measurements; debug builds are for development and interaction checks.
 
 ## iOS
 
 ### Running on the iOS simulator
 
-`ios/` is generated and git-ignored. Two scripts cover the whole path:
+`ios/` is generated and git-ignored. From the repository root:
 
 ```sh
-./scripts/ios-sim-setup.sh   # once: an Xcode that fits this macOS + the iOS runtime (asks for Apple ID, 2FA, Mac password)
-./scripts/ios-sim-run.sh     # prebuild + pods if needed, Release build, install, launch
+node scripts/mobile/doctor.mjs --create  # check tools and create missing named test devices
+pnpm --filter @generatorai/mobile exec expo run:ios --device gai-iphone
+node scripts/mobile/fingerprint.mjs --platform=ios --record
+node scripts/mobile/sandbox-pair.mjs --platform=ios
 ```
 
-The setup script exists because the App Store only carries the newest Xcode, which can demand a
-newer macOS than the machine has; it installs a chosen version from developer.apple.com through
-`xcodes`. `PAIR_URL='generatorai://pair?code=…' ./scripts/ios-sim-run.sh` opens a pairing link after
-launch; the simulator shares the host's network, so a `127.0.0.1` server address works as is.
+Install Xcode and its simulator runtime through Apple's tools first; doctor reports missing owner
+actions and does not request passwords or change the system Xcode selection. For a bundled build,
+add `--configuration Release` to `expo run:ios`. Keep simulator signing enabled: SecureStore needs
+the generated simulator keychain entitlements. The pairing helper starts a temporary sandbox and
+uses the simulator's shared host loopback. It stays attached until Ctrl-C; `sandbox-pair.mjs stop`
+from another terminal stops only that helper's verified sandbox. Android uses the same tools with
+`--platform=android` and `expo run:android --device gai-phone`.
 
 There is no Xcode in CI; `expo config --type introspect` and `expo export --platform ios` are the
 static checks. **Run introspect on a clean checkout** (or after `expo prebuild --clean`): a stale,
@@ -172,8 +165,8 @@ What the config guarantees, and why:
   way if the mark changes, e.g. with sharp: `sharp('assets/icon.png').flatten({ background:
   '#0d1117' }).removeAlpha().png().toFile('assets/icon-ios.png')`.
 - **Locked launch.** The session item is `WHEN_UNLOCKED_THIS_DEVICE_ONLY` (trade-off documented in
-  `src/auth/secureItemStore.ts`). A launch while locked reaches a “Unlock to continue” state
-  (`src/auth/restoreState.ts`) and retries when the app becomes active — it never routes to
+  `src/services/auth/secureItemStore.ts`). A launch while locked reaches a “Unlock to continue” state
+  (`src/services/auth/restoreState.ts`) and retries when the app becomes active — it never routes to
   `/pair`. Lock-screen Allow/Deny require device authentication.
 - **Orientation.** All orientations on phone and iPad. `ConnectionStripHost` pays the left/right
   safe-area insets once; full-window surfaces (`Sheet`, iOS form sheets) read the real insets via

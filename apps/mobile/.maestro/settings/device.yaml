@@ -1,0 +1,17 @@
+appId: ${APP_ID}
+name: settings · notifications, app lock & privacy, widgets & live activities
+# M7-07 (MSetNotifications, MSetAppLock, MSetWidgets). Per-device screens; nothing here writes to the server.
+tags: [settings]
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///settings/notifications
+- extendedWaitUntil: {visible: {id: settings-notifications-screen}, timeout: 20000}
+- assertVisible: {id: notifications-system}
+- openLink: generatorai:///settings/app-lock
+- extendedWaitUntil: {visible: {id: app-lock-require}, timeout: 15000}
+- assertVisible: {id: app-lock-hide-switcher}
+- assertVisible: {id: app-lock-hide-previews}
+- openLink: generatorai:///settings/widgets
+- extendedWaitUntil: {visible: {id: widgets-live-runs}, timeout: 15000}
+- tapOn: {id: widgets-live-chats}
+- tapOn: {id: widgets-live-chats}

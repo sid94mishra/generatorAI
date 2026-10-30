@@ -12,7 +12,8 @@
     "noEmit": true,
     "allowImportingTsExtensions": false,
     "types": [
-      "node"
+      "node",
+      "jest"
     ],
     "paths": {
       "@/*": [
@@ -25,9 +26,10 @@
     "app/**/*",
     "*.ts",
     "*.tsx",
-    "nativewind-env.d.ts",
     ".expo/types/**/*.ts",
-    "expo-env.d.ts"
+    "expo-env.d.ts",
+    ".rnstorybook/**/*.tsx",
+    ".rnstorybook/vrtMode.ts"
   ],
   "exclude": [
     "node_modules",

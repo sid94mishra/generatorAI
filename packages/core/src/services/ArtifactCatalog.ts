@@ -101,6 +101,15 @@ export interface ArtifactCatalogOptions {
    * already store/pass an absolute path.
    */
   resolveProjectConfigPath?: (config: ProjectConfig) => string;
+  /**
+   * G-19 — per-project artifact enable/disable, applied AT THE SOURCE so
+   * every resolution path (`AgentResolver`'s chat/stage resolution, plus
+   * `AgentService`'s save-time validation, which is deliberately caught by
+   * the same filter: an agent cannot reference something disabled for its
+   * project) sees a project-disabled skill/MCP server as simply absent.
+   * Absent callback or no `projectId` → nothing is hidden.
+   */
+  getDisabledArtifactIds?: (projectId: string, type: 'skill' | 'mcp') => Promise<ReadonlySet<string>>;
 }
 
 export class ArtifactCatalog {
@@ -134,7 +143,19 @@ export class ArtifactCatalog {
         });
       }
     }
-    return out;
+    return this.applyDisabled(out, projectId, 'skill');
+  }
+
+  /** G-19 — drops entries the project has disabled (by id, regardless of `source`). */
+  private async applyDisabled<T extends { id: string }>(
+    items: T[],
+    projectId: string | undefined,
+    type: 'skill' | 'mcp',
+  ): Promise<T[]> {
+    if (!projectId || !this.options.getDisabledArtifactIds) return items;
+    const disabled = await this.options.getDisabledArtifactIds(projectId, type);
+    if (!disabled.size) return items;
+    return items.filter((item) => !disabled.has(item.id));
   }
 
   /** The raw bundled catalog, validated. Missing/corrupt file → `[]` (logged). */
@@ -180,7 +201,7 @@ export class ArtifactCatalog {
         }
       }
     }
-    return out;
+    return this.applyDisabled(out, projectId, 'mcp');
   }
 
   // ── Builders ──

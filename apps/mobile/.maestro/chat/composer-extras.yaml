@@ -1,0 +1,36 @@
+appId: ${APP_ID}
+name: chat · composer "+" menu, slash and mention popovers
+# Part of the web-preview e2e/flow3.mjs (08 §6.3; flow3 goes with pane/browser.yaml in M6-10). M6-04 (MB-01, MD-63).
+tags: [smoke, chat]
+env: {FRESH_CHAT: stream}
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///chats/${CHAT_STREAM_ID}
+- extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- runFlow: ../_subflows/pane-closed.yaml
+- assertVisible: {id: composer-send, enabled: false}
+# The "+" menu first, before the keyboard is up: with it up the native menu has no room and scrolls its items.
+# A menu item that needs a scope the device lacks carries the reason in its label ("Attach file, Uploading files needs…").
+- tapOn: {id: composer-options}
+- extendedWaitUntil: {visible: "Attach file.*", timeout: 10000}
+- assertVisible: "Commands & skills.*"
+- assertVisible: "Mention file.*"
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - back
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      # A tap outside a UIMenu closes it.
+      - tapOn: {point: "50%, 20%"}
+- waitForAnimationToEnd
+- tapOn: {id: composer-input}
+- inputText: /
+- extendedWaitUntil: {visible: {id: composer-suggestions}, timeout: 15000}
+# Android reads the header and its count as one node ("Commands & skills, 12").
+- assertVisible: "Commands & skills.*"
+- eraseText
+- inputText: "@"
+- extendedWaitUntil: {visible: {id: composer-suggestions}, timeout: 15000}
+- eraseText

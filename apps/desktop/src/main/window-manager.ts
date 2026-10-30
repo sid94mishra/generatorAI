@@ -4,8 +4,9 @@
 // state persistence, and safe navigation helpers.
 // ────────────────────────────────────────────────────────────────
 
-import { BrowserWindow, dialog, shell, nativeTheme, screen, type MessageBoxOptions } from 'electron';
+import { BrowserWindow, dialog, shell, screen, type MessageBoxOptions } from 'electron';
 import * as path from 'node:path';
+import { CHROME } from '@generatorai/design-tokens/chrome';
 import { log } from './logger';
 import { loadSettings, saveSettings } from './config';
 import {
@@ -13,13 +14,21 @@ import {
   isWayland,
   titleBarOptions,
   titleBarSymbolColor,
-  TITLE_BAR_HEIGHT,
   useCustomTitleBar,
+  windowChrome,
 } from './platform';
-import type { DesktopCommand } from '../shared/ipc';
+import type {
+  DesktopAppearanceRequest,
+  DesktopCommand,
+  DesktopThemePreference,
+  NavHistoryState,
+} from '../shared/ipc';
 import { IPC_EVENT } from '../shared/ipc';
+import { windowChromeArg } from '../shared/window-chrome-arg';
+import { appearanceMirror } from './appearance';
 import { appRouteOf, isAppOrigin, isExternalUrlAllowed } from './navigation-guard';
 import { hasUnsavedWork } from './unsaved-work';
+import { localPageUrl } from './local-pages';
 import { appWindowPermissionPolicy, installCspFloor, installPermissionPolicy } from './session-hardening';
 
 const RESOURCES = path.join(__dirname, '..', '..', 'resources');
@@ -39,6 +48,16 @@ export function shouldHideOnClose(state: { minimizeToTray: boolean; quitting: bo
   return state.minimizeToTray && !state.quitting;
 }
 
+/** One step through the window's session history, when it can move that way (D-93). */
+export function navigateHistory(win: Pick<BrowserWindow, 'isDestroyed' | 'webContents'>, direction: 'back' | 'forward'): boolean {
+  if (win.isDestroyed()) return false;
+  const history = win.webContents.navigationHistory;
+  if (direction === 'back' ? !history.canGoBack() : !history.canGoForward()) return false;
+  if (direction === 'back') history.goBack();
+  else history.goForward();
+  return true;
+}
+
 export class WindowManager {
   private mainWindow: BrowserWindow | null = null;
   private splashWindow: BrowserWindow | null = null;
@@ -47,9 +66,71 @@ export class WindowManager {
   /** Set once the user has agreed to lose unsaved work, so the retried close
    *  does not ask again. */
   private discardConfirmed = false;
+  private readonly rendererResetListeners = new Set<() => void>();
+  /** True once the main window's current document is the app page, loaded. */
+  private appPageLoaded = false;
+  /**
+   * A route asked for before the app page could take it (a deep link on a cold
+   * start arrives before the window exists or while it is still loading). The
+   * last one wins; it is applied on the app page's next `did-finish-load`.
+   */
+  private pendingRoute: string | null = null;
+  /**
+   * True once the main window's current document has pushed `setMenuState`,
+   * which proves its bridge listeners (`onNavigate` among them) are up. Routes
+   * then go over `IPC_EVENT.navigate` into React Router instead of a
+   * History-API injection (06 §3.4). Cleared with every renderer reset.
+   */
+  private rendererReady = false;
+  /**
+   * A renderer command asked for before any page could run it (a
+   * `generatorai://command/<id>` link on a cold start, a dock menu action
+   * while the window loads). The last one wins; it is sent when the app page
+   * reports in (`markRendererReady`), after any held route.
+   */
+  private pendingCommand: DesktopCommand | null = null;
 
   getMainWindow(): BrowserWindow | null {
     return this.mainWindow;
+  }
+
+  /**
+   * Subscribe to "the page that pushed renderer state is gone": the main
+   * window closed, its renderer process died, or its top frame started loading
+   * a new document (a backend switch, a server restart repoint, a reload, the
+   * error page). Whatever that page reported (attention counts, update
+   * subscriptions) no longer has anyone keeping it current, so listeners drop
+   * it. Same-document navigations (SPA route changes) do not fire this.
+   */
+  onRendererReset(listener: () => void): () => void {
+    this.rendererResetListeners.add(listener);
+    return () => this.rendererResetListeners.delete(listener);
+  }
+
+  private emitRendererReset(): void {
+    // The next document has to report in before it is sent routes over IPC.
+    this.rendererReady = false;
+    for (const listener of this.rendererResetListeners) {
+      try {
+        listener();
+      } catch (e) {
+        log.warn('renderer-reset listener failed', e);
+      }
+    }
+  }
+
+  /**
+   * The main window's current document pushed its first `setMenuState` (the
+   * IPC guard admits only that document), so its bridge listeners are live.
+   */
+  markRendererReady(): void {
+    this.rendererReady = true;
+    const command = this.pendingCommand;
+    const win = this.mainWindow;
+    if (command && win && !win.isDestroyed()) {
+      this.pendingCommand = null;
+      win.webContents.send(IPC_EVENT.command, command);
+    }
   }
 
   /** The URL the main window is meant to be showing. */
@@ -64,12 +145,31 @@ export class WindowManager {
    */
   setQuitting(value: boolean): void {
     this.quitting = value;
+    // A quit that was abandoned (an update install that did not start)
+    // must ask about unsaved work again next time.
+    if (!value) this.discardConfirmed = false;
   }
 
+  /**
+   * The window background before the renderer paints: the persisted `ground`
+   * of the user's theme for the current appearance (D-25), so a cold start in
+   * any of the 18 themes opens on its own colour instead of a GitHub literal.
+   */
   private backgroundColor(): string {
-    const theme = loadSettings().theme;
-    const dark = theme === 'system' ? nativeTheme.shouldUseDarkColors : theme === 'dark';
-    return dark ? '#0d1117' : '#ffffff';
+    return appearanceMirror().ground;
+  }
+
+  /**
+   * Repaints everything main draws in the theme's colours after an appearance
+   * push or an OS light/dark flip: the window backgrounds (visible while
+   * resizing and before the renderer paints) and the caption glyphs.
+   */
+  applyAppearance(): void {
+    const ground = this.backgroundColor();
+    for (const win of [this.mainWindow, this.splashWindow]) {
+      if (win && !win.isDestroyed()) win.setBackgroundColor(ground);
+    }
+    this.refreshTitleBarTheme();
   }
 
   showSplash(): void {
@@ -85,7 +185,7 @@ export class WindowManager {
       backgroundColor: this.backgroundColor(),
       webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
     });
-    this.splashWindow.loadFile(path.join(RESOURCES, 'splash.html')).catch((e) => {
+    this.splashWindow.loadURL(localPageUrl('splash.html')).catch((e) => {
       log.warn('Failed to load splash', e);
     });
     this.splashWindow.on('closed', () => {
@@ -102,6 +202,8 @@ export class WindowManager {
 
   createMainWindow(appUrl: string, options: CreateMainWindowOptions = {}): BrowserWindow {
     this.appUrl = appUrl;
+    this.appPageLoaded = false;
+    this.rendererReady = false;
     const settings = loadSettings();
     const bounds = this.sanitizeBounds(settings.window);
 
@@ -110,11 +212,11 @@ export class WindowManager {
       height: bounds.height,
       x: bounds.x,
       y: bounds.y,
-      // 860 keeps the app usable side-by-side on a 13" laptop. The web layout
-      // collapses the sidebar below this, so a smaller floor would only
-      // produce a broken-looking window rather than a useful one.
-      minWidth: 860,
-      minHeight: 560,
+      // CHROME.minWindow (860×560) keeps the app usable side-by-side on a 13"
+      // laptop. The web layout collapses the sidebar below this, so a smaller
+      // floor would only produce a broken-looking window rather than a useful one.
+      minWidth: CHROME.minWindow.width,
+      minHeight: CHROME.minWindow.height,
       show: false,
       backgroundColor: this.backgroundColor(),
       title: 'GeneratorAI',
@@ -133,6 +235,10 @@ export class WindowManager {
         sandbox: true,
         webSecurity: true,
         spellcheck: true,
+        // The window chrome is static per process, so the preload reads it
+        // synchronously from argv and the renderer lays out its title strip or
+        // traffic-light row on the first frame (06 §3.6).
+        additionalArguments: [windowChromeArg(windowChrome())],
       },
     });
     this.mainWindow = win;
@@ -198,6 +304,54 @@ export class WindowManager {
 
     win.on('closed', () => {
       this.mainWindow = null;
+      this.appPageLoaded = false;
+      // A window closed without quitting (macOS keeps the app running): the
+      // "Discard" answered for it must not carry over to the next window.
+      if (!this.quitting) this.discardConfirmed = false;
+      this.emitRendererReset();
+    });
+    win.webContents.on('render-process-gone', (_event, details) => {
+      log.error('App renderer gone', details);
+      this.appPageLoaded = false;
+      this.emitRendererReset();
+    });
+    // The page's own errors and stalls go to the app log: a blank or reset page someone reports later is otherwise
+    // unexplainable, because the renderer console dies with the window.
+    win.webContents.on('unresponsive', () => log.warn('App renderer unresponsive'));
+    win.webContents.on('responsive', () => log.info('App renderer responsive again'));
+    win.webContents.on('console-message', (event) => {
+      if (event.level !== 'error') return;
+      log.warn('App renderer error', { message: event.message.slice(0, 2000), source: `${event.sourceId}:${event.lineNumber}` });
+    });
+    // `did-navigate`, not `did-start-navigation`: only a committed top-level
+    // document replaces the page. A navigation that never commits (an external
+    // link `will-navigate` blocks, a download, a 204) leaves the page, and
+    // what it pushed, in place (P1-review P2-R39). Same-document navigations
+    // fire `did-navigate-in-page` instead, so SPA route changes never reach here.
+    // A committed document is not the app page until it finishes loading, so
+    // routes asked for meanwhile are held (G-08).
+    win.webContents.on('did-navigate', () => {
+      log.info('App page loaded (a new document: launch, reload or backend switch)');
+      this.appPageLoaded = false;
+      this.emitRendererReset();
+      this.emitNavHistory(win);
+    });
+    // Back / Forward enabled state for the title strip and the native-frame
+    // sidebar row. Chromium's session history is the authority (as for the
+    // menu, see `menu.ts`); SPA route changes arrive here.
+    win.webContents.on('did-navigate-in-page', () => this.emitNavHistory(win));
+    // D-93: the mouse's Back / Forward buttons and the keyboard's Browser Back
+    // / Forward keys (Windows, Linux) and the trackpad swipe (macOS, when
+    // "Swipe between pages" is a two/three-finger swipe) move through the same
+    // session history as the menu and the buttons. macOS mouse buttons 4/5
+    // reach the page and are handled in the renderer (useCommandHost).
+    win.on('app-command', (_event, command) => {
+      if (command === 'browser-backward') navigateHistory(win, 'back');
+      else if (command === 'browser-forward') navigateHistory(win, 'forward');
+    });
+    win.on('swipe', (_event, direction) => {
+      if (direction === 'left') navigateHistory(win, 'back');
+      else if (direction === 'right') navigateHistory(win, 'forward');
     });
 
     // Security: open external links in the OS browser, never new Electron windows.
@@ -250,18 +404,17 @@ export class WindowManager {
       this.showError(`${errorDescription} (${errorCode})`);
     });
 
-    // Install the native directory-picker shim into the page (main world).
+    // Hand the page any route that arrived while it was loading.
     win.webContents.on('did-finish-load', () => {
-      win.webContents
-        .executeJavaScript(
-          `(() => { try {
-             const np = window.__generatoraiNativePickers;
-             if (np && typeof np.showDirectoryPicker === 'function') {
-               window.showDirectoryPicker = np.showDirectoryPicker;
-             }
-           } catch (e) { /* ignore */ } })();`,
-        )
-        .catch(() => undefined);
+      this.appPageLoaded = isAppOrigin(win.webContents.getURL(), this.appUrl);
+      // A fresh document's preload was not listening yet on `did-navigate`;
+      // it is now, and it keeps the value for later subscribers.
+      this.emitNavHistory(win);
+      const pending = this.pendingRoute;
+      if (this.appPageLoaded && pending) {
+        this.pendingRoute = null;
+        this.deliverRoute(win, pending);
+      }
     });
 
     log.info('Loading app URL', { appUrl });
@@ -283,15 +436,21 @@ export class WindowManager {
    * swap is deliberate: changing origin makes the browser discard every store,
    * cache and open stream from the previous server.
    */
-  repointMainWindow(url: string): void {
+  repointMainWindow(url: string, initialPath?: string): void {
     this.appUrl = url;
+    this.appPageLoaded = false;
+    // The new origin's page reports its own state; the old one's is stale now
+    // (also covered by `did-navigate`, but not when a window is created).
+    this.emitRendererReset();
     const win = this.mainWindow;
     if (!win || win.isDestroyed()) {
       this.createMainWindow(url);
       return;
     }
     log.info('Repointing main window', { url });
-    win.loadURL(url).catch((err: unknown) => {
+    // `initialPath` (e.g. `/?pair=…`) is part of the first load, so a page that
+    // reads its query once on mount (the pairing screen) sees it. Never logged.
+    win.loadURL(initialPath ? `${url}${initialPath}` : url).catch((err: unknown) => {
       log.error('Failed to load backend', err);
       this.showError(`Could not load ${url}.\n\n${err instanceof Error ? err.message : String(err)}`);
     });
@@ -306,6 +465,11 @@ export class WindowManager {
       if (this.appUrl) this.createMainWindow(this.appUrl);
       return;
     }
+    WindowManager.reveal(win);
+  }
+
+  /** Restore a minimised window and bring it to the front (also shows one hidden to the tray). */
+  private static reveal(win: BrowserWindow): void {
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
@@ -330,7 +494,7 @@ export class WindowManager {
     }
     this.closeSplash();
     const target = this.mainWindow ?? this.createBareWindow();
-    const url = `file://${path.join(RESOURCES, 'error.html')}?message=${encodeURIComponent(message)}`;
+    const url = localPageUrl('error.html', new URLSearchParams({ message }));
     target.loadURL(url).catch((e) => log.error('Failed to load error page', e));
     if (!target.isVisible()) target.show();
   }
@@ -345,14 +509,41 @@ export class WindowManager {
     this.mainWindow = win;
     win.on('closed', () => {
       this.mainWindow = null;
+      this.emitRendererReset();
     });
     return win;
   }
 
-  /** Navigate the SPA via the History API without a full reload. */
+  /**
+   * Navigate the SPA without a full reload. When the app page is not there yet
+   * (no window, first load, a repoint or the error page) the route is kept and
+   * applied once the app page finishes loading.
+   */
   navigateTo(routePath: string): void {
     const win = this.mainWindow;
-    if (!win || win.isDestroyed()) return;
+    if (!win || win.isDestroyed() || !this.appPageLoaded) {
+      this.pendingRoute = routePath;
+      if (win && !win.isDestroyed()) WindowManager.reveal(win);
+      return;
+    }
+    this.deliverRoute(win, routePath);
+    WindowManager.reveal(win);
+  }
+
+  /**
+   * Hands a route to the loaded app page: through the bridge (`onNavigate` →
+   * React Router) once the document has reported in, otherwise by injecting a
+   * History-API push, which works before any React listener exists.
+   */
+  private deliverRoute(win: BrowserWindow, routePath: string): void {
+    if (this.rendererReady) {
+      win.webContents.send(IPC_EVENT.navigate, routePath);
+      return;
+    }
+    this.pushRoute(win, routePath);
+  }
+
+  private pushRoute(win: BrowserWindow, routePath: string): void {
     const safe = JSON.stringify(routePath);
     win.webContents
       .executeJavaScript(
@@ -362,12 +553,27 @@ export class WindowManager {
          } catch (e) { window.location.assign(${safe}); } })();`,
       )
       .catch(() => undefined);
-    win.show();
-    win.focus();
   }
 
+  /**
+   * Run a renderer command and bring the window forward. Every caller is a
+   * menu, accelerator, tray or dock action whose result the user must see:
+   * Settings…, New chat or the palette sent to a window that is minimised or
+   * hidden to the tray would open where nobody can see it (P1-R2).
+   */
   sendCommand(command: DesktopCommand): void {
-    this.mainWindow?.webContents.send(IPC_EVENT.command, command);
+    const win = this.mainWindow;
+    if (!win || win.isDestroyed() || !this.rendererReady) {
+      // No page to run it yet: a `generatorai://command/<id>` link on a cold
+      // start, a dock/JumpList action while the window is loading, the pairing
+      // screen. Held (last one wins) and run once the app page reports in
+      // (`markRendererReady`), like a held route.
+      this.pendingCommand = command;
+      if (win && !win.isDestroyed()) WindowManager.reveal(win);
+      return;
+    }
+    win.webContents.send(IPC_EVENT.command, command);
+    WindowManager.reveal(win);
   }
 
   /**
@@ -384,6 +590,14 @@ export class WindowManager {
       fullScreen: win.isFullScreen(),
       focused: win.isFocused(),
     });
+  }
+
+  /** Tells the renderer whether Back / Forward can move (06 §3.4). */
+  private emitNavHistory(win: BrowserWindow): void {
+    if (win.isDestroyed()) return;
+    const history = win.webContents.navigationHistory;
+    const state: NavHistoryState = { back: history.canGoBack(), forward: history.canGoForward() };
+    win.webContents.send(IPC_EVENT.navHistoryChanged, state);
   }
 
   /** Re-emits current window state. Used when the renderer (re)connects. */
@@ -417,7 +631,7 @@ export class WindowManager {
       win.setTitleBarOverlay({
         color: '#00000000',
         symbolColor: titleBarSymbolColor(),
-        height: TITLE_BAR_HEIGHT,
+        height: CHROME.strip.height,
       });
     } catch {
       // Not supported by this window manager — the native frame still works.
@@ -441,7 +655,16 @@ export class WindowManager {
    * user said "Discard" must not re-ask.
    */
   async confirmDiscard(win?: BrowserWindow): Promise<boolean> {
-    if (this.discardConfirmed || !hasUnsavedWork()) return true;
+    if (this.discardConfirmed) return true;
+    if (!hasUnsavedWork()) {
+      // Remembered even with nothing to lose, so a quit that asks here and
+      // again at `before-quit` (an update install, P1-review P2-R37) cannot
+      // prompt the second time for work opened in between and strand the
+      // install half-way. `setQuitting(false)` and a window closed without
+      // quitting forget it.
+      this.discardConfirmed = true;
+      return true;
+    }
     const target = win ?? this.mainWindow ?? undefined;
     const opts: MessageBoxOptions = {
       type: 'warning',
@@ -459,10 +682,18 @@ export class WindowManager {
     return response === 0;
   }
 
-  /** Tells the renderer which appearance the user picked natively. */
-  sendThemePreference(theme: 'light' | 'dark' | 'system'): void {
+  /**
+   * Asks the renderer to apply a mode picked in View ▸ Appearance. Main does
+   * not apply it itself: ThemeProvider is the only appearance writer (D-25)
+   * and pushes the result back through IPC.setAppearance. Returns false when
+   * there is no window to ask.
+   */
+  sendAppearanceRequest(mode: DesktopThemePreference): boolean {
     const win = this.mainWindow;
-    if (win && !win.isDestroyed()) win.webContents.send(IPC_EVENT.themePreferenceChanged, theme);
+    if (!win || win.isDestroyed()) return false;
+    const request: DesktopAppearanceRequest = { mode };
+    win.webContents.send(IPC_EVENT.appearanceRequest, request);
+    return true;
   }
 
   openExternalSafely(url: string): void {
@@ -501,7 +732,14 @@ export class WindowManager {
         y = undefined;
       }
     }
-    return { width: Math.max(940, width), height: Math.max(600, height), x, y };
+    // Clamp to the same floor the window enforces, so a restored window is
+    // never smaller than one the user could have resized to.
+    return {
+      width: Math.max(CHROME.minWindow.width, width),
+      height: Math.max(CHROME.minWindow.height, height),
+      x,
+      y,
+    };
   }
 }
 

@@ -24,7 +24,7 @@ import type { IGitClient } from '@generatorai/git';
 import type { IProjectCodebaseRepository } from '../../domain/ports/IProjectCodebaseRepository.js';
 import type { IExecutionWorkspaceRepository } from '../../domain/ports/IExecutionWorkspaceRepository.js';
 import type { IWorkspaceMountRepository } from '../../domain/ports/IWorkspaceMountRepository.js';
-import { MountService, buildExposure, SCRATCH_DIR } from '../MountService.js';
+import { MountService, buildExposure, countFiles, mountWorkdir, SCRATCH_DIR } from '../MountService.js';
 
 function makeLogger(): ILogger {
   const logger: ILogger = {
@@ -47,9 +47,11 @@ function makeGit() {
     revParse: vi.fn(async () => 'deadbeef'),
     worktreeHoldingBranch: vi.fn(async () => null),
     isClean: vi.fn(async () => true),
+    currentBranch: vi.fn(async (): Promise<string | null> => 'main'),
     nestedRepos: vi.fn(async () => []),
     createBranch: vi.fn(async () => {}),
     checkoutBranch: vi.fn(async () => {}),
+    detachHead: vi.fn(async () => {}),
     addWorktree: vi.fn(async () => {}),
     initShadowRepo: vi.fn(async () => true),
     commonObjectsDir: vi.fn(async () => null),
@@ -136,6 +138,21 @@ describe('MountService.plan validation', () => {
     ).rejects.toThrow(/does not exist/);
   });
 
+  it('refuses to switch the branch of a dirty folder in place while the chat is created, not later', async () => {
+    const workspacesDir = await tmpDir();
+    const mine = await tmpDir();
+    await fs.mkdir(path.join(mine, '.git'));
+    const { service, git } = makeService({ workspacesDir });
+    git.isClean.mockResolvedValue(false);
+    const plan = (spec: ChatSourceSpec) => service.plan(path.join(workspacesDir, 'executions', 'chat-1'), undefined, [spec]);
+
+    await expect(plan({ kind: 'folder', path: mine, mode: 'in-place', newBranch: 'feature/x' })).rejects.toThrow(
+      /uncommitted changes, so its branch cannot be switched/,
+    );
+    // Staying on the current branch needs no clean tree.
+    await expect(plan({ kind: 'folder', path: mine, mode: 'in-place' })).resolves.toHaveLength(1);
+  });
+
   it('refuses a relative folder path', async () => {
     const workspacesDir = await tmpDir();
     const { service } = makeService({ workspacesDir });
@@ -160,7 +177,7 @@ describe('MountService.plan validation', () => {
       service.plan(path.join(workspacesDir, 'executions', 'chat-1'), undefined, [
         { kind: 'folder', path: inside },
       ]),
-    ).rejects.toThrow(/managed workspaces directory/);
+    ).rejects.toThrow(/part of GeneratorAI's own workspaces/);
   });
 
   it('refuses two mounts whose directories overlap', async () => {
@@ -178,7 +195,13 @@ describe('MountService.plan validation', () => {
         { kind: 'folder', path: outer },
         { kind: 'folder', path: inner },
       ]),
-    ).rejects.toThrow(/overlaps another mount/);
+    ).rejects.toThrow(/Folder web is inside repo, which is already a source/);
+    await expect(
+      service.plan(path.join(workspacesDir, 'executions', 'chat-1'), undefined, [
+        { kind: 'folder', path: outer },
+        { kind: 'folder', path: outer, alias: 'again' },
+      ]),
+    ).rejects.toThrow(/Folder repo is added twice/);
   });
 
   it('refuses to mount a git-remote codebase in place', async () => {
@@ -207,6 +230,70 @@ describe('MountService.plan validation', () => {
         { kind: 'codebase', codebaseId: 'cb-api', mode: 'in-place' },
       ]),
     ).rejects.toThrow(/remote clone with no working copy/);
+  });
+
+  it('takes the next free name when a generated branch name is taken by another chat, but refuses a chosen one', async () => {
+    const workspacesDir = await tmpDir();
+    const home = await tmpDir();
+    const clonePath = path.join(home, 'api.git');
+    await fs.mkdir(clonePath, { recursive: true });
+    const codebase: ProjectCodebase = {
+      id: 'cb-api', projectId: 'proj', alias: 'api', type: 'git-remote', url: 'https://example.invalid/api.git',
+      clonePath, status: 'ready', settings: {}, createdAt: new Date(), updatedAt: new Date(),
+    };
+    const { service, git } = makeService({ workspacesDir, codebases: [codebase] });
+    const taken = new Set(['generatorai/use-only-the-read', 'feature/login']);
+    git.branchExists.mockImplementation((async (_repo: string, name: string) => taken.has(name)) as never);
+
+    const planned = await service.plan(path.join(workspacesDir, 'executions', 'chat-2'), undefined, [
+      { kind: 'codebase', codebaseId: 'cb-api', mode: 'worktree', newBranch: 'generatorai/use-only-the-read' },
+    ]);
+    expect(JSON.stringify(planned)).toContain('generatorai/use-only-the-read-2');
+
+    await expect(
+      service.plan(path.join(workspacesDir, 'executions', 'chat-3'), undefined, [
+        { kind: 'codebase', codebaseId: 'cb-api', mode: 'worktree', newBranch: 'feature/login' },
+      ]),
+    ).rejects.toThrow(/already exists/);
+  });
+
+  it("releases a branch held by a finished run's clean worktree, but not a live run's", async () => {
+    const workspacesDir = await tmpDir();
+    const home = await tmpDir();
+    const clonePath = path.join(home, 'api.git');
+    await fs.mkdir(clonePath, { recursive: true });
+    const codebase: ProjectCodebase = {
+      id: 'cb-api', projectId: 'proj', alias: 'api', type: 'git-remote', url: 'https://example.invalid/api.git',
+      clonePath, status: 'ready', settings: {}, createdAt: new Date(), updatedAt: new Date(),
+    };
+    const finished = new Set(['run-done']);
+    const git = makeGit();
+    const service = new MountService({
+      mountRepo: mountRepo(),
+      workspaceRepo: workspaceRepo(),
+      git: git as unknown as IGitClient,
+      logger: makeLogger(),
+      workspacesDir,
+      codebaseRepo: { getById: vi.fn(async () => codebase), getByAlias: vi.fn(async () => codebase) } as unknown as IProjectCodebaseRepository,
+      isRunFinished: async (runId) => finished.has(runId),
+    });
+    git.branchExists.mockImplementation((async () => true) as never);
+    const holderOf = (runId: string) => path.join(workspacesDir, 'executions', runId, 'source', 'api');
+
+    git.worktreeHoldingBranch.mockImplementation((async () => holderOf('run-done')) as never);
+    await service.plan(path.join(workspacesDir, 'executions', 'chat-9'), undefined, [
+      { kind: 'codebase', codebaseId: 'cb-api', mode: 'worktree', branch: 'generatorai/pr-17' },
+    ]);
+    expect(git.detachHead).toHaveBeenCalledWith(holderOf('run-done'));
+
+    git.detachHead.mockClear();
+    git.worktreeHoldingBranch.mockImplementation((async () => holderOf('run-live')) as never);
+    await expect(
+      service.plan(path.join(workspacesDir, 'executions', 'chat-10'), undefined, [
+        { kind: 'codebase', codebaseId: 'cb-api', mode: 'worktree', branch: 'generatorai/pr-17' },
+      ]),
+    ).rejects.toThrow(/already checked out/);
+    expect(git.detachHead).not.toHaveBeenCalled();
   });
 
   it('refuses a codebase that is not ready', async () => {
@@ -284,6 +371,79 @@ describe('MountService.plan validation', () => {
   });
 });
 
+// ── the chat folder (D-141) ──────────────────────────────────────
+
+describe('the chat folder', () => {
+  it('plans as the generated mount at source/main, beside a folder — even one called "main"', async () => {
+    const workspacesDir = await tmpDir();
+    const { service } = makeService({ workspacesDir });
+    const root = path.join(workspacesDir, 'executions', 'chat-1');
+    const userMain = path.join(await tmpDir(), 'main');
+    await fs.mkdir(userMain);
+
+    const planned = await service.plan(root, undefined, [{ kind: 'folder', path: userMain }, { kind: 'chat-folder' }]);
+
+    expect(planned.map((m) => [m.alias, m.mode, m.path])).toEqual([
+      ['main-2', 'in-place', userMain],
+      ['main', 'generated', path.join(root, 'source', 'main')],
+    ]);
+  });
+
+  it('counts files without .git, and stops at the cap', async () => {
+    const dir = await tmpDir();
+    await fs.mkdir(path.join(dir, '.git'));
+    await fs.writeFile(path.join(dir, '.git', 'HEAD'), 'ref: refs/heads/main');
+    expect(await countFiles(dir)).toBe(0);
+    await fs.mkdir(path.join(dir, 'src'));
+    await fs.writeFile(path.join(dir, 'a.txt'), '1');
+    await fs.writeFile(path.join(dir, 'src', 'b.ts'), '2');
+    await fs.writeFile(path.join(dir, 'src', 'c.ts'), '3');
+    expect(await countFiles(dir)).toBe(3);
+    expect(await countFiles(dir, 2)).toBe(2);
+  });
+});
+
+// ── remove() ─────────────────────────────────────────────────────
+
+describe('MountService.remove', () => {
+  it('forgets the checkpoints of every alias whose shadow store it deletes', async () => {
+    // Edit sources: Empty workspace → a folder → Empty workspace again. The
+    // re-added "main" used to inherit checkpoint rows whose commits lived in
+    // the deleted store, so every later capture failed.
+    const workspacesDir = await tmpDir();
+    const root = path.join(workspacesDir, 'executions', 'chat-1');
+    const mount = {
+      id: 'm1',
+      workspaceId: 'ws-1',
+      alias: 'notes',
+      mode: 'in-place',
+      originKind: 'folder',
+      path: path.join(workspacesDir, 'notes'),
+      git: { isRepo: false, nested: ['lib'] },
+    } as unknown as WorkspaceMount;
+    const mounts = mountRepo();
+    vi.mocked(mounts.findById).mockResolvedValue(mount);
+    const workspaces = workspaceRepo();
+    vi.mocked(workspaces.findById).mockResolvedValue({ id: 'ws-1', rootPath: root } as ExecutionWorkspace);
+    const service = new MountService({
+      mountRepo: mounts,
+      workspaceRepo: workspaces,
+      git: makeGit() as unknown as IGitClient,
+      logger: makeLogger(),
+      workspacesDir,
+    });
+    const forgotten: string[] = [];
+    service.setStoreForgotten(async (workspaceId, alias) => {
+      forgotten.push(`${workspaceId}:${alias}`);
+    });
+
+    await service.remove('m1');
+
+    expect(forgotten).toEqual(['ws-1:notes', 'ws-1:notes/lib']);
+    expect(mounts.delete).toHaveBeenCalledWith('m1');
+  });
+});
+
 // ── buildExposure ────────────────────────────────────────────────
 
 describe('buildExposure', () => {
@@ -338,6 +498,47 @@ describe('buildExposure', () => {
     expect(exposure.hint).toContain('mount "web"');
     expect(exposure.hint).toContain('branch feature/x');
     expect(exposure.hint).toContain(`Scratch directory: ${scratchDir}`);
+  });
+
+  it("starts the agent in a codebase's subdirectory and still exposes the whole repository (S-10)", async () => {
+    const repo = await tmpDir();
+    await fs.mkdir(path.join(repo, 'packages', 'ledger'), { recursive: true });
+    const exposure = buildExposure(workspace, [mount({ alias: 'mono', path: repo, position: 0, workdir: 'packages/ledger' })]);
+    const pkg = path.join(repo, 'packages', 'ledger');
+    expect(exposure.workingDirectory).toBe(pkg);
+    expect(exposure.additionalDirectories).toContain(repo);
+    expect(exposure.hint).toContain(`Working directory: ${pkg}`);
+    expect(exposure.hint).toContain(`repository root ${repo}`);
+    // A branch without the package yet: the mount itself, never a missing cwd.
+    const missing = buildExposure(workspace, [mount({ alias: 'mono', path: repo, position: 0, workdir: 'apps/none' })]);
+    expect(missing.workingDirectory).toBe(repo);
+    // Composed while the worktree is still being created: the package folder cannot exist yet, so it is trusted.
+    const preparing = buildExposure(workspace, [mount({ alias: 'mono', path: path.join(repo, 'not-yet'), position: 0, workdir: 'apps/web', status: 'preparing' })]);
+    expect(preparing.workingDirectory).toBe(path.join(repo, 'not-yet', 'apps', 'web'));
+    expect(mountWorkdir(' ./packages//ledger/ ')).toBe('packages/ledger');
+    expect(mountWorkdir('../escape')).toBeUndefined();
+    expect(mountWorkdir('.')).toBeUndefined();
+  });
+
+  it("names every mount's rule files, not only the working directory's (D-168)", async () => {
+    const api = await tmpDir();
+    const web = await tmpDir();
+    await fs.writeFile(path.join(api, 'AGENTS.md'), '# rules');
+    await fs.mkdir(path.join(web, '.github'));
+    await fs.writeFile(path.join(web, 'CLAUDE.md'), '# rules');
+    await fs.writeFile(path.join(web, '.github', 'copilot-instructions.md'), '# rules');
+    const { hint } = buildExposure(workspace, [
+      mount({ alias: 'api', path: api, position: 0 }),
+      mount({ alias: 'web', path: web, position: 1 }),
+    ]);
+
+    const rules = [
+      path.join(api, 'AGENTS.md'),
+      path.join(web, 'CLAUDE.md'),
+      path.join(web, '.github', 'copilot-instructions.md'),
+    ];
+    expect(hint).toContain(`Project rules: ${rules.join(', ')}`);
+    expect(buildExposure(workspace, [mount({ alias: 'x', path: path.join(path.sep, 'nowhere') })]).hint).not.toContain('Project rules');
   });
 
   it('is byte-identical for the same mounts, whatever order they arrive in', () => {

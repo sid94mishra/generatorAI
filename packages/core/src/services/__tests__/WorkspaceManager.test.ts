@@ -129,6 +129,9 @@ class FakeMountRepo implements IWorkspaceMountRepository {
       .filter((r) => opts?.includeRemoved || r.status !== 'removed')
       .sort((a, b) => a.position - b.position);
   }
+  async findInPlaceByPath(p: string): Promise<WorkspaceMount[]> {
+    return this.rows.filter((r) => r.path === p && r.mode === 'in-place' && r.status !== 'removed');
+  }
   async findByCodebase(codebaseId: string): Promise<WorkspaceMount[]> {
     return this.rows.filter((r) => r.codebaseId === codebaseId);
   }
@@ -202,6 +205,8 @@ function makeGitClient() {
     }),
     pruneWorktrees: vi.fn(async () => {}),
     commit: vi.fn(async () => true),
+    /** HEAD of a chat folder: null while it has no commits. */
+    revParse: vi.fn(async (_dir: string, _ref: string): Promise<string | null> => null),
   };
 }
 
@@ -671,6 +676,26 @@ describe('WorkspaceManager filesystem failure handling', () => {
 
     expect(removed).toBe(0);
     expect(h.workspaceRepo.rows.has(stale.id)).toBe(true);
+  });
+
+  it('keeps a workspace whose chat folder holds commits — they exist nowhere else', async () => {
+    const h = await makeHarness();
+    const policy = {
+      completedRetentionHours: 1,
+      archiveIfDirty: false,
+      protectUnpushed: true,
+      maxTotalDiskMB: 1024,
+      respectAutomationRetention: false,
+    };
+    const committed = await seedWorkspace(h, { status: 'completed', completedAt: new Date(Date.now() - 72 * 3600_000) });
+    const chatFolder = await addMount(h, committed, { alias: 'main', mode: 'generated' });
+    h.git.revParse.mockImplementation(async (dir: string) => (dir === chatFolder.path ? 'abc123' : null));
+    const unborn = await seedWorkspace(h, { status: 'completed', completedAt: new Date(Date.now() - 72 * 3600_000) });
+    await addMount(h, unborn, { alias: 'main', mode: 'generated' });
+
+    expect(await h.manager.cleanupExpiredWorkspaces(policy)).toBe(1);
+    expect(h.workspaceRepo.rows.has(committed.id)).toBe(true);
+    expect(h.workspaceRepo.rows.has(unborn.id)).toBe(false);
   });
 
   it('sweeps stale ACTIVE workspaces when asked, judging them on updatedAt', async () => {

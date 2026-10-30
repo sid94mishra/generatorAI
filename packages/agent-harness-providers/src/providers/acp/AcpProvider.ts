@@ -62,6 +62,7 @@ import type {
 } from '@generatorai/core';
 import type { AgentEvent } from '@generatorai/shared';
 import { buildHarnessEnv } from '../../childEnv.js';
+import { rootsOf, sameRoots } from '../../conversationRoots.js';
 import type { AcpProviderOptions } from '../../types.js';
 
 // ── W41 — lazy SDK module singleton ──────────────────────────────
@@ -398,9 +399,12 @@ export class AcpProvider implements IAgentHarness {
       reasoningEfforts: [],
       planMode: false,
       mcpServers: false,
-      skillDirectories: false,
-      // Tier-B: full tool gating enforced at the host boundary, not in-provider.
-      fullToolGating: !tierB,
+      skills: 'none',
+      // `session/request_permission` reaches the session's gate per call
+      // (Tier-B additionally denies `execute`-kind calls at the boundary).
+      approvalGating: 'per_call',
+      hostTools: 'none',
+      structuredOutput: 'none',
       sessionPersistence: false,
       budgetTracking: false,
       // ACP has no dedicated GUI/computer-use surface, and Tier-B blocks
@@ -473,9 +477,22 @@ export class AcpProvider implements IAgentHarness {
   }
 
   async resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void> {
-    if (!this.conversations.has(conversationId) && params) {
-      await this.createConversation(params);
+    const live = this.conversations.get(conversationId);
+    if (!live) {
+      if (params) await this.createConversation(params);
+      return;
     }
+    // "Edit sources" on a live chat (D-137) moves the cwd and extra roots, and
+    // an ACP session's are fixed by `session/new`. Without persistence there is
+    // no session to reload, so the move is a new session in the new roots —
+    // reported as CONVERSATION_RESTARTED so the caller hands it the transcript.
+    if (!params || live.inFlight || sameRoots(rootsOf(live.params, this.opts.defaultCwd), params, this.opts.defaultCwd)) return;
+    await this.deleteConversation(conversationId);
+    await this.createConversation(params);
+    this.conversations.get(conversationId)?.warnings.push({
+      code: 'CONVERSATION_RESTARTED',
+      params: { provider: 'acp', reason: 'session roots moved' },
+    });
   }
 
   hasLiveConversation(conversationId: string): boolean {

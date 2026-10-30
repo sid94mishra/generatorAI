@@ -89,7 +89,8 @@ describe('CodexProvider — lifecycle over a real JSON-RPC child process', () =>
         name: 'GPT-5 Codex',
         provider: 'codex',
         description: 'Fixture model',
-        supportsReasoning: false,
+        isDefault: true,
+        inputModalities: ['text'],
         supportsVision: false,
       },
     ]);
@@ -560,7 +561,46 @@ describe('CodexProvider — per-conversation workspace', () => {
     expect((await echo(p, 'c-roots')).turn['sandboxPolicy']).toEqual({
       type: 'workspaceWrite',
       writableRoots: ['/work/docs', '/work/.generatorai/scratch'],
+      networkAccess: true,
     });
+  }, 20_000);
+
+  it('moves a live conversation to new roots on resume (Edit sources, D-137)', async () => {
+    const p = await started({ defaultCwd: SERVER_CWD, sandboxMode: 'workspace-write' });
+    await p.createConversation({ conversationId: 'c-move', workingDirectory: '/work/old' } as CreateConversationParams);
+    expect((await echo(p, 'c-move')).turn['cwd']).toBe('/work/old');
+
+    await p.resumeConversation('c-move', {
+      conversationId: 'c-move',
+      workingDirectory: '/work/new',
+      additionalDirectories: ['/work/extra'],
+    } as CreateConversationParams);
+    const turn = (await echo(p, 'c-move')).turn;
+    expect(turn['cwd']).toBe('/work/new');
+    expect(turn['sandboxPolicy']).toMatchObject({ type: 'workspaceWrite', writableRoots: ['/work/extra'] });
+  }, 20_000);
+
+  it('a model picked mid-chat runs from the next turn on a live thread', async () => {
+    const p = await started({ defaultCwd: SERVER_CWD });
+    await p.createConversation({ conversationId: 'c-model', model: 'gpt-6.1-terra' } as CreateConversationParams);
+    expect((await echo(p, 'c-model')).turn['model']).toBe('gpt-6.1-terra');
+
+    await p.resumeConversation('c-model', { conversationId: 'c-model', model: 'gpt-5.6-terra', reasoningEffort: 'low' } as CreateConversationParams);
+    const turn = (await echo(p, 'c-model')).turn;
+    expect(turn['model']).toBe('gpt-5.6-terra');
+    expect(turn['effort']).toBe('low');
+  }, 20_000);
+
+  it('networkAccess: false keeps the sandbox off the network, at thread start and on every turn', async () => {
+    const p = await started({ defaultCwd: SERVER_CWD, sandboxMode: 'workspace-write', networkAccess: false });
+    await p.createConversation({
+      conversationId: 'c-offline',
+      workingDirectory: '/work/repo',
+      additionalDirectories: ['/work/docs'],
+    } as CreateConversationParams);
+    const echoed = await echo(p, 'c-offline');
+    expect((echoed.thread['config'] as Record<string, unknown>)['sandbox_workspace_write']).toEqual({ network_access: false });
+    expect(echoed.turn['sandboxPolicy']).toMatchObject({ type: 'workspaceWrite', networkAccess: false });
   }, 20_000);
 
   it('warns instead of reshaping the roots when the sandbox has none', async () => {
@@ -687,10 +727,14 @@ describe('CodexProvider — integration parity with the other providers', () => 
     warn.push(...p.getConversationWarnings('wire'));
     const echoed = JSON.parse((await p.sendPromptAndWait('wire', 'ECHO_PARAMS')).content) as {
       thread: { config?: { mcp_servers?: Record<string, unknown>; projects?: unknown }; dynamicTools?: unknown[] };
-      turn: { effort?: string };
+      turn: { effort?: string; summary?: string };
       skillRoots: string[] | null;
     };
+    // Without a summary request Codex streams no reasoning at all.
+    expect(echoed.turn.summary).toBe('auto');
     expect(echoed.thread.config?.projects).toEqual({ [process.cwd()]: { trust_level: 'trusted' } });
+    // A localhost test server needs a socket; the workspace sandbox denies them unless network access is on.
+    expect((echoed.thread.config as Record<string, unknown> | undefined)?.['sandbox_workspace_write']).toEqual({ network_access: true });
     expect(echoed.thread.config?.mcp_servers).toEqual({
       node_repl: { enabled: false },
       local: { command: 'node', args: ['srv.js'], env: { A: '1' }, enabled_tools: ['t1'], tool_timeout_sec: 2 },
@@ -773,6 +817,13 @@ describe('CodexProvider — integration parity with the other providers', () => 
     expect(plain.thread.config?.['features']).toBeUndefined();
   }, 20_000);
 
+  it('offers the question tool outside plan mode only when someone can answer it', async () => {
+    const p = await started();
+    await p.createConversation({ ...CONV('asks'), onQuestionRequest: async () => ({ answers: {} }) } as unknown as CreateConversationParams);
+    const asks = JSON.parse((await p.sendPromptAndWait('asks', 'ECHO_PARAMS')).content) as { thread: { config?: Record<string, unknown> } };
+    expect(asks.thread.config).toMatchObject({ features: { default_mode_request_user_input: true } });
+  }, 20_000);
+
   it('re-asserts instructions, MCP servers and delegation policy when resuming a thread', async () => {
     const p = await started();
     await p.createConversation({
@@ -788,6 +839,7 @@ describe('CodexProvider — integration parity with the other providers', () => 
     expect(echoed.thread.developerInstructions).toBe('You are an orchestrator.');
     expect(echoed.thread.config).toEqual({
       projects: { [process.cwd()]: { trust_level: 'trusted' } },
+      sandbox_workspace_write: { network_access: true },
       plugins: {
         'unified-computer-use@openai-bundled': { enabled: false },
         'computer-use@openai-bundled': { enabled: false },

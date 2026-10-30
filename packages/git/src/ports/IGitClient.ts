@@ -9,6 +9,16 @@ export interface GitClientOptions {
   defaultTimeoutMs?: number;
 }
 
+/**
+ * Live line-by-line output for a long-running operation (G-16: codebase
+ * clone/fetch logs). `IGitProcessRunner.run` already threads a `streamTo`
+ * through to the underlying process runner — this just exposes it on the
+ * two ops slow enough to be worth tailing.
+ */
+export interface GitStreamOptions {
+  streamTo?: (line: string, stream: 'stdout' | 'stderr') => void;
+}
+
 export interface GitTreeEntry {
   type: 'blob' | 'tree';
   name: string;
@@ -82,6 +92,15 @@ export interface GitMergeResult {
 export interface GitCommitResult {
   sha: string;
   message: string;
+}
+
+/** One commit from `logEntries`. */
+export interface GitLogEntry {
+  sha: string;
+  subject: string;
+  author: string;
+  /** ISO 8601 author date. */
+  date: string;
 }
 
 /** Options for `merge`. */
@@ -162,6 +181,8 @@ export interface IGitClient {
   createBranch(repoDir: string, name: string, base?: string): Promise<void>;
   /** `git checkout <branch>` in an existing checkout. */
   checkoutBranch(repoDir: string, branch: string): Promise<void>;
+  /** `git checkout --detach` — the checkout stays at its commit and lets go of its branch. */
+  detachHead(repoDir: string): Promise<void>;
   /** Path of the worktree that has `branch` checked out, or null. */
   worktreeHoldingBranch(repoPath: string, branch: string): Promise<string | null>;
   /** `git worktree add` with an existing or a new branch. */
@@ -196,7 +217,7 @@ export interface IGitClient {
   lsFiles(dir: string): Promise<string[]>;
   currentBranch(repoDir: string): Promise<string | null>;
   cleanup(repoDir: string): Promise<void>;
-  bareClone(repoUrl: string, targetDir: string): Promise<string>;
+  bareClone(repoUrl: string, targetDir: string, options?: GitStreamOptions): Promise<string>;
   createWorktree(
     repoPath: string,
     worktreePath: string,
@@ -205,7 +226,7 @@ export interface IGitClient {
   ): Promise<string>;
   removeWorktree(repoPath: string, worktreePath: string): Promise<void>;
   listWorktrees(repoPath: string): Promise<string[]>;
-  fetchAll(repoPath: string): Promise<void>;
+  fetchAll(repoPath: string, options?: GitStreamOptions): Promise<void>;
   getBranches(repoPath: string): Promise<string[]>;
   pruneWorktrees(repoPath: string): Promise<void>;
   lsTree(repoPath: string, subPath?: string, ref?: string): Promise<GitTreeEntry[]>;
@@ -295,6 +316,27 @@ export interface IGitClient {
    */
   readBlobById(repoDir: string, sha: string): Promise<string | null>;
   /**
+   * A 3-way merge of two commits against an explicit base, without a working
+   * tree (`git merge-tree --write-tree --merge-base`; before git 2.40, a
+   * throwaway-index merge with `merge-file`): the
+   * merged tree, or the conflicted paths and `conflictTree`, the merge with
+   * conflict markers written into those files. `supported: false` when git
+   * cannot answer (too old, an unresolvable commit).
+   */
+  mergeTrees(
+    repoDir: string,
+    base: string,
+    ours: string,
+    theirs: string,
+  ): Promise<{ supported: boolean; tree: string | null; conflicts: string[]; conflictTree?: string | null }>;
+  /**
+   * Move the working tree from `fromTree` to `toTree` (a two-way
+   * `read-tree -m -u` through the throwaway `indexFile`): only the paths
+   * that differ are written or removed; the repository's index and HEAD are
+   * untouched. The working tree must match `fromTree`. Throws on failure.
+   */
+  checkoutTree(repoDir: string, fromTree: string, toTree: string, indexFile: string): Promise<void>;
+  /**
    * Restore `paths` in the working tree from `treeish` (binary-safe, via a
    * throwaway index + `git checkout-index`).
    */
@@ -312,6 +354,10 @@ export interface IGitClient {
 
   /** `git fetch <remote> [<ref>]`. Throws GitError on failure. */
   fetch(repoDir: string, remote?: string, ref?: string): Promise<void>;
+  /** Fetch one branch into `<remote>/<branch>` with an explicit refspec (works in a bare clone's worktree). */
+  fetchBranch(repoDir: string, remote: string, branch: string): Promise<void>;
+  /** Give `<remote>` the standard tracking refspec when it has none (bare clones). */
+  ensureTrackingRefspec(repoPath: string, remote?: string): Promise<void>;
   /**
    * Default branch of `origin`, e.g. `main`. Tries, in order:
    *   git symbolic-ref --short refs/remotes/origin/HEAD   (strip the `origin/` prefix)
@@ -328,10 +374,17 @@ export interface IGitClient {
   aheadBehind(repoDir: string, ref: string, upstream: string): Promise<GitAheadBehind | null>;
   /** `git rev-parse --abbrev-ref <branch>@{upstream}` → e.g. `origin/main`, or null. */
   upstreamOf(repoDir: string, branch: string): Promise<string | null>;
-  /** `git rev-parse --symbolic-full-name HEAD` === 'HEAD' (detached). */
+  /** True when HEAD names a branch with no commits yet (fresh `git init`). */
+  isUnborn(repoDir: string): Promise<boolean>;
+  /** HEAD is not a symbolic ref (`git symbolic-ref -q HEAD` exits 1). An unborn branch is not detached. */
   isDetached(repoDir: string): Promise<boolean>;
   /** True when `<gitdir>/MERGE_HEAD` exists (use `absoluteGitDir`, fall back to `<repoDir>/.git`). */
   mergeInProgress(repoDir: string): Promise<boolean>;
+  /**
+   * The branch an in-progress merge brings in, read from `<gitdir>/MERGE_MSG` ("Merge remote-tracking
+   * branch 'origin/x' …", "Merge branch 'x' …" or "Merge origin/x into …"), without the `origin/`; null otherwise.
+   */
+  mergeSource(repoDir: string): Promise<string | null>;
   /** `git diff --name-only --diff-filter=U` — paths with unresolved conflicts. */
   unmergedFiles(repoDir: string): Promise<string[]>;
   /**
@@ -363,8 +416,15 @@ export interface IGitClient {
   pushSetUpstream(repoDir: string, remote: string, branch: string): Promise<void>;
   /** `git log --no-merges --pretty=format:%s -n <max> <range>` → subject lines. Empty array on failure. */
   log(repoDir: string, range: string, max?: number): Promise<string[]>;
+  /** `git log` over `range` (merge commits included, as GitHub counts them) → sha, subject, author, ISO date per commit, newest first. Empty on failure. */
+  logEntries(repoDir: string, range: string, max?: number): Promise<GitLogEntry[]>;
   /** Name-status of staged + unstaged + untracked changes in the working tree. */
   changedFilesSummary(repoDir: string): Promise<GitNameStatusEntry[]>;
   /** `git --version` → e.g. `2.45.1`, or null. Cached for the client's lifetime. */
   gitVersion(): Promise<string | null>;
 }
+
+/** `GitClient.lsRemoteBranches` (mobile MG-11). Failures are values: the route maps each reason to an error code. */
+export type GitRemoteBranches =
+  | { ok: true; defaultBranch?: string; branches: string[]; truncated: boolean }
+  | { ok: false; reason: 'invalid_url' | 'auth' | 'not_found' | 'timeout' | 'failed'; message: string };

@@ -2,13 +2,14 @@
 // here is either a silent lockout (session stored where nothing looks for it)
 // or a credential mix-up between servers. Both are covered below.
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   activeConnection,
   clearConnectionCredentials,
   deviceKeyId,
   hostLabel,
   loadCatalog,
+  probeServer,
   removeConnection,
   saveCatalog,
   sessionStorageKey,
@@ -219,5 +220,148 @@ describe('helpers', () => {
     const catalog = upsertConnection(loadCatalog(storage), connection());
     expect(activeConnection(catalog)?.serverId).toBe(SERVER_A);
     expect(activeConnection({ connections: [], activeServerId: null })).toBeNull();
+  });
+});
+
+// The switcher's status dot (G-03) reads directly off this, so each branch is
+// pinned: reachable-and-identified, reachable-but-not-recognisable, and
+// genuinely unreachable never get confused with each other.
+describe('probeServer', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('reports connected with the server name and latency on a good response', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ serverId: 'srv-1', serverName: 'Studio' }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await probeServer('https://studio.example:3100');
+    expect(result.status).toBe('connected');
+    expect(result.serverName).toBe('Studio');
+    expect(typeof result.latencyMs).toBe('number');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://studio.example:3100/api/auth/server-info',
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+  });
+
+  it('reports unpaired on a 4xx response (something else answers at this address)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 404 })));
+    const result = await probeServer('https://studio.example:3100');
+    expect(result).toMatchObject({ status: 'unpaired' });
+  });
+
+  it.each([429, 500, 502, 503])('reports error, not unpaired, on HTTP %i (reachable but failing or throttled)', async (status) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('busy', { status })));
+    const result = await probeServer('https://studio.example:3100');
+    expect(result.status).toBe('error');
+    expect(typeof result.latencyMs).toBe('number');
+  });
+
+  it('reports connected when the serverId matches the expected one', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ serverId: 'srv-1', serverName: 'Studio' }), { status: 200 })),
+    );
+    const result = await probeServer('https://studio.example:3100', { expectedServerId: 'srv-1' });
+    expect(result).toMatchObject({ status: 'connected', serverName: 'Studio' });
+  });
+
+  it('reports unpaired when a different server answers at the address', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ serverId: 'srv-2', serverName: 'Laptop' }), { status: 200 })),
+    );
+    const result = await probeServer('https://studio.example:3100', { expectedServerId: 'srv-1' });
+    expect(result).toMatchObject({ status: 'unpaired', serverName: 'Laptop' });
+  });
+
+  it('reports unpaired when the body has no serverId', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ hello: 'world' }), { status: 200 })),
+    );
+    const result = await probeServer('https://studio.example:3100');
+    expect(result).toMatchObject({ status: 'unpaired' });
+  });
+
+  it('reports unpaired on unparseable JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('not json', { status: 200 })));
+    const result = await probeServer('https://studio.example:3100');
+    expect(result).toMatchObject({ status: 'unpaired' });
+  });
+
+  it('reports offline when the request throws (network error)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('ECONNREFUSED');
+      }),
+    );
+    const result = await probeServer('https://studio.example:3100');
+    expect(result).toEqual({ status: 'offline' });
+  });
+
+  it('reports offline on a timeout, honouring a custom timeoutMs', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init?: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+          }),
+      ),
+    );
+    const result = await probeServer('https://studio.example:3100', { timeoutMs: 5 });
+    expect(result).toEqual({ status: 'offline' });
+  });
+
+  // P2-R40
+  it('never follows a redirect: passes redirect: "manual"', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ serverId: 'srv-1' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await probeServer('https://studio.example:3100');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://studio.example:3100/api/auth/server-info',
+      expect.objectContaining({ redirect: 'manual' }),
+    );
+  });
+
+  it('reports unpaired, not connected, on a 3xx (never reaches whatever a redirect would bounce to)', async () => {
+    // A real fetch given redirect: 'manual' surfaces a 3xx directly (Node) or
+    // as an opaque, status-0 response (browsers/Electron's net.fetch) —
+    // either way it must never carry a matching serverId through.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 302 })));
+    const result = await probeServer('https://studio.example:3100');
+    expect(result).toMatchObject({ status: 'unpaired' });
+  });
+
+  it('reports error (not unpaired) when the timeout cuts the body read short after a 200 status line arrived', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: { signal?: AbortSignal }) => {
+        const body = new ReadableStream({
+          start(controller) {
+            init?.signal?.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')));
+            // Never enqueue/close — the read only ever resolves via the abort above.
+          },
+        });
+        return Promise.resolve(new Response(body, { status: 200 }));
+      }),
+    );
+    const result = await probeServer('https://studio.example:3100', { timeoutMs: 5 });
+    expect(result).toMatchObject({ status: 'error' });
+  });
+
+  it('accepts an injectable fetch (options.fetch) instead of the global one', async () => {
+    const globalFetch = vi.fn();
+    vi.stubGlobal('fetch', globalFetch);
+    const injected = vi.fn(async () => new Response(JSON.stringify({ serverId: 'srv-1' }), { status: 200 }));
+    const result = await probeServer('https://studio.example:3100', { fetch: injected });
+    expect(result).toMatchObject({ status: 'connected' });
+    expect(injected).toHaveBeenCalledTimes(1);
+    expect(globalFetch).not.toHaveBeenCalled();
   });
 });

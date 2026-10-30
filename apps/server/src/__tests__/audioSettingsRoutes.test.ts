@@ -99,4 +99,23 @@ describe('GET/PUT /api/system/audio', () => {
     const res = await request(makeApp()).get('/api/system/audio').expect(200);
     expect(res.body.engineLockedByEnv).toBe('whisper');
   });
+
+  it('stores the dictation language (MG-17): auto by default, a BCP-47 tag, nothing else', async () => {
+    const app = makeApp();
+    expect((await request(app).get('/api/system/audio').expect(200)).body.sttLanguage).toBe('auto');
+    const res = await request(app).put('/api/system/audio').send({ sttLanguage: 'pt-BR' }).expect(200);
+    expect(res.body.sttLanguage).toBe('pt-BR');
+    expect(reloadVoiceConfig).toHaveBeenCalledTimes(1);
+    await request(app).put('/api/system/audio').send({ sttLanguage: 'not a language' }).expect(400);
+    expect((await request(app).get('/api/system/audio').expect(200)).body.sttLanguage).toBe('pt-BR');
+  });
 });
+
+describe('defaultSttLanguage', () => {
+  it('maps auto to no language and passes a tag through', async () => {
+    const { defaultSttLanguage } = await import('../settings/audio.js');
+    expect(defaultSttLanguage({ sttLanguage: 'auto' })).toBeUndefined();
+    expect(defaultSttLanguage({ sttLanguage: 'de' })).toBe('de');
+  });
+});
+

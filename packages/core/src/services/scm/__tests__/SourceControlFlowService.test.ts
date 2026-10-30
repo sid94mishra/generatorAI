@@ -79,6 +79,9 @@ async function identify(repoDir: string): Promise<void> {
   await git(repoDir, 'config', 'user.email', 'test@generatorai.local');
   await git(repoDir, 'config', 'user.name', 'GeneratorAI Test');
   await git(repoDir, 'config', 'commit.gpgsign', 'false');
+  // Byte-exact checkouts: Git for Windows defaults to core.autocrlf=true,
+  // which rewrites files restored by `merge --abort` with CRLF endings.
+  await git(repoDir, 'config', 'core.autocrlf', 'false');
 }
 
 async function write(dir: string, rel: string, content: string): Promise<void> {
@@ -146,11 +149,11 @@ describe('SourceControlFlowService (real git)', () => {
   let origin: string;
   let work: string;
   let seed: string;
-  let gitClient: GitClient;
+  let baseGitClient: GitClient;
 
   beforeEach(async () => {
     root = await fs.mkdtemp(path.join(os.tmpdir(), 'scm-flow-'));
-    // Nested so `parseRepoSlug` sees a `.../acme/web.git` shaped remote.
+    // The bare origin; `hostedRemote` makes it read as github.com/acme/web for the PR steps.
     const ownerDir = path.join(root, 'acme');
     await fs.mkdir(ownerDir, { recursive: true });
     origin = path.join(ownerDir, 'web.git');
@@ -158,7 +161,7 @@ describe('SourceControlFlowService (real git)', () => {
     await execFileAsync('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], { cwd: origin });
 
     seed = path.join(root, 'seed');
-    await execFileAsync('git', ['clone', origin, seed]);
+    await execFileAsync('git', ['clone', '-c', 'core.autocrlf=false', origin, seed]);
     await identify(seed);
     await write(seed, 'README.md', '# web\n');
     await write(seed, 'shared.txt', 'line one\nline two\n');
@@ -170,10 +173,10 @@ describe('SourceControlFlowService (real git)', () => {
     // A FULL clone — `--depth 1` implies `--single-branch`, which breaks
     // `@{upstream}` resolution for a freshly pushed branch.
     work = path.join(root, 'work');
-    await execFileAsync('git', ['clone', origin, work]);
+    await execFileAsync('git', ['clone', '-c', 'core.autocrlf=false', origin, work]);
     await identify(work);
 
-    gitClient = new GitClient(new NodeGitRunner(), silentLogger, {
+    baseGitClient = new GitClient(new NodeGitRunner(), silentLogger, {
       workspacesDir: root,
       defaultTimeoutMs: 60_000,
     });
@@ -183,7 +186,19 @@ describe('SourceControlFlowService (real git)', () => {
     await removeDirWithRetry(root);
   });
 
+  /**
+   * The real client, except the remote reads as hosted: the bare origin is a local path, which (rightly)
+   * has no host to open a PR on. Pushes and fetches still go to the local origin.
+   */
+  function hostedRemote(client: GitClient): GitClient {
+    const wrapped = Object.create(client) as GitClient;
+    wrapped.getRemoteUrl = async (dir: string, remote?: string) =>
+      (await client.getRemoteUrl(dir, remote)) ? 'https://github.com/acme/web.git' : null;
+    return wrapped;
+  }
+
   function makeService(registry: SourceControlRegistry, defaultBase: string | null = null) {
+    const gitClient = hostedRemote(baseGitClient);
     const harness = {
       createConversation: vi.fn(),
       sendPromptAndWait: vi.fn(),
@@ -245,7 +260,7 @@ describe('SourceControlFlowService (real git)', () => {
       'readiness:done',
       'branch:done',
       'commit:done',
-      'sync:done',
+      'sync:skipped',
       'push:done',
       'pull_request:done',
     ]);
@@ -255,6 +270,27 @@ describe('SourceControlFlowService (real git)', () => {
     expect((await git(work, 'rev-parse', '--abbrev-ref', 'HEAD')).trim()).toBe(result.branch);
     expect(provider.createPullRequest).toHaveBeenCalledTimes(1);
     expect(created[0]).toMatchObject({ owner: 'acme', repo: 'web', base: 'main' });
+  });
+
+  it("(a2) a generation that cannot run falls back to the caller's own text, not the heuristic", async () => {
+    const { registry, created } = fakeProviderPair();
+    const flow = makeService(registry);
+    await write(work, 'src/a.ts', 'export const a = 1;\n');
+
+    const result = await flow.run({
+      repoDir: work,
+      alias: '.',
+      request: {
+        commit: { generate: true, fallbackMessage: 'feat(api): search the monitor list' },
+        push: true,
+        pullRequest: { generate: true, fallback: { title: 'feat(api): search the monitor list', body: 'The review.' } },
+      },
+      context: { hint: 'Pulse Feature (workflow run 1)' },
+    });
+
+    expect(result.status).toBe('ok');
+    expect(result.commit?.message).toBe('feat(api): search the monitor list');
+    expect(created[0]).toMatchObject({ title: 'feat(api): search the monitor list', body: 'The review.' });
   });
 
   it('(b) keeps an existing work branch instead of cutting a new one', async () => {
@@ -326,7 +362,7 @@ describe('SourceControlFlowService (real git)', () => {
     expect(provider.createPullRequest).not.toHaveBeenCalled();
 
     // The tree is untouched: no merge in progress, no markers, clean status.
-    expect(await gitClient.mergeInProgress(work)).toBe(false);
+    expect(await baseGitClient.mergeInProgress(work)).toBe(false);
     expect((await git(work, 'status', '--porcelain')).trim()).toBe('');
     expect(await fs.readFile(path.join(work, 'shared.txt'), 'utf-8')).toBe('OURS\nline two\n');
   });
@@ -344,7 +380,7 @@ describe('SourceControlFlowService (real git)', () => {
     const report = await flow.startConflictMerge({ repoDir: work, alias: '.', base: 'main' });
     expect(report).toMatchObject({ base: 'main', head: 'feature/conflict', mergeStarted: true });
     expect(report.files).toContain('shared.txt');
-    expect(await gitClient.mergeInProgress(work)).toBe(true);
+    expect(await baseGitClient.mergeInProgress(work)).toBe(true);
     expect(await fs.readFile(path.join(work, 'shared.txt'), 'utf-8')).toContain('<<<<<<<');
 
     // Still conflicted → refuses to commit.
@@ -357,7 +393,7 @@ describe('SourceControlFlowService (real git)', () => {
     expect(done.ok).toBe(true);
     expect(done.sha).toMatch(/^[0-9a-f]{40}$/);
     expect(done.remaining).toEqual([]);
-    expect(await gitClient.mergeInProgress(work)).toBe(false);
+    expect(await baseGitClient.mergeInProgress(work)).toBe(false);
     expect((await git(work, 'status', '--porcelain')).trim()).toBe('');
 
     // And abort restores a clean tree from a fresh conflicted merge.
@@ -365,11 +401,33 @@ describe('SourceControlFlowService (real git)', () => {
     const second = await flow.startConflictMerge({ repoDir: work, alias: '.', base: 'main' });
     expect(second.files).toContain('shared.txt');
     await flow.abortConflicts({ repoDir: work, alias: '.' });
-    expect(await gitClient.mergeInProgress(work)).toBe(false);
-    expect(await gitClient.isClean(work)).toBe(true);
+    expect(await baseGitClient.mergeInProgress(work)).toBe(false);
+    expect(await baseGitClient.isClean(work)).toBe(true);
     expect(await fs.readFile(path.join(work, 'shared.txt'), 'utf-8')).toBe(
       'OURS AND THEIRS\nline two\n',
     );
+  });
+
+  it('(e2) a merge from a non-default branch keeps its name through start and continue, whatever the caller guesses', async () => {
+    const { registry } = fakeProviderPair();
+    const flow = makeService(registry);
+    await git(seed, 'checkout', '-b', 'release/2.0');
+    await write(seed, 'shared.txt', 'RELEASE\nline two\n');
+    await git(seed, 'add', '-A');
+    await git(seed, 'commit', '-m', 'fix: release line one');
+    await git(seed, 'push', 'origin', 'release/2.0');
+    await git(seed, 'checkout', 'main');
+    await git(work, 'checkout', '-b', 'feature/rel');
+    await write(work, 'shared.txt', 'OURS\nline two\n');
+    await git(work, 'add', '-A');
+    await git(work, 'commit', '-m', 'fix: our line one');
+
+    await flow.startConflictMerge({ repoDir: work, alias: '.', base: 'release/2.0' });
+    // After a restart the client only knows the default branch; the merge in progress still names its source.
+    expect(await flow.startConflictMerge({ repoDir: work, alias: '.', base: 'main' })).toMatchObject({ base: 'release/2.0' });
+    await write(work, 'shared.txt', 'OURS AND RELEASE\nline two\n');
+    expect((await flow.continueAfterConflicts({ repoDir: work, alias: '.', base: 'main' })).ok).toBe(true);
+    expect((await git(work, 'log', '-1', '--format=%s')).trim()).toBe('Merge origin/release/2.0 into feature/rel');
   });
 
   it('(f) reuses an already-open pull request instead of creating one', async () => {
@@ -391,6 +449,71 @@ describe('SourceControlFlowService (real git)', () => {
       status: 'done',
       detail: 'Reused existing PR #11',
     });
+  });
+
+  it('(f2) a plain push to a branch with an open PR reports that PR as updated', async () => {
+    const { registry, provider } = fakeProviderPair({ existingPr: OPEN_PR });
+    const flow = makeService(registry);
+    await git(work, 'checkout', '-b', 'feature/update');
+    await write(work, 'src/u.ts', 'export const u = 1;\n');
+    await git(work, 'add', '-A');
+    await git(work, 'commit', '-m', 'feat: u');
+    await git(work, 'push', '-u', 'origin', 'feature/update');
+    await write(work, 'src/u.ts', 'export const u = 2;\n');
+
+    const result = await flow.run({ repoDir: work, alias: '.', request: { commit: { message: 'fix: u' }, push: true } });
+
+    expect(result.status).toBe('ok');
+    expect(result.pullRequest).toEqual(OPEN_PR);
+    expect(provider.createPullRequest).not.toHaveBeenCalled();
+    expect(result.steps.find((s) => s.id === 'pull_request')).toMatchObject({ status: 'done', detail: 'Updated PR #11' });
+  });
+
+  /** Someone else pushed to the work branch (another machine, GitHub's "Update branch"). */
+  async function pushToBranchElsewhere(branch: string, rel: string, content: string): Promise<void> {
+    await git(seed, 'fetch', 'origin');
+    await git(seed, 'checkout', '-B', branch, `origin/${branch}`);
+    await write(seed, rel, content);
+    await git(seed, 'add', '-A');
+    await git(seed, 'commit', '-m', `edit ${rel} elsewhere`);
+    await git(seed, 'push', 'origin', branch);
+    await git(seed, 'checkout', 'main');
+  }
+
+  it('(k) merges new commits from the branch on the remote before pushing, so the push is not rejected', async () => {
+    const { registry } = fakeProviderPair();
+    const flow = makeService(registry);
+    await git(work, 'checkout', '-b', 'feature/moved');
+    await write(work, 'src/a.ts', 'export const a = 1;\n');
+    await git(work, 'add', '-A');
+    await git(work, 'commit', '-m', 'feat: a');
+    await git(work, 'push', '-u', 'origin', 'feature/moved');
+    await pushToBranchElsewhere('feature/moved', 'src/b.ts', 'export const b = 1;\n');
+    await write(work, 'src/a.ts', 'export const a = 2;\n');
+
+    const result = await flow.run({ repoDir: work, alias: '.', request: { commit: { message: 'fix: a' }, push: true } });
+
+    expect(result.status).toBe('ok');
+    expect(result.steps.find((s) => s.id === 'sync')?.detail).toBe('Merged origin/feature/moved');
+    expect(await fs.readFile(path.join(work, 'src/b.ts'), 'utf8')).toBe('export const b = 1;\n');
+    expect(result.readiness.ahead).toBe(0);
+    expect(result.readiness.behind).toBe(0);
+  });
+
+  it('(l) a conflicting commit pushed to the remote branch stops at a conflict report naming that branch', async () => {
+    const { registry } = fakeProviderPair();
+    const flow = makeService(registry);
+    await git(work, 'checkout', '-b', 'feature/clash');
+    await write(work, 'shared.txt', 'line one\nline two\n');
+    await git(work, 'push', '-u', 'origin', 'feature/clash');
+    await pushToBranchElsewhere('feature/clash', 'shared.txt', 'line one\nTHEIRS\n');
+    await write(work, 'shared.txt', 'line one\nOURS\n');
+
+    const result = await flow.run({ repoDir: work, alias: '.', request: { commit: { message: 'fix: ours' }, push: true } });
+
+    expect(result.status).toBe('conflicts');
+    expect(result.conflicts).toMatchObject({ base: 'feature/clash', files: ['shared.txt'] });
+    expect(result.steps.at(-1)).toMatchObject({ id: 'sync', status: 'failed', detail: 'Merge conflicts with origin/feature/clash' });
   });
 
   it('(g) blocks a push in a repo with no remote', async () => {
@@ -418,6 +541,72 @@ describe('SourceControlFlowService (real git)', () => {
     expect(result.readiness.hasRemote).toBe(false);
     // Nothing was committed.
     expect((await git(solo, 'status', '--porcelain')).trim()).toContain('b.txt');
+  });
+
+  it('(h) lists the remote branches for the PR base picker: default first, never the current branch', async () => {
+    await git(seed, 'checkout', '-b', 'release/1.0');
+    await git(seed, 'push', 'origin', 'release/1.0');
+    await git(seed, 'checkout', 'main');
+    await git(work, 'checkout', '-b', 'feature/pick');
+    const flow = makeService(fakeProviderPair().registry);
+
+    const list = await flow.branches({ repoDir: work, alias: '.' });
+
+    expect(list).toMatchObject({ defaultBranch: 'main', current: 'feature/pick', fresh: true });
+    expect(list.branches).toEqual(['main', 'release/1.0']);
+  });
+
+  it('(i) compares the branch with its base: commits, files, behind, and conflicts before any push', async () => {
+    await git(work, 'checkout', '-b', 'feature/compare');
+    await write(work, 'src/b.ts', 'export const b = 2;\n');
+    await git(work, 'add', '-A');
+    await git(work, 'commit', '-m', 'feat: add b');
+    await write(work, 'shared.txt', 'line one CHANGED HERE\nline two\n');
+    await git(work, 'add', '-A');
+    await git(work, 'commit', '-m', 'fix: our line one');
+    await write(work, 'notes.md', 'uncommitted\n');
+    const flow = makeService(fakeProviderPair().registry);
+
+    const clean = await flow.compare({ repoDir: work, alias: '.', base: 'main' });
+    expect(clean.commits.map((c) => c.subject)).toEqual(['fix: our line one', 'feat: add b']);
+    expect(clean.files.map((f) => `${f.status}:${f.path}`)).toEqual(['modified:shared.txt', 'added:src/b.ts']);
+    expect(clean).toMatchObject({ behind: 0, uncommittedFiles: 1 });
+    expect(clean.mergeable === 'clean' || clean.mergeable === 'unknown').toBe(true);
+
+    await moveBase('shared.txt', 'line one THEIRS\nline two\n', 'fix: their line one');
+    const conflicted = await flow.compare({ repoDir: work, alias: '.', base: 'main' });
+    expect(conflicted.behind).toBe(1);
+    if (conflicted.mergeable !== 'unknown') {
+      expect(conflicted.mergeable).toBe('conflicts');
+      expect(conflicted.conflictFiles).toEqual(['shared.txt']);
+    }
+  });
+
+  it('(j) appends "Closes #n" to the PR body and reports metadata the host refused', async () => {
+    const pair = fakeProviderPair();
+    const addMeta = vi.fn(async () => ['GitHub could not add labels: not found']);
+    Object.assign(pair.provider, { addPullRequestMetadata: addMeta });
+    const flow = makeService(pair.registry);
+    await git(work, 'checkout', '-b', 'feature/meta');
+    await write(work, 'src/c.ts', 'export const c = 3;\n');
+
+    const result = await flow.run({
+      repoDir: work,
+      alias: '.',
+      request: {
+        commit: { message: 'feat: c' },
+        push: true,
+        pullRequest: { title: 'Add c', body: 'Adds c.', labels: ['nope'], reviewers: ['ana'], closesIssues: [7, 7, 9] },
+      },
+    });
+
+    expect(result.status).toBe('ok');
+    expect(pair.created[0]).toMatchObject({ body: 'Adds c.\n\nCloses #7\nCloses #9' });
+    expect(addMeta).toHaveBeenCalledWith(
+      { owner: 'acme', repo: 'web', number: 99, host: expect.anything() },
+      { reviewers: ['ana'], labels: ['nope'] },
+    );
+    expect(result.steps.at(-1)?.detail).toBe('Opened PR #99 · GitHub could not add labels: not found');
   });
 
   it('skips the commit step on a clean tree without blocking the rest', async () => {
@@ -476,6 +665,7 @@ describe('SourceControlFlowService (real git)', () => {
     expect(prompt).toContain('`git push`');
     expect(prompt).toContain('`git rebase`');
     expect(prompt).toContain('prefer the incoming base-branch change');
+    expect(prompt).toContain('`git show :1:<file>` (ancestor)');
     expect(prompt).toContain('one line per file');
   });
 });

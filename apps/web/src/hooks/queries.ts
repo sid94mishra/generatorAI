@@ -2,25 +2,28 @@
 // TanStack Query hooks — sessions, workflows, chat, templates, artifacts
 // ────────────────────────────────────────────────────────────────
 
+import { useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePlatform } from '../providers/PlatformProvider.js';
-import type { CreateSessionParams, CreateChatParams } from '@generatorai/shared';
+import type { BackgroundTaskListItem, CreateChatParams } from '@generatorai/shared';
 import type { AgentMode, PlanAction } from '@generatorai/shared';
 import type {
   ScmFlowRequest,
   ScmGenerateRequest,
   OpenInEditorRequest,
   ChatSourceControlOptions,
+  MergePullRequestRequest,
+  CreateIssueRequest,
+  CloseIssueRequest,
 } from '@generatorai/shared';
-import type { HttpPlatformClient, ChatModel, RewindScope } from '../platform/HttpPlatformClient.js';
+import type { HttpPlatformClient, RewindScope } from '../platform/HttpPlatformClient.js';
 import { formatTranscriptMarkdown } from '@generatorai/client-core';
-import { toast } from '../components/Toast.js';
+import { toast } from '@/ui/primitives/Toast/Toast.js';
 
 // ── Query Keys ──
 export const queryKeys = {
   sessions: ['sessions'] as const,
   session: (id: string) => ['session', id] as const,
-  workflows: (sessionId: string) => ['workflows', sessionId] as const,
   chatHistory: (sessionId: string) => ['chat', sessionId] as const,
   templates: ['templates'] as const,
   artifacts: (sessionId: string) => ['artifacts', sessionId] as const,
@@ -33,45 +36,6 @@ export const queryKeys = {
 };
 
 // ── Query Hooks ──
-
-export function useSessions() {
-  const platform = usePlatform();
-  return useQuery({
-    queryKey: queryKeys.sessions,
-    queryFn: () => platform.getSessions(),
-    refetchInterval: 30_000,
-  });
-}
-
-export function useSession(sessionId: string | undefined) {
-  const platform = usePlatform();
-  return useQuery({
-    queryKey: queryKeys.session(sessionId ?? ''),
-    queryFn: () => platform.getSession(sessionId!),
-    enabled: !!sessionId,
-    // Reduce polling for terminal states — SSE events handle active session updates.
-    // Only poll as a safety net for active sessions.
-    refetchInterval: (query) => {
-      const session = query.state.data;
-      if (session && ['completed', 'cancelled', 'deleted'].includes(session.status)) {
-        return false; // No polling for terminal states
-      }
-      return 30_000; // Safety-net polling for active sessions (SSE is primary)
-    },
-  });
-}
-
-export function useWorkflows(sessionId: string | undefined, opts?: { refetchInterval?: number | false }) {
-  const platform = usePlatform();
-  return useQuery({
-    queryKey: queryKeys.workflows(sessionId ?? ''),
-    queryFn: () => platform.getWorkflows(sessionId!),
-    enabled: !!sessionId,
-    // Default: SSE events handle workflow invalidation, so no polling.
-    // Callers can pass a specific interval if needed.
-    refetchInterval: opts?.refetchInterval ?? false,
-  });
-}
 
 export function useChatHistory(sessionId: string | undefined) {
   const platform = usePlatform();
@@ -112,45 +76,6 @@ export function useArtifacts(sessionId: string | undefined) {
   });
 }
 
-/**
- * The model catalog, derived from the single `/api/harness/providers` fetch.
- *
- * This deliberately shares `useHarnessProviders`' query key rather than
- * calling `/api/harness/models` separately. Both endpoints go through
- * `HarnessRegistry.refresh()`, which spawns each provider's CLI on a cold
- * probe, so having the composer and the picker each fetch their own copy
- * meant two round trips (and two cold probes) every time a chat opened.
- * One cache entry, one request, both consumers stay in sync.
- */
-/**
- * How often to re-ask while the server is still probing in the background.
- *
- * The server now answers instantly from its disk cache after a restart rather
- * than blocking for the length of a cold probe, which is what kept the
- * composer behind a skeleton for ~22 s. The trade is that the first answer can
- * be last-known-good, so we poll at a low rate until `stale` clears and the
- * catalog converges on the live one. Polling STOPS as soon as it does.
- */
-const HARNESS_PROVIDERS_STALE_POLL_MS = 3_000;
-
-export function useModels() {
-  return useQuery({
-    queryKey: ['harness-providers'] as const,
-    queryFn: fetchHarnessProviders,
-    staleTime: 60_000 * 5,
-    refetchOnWindowFocus: false,
-    // Same key as `useHarnessProviders`, so keep the same convergence
-    // behaviour: while the server reports a background re-probe, poll until it
-    // lands. Without this the composer would render from the disk-cached
-    // catalog and then hold it for the full 5-minute staleTime.
-    refetchInterval: (query) => (query.state.data?.stale ? HARNESS_PROVIDERS_STALE_POLL_MS : false),
-    select: (data): ChatModel[] =>
-      data.providers
-        .filter((p) => p.ready)
-        .flatMap((p) => p.models.map((m) => ({ ...m, provider: m.provider ?? p.type }))),
-  });
-}
-
 /** Active harness/agent provider ('copilot' | 'claude-agent'). */
 export function useHarnessConfig() {
   const platform = usePlatform();
@@ -158,56 +83,6 @@ export function useHarnessConfig() {
     queryKey: ['harness-config'] as const,
     queryFn: () => (platform as HttpPlatformClient).getHarnessConfig(),
     staleTime: 60_000 * 10,
-  });
-}
-
-/** Live readiness + model catalog for every agent provider this build knows. */
-export interface HarnessProviderInfo {
-  type: string;
-  label: string;
-  installed: boolean;
-  connected: boolean;
-  authenticated: boolean;
-  /** Usable right now — the provider answered with a live catalog. */
-  ready: boolean;
-  error?: string;
-  checkedAt?: number;
-  modelCount: number;
-  models: ChatModel[];
-  /** The provider can sign the user in from the app (POST /harness/providers/:type/login). */
-  supportsLogin?: boolean;
-}
-
-/**
- * Every provider's live status + catalog.
- *
- * A cold probe spawns each provider's CLI, so this is cached generously and
- * never refetched on window focus; the picker exposes an explicit refresh.
- * `useModels` reads the same cache entry so a chat open costs one request.
- */
-export interface HarnessProvidersResponse {
-  primary: string;
-  providers: HarnessProviderInfo[];
-  /**
-   * The server served a cached snapshot and is re-probing in the background.
-   * Absent on older servers, which always answered from a blocking probe.
-   */
-  stale?: boolean;
-}
-
-async function fetchHarnessProviders(): Promise<HarnessProvidersResponse> {
-  const res = await fetch('/api/harness/providers');
-  if (!res.ok) throw new Error(`Failed to load providers (${res.status})`);
-  return res.json() as Promise<HarnessProvidersResponse>;
-}
-
-export function useHarnessProviders() {
-  return useQuery({
-    queryKey: ['harness-providers'] as const,
-    queryFn: fetchHarnessProviders,
-    staleTime: 60_000 * 5,
-    refetchOnWindowFocus: false,
-    refetchInterval: (query) => (query.state.data?.stale ? HARNESS_PROVIDERS_STALE_POLL_MS : false),
   });
 }
 
@@ -221,7 +96,7 @@ export function useCopilotState() {
 }
 
 /**
- * System health snapshot — polled every 5s to drive the dashboard heartbeat
+ * System health snapshot — polled every 5s to drive the Diagnostics heartbeat
  * card. A successful fetch means the server is reachable ("connected"); a
  * failed fetch flips the connection indicator to "disconnected". Keeps the
  * last good value so counts don't flicker between polls.
@@ -238,83 +113,17 @@ export function useHealth() {
   });
 }
 
+/** Public server config (sandbox execution) — Settings › Diagnostics. Rarely changes; not polled. */
+export function useHealthConfig() {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: ['health-config'] as const,
+    queryFn: () => (platform as HttpPlatformClient).getHealthConfig(),
+    staleTime: 60_000,
+  });
+}
+
 // ── Mutation Hooks ──
-
-export function useCreateSession() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (params: CreateSessionParams) => platform.createSession(params),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-    },
-  });
-}
-
-export function useStartSession() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (sessionId: string) => platform.startSession(sessionId),
-    onSuccess: (_data, sessionId) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-      queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-    },
-  });
-}
-
-export function usePauseSession() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (sessionId: string) => platform.pauseSession(sessionId),
-    onSuccess: (_data, sessionId) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-      queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-    },
-  });
-}
-
-export function useResumeSession() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (sessionId: string) => platform.resumeSession(sessionId),
-    onSuccess: (_data, sessionId) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-      queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-    },
-  });
-}
-
-export function useCancelSession() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (sessionId: string) => platform.cancelSession(sessionId),
-    onSuccess: (_data, sessionId) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-      queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-    },
-  });
-}
-
-export function useDeleteSession() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (sessionId: string) => platform.deleteSession(sessionId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-    },
-  });
-}
 
 export function useSendPrompt(sessionId: string) {
   const platform = usePlatform();
@@ -335,32 +144,6 @@ export function useSendPrompt(sessionId: string) {
     // display to flash.  SSE events (copilot.user_message, copilot.idle,
     // copilot.message_complete) handle chatHistory invalidation at the
     // correct points when the data is actually persisted.
-  });
-}
-
-export function usePauseWorkflow() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: { workflowId: string; sessionId: string }) =>
-      platform.pauseWorkflow(args.workflowId),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.workflows(args.sessionId) });
-    },
-  });
-}
-
-export function useResumeWorkflow() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: { workflowId: string; sessionId: string }) =>
-      platform.resumeWorkflow(args.workflowId),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.workflows(args.sessionId) });
-    },
   });
 }
 
@@ -390,20 +173,7 @@ export function useDownloadArtifact() {
 // v2: Chat Operations — first-class Chat entity hooks
 // ════════════════════════════════════════════════════════════════
 
-/** List all chats, optionally filtered by status */
-export function useChats(statusFilter?: 'active' | 'archived') {
-  const platform = usePlatform();
-  return useQuery({
-    queryKey: [...queryKeys.chats, statusFilter ?? 'all'],
-    queryFn: async () => {
-      const all = await platform.listChats(statusFilter ? { status: statusFilter } : undefined);
-      // Hide orchestrator WORKER chats (they have a parentChatId) from the main
-      // list — they live in the parent orchestrator's Background Tasks panel.
-      return all.filter((c) => !(c as { parentChatId?: string }).parentChatId);
-    },
-    refetchInterval: 30_000,
-  });
-}
+// The chat LIST (paged, filtered, live) is in `chatListQueries.ts` (G-02).
 
 /** Get a single chat by ID */
 export function useChat(chatId: string | undefined) {
@@ -687,7 +457,7 @@ export function useDiscardWorkspaceChanges(workspaceId: string | undefined) {
   const platform = usePlatform() as HttpPlatformClient;
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: { files?: Array<{ alias: string; path: string }>; all?: boolean }) =>
+    mutationFn: (body: { files?: Array<{ alias: string; path: string }>; all?: boolean; base?: string }) =>
       platform.discardWorkspaceChanges(workspaceId!, body),
     onSuccess: () => invalidateWorkspaceChanges(queryClient, workspaceId),
   });
@@ -805,6 +575,9 @@ export function useCreateChat() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.chats });
     },
+    // Both callers (the New chat dialog, the create page) say why it failed in their own toast; the
+    // global "Action failed" repeated the same message underneath it.
+    meta: { silentError: true },
   });
 }
 
@@ -822,6 +595,32 @@ export function useUpdateChat(chatId: string) {
   });
 }
 
+/** A chat's tool-approval policy (the composer's Agent mode menu ▸ Approvals); applies from the next turn. */
+export function useSetChatPermissionMode(chatId: string) {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (mode: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan') => platform.setChatPermissionMode(chatId, mode),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId) });
+    },
+    meta: { errorTitle: 'Approvals not changed' },
+  });
+}
+
+/** Rename a chat (PATCH `/chats/:id` `{ name }`; the chat header's More ▸ Rename). */
+export function useRenameChat(chatId: string) {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => platform.updateChat(chatId, { name }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chats });
+    },
+  });
+}
+
 // ── Orchestrator background tasks ──
 
 export const backgroundTasksKeys = {
@@ -829,14 +628,62 @@ export const backgroundTasksKeys = {
   detail: (chatId: string, taskId: string) => ['background-tasks', chatId, taskId] as const,
 };
 
-/** Poll the list of background worker tasks spawned by an orchestrator chat. */
-export function useBackgroundTasks(chatId: string | undefined, enabled = true) {
+/**
+ * Poll the list of background worker tasks spawned by an orchestrator chat.
+ * `poll: false` for a caller that refetches on its own trigger (the Activity
+ * popover follows the attention feed's worker tally, D-92).
+ */
+export function useBackgroundTasks(chatId: string | undefined, enabled = true, opts: { poll?: boolean } = {}) {
   const platform = usePlatform() as HttpPlatformClient;
   return useQuery({
     queryKey: backgroundTasksKeys.list(chatId ?? ''),
     queryFn: () => platform.getBackgroundTasks(chatId!),
     enabled: !!chatId && enabled,
-    refetchInterval: 2500,
+    refetchInterval: opts.poll === false ? false : 2500,
+  });
+}
+
+/**
+ * Cancel one background worker (G-20). The server attributes it to the user;
+ * the answer's `cancelledBy` / `cancelledAt` go straight into the cached list
+ * so the row can say "Cancelled · by you at …" before the next poll.
+ */
+export function useCancelBackgroundTask(chatId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId: string) => platform.cancelBackgroundTask(chatId!, taskId),
+    onSuccess: (result) => {
+      const key = backgroundTasksKeys.list(chatId ?? '');
+      queryClient.setQueryData<{ tasks: BackgroundTaskListItem[] }>(key, (prev) =>
+        prev
+          ? {
+              tasks: prev.tasks.map((t) =>
+                t.taskId === result.taskId
+                  ? { ...t, status: 'cancelled', cancelledBy: result.cancelledBy, cancelledAt: result.cancelledAt }
+                  : t,
+              ),
+            }
+          : prev,
+      );
+      void queryClient.invalidateQueries({ queryKey: key });
+    },
+  });
+}
+
+/** D-100: resume a worker a restart interrupted; the row flips to running before the next poll. */
+export function useResumeBackgroundTask(chatId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId: string) => platform.resumeBackgroundTask(chatId!, taskId),
+    onSuccess: (result) => {
+      const key = backgroundTasksKeys.list(chatId ?? '');
+      queryClient.setQueryData<{ tasks: BackgroundTaskListItem[] }>(key, (prev) =>
+        prev ? { tasks: prev.tasks.map((t) => (t.taskId === result.taskId ? { ...t, status: 'running' } : t)) } : prev,
+      );
+      void queryClient.invalidateQueries({ queryKey: key });
+    },
   });
 }
 
@@ -848,6 +695,17 @@ export function useBackgroundTaskDigest(chatId: string | undefined, taskId: stri
     queryFn: () => platform.getBackgroundTaskDigest(chatId!, taskId!),
     enabled: !!chatId && !!taskId,
     refetchInterval: 3000,
+  });
+}
+
+/** D-89: one worker's brief, review rounds and latest steps; polled while it works. */
+export function useBackgroundTaskDetail(chatId: string | undefined, taskId: string | undefined, live = false) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: [...backgroundTasksKeys.detail(chatId ?? '', taskId ?? ''), 'detail'] as const,
+    queryFn: () => platform.getBackgroundTaskDetail(chatId!, taskId!),
+    enabled: !!chatId && !!taskId,
+    refetchInterval: live ? 3000 : false,
   });
 }
 
@@ -874,6 +732,19 @@ export function useSendChatPrompt(chatId: string) {
     // (still generating, waiting on a review) never reached the user.
     meta: { errorTitle: 'Message not sent' },
     // Fire-and-forget: SSE events handle chatMessages invalidation
+  });
+}
+
+/**
+ * Send a prompt to a chat named per call — Home's quick composer sends the
+ * task to the chat it just created (the chat page keeps `useSendChatPrompt`).
+ */
+export function useSendChatPromptTo() {
+  const platform = usePlatform();
+  return useMutation({
+    mutationFn: ({ chatId, prompt, mode }: { chatId: string; prompt: string; mode?: AgentMode }) =>
+      platform.sendChatPrompt(chatId, prompt, undefined, mode),
+    meta: { errorTitle: 'Message not sent' },
   });
 }
 
@@ -950,19 +821,22 @@ export function useForkChat(chatId: string, workspaceId?: string) {
 /**
  * The whole transcript, for "Copy transcript".
  *
- * Deliberately not a hook: it is fetched on click (an export is never worth a
- * standing subscription) and rendered through client-core's shared markdown
- * formatter so web and mobile produce the same document.
+ * Returns a fetcher rather than a query: it is fetched on click (an export is
+ * never worth a standing subscription) and rendered through client-core's
+ * shared markdown formatter so web and mobile produce the same document.
  */
-export async function fetchChatTranscript(
-  platform: HttpPlatformClient,
-  chatId: string,
-): Promise<{ name: string; markdown: string }> {
-  const transcript = await platform.getChatTranscript(chatId);
-  return {
-    name: transcript.name,
-    markdown: formatTranscriptMarkdown(transcript.name, transcript.messages),
-  };
+export function useFetchChatTranscript() {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useCallback(
+    async (chatId: string): Promise<{ name: string; markdown: string }> => {
+      const transcript = await platform.getChatTranscript(chatId);
+      return {
+        name: transcript.name,
+        markdown: formatTranscriptMarkdown(transcript.name, transcript.messages),
+      };
+    },
+    [platform],
+  );
 }
 
 // ── PLN-01: plan mode ──
@@ -1030,9 +904,7 @@ export function useDecidePlan(chatId: string) {
       // another tab, or timed out. Clicking used to fail silently and leave
       // an approvable-looking card (observed live after a mid-review server
       // crash). Tell the user, and refetch so the stale card reconciles.
-      toast({
-        variant: 'error',
-        title: 'Plan decision failed',
+      toast.error('Plan decision failed', {
         description:
           error instanceof Error && /409|conflict/i.test(error.message)
             ? 'This plan is no longer awaiting review — it may have expired or been decided elsewhere.'
@@ -1116,13 +988,103 @@ export function useAnswerPermission(chatId: string) {
       interactionId: string;
       behavior: 'allow' | 'deny';
       message?: string;
+      /** "Allow for this chat" (U-16, D-147). */
+      remember?: 'owner' | 'project';
     }) => {
       const { interactionId, ...response } = params;
       return platform.respondToChatPermission(chatId, interactionId, response);
     },
-    onSuccess: () => {
+    meta: { errorTitle: 'Answer not sent' },
+    onSuccess: (_data, params) => {
       void queryClient.invalidateQueries({ queryKey: ['chat', chatId, 'interactions'] });
+      if (params.remember) {
+        void queryClient.invalidateQueries({ queryKey: chatPermissionRulesKey(chatId) });
+        void queryClient.invalidateQueries({ queryKey: ['project'], predicate: (q) => q.queryKey[2] === 'permission-rules' });
+      }
     },
+  });
+}
+
+/** U-16 (D-147): the query key of a chat's remembered permission rules. */
+export const chatPermissionRulesKey = (chatId: string) => ['chat', chatId, 'permission-rules'] as const;
+
+/** The permission rules this chat remembered ("Allow for this chat"). */
+export function useChatPermissionRules(chatId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: chatPermissionRulesKey(chatId ?? ''),
+    queryFn: () => platform.listPermissionRules({ kind: 'chat', id: chatId! }),
+    enabled: !!chatId,
+    select: (r) => r.rules,
+  });
+}
+
+/** Forget every rule this chat remembered: its gates ask again. */
+export function useClearChatPermissionRules(chatId: string) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => platform.clearPermissionRules({ kind: 'chat', id: chatId }),
+    meta: { errorTitle: 'Rules not cleared' },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: chatPermissionRulesKey(chatId) }),
+  });
+}
+
+/** The query key of a project's remembered permission rules ("Allow in this project"). */
+export const projectPermissionRulesKey = (projectId: string) => ['project', projectId, 'permission-rules'] as const;
+
+/** The permission rules a project remembered: they cover every chat and run in it. */
+export function useProjectPermissionRules(projectId: string | null | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: projectPermissionRulesKey(projectId ?? ''),
+    queryFn: () => platform.listPermissionRules({ kind: 'project', id: projectId! }),
+    enabled: !!projectId,
+    select: (r) => r.rules,
+  });
+}
+
+/** Forget every rule a project remembered: its chats and runs ask again. */
+export function useClearProjectPermissionRules(projectId: string | null | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => platform.clearPermissionRules({ kind: 'project', id: projectId! }),
+    meta: { errorTitle: 'Rules not cleared' },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: projectPermissionRulesKey(projectId ?? '') }),
+  });
+}
+
+/** D-157 — allow commands for every chat and run of a project, up front. */
+export function useAddProjectCommandRules(projectId: string) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (commands: readonly string[]) => platform.addProjectCommandRules(projectId, commands),
+    meta: { errorTitle: 'Command not allowed' },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: projectPermissionRulesKey(projectId) }),
+  });
+}
+
+/** Forget one of a project's rules: its chats and runs ask for it again. */
+export function useRevokeProjectPermissionRule(projectId: string) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (ruleId: string) => platform.revokePermissionRule({ kind: 'project', id: projectId }, ruleId),
+    meta: { errorTitle: 'Rule not removed' },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: projectPermissionRulesKey(projectId) }),
+  });
+}
+
+/** The project's test / lint / build scripts, offered for "run without asking". */
+export function useProjectCommandSuggestions(projectId: string) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: [...projectPermissionRulesKey(projectId), 'suggestions'] as const,
+    queryFn: () => platform.projectCommandSuggestions(projectId),
+    select: (r) => r.suggestions,
+    staleTime: 60_000,
   });
 }
 
@@ -1145,6 +1107,20 @@ export function useArchiveChat() {
       queryClient.invalidateQueries({ queryKey: queryKeys.chats });
       // Also refresh the specific chat so the open page reflects the archived
       // status immediately (banner + disabled input), not just the list.
+      queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId) });
+    },
+  });
+}
+
+/** Restore an archived chat to Active (P3-07 row action). */
+export function useUnarchiveChat() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (chatId: string) => platform.unarchiveChat(chatId),
+    onSuccess: (_data, chatId) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.chats });
       queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId) });
     },
   });
@@ -1184,35 +1160,6 @@ export function useDeleteChat() {
   });
 }
 
-/**
- * Bulk-delete multiple chats in parallel.
- * Calls the single-delete endpoint for each ID and invalidates
- * the chats cache once after all deletions complete.
- */
-export function useBulkDeleteChats() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (chatIds: string[]) => {
-      const results = await Promise.allSettled(
-        chatIds.map((id) => platform.deleteChat(id)),
-      );
-      const failed = results.filter((r) => r.status === 'rejected');
-      if (failed.length > 0) {
-        throw new Error(`Failed to delete ${failed.length} of ${chatIds.length} chats`);
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.chats });
-    },
-    onError: () => {
-      // Still refresh — some deletions may have succeeded
-      queryClient.invalidateQueries({ queryKey: queryKeys.chats });
-    },
-  });
-}
-
 // ── Source control v2 ────────────────────────────────────────────
 //
 // Accounts + settings, per-mount readiness, the commit → PR flow, project
@@ -1226,6 +1173,9 @@ export const scmKeys = {
   deviceLogin: (loginId: string) => ['scm-device-login', loginId] as const,
   readiness: (workspaceId: string, alias?: string) =>
     ['scm-readiness', workspaceId, alias ?? '*'] as const,
+  branches: (workspaceId: string, alias: string) => ['scm-branches', workspaceId, alias] as const,
+  compare: (workspaceId: string, alias: string, base: string) => ['scm-compare', workspaceId, alias, base] as const,
+  pullRequestOptions: (workspaceId: string, alias: string) => ['scm-pr-options', workspaceId, alias] as const,
   codebaseReadiness: (projectId: string, codebaseId: string) =>
     ['scm-codebase-readiness', projectId, codebaseId] as const,
   editors: ['scm-editors'] as const,
@@ -1237,6 +1187,9 @@ export const scmKeys = {
     ['pull-request-files', projectId, codebaseId, number] as const,
   pullRequestComments: (projectId: string, codebaseId: string, number: number) =>
     ['pull-request-comments', projectId, codebaseId, number] as const,
+  projectIssuesAll: (projectId: string) => ['project-issues', projectId] as const,
+  projectIssues: (projectId: string, state: string) => ['project-issues', projectId, state] as const,
+  issue: (projectId: string, codebaseId: string, number: number) => ['issue', projectId, codebaseId, number] as const,
 };
 
 /** Accounts, generation model, editor + the login methods the server offers. */
@@ -1342,6 +1295,26 @@ export function useWorkspaceReadiness(workspaceId: string | undefined, alias?: s
   });
 }
 
+/**
+ * Fetches `origin`, then refreshes the workspace's readiness with the result — run while the
+ * ship dialog is open, so ahead/behind counts include what landed on the remote meanwhile.
+ */
+export function useFetchedReadiness(workspaceId: string | undefined, enabled: boolean) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: ['scm-readiness-fetched', workspaceId ?? ''],
+    queryFn: async () => {
+      const fresh = await platform.getWorkspaceScmReadiness(workspaceId!, undefined, { fetch: true });
+      queryClient.setQueryData(scmKeys.readiness(workspaceId!), fresh);
+      return fresh;
+    },
+    enabled: !!workspaceId && enabled,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
+  });
+}
+
 /** Readiness for a project codebase's own checkout. */
 export function useCodebaseReadiness(projectId: string | undefined, codebaseId: string | undefined) {
   const platform = usePlatform() as HttpPlatformClient;
@@ -1362,6 +1335,7 @@ function invalidateScmSurfaces(queryClient: ReturnType<typeof useQueryClient>, w
   void queryClient.invalidateQueries({ queryKey: ['workspace-changes', workspaceId] });
   void queryClient.invalidateQueries({ queryKey: ['workspace-change-summary', workspaceId] });
   void queryClient.invalidateQueries({ queryKey: ['workspace-pull-requests', workspaceId] });
+  void queryClient.invalidateQueries({ queryKey: ['scm-compare', workspaceId ?? ''] });
 }
 
 /** Run branch → commit → sync → push → PR. */
@@ -1371,6 +1345,39 @@ export function useRunScmFlow(workspaceId: string | undefined) {
   return useMutation({
     mutationFn: (request: ScmFlowRequest) => platform.runWorkspaceScmFlow(workspaceId!, request),
     onSettled: () => invalidateScmSurfaces(queryClient, workspaceId),
+  });
+}
+
+/** The remote's branches (fetched on the server), for the PR base picker. */
+export function useScmBranches(workspaceId: string | undefined, alias: string | undefined, enabled = true) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.branches(workspaceId ?? '', alias ?? '.'),
+    queryFn: () => platform.getScmBranches(workspaceId!, alias),
+    enabled: enabled && !!workspaceId && !!alias,
+    staleTime: 60_000,
+  });
+}
+
+/** Commits, files and mergeability of a PR from the current branch into `base`. */
+export function useScmCompare(workspaceId: string | undefined, alias: string | undefined, base: string, enabled = true) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.compare(workspaceId ?? '', alias ?? '.', base),
+    queryFn: () => platform.getScmCompare(workspaceId!, { ...(alias ? { alias } : {}), ...(base ? { base } : {}) }),
+    enabled: enabled && !!workspaceId && !!alias && !!base,
+    staleTime: 15_000,
+  });
+}
+
+/** People, labels and open issues for the PR form's sidebar. */
+export function useScmPullRequestOptions(workspaceId: string | undefined, alias: string | undefined, enabled = true) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.pullRequestOptions(workspaceId ?? '', alias ?? '.'),
+    queryFn: () => platform.getScmPullRequestOptions(workspaceId!, alias),
+    enabled: enabled && !!workspaceId && !!alias,
+    staleTime: 5 * 60_000,
   });
 }
 
@@ -1391,8 +1398,13 @@ export function useScmConflictAction(workspaceId: string | undefined) {
       action: 'start' | 'continue' | 'abort' | 'resolve-with-agent';
       alias?: string;
       chatId?: string;
+      /** The branch the conflicting merge brings in (the conflict report's base). */
+      base?: string;
     }) => {
-      const alias = input.alias !== undefined ? { alias: input.alias } : {};
+      const alias = {
+        ...(input.alias !== undefined ? { alias: input.alias } : {}),
+        ...(input.base ? { base: input.base } : {}),
+      };
       switch (input.action) {
         case 'start':
           return platform.startScmConflictResolution(workspaceId!, alias);
@@ -1486,6 +1498,83 @@ export function useCreatePullRequestReviewChat(
   });
 }
 
+/**
+ * Merge a PR (D-146). Settles by refetching the PR (state → merged), the
+ * project's PR lists and the codebase readiness (a deleted head branch).
+ */
+export function useMergePullRequest(
+  projectId: string | undefined,
+  codebaseId: string | undefined,
+  number: number | undefined,
+) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: MergePullRequestRequest) => platform.mergePullRequest(projectId!, codebaseId!, number!, input),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: scmKeys.pullRequest(projectId ?? '', codebaseId ?? '', number ?? 0) });
+      void queryClient.invalidateQueries({ queryKey: ['project-pull-requests', projectId ?? ''] });
+      void queryClient.invalidateQueries({ queryKey: scmKeys.codebaseReadiness(projectId ?? '', codebaseId ?? '') });
+    },
+  });
+}
+
+/** Issues across every codebase of a project (D-146). */
+export function useProjectIssues(projectId: string | undefined, state: 'open' | 'closed' | 'all' = 'open') {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.projectIssues(projectId ?? '', state),
+    queryFn: () => platform.listProjectIssues(projectId!, state),
+    enabled: !!projectId,
+    staleTime: 30_000,
+  });
+}
+
+/** One issue with its comments. */
+export function useIssue(projectId: string | undefined, codebaseId: string | undefined, number: number | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: scmKeys.issue(projectId ?? '', codebaseId ?? '', number ?? 0),
+    queryFn: () => platform.getIssue(projectId!, codebaseId!, number!),
+    enabled: !!projectId && !!codebaseId && Number.isFinite(number),
+    staleTime: 15_000,
+  });
+}
+
+function invalidateIssue(queryClient: ReturnType<typeof useQueryClient>, projectId: string, codebaseId: string, number?: number) {
+  void queryClient.invalidateQueries({ queryKey: scmKeys.projectIssuesAll(projectId) });
+  if (number !== undefined) void queryClient.invalidateQueries({ queryKey: scmKeys.issue(projectId, codebaseId, number) });
+}
+
+/** Create an issue in one codebase's repository; the codebase is part of the input (the dialog picks it). */
+export function useCreateIssue(projectId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ codebaseId, ...input }: CreateIssueRequest & { codebaseId: string }) =>
+      platform.createIssue(projectId!, codebaseId, input),
+    onSuccess: (_issue, { codebaseId }) => invalidateIssue(queryClient, projectId ?? '', codebaseId),
+  });
+}
+
+export function useCommentOnIssue(projectId: string | undefined, codebaseId: string | undefined, number: number | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: string) => platform.commentOnIssue(projectId!, codebaseId!, number!, body),
+    onSuccess: () => invalidateIssue(queryClient, projectId ?? '', codebaseId ?? '', number),
+  });
+}
+
+export function useCloseIssue(projectId: string | undefined, codebaseId: string | undefined, number: number | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CloseIssueRequest) => platform.closeIssue(projectId!, codebaseId!, number!, input),
+    onSuccess: () => invalidateIssue(queryClient, projectId ?? '', codebaseId ?? '', number),
+  });
+}
+
 /** Editors the server host can launch. */
 export function useEditors() {
   const platform = usePlatform() as HttpPlatformClient;
@@ -1515,7 +1604,7 @@ export function useOpenInEditor() {
       return result;
     },
     onError: (error: Error) => {
-      toast({ variant: 'error', title: 'Could not open the editor', description: error.message });
+      toast.error('Could not open the editor', { description: error.message });
     },
   });
 }

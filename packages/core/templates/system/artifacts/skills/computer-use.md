@@ -221,6 +221,11 @@ verified by read-back. Reach for them only when:
 * the app needs a keyboard shortcut with no equivalent control (`Ctrl+S`), or
 * you must scroll to reveal off-screen content.
 
+When one small job needs several of these in a row (click a field, type, press
+Enter), send them as ONE `computer_run_steps` call: the user approves the whole
+list in one prompt instead of one prompt per keystroke. It takes at most ten
+coordinate/keyboard steps against one window and stops at the first failure.
+
 **They do NOT need the window to be frontmost.** The driver delivers keys in
 the background by default — UIA invoke for modern controls, `PostMessage` for
 legacy Win32 — and never raises the window. Do not call
@@ -399,6 +404,8 @@ React to the code, do not blind-retry.
 | `target_lost` | No app matched | Re-run `computer_list_apps`. If the app is genuinely absent, `computer_launch_app`. |
 | `app_blocked` / `target_lost` on a sensitive app | Permanently blocked (password managers, credential UIs) | Stop. Tell the user this app cannot be automated. Do not look for a workaround. |
 | `consent_denied` | The user declined, or the prompt expired unanswered | Stop. Never re-issue the same action — a second prompt for something already declined is how consent fatigue starts. Report what was blocked. |
+| `agent_paused` | The user pressed Pause agent | Stop and wait. Do not retry or work around it; say what you were about to do. |
+| `user_in_control` | The user took over the computer | Send nothing. Say what you were about to do and wait until they hand control back. |
 | `provider_unavailable` | Computer use not available here | Stop and report. |
 | `capacity_exhausted` | Too many actions in flight | Wait for the current step, then continue. |
 

@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   CHANNELS,
   createBuildConfig,
+  electronFuses,
   resolveChannel,
   resolveGitHubPublish,
   resolveSigning,
@@ -11,7 +12,10 @@ import {
   assertPublishAllowed,
   requestsPublish,
   UnsignedPublishError,
+  LINUX_DESKTOP_ACTIONS,
 } from './build-config.mjs';
+import { LAUNCHER_ACTIONS, launcherActionLabel, launcherActionLink } from '@generatorai/shared/ui-contract';
+import { menuLabel } from '../../src/main/menu-label.ts';
 
 const base = { platform: 'win', arch: 'x64', channel: 'alpha', signed: false, env: {} };
 
@@ -275,6 +279,16 @@ describe('createBuildConfig', () => {
     expect(config.linux.desktop.entry.StartupWMClass).toBe(config.linux.executableName);
   });
 
+  it('Linux .desktop actions are the registry launcher actions (06 §8, P3-06)', () => {
+    const config = createBuildConfig({ ...base, platform: 'linux', arch: 'x64' });
+    const actions = Object.values(config.linux.desktop.desktopActions);
+    expect(actions).toEqual(
+      LAUNCHER_ACTIONS.map((a) => ({ Name: menuLabel(launcherActionLabel(a)), Exec: `xdg-open ${launcherActionLink(a)}` })),
+    );
+    expect(config.linux.desktop.desktopActions).toBe(LINUX_DESKTOP_ACTIONS);
+    expect(config.linux.desktop.entry.Actions).toBe(`${Object.keys(LINUX_DESKTOP_ACTIONS).join(';')};`);
+  });
+
   it('ships one Chromium locale instead of 55', () => {
     expect(createBuildConfig(base).electronLanguages).toEqual(['en-US']);
   });
@@ -376,5 +390,28 @@ describe('requestsPublish / assertPublishAllowed', () => {
   it('never blocks a build that does not publish', () => {
     expect(() => assertPublishAllowed({ argv: ['--publish', 'never'], signed: false, platform: 'mac', env: {} })).not.toThrow();
     expect(() => assertPublishAllowed({ argv: [], signed: false, platform: 'mac', env: {} })).not.toThrow();
+  });
+});
+
+describe('electronFuses (F-4)', () => {
+  it('ships with RunAsNode, NODE_OPTIONS and --inspect off and the app code locked to a checked app.asar', () => {
+    for (const platform of ['mac', 'win', 'linux']) {
+      const config = createBuildConfig({ platform, arch: 'x64', channel: 'latest', signed: false });
+      expect(config.electronFuses).toMatchObject({
+        runAsNode: false,
+        enableNodeOptionsEnvironmentVariable: false,
+        enableNodeCliInspectArguments: false,
+        enableEmbeddedAsarIntegrityValidation: true,
+        onlyLoadAppFromAsar: true,
+        enableCookieEncryption: true,
+        grantFileProtocolExtraPrivileges: false,
+      });
+    }
+  });
+
+  it('resets the ad-hoc signature only for an unsigned macOS build (a signed one is re-signed after the flip)', () => {
+    expect(electronFuses({ platform: 'mac', signed: false }).resetAdHocDarwinSignature).toBe(true);
+    expect(electronFuses({ platform: 'mac', signed: true }).resetAdHocDarwinSignature).toBe(false);
+    expect(electronFuses({ platform: 'win', signed: false }).resetAdHocDarwinSignature).toBe(false);
   });
 });

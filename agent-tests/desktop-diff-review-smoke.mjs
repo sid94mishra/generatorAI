@@ -9,8 +9,12 @@
 import { _electron as electron } from '@playwright/test';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { DESKTOP_DIR } from './helpers/desktop-profile.mjs';
+import os from 'node:os';
+import fs from 'node:fs';
 
-const DESKTOP = path.resolve(process.cwd(), '..', 'apps', 'desktop');
+// From this file, not the cwd: the smoke runs from the repo root or agent-tests/.
+const DESKTOP = DESKTOP_DIR;
 const requireFromDesktop = createRequire(path.join(DESKTOP, 'package.json'));
 const ELECTRON = requireFromDesktop('electron');
 
@@ -22,7 +26,11 @@ const record = (name, ok, info = '') => {
 
 const app = await electron.launch({
   executablePath: ELECTRON,
-  args: ['.'],
+  // Isolated profile, as in desktop-browser-smoke.mjs: the renderer pins the
+  // embedded server's host identity in userData, so sharing the developer's
+  // real profile with a fresh DB_PATH (new identity, same origin) is refused
+  // with HostIdentityChangedError — and would also touch their saved state.
+  args: ['.', `--user-data-dir=${fs.mkdtempSync(path.join(os.tmpdir(), 'gai-diff-'))}`],
   cwd: DESKTOP,
   env: { ...process.env, GENERATORAI_DESKTOP_MODE: 'standalone' },
   timeout: 60000,
@@ -44,6 +52,24 @@ if (!page) {
 await page.waitForLoadState('domcontentloaded');
 const base = new URL(page.url()).origin;
 record('renderer window', true, base);
+
+// A fresh profile (see --user-data-dir above) pairs with the embedded server
+// on first load; the renderer's fetch rejects with NotPairedError until then.
+// Wait for the paired client to answer before driving the API through it.
+{
+  let paired = false;
+  for (let i = 0; i < 90 && !paired; i++) {
+    paired = await page
+      .evaluate(async (u) => {
+        try { return (await fetch(u)).ok; } catch { return false; }
+      }, base + '/api/health')
+      .catch(() => false); // a pairing reload can destroy the context mid-call
+    if (!paired) await new Promise((r) => setTimeout(r, 1000));
+  }
+  // A failed check, not a warning: without pairing every API call below fails
+  // with a confusing error, and the smoke must exit non-zero.
+  record('renderer paired with its embedded server', paired, paired ? '' : 'no /api/health answer within 90 s');
+}
 
 // Surface any renderer-side errors: a failed worker load shows up here first.
 const pageErrors = [];
@@ -107,7 +133,7 @@ record('change summary lists the new file', files.length > 0, files.join(','));
 // ── 3. Diff renders in the PRODUCTION bundle (workers + shadow DOM) ──
 await page.goto(`${base}/chats/${chat.id}`);
 await page.waitForTimeout(6000);
-// The Changes surface lives in the RIGHT PANE, collapsed by default.
+// The Changes panel (blocks/changes/ChangesPanel) lives in the RIGHT PANE, collapsed by default.
 const showPane = page.getByRole('button', { name: /Show side pane/i }).first();
 if (await showPane.count()) {
   await showPane.click().catch(() => {});
@@ -118,7 +144,7 @@ await changesTab.click().catch(() => {});
 await page.waitForTimeout(5000);
 // Files start collapsed (bodies are lazy), so expand before asserting —
 // otherwise a mounted-but-empty host reads as a render failure.
-const expandAll = page.getByRole('button', { name: /^Expand all$/ }).first();
+const expandAll = page.getByRole('button', { name: /^Expand all files$/ }).first();
 if (await expandAll.count()) {
   await expandAll.click().catch(() => {});
   await page.waitForTimeout(8000);

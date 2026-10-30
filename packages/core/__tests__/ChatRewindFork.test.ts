@@ -87,7 +87,7 @@ class BranchingHarness extends MockAgentHarness {
   capabilities(): ProviderCapabilities {
     return {
       vision: false, reasoning: false, reasoningEfforts: [], planMode: false, mcpServers: false,
-      skillDirectories: false, fullToolGating: false, sessionPersistence: true, budgetTracking: false,
+      approvalGating: 'none', hostTools: 'none', structuredOutput: 'none', skills: 'none', sessionPersistence: true, budgetTracking: false,
       ...this.caps,
     };
   }
@@ -241,6 +241,9 @@ describe('rewindChat / forkChat', () => {
     const promptText = String(sent[0]!.args[1]);
     expect(promptText).toContain('[Conversation history');
     expect(promptText.endsWith('[New message from the user]\nnext question')).toBe(true);
+    harness.simulateConversationEvent(String(sent[0]!.args[0]), { kind: 'harness.message_complete', data: { content: 'ok' } } as AgentEvent);
+    harness.simulateConversationEvent(String(sent[0]!.args[0]), { kind: 'harness.idle', data: {} } as AgentEvent);
+    await new Promise((r) => setTimeout(r, 0));
     expect((await service.getChat(chat.id)).conversationSeed ?? '').toBe('');
   });
 

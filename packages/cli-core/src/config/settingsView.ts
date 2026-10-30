@@ -10,7 +10,7 @@
 // Pure, so the whole thing is testable without a filesystem or a terminal.
 // ────────────────────────────────────────────────────────────────
 
-import { CliConfigSchema, DEFAULT_CONFIG } from './schema.js';
+import { CliConfigSchema, DEFAULT_CONFIG, TUI_ACCENT_IDS } from './schema.js';
 
 export interface SettingRow {
   /** Dotted key, exactly what `config set`/`config get`/`config unset` take. */
@@ -162,7 +162,7 @@ function enumChoicesFor(key: string): readonly string[] | undefined {
     case 'tui.appearance':
       return ['auto', 'light', 'dark'];
     case 'tui.accent':
-      return ['blue', 'violet', 'green', 'orange', 'rose', 'teal'];
+      return ['auto', ...TUI_ACCENT_IDS];
     case 'tui.graphics':
       return ['auto', 'kitty', 'iterm2', 'sixel', 'halfblock', 'ascii'];
     default:

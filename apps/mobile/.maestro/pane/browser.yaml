@@ -1,0 +1,32 @@
+appId: ${APP_ID}
+name: pane · browser start, live view and comment mode
+tags: [full, pane]
+env: {FRESH_CHAT: stream, DEVICE_SCOPES: "exec:browser"}
+# Replaces the web-preview e2e/browser.mjs and e2e/flow3.mjs (08 §6.3; the composer half of flow3 is
+# chat/composer-extras.yaml). MB-28 (M6-10): the address field starts the browser at a URL, the stream frame shows,
+# Comment turns the page inspector on (MD-114). The step-up prompt is answered by the simulator / emulator biometrics.
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///chats/${CHAT_STREAM_ID}
+- extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- runFlow: ../_subflows/pane-closed.yaml
+- runFlow: ../_subflows/open-pane.yaml
+- tapOn: {id: pane-tab-browser}
+- extendedWaitUntil: {visible: {id: browser-address}, timeout: 30000}
+- tapOn: {id: browser-address}
+- inputText: https://example.com
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
+      - tapOn: {id: browser-start}
+# iOS: Maestro's hideKeyboard does not work on iOS 27; Return submits the address (the same start action).
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - pressKey: Enter
+- extendedWaitUntil: {visible: {id: browser-frame}, timeout: 60000}
+- tapOn: {id: browser-comment}
+- assertVisible: "View only · tap an element to comment"
+- tapOn: {id: browser-comment}
+- assertVisible: "View only"

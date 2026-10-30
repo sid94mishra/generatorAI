@@ -47,7 +47,7 @@ Standalone mobile still excludes `exec:computer` and all `admin:*` scopes by def
 
 `createSecretStore` selects a key provider in this order:
 
-1. Operator-supplied `GENERATORAI_SECRET_KEY` or passphrase.
+1. An operator key: `GENERATORAI_SECRET_KEY` or a passphrase in the environment of a headless server, or the key the desktop app unlocks with Electron `safeStorage` and hands to its embedded server over the process's message channel when the server asks (`GENERATORAI_SECRET_KEY_HANDOFF=parent`). The desktop key never sits in the server's environment, where `ps eww` or `/proc/<pid>/environ` would show it to any process of the same user.
 2. OS-protected hooks supplied by the desktop environment, such as Electron safeStorage.
 3. A mode-0600 local key file, explicitly classified as an insecure development fallback.
 
@@ -60,6 +60,8 @@ Operator key rotation can use the previous-key migration path. Preserve the corr
 ## Desktop bridge
 
 The main application window uses context isolation, no Node integration, sandboxing, and web security. Native browser views have a separate content boundary because they can navigate to arbitrary sites.
+
+The packaged binary ships with Electron's `RunAsNode`, `EnableNodeOptionsEnvironmentVariable`, `EnableNodeCliInspectArguments` and `GrantFileProtocolExtraPrivileges` fuses off and `EnableEmbeddedAsarIntegrityValidation`, `OnlyLoadAppFromAsar` and `EnableCookieEncryption` on, so `ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS` and `--inspect` cannot run code as the app, and the app code is the integrity-checked `app.asar`. The embedded server therefore runs in an Electron utility process rather than as the app binary in Node mode. Code signing and notarization need release credentials and are configured separately.
 
 `apps/desktop/src/main/ipc-guard.ts` checks that IPC originates from the trusted main window, expected top frame, and application origin. Browser views, popups, and embedded frames must not receive the main renderer's shell/dialog/credential authority.
 

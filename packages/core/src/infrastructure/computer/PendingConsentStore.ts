@@ -11,8 +11,16 @@
 // as a denial. A consent gate whose failure mode is "allow" is not a gate.
 // ────────────────────────────────────────────────────────────────
 
-import type { AgentEvent, ComputerConsentDecision, ILogger } from '@generatorai/shared';
 import type {
+  AgentEvent,
+  ComputerConsentDecision,
+  ComputerConsentReach,
+  ComputerPendingConsent,
+  ILogger,
+} from '@generatorai/shared';
+import { defaultConsentReach } from '@generatorai/shared';
+import type {
+  ComputerConsentOutcome,
   ComputerConsentPrompt,
   ComputerConsentScope,
   ComputerStoredGrant,
@@ -32,7 +40,7 @@ export interface IComputerGrantRepository {
 }
 
 interface Pending {
-  resolve: (decision: ComputerConsentDecision) => void;
+  resolve: (outcome: ComputerConsentOutcome) => void;
   workspaceId: string;
   appIdentity: string;
   expiresAt: number;
@@ -40,17 +48,6 @@ interface Pending {
   synthetic: boolean;
   /** Kept so a UI that connects mid-prompt can render it without the event. */
   prompt: ComputerConsentPrompt;
-}
-
-/** A prompt still awaiting an answer, for a client that missed the event. */
-export interface PendingConsentSummary {
-  requestId: string;
-  appIdentity: string;
-  appLabel: string;
-  action: string;
-  summary: string;
-  path: 'synthetic' | 'accessibility';
-  expiresAt: number;
 }
 
 export interface PendingConsentStoreOptions {
@@ -66,6 +63,24 @@ export interface PendingConsentStoreOptions {
    * loudly logged, and inert in production.
    */
   autoApproveForDevelopment?: boolean;
+}
+
+const DENY: ComputerConsentOutcome = { decision: 'deny', reach: 'app' };
+
+/** The wire shape of a prompt: the `computer.consent_required` payload and a pending row. */
+function pendingOf(request: ComputerConsentPrompt): ComputerPendingConsent {
+  return {
+    requestId: request.requestId,
+    workspaceId: request.workspaceId,
+    ...(request.chatId ? { chatId: request.chatId } : {}),
+    appIdentity: request.app.appId,
+    appLabel: request.app.name,
+    action: request.action,
+    summary: request.summary,
+    path: request.scope === 'synthetic' ? 'synthetic' : 'accessibility',
+    ...(request.plan && request.plan.length > 0 ? { plan: request.plan } : {}),
+    expiresAt: request.expiresAt,
+  };
 }
 
 export class PendingConsentStore implements IComputerConsentStore {
@@ -103,7 +118,7 @@ export class PendingConsentStore implements IComputerConsentStore {
     await this.repository.saveGrant(workspaceId, appIdentity, appLabel, decision, scope);
   }
 
-  async prompt(request: ComputerConsentPrompt): Promise<ComputerConsentDecision> {
+  async prompt(request: ComputerConsentPrompt): Promise<ComputerConsentOutcome> {
     // The service races its own deadline and abandons this promise on timeout;
     // without a sweep the entry would live forever and a late answer would
     // report success to a UI whose prompt nobody is waiting on.
@@ -121,10 +136,10 @@ export class PendingConsentStore implements IComputerConsentStore {
       this.logger.warn?.(
         `[PendingConsentStore] auto-approved ${request.action} on ${request.app.name} (development)`,
       );
-      return 'allow_once';
+      return { decision: 'allow_once', reach: 'app' };
     }
 
-    const answered = new Promise<ComputerConsentDecision>((resolve) => {
+    const answered = new Promise<ComputerConsentOutcome>((resolve) => {
       this.pending.set(request.requestId, {
         resolve,
         workspaceId: request.workspaceId,
@@ -135,20 +150,7 @@ export class PendingConsentStore implements IComputerConsentStore {
       });
     });
 
-    const event: AgentEvent = {
-      kind: 'computer.consent_required',
-      data: {
-        workspaceId: request.workspaceId,
-        chatId: request.chatId,
-        requestId: request.requestId,
-        appIdentity: request.app.appId,
-        appLabel: request.app.name,
-        action: request.action,
-        summary: request.summary,
-        path: request.scope === 'synthetic' ? 'synthetic' : 'accessibility',
-        expiresAt: request.expiresAt,
-      },
-    };
+    const event: AgentEvent = { kind: 'computer.consent_required', data: pendingOf(request) };
 
     try {
       await this.eventBus.emit(`${this.scope}:${request.workspaceId}`, event);
@@ -157,7 +159,7 @@ export class PendingConsentStore implements IComputerConsentStore {
       // here is what stops a broken event pipeline reading as approval.
       this.pending.delete(request.requestId);
       this.logger.warn?.(`[PendingConsentStore] could not deliver consent prompt: ${(err as Error).message}`);
-      return 'deny';
+      return DENY;
     }
 
     return answered;
@@ -166,17 +168,7 @@ export class PendingConsentStore implements IComputerConsentStore {
   private async emitPrompt(request: ComputerConsentPrompt): Promise<void> {
     await this.eventBus.emit(`${this.scope}:${request.workspaceId}`, {
       kind: 'computer.consent_required',
-      data: {
-        workspaceId: request.workspaceId,
-        chatId: request.chatId,
-        requestId: request.requestId,
-        appIdentity: request.app.appId,
-        appLabel: request.app.name,
-        action: request.action,
-        summary: request.summary,
-        path: request.scope === 'synthetic' ? 'synthetic' : 'accessibility',
-        expiresAt: request.expiresAt,
-      },
+      data: pendingOf(request),
     });
   }
 
@@ -188,22 +180,22 @@ export class PendingConsentStore implements IComputerConsentStore {
    * without this the user is shown a surface that knows nothing is waiting
    * while the agent sits blocked behind it.
    */
-  listPending(workspaceId: string): PendingConsentSummary[] {
+  listPending(workspaceId: string): ComputerPendingConsent[] {
     this.sweepExpired();
-    const out: PendingConsentSummary[] = [];
-    for (const [requestId, entry] of this.pending) {
-      if (entry.workspaceId !== workspaceId) continue;
-      out.push({
-        requestId,
-        appIdentity: entry.prompt.app.appId,
-        appLabel: entry.prompt.app.name,
-        action: entry.prompt.action,
-        summary: entry.prompt.summary,
-        path: entry.synthetic ? 'synthetic' : 'accessibility',
-        expiresAt: entry.expiresAt,
-      });
+    const out: ComputerPendingConsent[] = [];
+    for (const entry of this.pending.values()) {
+      if (entry.workspaceId === workspaceId) out.push(pendingOf(entry.prompt));
     }
     return out;
+  }
+
+  /**
+   * Every prompt still awaiting an answer, across workspaces. The attention
+   * feed reads it to list consent asks next to the chat that raised them.
+   */
+  listAllPending(): ComputerPendingConsent[] {
+    this.sweepExpired();
+    return [...this.pending.values()].map((entry) => pendingOf(entry.prompt));
   }
 
   /**
@@ -212,7 +204,12 @@ export class PendingConsentStore implements IComputerConsentStore {
    * @returns false when nothing was waiting — a replay, an expired prompt, or
    * an answer naming an application other than the one being asked about.
    */
-  resolve(requestId: string, decision: ComputerConsentDecision, appIdentity: string): boolean {
+  resolve(
+    requestId: string,
+    decision: ComputerConsentDecision,
+    appIdentity: string,
+    reach?: ComputerConsentReach,
+  ): boolean {
     const entry = this.pending.get(requestId);
     if (!entry) return false;
     if (entry.appIdentity !== appIdentity) {
@@ -223,14 +220,16 @@ export class PendingConsentStore implements IComputerConsentStore {
     }
     if (entry.expiresAt <= Date.now()) {
       this.pending.delete(requestId);
-      entry.resolve('deny');
+      entry.resolve(DENY);
       return false;
     }
     this.pending.delete(requestId);
     // Downgraded rather than rejected: a UI that offers "always allow" on a
     // Tier 3 prompt is a bug, but the user did mean to approve this one action.
     const effective = entry.synthetic && decision === 'always_allow' ? 'allow_once' : decision;
-    entry.resolve(effective);
+    // A deny is always for this app: "deny any app" is not an answer anyone is offered.
+    const effectiveReach = effective === 'deny' ? 'app' : (reach ?? defaultConsentReach(effective));
+    entry.resolve({ decision: effective, reach: effectiveReach });
     return true;
   }
 
@@ -239,7 +238,7 @@ export class PendingConsentStore implements IComputerConsentStore {
     for (const [requestId, entry] of this.pending) {
       if (entry.expiresAt > now) continue;
       this.pending.delete(requestId);
-      entry.resolve('deny');
+      entry.resolve(DENY);
     }
   }
 
@@ -248,7 +247,7 @@ export class PendingConsentStore implements IComputerConsentStore {
     for (const [requestId, entry] of this.pending) {
       if (workspaceId && entry.workspaceId !== workspaceId) continue;
       this.pending.delete(requestId);
-      entry.resolve('deny');
+      entry.resolve(DENY);
     }
   }
 }

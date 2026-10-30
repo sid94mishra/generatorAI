@@ -44,7 +44,8 @@ describe('Content-Security-Policy', () => {
     app.get('/', (_req, res) => res.send('ok'));
     const res = await request(app).get('/');
     const directives = (res.headers['content-security-policy'] as string).split(';').map((d) => d.trim());
-    expect(directives).toContain("frame-src 'self' http://127.0.0.1:58501 http://localhost:58501 http://[::1]:58501");
+    // No IPv6 literal: CSP host-source cannot express it and Chromium logs an error for it.
+    expect(directives).toContain("frame-src 'self' http://127.0.0.1:58501 http://localhost:58501");
     expect(directives).toContain("frame-ancestors 'none'");
     expect(directives).toContain("connect-src 'self'");
     expect(() => createCspMiddleware('javascript:alert(1)')).toThrow();

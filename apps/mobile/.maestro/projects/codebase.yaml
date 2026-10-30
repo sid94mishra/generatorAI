@@ -1,0 +1,14 @@
+appId: ${APP_ID}
+name: projects · codebase detail, worktrees and files
+# M7-02 (MCodebase, MCodebaseFiles; M10-02 coverage). The seeded sandbox project and the Edits fixture's dummy-repo
+# codebase (PROJECT_ID / CODEBASE_ID from sandbox-pair). Read-only: nothing is cleaned up or fetched.
+tags: [projects]
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///projects/${PROJECT_ID}/codebases/${CODEBASE_ID}
+- extendedWaitUntil: {visible: {id: codebase}, timeout: 20000}
+- assertVisible: {id: codebase-meta}
+- assertVisible: "Worktrees"
+- openLink: generatorai:///projects/${PROJECT_ID}/codebases/${CODEBASE_ID}/files
+- extendedWaitUntil: {visible: "Files", timeout: 20000}
+- assertVisible: "README.md.*"

@@ -33,6 +33,7 @@ import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
 import type { Container } from './composition-root.js';
 import { authorizeWebSocketUpgrade } from './middleware/wsAuth.js';
+import { trackWebSocket } from './streaming/liveConnections.js';
 import type { BrowserInputEvent, ScreencastCodec, ScreencastFrame } from '@generatorai/core';
 import { SCREENCAST_LIMITS, clampScreencastOptions } from '@generatorai/core';
 import { readBoundedInt } from '@generatorai/shared';
@@ -165,6 +166,7 @@ export function attachBrowserWebSocket(server: HttpServer, container: Container)
         severity: 'warn',
       });
       wss.handleUpgrade(req, socket, head, (ws) => {
+        trackWebSocket(result.principal, ws, 'browser-ws', ['exec:browser']);
         handleConnection(ws, workspaceId);
       });
     })().catch((err: unknown) => {

@@ -45,7 +45,6 @@ export const NOISE_EVENT_KINDS: ReadonlySet<string> = new Set(['harness.unknown'
  */
 const EMPTYABLE_DELTA_INFO_TYPES: ReadonlySet<string> = new Set([
   'assistant_streaming_delta',
-  'tool_input_delta',
   'thinking_tokens',
 ]);
 

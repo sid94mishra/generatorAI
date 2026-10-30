@@ -28,7 +28,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { STOP_ARMING_MS, STOP_FORCE_RESET_MS } from '@generatorai/client-core';
 
 import { useTwoPhaseStop } from '@/hooks/useTwoPhaseStop.js';
-import { applyStopEffects, type StopEffectStore } from '@/pages/chatStopEffects.js';
+import { applyStopEffects, type StopEffectStore } from '@/features/chat/chatStopEffects.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 
 const SESSION = 'session-under-test';

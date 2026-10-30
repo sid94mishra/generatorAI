@@ -6,7 +6,7 @@
 
 const DEFAULT_CHAT_MODEL_KEY = 'generatorai:defaultChatModel';
 
-/** Preferred model id for NEW chats (empty = provider default). Read by CreateChatDialog. */
+/** Preferred model id for NEW chats (empty = provider default). Read by the create-chat surfaces (features/chats/create). */
 export function getDefaultChatModel(): string {
   try {
     return window.localStorage.getItem(DEFAULT_CHAT_MODEL_KEY) ?? '';

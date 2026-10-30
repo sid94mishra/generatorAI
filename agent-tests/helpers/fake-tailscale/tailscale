@@ -1,0 +1,3 @@
+#!/usr/bin/env node
+// POSIX shim so `tailscale` on PATH runs the fake (Windows uses GENERATORAI_TAILSCALE_CLI).
+import('./tailscale.mjs');

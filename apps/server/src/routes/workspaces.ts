@@ -8,6 +8,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { changeFileEtag } from './changeFileEtag.js';
 import type { Container } from '../composition-root.js';
+import { recordScmOutcome, scmOutcomeFrom } from './scmOutcome.js';
 import { resolveWorktreePath, type WorkspaceTreeRepo } from '@generatorai/core';
 import {
   stripAliasPrefix,
@@ -58,6 +59,7 @@ export function createWorkspaceRoutes(container: Container): Router {
     repoReadinessService,
     chatManagementService,
     chatEntityRepo,
+    executionWorkspaceRepo,
     eventBus,
     logger,
   } = container;
@@ -173,6 +175,8 @@ export function createWorkspaceRoutes(container: Container): Router {
    *   turn:<turnId>           → the checkpoint captured before that turn
    *   stage:<stageRunId>      → the checkpoint captured before that stage
    *   ref:<rev>               → a raw git revision
+   *   head                    → each mount's last commit (its own HEAD); a
+   *                             mount without commits falls back to its baseline
    */
   async function parseRevision(
     raw: unknown,
@@ -183,6 +187,7 @@ export function createWorkspaceRoutes(container: Container): Router {
     if (!value) return { kind: fallback };
     if (value === 'baseline') return { kind: 'baseline' };
     if (value === 'working') return { kind: 'working' };
+    if (value === 'head') return { kind: 'ref', id: 'HEAD' };
 
     const sep = value.indexOf(':');
     if (sep === -1) return { kind: fallback };
@@ -357,8 +362,9 @@ export function createWorkspaceRoutes(container: Container): Router {
           ? [{ alias: aliasQuery, dir: mountDir(info, aliasQuery) ?? info.workingDirectory }]
           : scmMounts(info);
 
+      const fetch = req.query['fetch'] === '1';
       const repos = await Promise.all(
-        targets.map((t) => repoReadinessService.readiness({ repoDir: t.dir, alias: t.alias })),
+        targets.map((t) => repoReadinessService.readiness({ repoDir: t.dir, alias: t.alias, ...(fetch ? { fetch } : {}) })),
       );
       res.json({ workspaceId: id, repos });
     } catch (err) {
@@ -387,6 +393,9 @@ export function createWorkspaceRoutes(container: Container): Router {
           ? { context: { ...(context.context ?? {}), ...(hint ? { hint } : {}) } }
           : {}),
       });
+      // MG-13: remember the commit / PR so "Recently finished" can say so.
+      const outcome = scmOutcomeFrom(result, new Date());
+      if (outcome) await recordScmOutcome(executionWorkspaceRepo, target.id, outcome);
       res.json(result);
     } catch (err) {
       next(err);
@@ -413,6 +422,44 @@ export function createWorkspaceRoutes(container: Container): Router {
         ...(await flowContext(target.info)),
       });
       res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /workspaces/:id/scm/branches — the remote's branches, the PR base picker.
+  router.get('/:id/scm/branches', async (req, res, next) => {
+    try {
+      const target = await scmTarget(req, res);
+      if (!target) return;
+      res.json(await sourceControlFlowService.branches({ repoDir: target.repoDir, alias: target.alias }));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /workspaces/:id/scm/compare?base= — commits, files and mergeability of
+  // a PR from the current branch into `base` (GitHub's "Comparing changes").
+  router.get('/:id/scm/compare', async (req, res, next) => {
+    try {
+      const target = await scmTarget(req, res);
+      if (!target) return;
+      const base = typeof req.query['base'] === 'string' && req.query['base'].trim() ? req.query['base'].trim() : undefined;
+      res.json(
+        await sourceControlFlowService.compare({ repoDir: target.repoDir, alias: target.alias, ...(base ? { base } : {}) }),
+      );
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /workspaces/:id/scm/pull-request-options — reviewers / assignees /
+  // labels / issues for the PR form's sidebar. Unavailable is a 200 with a reason.
+  router.get('/:id/scm/pull-request-options', async (req, res, next) => {
+    try {
+      const target = await scmTarget(req, res);
+      if (!target) return;
+      res.json(await sourceControlFlowService.pullRequestOptions({ repoDir: target.repoDir, alias: target.alias }));
     } catch (err) {
       next(err);
     }
@@ -452,10 +499,12 @@ export function createWorkspaceRoutes(container: Container): Router {
       const target = await scmTarget(req, res);
       if (!target) return;
       const message = typeof req.body?.message === 'string' ? req.body.message : undefined;
+      const base = typeof req.body?.base === 'string' ? req.body.base : undefined;
       const result = await sourceControlFlowService.continueAfterConflicts({
         repoDir: target.repoDir,
         alias: target.alias,
         ...(message ? { message } : {}),
+        ...(base ? { base } : {}),
       });
       res.json(result);
     } catch (err) {
@@ -497,9 +546,11 @@ export function createWorkspaceRoutes(container: Container): Router {
       // to read, so it has to have happened first. `startConflictMerge` is
       // idempotent — it reports the already-conflicted paths when a merge is
       // in progress rather than starting a second one.
+      const base = typeof req.body?.base === 'string' ? req.body.base : undefined;
       const report = await sourceControlFlowService.startConflictMerge({
         repoDir: target.repoDir,
         alias: target.alias,
+        ...(base ? { base } : {}),
       });
 
       if (report.files.length === 0) {
@@ -871,6 +922,9 @@ export function createWorkspaceRoutes(container: Container): Router {
   //
   //   { files: [{ alias, path }] }   discard exactly these
   //   { all: true }                  discard every changed file, every mount
+  //   base?: <selector>              what "changed" is measured against and
+  //                                  restored to (default `baseline`) — the
+  //                                  Changes panel sends the base it shows
   //
   // Each mount is restored from ITS OWN base, which is the whole point: the
   // per-file "Undo" used to go through the first mount's checkpoint id, so
@@ -907,7 +961,7 @@ export function createWorkspaceRoutes(container: Container): Router {
         rootPath,
         worktrees,
         mounts,
-        base: { kind: 'baseline' },
+        base: await parseRevision(req.body?.base, 'baseline', id),
         head: { kind: 'working' },
         autoInit: false,
       });

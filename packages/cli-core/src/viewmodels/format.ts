@@ -33,7 +33,6 @@ const STATUS_TONES: Record<string, StatusTone> = {
   canceled: 'failure',
   revoked: 'failure',
   paused: 'warning',
-  sleeping: 'warning',
   awaiting_input: 'warning',
   pending: 'idle',
   queued: 'idle',

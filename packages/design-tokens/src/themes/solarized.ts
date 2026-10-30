@@ -81,11 +81,16 @@ export const solarized: ThemeDef = {
     hues: {
       red: '#c0272b',
       orange: '#bb4410',
-      yellow: '#96730b',
-      green: '#4d7a1f',
+      // yellow/green/blue nudged ~1-8% darker (P4-05): as authored they read
+      // 3.6-4.31:1 as 13px text on base2 (#eee8d5) — found via CodeBlock's
+      // Shiki theme, which colours syntax roles directly off these hues
+      // (packages/design-tokens/src/themes/types.ts resolveSyntaxTokens).
+      // Below 4.5:1 AA. The other light hues already clear it.
+      yellow: '#816309',
+      green: '#48731d',
       teal: '#1f7f78',
       cyan: '#1b6f7d',
-      blue: '#20729f',
+      blue: '#1f6d99',
       purple: '#5a5fb0',
       pink: '#bd2f75',
     },

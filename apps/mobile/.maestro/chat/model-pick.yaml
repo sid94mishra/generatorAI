@@ -1,0 +1,23 @@
+appId: ${APP_ID}
+name: chat · Turn sheet (model, mode, effort)
+# Replaces the web-preview e2e/modelterm.mjs (08 §6.3) with terminal/open-type.yaml. M6-04 (MB-02, MD-03): the model
+# chip opens "Next turn"; Done applies, ✕ with changes asks first.
+tags: [smoke, chat]
+env: {FRESH_CHAT: stream}
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///chats/${CHAT_STREAM_ID}
+- extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- runFlow: ../_subflows/pane-closed.yaml
+- tapOn: {id: composer-model}
+- extendedWaitUntil: {visible: {id: turn-sheet}, timeout: 15000}
+- assertVisible: "Next turn"
+- assertVisible: {id: composer-mode}
+- tapOn: {id: composer-mode-plan}
+- tapOn: "Done"
+- extendedWaitUntil: {visible: {id: composer-input}, timeout: 15000}
+# Back to Auto so the fixture chat stays as it was.
+- tapOn: {id: composer-model}
+- extendedWaitUntil: {visible: {id: turn-sheet}, timeout: 15000}
+- tapOn: {id: composer-mode-auto}
+- tapOn: "Done"

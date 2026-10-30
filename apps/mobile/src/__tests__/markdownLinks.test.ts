@@ -5,7 +5,7 @@ import {
   classifyImage,
   classifyLink,
   linkScheme,
-} from '../components/markdown/linkPolicy';
+} from '../blocks/AssistantText/model/linkPolicy';
 
 describe('linkScheme', () => {
   it('extracts a lower-cased scheme', () => {

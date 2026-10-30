@@ -77,7 +77,7 @@ Use the visible Settings controls for these host-wide preferences. Global event-
 | `defaultAccountId` | string or `null`; use an actual connected account ID |
 | `generation.provider` | string or `null` |
 | `generation.model` | string or `null`; use a live model catalogue value |
-| `editor.defaultEditor` | `vscode`, `vscode-insiders`, `cursor`, `windsurf`, or `null` |
+| `editor.defaultEditor` | `vscode`, `cursor`, or `null` |
 | `defaultBase` | non-empty branch string or `null` |
 
 ```json
@@ -102,8 +102,8 @@ Configure in this order: select the intended server, verify host identity and pr
 | --- | --- |
 | Default new-chat model | `generatorai:defaultChatModel`; empty means no explicit local preference |
 | Mode | `generatorai-theme`; `system`, `light`, `dark`; application renderer default dark |
-| Palette | `generatorai-theme-palette`; one of 17 registered palettes, default `github` |
-| Accent | `generatorai-accent`; blue/violet/green/orange/rose/teal; initial choice follows the palette default |
+| Palette | `generatorai-theme-palette`; one of 18 registered palettes, default `instrument` |
+| Accent | `generatorai-accent`; ink/blue/violet/green/orange/rose/teal; initial choice follows the palette default (ink for Instrument) |
 | Web browser interaction | `generatorai:browser:webInteractivity`; local browser-client opt-in |
 | Terminal shell | `generatorai:terminal:shell`; used when opening a new host terminal |
 | PowerShell profile | `generatorai:terminal:loadPwshProfile`; relevant to Windows hosts |
@@ -131,4 +131,4 @@ When both non-approval categories are off, the client requests a server mute for
 
 ## Sources
 
-`packages/shared/src/types/Project.ts`, `apps/server/src/routes/{projects,system,sourceControl,auth}.ts`, `apps/server/src/settings/{audio,computerUse,workspaceRetention}.ts`, `apps/desktop/src/main/{config,settings-schema}.ts`, `apps/mobile/src/prefs/preferences.tsx`, `apps/mobile/src/notifications/notificationFilter.ts`, `apps/web/src/lib/appPreferences.ts`, `apps/web/src/components/settings/sections/`.
+`packages/shared/src/types/Project.ts`, `apps/server/src/routes/{projects,system,sourceControl,auth}.ts`, `apps/server/src/settings/{audio,computerUse,workspaceRetention}.ts`, `apps/desktop/src/main/{config,settings-schema}.ts`, `apps/mobile/src/prefs/preferences.tsx`, `apps/mobile/src/notifications/notificationFilter.ts`, `apps/web/src/lib/appPreferences.ts`, `apps/web/src/features/settings/sections/`.

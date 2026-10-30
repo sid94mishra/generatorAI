@@ -7,6 +7,7 @@ Workspaces declared in [pnpm-workspace.yaml](../../pnpm-workspace.yaml):
 ```
 packages/
   shared/                    @generatorai/shared
+  workflow-spec/             @generatorai/workflow-spec
   core/                      @generatorai/core
   db/                        @generatorai/db
   agent-harness-providers/   @generatorai/agent-harness-providers
@@ -24,18 +25,13 @@ The lowest-level package. Anything anyone depends on. Contains:
 
 - **`config/`** — Zod schemas + the resolved `AppConfig` type
   - `AppConfig.ts` (server-side resolved config + env mapping)
-  - `WorkflowDefinitionSchemas.ts` (Create/Update/Import schemas for workflows + stages + edges)
   - `ChatSchemas.ts` (CreateChatSchema, SendPromptSchema)
   - `AutomationSchemas.ts` (Create/UpdateAutomationSchema + trigger/input-mode discriminators)
-  - `WorkflowScriptSchema.ts` (validates `.workflow.mjs` outputs)
-  - `WorkflowTemplate.ts` (template JSON shape + default models)
 - **`types/`** — Pure TypeScript domain types
   - `AgentEvent.ts` (discriminated union of ~60 event kinds + factory `createAgentEvent`)
-  - `Session.ts`, `Chat.ts`, `ChatMessage.ts`, `Workflow.ts`, `WorkflowDefinition.ts`, `WorkflowRun.ts`, `StageDefinition.ts`, `Automation.ts`, `Project.ts`, `Workspace.ts`, `Artifact.ts`, `Webhook.ts`, `RunProfile.ts`, `HookDefinition.ts`, `IPlatformClient.ts`, `ILogger.ts`, `CreateSessionParams.ts`
+  - `Session.ts`, `Chat.ts`, `ChatMessage.ts`, `Workflow.ts`, `WorkflowRun.ts`, `Automation.ts`, `Project.ts`, `Workspace.ts`, `Artifact.ts`, `Webhook.ts`, `RunProfile.ts`, `HookDefinition.ts`, `IPlatformClient.ts`, `ILogger.ts`, `CreateSessionParams.ts`
   - `*StateMachine.ts` (state enums + valid-transition tables for Session / WorkflowRun / StageRun / Workflow)
-- **`builders/`** — Fluent builders re-exported through `@generatorai/sdk`
-  - `WorkflowBuilder` — `id().name().description().stage().edge().variable().hook().harnessConfig().profile()`
-  - `StageBuilder` — `name().prompts().condition().contextFilter().hooks().retryPolicy().resultValidation().outputFormat()`
+- Workflow definition shapes (the v2 `WorkflowGraph`, stages, edges, templates, script profiles), their validator and the fluent builders are **not** in `shared`; they live in [`workflow-spec`](#workflow-spec).
 - **`errors/`** — `GeneratorAIError` hierarchy (15+ types, see [architecture.md §8](./architecture.md#8-error-handling))
 - **`logging/`** — `Logger` interface + pino factory
 - **`telemetry/`** — OTel meter/tracer factories, span helpers (`withSpan`)
@@ -45,6 +41,22 @@ The lowest-level package. Anything anyone depends on. Contains:
 **Public exports:** Every directory exposes a barrel `index.ts`; the top-level `src/index.ts` re-exports everything. SDK consumers should import from `@generatorai/sdk` instead.
 
 **Extension pattern:** Add a new type → put it in `shared/src/types/X.ts`, export from `types/index.ts`, then write a matching Zod schema in `shared/src/config/`. If it ends up in a DB JSON column, add a runtime validator under `packages/db/src/utils/jsonColumnSchemas.ts`.
+
+---
+
+## `workflow-spec`
+
+**Path:** [packages/workflow-spec/](../../packages/workflow-spec/)
+
+The one source of truth for workflow shapes. Pure and browser-safe (depends only on zod); the server, store, builder UI, CLI, SDK, templates and scripts all derive from it.
+
+- **Schemas** — `WorkflowGraph` (`formatVersion: 2`, `workflow`, `stages`, `edges`), `SessionSpec`, `AgentStage`, `EdgeSpec`, persisted records (`WorkflowDefinitionRecord`, `WorkflowDefinitionSummary`, versions), `WorkflowTemplate` (`{ id, category, graph }`), `ScriptRunProfile`. The JSON Schema is `@generatorai/workflow-spec/workflow.schema.json`; every field is listed in the generated [FIELDS.md](../../docs/workflow-overhaul/generated/FIELDS.md).
+- **Validation** — `validateWorkflow(graph, { engine })` → `{ valid, issues, graph? }`; `analyzeGraph` (ordering, layers, cycles).
+- **Expression v2** — `parseExpression`, `checkExpression`, `conditionHolds`, `EXPRESSION_GRAMMAR`.
+- **Documents** — `exportGraph` / `importGraph` (canonical JSON text), `parseGraph` (strict parse).
+- **Builders** — `@generatorai/workflow-spec/builders`: `workflow(name).stage(key, s => …).edge(a, b).build()`, `WorkflowBuilder`, `StageBuilder`, `WorkflowBuildError`. Re-exported by `@generatorai/sdk`.
+
+See [feature-workflows.md](./feature-workflows.md) and [feature-stages.md](./feature-stages.md).
 
 ---
 
@@ -60,8 +72,8 @@ The brain. Split into four sub-trees:
 domain/
 ├── ports/                       30+ interfaces (IAgentHarness, I*Repository, ISandboxProvider, IScriptRunner, IHttpClient,
 │                                                  IBrowserBridge, ITerminalHost, …)
-├── state-machines/              SessionStateMachine, WorkflowRunStateMachine, StageRunStateMachine
-├── dag/                         DAGValidator (Kahn), ConditionEvaluator (safe expression eval), types
+├── state-machines/              WorkflowRunStateMachine, StageRunStateMachine
+├── dag/                         buildDAG (the scheduler's graph over stage keys), types
 └── events/                      AgentEvent factories
 ```
 
@@ -71,8 +83,7 @@ Key files:
 - [domain/ports/IHookBridge.ts](../../packages/core/src/domain/ports/IHookBridge.ts) — synchronous intercepts (`onPreToolUse`, `onPostToolUse`, `onUserPromptSubmitted`, `onSessionStart`) used by HKS-01.
 - [domain/ports/IBrowserBridge.ts](../../packages/core/src/domain/ports/IBrowserBridge.ts) — Chromium abstraction: start / navigate / click / type / screenshot / captureRegion / screencast / inspector / dialog handling. Two adapters (`ServerPlaywrightHost`, `ElectronBridgeAdapter`).
 - [domain/ports/ITerminalHost.ts](../../packages/core/src/domain/ports/ITerminalHost.ts) — PTY abstraction: `spawn(opts) → ITerminalHandle` with `write / resize / signal / kill / pause / resume / onData / onExit`. Three adapters (`NodePtyHost`, `SandboxPtyHost`, `FallbackChildProcessHost`).
-- [domain/dag/DAGValidator.ts](../../packages/core/src/domain/dag/DAGValidator.ts) — `validateDAG()`, `topologicalSort()`, `buildDAG()`, `getExecutionLayers()`.
-- [domain/dag/ConditionEvaluator.ts](../../packages/core/src/domain/dag/ConditionEvaluator.ts) — safe boolean expression evaluator (tokenize → shunting-yard → RPN). Supports `==`, `!=`, `<`, `>`, `<=`, `>=`, `&&` / `AND`, `||` / `OR`, `!` / `NOT`, quoted strings, and dotted variable references (`variables.foo.bar`).
+- [domain/dag/buildDAG.ts](../../packages/core/src/domain/dag/buildDAG.ts) — `buildDAG(graph)` lays out a validated `WorkflowGraph` (nodes keyed by stage key, dependency/dependent lists, root ids, execution layers) using `analyzeGraph` from `workflow-spec`; throws `DAGValidationError` on a cycle. Validation and Expression v2 live in `workflow-spec`.
 
 ### `services/` — application layer
 
@@ -80,23 +91,21 @@ Thirty-plus services. Most relevant:
 
 | Service | Responsibility |
 |---|---|
-| `SessionService` | v1 session lifecycle + recovery |
 | `ChatManagementService` | v2 chat CRUD + send-prompt + workspace creation |
-| `WorkflowDefinitionService` | CRUD on workflow definitions + stages + edges; validation |
+| `WorkflowDefinitionService` | Definitions as whole v2 graphs: `createFromSpec` (the one materializer), `saveGraph` (revision-checked), `publish`, versions, `validate`, `import`/`importTemplate`, `exportGraph`, delete/archive |
 | `WorkflowRunService` | Run lifecycle, DAG orchestration loop, retries, validation feedback |
 | `StageExecutionService` | Per-stage execution (prompt interpolation, harness call, artifact extraction, predecessor context injection) |
-| `DAGScheduler` | Build DAG, get root stages, evaluate edge conditions on completion, hash-based cache |
-| `SessionAllocator` | Allocate sessions per mode (single / per-stage / auto), persist allocation map (1.6) |
-| `ConfigResolver` | Deep-merge 3-level config |
+| `DAGScheduler` | `buildDAGForRun` (cached per pinned version) and the one `reconcileRun` (edge `on`/`when`, stage `guard`, cascading skips, terminal status) |
+| `SessionAllocator` | Allocate sessions per run mode (`single` / `per-stage`, resolved from the graph shape at start), persist allocation map (1.6) |
+| `RunDefinitionReader` (`services/definitions/`) | Reads a run's pinned graph / stage by `definitionVersionId` + `stageKey` |
 | `HookExecutor` | Run hooks in priority order with timeout/retry/failure-policy |
 | `HookInterceptor` | Map harness events → hook phases |
-| `ResultValidator` | Apply `resultValidation` rules to assistant output |
+| `ResultValidator` | Apply a stage's `output.rules` to assistant output |
 | `HitlService` | Permission mode CRUD + pending interrupts + approve/reject |
 | `ArtifactService` | Session-scoped artifact persistence |
 | `SystemArtifactService` | Load system agents/prompts/skills on boot |
 | `TemplateRegistry` | Load + serve workflow templates from `templates/system/` |
 | `AutomationService` | Automation CRUD + cron scheduler + webhook trigger + execution fan-out |
-| `DataSourceResolver` | Resolve `dataSourceConfig` (file path / script / inline) to a row array |
 | `ProjectService`, `CodebaseService`, `ProjectConfigService` | Project + codebase + config CRUD |
 | `WorktreeService`, `WorktreeCleanupService` | Per-run worktree lifecycle + retention sweeper |
 | `WorkspaceManager`, `PathResolver` | Execution workspaces (chat / run / automation) + path boundary enforcement |
@@ -104,12 +113,10 @@ Thirty-plus services. Most relevant:
 | `TerminalService` | Workspace-scoped PTY sessions (see [feature-integrated-terminal.md](./feature-integrated-terminal.md)). Ephemeral `Map<sid, TerminalRecord>` + 4 MiB scrollback ring + idle reaper; hooks into `WorkspaceManager.registerBeforeDelete` for cleanup. |
 | `ExtensionManager` | Hot-load / install / reload / uninstall for system + user + workspace extensions. Runs `loadExtension(ai)` and commits staged contributions atomically into `WidgetRegistry`, `customToolRegistry`, and `SystemArtifactService`. See [feature-extensions-widgets.md](./feature-extensions-widgets.md). |
 | `WidgetService`, `WidgetRegistry` | Lifecycle for `WidgetInstance` rows (`widget_instances` table, migration v14; surface constraint tightened in v16) + in-memory descriptor catalog (incl. action catalog). Emit `harness.widget.render` / `.state` / `.action` / `.invoke` / `.closed` on the bus so the SPA Widget tab + inline widgets stay in sync. Drives agent actions via the `widget:invoke` → `widget:invoke-result` round-trip. |
-| `WebhookService` | Outgoing webhook delivery + signature; incoming webhook dispatch |
 | `WorkflowScriptLoader` | Scan `templates/scripts/*.workflow.mjs`, dynamic-import, validate |
 | `WorkflowOrchestrator` | Higher-level system-template flows + preprocessing |
 | `WorkflowPreprocessor` | Variable resolution + workspace setup before run start |
 | `StartupRecoveryService` | Recover in-flight runs on server restart |
-| `DurableSleepService` | Wake stage runs from `sleeping` state when `wake_at` reached |
 | `StreamBroker` | Persistent SSE broker (see [feature-streaming-events.md](./feature-streaming-events.md)) |
 | `SandboxLifecycleManager` | Cleanup Docker sandbox containers on shutdown |
 | `ErrorHandler` | Normalize errors into wire format |
@@ -180,11 +187,12 @@ artifacts               session-scoped file artifacts
 webhook_registrations   incoming webhook triggers
 webhook_deliveries      delivery audit log (unique idx for dedup)
 chats                   v2 top-level chat entities (codebaseIds, gitRepositories, projectId, workspaceId, useWorktree)
-workflow_definitions    v2 DAG templates (sessionMode, harnessConfig, variables, hooks, orchestratorConfig, scope, projectId, useWorktree)
-stage_definitions       v2 stage nodes (prompts, condition, retryPolicy, contextFilter, agentName, resultValidation, hooks, harnessConfigOverrides, outputFormat, outputSchema, contextSources)
-stage_edges             v2 DAG edges
-workflow_runs           v2 run instances (status, sessionMode, masterSessionId, variables, permissionMode, projectId, workspaceId)
-stage_runs              v2 stage executions (status, retryCount, version (optimistic lock), wakeAt + sleptSince (DUR-05), interruptData (HITL-02), summary)
+workflow_definitions    definitions (name, description, project_id, status draft|published, revision, current_version_id, archived_at, needs_attention, spec = workflow-level JSON)
+stage_definitions       one row per stage (key unique per definition, name, ordinal, position_x/y, spec = the stage JSON)
+stage_edges             from_key, to_key, edge_on, when_expr, handles_failure, ordinal
+workflow_definition_versions  immutable graph copies (version, kind published|test, content_hash, spec); runs pin one
+workflow_runs           run instances (definition_version_id, status, session_mode resolved at start, variables, permission_mode, project_id, workspace_id, ancestor_run_id)
+stage_runs              stage executions (stage_key, status, retry_count, version (optimistic lock), summary, output_text, output_data, interrupt_data (HITL-02), heartbeat_at)
 session_allocations     SessionAllocator state (1.6) — workflowRunId → mode + sharedSessionId
 stage_session_maps      Stage → SDK session mapping
 projects, project_codebases, project_configs, worktrees, system_configs   Project + codebase management (Phase 6/7)
@@ -297,7 +305,7 @@ src/
 - `Copilot GHEC tenants` — the CLI resolves the tenant from its own stored credentials (Windows Credential Manager: `copilot-cli/<host>:<user>`), so a plain `copilot` → `/login` is usually all that is needed and `COPILOT_GH_HOST` can stay unset. Set `COPILOT_GH_HOST=https://<tenant>.ghe.com/` only if the CLI picks the wrong host; when you do, *also* scrub `COPILOT_GITHUB_TOKEN` / `GITHUB_TOKEN` / `GH_TOKEN` from the spawned environment, because an ambient github.com token takes precedence over the stored tenant credential and yields 401/403.
 - **Changing a Copilot session's model requires `session.setModel()`, not resume.** `client.resumeSession(id, { model })` rehydrates from the SDK's persistent store, which carries the model the session was *created* with — the `model` on `ResumeSessionConfig` does **not** override it. Passing it and hoping silently keeps every later turn on the original model. `CopilotProvider.resumeConversation` therefore calls `session.setModel(model, { reasoningEffort, contextTier })` both for an in-place switch (live handle) and immediately after a resume (post-restart). `setModel` preserves conversation history and takes effect on the next message.
 - `claude-agent` reads auth from `~/.claude/.credentials.json` set up by the user's local `claude` Code CLI login. We don't pass any keys.
-- Stage `harnessConfigOverrides.model` is provider-specific. Switching providers without scrubbing overrides will fail (see `gpt-5.4-mini` under `claude-agent` returning "issue with the selected model").
+- A stage's `session.model` (or `workflow.session.model`) is provider-specific. Switching providers without scrubbing overrides will fail (see `gpt-5.4-mini` under `claude-agent` returning "issue with the selected model").
 - **`@anthropic-ai/claude-agent-sdk` declares `zod@^4` as a peer** but the monorepo pins `zod@3`. This is a *documented, verified-safe* mismatch: the SDK **bundles its own zod v4** inside `sdk.mjs` (the only external imports are Node built-ins), and `createSdkMcpServer` accepts a zod-v3 raw shape via the `AnyZodRawShape = ZodRawShape | ZodRawShape_2` union in `sdk.d.ts`. `jsonSchemaToZodShape()` therefore keeps emitting zod v3 shapes. Do **not** "fix" the pnpm peer warning by force-upgrading the workspace to zod v4 — that would break every other package.
 - **Claude SDK `canUseTool` is shadowed by bare `allowedTools` entries** (v0.3.186+ emits `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warnings at runtime). Bare tool names in `allowedTools` auto-approve before the callback runs. To gate *every* call, either use a `PreToolUse` hook or remove the bare names so they fall through to `canUseTool`.
 - **`TodoWrite` is deprecated** in the Claude SDK in favour of `TaskCreate` / `TaskUpdate` / `TaskGet` / `TaskList`. We never referenced it explicitly, so nothing to migrate — but do not add it to new tool specs.
@@ -333,11 +341,11 @@ const ai = await createGeneratorAI({
 
 | Facade | Methods |
 |---|---|
-| `ai.workflows` | `create({ id, name, description, stages, edges, variables, hooks })`, `list()`, `get(id)`, `run(id, { variables, projectId })`, `stream(runId, { fromSequence })`, `pause/resume/cancel(runId)`, `retry(runId)` |
+| `ai.workflows` | `create(graphOrBuilder, { publish? })`, `save(id, graph, expectedRevision)`, `publish(id)`, `validate(graph)`, `list()`, `get(id)`, `invoke(request)` (the one run start, trigger `external_agent via sdk`), `run(id, { variables, codebases, stageOverrides, overrides, testRun, … })`, `plan(request)`, `fork(runId, { rerunFrom? })`, `waitFor(runId, { timeoutMs, stopOnApproval? })`, `digest(runId)`, `stream(runId, { fromSequence })` (the run scope replayed, then live, until `finalized`), `command(runId, cmd)`, `status(runId)`, `deleteRun(runId)` |
 | `ai.chat` | `create({ name, description?, model?, projectId?, tags? })`, `send(chatId, message)`, `onMessage(chatId, handler)`, `list(status?, projectId?)`, `get(chatId)`, `archive(chatId)` |
 | `ai.automations` | `create(params)`, `list(projectId?)`, `get(id)`, `trigger(id)`, `update(id, params)`, `delete(id)`, `enable/disable(id)`, `getExecution(execId)` |
 | `ai.events` | `onAll(handler)`, `onRun(runId, handler)`, `onSession(sessionId, handler)`, `replay(sessionId, afterSeq?)`, `emit(sessionId, event)` |
-| `ai.scripts` | `list()`, `get(scriptId)`, `validate(filePath)`, `reload()`, `reloadScript(scriptId)`, `setScriptLoader(loader)` |
+| `ai.scripts` | `list()`, `get(scriptId)`, `validate(filePath)`, `reload()`, `reloadScript(scriptId)`, `materialize(scriptId, opts)`, `run(scriptId, { profileName, variables, projectId })`, `setScriptLoader(loader)` |
 | `ai.tools` | `tool({ name, description, inputSchema: ZodType, execute })`, `register(toolDef)`, `unregister(name)`, `list()`, `has(name)`, `setRegistry(registry)` |
 
 `ai.services` exposes the entire `CoreServices` bundle for power users (see [packages.md → core](#core)).
@@ -357,24 +365,18 @@ const ai = await createTestGeneratorAI();   // creates temp DB + artifacts + scr
 ### Builder pattern
 
 ```typescript
-import { workflow, type CreateWorkflowInput } from '@generatorai/sdk';
+import { workflow } from '@generatorai/sdk';   // re-exported from @generatorai/workflow-spec/builders
 
-const wf: CreateWorkflowInput = workflow(b => b
-  .id('hello-world')
-  .name('Hello World')
-  .variable({ name: 'topic', type: 'string', defaultValue: 'AI' })
-  .stage('analyze', s => s
+const wf = workflow('Hello World')
+  .variable('topic', { type: 'string', label: 'Topic', required: false, defaultValue: 'AI' })
+  .stage('analyze', (s) => s
     .name('Analyze')
-    .prompts([{ label: 'main', text: 'Tell me about {{topic}}', source: 'inline' }])
-    .outputFormat('text')
-    .contextFilter('full')
-    .retryPolicy({ maxRetries: 2, backoffMs: 1000, backoffMultiplier: 2 })
-  )
-  .stage('summarize', s => s.prompts([{ text: 'Summarize the above in 3 bullets.' }]))
-  .edge('analyze', 'summarize', 'on_success')
-);
+    .prompt('Tell me about {{topic}}', 'main')
+    .retry({ maxAttempts: 3, initialDelayMs: 1000, backoffMultiplier: 2 }))
+  .stage('summarize', (s) => s.prompt('Summarize the above in 3 bullets.').contextFrom(['analyze'], 'output'))
+  .edge('analyze', 'summarize');              // on: 'success' by default
 
-await ai.workflows.create(wf);
+await ai.workflows.create(wf);                // validates; published unless { publish: false }
 ```
 
 See [usage-sdk.md](./usage-sdk.md) for full integration recipes.

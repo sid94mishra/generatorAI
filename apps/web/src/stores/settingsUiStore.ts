@@ -1,105 +1,44 @@
 // ────────────────────────────────────────────────────────────────
-// settingsUiStore — which Settings section is active.
+// settingsUiStore — the one "open Settings" hop every call site uses.
 //
-// Settings is a ROUTED PAGE (`/settings/:section`), not a modal. This
-// store no longer owns an `open` flag; it keeps the last-visited section
-// (so `openSettings()` with no argument returns where the user was) and
-// owns the one-line navigation hop every "open settings" call site uses.
-//
-// The navigator is injected by AppLayout rather than imported from
-// `router.tsx`: the router module imports every page, and every page may
-// import this store, so importing it here would close a cycle. The
-// fallback keeps a call working (full page load) if the layout has not
-// mounted yet — e.g. a deep link handled before hydration.
+// Settings is a modal addressed by URL (D-26): `openSettings(section)` is a
+// navigation to `/settings/<section>` that carries the current page as
+// `state.backgroundLocation`, so the page stays mounted behind the modal.
+// The store keeps the last-visited section (a bare `openSettings()` returns
+// where the user was) and holds the opener the shell lends it
+// (app/shell/ShellRoute) — the shell knows the current location; a store
+// cannot hold a router hook, and importing the router here would close an
+// import cycle through every lazy page. Before the shell mounts (a deep link
+// handled before hydration) the fallback is a full page load.
 // ────────────────────────────────────────────────────────────────
 
 import { create } from 'zustand';
+import { DEFAULT_SETTINGS_SECTION, settingsPath, type SettingsSectionId } from '@generatorai/shared/ui-contract';
 import { globalSingleton } from '../lib/globalSingleton.js';
 
-export type SettingsSectionId =
-  | 'general'
-  | 'appearance'
-  | 'providers'
-  | 'agents'
-  | 'skills'
-  | 'mcp'
-  | 'templates'
-  | 'source-control'
-  | 'browser-terminal'
-  | 'computer-use'
-  | 'audio'
-  | 'extensions'
-  | 'security'
-  | 'storage'
-  | 'diagnostics';
-
-export const SETTINGS_SECTION_IDS: readonly SettingsSectionId[] = [
-  'general',
-  'appearance',
-  'providers',
-  'agents',
-  'skills',
-  'mcp',
-  'templates',
-  'source-control',
-  'browser-terminal',
-  'computer-use',
-  'audio',
-  'extensions',
-  'security',
-  'storage',
-  'diagnostics',
-];
-
-export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = 'general';
-
-/** Narrow an arbitrary URL segment to a known section id. */
-export function toSettingsSection(value: string | undefined | null): SettingsSectionId {
-  return SETTINGS_SECTION_IDS.includes(value as SettingsSectionId)
-    ? (value as SettingsSectionId)
-    : DEFAULT_SETTINGS_SECTION;
-}
-
-/** The canonical URL for a section. */
-export function settingsPath(section: SettingsSectionId = DEFAULT_SETTINGS_SECTION): string {
-  return `/settings/${section}`;
-}
-
-type Navigator = (path: string, opts?: { replace?: boolean }) => void;
+/** Opens (or, inside the modal, switches to) a section; lent by the shell. */
+export type SettingsOpener = (section: SettingsSectionId) => void;
 
 interface SettingsUiState {
   /** Last section the user looked at — the target of a bare `openSettings()`. */
   section: SettingsSectionId;
-  /** Injected by AppLayout; null before the shell mounts. */
-  navigator: Navigator | null;
-  setNavigator: (navigate: Navigator | null) => void;
-  /** Navigate to `/settings/<section>`. */
+  /** Injected by the shell (ShellRoute); null before it mounts. */
+  opener: SettingsOpener | null;
+  setOpener: (opener: SettingsOpener | null) => void;
+  /** Open the Settings modal over the current page, or switch its section when it is open. */
   openSettings: (section?: SettingsSectionId) => void;
-  /** Kept for call sites that used to dismiss the modal. Now a no-op hop home. */
-  closeSettings: () => void;
-  /** Switch section from inside the page (replaces the history entry). */
-  setSection: (section: SettingsSectionId) => void;
 }
 
 const useSettingsUiStoreImpl = create<SettingsUiState>((set, get) => ({
   section: DEFAULT_SETTINGS_SECTION,
-  navigator: null,
-  setNavigator: (navigate) => set({ navigator: navigate }),
+  opener: null,
+  setOpener: (opener) => set({ opener }),
   openSettings: (section) => {
     const target = section ?? get().section;
     set({ section: target });
-    const go = get().navigator;
-    if (go) go(settingsPath(target));
+    const open = get().opener;
+    if (open) open(target);
     else if (typeof window !== 'undefined') window.location.assign(settingsPath(target));
-  },
-  closeSettings: () => {
-    const go = get().navigator;
-    if (go) go('/');
-  },
-  setSection: (section) => {
-    set({ section });
-    const go = get().navigator;
-    if (go) go(settingsPath(section), { replace: true });
   },
 }));
 

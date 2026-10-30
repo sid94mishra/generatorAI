@@ -68,10 +68,18 @@ export interface WorkspaceMount {
   mode: MountMode;
   /** Absolute directory the agent edits. */
   path: string;
+  /**
+   * Relative directory inside `path` the agent starts in when this is the
+   * working directory — a codebase's `subdirectory` (a monorepo package). The
+   * mount is still the whole repository.
+   */
+  workdir?: string;
   git?: MountGitState;
   status: MountStatus;
   error?: string;
   hasUncommittedChanges: boolean;
+  /** The chat folder (`generated`) only: how many files it holds, capped at 1000 (D-141). */
+  fileCount?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -103,7 +111,13 @@ export type ChatSourceSpec =
       newBranch?: string;
       baseRef?: string;
       alias?: string;
-    };
+    }
+  /**
+   * The folder the chat owns — where a chat with no sources works ("Empty
+   * workspace"). Listed beside other sources so the files the agent made
+   * there stay when the user links a folder (D-141).
+   */
+  | { kind: 'chat-folder' };
 
 /** Everything a harness needs to know about where a chat works. */
 export interface WorkspaceExposure {

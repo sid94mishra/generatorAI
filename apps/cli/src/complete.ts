@@ -14,6 +14,7 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { readyCatalogModels } from '@generatorai/client-core';
 import {
   ConnectionManager,
   createCliClient,
@@ -111,17 +112,14 @@ async function fetchCandidates(
 ): Promise<Array<{ id: string; label?: string | null }>> {
   switch (source) {
     case 'chat':
-      return (await api.chats.list({ limit: MAX_CANDIDATES })).map((c) => ({ id: c.id, label: c.name }));
+      return (await api.chats.list({ limit: MAX_CANDIDATES })).items.map((c) => ({ id: c.id, label: c.name }));
     case 'agent':
       return (await api.agents.list()).map((a) => ({
         id: (a as { id: string }).id,
         label: (a as { name?: string }).name,
       }));
     case 'workflow':
-      return (await api.definitions.list()).map((w) => ({
-        id: (w as { id: string }).id,
-        label: (w as { name?: string }).name,
-      }));
+      return (await api.definitions.list({ limit: MAX_CANDIDATES })).items.map((w) => ({ id: w.id, label: w.name }));
     case 'run':
       return (await api.runs.list({ limit: MAX_CANDIDATES })).map((r) => ({
         id: r.id,
@@ -145,21 +143,15 @@ async function fetchCandidates(
     case 'script':
       return (await api.scripts.list()).map((s) => ({ id: s.id, label: s.name }));
     case 'template':
-      return (await api.templates.list()).map((t) => ({
-        id: String((t as { id?: unknown }).id ?? ''),
-        label: String((t as { name?: unknown }).name ?? ''),
-      }));
+      return (await api.templates.list()).map((t) => ({ id: t.id, label: t.graph.workflow.name }));
     case 'extension':
       return (await api.extensions.list()).map((e) => ({ id: e.id, label: e.name }));
     case 'widget':
       return (await api.widgets.list()).map((w) => ({ id: w.id, label: w.title }));
     case 'model': {
-      const providers = (await api.harness.providers()) as {
-        providers?: Array<{ models?: Array<{ id: string; name?: string }> }>;
-      };
-      return (providers.providers ?? []).flatMap((p) =>
-        (p.models ?? []).map((m) => ({ id: m.id, label: m.name })),
-      );
+      // Only models of READY providers: a signed-out provider's model would be
+      // offered and then refused when the chat starts.
+      return readyCatalogModels(await api.harness.providers()).map((m) => ({ id: m.id, label: m.name }));
     }
     // `stage` and `codebase` are scoped to a parent whose id the shell has not
     // necessarily typed yet. Offering every stage on the server would be

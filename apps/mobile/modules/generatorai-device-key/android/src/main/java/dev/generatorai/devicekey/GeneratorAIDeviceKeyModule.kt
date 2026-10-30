@@ -21,21 +21,29 @@
 //     DER; `derToRaw` converts it to the raw `r || s` (64 bytes) JOSE form
 //     that `createDpopProof` base64url-encodes.
 //   • Usable while locked. No `setUserAuthenticationRequired`: lock-screen
-//     Allow/Deny actions (src/auth/backgroundFetch.ts) sign while the phone
+//     Allow/Deny actions (src/services/auth/backgroundFetch.ts) sign while the phone
 //     is locked, and app lock / step-up are enforced in JS instead.
 //   • `setUnlockedDeviceRequired` is deliberately NOT set for the same reason.
 //
-// JS facade: apps/mobile/src/native/deviceKeyModule.ts.
+// JS facade: apps/mobile/src/services/native/deviceKeyModule.ts; Recents
+// privacy (M9-09) from apps/mobile/src/services/native/privacy.ts; the key
+// commands of M5-09 (KeyCommands.kt) are driven from
+// apps/mobile/src/services/native/keyCommands.ts; the approval key of M6-03
+// (ApprovalKey.kt) from apps/mobile/src/services/native/approvalKey.ts.
 // ────────────────────────────────────────────────────────────────
 
 package dev.generatorai.devicekey
 
+import android.app.Activity
+import android.content.res.Configuration
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
 import android.security.keystore.StrongBoxUnavailableException
 import android.util.Base64
+import androidx.fragment.app.FragmentActivity
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -56,6 +64,16 @@ private const val BACKING_STRONGBOX = "strongbox"
 private const val BACKING_KEYSTORE = "keystore"
 private const val BACKING_SOFTWARE = "software"
 
+/** The Recents privacy choice, re-applied to every new activity instance (API 33+). */
+internal object RecentsPrivacy {
+  @Volatile var hidden = false
+
+  fun apply(activity: Activity?) {
+    if (activity == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+    activity.setRecentsScreenshotEnabled(!hidden)
+  }
+}
+
 internal class DeviceKeyNotFoundException(alias: String) :
   CodedException("No device key exists under alias \"$alias\"")
 
@@ -68,6 +86,51 @@ internal class DeviceKeySignatureFormatException :
 class GeneratorAIDeviceKeyModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("GeneratorAIDeviceKey")
+
+    // ── Hardware keyboard shortcuts (M5-09; KeyCommands.kt) ──────────
+    Events("onKeyCommand", "onHardwareKeyboardChange")
+
+    OnCreate {
+      KeyCommandCenter.emit = { id -> sendEvent("onKeyCommand", mapOf("id" to id)) }
+    }
+
+    Function("setKeyCommands") { commands: List<KeyCommandRecord> ->
+      KeyCommandCenter.specs = commands.mapNotNull { KeyCommandCenter.spec(it) }
+      val activity = appContext.currentActivity
+      activity?.runOnUiThread { KeyCommandCenter.install(activity) }
+    }
+
+    Function("setKeyCommandsSuspended") { suspended: Boolean ->
+      KeyCommandCenter.suspended = suspended
+    }
+
+    Function("isHardwareKeyboardAttached") {
+      hardwareKeyboardAttached()
+    }
+
+    // A new activity instance (recreated after a configuration change) gets the callback again; a keyboard plugged
+    // in or out while backgrounded is reported on return. The Recents privacy flag is per activity instance, so it
+    // is applied again too.
+    OnActivityEntersForeground {
+      val activity = appContext.currentActivity
+      activity?.runOnUiThread {
+        KeyCommandCenter.install(activity)
+        RecentsPrivacy.apply(activity)
+      }
+      sendEvent("onHardwareKeyboardChange", mapOf("attached" to hardwareKeyboardAttached()))
+    }
+
+    // ── Recents privacy (M9-09, MX-10, mobile 06 §6.2) ───────────────
+    // `Activity.setRecentsScreenshotEnabled(false)` (API 33+): Recents shows a blank card instead of the last frame,
+    // and screenshots stay possible (unlike FLAG_SECURE). Returns false below API 33, where the JS side falls back to
+    // FLAG_SECURE through expo-screen-capture.
+    Function("setRecentsScreenshotEnabled") { enabled: Boolean ->
+      RecentsPrivacy.hidden = !enabled
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return@Function false
+      val activity = appContext.currentActivity
+      activity?.runOnUiThread { RecentsPrivacy.apply(activity) }
+      true
+    }
 
     // Every supported Android version has AndroidKeyStore; whether it is
     // hardware-backed is answered per key by `backing`, not up front.
@@ -114,6 +177,46 @@ class GeneratorAIDeviceKeyModule : Module() {
     AsyncFunction("remove") { alias: String ->
       deleteKey(alias)
     }
+
+    // ── Approval key (M6-03, MG-05 / MD-31; ApprovalKey.kt) ──────────
+    // A presence-bound key per server that signs risky approvals; every use shows the BiometricPrompt.
+
+    AsyncFunction("generateApprovalKey") { alias: String ->
+      val context = appContext.reactContext ?: throw ApprovalKeyFailedException("no React context")
+      val presence = ApprovalKeys.generate(context, alias)
+      handleFor(alias) + mapOf("presence" to presence)
+    }
+
+    AsyncFunction("approvalKeyStatus") { alias: String ->
+      val context = appContext.reactContext ?: return@AsyncFunction "unsupported"
+      ApprovalKeys.status(context, alias)
+    }
+
+    AsyncFunction("signWithPrompt") { alias: String, dataBase64: String, prompt: ApprovalPromptRecord, promise: Promise ->
+      val activity = appContext.currentActivity as? FragmentActivity
+      if (activity == null) {
+        promise.reject(ApprovalKeyFailedException("no foreground activity to show the prompt"))
+      } else {
+        ApprovalKeys.signWithPrompt(activity, alias, dataBase64, prompt, { der -> derToRaw(der) }, promise)
+      }
+    }
+
+    AsyncFunction("removeApprovalKey") { alias: String ->
+      val context = appContext.reactContext ?: return@AsyncFunction Unit
+      ApprovalKeys.remove(context, alias)
+    }
+
+    // Ends a prompt that is still up (the JS timeout, MD-155); `signWithPrompt` then rejects as cancelled.
+    Function("cancelApprovalPrompt") {
+      ApprovalKeys.cancelPrompt()
+    }
+  }
+
+  /** A physical keyboard is attached and not hidden (Configuration.keyboard / hardKeyboardHidden). */
+  private fun hardwareKeyboardAttached(): Boolean {
+    val config = appContext.reactContext?.resources?.configuration ?: return false
+    return config.keyboard == Configuration.KEYBOARD_QWERTY &&
+      config.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
   }
 
   // ── Keystore ──────────────────────────────────────────────────

@@ -23,6 +23,9 @@ export interface SourceControlAccount {
   host?: string;
   /** User login as reported by the host. */
   login?: string;
+  /** The host's numeric user id and profile name: the default account commits as them when git has no identity (U-83). */
+  userId?: number;
+  displayName?: string;
   avatarUrl?: string;
   scopes?: string[];
   authMethod: SourceControlAuthMethod;
@@ -36,7 +39,10 @@ export interface SourceControlProviderInfo {
   loginMethods: SourceControlAuthMethod[];
 }
 
-export type EditorId = 'vscode' | 'vscode-insiders' | 'cursor' | 'windsurf';
+/** The editors "Open in" offers: VS Code and Cursor (owner, 2026-10-20). */
+export type EditorId = 'vscode' | 'cursor';
+
+export const EDITOR_IDS: readonly EditorId[] = ['vscode', 'cursor'];
 
 export interface EditorInfo {
   id: EditorId;
@@ -155,6 +161,97 @@ export interface ProjectPullRequestsResponse {
   unavailable: Array<{ codebaseId: string; alias: string; reason: string }>;
 }
 
+// ── Merging a pull request ──
+
+/** How a pull request lands on its base: a merge commit, one squashed commit, or rebased commits. */
+export type PullRequestMergeMethod = 'merge' | 'squash' | 'rebase';
+
+/** `POST /api/projects/:id/codebases/:cid/pull-requests/:number/merge` body. */
+export interface MergePullRequestRequest {
+  method: PullRequestMergeMethod;
+  /** Delete the head branch on the host once merged. */
+  deleteBranch?: boolean;
+  commitTitle?: string;
+  commitMessage?: string;
+}
+
+export interface MergePullRequestResult {
+  merged: boolean;
+  /** The merge (or squash / last rebased) commit on the base branch. */
+  sha?: string;
+  /** The host's own message ("Pull Request successfully merged"). */
+  message: string;
+  /** Present when `deleteBranch` was asked for: true when the host deleted it, false when it was already gone. */
+  branchDeleted?: boolean;
+  /** Why the head branch could not be deleted (the merge itself succeeded). */
+  branchDeleteError?: string;
+}
+
+// ── Issues ──
+
+export type IssueState = 'open' | 'closed';
+
+/** Why a closed issue was closed (GitHub's `state_reason`). */
+export type IssueCloseReason = 'completed' | 'not_planned';
+
+/** A host issue (never a pull request, even where the host lists both together). */
+export interface IssueSummary {
+  provider: SourceControlProviderId;
+  number: number;
+  title: string;
+  /** Markdown; empty when the issue has no description. */
+  body: string;
+  state: IssueState;
+  stateReason?: IssueCloseReason | 'reopened';
+  labels: string[];
+  author?: string;
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Number of comments on the issue. */
+  comments: number;
+}
+
+export interface IssueComment {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+  url?: string;
+}
+
+/** `GET /api/projects/:id/codebases/:cid/issues/:number`. */
+export interface IssueDetailResponse {
+  issue: IssueSummary;
+  comments: IssueComment[];
+}
+
+/** An issue row as listed under a project, with the codebase it belongs to. */
+export interface ProjectIssue extends IssueSummary {
+  codebaseId: string;
+  codebaseAlias: string;
+}
+
+export interface ProjectIssuesResponse {
+  items: ProjectIssue[];
+  /** Codebases that could not be listed, with a user-facing reason. */
+  unavailable: Array<{ codebaseId: string; alias: string; reason: string }>;
+}
+
+/** `POST /api/projects/:id/codebases/:cid/issues` body. */
+export interface CreateIssueRequest {
+  title: string;
+  body?: string;
+  labels?: string[];
+}
+
+/** `POST …/issues/:number/close` body. */
+export interface CloseIssueRequest {
+  reason?: IssueCloseReason;
+  /** Posted as a comment before the issue is closed. */
+  comment?: string;
+}
+
 /** Everything the client needs to decide which SCM actions to offer for one mount. */
 export interface RepoReadiness {
   alias: string;
@@ -169,14 +266,21 @@ export interface RepoReadiness {
   connected: boolean;
   branch: string | null;
   detached: boolean;
+  /** The branch exists by name but has no commits yet (a fresh `git init`). */
+  unborn?: boolean;
   defaultBranch: string | null;
   onDefaultBranch: boolean;
   dirty: boolean;
   changedFiles: number;
+  /** Against the branch's own upstream (`origin/<branch>`), or the remote default branch before the first push. */
   ahead: number | null;
   behind: number | null;
   hasUpstream: boolean;
+  /** How the branch stands against the remote default branch; absent on that branch or without a remote. */
+  vsBase?: { branch: string; ahead: number; behind: number };
   mergeInProgress: boolean;
+  /** The branch an in-progress merge brings in (from git's merge message); absent otherwise. */
+  mergingFrom?: string;
   conflictedFiles: string[];
   /** Open PR whose head is the current branch, when one exists. */
   openPullRequest: PullRequestSummary | null;
@@ -192,9 +296,24 @@ export interface WorkspaceReadinessResponse {
 export interface ScmFlowRequest {
   /** Mount alias (`.` for the root). */
   alias?: string;
-  commit?: { message?: string; generate?: boolean };
+  /** `fallbackMessage`: used instead of the heuristic text when a generation cannot run or fails. */
+  commit?: { message?: string; generate?: boolean; fallbackMessage?: string };
   push?: boolean;
-  pullRequest?: { title?: string; body?: string; base?: string; draft?: boolean; generate?: boolean };
+  pullRequest?: {
+    title?: string;
+    body?: string;
+    base?: string;
+    draft?: boolean;
+    generate?: boolean;
+    /** Used instead of the heuristic text when a generation cannot run or fails (a workflow step's own templates). */
+    fallback?: { title?: string; body?: string };
+    /** Logins asked to review once the PR is open (the author is skipped by the host). */
+    reviewers?: string[];
+    assignees?: string[];
+    labels?: string[];
+    /** Issues the PR closes: `Closes #n` lines are appended to the body (given or generated). */
+    closesIssues?: number[];
+  };
   /** Merge the base branch into the current branch before push/PR. Default true when pushing or opening a PR. */
   sync?: boolean;
   /** When on the default branch, cut a work branch first. Default true when pushing or opening a PR. */
@@ -249,6 +368,84 @@ export interface ScmGenerateResult {
   source: 'model' | 'heuristic';
 }
 
+/** `GET /workspaces/:id/scm/branches` — the branches a PR can target, read from the remote. */
+export interface ScmBranchList {
+  alias: string;
+  defaultBranch: string | null;
+  /** The branch the work is on (never offered as a base). */
+  current: string | null;
+  /** Remote branch names, default first, then sorted. */
+  branches: string[];
+  /** False when the remote could not be reached and the list is the last fetched one. */
+  fresh: boolean;
+}
+
+export interface ScmCommitEntry {
+  sha: string;
+  subject: string;
+  author: string;
+  /** ISO 8601. */
+  date: string;
+}
+
+export interface ScmCompareFile {
+  path: string;
+  oldPath?: string;
+  status: 'added' | 'modified' | 'deleted' | 'renamed';
+  additions: number;
+  deletions: number;
+}
+
+/**
+ * `GET /workspaces/:id/scm/compare?base=` — what a pull request from the
+ * current branch into `base` would contain, GitHub's "Comparing changes".
+ */
+export interface ScmCompareResult {
+  alias: string;
+  base: string;
+  head: string | null;
+  /** Commits on the branch that `base` lacks, newest first. */
+  commits: ScmCommitEntry[];
+  /** Files changed by those commits (merge base → HEAD). */
+  files: ScmCompareFile[];
+  additions: number;
+  deletions: number;
+  /** Commits on `base` the branch lacks; the flow merges them in before pushing. */
+  behind: number;
+  mergeable: 'clean' | 'conflicts' | 'unknown';
+  conflictFiles: string[];
+  /** Working-tree files not committed yet (a commit in the same run adds them). */
+  uncommittedFiles: number;
+}
+
+export interface ScmPerson {
+  login: string;
+  name?: string;
+  avatarUrl?: string;
+}
+
+export interface ScmLabel {
+  name: string;
+  /** Hex without `#`, as the host returns it. */
+  color: string;
+  description?: string;
+}
+
+/** `GET /workspaces/:id/scm/pull-request-options` — the PR sidebar's pickers. */
+export interface ScmPullRequestOptions {
+  alias: string;
+  /** False when the host cannot be asked (no account, CLI-only auth); `reason` says why. */
+  available: boolean;
+  reason?: string;
+  /** The connected account (can assign itself, cannot review its own PR). */
+  viewer: string | null;
+  /** People who can be assigned or asked to review. */
+  people: ScmPerson[];
+  labels: ScmLabel[];
+  /** Open issues a PR can close. */
+  issues: Array<{ number: number; title: string }>;
+}
+
 /** Agent-native options stored on a chat (and on workflow orchestrator config). */
 export interface ChatSourceControlOptions {
   /** Commit the change set after every completed turn. */
@@ -275,4 +472,26 @@ export interface OpenInEditorResult {
   /** For browsers: a URL the client can try when the server could not launch the editor. */
   fallbackUrl?: string;
   error?: string;
+}
+
+// ── Remote branch list before clone (mobile MG-11) ──
+
+/** `POST /api/source-control/remote-refs` body. */
+export interface RemoteRefsRequest {
+  /** `https://`, `http://`, `ssh://`, `git://` or scp-style `user@host:path`. */
+  url: string;
+}
+
+/**
+ * The branches a Git remote advertises, read with `git ls-remote` before any
+ * codebase exists — the add-codebase form's default-branch options. Errors:
+ * `AUTH_REQUIRED`, `NOT_FOUND`, `TIMEOUT` (15 s), `INVALID_URL`.
+ */
+export interface RemoteRefs {
+  /** The remote's HEAD branch, when it advertises one. */
+  defaultBranch?: string;
+  /** Branch names (without `refs/heads/`), default branch first, then sorted. At most 500. */
+  branches: string[];
+  /** True when the remote had more than 500 branches. */
+  truncated: boolean;
 }

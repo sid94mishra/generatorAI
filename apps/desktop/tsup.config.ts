@@ -20,4 +20,9 @@ export default defineConfig({
   shims: false,
   // Provided by the Electron runtime / resolved from node_modules at runtime.
   external: ['electron', 'electron-updater'],
+  // Workspace packages ship TypeScript/ESM source, so they must be BUNDLED:
+  // an externalised one would be `require()`d at runtime and crash. They are
+  // devDependencies (tsup externalises `dependencies`); this keeps them bundled
+  // even if someone moves one into `dependencies` (06-desktop-and-shell.md §3.2).
+  noExternal: [/^@generatorai\//],
 });

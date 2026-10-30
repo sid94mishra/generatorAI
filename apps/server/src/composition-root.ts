@@ -3,25 +3,32 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { AppConfig, ILogger, PersistedEvent } from '@generatorai/shared';
-import { createLogger, readBoundedInt } from '@generatorai/shared';
+import { createLogger, getMeter, isLoopbackHost, readBoundedInt } from '@generatorai/shared';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
+import { WorkflowEngineSettingsStore } from './settings/workflowEngine.js';
+import { ProviderVisibilityStore } from './settings/providerVisibility.js';
+import { CopilotCliService } from './settings/copilotCli.js';
 import * as path from 'node:path';
-import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider, resolveCodexCommand } from '@generatorai/agent-harness-providers';
+import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider, resolveCodexCommand, harnessErrorOf } from '@generatorai/agent-harness-providers';
 import type { ProviderInstanceId } from '@generatorai/core';
 import { readWorkspaceRetentionPreferences } from './settings/workspaceRetention.js';
-import { readAudioPreferences } from './settings/audio.js';
-import { AgentHostClient, HostSupervisor, resolveWorktreePath } from '@generatorai/core';
-import { createSecurityContext, type SecurityContext } from './composition/security.js';
+import { defaultSttLanguage, readAudioPreferences } from './settings/audio.js';
+import { AgentHostClient, HostSupervisor, resolveWorktreePath, sessionHookBridgeFactory } from '@generatorai/core';
+import { parentChannel } from './parentChannel.js';
+import { applyReachabilityToPermissionDefault, createSecurityContext, type SecurityContext } from './composition/security.js';
+import { TailscaleAccess } from './network/tailscale/TailscaleAccess.js';
+import { describeExposurePreconditions } from './network/exposure.js';
 import { registerHarnessInstances } from './composition/harnessInstances.js';
 import { mintLocalAdminToken } from './composition/localAdminToken.js';
+import { loadOrCreateCallbackKey } from './composition/callbackKey.js';
 import { installAgentCursorTheme, resolveCuaDriverBinary } from './computer/driverBinary.js';
 import { ScreenCast } from './computer/screenCast.js';
 import { createPreviewProducer } from './computer/previewProducer.js';
 import { registerEphemeralProducer } from './streaming/ephemeralScopes.js';
 import { RelayHostBroker } from './relay/RelayHostBroker.js';
-import { deriveStreamScopes } from './composition/streamScopes.js';
+import { deriveStreamScopes, streamRowsFor } from './composition/streamScopes.js';
 import {
   ExpoPushProvider,
   PushDispatcher,
@@ -31,33 +38,31 @@ import {
   createDB,
   migrateDB,
   closeDB,
-  withTransaction,
   setInvalidJsonColumnReporter,
   EventRetentionService,
   PushTokenRepository,
 } from '@generatorai/db';
 import type { AppDatabase } from '@generatorai/db';
+import { createEngineStores } from '@generatorai/db';
 import {
   DrizzleSessionRepository,
-  DrizzleWorkflowRepository,
   DrizzleEventRepository,
   DrizzleSequenceAllocator,
-  DrizzleSessionAllocationRepository,
   DrizzleStreamCursorRepository,
   DrizzleChatMessageRepository,
   DrizzleArtifactRepository,
-  DrizzleWebhookRepository,
   // v2 repositories
   DrizzleChatRepository,
-  DrizzleWorkflowDefinitionRepository,
-  DrizzleStageDefinitionRepository,
-  DrizzleStageEdgeRepository,
+  SqliteWorkflowDefinitionStore,
   DrizzleWorkflowRunRepository,
   DrizzleStageRunRepository,
   // Automation repositories
   DrizzleAutomationRepository,
   DrizzleAutomationExecutionRepository,
   DrizzleIdempotencyKeyRepository,
+  DrizzleInvocationUploadRepository,
+  DrizzleChatWorkflowRunRepository,
+  DrizzlePermissionRuleRepository,
   // Project & Codebase Management repositories
   DrizzleProjectRepository,
   DrizzleProjectCodebaseRepository,
@@ -85,11 +90,13 @@ import {
   // W22 / W47 — durable execution engine storage (migration v36–v37)
   RegisterRepository,
   EntryRepository,
+  // G-01 — one indexed query for the attention feed's boot rebuild (P2-R16)
+  listAutomationExecutionIdsByStatus,
 } from '@generatorai/db';
 import {
   // Bootstrap — shared core services factory
   createCoreServices,
-  StartupRecoveryService,
+  runBootHousekeeping,
   InterruptedTurnRecoveryService,
   OrphanProcessReaper,
   SandboxedScriptRunner,
@@ -104,19 +111,17 @@ import {
   ReviewThreadService,
   SourceControlService,
   SourceControlConfigService,
+  GitGlobalConfig,
   SourceControlRegistry,
   RepoReadinessService,
+  CodebaseRemoteResolver,
+  GitHubToolHost,
   ScmTextGenerator,
   SourceControlFlowService,
   EditorLauncherService,
-  DockerSandboxProvider,
-  HostProcessSandboxProvider,
   SandboxScriptRunner,
+  createRunSandbox,
   // orchestrator services
-  WorkflowOrchestrator,
-  WorkflowPreprocessor,
-  ResultValidator,
-  SandboxLifecycleManager,
   // Phase 4 streaming rewrite (additive)
   StreamBroker,
   // W07 — durable delta log, dual-written alongside stream_cursors
@@ -126,12 +131,12 @@ import {
   InMemoryMcpHub,
   McpCredentialVault,
   McpSettingsStore,
-  // DUR-05 — durable step.sleep sweeper
-  DurableSleepService,
   // Project & Codebase Management services
   ProjectService,
   CodebaseService,
+  CodebaseLogService,
   WorktreeService,
+  WorktreeSizeService,
   ProjectConfigService,
   WorktreeCleanupService,
   WorkspaceRetentionService,
@@ -153,6 +158,12 @@ import {
   CuaDriverBridge,
   NullComputerBridge,
   PendingConsentStore,
+  // G-01 — attention feed
+  AttentionService,
+  ChatChangeStatsService,
+  ChatListInvalidator,
+  ChatListService,
+  netChangeStats,
   // Integrated Terminal
   TerminalService,
   NodePtyHost,
@@ -178,40 +189,45 @@ import {
   // Extension-author built-in tools
   buildWriteExtensionTool,
   buildReloadExtensionTool,
-  // M8-fix: W18 admission controller — value import (cannot be `import type`)
+  // The admission controller (flow keys) — value import (cannot be `import type`)
   AdmissionController,
+  providerFlowKey,
   // Workspace mounts (chat sources → directories the agent edits)
   MountService,
 } from '@generatorai/core';
 import type {
   IAgentHarness,
-  ISandboxProvider,
+  RunSandbox,
   TemplateRegistry,
   HookExecutor,
-  ConfigResolver,
   IMcpHub,
 
   // Types referenced by call sites below
   EventBus,
-  SessionService,
   ArtifactService,
-  WebhookService,
   ErrorHandler,
   // v2 services
-  SessionAllocator,
   ChatManagementService,
   OrchestratorService,
   WorkflowDefinitionService,
-  DAGScheduler,
-  StageExecutionService,
+  RunDefinitionReader,
+  RunSupervisor,
+  OutboxPublisher,
   WorkflowRunService,
+  WorkflowInvocationService,
+  WorkflowApprovalService,
+  WorkflowCallbacks,
+  WorkflowAuthoringService,
+  WorkflowToolHost,
+  ChatWorkflowRunBridge,
+  IdempotencyService,
+  StageConversationService,
   // automation services
   AutomationService,
   // Track A1 — boot reconciler + idempotency sweeper
   AutomationRecoveryService,
-  // HITL-03 — human-in-the-loop interrupt/resume service
-  HitlService,
   AgentInteractionService,
+  PermissionRuleService,
   PlanService,
   ChatManagementServiceExtensions,
 } from '@generatorai/core';
@@ -220,7 +236,12 @@ import type {
 // dependencies are optional at runtime.
 // Legacy streaming imports removed in CLN-12 — unified /api/stream is the only transport.
 
-export async function createContainer(config: AppConfig): Promise<Container> {
+export interface CreateContainerOptions {
+  /** F-8 — the vault key handed over by the desktop app's channel (never via the environment). */
+  secretKey?: string | undefined;
+}
+
+export async function createContainer(config: AppConfig, options: CreateContainerOptions = {}): Promise<Container> {
   const logger: ILogger = createLogger({ level: config.logLevel ?? 'info', service: 'generatorai' });
 
   // ── Infrastructure ──
@@ -231,6 +252,13 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // because createDB throws first for other drivers.
   const db: AppDatabase = createDB(process.env['GENERATORAI_DATABASE_URL'] ?? config.dbPath);
   migrateDB(db);
+
+  // U-83 — before any child starts: git everywhere the server reaches falls back to the connected GitHub account's
+  // identity instead of `user@hostname`, below anything the person set themselves (see gitIdentity.ts).
+  const gitGlobalConfig = new GitGlobalConfig(path.join(dirname(resolve(config.dbPath)), 'git'));
+  await gitGlobalConfig.install().catch((err: unknown) => {
+    logger.warn(`[SCM] Could not install the git fallback identity: ${err instanceof Error ? err.message : String(err)}`);
+  });
 
   // Review 6.6 — a stored JSON column that fails validation is replaced by a
   // default, and the next unrelated save persists that default over the real
@@ -249,7 +277,28 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // listener is created: `createSecurityContext` throws `StartupSecurityError`
   // when the process is configured in a way that would expose an
   // unauthenticated API, and we want that to happen before anything binds.
-  const security = await createSecurityContext({ config, db, logger });
+  const security = await createSecurityContext({ config, db, logger, suppliedSecretKey: options.secretKey });
+
+  // "Connect with Tailscale" (D-123). Started by index.ts once the listener
+  // has bound its port; the same blockers as Network exposure apply.
+  const tailscale = new TailscaleAccess({
+    dataDir: dirname(resolve(config.dbPath)),
+    port: () => config.port,
+    logger: {
+      info: (m, meta) => logger.info(m, meta),
+      warn: (m, meta) => logger.warn(m, meta),
+    },
+    blockers: async () =>
+      describeExposurePreconditions({
+        unauthenticatedLoopback: security.posture.unauthenticatedLoopback,
+        secretStoreSecure: (await security.secretStore.backendInfo()).secure,
+      }),
+    onReachableChange: (reachable) =>
+      applyReachabilityToPermissionDefault({
+        reachableBeyondLoopback: reachable || !security.posture.loopbackOnly,
+        production: security.posture.production,
+      }),
+  });
 
   // Recovery channel for a lost admin device. Only meaningful once pairing is
   // actually enforced; in unauthenticated loopback mode it would be a live
@@ -267,6 +316,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     enabled: config.security.relayEnabled,
     directorUrl: config.security.relayDirectorUrl,
     signingKey: security.relaySigningKey,
+  });
+  // F-2 — tell the relay cell about a revocation now rather than on the next
+  // 30 s outbox sweep, so new relay streams for the device stop at once. The
+  // device's open bridged streams end with its local streams (liveConnections).
+  security.devices.onAccessChanged((change) => {
+    if (change.kind === 'revoked') relayHostBroker.drainRevokeOutbox().catch(() => undefined);
   });
 
   // ── Harness Providers (multi-provider) ──
@@ -329,7 +384,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   };
 
   // W12 / P0-14 — process-wide supervisor bounding concurrent Claude turns.
-  // maxConcurrentExecutions defaults to 16 (env: GENERATORAI_MAX_CONCURRENT_AGENT_TURNS).
+  // Its turn permits come from the admission controller's
+  // `provider:claude-agent` flow key once that exists (below; P07 WP-7.2).
   // maxConcurrentColdStarts defaults to 4 (env: GENERATORAI_MAX_CONCURRENT_COLD_STARTS).
   //
   // W12-wiring: AgentHostClient (out-of-process) is OPT-IN, not the default,
@@ -387,6 +443,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // still overrides this per turn (see CodexProvider.approvalPolicyForTurn).
       approvalPolicy: config.harness?.codex?.approvalPolicy ?? 'on-request',
       sandboxMode: config.harness?.codex?.sandboxMode ?? 'workspace-write',
+      networkAccess: config.harness?.codex?.networkAccess ?? true,
       clientName: 'generatorai',
       logger,
     } : undefined,
@@ -431,13 +488,38 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     } : undefined,
   });
 
+  // P2-00 — read once, up here, so both HarnessRegistry's synthetic 'faux'
+  // status (below) and the FauxProvider-as-`harness` wiring further down
+  // (originally `loadTestFauxHarness`, renamed with the flag itself — see
+  // the note there) agree on the same value. Was
+  // `GENERATORAI_LOAD_TEST_FAUX_HARNESS`; renamed because VRT, the sandbox
+  // and e2e all reuse it too, not just the load test (D-02: clean rename,
+  // no alias).
+  const testFauxHarness = process.env['GENERATORAI_TEST_FAUX_HARNESS'] === 'true';
   const harnessRegistry = new HarnessRegistry({
     buildConfig: buildHarnessConfig,
     primary: primaryHarnessType,
     logger: { info: (m) => logger.info(m), warn: (m) => logger.warn(m) },
     // W41 — disk cache so boot never blocks on a provider probe.
     diskCacheFile: `${config.artifactsDir}/.generatorai-provider-status-cache.json`,
+    // P2-00 — report a synthetic, always-ready 'faux' provider so
+    // /harness/providers and /harness/models see it too (P0 review R15).
+    testFauxHarness,
   });
+  // D-131 — which providers this server serves. Applied before anything can
+  // probe or list a provider, so a hidden one never spawns its CLI.
+  // The Copilot CLI is downloaded on first use rather than bundled (evaluation: ~308 MB per download).
+  const copilotCli = new CopilotCliService(
+    path.join(dirname(resolve(config.dbPath)), 'cli', 'copilot'),
+    () => {
+      harnessRegistry.invalidate('copilot');
+      harnessRegistry.requestRefresh();
+    },
+    { info: (m) => logger.info(m), warn: (m) => logger.warn(m) },
+  );
+  const providerVisibility = await ProviderVisibilityStore.load(dirname(resolve(config.dbPath)), process.env, (hidden) =>
+    harnessRegistry.setHiddenTypes(hidden),
+  );
   // W41-N2 — disk cache is awaited in initialize() so the seed is guaranteed
   // to complete before any getAllModels() call. Do NOT call it here (construction
   // time) — the fire-and-forget races the first user-facing query.
@@ -493,12 +575,25 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // If the build is absent, we fall back to MultiHarness with a warning so the
   // server still starts.
   const agentHostEnabled = process.env['GENERATORAI_AGENT_HOST'] === 'true';
-  // §1.Q — see the FauxProvider branch just below. Named so every place that
-  // must also avoid touching a real provider CLI (the model-catalog warm-up,
-  // in particular) can check the same flag rather than re-reading env.
-  const loadTestFauxHarness = process.env['GENERATORAI_LOAD_TEST_FAUX_HARNESS'] === 'true';
+  // §1.Q / P2-00 — `testFauxHarness` was read above (before HarnessRegistry
+  // construction) so both this branch and the registry's synthetic 'faux'
+  // status agree. Named so every place that must also avoid touching a real
+  // provider CLI (the model-catalog warm-up, in particular) can check the
+  // same flag rather than re-reading env.
   let harness: IAgentHarness;
   let hostSupervisor: HostSupervisor | undefined;
+  /** The out-of-process agent host's client: its turns are admitted on the gateway's flow keys (P07 WP-7.2). */
+  let agentHostTurns: AgentHostClient | undefined;
+
+  // P2-00 — GENERATORAI_TEST_FAUX_SCRIPT=<path.json>: a fixture of
+  // FauxScriptEntry[][] turn-scripts keyed by conversation NAME (chats don't
+  // have a stable id until they're created, so fixtures key by the name the
+  // caller gives them). `resolveChatNameForFaux` is a forward reference —
+  // `chatEntityRepo` (assigned it below, once the v2 repositories are
+  // constructed) is only ever CALLED once a real conversation is created,
+  // long after that assignment has run, so the closure sees it correctly.
+  let resolveChatNameForFaux: ((conversationId: string) => Promise<string | undefined>) | undefined;
+  const fauxScriptFilePath = process.env['GENERATORAI_TEST_FAUX_SCRIPT'];
 
   // §1.Q — the concurrent-load test (agent-tests/concurrent-load-1q.mjs)
   // needs to drive real chat/workflow/automation traffic through the FULL
@@ -511,11 +606,22 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // ChatManagementService, EventBus, and DB writes end to end. Explicit,
   // scary env var name so this is unmistakably a test-only escape hatch —
   // off by default, never reachable in a normal deployment.
-  if (loadTestFauxHarness) {
-    harness = new FauxProvider();
+  if (testFauxHarness) {
+    harness = new FauxProvider(
+      fauxScriptFilePath
+        ? {
+            scriptSource: {
+              filePath: fauxScriptFilePath,
+              resolveConversationName: async (id) => resolveChatNameForFaux?.(id),
+              logger: { warn: (m) => logger.warn(m) },
+            },
+          }
+        : undefined,
+    );
     logger.warn(
-      '[Container] GENERATORAI_LOAD_TEST_FAUX_HARNESS=true — using FauxProvider for ALL conversations. ' +
-      'This must never be set outside a load test.',
+      '[Container] GENERATORAI_TEST_FAUX_HARNESS=true — using FauxProvider for ALL conversations. ' +
+      'This must never be set outside a test.' +
+      (fauxScriptFilePath ? ` Scripted from ${fauxScriptFilePath}.` : ''),
     );
   } else if (agentHostEnabled) {
     // Resolve the agent-host entry point. In the monorepo the package lives
@@ -554,6 +660,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
         onFatal: (reason) => agentHostClient?.handleHostFatal(reason),
       });
       agentHostClient = new AgentHostClient(supervisor, logger);
+      agentHostTurns = agentHostClient;
       hostSupervisor = supervisor;
       harness = agentHostClient;
       logger.info('[Container] AgentHostClient wired — provider runtimes will run out-of-process (L5)');
@@ -612,6 +719,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     secrets: security.secretStore,
     logger,
     configDir: resolve(config.dbPath, '..'),
+    gitIdentity: gitGlobalConfig,
     env: {
       ...(githubToken ? { githubToken } : {}),
       ...(githubHost ? { githubHost } : {}),
@@ -657,86 +765,51 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   );
 
   // ── Sandbox Infrastructure (conditional) ──
-  let sandboxProvider: ISandboxProvider | undefined;
-  let sandboxLifecycleManager: SandboxLifecycleManager | undefined;
-
-  if (config.sandbox.enabled) {
-    // Determine which provider to use
-    const wantDocker = config.sandbox.provider === 'docker' || config.sandbox.provider === 'auto';
-    let dockerAvailable = false;
-
-    if (wantDocker) {
-      const dockerProvider = new DockerSandboxProvider(logger);
-      dockerAvailable = await dockerProvider.isAvailable();
-
-      if (dockerAvailable) {
-        sandboxProvider = dockerProvider;
-        logger.info('[Container] Docker Sandbox detected — using microVM isolation');
-      } else if (config.sandbox.provider === 'docker') {
-        // User explicitly requested Docker but it's not available
-        logger.error('[Container] Docker Sandbox not available but provider=docker was specified');
-        throw new Error(
-          'Sandbox mode requires Docker Desktop with Sandbox support. ' +
-          'Set sandbox.provider to "auto" or "host" for fallback, or disable sandbox mode.',
-        );
-      }
-    }
-
-    if (!sandboxProvider) {
-      // Host-process fallback has NO hypervisor isolation — agent-generated
-      // code runs directly on the host. Require explicit opt-in (either by
-      // choosing `provider='host'` or by setting the env var below) to prevent
-      // users who configured `auto` from silently running unsandboxed.
-      const hostExplicit = config.sandbox.provider === 'host';
-      const hostAllowed = process.env['GENERATORAI_ALLOW_HOST_SANDBOX'] === 'true';
-      if (!hostExplicit && !hostAllowed) {
-        logger.error(
-          '[Container] Docker Sandbox unavailable and host-process fallback not opted in. ' +
-          'Either install Docker, set sandbox.provider="host" explicitly, ' +
-          'or set GENERATORAI_ALLOW_HOST_SANDBOX=true to proceed without isolation.',
-        );
-        throw new Error(
-          'Sandbox fallback to host-process requires explicit opt-in. ' +
-          'Set GENERATORAI_ALLOW_HOST_SANDBOX=true or sandbox.provider="host".',
-        );
-      }
-      sandboxProvider = new HostProcessSandboxProvider(logger);
-      // Use ERROR level so this cannot be missed in log scrapers; agent code
-      // running on the host is a production hazard.
-      logger.error(
-        '[Container] SANDBOX ISOLATION DISABLED — using host-process fallback. ' +
-        'Agent-generated code will run with the server process\'s privileges. ' +
-        `(opt-in source: ${hostExplicit ? 'sandbox.provider="host"' : 'GENERATORAI_ALLOW_HOST_SANDBOX=true'})`,
-      );
-    }
-
-    sandboxLifecycleManager = new SandboxLifecycleManager(
-      sandboxProvider,
-      {
-        image: config.sandbox.image,
-        cliPort: config.sandbox.cliPort,
-        startupTimeoutMs: config.sandbox.startupTimeoutMs,
-        dockerAvailable,
-      },
-      logger,
-    );
-
-    logger.info(`[Container] Sandbox mode ENABLED (provider: ${dockerAvailable ? 'docker' : 'host-fallback'})`);
-  }
+  // `null` when sandbox mode is off; the provider choice (and its refusal to
+  // fall back to the host without an explicit opt-in) lives in core so the
+  // SDK boots the same sandbox for the same settings.
+  const sandbox: RunSandbox | null = config.sandbox.enabled
+    ? await createRunSandbox(
+        {
+          provider: config.sandbox.provider,
+          image: config.sandbox.image,
+          cliPort: config.sandbox.cliPort,
+          startupTimeoutMs: config.sandbox.startupTimeoutMs,
+          allowHostFallback: process.env['GENERATORAI_ALLOW_HOST_SANDBOX'] === 'true',
+        },
+        logger,
+      )
+    : null;
+  const sandboxLifecycleManager = sandbox?.lifecycle;
 
   // ── Repositories (v1) ──
   const sessionRepo = new DrizzleSessionRepository(db);
-  const workflowRepo = new DrizzleWorkflowRepository(db);
   const eventRepo = new DrizzleEventRepository(db);
   const chatMessageRepo = new DrizzleChatMessageRepository(db);
   const artifactRepo = new DrizzleArtifactRepository(db);
-  const webhookRepo = new DrizzleWebhookRepository(db);
 
   // ── Repositories (v2) ──
   const chatEntityRepo = new DrizzleChatRepository(db);
-  const workflowDefinitionRepo = new DrizzleWorkflowDefinitionRepository(db);
-  const stageDefinitionRepo = new DrizzleStageDefinitionRepository(db);
-  const stageEdgeRepo = new DrizzleStageEdgeRepository(db);
+  // P2-00 — now that the v2 chat repository exists, complete the forward
+  // reference the FauxProvider's scriptSource closure was given above.
+  //
+  // `conversationId` (what FauxProvider.createConversation actually receives)
+  // is NOT the chat id — ChatManagementService.createChat mints it as
+  // `chat-${chatId}-${Date.now()}` (a chat's *session* carries this as
+  // `conversationId`, separate from both the chat's own id and its
+  // sessionId). Anchored on both ends so it still finds the id even though a
+  // chat id (a UUID) can itself contain hyphens and all-digit segments.
+  const CHAT_CONVERSATION_ID_RE = /^chat-(.+)-\d+$/;
+  resolveChatNameForFaux = async (conversationId) => {
+    const chatId = CHAT_CONVERSATION_ID_RE.exec(conversationId)?.[1];
+    if (!chatId) return undefined; // not a chat conversation (e.g. a workflow stage run)
+    try {
+      return (await chatEntityRepo.getById(chatId)).name;
+    } catch {
+      return undefined; // no such chat
+    }
+  };
+  const workflowDefinitionStore = new SqliteWorkflowDefinitionStore(db);
   const workflowRunRepo = new DrizzleWorkflowRunRepository(db);
   const stageRunRepo = new DrizzleStageRunRepository(db);
 
@@ -768,9 +841,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // sequence IDs. Without it, the in-memory counter in EventRepository
   // can collide when multiple processes write to the same DB.
   const sequenceAllocator = new DrizzleSequenceAllocator(db);
-  // Persist SessionAllocator state (Phase 1, 1.6) so a restart doesn't
-  // orphan SDK sessions.
-  const sessionAllocationRepo = new DrizzleSessionAllocationRepository(db);
 
   // Section 8 (TOL-01 / TOL-06) — harness-agnostic tool + MCP layer.
   // Declared BEFORE `createCoreServices` so they can be threaded into
@@ -792,15 +862,69 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // as `settings/computerUse.ts`'s computer-use.json.
   const mcpSettingsStore = new McpSettingsStore(path.dirname(resolve(config.dbPath)));
 
+  // ── Workspace Manager ──
+  const workspaceManager = new WorkspaceManager(
+    executionWorkspaceRepo,
+    workspaceMountRepo,
+    workspaceArtifactRepo,
+    {
+      workspacesDir: config.workspacesDir,
+      defaultGitEnabled: true,
+    },
+    logger,
+    gitManager,
+    // The legacy `worktrees` table: back-fills mounts for pre-mount
+    // workspaces and is unregistered on delete.
+    worktreeRepo,
+  );
+
+  // P07 WP-7.2 — the AdmissionController's flow keys are the one
+  // concurrency gate; their limits are operator settings (Settings →
+  // Workflow engine), not environment variables. The old admission-lane
+  // variables do nothing: say so rather than let an operator believe them.
+  for (const name of Object.keys(process.env).filter((k) => /^GENERATORAI_((INTERACTIVE|ORDINARY|BULK)_CONCURRENCY|ADMISSION_QUEUE_WAIT_MS)$/.test(k))) {
+    logger.warn(`[Admission] ${name} is ignored: concurrency limits are the flow keys of Settings → Workflow engine`);
+  }
+  const admissionController = new AdmissionController({
+    logger: {
+      info: (msg, meta) => logger.info(msg, meta),
+      warn: (msg, meta) => logger.warn(msg, meta),
+    },
+  });
+
+  // P07 WP-7.2 (W-66, O-2) — one concurrency gate. A provider's per-turn
+  // permit IS the admission controller's `provider:<id>` flow key, so chat
+  // turns and workflow stages count against the one limit, and the operator
+  // sets every limit in Settings → Workflow engine (applied live). With the
+  // agent host on, the gateway admits every turn before it crosses IPC.
+  agentHostSupervisor.useExecutionGate(admissionController.flowGate(providerFlowKey('claude-agent')));
+  agentHostTurns?.useTurnGates(
+    (provider) => admissionController.flowGate(providerFlowKey(provider)),
+    (model) => harnessRegistry.resolveProviderForModel(model),
+  );
+  const workflowEngineSettings = await WorkflowEngineSettingsStore.load(dirname(resolve(config.dbPath)), (s) => {
+    admissionController.setFlowLimits(s.flowLimits);
+    scriptRunner.setAllowedCommands(s.allowedCommands);
+  });
+
   // Chat extensions object — passed by reference to createCoreServices.
   // `worktreeService` is set later after project services are created.
   const chatExtensions: ChatManagementServiceExtensions = {
     customToolRegistry,
     mcpHub,
+    // BYOK provider API keys are `secretref:` pointers; the session composer
+    // reads the value here, at the last moment (never the pointer string).
+    resolveSecretRef: (ref) => mcpCredentialVault.resolveRef(ref),
     // Agent-native source control (doc §5) — the post-turn commit → push → PR
     // hook for chats created with `sourceControl.autoCommit`.
     sourceControlFlowService,
     repoReadinessService,
+  };
+
+  // The engine's outbox publisher needs the stream broker, which is built
+  // after the core graph; it is assigned right after the broker exists.
+  let publishEngineEvent: OutboxPublisher = async () => {
+    throw new Error('the engine outbox publisher is not wired yet');
   };
 
   // Core services factory — shared with the CLI composition root. Any
@@ -808,6 +932,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // wiring (stream manager, sandbox manager, orchestrator stack) stays
   // here.
   const core = createCoreServices({
+    workflowSummaryModel: () => workflowEngineSettings.get().summaryModel,
     logger,
     harness,
     scriptRunner,
@@ -818,48 +943,43 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     eventRepo,
     chatMessageRepo,
     artifactRepo,
-    webhookRepo,
     chatEntityRepo,
-    workflowDefinitionRepo,
-    stageDefinitionRepo,
-    stageEdgeRepo,
+    workflowDefinitionStore,
     workflowRunRepo,
     stageRunRepo,
     automationRepo,
     automationExecutionRepo,
     idempotencyKeyRepo,
+    // P04 — files staged before a run starts, and the codebases a run may mount.
+    invocationUploadRepo: new DrizzleInvocationUploadRepository(db),
+    projectCodebaseRepo,
+    // P06 — the runs chats start through their workflow tools, the generated
+    // authoring skill (guide, schema hash) and the operator's publish switch.
+    chatWorkflowRunRepo: new DrizzleChatWorkflowRunRepository(db),
+    // U-16 (D-147) — "Allow for this chat / for this run": remembered permission rules.
+    permissionRuleRepo: new DrizzlePermissionRuleRepository(db),
+    workflowSkillDir: resolve(config.templatesDir, 'system', 'skills', 'generatorai-workflow-author'),
+    allowAgentPublish: config.workflows?.allowAgentPublish === true,
     // W22 / W47 — durable execution engine storage.
     registerRepo,
     entryRepo,
-    sessionAllocationRepo,
-    // Wire the sandbox lifecycle manager as the orphan reaper so
-    // StartupRecoveryService can call `cleanupOrphans()` on boot to
-    // destroy `genai-run-*` containers left behind by a crash.
-    sandboxCleaner: sandboxLifecycleManager,
+    // The workflow engine (P03): its stores over this database, the harness
+    // boundary, and the outbox publisher (wired below, once the stream
+    // broker exists).
+    engineStores: createEngineStores(db),
+    // P05 §4.3 — the key of the per-wait callback tokens (kept in the data dir).
+    callbackKey: loadOrCreateCallbackKey(path.dirname(resolve(config.dbPath))),
+    toHarnessError: harnessErrorOf,
+    publishEngineEvent: (event, row) => publishEngineEvent(event, row),
+    engineOwnerLabel: `server:${process.pid}`,
+    workspaceManager,
+    admissionController,
+    // Post-processing commit/push/PR runs through the same flow as the
+    // Changes tab and agent-native chats (doc §5).
+    scmFlow: sourceControlFlowService,
     config: {
       artifactsDir: config.artifactsDir,
-      maxConcurrentSessions: config.maxConcurrentSessions,
-      // P1#7 — bound concurrent stage execution (harness subprocess fan-out).
-      // Env-overridable; defaults to 8 inside createCoreServices when undefined.
-      //
-      // Bounded read: this value reaches `new Semaphore(...)`, and a bare
-      // `parseInt` of a typo'd value yielded NaN — which the semaphore
-      // accepted and then never granted a permit for, hanging every stage
-      // launch silently. `readBoundedInt` cannot produce a non-finite value.
-      maxConcurrentStages: process.env['MAX_CONCURRENT_STAGES']
-        ? readBoundedInt('MAX_CONCURRENT_STAGES', {
-            defaultValue: 8,
-            min: 1,
-            max: 64,
-            onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
-          })
-        : undefined,
-      webhooks: config.webhooks,
-      projectRoot: config.projectRoot,
     },
-    // Atomically commit multi-row writes (run + stage_rows, automation open);
-    // a mid-sequence failure rolls back.
-    withTransaction: (fn) => withTransaction(db, fn),
     // Section 8 — thread harness-agnostic extensions into ChatManagementService.
     // Until a module registers tools / overrides MCP / installs a HookBridge
     // factory, every handler here is a no-op at runtime.
@@ -868,6 +988,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // factory, every handler here is a no-op at runtime.
     // `worktreeService` is set *after* project service creation below.
     chatExtensions,
+    // `secretref:workflow/<name>` values of workflow hooks (namespace-restricted).
+    workflowSecrets: mcpCredentialVault,
     // PLN-01 — plan mode persistence.
     planRepo: new DrizzlePlanRepository(db),
     agentInteractionRepo: new DrizzleAgentInteractionRepository(db),
@@ -876,28 +998,32 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const {
     eventBus,
     templateRegistry,
-    configResolver,
     hookExecutor,
     hookInterceptor,
-    sessionService,
     artifactService,
-    webhookService,
-    recoveryService,
     errorHandler,
-    sessionAllocator,
     chatManagementService,
     orchestratorService,
-    dagScheduler,
     workflowDefinitionService,
-    stageExecutionService,
+    runDefinitionReader,
+    engine,
     workflowRunService,
+    stageConversationService,
     automationService,
     automationRecoveryService,
-    hitlService,
     planService,
     agentInteractionService,
-    dataSourceResolver,
+    permissionRuleService,
+    workflowInvocationService,
+    workflowApprovalService,
+    workflowCallbacks,
+    workflowAuthoringService,
+    workflowToolHost,
+    chatWorkflowRunBridge,
+    idempotencyService,
   } = core;
+  // P07 WP-7.2 — the webhook/cron trigger debounce is an engine setting, read per trigger.
+  automationService.setTriggerDebounce(() => workflowEngineSettings.get().triggerDebounceMs);
 
   // STR-01 / CLN-12 — `StreamBroker` is now the only streaming transport.
   // Web clients subscribe via the unified `/api/stream?scope=<s>&id=<id>`
@@ -930,6 +1056,17 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     logger.info('[Container] GENERATORAI_DELTA_LOG=true — deltas are dual-written to the file delta log (experimental)');
   }
   const streamBroker = new StreamBroker(streamCursorRepo, logger, deltaLog ? { deltaLog } : {});
+
+  // The engine's outbox publisher (G5 §5.8, B-21): every engine event is
+  // published to its run's stream scope AND broadcast globally (the RV-5
+  // terminal-event listeners read the global bus), both AWAITED before the
+  // outbox row is marked dispatched. The event carries its `runSeq`, so the
+  // bridge below knows the run scope already has it.
+  publishEngineEvent = async (event, row) => {
+    const data = { ...event.data, runSeq: row.runSeq };
+    await streamBroker.publish('run', row.workflowRunId, event.kind, data);
+    await eventBus.emitGlobal({ kind: event.kind, data } as Parameters<typeof eventBus.emitGlobal>[0]);
+  };
 
   // P1-4 / EVT-01 — the durable stream log is now the event bus's commit point
   // AND its sequence source. `emit()` awaits `append` before broadcasting, so a
@@ -1015,6 +1152,11 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     });
   };
 
+  // P07 WP-7.5 — write amplification of workflow events (W-42, accepted at <= 2.2 rows per event).
+  const streamRowsPerEvent = getMeter('generatorai.server').createHistogram('workflow.stream.rows_per_event', {
+    description: 'stream_cursors rows written per workflow event (primary scope + fan-out)',
+  });
+
   const bridgeEvent = (event: {
     sessionId: string;
     kind: string;
@@ -1034,8 +1176,13 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // Secondary scopes stay fire-and-forget: they are additional views of an
     // event that is already durable, so losing one costs a resume on that
     // view alone.
-    for (const target of deriveStreamScopes(event)) {
+    const targets = deriveStreamScopes(event);
+    for (const target of targets) {
       publishToBroker(target.scope, target.id, event.kind, event.data);
+    }
+    // P07 WP-7.5 (W-42): the rows a workflow event costs across its scopes.
+    if (event.data && typeof (event.data as { workflowRunId?: unknown }).workflowRunId === 'string') {
+      streamRowsPerEvent.record(streamRowsFor(event, targets), { family: event.kind.split('.')[0] ?? event.kind });
     }
   };
 
@@ -1070,60 +1217,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     );
   }
 
-  // DUR-05 — durable step.sleep sweeper. Flips `sleeping → queued` for
-  // stage rows whose `wake_at` has passed and then invokes `onWake` to
-  // resume execution. Stage code calls `durableSleepService.sleep(...)`
-  // to park a running stage; the sweeper owns the reverse transition.
-  //
-  // `onWake` lives in the composition root because it bridges two
-  // services — it needs `stageExecutionService` (to re-run the stage)
-  // AND `workflowRunRepo` (to fetch the run's sessionMode). Keeping it
-  // here avoids pulling either concern into `DurableSleepService`.
-  const durableSleepService = new DurableSleepService(
-    stageRunRepo,
-    eventBus,
-    async (stage) => {
-      try {
-        const run = await workflowRunRepo.getById(stage.workflowRunId);
-        // Fire-and-forget: the stage execution path already plumbs
-        // onStageCompleted / onStageFailed through WorkflowRunService,
-        // so the run loop continues on its own once executeStage
-        // resolves / rejects.
-        stageExecutionService
-          .executeStage(stage, stage.workflowRunId, run.sessionMode)
-          .then(() => workflowRunService.onStageCompleted(stage.workflowRunId, stage.id))
-          .catch((err) => workflowRunService.onStageFailed(stage.workflowRunId, stage.id, err));
-      } catch (err) {
-        logger.error(`[DurableSleep] Failed to resume woken stage ${stage.id}`, {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    },
-    config.durableSleep,
-    logger,
-  );
-
   // ── Orchestrator Services ──
-
-  const workflowPreprocessor = new WorkflowPreprocessor(
-    gitManager,
-    scriptRunner,
-    eventBus,
-    logger,
-    sourceControlService,
-    // Post-processing commit/push/PR runs through the SAME flow as the
-    // Changes tab and agent-native chats (doc §5) — one branch policy, one
-    // base-branch sync, one conflict dry-run.
-    sourceControlFlowService,
-  );
-
-  const resultValidator = new ResultValidator(
-    chatMessageRepo,
-    stageRunRepo,
-    eventBus,
-    logger,
-    scriptRunner,
-  );
 
   // ── Project & Codebase Management Services ──
   const projectService = new ProjectService(
@@ -1134,11 +1228,16 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     logger,
   );
 
+  // G-16 — ring buffer of clone/fetch log lines + job tracking, in memory.
+  const codebaseLogService = new CodebaseLogService();
+
   const codebaseService = new CodebaseService(
     projectCodebaseRepo,
     projectService,
     gitManager,
     logger,
+    codebaseLogService,
+    eventBus,
   );
 
   const worktreeService = new WorktreeService(
@@ -1148,6 +1247,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     gitManager,
     logger,
   );
+
+  // G-17 — async, cached worktree disk-usage measurement.
+  const worktreeSizeService = new WorktreeSizeService(logger);
 
   const projectConfigService = new ProjectConfigService(
     projectConfigRepo,
@@ -1174,6 +1276,20 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // doc) — without this a project MCP server's file never resolved and
       // the server was silently dropped from the catalog.
       resolveProjectConfigPath: (c) => path.join(projectService.getProjectConfigTypeDir(c.projectId, c.type), c.filePath),
+      // G-19 — per-project artifact enable/disable, stored on the project's
+      // existing JSON `settings` column (no migration, D-58 §G-13 precedent).
+      getDisabledArtifactIds: async (projectId, type) => {
+        try {
+          const project = await projectService.getProject(projectId);
+          return new Set(
+            (project.settings.disabledArtifacts ?? [])
+              .filter((d) => d.type === type)
+              .map((d) => d.id),
+          );
+        } catch {
+          return new Set();
+        }
+      },
     },
   );
   const agentRepo = new DrizzleAgentRepository(db);
@@ -1205,22 +1321,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     chatEntityRepo,
   );
 
-  // ── Workspace Manager ──
-  const workspaceManager = new WorkspaceManager(
-    executionWorkspaceRepo,
-    workspaceMountRepo,
-    workspaceArtifactRepo,
-    {
-      workspacesDir: config.workspacesDir,
-      defaultGitEnabled: true,
-    },
-    logger,
-    gitManager,
-    // The legacy `worktrees` table: back-fills mounts for pre-mount
-    // workspaces and is unregistered on delete.
-    worktreeRepo,
-  );
-
   // ── Mounts ──
   //
   // A chat's sources (project codebases and/or local folders, each in place
@@ -1235,7 +1335,16 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     workspacesDir: config.workspacesDir,
     codebaseRepo: projectCodebaseRepo,
     eventBus,
+    worktreeRepo,
+    // A finished run's worktree lets go of its branch when a chat asks for it (fixing the PR it opened).
+    isRunFinished: async (runId) => {
+      const run = await workflowRunRepo.getById(runId).catch(() => null);
+      return !!run && (run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled');
+    },
   });
+  // A codebase worktree mount's `worktrees` row shares the mount's id: removing
+  // it (Remove, Clean up orphans, the retention sweep) releases the mount.
+  worktreeService.setMountReleaser((id) => mountService.releaseWorktree(id));
 
   // ── Workspace retention (nightly) ──
   //
@@ -1284,6 +1393,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   mountService.setBaselineCapture((workspaceId) =>
     workspaceCheckpointService.capture({ workspaceId, kind: 'baseline' }),
   );
+  mountService.setStoreForgotten((workspaceId, alias) => workspaceCheckpointService.forgetRepo(workspaceId, alias));
   // Archived chats: reclaim worktree directories after the project's
   // retention (default 24h), keeping branches so the work is recoverable.
   worktreeCleanupService.setArchivedReleaser(async () => {
@@ -1478,6 +1588,15 @@ export async function createContainer(config: AppConfig): Promise<Container> {
 
   if (pushTokens) {
     const dispatcher = new PushDispatcher({
+      serverId: security.identity.hostId,
+      workflowDefinitionId: async (runId) => (await workflowRunRepo.getById(runId)).workflowDefinitionId,
+      // MG-06 part B: the badge and quick-action counts. The feed is declared below and started in
+      // `initialize()`; until it is available the push carries no counts.
+      attentionCounts: () => {
+        if (!attentionService.isAvailable()) return null;
+        const { counts } = attentionService.getSnapshot();
+        return { needsYou: counts.needsYou, running: counts.running };
+      },
       // Snapshot refreshed off the device list rather than read per event:
       // `DeviceService.getDevice` is async and the dispatcher decision path
       // is deliberately synchronous so it can never stall the event bus.
@@ -1525,7 +1644,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     };
 
     eventBus.subscribeAll((event) => {
-      dispatcher.handleEvent({ kind: event.kind, data: event.data });
+      void dispatcher.dispatchEvent({ kind: event.kind, data: event.data }).catch((error: unknown) => {
+        logger.warn('[Push] Could not resolve notification target', { error: error instanceof Error ? error.message : String(error) });
+      });
     });
 
     const pushRefreshTimer = setInterval(() => void refreshPushTargets(), 30_000);
@@ -1535,71 +1656,13 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     void refreshPushTargets();
   }
 
-  const workflowOrchestrator = new WorkflowOrchestrator(
-    workflowRunService,
-    workflowDefinitionService,
-    workflowPreprocessor,
-    resultValidator,
-    stageRunRepo,
-    stageDefinitionRepo,
-    workflowRunRepo,
-    eventBus,
-    templateRegistry,
-    logger,
-    config.artifactsDir,
-    sandboxLifecycleManager,
-    sandboxProvider,
-    worktreeService,
-    projectService,
-    projectConfigService,
-    workspaceManager,
-    hookExecutor,
-  );
-
-  // Late-wire workspaceManager into services that were created before it.
-  workflowRunService.setWorkspaceManager(workspaceManager);
-  workflowRunService.setWorktreeService(worktreeService, projectCodebaseRepo);
-  workflowRunService.setHookExecutor(hookExecutor);
-  workflowRunService.setResultValidator(resultValidator);
-
-  // M8-fix: W18 — wire the AdmissionController so stage launches are gated by
-  // the `ordinary` lane. Interactive chat turns bypass this via ChatManagementService.
-  //
-  // W18 requires configuration to be clamped on load, logged, and audited.
-  // Reading these with a bare `parseInt` was a live hang: a typo'd value
-  // parsed to NaN, which `new Semaphore(NaN)` accepted and every `acquire()`
-  // then awaited forever — no error, no log, every workflow stage stuck.
-  // `readBoundedInt` cannot produce a non-finite value, and reports whatever
-  // it had to correct. `undefined` (variable unset) is passed through so the
-  // controller can size the lane from measured machine capacity instead.
-  const laneEnv = (name: string, min: number, max: number, dflt: number): number | undefined =>
-    process.env[name] === undefined
-      ? undefined
-      : readBoundedInt(name, {
-          defaultValue: dflt,
-          min,
-          max,
-          onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
-        });
-
-  const admissionController = new AdmissionController({
-    interactiveConcurrency: laneEnv('GENERATORAI_INTERACTIVE_CONCURRENCY', 1, 64, 4),
-    ordinaryConcurrency: laneEnv('GENERATORAI_ORDINARY_CONCURRENCY', 1, 64, 8),
-    bulkConcurrency: laneEnv('GENERATORAI_BULK_CONCURRENCY', 1, 64, 2),
-    queueWaitTimeoutMs: readBoundedInt('GENERATORAI_ADMISSION_QUEUE_WAIT_MS', {
-      defaultValue: 1_800_000,
-      min: 0,
-      max: 24 * 60 * 60 * 1000,
-      onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
-    }),
-    logger: {
-      info: (msg, meta) => logger.info(msg, meta),
-      warn: (msg, meta) => logger.warn(msg, meta),
-    },
-  });
-  workflowRunService.setAdmissionController(admissionController);
-  stageExecutionService.setWorkspaceManager(workspaceManager);
-  stageExecutionService.setWorkspaceCheckpointService(workspaceCheckpointService);
+  // Late-wire services that were created after the core graph: the
+  // engine's prepare phase creates the project's worktrees, its executor
+  // and compensation use checkpoints, and a `restore_checkpoint` fork rolls
+  // the source workspace back.
+  engine.setLifecyclePlatform({ mounts: mountService, projectConfigs: projectConfigService, sandbox });
+  engine.setCheckpoints(workspaceCheckpointService);
+  workflowRunService.setCheckpointService(workspaceCheckpointService);
 
   // ── Register built-in function hook handlers ──
   // These handlers demonstrate the HookResult return channel and can be
@@ -1684,8 +1747,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   chatExtensions.agentResolver = agentResolver;
   chatExtensions.agentStaging = agentStaging;
   chatExtensions.systemArtifacts = systemArtifactService;
-  stageExecutionService.setAgentServices(agentResolver, agentStaging);
   orchestratorService.setAgentService(agentService);
+  // P06 — authoring validation checks that the agents a draft names exist.
+  workflowAuthoringService.setAgents(agentService);
   // Staged skill files live under `<workspace>/.generatorai`, outside every
   // worktree; drop them with the workspace (invariant §5.14).
   //
@@ -1701,7 +1765,14 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // Best effort — never block workspace deletion.
     }
   }, 'storage');
-  chatExtensions.codebaseRepo = projectCodebaseRepo;  // ── Integrated Browser (v13) ──
+  chatExtensions.codebaseRepo = projectCodebaseRepo;
+  // D-146 — the agent's GitHub issue + merge tools: the repository comes from
+  // the project's codebase remote, the token from the connected account.
+  chatExtensions.githubTools = new GitHubToolHost({
+    codebases: projectCodebaseRepo,
+    resolver: new CodebaseRemoteResolver({ git: gitManager, registry: scmRegistry }),
+  });
+  // ── Integrated Browser (v13) ──
   // BrowserService owns the per-workspace Chromium lifecycle. The bridge
   // chain is tried in order: `ElectronBridgeAdapter` first (only available
   // when running under the desktop shell with
@@ -1710,7 +1781,14 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // `POST /internal/browser/cdp-endpoint` as the active tab changes, and
   // drives the human's WCV directly, so agent + user see the same tab).
   // `ServerPlaywrightHost` is the fallback used everywhere else and by CI.
-  const electronBridgeAdapter = new ElectronBridgeAdapter(logger);
+  // D-105: under the desktop app (spawned with an IPC channel) a workspace with no Browser dock tab gets a hidden
+  // agent tab on the agent's first browser call.
+  const desktopChannel = parentChannel();
+  const electronBridgeAdapter = new ElectronBridgeAdapter(logger, {
+    ...(desktopChannel
+      ? { requestTab: (workspaceId: string) => { desktopChannel.send({ type: 'browser.ensure-tab', workspaceId }); } }
+      : {}),
+  });
   const serverPlaywrightHost = new ServerPlaywrightHost(logger);
   const browserService = new BrowserService(
     executionWorkspaceRepo,
@@ -1719,6 +1797,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     logger,
     [electronBridgeAdapter, serverPlaywrightHost],
     {
+      // D-143: on a loopback-bound server (the desktop app's own), localhost
+      // is the user's dev server — the in-app browser's main use.
+      allowLoopback: isLoopbackHost(config.security.bindHost ?? '127.0.0.1'),
       // §1.P lists this variable as a documented cap the code did not honour.
       // Read it the same bounded way `ServerPlaywrightHost` does, so the two
       // readers of the same variable cannot disagree.
@@ -1772,13 +1853,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     }
   }, 'native');
 
-  // Late-wire browserService into ChatManagementService so chats with
-  // `browserConfig.enabled: true` auto-boot a shared Chromium and inject
-  // the CDP endpoint into the harness system prompt.
-  chatExtensions.browserService = browserService;  // Same story for stage sessions — the workflow path builds sessions
-  // via StageExecutionService which needs BrowserService to register
-  // the built-in browser tool set per stage.
-  stageExecutionService.setBrowserService(browserService);
+  // Late-wire browserService into the session composer's deps: every chat
+  // and every stage session gets the built-in browser tool set, and sessions
+  // with `browserConfig.enabled` auto-boot a shared Chromium.
+  chatExtensions.browserService = browserService;
 
   // Computer Use. The bridge chain ends in NullComputerBridge so that with no
   // desktop attached every call resolves to a typed refusal rather than
@@ -1800,6 +1878,75 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const cursorThemeId = driverBinaryPath ? installAgentCursorTheme(logger) : null;
   const computerConsentStore = new PendingConsentStore(computerUseRepo, eventBus, logger, {
     autoApproveForDevelopment: process.env['GENERATORAI_COMPUTER_USE_AUTO_APPROVE'] === '1',
+  });
+
+  // G-01 — the attention feed: Needs you + Running across chats, workflow
+  // runs and automation executions. Started in `initialize()` after boot
+  // recovery, so its rebuild reads settled rows.
+  const attentionService = new AttentionService({
+    eventBus,
+    chats: chatEntityRepo,
+    projects: projectRepo,
+    ...(agentInteractionService ? { interactions: agentInteractionService } : {}),
+    streaming: chatManagementService,
+    runs: workflowRunRepo,
+    stageRuns: stageRunRepo,
+    definitions: workflowDefinitionStore,
+    automations: automationRepo,
+    executions: {
+      getExecutionById: (id) => automationExecutionRepo.getExecutionById(id),
+      getExecutionsByAutomationId: (id) => automationExecutionRepo.getExecutionsByAutomationId(id),
+      listIdsByStatus: (statuses) => listAutomationExecutionIdsByStatus(db, statuses),
+    },
+    consent: computerConsentStore,
+    logger,
+  });
+
+  // G-02 — chat list v2. The "Changes ±" column is the chat workspace's net
+  // change (baseline → working), recomputed at turn end and on a coalesced
+  // `workspace.changed`; the list itself pages over the chats table and
+  // resolves the live Status filter against the attention feed.
+  const chatChangeStatsService = new ChatChangeStatsService({
+    eventBus,
+    chats: chatEntityRepo,
+    computeStats: async (workspaceId) => {
+      const ws = await workspaceManager.getExecutionWorkspace(workspaceId);
+      const info = ws ? await workspaceManager.getWorkspaceInfo(workspaceId) : null;
+      if (!ws || !info) return null;
+      const summary = await changeSummaryService.getSummary({
+        workspaceId,
+        // Same reason as the review re-anchor below: the memoised working
+        // tree is for one panel render, and this runs because the tree just
+        // moved. Only this workspace's repos are dropped (P2-R9).
+        freshWorkingTree: true,
+        rootPath: ws.codeRoot ?? ws.rootPath,
+        worktrees: (info.worktrees ?? []).map((wt) => ({
+          alias: wt.alias,
+          worktreePath: resolveWorktreePath(info.rootPath, wt.worktreePath),
+        })),
+        mounts: await workspaceManager.toMountRefs(ws),
+        autoInit: false,
+      });
+      return netChangeStats(summary.repos);
+    },
+    logger,
+  });
+  // P2-R33 — `chat.updated` for rows an agent rename/delete or a project
+  // delete changes without writing the chat.
+  const chatListInvalidator = new ChatListInvalidator({
+    eventBus,
+    chats: chatEntityRepo,
+    attention: attentionService,
+    logger,
+  });
+  const chatListService = new ChatListService({
+    modelMetadata: () => Object.values(harnessRegistry.statusSnapshot).flatMap((provider) => provider.models.map((model) => ({ ...model, provider: model.provider ?? provider.type }))),
+    chats: chatEntityRepo,
+    attention: attentionService,
+    messages: chatMessageRepo,
+    agents: agentService,
+    changeStats: chatChangeStatsService,
+    logger,
   });
   const cuaDriverBridge = new CuaDriverBridge({
     logger,
@@ -2119,6 +2266,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       new EnergyVad({ silenceHangoverMs: endpointSilenceMs }),
   );
   voiceService.start();
+  // MG-17 — the dictation language from Settings › Audio, applied from boot.
+  voiceService.reconfigure({ defaultLanguage: defaultSttLanguage(audioPrefs) ?? null });
 
   /**
    * Re-read Settings > Audio and rebuild the voice engines from it.
@@ -2167,6 +2316,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     );
     voiceService.reconfigure({
       sttEngine: nextStt,
+      defaultLanguage: defaultSttLanguage(prefs) ?? null,
       ...(nextTts ? { ttsEngine: nextTts } : { clearTts: true }),
       ...(nextFormatter ? { textFormatter: nextFormatter } : { clearFormatter: true }),
     });
@@ -2184,9 +2334,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // not opted in — not just the upload route.
     enabled: config.scripts.workflowScriptsEnabled,
   });
-
-  // Late-bind script loader into DataSourceResolver for 'workflow_script' data source support
-  dataSourceResolver.setScriptLoader(workflowScriptLoader);
+  // A script target is materialized from the loaded script (P04).
+  workflowInvocationService.setScripts(workflowScriptLoader);
+  // Staged run uploads nobody used expire after an hour.
+  let invocationUploadSweeper: ReturnType<typeof setInterval> | undefined;
 
   // ── Widgets & Extensions ──
   const widgetRegistry = new WidgetRegistry();
@@ -2199,7 +2350,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       },
       logger,
     },
-    { widgetRegistry, customToolRegistry, eventBus },
+    { widgetRegistry, customToolRegistry, eventBus, sessionHookRegistry: core.sessionHookRegistry },
   );
   const widgetOrigin =
     process.env['WIDGET_ORIGIN'] ??
@@ -2219,6 +2370,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // host SPA/API — the MCP-Apps sandbox-proxy origin split. Override with
   // WIDGET_ORIGIN (e.g. a packaged desktop build's loopback URL).
   chatExtensions.widgetService = widgetService;
+  // HKS-01 / W-54 — the synchronous hook bridge every chat and stage session
+  // gets: the in-process hooks extensions register (`ai.registerHook`). With
+  // none registered the factory returns undefined and configs are unchanged.
+  chatExtensions.buildHookBridge = sessionHookBridgeFactory(core.sessionHookRegistry, hookInterceptor, eventBus);
   chatExtensions.widgetRegistry = widgetRegistry;
   chatExtensions.widgetAssetsBase = widgetOrigin;
 
@@ -2242,27 +2397,33 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     logger,
     eventBus,
     security,
+    tailscale,
     localAdminToken,
     relayHostBroker,
     pushTokens,
 
     // Services
-    sessionService,
     artifactService,
-    webhookService,
     errorHandler,
 
     // v2 Services
     chatManagementService,
     orchestratorService,
     workflowDefinitionService,
+    runDefinitionReader,
+    engine,
     workflowRunService,
-    dagScheduler,
-    stageExecutionService,
-    sessionAllocator,
+    stageConversationService,
+    // P04 — THE way a run starts.
+    workflowInvocationService,
+    // P05 — pending decisions (sub-workflow children mirrored) and per-wait callbacks.
+    workflowApprovalService,
+    workflowCallbacks,
+    // P06 — agents and workflows: authoring, the tools' one implementation, chat run cards.
+    workflowAuthoringService,
+    workflowToolHost,
+    chatWorkflowRunBridge,
 
-    // Orchestrator
-    workflowOrchestrator,
     gitManager,
     changeSetService,
     sourceControlService,
@@ -2277,18 +2438,20 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     automationService,
     automationRecoveryService,
     idempotencyKeyRepo,
-
-    // HITL (Human-in-the-Loop)
-    hitlService,
+    idempotencyService,
 
     // PLN-01 — plan mode
     planService,
     agentInteractionService,
+    // U-16 (D-147) — remembered permission rules
+    permissionRuleService,
 
     // Project & Codebase Management
     projectService,
     codebaseService,
+    codebaseLogService,
     worktreeService,
+    worktreeSizeService,
     projectConfigService,
     worktreeCleanupService,
     workspaceRetentionService,
@@ -2327,6 +2490,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     cuaDriverBridge,
     computerConsentStore,
     screenCast,
+    // G-01 — attention feed
+    attentionService,
+    // G-02 — chat list v2
+    chatListService,
+    chatChangeStatsService,
+    chatListInvalidator,
     // Expose the execution-workspace + artifact repos so routes can read
     // browser artifacts + workspace rows without a full service round-trip.
     executionWorkspaceRepo,
@@ -2340,7 +2509,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     reloadVoiceConfig,
 
     // v2 Repositories (exposed for route-level queries)
-    workflowRepo,
+    sessionRepo,
     chatEntityRepo,
     chatMessageRepo,
     workflowRunRepo,
@@ -2358,15 +2527,17 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // undefined = fell back to in-process MultiHarness.
     hostSupervisor,
     admissionController,
+    workflowEngineSettings,
+    providerVisibility,
+    copilotCli,
     streamBroker,
     customToolRegistry,
     mcpHub,
     mcpSettingsStore,
     mcpCredentialVault,
-    durableSleepService,
     templateRegistry,
     hookExecutor,
-    configResolver,
+    scriptRunner,
     workflowScriptLoader,
 
     // Widgets & Extensions
@@ -2447,8 +2618,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // test's own `killOwnDescendants()` shutdown assertion caught exactly
       // that: a leftover `copilot.exe`/`conhost.exe` pair reaped at shutdown
       // even though FauxProvider had handled every actual conversation.
-      if (loadTestFauxHarness) {
-        logger.warn('[Container] GENERATORAI_LOAD_TEST_FAUX_HARNESS=true — skipping real-provider model-catalog warm-up.');
+      if (testFauxHarness) {
+        logger.warn('[Container] GENERATORAI_TEST_FAUX_HARNESS=true — skipping real-provider model-catalog warm-up.');
       } else {
         void harnessRegistry.refresh(true)
           .then((statuses) => {
@@ -2464,22 +2635,29 @@ export async function createContainer(config: AppConfig): Promise<Container> {
           });
       }
 
-      // Register global harness lifecycle hooks
-      const globalHooks = configResolver.resolveGlobalHooks();
-      hookInterceptor.registerClientLifecycleHooks(harness, globalHooks, {
-        sessionId: '__global__',
-        workspacePath: config.workspacesDir,
-        variables: {},
-        eventBus,
-      });
+      // Surface harness client lifecycle events on the global stream
+      hookInterceptor.registerClientLifecycleEvents(harness);
 
       // Restore global event sequence counter from DB so post-restart
       // global events don't collide with pre-restart sequence IDs.
       await eventRepo.initialize();
 
-      // Recover interrupted sessions (also restores per-session EventBus
-      // sequence counters from DB via restoreCounters()).
-      await recoveryService.recover();
+      // Boot housekeeping: EventBus sequence counters, sessions a crash left
+      // closing, and orphaned sandbox containers.
+      await runBootHousekeeping({
+        eventBus,
+        sessionRepo,
+        harness,
+        ...(sandbox ? { orphanReaper: sandbox.lifecycle } : {}),
+        logger,
+      });
+
+      // The workflow engine: the single-engine lock, then recovery of every
+      // live run (G5 §3.10). Another live process on this database owns the
+      // engine; this one serves everything else, and run commands answer
+      // ENGINE_UNAVAILABLE until its lock goes stale (a quick restart finds
+      // the previous process's lock still fresh): the engine then starts.
+      await engine.startOrRetry();
 
       // Chat turns the previous process died in: persist what streamed and
       // write the terminal events a reconnecting client is waiting for.
@@ -2537,22 +2715,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
         }
         automationRecoveryService.startIdempotencySweeper();
       }
-
-      // Re-arm workflow post-processing that a restart interrupted.
-      //
-      // Auto-commit and auto-PR were attached to a run only as an in-memory
-      // event subscription, so a restart lost them silently: the run reported
-      // success and never opened its pull request. The intent is persisted on
-      // the run now, and this is what picks it back up (review 6.2).
-      if (workflowOrchestrator) {
-        try {
-          await workflowOrchestrator.reArmPendingPostProcessing();
-        } catch (err) {
-          logger.warn(
-            `[Container] Re-arming workflow post-processing failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
+      invocationUploadSweeper = setInterval(() => {
+        void workflowInvocationService.sweepUploads().catch((err: unknown) => logger.warn(`[Container] upload sweep failed: ${String(err)}`));
+      }, 10 * 60_000);
+      invocationUploadSweeper.unref?.();
 
       // Initialize automation cron scheduler AFTER recovery so the two
       // don't race on the same execution row.
@@ -2560,11 +2726,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
 
       // DB-04 — start the event/stream retention sweeper. No-op if disabled.
       eventRetentionService.start();
-
-      // DUR-05 — start the durable-sleep sweeper. One tick fires
-      // immediately so a server that restarted mid-sleep resumes any
-      // stages whose `wake_at` is already in the past.
-      durableSleepService.start();
 
       // Worktree cleanup: detect orphaned worktrees from crashed runs
       // and start the background retention sweep timer.
@@ -2602,29 +2763,50 @@ export async function createContainer(config: AppConfig): Promise<Container> {
         logger.warn(`[Container] Extension load failed — continuing without extensions: ${String(err)}`);
       }
 
+      // G-01 — after every boot recovery above, so the rebuilt snapshot
+      // reads settled rows (expired chat gates, recovered runs/executions).
+      try {
+        await attentionService.start();
+      } catch (err) {
+        // `GET /api/attention` answers 503 until it has (P2-R17).
+        logger.warn(`[Container] attention feed failed to start: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      chatChangeStatsService.start();
+      chatListInvalidator.start();
+
       logger.info('[Container] All services initialized');
     },
 
     /** Graceful shutdown. */
     async shutdown(): Promise<void> {
+      // Persist every turn still streaming as cut short, FIRST: a quit or restart mid-turn used to drop
+      // the whole turn (an orchestrator's six minutes of steps, delegations and an open question
+      // vanished; only the user's message survived). It ran after the terminal, browser and sandbox
+      // teardown, so a shell that bounds the shutdown (the desktop app kills the server after 15 s)
+      // could cut it off, and recovery then saved the text alone. The finaliser is idempotent: the
+      // turn's own end, if it still comes, does not write it again.
+      await chatManagementService.flushInFlightTurns().catch((err: unknown) => {
+        logger.warn(`[Container] flushing in-flight turns failed: ${String(err)}`);
+      });
+      tailscale.stop();
+      attentionService.stop();
+      chatChangeStatsService.stop();
+      chatListInvalidator.stop();
       scriptRunner.shutdown();
       automationService.shutdown();
       // Track A1 — stop the idempotency-key sweeper.
       if (automationRecoveryService) {
         automationRecoveryService.stopIdempotencySweeper();
       }
+      if (invocationUploadSweeper) clearInterval(invocationUploadSweeper);
       // DB-04 — halt the retention sweeper so a pending sweep can't block
       // closeDB() by holding the write lock.
       eventRetentionService.stop();
-      // DUR-05 — stop the durable-sleep sweeper. Any stages still
-      // `sleeping` stay that way — a subsequent server boot resumes
-      // them on the next sweep.
-      durableSleepService.stop();
       worktreeCleanupService.stop();
       workspaceRetentionService.stop();
-      // Stop run poll loops + unsubscribe EventBus listeners + close run loggers
-      // so no new events are produced and no setInterval handles are orphaned.
-      workflowRunService.shutdown();
+      // Stop the workflow engine: its timers, reaper and outbox, and release
+      // the engine lock. In-flight attempts are recovered by the next boot.
+      await engine.stop();
 
       // Kill any live terminal sessions (PTY handles hold FDs → must not
       // outlive the process on shutdown paths where OS reaping is unreliable).
@@ -2699,6 +2881,8 @@ export interface Container {
   eventBus: EventBus;
   /** Secret store, device/pairing services, DPoP verification, audit log. */
   security: SecurityContext;
+  /** "Connect with Tailscale": `tailscale serve` → this server on loopback (D-123). */
+  tailscale: TailscaleAccess;
   /**
    * Per-launch token proving a caller is the OS user who owns this server.
    * Null when authentication is disabled, where it would grant nothing.
@@ -2712,22 +2896,33 @@ export interface Container {
    * than assuming it exists.
    */
   pushTokens: PushTokenRepository | null;
-  sessionService: SessionService;
   artifactService: ArtifactService;
-  webhookService: WebhookService;
   errorHandler: ErrorHandler;
 
   // v2 services
   chatManagementService: ChatManagementService;
   orchestratorService: OrchestratorService;
   workflowDefinitionService: WorkflowDefinitionService;
+  /** The graph of each run's pinned definition version. */
+  runDefinitionReader: RunDefinitionReader;
+  /** The workflow engine (P03). */
+  engine: RunSupervisor;
   workflowRunService: WorkflowRunService;
-  dagScheduler: DAGScheduler;
-  stageExecutionService: StageExecutionService;
-  sessionAllocator: SessionAllocator;
+  /** The stage conversation API (P03b): a stage is a compact chat. */
+  stageConversationService: StageConversationService;
 
-  // Orchestrator
-  workflowOrchestrator: WorkflowOrchestrator;
+  /** THE way a run starts (P04): `POST /workflow-invocations`. */
+  workflowInvocationService: WorkflowInvocationService;
+  /** Pending decisions of a run, its sub-workflow children's mirrored, and the one way to answer them (P05). */
+  workflowApprovalService: WorkflowApprovalService;
+  /** Per-wait callback tokens (`/api/workflow-callbacks/:token`, P05 §4.3). */
+  workflowCallbacks: WorkflowCallbacks;
+  /** How agents author workflows (P06 WP-6.5): validate, plan, drafts, publish, the skill bundle. */
+  workflowAuthoringService: WorkflowAuthoringService;
+  /** The workflow tools' one implementation (P06 WP-6.1); the MCP tool route runs it for external agents. */
+  workflowToolHost: WorkflowToolHost;
+  /** Runs chats started, mirrored onto the chats (P06 WP-6.2). */
+  chatWorkflowRunBridge: ChatWorkflowRunBridge | null;
   gitManager: GitManager;
   changeSetService: ChangeSetService;
   sourceControlService: SourceControlService;
@@ -2746,19 +2941,23 @@ export interface Container {
   automationService: AutomationService;
   /** Track A — recovery service for boot-time reconciliation. */
   automationRecoveryService: AutomationRecoveryService | null;
-  /** Track A3 — idempotency key store, used directly by trigger routes. */
+  /** Track A3 — idempotency key store. */
   idempotencyKeyRepo: DrizzleIdempotencyKeyRepository;
+  /** Claim-then-finalize idempotency (automation triggers, invocations). */
+  idempotencyService: IdempotencyService | null;
 
-  /** HITL — human-in-the-loop interrupt/resume service. */
-  hitlService: HitlService;
   /** PLN-01 — plan mode. Undefined only if the plan repos were not supplied. */
   planService: PlanService | undefined;
   agentInteractionService: AgentInteractionService | undefined;
+  /** U-16 (D-147) — "Allow for this chat / run" rules. */
+  permissionRuleService: PermissionRuleService | undefined;
 
   // Project & Codebase Management
   projectService: ProjectService;
   codebaseService: CodebaseService;
+  codebaseLogService: CodebaseLogService;
   worktreeService: WorktreeService;
+  worktreeSizeService: WorktreeSizeService;
   worktreeCleanupService: WorktreeCleanupService;
   workspaceRetentionService: WorkspaceRetentionService;
   projectConfigService: ProjectConfigService;
@@ -2795,6 +2994,14 @@ export interface Container {
   cuaDriverBridge: CuaDriverBridge;
   /** Exposed so routes/internal-computer.ts can deliver the user's answer. */
   computerConsentStore: PendingConsentStore;
+  /** G-01 — Needs you + Running snapshot for `GET /api/attention`. */
+  attentionService: AttentionService;
+  /** G-02 — one page of `GET /api/chats` with row summaries. */
+  chatListService: ChatListService;
+  /** G-02 — keeps each chat's "Changes ±" columns current. */
+  chatChangeStatsService: ChatChangeStatsService;
+  /** P2-R33 — announces chats an agent change or a project delete touched. */
+  chatListInvalidator: ChatListInvalidator;
   screenCast: ScreenCast;
   /** Execution workspace repo — exposed for the browser route (read workspace row). */
   executionWorkspaceRepo: InstanceType<typeof DrizzleExecutionWorkspaceRepository>;
@@ -2813,7 +3020,7 @@ export interface Container {
   reloadVoiceConfig: () => Promise<void>;
 
   // v2 repositories (for route-level queries)
-  workflowRepo: InstanceType<typeof DrizzleWorkflowRepository>;
+  sessionRepo: InstanceType<typeof DrizzleSessionRepository>;
   chatEntityRepo: InstanceType<typeof DrizzleChatRepository>;
   chatMessageRepo: InstanceType<typeof DrizzleChatMessageRepository>;
   workflowRunRepo: InstanceType<typeof DrizzleWorkflowRunRepository>;
@@ -2845,6 +3052,12 @@ export interface Container {
    * is observable rather than mysterious.
    */
   admissionController: AdmissionController;
+  /** Flow key limits, the summary model and the trigger debounce (Settings → Workflow engine, P07). */
+  workflowEngineSettings: WorkflowEngineSettingsStore;
+  /** D-131 — which agent providers this server serves (Settings › Model providers, admin). */
+  providerVisibility: ProviderVisibilityStore;
+  /** The Copilot CLI, downloaded on first use. */
+  copilotCli: CopilotCliService;
   streamBroker: StreamBroker;
   /** TOL-01 — harness-agnostic custom tool catalog. Empty by default. */
   customToolRegistry: CustomToolRegistry;
@@ -2854,11 +3067,10 @@ export interface Container {
   mcpSettingsStore: McpSettingsStore;
   /** W48 — the only place MCP credential VALUES are read/written. */
   mcpCredentialVault: McpCredentialVault;
-  /** DUR-05 — durable step.sleep sweeper. Stage code calls `sleep(...)` to park. */
-  durableSleepService: DurableSleepService;
   templateRegistry: TemplateRegistry;
   hookExecutor: HookExecutor;
-  configResolver: ConfigResolver;
+  /** The policy-checked child-process runner (hooks, lifecycle scripts, check stages). */
+  scriptRunner: SandboxedScriptRunner;
   workflowScriptLoader: WorkflowScriptLoader;
 
   // Widgets & Extensions

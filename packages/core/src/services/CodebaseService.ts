@@ -10,13 +10,24 @@ import type {
   ProjectCodebase,
   CreateCodebaseParams,
   UpdateCodebaseParams,
+  CodebaseStatus,
   CodebaseType,
+  CodebaseJob,
   FileEntry,
   ILogger,
 } from '@generatorai/shared';
 import { ValidationError, GitError } from '@generatorai/shared';
 import type { GitManager } from '../infrastructure/GitManager.js';
 import type { ProjectService } from './ProjectService.js';
+import type { CodebaseLogService } from './CodebaseLogService.js';
+
+/** Structurally compatible with core's `EventBus` — kept minimal so tests can stub it. */
+export interface CodebaseStatusEventBus {
+  emit(sessionId: string, event: { kind: string; data: unknown }): Promise<unknown>;
+}
+
+/** A line callback threaded down into `GitManager.bareClone`/`fetchAll`'s `streamTo`. */
+type LineSink = (line: string, stream: 'stdout' | 'stderr') => void;
 
 export class CodebaseService {
   constructor(
@@ -24,7 +35,41 @@ export class CodebaseService {
     private readonly projectService: ProjectService,
     private readonly gitManager: GitManager,
     private readonly logger: ILogger,
+    /**
+     * Both optional so every existing unit test that constructs this service
+     * directly keeps compiling: without them, status changes are written to
+     * the repo exactly as before, just with no live log tail and no
+     * `codebase.status_changed` event.
+     */
+    private readonly codebaseLogService?: CodebaseLogService,
+    private readonly eventBus?: CodebaseStatusEventBus,
   ) {}
+
+  /**
+   * Writes the status (+ optional error) and, when an event bus is wired,
+   * emits `codebase.status_changed` on the `global` scope (G-16) so a live
+   * ProjectDetail/CodebaseDetail view never has to poll. Every status
+   * transition in this service goes through here — nothing calls
+   * `codebaseRepo.updateStatus` directly any more.
+   */
+  private async setStatus(codebase: ProjectCodebase, status: CodebaseStatus, error?: string): Promise<void> {
+    await this.codebaseRepo.updateStatus(codebase.id, status, error);
+    if (!this.eventBus) return;
+    let lastFetchedAt: Date | undefined = codebase.lastFetchedAt;
+    if (status === 'ready') lastFetchedAt = new Date();
+    await this.eventBus
+      .emit('__global__', {
+        kind: 'codebase.status_changed',
+        data: {
+          projectId: codebase.projectId,
+          codebaseId: codebase.id,
+          status,
+          ...(lastFetchedAt ? { lastFetchedAt: lastFetchedAt.toISOString() } : {}),
+          ...(error ? { error } : {}),
+        },
+      })
+      .catch(() => undefined);
+  }
 
   async linkCodebase(projectId: string, params: CreateCodebaseParams): Promise<ProjectCodebase> {
     // Validate project exists
@@ -37,6 +82,8 @@ export class CodebaseService {
     if (existing.length >= maxCodebases) {
       throw new ValidationError(`Project has reached the maximum number of codebases (${maxCodebases})`);
     }
+
+    assertSubdirectory(params.subdirectory);
 
     // Check alias uniqueness
     const existingAlias = await this.codebaseRepo.getByAlias(projectId, params.alias);
@@ -70,10 +117,17 @@ export class CodebaseService {
 
     // Trigger clone/link based on type
     if (params.type === 'git-remote') {
-      // Start async clone
-      void this.cloneRemoteRepo(codebase).catch((err) => {
-        this.logger.error(`[Codebase] Failed to clone "${params.alias}": ${err}`);
-      });
+      // Start async clone (G-16: tracked as a job so `GET .../logs` can tail it).
+      this.codebaseLogService?.startJob(id, 'clone');
+      const onLine: LineSink | undefined = this.codebaseLogService
+        ? (line, stream) => this.codebaseLogService?.appendLine(id, stream, line)
+        : undefined;
+      void this.cloneRemoteRepo(codebase, onLine)
+        .then(() => this.codebaseLogService?.finishJob(id, 'succeeded'))
+        .catch((err) => {
+          this.logger.error(`[Codebase] Failed to clone "${params.alias}": ${err}`);
+          this.codebaseLogService?.finishJob(id, 'failed', err instanceof Error ? err.message : String(err));
+        });
     } else if (params.type === 'git-local') {
       await this.linkLocalRepo(codebase);
     } else if (params.type === 'local-dir') {
@@ -86,12 +140,15 @@ export class CodebaseService {
   async unlinkCodebase(codebaseId: string): Promise<void> {
     const codebase = await this.codebaseRepo.getById(codebaseId);
 
-    // Clean up filesystem
-    if (codebase.clonePath) {
+    // Only the bare clone this service made under the project's repos dir is
+    // ours to delete. A git-local / local-dir codebase's clonePath IS the
+    // user's own folder: unlinking forgets it and never touches the disk.
+    const clonePath = this.ownedClonePath(codebase);
+    if (clonePath) {
       try {
-        await fs.rm(codebase.clonePath, { recursive: true, force: true });
+        await fs.rm(clonePath, { recursive: true, force: true });
       } catch (err) {
-        this.logger.warn(`[Codebase] Failed to clean up ${codebase.clonePath}: ${err}`);
+        this.logger.warn(`[Codebase] Failed to clean up ${clonePath}: ${err}`);
       }
     }
 
@@ -99,7 +156,18 @@ export class CodebaseService {
     this.logger.info(`[Codebase] Unlinked codebase ${codebaseId}`);
   }
 
-  async cloneRemoteRepo(codebase: ProjectCodebase): Promise<void> {
+  /** The clone path when it is an app-made clone strictly inside the project's repos dir; otherwise null. */
+  private ownedClonePath(codebase: ProjectCodebase): string | null {
+    if (codebase.type !== 'git-remote' || !codebase.clonePath) return null;
+    const reposDir = path.resolve(this.projectService.getProjectReposDir(codebase.projectId));
+    const clonePath = path.resolve(codebase.clonePath);
+    const rel = path.relative(reposDir, clonePath);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+    if (codebase.localPath && path.resolve(codebase.localPath) === clonePath) return null;
+    return clonePath;
+  }
+
+  async cloneRemoteRepo(codebase: ProjectCodebase, onLine?: LineSink): Promise<void> {
     if (!codebase.url) {
       throw new Error('Codebase URL is required for git-remote type');
     }
@@ -107,19 +175,19 @@ export class CodebaseService {
       throw new Error('Clone path is required');
     }
 
-    await this.codebaseRepo.updateStatus(codebase.id, 'cloning');
+    await this.setStatus(codebase, 'cloning');
 
     try {
       await fs.mkdir(path.dirname(codebase.clonePath), { recursive: true });
 
       // Bare clone for remote repos
-      await this.gitManager.bareClone(codebase.url, codebase.clonePath);
+      await this.gitManager.bareClone(codebase.url, codebase.clonePath, onLine ? { streamTo: onLine } : undefined);
 
-      await this.codebaseRepo.updateStatus(codebase.id, 'ready');
+      await this.setStatus(codebase, 'ready');
       this.logger.info(`[Codebase] Bare cloned "${codebase.alias}" from ${codebase.url}`);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      await this.codebaseRepo.updateStatus(codebase.id, 'error', errMsg);
+      await this.setStatus(codebase, 'error', errMsg);
       throw err;
     }
   }
@@ -132,15 +200,23 @@ export class CodebaseService {
     try {
       // Verify the path exists and is a git repo
       await fs.access(path.join(codebase.localPath, '.git'));
-      // Store the local path as clonePath directly (no symlink needed, worktrees reference it)
+      // Store the local path as clonePath directly (no symlink needed, worktrees reference it).
+      // Without a default branch the UI fell back to "main", which this repository may not have: take the
+      // remote's head when it is known locally, else the branch checked out now.
+      const defaultBranch =
+        codebase.defaultBranch ||
+        (await this.gitManager.defaultBranch(codebase.localPath).catch(() => null)) ||
+        (await this.gitManager.currentBranch(codebase.localPath).catch(() => null)) ||
+        undefined;
       await this.codebaseRepo.update(codebase.id, {
         clonePath: codebase.localPath,
         status: 'ready',
+        ...(defaultBranch ? { defaultBranch } : {}),
       });
       this.logger.info(`[Codebase] Linked local git repo "${codebase.alias}" at ${codebase.localPath}`);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      await this.codebaseRepo.updateStatus(codebase.id, 'error', errMsg);
+      await this.setStatus(codebase, 'error', errMsg);
       throw new Error(`Path "${codebase.localPath}" is not a valid git repository`);
     }
   }
@@ -159,12 +235,17 @@ export class CodebaseService {
       this.logger.info(`[Codebase] Linked local directory "${codebase.alias}" at ${codebase.localPath}`);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      await this.codebaseRepo.updateStatus(codebase.id, 'error', errMsg);
+      await this.setStatus(codebase, 'error', errMsg);
       throw new Error(`Path "${codebase.localPath}" does not exist or is not accessible`);
     }
   }
 
-  async fetchCodebase(codebaseId: string): Promise<void> {
+  /**
+   * Runs a fetch synchronously against an already-loaded codebase. Used
+   * directly by tests and by `fetchAllCodebases`; `startFetchJob` below is
+   * the async, job-tracked entry point the route uses (G-16).
+   */
+  async fetchCodebase(codebaseId: string, onLine?: LineSink): Promise<void> {
     const codebase = await this.codebaseRepo.getById(codebaseId);
 
     if (codebase.type !== 'git-remote' && codebase.type !== 'git-local') {
@@ -175,15 +256,45 @@ export class CodebaseService {
       throw new Error('Codebase has no clone path');
     }
 
+    // Reuses the 'cloning' status while the fetch is in flight — it already
+    // means "a git operation that will change readiness is in progress" and
+    // every existing consumer (legacy ProjectDetail/CodebaseDetail polling,
+    // D-01) already treats it that way. `job.kind === 'fetch'` (via
+    // `GET .../logs`) is what tells a future UI to say "Fetching" instead of
+    // "Cloning" for the same status value.
+    await this.setStatus(codebase, 'cloning');
+
     try {
-      await this.gitManager.fetchAll(codebase.clonePath);
-      await this.codebaseRepo.updateStatus(codebase.id, 'ready');
+      await this.gitManager.fetchAll(codebase.clonePath, onLine ? { streamTo: onLine } : undefined);
+      const updated = await this.codebaseRepo.getById(codebase.id);
+      await this.setStatus(updated, 'ready');
       this.logger.info(`[Codebase] Fetched "${codebase.alias}"`);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      await this.codebaseRepo.updateStatus(codebase.id, 'stale', errMsg);
+      await this.setStatus(codebase, 'stale', errMsg);
       throw err;
     }
+  }
+
+  /**
+   * G-16 — `POST .../fetch` becomes a background job: returns the job
+   * immediately (the route answers `202 { jobId }`) and runs the fetch
+   * without the caller waiting for it. Every stdout/stderr line is tailed
+   * into the codebase's ring buffer as it arrives (`GitManager.fetchAll`'s
+   * `streamTo`), so `GET .../logs` shows real progress while it runs, not
+   * just the outcome.
+   */
+  startFetchJob(codebaseId: string): CodebaseJob {
+    if (!this.codebaseLogService) {
+      throw new Error('CodebaseLogService is required for background fetch jobs');
+    }
+    const job = this.codebaseLogService.startJob(codebaseId, 'fetch');
+    void this.fetchCodebase(codebaseId, (line, stream) => this.codebaseLogService?.appendLine(codebaseId, stream, line))
+      .then(() => this.codebaseLogService?.finishJob(codebaseId, 'succeeded'))
+      .catch((err) => {
+        this.codebaseLogService?.finishJob(codebaseId, 'failed', err instanceof Error ? err.message : String(err));
+      });
+    return job;
   }
 
   async fetchAllCodebases(projectId: string): Promise<void> {
@@ -225,7 +336,10 @@ export class CodebaseService {
       values.alias = updates.alias;
     }
     if (updates.defaultBranch !== undefined) values.defaultBranch = updates.defaultBranch;
-    if (updates.subdirectory !== undefined) values.subdirectory = updates.subdirectory;
+    if (updates.subdirectory !== undefined) {
+      assertSubdirectory(updates.subdirectory);
+      values.subdirectory = updates.subdirectory;
+    }
     // Correcting the location clears the previous failure, so the next fetch
     // reports the new location's outcome rather than the stale error.
     if (updates.url !== undefined) {
@@ -499,5 +613,15 @@ export class CodebaseService {
       .replace(/⬛/g, '.*')
       .replace(/\?/g, '[^/]');
     return new RegExp(`^${regexStr}$`).test(str);
+  }
+}
+
+/** A codebase's subdirectory is a relative path inside the repository (a monorepo package), never outside it. */
+function assertSubdirectory(subdirectory: string | undefined): void {
+  const raw = subdirectory?.trim();
+  if (!raw) return;
+  const norm = path.posix.normalize(raw.replace(/\\/g, '/'));
+  if (path.isAbsolute(raw) || /^[A-Za-z]:/.test(raw) || norm === '..' || norm.startsWith('../')) {
+    throw new ValidationError(`Subdirectory must be a relative path inside the repository: ${raw}`);
   }
 }

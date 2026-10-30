@@ -74,9 +74,9 @@ export interface AutomationDataset {
 export interface PlannedIterations {
   iterations: Array<{
     /** The variable bag that will be interpolated into the workflow's
-     *  prompts. Includes the row's fields, `__iteration_index`,
-     *  `__iteration_total`, and the group/dataset variable when in
-     *  `group_by` / `single` mode. */
+     *  prompts: the row's declared fields and the group/dataset variable
+     *  in `group_by` / `single` mode. The iteration index travels in the
+     *  run's trigger, never as a variable. */
     variables: Record<string, unknown>;
     /** Human-readable label used in the UI ("Row 1", "priority=high"). */
     label: string;

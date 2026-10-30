@@ -70,9 +70,8 @@ const MAX_PENDING = 10_000;
  * How long a commit may be blocked by an unrelated open transaction before the
  * batch gives up.
  *
- * `withTransaction` tolerates a caller holding a transaction for up to its
- * 10 s deadline, and better-sqlite3 exposes one connection, so a stream write
- * landing in that window cannot commit. Retrying is right — the transaction
+ * better-sqlite3 exposes one connection, so a stream write landing while
+ * another caller holds a transaction cannot commit. Retrying is right — the transaction
  * will end — and this bounds how long we are willing to wait for it.
  */
 const TX_CONTENTION_RETRY_MS = 25;
@@ -84,7 +83,7 @@ interface Pending {
   kind: string;
   payload: unknown;
   cls: EventClass;
-  resolve: (row: StreamEventRow) => void;
+  resolve: (row: BatchedStreamRow) => void;
   reject: (err: unknown) => void;
 }
 
@@ -95,6 +94,20 @@ export interface StreamWriteBatcherOptions {
   maxPending?: number;
   /** Overall budget for waiting out an unrelated open transaction. */
   contentionMaxWaitMs?: number;
+}
+
+/** A committed row; `coalesced` when this caller's delta was folded into a later event's row (U-39). */
+export type BatchedStreamRow = StreamEventRow & { coalesced?: true };
+
+/** `{ text }` payloads that differ only in their text, joined in order; else null. */
+function mergedText(a: unknown, b: unknown): Record<string, unknown> | null {
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) || Array.isArray(b)) return null;
+  const x = a as Record<string, unknown>;
+  const y = b as Record<string, unknown>;
+  if (typeof x['text'] !== 'string' || typeof y['text'] !== 'string') return null;
+  const keys = new Set([...Object.keys(x), ...Object.keys(y)]);
+  for (const k of keys) if (k !== 'text' && x[k] !== y[k]) return null;
+  return { ...y, text: x['text'] + y['text'] };
 }
 
 /** Thrown to a caller whose event could not be queued. */
@@ -139,7 +152,7 @@ export class StreamWriteBatcher {
     scopeId: string,
     kind: string,
     payload: unknown,
-  ): Promise<StreamEventRow> {
+  ): Promise<BatchedStreamRow> {
     const cls = classifyEvent(kind, payload);
 
     if (this.pending.length >= this.maxPending && !this.makeRoom()) {
@@ -149,7 +162,7 @@ export class StreamWriteBatcher {
       return Promise.reject(new StreamWriteQueueFullError(this.pending.length));
     }
 
-    return new Promise<StreamEventRow>((resolve, reject) => {
+    return new Promise<BatchedStreamRow>((resolve, reject) => {
       this.pending.push({ scope, scopeId, kind, payload, cls, resolve, reject });
 
       // A full batch goes now regardless of class: past this point waiting buys
@@ -167,6 +180,7 @@ export class StreamWriteBatcher {
    * queue is all items, and an item may never be dropped.
    */
   private makeRoom(): boolean {
+    if (this.foldOne()) return true;
     const idx = this.pending.findIndex((p) => p.cls === 'delta');
     if (idx === -1) return false;
     const [dropped] = this.pending.splice(idx, 1);
@@ -181,6 +195,37 @@ export class StreamWriteBatcher {
       });
     }
     return true;
+  }
+
+  /**
+   * U-39 — before dropping anything, fold the oldest text delta into the next queued event of its stream when
+   * that is a text delta of the same kind: the text survives in one row instead of a hole nobody can see (rows
+   * get their `seq` at commit, so a dropped delta left no gap for a client to detect). Only the next event of the
+   * SAME stream is a candidate, so the stream's order is unchanged. The folded caller resolves with the merged
+   * row, marked `coalesced` so the broker does not broadcast it twice.
+   */
+  private foldOne(): boolean {
+    for (let i = 0; i < this.pending.length; i += 1) {
+      const from = this.pending[i]!;
+      if (from.cls !== 'delta') continue;
+      const j = this.pending.findIndex((p, k) => k > i && p.scope === from.scope && p.scopeId === from.scopeId);
+      const into = j === -1 ? undefined : this.pending[j];
+      const merged = into && into.kind === from.kind ? mergedText(from.payload, into.payload) : null;
+      if (!into || !merged) continue;
+      const { resolve, reject } = into;
+      into.payload = merged;
+      into.resolve = (row) => {
+        resolve(row);
+        from.resolve({ ...row, coalesced: true });
+      };
+      into.reject = (err) => {
+        reject(err);
+        from.reject(err);
+      };
+      this.pending.splice(i, 1);
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -316,8 +361,8 @@ export class StreamWriteBatcher {
   /**
    * Commit, waiting out an unrelated open transaction rather than failing.
    *
-   * better-sqlite3 exposes one connection, and `withTransaction` legitimately
-   * holds it across awaits for up to its 10 s deadline. `appendBatch` refuses
+   * better-sqlite3 exposes one connection, and another caller may hold a
+   * transaction on it. `appendBatch` refuses
    * to run inside a transaction — correctly, because it would become a
    * SAVEPOINT the outer rollback could undo after the broadcast — but the
    * batcher commits on a timer, so it can land in that window through no fault

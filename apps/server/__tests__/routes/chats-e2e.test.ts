@@ -47,14 +47,15 @@ describe('E2E: Chat API Flow', () => {
       const res = await request(app).get('/api/chats');
 
       expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-      expect(res.body.length).toBeGreaterThanOrEqual(0);
-      expect(container.chatManagementService.listChats).toHaveBeenCalled();
+      expect(Array.isArray(res.body.items)).toBe(true);
+      expect(res.body.items[0]).toMatchObject({ id: 'chat-1', summary: { lastActivityAt: expect.any(String) } });
+      expect(res.body).toMatchObject({ nextCursor: null, total: 1, counts: { all: 1, active: 1, archived: 0 } });
+      expect(container.chatListService.list).toHaveBeenCalled();
     });
 
     it('should filter by status', async () => {
       await request(app).get('/api/chats?status=active');
-      expect(container.chatManagementService.listChats).toHaveBeenCalled();
+      expect(container.chatListService.list).toHaveBeenCalledWith(expect.objectContaining({ status: 'active' }));
     });
   });
 

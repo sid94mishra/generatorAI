@@ -211,8 +211,10 @@ export class WorkspacedCopilotPool implements IAgentHarness {
       reasoningEfforts: [],
       planMode: true,
       mcpServers: false,
-      skillDirectories: false,
-      fullToolGating: true,
+      approvalGating: 'per_call',
+      hostTools: 'full',
+      structuredOutput: 'tool',
+      skills: 'directories',
       sessionPersistence: true,
       budgetTracking: false,
     };
@@ -225,6 +227,7 @@ export class WorkspacedCopilotPool implements IAgentHarness {
     for (const entry of this.workspaces.values()) {
       if (entry.initialized) {
         const models = await entry.provider.getModels();
+        this.lastModelProbeError = entry.provider.getLastModelProbeError();
         if (models.length > 0) return models;
       }
     }
@@ -232,7 +235,20 @@ export class WorkspacedCopilotPool implements IAgentHarness {
     const defaultKey = this.baseOptions.defaultCwd ?? '';
     const entry = await this.ensureWorkspace(defaultKey);
     await this.waitForInit(entry);
-    return entry.provider.getModels();
+    const models = await entry.provider.getModels();
+    this.lastModelProbeError = entry.provider.getLastModelProbeError();
+    return models;
+  }
+
+  private lastModelProbeError: string | undefined;
+
+  /**
+   * W41 — why the last `getModels()` returned `[]` (e.g. "Not authenticated"),
+   * forwarded from the workspace provider that answered, so the registry can
+   * say why Copilot has no catalog instead of an empty, reasonless status.
+   */
+  getLastModelProbeError(): string | undefined {
+    return this.lastModelProbeError;
   }
 
   // ── Conversation lifecycle ────────────────────────────────────────
@@ -247,6 +263,13 @@ export class WorkspacedCopilotPool implements IAgentHarness {
   }
 
   async resumeConversation(conversationId: string, params?: CreateConversationParams): Promise<void> {
+    // "Edit sources" on a live chat (D-137): the chat's cwd moved, so the
+    // conversation belongs to another workspace's CLI process now.
+    const currentKey = this.conversationWorkspace.get(conversationId);
+    if (params && currentKey !== undefined && this.workspaces.has(currentKey)) {
+      const key = this.workspaceKeyFor(params);
+      if (key !== currentKey) return this.moveConversation(conversationId, currentKey, key, params);
+    }
     const entry = await this.resolveEntry(conversationId, params);
     if (!entry) return;
     entry.lastUsedAt = Date.now();
@@ -490,6 +513,47 @@ export class WorkspacedCopilotPool implements IAgentHarness {
     }
   }
 
+  /**
+   * Move a conversation to the workspace for its new cwd (D-137).
+   *
+   * The target CLI is started first, so one that cannot start leaves the
+   * conversation where it was. The old process then only disconnects its
+   * handle (`destroyConversation` keeps the persisted session) and the target
+   * resumes the session by id with the new `workingDirectory`, system message
+   * and tools — the history carries over. Should that resume fail, a fresh
+   * session in the new cwd keeps the turn going instead of erroring.
+   */
+  private async moveConversation(
+    conversationId: string,
+    fromKey: string,
+    toKey: string,
+    params: CreateConversationParams,
+  ): Promise<void> {
+    const target = await this.ensureWorkspace(toKey);
+    await this.waitForInit(target);
+    // `ensureWorkspace` may have evicted the old workspace (its process is gone
+    // then, and with it the live handle).
+    const source = this.workspaces.get(fromKey);
+    if (source) {
+      try {
+        await source.provider.destroyConversation(conversationId);
+      } catch {
+        // The old process may already have dropped it — not fatal.
+      }
+    }
+    this.conversationWorkspace.set(conversationId, toKey);
+    target.lastUsedAt = Date.now();
+    try {
+      await target.provider.resumeConversation(conversationId, params);
+    } catch (err) {
+      console.warn(
+        `[WorkspacedCopilotPool] resume of ${conversationId} in ${toKey || '(default)'} failed; starting a fresh session:`,
+        err,
+      );
+      await target.provider.createConversation(params);
+    }
+  }
+
   /** Look up the WorkspaceEntry for an existing conversation. */
   private entryFor(conversationId: string): WorkspaceEntry | undefined {
     const key = this.conversationWorkspace.get(conversationId);
@@ -512,6 +576,8 @@ export class WorkspacedCopilotPool implements IAgentHarness {
     // Treat resume as a late-binding create
     const key = this.workspaceKeyFor(params);
     const entry = await this.ensureWorkspace(key);
+    // The provider resumes on its client right away, so its CLI must be up.
+    await this.waitForInit(entry);
     this.conversationWorkspace.set(conversationId, key);
     return entry;
   }

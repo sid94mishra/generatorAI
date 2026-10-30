@@ -145,6 +145,73 @@ describe('ChatManagementService', () => {
     });
   });
 
+  // ── E-4: moving a chat to another provider ──
+
+  describe('switching provider', () => {
+    it('gives the new provider the chat so far, once', async () => {
+      const chat = await service.createChat({ name: 'Switch', model: 'gpt-5.6-terra' });
+      await messageRepo.create({ id: 'm1', chatId: chat.id, sessionId: chat.sessionId, role: 'user', content: 'Add a CSV export.', createdAt: new Date() } as ChatMessage);
+      await messageRepo.create({ id: 'm2', chatId: chat.id, sessionId: chat.sessionId, role: 'assistant', content: 'Added GET /results.csv with tests.', createdAt: new Date() } as ChatMessage);
+      (copilot as unknown as { conversationHarness: () => string }).conversationHarness = () => 'codex';
+      await chatRepo.update(chat.id, { model: 'sonnet', harnessConfig: { harnessType: 'claude-agent' } }); // what PATCH /chats/:id writes
+
+      await service.sendPrompt(chat.id, 'Review what you just did.');
+      const sent = copilot.calls.filter((c) => c.method === 'sendPrompt').map((c) => String(c.args[1]));
+      expect(sent[0]).toContain('moved to another model provider');
+      expect(sent[0]).toContain('Added GET /results.csv with tests.');
+      expect(sent[0]).toContain('Review what you just did.');
+      const { conversationId } = await sessionRepo.getById(chat.sessionId);
+      copilot.simulateConversationEvent(conversationId, { kind: 'harness.message_complete', data: { content: 'Reviewed.' } } as never);
+      copilot.simulateConversationEvent(conversationId, { kind: 'harness.idle', data: {} } as never);
+      await new Promise((r) => setTimeout(r, 0));
+      expect((await chatRepo.getById(chat.id)).conversationSeed ?? '').toBe('');
+    });
+
+    it('keeps the chat so far for the next prompt when the switched turn fails before answering', async () => {
+      const chat = await service.createChat({ name: 'Switch fails', model: 'gpt-5.6-terra' });
+      await messageRepo.create({ id: 'm1', chatId: chat.id, sessionId: chat.sessionId, role: 'user', content: 'Add a CSV export.', createdAt: new Date() } as ChatMessage);
+      await messageRepo.create({ id: 'm2', chatId: chat.id, sessionId: chat.sessionId, role: 'assistant', content: 'Added GET /results.csv with tests.', createdAt: new Date() } as ChatMessage);
+      (copilot as unknown as { conversationHarness: () => string }).conversationHarness = () => 'codex';
+      await chatRepo.update(chat.id, { model: 'sonnet', harnessConfig: { harnessType: 'claude-agent' } });
+
+      await service.sendPrompt(chat.id, 'Review what you just did.');
+      const { conversationId } = await sessionRepo.getById(chat.sessionId);
+      copilot.simulateConversationEvent(conversationId, { kind: 'harness.error', data: { message: 'No conversation found' } } as never);
+      copilot.simulateConversationEvent(conversationId, { kind: 'harness.idle', data: {} } as never);
+      await new Promise((r) => setTimeout(r, 0));
+      expect((await chatRepo.getById(chat.id)).conversationSeed).toContain('Added GET /results.csv with tests.');
+
+      await service.sendPrompt(chat.id, 'Try again.');
+      const sent = copilot.calls.filter((c) => c.method === 'sendPrompt').map((c) => String(c.args[1]));
+      expect(sent[1]).toContain('Added GET /results.csv with tests.');
+      expect(sent[1]).toContain('Try again.');
+    });
+  });
+
+  // ── E-5: a reply cut off by a restart ──
+
+  describe('after an interrupted reply', () => {
+    it('tells the agent what it had written, once', async () => {
+      const chat = await service.createChat({ name: 'Cut off' });
+      await messageRepo.create({ id: 'u1', chatId: chat.id, sessionId: chat.sessionId, role: 'user', content: 'Write a story.', createdAt: new Date() } as ChatMessage);
+      await messageRepo.create({ id: 'a1', chatId: chat.id, sessionId: chat.sessionId, role: 'assistant', content: 'The keeper climbed the stairs', metadata: { partial: true }, createdAt: new Date() } as ChatMessage);
+
+      await service.sendPrompt(chat.id, 'Please continue.');
+      const prompts = () => copilot.calls.filter((c) => c.method === 'sendPrompt').map((c) => String(c.args[1]));
+      expect(prompts()[0]).toContain('cut off before it finished');
+      expect(prompts()[0]).toContain('The keeper climbed the stairs');
+      expect(prompts()[0]).toContain('Please continue.');
+    });
+
+    it('says nothing after a finished reply', async () => {
+      const chat = await service.createChat({ name: 'Whole' });
+      await messageRepo.create({ id: 'a2', chatId: chat.id, sessionId: chat.sessionId, role: 'assistant', content: 'Done.', createdAt: new Date() } as ChatMessage);
+      await service.sendPrompt(chat.id, 'Thanks.');
+      const sent = copilot.calls.filter((c) => c.method === 'sendPrompt').map((c) => String(c.args[1]));
+      expect(sent[0]).not.toContain('cut off');
+    });
+  });
+
   // ── sendPrompt ──
 
   describe('sendPrompt', () => {
@@ -179,8 +246,8 @@ describe('ChatManagementService', () => {
     //
     // Persisting both produced one call the user could see twice — the copy
     // holding the RESULT could not say what the tool was called with, and the
-    // copy holding the args stayed `running` forever. `StageExecutionService`
-    // already merged these; the chat path did not.
+    // copy holding the args stayed `running` forever. The stage
+    // path already merged these; the chat path did not.
     it('merges a tool call re-announced with the same callId', async () => {
       const chat = await service.createChat({ name: 'Tool dedup' });
       const session = await sessionRepo.getById(chat.sessionId);

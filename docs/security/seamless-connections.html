@@ -1,0 +1,303 @@
+<title>Connect From Anywhere</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a working plan document — sticky contents rail on wide screens, one reading column, tables in scroll boxes.
+   Palette and type follow GeneratorAI's own Instrument theme (light + dark). */
+:root {
+  --bg: #ffffff; --raised: #fafaf9; --card: #f1f1ef; --sunken: #f6f6f4;
+  --fg: #18181b; --muted: #55555d; --line: #dcdcd7; --line-soft: #ecece9;
+  --blue: #1d6ae5; --green: #16804c; --yellow: #935f00; --red: #d1242f; --purple: #7152e0;
+  --green-bg: #e6f3ec; --yellow-bg: #f8efdc; --red-bg: #fbe7e8; --blue-bg: #e7effc;
+  --sans: "Instrument Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --measure: 72ch;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0b0b0c; --raised: #17171a; --card: #111113; --sunken: #0d0d0f;
+  --fg: #ededef; --muted: #a1a1aa; --line: #2c2c31; --line-soft: #1c1c20;
+  --blue: #6aa6ff; --green: #4cc38a; --yellow: #f0b429; --red: #ff6369; --purple: #a48cff;
+  --green-bg: #12261c; --yellow-bg: #2a2110; --red-bg: #2c1416; --blue-bg: #142035;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0b0b0c; --raised: #17171a; --card: #111113; --sunken: #0d0d0f;
+  --fg: #ededef; --muted: #a1a1aa; --line: #2c2c31; --line-soft: #1c1c20;
+  --blue: #6aa6ff; --green: #4cc38a; --yellow: #f0b429; --red: #ff6369; --purple: #a48cff;
+  --green-bg: #12261c; --yellow-bg: #2a2110; --red-bg: #2c1416; --blue-bg: #142035;
+  color-scheme: dark; }
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.6;
+  padding-inline: 20px; padding-block: 0 64px; -webkit-font-smoothing: antialiased; }
+a { color: var(--blue); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+code { background: var(--card); border: 1px solid var(--line-soft); border-radius: 4px; padding: 0 4px; }
+
+.shell { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 56px; }
+@media (max-width: 960px) { .shell { grid-template-columns: minmax(0, 1fr); gap: 0; } .toc { display: none; } }
+
+.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 28px); align-self: start; padding-top: 40px; font-size: 13px; }
+.toc .label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; border-left: 1px solid var(--line); }
+.toc a { display: block; padding: 4px 0 4px 12px; color: var(--muted); text-decoration: none; margin-left: -1px; border-left: 1px solid transparent; }
+.toc a:hover { color: var(--fg); border-left-color: var(--fg); }
+
+main { min-width: 0; padding-top: 40px; }
+header.top { padding-bottom: 28px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.eyebrow { font-family: var(--mono); font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 14px; }
+h1 { font-size: clamp(30px, 4.4vw, 44px); line-height: 1.1; letter-spacing: -0.02em; font-weight: 600; margin: 14px 0 12px; text-wrap: balance; }
+.lede { font-size: 17px; color: var(--muted); max-width: var(--measure); margin: 0; }
+
+section { padding-top: 44px; scroll-margin-top: 16px; }
+h2 { font-size: 23px; letter-spacing: -0.01em; font-weight: 600; margin: 0 0 6px; text-wrap: balance; display: flex; gap: 12px; align-items: baseline; }
+h2 .n { font-family: var(--mono); font-size: 13px; font-weight: 400; color: var(--muted); }
+h3 { font-size: 16px; font-weight: 600; margin: 26px 0 6px; }
+p, li { max-width: var(--measure); }
+p { margin: 8px 0; }
+ul, ol { padding-left: 20px; margin: 8px 0; }
+li { margin: 4px 0; }
+.muted { color: var(--muted); }
+
+.tablebox { overflow-x: auto; margin: 14px 0; border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line-soft); }
+th { font-weight: 600; font-size: 12px; color: var(--muted); background: var(--raised); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 500; }
+
+.chip { display: inline-block; font-family: var(--mono); font-size: 11px; line-height: 1; padding: 4px 7px; border-radius: 999px; white-space: nowrap; border: 1px solid transparent; }
+.chip.ok { color: var(--green); background: var(--green-bg); }
+.chip.ext { color: var(--yellow); background: var(--yellow-bg); }
+.chip.miss { color: var(--red); background: var(--red-bg); }
+.chip.info { color: var(--blue); background: var(--blue-bg); }
+.chip.plain { color: var(--muted); border-color: var(--line); }
+
+.callout { border: 1px solid var(--line); background: var(--raised); border-radius: 10px; padding: 14px 16px; margin: 16px 0; max-width: 80ch; }
+.callout strong { font-weight: 600; }
+
+/* Three layers */
+.layers { display: grid; gap: 10px; margin: 16px 0; }
+.layer { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 16px; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: var(--raised); }
+.layer .tag { font-family: var(--mono); font-size: 12px; }
+.layer h4 { margin: 0 0 4px; font-size: 15px; font-weight: 600; }
+.layer p { margin: 0; color: var(--muted); font-size: 14px; }
+@media (max-width: 560px) { .layer { grid-template-columns: minmax(0, 1fr); gap: 6px; } }
+
+/* Architecture */
+.arch { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 16px 0; background: var(--sunken); display: grid; gap: 10px; }
+.arch .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.box { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.box b { display: block; font-size: 13.5px; font-weight: 600; }
+.box span { display: block; font-size: 12.5px; color: var(--muted); line-height: 1.45; margin-top: 2px; }
+.box.core { border-color: var(--fg); }
+.arch .lane { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.flow { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: center; }
+
+/* Phases */
+.phases { display: grid; gap: 0; margin: 16px 0; border-left: 1px solid var(--line); }
+.phase { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 14px; padding: 12px 0 12px 16px; position: relative; border-bottom: 1px solid var(--line-soft); }
+.phase::before { content: ""; position: absolute; left: -5px; top: 18px; width: 9px; height: 9px; border-radius: 50%; background: var(--bg); border: 2px solid var(--muted); }
+.phase.first::before { border-color: var(--blue); background: var(--blue); }
+.phase .id { font-family: var(--mono); font-size: 13px; font-weight: 500; padding-top: 1px; }
+.phase h4 { margin: 0; font-size: 15px; font-weight: 600; }
+.phase p { margin: 3px 0 0; font-size: 13.5px; color: var(--muted); }
+.phase .exit { font-size: 13px; margin-top: 6px; }
+.phase .exit em { font-style: normal; font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 0.05em; text-transform: uppercase; margin-right: 6px; }
+.size { font-family: var(--mono); font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; align-self: start; white-space: nowrap; }
+.release { font-family: var(--mono); font-size: 11px; color: var(--blue); letter-spacing: 0.05em; text-transform: uppercase; padding: 10px 0 2px 16px; }
+@media (max-width: 560px) { .phase { grid-template-columns: 48px minmax(0, 1fr); } .size { grid-column: 2; justify-self: start; } }
+
+/* Slack walkthrough */
+.steps { counter-reset: s; list-style: none; padding: 0; display: grid; gap: 8px; margin: 14px 0; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; max-width: 80ch; }
+.steps li::before { content: counter(s); font-family: var(--mono); font-size: 12px; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; color: var(--muted); }
+
+/* Decisions */
+.decisions { display: grid; gap: 10px; margin: 14px 0; }
+.decision { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: grid; gap: 4px; }
+.decision b { font-weight: 600; }
+.decision .rec { font-size: 13.5px; color: var(--muted); }
+.decision .rec span { color: var(--green); font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 6px; }
+
+/* Prompt */
+.prompt-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-top: 14px; }
+button.copy { font: 500 13px var(--sans); color: var(--bg); background: var(--fg); border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+button.copy:hover { opacity: 0.88; }
+.copied { font-family: var(--mono); font-size: 12px; color: var(--green); }
+pre.prompt { white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; background: var(--sunken); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 10px 0 0; max-height: 560px; overflow: auto; }
+
+.sources { columns: 2 280px; column-gap: 32px; font-size: 13px; padding-left: 18px; }
+.sources li { break-inside: avoid; margin: 0 0 6px; }
+footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+<style>
+.cmp td:first-child { white-space: nowrap; }
+.big { font-size: 17px; }
+</style>
+<div class="shell">
+<nav class="toc" aria-label="Contents">
+  <div class="label">Contents</div>
+  <ol>
+    <li><a href="#why-claude">Why Claude needs no certificate</a></li>
+    <li><a href="#why-us">Why we ask for one today</a></li>
+    <li><a href="#same-network">Same network: what's needed</a></li>
+    <li><a href="#tunnels">Cloudflare Tunnel and Tailscale</a></li>
+    <li><a href="#options">Options compared</a></li>
+    <li><a href="#approach">Recommended approach</a></li>
+    <li><a href="#keep">Keep, change, remove</a></li>
+    <li><a href="#plan">Build order</a></li>
+    <li><a href="#decisions">Decisions needed</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="top">
+  <div class="eyebrow"><span>GeneratorAI</span><span>Connection architecture · 9 Oct 2026</span><span>follows the security analysis</span></div>
+  <h1>Connect from anywhere with no certificates</h1>
+  <p class="lede">Why Claude Remote Control and similar apps never ask anyone to install a certificate, why GeneratorAI does today, and a simpler architecture that works the same on the same network and across networks.</p>
+</header>
+
+<section id="why-claude">
+  <h2><span class="n">01</span>Why Claude Remote Control needs no certificate</h2>
+  <p class="big">Because no phone or browser ever connects to your machine.</p>
+  <ul>
+    <li>The web UI comes from <strong>claude.ai</strong>, a public site with an ordinary trusted certificate. The phone app talks to Anthropic too.</li>
+    <li>Your machine only connects <strong>out</strong>. Anthropic's docs: <em>"Your local Claude Code session makes outbound HTTPS requests only and never opens inbound ports on your machine. When you start Remote Control, it registers with the Anthropic API and polls for work… All traffic travels through the Anthropic API over TLS."</em></li>
+    <li>Anthropic's servers pass messages between your machine and your devices. Every hop uses a normal public certificate, so nothing needs installing.</li>
+  </ul>
+  <p>Codex, Cursor, Warp and VS Code Remote Tunnels follow the same pattern:</p>
+  <ul>
+    <li>the UI comes from a public site (<code>chatgpt.com</code>, <code>vscode.dev</code>), or from a native app;</li>
+    <li>the user's machine dials out to a relay;</li>
+    <li>the devices reach it through that relay.</li>
+  </ul>
+  <p>The price is a vendor relay. Most of these relays can read the traffic: Claude Remote Control stores transcripts and is switched off for zero-retention and HIPAA organisations. Codex and VS Code tunnels encrypt end to end through theirs.</p>
+</section>
+
+<section id="why-us">
+  <h2><span class="n">02</span>Why GeneratorAI asks for one today</h2>
+  <p>Only one scenario needs a certificate: <strong>a browser on another device loading the web UI straight from your computer.</strong> Two hard rules cause it.</p>
+  <ol>
+    <li><strong>Browsers only allow the crypto we need on secure pages.</strong> Pairing creates a device key in the browser (<code>crypto.subtle</code>). Browsers allow that only on <code>https://</code> pages or <code>localhost</code>. <code>http://192.168.x.x</code> is neither. That's the "Web Crypto unavailable" error you saw on Windows.</li>
+    <li><strong>No public certificate authority will certify a home-network address.</strong> CA/Browser Forum rules forbid it. Let's Encrypt's IP certificates need a public address it can reach. So HTTPS on a LAN address means a certificate only your machine vouches for, and every browser warns about it until it's installed.</li>
+  </ol>
+  <p>Could we just allow plain HTTP for browsers on the home network? No. Without HTTPS, anyone on the same Wi-Fi can <strong>rewrite the web page itself</strong> on its way to the browser, and steal the session or approve actions. That's fine at home but dangerous in an office, hotel or café. The secure-page rule exists to stop exactly this.</p>
+  <div class="callout"><strong>The root cause is architectural.</strong> We made other devices load the UI from your computer. The apps that need no certificate serve the UI from a public site and reach your computer through an outbound relay.</div>
+</section>
+
+<section id="same-network">
+  <h2><span class="n">03</span>Same network: what's actually needed</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>Client on the same network</th><th>Needs a certificate install?</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Desktop window</td><td><span class="chip ok">never</span></td><td>It runs on the same machine (<code>127.0.0.1</code>), which browsers already treat as secure.</td></tr>
+      <tr><td>Browser on the same computer</td><td><span class="chip ok">never</span></td><td>Also <code>localhost</code>.</td></tr>
+      <tr><td>Mobile app</td><td><span class="chip ok">never</span></td><td>The app trusts the server's identity in code, from the pairing QR. The user never sees it. The work is native trust code in the app (MV-44); today the app falls back to plain HTTP instead.</td></tr>
+      <tr><td>Desktop app → another computer</td><td><span class="chip ok">never</span></td><td>Same as the mobile app: trust in code, learned at pairing.</td></tr>
+      <tr><td>Browser on another device</td><td><span class="chip miss">yes, if it connects directly</span></td><td>The two rules above. <strong>Not if the browser loads the UI from a public site and goes through the relay.</strong></td></tr>
+    </tbody>
+  </table></div>
+  <p>So the certificate download and fingerprint comparison only exist for the direct-LAN-browser path. Everything else can be invisible.</p>
+</section>
+
+<section id="tunnels">
+  <h2><span class="n">04</span>Cloudflare Tunnel and Tailscale</h2>
+  <h3>Cloudflare Tunnel: not implemented</h3>
+  <p>A design existed (<code>docs/CLOUDFLARE_TUNNEL_RELAY_PLAN.md</code>, status "proposed, not yet built"). It was deleted in the release-cleanup commit <code>84be7f2c</code>. No code launches <code>cloudflared</code>.</p>
+  <ul>
+    <li><strong>Quick Tunnels</strong> need no account, but they are wrong for this. Cloudflare's own docs: <em>"Quick Tunnels are for testing and development"</em>, <em>"no uptime guarantee"</em>, a 200 in-flight request cap, a new hostname every time, and <em>"Quick Tunnels do not support Server-Sent Events (SSE)"</em>. GeneratorAI streams chats and runs over SSE.</li>
+    <li><strong>Named Tunnels</strong> work well, with a stable public HTTPS address and no certificate install. But each user needs a Cloudflare account and a domain, and Cloudflare ends the TLS at its edge, so it can read the traffic. They're a good <strong>advanced option</strong>, not a default.</li>
+  </ul>
+  <h3>Tailscale: works today</h3>
+  <p>With the "your own certificate" feature (D-113), <code>tailscale cert</code> gives a publicly trusted certificate for <code>machine.tailnet.ts.net</code>, so browsers show no warning. Traffic is WireGuard-encrypted end to end, on the same network and across networks. The catch: <strong>every device must install Tailscale and join the account.</strong> That's great for technical users, but too much to ask by default.</p>
+</section>
+
+<section id="options">
+  <h2><span class="n">05</span>Options compared</h2>
+  <div class="tablebox"><table class="cmp">
+    <thead><tr><th>Option</th><th>User steps</th><th>Same network</th><th>Other networks</th><th>Who can read traffic</th><th>What we must run</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Hosted web app + relay</strong> (Claude, Codex, VS Code)</td><td>Open the site, scan or type a code</td><td><span class="chip ok">yes</span></td><td><span class="chip ok">yes</span></td><td>Nobody in transit if we encrypt end to end in the app. You trust the code the site serves, as with any web app.</td><td>A static website and the relay service</td></tr>
+      <tr><td><strong>Native app, pinned</strong> (LAN first, relay fallback)</td><td>Scan the QR once</td><td><span class="chip ok">yes</span></td><td><span class="chip ok">yes</span> via relay</td><td>Nobody</td><td>The relay, for other networks</td></tr>
+      <tr><td>Tailscale + its certificate</td><td>Install Tailscale on every device</td><td><span class="chip ok">yes</span></td><td><span class="chip ok">yes</span></td><td>Nobody</td><td>Nothing (Tailscale's service)</td></tr>
+      <tr><td>Cloudflare named tunnel</td><td>Cloudflare account and domain setup</td><td><span class="chip ok">yes</span></td><td><span class="chip ok">yes</span></td><td>Cloudflare</td><td>Nothing (the user's Cloudflare)</td></tr>
+      <tr><td>Direct LAN browser, private CA (today)</td><td>Warning, fingerprint check or certificate install</td><td><span class="chip ext">friction</span></td><td><span class="chip miss">no</span></td><td>Nobody, once trusted</td><td>Nothing</td></tr>
+      <tr><td>Cloudflare Quick Tunnel</td><td>None</td><td colspan="2"><span class="chip miss">testing only</span>: no SSE, random address</td><td>Cloudflare</td><td>Nothing</td></tr>
+      <tr><td>Plain HTTP browser on LAN</td><td>None</td><td colspan="2"><span class="chip miss">impossible</span>: browsers block the crypto</td><td>Anyone on the Wi-Fi</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="approach">
+  <h2><span class="n">06</span>Recommended approach</h2>
+  <p class="big">One QR code, connect from anywhere, nothing to install.</p>
+  <div class="tablebox"><table>
+    <thead><tr><th>Client</th><th>How it connects</th><th>What the user does</th></tr></thead>
+    <tbody>
+      <tr><td>Desktop window, same-computer browser</td><td>Loopback, as today</td><td>Nothing</td></tr>
+      <tr><td>Mobile app</td><td>Directly over the home network when reachable, otherwise through the relay. Always TLS, with the server's identity pinned from the QR.</td><td>Scan the QR once</td></tr>
+      <tr><td>Browser on any other device</td><td>Opens the <strong>hosted GeneratorAI web app</strong> (a public site, real certificate), then connects to the user's computer <strong>through the relay</strong>. Traffic is encrypted end to end inside the relay, using the server identity from the QR, so the relay can't read it.</td><td>Open the site, scan or type the code</td></tr>
+      <tr><td>Desktop app → another computer</td><td>Like the mobile app</td><td>Scan or type the code</td></tr>
+      <tr><td>Advanced and self-hosting</td><td>Tailscale (works today), a self-hosted relay (<code>apps/relay</code>), a Cloudflare named tunnel or your own proxy, or the direct-LAN private-CA mode for offline networks</td><td>Opt-in, under Settings › Advanced</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Why this is the best fit</h3>
+  <ul>
+    <li><strong>No certificate install, ever, by default.</strong> Public certificates cover the hosted site and the relay. Native apps pin in code.</li>
+    <li><strong>The same flow on the same network and across networks.</strong> The relay works from anywhere. Native apps use the LAN shortcut automatically.</li>
+    <li><strong>Better privacy than Claude Remote Control.</strong> End-to-end encryption through our relay, the way Codex and VS Code tunnels do it. Claude's relay reads and stores transcripts.</li>
+    <li><strong>Only outbound connections from the user's computer.</strong> No open ports or router changes, and no LAN exposure needed. That shrinks the attack surface, avoiding the class of exposed-server incidents seen with Ollama and OpenClaw.</li>
+    <li><strong>No OS network prompts</strong> for browsers. Chrome's Local Network Access and the iOS and Android local-network permissions don't apply when everything goes through a public relay.</li>
+  </ul>
+  <h3>The honest cost</h3>
+  <ul>
+    <li><strong>We have to run a static website and the relay service.</strong> The relay code is already written (<code>apps/relay</code>). It still needs hosting, monitoring and abuse limits.</li>
+    <li><strong>The hosted site serves the browser's code.</strong> Users trust GeneratorAI's site, as they trust claude.ai. End-to-end encryption still protects them if the relay itself is compromised.</li>
+    <li><strong>Without internet,</strong> browsers on other devices need the advanced direct-LAN mode. Native apps keep working over the LAN.</li>
+  </ul>
+</section>
+
+<section id="keep">
+  <h2><span class="n">07</span>Keep, change, remove</h2>
+  <div class="tablebox"><table>
+    <thead><tr><th>Part</th><th>Decision</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Device keys, DPoP tokens, pairing grants, scopes, signed approvals</td><td><span class="chip ok">keep</span></td><td>Standards-correct and transport-independent. They work the same over loopback, LAN and relay.</td></tr>
+      <tr><td>Per-install certificate authority</td><td><span class="chip ok">keep</span>, use it differently</td><td>It becomes the identity native apps pin and the anchor for end-to-end encryption through the relay. Users never handle it.</td></tr>
+      <tr><td>Relay (<code>apps/relay</code>, host broker)</td><td><span class="chip ext">turn on and finish</span></td><td>Enable the client side, add end-to-end encryption (wire the existing <code>e2ee.ts</code> framing, or run TLS through the relay for native apps), host it.</td></tr>
+      <tr><td>Web UI</td><td><span class="chip ext">also publish it as a hosted site</span></td><td>The same build, served from a public origin. The local server keeps serving it for the desktop window and same-machine browsers.</td></tr>
+      <tr><td>Pairing QR</td><td><span class="chip ext">extend</span></td><td>One QR carrying the relay address, LAN addresses, server identity and a one-time code. It works whether the phone is near the computer or not.</td></tr>
+      <tr><td>Mobile plain-HTTP LAN lane</td><td><span class="chip miss">remove</span> after pinning lands</td><td>Replaced by pinned TLS (MV-44).</td></tr>
+      <tr><td>Network exposure (LAN) + certificate download + fingerprint check</td><td><span class="chip ext">move to Advanced</span></td><td>Only needed for offline LAN browsers. The default path doesn't open the server to the network at all.</td></tr>
+      <tr><td>Your own certificate, trusted proxy (D-113, D-114)</td><td><span class="chip ok">keep</span> (advanced)</td><td>These power the Tailscale, Cloudflare named tunnel and reverse-proxy options.</td></tr>
+      <tr><td>Cloudflare Tunnel</td><td><span class="chip plain">optional, later</span></td><td>Named tunnel as an advanced transport, with an honest note that Cloudflare can read the traffic. No Quick Tunnels: no SSE, testing only.</td></tr>
+      <tr><td>Bug fixes B-1 to B-6</td><td><span class="chip ok">in progress</span></td><td>Needed under every approach.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="plan">
+  <h2><span class="n">08</span>Build order</h2>
+  <div class="phases">
+    <div class="phase first"><div class="id">1</div><div><h4>Security bug fixes</h4><p>B-1 to B-6, already running.</p></div><span class="size">small</span></div>
+    <div class="phase first"><div class="id">2</div><div><h4>Relay on, encrypted end to end</h4><p>Enable the client transport. End-to-end encryption keyed to the server identity from the QR, so the relay sees only ciphertext. Host the relay, with health checks and abuse limits.</p></div><span class="size">medium</span></div>
+    <div class="phase first"><div class="id">3</div><div><h4>Hosted web app</h4><p>Publish the web build at a public origin that pairs by code or QR and connects through the relay. The pairing screen offers "Open on another device", showing the address and a QR.</p></div><span class="size">medium</span></div>
+    <div class="phase"><div class="id">4</div><div><h4>Native pinning and automatic routing</h4><p>MV-44 on iOS and Android, and pinning on the desktop app as a client. LAN when reachable, otherwise relay. Then delete the plain-HTTP lane.</p></div><span class="size">medium</span></div>
+    <div class="phase"><div class="id">5</div><div><h4>Advanced section and docs</h4><p>Move LAN exposure and certificates under Advanced. Add guided Tailscale, self-hosted relay and Cloudflare named tunnel setups.</p></div><span class="size">small</span></div>
+  </div>
+</section>
+
+<section id="decisions">
+  <h2><span class="n">09</span>Decisions needed</h2>
+  <div class="decisions">
+    <div class="decision"><b>Run a hosted relay and a hosted web app</b><div class="rec"><span>Recommended</span>This is what makes "nothing to install" possible. Without it, the best default is Tailscale.</div></div>
+    <div class="decision"><b>The public domain</b><div class="rec"><span>Needed</span>For example <code>app.&lt;your-domain&gt;</code> and <code>relay.&lt;your-domain&gt;</code>. This can be the same domain chosen for the Connections client metadata file.</div></div>
+    <div class="decision"><b>End-to-end encryption through the relay</b><div class="rec"><span>Recommended</span>Yes, from day one. It's the difference between us and Claude Remote Control, and the framing code exists.</div></div>
+    <div class="decision"><b>LAN exposure</b><div class="rec"><span>Recommended</span>Off by default, under Advanced, for offline networks only.</div></div>
+  </div>
+</section>
+
+<footer>Sources: Anthropic Remote Control docs (code.claude.com/docs/en/remote-control), Cloudflare TryCloudflare docs, and the research and audit in <code>docs/security/</code>. 9 October 2026.</footer>
+</main>
+</div>

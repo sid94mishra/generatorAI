@@ -27,9 +27,9 @@ vi.mock('@/platform/authTransport.js', () => ({
 vi.mock('@/platform/muxStream.js', () => ({
   openMultiplexedStream: () => ({ close: () => {} }),
 }));
-vi.mock('./NativeBrowserView.js', () => ({ NativeBrowserView: () => null }));
+vi.mock('@/blocks/browser/NativeBrowserView.js', () => ({ NativeBrowserView: () => null }));
 
-import { BrowserPanel } from '@/components/chat/BrowserPanel.js';
+import { BrowserPanel } from '@/blocks/browser/BrowserPanel.js';
 
 let descriptorCalls = 0;
 
@@ -73,7 +73,7 @@ afterEach(() => {
 });
 
 function panel() {
-  return <BrowserPanel embedded workspaceId="ws-1" tabId="browser-1" open visible onClose={() => {}} />;
+  return <BrowserPanel workspaceId="ws-1" tabId="browser-1" open visible onClose={() => {}} />;
 }
 
 describe('BrowserPanel — a denied device', () => {

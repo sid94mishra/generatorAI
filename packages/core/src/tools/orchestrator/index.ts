@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // buildOrchestratorToolSet — the background-agent tool surface an
 // orchestrator chat drives. Mirrors buildBrowserToolSet: handlers close
-// over the OrchestratorService + parentChatId.
+// over the OrchestratorService + the parent id (a chat, or a stage run whose agent is an orchestrator).
 //
 // Tool schemas use STABLE key order so the tools prefix hashes identically
 // across turns/workers (prompt-cache friendliness, plan §5.8 / M2).
@@ -13,7 +13,7 @@ import { TaskBriefSchema } from '@generatorai/shared';
 
 export interface OrchestratorToolSetDeps {
   orchestratorService: OrchestratorService;
-  parentChatId: string;
+  parentId: string;
   owner?: string;
   /**
    * Append `list_available_agents`. Off by default: adding a 7th tool
@@ -24,7 +24,7 @@ export interface OrchestratorToolSetDeps {
 }
 
 export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDefinition[] {
-  const { orchestratorService, parentChatId, owner } = deps;
+  const { orchestratorService, parentId, owner } = deps;
 
   const spawn: ToolDefinition = {
     name: 'spawn_background_agent',
@@ -44,7 +44,7 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
         taskName: { type: 'string', description: 'Short, unique-ish name shown in the UI.' },
         objective: { type: 'string', description: 'The ONE outcome this worker must produce.' },
         context: { type: 'string', description: 'ONLY the facts/decisions the worker needs. Self-contained, no "see above".' },
-        model: { type: 'string', description: 'Optional model/tier for the worker. Omit to use the default worker model.' },
+        model: { type: 'string', description: 'Model for the worker. Ignored when agentRef names an agent with its own model (list_available_agents shows it). Omit to use the default worker model.' },
         inputArtifacts: { type: 'array', items: { type: 'string' }, description: 'Read-only artifact paths the worker may open.' },
         boundaries: { type: 'string', description: 'Explicit out-of-scope list to prevent duplicated work.' },
         budget: {
@@ -63,19 +63,32 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
             '(see list_available_agents). Gives the worker that agent\'s instructions, skills, ' +
             'MCP servers and tool policy. Omit for a generic worker.',
         },
+        sharedWorkspace: {
+          type: 'boolean',
+          description:
+            'Default true: the worker edits YOUR folders and branch, so its changes appear where you work. ' +
+            'Set false when parallel workers would edit the same files: the worker gets its own worktrees on new ' +
+            'branches cut from your current commit (your uncommitted files included); the spawn result names them, ' +
+            'and you merge the branch you accept. Plain (non-git) folders stay shared.',
+        },
       },
       required: ['taskName', 'objective'],
     },
     skipPermission: true,
-    owner: owner ?? `orchestrator:${parentChatId}`,
+    owner: owner ?? `orchestrator:${parentId}`,
     handler: async (args) => {
       const parsed = TaskBriefSchema.safeParse(args);
       if (!parsed.success) {
         return { ok: false, error: `Invalid brief: ${parsed.error.issues.map((i: { path: (string | number)[]; message: string }) => `${i.path.join('.')}: ${i.message}`).join('; ')}` };
       }
-      return orchestratorService.spawnBackgroundAgent(parentChatId, parsed.data);
+      return orchestratorService.spawnBackgroundAgent(parentId, parsed.data);
     },
   };
+
+  // A wait blocks up to workerTimeoutMs (default 5 min); the provider's per-tool budget (120 s) abandoned
+  // check_background_agents({ wait: true }) mid-wait ("exceeded its 120000ms budget"), and three such strikes
+  // would have quarantined the orchestrator's only way to read its workers.
+  const waitBudgetMs = orchestratorService.getConfig().workerTimeoutMs + 60_000;
 
   const checkAll: ToolDefinition = {
     name: 'check_background_agents',
@@ -90,10 +103,11 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
       },
     },
     skipPermission: true,
-    owner: owner ?? `orchestrator:${parentChatId}`,
+    timeoutMs: waitBudgetMs,
+    owner: owner ?? `orchestrator:${parentId}`,
     handler: async (args) => {
       const wait = Boolean((args as { wait?: unknown }).wait);
-      const digests = await orchestratorService.checkBackgroundAgents(parentChatId, { wait });
+      const digests = await orchestratorService.checkBackgroundAgents(parentId, { wait });
       return { count: digests.length, digests };
     },
   };
@@ -110,7 +124,8 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
       required: ['taskId'],
     },
     skipPermission: true,
-    owner: owner ?? `orchestrator:${parentChatId}`,
+    timeoutMs: waitBudgetMs,
+    owner: owner ?? `orchestrator:${parentId}`,
     handler: async (args) => {
       const a = args as { taskId?: unknown; wait?: unknown };
       if (typeof a.taskId !== 'string') return { ok: false, error: 'taskId is required' };
@@ -122,7 +137,8 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
     name: 'send_to_background_agent',
     description:
       'Send a follow-up message to a background worker (resumes its context) — use to request a revision after ' +
-      'reviewing its digest. Bounded by a per-worker review-round limit.',
+      'reviewing its digest. Bounded by a per-worker review-round limit. A worker whose status is "interrupted" ' +
+      '(the app restarted mid-task) resumes from its transcript when sent a follow-up.',
     parametersSchema: {
       type: 'object',
       properties: {
@@ -132,7 +148,7 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
       required: ['taskId', 'followup'],
     },
     skipPermission: true,
-    owner: owner ?? `orchestrator:${parentChatId}`,
+    owner: owner ?? `orchestrator:${parentId}`,
     handler: async (args) => {
       const a = args as { taskId?: unknown; followup?: unknown };
       if (typeof a.taskId !== 'string' || typeof a.followup !== 'string') {
@@ -150,9 +166,9 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
       properties: {},
     },
     skipPermission: true,
-    owner: owner ?? `orchestrator:${parentChatId}`,
+    owner: owner ?? `orchestrator:${parentId}`,
     handler: async () => {
-      const tasks = await orchestratorService.listBackgroundAgents(parentChatId);
+      const tasks = await orchestratorService.listBackgroundAgents(parentId);
       return { count: tasks.length, tasks };
     },
   };
@@ -169,7 +185,7 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
       properties: {},
     },
     skipPermission: true,
-    owner: owner ?? `orchestrator:${parentChatId}`,
+    owner: owner ?? `orchestrator:${parentId}`,
     handler: async () => {
       const models = await orchestratorService.listAvailableModels();
       return { count: models.length, models };
@@ -180,8 +196,8 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
     name: 'list_available_agents',
     description:
       'List the custom agents you may assign to background workers. Each entry has a ' +
-      '`ref` (pass it as `agentRef` to spawn_background_agent), a name and a description ' +
-      'of when to use it. Prefer picking a specialised agent over writing the same ' +
+      '`ref` (pass it as `agentRef` to spawn_background_agent), a name, a description ' +
+      'of when to use it and, when it sets one, the `model` it always runs on. Prefer picking a specialised agent over writing the same ' +
       'instructions into every brief. After calling this, every spawn whose subtask ' +
       'matches one of these agents MUST carry that agent\'s `ref` in `agentRef`.',
     parametersSchema: {
@@ -189,9 +205,9 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
       properties: {},
     },
     skipPermission: true,
-    owner: owner ?? `orchestrator:${parentChatId}`,
+    owner: owner ?? `orchestrator:${parentId}`,
     handler: async () => {
-      const agents = await orchestratorService.listAssignableAgents(parentChatId);
+      const agents = await orchestratorService.listAssignableAgents(parentId);
       return { count: agents.length, agents };
     },
   };

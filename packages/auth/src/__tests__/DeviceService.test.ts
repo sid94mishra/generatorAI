@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DeviceService } from '../DeviceService.js';
+import { ALL_SCOPES } from '../scopes.js';
 import type { PairingError } from '../DeviceService.js';
 import { sha256Base64Url } from '../jose.js';
 import type {
@@ -142,5 +143,57 @@ describe('DeviceService refresh generation grace', () => {
     expect(device.scopes).toEqual(scopes);
     expect(device.credentialVersion).toBe(versionBefore);
     expect(devices.revokeCredentialsCalls).toBe(0);
+  });
+});
+describe('MCP devices (CONVINV-R9)', () => {
+  it('never hold administration or the terminal, whoever grants them', async () => {
+    const { device, service } = fixture();
+    device.platform = 'mcp';
+    const admin = { type: 'local-desktop' as const, id: 'owner', displayName: 'Owner', scopes: [...ALL_SCOPES], transport: 'loopback' as const };
+    await expect(service.updateDeviceScopes(device.deviceId, ['exec:agent', 'admin:settings'], admin)).rejects.toMatchObject<Partial<PairingError>>({
+      code: 'SCOPE_ESCALATION',
+    });
+    await expect(service.updateDeviceScopes(device.deviceId, ['exec:agent', 'write:workflows'], admin)).resolves.toEqual(['exec:agent', 'write:workflows']);
+  });
+});
+
+describe('access-change events (audit F-2)', () => {
+  const admin = {
+    type: 'service-account' as const,
+    id: 'admin',
+    scopes: [...ALL_SCOPES],
+    transport: 'loopback' as const,
+  };
+
+  it('announces revocation, credential rotation and scope changes with what was removed', async () => {
+    const { device, service } = fixture();
+    device.scopes = ['read:status', 'read:chats', 'stream:events'];
+    const seen: unknown[] = [];
+    const off = service.onAccessChanged((change) => seen.push(change));
+
+    await service.updateDeviceScopes(device.deviceId, ['read:status', 'stream:events', 'write:chats'], admin);
+    await service.rotateCredentials(device.deviceId, admin);
+    await service.revokeDevice(device.deviceId, 'lost', admin);
+    off();
+    await service.revokeDevice(device.deviceId, 'again', admin);
+
+    expect(seen).toEqual([
+      {
+        kind: 'scopes-changed',
+        deviceId: 'device-1',
+        scopes: ['read:status', 'stream:events', 'write:chats'],
+        removed: ['read:chats'],
+      },
+      { kind: 'credentials-rotated', deviceId: 'device-1' },
+      { kind: 'revoked', deviceId: 'device-1', reason: 'lost' },
+    ]);
+  });
+
+  it('a throwing listener does not fail the revocation', async () => {
+    const { device, service } = fixture();
+    service.onAccessChanged(() => {
+      throw new Error('boom');
+    });
+    await expect(service.revokeDevice(device.deviceId, 'x', admin)).resolves.toBeUndefined();
   });
 });

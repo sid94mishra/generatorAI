@@ -1,0 +1,19 @@
+appId: ${APP_ID}
+name: auth · a companion device sees its scopes and the honest locked states
+# M7-07. Replaces e2e companion.mjs / legacy.mjs / approveadmin.mjs: the stream connects (Home loads), Security lists
+# what the device holds, admin-only rows ask for access instead of failing.
+tags: [settings, scopes]
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///settings/security
+- extendedWaitUntil: {visible: {id: security-scopes}, timeout: 20000}
+- tapOn: {id: security-scopes}
+# Each row reads "<label>, <scope>" (one accessibility element).
+- extendedWaitUntil: {visible: ".*read:status", timeout: 10000}
+- runFlow: ../_subflows/back.yaml
+- runFlow:
+    when: {visible: {id: security-devices-requires-admin}}
+    commands:
+      - assertVisible: "Requires admin access · Request"
+- openLink: generatorai:///settings/mcp
+- extendedWaitUntil: {visible: {id: settings-mcp-screen}, timeout: 15000}

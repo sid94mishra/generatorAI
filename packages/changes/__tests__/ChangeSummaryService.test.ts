@@ -456,6 +456,124 @@ describe('ChangeSummaryService (real git)', () => {
     for (const repo of summary.repos) expect(repo.head.kind).toBe('working');
   });
 
+  it('a plain folder with no baseline yet reports none of the user\'s files as changed', async () => {
+    // A plain (non-git) folder linked in place is tracked through a shadow
+    // store. Before its baseline checkpoint lands (the mount is still being
+    // prepared) the summary used to diff against the empty tree: the user's
+    // own files read as "added by the agent", and Undo all deleted them.
+    const folder = path.join(tmpRoot, 'notes');
+    const shadow = path.join(tmpRoot, 'shadow', 'notes');
+    await fs.mkdir(folder, { recursive: true });
+    await fs.writeFile(path.join(folder, 'existing.txt'), 'mine\n');
+    expect(await git.initShadowRepo(shadow, folder)).toBe(true);
+
+    const summary = await service.getSummary({
+      ...params(),
+      mounts: [{ alias: 'notes', path: folder, gitDir: shadow }],
+    });
+
+    const repo = summary.repos.find((r) => r.alias === 'notes')!;
+    expect(repo.files).toEqual([]);
+    expect(repo.base.label).toBe('Session start');
+    expect(repo.base.treeish).toBeDefined();
+  });
+
+  it('two chats mounting one folder in place each read through their own shadow store', { timeout: 30_000 }, async () => {
+    const folder = path.join(tmpRoot, 'shared-notes');
+    await fs.mkdir(folder, { recursive: true });
+    await fs.writeFile(path.join(folder, 'spec.md'), 'v1\n');
+    const shadowA = path.join(tmpRoot, 'shadow', 'chat-a');
+    const shadowB = path.join(tmpRoot, 'shadow', 'chat-b');
+    expect(await git.initShadowRepo(shadowA, folder)).toBe(true);
+    expect(await git.initShadowRepo(shadowB, folder)).toBe(true);
+    await fs.writeFile(path.join(folder, 'spec.md'), 'v2\n');
+    const warnings: string[] = [];
+    const logger = { ...silentLogger, warn: (m: string) => void warnings.push(String(m)) } as unknown as ILogger;
+    const svc = new ChangeSummaryService(new GitClient(realRunner, logger, { workspacesDir: tmpRoot }), checkpoints, logger);
+    const read = (gitDir: string) => svc.getSummary({ ...params(), mounts: [{ alias: 'notes', path: folder, gitDir }] });
+    // Alternate the two chats: one must never use the other's index or tree (the tree is not in its store).
+    for (const gitDir of [shadowA, shadowB, shadowA, shadowB]) {
+      // Past the snapshot memo, so each read really stages through an index file.
+      await new Promise((r) => setTimeout(r, ChangeSummaryService.WORKING_TREE_TTL_MS + 200));
+      const summary = await read(gitDir);
+      expect(summary.repos[0]!.base.treeish).toBeDefined();
+    }
+    expect(warnings.filter((w) => /write-tree failed|invalid object/.test(w))).toEqual([]);
+  });
+
+  it('files a sparse checkout keeps off disk are not reported as deleted, directly or through a shadow store (D-171)', async () => {
+    const run = (...args: string[]) =>
+      realRunner.run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd: repoDir, timeout: 15_000 });
+    await fs.writeFile(path.join(repoDir, 'keep.txt'), 'kept\n');
+    await fs.writeFile(path.join(repoDir, 'private.pdf'), 'binary-ish\n');
+    await run('add', '-A');
+    await run('commit', '-m', 'two files');
+    await run('sparse-checkout', 'set', '--no-cone', '/*', '!/private.pdf');
+    await fs.access(path.join(repoDir, 'private.pdf')).then(() => expect.fail('still on disk'), () => undefined);
+    await snapshot('baseline');
+    await fs.writeFile(path.join(repoDir, 'keep.txt'), 'edited\n');
+
+    // Since the session start: the start snapshot keeps the skipped file too, so it is neither added nor deleted.
+    const sinceStart = await service.getSummary(params());
+    expect(sinceStart.repos[0]!.files.map((f) => f.path)).toEqual(['keep.txt']);
+
+    const direct = await service.getSummary({ ...params(), base: { kind: 'ref', id: 'HEAD' } });
+    expect(direct.repos[0]!.files.map((f) => f.path)).toEqual(['keep.txt']);
+
+    const shadow = path.join(tmpRoot, 'shadow', 'sparse');
+    const objects = await git.commonObjectsDir(repoDir);
+    expect(await git.initShadowRepo(shadow, repoDir, { ...(objects ? { alternatesObjectsDir: objects } : {}) })).toBe(true);
+    const viaShadow = await service.getSummary({
+      ...params(),
+      base: { kind: 'ref', id: 'HEAD' },
+      mounts: [{ alias: 'repo', path: repoDir, gitDir: shadow }],
+    });
+    expect(viaShadow.repos[0]!.files.map((f) => f.path)).toEqual(['keep.txt']);
+  });
+
+  it('"Uncommitted changes" (ref HEAD) lists only what the last commit lacks; a shadow folder falls back to its baseline', async () => {
+    await fs.writeFile(path.join(repoDir, 'a.txt'), 'v1\n');
+    await snapshot('baseline');
+    await fs.writeFile(path.join(repoDir, 'a.txt'), 'v2\n');
+    const run = (...args: string[]) =>
+      realRunner.run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd: repoDir, timeout: 15_000 });
+    await run('add', '-A');
+    await run('commit', '-m', 'committed');
+    await fs.writeFile(path.join(repoDir, 'b.txt'), 'not committed\n');
+
+    const sinceChat = await service.getSummary(params());
+    expect(sinceChat.repos[0]!.files.map((f) => f.path).sort()).toEqual(['a.txt', 'b.txt']);
+    const uncommitted = await service.getSummary({ ...params(), base: { kind: 'ref', id: 'HEAD' } });
+    expect(uncommitted.repos[0]!.files.map((f) => f.path)).toEqual(['b.txt']);
+
+    // A repository mount tracked through a shadow store (how chats mount codebases): HEAD is the
+    // repository's, not the store's, and the store reads its objects through alternates.
+    const repoShadow = path.join(tmpRoot, 'shadow', 'repo');
+    const objects = await git.commonObjectsDir(repoDir);
+    expect(await git.initShadowRepo(repoShadow, repoDir, { ...(objects ? { alternatesObjectsDir: objects } : {}) })).toBe(true);
+    const viaShadow = await service.getSummary({
+      ...params(),
+      base: { kind: 'ref', id: 'HEAD' },
+      mounts: [{ alias: 'repo', path: repoDir, gitDir: repoShadow }],
+    });
+    expect(viaShadow.repos[0]!.files.map((f) => f.path)).toEqual(['b.txt']);
+    expect(viaShadow.repos[0]!.base.label).toBe('Last commit');
+
+    const folder = path.join(tmpRoot, 'notes');
+    const shadow = path.join(tmpRoot, 'shadow', 'notes');
+    await fs.mkdir(folder, { recursive: true });
+    await fs.writeFile(path.join(folder, 'existing.txt'), 'mine\n');
+    expect(await git.initShadowRepo(shadow, folder)).toBe(true);
+    const plain = await service.getSummary({
+      ...params(),
+      base: { kind: 'ref', id: 'HEAD' },
+      mounts: [{ alias: 'notes', path: folder, gitDir: shadow }],
+    });
+    const notes = plain.repos.find((r) => r.alias === 'notes')!;
+    expect(notes.files).toEqual([]);
+    expect(notes.base.label).toBe('Session start');
+  });
+
   it('marks the first-commit fallback normalized, so a CRLF checkout is not all-changed', async () => {
     const g = (...args: string[]) =>
       realRunner.run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: repoDir, timeout: 15_000 });

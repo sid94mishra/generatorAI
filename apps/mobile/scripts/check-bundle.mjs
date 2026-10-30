@@ -41,6 +41,9 @@ const FORBIDDEN = [
   { pattern: /node_modules\/(express|better-sqlite3|ws|node-pty|playwright)\b/, why: 'server runtime' },
   { pattern: /node_modules\/@gorhom\//, why: 'removed sheet library' },
   { pattern: /node_modules\/@shopify\/react-native-skia\//, why: 'removed (native 10 MB, unused)' },
+  // 02 §5.2: per-icon imports only (Icon/lucide.ts imports `lucide-react-native/icons/*`); the 1.x barrel bundles every icon.
+  { pattern: /lucide-react-native\/dist\/esm\/lucide-react-native\.mjs$/, why: 'lucide barrel (use lucide-react-native/icons/<name>)' },
+  { pattern: /lucide-react-native\/dist\/esm\/icons\/index\.mjs$/, why: 'lucide icons barrel' },
 ];
 
 // Note: `semver` still appears via react-native-reanimated's own
@@ -50,7 +53,11 @@ const FORBIDDEN = [
 /** Per-package source-size ceilings (bytes of source). */
 const CEILINGS = {
   'lucide-react-native': 200_000,
-  'workspace:shared': 200_000,
+  // Source bytes, type declarations and comments included (types/AgentEvent.ts alone is 44 KB,
+  // mostly erased at build). M2 deliberately moved status maps, the ui-contract (commands, keys,
+  // copy) and the timeline model into shared, so the 200 KB pre-overhaul budget no longer fits;
+  // server-only shared modules stay banned by FORBIDDEN above (MD-125). Measured 336 KB at M3.
+  'workspace:shared': 400_000,
 };
 
 function packageKey(source) {

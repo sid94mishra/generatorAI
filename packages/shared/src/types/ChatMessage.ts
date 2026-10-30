@@ -11,8 +11,10 @@ import type {
 import type { FileOpStat } from './AgentEvent.js';
 
 export interface ChatMessageMetadata {
-  /** Thinking/reasoning text from the harness */
+  /** Thinking/reasoning text from the harness (all of the turn's, joined) */
   thinkingText?: string;
+  /** Each stretch of thinking with the turn ordinal it started at, so history shows it where it happened. */
+  thinkingSegments?: Array<{ text: string; sequence?: number }>;
   /** Tool calls made during this response */
   toolCalls?: Array<{
     id: string;
@@ -82,6 +84,11 @@ export interface ChatMessageMetadata {
    * anchors were captured — those fall back to the synthetic rewind.
    */
   providerAnchor?: { kind: 'message' | 'turn'; id: string };
+  /** Assistant messages: the model id and provider the turn ran on, as the
+   *  provider's own usage report named them. The transcript heads a past turn
+   *  with them; absent when the provider reported no usage. */
+  model?: string;
+  provider?: string;
   /** Widget instance IDs rendered as part of this message.
    *  The client uses these to reconstitute inline widget blocks on
    *  history replay (see chatMessageToBlocks). */
@@ -121,8 +128,19 @@ export interface ChatMessage {
   toolName?: string;
   toolArgs?: unknown;
   toolResult?: unknown;
-  workflowId?: string;
   /** Rich metadata for assistant messages (thinking, tool calls, system msgs) */
   metadata?: ChatMessageMetadata;
+  /**
+   * RV-10 — assistant messages: true when written on the provider's final
+   * turn event, false for a turn cut short (stop, pause, abort). Stored as
+   * `chat_messages.complete` (v56); absent on other roles.
+   */
+  complete?: boolean;
+  /**
+   * The role of the turn in a workflow stage conversation
+   * (`chat_messages.turn_role`, v57): prompt, repair, summary,
+   * approval_feedback and so on. Absent on chat messages.
+   */
+  turnRole?: string;
   timestamp: Date;
 }

@@ -5,14 +5,18 @@
     "rootDir": "./src",
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
       "@generatorai/shared": ["../../packages/shared/src/index.ts"],
       "@generatorai/client-runtime": ["../../packages/client-runtime/src/index.ts"]
     },
     "moduleResolution": "bundler",
-    "noEmit": true
+    "noEmit": true,
+    // An app emits no .d.ts. Inherited from the base, `declaration` made TS 6
+    // reject every CSF `satisfies Meta` object as a non-portable declaration
+    // (TS2883: its inferred type names Storybook's internal csf types).
+    "declaration": false,
+    "declarationMap": false
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "references": [

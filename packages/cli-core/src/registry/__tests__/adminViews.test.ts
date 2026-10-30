@@ -32,8 +32,9 @@ describe('admin views', () => {
       'skills',
       'prompts',
       'mcp',
-      'hooks',
-      'webhooks',
+      // Hooks are listed by phase; session-scoped hook listing and the v1
+      // webhook registrations were deleted with the v1 session stack (P01).
+      'hook-phases',
       'providers',
       'connections',
       'devices',

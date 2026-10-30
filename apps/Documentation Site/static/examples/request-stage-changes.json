@@ -1,4 +1,6 @@
 {
+  "command": "approve",
+  "instanceId": "9b2d7c1e-5f4a-5c3b-8e21-0d6f4a7b3c10",
   "outcome": "changes_requested",
-  "followUpPrompt": "Add a regression test for the legacy bookmarked URL before continuing."
+  "feedback": "Add a regression test for the bookmarked URL before continuing."
 }

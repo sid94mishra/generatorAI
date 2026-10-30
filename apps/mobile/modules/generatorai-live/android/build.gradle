@@ -1,0 +1,22 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'dev.generatorai'
+version = '0.1.0'
+
+android {
+  namespace "dev.generatorai.live"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  // NotificationCompat.ProgressStyle, Builder.setRequestPromotedOngoing / setShortCriticalText and
+  // NotificationManagerCompat.canPostPromotedNotifications arrived in androidx.core 1.17 (compileSdk 36, which
+  // React Native 0.86 already uses). Below API 36 ProgressStyle falls back to a plain determinate progress bar.
+  implementation "androidx.core:core:1.17.0"
+}

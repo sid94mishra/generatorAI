@@ -61,124 +61,27 @@ describe('HttpPlatformClient', () => {
     resetMuxStreamForTests();
   });
 
-  it('sends orchestrated uploads and overrides in one request before execution', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse({ workflowRunId: 'r1' }, 201));
+  it('starts a run with its uploads and overrides in one invocation request', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse({ runId: 'r1' }, 202));
     const skill = new File(['skill instructions'], 'review.md', { type: 'text/markdown' });
-    await client.startOrchestratedRun({
-      workflowDefinitionId: 'd1', stageOverrides: [{ stageIndex: 1, skip: true }],
-      uploads: { skills: [skill], prompts: [], agents: [] },
-    });
+    const request = {
+      target: { kind: 'definition' as const, workflowDefinitionId: 'd1' },
+      variables: {},
+      stageOverrides: [{ stageKey: 'review', skip: true }],
+    };
+    // jsdom's FormData drops a Blob part's filename, so read what was appended.
+    const append = vi.spyOn(FormData.prototype, 'append');
+    await client.invokeWorkflow(request, { idempotencyKey: 'k1', files: { skills: [skill] } });
+    expect(append).toHaveBeenCalledWith('skills', expect.any(Blob), 'review.md');
+    append.mockRestore();
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    const init = vi.mocked(globalThis.fetch).mock.calls[0]?.[1];
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
+    expect(url).toBe('http://localhost:3000/api/workflow-invocations');
     const body = init?.body as FormData;
-    expect(JSON.parse(body.get('config') as string)).toEqual({
-      workflowDefinitionId: 'd1', stageOverrides: [{ stageIndex: 1, skip: true }],
-    });
-    expect((body.get('skills') as File).name).toBe('review.md');
-    expect(new Headers(init?.headers).has('content-type')).toBe(false);
-  });
-
-  // ── Session CRUD ──
-
-  it('createSession calls POST /api/sessions with JSON body', async () => {
-    const session = { id: 's1', name: 'Test', status: 'created' };
-    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse(session, 201));
-
-    const params = { name: 'Test', workflows: [{ templateId: 'code-generation' }] };
-    const result = await client.createSession(params as any);
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/sessions',
-      expect.objectContaining({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
-      }),
-    );
-    expect(result).toEqual(session);
-  });
-
-  it('getSessions calls GET /api/sessions', async () => {
-    const sessions = [{ id: 's1', name: 'A' }, { id: 's2', name: 'B' }];
-    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse(sessions));
-
-    const result = await client.getSessions();
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/sessions',
-      expect.objectContaining({ headers: {} }),
-    );
-    expect(result).toEqual(sessions);
-  });
-
-  it('getSession calls GET /api/sessions/:id', async () => {
-    const session = { id: 's1', name: 'Test', workflows: [] };
-    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse(session));
-
-    const result = await client.getSession('s1');
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/sessions/s1',
-      expect.objectContaining({ headers: {} }),
-    );
-    expect(result).toEqual(session);
-  });
-
-  // ── Session Control ──
-
-  it('startSession calls POST /api/sessions/:id/start', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(noContentResponse());
-
-    await client.startSession('s1');
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/sessions/s1/start',
-      expect.objectContaining({ method: 'POST' }),
-    );
-  });
-
-  it('pauseSession calls POST /api/sessions/:id/pause', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(noContentResponse());
-
-    await client.pauseSession('s1');
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/sessions/s1/pause',
-      expect.objectContaining({ method: 'POST' }),
-    );
-  });
-
-  it('resumeSession calls POST /api/sessions/:id/resume', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(noContentResponse());
-
-    await client.resumeSession('s1');
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/sessions/s1/resume',
-      expect.objectContaining({ method: 'POST' }),
-    );
-  });
-
-  it('cancelSession calls POST /api/sessions/:id/cancel', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(noContentResponse());
-
-    await client.cancelSession('s1');
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/sessions/s1/cancel',
-      expect.objectContaining({ method: 'POST' }),
-    );
-  });
-
-  it('deleteSession calls DELETE /api/sessions/:id', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(noContentResponse());
-
-    await client.deleteSession('s1');
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/sessions/s1',
-      expect.objectContaining({ method: 'DELETE' }),
-    );
+    expect(JSON.parse(body.get('request') as string)).toEqual(request);
+    const headers = new Headers(init?.headers);
+    expect(headers.has('content-type')).toBe(false);
+    expect(headers.get('idempotency-key')).toBe('k1');
   });
 
   // ── Chat ──
@@ -301,15 +204,19 @@ describe('HttpPlatformClient', () => {
   }
 
   function makeMockEventSource(closeFn: () => void = vi.fn()) {
-    return vi.fn().mockImplementation(() => ({
-      onopen: null,
-      onerror: null,
-      onmessage: null,
-      close: closeFn,
-      readyState: 0,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    }));
+    // Called with `new`, so the implementation must be a `function` (Vitest 4
+    // refuses to construct an arrow-function mock).
+    return vi.fn().mockImplementation(function () {
+      return {
+        onopen: null,
+        onerror: null,
+        onmessage: null,
+        close: closeFn,
+        readyState: 0,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      };
+    });
   }
 
   it('subscribeToEvents creates EventSource and returns unsubscribe function', async () => {
@@ -442,5 +349,51 @@ describe('HttpPlatformClient', () => {
       'http://localhost:3000/api/system/mcp-servers/system/system-mcp-filesystem',
       expect.objectContaining({ method: 'PUT', body: JSON.stringify(data) }),
     );
+  });
+
+  it('P2-R1: deleteChats splits a selection above the server cap into capped requests and merges them', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation(async (_url, init) => {
+      const { ids } = JSON.parse(String(init?.body)) as { ids: string[] };
+      return jsonResponse({ succeeded: ids, failed: [] });
+    });
+    const ids = Array.from({ length: 401 }, (_, i) => `c${i}`);
+    const result = await client.deleteChats(ids);
+    const sizes = vi.mocked(globalThis.fetch).mock.calls.map(
+      ([url, init]) => [String(url), (JSON.parse(String(init?.body)) as { ids: string[] }).ids.length],
+    );
+    expect(sizes).toEqual([
+      ['http://localhost:3000/api/chats/delete', 200],
+      ['http://localhost:3000/api/chats/delete', 200],
+      ['http://localhost:3000/api/chats/delete', 1],
+    ]);
+    expect(result).toEqual({ succeeded: ids, failed: [] });
+  });
+
+  it('G-09: provider methods hit the harness routes (refresh only on request)', async () => {
+    const providers = { primary: 'copilot', stale: false, providers: [] };
+    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse(providers));
+    expect(await client.getHarnessProviders()).toEqual(providers);
+    await client.getHarnessProviders({ refresh: true });
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonResponse({ authUrl: 'https://auth.example' }));
+    expect(await client.loginProvider('claude-agent')).toEqual({ authUrl: 'https://auth.example' });
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonResponse({ ok: true }));
+    await client.logoutProvider('codex');
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonResponse({ message: 'm', type: 'codex', switched: true }));
+    expect(await client.setDefaultProvider('codex')).toMatchObject({ switched: true });
+    const calls = vi.mocked(globalThis.fetch).mock.calls.map(([url, init]) => [String(url), init?.method ?? 'GET']);
+    expect(calls).toEqual([
+      ['http://localhost:3000/api/harness/providers', 'GET'],
+      ['http://localhost:3000/api/harness/providers?refresh=1', 'GET'],
+      ['http://localhost:3000/api/harness/providers/claude-agent/login', 'POST'],
+      ['http://localhost:3000/api/harness/providers/codex/logout', 'POST'],
+      ['http://localhost:3000/api/harness/switch', 'POST'],
+    ]);
+  });
+
+  it('G-09: a refused sign-in surfaces the server message', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      jsonResponse({ error: { code: 'UNSUPPORTED', message: 'copilot has no in-app sign-in' } }, 409),
+    );
+    await expect(client.loginProvider('copilot')).rejects.toThrow(/no in-app sign-in/);
   });
 });

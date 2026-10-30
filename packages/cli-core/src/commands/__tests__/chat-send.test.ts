@@ -23,7 +23,12 @@ function fakeContext(overrides: {
   return {
     api: {
       chats: {
-        list: vi.fn(async () => [CHAT_SUMMARY]),
+        list: vi.fn(async () => ({
+          items: [CHAT_SUMMARY],
+          nextCursor: null,
+          total: 1,
+          counts: { all: 1, active: 1, archived: 0 },
+        })),
         get: vi.fn(async () => ({ ...CHAT_SUMMARY, sessionId: overrides.sessionId ?? 's1' })),
         send,
         sendWithAttachments,

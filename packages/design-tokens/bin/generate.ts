@@ -10,14 +10,37 @@
 // ────────────────────────────────────────────────────────────────
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { emitCss, spliceCss } from '../src/emit/css.js';
-import { emitNative } from '../src/emit/native.js';
+import { prepaintCspHash, splicePrepaint } from '../src/emit/prepaint.js';
+import { emitStaticCss } from '../src/emit/static.js';
+import {
+  emitNativePalette,
+  emitNativePaletteIndex,
+  emitSplashColors,
+  emitUniwindThemeList,
+  emitUniwindThemes,
+} from '../src/emit/uniwind.js';
+import { THEMES } from '../src/themes/index.js';
+import {
+  emitMobileVocabularyCss,
+  emitMobileVocabularyJson,
+  emitVocabularyCss,
+  emitVocabularyJson,
+} from '../src/emit/vocabulary.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../../..');
+
+/** Swap the one `sha256-…` source the pattern captures around for the current pre-paint hash. */
+function replacePin(existing: string | null, pattern: RegExp): string {
+  if (existing === null || !pattern.test(existing)) {
+    throw new Error(`CSP pin not found (expected ${pattern})`);
+  }
+  return existing.replace(pattern, `$1${prepaintCspHash()}$2`);
+}
 
 interface Target {
   label: string;
@@ -40,10 +63,104 @@ const targets: Target[] = [
     },
   },
   {
-    label: 'mobile token module',
-    path: resolve(repoRoot, 'apps/mobile/src/theme/tokens.generated.ts'),
+    label: 'web pre-paint script',
+    path: resolve(repoRoot, 'apps/web/index.html'),
+    render(existing) {
+      if (existing === null) {
+        throw new Error('apps/web/index.html not found');
+      }
+      return splicePrepaint(existing);
+    },
+  },
+  // The pre-paint script is allow-listed by SHA-256 in two CSPs (the server's
+  // header and the desktop's CSP floor); both pins must follow the script.
+  {
+    label: 'server CSP pre-paint hash',
+    path: resolve(repoRoot, 'apps/server/src/middleware/csp.ts'),
+    render: (existing) => replacePin(existing, /(THEME_SCRIPT_CSP_HASH = ')sha256-[A-Za-z0-9+/=]+(')/),
+  },
+  {
+    label: 'desktop CSP pre-paint hash',
+    path: resolve(repoRoot, 'apps/desktop/src/main/session-hardening.ts'),
+    render: (existing) => replacePin(existing, /("script-src 'self' ')sha256-[A-Za-z0-9+/=]+(')/),
+  },
+  // Static desktop pages (06 §7, P5-11): no script beyond error.html's own
+  // (CSP `default-src 'none'`), so they get one generated `:root` block +
+  // dark-mode media query instead of the web app's full layer stack.
+  {
+    label: 'desktop splash page tokens',
+    path: resolve(repoRoot, 'apps/desktop/resources/splash.html'),
+    render(existing) {
+      if (existing === null) throw new Error('apps/desktop/resources/splash.html not found');
+      return spliceCss(existing, emitStaticCss());
+    },
+  },
+  {
+    label: 'desktop error page tokens',
+    path: resolve(repoRoot, 'apps/desktop/resources/error.html'),
+    render(existing) {
+      if (existing === null) throw new Error('apps/desktop/resources/error.html not found');
+      return spliceCss(existing, emitStaticCss());
+    },
+  },
+  {
+    label: 'desktop prompt page tokens',
+    path: resolve(repoRoot, 'apps/desktop/resources/prompt.html'),
+    render(existing) {
+      if (existing === null) throw new Error('apps/desktop/resources/prompt.html not found');
+      return spliceCss(existing, emitStaticCss());
+    },
+  },
+  {
+    label: 'shared class vocabulary',
+    path: resolve(repoRoot, 'packages/design-tokens/css/vocabulary.css'),
+    render: () => emitVocabularyCss(),
+  },
+  {
+    label: 'vocabulary lists for Node tools',
+    path: resolve(repoRoot, 'packages/design-tokens/generated/vocabulary.json'),
+    render: () => emitVocabularyJson(),
+  },
+  {
+    label: 'mobile class vocabulary',
+    path: resolve(repoRoot, 'packages/design-tokens/css/vocabulary-mobile.css'),
+    render: () => emitMobileVocabularyCss(),
+  },
+  {
+    label: 'mobile vocabulary lists',
+    path: resolve(repoRoot, 'packages/design-tokens/generated/vocabulary-mobile.json'),
+    render: () => emitMobileVocabularyJson(),
+  },
+  {
+    label: 'mobile Uniwind themes',
+    path: resolve(repoRoot, 'apps/mobile/src/theme/uniwind-themes.css'),
     optional: true,
-    render: () => emitNative(),
+    render: () => emitUniwindThemes(),
+  },
+  {
+    label: 'mobile Uniwind theme list',
+    path: resolve(repoRoot, 'apps/mobile/src/theme/uniwind-themes.json'),
+    optional: true,
+    render: () => emitUniwindThemeList(),
+  },
+  // Literal palettes for native hosts, one module per theme (02 §9.3).
+  ...THEMES.map((theme) => ({
+    label: `mobile palette ${theme.id}`,
+    path: resolve(repoRoot, `apps/mobile/src/theme/palettes/${theme.id}.ts`),
+    optional: true,
+    render: () => emitNativePalette(theme.id),
+  })),
+  {
+    label: 'mobile palette index',
+    path: resolve(repoRoot, 'apps/mobile/src/theme/palettes/index.ts'),
+    optional: true,
+    render: () => emitNativePaletteIndex(),
+  },
+  {
+    label: 'mobile splash colours',
+    path: resolve(repoRoot, 'apps/mobile/src/theme/splash-colors.json'),
+    optional: true,
+    render: () => emitSplashColors(),
   },
 ];
 
@@ -86,8 +203,10 @@ for (const target of targets) {
   const exists = existsSync(target.path);
 
   if (!exists && target.optional) {
-    // The host app is not scaffolded yet — nothing to keep in sync.
-    if (!existsSync(dirname(target.path))) {
+    // The host app is not scaffolded yet — nothing to keep in sync. A missing
+    // folder INSIDE a present app (e.g. a first palettes/ write) is created.
+    const appRoot = resolve(repoRoot, relative(repoRoot, target.path).split(/[\\/]/).slice(0, 2).join('/'));
+    if (!existsSync(appRoot)) {
       console.log(`  skip   ${target.label} (host app not present)`);
       continue;
     }

@@ -1,0 +1,12 @@
+appId: ${APP_ID}
+# The workspace pane toggle: `pane-toggle` on Android; the iOS native toolbar item by its label (MD-95, MD-133).
+---
+- runFlow: pane-closed.yaml
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: {id: pane-toggle}
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: "Open workspace pane.*"

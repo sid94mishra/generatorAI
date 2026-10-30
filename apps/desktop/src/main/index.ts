@@ -7,19 +7,21 @@
 // parity with the web app, and full CLI parity at the API layer.
 // ────────────────────────────────────────────────────────────────
 
-import { app, dialog, nativeTheme, BrowserWindow, Menu, session } from 'electron';
+import { app, dialog, nativeTheme, BrowserWindow, session } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { log } from './logger';
 import { loadSettings } from './config';
-import { getServerManager, VAULT_UNREADABLE_MESSAGE } from './server-manager';
+import { getServerManager, KeystoreUnavailableError, VAULT_UNREADABLE_MESSAGE } from './server-manager';
 import { resolveTarget } from './serverConnections';
+import { VERIFY_USE_CHROMIUM, verifyWithPins } from './pinnedTrust';
 import { getWindowManager } from './window-manager';
-import { nativeBrowserEnabled } from './browser-host';
-import { disposeComputerHost, initComputerHost } from './computer-host-registry';
+import { getNativeBrowserHost, nativeBrowserEnabled } from './browser-host';
+import { initComputerHost } from './computer-host-registry';
 import { setIpcToken } from './cdp/ipc-token';
 import { registerIpc } from './ipc';
-import { buildMenu, syncMenuThemeFromSettings } from './menu';
-import { createTray, destroyTray, refreshTrayMenu } from './tray';
+import { buildMenu, setMenuUpdateReady, syncMenuThemeFromSettings } from './menu';
+import { registerLauncherActions } from './launcher-actions';
+import { createTray, refreshTrayMenu } from './tray';
 import { registerDownloadHandler } from './downloads';
 import {
   registerDeepLinks,
@@ -27,15 +29,20 @@ import {
   handleDeepLink,
   findDeepLinkInArgv,
 } from './deep-link';
-import { initAutoUpdates, checkForUpdatesInteractive } from './updater';
+import {
+  checkForUpdatesInteractive,
+  initAutoUpdates,
+  installUpdateInteractive,
+  onUpdateStateChange,
+} from './updater';
 import { repointTarget } from './repoint';
+import { isQuitting, quitApp } from './quit-coordinator';
+import { handleLocalPages, registerLocalPagesScheme } from './local-pages';
 
 const DEV_SERVER_URL = process.env['DESKTOP_DEV_SERVER_URL'] || null;
 const mode: 'dev' | 'standalone' = DEV_SERVER_URL ? 'dev' : 'standalone';
 
 let appUrl: string | null = null;
-let isQuitting = false;
-let quitHandled = false;
 /**
  * One process-lifetime secret used to authenticate the desktop→server
  * handshake route that pushes each workspace's scoped CDP endpoint (see
@@ -47,6 +54,9 @@ let quitHandled = false;
 let ipcToken: string | null = null;
 
 // Single-instance lock — focus the existing window instead of opening a 2nd.
+// Before ready: the shell's splash/error/prompt pages come from a custom scheme (local-pages.ts).
+registerLocalPagesScheme();
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -57,33 +67,11 @@ if (!app.requestSingleInstanceLock()) {
   main();
 }
 
-/**
- * Resolve `work`, or give up after `ms` and carry on.
- *
- * Deliberately resolves rather than rejects on the deadline: the caller's job
- * is to finish quitting either way, and a rejection there would only travel to
- * a `catch` that logs and continues. The timer is unref'd so it can never be
- * the reason the process stays alive — which would be a fine irony in a
- * shutdown path.
- */
-async function withDeadline(work: Promise<void>, ms: number, message: string): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  const deadline = new Promise<void>((resolve) => {
-    timer = setTimeout(() => {
-      log.warn(message);
-      resolve();
-    }, ms);
-    timer.unref?.();
-  });
-  try {
-    await Promise.race([work, deadline]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
 function main(): void {
   registerProtocolClient();
+  // Before `whenReady`: on macOS a link that launches the app arrives as
+  // `open-url` during `will-finish-launching`.
+  registerDeepLinks();
 
   app.on('second-instance', (_event, argv) => {
     const win = getWindowManager().getMainWindow();
@@ -121,63 +109,27 @@ function main(): void {
     }
   });
 
-  app.on('before-quit', async (event) => {
-    if (quitHandled) return;
+  app.on('before-quit', (event) => {
+    // Every quit, an update install's included, is cancelled here and
+    // finished by `quitApp`: it asks before discarding unsaved edits (Cmd+Q
+    // and the Dock's Quit reach here without the window's close handler ever
+    // running), runs the bounded shutdown and ends in `app.exit(0)`, which
+    // still emits `quit` for electron-updater (quit-coordinator.ts).
     event.preventDefault();
-    // Ask before discarding unsaved edits — Cmd+Q and the Dock's Quit reach
-    // here without the window's close handler ever running.
-    if (!(await getWindowManager().confirmDiscard())) return;
-    quitHandled = true;
-    isQuitting = true;
-    // Let the minimise-to-tray `close` interception stand aside.
-    getWindowManager().setQuitting(true);
-    log.info('Quitting — shutting down embedded server');
-    try {
-      // Bounded, because `app.exit(0)` below is the only thing that actually
-      // ends the process once `preventDefault()` has been called. Anything that
-      // can hang in here — a server that will not drain, a driver that will not
-      // release — takes the whole quit with it, and the user is left with a
-      // window that closed and an application that did not, still holding the
-      // database and the port. That happened: the packaged app hung here
-      // indefinitely and had to be killed from the task manager.
-      //
-      // Graceful shutdown gets a generous window and then loses. `stop()` runs
-      // its own 15 s drain-then-force sequence inside this, so reaching the
-      // deadline means something below it is genuinely stuck, and the honest
-      // response is to say so and go.
-      await withDeadline(
-        (async () => {
-          // Before the server: the driver holds OS-level input grants, and
-          // leaving it running past the app that is responsible for it is
-          // exactly the orphaned-automation case the TCC model is meant to
-          // prevent.
-          await disposeComputerHost();
-          if (mode === 'standalone') await getServerManager().stop();
-        })(),
-        20_000,
-        'shutdown did not finish in 20s — exiting anyway',
-      );
-    } catch (e) {
-      log.warn('Error stopping server during quit', e);
-    } finally {
-      // Logged, not silent. This is the last stretch of a path that has already
-      // hung once in a shipped build, and when it hangs the only evidence is
-      // which of these lines was the last one written.
-      log.info('Shutdown complete — destroying tray');
-      try {
-        destroyTray();
-      } catch (e) {
-        log.warn('Error destroying tray during quit', e);
-      }
-      log.info('Exiting');
-      app.exit(0);
-    }
+    void quitApp(mode);
   });
 }
 
 async function onReady(): Promise<void> {
+  // One line per launch with the running version: the update-install run
+  // (agent-tests/mock-update-server.mjs verify-log) reads it to confirm the
+  // app came back on the new version.
+  log.info('GeneratorAI starting', { version: app.getVersion(), platform: process.platform, packaged: app.isPackaged });
+  handleLocalPages();
   const settings = loadSettings();
-  nativeTheme.themeSource = settings.theme;
+  // Mirror the renderer's last mode (D-25) before any window exists, so
+  // prefers-color-scheme and the native chrome agree from the first frame.
+  nativeTheme.themeSource = settings.appearance.mode;
 
   const wm = getWindowManager();
   const sm = getServerManager();
@@ -186,10 +138,36 @@ async function onReady(): Promise<void> {
   // spawned server sees it as env and can authenticate the per-workspace
   // CDP-endpoint pushes NativeBrowserHost sends as tabs become active.
   sm.setElectronIpcToken(ipcToken);
+  // D-105: an agent's browser call with no Browser dock tab open gets a hidden agent tab.
+  sm.on('browser-ensure-tab', (workspaceId: string) => {
+    const host = getNativeBrowserHost();
+    // The window is otherwise attached on the first renderer-created tab, which is exactly what is missing here.
+    const win = wm.getMainWindow();
+    if (win) host.attachOwnerWindow(win);
+    host.ensureAgentTab(workspaceId);
+  });
 
   registerIpc(mode);
-  registerDeepLinks();
   registerDownloadHandler(session.defaultSession);
+
+  // G-4 (D-126): another machine's GeneratorAI server is trusted through the
+  // CA pinned for it when it was added — for that server's host only. Chromium's
+  // own OK (a ts.net or other public certificate) is kept; everything else
+  // gets Chromium's verdict, so an unpinned self-signed server still fails.
+  // The app's session only: native browser tabs have their own partitions.
+  session.defaultSession.setCertificateVerifyProc((request, callback) => {
+    try {
+      callback(
+        verifyWithPins(
+          { hostname: request.hostname, verificationResult: request.verificationResult, certificatePem: request.certificate.data },
+          loadSettings().servers.connections,
+        ),
+      );
+    } catch (err) {
+      log.warn('Certificate check failed; using Chromium’s verdict', err);
+      callback(VERIFY_USE_CHROMIUM);
+    }
+  });
 
   // Trust self-signed/invalid certs on loopback only — for a browser tab
   // hitting the user's own `https://localhost:PORT` dev server. Checks the
@@ -205,9 +183,18 @@ async function onReady(): Promise<void> {
     }
     callback(false);
   });
-  buildMenu({ showAbout, checkForUpdates: () => void checkForUpdatesInteractive() });
+  buildMenu({
+    showAbout,
+    checkForUpdates: () => void checkForUpdatesInteractive(),
+    installUpdate: () => void installUpdateInteractive(),
+  });
   syncMenuThemeFromSettings();
-  registerNativeShortcuts();
+  // Help ▸ "Check for Updates…" becomes "Restart to Update (v…)" while an
+  // update is ready (06 §8); the same state feeds the renderer's pill.
+  onUpdateStateChange((s) => setMenuUpdateReady(s.status === 'ready' ? (s.downloadedVersion ?? null) : null));
+  registerAboutPanel();
+  // macOS Dock menu / Windows JumpList from the registry's LAUNCHER_ACTIONS.
+  registerLauncherActions();
   createTray();
 
   wm.showSplash();
@@ -226,7 +213,7 @@ async function onReady(): Promise<void> {
   // A vault that stops opening mid-session leaves the server dead and every
   // request failing; the same recovery is offered as at startup.
   sm.on('vault-unreadable', () => {
-    if (isQuitting) return;
+    if (isQuitting()) return;
     void offerVaultReset(sm);
   });
 
@@ -262,12 +249,15 @@ async function onReady(): Promise<void> {
       // reject — reporting that to the user would be blaming them for their own
       // decision, and the window it opens is what used to stop the app exiting
       // at all (see `showError`, which now refuses regardless).
-      if (isQuitting) {
+      if (isQuitting()) {
         log.info('Server start abandoned because the app is quitting');
         return;
       }
       log.error('Embedded server failed to start', err);
-      if (sm.isVaultUnreadable()) {
+      if (err instanceof KeystoreUnavailableError) {
+        await offerKeystoreRetry(err);
+        return;
+      } else if (sm.isVaultUnreadable()) {
         // Recoverable, but only by discarding the vault — so it is the user's
         // call, not ours. Without this the app restart-looped and then sat on
         // an error screen quoting a decryption stack trace, with no way out.
@@ -316,11 +306,27 @@ async function onReady(): Promise<void> {
 }
 
 /**
- * Native OS integrations that are not menus: the macOS About panel (so
- * `⌘ + About GeneratorAI` shows the standard sheet rather than a generic
- * dialog), the Dock menu, and the Windows JumpList. Each is a no-op on the
- * platforms that do not have that affordance.
+ * The OS keystore would not hand over the vault key — most often a macOS
+ * keychain prompt that was dismissed or denied. Nothing is lost, so offer the
+ * fix instead of an error screen. A fresh process is the reliable retry: the
+ * keystore answer can stick for the life of this one, and a relaunch asks the
+ * OS again.
  */
+async function offerKeystoreRetry(err: KeystoreUnavailableError): Promise<void> {
+  const { response } = await dialog.showMessageBox({
+    type: 'warning',
+    buttons: ['Try again', 'Quit'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'GeneratorAI is locked',
+    message: 'GeneratorAI is locked',
+    detail: err.message,
+  });
+  if (response === 0) app.relaunch();
+  // Nothing was started, so there is no graceful shutdown to wait for.
+  app.exit(0);
+}
+
 /**
  * The credential vault cannot be opened with the key this machine still has.
  * That is unrecoverable for the stored credentials, but perfectly recoverable
@@ -358,7 +364,9 @@ async function promptVaultReset(sm: ReturnType<typeof getServerManager>): Promis
       'vault file is kept next to it in case the keystore entry can be restored.',
   });
   if (response !== 0) {
-    isQuitting = true;
+    // `before-quit` → `quitApp` sets the quitting flag once the quit is
+    // accepted; setting it here first leaked when the unsaved-work prompt was
+    // declined (P1-review P2-R38).
     app.quit();
     return false;
   }
@@ -375,59 +383,13 @@ async function promptVaultReset(sm: ReturnType<typeof getServerManager>): Promis
   }
 }
 
-function registerNativeShortcuts(): void {
+function registerAboutPanel(): void {
   app.setAboutPanelOptions({
     applicationName: 'GeneratorAI',
     applicationVersion: app.getVersion(),
     version: `Electron ${process.versions.electron}`,
     copyright: `© ${new Date().getFullYear()} GeneratorAI`,
   });
-
-  const go = (route: string) => {
-    const wm = getWindowManager();
-    const win = wm.getMainWindow();
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.show();
-      win.focus();
-    }
-    wm.navigateTo(route);
-  };
-
-  if (process.platform === 'darwin') {
-    app.dock?.setMenu(
-      Menu.buildFromTemplate([
-        { label: 'New Chat', click: () => go('/chats') },
-        { label: 'New Workflow', click: () => go('/workflows/new') },
-        { type: 'separator' },
-        { label: 'Dashboard', click: () => go('/') },
-      ]),
-    );
-  }
-
-  if (process.platform === 'win32') {
-    // JumpList tasks re-launch the exe with a `generatorai://` argument;
-    // `second-instance` picks it out of argv via findDeepLinkInArgv and
-    // routes the already-running window instead of starting a second copy.
-    app.setUserTasks([
-      {
-        program: process.execPath,
-        arguments: 'generatorai://chats',
-        iconPath: process.execPath,
-        iconIndex: 0,
-        title: 'Chats',
-        description: 'Open GeneratorAI chats',
-      },
-      {
-        program: process.execPath,
-        arguments: 'generatorai://workflows/new',
-        iconPath: process.execPath,
-        iconIndex: 0,
-        title: 'New Workflow',
-        description: 'Create a new GeneratorAI workflow',
-      },
-    ]);
-  }
 }
 
 function showAbout(): void {
@@ -450,6 +412,3 @@ function showAbout(): void {
       .join('\n'),
   });
 }
-
-// Referenced to keep the linter aware these are intentionally part of lifecycle.
-// `isQuitting` is read by the startup-failure path in `onReady`.

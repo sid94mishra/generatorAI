@@ -1,0 +1,29 @@
+appId: ${APP_ID}
+name: workflows · run sheet (stages, overrides page, plan preview, run)
+# M8-02 (MWorkflowLaunch, MWorkflowLaunchAdvanced, MWorkflowLaunchPlan). Starts a real run of the sandbox's
+# "Sandbox Workflow.*" (Faux harness); needs exec:agent + read:workflows.
+tags: [workflows]
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///workflows
+- extendedWaitUntil: {visible: {id: "workflow-row-.*"}, timeout: 20000}
+- tapOn: {id: "workflow-row-.*", index: 0}
+- extendedWaitUntil: {visible: {id: workflow-run}, timeout: 15000}
+- tapOn: {id: workflow-run}
+- extendedWaitUntil: {visible: {id: run-sheet}, timeout: 10000}
+- assertVisible: "Stages 2 of 2"
+- tapOn: {id: run-stage-apply}
+- extendedWaitUntil: {visible: {id: run-stage-page}, timeout: 5000}
+- tapOn: {id: run-stage-run}
+- tapOn: {id: run-stage-done}
+- assertVisible: "Stages 1 of 2"
+# The row sits under the sticky footer until scrolled up; a tap on its centre would press Run.
+- scrollUntilVisible: {element: {id: run-permission-acceptEdits}, direction: DOWN, centerElement: true}
+- tapOn: {id: run-permission-acceptEdits}
+- tapOn: {id: run-sheet-review, retryTapIfNoChange: false}
+- extendedWaitUntil: {visible: "Plan preview", timeout: 15000}
+# Android exposes the row's texts ("L1"), iOS its label ("Layer 1: plan").
+- assertVisible: "(L1|Layer 1).*"
+- tapOn: {id: run-sheet-options}
+- tapOn: {id: run-sheet-run}
+- extendedWaitUntil: {visible: "Plan.*", timeout: 30000}

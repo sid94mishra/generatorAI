@@ -98,7 +98,7 @@ describe('a resumed Claude session', () => {
     const session = {
       conversationId: id, query, input: { end: vi.fn(), push: vi.fn() }, fingerprint: 'fp',
       liveModel: undefined, livePermissionMode: undefined, liveMcpKey: '{}', sdkSessionId: undefined,
-      closed: false, reader: Promise.resolve(),
+      closed: false, reader: Promise.resolve(), backgroundAgents: new Set<string>(),
     };
     session.reader = internals.readSession(session);
     internals.sessions.set(id, session);
@@ -132,6 +132,19 @@ describe('a resumed Claude session', () => {
     expect(supervisor.snapshot().activeExecutions).toBe(0);
   });
 
+  it('knows the SDK session id by the time harness.idle is published (the chat persists it from that handler)', async () => {
+    const { query, turn } = await turnInFlight('c5', 'hello');
+    let idAtIdle: string | undefined = 'unset';
+    provider.onConversationEvent('c5', (e) => {
+      if (e.kind === 'harness.idle') idAtIdle = provider.getProviderSessionId('c5');
+    });
+    query.push({ type: 'system', subtype: 'init', session_id: 'sdk-9' });
+    query.push({ ...ANSWER, session_id: 'sdk-9' });
+    query.push({ ...REAL_RESULT, session_id: 'sdk-9' });
+    await turn.done;
+    expect(idAtIdle).toBe('sdk-9');
+  });
+
   it('still ends a CLI-local command, whose only result has zero turns', async () => {
     const { query, turn } = await turnInFlight('c2', '/compact');
     query.push(HOUSEKEEPING);
@@ -145,6 +158,21 @@ describe('a resumed Claude session', () => {
     query.push({ ...HOUSEKEEPING });
     await turn.done;
     expect(turn.settled).toBe(true);
+  });
+
+  it('ends a failed turn with error THEN idle, so the chat is not left running', async () => {
+    // Live (2026-10-17): a resume of an unknown session failed with an error result; only `harness.error` went out,
+    // and the chat service — which closes a turn on idle — kept the chat "running" for good.
+    const { query, turn, events } = await turnInFlight('c6', 'hello');
+    query.push({
+      type: 'result', subtype: 'error_during_execution', is_error: true, num_turns: 0, session_id: 'sdk-1',
+      errors: ['No conversation found with session ID: 01a1'],
+      usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+    });
+    await turn.done;
+    const kinds = events.map((e) => e.kind).filter((k) => k === 'harness.error' || k === 'harness.idle');
+    expect(kinds).toEqual(['harness.error', 'harness.idle']);
+    expect(events.filter((e) => e.kind === 'harness.context_usage').length).toBeLessThanOrEqual(1);
   });
 
   it('publishes the provider context breakdown even when the probe lands after the result', async () => {

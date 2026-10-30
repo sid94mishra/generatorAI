@@ -65,7 +65,7 @@ Script imports and hook functions execute code. Treat an imported script as soft
 
 ## Source evidence
 
-`apps/web/src/pages/ScriptsListPage.tsx`, `apps/web/src/pages/ScriptDetailPage.tsx`, `apps/web/src/hooks/scriptQueries.ts`, `packages/shared/src/builders/WorkflowBuilder.ts`, `packages/shared/src/builders/StageBuilder.ts`, `packages/shared/src/config/WorkflowScriptSchema.ts`, and `templates/scripts/code-review.workflow.mjs`.
+`apps/web/src/features/scripts/ScriptsListPage.tsx`, `apps/web/src/hooks/scriptQueries.ts`, `packages/shared/src/builders/WorkflowBuilder.ts`, `packages/shared/src/builders/StageBuilder.ts`, `packages/shared/src/config/WorkflowScriptSchema.ts`, and `templates/scripts/code-review.workflow.mjs`.
 
 ## Configuration and worked examples
 

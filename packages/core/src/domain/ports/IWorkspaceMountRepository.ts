@@ -20,6 +20,8 @@ export interface IWorkspaceMountRepository {
   findByWorkspace(workspaceId: string, opts?: { includeRemoved?: boolean }): Promise<WorkspaceMount[]>;
   findByCodebase(codebaseId: string): Promise<WorkspaceMount[]>;
   update(id: string, updates: WorkspaceMountUpdate): Promise<void>;
+  /** Live (not removed) in-place mounts of exactly this folder, across workspaces. */
+  findInPlaceByPath(path: string): Promise<WorkspaceMount[]>;
   delete(id: string): Promise<void>;
   deleteByWorkspace(workspaceId: string): Promise<void>;
 }

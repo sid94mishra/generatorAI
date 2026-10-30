@@ -116,6 +116,12 @@ export interface BrowserServiceConfig {
   restartCooldownMs?: number;
   /** Session id used for global event emission ('browser'). Prefixed. */
   eventBusScopeSessionId?: string;
+  /**
+   * The server is bound to loopback (it runs on the user's machine), so
+   * pages on `localhost` are the user's own dev servers and may load (D-143).
+   * Default false: a network-exposed server's localhost is not the user's.
+   */
+  allowLoopback?: boolean;
 }
 
 export class BrowserService {
@@ -153,6 +159,7 @@ export class BrowserService {
         config?.maxConcurrent ??
         readBoundedInt('GENERATORAI_BROWSER_MAX_CONCURRENT', { defaultValue: 5, min: 1, max: 100 }),
       maxRestarts: config?.maxRestarts ?? 3,
+      allowLoopback: config?.allowLoopback ?? false,
       restartCooldownMs: config?.restartCooldownMs ?? 10_000,
       eventBusScopeSessionId: config?.eventBusScopeSessionId ?? 'browser',
     };
@@ -519,8 +526,8 @@ export class BrowserService {
   }
 
   /**
-   * Idempotent re-attach hook invoked by ChatManagementService /
-   * StageExecutionService on every new user prompt. Restores agent
+   * Idempotent re-attach hook invoked by the session composer on every new
+   * prompt (chats and stages). Restores agent
    * access to a browser the user detached between turns — matches the
    * "next prompt reattaches" semantics discussed in Session 78.
    * No-op when the session doesn't exist yet.
@@ -1249,7 +1256,7 @@ export class BrowserService {
    * driving a local development server remains possible on purpose.
    */
   private navigationVerdict(cfg: BrowserConfig, url: string): NavigationVerdict {
-    return isNavigationAllowed(url, cfg.allowedHosts);
+    return isNavigationAllowed(url, cfg.allowedHosts, { allowLoopback: this.cfg.allowLoopback });
   }
 
   private isHostAllowed(cfg: BrowserConfig, url: string): boolean {

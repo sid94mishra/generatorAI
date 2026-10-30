@@ -3,36 +3,86 @@
 // main process. Every channel is explicitly registered and validated.
 // ────────────────────────────────────────────────────────────────
 
+import { isLocalOnlyChannel, isSameOrigin } from './ipc-scope';
+import { findInPageOptions } from './find-options';
 import { app, dialog, shell, nativeTheme, BrowserWindow } from 'electron';
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {
   IPC,
   IPC_EVENT,
   type AppInfo,
   type DesktopPairingCode,
+  type DesktopServerEntry,
   type MenuState,
-  type ShellState,
+  type DesktopShellStatePush,
   type SaveFileOptions,
-  type ThemePreference,
-  type WindowChrome,
+  type DesktopUpdateState,
 } from '../shared/ipc';
 import { BROWSER_IPC, BROWSER_IPC_EVENT, type BrowserBounds, type NativeBrowserEvent } from '../shared/browser-ipc';
 import { getWindowManager } from './window-manager';
 import { getServerManager } from './server-manager';
 import { getNativeBrowserHost } from './browser-host';
-import { connectionState } from './backend-switcher';
+import { sanitizeAnnotationPalette } from './annotation-palette';
+import {
+  connectionState,
+  listServers,
+  onServersChanged,
+  promptForRemoteServer,
+  switchServerById,
+} from './backend-switcher';
 import { resolvePaths } from './paths';
 import { loadSettings, saveSettings } from './config';
-import { windowChrome } from './platform';
-import { updateMenuState } from './menu';
+import { applyMenuPush, updateMenuState } from './menu';
+import { refreshTrayMenu } from './tray';
+import { clearAttention, setAttention } from './attention-state';
+import { probeKnownServers } from './server-probe';
+import {
+  clearUpdateWatchers,
+  getUpdateState,
+  installUpdateInteractive,
+  onUpdateStateChange,
+  setUpdateWatch,
+} from './updater';
 import { setUnsavedWork } from './unsaved-work';
 import { log } from './logger';
+import { macPermissionStatus, openScreenRecordingSettings, requestMacPermissions } from './computer-host';
 import { createIpcGuard, defaultFromWebContents } from './ipc-guard';
 import { admitPairingRequest, PairingGate } from './pairing-gate';
 import { isRendererSettingKey, validateSettingValue } from './settings-schema';
+import { commitAppearance } from './appearance';
+import type { AttentionCounts, AttentionEntity } from '@generatorai/shared';
 
 /** One gate per process: the limits are about THIS shell's lifetime. */
 const pairingGate = new PairingGate();
+
+const ATTENTION_ENTITIES: readonly AttentionEntity[] = ['chat', 'workflow_run', 'automation_execution'];
+
+/** Non-negative integer, capped at 999 (06 §5.4) — this feeds native menu/tray text. */
+function clampCount(value: unknown): number {
+  const n = typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : 0;
+  return Math.max(0, Math.min(999, n));
+}
+
+/**
+ * Validates a renderer-pushed `attention` patch. `null` (no snapshot yet) and
+ * a well-formed `AttentionCounts` both pass through; anything else is
+ * dropped, same as the rest of `setMenuState`'s validation — the value ends
+ * up in a native menu and the tray, both of which are attacker-adjacent if a
+ * compromised page could inject arbitrary text into them.
+ */
+function sanitizeAttention(value: unknown): AttentionCounts | null | undefined {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object') return undefined;
+  const a = value as Partial<AttentionCounts>;
+  if (!a.byEntity || typeof a.byEntity !== 'object') return undefined;
+  const byEntity = {} as AttentionCounts['byEntity'];
+  for (const entity of ATTENTION_ENTITIES) {
+    const raw = (a.byEntity as Record<string, { needsYou?: unknown; running?: unknown } | undefined>)[entity];
+    byEntity[entity] = { needsYou: clampCount(raw?.needsYou), running: clampCount(raw?.running) };
+  }
+  return { needsYou: clampCount(a.needsYou), running: clampCount(a.running), byEntity };
+}
 
 /**
  * Native confirmation for every pairing mint after the first. Drawn by the OS,
@@ -58,6 +108,11 @@ async function confirmPairingNatively(deviceName: string | undefined): Promise<b
   return response === 0;
 }
 
+/** True when `frameUrl` is a page of the embedded server at `embeddedUrl`. */
+export function isEmbeddedServerOrigin(frameUrl: string | undefined, embeddedUrl: string | null): boolean {
+  return isSameOrigin(frameUrl, embeddedUrl);
+}
+
 export function registerIpc(mode: 'dev' | 'standalone'): void {
   const wm = getWindowManager();
   const sm = getServerManager();
@@ -66,14 +121,22 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
   // Every channel below goes through the sender guard: only the main window's
   // top frame, on the app origin, may call in. Browser-tab WebContentsViews,
   // popups and iframes are refused and logged. See ipc-guard.ts.
-  const { guardedHandle } = createIpcGuard({
+  const { guardedHandle, isLocalSender } = createIpcGuard({
     getMainWindow: () => wm.getMainWindow(),
     getAppUrl: () => wm.getAppUrl(),
     fromWebContents: defaultFromWebContents,
     log,
+    // A remote server's page in the window may not call channels that act on
+    // this computer (ipc-scope.ts). "This computer's server": the embedded one
+    // (or the dev server the shell was started against), while not in remote mode.
+    isLocalOnlyChannel,
+    isLocalOrigin: (frameUrl) =>
+      connectionState().serverMode !== 'remote' && isSameOrigin(frameUrl, mode === 'dev' ? wm.getAppUrl() : sm.url),
   });
 
-  guardedHandle(IPC.getAppInfo, (): AppInfo => {
+  guardedHandle(IPC.getAppInfo, (e): AppInfo => {
+    // A remote server's page learns the app and platform, not this computer's paths or its server.
+    const local = isLocalSender(e);
     return {
       name: app.getName(),
       version: app.getVersion(),
@@ -87,9 +150,10 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
       arch: process.arch,
       isPackaged: app.isPackaged,
       mode,
-      dataDir: paths.dataDir,
-      logFile: log.getLogFilePath() ?? '',
-      serverUrl: sm.url,
+      dataDir: local ? paths.dataDir : '',
+      logFile: local ? (log.getLogFilePath() ?? '') : '',
+      serverUrl: local ? sm.url : null,
+      localServer: local,
     };
   });
 
@@ -100,9 +164,18 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
     await sm.restart();
   });
 
-  guardedHandle(IPC.selectDirectory, async (): Promise<string | null> => {
+  // The OS folder picker (D-136). Local-only (ipc-scope.ts): a path picked here
+  // names a folder on THIS computer, which only this computer's server can use.
+  guardedHandle(IPC.selectDirectory, async (_e, opts?: { defaultPath?: unknown }): Promise<string | null> => {
     const win = BrowserWindow.getFocusedWindow() ?? wm.getMainWindow() ?? undefined;
-    const res = await dialog.showOpenDialog(win!, { properties: ['openDirectory', 'createDirectory'] });
+    // Only an absolute path is a usable start; anything else opens the OS default.
+    const defaultPath =
+      typeof opts?.defaultPath === 'string' && path.isAbsolute(opts.defaultPath) ? opts.defaultPath : undefined;
+    // `createDirectory` is macOS-only; Windows and Linux dialogs offer "New folder" themselves.
+    const res = await dialog.showOpenDialog(win!, {
+      properties: ['openDirectory', 'createDirectory'],
+      ...(defaultPath ? { defaultPath } : {}),
+    });
     if (res.canceled || res.filePaths.length === 0) return null;
     return res.filePaths[0] ?? null;
   });
@@ -154,14 +227,8 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
   guardedHandle(IPC.findInPage, (e, arg: unknown): void => {
     const a = (arg ?? {}) as { text?: unknown; forward?: unknown; findNext?: unknown };
     if (typeof a.text !== 'string' || a.text.length === 0) return;
-    // `findNext` is OMITTED rather than set to false for a new search.
-    // Electron 42 answers a request carrying an explicit `findNext: false`
-    // without ever emitting `found-in-page`, so the bar showed no match count
-    // at all; leaving the key out takes the same code path as the documented
-    // default and reports normally.
-    const options: Electron.FindInPageOptions = { forward: a.forward !== false };
-    if (a.findNext === true) options.findNext = true;
-    e.sender.findInPage(a.text, options);
+    // The renderer's `findNext` means "step"; Electron's means "new session" (find-options.ts).
+    e.sender.findInPage(a.text, findInPageOptions(a));
   });
 
   guardedHandle(IPC.stopFindInPage, (e): void => {
@@ -185,8 +252,13 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
   // the renderer shows on its manual pairing screen.
   guardedHandle(
     IPC.requestPairingCode,
-    async (_e, deviceName?: unknown): Promise<DesktopPairingCode | null> => {
+    async (e, deviceName?: unknown): Promise<DesktopPairingCode | null> => {
       if (mode === 'dev') return null;
+      // Only a page served by THIS shell's own server may pair itself with it.
+      // Another machine's server shown in the window (remote mode, D-126) is
+      // the main window's document too, and must never be able to mint an
+      // all-scope grant for this computer.
+      if (!isEmbeddedServerOrigin(e.senderFrame?.url, sm.url)) return null;
       const name = typeof deviceName === 'string' && deviceName.length > 0 ? deviceName.slice(0, 64) : undefined;
       await admitPairingRequest(name, { gate: pairingGate, confirm: confirmPairingNatively, log });
       return sm.requestPairingCode(name);
@@ -197,12 +269,15 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
     wm.openExternalSafely(url);
   });
 
-  // ── Window chrome ──────────────────────────────────────────────
-  //
-  // The renderer needs to know how much room the OS window controls occupy
-  // so its header can reserve exactly that much — the inset differs by
-  // platform (traffic lights left on macOS, min/max/close right elsewhere).
-  guardedHandle(IPC.getWindowChrome, (): WindowChrome => windowChrome());
+  guardedHandle(IPC.computerPermissions, async (_e, action?: unknown) => {
+    if (process.platform !== 'darwin') return null;
+    if (action === 'request') return requestMacPermissions();
+    if (action === 'openSettings') await openScreenRecordingSettings();
+    return macPermissionStatus();
+  });
+
+  // Window chrome is not a channel: it is static per process, so the main
+  // window hands it to the preload as a launch argument (06 §3.6).
 
   guardedHandle(IPC.windowMaximizeToggle, () => wm.toggleMaximize());
   guardedHandle(IPC.windowIsMaximized, (): boolean => wm.isMaximized());
@@ -213,14 +288,17 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
   // pushes its UI state here so `View ▸ Toggle Sidebar` shows a real
   // checkmark, `Back` greys out, and `Open Recent` lists real routes.
   guardedHandle(IPC.setMenuState, (_e, patch: unknown) => {
+    // The guard admits only the main window's current top-level document, and
+    // a push proves its bridge listeners are up: routes can now go to it over
+    // IPC_EVENT.navigate instead of a History-API injection (06 §3.4).
+    wm.markRendererReady();
     if (!patch || typeof patch !== 'object') return;
-    const p = patch as Partial<ShellState>;
+    const p = patch as Partial<DesktopShellStatePush>;
     const safe: Partial<MenuState> = {};
     if (typeof p.sidebarOpen === 'boolean') safe.sidebarOpen = p.sidebarOpen;
     if (typeof p.rightPaneOpen === 'boolean') safe.rightPaneOpen = p.rightPaneOpen;
     // Not menu state — the shell's close/quit guard reads it (unsaved-work.ts).
     if (typeof p.hasUnsavedWork === 'boolean') setUnsavedWork(p.hasUnsavedWork);
-    if (p.theme === 'light' || p.theme === 'dark' || p.theme === 'system') safe.theme = p.theme;
     if (Array.isArray(p.recent)) {
       // Bound and sanitise: this list is rendered into a native menu, and an
       // unbounded or malformed entry would corrupt it.
@@ -234,15 +312,43 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
         .slice(0, 10)
         .map((r) => ({ label: r.label.slice(0, 80), route: r.route.slice(0, 300) }));
     }
-    updateMenuState(safe);
+    // Rebuilding the whole application menu can close a menu the user has
+    // open (macOS), so only for pushes that change something it shows. The
+    // renderer re-sends every field whenever the attention counts move, and
+    // the counts are not in the menu (P1-review P2-R16).
+    applyMenuPush(safe);
+    // Only when this push actually carried attention data: G-05's badge and
+    // tray text follow the D-36 feed, which is optional right up until the
+    // renderer has a first snapshot.
+    const attention = sanitizeAttention(p.attention);
+    if (attention !== undefined) setAttention(attention);
   });
 
-  guardedHandle(IPC.getTheme, (): ThemePreference => loadSettings().theme);
+  // The page that pushed the counts and subscribed to updates is gone
+  // (closed, crashed, reloaded, or moved to another server): its counts are
+  // stale and its update listeners are dead (P1-review P2-R8, P2-R3).
+  wm.onRendererReset(() => {
+    clearAttention();
+    clearUpdateWatchers();
+  });
 
-  guardedHandle(IPC.setTheme, (_e, theme: ThemePreference) => {
-    if (theme !== 'light' && theme !== 'dark' && theme !== 'system') return;
-    saveSettings({ theme });
-    nativeTheme.themeSource = theme;
+  // ── Appearance (D-25) ──────────────────────────────────────────
+  //
+  // The renderer is the only appearance writer; main mirrors each push
+  // (persist, themeSource, window background, caption glyphs, menu radio).
+  guardedHandle(IPC.setAppearance, (_e, payload: unknown) => {
+    const result = commitAppearance(payload, {
+      save: (appearance) => saveSettings({ appearance }),
+      setThemeSource: (mode) => {
+        nativeTheme.themeSource = mode;
+      },
+      repaint: () => wm.applyAppearance(),
+      updateMenu: (mode) => updateMenuState({ mode }),
+    });
+    if (!result.ok) {
+      log.warn('[ipc] rejected appearance push', { error: result.error });
+      throw new Error(`Invalid appearance: ${result.error}`);
+    }
   });
 
   guardedHandle(IPC.getSetting, (_e, key: unknown) => {
@@ -266,23 +372,66 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
   guardedHandle(IPC.reload, () => wm.reload());
   guardedHandle(IPC.toggleDevtools, () => wm.toggleDevtools());
 
+  // ── Servers (G-03) ────────────────────────────────────────────
+  //
+  // The desktop is the source of truth for "which servers does this shell
+  // know about" — `localStorage` is per-origin, so the renderer cannot hold
+  // this list itself once it has navigated to a server's own origin. Main
+  // also probes reachability: the renderer's CSP and CORS allow it to reach
+  // only its own origin (P1-review P2-R6). Bounded by the probe timeout.
+  guardedHandle(IPC.getServers, (): Promise<DesktopServerEntry[]> => probeKnownServers(listServers()));
+
+  guardedHandle(IPC.switchServer, async (_e, id: unknown) => {
+    if (typeof id !== 'string' || !id) return;
+    await switchServerById(id);
+  });
+
+  guardedHandle(IPC.addServer, async () => {
+    await promptForRemoteServer();
+  });
+
+  // Every switch, add or forget, wherever it came from (this IPC, the menu,
+  // the tray): the renderer refetches, the Server submenu's radio and list are
+  // rebuilt, and the tray's status lines follow the active server
+  // (P1-review P2-R23).
+  onServersChanged(() => {
+    const win = wm.getMainWindow();
+    if (win && !win.isDestroyed()) win.webContents.send(IPC_EVENT.serversChanged);
+    updateMenuState({});
+    refreshTrayMenu();
+  });
+
+  // ── Updates (G-04) ─────────────────────────────────────────────
+  guardedHandle(IPC.getUpdateState, (): DesktopUpdateState => getUpdateState());
+
+  guardedHandle(IPC.installUpdate, async () => {
+    // The "Restart to update" pill: a user request, so a failure gets the
+    // error dialog; the pill also sees it in the state (`ready` + `error`).
+    await installUpdateInteractive();
+  });
+
+  guardedHandle(IPC.watchUpdates, (e, watching: unknown) => {
+    if (typeof watching !== 'boolean') return;
+    setUpdateWatch(e.sender.id, watching);
+  });
+
+  onUpdateStateChange((state) => {
+    const win = wm.getMainWindow();
+    if (win && !win.isDestroyed()) win.webContents.send(IPC_EVENT.updateStateChanged, state);
+  });
+
   // Push server status changes to the renderer (so a UI badge can react live).
   sm.on('status', (status) => {
     const win = wm.getMainWindow();
     if (win && !win.isDestroyed()) win.webContents.send(IPC_EVENT.serverStatus, status);
   });
 
-  // Propagate OS theme changes for any renderer that wants to follow them.
-  nativeTheme.on('updated', () => {
-    const win = wm.getMainWindow();
-    if (win && !win.isDestroyed()) {
-      win.webContents.send(IPC_EVENT.themeChanged, nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
-    }
-    // The OS paints the Window Controls Overlay glyphs, so they do not inherit
-    // our CSS. Without this repaint the close button stays dark-on-dark after
-    // the system flips to dark mode.
-    wm.refreshTitleBarTheme();
-  });
+  // An OS light/dark flip while the mode is `system`: the renderer re-resolves
+  // through its own matchMedia listener; main repaints what the OS draws or
+  // what shows before the renderer paints — the window background and the
+  // Window Controls Overlay glyphs, which do not inherit our CSS (without this
+  // the close button stays dark-on-dark after the system flips to dark).
+  nativeTheme.on('updated', () => wm.applyAppearance());
 
   // ── Native Browser (feature-flagged; Phase 2) ──
   // Only wire the channels if the flag is on so a mis-typed invoke from an
@@ -361,22 +510,25 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
       const f = Number(factor);
       if (Number.isFinite(f)) host.setZoom(tabId, f);
     });
-    guardedHandle(BROWSER_IPC.pickElement, async (_e, tabId: string) => {
+    // Overlay palettes are interpolated into scripts run in third-party pages:
+    // validate every value here, before anything reaches executeJavaScript;
+    // an invalid or missing palette becomes the default one (06 §4.4).
+    guardedHandle(BROWSER_IPC.capture, async (_e, tabId: string, mode: unknown) => {
       if (typeof tabId !== 'string' || !tabId) return null;
-      return host.pickElement(tabId);
+      return host.capture(tabId, mode === 'full' ? 'full' : 'visible');
     });
-    guardedHandle(BROWSER_IPC.captureRegion, async (_e, tabId: string) => {
+    guardedHandle(BROWSER_IPC.captureRegion, async (_e, tabId: string, palette?: unknown) => {
       if (typeof tabId !== 'string' || !tabId) return null;
-      return host.captureRegion(tabId);
+      return host.captureRegion(tabId, sanitizeAnnotationPalette(palette));
     });
-    guardedHandle(BROWSER_IPC.annotateStart, async (_e, tabId: string, theme?: string) => {
-      if (typeof tabId === 'string' && tabId) await host.annotateStart(tabId, theme === 'light' ? 'light' : 'dark');
+    guardedHandle(BROWSER_IPC.annotateStart, async (_e, tabId: string, palette?: unknown) => {
+      if (typeof tabId === 'string' && tabId) await host.annotateStart(tabId, sanitizeAnnotationPalette(palette));
     });
     guardedHandle(BROWSER_IPC.annotateStop, async (_e, tabId: string) => {
       if (typeof tabId === 'string' && tabId) await host.annotateStop(tabId);
     });
     guardedHandle(BROWSER_IPC.annotatePoll, async (_e, tabId: string) => {
-      if (typeof tabId !== 'string' || !tabId) return { total: 0, items: [] };
+      if (typeof tabId !== 'string' || !tabId) return { items: [], pending: null, exit: false };
       return host.annotatePoll(tabId);
     });
     guardedHandle(BROWSER_IPC.annotateSend, async (_e, tabId: string, keys?: unknown) => {
@@ -384,8 +536,15 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
       const arr = Array.isArray(keys) ? keys.filter((k): k is string => typeof k === 'string') : undefined;
       return host.annotateSend(tabId, arr);
     });
-    guardedHandle(BROWSER_IPC.annotateRegion, async (_e, tabId: string) => {
-      if (typeof tabId === 'string' && tabId) await host.annotateRegion(tabId);
+    guardedHandle(BROWSER_IPC.annotateOpen, async (_e, tabId: string, key: string) => {
+      if (typeof tabId === 'string' && tabId && typeof key === 'string') await host.annotateOpen(tabId, key);
+    });
+    guardedHandle(BROWSER_IPC.annotateSave, async (_e, tabId: string, key: unknown, comment: unknown, intent: unknown) => {
+      if (typeof tabId !== 'string' || !tabId || typeof key !== 'string' || typeof comment !== 'string') return false;
+      return host.annotateSave(tabId, key, comment, typeof intent === 'string' ? intent : 'fix');
+    });
+    guardedHandle(BROWSER_IPC.annotateCancel, async (_e, tabId: string, key: unknown) => {
+      if (typeof tabId === 'string' && tabId && typeof key === 'string') await host.annotateCancel(tabId, key);
     });
     guardedHandle(BROWSER_IPC.annotateRemove, async (_e, tabId: string, key: string) => {
       if (typeof tabId === 'string' && tabId && typeof key === 'string') await host.annotateRemove(tabId, key);

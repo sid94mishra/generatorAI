@@ -1,0 +1,8 @@
+{
+  "claude:Opus 5.5": "Opus 5.5\ndefault\n\nopus\n\nFor complex work and everyday tasks\n\nProvider\nClaude Code\nResolves to\nclaude-opus-5-5\nReasoning\nlow, medium, high, xhigh, max\nDefault effort\nmedium\nFeatures\nAdaptive thinking, Fast mode, Auto mode\n\nChanging the model applies from the next turn.",
+  "claude:Haiku 4.5": "Haiku 4.5\n\nhaiku\n\nFastest for quick answers\n\nProvider\nClaude Code\nResolves to\nclaude-haiku-4-5-20251001\n\nChanging the model applies from the next turn.",
+  "claude:Sonnet 4.6": "Sonnet 4.6\n\nclaude-sonnet-4-6\n\nEfficient for routine tasks\n\nProvider\nClaude Code\nReasoning\nlow, medium, high, max\nDefault effort\nmedium\nFeatures\nAdaptive thinking, Auto mode\n\nChanging the model applies from the next turn.",
+  "codex:GPT-6-Luna": "GPT-6-Luna\ndefault\n\ngpt-6-luna\n\nFast and affordable model for easier tasks.\n\nProvider\nCodex\nReasoning\nlow, medium, high, xhigh, max\nDefault effort\nmedium\nInput\ntext, image\n\nChanging the model applies from the next turn.",
+  "codex:GPT-5.6-Terra": "GPT-5.6-Terra\n\ngpt-5.6-terra\n\nOlder balanced model for straightforward work.\n\nProvider\nCodex\nReasoning\nlow, medium, high, xhigh, max, ultra\nDefault effort\nmedium\nInput\ntext, image\n\nChanging the model applies from the next turn.",
+  "codex:keyboard-ArrowDown": "GPT-5.6-Luna\n\ngpt-5.6-luna\n\nOlder fast and efficient model.\n\nProvider\nCodex\nReasoning\nlow, medium, high, xhigh, max\nDefault effort\nmedium\nInput\ntext, image\n\nChanging the model applies from the next turn."
+}

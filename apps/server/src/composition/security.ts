@@ -19,6 +19,7 @@ import * as path from 'node:path';
 import {
   AuthService,
   DeviceService,
+  ApprovalProofVerifier,
   DpopVerifier,
   SecurityAuditService,
   TokenService,
@@ -57,8 +58,12 @@ import {
   type AppDatabase,
 } from '@generatorai/db';
 import { hostIdFromPublicKey, keyPairFromSecretKey, toBase64Url } from '@generatorai/relay-protocol';
+import { TlsManager } from '../network/tls/TlsManager.js';
+import { configuredAdvertisedHosts } from '../network/serverEndpoints.js';
 import { setDefaultChatPermissionMode } from '@generatorai/core';
+import { readTailscaleAccess } from '../network/tailscale/TailscaleAccess.js';
 import type { AppConfig, ILogger } from '@generatorai/shared';
+import { liveConnections } from '../streaming/liveConnections.js';
 
 /**
  * The host's long-term X25519 identity. Clients pin `hostId` at pairing time,
@@ -78,12 +83,16 @@ export interface SecurityBootstrapOptions {
   logger: ILogger;
   /** Supplied by the Electron desktop shell (safeStorage). */
   osHooks?: OsProtectedKeyHooks | undefined;
+  /** F-8 — the vault key the desktop app handed over its channel (base64/hex, like GENERATORAI_SECRET_KEY). */
+  suppliedSecretKey?: string | undefined;
 }
 
 export interface SecurityContext {
   secretStore: SecretStore;
   tokens: TokenService;
   dpop: DpopVerifier;
+  /** MG-05 — approval nonces, key registrations and signed risky approvals. */
+  approvals: ApprovalProofVerifier;
   devices: DeviceService;
   auth: AuthService;
   audit: SecurityAuditService;
@@ -109,6 +118,15 @@ export interface SecurityContext {
   /** Effective posture, surfaced by `GET /api/security/posture`. */
   posture: SecurityPosture;
 
+  /**
+   * Built-in HTTPS for the network-facing listener (D-110). Null on a
+   * loopback-only server (nothing off the machine to protect, and the same
+   * machine is a secure context over plain HTTP), when the operator opted out
+   * with `GENERATORAI_LAN_TLS=0`, or when the certificate could not be
+   * prepared — the server then still starts, and the posture says why.
+   */
+  tls: TlsManager | null;
+
   /** Stops background sweepers and flushes the audit queue. */
   shutdown(): Promise<void>;
 }
@@ -123,6 +141,26 @@ export interface SecurityPosture {
   legacyApiKeyActive: boolean;
   relayEnabled: boolean;
   tokenAudience: string;
+  /** Why a network-facing server is NOT serving HTTPS, or null when it is (or need not). */
+  tlsUnavailableReason: string | null;
+}
+
+/**
+ * The default agent permission mode (plan G14): autonomous only on a
+ * development server nothing else can reach. `GENERATORAI_DEFAULT_PERMISSION_MODE=bypassPermissions`
+ * keeps full autonomy regardless.
+ */
+export function defaultPermissionModeFor(input: {
+  reachableBeyondLoopback: boolean;
+  production: boolean;
+}): 'bypassPermissions' | 'acceptEdits' {
+  if (process.env['GENERATORAI_DEFAULT_PERMISSION_MODE'] === 'bypassPermissions') return 'bypassPermissions';
+  return !input.reachableBeyondLoopback && !input.production ? 'bypassPermissions' : 'acceptEdits';
+}
+
+/** Re-derives the default when Tailscale access turns on or off at runtime (D-123). */
+export function applyReachabilityToPermissionDefault(input: { reachableBeyondLoopback: boolean; production: boolean }): void {
+  setDefaultChatPermissionMode(defaultPermissionModeFor(input));
 }
 
 /** Thrown when the process must refuse to start. */
@@ -180,6 +218,7 @@ export async function createSecurityContext(
   const secretStore = createSecretStore({
     dataDir: secretsDir,
     osHooks: options.osHooks,
+    suppliedKey: options.suppliedSecretKey,
     requireSecure: requireSecureSecretStore,
     logger: {
       warn: (m, meta) => logger.warn(m, meta as Record<string, unknown>),
@@ -254,6 +293,19 @@ export async function createSecurityContext(
       warn: (m, meta) => logger.warn(m, meta as Record<string, unknown>),
       info: (m, meta) => logger.info(m, meta as Record<string, unknown>),
     },
+  });
+
+  // F-2 — a revocation, credential rotation or scope cut also ends the
+  // device's already-open streams (SSE, WebSockets, relay-bridged sockets).
+  devices.onAccessChanged((change) => {
+    const closed = liveConnections.apply(change);
+    if (closed > 0) {
+      logger.info('[Security] Closed live connections after a device access change', {
+        deviceId: change.deviceId,
+        kind: change.kind,
+        closed,
+      });
+    }
   });
 
   const auth = new AuthService({
@@ -339,6 +391,37 @@ export async function createSecurityContext(
     });
   }
 
+  // ── Built-in LAN HTTPS (D-110) ──────────────────────────────────
+  //
+  // Only off loopback: that is where a second device needs a secure context.
+  // Prepared here, after the vault, because its key material lives there.
+  let tls: TlsManager | null = null;
+  let tlsUnavailableReason: string | null = null;
+  if (!loopbackOnly) {
+    if (process.env['GENERATORAI_LAN_TLS'] === '0') {
+      tlsUnavailableReason = 'GENERATORAI_LAN_TLS=0 is set, so this server speaks plain HTTP on the network.';
+    } else {
+      const manager = new TlsManager({
+        secretStore,
+        logger: {
+          info: (m, meta) => logger.info(m, meta),
+          warn: (m, meta) => logger.warn(m, meta),
+        },
+        hostname: () => os.hostname(),
+        networkInterfaces: () => os.networkInterfaces(),
+        advertisedHosts: () => configuredAdvertisedHosts(),
+      });
+      try {
+        await manager.initialize();
+        manager.startAutoRefresh();
+        tls = manager;
+      } catch (err) {
+        tlsUnavailableReason = `The HTTPS certificate could not be prepared: ${err instanceof Error ? err.message : String(err)}`;
+        logger.error(`[TLS] ${tlsUnavailableReason} Browsers on other devices will not be able to pair.`);
+      }
+    }
+  }
+
   // ── Background sweepers ─────────────────────────────────────────
   const retentionMs = security.auditRetentionDays * 24 * 60 * 60_000;
   const sweeper = setInterval(() => {
@@ -367,6 +450,7 @@ export async function createSecurityContext(
     legacyApiKeyActive: Boolean(legacyApiKey),
     relayEnabled: security.relayEnabled,
     tokenAudience: security.tokenAudience,
+    tlsUnavailableReason,
   };
 
   logSecurityBanner(logger, posture);
@@ -379,19 +463,17 @@ export async function createSecurityContext(
   // loopback — LAN, SSH-forwarded, relay, or production — must not run agents
   // that can touch the host with no approval gate, because the blast radius of
   // one compromised client becomes the whole workstation.
-  const permissionDefault: 'bypassPermissions' | 'acceptEdits' =
-    process.env['GENERATORAI_DEFAULT_PERMISSION_MODE'] === 'bypassPermissions'
-      ? 'bypassPermissions'
-      : loopbackOnly && !production
-        ? 'bypassPermissions'
-        : 'acceptEdits';
+  // "Connect with Tailscale" (D-123) makes a loopback listener reachable from
+  // the owner's other devices, so it counts as beyond loopback here.
+  const tailscaleOn = readTailscaleAccess(path.dirname(path.resolve(config.dbPath))).enabled;
+  const permissionDefault = defaultPermissionModeFor({ reachableBeyondLoopback: !loopbackOnly || tailscaleOn, production });
   setDefaultChatPermissionMode(permissionDefault);
   if (permissionDefault !== 'bypassPermissions') {
     logger.info(
       '[Security] Agents default to `acceptEdits` on this deployment. Chats may still opt ' +
         'into full autonomy individually.',
     );
-  } else if (!loopbackOnly || production) {
+  } else if (!loopbackOnly || production || tailscaleOn) {
     // Only reachable via the explicit env override above.
     logger.warn(
       '[Security] GENERATORAI_DEFAULT_PERMISSION_MODE=bypassPermissions is set on a ' +
@@ -402,7 +484,7 @@ export async function createSecurityContext(
       result: 'success',
       resourceType: 'security',
       resourceId: 'default-permission-mode',
-      metadata: { mode: permissionDefault, loopbackOnly, production },
+      metadata: { mode: permissionDefault, loopbackOnly, production, tailscaleOn },
       severity: 'critical',
     });
   }
@@ -411,6 +493,7 @@ export async function createSecurityContext(
     secretStore,
     tokens,
     dpop,
+    approvals: new ApprovalProofVerifier({ nonceStore, serverId: identity.hostId }),
     devices,
     auth,
     audit,
@@ -426,8 +509,10 @@ export async function createSecurityContext(
     relayOutboxRepo,
     scopeRequestRepo,
     posture,
+    tls,
     async shutdown() {
       clearInterval(sweeper);
+      tls?.stop();
       await audit.flush();
     },
   };

@@ -1,0 +1,51 @@
+appId: ${APP_ID}
+name: workflows · list, detail, runs, graph, new draft
+# M8-01 (MWorkflows, MWorkflowDetail(+More), MWorkflowNew(+Basics)). Replaces the "workflow" phase of the
+# web-preview e2e/audit-scenarios.mjs (08 §6.3). The sandbox seeds "Sandbox Workflow.*"; the draft needs write:workflows.
+tags: [workflows]
+env: {DEVICE_SCOPES: "write:workflows"}
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///workflows
+- extendedWaitUntil: {visible: {id: workflows}, timeout: 20000}
+- extendedWaitUntil: {visible: {id: "workflow-row-.*"}, timeout: 15000}
+- tapOn: {id: "workflow-row-.*", index: 0}
+- extendedWaitUntil: {visible: {id: workflow-detail}, timeout: 15000}
+- assertVisible: {id: workflow-version}
+- assertVisible: "Recent runs"
+- scrollUntilVisible: {element: "Setup", direction: DOWN}
+- scrollUntilVisible: {element: {id: workflow-mini-graph}, direction: UP}
+- tapOn: {id: workflow-mini-graph}
+- extendedWaitUntil: {visible: {id: workflow-graph-canvas}, timeout: 10000}
+- tapOn: {id: graph-fit}
+- tapOn: {id: graph-list}
+- extendedWaitUntil: {visible: {id: workflow-detail}, timeout: 10000}
+- openLink: generatorai:///workflows/new
+- extendedWaitUntil: {visible: {id: workflow-new}, timeout: 15000}
+- tapOn: {id: workflow-new-blank}
+- tapOn: {id: workflow-new-name}
+- inputText: Maestro draft
+- tapOn: "Create"
+# Create opens the new workflow with the builder over it (M8-05): leave the builder first.
+- extendedWaitUntil: {visible: {id: builder}, timeout: 20000}
+- tapOn: "Cancel"
+- extendedWaitUntil: {visible: {id: workflow-detail}, timeout: 20000}
+- assertVisible: "Draft.*"
+# A header action: by testID on Android, by its label on iOS (native toolbar items take no testID, MD-133).
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: {id: workflow-more}
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: "Workflow actions"
+- tapOn: "Delete workflow"
+# The confirmation names the workflow; its button repeats the label (the menu is gone by then).
+- extendedWaitUntil: {visible: "Delete Maestro draft.*", timeout: 10000}
+- tapOn: "Delete workflow"
+# Delete goes back one screen: here that is Sandbox Workflow's detail (the draft was opened over it by link).
+- extendedWaitUntil: {notVisible: {id: builder}, timeout: 15000}
+- openLink: generatorai:///workflows
+- extendedWaitUntil: {visible: {id: workflows}, timeout: 15000}
+- assertNotVisible: "Maestro draft.*"

@@ -13,7 +13,7 @@ import {
   restoredPromptFrom,
   rewoundMatchesChat,
   type ChatRewoundEffect,
-} from '../stream/rewindEffects';
+} from '../services/stream/rewindEffects';
 
 function rewound(over: Partial<ChatRewoundEffect> = {}): ChatRewoundEffect {
   return {

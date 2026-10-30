@@ -59,6 +59,105 @@ describe('chat wire contract', () => {
   });
 });
 
+describe('system info wire contract (G-12)', () => {
+  it('reads GET /api/system/info with no query string', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).system.info();
+
+    expect(calls[0]?.method).toBe('GET');
+    expect(calls[0]?.path).toBe('/api/system/info');
+  });
+});
+
+describe('project summary wire contract (G-13)', () => {
+  it('omits ?include=summary by default', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.list();
+    expect(calls[0]?.path).toBe('/api/projects');
+  });
+
+  it('sends ?include=summary when the caller asks for the summary columns', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.list({ includeSummary: true });
+    expect(calls[0]?.path).toBe('/api/projects?include=summary');
+
+    await createApiClient(fetchImpl).projects.get('proj-1', { includeSummary: true });
+    expect(calls[1]?.path).toBe('/api/projects/proj-1?include=summary');
+  });
+});
+
+describe('stats summary wire contract (G-10)', () => {
+  it('always sends from/to, and the optional filters + groupBy when given', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).stats.summary({
+      from: '2026-01-01T00:00:00Z',
+      to: '2026-01-07T23:59:59Z',
+      projectId: 'proj-1',
+      definitionId: 'def-1',
+      automationId: 'auto-1',
+      groupBy: 'definition',
+    });
+    const url = new URL(calls[0]!.path, 'http://x');
+    expect(url.pathname).toBe('/api/stats/summary');
+    expect(url.searchParams.get('from')).toBe('2026-01-01T00:00:00Z');
+    expect(url.searchParams.get('to')).toBe('2026-01-07T23:59:59Z');
+    expect(url.searchParams.get('projectId')).toBe('proj-1');
+    expect(url.searchParams.get('definitionId')).toBe('def-1');
+    expect(url.searchParams.get('automationId')).toBe('auto-1');
+    expect(url.searchParams.get('groupBy')).toBe('definition');
+  });
+
+  it('omits the optional filters when not given', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).stats.summary({ from: '2026-01-01', to: '2026-01-07' });
+    const url = new URL(calls[0]!.path, 'http://x');
+    expect(url.searchParams.has('projectId')).toBe(false);
+    expect(url.searchParams.has('groupBy')).toBe(false);
+  });
+});
+
+describe('recent activity wire contract (G-11)', () => {
+  it('reads GET /api/activity/recent with no query string by default', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).activity.recent();
+    expect(calls[0]?.method).toBe('GET');
+    expect(calls[0]?.path).toBe('/api/activity/recent');
+  });
+
+  it('sends since, limit and projectId when given', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).activity.recent({ since: '2026-01-01T00:00:00Z', limit: 10, projectId: 'proj-1' });
+    const url = new URL(calls[0]!.path, 'http://x');
+    expect(url.pathname).toBe('/api/activity/recent');
+    expect(url.searchParams.get('since')).toBe('2026-01-01T00:00:00Z');
+    expect(url.searchParams.get('limit')).toBe('10');
+    expect(url.searchParams.get('projectId')).toBe('proj-1');
+  });
+});
+
+describe('project runs wire contract (G-15)', () => {
+  it('reads GET /api/projects/:id/runs, not /workflow-runs?projectId= (that route is off-limits)', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.runs('proj-1');
+    expect(calls[0]?.method).toBe('GET');
+    expect(calls[0]?.path).toBe('/api/projects/proj-1/runs');
+  });
+
+  it('sends status (joined), cursor and limit as query params', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.runs('proj-1', {
+      status: ['running', 'failed'],
+      cursor: 'run-9',
+      limit: 20,
+    });
+    const url = new URL(calls[0]!.path, 'http://x');
+    expect(url.pathname).toBe('/api/projects/proj-1/runs');
+    expect(url.searchParams.get('status')).toBe('running,failed');
+    expect(url.searchParams.get('cursor')).toBe('run-9');
+    expect(url.searchParams.get('limit')).toBe('20');
+  });
+});
+
 describe('chat update wire contract', () => {
   it('sends agentRef, matching the field the PATCH /chats/:id route reads to bind an agent', async () => {
     const { calls, fetchImpl } = capture();
@@ -90,17 +189,34 @@ describe('chat attachment wire contract', () => {
   });
 });
 
+describe('chat ingest wire contract (MG-09)', () => {
+  it('sends `target` as JSON, the text parts and `attachments`, with the Idempotency-Key header', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).chats.ingest(
+      { target: { newChat: { agentRef: 'user:bug-fixer' } }, note: 'look', url: 'https://x.dev', attachments: [{ name: 'a.log', data: new Uint8Array([1]) }] },
+      { idempotencyKey: 'k-1' },
+    );
+    expect(calls[0]?.path).toBe('/api/chats/ingest');
+    expect(calls[0]?.method).toBe('POST');
+    expect(calls[0]?.headers).toEqual({ 'idempotency-key': 'k-1' });
+    const form = calls[0]?.body as unknown as FormData;
+    expect(JSON.parse(String(form.get('target')))).toEqual({ newChat: { agentRef: 'user:bug-fixer' } });
+    expect(form.get('note')).toBe('look');
+    expect(form.get('url')).toBe('https://x.dev');
+    expect(form.get('text')).toBeNull();
+    expect((form.get('attachments') as File).name).toBe('a.log');
+  });
+});
+
 describe('automation wire contract (create/update)', () => {
-  it('sends workflowIds/cronExpression/batchDataFormat/onError, not the CLI-flag-shaped names', async () => {
+  it('sends workflowIds/cronExpression/onError, not the CLI-flag-shaped names', async () => {
     const { calls, fetchImpl } = capture();
     await createAdminApi(fetchImpl).automations.create({
       name: 'nightly',
       workflowIds: ['00000000-0000-0000-0000-000000000001'],
       triggerType: 'schedule',
-      inputMode: 'batch',
       variables: {},
       cronExpression: '0 2 * * *',
-      batchDataFormat: 'csv',
       onError: 'stop',
     });
 
@@ -111,7 +227,6 @@ describe('automation wire contract (create/update)', () => {
     expect(calls[0]?.body).toMatchObject({
       workflowIds: ['00000000-0000-0000-0000-000000000001'],
       cronExpression: '0 2 * * *',
-      batchDataFormat: 'csv',
       onError: 'stop',
     });
     expect(calls[0]?.body).not.toHaveProperty('workflowDefinitionIds');
@@ -130,40 +245,15 @@ describe('automation wire contract (create/update)', () => {
   });
 });
 
-describe('workflow stage/edge wire contract', () => {
-  it('addStage sends prompts/harnessConfigOverrides/timeoutMs/retryPolicy, not prompt/model/timeoutSeconds/maxRetries', async () => {
+describe('workflow definition wire contract', () => {
+  it('saveGraph PUTs the whole graph with the revision it edited', async () => {
     const { calls, fetchImpl } = capture();
-    await createAdminApi(fetchImpl).definitions.addStage('wf1', {
-      name: 'build',
-      prompts: [{ label: 'prompt', text: 'build it', source: 'inline', waitForCompletion: true }],
-      harnessConfigOverrides: { model: 'gpt-5' },
-      timeoutMs: 60_000,
-      retryPolicy: { maxRetries: 2, backoffMs: 1000, backoffMultiplier: 2 },
-    });
+    const graph = { formatVersion: 2 as const, workflow: { name: 'wf' }, stages: [{ kind: 'agent' as const, key: 'build', name: 'Build' }] };
+    await createAdminApi(fetchImpl).definitions.saveGraph('wf1', graph, 3);
 
-    expect(calls[0]?.path).toBe('/api/workflow-definitions/wf1/stages');
-    expect(calls[0]?.body).toMatchObject({
-      name: 'build',
-      prompts: [{ label: 'prompt', text: 'build it', source: 'inline', waitForCompletion: true }],
-      harnessConfigOverrides: { model: 'gpt-5' },
-      timeoutMs: 60_000,
-      retryPolicy: { maxRetries: 2, backoffMs: 1000, backoffMultiplier: 2 },
-    });
-    for (const legacyKey of ['prompt', 'model', 'timeoutSeconds', 'maxRetries']) {
-      expect(calls[0]?.body).not.toHaveProperty(legacyKey);
-    }
-  });
-
-  it('addEdge sends only fromStageId/toStageId/edgeType — there is no server-side "condition" on an edge', async () => {
-    const { calls, fetchImpl } = capture();
-    await createAdminApi(fetchImpl).definitions.addEdge('wf1', {
-      fromStageId: 's1',
-      toStageId: 's2',
-      edgeType: 'on_success',
-    });
-
-    expect(calls[0]?.path).toBe('/api/workflow-definitions/wf1/edges');
-    expect(calls[0]?.body).toEqual({ fromStageId: 's1', toStageId: 's2', edgeType: 'on_success' });
+    expect(calls[0]?.path).toBe('/api/workflow-definitions/wf1/graph');
+    expect(calls[0]?.method).toBe('PUT');
+    expect(calls[0]?.body).toEqual({ graph, expectedRevision: 3 });
   });
 });
 
@@ -239,20 +329,6 @@ describe('hook wire contract', () => {
       timeoutMs: 10_000,
       config: { type: 'script', command: 'echo', args: ['hi'] },
     });
-  });
-
-  it('types the grouped { workflowHooks, globalHooks } envelope instead of a bare array', async () => {
-    const fetchImpl = (async () =>
-      new Response(
-        JSON.stringify({ sessionId: 's1', workflowHooks: [], globalHooks: [{ id: 'g1' }] }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      )) as unknown as typeof fetch;
-
-    const result = await createAdminApi(fetchImpl).hooks.sessionHooks('s1');
-    // Previously typed `Array<Record<string, unknown>>` — a caller indexing
-    // `result[0]` compiled fine and read `undefined` at every index.
-    expect(result.globalHooks[0]?.id).toBe('g1');
-    expect(result.workflowHooks).toEqual([]);
   });
 });
 
@@ -452,54 +528,17 @@ describe('workflow validation wire contract', () => {
         headers: { 'content-type': 'application/json' },
       })) as unknown as typeof fetch;
 
-  it('returns the body of a 422 instead of throwing, so the findings survive', async () => {
+  it('validates a document statelessly and returns the issues', async () => {
     const body = {
       valid: false,
-      errors: ["Self-edge detected on stage 'A'"],
-      warnings: [],
-      issues: [
-        {
-          severity: 'error',
-          code: 'self-edge',
-          message: "Self-edge detected on stage 'A'",
-          stageIds: ['A'],
-          edge: { fromStageId: 'A', toStageId: 'A', edgeType: 'on_success' },
-        },
-      ],
+      issues: [{ code: 'edge-self', severity: 'error', path: '/edges/0', message: 'A stage cannot depend on itself' }],
     };
-
-    const result = await createAdminApi(respondWith(422, body)).definitions.validate('wf-1');
+    const result = await createAdminApi(respondWith(200, body)).definitions.validate({ formatVersion: 2 });
 
     expect(result.valid).toBe(false);
-    expect(result.errors).toEqual(["Self-edge detected on stage 'A'"]);
-    expect(result.issues?.[0]?.stageIds).toEqual(['A']);
-  });
-
-  it('still returns a 200 body unchanged', async () => {
-    const result = await createAdminApi(
-      respondWith(200, { valid: true, errors: [], warnings: ['DAG has no stages'], issues: [] }),
-    ).definitions.validate('wf-1');
-
-    expect(result.valid).toBe(true);
-    expect(result.warnings).toEqual(['DAG has no stages']);
-  });
-
-  it('still throws on a status that is NOT in the allow list', async () => {
-    // The tolerance is narrow on purpose: 422 means "here is the answer",
-    // 500 means the answer never got computed.
-    await expect(
-      createAdminApi(respondWith(500, { error: 'boom' })).definitions.validate('wf-1'),
-    ).rejects.toThrow('boom');
+    expect(result.issues[0]?.path).toBe('/edges/0');
   });
 });
-
-// ── Envelope unwrapping (Phase 8) ──────────────────────────────────
-//
-// Six routes in the browser/computer/widget namespaces answer an ENVELOPE
-// and were typed as bare arrays or bare objects. Types cannot catch it:
-// `request<T>()` casts with no runtime validation, so every one of these
-// rendered as permanently empty (or as an object with one key) against a
-// real server while looking correct in the source.
 
 describe('list-envelope wire contracts', () => {
   const respondWith = (body: unknown): typeof fetch =>
@@ -564,6 +603,14 @@ describe('browser semantic inspector wire contract', () => {
     expect(calls[0]?.method).toBe('POST');
   });
 
+  it('POSTs a page-space click to the input route (MG-24 element pick)', async () => {
+    const { calls, fetchImpl } = capture();
+    await createAdminApi(fetchImpl).browser.input('ws-1', { type: 'mouse.click', x: 120, y: 340 });
+    expect(calls[0]?.path).toBe('/api/workspaces/ws-1/browser/input');
+    expect(calls[0]?.method).toBe('POST');
+    expect(calls[0]?.body).toEqual({ type: 'mouse.click', x: 120, y: 340 });
+  });
+
   it('asks the actions route for a screenshot, not the region-capture route', async () => {
     // `/browser/capture` requires a clip rectangle and answers raw
     // `image/png`; `browser screenshot` used to post to it with `fullPage`
@@ -589,19 +636,89 @@ describe('browser semantic inspector wire contract', () => {
   });
 });
 
-describe('orchestrator run uploads wire contract', () => {
-  it('posts multipart `category` + `files`, which is what the multer route reads', async () => {
+describe('invocation uploads wire contract', () => {
+  it('posts multipart files under their category field, which is what the multer route reads', async () => {
     const { calls, fetchImpl } = capture();
-    await createAdminApi(fetchImpl).orchestrator.uploadRunFiles('r1', 'skills', [
-      { name: 'skill.md', data: new TextEncoder().encode('# hi'), mimeType: 'text/markdown' },
+    await createAdminApi(fetchImpl).workflows.uploads([
+      { category: 'skills', name: 'skill.md', data: new TextEncoder().encode('# hi'), mimeType: 'text/markdown' },
     ]);
 
-    expect(calls[0]?.path).toBe('/api/orchestrator/runs/r1/uploads');
+    expect(calls[0]?.path).toBe('/api/workflow-invocations/uploads');
     expect(calls[0]?.method).toBe('POST');
     const form = calls[0]?.body as unknown as FormData;
-    expect(form.get('category')).toBe('skills');
-    const files = form.getAll('files') as File[];
+    const files = form.getAll('skills') as File[];
     expect(files).toHaveLength(1);
     expect(files[0]?.name).toBe('skill.md');
+  });
+});
+
+describe('G-16 codebase fetch/logs wire contract', () => {
+  it('POSTs the fetch job route with no body', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.fetchCodebase('p1', 'cb1');
+    expect(calls[0]?.path).toBe('/api/projects/p1/codebases/cb1/fetch');
+    expect(calls[0]?.method).toBe('POST');
+  });
+
+  it('sends `limit` as a query param on the logs route', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.codebaseLogs('p1', 'cb1', { limit: 50 });
+    expect(calls[0]?.path).toBe('/api/projects/p1/codebases/cb1/logs?limit=50');
+  });
+
+  it('omits the query string when no limit is given', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.codebaseLogs('p1', 'cb1');
+    expect(calls[0]?.path).toBe('/api/projects/p1/codebases/cb1/logs');
+  });
+});
+
+describe('G-17 worktree enrichment wire contract', () => {
+  it('bare call sends no `include`', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.codebaseWorktrees('p1', 'cb1');
+    expect(calls[0]?.path).toBe('/api/projects/p1/codebases/cb1/worktrees');
+  });
+
+  it('joins `include` with commas', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.codebaseWorktrees('p1', 'cb1', { include: ['usage', 'link'] });
+    expect(calls[0]?.path).toBe('/api/projects/p1/codebases/cb1/worktrees?include=usage,link');
+  });
+});
+
+describe('G-19 per-project artifact prefs wire contract', () => {
+  it('GETs the prefs route', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.artifactPrefs.get('p1');
+    expect(calls[0]?.path).toBe('/api/projects/p1/artifact-prefs');
+    expect(calls[0]?.method).toBe('GET');
+  });
+
+  it('PUTs `disabled` verbatim, which is what the route reads', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.artifactPrefs.update('p1', {
+      disabled: [{ type: 'skill', id: 's1' }],
+    });
+    expect(calls[0]?.path).toBe('/api/projects/p1/artifact-prefs');
+    expect(calls[0]?.method).toBe('PUT');
+    expect(calls[0]?.body).toEqual({ disabled: [{ type: 'skill', id: 's1' }] });
+  });
+});
+
+describe('G-18 palette entity search wire contract', () => {
+  it('sends `q` and omits `types`/`limit` when not given', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).search({ q: 'nightly' });
+    expect(calls[0]?.path).toBe('/api/search?q=nightly');
+  });
+
+  it('joins `types` with commas and sends `limit`', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).search({ q: 'run nig', types: ['workflow', 'automation'], limit: 5 });
+    const url = new URL(calls[0]!.path, 'http://x');
+    expect(url.searchParams.get('q')).toBe('run nig');
+    expect(url.searchParams.get('types')).toBe('workflow,automation');
+    expect(url.searchParams.get('limit')).toBe('5');
   });
 });

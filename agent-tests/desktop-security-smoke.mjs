@@ -22,9 +22,14 @@
 
 import { _electron as electron } from '@playwright/test';
 import path from 'node:path';
+import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { DESKTOP_DIR as DESKTOP, isolatedProfile } from './helpers/desktop-profile.mjs';
 
-const DESKTOP = path.resolve(process.cwd(), 'apps', 'desktop');
+// A fresh profile: never the developer's userData or vault key.
+const profile = isolatedProfile('gai-security-smoke-');
+process.on('exit', profile.cleanup);
 const requireFromDesktop = createRequire(path.join(DESKTOP, 'package.json'));
 const ELECTRON = requireFromDesktop('electron');
 
@@ -38,11 +43,15 @@ const record = (name, ok, info = '') => {
 
 const app = await electron.launch({
   executablePath: ELECTRON,
-  args: ['.'],
+  args: ['.', profile.arg],
   cwd: DESKTOP,
   env: { ...process.env, GENERATORAI_DESKTOP_MODE: 'standalone' },
   timeout: 90_000,
 });
+// P2-R44 — hand the launched app to the profile helper so a SIGINT/SIGTERM
+// that lands after this point can close Electron before removing the
+// directory it may still hold files in.
+profile.attach(app);
 
 const mainLog = [];
 app.process().stdout?.on('data', (d) => mainLog.push(d.toString()));
@@ -55,6 +64,9 @@ async function finish() {
   } catch {
     /* already gone */
   }
+  // P2-R44 — close before cleanup: the directory is only removed once
+  // Electron (and the embedded server it spawned) has released its files.
+  profile.cleanup();
   process.exit(failed === 0 ? 0 : 1);
 }
 
@@ -88,18 +100,25 @@ await page.waitForLoadState('domcontentloaded').catch(() => {});
 // Auto-pairing is a round trip through the shell, so give it room.
 await page
   .waitForFunction(
-    () => !document.body.innerText.includes('Pair this device') &&
+    () => !document.querySelector('[data-testid="pairing-gate"]') &&
       document.querySelector('#root')?.children.length > 0,
     { timeout: 60_000 },
   )
   .catch(() => {});
 await page.waitForTimeout(2500);
 
-// ── 1. The renderer paired itself; no pairing wall ──
-const bodyText = await page.evaluate(() => document.body.innerText.slice(0, 400));
+// ── 1. The renderer paired itself; no pairing wall (P5-11: the pairing
+//      screen is `features/pairing/PairingGate`, `data-testid="pairing-gate"`
+//      on its Gate root — checked by presence, not by copy, since "Connect to
+//      a GeneratorAI server" / "This device was revoked" are two different
+//      titles on the same screen) ──
+const [hasPairingGate, bodyText] = await page.evaluate(() => [
+  Boolean(document.querySelector('[data-testid="pairing-gate"]')),
+  document.body.innerText.slice(0, 400),
+]);
 record(
   'renderer auto-paired (no pairing screen)',
-  !bodyText.includes('Pair this device'),
+  !hasPairingGate,
   bodyText.slice(0, 60).replace(/\n/g, ' '),
 );
 
@@ -167,7 +186,21 @@ record('no legacy shared API key in localStorage', !leaks.hasLegacyKey);
 record('no token/secret-named localStorage keys', leaks.suspicious.length === 0, leaks.suspicious.join(','));
 record('auth runtime is not exposed on window', !leaks.globalRuntime);
 
-const keyIsNonExtractable = await page.evaluate(async () => {
+// Credentials are stored per server: the key id is derived from the active
+// connection's serverId by the same helpers the app uses (connections.ts).
+const { loadCatalog, activeConnection, deviceKeyId } = await import(
+  '../packages/client-runtime/src/connections.ts'
+);
+const lsSnapshot = await page.evaluate(() => ({ ...localStorage }));
+const memoryStorage = {
+  getItem: (k) => (Object.hasOwn(lsSnapshot, k) ? lsSnapshot[k] : null),
+  setItem: () => {},
+  removeItem: () => {},
+};
+const activeServerId = activeConnection(loadCatalog(memoryStorage))?.serverId ?? null;
+const deviceKeyName = activeServerId ? deviceKeyId(activeServerId) : null;
+
+const keyIsNonExtractable = await page.evaluate(async (keyName) => {
   try {
     const db = await new Promise((res, rej) => {
       const r = indexedDB.open('generatorai-auth');
@@ -175,13 +208,16 @@ const keyIsNonExtractable = await page.evaluate(async () => {
       r.onerror = () => rej(r.error);
     });
     if (!db.objectStoreNames.contains('keys')) return 'no key store';
+    if (!keyName) return 'no active connection';
     const pair = await new Promise((res, rej) => {
-      // Must match `KEY_ID` in packages/client-runtime/src/browserStores.ts.
-      const tx = db.transaction('keys', 'readonly').objectStore('keys').get('device-key');
+      const tx = db.transaction('keys', 'readonly').objectStore('keys').get(keyName);
       tx.onsuccess = () => res(tx.result);
       tx.onerror = () => rej(tx.error);
     });
     if (!pair?.privateKey) return 'no private key';
+    const k = pair.privateKey;
+    if (k.extractable || k.algorithm?.name !== 'ECDSA' || k.algorithm?.namedCurve !== 'P-256')
+      return `bad key: extractable=${k.extractable} alg=${k.algorithm?.name}/${k.algorithm?.namedCurve}`;
     // A non-extractable key throws on export. That is the whole point: XSS
     // can *use* the key while the page lives, but can never steal it.
     try {
@@ -193,12 +229,36 @@ const keyIsNonExtractable = await page.evaluate(async () => {
   } catch (e) {
     return `error: ${String(e).slice(0, 60)}`;
   }
-});
+}, deviceKeyName);
 record(
   'device private key is non-extractable',
   keyIsNonExtractable === 'non-extractable',
   keyIsNonExtractable,
 );
+
+// ── 5b. F-8: the vault key is handed over the server's channel, not its environment ──
+// `ps eww` (macOS) and /proc/<pid>/environ (Linux) show the environment a
+// process started with to any process of the same user. Windows has neither
+// tool; the handoff is the same code path there.
+if (process.platform !== 'win32') {
+  let serverPid = null;
+  try {
+    const port = new URL(origin).port;
+    serverPid = execFileSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], { encoding: 'utf8' }).trim().split('\n')[0] || null;
+  } catch {
+    /* lsof missing */
+  }
+  if (serverPid) {
+    const environ =
+      process.platform === 'linux'
+        ? fs.readFileSync(`/proc/${serverPid}/environ`, 'utf8').split('\0').join(' ')
+        : execFileSync('ps', ['eww', '-o', 'command=', '-p', serverPid], { encoding: 'utf8' });
+    record('server environment carries no vault key (F-8)', !/GENERATORAI_SECRET_KEY=\S/.test(environ), `pid=${serverPid}`);
+    record('server was told to ask its channel for the key', /GENERATORAI_SECRET_KEY_HANDOFF=parent/.test(environ));
+  } else {
+    record('server environment carries no vault key (F-8)', false, 'could not find the server pid (lsof)');
+  }
+}
 
 // ── 6. Main-process logs must not carry credentials ──
 const joined = mainLog.join('\n');

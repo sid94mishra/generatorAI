@@ -9,7 +9,7 @@ import {
   isFeatureAvailable,
   isScopeRequestable,
   type MobileFeature,
-} from '../auth/featureGate';
+} from '../services/auth/featureGate';
 
 const MOBILE = DEFAULT_MOBILE_SCOPES;
 const ALL_FEATURES = Object.keys(FEATURE_REQUIREMENTS) as MobileFeature[];
@@ -26,6 +26,7 @@ describe('feature gate — default mobile device', () => {
   it('withholds every write capability beyond chat and review', () => {
     for (const feature of [
       'fileUpload',
+      'scriptRun',
       'runControl',
       'workflowEdit',
       'projectEdit',
@@ -121,6 +122,7 @@ describe('feature gate — grantability', () => {
         'fileUpload',
         'projectEdit',
         'runControl',
+        'scriptRun',
         'terminal',
         'workflowEdit',
       ].sort(),

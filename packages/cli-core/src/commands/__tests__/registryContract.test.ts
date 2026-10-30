@@ -38,15 +38,25 @@ import type { CommandSpec } from '../../registry/CommandSpec.js';
  * `ctx.api.a.b.c(...)` chains through any depth), and calling it resolves to
  * an empty array — the most permissive value in JS: safe to index, iterate,
  * `.map`/`.length`, or read a property off (`undefined`) without throwing.
+ *
+ * `chats.list` is the one exception: it answers a keyset page
+ * (`{ items, nextCursor, total, counts }`, chat list v2 / G-02), not a bare
+ * array, so `path` tracks how we got here and that one call returns an empty
+ * page shape instead.
  */
-function deepStub(): unknown {
-  const fn = async (..._args: unknown[]): Promise<unknown[]> => [];
+function deepStub(path: readonly string[] = []): unknown {
+  const fn = async (..._args: unknown[]): Promise<unknown> => {
+    if (path.length === 2 && path[0] === 'chats' && path[1] === 'list') {
+      return { items: [], nextCursor: null, total: 0, counts: { all: 0, active: 0, archived: 0 } };
+    }
+    return [];
+  };
   return new Proxy(fn, {
     get(target, prop, receiver) {
       if (prop === 'then' || prop === 'catch' || prop === 'finally' || typeof prop === 'symbol') {
         return Reflect.get(target, prop, receiver);
       }
-      return deepStub();
+      return deepStub([...path, String(prop)]);
     },
   });
 }

@@ -18,41 +18,8 @@ import type {
   HarnessPermissionMode,
   PermissionRequest,
 } from '../domain/ports/IAgentHarness.js';
-import type { ToolPermissionRequestPayload } from '@generatorai/shared';
-
-/**
- * Per-turn context the plan/question gates need.
- *
- * The gates are installed once at conversation-creation time but must report
- * against the CURRENT turn, so `sendPrompt` refreshes this before every send
- * and the handlers close over the mutable holder.
- */
-export interface TurnContext {
-  chatId: string;
-  sessionId: string;
-  turnId: string;
-  agentMode: AgentMode;
-  /**
-   * Effective harness permission mode for this turn (see
-   * `resolveTurnPermissionMode`). The permission handler reads it lazily so
-   * a prompt raised mid-turn is judged against the mode the turn was sent
-   * with, not whatever the chat was flipped to afterwards.
-   */
-  permissionMode: HarnessPermissionMode;
-  /** Plans surfaced during this turn, for transcript persistence. */
-  planIds: string[];
-  /** Question + tool-permission gates opened during this turn, for transcript persistence. */
-  interactionIds: string[];
-  /**
-   * Monotonic ordinal handed out to every ordered item of the turn — each
-   * tool call, and each plan/question card. Persisting it is what lets the
-   * transcript be rebuilt in true chronological order after a reload; without
-   * it the cards can only be appended after the final answer.
-   */
-  nextSequence: number;
-  /** planId | interactionId → the ordinal that card was issued. */
-  cardSequence: Map<string, number>;
-}
+import { classifyPermissionRisk, isReadOnlyInspection, rememberablePermission, type ToolPermissionRequestPayload } from '@generatorai/shared';
+import { permissionWording } from '@generatorai/shared/ui-contract';
 
 /** The behavioural contract for a mode. Re-exported so callers need one import. */
 export function resolveModeDescriptor(mode: AgentMode | undefined): AgentModeDescriptor {
@@ -155,11 +122,97 @@ export function decideToolPermission(
   }
 }
 
-const INPUT_SUMMARY_MAX_CHARS = 600;
+/**
+ * U-27b — a shell command that only writes one file inside the working directory from a heredoc
+ * (`cat > src/a.ts <<'EOF' … EOF`, optionally after `mkdir -p src &&`) is a file edit: "Accept edits" allows it
+ * as it allows the Write tool, instead of asking as for any shell command. The target must be a plain relative
+ * path with no `..` and no dot-directory (`.git/hooks`, `.claude`, `.github`: those still ask), and the body
+ * must not expand (a quoted delimiter, or no `$`, backtick or backslash). Returns the target, else null.
+ */
+export function heredocWriteTarget(command: string): string | null {
+  const lines = command.replace(/\r\n/g, '\n').replace(/\n+$/, '').split('\n');
+  if (lines.length < 2) return null;
+  const head = lines[0]!.trim();
+  const REL = String.raw`([\w@+./-]+)`;
+  const DELIM = String.raw`<<(-?)\s*(?:'(\w+)'|"(\w+)"|(\w+))`;
+  const prefix = String.raw`^(?:mkdir\s+-p\s+${REL}\s*&&\s*)?cat\s+`;
+  const outFirst = new RegExp(`${prefix}>\\s*${REL}\\s+${DELIM}$`).exec(head);
+  const inFirst = outFirst ? null : new RegExp(`${prefix}${DELIM}\\s+>\\s*${REL}$`).exec(head);
+  const parts = outFirst
+    ? [outFirst[1], outFirst[2], outFirst[3], outFirst[4], outFirst[5], outFirst[6]]
+    : inFirst
+      ? [inFirst[1], inFirst[6], inFirst[2], inFirst[3], inFirst[4], inFirst[5]]
+      : null;
+  if (!parts) return null;
+  const [dir, target, dash, single, double, bare] = parts;
+  const delimiter = single ?? double ?? bare;
+  const closes = (line: string) => (dash ? line.replace(/^\t+/, '') : line) === delimiter;
+  // The heredoc ends at the FIRST delimiter line: anything after it would run as commands.
+  const end = lines.findIndex((line, i) => i > 0 && closes(line));
+  if (!target || !delimiter || end !== lines.length - 1) return null;
+  const body = lines.slice(1, -1).join('\n');
+  if (bare && /[$`\\]/.test(body)) return null;
+  const plain = (p: string, file: boolean) => {
+    const parts = p.replace(/\/+$/, '').split('/');
+    return (
+      !p.startsWith('/') &&
+      !p.startsWith('-') &&
+      parts.every((seg, i) => seg !== '' && seg !== '..' && (seg !== '.' || i < parts.length - 1) && (!seg.startsWith('.') || seg === '.' || (file && i === parts.length - 1)))
+    );
+  };
+  if (!plain(target, true) || (dir !== undefined && !plain(dir, false))) return null;
+  return target;
+}
+
+/** The tool input a permission request carries: Claude's `details.input`, else Copilot's raw request fields. */
+function requestInput(details: Record<string, unknown>): unknown {
+  if ('input' in details) return details['input'];
+  const rest: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(details)) if (!DETAIL_META_KEYS.has(k)) rest[k] = v;
+  return Object.keys(rest).length > 0 ? rest : undefined;
+}
+
+/**
+ * What the agent is told when a person denies a request with a reason: bare, "Not now." read as the platform's own
+ * refusal ("The platform refused it with …"), not the user's answer (U-82).
+ */
+export function personDenied(reason: string): string {
+  return `The user denied this request: ${reason}`;
+}
+
+/** The kind of access a request is judged as: a heredoc file write counts as a file write (U-27b), a read-only inspection line as a file read (D-150). */
+export function permissionTypeOf(request: PermissionRequest): PermissionRequest['type'] {
+  if (request.type !== 'shell_exec') return request.type;
+  const command = fullShellCommand(requestInput((request.details ?? {}) as Record<string, unknown>));
+  if (!command) return request.type;
+  if (heredocWriteTarget(command)) return 'file_write';
+  // D-150 — `cat`, `sed -n 1,80p`, `grep`, `git diff` inside the workspace read like the Read tool: "Accept edits"
+  // allows them as it allows reads. They were half of a team run's approvals, each one a stop.
+  return isReadOnlyInspection(command) ? 'file_read' : request.type;
+}
+
+/**
+ * A read of a file attached to the current turn. Attachments are stored as artifacts outside the workspace, so
+ * the provider asks before reading them; the person who attached a file already said the agent may read it.
+ * Claude reports `{ input: { file_path } }`, Copilot `{ path }`.
+ */
+export function isAttachedFileRead(request: PermissionRequest, attachedPaths: readonly string[] | undefined): boolean {
+  if (request.type !== 'file_read' || !attachedPaths?.length) return false;
+  const details = (request.details ?? {}) as Record<string, unknown>;
+  const input = (details['input'] ?? {}) as Record<string, unknown>;
+  const target = [input['file_path'], input['path'], details['path']].find((v): v is string => typeof v === 'string');
+  if (!target) return false;
+  const norm = (p: string) => p.replace(/\\/g, '/');
+  return attachedPaths.some((p) => norm(p) === norm(target));
+}
+
+// The person approves what the card shows, so a multi-line command must arrive whole (the card scrolls); 600
+// characters cut a six-commit line after its second commit (U-72). Pushes and attention asks clip their own text.
+const INPUT_SUMMARY_MAX_CHARS = 16_000;
 const SECRET_KEY_PATTERN = /token|secret|password|passwd|api[_-]?key|authorization|cookie/i;
 
 /** Redacts secret-looking keys and bounds the rendering so a card never ships a raw env dump. */
-function summariseToolInput(input: unknown): string {
+function summariseToolInput(input: unknown, maxChars: number = INPUT_SUMMARY_MAX_CHARS): string {
   const redact = (value: unknown, depth: number): unknown => {
     if (depth > 4) return '…';
     if (Array.isArray(value)) return value.slice(0, 50).map((v) => redact(v, depth + 1));
@@ -182,11 +235,28 @@ function summariseToolInput(input: unknown): string {
       text = String(input);
     }
   }
-  return text.length > INPUT_SUMMARY_MAX_CHARS ? `${text.slice(0, INPUT_SUMMARY_MAX_CHARS)}…` : text;
+  return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+}
+
+/**
+ * The full command line of a shell request, from whichever field its provider uses: Claude `input.command`,
+ * Codex `command`, Copilot `fullCommandText`, ACP `rawInput.command` (an argv array is joined). Never the display
+ * summary — that one is cut at its length cap, and a cut command must not be judged by its head (U-16).
+ */
+export function fullShellCommand(input: unknown, depth = 0): string | undefined {
+  if (typeof input === 'string') return input.trim() ? input : undefined;
+  if (!input || typeof input !== 'object' || depth > 2) return undefined;
+  const o = input as Record<string, unknown>;
+  for (const key of ['command', 'cmd', 'fullCommandText']) {
+    const v = o[key];
+    if (typeof v === 'string' && v.trim()) return v;
+    if (Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === 'string')) return (v as string[]).join(' ');
+  }
+  return fullShellCommand(o['rawInput'], depth + 1);
 }
 
 /** Keys the adapters add to `details` that describe the request, not the tool's input. */
-const DETAIL_META_KEYS = new Set(['toolName', 'input', 'toolUseID', 'blockedPath', 'decisionReason', 'kind']);
+const DETAIL_META_KEYS = new Set(['toolName', 'input', 'toolUseID', 'blockedPath', 'decisionReason', 'kind', 'alwaysAsk']);
 
 /**
  * Builds the durable, display-safe payload for a `tool_permission` gate.
@@ -207,20 +277,33 @@ export function buildToolPermissionPayload(
       : typeof details['kind'] === 'string' && details['kind'].length > 0
         ? details['kind']
         : request.type;
-  let input: unknown;
-  if ('input' in details) {
-    input = details['input'];
-  } else {
-    const rest: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(details)) if (!DETAIL_META_KEYS.has(k)) rest[k] = v;
-    input = Object.keys(rest).length > 0 ? rest : undefined;
-  }
+  const input = requestInput(details);
+  const inputSummary = summariseToolInput(input);
+  // MG-04: stamped once, here, so the stored gate, its event, the attention
+  // ask and the push all carry the same verdict.
+  const { risk, reasons } = classifyPermissionRisk({ type: request.type, toolName, inputSummary });
+  // D-107: what the card asks, in words, for every client (the push and the attention ask too).
+  const { title, kindLabel } = permissionWording(toolName, request.type);
+  // U-16 (D-147): what "Allow for this chat / run" would remember, judged on the FULL request.
+  const remember = rememberablePermission({
+    type: request.type,
+    toolName,
+    command: request.type === 'shell_exec' ? fullShellCommand(input) : undefined,
+    inputSummary: summariseToolInput(input, Number.POSITIVE_INFINITY),
+    alwaysAsk: details['alwaysAsk'] === true,
+  });
   return {
+    title,
+    kindLabel,
     toolName,
     type: request.type,
     description: request.description,
-    inputSummary: summariseToolInput(input),
+    inputSummary,
     permissionMode: permissionMode as ToolPermissionRequestPayload['permissionMode'],
+    risk,
+    ...(reasons.length > 0 ? { riskReasons: reasons } : {}),
+    rememberRules: remember.rules,
+    ...(remember.refusal ? { rememberRefusal: remember.refusal } : {}),
   };
 }
 

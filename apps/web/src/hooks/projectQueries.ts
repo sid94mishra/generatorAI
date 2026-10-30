@@ -17,6 +17,7 @@ import type {
   McpServerEntry,
   SystemConfig,
   FileEntry,
+  ProjectArtifactPrefs,
 } from '@generatorai/shared';
 
 // ── Query Keys ──
@@ -28,34 +29,49 @@ export const projectKeys = {
   branches: (projectId: string, codebaseId: string) => ['codebase-branches', projectId, codebaseId] as const,
   configs: (projectId: string) => ['project-configs', projectId] as const,
   worktrees: (projectId: string) => ['project-worktrees', projectId] as const,
+  runs: (projectId: string, query?: { status?: string | string[]; cursor?: string; limit?: number }) =>
+    ['project-runs', projectId, query] as const,
   systemArtifacts: (type?: string) => ['system-artifacts', type] as const,
   availableArtifacts: (projectId: string, type?: string) => ['available-artifacts', projectId, type] as const,
-  codebaseWorktrees: (projectId: string, codebaseId: string) => ['codebase-worktrees', projectId, codebaseId] as const,
+  codebaseWorktrees: (projectId: string, codebaseId: string, include?: readonly string[]) =>
+    ['codebase-worktrees', projectId, codebaseId, include] as const,
   codebaseFiles: (projectId: string, codebaseId: string, path?: string) => ['codebase-files', projectId, codebaseId, path] as const,
   codebaseFileContent: (projectId: string, codebaseId: string, filePath: string) => ['codebase-file-content', projectId, codebaseId, filePath] as const,
   artifactContent: (artifactId: string, source: string) => ['artifact-content', artifactId, source] as const,
   mcpServers: (projectId: string) => ['project-mcp-servers', projectId] as const,
   systemMcpServers: ['system-mcp-servers'] as const,
+  // G-16 — codebase clone/fetch logs.
+  codebaseLogs: (projectId: string, codebaseId: string) => ['codebase-logs', projectId, codebaseId] as const,
+  // G-19 — per-project artifact enable/disable.
+  artifactPrefs: (projectId: string) => ['project-artifact-prefs', projectId] as const,
 };
 
 // ════════════════════════════════════════════════════════════════
 // Project Queries & Mutations
 // ════════════════════════════════════════════════════════════════
 
-export function useProjects() {
+/**
+ * `includeSummary` (G-13) adds each project's `summary` (Codebases, Active
+ * chats + Needs you, Last run, Worktrees) for the Projects list columns.
+ * Kept a separate query key so a plain list (pickers) and the summary list
+ * (Projects page) cache independently.
+ */
+export function useProjects(options?: { includeSummary?: boolean }) {
   const platform = usePlatform();
+  const includeSummary = options?.includeSummary ?? false;
   return useQuery({
-    queryKey: projectKeys.projects,
-    queryFn: () => platform.listProjects(),
+    queryKey: includeSummary ? [...projectKeys.projects, 'summary'] : projectKeys.projects,
+    queryFn: () => platform.listProjects(includeSummary ? { includeSummary: true } : undefined),
     staleTime: 30_000,
   });
 }
 
-export function useProject(id: string | undefined) {
+export function useProject(id: string | undefined, options?: { includeSummary?: boolean }) {
   const platform = usePlatform();
+  const includeSummary = options?.includeSummary ?? false;
   return useQuery({
-    queryKey: projectKeys.project(id ?? ''),
-    queryFn: () => platform.getProject(id!),
+    queryKey: includeSummary ? [...projectKeys.project(id ?? ''), 'summary'] : projectKeys.project(id ?? ''),
+    queryFn: () => platform.getProject(id!, includeSummary ? { includeSummary: true } : undefined),
     enabled: !!id,
   });
 }
@@ -178,6 +194,13 @@ export function useUnlinkCodebase() {
   });
 }
 
+/**
+ * G-16 — the fetch now runs as a background job: this resolves as soon as
+ * the job starts (`{ jobId }`), not when the fetch finishes. Invalidating
+ * `codebases` still shows the immediate `cloning` transition; poll
+ * `useCodebaseLogs` (or fold in the `codebase.status_changed` stream event,
+ * once a live view subscribes to it) to see when it lands.
+ */
 export function useFetchCodebase() {
   const platform = usePlatform();
   const queryClient = useQueryClient();
@@ -186,6 +209,7 @@ export function useFetchCodebase() {
       platform.fetchCodebase(projectId, codebaseId),
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: projectKeys.codebases(vars.projectId) });
+      queryClient.invalidateQueries({ queryKey: projectKeys.codebaseLogs(vars.projectId, vars.codebaseId) });
     },
   });
 }
@@ -278,6 +302,28 @@ export function useCleanupWorktrees() {
 }
 
 // ════════════════════════════════════════════════════════════════
+// Workflow Runs (G-15) — ProjectDetail Runs tab
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * One page of a project's workflow runs, newest first. `WorkflowRun` has no
+ * `projectId` of its own, so this reads `GET /projects/:id/runs` (joined
+ * through the definition server-side) rather than `/workflow-runs?
+ * projectId=`. Pass `nextCursor` back as `cursor` for the next page.
+ */
+export function useProjectRuns(
+  projectId: string | undefined,
+  query?: { status?: string | string[]; cursor?: string; limit?: number },
+) {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: projectKeys.runs(projectId ?? '', query),
+    queryFn: () => platform.listProjectRuns(projectId!, query),
+    enabled: !!projectId,
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
 // System Artifacts & Available Artifacts
 // ════════════════════════════════════════════════════════════════
 
@@ -310,6 +356,75 @@ export function useCodebaseWorktrees(projectId: string | undefined, codebaseId: 
     queryFn: () => platform.listCodebaseWorktrees(projectId!, codebaseId!),
     enabled: !!projectId && !!codebaseId,
     refetchInterval: 30_000,
+  });
+}
+
+/**
+ * G-17 — `sizeBytes`/`link`/`expiresAt` per worktree plus the
+ * `totalBytes`/`reclaimableBytes` list summary. Sizes are measured
+ * asynchronously server-side (bounded concurrency, 10-minute cache) — a
+ * worktree whose size has not been measured yet simply omits `sizeBytes`
+ * (never a fake `0`); polling this again is what picks up a size once the
+ * server has one.
+ */
+export function useCodebaseWorktreesUsage(projectId: string | undefined, codebaseId: string | undefined) {
+  const platform = usePlatform();
+  const include = ['usage', 'link'] as const;
+  return useQuery({
+    queryKey: projectKeys.codebaseWorktrees(projectId ?? '', codebaseId ?? '', include),
+    queryFn: () => platform.listCodebaseWorktrees(projectId!, codebaseId!, { include: [...include] }),
+    enabled: !!projectId && !!codebaseId,
+    refetchInterval: 30_000,
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+// Codebase fetch/clone logs (G-16)
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * Tails a codebase's clone/fetch log ring buffer + current job. Per the gap
+ * ("the web polls the logs only while the status is cloning or fetching"),
+ * `enabled`/`isLive` is the caller's call — pass the codebase's own
+ * `status === 'cloning'` (or `pending`) so this stops polling once the job
+ * lands on `ready`/`stale`/`error`.
+ */
+export function useCodebaseLogs(
+  projectId: string | undefined,
+  codebaseId: string | undefined,
+  options?: { limit?: number; isLive?: boolean },
+) {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: projectKeys.codebaseLogs(projectId ?? '', codebaseId ?? ''),
+    queryFn: () => platform.getCodebaseLogs(projectId!, codebaseId!, { limit: options?.limit }),
+    enabled: !!projectId && !!codebaseId,
+    refetchInterval: options?.isLive ? 2_000 : false,
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+// Per-project artifact customization (G-19)
+// ════════════════════════════════════════════════════════════════
+
+export function useProjectArtifactPrefs(projectId: string | undefined) {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: projectKeys.artifactPrefs(projectId ?? ''),
+    queryFn: () => platform.getProjectArtifactPrefs(projectId!),
+    enabled: !!projectId,
+  });
+}
+
+export function useUpdateProjectArtifactPrefs() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, prefs }: { projectId: string; prefs: ProjectArtifactPrefs }) =>
+      platform.updateProjectArtifactPrefs(projectId, prefs),
+    onSuccess: (data, vars) => {
+      queryClient.setQueryData(projectKeys.artifactPrefs(vars.projectId), data);
+    },
   });
 }
 

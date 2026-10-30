@@ -1,0 +1,18 @@
+appId: ${APP_ID}
+name: scripts · list, detail, run sheet
+# M7-04 (MScripts, MScriptDetail). The sandbox must have workflow scripts enabled (GENERATORAI_ALLOW_WORKFLOW_SCRIPTS).
+tags: [scripts]
+# The paired device has the default scopes; this flow edits, so it adds the route-policy scope for its run.
+env: {DEVICE_SCOPES: "write:workflows"}
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///scripts
+- extendedWaitUntil: {visible: {id: scripts}, timeout: 20000}
+- runFlow:
+    when: {visible: {id: "script-row-.*"}}
+    commands:
+      - tapOn: {id: "script-row-.*", index: 0}
+      - extendedWaitUntil: {visible: {id: script-detail}, timeout: 15000}
+      - assertVisible: "Stages.*"
+      - tapOn: {id: script-run}
+      - extendedWaitUntil: {visible: {id: script-run-sheet}, timeout: 10000}

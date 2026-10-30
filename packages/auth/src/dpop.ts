@@ -273,7 +273,10 @@ export function canonicalHtu(url: string): string {
   ) {
     parsed.port = '';
   }
-  // Normalize a trailing-slash-only path so `/api` and `/api/` do not diverge
-  // for the root case only; deeper paths stay byte-exact.
+  // Scheme and host are case-insensitive (RFC 3986 §6.2.2.1); the WHATWG
+  // parser already lower-cases them for http(s), and this keeps it true for
+  // any URL the server rebuilds (audit F-7). The path stays byte-exact:
+  // route case is decided by the canonical route policy (D-115), not here.
+  parsed.hostname = parsed.hostname.toLowerCase();
   return parsed.toString();
 }

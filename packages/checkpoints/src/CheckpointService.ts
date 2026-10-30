@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import type {
   CheckpointDiffFile,
   CheckpointFilters,
+  CheckpointKind,
   CheckpointRecord,
   CheckpointRetentionPolicy,
   CreateCheckpointParams,
@@ -60,7 +61,45 @@ export class CheckpointService {
   async create(params: CreateCheckpointParams): Promise<CheckpointRecord | null> {
     const repoAlias = params.repoAlias ?? '.';
     const key = `${params.workspaceId}::${repoAlias}`;
+    // Nothing to capture, decided outside the per-repo lock (P07 WP-7.1,
+    // F O-1): parallel stages that write nothing no longer queue behind each
+    // other's `git add -A` + `write-tree`.
+    if ((params.skipIfUnchanged ?? true) && (await this.cleanAtPrevious(params.workspaceId, repoAlias, params.repoDir, params.kind))) return null;
     return this.withLock(key, () => this.createUnlocked(params, repoAlias));
+  }
+
+  /**
+   * A git checkout whose `git status --porcelain` is empty and whose HEAD
+   * tree is the previous snapshot's has nothing new. False whenever it
+   * cannot tell (a shadow store, no previous snapshot, a git error): the
+   * full capture then decides.
+   */
+  private async cleanAtPrevious(workspaceId: string, repoAlias: string, repoDir: string, kind: CheckpointKind): Promise<boolean> {
+    if (this.store.shadowGitDir(repoDir)) return false;
+    try {
+      const previous = await this.previousFor(workspaceId, repoAlias, kind);
+      if (!previous) return false;
+      const git = this.store.gitFor(repoDir);
+      if (!(await git.isClean(repoDir))) return false;
+      return (await git.revParse(repoDir, 'HEAD^{tree}')) === previous.treeSha;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The snapshot a new one is compared with (skip-if-unchanged, stats,
+   * parent). A durable snapshot compares with the latest DURABLE one: the
+   * rolling `live` snapshots a turn's tool calls schedule usually already
+   * hold the turn's final tree, and comparing with them made the turn's
+   * `after` boundary look unchanged and get skipped — with a real provider
+   * (which reports tool calls) a turn never recorded its `after` (review-2).
+   * A `live` snapshot compares with the latest of any kind.
+   */
+  private async previousFor(workspaceId: string, repoAlias: string, kind: CheckpointKind): Promise<CheckpointRecord | null> {
+    if (kind === 'live') return this.repository.findLatest(workspaceId, repoAlias);
+    const [latestDurable] = await this.repository.list({ workspaceId, repoAlias, limit: 1 });
+    return latestDurable ?? null;
   }
 
   private async createUnlocked(
@@ -76,7 +115,7 @@ export class CheckpointService {
         return null;
       }
 
-      const previous = await this.repository.findLatest(workspaceId, repoAlias);
+      const previous = await this.previousFor(workspaceId, repoAlias, kind);
       const seq = (await this.repository.maxSeq(workspaceId, repoAlias)) + 1;
       const refName = checkpointRefName(workspaceId, repoAlias, seq);
       const message = `generatorai:${kind}${label ? ` ${label}` : ''}`;
@@ -133,6 +172,17 @@ export class CheckpointService {
     } catch (err) {
       // Checkpointing must never break the agent loop.
       this.logger.warn(`[Checkpoints] create failed for ${repoDir}: ${err}`);
+      return null;
+    }
+  }
+
+  /** The tree hash of a repository's working tree (no ref, no record); null when it cannot be computed. */
+  async treeHash(repoDir: string): Promise<string | null> {
+    try {
+      if (!(await this.store.prepare(repoDir))) return null;
+      return await this.store.treeHash(repoDir);
+    } catch (err) {
+      this.logger.warn(`[Checkpoints] tree hash failed for ${repoDir}: ${err}`);
       return null;
     }
   }
@@ -422,6 +472,19 @@ export class CheckpointService {
 
   async deleteWorkspace(workspaceId: string): Promise<void> {
     await this.repository.deleteByWorkspace(workspaceId);
+  }
+
+  /**
+   * Drop every checkpoint row of one repo alias — called when its store is
+   * deleted (a mount removed by Edit sources). The rows point at objects
+   * that no longer exist: a mount coming back under the same alias would
+   * chain its next snapshot onto a parent commit git cannot find (every
+   * capture failed) and diff against a baseline tree that is gone.
+   */
+  async forgetRepo(workspaceId: string, repoAlias: string): Promise<number> {
+    const rows = await this.repository.list({ workspaceId, repoAlias, excludeLive: false, limit: 10_000 });
+    for (const row of rows) await this.repository.delete(row.id);
+    return rows.length;
   }
 
   // ── Internals ───────────────────────────────────────────────

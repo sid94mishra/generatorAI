@@ -3,6 +3,129 @@ import tseslint from '@typescript-eslint/eslint-plugin';
 import tsparser from '@typescript-eslint/parser';
 import reactHooks from 'eslint-plugin-react-hooks';
 import prettierConfig from 'eslint-config-prettier';
+import betterTailwind from 'eslint-plugin-better-tailwindcss';
+import boundaries from 'eslint-plugin-boundaries';
+import mobileConfig from './apps/mobile/scripts/eslint-config.mjs';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+// Absolute paths: turbo runs `eslint src/` from apps/web while `pnpm lint`'s
+// check:syncio runs `eslint .` from the repo root, and both must resolve the
+// same files.
+const REPO_ROOT = fileURLToPath(new URL('.', import.meta.url));
+const WEB_DIR = fileURLToPath(new URL('./apps/web', import.meta.url));
+const WEB_CSS = fileURLToPath(new URL('./apps/web/src/styles/globals.css', import.meta.url));
+const WEB_TSCONFIG = fileURLToPath(new URL('./apps/web/tsconfig.eslint.json', import.meta.url));
+
+// ── Web design-system restrictions shared by every block that re-declares ──
+// `no-restricted-imports` / `no-restricted-syntax` for apps/web/src (see the
+// flat-config trap at the bottom of this file: a later block REPLACES a rule
+// for the files it matches, it does not merge with it).
+const WEB_RESTRICTED_IMPORT_PATHS = [
+  {
+    name: 'lucide-react',
+    importNames: ['Loader2'],
+    message: 'Use <Spinner> from @/ui/primitives instead of raw Loader2.',
+  },
+];
+const WEB_RESTRICTED_SYNTAX = [
+  {
+    selector: "JSXOpeningElement[name.name='button']",
+    message: 'Use <Button> / <IconButton> from @/ui/primitives instead of a raw <button>.',
+  },
+  {
+    selector: "JSXOpeningElement[name.name='select']",
+    message: 'Use <Select> from @/ui/primitives instead of a raw <select>.',
+  },
+];
+
+// ── Redesign layers (docs/redesign/09-verification.md §2.3, D-04) ──────────
+const WEB_NEW_CODE = 'apps/web/src/{ui,blocks,features,app}/**/*.{ts,tsx}';
+const WEB_TEST_FILES = ['apps/web/src/**/__tests__/**', 'apps/web/src/**/*.test.{ts,tsx}'];
+const WEB_STORIES = '**/*.stories.tsx';
+
+// The same raw-element / confirm rules for the redesign folders, as errors.
+// Loader2 needs no entry here: every lucide import outside ui/icons is already
+// banned (LUCIDE below).
+const NEW_CODE_RESTRICTED_SYNTAX = [
+  {
+    selector: "JSXOpeningElement[name.name='button']",
+    message: 'Use <Button> / <IconButton> from @/ui/primitives instead of a raw <button>.',
+  },
+  {
+    selector: "JSXOpeningElement[name.name='select']",
+    message: 'Use <Select> from @/ui/primitives instead of a raw <select>.',
+  },
+];
+
+const LUCIDE = { name: 'lucide-react', message: 'Import icons from @/ui/icons by concept (D-17).' };
+const HEADLESS = {
+  group: ['@radix-ui/*', 'radix-ui', '@base-ui/*', '@base-ui-components/*', 'cmdk'],
+  message: 'Headless primitives are wrapped in @/ui/primitives (D-05).',
+};
+const UI_LAYER = [
+  {
+    group: ['@tanstack/react-query', 'react-router', 'react-router-dom', 'zustand', 'zustand/*', '@generatorai/client-core', '@generatorai/client-runtime'],
+    message: 'ui/ is presentational: pass data and callbacks in as props.',
+  },
+  {
+    group: ['@/stores/*', '@/platform/*', '@/hooks/*', '@/features/*', '@/blocks/*'],
+    message: 'ui/ may import only ui/ (D-04).',
+  },
+];
+
+// features/ get data only through hooks/*Queries.ts or stores (D-04), never the
+// query client, the platform client or the client packages directly. Type
+// imports stay allowed: sharing a type is not reaching the data.
+const FEATURES_DATA = [
+  {
+    group: ['@tanstack/react-query', '@tanstack/react-query/*'],
+    allowTypeImports: true,
+    message: 'features/ read data through hooks/*Queries.ts or stores, not react-query directly (D-04).',
+  },
+  {
+    // client-core stays allowed: it holds pure, React-free helpers and read
+    // models (runTitle, parseUnifiedDiff, status map …) that features render.
+    group: ['@generatorai/client-runtime', '@generatorai/client-runtime/*', '@generatorai/client-transport', '@generatorai/client-transport/*'],
+    allowTypeImports: true,
+    message: 'features/ reach the client runtime/transport through hooks/*Queries.ts or stores (D-04). Type imports are fine.',
+  },
+  {
+    group: ['@/providers/PlatformProvider', '@/providers/PlatformProvider.js', '**/providers/PlatformProvider', '**/providers/PlatformProvider.js'],
+    allowTypeImports: true,
+    message: 'features/ never hold the platform client (usePlatform); add a hook in hooks/ instead (D-04).',
+  },
+  {
+    group: ['@/providers/QueryProvider', '@/providers/QueryProvider.js', '**/providers/QueryProvider', '**/providers/QueryProvider.js'],
+    allowTypeImports: true,
+    message: 'features/ never touch the query client directly; add a hook in hooks/*Queries.ts instead (D-04).',
+  },
+];
+
+// LEGACY_UTILITY_NAMES from packages/design-tokens (src/vocabulary.ts), via the
+// JSON `pnpm tokens:write` generates next to it (a config cannot import TS).
+const LEGACY_UTILITY_NAMES = JSON.parse(
+  readFileSync(new URL('./packages/design-tokens/generated/vocabulary.json', import.meta.url), 'utf8'),
+).legacyUtilityNames;
+const LEGACY_UTILITY_RESTRICTION = {
+  pattern: `^(.*:)?!?(bg|text|border|ring|fill|stroke|outline|divide|from|to|via|shadow|accent|caret|decoration|placeholder)-(${LEGACY_UTILITY_NAMES.join('|')})(/\\d+)?$`,
+  message: 'Legacy token utility (D-06). Use the design vocabulary: bg-surface, text-fg-2, border-line … (02 §2.3).',
+};
+const ARBITRARY_VALUE_RESTRICTION = { pattern: '\\[.+\\]', message: 'No arbitrary values. Add a token or a kit variant.' };
+const NEW_CODE_RESTRICTED_CLASSES = [
+  { pattern: '^(.*:)?text-(xs|sm|base|lg|xl|\\d?xl)$', message: 'Use the D-13 scale: text-micro|small|ui|body|title|heading|display.' },
+  { pattern: '^(.*:)?(bg|text|border|ring|fill|stroke|outline|divide|from|to|via)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d+(/\\d+)?$', message: 'Palette classes are off-system. Use design tokens (D-08).' },
+  { pattern: '^(.*:)?(bg|text|border|ring|fill|stroke)-(white|black)(/\\d+)?$', message: 'Use fg/surface/on-accent tokens.' },
+  { pattern: '^(.*:)?rounded(-[trblxyse]{1,2})?(-(xs|sm|md|lg|xl|\\dxl))?$', message: 'Use rounded-badge|control-sm|control|seg|card|panel|dialog (D-14).' },
+  { pattern: '^(.*:)?shadow(-(2xs|xs|sm|md|lg|xl|2xl|inner))?$', message: 'Only shadow-pop / shadow-none exist.' },
+  ARBITRARY_VALUE_RESTRICTION,
+  { pattern: '^(.*:)?h-(\\d+(\\.\\d+)?|px)$', message: 'Heights come from density variables: h-control-sm|h-control|h-control-lg|h-row|h-bar|h-tab|h-nav (D-15).' },
+  // Legacy semantic utilities are banned in new code (09 §2.3).
+  LEGACY_UTILITY_RESTRICTION,
+];
+
+/** Allow imports into the given element types (eslint-plugin-boundaries v7 policy selector). */
+const toTypes = (...types) => ({ to: { element: { type: types } } });
 
 /** @type {import('eslint').Linter.Config[]} */
 export default [
@@ -72,43 +195,198 @@ export default [
     },
   },
   {
-    // Design-system enforcement for the web app (see apps/web/DESIGN_SYSTEM.md).
-    // `warn` during the migration phases; flipped to `error` in the final
-    // lock-in phase once counts hit ~0. The primitives themselves are exempt.
+    // Design-system enforcement for the .tsx outside the redesign folders (the
+    // entry, providers). `error` since P7-03 (the ratchet is at 0); stories may
+    // use raw elements (D-45).
     files: ['apps/web/src/**/*.tsx'],
-    ignores: [
-      'apps/web/src/components/ui/**',
-      'apps/web/src/**/__tests__/**',
-      'apps/web/src/**/*.test.tsx',
-    ],
+    ignores: [WEB_NEW_CODE, WEB_STORIES, ...WEB_TEST_FILES],
     rules: {
-      'no-restricted-syntax': [
-        'warn',
-        {
-          selector: "JSXOpeningElement[name.name='button']",
-          message: 'Use <Button> from @/components/ui instead of a raw <button>.',
-        },
-        {
-          selector: "JSXOpeningElement[name.name='select']",
-          message: 'Use <Select> from @/components/ui instead of a raw <select>.',
-        },
+      'no-restricted-syntax': ['error', ...WEB_RESTRICTED_SYNTAX],
+      'no-restricted-imports': ['error', { paths: WEB_RESTRICTED_IMPORT_PATHS }],
+      'no-restricted-globals': [
+        'error',
+        { name: 'confirm', message: 'Use useConfirm() / <AlertDialog> from @/ui/primitives (P-32).' },
       ],
-      'no-restricted-imports': [
-        'warn',
+    },
+  },
+  {
+    // The same for the redesign folders, with messages that point at the new
+    // kit. `error`: the ratchet already hard-zeros these there. ui/primitives
+    // render the raw elements by design (D-43), and stories may (D-45).
+    files: [WEB_NEW_CODE],
+    ignores: ['apps/web/src/ui/primitives/**', WEB_STORIES, ...WEB_TEST_FILES],
+    rules: {
+      'no-restricted-syntax': ['error', ...NEW_CODE_RESTRICTED_SYNTAX],
+      'no-restricted-globals': [
+        'error',
+        { name: 'confirm', message: 'Use useConfirm() / <AlertDialog> from @/ui/primitives (P-32).' },
+      ],
+    },
+  },
+  // ── Redesign guardrails (D-03; docs/redesign/09-verification.md §2.3) ──────
+  //
+  // (a) Tailwind vocabulary, new code only. `error` from P0: the folders start
+  // empty. Legacy code is held by the check-design-system.mjs ratchet instead.
+  //
+  // `cwd` is not optional: from the repo root `tailwindcss` resolves to the
+  // hoisted 3.x (docs site), and the plugin would then lint v4 code against v3.
+  // `callees` is left at the plugin default on purpose: it already covers cn,
+  // cva, clsx and twMerge (including cva `variants` values), and setting the
+  // option replaces those matchers instead of extending them.
+  //
+  // Stories are linted too (D-45): they must show real classes, so the
+  // vocabulary applies; only arbitrary values are free (demo frames), below.
+  {
+    files: [WEB_NEW_CODE],
+    ignores: WEB_TEST_FILES,
+    plugins: { 'better-tailwindcss': betterTailwind },
+    settings: { 'better-tailwindcss': { entryPoint: WEB_CSS, cwd: WEB_DIR } },
+    rules: {
+      'better-tailwindcss/no-unknown-classes': ['error', { ignore: ['^app-drag-region$', '^no-drag$', '^group(/.+)?$', '^peer(/.+)?$'] }],
+      'better-tailwindcss/no-conflicting-classes': 'error',
+      'better-tailwindcss/no-duplicate-classes': 'error',
+      'better-tailwindcss/no-deprecated-classes': 'error',
+      'better-tailwindcss/no-unnecessary-whitespace': 'error',
+      'better-tailwindcss/no-restricted-classes': ['error', { restrict: NEW_CODE_RESTRICTED_CLASSES }],
+    },
+  },
+  {
+    // ui/lib is the one sanctioned home of arbitrary values in product code
+    // (Base UI CSS-variable passthroughs, each with a comment), and stories may
+    // use them as demo scaffolding (D-45) — the same exemptions the ratchet's
+    // `arbitraryValue` rule gives. Everything else in (a) still applies.
+    files: ['apps/web/src/ui/lib/**/*.{ts,tsx}', `apps/web/src/{ui,blocks,features,app}/${WEB_STORIES}`],
+    ignores: WEB_TEST_FILES,
+    rules: {
+      'better-tailwindcss/no-restricted-classes': [
+        'error',
+        { restrict: NEW_CODE_RESTRICTED_CLASSES.filter((r) => r !== ARBITRARY_VALUE_RESTRICTION) },
+      ],
+    },
+  },
+  // (b) Layer boundaries (D-04), over all of apps/web/src.
+  {
+    files: ['apps/web/src/**/*.{ts,tsx}'],
+    plugins: { boundaries },
+    settings: {
+      'import/resolver': { typescript: { project: WEB_TSCONFIG } },
+      'boundaries/root-path': REPO_ROOT,
+      'boundaries/include': ['apps/web/src/**/*'],
+      // Tests are not a layer: they may import any layer, and nothing but
+      // tests imports them. Ignoring them keeps no-unknown-files quiet for
+      // src/__tests__ without inventing a policy-free element.
+      'boundaries/ignore': WEB_TEST_FILES,
+      // Lazy route modules and barrel re-exports cross layers too.
+      'boundaries/dependency-nodes': ['import', 'dynamic-import', 'export'],
+      'boundaries/elements': [
+        // Storybook-only design-foundations showcase (D-04): not a kit folder.
+        // It may use ui/, and nothing may import it. Listed before `ui` so it
+        // matches first.
+        { type: 'foundations', pattern: 'apps/web/src/ui/foundations', partialMatch: false },
+        { type: 'ui', pattern: 'apps/web/src/ui', partialMatch: false },
+        { type: 'blocks', pattern: 'apps/web/src/blocks', partialMatch: false },
+        { type: 'features', pattern: 'apps/web/src/features/*', partialMatch: false, capture: ['domain'] },
+        { type: 'app', pattern: 'apps/web/src/app', partialMatch: false },
+        { type: 'platform', pattern: 'apps/web/src/platform', partialMatch: false },
+        { type: 'data', pattern: 'apps/web/src/{stores,hooks,lib,utils,providers,types,audio}', partialMatch: false },
+        // Stylesheets (globals.css), imported for their side effect by the entry.
+        { type: 'styles', pattern: 'apps/web/src/styles', partialMatch: false },
+        // The loose files at the top of src (App, main, router). v7 has no
+        // non-deprecated way to make a single file an element; `mode: 'file'`
+        // is it.
+        { type: 'root', pattern: 'apps/web/src/*.{ts,tsx}', mode: 'file' },
+      ],
+    },
+    rules: {
+      'boundaries/dependencies': [
+        'error',
         {
-          paths: [
+          default: 'disallow',
+          policies: [
+            { from: { element: { type: 'ui' } }, allow: toTypes('ui') },
+            // No policy allows any element INTO foundations.
+            { from: { element: { type: 'foundations' } }, allow: toTypes('ui', 'foundations') },
+            { from: { element: { type: 'blocks' } }, allow: toTypes('ui', 'blocks', 'data', 'platform') },
+            { from: { element: { type: 'features' } }, allow: toTypes('ui', 'blocks', 'data') },
             {
-              name: 'lucide-react',
-              importNames: ['Loader2'],
-              message: 'Use <Spinner> from @/components/ui instead of raw Loader2.',
+              from: { element: { type: 'features' } },
+              allow: { to: { element: { type: 'features', captured: { domain: '{{ from.element.captured.domain }}' } } } },
             },
+            { from: { element: { type: 'app' } }, allow: toTypes('ui', 'blocks', 'features', 'data', 'platform') },
+            { from: { element: { type: 'data' } }, allow: toTypes('data', 'platform') },
+            // The kit's pure helpers in ui/lib are shared with the data layer:
+            // ThemeProvider (providers/) writes the appearance through
+            // applyAppearance (D-25, 09 §3.3). And the imperative kit toast:
+            // the global mutation/query error handlers (providers/QueryProvider)
+            // and a few hooks/queries.ts `onError`s report through `toast.error`
+            // (D-30). Those two targets only; the rest of ui/ stays out of data.
+            {
+              from: { element: { type: 'data' } },
+              allow: {
+                to: {
+                  element: { type: 'ui' },
+                  file: { path: ['apps/web/src/ui/lib/*.ts', 'apps/web/src/ui/primitives/Toast/Toast.tsx'] },
+                },
+              },
+            },
+            { from: { element: { type: 'platform' } }, allow: toTypes('platform', 'data') },
+            // `root` too: each loose file is its own element, and main.tsx imports App.tsx.
+            { from: { element: { type: 'root' } }, allow: toTypes('root', 'app', 'ui', 'data', 'platform', 'styles') },
           ],
         },
       ],
-      'no-restricted-globals': [
-        'warn',
-        { name: 'confirm', message: 'Use <ConfirmDialog> from @/components/ui.' },
-      ],
+      // Fail closed (D-03): a folder that is not declared above (src/services,
+      // src/queries …) is neither importable nor allowed to exist, so it cannot
+      // sidestep the policies. Declare it as an element first.
+      'boundaries/no-unknown-dependencies': 'error',
+      'boundaries/no-unknown-files': 'error',
+    },
+  },
+  // (c) no-restricted-imports per layer. The file sets are DISJOINT, so no
+  // block replaces another's rule; the first block repeats
+  // WEB_RESTRICTED_IMPORT_PATHS because it replaces the design-system block's
+  // rule above (the new folders are outside that block).
+  {
+    // Everything outside the redesign folders (entry, data layer, platform):
+    // `error` since P7-03 (lucideDirectImport, rawHeadlessImport are at 0).
+    files: ['apps/web/src/**/*.{ts,tsx}'],
+    ignores: [WEB_NEW_CODE, ...WEB_TEST_FILES],
+    rules: {
+      'no-restricted-imports': ['error', { paths: [...WEB_RESTRICTED_IMPORT_PATHS, LUCIDE], patterns: [HEADLESS] }],
+    },
+  },
+  {
+    // blocks/ and app/: icons by concept, headless only through the kit. `error`:
+    // the ratchet already hard-zeros both in the new folders.
+    files: ['apps/web/src/{blocks,app}/**/*.{ts,tsx}'],
+    ignores: WEB_TEST_FILES,
+    rules: {
+      'no-restricted-imports': ['error', { paths: [LUCIDE], patterns: [HEADLESS] }],
+    },
+  },
+  {
+    // features/: the same, plus data only through hooks or stores (D-04).
+    files: ['apps/web/src/features/**/*.{ts,tsx}'],
+    ignores: WEB_TEST_FILES,
+    rules: {
+      'no-restricted-imports': ['error', { paths: [LUCIDE], patterns: [HEADLESS, ...FEATURES_DATA] }],
+    },
+  },
+  {
+    // ui/ except the icon registry: headless allowed, lucide and data layers not.
+    files: ['apps/web/src/ui/**/*.{ts,tsx}'],
+    ignores: ['apps/web/src/ui/icons/**', ...WEB_TEST_FILES],
+    rules: {
+      'no-restricted-imports': ['error', { paths: [LUCIDE], patterns: UI_LAYER }],
+    },
+  },
+  {
+    // The icon registry: the only lucide importer (it maps the loader concept
+    // too, so Loader2 is allowed here).
+    files: ['apps/web/src/ui/icons/**/*.{ts,tsx}'],
+    ignores: WEB_TEST_FILES,
+    rules: {
+      'no-restricted-imports': ['error', { patterns: UI_LAYER }],
     },
   },
   // ── W33 Layer boundary rules ────────────────────────────────────────────────
@@ -320,5 +598,6 @@ export default [
       ],
     },
   },
+  ...mobileConfig,
   prettierConfig,
 ];

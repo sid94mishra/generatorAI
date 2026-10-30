@@ -1,6 +1,12 @@
 // Shared types barrel
-export { HARNESS_PROVIDER_IDS, REASONING_EFFORTS } from './ProviderConfig.js';
-export type { HarnessProviderId, ReasoningEffort } from './ProviderConfig.js';
+export {
+  HARNESS_PROVIDER_IDS,
+  HARNESS_PROVIDER_LABELS,
+  HARNESS_PROVIDER_STABILITY,
+  harnessProviderLabel,
+  REASONING_EFFORTS,
+} from './ProviderConfig.js';
+export type { HarnessProviderId, HarnessProviderStability, ReasoningEffort } from './ProviderConfig.js';
 export type {
   AgentEvent,
   AgentEventKind,
@@ -28,6 +34,8 @@ export type { EventClass } from './eventClass.js';
 export {
   EVENT_CLASS,
   DELTA_SESSION_INFO_TYPES,
+  CHAT_TURN_PRELUDE,
+  isChatTurnStart,
   classifyEvent,
   isDeltaEvent,
 } from './eventClass.js';
@@ -43,18 +51,13 @@ export type {
   FunctionHookConfig,
   WorkflowHookPhase,
   WorkflowHookDefinition,
-  HooksFileConfig,
   HookResult,
   HookPhaseResult,
 } from './HookDefinition.js';
 
-export type { Session, SessionWithWorkflows, SessionOwnerType, SessionStatus } from './Session.js';
-export type { SessionTransition } from './SessionStateMachine.js';
+export type { Session, SessionOwnerType, SessionStatus } from './Session.js';
 
-export type { Workflow, HarnessConfig } from './Workflow.js';
-export type { WorkflowStatus, WorkflowTransition } from './WorkflowStateMachine.js';
-export type { WorkflowRunTransition } from './WorkflowRunStateMachine.js';
-export type { StageRunTransition } from './StageRunStateMachine.js';
+export type { HarnessConfig } from './Workflow.js';
 
 export type { ChatMessage, ChatMessageMetadata } from './ChatMessage.js';
 export type { Artifact } from './Artifact.js';
@@ -71,11 +74,18 @@ export type {
   ComputerActionResult,
   ComputerConsentDecision,
   ComputerGrantDecision,
-  ComputerConsentRequest,
+  ComputerConsentReach,
+  ComputerConsentPlanStep,
+  ComputerPendingConsent,
+  ComputerConsentAnswer,
+  ComputerConsentAnswerResult,
+  ComputerGrant,
+  ComputerControlMode,
+  ComputerControlState,
   ComputerCapabilities,
 } from './ComputerUse.js';
-export type { WebhookRegistration, WebhookDelivery } from './Webhook.js';
-export type { CreateSessionParams, McpServerConfig } from './CreateSessionParams.js';
+export { COMPUTER_ANY_APP, COMPUTER_CONTROL_MODES, defaultConsentReach } from './ComputerUse.js';
+export type { McpServerConfig } from './McpServerConfig.js';
 export type { ILogger } from './ILogger.js';
 
 // ── Agents (first-class agent entity) ──
@@ -95,6 +105,9 @@ export type {
   ResolvedAgentProjection,
   ResolvedSkillRef,
   ResolvedTeamAgent,
+  AgentImportPreviewRequest,
+  AgentImportPreview,
+  AgentImportWarning,
 } from './Agent.js';
 export {
   AGENT_TOOL_GROUPS,
@@ -108,7 +121,8 @@ export {
 } from './Agent.js';
 
 // ── v2 New Types ──
-export type { Chat, ChatStatus, ChatLocalFolder, CreateChatParams, BackgroundTaskStatus, BackgroundTaskMeta, ChatPermissionMode } from './Chat.js';
+export type { Chat, ChatStatus, ChatLocalFolder, CreateChatParams, BackgroundTaskStatus, BackgroundTaskMeta, BackgroundTaskCancelledBy, BackgroundTaskCancellation, BackgroundTaskCancelResult, BackgroundTaskDetail, BackgroundTaskListItem, ChatPermissionMode, ChatPrincipal } from './Chat.js';
+export { BACKGROUND_TASK_CANCELLERS } from './Chat.js';
 export { DEFAULT_CHAT_PERMISSION_MODE } from './Chat.js';
 
 // ── Agent modes (mode registry, plan documents, interactive questions) ──
@@ -126,6 +140,7 @@ export type {
   PlanScope,
   PlanDocument,
   PlanCardSummary,
+  PlanCardNote,
   AgentQuestionOption,
   AgentQuestion,
   AgentQuestionResponse,
@@ -146,7 +161,6 @@ export {
   DEFAULT_AGENT_MODE,
   AGENT_MODES,
   isAgentMode,
-  coerceAgentMode,
   PLAN_ACTIONS,
   isPlanAction,
   TERMINAL_INTERACTION_STATUSES,
@@ -154,51 +168,32 @@ export {
   isStageReviewOutcome,
 } from './AgentMode.js';
 export type {
-  WorkflowDefinition,
-  WorkflowDefinitionWithStages,
-  WorkflowSessionMode,
-  VariableDefinition,
-  SkillReference,
-  AgentReference,
-  CreateWorkflowDefinitionParams,
-  UpdateWorkflowDefinitionParams,
-} from './WorkflowDefinition.js';
-export type {
-  StageDefinition,
-  StageEdge,
-  StageEdgeType,
-  PromptDefinition,
-  PromptType,
-  RetryPolicy,
-  StageCondition,
-  CreateStageParams,
-  CreateEdgeParams,
-  ContextFilter,
-  StageSkillReference,
-  IterationConfig,
-  ArtifactManifestEntry,
-} from './StageDefinition.js';
-export type {
   WorkflowRun,
+  RunUsage,
   WorkflowRunStatus,
   StageRun,
   StageRunStatus,
   WorkflowRunWithStages,
-  CreateWorkflowRunParams,
+  LoopIteration,
+  LoopStateView,
+  MapItemView,
+  MapStateView,
+  MapWinnerView,
+  SubworkflowStateView,
+  ExpansionStateView,
+  PendingDecisionView,
   WorkflowRunPermissionMode,
-  WorkflowDefinitionSnapshot,
-  RunScratchpad,
-  RunScratchpadEntry,
+  ArtifactManifestEntry,
 } from './WorkflowRun.js';
-export { DEFAULT_WORKFLOW_RUN_PERMISSION_MODE } from './WorkflowRun.js';
-export type { RunProfile, StageRunOverride } from './RunProfile.js';
 
 export type {
   IPlatformClient,
+  ScriptAllowlist,
+  InvocationFiles,
+  WorkflowRunListFilter,
   PlatformType,
   PaginatedResult,
   EventSubscriptionOptions,
-  WorkflowTemplateSummary,
 } from './IPlatformClient.js';
 
 // ── Automation Types ──
@@ -209,7 +204,6 @@ export type {
   AutomationExecutionWithRuns,
   AutomationWithExecutions,
   AutomationTriggerType,
-  AutomationInputMode,
   AutomationErrorPolicy,
   AutomationExecutionStatus,
   AutomationRunItemStatus,
@@ -222,22 +216,13 @@ export type {
   UpdateAutomationParams,
   TriggerAutomationBody,
   // E1 — Dynamic Data Source types
-  DataSourceType,
-  DataSourceOutputFormat,
-  DataSourceConfig,
-  StaticDataSourceConfig,
-  ScriptDataSourceConfig,
-  HttpDataSourceConfig,
-  FileDataSourceConfig,
-  WorkflowScriptDataSourceConfig,
-  DataSourceSchema,
-  DataSourceTestResult,
   // Track C — Schema-driven pipeline
   DataFieldType,
   DataFieldDef,
   DataSchema,
   IterationMode,
   AutomationDataset,
+  AutomationCodebase,
   PlannedIterations,
   IterationPreview,
 } from './Automation.js';
@@ -264,12 +249,28 @@ export type {
   WorktreeInfo,
   EntityScope,
   ProjectWithCodebases,
+  ProjectSummary,
   SystemConfig,
   ArtifactSource,
   ArtifactType,
   ArtifactWithSource,
   McpServerEntry,
   FileEntry,
+  // G-16 — codebase fetch/clone jobs and live logs
+  CodebaseJobKind,
+  CodebaseJobStatus,
+  CodebaseJob,
+  CodebaseLogLine,
+  CodebaseLogsResponse,
+  FetchCodebaseResult,
+  // G-17 — worktree enrichment
+  WorktreeLinkEntity,
+  WorktreeLink,
+  WorktreeListItem,
+  WorktreeListEnriched,
+  // G-19 — per-project artifact customization
+  ProjectArtifactPrefEntry,
+  ProjectArtifactPrefs,
 } from './Project.js';
 
 // ── MCP servers (config forwarding, credentials, startup status) ──
@@ -301,38 +302,14 @@ export {
   mcpStartupWarnings,
 } from './McpServer.js';
 
-// ── Orchestrator Types ──
+// ── Run lifecycle ──
 export type {
-  GitRepositoryConfig,
-  PreprocessingStep,
-  PreprocessingStepType,
-  PreprocessingStepConfig,
-  CloneRepoStepConfig,
-  RunScriptStepConfig,
-  ValidateInputStepConfig,
-  SetVariableStepConfig,
-  ConditionalStepConfig,
-  ValidationRule,
-  StageResultValidation,
-  ResultValidationRule,
-  WorkflowCategory,
-  PostProcessingStep,
-  PostProcessingStepType,
-  PostProcessingStepConfig,
-  CommitAndPushStepConfig,
-  CreatePRStepConfig,
-  PostRunScriptStepConfig,
-  OrchestratorConfig,
-  OrchestratedRunParams,
-  OrchestratorContext,
   PreprocessingResult,
-  StageValidationResult,
-  SystemWorkflowTemplate,
-  SystemStageTemplate,
-  ConfigurableVariable,
+  RunCodebase,
+  RunPhaseRecord,
+  RunSystemVars,
   RunWorkspaceInfo,
-  RunUploadResult,
-} from './WorkflowOrchestrator.js';
+} from './RunLifecycle.js';
 
 // ── Workspace Management Types ──
 export type {
@@ -446,6 +423,18 @@ export type {
   PullRequestComment,
   ProjectPullRequest,
   ProjectPullRequestsResponse,
+  PullRequestMergeMethod,
+  MergePullRequestRequest,
+  MergePullRequestResult,
+  IssueState as ScmIssueState,
+  IssueCloseReason,
+  IssueSummary,
+  IssueComment,
+  IssueDetailResponse,
+  ProjectIssue,
+  ProjectIssuesResponse,
+  CreateIssueRequest,
+  CloseIssueRequest,
   RepoReadiness,
   WorkspaceReadinessResponse,
   ScmFlowRequest,
@@ -455,7 +444,184 @@ export type {
   ScmFlowResult,
   ScmGenerateRequest,
   ScmGenerateResult,
+  ScmBranchList,
+  ScmCommitEntry,
+  ScmCompareFile,
+  ScmCompareResult,
+  ScmPerson,
+  ScmLabel,
+  ScmPullRequestOptions,
   ChatSourceControlOptions,
   OpenInEditorRequest,
   OpenInEditorResult,
+  RemoteRefsRequest,
+  RemoteRefs,
 } from './SourceControl.js';
+export { EDITOR_IDS } from './SourceControl.js';
+
+// ── Own device record (mobile MG-01) ──
+export type { SelfDevicePlatform, SelfDeviceApprovalKey, SelfDeviceView } from './Device.js';
+
+// ── Audio settings wire shapes (mobile MG-17 / MG-22) ──
+export type { AudioSettingsView, AudioSettingsUpdate, AudioModelStatus } from './AudioSettings.js';
+
+// ── Attention feed (G-01) ──
+export type {
+  AttentionEntity,
+  AttentionItemState,
+  AttentionAskKind,
+  AttentionAction,
+  AttentionAsk,
+  AttentionProgress,
+  AttentionItem,
+  AttentionEntityCounts,
+  AttentionCounts,
+  AttentionSnapshot,
+  AttentionFilter,
+  AttentionUpsertEventData,
+  AttentionRemoveEventData,
+  AttentionCountsEventData,
+  AttentionEventKind,
+  ActivityWorkerTally,
+  ActivityMeta,
+} from './Attention.js';
+export {
+  ATTENTION_ENTITIES,
+  ATTENTION_EVENT_KINDS,
+  isAttentionAsk,
+  emptyAttentionCounts,
+  countAttention,
+  compareAttentionItems,
+} from './Attention.js';
+
+// ── Desktop shell IPC payloads (G-03…G-05, D-25) ──
+export type {
+  DesktopThemePreference,
+  DesktopAppearancePush,
+  DesktopAppearanceRequest,
+  DesktopShellStatePush,
+  ServerReachability,
+  DesktopServerEntry,
+  DesktopUpdateState,
+  // P2-R41 — window chrome / find-in-page / browser-IPC payloads, single-sourced.
+  DesktopPlatform,
+  WindowChrome,
+  WindowStateChange,
+  NavHistoryState,
+  FindInPageResult,
+  BrowserBounds,
+  BrowserDevtoolsPanel,
+  BrowserEmulationParams,
+  NativeBrowserDescriptor,
+  NativeBrowserEvent,
+  BrowserPickResult,
+  BrowserAnnotationSummary,
+  BrowserAnnotatePollResult,
+  BrowserCaptureResult,
+} from './DesktopShell.js';
+
+// ── Chat ingest (mobile MG-09) ──
+export type { ChatIngestTarget, ChatIngestResult, ChatIngestInput } from './ChatIngest.js';
+export {
+  CHAT_INGEST_MAX_FILES,
+  CHAT_INGEST_MAX_FILE_BYTES,
+  CHAT_INGEST_MAX_TEXT,
+  chatIngestPrompt,
+  chatIngestName,
+} from './ChatIngest.js';
+
+// ── Chat list v2 (G-02) ──
+export type {
+  ChatTurnStatus,
+  ChatChangeStats,
+  ChatLastTurn,
+  ChatListAgent,
+  ChatListPreview,
+  ChatListSummary,
+  ChatListItem,
+  ChatListState,
+  ChatListSort,
+  ChatListQuery,
+  ChatListCounts,
+  ChatListPage,
+  ChatBulkRequest,
+  ChatBulkFailure,
+  ChatBulkResult,
+  ChatUpdatedEventData,
+} from './ChatList.js';
+export {
+  CHAT_TURN_STATUSES,
+  CHAT_LIST_STATES,
+  CHAT_LIST_SORTS,
+  CHAT_LIST_DEFAULT_LIMIT,
+  CHAT_LIST_MAX_LIMIT,
+  CHAT_BULK_MAX_IDS,
+  chatListSearchParams,
+  runChatBulk,
+  liveChatIds,
+} from './ChatList.js';
+
+// ── Agent-provider catalog (G-09) ──
+export type {
+  HarnessCatalogModel,
+  HarnessProviderStatus,
+  HarnessProvidersResponse,
+  HarnessLoginResult,
+  HarnessSetDefaultResult,
+  HarnessProviderVisibility,
+  HarnessProviderVisibilitySource,
+  HarnessVisibilityResponse,
+  HarnessVisibilityUpdate,
+} from './HarnessCatalog.js';
+
+// ── System info (G-12) ──
+export type { SystemInfo } from './SystemInfo.js';
+
+// ── Security reads: server-info, posture, network access (F-6, D-120) ──
+export type {
+  NetworkAccess,
+  NetworkEndpoint,
+  NetworkTls,
+  PublicServerInfo,
+  PublicTlsStatus,
+  SecurityDetail,
+  SecurityPosture,
+  SecurityWarning,
+  TailscaleAccessStatus,
+  TailscaleState,
+  TlsStatus,
+} from './SecurityPosture.js';
+
+// ── Project-scoped workflow runs (G-15) ──
+export type { ProjectRunListItem, ProjectRunListQuery, ProjectRunListPage } from './ProjectRuns.js';
+
+// ── Recently finished activity (G-11) ──
+export type {
+  ActivityEntity,
+  ActivityOutcome,
+  RecentActivityQuery,
+  RecentActivityChanges,
+  RecentActivityItem,
+  RecentActivityPage,
+} from './RecentActivity.js';
+
+// ── Stats summary (G-10) ──
+export type {
+  StatsSummaryQuery,
+  StatsChatsSummary,
+  StatsRunsSummary,
+  StatsAutomationsSummary,
+  StatsByDefinitionRow,
+  StatsSummary,
+} from './StatsSummary.js';
+
+// ── Palette entity search (G-18) ──
+export type {
+  SearchEntityType,
+  SearchResultAction,
+  SearchResult,
+  SearchQuery,
+  SearchResponse,
+} from './EntitySearch.js';
+export { SEARCH_ENTITY_TYPES } from './EntitySearch.js';
+export type { PushData, PushQuestion } from './Push.js';

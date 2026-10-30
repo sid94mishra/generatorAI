@@ -17,7 +17,9 @@ import {
   AuditAction,
   DEFAULT_CLI_SCOPES,
   DEFAULT_DEVICE_SCOPES,
+  DEFAULT_MCP_SCOPES,
   DEFAULT_MOBILE_SCOPES,
+  ApprovalProofError,
   DpopError,
   isNonceChallenge,
   HIGH_RISK_SCOPES,
@@ -31,18 +33,17 @@ import {
   type Scope,
 } from '@generatorai/auth';
 import { PairingOfferSchema, encodePairingOffer, pairingOfferUrl } from '@generatorai/relay-protocol';
-import { formatPairingCode } from '@generatorai/shared';
+import { formatPairingCode, type PublicServerInfo, type SelfDeviceView } from '@generatorai/shared';
 import { dirname, resolve } from 'node:path';
 import type { Container } from '../composition-root.js';
 import { removeBootstrapFile } from '../composition/bootstrapPairing.js';
 import { isLoopbackRequest } from '../middleware/auth.js';
-import {
-  resolveAdvertisedEndpoints,
-  selectPairingEndpoint,
-  type AdvertisedEndpointCandidate,
-} from '../network/advertisedEndpoints.js';
+import { requestAbsoluteUrl, requestClientAddress, requestOrigin } from '../network/requestOrigin.js';
+import { fingerprintToBase64Url } from '../network/tls/certificates.js';
+import { selectPairingEndpoint, type AdvertisedEndpointCandidate } from '../network/advertisedEndpoints.js';
+import { serverEndpoints } from '../network/serverEndpoints.js';
 
-const PLATFORMS = ['web', 'desktop', 'cli', 'mobile', 'other'] as const;
+const PLATFORMS = ['web', 'desktop', 'cli', 'mobile', 'mcp', 'other'] as const;
 
 const createPairingSchema = z.object({
   deviceName: z.string().min(1).max(64),
@@ -84,6 +85,14 @@ const refreshSchema = z.object({
 });
 
 const renameSchema = z.object({ name: z.string().min(1).max(64) });
+/** `PUT /auth/devices/me/approval-key` (MG-05). The key is P-256; protection and presence are the device's own report. */
+const approvalKeySchema = z.object({
+  publicJwk: z.object({ kty: z.literal('EC'), crv: z.literal('P-256'), x: z.string().max(64), y: z.string().max(64) }).strict(),
+  keyProtection: z.enum(['secure-enclave', 'strongbox', 'tee']),
+  presence: z.enum(['biometry', 'passcode']),
+  nonce: z.string().min(1).max(256),
+  proof: z.string().min(1).max(256),
+});
 const scopesSchema = z.object({ scopes: z.array(z.string()).max(SCOPES.length) });
 const revokeSchema = z.object({ reason: z.string().min(1).max(200).default('revoked by operator') });
 
@@ -107,7 +116,7 @@ const muteSchema = z.object({
 
 export function createAuthRoutes(container: Container): Router {
   const router = Router();
-  const { devices, tokens, dpop, audit, posture, identity } = container.security;
+  const { devices, tokens, dpop, audit, posture, identity, approvals, deviceRepo } = container.security;
   const logger = container.logger;
 
   // ── Public bootstrap ─────────────────────────────────────────────
@@ -116,23 +125,31 @@ export function createAuthRoutes(container: Container): Router {
    * Server identity + capabilities. Deliberately reveals nothing secret: the
    * token public JWK is the *verification* key, and the fingerprint is what a
    * pairing QR pins so a client can detect a substituted host.
+   *
+   * Public by necessity, so it is also trimmed to what identifying a server
+   * needs (F-6, D-120): the operator-set display name only (never the machine
+   * hostname), only the endpoint this request used, the certificate's
+   * fingerprints but not its name list, and no legacy-key posture. The
+   * address map and the full certificate are in the pairing offer (shown to
+   * the code holder) and in `/security/network-access` (admin).
    */
-  router.get('/server-info', (_req: Request, res: Response) => {
+  router.get('/server-info', (req: Request, res: Response) => {
     const endpoints = advertisedEndpoints(container);
-    res.json({
+    const here = requestOrigin(req);
+    const ownOrigin = `${here.scheme}://${here.host}`.toLowerCase();
+    const tls = container.security.tls?.status() ?? null;
+    const configuredName = configuredServerName();
+    const body: PublicServerInfo = {
       issuer: 'generatorai',
       audience: posture.tokenAudience,
-      /** Ed25519 JWS verification key for access tokens — safe to publish. */
-      tokenPublicJwk: tokens.publicJwk(),
-      /** X25519 host identity that paired clients pin. */
+      tokenPublicJwk: tokens.publicJwk() as unknown as Record<string, unknown>,
       serverId: identity.hostId,
       serverPublicKey: identity.publicKeyBase64Url,
-      serverName: serverDisplayName(),
+      ...(configuredName ? { serverName: configuredName } : {}),
       protocolVersion: 2,
       authentication: {
         required: posture.authenticationRequired,
         dpopRequired: true,
-        legacyApiKeyAccepted: posture.legacyApiKeyActive,
       },
       transports: {
         loopback: endpoints.some((endpoint) => endpoint.reachability === 'loopback'),
@@ -140,9 +157,39 @@ export function createAuthRoutes(container: Container): Router {
         privateNetwork: endpoints.some((endpoint) => endpoint.reachability === 'private-network'),
         relay: false,
       },
-      endpoints,
+      endpoints: endpoints
+        .filter((endpoint) => endpoint.origin.toLowerCase() === ownOrigin)
+        .map((endpoint) => ({ origin: endpoint.origin, reachability: endpoint.reachability })),
+      tls: tls
+        ? {
+            enabled: true,
+            source: tls.source,
+            fingerprintSha256: tls.fingerprintSha256,
+            caFingerprintSha256: tls.caFingerprintSha256,
+            notAfter: tls.notAfter,
+          }
+        : null,
       scopes: SCOPES,
-    });
+    };
+    res.json(body);
+  });
+
+  /**
+   * The local CA certificate (public). Installing it on a device makes the
+   * browser trust this server's generated certificate, so the warning stops
+   * appearing; the CA is name-constrained to private addresses and `.local`
+   * names, so it cannot vouch for anything else (D-110).
+   */
+  router.get('/tls/ca.crt', (_req: Request, res: Response) => {
+    const pem = container.security.tls?.caCertificatePem();
+    if (!pem) {
+      res.status(404).json({ error: { code: 'TLS_NOT_ACTIVE', message: 'This server does not use a generated certificate.' } });
+      return;
+    }
+    res
+      .type('application/x-x509-ca-cert')
+      .set('Content-Disposition', 'attachment; filename="generatorai-local-ca.crt"')
+      .send(pem);
   });
 
   /** Issues a DPoP nonce for clients whose clock is outside the skew window. */
@@ -194,7 +241,9 @@ export function createAuthRoutes(container: Container): Router {
           ...(parsed.data.deviceName ? { deviceName: parsed.data.deviceName } : {}),
           ...(parsed.data.platform ? { platform: parsed.data.platform } : {}),
           ...(parsed.data.connectionMode ? { connectionMode: parsed.data.connectionMode } : {}),
-          sourceAddress: req.socket.remoteAddress ?? null,
+          // The tailnet peer, not the proxy's 127.0.0.1, behind tailscale serve (D-124).
+          sourceAddress: requestClientAddress(req),
+          trustedSource: isLoopbackRequest(req),
           requestId: req.requestId,
         });
 
@@ -252,7 +301,11 @@ export function createAuthRoutes(container: Container): Router {
       try {
         const preview = await devices.previewPairingGrant({
           pairingToken: parsed.data.pairingToken,
-          sourceAddress: req.socket.remoteAddress ?? null,
+          // The tailnet peer, not the proxy's 127.0.0.1, behind tailscale serve (D-124).
+          sourceAddress: requestClientAddress(req),
+          // F-3 — this machine (the desktop window, the owner's local browser)
+          // has its own budget and is never starved by a LAN flood.
+          trustedSource: isLoopbackRequest(req),
           requestId: req.requestId,
         });
         res.json({
@@ -260,6 +313,7 @@ export function createAuthRoutes(container: Container): Router {
           serverPublicKey: identity.publicKeyBase64Url,
           serverName: serverDisplayName(),
           endpoints: advertisedEndpoints(container),
+          tls: container.security.tls?.status() ?? null,
           ...preview,
         });
       } catch (err) {
@@ -342,6 +396,8 @@ export function createAuthRoutes(container: Container): Router {
           return;
         }
 
+        // Every client gets the https:// addresses (D-127): a browser needs the
+        // secure context, the mobile app pins the local CA named below (MV-44).
         const endpoints = advertisedEndpoints(container);
         const selectedEndpoint = selectPairingEndpoint(endpoints, platform);
         if (!selectedEndpoint) {
@@ -372,6 +428,8 @@ export function createAuthRoutes(container: Container): Router {
         // Validate through the SAME schema clients use to decode. If the host
         // cannot produce a valid offer, that is a server bug — never ship a
         // half-valid offer that a client will reject after scanning.
+        const pinned = container.security.tls?.pinnedFingerprint() ?? null;
+        const backup = container.security.tls?.backupPinnedFingerprint() ?? null;
         const offerResult = PairingOfferSchema.safeParse({
           v: 2,
           endpoint: selectedEndpoint.origin,
@@ -382,6 +440,12 @@ export function createAuthRoutes(container: Container): Router {
           })),
           serverId: identity.hostId,
           serverPublicKey: identity.publicKeyBase64Url,
+          // The CA a native client pins for the LAN addresses (MV-44): base64url
+          // of its SHA-256, compact for the QR, plus the standby CA a rotation
+          // will promote (D-127). Absent for a custom certificate, which is
+          // trusted through its own CA.
+          ...(pinned ? { certificateFingerprint: fingerprintToBase64Url(pinned) } : {}),
+          ...(backup ? { backupCertificateFingerprint: fingerprintToBase64Url(backup) } : {}),
           pairingGrant: grant.pairingToken,
           pairingExpiresAt: grant.expiresAt,
           requestedScopes: grant.requestedScopes,
@@ -424,6 +488,8 @@ export function createAuthRoutes(container: Container): Router {
            * for clients that cannot reach this server same-origin.
            */
           joinUrl: selectedEndpoint.origin,
+          /** The certificate the joining browser will be shown (D-110). Null without TLS. */
+          tls: container.security.tls?.status() ?? null,
           /** Encoded offer — render as a QR code. */
           pairingCode: encodePairingOffer(offerResult.data),
           pairingUrl: pairingOfferUrl(offerResult.data),
@@ -465,6 +531,26 @@ export function createAuthRoutes(container: Container): Router {
       const includeRevoked = req.query['includeRevoked'] === 'true';
       const list = await devices.listDevices(includeRevoked);
       res.json({ devices: list.map(toPublicDevice) });
+    })();
+  });
+
+  // GET /auth/devices/me — the calling device's OWN record (mobile MG-01).
+  // `read:status` only (routePolicy carve-out); the id is the principal's,
+  // never the path's. Registered before `/devices/:deviceId` so `me` is not
+  // read as an id.
+  router.get('/devices/me', (req: Request, res: Response) => {
+    void (async () => {
+      const principal = requirePrincipal(req);
+      if (principal.type !== 'paired-device') {
+        res.status(404).json({ error: { code: 'NOT_A_DEVICE', message: 'This session is not a paired device' } });
+        return;
+      }
+      const device = await devices.getDevice(principal.id);
+      if (!device || device.revokedAt != null) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Device not found' } });
+        return;
+      }
+      res.json(toSelfDeviceView(device));
     })();
   });
 
@@ -636,6 +722,80 @@ export function createAuthRoutes(container: Container): Router {
     })();
   });
 
+  // ── Approval key (mobile MG-05, MD-31) ───────────────────────────
+  //
+  // A phone answers risky gates with a signature from a biometric-gated
+  // hardware key. Like push tokens, the device id always comes from the
+  // DPoP-authenticated principal: a device can only register its own key.
+
+  /** A single-use, device-bound nonce (60 s) for an approval or a key registration. */
+  router.post('/approval-nonce', (req: Request, res: Response) => {
+    void (async () => {
+      const principal = requirePrincipal(req);
+      if (principal.type !== 'paired-device') {
+        res.status(403).json({ error: { code: 'NOT_A_DEVICE', message: 'Only a paired device signs approvals' } });
+        return;
+      }
+      res.json(await approvals.issueNonce(principal.id));
+    })();
+  });
+
+  router.put('/devices/me/approval-key', (req: Request, res: Response) => {
+    void (async () => {
+      const parsed = approvalKeySchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: { code: 'INVALID_BODY', message: parsed.error.message } });
+        return;
+      }
+      const principal = requirePrincipal(req);
+      if (principal.type !== 'paired-device') {
+        res.status(403).json({ error: { code: 'NOT_A_DEVICE', message: 'Only a paired device holds an approval key' } });
+        return;
+      }
+      let jwk;
+      try {
+        jwk = await approvals.verifyRegistration(principal.id, parsed.data);
+      } catch (err) {
+        if (!(err instanceof ApprovalProofError)) throw err;
+        res.status(403).json({ error: { code: err.code, message: err.message } });
+        return;
+      }
+      await deviceRepo.update(principal.id, {
+        approvalPublicJwk: JSON.stringify(jwk),
+        approvalKeyCreatedAt: Date.now(),
+        approvalKeyPresence: parsed.data.presence,
+      });
+      await audit.record({
+        action: 'approval.keyRegistered',
+        result: 'success',
+        principal,
+        resourceType: 'device',
+        resourceId: principal.id,
+        metadata: { keyProtection: parsed.data.keyProtection, presence: parsed.data.presence },
+        severity: 'info',
+      });
+      res.status(204).end();
+    })();
+  });
+
+  router.delete('/devices/me/approval-key', (req: Request, res: Response) => {
+    void (async () => {
+      const principal = requirePrincipal(req);
+      if (principal.type === 'paired-device') {
+        await deviceRepo.update(principal.id, { approvalPublicJwk: null, approvalKeyCreatedAt: null, approvalKeyPresence: null });
+        await audit.record({
+          action: 'approval.keyRemoved',
+          result: 'success',
+          principal,
+          resourceType: 'device',
+          resourceId: principal.id,
+          severity: 'info',
+        });
+      }
+      res.status(204).end();
+    })();
+  });
+
   // ── Audit log ────────────────────────────────────────────────────
 
   router.get('/audit', (req: Request, res: Response) => {
@@ -677,12 +837,35 @@ function toPublicDevice(device: DeviceRecord): Record<string, unknown> {
   };
 }
 
+function iso(ms: number): string {
+  return new Date(ms).toISOString();
+}
+
+/** MG-01 — the self-service view: no key material, no owner, no relay binding. */
+function toSelfDeviceView(device: DeviceRecord): SelfDeviceView {
+  return {
+    deviceId: device.deviceId,
+    name: device.name,
+    platform: device.platform,
+    scopes: [...device.scopes],
+    createdAt: iso(device.createdAt),
+    ...(device.lastSeenAt != null ? { lastSeenAt: iso(device.lastSeenAt) } : {}),
+    connectionMode: device.connectionMode,
+    credentialVersion: device.credentialVersion,
+    ...(device.approvalPublicJwk && device.approvalKeyCreatedAt != null && device.approvalKeyPresence
+      ? { approvalKey: { createdAt: iso(device.approvalKeyCreatedAt), presence: device.approvalKeyPresence } }
+      : {}),
+  };
+}
+
 function defaultScopesFor(platform: DevicePlatform): Scope[] {
   switch (platform) {
     case 'mobile':
       return [...DEFAULT_MOBILE_SCOPES];
     case 'cli':
       return [...DEFAULT_CLI_SCOPES];
+    case 'mcp':
+      return [...DEFAULT_MCP_SCOPES];
     default:
       return [...DEFAULT_DEVICE_SCOPES];
   }
@@ -707,14 +890,9 @@ function systemPrincipal(): Principal {
   };
 }
 
+/** DPoP `htu`: the URL the client signed, scheme-aware (D-111, D-114). */
 function absoluteUrl(req: Request): string {
-  const proto = firstValue(req.headers['x-forwarded-proto']) ?? (req.secure ? 'https' : 'http');
-  const host = firstValue(req.headers['host']) ?? 'localhost';
-  return `${proto}://${host}${req.originalUrl}`;
-}
-
-function firstValue(v: string | string[] | undefined): string | undefined {
-  return Array.isArray(v) ? v[0] : v;
+  return requestAbsoluteUrl(req, req.originalUrl);
 }
 
 /** Express 5 types path params as `string | string[]`; we only ever want one. */
@@ -728,15 +906,10 @@ function pathParam(req: Request, name: string): string {
  * the server is deliberately bound beyond loopback.
  */
 function advertisedEndpoints(container: Container): AdvertisedEndpointCandidate[] {
-  const configured = [
-    ...(process.env['GENERATORAI_ADVERTISED_URLS']?.split(',') ?? []),
-    ...(process.env['GENERATORAI_ADVERTISED_URL'] ? [process.env['GENERATORAI_ADVERTISED_URL']] : []),
-  ];
-  return resolveAdvertisedEndpoints({
+  return serverEndpoints({
     port: container.config.port,
     bindHost: container.security.posture.bindHost,
-    configuredOrigins: configured,
-    networkInterfaces: os.networkInterfaces(),
+    tls: container.security.tls,
   });
 }
 
@@ -747,9 +920,20 @@ function buildTransportCapabilities(endpoints: readonly AdvertisedEndpointCandid
   return caps;
 }
 
-/** Friendly host label shown on the pairing consent screen. */
-function serverDisplayName(): string {
-  return (process.env['GENERATORAI_SERVER_NAME'] ?? os.hostname() ?? 'GeneratorAI').slice(0, 120);
+/**
+ * Friendly host label shown on the pairing consent screen. Exported for
+ * `GET /system/info` (G-12), which shows the same name on the Home System
+ * card and Settings › Diagnostics — one implementation, not a second guess
+ * at the hostname.
+ */
+export function serverDisplayName(): string {
+  return (configuredServerName() ?? os.hostname() ?? 'GeneratorAI').slice(0, 120);
+}
+
+/** The display name the operator set, or null — the only name the public `server-info` may show (D-120). */
+export function configuredServerName(): string | null {
+  const name = process.env['GENERATORAI_SERVER_NAME']?.trim();
+  return name ? name.slice(0, 120) : null;
 }
 
 function handlePairingError(
@@ -760,6 +944,15 @@ function handlePairingError(
   if (err instanceof PairingError) {
     const status =
       err.code === 'SCOPE_ESCALATION' ? 403 : err.code === 'THROTTLED' ? 429 : 400;
+    if (err.throttle) {
+      // F-3 — say when, and whose budget ran out, so the UI can show it.
+      const retryAfterSeconds = Math.ceil(err.throttle.retryAfterMs / 1000);
+      res.set('Retry-After', String(retryAfterSeconds));
+      res.status(status).json({
+        error: { code: err.code, message: err.message, retryAfterSeconds, limit: err.throttle.limit },
+      });
+      return;
+    }
     res.status(status).json({ error: { code: err.code, message: err.message } });
     return;
   }

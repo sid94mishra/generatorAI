@@ -13,7 +13,7 @@
 // tells us what that variant looks like.
 // ────────────────────────────────────────────────────────────────
 
-import type { Appearance } from './themes/types.js';
+import type { AccentId, Appearance } from './themes/types.js';
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 
@@ -53,3 +53,33 @@ export function resolveAppearance(mode: string | null | undefined, systemPrefers
 export const MODE_STORAGE_KEY = 'generatorai-theme';
 export const THEME_STORAGE_KEY = 'generatorai-theme-palette';
 export const ACCENT_STORAGE_KEY = 'generatorai-accent';
+export const DENSITY_STORAGE_KEY = 'generatorai-density';
+export const FONT_SIZE_STORAGE_KEY = 'generatorai-font-size';
+/** `'1'` = always reduce motion; absent = follow the OS (02 §11.1). */
+export const REDUCE_MOTION_STORAGE_KEY = 'generatorai-reduce-motion';
+
+// ── Defaults for the remaining axes (02 §4.3) ───────────────────
+
+/**
+ * The accent of the default theme. A user on another theme with no stored
+ * accent gets THAT theme's `defaultAccent` (`resolveAccentId`), not this.
+ */
+export const DEFAULT_ACCENT: AccentId = 'ink';
+
+/** Row/control density (D-15). Compact subtracts 4px from rows and controls. */
+export const DENSITIES = ['comfortable', 'compact'] as const;
+export type Density = (typeof DENSITIES)[number];
+export const DEFAULT_DENSITY: Density = 'comfortable';
+
+/** Interface font size (D-13): shifts every type step by −1 / 0 / +1 px. */
+export const FONT_SIZES = ['12', '13', '14'] as const;
+export type FontSizeSetting = (typeof FONT_SIZES)[number];
+export const DEFAULT_FONT_SIZE: FontSizeSetting = '13';
+
+export function isKnownDensity(id: string | null | undefined): id is Density {
+  return (DENSITIES as readonly string[]).includes(id ?? '');
+}
+
+export function isKnownFontSize(id: string | null | undefined): id is FontSizeSetting {
+  return (FONT_SIZES as readonly string[]).includes(id ?? '');
+}
