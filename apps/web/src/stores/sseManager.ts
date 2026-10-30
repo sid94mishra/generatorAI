@@ -485,6 +485,10 @@ function applyHostEffect(
       useWorkflowRunStore.getState().setAdmission(effect.stageRunId, effect.wait, effect.runId);
       return;
 
+    case 'stageOutput':
+      useWorkflowRunStore.getState().appendCheckOutput(effect.stageRunId, effect.text, effect.runId);
+      return;
+
     case 'registerStageSession':
       useWorkflowRunStore.getState().registerStageSession(effect.stageRunId, effect.sessionId);
       return;

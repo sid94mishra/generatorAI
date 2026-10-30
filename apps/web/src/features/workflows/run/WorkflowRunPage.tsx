@@ -131,6 +131,7 @@ export function WorkflowRunPage() {
   const focusedStageId = useWorkflowRunStore((s) => s.selectedStageRunId);
   const setFocusedStageId = useWorkflowRunStore((s) => s.selectStageRun);
   const admission = useWorkflowRunStore((s) => s.admission);
+  const checkOutput = useWorkflowRunStore((s) => s.checkOutput);
 
   // Subscribe ONLY to this run's stage streams (P0-49): any other chat's
   // tokens must not re-render the page.
@@ -266,9 +267,10 @@ export function WorkflowRunPage() {
       streams,
       permissionMode,
       admission,
+      checkOutput,
       cache: viewCache.current,
     });
-  }, [storeRun, pinnedGraph, streams, permissionMode, admission]);
+  }, [storeRun, pinnedGraph, streams, permissionMode, admission, checkOutput]);
   // A reader at the end of a streaming stage stays with its output (D-91). Bound once the
   // run view exists, i.e. once the scroll host below is mounted (the page renders a skeleton until then).
   useStickToBottom(runLoading || !runData || !runView ? null : runId, { ref: scrollHostRef, initiallyPinned: false });

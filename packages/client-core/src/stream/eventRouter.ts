@@ -233,6 +233,8 @@ export type StreamEffect =
       runId?: string;
       wait: { flowKey: string; label: string; running: number; limit: number | null; queued: number } | null;
     }
+  /** A running check's output as it prints (D-173): appended to the stage's live view. */
+  | { op: 'stageOutput'; stageRunId: string; runId?: string; text: string }
   | { op: 'registerStageSession'; stageRunId: string; sessionId: string }
   | { op: 'selectStageRun'; stageRunId: string }
   /** Terminal stage: settle its stream and refetch the history it produced. */
@@ -1744,6 +1746,16 @@ export class StreamEventRouter {
                 }
               : null,
         });
+        break;
+      }
+
+      // ── A running check's output (D-173) ─────────────────────────
+      case 'stage_run.output': {
+        const stageRunId = stageRunIdOf();
+        const text = optStr(data['text']);
+        if (!stageRunId || !text) break;
+        const runId = optStr(data['workflowRunId']);
+        out.push({ op: 'stageOutput', stageRunId, ...(runId ? { runId } : {}), text });
         break;
       }
 

@@ -163,6 +163,10 @@ export interface StageView {
   harnessType?: string;
   /** The node kind (`agent`, `check`, `loop`, P05). */
   kind?: string;
+  /** A check: the command line it runs (D-173). */
+  command?: string;
+  /** A check: its output so far, while it runs (D-173). */
+  liveOutput?: string;
   /** A loop body instance: the enclosing loop instance's id (`scopeId`). */
   loopId?: string;
   /** A loop body instance: its iteration (0-based); absent on a wrap-up. */

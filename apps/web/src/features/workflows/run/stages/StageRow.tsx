@@ -26,6 +26,7 @@ import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { STATUS_TONE_TEXT } from '@/ui/primitives/StatusBadge/StatusBadge.js';
+import { CheckOutput } from './CheckOutput.js';
 import { StageTranscript } from './StageTranscript.js';
 import { useStageAgent } from './useStageAgent.js';
 import { MenuButton, type MenuButtonItem } from '@/ui/patterns/MenuButton/MenuButton.js';
@@ -291,9 +292,14 @@ export const StageRow = memo(function StageRow({
   };
   // An agent stage streams through the same live panel as a chat turn (D-172): agent header, body, thinking
   // placeholder; the stage row's header, result, output chips and review card are the workflow's own parts around
-  // it. A check (a command) is no agent: it keeps the bare body, with no avatar and no "is thinking".
+  // it. A check (a command) is no agent: no avatar and no "is thinking" — its command and output as it prints (D-173).
   const turnBody =
-    stage.kind !== undefined && stage.kind !== 'agent' ? (
+    stage.kind === 'check' ? (
+      <>
+        <CheckOutput stage={stage} running={stage.status === 'running'} />
+        {turnProps.error ? <TurnBody {...turnProps} segments={[]} steps={[]} answer={undefined} /> : null}
+      </>
+    ) : stage.kind !== undefined && stage.kind !== 'agent' ? (
       <TurnBody {...turnProps} loading={isActive && !isAwaiting && stage.steps.length === 0 && !stage.answer} />
     ) : (
       <LiveTurn

@@ -1764,8 +1764,17 @@ agent's responses stay full width on the left, so the two never read as one stre
 thinking placeholder. A stage names who answers exactly as the chat does — the bound agent ("Pulse QA Engineer is
 thinking"), else the provider the stage pins ("Codex"), else "Agent"; never the stage's own name — with the chat's avatar
 rule (initials for an agent, the provider's logo otherwise), live and persisted alike. Only agent stages use the panel:
-a check (a command) keeps its bare body. The stage row header, result, output chips and review card are the workflow's
-own parts around that core panel.
+a check (a command) has its own body (D-173). The stage row header, result, output chips and review card are the
+workflow's own parts around that core panel.
+
+### D-173 A running check shows its command and prints as it runs (owner, 2026-10-30) — Final
+A check stage used to show only a loading shimmer until its command ended: its output reached the page as the stored
+tails, after the fact, so nobody could tell whether `pnpm install` had started. While it runs the server now sends the
+output as `stage_run.output` events (whole lines, secrets masked, ANSI stripped, batched every 300 ms, the last batch
+sent before the outcome), and the stage row shows "Running `<command line>`" and the newest 40 lines in a CodeBlock
+headed `$ <command line>`, like a terminal. Once it ends, the same block keeps the end of its output (the live text,
+else the stored tails after a reload); the full tails stay in the inspector's Output. A new attempt starts the block
+empty. No avatar and no "is thinking": a check is a command, not an agent.
 
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)

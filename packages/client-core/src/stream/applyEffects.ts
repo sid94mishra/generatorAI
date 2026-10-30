@@ -130,6 +130,7 @@ export function applyStreamEffect(streams: StreamsRecord, effect: StreamEffect):
     case 'runStatus':
     case 'stageStatus':
     case 'stageAdmission':
+    case 'stageOutput':
     case 'registerStageSession':
     case 'selectStageRun':
     case 'stageSettled':
@@ -174,6 +175,7 @@ const HOST_OPS: ReadonlySet<StreamEffect['op']> = new Set<StreamEffect['op']>([
   'runStatus',
   'stageStatus',
   'stageAdmission',
+  'stageOutput',
   'registerStageSession',
   'selectStageRun',
   'stageSettled',

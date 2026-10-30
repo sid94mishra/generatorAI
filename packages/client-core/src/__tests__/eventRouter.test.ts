@@ -396,3 +396,14 @@ describe('StreamEventRouter — remembered permission rules (U-16)', () => {
     ]);
   });
 });
+
+describe('StreamEventRouter — a running check prints (D-173)', () => {
+  it('hands a check’s output to the host as a stageOutput op, never into a transcript', () => {
+    const effects = run([{ kind: 'stage_run.output', data: { stageRunId: 'sr-1', workflowRunId: 'run-1', text: 'Progress: 1\n' } }]);
+    expect(effects).toEqual([{ op: 'stageOutput', stageRunId: 'sr-1', runId: 'run-1', text: 'Progress: 1\n' }]);
+  });
+
+  it('drops an output event with no stage or no text', () => {
+    expect(run([{ kind: 'stage_run.output', data: { text: 'x' } }, { kind: 'stage_run.output', data: { stageRunId: 'sr-1', text: '' } }])).toEqual([]);
+  });
+});

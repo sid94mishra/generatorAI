@@ -89,7 +89,7 @@ import type { IsolatedMerge, IsolatedPlacement, StageIsolation } from './StageIs
 import type { WorkflowCallbacks } from './WorkflowCallbacks.js';
 import { waitInterruptOf } from '../../domain/scheduler/waits.js';
 import { StageConversationError } from './StageConversationError.js';
-import { runCheck } from './CheckRunner.js';
+import { outputBatches, runCheck } from './CheckRunner.js';
 import type { AttemptTrace, EngineTelemetry } from './EngineTelemetry.js';
 import { AUTO_SUMMARY_TURN_THRESHOLD, autoSummary, jsonSummary, summaryPrompt } from './summaries.js';
 import { compile, type CompiledNode, type CompiledWorkflow } from '../../domain/workflow-graph/compile.js';
@@ -867,6 +867,12 @@ export class StageExecutor {
     const item = mapItemPlacement(state, instance);
     const placed = item ? runForItem(run, item) : run;
     const workspace = await runWorkspace(this.deps.workspaceManager, run);
+    // The output as it prints, batched: the run page shows it live, before the tails exist.
+    const live = outputBatches((text) =>
+      this.deps.eventBus
+        .emitGlobal({ kind: 'stage_run.output', data: { stageRunId, workflowRunId: runId, text } } as unknown as AgentEvent)
+        .catch(() => undefined),
+    );
     const outcome = await runCheck({
       stage,
       run: placed,
@@ -874,8 +880,9 @@ export class StageExecutor {
       scope: templateScope(compile(graph), state, instance, userVariables({ ...(run.variables ?? {}) })),
       scriptRunner: this.deps.scriptRunner,
       secrets: this.deps.workflowSecrets,
+      onOutput: live.push,
       signal: frame.ac.signal,
-    });
+    }).finally(() => live.end());
     if (frame.stop) throw new AttemptStop(frame.stop);
     if (outcome.kind !== 'succeeded') return outcome;
     // running → validating: the output is the command's result (no contract to check).

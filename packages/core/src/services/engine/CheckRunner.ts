@@ -24,7 +24,10 @@
 //     (never passed on verbatim), and the secret values are masked in the
 //     output (final review PLATFORM R2 / LOOP R11);
 //   - the command runs in the mount (`check.mount`, else the primary mount),
-//     `cwd` inside it, with a child environment built by `buildChildEnv`.
+//     `cwd` inside it, with a child environment built by `buildChildEnv`;
+//   - while it runs, its output goes to `onOutput` in whole lines (redacted,
+//     ANSI stripped) so the run page can show it live — the tails above are
+//     only known when it ends.
 // ────────────────────────────────────────────────────────────────
 
 import * as path from 'node:path';
@@ -72,6 +75,8 @@ export interface CheckRunInput {
   scriptRunner: IScriptRunner | undefined;
   /** Resolves `secretref:workflow/<name>` env values; without it such a check cannot launch. */
   secrets?: WorkflowSecretResolver | undefined;
+  /** The command's output while it runs: whole lines, redacted, ANSI stripped. */
+  onOutput?: ((text: string) => void) | undefined;
   signal: AbortSignal;
 }
 
@@ -117,6 +122,8 @@ export async function runCheck(input: CheckRunInput): Promise<AttemptOutcome> {
   // The check's own env wins.
   const env: Record<string, string> = { CI: 'true', NO_COLOR: '1', FORCE_COLOR: '0', ...resolved.values };
   const redact = (text: string) => redactSecrets(text, resolved.secrets);
+  // Whole lines only: a secret split across two chunks would otherwise slip past the redaction.
+  const lines = input.onOutput ? lineBuffer((text) => input.onOutput?.(stripAnsi(redact(text)))) : undefined;
 
   let result;
   try {
@@ -128,10 +135,13 @@ export async function runCheck(input: CheckRunInput): Promise<AttemptOutcome> {
       confineTo: dirs.root,
       // Past the output cap a check keeps the end (its tails) — but `parseJson` needs the start of the document (LOOP-R12).
       keepTail: !check.parseJson,
+      ...(lines ? { streamTo: (chunk: string) => lines.push(chunk) } : {}),
     });
   } catch (err) {
     // The runner's policy refused the command line before anything was spawned.
     return fail('check_launch_failed', `The command was refused: ${(err as Error).message}`);
+  } finally {
+    lines?.end();
   }
   if (result.launchError !== undefined) {
     if (TRANSIENT_SPAWN.has(result.launchError)) {
@@ -168,6 +178,61 @@ export async function runCheck(input: CheckRunInput): Promise<AttemptOutcome> {
       data: output,
       text: output.stdoutTail,
       summary: `${check.command} ${passed ? 'passed' : timedOut ? 'timed out' : `exited with ${result.exitCode}`} in ${result.durationMs} ms`,
+    },
+  };
+}
+
+/**
+ * A running check's output in batches for the live view: at most one `send` per `everyMs`, never two in flight (the
+ * batches arrive in order). Past `maxChars` a batch keeps its end — the live view shows the newest lines. `end` sends
+ * the rest and resolves once everything has been sent, so the last lines land before the stage's outcome.
+ */
+export function outputBatches(
+  send: (text: string) => Promise<unknown>,
+  everyMs = 300,
+  maxChars = 16_000,
+): { push: (text: string) => void; end: () => Promise<void> } {
+  let held = '';
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let chain: Promise<unknown> = Promise.resolve();
+  const flush = () => {
+    timer = undefined;
+    if (!held) return;
+    const text = held.length > maxChars ? held.slice(-maxChars) : held;
+    held = '';
+    chain = chain.then(() => send(text));
+  };
+  return {
+    push: (text) => {
+      held += text;
+      timer ??= setTimeout(flush, everyMs);
+    },
+    end: () => {
+      if (timer) clearTimeout(timer);
+      flush();
+      return chain.then(() => undefined);
+    },
+  };
+}
+
+/** Hands on complete lines only; `end` hands on the rest. A line longer than `maxLine` is cut rather than held. */
+function lineBuffer(emit: (text: string) => void, maxLine = 4_000): { push(chunk: string): void; end(): void } {
+  let held = '';
+  return {
+    push(chunk) {
+      held += chunk;
+      const cut = held.lastIndexOf('\n');
+      if (cut >= 0) {
+        emit(held.slice(0, cut + 1));
+        held = held.slice(cut + 1);
+      } else if (held.length > maxLine) {
+        emit(held);
+        held = '';
+      }
+    },
+    end() {
+      if (held) emit(held);
+      held = '';
     },
   };
 }

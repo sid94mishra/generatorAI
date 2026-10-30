@@ -44,6 +44,8 @@ interface RunMonitorState {
   focusPinned: boolean;
   /** `ready` instances waiting for an admission slot, by instance id (P07 WP-7.2). */
   admission: Record<string, AdmissionWait>;
+  /** A running check's output as it prints, by instance id: its newest `CHECK_OUTPUT_KEEP` characters (D-173). */
+  checkOutput: Record<string, string>;
   /** Whether the run data is loading */
   isLoading: boolean;
   /** Error message if run load failed */
@@ -67,6 +69,8 @@ interface RunMonitorActions {
   updateStageRunStatus: (stageRunId: string, status: StageRunStatus, data?: Record<string, unknown>) => void;
   /** A `ready` instance waits for a flow key's slot (`wait`), or got it (null). */
   setAdmission: (stageRunId: string, wait: AdmissionWait | null, runId?: string) => void;
+  /** A running check printed `text`. */
+  appendCheckOutput: (stageRunId: string, text: string, runId?: string) => void;
   /** Register a stage → session mapping for SSE routing */
   registerStageSession: (stageRunId: string, sessionId: string) => void;
   /** Get sessionId for a stage run */
@@ -89,11 +93,15 @@ const initialState: RunMonitorState = {
   selectedStageRunId: null,
   focusPinned: false,
   admission: {},
+  checkOutput: {},
   isLoading: false,
   error: null,
 };
 
 // ── Helpers ──
+
+/** The live view shows the end of a check's output; older lines are in its output once it finishes. */
+const CHECK_OUTPUT_KEEP = 32_000;
 
 function isTerminalRunStatus(status: WorkflowRunStatus): boolean {
   return ['completed', 'failed', 'cancelled'].includes(status);
@@ -229,6 +237,12 @@ const useWorkflowRunStoreImpl = create<RunMonitorState & RunMonitorActions>((set
     // Events for another run's instances (the global bus) are not ours.
     const eventRunId = data?.['workflowRunId'];
     if (typeof eventRunId === 'string' && eventRunId !== run.id) return;
+    // A new attempt prints from the start (a replay after a reload re-sends its output after this).
+    if (status === 'running' && stageRunId in get().checkOutput) {
+      const checkOutput = { ...get().checkOutput };
+      delete checkOutput[stageRunId];
+      set({ checkOutput });
+    }
 
     const now = new Date();
     const version = typeof data?.['version'] === 'number' ? (data['version'] as number) : undefined;
@@ -321,6 +335,13 @@ const useWorkflowRunStoreImpl = create<RunMonitorState & RunMonitorActions>((set
     const next = { ...admission };
     delete next[stageRunId];
     set({ admission: next });
+  },
+
+  appendCheckOutput: (stageRunId, text, runId) => {
+    const { run, checkOutput } = get();
+    if (!run || (runId !== undefined && runId !== run.id)) return;
+    const next = (checkOutput[stageRunId] ?? '') + text;
+    set({ checkOutput: { ...checkOutput, [stageRunId]: next.length > CHECK_OUTPUT_KEEP ? next.slice(-CHECK_OUTPUT_KEEP) : next } });
   },
 
   registerStageSession: (stageRunId, sessionId) => {

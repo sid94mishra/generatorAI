@@ -257,6 +257,8 @@ export interface DeriveRunViewInput {
   permissionMode?: WorkflowRunPermissionMode;
   /** `ready` instances waiting for an admission slot, by instance id (P07). */
   admission?: Record<string, AdmissionWait>;
+  /** A running check's output so far, by instance id (D-173). */
+  checkOutput?: Record<string, string>;
   /** Per-stage memo (one per mounted page): unchanged stages keep their StageView object. */
   cache?: StageViewCache;
 }
@@ -278,6 +280,8 @@ interface StageViewInputs {
   loopId: string | undefined;
   /** The flow key the instance waits on for a launch slot. */
   admission: AdmissionWait | undefined;
+  /** A running check's output so far. */
+  liveOutput: string | undefined;
   /** The enclosing container's kind (`loop`, `map`). */
   containerKind: string | undefined;
   /** An expansion node's planner name (P08 plan-then-execute). */
@@ -296,7 +300,7 @@ function sameInputs(a: StageViewInputs, b: StageViewInputs): boolean {
     a.parallel === b.parallel && a.dependsOn === b.dependsOn && a.shared === b.shared && a.vars === b.vars &&
     a.stageScope === b.stageScope &&
     a.loopId === b.loopId && a.containerKind === b.containerKind && a.plannerName === b.plannerName &&
-    a.admission === b.admission
+    a.admission === b.admission && a.liveOutput === b.liveOutput
   );
 }
 
@@ -313,7 +317,7 @@ function isLive(stream: StreamState | undefined): boolean {
 }
 
 export function deriveRunView(input: DeriveRunViewInput): RunView {
-  const { run, stageDefs, edges, streams, permissionMode, admission, cache } = input;
+  const { run, stageDefs, edges, streams, permissionMode, admission, checkOutput, cache } = input;
 
   const stageDefByKey = new Map(stageDefs.map((s) => [s.key, s]));
   const orderByKey = new Map(stageDefs.map((s, i) => [s.key, i]));
@@ -386,6 +390,7 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
       containerKind: def?.parentKey ? stageDefByKey.get(def.parentKey)?.kind : undefined,
       plannerName: sr.kind === 'expansion' ? stageDefByKey.get(plannerKeyOf(sr.stageKey) ?? '')?.name : undefined,
       admission: admission?.[sr.id],
+      liveOutput: checkOutput?.[sr.id],
     };
     seen.add(sr.id);
     const cached = cache?.get(sr.id);
@@ -542,6 +547,8 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
     ...(sr.sessionId ? { sessionId: sr.sessionId } : {}),
     ...(session?.agentRef ? { agentRef: session.agentRef } : {}),
     ...(session?.harnessType ? { harnessType: session.harnessType } : {}),
+    ...(def?.kind === 'check' ? { command: [def.check.command, ...def.check.args].join(' ') } : {}),
+    ...(inputs.liveOutput ? { liveOutput: inputs.liveOutput } : {}),
     hooks: hooksFrom(stream, sr.id),
     usage: usageFrom(stream),
     contextUsage: stream?.contextUsage ?? undefined,
