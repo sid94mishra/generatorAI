@@ -84,7 +84,9 @@ export function budgetSummary(items: readonly BudgetItem[], usage: RunUsage | un
 function triggerText(i: BudgetItem): string {
   if (i.key === 'cost') return `${i.limitText ? `${i.usedText} of ${i.limitText}` : i.usedText}${i.unpricedText ? ` + ${i.unpricedText} unpriced` : ''}`;
   if (i.key === 'wall') return i.limitText ? `${i.usedText} of ${i.limitText}` : i.usedText;
-  return i.limitText ? `${i.usedText}/${i.limitText} ${i.label}` : `${i.usedText} ${i.label}`;
+  // "1 turn", never "1 turns".
+  const label = i.key === 'turns' && i.usedText === '1' && !i.limitText ? 'turn' : i.label;
+  return i.limitText ? `${i.usedText}/${i.limitText} ${i.label}` : `${i.usedText} ${label}`;
 }
 
 export interface BudgetMeterProps {

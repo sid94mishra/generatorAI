@@ -175,7 +175,8 @@ export const TRANSCRIPT_COPY = {
 export const TURN_ROLE_LABELS: Readonly<Record<string, { label: string; icon: string }>> = {
   prompt: { label: 'Stage prompt', icon: 'user' },
   iteration_input: { label: 'Iteration input', icon: 'download' },
-  operator: { label: 'Operator message', icon: 'message' },
+  // What the person sent the stage from its composer (D-175): their follow-up, not engine text.
+  operator: { label: 'Your follow-up', icon: 'message' },
   digest: { label: 'Conversation digest', icon: 'layers' },
   wrap_up: { label: 'Wrap-up prompt', icon: 'archive' },
 };

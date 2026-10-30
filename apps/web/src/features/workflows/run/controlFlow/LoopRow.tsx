@@ -279,7 +279,7 @@ export function LoopRow({ runId, stage, bodies, focusedId, showConnector, render
 /** Turn roles of a loop body's conversation that the transcript labels (P05). */
 const TURN_LABELS: Record<string, { label: string; icon: IconConcept }> = {
   iteration_input: { label: 'Iteration input', icon: 'download' },
-  operator: { label: 'Operator message', icon: 'message' },
+  operator: { label: 'Your follow-up', icon: 'message' },
   digest: { label: 'Conversation digest', icon: 'layers' },
   wrap_up: { label: 'Wrap-up prompt', icon: 'archive' },
 };

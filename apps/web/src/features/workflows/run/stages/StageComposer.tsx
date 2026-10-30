@@ -11,7 +11,7 @@
 // refusal is toasted by the mutation.
 // ────────────────────────────────────────────────────────────────
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AgentMode } from '@generatorai/shared';
 import { Composer } from '@/blocks/composer/index.js';
 import { useCancelStageTurn, useSendStageMessage } from '@/hooks/workflowQueries.js';
@@ -66,6 +66,15 @@ export function StageComposer({ runId, stage, workspaceId, agentName }: StageCom
   const [agentMode, setAgentMode] = useState<AgentMode>('auto');
   const [outcome, setOutcome] = useState<string | null>(null);
   const streaming = stage.streaming === true;
+  // The outcome line ("Amending the stage’s output") says what a send started; once that turn is over — the
+  // stage stopped streaming, or its amendment landed — it no longer holds and goes.
+  const amendedAt = useRef(stage.amendedAt);
+  const wasStreaming = useRef(streaming);
+  useEffect(() => {
+    if ((wasStreaming.current && !streaming) || amendedAt.current !== stage.amendedAt) setOutcome(null);
+    wasStreaming.current = streaming;
+    amendedAt.current = stage.amendedAt;
+  }, [streaming, stage.amendedAt]);
 
   const sendAsync = send.mutateAsync;
   const customSendFn = useCallback(
