@@ -1,6 +1,11 @@
 # Connections — analysis, architecture and phased plan
 
-Status: proposal for the owner, 2026-10-04. Evidence lives in two companion files:
+Status: **deferred (owner, 2026-10-30)** — parked until the app is stable with its current features. Read
+[`addendum-2026-10-30.md`](addendum-2026-10-30.md) first: it records what changed since this plan, why the changes go
+beyond today's MCP support, whether the gateway is needed, revised phases (P0–P5), the developer / product / user setup,
+one-click Google and Microsoft sign-in, and how other agent apps handle it. Where the two disagree, the addendum wins.
+
+Original status: proposal for the owner, 2026-10-04. Evidence lives in two companion files:
 [`research-external.md`](research-external.md) (how other products do it, vendor rules, MCP spec, security; every claim
 linked) and [`current-foundations.md`](current-foundations.md) (what GeneratorAI has today, with file paths). Section
 references below (`ext §3.1`, `found §5`) point into those files.
@@ -213,8 +218,8 @@ webhooks, so tier C plus a relay — a later option, not v1.
 | Notion, Linear, GitHub, Atlassian, Sentry | Official remote MCP + our OAuth (CIMD/DCR) | Works out of the box. Atlassian needs the admin to allowlist our callback domain. |
 | Slack | Bring-your-own internal Slack app: Socket Mode bot + Slack MCP with user token | See the walkthrough in §4.5. |
 | Discord | Bring-your-own bot: token + Gateway, native tools for read/post | No official MCP; MESSAGE_CONTENT is a privileged intent. |
-| Gmail / Google Workspace | Bring-your-own Google Cloud OAuth client: Workspace MCP (preview) or REST; polling for new mail | Avoids restricted-scope verification for local use. Testing-mode refresh tokens expire after 7 days — surface that clearly. |
-| Microsoft 365 | User/tenant Entra app registration (localhost redirect): Graph via device code or loopback; Work IQ MCP for Copilot-licensed tenants | Graph delta for events. |
+| Gmail / Google Workspace | *(Addendum §6: prefer our own verified Google app for one-click sign-in; BYO becomes the fallback.)* Bring-your-own Google Cloud OAuth client: Workspace MCP (preview) or REST; polling for new mail | Avoids restricted-scope verification for local use. Testing-mode refresh tokens expire after 7 days — surface that clearly. |
+| Microsoft 365 | *(Addendum §6: prefer our own multi-tenant app with publisher verification; BYO becomes the fallback.)* User/tenant Entra app registration (localhost redirect): Graph via device code or loopback; Work IQ MCP for Copilot-licensed tenants | Graph delta for events. |
 | Figma | Desktop Figma MCP server (local) or REST with a personal token; apply for the Figma MCP catalogue | Remote MCP is catalogue-gated. |
 | Anything else | "Custom MCP server" (URL or command) + generic OAuth/API key | Zapier MCP and Composio can be added this way. |
 
@@ -254,6 +259,8 @@ with the usual gates plus a real-user pass in the desktop app.
 | **C7 Google & Microsoft** | BYO Google Cloud client setup guide + Workspace MCP / REST tools, Gmail polling events; Entra app setup + Graph tools via device code/loopback, Graph delta events; Work IQ when licensed. | New email starts an automation; send-mail is risky + gated | L |
 | **C8 Events tier B/C** | Polling framework (cursors, backoff, rate limits); webhook adapters with per-provider verification on a user-supplied public URL / tunnel; subscription renewals; dead-letter view. | GitHub/Notion webhooks via Tailscale Funnel; renewals survive restarts | M–L |
 | **C9 Ecosystem & hardening** | MCP Apps (`ui://`) and URL-mode elicitation/MRTR in the chat renderer; admin policy (allow/deny connectors and tools); signed connector bundles via extensions (wire the staged `registerMcpServer`); optional hosted relay ingress (needs its own privacy review); optional Nango backend for long-tail APIs. | — | M each |
+
+The addendum (§4) regroups these into P0–P5 with a smaller first release; use that table when work resumes.
 
 Suggested order: C0 → C1 → C2 → C3 → C4 → C5 is the first release (pull connectors, safe). C6 delivers the Slack
 example. C7–C9 follow by demand. C1 is worth doing now regardless: it closes a live gap for today's MCP servers.
@@ -296,6 +303,9 @@ Rejected:
 - Multi-user now — no user model exists; v1 is server-global with `created_by` to keep the door open.
 
 ## 8. Decisions needed from the owner
+
+Superseded by the updated list in [`addendum-2026-10-30.md` §8](addendum-2026-10-30.md#8-decisions-for-when-work-resumes)
+(adds Google/Microsoft one-click sign-in, Gmail-reading scope, gateway timing). The original list:
 
 1. **CIMD host:** which stable HTTPS domain hosts `client-metadata.json` (the project website is enough)?
 2. **Slack model for v1:** BYO internal Slack app + Socket Mode (recommended), versus our own Marketplace app (needs
