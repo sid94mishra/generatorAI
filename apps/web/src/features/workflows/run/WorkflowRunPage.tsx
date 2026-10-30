@@ -84,7 +84,7 @@ import {
 import { RunEventTimeline } from './inspector/RunEventTimeline.js';
 import { RunGraph } from './graph/RunGraph.js';
 import { RunDockContext, RunInspectorDockPanel, RunUsageDockPanel, RunWidgetDockPanel, type RunDockContextValue } from './dock/runDockPanels.js';
-import { createStageViewCache, deriveRunView, pickStageStreams } from './model/deriveRunView.js';
+import { createStageViewCache, deriveRunView, pickStageStreams, stageNeedsPerson } from './model/deriveRunView.js';
 import type { RenderStage } from './model/renderStage.js';
 import type { StageView } from './model/types.js';
 import { heldByPausedStages } from './model/pausedStages.js';
@@ -672,7 +672,7 @@ export function WorkflowRunPage() {
     [runId, runData, focusedStageEnriched, inspectorFiles.note, focusStage],
   );
 
-  const awaitingCount = runView?.stages.filter((s) => s.status === 'awaiting_input').length ?? 0;
+  const awaitingCount = runView?.stages.filter(stageNeedsPerson).length ?? 0;
   /**
    * Where a Changes review batch goes: the stage parked on its completion
    * review (the batch requests changes), else the focused stage when it can

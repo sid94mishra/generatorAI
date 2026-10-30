@@ -49,6 +49,8 @@ export interface ReviewCardProps {
   agentName?: string | undefined;
   /** The stage output being approved, shown in full (U-19). */
   output?: string | undefined;
+  /** The output is the reply printed right above the card: say so instead of printing it twice. */
+  outputShownAbove?: boolean | undefined;
   /** The steps the run takes once it completes, from its settings; empty: it publishes nothing. */
   afterRun?: readonly string[] | undefined;
   /** What approving starts ("run_tests"), when the stage has successors. */
@@ -68,6 +70,7 @@ export function ReviewCard({
   args,
   agentName,
   output,
+  outputShownAbove = false,
   afterRun,
   approveStarts,
   onApprove,
@@ -136,7 +139,9 @@ export function ReviewCard({
             {JSON.stringify(args, null, 2)}
           </pre>
         ) : null}
-        {output ? (
+        {output && outputShownAbove ? (
+          <p className="text-small text-fg-3">The output to approve is the reply above.</p>
+        ) : output ? (
           <section aria-label="Output to approve" className="max-h-96 overflow-auto rounded-card border border-line-soft bg-sunken px-3 py-2" data-testid="stage-review-output">
             <Markdown>{reviewMarkdown(output)}</Markdown>
           </section>

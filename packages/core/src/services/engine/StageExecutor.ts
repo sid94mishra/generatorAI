@@ -1727,6 +1727,9 @@ export class StageExecutor {
       now: this.now(),
     });
     if (!r.ok) throw new AttemptStop(ctx.frame.stop ?? { kind: 'aborted', reason: 'superseded' });
+    // The run went `waiting` while this stage waited on a person; the scheduler sees it working again only when
+    // it next decides — a revision turn with no tool call read "Waiting" all through (evaluation 2026-10-30).
+    if (from === 'awaiting_input') this.deps.post(ctx.frame.req.runId, { type: 'tick' });
     return r.row.version;
   }
 

@@ -1798,6 +1798,16 @@ review's follow-up target. The turn in flight draws only what came after the per
 the message and the turns before it — drawing the whole stream showed the prompt twice and, on Codex, the previous
 reply again), and a saved, finished reply wins over a stream left "streaming" (a revisit lost the follow-up's answer).
 
+### D-176 Whatever holds the run for the person says so; a run's commit and PR text come from the run (evaluation, 2026-10-30) — Final
+An open approval wait is a decision like a review: its row opens, reads "Needs you" and counts in the header badge
+(it read "Waiting", folded, while the sidebar asked to approve it). A stage leaving a gate for a turn (a revision after
+"Request changes", the rest of a turn after a permission) wakes the scheduler, so the run reads Running again. When the
+reply above a review card is the output under review, the card says so instead of printing it twice (U-19 still holds
+when they differ). A generated commit message / PR text is written by the run's own model (its last agent stage's,
+else the workflow default) when no app-wide one is set, and a generation that cannot run uses the step's own
+templates, never "<workflow> (workflow run <id>)". A shell step reads as the line it runs (Codex's `/bin/zsh -lc "…"`
+is unwrapped), a failed command's error is its last lines, and reasoning renders as markdown.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

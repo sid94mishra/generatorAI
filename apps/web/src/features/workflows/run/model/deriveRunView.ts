@@ -643,6 +643,15 @@ export function deriveMapView(sr: StageRun, def: StageSpec | undefined): MapView
 }
 
 /** A wait instance's view (P05 §4.3): its question while waiting, its outcome once resolved. */
+/**
+ * The stage holds the run until the person acts: a review or gate (`awaiting_input`), or an approval wait still
+ * open — a wait is `waiting`, and "Ship it?" read Waiting, folded, while the sidebar said to approve it.
+ */
+export function stageNeedsPerson(stage: Pick<StageView, 'status' | 'kind' | 'wait'>): boolean {
+  if (stage.status === 'awaiting_input') return true;
+  return stage.kind === 'wait' && stage.status === 'waiting' && stage.wait?.type === 'approval' && !stage.wait.outcome;
+}
+
 export function deriveWaitView(sr: StageRun, def: StageSpec | undefined): WaitView | undefined {
   if (sr.kind !== 'wait' && def?.kind !== 'wait') return undefined;
   const spec = def?.kind === 'wait' ? def.wait : undefined;

@@ -114,7 +114,8 @@ export function StagesCard({ graph }: { graph: WorkflowGraph }) {
                       {session?.agentRef ? <span className="truncate">{session.agentRef}</span> : null}
                       {session?.agentRef && session?.model ? <span aria-hidden>·</span> : null}
                       {session?.model ? <ModelLabel modelId={session.model} /> : null}
-                      {!session?.agentRef && !session?.model ? <span className="text-fg-3">default</span> : null}
+                      {/* Only an agent stage has a session: a command or a wait runs no LLM. */}
+                      {!session?.agentRef && !session?.model ? <span className="text-fg-3">{stage.kind === 'agent' ? 'default' : '—'}</span> : null}
                     </span>
                   </TableCell>
                 </TableRow>
@@ -181,8 +182,9 @@ export function SetupCard({ graph, projectName }: { graph: WorkflowGraph; projec
             {session.model ? <ModelLabel modelId={session.model} /> : null}
             {[session.agentRef, session.reasoningEffort, session.permissionMode ? APPROVAL_MODE_LABELS[session.permissionMode as ApprovalMode]?.word : null]
               .filter(Boolean)
-              .map((part) => (
-                <span key={String(part)}>· {part}</span>
+              .map((part, i) => (
+                // The dot separates: the first part leads only when a model stands before it.
+                <span key={String(part)}>{i > 0 || session.model ? `· ${part}` : part}</span>
               ))}
           </span>
         ) : (

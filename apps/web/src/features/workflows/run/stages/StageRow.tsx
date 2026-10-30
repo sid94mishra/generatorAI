@@ -33,6 +33,7 @@ import { StageTranscript } from './StageTranscript.js';
 import { useStageAgent } from './useStageAgent.js';
 import { MenuButton, type MenuButtonItem } from '@/ui/patterns/MenuButton/MenuButton.js';
 import { formatStageDuration } from '../model/format.js';
+import { stageNeedsPerson } from '../model/deriveRunView.js';
 import type { StageView } from '../model/types.js';
 import { ReviewCard } from './ReviewCard.js';
 import { formatWhen } from '@/lib/formatWhen.js';
@@ -245,7 +246,8 @@ export const StageRow = memo(function StageRow({
   hidePrompt,
   renderComposer,
 }: StageRowProps) {
-  const isActive = stage.status === 'running' || stage.status === 'awaiting_input' || stage.streaming === true;
+  const needsPerson = stageNeedsPerson(stage);
+  const isActive = stage.status === 'running' || needsPerson || stage.streaming === true;
   const isTerminal =
     stage.status === 'completed' ||
     stage.status === 'failed' ||
@@ -284,7 +286,10 @@ export const StageRow = memo(function StageRow({
     setOpen((o) => !o);
   };
 
-  const status = resolveStatus('stageRun', stage.rawStatus) ?? resolveMapping({ state: 'queued' }, 'stageRun');
+  // An open approval wait reads like a review: the person has the ball, not the clock.
+  const status =
+    (needsPerson && stage.status === 'waiting' ? resolveStatus('stageRun', 'awaiting_input') : resolveStatus('stageRun', stage.rawStatus)) ??
+    resolveMapping({ state: 'queued' }, 'stageRun');
   // U-18: a check that ran to the end but did not pass completes (it never fails the run on its own),
   // yet it must not read "Succeeded".
   const checkFailure =
@@ -369,7 +374,7 @@ export const StageRow = memo(function StageRow({
             <span
               className={cn(
                 'min-w-0 truncate text-ui',
-                isAwaiting ? 'font-semibold text-fg' : isSkippedOrCancelled ? 'text-fg-3' : 'font-medium text-fg',
+                needsPerson ? 'font-semibold text-fg' : isSkippedOrCancelled ? 'text-fg-3' : 'font-medium text-fg',
               )}
             >
               {stage.name}
@@ -563,6 +568,7 @@ export const StageRow = memo(function StageRow({
               tool={stage.interrupt.tool}
               args={stage.interrupt.args}
               output={stage.interrupt.output}
+              outputShownAbove={!!stage.interrupt.output && stage.answer.trim() === stage.interrupt.output.trim()}
               afterRun={stage.interrupt.afterRun}
               approveStarts={approveStarts}
               busy={gateBusy}
