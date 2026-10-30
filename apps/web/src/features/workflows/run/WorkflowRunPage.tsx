@@ -508,13 +508,12 @@ export function WorkflowRunPage() {
   // D-22: the Inspector's Files are the focused stage's own changes.
   const inspectorFiles = useStageFiles(runWorkspaceId, focusedStage, dockOpen);
 
-  // Only an agent stage is a conversation (loops, maps, waits, sub-workflows, checks decide through their cards).
-  const focusedComposer = useMemo(
-    () =>
-      runId && focusedStage && focusedStage.kind === 'agent' && focusedStage.status !== 'skipped' && focusedStage.status !== 'cancelled' ? (
-        <StageComposer runId={runId} stage={focusedStage} workspaceId={runWorkspaceId} docked />
-      ) : null,
-    [runId, focusedStage, runWorkspaceId],
+  // An agent stage's composer opens inside its own row, on "Follow up" (D-175); a command, loop, map, wait or
+  // sub-workflow has no conversation (StageRow offers it to agent stages only).
+  const renderComposer = useCallback(
+    (s: StageView, agentName: string) =>
+      runId ? <StageComposer runId={runId} stage={s} workspaceId={runWorkspaceId} agentName={agentName} /> : null,
+    [runId, runWorkspaceId],
   );
 
   // What approving a stage's review starts: the stages that depend on it.
@@ -562,9 +561,11 @@ export function WorkflowRunPage() {
         {...(opts.body ? { body: opts.body } : {})}
         {...(opts.preamble ? { preamble: opts.preamble } : {})}
         {...(opts.hidePrompt ? { hidePrompt: true } : {})}
+        renderComposer={renderComposer}
       />
     ),
     [
+      renderComposer,
       focusedStageId,
       runIsActive,
       runIsTerminal,
@@ -679,7 +680,7 @@ export function WorkflowRunPage() {
    */
   const reviewStageId =
     runView?.stages.find((s) => s.status === 'awaiting_input' && !!s.interrupt)?.id ??
-    (focusedStage && CONVERSABLE.has(focusedStage.rawStatus) ? focusedStage.id : null);
+    (focusedStage && focusedStage.kind === 'agent' && CONVERSABLE.has(focusedStage.rawStatus) ? focusedStage.id : null);
   const changesProps = useMemo<ChangesPanelProps>(
     () => ({
       ...(runWorkspaceId ? { workspaceId: runWorkspaceId } : {}),
@@ -822,7 +823,6 @@ export function WorkflowRunPage() {
                   />
                 }
                 main={main}
-                bottom={focusedComposer}
                 dockHost={(column) => (
                   <Dock
                     open={dockOpen}

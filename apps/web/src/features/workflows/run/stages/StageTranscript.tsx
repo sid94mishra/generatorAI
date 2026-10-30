@@ -48,6 +48,15 @@ export function persistedRows(
   );
 }
 
+/**
+ * Whether the turn the stream calls live is already saved, finished. The stream is then stale — left
+ * "streaming" by a tab that went away mid-turn, or by a provider that never ends its turn on the wire —
+ * and the saved reply wins: hiding it behind the stale stream lost a follow-up's answer on a revisit.
+ */
+export function liveTurnSaved(messages: readonly ChatMessage[], liveTurnId: string | null): boolean {
+  return !!liveTurnId && messages.some((m) => m.role === 'assistant' && m.complete !== false && m.metadata?.turnId === liveTurnId);
+}
+
 /** Whether the conversation already holds a response to its latest prompt. */
 export function answeredLastPrompt(messages: readonly ChatMessage[]): boolean {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -79,11 +88,13 @@ export const StageTranscript = memo(function StageTranscript({
     void refetch();
   }, [stage.rawStatus, stage.streaming, stage.version, stage.attempt, stage.amendedAt, refetch]);
 
-  const rows = useMemo(() => persistedRows(messages ?? [], live, liveTurnId), [messages, live, liveTurnId]);
+  const saved = liveTurnSaved(messages ?? [], liveTurnId);
+  const turnLive = live && !saved;
+  const rows = useMemo(() => persistedRows(messages ?? [], turnLive, liveTurnId), [messages, turnLive, liveTurnId]);
   const streamHasContent = stage.segments.length > 0 || stage.steps.length > 0;
   // The stream renders the turn in flight, and a turn whose response never reached the
   // history (the server stopped before persisting it) rather than leaving a gap.
-  const showLive = live || (streamHasContent && !answeredLastPrompt(rows));
+  const showLive = turnLive || (!saved && streamHasContent && !answeredLastPrompt(rows));
   const turns = useMemo(() => buildTranscriptTurns(rows, { live: showLive }), [rows, showLive]);
 
   if (!stage.sessionId || rows.length === 0) return <>{fallback}</>;

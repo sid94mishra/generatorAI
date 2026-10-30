@@ -1,5 +1,6 @@
 // ────────────────────────────────────────────────────────────────
-// StageComposer — the focused stage's compact composer (WF-17; P03b WP-3b.2).
+// StageComposer — an agent stage's compact composer (WF-17; P03b WP-3b.2),
+// opened inside the stage's row by "Follow up" (D-175).
 //
 // A stage is a compact chat: the shared composer's `stage` variant
 // (attachments, agent mode, Stop; no model chips), sending to the stage
@@ -14,7 +15,6 @@ import { useCallback, useState } from 'react';
 import type { AgentMode } from '@generatorai/shared';
 import { Composer } from '@/blocks/composer/index.js';
 import { useCancelStageTurn, useSendStageMessage } from '@/hooks/workflowQueries.js';
-import { cn } from '@/ui/lib/cn.js';
 import { useTwoPhaseStop } from '@/hooks/useTwoPhaseStop.js';
 import type { StageView } from '../model/types.js';
 
@@ -24,11 +24,6 @@ export interface StageComposerProps {
   workspaceId?: string | undefined;
   /** The stage agent's name, for the placeholder ("Message Bug Fixer in this stage…"). */
   agentName?: string | undefined;
-  /**
-   * Pinned under the run's scrolling stages, like the chat composer: the chat's frame, plus a line
-   * naming the stage it messages (the box is no longer inside that stage's row).
-   */
-  docked?: boolean;
 }
 
 /** Why the composer is closed for this stage, or null when it takes a message. */
@@ -65,7 +60,7 @@ const OUTCOME_COPY = {
   retrying: 'The stage resumes with your message',
 } as const;
 
-export function StageComposer({ runId, stage, workspaceId, agentName, docked = false }: StageComposerProps) {
+export function StageComposer({ runId, stage, workspaceId, agentName }: StageComposerProps) {
   const send = useSendStageMessage();
   const cancel = useCancelStageTurn();
   const [agentMode, setAgentMode] = useState<AgentMode>('auto');
@@ -101,16 +96,6 @@ export function StageComposer({ runId, stage, workspaceId, agentName, docked = f
     <div className="flex flex-col gap-1" data-testid="stage-composer">
       <Composer
         variant="stage"
-        docked={docked}
-        {...(docked
-          ? {
-              aboveComposer: (
-                <p className="truncate px-1 pb-1.5 text-small text-fg-3" data-testid="stage-composer-target">
-                  To stage <span className="font-medium text-fg-2">{stage.name}</span>
-                </p>
-              ),
-            }
-          : {})}
         sessionId={`stageRun:${stage.id}`}
         manageStream={false}
         disabled={closed !== null}
@@ -128,7 +113,7 @@ export function StageComposer({ runId, stage, workspaceId, agentName, docked = f
         pendingInteractionLabel={pending}
       />
       {outcome ? (
-        <p role="status" className={cn('px-1 text-small text-fg-3', docked && 'mx-auto w-full max-w-190 px-3 pb-2')}>
+        <p role="status" className="px-1 text-small text-fg-3">
           {outcome}
         </p>
       ) : null}

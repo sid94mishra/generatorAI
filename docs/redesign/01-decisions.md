@@ -1776,6 +1776,28 @@ headed `$ <command line>`, like a terminal. Once it ends, the same block keeps t
 else the stored tails after a reload); the full tails stay in the inspector's Output. A new attempt starts the block
 empty. No avatar and no "is thinking": a check is a command, not an agent.
 
+### D-174 A check stage is a Command stage; its command is typed freely; its run reads like a command in the chat (owner, 2026-10-30) — Final
+Everywhere the person reads it — the builder's palette, inspector and canvas, the definition cards, the run page and its
+"Command failed · exit 1" — the stage kind is "Command". The stored kind stays `check` (the engine, the spec, the
+validator codes and every saved definition use it; renaming those is a schema migration with no user-visible gain). The
+command is ONE text field holding the whole command line (`pnpm --filter @pulse/api test`), split shell-like
+(`parseCommandLine`: quotes, escapes, nothing expanded) into the program and its literal arguments; `&&`, `|`, `>` are
+called out because no shell runs. The allow-list stays the safety boundary, but a program not on it no longer blocks
+the person: the field says so and offers "Allow `<program>`", which an administrator (admin:settings) applies at once
+(`PUT /settings/script-allowlist`, persisted with the engine settings; shells, downloaders and deleting coreutils carry
+a stronger warning). The run row draws the command as the chat draws a command an agent ran: a header "Running / Ran
+`<command line>`" with the exit code, the time and copy; a fixed-height output box that follows the newest lines until
+the person scrolls up; a details line (where it ran, its timeout, why it did not pass, Full output → inspector).
+
+### D-175 An agent stage's composer opens inside its own row, on "Follow up" (owner, 2026-10-30) — Final
+The composer pinned under the run's stages (WF-17's docked box, "To stage X") is gone. An agent stage that can take a
+message carries a "Follow up" icon in its row header and a "Follow up" button at the end of its body; either opens the
+stage composer inside that row, under its conversation, and "Hide composer" closes it. Command, loop, map, wait and
+sub-workflow stages have no composer (the server refuses them anyway: STAGE_NOT_CONVERSABLE), nor are they a Changes
+review's follow-up target. The turn in flight draws only what came after the person's last message (the history holds
+the message and the turns before it — drawing the whole stream showed the prompt twice and, on Codex, the previous
+reply again), and a saved, finished reply wins over a stream left "streaming" (a revisit lost the follow-up's answer).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

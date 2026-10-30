@@ -26,7 +26,9 @@ import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { STATUS_TONE_TEXT } from '@/ui/primitives/StatusBadge/StatusBadge.js';
+import type { StreamSegment } from '@generatorai/client-core';
 import { CommandRun } from './CommandRun.js';
+import { stageComposerClosedReason } from './StageComposer.js';
 import { StageTranscript } from './StageTranscript.js';
 import { useStageAgent } from './useStageAgent.js';
 import { MenuButton, type MenuButtonItem } from '@/ui/patterns/MenuButton/MenuButton.js';
@@ -100,6 +102,19 @@ export interface StageRowProps {
   body?: ReactNode;
   preamble?: ReactNode;
   hidePrompt?: boolean;
+  /** The stage's composer (an agent stage only, D-175): opened inside the row by "Follow up". */
+  renderComposer?: (stage: StageView, agentName: string) => ReactNode;
+}
+
+/**
+ * The turn in flight of a stage conversation: what came after the person's last message. The history
+ * already shows that message and every turn before it; drawing the whole stream too showed the
+ * prompt twice and, on a provider that never resets the stream between turns, the last reply again.
+ * Null when the person has not written in this stage (the whole stream is the turn).
+ */
+export function liveTurnSegments(segments: readonly StreamSegment[]): StreamSegment[] | null {
+  for (let i = segments.length - 1; i >= 0; i -= 1) if (segments[i]!.type === 'operator') return segments.slice(i + 1);
+  return null;
 }
 
 /** The interaction a plan card answers: the plan block's own. */
@@ -228,6 +243,7 @@ export const StageRow = memo(function StageRow({
   body,
   preamble,
   hidePrompt,
+  renderComposer,
 }: StageRowProps) {
   const isActive = stage.status === 'running' || stage.status === 'awaiting_input' || stage.streaming === true;
   const isTerminal =
@@ -242,6 +258,15 @@ export const StageRow = memo(function StageRow({
   // Streaming / awaiting / failed rows open; pending and completed rows stay closed.
   const [open, setOpen] = useState(isActive || isFailed);
   const [userToggled, setUserToggled] = useState(false);
+  // Only an agent stage is a conversation (a command has no agent to answer); its composer opens on demand (D-175).
+  const conversable = !!renderComposer && stage.kind === 'agent' && stageComposerClosedReason(stage) === null;
+  const [composerOpen, setComposerOpen] = useState(false);
+  const openComposer = () => {
+    onFocus?.(stage.id);
+    setUserToggled(true);
+    setOpen(true);
+    setComposerOpen(true);
+  };
 
   // Open the moment a row becomes active; close it when it completes (room for
   // the next stage) — unless the user toggled it. When the run is over the
@@ -281,6 +306,7 @@ export const StageRow = memo(function StageRow({
     ) : null;
 
   const agent = useStageAgent(stage);
+  const liveTurn = liveTurnSegments(stage.segments);
   const turnProps = {
     segments: stage.segments,
     steps: stage.steps,
@@ -308,6 +334,7 @@ export const StageRow = memo(function StageRow({
     ) : (
       <LiveTurn
         {...turnProps}
+        {...(liveTurn ? { segments: liveTurn, steps: undefined, answer: undefined } : {})}
         agentName={agent.name}
         avatarProvider={agent.harnessProvider}
         thinking={isActive && !isAwaiting}
@@ -401,6 +428,9 @@ export const StageRow = memo(function StageRow({
         <span className="w-16 shrink-0 text-right font-mono text-micro text-fg-2 tabular-nums">{dur ?? '—'}</span>
         {isFailed && onRetry ? (
           <IconButton icon="retry" label="Re-run from this stage" size="sm" onClick={() => onRetry(stage.id)} />
+        ) : null}
+        {conversable ? (
+          <IconButton icon="message" label={`Follow up with ${stage.name}`} size="sm" onClick={openComposer} />
         ) : null}
         {menu ? (
           <MenuButton
@@ -542,6 +572,25 @@ export const StageRow = memo(function StageRow({
                 ? { onReject: (reason?: string) => onTerminalRejectHitl(stage.id, reason) }
                 : {})}
             />
+          ) : null}
+
+          {conversable && renderComposer ? (
+            composerOpen ? (
+              <div className="flex flex-col gap-1" data-testid="stage-followup">
+                {renderComposer(stage, agent.name)}
+                <div>
+                  <Button size="sm" variant="ghost" className="-ml-2" onClick={() => setComposerOpen(false)}>
+                    Hide composer
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <Button size="sm" variant="ghost" icon="message" className="-ml-2" onClick={openComposer}>
+                  Follow up
+                </Button>
+              </div>
+            )
           ) : null}
         </div>
       </Reveal>

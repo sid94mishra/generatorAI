@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '@generatorai/shared';
-import { answeredLastPrompt, persistedRows } from './StageTranscript.js';
+import { answeredLastPrompt, liveTurnSaved, persistedRows } from './StageTranscript.js';
+import { liveTurnSegments } from './StageRow.js';
 
 const row = (id: string, role: ChatMessage['role'], extra: Partial<ChatMessage> = {}): ChatMessage =>
   ({ id, sessionId: 's', role, content: id, timestamp: new Date(0), ...extra }) as ChatMessage;
@@ -26,5 +27,24 @@ describe('answeredLastPrompt', () => {
     expect(answeredLastPrompt([row('p', 'user'), row('a', 'assistant')])).toBe(true);
     expect(answeredLastPrompt([row('p', 'user'), row('a', 'assistant'), row('p2', 'user')])).toBe(false);
     expect(answeredLastPrompt([])).toBe(false);
+  });
+});
+
+describe('liveTurnSaved (a follow-up lost on a revisit)', () => {
+  it('is true once the live turn is saved finished: the stream is stale, the history wins', () => {
+    const doneT2 = row('a2', 'assistant', { metadata: { turnId: 't2' } as ChatMessage['metadata'] });
+    const partialT2 = row('p2', 'assistant', { complete: false, metadata: { turnId: 't2' } as ChatMessage['metadata'] });
+    expect(liveTurnSaved([row('q', 'user'), doneT2], 't2')).toBe(true);
+    expect(liveTurnSaved([row('q', 'user'), partialT2], 't2')).toBe(false);
+    expect(liveTurnSaved([doneT2], null)).toBe(false);
+  });
+});
+
+describe('liveTurnSegments (the follow-up prompt drawn twice)', () => {
+  const answer = (id: string) => ({ type: 'answer' as const, id, text: id });
+  it('keeps only what came after the person’s last message; null when they never wrote', () => {
+    expect(liveTurnSegments([answer('first'), { type: 'operator', id: 'op', text: 'again' }, answer('second')])).toEqual([answer('second')]);
+    expect(liveTurnSegments([answer('first'), { type: 'operator', id: 'op', text: 'again' }])).toEqual([]);
+    expect(liveTurnSegments([answer('first')])).toBeNull();
   });
 });
