@@ -8,12 +8,13 @@
 // ────────────────────────────────────────────────────────────────
 
 import { TRANSCRIPT_COPY } from '@generatorai/shared/ui-contract';
+import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import { Collapsible } from '@/ui/primitives/Collapsible/Collapsible.js';
 import { cn } from '@/ui/lib/cn.js';
 import { WorkingIndicator } from '@/ui/primitives/WorkingIndicator/WorkingIndicator.js';
 
 export interface ThoughtPillProps {
-  /** Reasoning text (plain; rendered pre-wrapped). */
+  /** Reasoning text — markdown: Codex and Claude both title their summaries `**Planning the change**`. */
   text: string;
   /** Still streaming. */
   live?: boolean;
@@ -36,9 +37,11 @@ export function ThoughtPill({ text, live = false, defaultOpen = false, duration 
           <span className={cn('inline-flex items-center gap-1.5 text-ui', live ? 'text-shimmer' : 'text-fg-2')}>{label}</span>
         }
       >
-        <p className="max-h-65 overflow-auto border-l border-line pl-3 text-ui break-words whitespace-pre-wrap text-fg-2">
-          {text}
-        </p>
+        <div className="max-h-65 overflow-auto border-l border-line pl-3">
+          <Markdown size="compact" streaming={live} className="text-fg-2">
+            {text}
+          </Markdown>
+        </div>
       </Collapsible>
     </div>
   );

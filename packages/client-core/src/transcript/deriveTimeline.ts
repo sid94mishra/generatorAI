@@ -199,7 +199,31 @@ export function toolCallErrorText(b: Extract<StreamBlock, { type: 'tool_call' }>
       : undefined;
   if (!raw?.trim()) return undefined;
   const text = raw.trim();
+  // A failed command's result is everything it printed — a file it read, test logs — and the reason is at the
+  // end. The error shows that end; the whole output stays in the step's expand panel.
+  if (toolStepKind(b.tool) === 'run') {
+    const lines = text.split('\n');
+    if (lines.length > SHELL_ERROR_LINES) return `…\n${lines.slice(-SHELL_ERROR_LINES).join('\n')}`;
+  }
   return text.length > 2000 ? `${text.slice(0, 2000)}…` : text;
+}
+
+const SHELL_ERROR_LINES = 8;
+
+/**
+ * The line a shell wrapper runs: Codex sends every command as `/bin/zsh -lc "<line>"` (bash and sh alike), which
+ * read as `/…/zsh -lc "sed -n …"` on every step. Anything else is returned unchanged.
+ */
+export function unwrapShellLine(command: string): string {
+  const m = /^\s*(?:\S*[\\/])?(?:ba|z)?sh(?:\.exe)?\s+-l?c\s+([\s\S]+?)\s*$/.exec(command);
+  const body = m?.[1];
+  if (!body || body.length < 2) return command;
+  const q = body[0];
+  if ((q !== '"' && q !== "'") || body[body.length - 1] !== q) return command;
+  const inner = body.slice(1, -1);
+  // Single quotes: no escapes, except the `'\''` idiom; double quotes: \" \\ \$ \` are escapes.
+  if (q === "'") return inner.includes("'") && !inner.includes("'\\''") ? command : inner.replaceAll("'\\''", "'");
+  return inner.replace(/\\(["\\$`])/g, '$1');
 }
 
 /**
@@ -255,7 +279,7 @@ function summarizeArgs(toolName: string, args: unknown): { target: string; meta?
       break;
     }
   }
-  const target = targetRaw ? shortenTarget(targetRaw, targetKey) : '';
+  const target = targetRaw ? shortenTarget(targetKey === 'command' ? unwrapShellLine(targetRaw) : targetRaw, targetKey) : '';
   let meta: string | undefined;
   if (typeof a.startLine === 'number' && typeof a.endLine === 'number') {
     meta = `lines ${a.startLine}–${a.endLine}`;
