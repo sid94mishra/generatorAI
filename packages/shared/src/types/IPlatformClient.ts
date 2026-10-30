@@ -81,6 +81,17 @@ export interface EventSubscriptionOptions {
  * - Web → HttpPlatformClient (REST + SSE)
  * - Desktop → IpcPlatformClient (Electron IPC bridge)
  */
+/** The commands a command stage may run: defaults, the operator's config extras and those allowed in the app (D-174). */
+export interface ScriptAllowlist {
+  /** Everything allowed (defaults ∪ extras). */
+  commands: string[];
+  defaults: string[];
+  /** Allowed beyond the defaults: config extras and the app's. */
+  extras: string[];
+  /** Allowed in the app by an administrator: the set `setAllowedCommands` replaces. */
+  allowed: string[];
+}
+
 export interface IPlatformClient {
   /** Which platform this client targets */
   readonly platform: PlatformType;
@@ -165,7 +176,9 @@ export interface IPlatformClient {
   /** Every decision the run waits on, its sub-workflow children's mirrored (P05). */
   listPendingDecisions(runId: string): Promise<PendingDecisionView[]>;
   /** The commands a check stage may run: the defaults plus the operator's extras (P05). */
-  getScriptAllowlist(): Promise<{ commands: string[]; defaults: string[]; extras: string[] }>;
+  getScriptAllowlist(): Promise<ScriptAllowlist>;
+  /** Replace the commands an administrator allowed in the app (admin:settings, D-174). */
+  setAllowedCommands(allowed: string[]): Promise<ScriptAllowlist>;
   deleteRun(id: string): Promise<void>;
 
   // ── HITL — permission mode + interrupt resume (HITL-04) ──

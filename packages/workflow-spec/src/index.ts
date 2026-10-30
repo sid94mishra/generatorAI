@@ -53,3 +53,4 @@ export * from './secretRefs.js';
 export * from './definition.js';
 export * from './authoring.js';
 export * from './stageRefs.js';
+export * from './commandLine.js';

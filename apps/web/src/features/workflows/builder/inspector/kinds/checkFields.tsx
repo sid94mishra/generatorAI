@@ -1,27 +1,48 @@
 // ────────────────────────────────────────────────────────────────
-// The command parts of a check stage (P05 §1.2), shared with a map's item
-// setup steps: the allow-listed executable, literal arguments (a template
-// is refused: run values reach the command through env only), the mount,
-// the working directory and the environment table. A command runs
-// repository code, so saving one needs an administrator (the note).
+// The command parts of a command stage (P05 §1.2; kind `check`), shared with
+// a map's item setup steps: the command line, typed freely (D-174), the
+// mount, the working directory and the environment table. The program must
+// be on this computer's allow-list; one that is not can be allowed right
+// here by an administrator. Arguments are literals (a template is refused:
+// run values reach the command through env only). A command runs repository
+// code, so saving one needs an administrator (the note).
 // ────────────────────────────────────────────────────────────────
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { DEFAULT_COMMAND_ALLOWLIST, type CheckSpec } from '@generatorai/workflow-spec';
+import {
+  DEFAULT_COMMAND_ALLOWLIST,
+  OPT_IN_COMMANDS,
+  formatCommandLine,
+  parseCommandLine,
+  type CheckSpec,
+} from '@generatorai/workflow-spec';
 import { useWorkflowBuilderStore, type BuilderIssue } from '@/stores/workflowBuilderStore.js';
-import { useScriptAllowlist } from '@/hooks/scriptQueries.js';
+import { useAllowCommand, useScriptAllowlist } from '@/hooks/scriptQueries.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Callout } from '@/ui/primitives/Callout/Callout.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { InlineCode } from '@/ui/primitives/InlineCode/InlineCode.js';
 import { Input } from '@/ui/primitives/Input/Input.js';
 import { Select } from '@/ui/primitives/Select/Select.js';
+import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { FieldIssues, issuesAt } from '../../fields/FieldIssues.js';
 import { InspectorNote, InspectorRow } from '../../fields/InspectorLayout.js';
-import { ArgsEditor, NameField, renameKey, withoutKey } from '../../fields/stageFields.js';
+import { NameField, renameKey, withoutKey } from '../../fields/stageFields.js';
 
 const TEMPLATE_PATTERN = /\{\{/;
+
+/** What an opt-in program can do, for the warning before allowing it. */
+const OPT_IN_RISK: Record<string, string> = {
+  sh: 'runs any shell script',
+  bash: 'runs any shell script',
+  curl: 'downloads and uploads anything',
+  wget: 'downloads anything',
+  rm: 'deletes files',
+  mv: 'moves and overwrites files',
+  cp: 'overwrites files',
+  chmod: 'changes file permissions',
+};
 
 /** `spec` with `updates` merged in; an `undefined` value removes the field. */
 export function mergeCheckSpec(spec: CheckSpec, updates: Partial<CheckSpec>): CheckSpec {
@@ -31,7 +52,7 @@ export function mergeCheckSpec(spec: CheckSpec, updates: Partial<CheckSpec>): Ch
 }
 
 /** The admin note every command-bearing panel shows. */
-export function CommandAdminNote({ what = 'A check runs a command in the repository' }: { what?: string }) {
+export function CommandAdminNote({ what = 'A command stage runs a program in the repository' }: { what?: string }) {
   return (
     <Callout tone="info">
       {what} (the run needs the <InlineCode dense>shell</InlineCode> capability). Saving a workflow with one needs an
@@ -40,9 +61,14 @@ export function CommandAdminNote({ what = 'A check runs a command in the reposit
   );
 }
 
+/** The program name as the allow-list compares it (`npm.cmd` → `npm`). */
+function programName(command: string): string {
+  return command.toLowerCase().replace(/\.(exe|cmd|bat|com)$/, '');
+}
+
 /**
- * The command of a check (or of a map item setup step): the allow-listed
- * executable, literal arguments, the mount and the working directory.
+ * The command of a command stage (or of a map item setup step): the command
+ * line as one text field, the mount and the working directory.
  * `pointer` locates the validator's issues (`/check`, `/map/itemSetup/0`).
  */
 export function CheckCommandFields({
@@ -50,69 +76,97 @@ export function CheckCommandFields({
   onChange,
   issues,
   pointer,
-  label = 'Check',
+  label = 'Command',
 }: {
   spec: CheckSpec;
   onChange: (updates: Partial<CheckSpec>) => void;
   issues: readonly BuilderIssue[];
   pointer: string;
-  /** Accessible name prefix of the controls ("Check command"). */
+  /** Accessible name prefix of the controls ("Command line", "Setup step 1 line"). */
   label?: string;
 }) {
   const { data: allowlist, isLoading } = useScriptAllowlist();
+  const allow = useAllowCommand();
   const aliases = useWorkflowBuilderStore(useShallow((s) => s.workflow.lifecycle.codebaseAliases));
 
-  // The server's effective list (defaults plus the operator's extras); the
-  // spec's defaults until it arrives or when the server does not say.
+  // What is typed; the spec takes it whenever it parses. Replaced when the spec changes elsewhere (undo, another stage).
+  const formatted = formatCommandLine(spec.command, spec.args);
+  const [line, setLine] = useState(formatted);
+  const parsed = parseCommandLine(line);
+  const inSync = parsed.ok && formatCommandLine(parsed.command, parsed.args) === formatted;
+  useEffect(() => {
+    if (!inSync) setLine(formatted);
+    // Only an outside change of the spec resets the text; typing never does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formatted]);
+
+  // The server's effective list (defaults, the operator's extras, those allowed in the app); the
+  // spec's defaults until it arrives.
   const commands = allowlist?.commands.length ? allowlist.commands : [...DEFAULT_COMMAND_ALLOWLIST];
-  const extras = new Set(allowlist?.extras ?? []);
-  const commandItems = [
-    ...(commands.includes(spec.command) ? [] : [{ value: spec.command, label: spec.command, meta: 'not allowed' }]),
-    ...[...commands].sort().map((c) => ({ value: c, label: c, meta: extras.has(c) ? 'operator' : undefined })),
-  ];
+  const program = programName(spec.command);
+  const notAllowed = !isLoading && !commands.includes(program);
+  const risk = OPT_IN_COMMANDS.includes(program) ? (OPT_IN_RISK[program] ?? 'can change or remove files') : null;
   const templatedArgs = spec.args.filter((a) => TEMPLATE_PATTERN.test(a));
-  const commandIssues = issuesAt(issues, `${pointer}/command`);
-  const notAllowed = !commands.includes(spec.command);
+  const lineIssues = [...issuesAt(issues, `${pointer}/command`), ...issuesAt(issues, `${pointer}/args`)];
+
+  const allowProgram = () =>
+    allow.mutate(program, {
+      onSuccess: () => toast.done(`${program} is allowed on this computer`),
+      onError: (err) => toast.error(`Could not allow ${program}: ${err instanceof Error ? err.message : String(err)}`),
+    });
 
   return (
     <>
       <InspectorRow
         label="Command"
         hint={
-          notAllowed
-            ? 'Not on the allow-list: the save is refused.'
-            : isLoading
-              ? 'Loading the allow-list…'
-              : 'A bare executable from the allow-list; an operator can add more (scripts.extraAllowlist).'
-        }
-      >
-        <Select
-          aria-label={`${label} command`}
-          size="sm"
-          value={spec.command}
-          onValueChange={(command) => command && onChange({ command })}
-          items={commandItems}
-          invalid={notAllowed || commandIssues.some((i) => i.severity === 'error')}
-        />
-        <FieldIssues issues={commandIssues} />
-      </InspectorRow>
-      <InspectorRow
-        label="Arguments"
-        hint={
           <>
-            Literal values only: a <InlineCode dense>{'{{…}}'}</InlineCode> template is refused. Pass run values through the
-            environment.
+            One program and its arguments, as you would type it. It runs without a shell: no{' '}
+            <InlineCode dense>&amp;&amp;</InlineCode>, pipes or variables.
           </>
         }
       >
-        <ArgsEditor args={spec.args} onChange={(args) => onChange({ args })} ariaLabel={`${label} arguments`} placeholder={'One per line\nexec\nvitest\nrun'} />
-        {templatedArgs.length > 0 ? (
+        <Input
+          mono
+          size="sm"
+          value={line}
+          onChange={(e) => {
+            const next = e.target.value;
+            setLine(next);
+            const p = parseCommandLine(next);
+            if (p.ok) onChange({ command: p.command, args: p.args });
+          }}
+          aria-label={`${label} line`}
+          placeholder="pnpm --filter @pulse/api test"
+          spellCheck={false}
+          autoComplete="off"
+          invalid={!parsed.ok || notAllowed || lineIssues.some((i) => i.severity === 'error')}
+        />
+        {!parsed.ok ? <InspectorNote tone="warn">{parsed.error}.</InspectorNote> : null}
+        {parsed.ok && parsed.shellOperators.length > 0 ? (
           <InspectorNote tone="warn">
-            {templatedArgs.length === 1 ? 'An argument contains' : `${templatedArgs.length} arguments contain`} a template: move the
-            value to an environment variable.
+            <InlineCode dense>{parsed.shellOperators[0]}</InlineCode> reaches {spec.command} as a plain argument: there is no shell.
+            Split the steps into stages, or run a script file.
           </InspectorNote>
         ) : null}
-        <FieldIssues issues={issuesAt(issues, `${pointer}/args`)} />
+        {parsed.ok && notAllowed ? (
+          <div className="flex flex-col items-start gap-1.5" data-testid="command-not-allowed">
+            <InspectorNote tone="warn">
+              <InlineCode dense>{program}</InlineCode> is not on this computer&apos;s allowed programs, so the run would refuse it.
+              {risk ? ` It ${risk}: allow it only if you trust every workflow here.` : ''}
+            </InspectorNote>
+            <Button size="sm" variant="secondary" icon="check" loading={allow.isPending} onClick={allowProgram}>
+              Allow {program}
+            </Button>
+          </div>
+        ) : null}
+        {templatedArgs.length > 0 ? (
+          <InspectorNote tone="warn">
+            {templatedArgs.length === 1 ? 'An argument contains' : `${templatedArgs.length} arguments contain`} a{' '}
+            <InlineCode dense>{'{{…}}'}</InlineCode> template: pass run values through an environment variable.
+          </InspectorNote>
+        ) : null}
+        <FieldIssues issues={notAllowed ? lineIssues.filter((i) => i.code !== 'check-command') : lineIssues} />
       </InspectorRow>
       <InspectorRow label="Mount">
         <Select

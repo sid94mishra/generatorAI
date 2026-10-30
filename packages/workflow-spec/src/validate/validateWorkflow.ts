@@ -622,7 +622,7 @@ function referenceIssues(graph: WorkflowGraph, ctx: GraphContext, opts: Validate
       path,
       stageKey,
       message: `'${command}' is not on the command allow-list`,
-      hint: `Allowed: ${[...allowlist].sort().join(', ')} (an operator can add commands to scripts.extraAllowlist)`,
+      hint: `Allowed: ${[...allowlist].sort().join(', ')}. An administrator can allow it from the stage's Command field.`,
     });
   };
   const costWarned = new Set<string>();

@@ -183,7 +183,11 @@ const DEFAULT_MAX_OUTPUT = 1024 * 1024; // 1 MB
 export class SandboxedScriptRunner implements IScriptRunner {
   private readonly defaultTimeout: number;
   private readonly maxOutput: number;
-  private readonly allowlist: Set<string>;
+  private allowlist: Set<string>;
+  /** Defaults plus the operator's config extras: what `setAllowedCommands` adds to. */
+  private readonly baseAllowlist: ReadonlySet<string>;
+  /** Commands an administrator allowed in the app (D-174), on top of the base. */
+  private appAllowed: string[] = [];
   private readonly lookupEnv: NodeJS.ProcessEnv;
   private activeProcesses = new Map<string, ReturnType<typeof spawn>>();
 
@@ -212,6 +216,26 @@ export class SandboxedScriptRunner implements IScriptRunner {
         `[ScriptRunner] Script allow-list widened by operator config: ${[...this.allowlist].sort().join(', ')}`,
       );
     }
+    this.baseAllowlist = new Set(this.allowlist);
+  }
+
+  /**
+   * Replace the commands an administrator allowed in the app (D-174: a command
+   * stage's "Allow `make`"). Bare names only; applied to the next run at once.
+   */
+  setAllowedCommands(names: readonly string[]): void {
+    const allowed = [...new Set(names.map((n) => n.trim().toLowerCase()).filter((n) => isBareCommandName(n)))].sort();
+    const added = allowed.filter((n) => !this.baseAllowlist.has(n));
+    if (added.join() !== this.appAllowed.join() && added.length > 0) {
+      this.logger.warn(`[ScriptRunner] Script allow-list widened in the app: ${added.join(', ')}`);
+    }
+    this.appAllowed = added;
+    this.allowlist = new Set([...this.baseAllowlist, ...added]);
+  }
+
+  /** The commands allowed in the app (not defaults, not config extras). */
+  getAppAllowed(): string[] {
+    return [...this.appAllowed];
   }
 
   /** The effective allow-list (defaults + operator additions). */

@@ -69,6 +69,19 @@ export function useScriptAllowlist() {
 
 // ── Mutations ──
 
+/** Allow one more command in the app (an administrator, D-174): the allow-list query takes the server's answer. */
+export function useAllowCommand() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (command: string) => {
+      const current = await platform.getScriptAllowlist();
+      return platform.setAllowedCommands([...new Set([...current.allowed, command.toLowerCase()])]);
+    },
+    onSuccess: (allowlist) => queryClient.setQueryData(scriptKeys.allowlist, allowlist),
+  });
+}
+
 export function useMaterializeScript() {
   const platform = usePlatform();
   const queryClient = useQueryClient();

@@ -1,10 +1,13 @@
 // ────────────────────────────────────────────────────────────────
 // Settings routes read by authoring surfaces and the settings page.
 //
-//   GET /settings/script-allowlist — the commands a `check` stage (and any
-//   script hook) may run: the defaults plus the operator's extras
-//   (`scripts.extraAllowlist`). The builder's command picker reads it; the
-//   server validates checks against the same list (P05 §1.2).
+//   GET /settings/script-allowlist — the commands a command stage (and any
+//   script hook) may run: the defaults, the operator's extras
+//   (`scripts.extraAllowlist`) and the commands allowed in the app
+//   (`allowed`). The builder's command field reads it; the server validates
+//   commands against the same list (P05 §1.2).
+//   PUT /settings/script-allowlist (admin:settings) — replace the commands
+//   allowed in the app; applied at once (D-174).
 //
 //   GET /settings/workflow-engine — the engine settings (flow key limits,
 //   the workflow summary model, the trigger debounce), their defaults and
@@ -17,10 +20,15 @@
 
 import { Router } from 'express';
 import { z } from 'zod';
-import { DEFAULT_COMMAND_ALLOWLIST } from '@generatorai/workflow-spec';
+import { BARE_COMMAND_PATTERN, DEFAULT_COMMAND_ALLOWLIST } from '@generatorai/workflow-spec';
 import { MAX_FLOW_LIMIT } from '@generatorai/core';
 import type { Container } from '../composition-root.js';
-import { CONFIGURABLE_FLOW_KEY, DEFAULT_TRIGGER_DEBOUNCE_MS, MAX_TRIGGER_DEBOUNCE_MS } from '../settings/workflowEngine.js';
+import {
+  CONFIGURABLE_FLOW_KEY,
+  DEFAULT_TRIGGER_DEBOUNCE_MS,
+  MAX_ALLOWED_COMMANDS,
+  MAX_TRIGGER_DEBOUNCE_MS,
+} from '../settings/workflowEngine.js';
 
 type FlowKind = 'global' | 'provider' | 'model' | 'check' | 'worktree' | 'run';
 
@@ -55,17 +63,45 @@ const WorkflowEngineSettingsBody = z
   })
   .strict();
 
+const ScriptAllowlistBody = z
+  .object({
+    allowed: z
+      .array(z.string().regex(BARE_COMMAND_PATTERN, 'A bare executable name (no path separators)'))
+      .max(MAX_ALLOWED_COMMANDS)
+      .describe('The commands allowed in the app (the whole set), on top of the defaults and scripts.extraAllowlist'),
+  })
+  .strict();
+
 export function createSettingsRoutes(container: Container): Router {
   const router = Router();
 
-  router.get('/script-allowlist', (_req, res) => {
+  const allowlistView = () => {
     const commands = container.scriptRunner.getAllowlist();
     const defaults = new Set(DEFAULT_COMMAND_ALLOWLIST);
-    res.json({
+    return {
       commands,
       defaults: [...DEFAULT_COMMAND_ALLOWLIST].sort(),
       extras: commands.filter((c) => !defaults.has(c)),
-    });
+      allowed: container.scriptRunner.getAppAllowed(),
+    };
+  };
+
+  router.get('/script-allowlist', (_req, res) => {
+    res.json(allowlistView());
+  });
+
+  router.put('/script-allowlist', async (req, res, next) => {
+    const parsed = ScriptAllowlistBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: { code: 'INVALID_BODY', message: parsed.error.message } });
+      return;
+    }
+    try {
+      await container.workflowEngineSettings.update({ allowedCommands: parsed.data.allowed });
+      res.json(allowlistView());
+    } catch (err) {
+      next(err);
+    }
   });
 
   const engineView = () => {

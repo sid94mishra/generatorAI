@@ -1,6 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // Workflow engine settings (P07 WP-7.1, WP-7.2): the operator's flow key
-// limits, the workflow summary model and the trigger debounce.
+// limits, the workflow summary model, the trigger debounce and the commands
+// an administrator allowed in the app (D-174).
 //
 // Persisted next to the database (`<dataDir>/workflow-engine.json`) and
 // applied live: the admission controller takes new limits at once, the
@@ -13,6 +14,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { writeFileAtomicRestricted } from '@generatorai/shared/node';
 import { MAX_FLOW_LIMIT } from '@generatorai/core';
+import { BARE_COMMAND_PATTERN } from '@generatorai/workflow-spec';
 
 const STATE_FILE = 'workflow-engine.json';
 
@@ -30,12 +32,18 @@ export interface WorkflowEngineSettings {
   summaryModel: string | null;
   /** Trigger debounce of automation webhooks and cron (ms; 0 = off). */
   triggerDebounceMs: number;
+  /** Commands an administrator allowed in the app, on top of the defaults and `scripts.extraAllowlist` (D-174). */
+  allowedCommands: string[];
 }
+
+/** How many commands the app may add to the allow-list. */
+export const MAX_ALLOWED_COMMANDS = 64;
 
 export const WORKFLOW_ENGINE_DEFAULTS: WorkflowEngineSettings = {
   flowLimits: {},
   summaryModel: null,
   triggerDebounceMs: DEFAULT_TRIGGER_DEBOUNCE_MS,
+  allowedCommands: [],
 };
 
 /** Keep what is well formed: configurable keys with a limit in 1..MAX_FLOW_LIMIT. */
@@ -49,7 +57,17 @@ export function normalizeWorkflowEngineSettings(raw: Partial<WorkflowEngineSetti
   const d = raw?.triggerDebounceMs;
   const triggerDebounceMs =
     typeof d === 'number' && Number.isFinite(d) ? Math.min(MAX_TRIGGER_DEBOUNCE_MS, Math.max(0, Math.floor(d))) : DEFAULT_TRIGGER_DEBOUNCE_MS;
-  return { flowLimits, summaryModel, triggerDebounceMs };
+  const allowedCommands = [
+    ...new Set(
+      (Array.isArray(raw?.allowedCommands) ? raw.allowedCommands : [])
+        .filter((c): c is string => typeof c === 'string')
+        .map((c) => c.trim().toLowerCase())
+        .filter((c) => BARE_COMMAND_PATTERN.test(c)),
+    ),
+  ]
+    .sort()
+    .slice(0, MAX_ALLOWED_COMMANDS);
+  return { flowLimits, summaryModel, triggerDebounceMs, allowedCommands };
 }
 
 /** Read the settings; anything unreadable is the defaults. */
@@ -58,7 +76,7 @@ export async function readWorkflowEngineSettings(dataDir: string): Promise<Workf
     const raw = await fs.readFile(path.join(dataDir, STATE_FILE), 'utf8');
     return normalizeWorkflowEngineSettings(JSON.parse(raw) as Partial<WorkflowEngineSettings>);
   } catch {
-    return { ...WORKFLOW_ENGINE_DEFAULTS, flowLimits: {} };
+    return { ...WORKFLOW_ENGINE_DEFAULTS, flowLimits: {}, allowedCommands: [] };
   }
 }
 

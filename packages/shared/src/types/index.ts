@@ -188,6 +188,7 @@ export type {
 
 export type {
   IPlatformClient,
+  ScriptAllowlist,
   InvocationFiles,
   WorkflowRunListFilter,
   PlatformType,

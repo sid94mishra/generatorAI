@@ -1,4 +1,4 @@
-import type { HarnessProviderId } from '@generatorai/shared';
+import type { HarnessProviderId, ScriptAllowlist } from '@generatorai/shared';
 // ────────────────────────────────────────────────────────────────
 // HttpPlatformClient — Web platform IPlatformClient implementation
 // Communicates with the server via REST + SSE
@@ -1279,8 +1279,15 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch<PendingDecisionView[]>(`${this.baseUrl}/api/workflow-runs/${runId}/pending-decisions`);
   }
 
-  async getScriptAllowlist(): Promise<{ commands: string[]; defaults: string[]; extras: string[] }> {
-    return apiFetch<{ commands: string[]; defaults: string[]; extras: string[] }>(`${this.baseUrl}/api/settings/script-allowlist`);
+  async getScriptAllowlist(): Promise<ScriptAllowlist> {
+    return apiFetch<ScriptAllowlist>(`${this.baseUrl}/api/settings/script-allowlist`);
+  }
+
+  async setAllowedCommands(allowed: string[]): Promise<ScriptAllowlist> {
+    return apiFetch<ScriptAllowlist>(`${this.baseUrl}/api/settings/script-allowlist`, {
+      method: 'PUT',
+      body: JSON.stringify({ allowed }),
+    });
   }
 
   // ── A stage is a compact chat (P03b, the stage conversation API) ──

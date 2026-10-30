@@ -902,9 +902,10 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     (provider) => admissionController.flowGate(providerFlowKey(provider)),
     (model) => harnessRegistry.resolveProviderForModel(model),
   );
-  const workflowEngineSettings = await WorkflowEngineSettingsStore.load(dirname(resolve(config.dbPath)), (s) =>
-    admissionController.setFlowLimits(s.flowLimits),
-  );
+  const workflowEngineSettings = await WorkflowEngineSettingsStore.load(dirname(resolve(config.dbPath)), (s) => {
+    admissionController.setFlowLimits(s.flowLimits);
+    scriptRunner.setAllowedCommands(s.allowedCommands);
+  });
 
   // Chat extensions object — passed by reference to createCoreServices.
   // `worktreeService` is set later after project services are created.
