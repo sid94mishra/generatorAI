@@ -42,7 +42,7 @@ describe('stageSummary', () => {
   it('shows a check stage as its command', () => {
     const stage = newCheckStage('lint', 'Lint');
     const lines = stageLines(stage, () => undefined);
-    expect(lines.lead.text).toBe('Check · no LLM');
+    expect(lines.lead.text).toBe('Command · no LLM');
     expect(stagePills(stage, false)[0]?.label).toBe('Admin only');
   });
 

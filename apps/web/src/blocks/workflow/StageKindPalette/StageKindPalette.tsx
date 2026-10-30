@@ -27,7 +27,7 @@ import { Kbd } from '@/ui/primitives/Kbd/Kbd.js';
 export interface StageKindOption<K extends string = string> {
   kind: K;
   icon: IconConcept;
-  /** "Agent", "Check" … */
+  /** "Agent", "Command" … */
   name: string;
   /** One line on what the kind does. */
   hint: string;

@@ -4,7 +4,7 @@ import { StageKindPalette, type StageKindOption, type StageTemplateOption } from
 
 const KINDS: StageKindOption[] = [
   { kind: 'agent', icon: 'agents', name: 'Agent', hint: 'An agent turn (the default)' },
-  { kind: 'check', icon: 'terminal', name: 'Check', hint: 'Runs one allowlisted command, no LLM', admin: true },
+  { kind: 'check', icon: 'terminal', name: 'Command', hint: 'Runs one command, no LLM', admin: true },
   { kind: 'loop', icon: 'repeat', name: 'Loop', hint: 'Repeats its body until a rule fires' },
   { kind: 'map', icon: 'layers', name: 'Map', hint: 'Runs its body once per item of a list' },
   { kind: 'subworkflow', icon: 'workflows', name: 'Sub-workflow', hint: 'Runs another published workflow' },

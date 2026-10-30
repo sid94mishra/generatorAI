@@ -26,7 +26,7 @@ import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { STATUS_TONE_TEXT } from '@/ui/primitives/StatusBadge/StatusBadge.js';
-import { CheckOutput } from './CheckOutput.js';
+import { CommandRun } from './CommandRun.js';
 import { StageTranscript } from './StageTranscript.js';
 import { useStageAgent } from './useStageAgent.js';
 import { MenuButton, type MenuButtonItem } from '@/ui/patterns/MenuButton/MenuButton.js';
@@ -199,11 +199,11 @@ function stageMenuItems(
   return items;
 }
 
-/** "Check failed · exit 1" / "Check timed out" for a completed check whose output says it did not pass. */
+/** "Command failed · exit 1" / "Command timed out" for a completed command stage whose output says it did not pass. */
 export function checkFailureWord(output: Record<string, unknown> | undefined): string | null {
   if (!output || output['passed'] !== false) return null;
-  if (output['timedOut'] === true) return 'Check timed out';
-  return typeof output['exitCode'] === 'number' ? `Check failed · exit ${output['exitCode']}` : 'Check failed';
+  if (output['timedOut'] === true) return 'Command timed out';
+  return typeof output['exitCode'] === 'number' ? `Command failed · exit ${output['exitCode']}` : 'Command failed';
 }
 
 export const StageRow = memo(function StageRow({
@@ -296,7 +296,11 @@ export const StageRow = memo(function StageRow({
   const turnBody =
     stage.kind === 'check' ? (
       <>
-        <CheckOutput stage={stage} running={stage.status === 'running'} />
+        <CommandRun
+          stage={stage}
+          running={stage.status === 'running'}
+          onOpenOutput={onOpenInspector ? () => onOpenInspector(stage.id) : undefined}
+        />
         {turnProps.error ? <TurnBody {...turnProps} segments={[]} steps={[]} answer={undefined} /> : null}
       </>
     ) : stage.kind !== undefined && stage.kind !== 'agent' ? (

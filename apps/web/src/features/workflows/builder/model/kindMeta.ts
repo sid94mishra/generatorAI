@@ -8,7 +8,7 @@ import type { StageKind } from '@generatorai/workflow-spec';
 
 export interface KindMeta {
   icon: IconConcept;
-  /** Short name ("Agent", "Check"). */
+  /** Short name ("Agent", "Command"). */
   name: string;
   /** Inspector subtitle noun ("Agent stage", "Loop stage"). */
   noun: string;
@@ -20,7 +20,7 @@ export interface KindMeta {
 
 export const KIND_META: Record<StageKind, KindMeta> = {
   agent: { icon: 'agents', name: 'Agent', noun: 'Agent stage', hint: 'An agent turn (the default)' },
-  check: { icon: 'terminal', name: 'Check', noun: 'Check stage', hint: 'Runs one allowlisted command, no LLM', admin: true },
+  check: { icon: 'terminal', name: 'Command', noun: 'Command stage', hint: 'Runs one command, no LLM', admin: true },
   loop: { icon: 'repeat', name: 'Loop', noun: 'Loop stage', hint: 'Repeats its body until a rule fires' },
   map: { icon: 'layers', name: 'Map', noun: 'Map stage', hint: 'Runs its body once per item of a list' },
   subworkflow: { icon: 'workflows', name: 'Sub-workflow', noun: 'Sub-workflow stage', hint: 'Runs another published workflow' },

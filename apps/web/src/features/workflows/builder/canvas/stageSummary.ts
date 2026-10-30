@@ -8,7 +8,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { IconConcept } from '@generatorai/design-tokens';
-import type { StageSpec } from '@generatorai/workflow-spec';
+import { formatCommandLine, type StageSpec } from '@generatorai/workflow-spec';
 
 export interface StagePill {
   id: string;
@@ -66,7 +66,7 @@ export function stageLines(stage: StageSpec, agentOf: (ref: string) => AgentInfo
       };
     }
     case 'check':
-      return { lead: { icon: 'terminal', text: 'Check · no LLM' }, detail: [stage.check.command, ...stage.check.args].join(' ') };
+      return { lead: { icon: 'terminal', text: 'Command · no LLM' }, detail: formatCommandLine(stage.check.command, stage.check.args) };
     case 'wait': {
       const w = stage.wait;
       if (w.type === 'approval') return { lead: { icon: 'hand', text: 'Wait · approval' }, detail: w.prompt.label };
@@ -175,7 +175,7 @@ export function stagePills(stage: StageSpec, inLoopBody: boolean): StagePill[] {
     return pills;
   }
   if (stage.kind === 'check') {
-    pills.push({ id: 'admin', label: 'Admin only', icon: 'lock', tooltip: 'Saving a check stage needs the admin:settings scope' });
+    pills.push({ id: 'admin', label: 'Admin only', icon: 'lock', tooltip: 'Saving a command stage needs the admin:settings scope' });
     if (stage.check.parseJson) pills.push({ id: 'json', label: 'JSON', mono: true, tooltip: 'Parses stdout as JSON', field: '/check/parseJson' });
     pills.push(...guardPill(stage), ...joinPill(stage), ...retryPill(stage.retry));
     if (stage.check.timeoutMs) {

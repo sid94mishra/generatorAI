@@ -101,7 +101,7 @@ export async function runCheck(input: CheckRunInput): Promise<AttemptOutcome> {
   const { stage, scriptRunner } = input;
   const check = stage.check;
   if (input.run.permissionMode === 'plan') {
-    return fail('check_launch_failed', 'A check runs repository code, which a run in plan mode may not do');
+    return fail('check_launch_failed', 'A command stage runs repository code, which a run in plan mode may not do');
   }
   if (!scriptRunner) return fail('check_launch_failed', 'No script runner is configured on this server');
 

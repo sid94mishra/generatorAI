@@ -59,6 +59,14 @@ export interface HookInvocation {
   durationMs?: number;
 }
 
+/** What a command stage runs: its command line, mount, working directory and timeout. */
+export interface StageCommand {
+  line: string;
+  mount?: string;
+  cwd?: string;
+  timeoutMs: number;
+}
+
 export interface StageView {
   id: string;
   order: number;
@@ -163,8 +171,8 @@ export interface StageView {
   harnessType?: string;
   /** The node kind (`agent`, `check`, `loop`, P05). */
   kind?: string;
-  /** A check: the command line it runs (D-173). */
-  command?: string;
+  /** A command stage (kind `check`): what it runs and where (D-174). */
+  command?: StageCommand;
   /** A check: its output so far, while it runs (D-173). */
   liveOutput?: string;
   /** A loop body instance: the enclosing loop instance's id (`scopeId`). */

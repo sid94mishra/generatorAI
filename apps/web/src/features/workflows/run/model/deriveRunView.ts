@@ -14,7 +14,7 @@ import type {
   WorkflowRunWithStages, StageRun, StageRunStatus, WorkflowRunStatus,
   WorkflowRunPermissionMode,
 } from '@generatorai/shared';
-import { mapMergeMode, plannerKeyOf, renderTemplate, type EdgeSpec, type StageSpec } from '@generatorai/workflow-spec';
+import { formatCommandLine, mapMergeMode, plannerKeyOf, renderTemplate, type EdgeSpec, type StageSpec } from '@generatorai/workflow-spec';
 import { interpolateVariables } from '@generatorai/shared';
 import type { StreamState, StreamHookInvocation } from '@/stores/streamStore.js';
 import type { UsageInfo } from '@generatorai/client-core';
@@ -547,7 +547,16 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
     ...(sr.sessionId ? { sessionId: sr.sessionId } : {}),
     ...(session?.agentRef ? { agentRef: session.agentRef } : {}),
     ...(session?.harnessType ? { harnessType: session.harnessType } : {}),
-    ...(def?.kind === 'check' ? { command: [def.check.command, ...def.check.args].join(' ') } : {}),
+    ...(def?.kind === 'check'
+      ? {
+          command: {
+            line: formatCommandLine(def.check.command, def.check.args),
+            ...(def.check.mount ? { mount: def.check.mount } : {}),
+            ...(def.check.cwd ? { cwd: def.check.cwd } : {}),
+            timeoutMs: def.check.timeoutMs,
+          },
+        }
+      : {}),
     ...(inputs.liveOutput ? { liveOutput: inputs.liveOutput } : {}),
     hooks: hooksFrom(stream, sr.id),
     usage: usageFrom(stream),

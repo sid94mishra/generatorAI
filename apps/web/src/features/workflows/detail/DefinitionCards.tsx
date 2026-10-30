@@ -28,7 +28,7 @@ type Edge = WorkflowGraph['edges'][number];
 
 const KIND: Record<Stage['kind'], { label: string; icon: IconConcept }> = {
   agent: { label: 'Agent', icon: 'agents' },
-  check: { label: 'Check', icon: 'scan' },
+  check: { label: 'Command', icon: 'terminal' },
   loop: { label: 'Loop', icon: 'retry' },
   map: { label: 'Map', icon: 'layers' },
   subworkflow: { label: 'Sub-workflow', icon: 'workflows' },

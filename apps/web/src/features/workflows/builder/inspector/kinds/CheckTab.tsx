@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
-// The "Check" tab of a check stage (P05 §1.2): one deterministic command,
-// no LLM. The command comes from the server's allow-list, the arguments
-// are literals and the output is the exit code plus the tails of
+// The "Command" tab of a command stage (P05 §1.2; kind `check`): one
+// deterministic command, no LLM. The program must be on the server's
+// allow-list, the arguments are literals and the output is the exit code plus the tails of
 // stdout/stderr (optionally parsed JSON). Its timeouts and retry live on
 // the Policy tab (CheckPolicySections).
 // ────────────────────────────────────────────────────────────────

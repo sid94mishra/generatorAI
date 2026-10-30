@@ -383,7 +383,7 @@ export function newStage(kind: StageKind, key: string, name: string): StageSpec 
 /** The display-name prefix of a new stage of `kind` ("Stage 3", "Map 1", …). */
 export const KIND_NAME_PREFIX: Record<StageKind, string> = {
   agent: 'Stage',
-  check: 'Check',
+  check: 'Command',
   loop: 'Loop',
   map: 'Map',
   subworkflow: 'Sub-workflow',
