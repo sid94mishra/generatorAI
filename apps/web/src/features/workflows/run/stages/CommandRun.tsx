@@ -46,15 +46,20 @@ const FOLLOW_SLACK = 24;
 export function CommandRun({
   stage,
   running,
+  error,
   onOpenOutput,
 }: {
   stage: StageView;
   running: boolean;
+  /** The stage failed: a command that never started (refused, not found) has no result, only this reason. */
+  error?: string | null | undefined;
   /** Opens the stage in the inspector (its Output tab holds the full tails). */
   onOpenOutput?: (() => void) | undefined;
 }) {
   const text = commandOutputText(stage);
   const outcome = running ? null : commandOutcome(stage.outputData);
+  // Failed with no exit code: the program never ran (the runner refused it, or it was not found).
+  const refused = !running && !outcome && !!error;
   const duration = running ? null : formatStepDuration(stage.durationMs);
   const box = useRef<HTMLPreElement>(null);
   const follow = useRef(true);
@@ -86,12 +91,12 @@ export function CommandRun({
           <Spinner size={14} />
         ) : (
           <Icon
-            concept={outcome?.tone === 'err' ? 'status-failed' : 'status-succeeded'}
+            concept={outcome?.tone === 'err' || refused ? 'status-failed' : 'status-succeeded'}
             size={14}
-            className={cn('shrink-0', outcome?.tone === 'err' ? 'text-err' : 'text-ok')}
+            className={cn('shrink-0', outcome?.tone === 'err' || refused ? 'text-err' : 'text-ok')}
           />
         )}
-        <span className="shrink-0">{running ? 'Running' : 'Ran'}</span>
+        <span className="shrink-0">{running ? 'Running' : refused ? 'Did not start' : 'Ran'}</span>
         {command ? <InlineCode className="min-w-0 truncate">{command.line}</InlineCode> : null}
         <span className="ml-auto flex shrink-0 items-center gap-2 font-mono text-micro text-fg-3">
           {outcome ? <span className={outcome.tone === 'err' ? 'text-err' : undefined}>{outcome.label}</span> : null}
@@ -114,7 +119,11 @@ export function CommandRun({
         )}
         data-testid="command-output"
       >
-        {text || <span className="text-fg-3">{running ? 'Started — waiting for the first line…' : 'No output.'}</span>}
+        {refused ? (
+          <span className="text-err">{error}</span>
+        ) : (
+          text || <span className="text-fg-3">{running ? 'Started — waiting for the first line…' : 'No output.'}</span>
+        )}
       </pre>
       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-line-soft px-2.5 py-1 text-micro text-fg-3">
         <span className="min-w-0 truncate">

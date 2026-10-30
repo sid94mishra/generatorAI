@@ -59,6 +59,18 @@ export function FieldIssues({ issues, className }: { issues: readonly BuilderIss
 }
 
 /**
+ * A stage field as the inspector names it: `/check/args/2` → `command` (the command line is one field, D-174),
+ * `/check/env/TOKEN` → `command.env.TOKEN`, `/session/model` → `session.model`.
+ */
+export function issueFieldLabel(field: string): string {
+  return field
+    .slice(1)
+    .replace(/^check\/(command|args)(\/\d+)?$/, 'command')
+    .replace(/^check(?=\/|$)/, 'command')
+    .replace(/\//g, '.');
+}
+
+/**
  * Every issue of the selected stage, at the top of the inspector: the ones
  * whose field has no control (a field of another kind, an unknown field)
  * would otherwise show nowhere. Each carries its quick fix when it has one.
@@ -87,7 +99,7 @@ export function StageIssueList({ issues }: { issues: readonly BuilderIssue[] }) 
         {[...errors, ...warnings].map((issue, i) => (
           <li key={`${issue.code}:${issue.path}:${i}`} className="flex items-start gap-1.5 text-fg">
             <span className="min-w-0 flex-1">
-              {issue.field ? <span className="font-mono text-micro text-fg-3">{issue.field.slice(1).replace(/\//g, '.')}: </span> : null}
+              {issue.field ? <span className="font-mono text-micro text-fg-3">{issueFieldLabel(issue.field)}: </span> : null}
               {issue.message}
             </span>
             <IssueFixButton issue={issue} className="-my-0.5 shrink-0" />

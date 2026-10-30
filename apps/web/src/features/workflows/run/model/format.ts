@@ -27,9 +27,11 @@ export function formatDuration(ms: number): string {
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
 }
 
-/** A finished stage's duration, or null under half a second (noise). */
+/** A finished stage's duration ("26ms", "3.8s", "2m 5s"), or null when it never ran. */
 export function formatStageDuration(ms: number | undefined): string | null {
-  if (!ms || ms < 500) return null;
+  if (ms === undefined) return null;
+  // A command can finish in milliseconds; "—" there read as "never ran".
+  if (ms < 1000) return `${Math.max(1, Math.round(ms))}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
   return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`;
 }

@@ -595,6 +595,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     ...(inputs.workflowSkillDir ? { skillDir: inputs.workflowSkillDir } : {}),
     allowAgentPublish: () => inputs.allowAgentPublish === true,
     ...(inputs.appUrl ? { appUrl: inputs.appUrl } : {}),
+    ...(scriptRunner.validate ? { commandPolicy: (command: string, args: string[]) => scriptRunner.validate!(command, args) } : {}),
   });
   const chatWorkflowRunBridge = inputs.chatWorkflowRunRepo
     ? new ChatWorkflowRunBridge({

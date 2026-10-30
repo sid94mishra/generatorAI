@@ -325,9 +325,9 @@ export const StageRow = memo(function StageRow({
         <CommandRun
           stage={stage}
           running={stage.status === 'running'}
+          error={turnProps.error}
           onOpenOutput={onOpenInspector ? () => onOpenInspector(stage.id) : undefined}
         />
-        {turnProps.error ? <TurnBody {...turnProps} segments={[]} steps={[]} answer={undefined} /> : null}
       </>
     ) : stage.kind !== undefined && stage.kind !== 'agent' ? (
       <TurnBody {...turnProps} loading={isActive && !isAwaiting && stage.steps.length === 0 && !stage.answer} />

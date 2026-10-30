@@ -75,6 +75,8 @@ export interface WorkflowAuthoringDeps {
   allowAgentPublish?: (() => boolean) | undefined;
   /** The web app origin, for review links. */
   appUrl?: string | undefined;
+  /** The script runner's launch rules without running anything (inline code, dangerous patterns): `IScriptRunner.validate`. */
+  commandPolicy?: ((command: string, args: string[]) => Promise<{ ok: boolean; reason?: string }>) | undefined;
 }
 
 /** Who asks, for the checks that depend on it. */
@@ -164,6 +166,26 @@ export class WorkflowAuthoringService {
         out.push({ code: `capability-${w.code.replace(/_/g, '-')}`, severity: 'warning', path: `/stages/${i}/session`, stageKey: s.key, message: w.message });
       }
     });
+
+    // A command the runner would refuse at launch (`node -e`, a dangerous pattern): said while it is
+    // typed, not by a failed run (D-174). The allow-list itself is the spec validator's `check-command`.
+    if (this.deps.commandPolicy) {
+      const policy = this.deps.commandPolicy;
+      const commands: Array<{ command: string; args: string[]; path: string; stageKey: string }> = [];
+      graph.stages.forEach((s, i) => {
+        if (s.kind === 'check') commands.push({ command: s.check.command, args: s.check.args, path: `/stages/${i}/check/args`, stageKey: s.key });
+        if (s.kind === 'map') {
+          s.map.itemSetup?.forEach((step, j) =>
+            commands.push({ command: step.command, args: step.args, path: `/stages/${i}/map/itemSetup/${j}/args`, stageKey: s.key }),
+          );
+        }
+      });
+      for (const c of commands) {
+        const verdict = await policy(c.command, c.args).catch(() => ({ ok: true }) as { ok: boolean; reason?: string });
+        if (verdict.ok || !verdict.reason || /not in the allowlist/.test(verdict.reason)) continue;
+        out.push({ code: 'check-command-refused', severity: 'error', path: c.path, stageKey: c.stageKey, message: verdict.reason, hint: 'Run a script file from the repository instead' });
+      }
+    }
 
     if (!caller.canEditCommands) {
       for (const f of collectCommandFields(graph)) {

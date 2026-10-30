@@ -74,7 +74,7 @@ export interface EffectsDispatcherDeps {
 /** What a queued launch waits for, as the run page shows it: `provider claude-agent`. */
 export function flowLabel(flowKey: string): string {
   if (flowKey === GLOBAL_FLOW_KEY) return 'the global stage limit';
-  if (flowKey === CHECK_FLOW_KEY) return 'the check limit';
+  if (flowKey === CHECK_FLOW_KEY) return 'the command limit';
   const at = flowKey.indexOf(':');
   return at > 0 ? `${flowKey.slice(0, at)} ${flowKey.slice(at + 1)}` : flowKey;
 }
