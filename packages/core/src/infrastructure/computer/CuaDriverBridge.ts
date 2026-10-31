@@ -737,6 +737,7 @@ export class CuaDriverBridge implements IComputerBridge {
           focused: window?.focused ?? false,
         },
         elements: state.elements,
+        ...(state.text.length > 0 ? { text: state.text } : {}),
         // A laddered read answered a *smaller question* — the driver reports it
         // as complete because it returned everything within the reduced caps.
         // Without saying so, the agent takes a depth-3 chrome-only tree for the

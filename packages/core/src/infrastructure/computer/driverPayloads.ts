@@ -243,6 +243,36 @@ export interface ParsedWindowState {
   /** Non-null when the UIA walk was clipped by max_elements / max_depth. */
   truncated: { elements: number; depth: number } | null;
   screenshot: { width: number; height: number; mimeType: string } | null;
+  /** Read-only text the driver lists only in `tree_markdown` (no index): `readOnlyText`. */
+  text: string[];
+}
+
+/** Bounds on the read-only text handed to the model: it is untrusted, and a long document should not flood it. */
+const MAX_TEXT_LINES = 60;
+const MAX_TEXT_CHARS = 4000;
+
+/**
+ * The read-only text of a window, from the driver's `tree_markdown` — its un-indexed lines with a value, e.g.
+ * `    - AXStaticText = "408" (Edit field)`. The structured `elements` carry only what can be acted on, so a
+ * calculator's display, a status message or a label was invisible to the agent. Secure fields never appear: the
+ * driver does not print their values, and lines from secure roles are skipped here as well.
+ */
+export function readOnlyText(markdown: string): string[] {
+  const out: string[] = [];
+  let chars = 0;
+  for (const raw of markdown.split('\n')) {
+    const line = raw.trim();
+    // Indexed lines (`- [12] AXButton …`) are elements already.
+    const m = /^- (?!\[\d+\])([A-Za-z][\w.]*) = "((?:[^"\\]|\\.)*)"(?: \((.*)\))?$/.exec(line);
+    if (!m) continue;
+    const [, role, value, label] = m;
+    if (!value || SECURE_ROLES.has(role!.toLowerCase())) continue;
+    const entry = label ? `${label}: ${value}` : value!;
+    if (chars + entry.length > MAX_TEXT_CHARS || out.length >= MAX_TEXT_LINES) break;
+    out.push(entry);
+    chars += entry.length;
+  }
+  return out;
 }
 
 /** Roles the platforms use for password fields, normalised to lower case. */
@@ -319,6 +349,7 @@ export function parseWindowState(structuredJson: string, filtered = false): Pars
     windowId,
     elements,
     truncated,
+    text: readOnlyText(asString(root['tree_markdown']) ?? ''),
     screenshot:
       width !== undefined && height !== undefined
         ? { width, height, mimeType: asString(root['screenshot_mime_type']) ?? 'image/png' }

@@ -159,6 +159,11 @@ export interface ComputerSnapshot {
   app: Pick<ComputerAppInfo, 'id' | 'name' | 'pid'>;
   window: Pick<ComputerWindowInfo, 'id' | 'title' | 'index' | 'focused'>;
   elements: ComputerElement[];
+  /**
+   * Read-only text in the window that is not an element — a calculator's display, a status line, a label. The
+   * driver indexes only what can be acted on, so without this the agent could press "=" and never see the answer.
+   */
+  text?: string[];
   /** Non-null when caps clipped the tree — tells the agent to narrow scope. */
   truncated: { elements: number; depth: number } | null;
   capturedAt: number;
