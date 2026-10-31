@@ -1817,6 +1817,38 @@ ship. `complete` keeps the old routing on `stages.<key>.output.outcome`. The car
 the run: no commit, push or PR"), the builder's wait inspector has an "On reject" control, and a stored wait without
 the field reads as `fail`. Pre-release: no migration.
 
+### D-178 Agent-platform surfaces are composed from the kit, without boards (owner, 2026-10-31) — Final
+Chat references, side chats, platform tools, the MCP setup card and code mode have no Claude Design boards. Their UI is
+composed only from existing kit components and board patterns (attachment chips, dock tabs, `Menu`/`MenuButton`,
+`Popover` + `SegmentedControl`, `Dialog` + `EntityRow`, `CodeBlock`, `SettingsSection`, step rows and tool cards) — no
+new visual vocabulary. Plan: `docs/agent-platform/PLAN.md`.
+
+### D-179 A chat can be attached to another chat as quoted context (owner, 2026-10-31) — Final
+Up to five chats per message, from the `@` menu, "Attach chat…" or a side chat's "Send to main chat". Mode Auto (the
+whole thread when it fits ~24k characters, else a summary plus the last three turns), Summary, Recent (three turns) or
+Full (capped, oldest dropped with a notice). A snapshot at send time, fenced as untrusted data with its title, "as of"
+time, turns included of total and a What changed section; the user message keeps chips (`metadata.chatRefs`), never
+the rendered text.
+
+### D-180 Side chats: quick question, fork or new, as dock tabs, ephemeral until kept (owner, 2026-10-31) — Final
+A quick question copies the finished turns, shares the main chat's workspace and runs read-only (plan permission mode),
+even while the main chat runs. A fork copies the history and the files into its own worktree; a new side chat starts
+blank in the same project. Side chats open as dock tabs (at most four), stay out of the chat list, and are kept (a
+normal chat linked to its parent), opened as the main chat, sent back as a chat reference, or discarded.
+
+### D-181 One platform tool registry for in-app and external agents (owner, 2026-10-31) — Final
+Chats, projects, agents, automations, activity and chat files become platform tools (group `platform`, off by default,
+on for orchestrators), served to in-app sessions and, through `/platform-tools`, to `generatorai-mcp`. Limits live in
+the host: at most five chats created per chat, created chats record their creator, external callers never bypass and
+are capped at Accept edits; risky actions are approved only in GeneratorAI. MCP stays stdio; Settings shows copy-ready
+setup for Claude Code, Codex and Cursor.
+
+### D-182 Code mode is an opt-in tool group running QuickJS-wasm (owner, 2026-10-31) — Final
+`run_code` (group `codeMode`, off by default) runs an async JavaScript body that calls the session's own tools as
+`tools.<name>(args)` inside QuickJS compiled to WebAssembly: no file, network or process access, 64 MB, a deadline
+(60 s default, 300 s max), 200 calls, 24k characters of output. Calls go through the session's existing tool handlers,
+so approvals and plan-mode refusals apply unchanged. Node's `vm` is not used for it (not a security boundary).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
