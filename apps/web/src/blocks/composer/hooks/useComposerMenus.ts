@@ -66,10 +66,13 @@ export function useComposerMenus({ projectId, workspaceId, draft, textareaRef, c
     const q = menu.query;
     // Grouped Tools → Skills → Prompts (stable within a group), so the menu's
     // visual order and the keyboard index agree.
+    // A name the query spells exactly, then one it starts, lead: `/btw` + Enter picked `/browser` (both fuzzy-match).
+    const lower = q.toLowerCase();
+    const rank = (c: SlashCommand) => (!lower ? 2 : c.name.toLowerCase() === lower ? 0 : c.name.toLowerCase().startsWith(lower) ? 1 : 2);
     return slashCommands
       .filter((c) => fuzzyMatch(q, c.name) || (c.description ? fuzzyMatch(q, c.description) : false))
-      .map((c, i) => ({ c, i, g: SLASH_COMMAND_GROUPS.indexOf(slashCommandGroup(c)) }))
-      .sort((a, b) => a.g - b.g || a.i - b.i)
+      .map((c, i) => ({ c, i, r: rank(c), g: SLASH_COMMAND_GROUPS.indexOf(slashCommandGroup(c)) }))
+      .sort((a, b) => a.r - b.r || a.g - b.g || a.i - b.i)
       .map(({ c }) => c)
       .slice(0, 50);
   }, [menu, slashCommands]);

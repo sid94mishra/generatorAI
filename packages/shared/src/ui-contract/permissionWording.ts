@@ -56,6 +56,13 @@ function mcpServerOf(toolName: string): string | undefined {
 }
 
 /** The title and kind label of a permission gate for `toolName`. */
+/** D-181 — the platform writes, worded as what they do to GeneratorAI. */
+const PLATFORM_TITLES: Readonly<Record<string, string>> = {
+  create_chat: 'Start a new chat?',
+  send_to_chat: 'Send a message to another chat?',
+  trigger_automation: 'Start this automation?',
+};
+
 export function permissionWording(toolName: string, type: PermissionWordingType | string): PermissionWording {
   const raw = humanizeToolName(toolName);
   const name = raw.toLowerCase();
@@ -74,6 +81,8 @@ export function permissionWording(toolName: string, type: PermissionWordingType 
   if (github) return { title: github, kindLabel: 'GitHub' };
   const workflow = WORKFLOW_TITLES[name];
   if (workflow) return { title: workflow, kindLabel: 'Workflow' };
+  // D-181 — a platform write says what it does to GeneratorAI.
+  if (PLATFORM_TITLES[name]) return { title: PLATFORM_TITLES[name]!, kindLabel: 'GeneratorAI' };
   const kind = toolStepKind(toolName);
   if (kind === 'browser') return { title: BROWSER_TITLES[name] ?? 'Use the browser?', kindLabel: 'Browser' };
   if (kind === 'computer') return { title: `Control the computer: ${display}?`, kindLabel: 'Computer' };

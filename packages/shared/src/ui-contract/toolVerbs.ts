@@ -99,6 +99,20 @@ export const TOOL_VERB_OVERRIDES: Readonly<Record<string, { done: string; live: 
   spawn_background_agent: { done: 'Delegated', live: 'Delegating' },
   // Claude Code's deferred-tool loader: "Loaded tools: Delegate, Check tasks".
   toolsearch: { done: 'Loaded tools', live: 'Loading tools' },
+  // D-181 — the platform tools act on GeneratorAI (chats, projects, automations), not on files.
+  list_chats: { done: 'Listed chats', live: 'Listing chats' },
+  read_chat: { done: 'Read chat', live: 'Reading chat' },
+  create_chat: { done: 'Started chat', live: 'Starting chat' },
+  send_to_chat: { done: 'Messaged chat', live: 'Messaging chat' },
+  wait_for_chat: { done: 'Waited for chat', live: 'Waiting for chat' },
+  list_projects: { done: 'Listed projects', live: 'Listing projects' },
+  get_project: { done: 'Read project', live: 'Reading project' },
+  list_agents: { done: 'Listed agents', live: 'Listing agents' },
+  list_automations: { done: 'Listed automations', live: 'Listing automations' },
+  trigger_automation: { done: 'Started automation', live: 'Starting automation' },
+  list_needs_you: { done: 'Checked Needs you', live: 'Checking Needs you' },
+  list_chat_files: { done: 'Listed chat files', live: 'Listing chat files' },
+  read_chat_file: { done: 'Read chat file', live: 'Reading chat file' },
   // D-146 — the GitHub tools act on the project's repository, not on files.
   github_list_issues: { done: 'Listed issues', live: 'Listing issues' },
   github_get_issue: { done: 'Read issue', live: 'Reading issue' },
@@ -135,6 +149,26 @@ const TOOL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
 };
 
 /** The orchestrator's own bookkeeping tools (spawning is `delegate`): plain tool calls, not sub-agents. */
+/**
+ * D-181 — the platform tools: GeneratorAI actions, a `tool` step (the substring rules read `create_chat` as a file
+ * edit, so its approval asked "Change this file?").
+ */
+export const PLATFORM_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'list_chats',
+  'read_chat',
+  'create_chat',
+  'send_to_chat',
+  'wait_for_chat',
+  'list_projects',
+  'get_project',
+  'list_agents',
+  'list_automations',
+  'trigger_automation',
+  'list_needs_you',
+  'list_chat_files',
+  'read_chat_file',
+]);
+
 const ORCHESTRATOR_TOOLS: ReadonlySet<string> = new Set([
   'check_background_agents',
   'check_background_agent',
@@ -239,7 +273,7 @@ export function toolStepKind(toolName: string): StepKind {
   // Exact SDK tool names first.
   if (n === 'task' || n === 'agent') return 'subagent';
   if (n === SPAWN_WORKER_TOOL) return 'delegate';
-  if (n === 'toolsearch' || ORCHESTRATOR_TOOLS.has(n)) return 'tool';
+  if (n === 'toolsearch' || ORCHESTRATOR_TOOLS.has(n) || PLATFORM_TOOL_NAMES.has(n)) return 'tool';
   // D-146 — before the substring rules, which would read `github_create_issue` as a file edit.
   if (n.startsWith('github_')) return 'tool';
   // D-182 — before the substring rules, which would fold `run_code` into "Ran N commands".

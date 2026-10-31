@@ -196,6 +196,8 @@ export function ChatPage() {
   const pushInbox = useChatRefInboxStore((st) => st.push);
   const keepSide = sideActions.keep.mutate;
   const discardSide = sideActions.discard.mutate;
+  const sideList = sideChats.data;
+  const confirmSide = confirmer.confirm;
   const sideDock = useMemo<SideChatDockContextValue>(
     () => ({
       parentChatId: chatId,
@@ -203,17 +205,26 @@ export function ChatPage() {
         if (chatId) pushInbox(chatId, { chatId: c.id, name: c.name, mode: 'auto' });
       },
       keep: (id) => keepSide(id),
-      discard: (id) => discardSide(id, { onSuccess: () => closeSideTab(id) }),
+      // A fork or new side chat may have changed files: discarding it asks first (a quick question never writes).
+      discard: (id) => {
+        const side = sideList?.find((c) => c.id === id);
+        const run = () => discardSide(id, { onSuccess: () => closeSideTab(id) });
+        if (!side || side.sideMode === 'question') return run();
+        void confirmSide({
+          title: 'Discard this side chat?',
+          description: 'Discarding deletes it and anything it changed.',
+          confirmLabel: 'Discard',
+          tone: 'danger',
+        }).then((ok) => (ok ? run() : undefined));
+      },
       closeTab: closeSideTab,
     }),
-    [chatId, pushInbox, keepSide, discardSide, closeSideTab],
+    [chatId, pushInbox, keepSide, discardSide, closeSideTab, sideList, confirmSide],
   );
 
   // Closing a tab for good drops whatever that tab remembered.
   const forgetFileTab = fileTabs.forgetTab;
   const forgetBrowserTab = dock.forgetBrowserTab;
-  const sideList = sideChats.data;
-  const confirmSide = confirmer.confirm;
   const handleDockTabClose = useCallback(
     (tab: { id: string; type: string }) => {
       if (tab.type === 'side') {
