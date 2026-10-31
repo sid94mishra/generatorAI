@@ -2113,6 +2113,20 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       },
     },
 
+    '/api/chats/{id}/reference-preview': {
+      get: {
+        tags: ['Chats'],
+        summary: 'Preview attaching this chat to a message as context (D-179)',
+        description:
+          'What a chat reference in the given mode would include: the mode `auto` resolves to, turns included of total, characters and rough tokens. Send references with the `chatRefs` field of `POST /api/chats/{id}/prompt` (`[{chatId, mode}]`, at most 5).',
+        parameters: [idParam, { name: 'mode', in: 'query', required: false, schema: { type: 'string', enum: ['auto', 'summary', 'recent', 'full'] } }],
+        responses: {
+          '200': { description: '`{ chatId, name, mode, resolvedMode, includedTurns, totalTurns, chars, tokens }`' },
+          '404': { description: 'Unknown chat' },
+        },
+      },
+    },
+
     // ── Agents (AGT-01) ──
     // Reading the catalog needs `read:workflows`; AUTHORING an agent grants
     // capability (skills, MCP servers, tool policy) and therefore needs

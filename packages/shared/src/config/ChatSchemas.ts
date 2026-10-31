@@ -283,6 +283,11 @@ export const SendChatPromptSchema = z.object({
    * then to {@link DEFAULT_AGENT_MODE}.
    */
   mode: AgentModeSchema.optional(),
+  /** D-179 — chats attached as context (rendered by the server at send time). */
+  chatRefs: z
+    .array(z.object({ chatId: z.string().min(1).max(100), mode: z.enum(['auto', 'summary', 'recent', 'full']) }))
+    .max(5)
+    .optional(),
 });
 
 // ────────────────────────────────────────────────────────────────

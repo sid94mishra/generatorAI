@@ -60,6 +60,7 @@ export type { Session, SessionOwnerType, SessionStatus } from './Session.js';
 export type { HarnessConfig } from './Workflow.js';
 
 export type { ChatMessage, ChatMessageMetadata } from './ChatMessage.js';
+export * from './ChatReference.js';
 export type { Artifact } from './Artifact.js';
 
 export type {

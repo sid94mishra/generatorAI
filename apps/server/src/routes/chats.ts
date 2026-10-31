@@ -923,9 +923,19 @@ export function createChatApiRoutes(container: Container): Router {
         // Validate prompt against schema (C2 fix — enforces max length)
         // PLN-01 — `mode` selects the per-turn agent mode from the composer.
         const rawMode = req.body?.['mode'];
+        // D-179 — attached chats: a JSON field in the multipart body (or an array in a JSON body).
+        const rawChatRefs = req.body?.['chatRefs'];
+        let chatRefsInput: unknown;
+        try {
+          chatRefsInput = typeof rawChatRefs === 'string' && rawChatRefs.length > 0 ? JSON.parse(rawChatRefs) : rawChatRefs;
+        } catch {
+          res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'chatRefs must be JSON' } });
+          return;
+        }
         const promptValidation = SendChatPromptSchema.safeParse({
           prompt,
           ...(typeof rawMode === 'string' && rawMode.length > 0 ? { mode: rawMode } : {}),
+          ...(chatRefsInput !== undefined && chatRefsInput !== null ? { chatRefs: chatRefsInput } : {}),
         });
         if (!promptValidation.success) {
           res.status(400).json({
@@ -938,6 +948,19 @@ export function createChatApiRoutes(container: Container): Router {
           return;
         }
         const mode = promptValidation.data.mode;
+        const chatRefs = promptValidation.data.chatRefs ?? [];
+        // Refuse a reference the server can't honour now, not as a failed turn later.
+        for (const ref of chatRefs) {
+          if (ref.chatId === chatId) {
+            res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'A chat cannot be attached to itself' } });
+            return;
+          }
+          const exists = await container.chatEntityRepo.getById(ref.chatId).then(() => true, () => false);
+          if (!exists) {
+            res.status(404).json({ error: { code: 'NOT_FOUND', message: `Attached chat ${ref.chatId} was not found` } });
+            return;
+          }
+        }
 
         // PLN-01 — refuse while a human gate is open. Sending a second prompt
         // during a plan review would leave the first SDK turn blocked and
@@ -998,7 +1021,10 @@ export function createChatApiRoutes(container: Container): Router {
 
         // Send prompt asynchronously (fire and forget, events stream via SSE)
         chatManagementService
-          .sendPrompt(chatId, prompt, attachmentRefs, mode ? { mode } : undefined)
+          .sendPrompt(chatId, prompt, attachmentRefs, {
+            ...(mode ? { mode } : {}),
+            ...(chatRefs.length ? { chatRefs } : {}),
+          })
           .catch((err) => {
             logger.error(`[ChatRoutes] Prompt send failed for chat ${chatId}`, {
               error: err instanceof Error ? err.message : String(err),
@@ -1020,6 +1046,23 @@ export function createChatApiRoutes(container: Container): Router {
       }
     },
   );
+
+  // GET /chats/:id/reference-preview?mode= — what attaching this chat to a message would include (D-179).
+  router.get('/:id/reference-preview', async (req, res, next) => {
+    try {
+      const chatId = String(req.params['id']);
+      const rawMode = typeof req.query['mode'] === 'string' ? req.query['mode'] : 'auto';
+      const mode = (['auto', 'summary', 'recent', 'full'] as const).find((m) => m === rawMode);
+      if (!mode) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'mode must be auto, summary, recent or full' } });
+        return;
+      }
+      await container.chatEntityRepo.getById(chatId);
+      res.json(await chatManagementService.previewChatReference(chatId, mode));
+    } catch (err) {
+      next(err);
+    }
+  });
 
   // GET /chats/:id/messages — Get chat message history (paginated).
   // P0#5 — bounded by default (latest page) so a multi-thousand-message chat

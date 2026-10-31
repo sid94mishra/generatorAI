@@ -23,7 +23,9 @@ import type {
   ToolPermissionRequestPayload,
   PermissionRule,
 } from '@generatorai/shared';
-import { generateId, DEFAULT_AGENT_MODE, ValidationError, chatSourceAlias, isMountableSource } from '@generatorai/shared';
+import { generateId, DEFAULT_AGENT_MODE, ValidationError, chatSourceAlias, isMountableSource, MAX_CHAT_REFERENCES } from '@generatorai/shared';
+import type { ChatReferenceInput, ChatReferenceMode, ChatReferencePreview } from '@generatorai/shared';
+import { ChatReferenceSummarizer, joinChatReferences, needsSummary, renderChatReference, type RenderedChatReference } from './chatReferences.js';
 import { PLAN_GATE_COPY } from '@generatorai/shared/ui-contract';
 import * as path from 'node:path';
 import type { ChatSourceSpec, ExecutionWorkspace, WorkspaceExposure, WorkspaceMount } from '@generatorai/shared';
@@ -1967,12 +1969,14 @@ export class ChatManagementService {
     chatId: string,
     prompt: string,
     attachments?: AttachmentRef[],
-    options?: { mode?: AgentMode },
+    options?: { mode?: AgentMode; chatRefs?: readonly ChatReferenceInput[] },
   ): Promise<void> {
     const chat = await this.chatRepo.getById(chatId);
     if (chat.status !== 'active') {
       throw new Error(`Chat ${chatId} is archived and cannot accept prompts`);
     }
+    // D-179 — render attached chats first (a summary can take a model call), before the turn is claimed.
+    const references = options?.chatRefs?.length ? await this.renderChatReferences(chatId, options.chatRefs) : [];
 
     // PLN-01 — refuse an ordinary prompt while a gate is open.
     //
@@ -2212,7 +2216,7 @@ export class ChatManagementService {
       role: 'user',
       content: prompt,
       ...(persistedAttachments.length > 0 ? { attachments: persistedAttachments } : {}),
-      metadata: { turnId, agentMode },
+      metadata: { turnId, agentMode, ...(references.length ? { chatRefs: references.map((r) => r.record) } : {}) },
       timestamp: new Date(),
     });
 
@@ -2468,6 +2472,8 @@ export class ChatManagementService {
         { kind: 'chat', chatId, sessionId: chat.sessionId },
         chat.sessionId,
       ) + prompt;
+      // D-179 — chats the user attached go in front of the message, fenced as quoted data.
+      if (references.length) promptForHarness = joinChatReferences(references) + promptForHarness;
       // Plan mode for a provider that has none of its own: say so here, in
       // front of the prompt, or nothing does (see `PLAN_MODE_TURN_PREFIX`).
       // The provider that OWNS this conversation answers for itself; the chat
@@ -2885,6 +2891,61 @@ export class ChatManagementService {
       if (!next) continue;
       await this.messageRepo.updateMetadata(m.id, { ...m.metadata, providerAnchor: { kind: a.kind, id: next } });
     }
+  }
+
+  /** D-179 — the summariser for attached chats (one per service; it caches per chat). */
+  private chatReferenceSummarizer?: ChatReferenceSummarizer;
+
+  /**
+   * Render the chats attached to a message of `chatId` (D-179). Refuses the chat itself, a missing chat, and more
+   * than {@link MAX_CHAT_REFERENCES}; duplicates are attached once.
+   */
+  async renderChatReferences(chatId: string, refs: readonly ChatReferenceInput[]): Promise<RenderedChatReference[]> {
+    if (refs.length > MAX_CHAT_REFERENCES) {
+      throw new ValidationError(`At most ${MAX_CHAT_REFERENCES} chats can be attached to one message`);
+    }
+    const seen = new Set<string>();
+    const out: RenderedChatReference[] = [];
+    for (const ref of refs) {
+      if (seen.has(ref.chatId)) continue;
+      seen.add(ref.chatId);
+      if (ref.chatId === chatId) throw new ValidationError('A chat cannot be attached to itself');
+      out.push(await this.renderOneChatReference(ref.chatId, ref.mode));
+    }
+    return out;
+  }
+
+  /** What attaching `chatId` with `mode` would include (the composer pill's counts). */
+  async previewChatReference(chatId: string, mode: ChatReferenceMode): Promise<ChatReferencePreview> {
+    const { record } = await this.renderOneChatReference(chatId, mode, { summarize: false });
+    return {
+      chatId,
+      name: record.name,
+      mode,
+      resolvedMode: record.resolvedMode,
+      includedTurns: record.includedTurns,
+      totalTurns: record.totalTurns,
+      chars: record.chars,
+      tokens: Math.ceil(record.chars / 4),
+    };
+  }
+
+  private async renderOneChatReference(
+    chatId: string,
+    mode: ChatReferenceMode,
+    opts: { summarize?: boolean } = {},
+  ): Promise<RenderedChatReference> {
+    const source = await this.chatRepo.getById(chatId);
+    const messages = await this.messageRepo.getByChatId(chatId);
+    let summary: string | undefined;
+    if (opts.summarize !== false && needsSummary(messages, mode)) {
+      this.chatReferenceSummarizer ??= new ChatReferenceSummarizer(this.harness);
+      summary = await this.chatReferenceSummarizer.summarize(chatId, messages, {
+        ...(source.model ? { model: source.model } : {}),
+        ...(source.harnessConfig?.harnessType ? { harnessType: source.harnessConfig.harnessType } : {}),
+      });
+    }
+    return renderChatReference({ chatId, name: source.name, messages, mode, summary });
   }
 
   /**

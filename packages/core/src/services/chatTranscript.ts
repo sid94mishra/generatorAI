@@ -125,7 +125,7 @@ function clip(text: string, max: number): string {
 }
 
 /** One turn rendered for the seed. */
-function renderTurnForSeed(turn: ChatTurn): string {
+export function renderTurnForSeed(turn: ChatTurn): string {
   const parts: string[] = [];
   if (turn.userMessage) {
     const att = turn.userMessage.attachments?.length

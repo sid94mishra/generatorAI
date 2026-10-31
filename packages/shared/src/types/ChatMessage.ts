@@ -2,6 +2,7 @@
 // ChatMessage — Domain value object
 // ────────────────────────────────────────────────────────────────
 
+import type { ChatReferenceRecord } from './ChatReference.js';
 import type {
   AgentMode,
   PermissionCardSummary,
@@ -100,6 +101,8 @@ export interface ChatMessageMetadata {
   /** Which agent mode produced this turn. Stamped on both the user and the
    *  assistant message so the transcript can badge plan turns after reload. */
   agentMode?: AgentMode;
+  /** D-179 — chats attached to this user message as context (the transcript shows them as chips). */
+  chatRefs?: ChatReferenceRecord[];
   /** Plan documents surfaced during this turn. Persisted so the transcript can
    *  rebuild plan cards from the message alone — event replay is skipped for
    *  completed chats (see apps/web/src/utils/replayEvents.ts). */
