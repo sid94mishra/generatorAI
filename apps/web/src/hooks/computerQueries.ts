@@ -18,7 +18,7 @@
 // feed (`computer` scope, only while the tab is visible) and window frames.
 // ────────────────────────────────────────────────────────────────
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   COMPUTER_DESK_EVENT_KINDS,
@@ -419,20 +419,17 @@ export function useComputerPreviewFeed(workspaceId: string | undefined, enabled:
  * revoked only when it is replaced, and on unmount.
  */
 function useBlobUrl(blob: Blob | undefined): string | null {
-  const [url, setUrl] = useState<string | null>(null);
-  const current = useRef<string | null>(null);
-  useEffect(() => {
-    if (!blob) return;
-    const next = URL.createObjectURL(blob);
-    if (current.current) URL.revokeObjectURL(current.current);
-    current.current = next;
-    setUrl(next);
-  }, [blob]);
+  // Hold the last blob while the next one loads, so the picture does not blank between frames.
+  const [held, setHeld] = useState(blob);
+  if (blob && blob !== held) setHeld(blob);
+  const url = useMemo(() => (held ? URL.createObjectURL(held) : null), [held]);
+  // Revoked in the cleanup, which runs after the replacement is on screen: revoking while the old URL was still
+  // the element's src failed any load in flight (ERR_FILE_NOT_FOUND while Replay stepped through frames).
   useEffect(
     () => () => {
-      if (current.current) URL.revokeObjectURL(current.current);
+      if (url) URL.revokeObjectURL(url);
     },
-    [],
+    [url],
   );
   return url;
 }
