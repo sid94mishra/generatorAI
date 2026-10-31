@@ -1149,6 +1149,9 @@ importers:
       '@generatorai/workflow-spec':
         specifier: workspace:*
         version: link:../workflow-spec
+      '@jitl/quickjs-singlefile-mjs-release-sync':
+        specifier: 0.32.0
+        version: 0.32.0
       '@opentelemetry/api':
         specifier: ^1.9.0
         version: 1.9.1
@@ -1167,6 +1170,9 @@ importers:
       playwright:
         specifier: ^1.58.2
         version: 1.58.2
+      quickjs-emscripten-core:
+        specifier: 0.32.0
+        version: 0.32.0
       yaml:
         specifier: 2.8.3
         version: 2.8.3
@@ -1265,7 +1271,7 @@ importers:
         version: link:../workflow-spec
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
-        version: 1.29.0(zod@3.25.76)
+        version: 1.29.0(zod@4.3.6)
     devDependencies:
       esbuild:
         specifier: ^0.25.0
@@ -4312,6 +4318,12 @@ packages:
   '@jest/types@30.5.1':
     resolution: {integrity: sha512-LvVYn83nnXPl+Rg98nvcFgjx6nRMTArhSn6RAX/w3ELn54S8A42TYZvsCMdGUqTM8S0wyXbtlQdU6Hi6dykj9g==}
     engines: {node: ^18.14.0 || ^20.0.0 || ^22.0.0 || >=24.0.0}
+
+  '@jitl/quickjs-ffi-types@0.32.0':
+    resolution: {integrity: sha512-v9T+GQpmk43VDJ7d72sf0Nexhk+ArvtUihW27dy7lqAl0zBObFKtSBBIm5RBjwIhE8VwsPPm9PNuvPvNqLWUEg==}
+
+  '@jitl/quickjs-singlefile-mjs-release-sync@0.32.0':
+    resolution: {integrity: sha512-h9g2Dri6WxKNjX6a1+sFAafOVxj1n5YIA1GAzMoSdIqK1M8cG07tz3GxKVC3Gbdutz14uQ3oc3Q2lll8otInhA==}
 
   '@joshwooding/vite-plugin-react-docgen-typescript@0.7.0':
     resolution: {integrity: sha512-qvsTEwEFefhdirGOPnu9Wp6ChfIwy2dBCRuETU3uE+4cC+PFoxMSiiEhxk4lOluA34eARHA0OxqsEUYDqRMgeQ==}
@@ -13468,6 +13480,9 @@ packages:
     resolution: {integrity: sha512-WuyALRjWPDGtt/wzJiadO5AXY+8hZ80hVpe6MyivgraREW751X3SbhRvG3eLKOYN+8VEvqLcf3wdnt44Z4S4SA==}
     engines: {node: '>=10'}
 
+  quickjs-emscripten-core@0.32.0:
+    resolution: {integrity: sha512-QFnPfjFey8EqknSrSxe1hZrf1/8z7/6s1QzGOmKo6++02r7QRRX7ZoyNaZh7JuVjWsVW87KnQrbZqnHkOAzUyg==}
+
   randombytes@2.1.0:
     resolution: {integrity: sha512-vYl3iOX+4CKUWuxGi9Ukhie6fsqXqS9FE2Zaic4tNFD2N2QQaXOMFbuKK4QmDHC0JO6B1Zp41J0LpT0oR68amQ==}
 
@@ -20024,6 +20039,12 @@ snapshots:
       '@types/yargs': 17.0.35
       chalk: 4.1.2
 
+  '@jitl/quickjs-ffi-types@0.32.0': {}
+
+  '@jitl/quickjs-singlefile-mjs-release-sync@0.32.0':
+    dependencies:
+      '@jitl/quickjs-ffi-types': 0.32.0
+
   '@joshwooding/vite-plugin-react-docgen-typescript@0.7.0(typescript@6.0.3)(vite@8.3.2(@types/node@22.20.0)(esbuild@0.27.3)(jiti@2.7.0)(terser@5.51.2)(tsx@4.21.0)(yaml@2.9.1))':
     dependencies:
       glob: 13.0.6
@@ -20331,6 +20352,29 @@ snapshots:
       raw-body: 3.0.2
       zod: 3.25.76
       zod-to-json-schema: 3.25.2(zod@3.25.76)
+    transitivePeerDependencies:
+      - supports-color
+    optional: true
+
+  '@modelcontextprotocol/sdk@1.29.0(zod@4.3.6)':
+    dependencies:
+      '@hono/node-server': 1.19.14(hono@4.12.16)
+      ajv: 8.20.0
+      ajv-formats: 3.0.1(ajv@8.20.0)
+      content-type: 1.0.5
+      cors: 2.8.6
+      cross-spawn: 7.0.6
+      eventsource: 3.0.7
+      eventsource-parser: 3.0.6
+      express: 5.2.1
+      express-rate-limit: 8.4.1(express@5.2.1)
+      hono: 4.12.16
+      jose: 6.2.3
+      json-schema-typed: 8.0.2
+      pkce-challenge: 5.0.1
+      raw-body: 3.0.2
+      zod: 4.3.6
+      zod-to-json-schema: 3.25.2(zod@4.3.6)
     transitivePeerDependencies:
       - supports-color
 
@@ -30619,6 +30663,10 @@ snapshots:
 
   quick-lru@5.1.1: {}
 
+  quickjs-emscripten-core@0.32.0:
+    dependencies:
+      '@jitl/quickjs-ffi-types': 0.32.0
+
   randombytes@2.1.0:
     dependencies:
       safe-buffer: 5.2.1
@@ -33260,6 +33308,10 @@ snapshots:
   zod-to-json-schema@3.25.2(zod@3.25.76):
     dependencies:
       zod: 3.25.76
+
+  zod-to-json-schema@3.25.2(zod@4.3.6):
+    dependencies:
+      zod: 4.3.6
 
   zod-validation-error@4.0.2(zod@3.25.76):
     dependencies:
