@@ -24,6 +24,7 @@ const { FakeBrowserWindow, openExternal } = vi.hoisted(() => {
     session = {
       setPermissionRequestHandler: vi.fn(),
       setPermissionCheckHandler: vi.fn(),
+      setDisplayMediaRequestHandler: vi.fn(),
       webRequest: { onHeadersReceived: vi.fn() },
     };
     windowOpenHandler: ((d: { url: string }) => unknown) | null = null;

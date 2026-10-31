@@ -47,6 +47,7 @@ import {
 import { setUnsavedWork } from './unsaved-work';
 import { log } from './logger';
 import { macPermissionStatus, openScreenRecordingSettings, requestMacPermissions } from './computer-host';
+import { armWindowStream } from './computer-stream';
 import { createIpcGuard, defaultFromWebContents } from './ipc-guard';
 import { admitPairingRequest, PairingGate } from './pairing-gate';
 import { isRendererSettingKey, validateSettingValue } from './settings-schema';
@@ -275,6 +276,8 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
     if (action === 'openSettings') await openScreenRecordingSettings();
     return macPermissionStatus();
   });
+
+  guardedHandle(IPC.computerWindowStream, (_e, windowId?: unknown) => armWindowStream(windowId));
 
   // Window chrome is not a channel: it is static per process, so the main
   // window hands it to the preload as a launch argument (06 §3.6).

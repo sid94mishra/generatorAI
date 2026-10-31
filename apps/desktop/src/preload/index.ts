@@ -102,6 +102,9 @@ const api = {
   ): Promise<{ accessibility: boolean; screenRecording: boolean } | null> =>
     ipcRenderer.invoke(IPC.computerPermissions, action),
 
+  armComputerWindowStream: (windowId: number): Promise<boolean> =>
+    ipcRenderer.invoke(IPC.computerWindowStream, windowId),
+
   getSetting: <T = unknown>(key: string): Promise<T | undefined> =>
     ipcRenderer.invoke(IPC.getSetting, key),
   setSetting: (key: string, value: unknown): Promise<void> =>

@@ -101,6 +101,11 @@ export const IPC = {
    */
   computerPermissions: 'desktop:computerPermissions',
   /**
+   * Arms a live video capture of the driver window it names for the app window's next `getDisplayMedia()`
+   * (computer-stream.ts). False when no capture source matches. Local-only: a remote page must not capture this computer.
+   */
+  computerWindowStream: 'desktop:computerWindowStream',
+  /**
    * The renderer's appearance ({@link DesktopAppearancePush}). Main persists it,
    * mirrors `nativeTheme.themeSource`, repaints the window background and the
    * caption glyphs, and updates the View ▸ Appearance radio.

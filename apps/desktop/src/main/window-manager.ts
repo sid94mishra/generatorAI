@@ -30,6 +30,7 @@ import { appRouteOf, isAppOrigin, isExternalUrlAllowed } from './navigation-guar
 import { hasUnsavedWork } from './unsaved-work';
 import { localPageUrl } from './local-pages';
 import { appWindowPermissionPolicy, installCspFloor, installPermissionPolicy } from './session-hardening';
+import { installWindowStreamHandler } from './computer-stream';
 
 const RESOURCES = path.join(__dirname, '..', '..', 'resources');
 const PRELOAD = path.join(__dirname, '..', 'preload', 'index.js');
@@ -251,6 +252,8 @@ export class WindowManager {
     // session renders that did not bring its own policy.
     const ses = win.webContents.session;
     installPermissionPolicy(ses, appWindowPermissionPolicy(() => this.appUrl));
+    // The Computer tab's live video: only a window main armed, never a picker or the screen.
+    installWindowStreamHandler(ses);
     if (options.cspFloor !== false) installCspFloor(ses);
 
     if (settings.window.maximized) win.maximize();

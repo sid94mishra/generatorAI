@@ -389,3 +389,19 @@ export interface MacComputerPermissions {
 export async function macComputerPermissions(action: 'status' | 'request' | 'openSettings' = 'status'): Promise<MacComputerPermissions | null> {
   return (await bridge()?.computerPermissions?.(action)) ?? null;
 }
+
+/**
+ * A live video of the driver window `windowId`, captured by the desktop shell on this machine (computer-stream.ts).
+ * Null in a browser, against a remote server, or when the window has no capture source (Wayland): callers keep the
+ * frame-per-action preview then. The caller stops the tracks.
+ */
+export async function openComputerWindowStream(windowId: number): Promise<MediaStream | null> {
+  const arm = bridge()?.armComputerWindowStream;
+  if (!arm || !navigator.mediaDevices?.getDisplayMedia) return null;
+  try {
+    if (!(await arm(windowId))) return null;
+    return await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+  } catch {
+    return null;
+  }
+}

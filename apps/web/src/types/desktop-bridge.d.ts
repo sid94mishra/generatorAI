@@ -163,6 +163,8 @@ interface GeneratorAIDesktopBridge {
   computerPermissions?: (
     action?: 'status' | 'request' | 'openSettings',
   ) => Promise<{ accessibility: boolean; screenRecording: boolean } | null>;
+  /** Arms a live capture of the driver window `windowId` for the next getDisplayMedia(). Local server only. */
+  armComputerWindowStream?: (windowId: number) => Promise<boolean>;
 
   // ── OS file manager ──
   /** Reveals a path in Finder / File Explorer. False when it is not on this machine. */

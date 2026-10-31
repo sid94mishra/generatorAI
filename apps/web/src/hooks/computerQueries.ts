@@ -357,6 +357,8 @@ export interface ComputerWindowBounds {
   w: number;
   h: number;
   title: string;
+  /** The driver's id for the window — what the desktop shell streams as live video. */
+  windowId?: number;
 }
 
 export interface ComputerPreviewFeed {

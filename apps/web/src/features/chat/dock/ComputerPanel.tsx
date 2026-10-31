@@ -3,8 +3,9 @@
 // (P4-11; board ChatComputer). Chat-only dock tab (D-04).
 //
 //   • Now — the capture of the TARGET WINDOW each time the agent read it,
-//     never the whole screen; with a live preview running, the recorder's
-//     frame per action with the agent's cursor drawn on top.
+//     never the whole screen; with a live preview running, that window as
+//     live video (desktop shell, this machine) or else the recorder's frame
+//     per action, with the agent's cursor drawn on top.
 //   • Replay — the run played back (per-turn captures, or the opt-in ffmpeg
 //     screen video with chapter marks).
 // Plus the dock consent card, Pause agent / Take over (G-07), the driver
@@ -35,7 +36,7 @@ import {
   type ComputerRecordingState,
 } from '@/hooks/computerQueries.js';
 import { frameForEntry, type ComputerTimelineEntry } from '@/hooks/computerTimeline.js';
-import { macComputerPermissions, type MacComputerPermissions } from '@/lib/desktop.js';
+import { macComputerPermissions, openComputerWindowStream, type MacComputerPermissions } from '@/lib/desktop.js';
 import { ComputerActionLog } from './computer/ComputerActionLog.js';
 import { ComputerConsentCard } from './computer/ComputerConsentCard.js';
 import { ComputerGrants } from './computer/ComputerGrants.js';
@@ -84,6 +85,64 @@ function useMacPermissions(): { status: MacComputerPermissions | null; openSetti
     status,
     openSettings: () => void macComputerPermissions('openSettings'),
   };
+}
+
+/** How often a window with no capture source yet (still opening, off screen) is tried again. */
+const STREAM_RETRY_MS = 3_000;
+
+/**
+ * The agent's window as live video while `windowId` is set; null in a browser, against a remote server, or where
+ * the window cannot be captured. A new id swaps the stream; the tracks stop when it changes or the panel goes.
+ */
+function useWindowStream(windowId: number | null): MediaStream | null {
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  useEffect(() => {
+    if (windowId === null) return;
+    let disposed = false;
+    let current: MediaStream | null = null;
+    let retry: number | undefined;
+    const open = () =>
+      void openComputerWindowStream(windowId).then((next) => {
+        if (disposed) {
+          next?.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        if (!next) {
+          retry = window.setTimeout(open, STREAM_RETRY_MS);
+          return;
+        }
+        current = next;
+        setStream(next);
+        // The window closed: drop back to frames until the agent targets another.
+        next.getVideoTracks()[0]?.addEventListener('ended', () => setStream((s) => (s === next ? null : s)));
+      });
+    open();
+    return () => {
+      disposed = true;
+      window.clearTimeout(retry);
+      current?.getTracks().forEach((t) => t.stop());
+      setStream(null);
+    };
+  }, [windowId]);
+  return stream;
+}
+
+function LiveVideo({ stream, label }: { stream: MediaStream; label: string }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.srcObject = stream;
+  }, [stream]);
+  return (
+    <video
+      ref={ref}
+      autoPlay
+      muted
+      playsInline
+      aria-label={label}
+      data-testid="computer-live-video"
+      className="max-h-96 max-w-full rounded-control border border-line-soft object-contain"
+    />
+  );
 }
 
 /** Re-render when the earliest pending prompt expires (an unanswered prompt is a denial). */
@@ -154,8 +213,11 @@ function ComputerDesk({ workspaceId, active }: { workspaceId: string; active: bo
   // the frame's pixel space; otherwise the desktop cursor is mapped through the
   // window's bounds. The last spot is held rather than blinking out.
   const lastCursor = useRef<{ left: number; top: number } | null>(null);
+  const streamId = view === 'now' && recording.recording && active && !pinned ? (preview.window?.windowId ?? null) : null;
+  const stream = useWindowStream(streamId);
   const cursor = useMemo(() => {
-    const point = preview.frame?.point;
+    // A frame's click point belongs to that still, not to the video running past it.
+    const point = stream ? undefined : preview.frame?.point;
     if (point && frameSize && frameSize.w > 0 && frameSize.h > 0) {
       lastCursor.current = { left: (point.x / frameSize.w) * 100, top: (point.y / frameSize.h) * 100 };
       return lastCursor.current;
@@ -171,9 +233,9 @@ function ComputerDesk({ workspaceId, active }: { workspaceId: string; active: bo
       }
     }
     return lastCursor.current;
-  }, [preview.frame, preview.cursor, preview.window, frameSize]);
+  }, [stream, preview.frame, preview.cursor, preview.window, frameSize]);
 
-  const livePreview = view === 'now' && recording.recording && preview.frame && !pinned ? preview.frame : null;
+  const livePreview = view === 'now' && recording.recording && preview.frame && !pinned && !stream ? preview.frame : null;
   const liveSrc = useComputerTurnFrameUrl(workspaceId, livePreview ? { turn: livePreview.turn, kind: livePreview.kind } : null);
 
   return (
@@ -300,6 +362,18 @@ function ComputerDesk({ workspaceId, active }: { workspaceId: string; active: bo
                   entries={activity.entries}
                   videoNonce={videoNonce}
                 />
+              ) : stream ? (
+                <div className="relative inline-block max-w-full">
+                  <LiveVideo stream={stream} label={`Live — ${preview.window?.title || 'the agent’s window'}`} />
+                  {cursor ? (
+                    <span
+                      aria-hidden
+                      data-testid="computer-cursor"
+                      style={{ left: `${cursor.left}%`, top: `${cursor.top}%` }}
+                      className="pointer-events-none absolute size-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-run"
+                    />
+                  ) : null}
+                </div>
               ) : livePreview && liveSrc ? (
                 // The cursor is an overlay window, never in the capture — which
                 // is exactly why it travels as coordinates.
@@ -344,9 +418,11 @@ function ComputerDesk({ workspaceId, active }: { workspaceId: string; active: bo
           </div>
           {recording.recording ? (
             <p className="text-small text-fg-3">
-              {recording.cast?.active
-                ? 'Live preview on. Now updates once per action; open Replay for the smooth screen video.'
-                : 'Live preview on — the agent’s window and cursor. Nothing else on screen is captured.'}
+              {stream
+                ? 'Live preview on — streaming the agent’s window as it works, with its cursor. Nothing else on screen is captured.'
+                : recording.cast?.active
+                  ? 'Live preview on. Now updates once per action; open Replay for the smooth screen video.'
+                  : 'Live preview on — the agent’s window and cursor, a frame per action. Nothing else on screen is captured.'}
             </p>
           ) : null}
         </div>

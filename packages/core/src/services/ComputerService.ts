@@ -1987,7 +1987,7 @@ export class ComputerService {
    */
   async previewWindow(
     workspaceId: string,
-  ): Promise<{ x: number; y: number; w: number; h: number; title: string } | null> {
+  ): Promise<{ x: number; y: number; w: number; h: number; title: string; windowId: number } | null> {
     const session = this.sessions.get(workspaceId);
     const target = session?.lastTarget;
     if (!session || !target) return null;
@@ -1996,7 +1996,8 @@ export class ComputerService {
       const result = await session.bridge.listWindows(session.handle, target.app);
       const window = result.windows.find((w) => w.id === target.windowId) ?? result.windows[0];
       if (!window?.bounds) return null;
-      return { ...window.bounds, title: window.title };
+      // The id lets the desktop shell stream this exact window as live video.
+      return { ...window.bounds, title: window.title, windowId: window.id };
     } catch {
       return null;
     }
