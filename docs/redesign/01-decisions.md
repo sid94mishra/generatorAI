@@ -1861,6 +1861,16 @@ chat an agent creates mounts every codebase as a worktree. With several mounts a
 alias; with one it is relative to it. `generatorai-mcp` drops its own `list_chats` for the registry's and keeps
 `send_prompt` (its `wait` uses the server's `wait_for_chat`). The group's UI label is "GeneratorAI tools".
 
+### D-184 The packaged app ships the voice runtime (owner, 2026-10-31) — Final
+Voice input and read-aloud were "optional by design": `@huggingface/transformers` (and so `onnxruntime-node`) and
+`kokoro-js` stayed out of the installed app, so every speech engine failed with "Cannot find module" while the mic
+button still showed. The owner reported dictation not working: both packages are now staged beside the server bundle
+(`RUNTIME_PACKAGES`). Staging trims them (`pruneVoiceRuntime`): only the target's own onnxruntime binary, no
+`onnxruntime-web`, and only transformers' Node build — about 80 MB instead of ~400 MB. Staging fails when the target's
+onnxruntime binding is missing. The models still download on first use, into one per-user cache (`~/.cache/generatorai-models`, `STT_CACHE_DIR`
+overrides) — never inside the installed app. The guarded dynamic imports stay, so a
+broken install degrades to "voice input unavailable" instead of a server that will not start.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

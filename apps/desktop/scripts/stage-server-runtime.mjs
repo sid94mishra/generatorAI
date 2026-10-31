@@ -50,7 +50,14 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-import { RUNTIME_PACKAGES, ABI_SENSITIVE_PACKAGES, NATIVE_PACKAGES, driverPlatformPackage } from '../../server/bundle-externals.mjs';
+import {
+  RUNTIME_PACKAGES,
+  ABI_SENSITIVE_PACKAGES,
+  NATIVE_PACKAGES,
+  driverPlatformPackage,
+  pruneVoiceRuntime,
+  onnxBinding,
+} from '../../server/bundle-externals.mjs';
 import { nonExecutableNodePtyHelpers, restoreNodePtyExecBits } from '../../../scripts/lib/nativeExecBits.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -91,6 +98,11 @@ function installedVersion(name) {
   const direct = path.join(desktopRoot, 'node_modules', ...name.split('/'), 'package.json');
   if (fs.existsSync(direct)) {
     return JSON.parse(fs.readFileSync(direct, 'utf8')).version;
+  }
+  // Voice packages (D-184) are dependencies of @generatorai/core, and transformers' `exports` hides its package.json.
+  const fromCore = path.join(desktopRoot, '..', '..', 'packages', 'core', 'node_modules', ...name.split('/'), 'package.json');
+  if (fs.existsSync(fromCore)) {
+    return JSON.parse(fs.readFileSync(fromCore, 'utf8')).version;
   }
   try {
     return JSON.parse(fs.readFileSync(require.resolve(`${name}/package.json`), 'utf8')).version;
@@ -191,6 +203,10 @@ for (const entry of fs.readdirSync(path.join(nodeModules, '@github'), { withFile
   }
 }
 
+// Voice (D-184): keep the target's onnxruntime binary and transformers' Node build, drop the rest.
+const prunedVoice = pruneVoiceRuntime(nodeModules, targetPlatform, targetArch, fs, path);
+console.log(`[stage] voice runtime trimmed: ${prunedVoice.length} paths removed (other platforms, browser builds)`);
+
 // ── Verify ───────────────────────────────────────────────────────
 // A mis-staged tree installs cleanly and fails on first use inside the packaged
 // app, which is a long way from here. Check the invariants while it is cheap.
@@ -271,6 +287,12 @@ if (!fs.existsSync(driverLib)) {
     `${driver.name} has no ${driver.lib} for ${targetPlatform}-${targetArch}.\n` +
       `        Looked at ${path.relative(stageDir, driverLib)}.`,
   );
+}
+
+// Voice: every speech engine loads this binding; without it dictation fails on first use.
+const binding = path.join(nodeModules, ...onnxBinding(targetPlatform, targetArch));
+if (!fs.existsSync(binding)) {
+  fail(`onnxruntime-node has no binding for ${targetPlatform}-${targetArch} at ${path.relative(stageDir, binding)}; voice would be unavailable.`);
 }
 
 const staged = fs.readdirSync(nodeModules).filter((name) => !name.startsWith('.'));

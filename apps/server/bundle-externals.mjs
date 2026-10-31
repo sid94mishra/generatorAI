@@ -22,9 +22,11 @@
  *                              paths and ships a `bin/` directory, both of
  *                              which break when inlined.
  *
- *   @huggingface/transformers  Large, and already behind a guarded dynamic
- *                              import that degrades to "voice input
- *                              unavailable". Optional by design.
+ *   @huggingface/transformers  Loads onnxruntime-node (a native addon) and
+ *                              sharp; behind a guarded dynamic import, so a
+ *                              broken install degrades to "voice input
+ *                              unavailable" instead of a server that will
+ *                              not start.
  *
  *   kokoro-js                 The text-to-speech engine. It imports
  *                              @huggingface/transformers statically, and
@@ -32,7 +34,7 @@
  *                              bundle when kokoro-js is inlined — so the whole
  *                              server failed to start without transformers.
  *                              Kept external, it stays behind the engine's
- *                              guarded dynamic import. Optional, not staged.
+ *                              guarded dynamic import.
  *
  *   @trycua/cua-driver        Finds its native library through
  *                              `createRequire(callerUrl).resolve()` against a
@@ -59,9 +61,9 @@ export const BUNDLE_EXTERNALS = [
  *   playwright-core            A dependency of `playwright`, so pnpm brings it
  *                              in; naming it again would pin two versions.
  *
- *   @huggingface/transformers  ~300 MB of ONNX runtime for a feature that is
- *                              designed to be absent. Excluding it is what
- *                              makes the guarded import worth having.
+ * Voice (D-184): every speech engine runs on transformers + onnxruntime-node, so without them dictation and
+ * read-aloud cannot work in the packaged app. The install is ~400 MB; staging trims it to the target's own
+ * onnxruntime binary and transformers' Node build (`pruneVoiceRuntime`), about 80 MB.
  */
 export const RUNTIME_PACKAGES = [
   'better-sqlite3',
@@ -81,7 +83,48 @@ export const RUNTIME_PACKAGES = [
   // (`@github/copilot-<platform>-<arch>`, ~308 MB) is dropped at staging and downloaded on first use
   // (apps/server settings/copilotCli.ts), so the app no longer ships it to everyone.
   '@github/copilot',
+  // Voice input and read-aloud (D-184): the speech engines' runtime, and the text-to-speech engine.
+  '@huggingface/transformers',
+  'kokoro-js',
 ];
+
+/**
+ * D-184 — what voice needs of its packages, trimmed after install:
+ *  - onnxruntime-node vendors a binary for every OS and CPU (~210 MB): keep the target's own;
+ *  - onnxruntime-web (~90 MB) is the browser runtime: transformers' Node build never imports it;
+ *  - transformers ships browser builds, a 21 MB wasm and source maps beside its Node build.
+ * Returns what it removed, for the log.
+ */
+export function pruneVoiceRuntime(nodeModules, platform, arch, fs, path) {
+  const removed = [];
+  const rm = (p) => {
+    if (!fs.existsSync(p)) return;
+    fs.rmSync(p, { recursive: true, force: true });
+    removed.push(path.relative(nodeModules, p));
+  };
+  const napi = path.join(nodeModules, 'onnxruntime-node', 'bin', 'napi-v3');
+  if (fs.existsSync(napi)) {
+    for (const os of fs.readdirSync(napi)) {
+      const osDir = path.join(napi, os);
+      if (os !== platform) {
+        rm(osDir);
+        continue;
+      }
+      for (const cpu of fs.readdirSync(osDir)) if (cpu !== arch) rm(path.join(osDir, cpu));
+    }
+  }
+  rm(path.join(nodeModules, 'onnxruntime-web'));
+  const dist = path.join(nodeModules, '@huggingface', 'transformers', 'dist');
+  if (fs.existsSync(dist)) {
+    for (const f of fs.readdirSync(dist)) if (!/^transformers\.node\.(mjs|cjs)$/.test(f)) rm(path.join(dist, f));
+  }
+  return removed;
+}
+
+/** D-184 — the onnxruntime binding voice cannot run without, as path segments under node_modules. */
+export function onnxBinding(platform, arch) {
+  return ['onnxruntime-node', 'bin', 'napi-v3', platform, arch, 'onnxruntime_binding.node'];
+}
 
 /**
  * `@trycua/cua-driver` keeps its compiled library in a per-target optional

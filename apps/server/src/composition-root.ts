@@ -5,6 +5,7 @@
 import type { AppConfig, ILogger, PersistedEvent } from '@generatorai/shared';
 import { createLogger, getMeter, isLoopbackHost, readBoundedInt } from '@generatorai/shared';
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import { WorkflowEngineSettingsStore } from './settings/workflowEngine.js';
@@ -2143,6 +2144,10 @@ export async function createContainer(config: AppConfig, options: CreateContaine
   // end-to-end review finding — TTS's equivalent flag already worked this
   // way; STT's didn't).
   const sttDisabled = process.env['GENERATORAI_STT'] === '0';
+
+  // One per-user model cache for every voice engine (D-184). Unset, transformers caches inside its own package —
+  // inside the installed app, which is read-only on Windows and Linux and loses its signature on macOS.
+  process.env['STT_CACHE_DIR'] ??= path.join(homedir(), '.cache', 'generatorai-models');
 
   // Voice inference runs on a WORKER THREAD, not this one. `onnxruntime-node`
   // executes `session.run()` synchronously on the calling thread despite its
