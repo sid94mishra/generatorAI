@@ -80,6 +80,8 @@ export class DrizzleChatRepository implements IChatRepository {
         parentChatId: chat.parentChatId ?? null,
         forkedFromChatId: chat.forkedFromChatId ?? null,
         forkedAtTurnId: chat.forkedAtTurnId ?? null,
+        sideOfChatId: chat.sideOfChatId ?? null,
+        sideMode: chat.sideMode ?? null,
         conversationSeed: chat.conversationSeed ?? null,
         backgroundTaskName: chat.backgroundTask?.taskName ?? null,
         backgroundTaskIndex: chat.backgroundTask?.taskIndex ?? null,
@@ -221,6 +223,17 @@ export class DrizzleChatRepository implements IChatRepository {
 
   async delete(id: string): Promise<void> {
     await this.db.delete(chats).where(eq(chats.id, id));
+  }
+
+  /** D-180 — the side chats beside `chatId`, oldest first. */
+  async listSideChats(chatId: string): Promise<Chat[]> {
+    const rows = await this.db.select().from(chats).where(eq(chats.sideOfChatId, chatId)).orderBy(chats.createdAt);
+    return rows.map((r) => this.mapRow(r));
+  }
+
+  /** D-180 — keep a side chat: it leaves its parent's side and joins the chat list. */
+  async clearSideOf(id: string): Promise<void> {
+    await this.db.update(chats).set({ sideOfChatId: null, updatedAt: new Date() }).where(eq(chats.id, id));
   }
 
   /** List all WORKER chats spawned by a given orchestrator chat. */
@@ -437,6 +450,8 @@ export class DrizzleChatRepository implements IChatRepository {
       parentChatId: row.parentChatId ?? undefined,
       forkedFromChatId: row.forkedFromChatId ?? undefined,
       forkedAtTurnId: row.forkedAtTurnId ?? undefined,
+      ...(row.sideOfChatId ? { sideOfChatId: row.sideOfChatId } : {}),
+      ...(row.sideMode ? { sideMode: row.sideMode } : {}),
       conversationSeed: row.conversationSeed ?? undefined,
       backgroundTask,
       defaultAgentMode: isAgentMode(row.defaultAgentMode) ? row.defaultAgentMode : DEFAULT_AGENT_MODE,
@@ -510,6 +525,8 @@ function filterConditions(filter: ChatListFilter, withStatus: boolean): SQL[] {
   if (filter.pinned === 'exclude') where.push(isNull(chats.pinnedAt));
   if (withStatus && filter.status) where.push(eq(chats.status, filter.status));
   if (!filter.includeWorkers) where.push(isNull(chats.parentChatId));
+  // D-180 — side chats sit beside their chat, never in the list (until kept).
+  where.push(isNull(chats.sideOfChatId));
   if (filter.projectIds?.length) where.push(inArray(chats.projectId, [...filter.projectIds]));
   if (filter.agentRefs?.length) where.push(inArray(chats.agentRef, [...filter.agentRefs]));
   if (filter.tags?.length) {

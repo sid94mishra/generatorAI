@@ -308,6 +308,11 @@ export const chats = sqliteTable(
     // ── Agent integration (v60) ──
     /** The creating principal `{kind, id, scopes}`; the chat's workflow tools act with its scopes. NULL before v60. */
     createdByPrincipal: text('created_by_principal', { mode: 'json' }).$type<ChatPrincipal>(),
+    // ── Side chats (v70, D-180) ──
+    /** The chat this side chat sits beside; NULL for every other chat (and once kept). */
+    sideOfChatId: text('side_of_chat_id'),
+    /** `question` | `fork` | `new`. */
+    sideMode: text('side_mode', { enum: ['question', 'fork', 'new'] }),
   },
   (table) => ({
     statusIdx: index('idx_chats_status').on(table.status),
@@ -327,6 +332,7 @@ export const chats = sqliteTable(
       table.id,
     ),
     workspaceIdx: index('idx_chats_workspace_id').on(table.workspaceId),
+    sideOfIdx: index('idx_chats_side_of').on(table.sideOfChatId).where(sql`side_of_chat_id IS NOT NULL`),
   }),
 );
 

@@ -56,6 +56,7 @@ export type {
 export {
   AgentModeSchema,
   CreateChatSchema,
+  CreateSideChatSchema,
   ChatSourceSpecSchema,
   UpdateChatSourcesSchema,
   SendChatPromptSchema,

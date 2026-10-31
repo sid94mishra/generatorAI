@@ -2113,6 +2113,42 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       },
     },
 
+    '/api/chats/{id}/side-chats': {
+      get: {
+        tags: ['Chats'],
+        summary: 'List the side chats open beside this chat (D-180)',
+        parameters: [idParam],
+        responses: { '200': { description: 'Chat[] (oldest first)' } },
+      },
+      post: {
+        tags: ['Chats'],
+        summary: 'Open a side chat beside this chat (D-180)',
+        description:
+          '`question`: a read-only chat sharing this chat\'s workspace that knows its finished turns. `fork`: a full fork with its own copy of the files. `new`: a blank chat in the same project. Allowed while this chat runs. At most 4; side chats stay out of the chat list until kept.',
+        parameters: [idParam],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['mode'],
+                properties: { mode: { type: 'string', enum: ['question', 'fork', 'new'] }, prompt: { type: 'string' } },
+              },
+            },
+          },
+        },
+        responses: { '201': { description: 'The side chat' }, '400': { description: 'Archived chat, a side chat, or the limit reached' } },
+      },
+    },
+    '/api/chats/{id}/keep': {
+      post: {
+        tags: ['Chats'],
+        summary: 'Keep a side chat: it joins the chat list (D-180)',
+        parameters: [idParam],
+        responses: { '200': { description: 'The chat' } },
+      },
+    },
     '/api/chats/{id}/reference-preview': {
       get: {
         tags: ['Chats'],

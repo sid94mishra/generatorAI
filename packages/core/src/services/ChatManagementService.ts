@@ -24,7 +24,7 @@ import type {
   PermissionRule,
 } from '@generatorai/shared';
 import { generateId, DEFAULT_AGENT_MODE, ValidationError, chatSourceAlias, isMountableSource, MAX_CHAT_REFERENCES } from '@generatorai/shared';
-import type { ChatReferenceInput, ChatReferenceMode, ChatReferencePreview } from '@generatorai/shared';
+import type { ChatReferenceInput, ChatReferenceMode, ChatReferencePreview, SideChatMode } from '@generatorai/shared';
 import { ChatReferenceSummarizer, joinChatReferences, needsSummary, renderChatReference, type RenderedChatReference } from './chatReferences.js';
 import { PLAN_GATE_COPY } from '@generatorai/shared/ui-contract';
 import * as path from 'node:path';
@@ -115,6 +115,9 @@ const DEFAULT_CANCEL_BUDGET_SECONDS = 10;
 export interface InternalCreateChatExtras {
   forkedFromChatId?: string;
   forkedAtTurnId?: string;
+  /** D-180 — a side chat: the chat it sits beside and how it started. */
+  sideOfChatId?: string;
+  sideMode?: SideChatMode;
   conversationSeed?: string;
   /** Replaces `harness.createConversation` — a fork branches instead of starting cold. */
   createConversation?: (config: CreateConversationParams) => Promise<void>;
@@ -175,6 +178,9 @@ export interface ChatManagementServiceExtensions extends SessionComposerDeps {
   sourceControlFlowService?: AutoScmFlowPort;
   repoReadinessService?: AutoScmReadinessPort;
 }
+
+/** D-180 — side chats open beside one chat at most. */
+export const MAX_SIDE_CHATS = 4;
 
 export class ChatManagementService {
   /**
@@ -1635,6 +1641,7 @@ export class ChatManagementService {
       ...(sharedWorkspace && !params.forkedFromChatId ? {} : { sources, ...(primarySource ? { primarySource } : {}) }),
       ...(params.forkedFromChatId ? { forkedFromChatId: params.forkedFromChatId } : {}),
       ...(params.forkedAtTurnId ? { forkedAtTurnId: params.forkedAtTurnId } : {}),
+      ...(params.sideOfChatId ? { sideOfChatId: params.sideOfChatId, ...(params.sideMode ? { sideMode: params.sideMode } : {}) } : {}),
       ...(params.conversationSeed ? { conversationSeed: params.conversationSeed } : {}),
       // Agent-native source control: persisted verbatim; the route has already
       // shape-checked and normalised the flags.
@@ -2949,6 +2956,91 @@ export class ChatManagementService {
   }
 
   /**
+   * D-180 — open a side chat beside `parentId`:
+   *   question  a read-only (plan permission mode) chat that SHARES the parent's workspace and knows the finished
+   *             turns (a seed, not copied rows); fine while the parent runs
+   *   fork      a full fork with its own copy of the files (`forkChat`), also while the parent runs
+   *   new       a blank chat in the parent's project, with its sources, agent and model
+   * Side chats stay out of the chat list until kept; at most {@link MAX_SIDE_CHATS} per chat; a side chat has none.
+   * `prompt` is sent as the first message when given (a failure is announced like any prompt failure).
+   */
+  async createSideChat(parentId: string, input: { mode: SideChatMode; prompt?: string }): Promise<Chat> {
+    const parent = await this.chatRepo.getById(parentId);
+    if (parent.status !== 'active') throw new ValidationError('An archived chat cannot open side chats');
+    if (parent.sideOfChatId) throw new ValidationError('A side chat cannot open side chats of its own');
+    if (parent.parentChatId) throw new ValidationError('A background worker cannot open side chats');
+    const open = await this.chatRepo.listSideChats(parentId);
+    if (open.length >= MAX_SIDE_CHATS) {
+      throw new ValidationError(`At most ${MAX_SIDE_CHATS} side chats can be open beside one chat. Keep or discard one first.`);
+    }
+    const common = {
+      ...(parent.model ? { model: parent.model } : {}),
+      ...(parent.harnessConfig ? { harnessConfig: parent.harnessConfig } : {}),
+      ...(parent.projectId ? { projectId: parent.projectId } : {}),
+      ...(parent.agentRef ? { agentRef: parent.agentRef } : {}),
+      ...(parent.agentOverrides ? { agentOverrides: parent.agentOverrides } : {}),
+      ...(parent.createdByPrincipal ? { createdByPrincipal: parent.createdByPrincipal } : {}),
+      tags: [...(parent.tags ?? [])],
+      sideOfChatId: parentId,
+    };
+    let created: Chat;
+    if (input.mode === 'fork') {
+      created = (await this.forkChat(parentId, { whileBusy: true, side: { mode: 'fork' }, name: `${parent.name} · fork` })).chat;
+    } else if (input.mode === 'question') {
+      const messages = await this.messageRepo.getByChatId(parentId);
+      const turns = groupTurns(messages);
+      const finished = this.isTurnActive(parentId) ? turns.slice(0, -1) : turns;
+      const kept = finished.length ? messages.slice(0, finished.at(-1)!.endIndex) : [];
+      const seed = buildConversationSeed(kept);
+      created = await this.createChat({
+        ...common,
+        name: `${parent.name} · question`,
+        ...(parent.workspaceId ? { workspaceId: parent.workspaceId } : {}),
+        ...(parent.sources ? { sources: parent.sources } : {}),
+        ...(parent.primarySource ? { primary: parent.primarySource } : {}),
+        permissionMode: 'plan',
+        forkedFromChatId: parentId,
+        ...(seed ? { conversationSeed: seed } : {}),
+        sideMode: 'question',
+      });
+    } else {
+      created = await this.createChat({
+        ...common,
+        name: `${parent.name} · side chat`,
+        ...(parent.sources ? { sources: parent.sources } : {}),
+        ...(parent.primarySource ? { primary: parent.primarySource } : {}),
+        ...(parent.permissionMode ? { permissionMode: parent.permissionMode } : {}),
+        ...(parent.defaultAgentMode ? { defaultAgentMode: parent.defaultAgentMode } : {}),
+        sideMode: 'new',
+      });
+    }
+    const prompt = input.prompt?.trim();
+    if (prompt) {
+      void this.sendPrompt(created.id, prompt).catch((err: unknown) => {
+        void this.eventBus.emitGlobal({
+          kind: 'chat.prompt_failed',
+          data: { chatId: created.id, error: err instanceof Error ? err.message : String(err) },
+        });
+      });
+    }
+    return created;
+  }
+
+  /** D-180 — the side chats open beside `chatId`. */
+  listSideChats(chatId: string): Promise<Chat[]> {
+    return this.chatRepo.listSideChats(chatId);
+  }
+
+  /** D-180 — keep a side chat: it becomes an ordinary chat in the list (still linked to where it came from). */
+  async keepSideChat(chatId: string): Promise<Chat> {
+    const chat = await this.chatRepo.getById(chatId);
+    if (!chat.sideOfChatId) return chat;
+    await this.chatRepo.clearSideOf(chatId);
+    await this.eventBus.emitGlobal({ kind: 'chat.updated', data: { chatId } }).catch(() => undefined);
+    return this.chatRepo.getById(chatId);
+  }
+
+  /**
    * Branch a chat after `turnId` (default: its last turn) into a new chat.
    *
    * The fork gets a WORKSPACE OF ITS OWN that starts as a copy of the parent's
@@ -2961,9 +3053,15 @@ export class ChatManagementService {
    * (`forkSession` / `thread/fork`), else the new session is seeded with a
    * digest of the copied turns.
    */
-  async forkChat(chatId: string, options: { turnId?: string; name?: string } = {}): Promise<ForkChatResult> {
+  async forkChat(
+    chatId: string,
+    options: { turnId?: string; name?: string; whileBusy?: boolean; side?: { mode: SideChatMode } } = {},
+  ): Promise<ForkChatResult> {
     const source = await this.chatRepo.getById(chatId);
-    if (this.isTurnActive(chatId)) {
+    // D-180 — a side chat may branch while a turn runs: it copies the FINISHED turns (the one in flight is left
+    // out) and seeds them, since the provider's own history is mid-write.
+    const busy = this.isTurnActive(chatId);
+    if (busy && !options.whileBusy) {
       const err = new Error(
         'This chat is still generating a response. Wait for it to finish before forking.',
       ) as Error & { code?: string };
@@ -2973,7 +3071,7 @@ export class ChatManagementService {
     const sourceSession = await this.sessionRepo.getById(source.sessionId);
     const messages = await this.messageRepo.getByChatId(chatId);
     const turns = groupTurns(messages);
-    let cut = turns.length - 1;
+    let cut = busy ? turns.length - 2 : turns.length - 1;
     if (options.turnId) {
       cut = turns.findIndex((t) => t.turnId === options.turnId);
       if (cut < 0) {
@@ -2995,6 +3093,7 @@ export class ChatManagementService {
     }
     const caps = conversationId ? this.capabilitiesForConversation(conversationId) : this.harness.capabilities();
     const native =
+      !busy &&
       !!conversationId &&
       caps.conversationFork === true &&
       typeof this.harness.forkConversation === 'function' &&
@@ -3027,6 +3126,7 @@ export class ChatManagementService {
       ...(source.createdByPrincipal ? { createdByPrincipal: source.createdByPrincipal } : {}),
       forkedFromChatId: chatId,
       ...(cutTurnId ? { forkedAtTurnId: cutTurnId } : {}),
+      ...(options.side ? { sideOfChatId: chatId, sideMode: options.side.mode } : {}),
     };
 
     let created: Chat;
@@ -3300,6 +3400,13 @@ export class ChatManagementService {
    */
   async deleteChat(chatId: string): Promise<void> {
     const chat = await this.chatRepo.getById(chatId);
+
+    // D-180 — side chats are reachable only beside their chat: they go with it.
+    for (const side of await this.chatRepo.listSideChats(chatId).catch(() => [] as Chat[])) {
+      await this.deleteChat(side.id).catch((err) =>
+        console.warn(`[ChatManagement] deleteChat ${chatId}: could not delete side chat ${side.id}:`, err instanceof Error ? err.message : String(err)),
+      );
+    }
 
     // An orchestrator's workers share its workspace and are hidden from the
     // sidebar, so once the orchestrator is gone they are unreachable rows

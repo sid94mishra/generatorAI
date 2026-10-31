@@ -2890,6 +2890,20 @@ export const MIGRATIONS: readonly Migration[] = [
       name: 'workspace_mount_workdir',
       sql: [`ALTER TABLE workspace_mounts ADD COLUMN workdir TEXT;`],
     },
+    // v70 — side chats (D-180): a quick question, fork or new chat opened beside
+    // another chat. `side_of_chat_id` names the chat it sits beside (no FK: the
+    // service discards side chats with their parent, workspaces included);
+    // `side_mode` is question | fork | new. Side chats stay out of the chat list
+    // until kept (`side_of_chat_id` cleared). Additive; every row keeps NULL.
+    {
+      version: 70,
+      name: 'side_chats',
+      sql: [
+        `ALTER TABLE chats ADD COLUMN side_of_chat_id TEXT;`,
+        `ALTER TABLE chats ADD COLUMN side_mode TEXT;`,
+        `CREATE INDEX idx_chats_side_of ON chats(side_of_chat_id) WHERE side_of_chat_id IS NOT NULL;`,
+      ],
+    },
   ];
 
 

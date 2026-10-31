@@ -89,6 +89,10 @@ export interface IChatRepository {
   update(id: string, updates: Partial<Chat>): Promise<Chat>;
   updateStatus(id: string, status: ChatStatus): Promise<void>;
   delete(id: string): Promise<void>;
+  /** D-180 — the side chats beside `chatId`, oldest first. */
+  listSideChats(chatId: string): Promise<Chat[]>;
+  /** D-180 — keep a side chat: clears `sideOfChatId` so it joins the chat list. */
+  clearSideOf(id: string): Promise<void>;
   /** List all WORKER chats spawned by a given orchestrator chat. */
   listBackgroundTasks(parentChatId: string): Promise<Chat[]>;
   /**

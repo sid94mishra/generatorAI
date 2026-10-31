@@ -23,6 +23,14 @@ export const DEFAULT_CHAT_PERMISSION_MODE: ChatPermissionMode = 'bypassPermissio
 export type ChatStatus = 'active' | 'archived';
 
 /** A local folder path linked to a chat at creation time */
+/**
+ * D-180 — how a side chat started: a read-only quick question on a copy of the conversation, a full fork into its
+ * own worktree, or a new blank chat in the same project.
+ */
+export type SideChatMode = 'question' | 'fork' | 'new';
+
+export const SIDE_CHAT_MODES: readonly SideChatMode[] = ['question', 'fork', 'new'];
+
 export interface ChatLocalFolder {
   url: string;
   alias: string;
@@ -200,6 +208,10 @@ export interface Chat {
   forkedFromChatId?: string;
   /** The turn of `forkedFromChatId` the fork branched after. */
   forkedAtTurnId?: string;
+  /** D-180 — a side chat: the chat it sits beside (cleared when kept). */
+  sideOfChatId?: string;
+  /** D-180 — how the side chat started. */
+  sideMode?: SideChatMode;
   /**
    * Transcript digest a SYNTHETIC rewind/fork left behind for the provider
    * (one without native branching): prepended to the next prompt once, then
@@ -299,6 +311,9 @@ export interface CreateChatParams {
   /** Set by `forkChat`: the source chat and turn. Never accepted from the API. */
   forkedFromChatId?: string;
   forkedAtTurnId?: string;
+  /** Set by `createSideChat` (D-180). Never accepted from the API. */
+  sideOfChatId?: string;
+  sideMode?: SideChatMode;
   /** The creating principal (set by the route from the authenticated caller). Never accepted from the body. */
   createdByPrincipal?: ChatPrincipal;
 }

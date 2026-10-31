@@ -16,6 +16,7 @@ import {
   chatIngestPrompt,
   CreateChatSchema,
   SendChatPromptSchema,
+  CreateSideChatSchema,
   UpdatePlanContentSchema,
   CreatePlanCommentSchema,
   PlanDecisionSchema,
@@ -1046,6 +1047,42 @@ export function createChatApiRoutes(container: Container): Router {
       }
     },
   );
+
+  // POST /chats/:id/side-chats — open a side chat beside this chat (D-180): `{mode: question|fork|new, prompt?}`.
+  router.post('/:id/side-chats', async (req, res, next) => {
+    try {
+      const parsed = CreateSideChatSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'mode must be question, fork or new', fields: parsed.error.flatten().fieldErrors } });
+        return;
+      }
+      const chat = await chatManagementService.createSideChat(String(req.params['id']), {
+        mode: parsed.data.mode,
+        ...(parsed.data.prompt ? { prompt: parsed.data.prompt } : {}),
+      });
+      res.status(201).json(chat);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /chats/:id/side-chats — the side chats open beside this chat, oldest first.
+  router.get('/:id/side-chats', async (req, res, next) => {
+    try {
+      res.json(await chatManagementService.listSideChats(String(req.params['id'])));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /chats/:id/keep — keep a side chat: it joins the chat list as an ordinary chat.
+  router.post('/:id/keep', async (req, res, next) => {
+    try {
+      res.json(await chatManagementService.keepSideChat(String(req.params['id'])));
+    } catch (err) {
+      next(err);
+    }
+  });
 
   // GET /chats/:id/reference-preview?mode= — what attaching this chat to a message would include (D-179).
   router.get('/:id/reference-preview', async (req, res, next) => {

@@ -309,3 +309,9 @@ export const ChatIngestTargetSchema = z.union([
     })
     .strict(),
 ]);
+
+/** D-180 — `POST /chats/:id/side-chats`. */
+export const CreateSideChatSchema = z.object({
+  mode: z.enum(['question', 'fork', 'new']),
+  prompt: z.string().max(100_000).optional(),
+});
