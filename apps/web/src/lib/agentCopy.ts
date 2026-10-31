@@ -54,6 +54,7 @@ export const TOOL_GROUP_LABELS: Record<keyof AgentToolPolicy, string> = {
   web: 'Web fetch & search',
   workflows: 'Workflows',
   workflowAuthoring: 'Workflow authoring',
+  platform: 'GeneratorAI tools',
 };
 
 export const TOOL_GROUP_HINTS: Record<keyof AgentToolPolicy, string> = {
@@ -67,6 +68,7 @@ export const TOOL_GROUP_HINTS: Record<keyof AgentToolPolicy, string> = {
   web: 'Fetch URLs and run web searches.',
   workflows: 'Find, run, follow and cancel saved workflows. On for orchestrators; opt-in for chats.',
   workflowAuthoring: 'Validate, plan and submit workflow drafts. A person reviews and publishes them.',
+  platform: 'Read and start chats, read projects, agents, automations, Needs you and chat files. On for orchestrators; opt-in for chats.',
 };
 
 export const SCOPE_LABELS: Record<AgentScope, string> = {

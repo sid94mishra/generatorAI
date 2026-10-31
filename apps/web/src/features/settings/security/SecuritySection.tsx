@@ -3,7 +3,7 @@
 // the legacy 1,420-line Security.tsx into one group per concern:
 //   Servers · This server · Access from other devices (Tailscale; Advanced:
 //   Network exposure, D-123) · Pending access requests ·
-//   Paired devices · Pair a new device
+//   Paired devices · Pair a new device · Connect an external agent (D-181)
 // Data comes from hooks/securityQueries.ts (polled every 30 s while visible)
 // and hooks/serverQueries.ts. A failed action shows its server message in
 // the error callout at the top — it names the exact thing to fix.
@@ -27,6 +27,7 @@ import { ThisServerGroup } from './ServerPosture.js';
 import { AccessGroup } from './AccessGroup.js';
 import { AccessRequestsGroup, PairedDevicesGroup } from './DevicesGroups.js';
 import { PairDeviceGroup } from './PairDeviceGroup.js';
+import { ConnectAgentGroup } from './ConnectAgentGroup.js';
 
 export function SecuritySection() {
   const posture = useSecurityPosture();
@@ -67,6 +68,7 @@ export function SecuritySection() {
       <AccessRequestsGroup requests={requests.data ?? []} onError={onError} />
       <PairedDevicesGroup devices={devices.data} isPending={devices.isPending} onError={onError} />
       <PairDeviceGroup posture={posture.data} pending={pending.data ?? []} onError={onError} />
+      <ConnectAgentGroup />
     </SettingsSection>
   );
 }
