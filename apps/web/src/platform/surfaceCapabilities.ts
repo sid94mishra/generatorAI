@@ -58,11 +58,17 @@ export interface DockTabOptions {
  * this CHAT has anything to put in it. Both have to pass, and conflating them
  * is how a surface ends up offering a tab it cannot draw.
  */
+/**
+ * D-180: the web chat dock also has side-chat tabs. Web-only (mobile's pane registry is keyed by `DockTabType`
+ * and has no side chats yet), so the type lives here rather than in the shared contract.
+ */
+export type ChatDockTabType = DockTabType | 'side';
+
 export function dockTabTypes(
   options: DockTabOptions,
   caps: TransportCapabilitySet = surfaceCapabilities(),
-): DockTabType[] {
-  const tabs: DockTabType[] = [];
+): ChatDockTabType[] {
+  const tabs: ChatDockTabType[] = [];
   if (caps.diffRendering.supported) tabs.push('changes');
   tabs.push('files');
   if (caps.terminalRendering.supported) tabs.push('terminal');
@@ -78,7 +84,7 @@ export function dockTabTypes(
 }
 
 /** What the dock's "+" menu offers (D-27): extra Terminal / Browser instances and widgets. */
-export function dockAddableTabTypes(types: readonly DockTabType[]): DockTabType[] {
+export function dockAddableTabTypes(types: readonly ChatDockTabType[]): DockTabType[] {
   return (['terminal', 'browser', 'widget'] as const).filter((t) => types.includes(t));
 }
 

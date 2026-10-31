@@ -8,10 +8,10 @@
 
 import { useMemo } from 'react';
 import type { DockTabType } from '@generatorai/shared/ui-contract';
-import { defaultDockTab, dockAddableTabTypes, dockTabTypes } from '@/platform/surfaceCapabilities.js';
+import { defaultDockTab, dockAddableTabTypes, dockTabTypes, type ChatDockTabType } from '@/platform/surfaceCapabilities.js';
 
 export interface SurfaceDockTabs {
-  types: DockTabType[];
+  types: ChatDockTabType[];
   addable: DockTabType[];
   defaultTab: 'changes' | 'files';
 }

@@ -22,7 +22,6 @@ export const DOCK_TAB_TYPES = [
   'plan',
   'widget',
   'file',
-  'side',
 ] as const;
 export type DockTabType = (typeof DOCK_TAB_TYPES)[number];
 
@@ -40,7 +39,7 @@ export const DOCK_PINNED_TABS = ['changes', 'files', 'terminal', 'browser'] as c
 export const DOCK_CONDITIONAL_TABS = ['tasks', 'computer', 'plan'] as const satisfies readonly DockTabType[];
 
 /** Per-type instance caps (D-27: the caps of the pre-redesign code). */
-export const DOCK_TAB_CAPS = { browser: 5, terminal: 4, file: 8, widget: 6, side: 4 } as const satisfies Partial<
+export const DOCK_TAB_CAPS = { browser: 5, terminal: 4, file: 8, widget: 6 } as const satisfies Partial<
   Record<DockTabType, number>
 >;
 

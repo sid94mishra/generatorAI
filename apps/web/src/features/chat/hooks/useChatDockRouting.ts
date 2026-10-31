@@ -36,7 +36,8 @@ export const CHAT_DOCK_KEYS = dockStorageKeys('chat');
  * painting) — plus one PTY per tab on the host. Browser tabs each hold a live
  * session; widgets one surface each; file tabs one viewer each.
  */
-export const CHAT_DOCK_TAB_CAPS = DOCK_TAB_CAPS;
+/** D-180 adds side chats: four beside one chat (web-only, see `ChatDockTabType`). */
+export const CHAT_DOCK_TAB_CAPS = { ...DOCK_TAB_CAPS, side: 4 } as const;
 
 export type { DockFocusRequest };
 
