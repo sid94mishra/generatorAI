@@ -197,3 +197,18 @@ Workflow tools stay as they are (already one registry).
   with MCP (−98.7% in one example) and programmatic tool calling (Messages API only; −37–38% input tokens; worse for
   short sequential work), Codex experimental `features.code_mode`, Goose, mcp-use, Pydantic Monty. For a local Node app:
   QuickJS-wasm (no native module, no I/O, limits built in); Node `vm` is not a security boundary.
+
+## 9. Verification (2026-10-31, installed desktop build, `arch-echancement`)
+
+Clean release → install → launch, then driven like a user over CDP against a throwaway dummy repo:
+
+| Area | Checked | Result |
+|---|---|---|
+| Side chats | Quick question while the main chat ran (shares its workspace, read-only, answered from the copied turns); fork (own worktree, edits stayed there); new side chat (own worktree); `/btw <question>` (named after the question, main chat untouched); Send to main chat (chip in the main composer, then a correct answer from it); close: question discards silently, fork/new ask (Escape keeps); Discard from the menu asks for fork/new and closes the tab; Keep → joins the chat list with the parent's name | Pass |
+| Chat references | `@`/Attach chat dialog search, chip popover with live preview ("3 of 5 turns · ~657 tokens"), Recent and Auto modes, `metadata.chatRefs` on the message, linked chip in the transcript, answers built from the attached chat | Pass |
+| Platform tools | Agent with GeneratorAI tools + Code mode created in the agent editor; `list_chats`/`read_chat` (read freely), `create_chat` asked for approval ("Start a new chat?"), created a chat tagged `agent-created`, `wait_for_chat` returned its reply | Pass |
+| Code mode | One `run_code` script called `list_chats` + `read_chat`; transcript card shows the script, the call trace with timings and the result; QuickJS inlined in the server bundle | Pass |
+| MCP server | Paired an MCP device from Settings (least-privilege scopes), stdio client listed 25 tools (16 with `--read-only`, all `readOnlyHint`), `create_chat` capped at Accept edits, `wait_for_chat` returned "hello from MCP", `../../etc/passwd` refused (`PATH_OUTSIDE`) | Pass |
+| Regression | Home, chats list, projects, agents, workflows (detail, builder, a run with a Codex stage), automations, scripts, every Settings section, permission deny, commit from the Changes panel on the dummy repo, archive/unarchive, Fork from here; web unit suite 1735/1735, bundle budget OK | Pass |
+
+Defects found while testing and fixed: `/btw` + Enter picked `/browser` (exact/prefix slash matches now lead); `create_chat` read as a file edit ("Change this file?"); quick questions talked about planning; long, cut-off side chat names; `read_chat` "recent" missed earlier edits (What changed added, fence defusal shared); menu Discard of a fork deleted without asking; the side tab type broke mobile's pane registry (kept web-only); Source control's GitHub avatar violated the img-src CSP (initials now).
