@@ -12,7 +12,7 @@
 // standing grants. All data comes through hooks/computerQueries.ts.
 // ────────────────────────────────────────────────────────────────
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { selectPendingConsent } from '@generatorai/client-core';
 import type { ComputerControlMode } from '@generatorai/shared';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
@@ -35,6 +35,7 @@ import {
   type ComputerRecordingState,
 } from '@/hooks/computerQueries.js';
 import { frameForEntry, type ComputerTimelineEntry } from '@/hooks/computerTimeline.js';
+import { macComputerPermissions, type MacComputerPermissions } from '@/lib/desktop.js';
 import { ComputerActionLog } from './computer/ComputerActionLog.js';
 import { ComputerConsentCard } from './computer/ComputerConsentCard.js';
 import { ComputerGrants } from './computer/ComputerGrants.js';
@@ -67,6 +68,24 @@ export function ComputerPanel({ workspaceId, active = true }: ComputerPanelProps
   return <ComputerDesk workspaceId={workspaceId} active={active} />;
 }
 
+/**
+ * macOS Screen Recording, read the way Settings reads it and again when the window regains focus (a grant made in
+ * System Settings shows up on return). Null outside the macOS desktop shell.
+ */
+function useMacPermissions(): { status: MacComputerPermissions | null; openSettings: () => void } {
+  const [status, setStatus] = useState<MacComputerPermissions | null>(null);
+  const refresh = useCallback(() => void macComputerPermissions('status').then(setStatus), []);
+  useEffect(() => {
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, [refresh]);
+  return {
+    status,
+    openSettings: () => void macComputerPermissions('openSettings'),
+  };
+}
+
 /** Re-render when the earliest pending prompt expires (an unanswered prompt is a denial). */
 function useExpiryTick(expiries: readonly number[]): number {
   const [now, setNow] = useState(() => Date.now());
@@ -95,6 +114,10 @@ function ComputerDesk({ workspaceId, active }: { workspaceId: string; active: bo
   const preview = useComputerPreviewFeed(workspaceId, recording.recording && active);
   const frameUrl = useComputerFrameUrl(workspaceId, pinned?.artifactId ?? activity.latestFrameId);
 
+  const mac = useMacPermissions();
+  // Without Screen Recording the driver can still read and click, but captures nothing: say that, and offer the
+  // grant — not a Restart, which cannot fix a missing permission.
+  const noScreenRecording = mac.status !== null && !mac.status.screenRecording;
   const now = useExpiryTick(desk?.pending.map((p) => p.expiresAt) ?? []);
   const pending = desk ? selectPendingConsent(desk, { now }) : [];
   const prompt = pending[0];
@@ -208,7 +231,23 @@ function ComputerDesk({ workspaceId, active }: { workspaceId: string; active: bo
             </Callout>
           ) : null}
           {recording.detail && !recording.recording ? <Callout tone="warn">{recording.detail}</Callout> : null}
-          {runtime && runtime.enabled && runtime.state !== 'ready' ? (
+          {noScreenRecording ? (
+            <Callout
+              tone="warn"
+              title="Screen Recording is off for GeneratorAI"
+              action={
+                <Button size="sm" onClick={mac.openSettings}>
+                  Open settings
+                </Button>
+              }
+            >
+              The agent can still read controls and click, but no window images are captured, so Now, Live preview and
+              Replay stay empty. Turn GeneratorAI on in System Settings → Privacy &amp; Security → Screen Recording, then
+              quit and reopen GeneratorAI. If it is already on, turn it off and on again: macOS ties the permission to
+              each build.
+            </Callout>
+          ) : null}
+          {runtime && runtime.enabled && runtime.state !== 'ready' && !(noScreenRecording && /screen recording/i.test(runtime.detail ?? '')) ? (
             <Callout
               tone={runtime.state === 'stopped' ? 'neutral' : 'warn'}
               title={
