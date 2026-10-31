@@ -127,7 +127,16 @@ function useWindowStream(windowId: number | null): MediaStream | null {
   return stream;
 }
 
-function LiveVideo({ stream, label }: { stream: MediaStream; label: string }) {
+/** The video reports its capture size, the pixel space the actions' click points are in. */
+function LiveVideo({
+  stream,
+  label,
+  onSize,
+}: {
+  stream: MediaStream;
+  label: string;
+  onSize: (size: { w: number; h: number }) => void;
+}) {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     if (ref.current) ref.current.srcObject = stream;
@@ -140,6 +149,8 @@ function LiveVideo({ stream, label }: { stream: MediaStream; label: string }) {
       playsInline
       aria-label={label}
       data-testid="computer-live-video"
+      onLoadedMetadata={(e) => onSize({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight })}
+      onResize={(e) => onSize({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight })}
       className="max-h-96 max-w-full rounded-control border border-line-soft object-contain"
     />
   );
@@ -209,29 +220,32 @@ function ComputerDesk({ workspaceId, active }: { workspaceId: string; active: bo
     setView('now');
   };
 
-  // Cursor onto the rendered frame. The action's own click point is already in
-  // the frame's pixel space; otherwise the desktop cursor is mapped through the
-  // window's bounds. The last spot is held rather than blinking out.
+  // The agent's cursor on the rendered frame or video. Two sources: the
+  // desktop pointer mapped through the window's bounds, which moves only when
+  // the agent drives real input, and the action's click point, already in
+  // capture pixels — the only trace a background (accessibility) click leaves,
+  // since it never moves the pointer. A frame shows its own click; the video
+  // follows the pointer while it is on the window, else the latest click.
+  // The last spot is held rather than blinking out.
   const lastCursor = useRef<{ left: number; top: number } | null>(null);
   const streamId = view === 'now' && recording.recording && active && !pinned ? (preview.window?.windowId ?? null) : null;
   const stream = useWindowStream(streamId);
   const cursor = useMemo(() => {
-    // A frame's click point belongs to that still, not to the video running past it.
-    const point = stream ? undefined : preview.frame?.point;
-    if (point && frameSize && frameSize.w > 0 && frameSize.h > 0) {
-      lastCursor.current = { left: (point.x / frameSize.w) * 100, top: (point.y / frameSize.h) * 100 };
-      return lastCursor.current;
-    }
+    const point = preview.frame?.point;
+    const clicked =
+      point && frameSize && frameSize.w > 0 && frameSize.h > 0
+        ? { left: (point.x / frameSize.w) * 100, top: (point.y / frameSize.h) * 100 }
+        : null;
     const c = preview.cursor;
     const b = preview.window;
+    let pointer: { left: number; top: number } | null = null;
     if (c && b && b.w > 0 && b.h > 0) {
       const left = ((c.x - b.x) / b.w) * 100;
       const top = ((c.y - b.y) / b.h) * 100;
-      if (left >= -2 && left <= 102 && top >= -2 && top <= 102) {
-        lastCursor.current = { left, top };
-        return lastCursor.current;
-      }
+      if (left >= -2 && left <= 102 && top >= -2 && top <= 102) pointer = { left, top };
     }
+    const next = stream ? (pointer ?? clicked) : (clicked ?? pointer);
+    if (next) lastCursor.current = next;
     return lastCursor.current;
   }, [stream, preview.frame, preview.cursor, preview.window, frameSize]);
 
@@ -364,7 +378,11 @@ function ComputerDesk({ workspaceId, active }: { workspaceId: string; active: bo
                 />
               ) : stream ? (
                 <div className="relative inline-block max-w-full">
-                  <LiveVideo stream={stream} label={`Live — ${preview.window?.title || 'the agent’s window'}`} />
+                  <LiveVideo
+                    stream={stream}
+                    label={`Live — ${preview.window?.title || 'the agent’s window'}`}
+                    onSize={setFrameSize}
+                  />
                   {cursor ? (
                     <span
                       aria-hidden
