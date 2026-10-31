@@ -24,6 +24,7 @@ import type {
   ComputerControlState,
   ComputerGrant,
   ComputerPendingConsent,
+  PlatformToolAdvert,
 } from '@generatorai/shared';
 import type {
   Agent,
@@ -899,6 +900,20 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       call: (name: string, args: Record<string, unknown>, opts: { idempotencyKey?: string; clientName?: string } = {}) =>
         req<{ result: unknown }>(
           `/api/workflow-tools/${encodeURIComponent(name)}`,
+          json({ arguments: args, ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}), ...(opts.clientName ? { clientName: opts.clientName } : {}) }),
+        ),
+    },
+
+    // ── platformTools.ts (D-181) ────────────────────────────────
+    //
+    // The platform tools of an agent outside the server (the MCP server):
+    // chats, projects, agents, automations, Needs you, chat files — the same
+    // handlers the in-app tools run. A refusal is a normal result.
+    platformTools: {
+      list: () => req<{ tools: PlatformToolAdvert[] }>('/api/platform-tools'),
+      call: (name: string, args: Record<string, unknown>, opts: { idempotencyKey?: string; clientName?: string } = {}) =>
+        req<{ result: unknown }>(
+          `/api/platform-tools/${encodeURIComponent(name)}`,
           json({ arguments: args, ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}), ...(opts.clientName ? { clientName: opts.clientName } : {}) }),
         ),
     },

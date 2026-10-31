@@ -30,13 +30,15 @@ export const PLATFORM_LABEL: Record<string, string> = {
   other: 'Other',
 };
 
-export type PairingPlatform = 'mobile' | 'web' | 'desktop' | 'cli';
+export type PairingPlatform = 'mobile' | 'web' | 'desktop' | 'cli' | 'mcp';
 
 export const PAIRING_PLATFORMS: readonly { value: PairingPlatform; label: string }[] = [
   { value: 'mobile', label: 'Mobile' },
   { value: 'web', label: 'Web browser' },
   { value: 'desktop', label: 'Desktop' },
   { value: 'cli', label: 'CLI' },
+  // `generatorai-mcp`, for an external agent (D-181): see Connect an external agent.
+  { value: 'mcp', label: 'MCP server (external agent)' },
 ];
 
 export interface ScopePreset {

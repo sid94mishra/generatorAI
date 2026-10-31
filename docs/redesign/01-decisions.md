@@ -1849,6 +1849,18 @@ setup for Claude Code, Codex and Cursor.
 (60 s default, 300 s max), 200 calls, 24k characters of output. Calls go through the session's existing tool handlers,
 so approvals and plan-mode refusals apply unchanged. Node's `vm` is not used for it (not a security boundary).
 
+### D-183 Platform tool details the plan left open (derived, 2026-10-31) — Final
+Scopes per tool: chats read `read:chats`, write `write:chats`; projects `read:projects`; agents and automations
+`read:workflows`; triggering an automation `exec:agent` (a run-time act, like starting a run, PD-6); Needs you
+`read:activity`; chat files `read:chats` + `read:files`. The default MCP grant adds the read-only `read:projects`,
+`read:activity`, `read:files`. The ceiling also covers prompting: an agent cannot prompt a chat, or trigger an
+automation, whose permission mode is above its own (an external agent: above Accept edits) — refused, not lowered. A
+stage acts for the local owner with a device's default grant, not the engine's every-scope principal. The 5-chat cap
+counts chats per creating chat or stage (`createdByPrincipal.createdVia`); external clients are not counted. A project
+chat an agent creates mounts every codebase as a worktree. With several mounts a chat-file path starts with the mount
+alias; with one it is relative to it. `generatorai-mcp` drops its own `list_chats` for the registry's and keeps
+`send_prompt` (its `wait` uses the server's `wait_for_chat`). The group's UI label is "GeneratorAI tools".
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

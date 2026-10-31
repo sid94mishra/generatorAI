@@ -22,6 +22,33 @@ Agents can use your saved workflows and write new ones. A GeneratorAI chat, an o
 - It acts with the rights of the person or device that created the chat: running needs the "run agents" right, drafting needs "edit workflows".
 - It answers a stage's completion review only when you (or it) started the run with approvals delegated to the invoker. Tool-permission prompts and every other decision always wait for a person; the chat shows an approval card with a link.
 
+## Platform tools: chats, projects, automations and files
+
+The **GeneratorAI tools** group (`platform`) lets an agent use GeneratorAI itself. It is off by default, on for orchestrator chats, never given to an orchestrator's workers, and can be switched on per chat, per agent or per workflow stage. An external agent gets the same tools through `generatorai-mcp` ([SDK and MCP bridge](../clients/sdk-mcp.md)).
+
+| Toolset | Tools | Kind |
+| --- | --- | --- |
+| chats | `list_chats`, `read_chat` (recent: the last 3 turns, or full: capped at about 48,000 characters), `wait_for_chat` (up to 600 s; returns the last reply) | read |
+| chats | `create_chat` (name, first prompt, project, agent), `send_to_chat` | write |
+| projects | `list_projects`, `get_project` | read |
+| agents | `list_agents` | read |
+| automations | `list_automations`; `trigger_automation` | read; write |
+| activity | `list_needs_you`: permission prompts, questions and reviews waiting for a person | read |
+| files | `list_chat_files`, `read_chat_file`: read-only, inside that chat's workspace | read |
+
+Reads run without asking. Writes ask in *Ask before tools run* and *Accept edits, ask for the rest*, and are refused while planning.
+
+The limits are enforced by the server, not by the prompt:
+
+- A chat (or stage) creates at most 5 chats. Each records its creator and carries the tag `agent-created`.
+- Nothing an agent starts runs in a higher permission mode than its own. Chats an external agent starts are capped at *Accept edits*, never *Bypass*. A chat or automation whose mode is higher cannot be prompted or triggered by that agent.
+- A chat cannot prompt or wait for itself.
+- `read_chat_file` and `list_chat_files` stay inside the target chat's mounts, resolving symlinks, and never read `.git`. A file read returns at most 48,000 characters, with `nextOffset` to continue.
+- Text from `read_chat`, `wait_for_chat` and files is quoted data from another conversation; the agent is told not to follow instructions in it.
+- A repeated tool call (the same call id) returns the first result instead of creating a second chat.
+
+The tools act with the rights of the person or device that created the chat: writing a chat needs `write:chats`, triggering an automation `exec:agent`, projects `read:projects`, Needs you `read:activity`, files `read:files`.
+
 ## Following a run from the chat
 
 When a chat starts a run, a **run card** appears in the chat: status, the stage running, progress and a link to the run page. It survives a reload. A decision the run waits on shows an **approval card**; a completion review can be answered from the card. When the run finishes or parks on a decision and the chat is idle, the chat gets one short system message so the agent can check the result.
@@ -44,7 +71,7 @@ The `generatorai-workflow-author` skill is generated from the workflow schema, t
 
 ## Source evidence
 
-`packages/core/src/tools/workflows/`, `packages/core/src/services/WorkflowAuthoringService.ts`, `packages/core/src/services/workflow-invocation/ChatWorkflowRunBridge.ts`, `packages/core/src/services/session/PlatformToolBinder.ts`, `apps/server/src/routes/workflowTools.ts`, `apps/server/src/routes/workflowDefinitions.ts`, `packages/mcp-server/src/server.ts` and `skills/generatorai-workflow-author/`.
+`packages/core/src/tools/workflows/`, `packages/core/src/tools/platform/`, `apps/server/src/routes/platformTools.ts`, `packages/core/src/services/WorkflowAuthoringService.ts`, `packages/core/src/services/workflow-invocation/ChatWorkflowRunBridge.ts`, `packages/core/src/services/session/PlatformToolBinder.ts`, `apps/server/src/routes/workflowTools.ts`, `apps/server/src/routes/workflowDefinitions.ts`, `packages/mcp-server/src/server.ts` and `skills/generatorai-workflow-author/`.
 
 ## Configuration and worked examples
 

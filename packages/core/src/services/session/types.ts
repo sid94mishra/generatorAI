@@ -26,6 +26,7 @@ import type { PlanService } from '../PlanService.js';
 import type { WorkflowToolHost } from '../../tools/workflows/WorkflowToolHost.js';
 import type { GitHubToolHost } from '../../tools/github/GitHubToolHost.js';
 import type { PermissionRuleService } from '../PermissionRuleService.js';
+import type { PlatformToolHost } from '../../tools/platform/PlatformToolHost.js';
 
 /** Who a session belongs to. */
 export type SessionOwner =
@@ -95,6 +96,8 @@ export interface SessionComposerDeps {
   githubTools?: GitHubToolHost;
   /** U-16 (D-147): remembered permission rules — a chat's and a run's gates allow what they cover without asking. */
   permissionRules?: PermissionRuleService;
+  /** The platform tools (D-181): bound when the owner's `platform` group is on. */
+  platformTools?: PlatformToolHost;
 }
 
 /**

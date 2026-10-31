@@ -42,6 +42,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `workflow.session.agentOverrides.tools.web` | boolean |  |  | Web fetch and search tools |
 | `workflow.session.agentOverrides.tools.workflows` | boolean |  |  | Workflow tools: list, describe, run, check, respond to an approval, cancel |
 | `workflow.session.agentOverrides.tools.workflowAuthoring` | boolean |  |  | Workflow authoring tools: guide, validate, plan, create a draft |
+| `workflow.session.agentOverrides.tools.platform` | boolean |  |  | Platform tools: chats, projects, agents, automations, Needs you, chat files |
 | `workflow.session.agentOverrides.tools.codeMode` | boolean |  |  | Code mode: run_code scripts that call the session tools |
 | `workflow.session.agentOverrides.runtime` | object |  |  | Runtime delta over the bound agent |
 | `workflow.session.agentOverrides.runtime.model` | string (≤200 chars) |  |  | Model id |
@@ -321,6 +322,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `stages[].session.agentOverrides.tools.web` | boolean |  |  | Web fetch and search tools |
 | `stages[].session.agentOverrides.tools.workflows` | boolean |  |  | Workflow tools: list, describe, run, check, respond to an approval, cancel |
 | `stages[].session.agentOverrides.tools.workflowAuthoring` | boolean |  |  | Workflow authoring tools: guide, validate, plan, create a draft |
+| `stages[].session.agentOverrides.tools.platform` | boolean |  |  | Platform tools: chats, projects, agents, automations, Needs you, chat files |
 | `stages[].session.agentOverrides.tools.codeMode` | boolean |  |  | Code mode: run_code scripts that call the session tools |
 | `stages[].session.agentOverrides.runtime` | object |  |  | Runtime delta over the bound agent |
 | `stages[].session.agentOverrides.runtime.model` | string (≤200 chars) |  |  | Model id |

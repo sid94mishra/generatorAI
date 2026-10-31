@@ -5,7 +5,7 @@
 // tool set and the hook bridge, for either owner (chat or stage). The chat
 // create path is the canonical order and must stay byte-identical (R-10):
 // browser → computer → widgets → SCM hint → [MCP] → custom → orchestrator →
-// workflows → GitHub → hooks → code mode. The composer calls the methods in that order; each one
+// workflows → GitHub → platform → hooks → code mode. The composer calls the methods in that order; each one
 // appends its tools and system block and nothing else. The workflow tools
 // (P06) come after every existing tool, so a session without them keeps
 // its tool prefix byte-identical.
@@ -20,6 +20,7 @@ import { buildOrchestratorToolSet } from '../../tools/orchestrator/index.js';
 import { isExtensionAuthorToolName } from '../../tools/extensionAuthorTools.js';
 import { buildWorkflowToolSet, WORKFLOW_AUTHORING_HINT, type WorkflowToolCaller, type WorkflowToolTurn } from '../../tools/workflows/index.js';
 import { buildGitHubToolSet, GITHUB_MERGE_TOOL_NAME, GITHUB_READ_TOOL_NAMES, GITHUB_TOOLS_HINT } from '../../tools/github/index.js';
+import { buildPlatformToolSet, PLATFORM_WRITE_TOOL_NAMES, type PlatformToolCaller, type PlatformToolTurn } from '../../tools/platform/index.js';
 import { buildCodeModeTool } from '../../tools/codeMode/index.js';
 
 import type { ToolCallContext, ToolDefinition } from '../../domain/ports/IAgentHarness.js';
@@ -35,6 +36,9 @@ import {
 } from '../chatSystemHints.js';
 import { appendSystemBlock, appendTools, unionList, type ConversationConfig } from './cfg.js';
 import { ownerId, ownerTag, type SessionComposerDeps, type SessionOwner, type TurnContext } from './types.js';
+
+/** The platform tools that change something: asked like the GitHub writes (D-181). */
+const PLATFORM_WRITE_TOOLS: ReadonlySet<string> = new Set(PLATFORM_WRITE_TOOL_NAMES);
 
 /** The GitHub tools that only read: never gated (D-146). */
 const GITHUB_READ_TOOLS: ReadonlySet<string> = new Set(GITHUB_READ_TOOL_NAMES);
@@ -312,6 +316,32 @@ export class PlatformToolBinder {
     } catch (err) {
       console.warn(`[PlatformToolBinder] GitHub tool registration failed for ${ownerTag(t.owner)}:`, err);
     }
+  }
+
+  /**
+   * D-181 — the platform tools (chats, projects, agents, automations, Needs
+   * you, chat files) when the owner's `platform` group is on. Reads run
+   * unasked; creating or prompting a chat and triggering an automation ask in
+   * the asking modes and are refused while planning (`askBeforeActing`).
+   * Appended after the GitHub tools (R-10).
+   */
+  platform(
+    cfg: ConversationConfig,
+    t: BindTarget,
+    opts: { turnOf: () => PlatformToolTurn | undefined; port: GatePort | undefined; gateTurnOf: () => TurnContext | undefined },
+  ): void {
+    const host = this.deps.platformTools;
+    if (!host || !t.groups.platform) return;
+    const caller: PlatformToolCaller =
+      t.owner.kind === 'chat'
+        ? { kind: 'chat', chatId: t.owner.chatId, sessionId: t.sessionId }
+        : { kind: 'stage', runId: t.owner.workflowRunId, stageRunId: t.owner.stageRunId };
+    const all = buildPlatformToolSet(host, caller, { turnOf: opts.turnOf, owner: ownerTag(t.owner) });
+    const writes = askBeforeActing(
+      all.filter((tool) => PLATFORM_WRITE_TOOLS.has(tool.name)),
+      { turnOf: opts.gateTurnOf, port: opts.port, always: new Set() },
+    );
+    appendTools(cfg, all.map((tool) => writes.find((w) => w.name === tool.name) ?? tool));
   }
 
   /**

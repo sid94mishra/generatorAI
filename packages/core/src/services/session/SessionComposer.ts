@@ -11,7 +11,7 @@
 //   1 base · 2 resume id · 3 workspace exposure · 4 agent projection ·
 //   5 explicit spec (one precedence rule, create = resume) · 6 workspace
 //   hint · 7 platform tools: browser → computer → widgets → SCM hint → MCP →
-//   custom → orchestrator → hooks · skills delivery · 8 mode config ·
+//   custom → orchestrator → workflows → GitHub → platform → hooks · skills delivery · 8 mode config ·
 //   9 agent instructions LAST.
 //
 // Nothing a provider cannot do is dropped silently: capability loss, dropped
@@ -345,6 +345,20 @@ export class SessionComposer {
       port: i.gates && i.attended ? withAgentToolPolicy(i.gates, projection.toolPolicy.groups) : undefined,
       turnOf: () => this.turns.get(i.conversationId),
     });
+    // D-181 — the platform tools, after every other tool (R-10). Workers never;
+    // on for orchestrators, opt-in for plain chats and stages.
+    if (!isWorker && groups.platform === true) {
+      this.binder.platform(cfg, target, {
+        turnOf: () => {
+          const turn = this.turns.get(i.conversationId);
+          if (!turn) return undefined;
+          const yieldKeys = turn.yieldKeys ?? (() => this.harness.yieldTurnPermit?.(i.conversationId));
+          return { turnId: turn.turnId, permissionMode: turn.permissionMode, yieldKeys };
+        },
+        port: i.gates && i.attended ? withAgentToolPolicy(i.gates, projection.toolPolicy.groups) : undefined,
+        gateTurnOf: () => this.turns.get(i.conversationId),
+      });
+    }
     this.binder.hooks(cfg, target);
     // D-182 — code mode LAST: `run_code` lists and calls every tool bound above.
     this.binder.codeMode(cfg, target);

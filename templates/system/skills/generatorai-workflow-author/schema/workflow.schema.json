@@ -193,6 +193,10 @@
                           "type": "boolean",
                           "description": "Workflow authoring tools: guide, validate, plan, create a draft"
                         },
+                        "platform": {
+                          "type": "boolean",
+                          "description": "Platform tools: chats, projects, agents, automations, Needs you, chat files"
+                        },
                         "codeMode": {
                           "type": "boolean",
                           "description": "Code mode: run_code scripts that call the session tools"

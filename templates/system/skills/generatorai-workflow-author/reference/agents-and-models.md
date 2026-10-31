@@ -77,6 +77,7 @@ Nested blocks (`agentOverrides`, `mcp`, `browser`, `provider`, …) are listed f
 | `web` | boolean |  |  | Web fetch and search tools |
 | `workflows` | boolean |  |  | Workflow tools: list, describe, run, check, respond to an approval, cancel |
 | `workflowAuthoring` | boolean |  |  | Workflow authoring tools: guide, validate, plan, create a draft |
+| `platform` | boolean |  |  | Platform tools: chats, projects, agents, automations, Needs you, chat files |
 | `codeMode` | boolean |  |  | Code mode: run_code scripts that call the session tools |
 
 - `workflows` gives a stage the run tools (`list_workflows`, `describe_workflow`, `run_workflow`,

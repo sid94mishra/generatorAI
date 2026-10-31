@@ -256,6 +256,8 @@ export interface ChatPrincipal {
   kind: 'device' | 'service_account' | 'local' | 'system';
   id: string;
   scopes: string[];
+  /** Set when an agent created the chat through the platform tools (D-181): the calling chat, stage or external client. */
+  createdVia?: { kind: 'chat' | 'stage' | 'external'; id: string };
 }
 
 /** Parameters for creating a new Chat */

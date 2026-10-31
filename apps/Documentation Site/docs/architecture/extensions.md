@@ -85,17 +85,7 @@ The visual workflow builder and script catalog are different authoring surfaces.
 
 ## Exposing GeneratorAI through MCP
 
-`packages/mcp-server` implements a real MCP stdio server. Its built-in tools are:
-
-| Tool | Effect |
-| --- | --- |
-| `generatorai_list_chats` | List chats with optional status/project filters |
-| `generatorai_send_prompt` | Send to an existing chat or create one first; returns chat identity rather than a completed streamed answer |
-| `generatorai_run_workflow` | Start a workflow definition with optional variables/project |
-
-A supplied `CustomToolRegistry` can expose additional tools through `toolAdapter`. The CLI boots `createGeneratorAI` from the internal SDK, then attaches `StdioServerTransport`. It therefore runs its own in-process engine/configuration; it is not automatically a client of the desktop app's existing server.
-
-The package and SDK are private workspace packages. Document the source/build setup instead of presenting an unsupported public npm installation command. The SDK README's historical “zero importers” statement is superseded by this CLI implementation.
+`packages/mcp-server` (`generatorai-mcp`) is an MCP stdio server that acts on a **running** GeneratorAI server as a paired device of platform `mcp`. It serves the server's platform tools (`/api/platform-tools`: chats, projects, agents, automations, Needs you, chat files), its workflow tools (`/api/workflow-tools`), `generatorai_send_prompt`, and the workflow-authoring skill as resources. The server runs the same handlers in-app agents get, so limits and refusals match. Setup, flags and the tool list: [SDK and MCP bridge](../clients/sdk-mcp.md).
 
 ## Source evidence
 

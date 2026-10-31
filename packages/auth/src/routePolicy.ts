@@ -182,6 +182,11 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // answering and cancelling need `exec:agent`, a draft `write:workflows`;
   // listing, describing, validating and planning only read.
   { prefix: '/workflow-tools', read: ['read:workflows'], write: ['read:workflows'] },
+  // The platform tools of an external agent (D-181): each tool checks its own
+  // scopes in the handler — writing a chat needs `write:chats`, triggering an
+  // automation `exec:agent`, projects `read:projects`, Needs you
+  // `read:activity`, chat files `read:files`.
+  { prefix: '/platform-tools', read: ['read:chats'], write: ['read:chats'] },
   // Uploading a script installs code that runs in-process with the server's
   // privileges (A-19): admin only, on top of the operator opt-in flags.
   {
