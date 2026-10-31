@@ -346,6 +346,8 @@ export class SessionComposer {
       turnOf: () => this.turns.get(i.conversationId),
     });
     this.binder.hooks(cfg, target);
+    // D-182 — code mode LAST: `run_code` lists and calls every tool bound above.
+    this.binder.codeMode(cfg, target);
     if (levels && toolCount(cfg) > toolsBefore) {
       if (levels.hostTools === 'none') {
         warnings.push({

@@ -5,7 +5,7 @@
 // tool set and the hook bridge, for either owner (chat or stage). The chat
 // create path is the canonical order and must stay byte-identical (R-10):
 // browser → computer → widgets → SCM hint → [MCP] → custom → orchestrator →
-// workflows → GitHub → hooks. The composer calls the methods in that order; each one
+// workflows → GitHub → hooks → code mode. The composer calls the methods in that order; each one
 // appends its tools and system block and nothing else. The workflow tools
 // (P06) come after every existing tool, so a session without them keeps
 // its tool prefix byte-identical.
@@ -20,8 +20,9 @@ import { buildOrchestratorToolSet } from '../../tools/orchestrator/index.js';
 import { isExtensionAuthorToolName } from '../../tools/extensionAuthorTools.js';
 import { buildWorkflowToolSet, WORKFLOW_AUTHORING_HINT, type WorkflowToolCaller, type WorkflowToolTurn } from '../../tools/workflows/index.js';
 import { buildGitHubToolSet, GITHUB_MERGE_TOOL_NAME, GITHUB_READ_TOOL_NAMES, GITHUB_TOOLS_HINT } from '../../tools/github/index.js';
+import { buildCodeModeTool } from '../../tools/codeMode/index.js';
 
-import type { ToolCallContext } from '../../domain/ports/IAgentHarness.js';
+import type { ToolCallContext, ToolDefinition } from '../../domain/ports/IAgentHarness.js';
 import { askBeforeActing, askBeforeRunning, type GatePort } from './gates.js';
 import { ORCHESTRATOR_SYSTEM_PROMPT } from '../orchestrator/prompts.js';
 import type { StageOrchestratorParent } from '../orchestrator/OrchestratorService.js';
@@ -311,6 +312,17 @@ export class PlatformToolBinder {
     } catch (err) {
       console.warn(`[PlatformToolBinder] GitHub tool registration failed for ${ownerTag(t.owner)}:`, err);
     }
+  }
+
+  /**
+   * D-182 — code mode: `run_code` over every tool already bound, when the
+   * owner's `codeMode` group is on. Called after every other tool set (it
+   * lists and calls them), so it is the last tool in the list (R-10).
+   */
+  codeMode(cfg: ConversationConfig, t: BindTarget): void {
+    if (!t.groups.codeMode) return;
+    const existing = Array.isArray(cfg['tools']) ? (cfg['tools'] as ToolDefinition[]) : [];
+    appendTools(cfg, [buildCodeModeTool(existing, { owner: ownerTag(t.owner) })]);
   }
 
   /** The synchronous hook bridge (HKS-01), one factory for both owners. */

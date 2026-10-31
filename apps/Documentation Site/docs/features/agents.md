@@ -29,9 +29,18 @@ The instruction body has a 32 KiB hard limit and an 8 KiB warning threshold in t
 
 ## Capabilities and runtime
 
-Tool groups include browser, widgets, extension authoring, orchestration, file read, file write, shell, and web access. A persisted group can be On, Off, or inherited. Disabling a group is a policy decision, not a request for the model to voluntarily avoid it.
+Tool groups include browser, widgets, extension authoring, orchestration, file read, file write, shell, web access, workflows, workflow authoring and code mode. A persisted group can be On, Off, or inherited. Disabling a group is a policy decision, not a request for the model to voluntarily avoid it.
 
 Extension authoring is off by default because it writes and hot-loads executable extensions. Orchestration is enabled for orchestrator agents. Selected MCP servers must come from the vetted registry; an agent definition does not accept arbitrary inline server configurations.
+
+### Code mode
+
+**Code mode** (tool group `codeMode`, off by default) gives the agent one more tool, `run_code`: the agent writes a short async JavaScript script that calls its other tools as functions (`await tools.<name>(args)`), so it can loop over results, filter them and chain many calls in one step instead of one model turn per call. Turn it on per agent (Agents › Capabilities) or per workflow stage (the stage's agent overrides); plain chats get it only through an agent that enables it.
+
+- The script runs in QuickJS compiled to WebAssembly. It sees only `tools` and `console`: no files, network, processes, timers or imports.
+- Limits per script: 64 MB of memory, a deadline (`timeoutSeconds`, default 60 s, at most 300 s, tool calls and approvals included), 200 tool calls and 24,000 characters of output (cut and marked `truncated` beyond that).
+- Each `tools.<name>()` call runs the same tool the agent could call directly, with the same approvals, plan-mode refusals and per-tool time limits. A refused or failing call throws an error the script can catch. Built-in provider tools (Read, Bash, …) and external MCP servers are not callable from a script; the tool's description lists what is.
+- The transcript shows a **Ran code** step with the script, each call (tool, OK or failed, duration), the logs and the result.
 
 Runtime settings include provider, model, reasoning effort, context tier, maximum turns, permission mode, and default agent mode. Empty fields inherit from the binding site or server defaults. Provider support differs; the editor and resolver can report unsupported fields, missing skills, disabled servers, incomplete credentials, and unavailable team agents.
 

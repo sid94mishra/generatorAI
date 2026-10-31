@@ -45,6 +45,7 @@ export const AgentToolPolicySchema = z
     web: z.boolean().optional().describe('Web fetch and search tools'),
     workflows: z.boolean().optional().describe('Workflow tools: list, describe, run, check, respond to an approval, cancel'),
     workflowAuthoring: z.boolean().optional().describe('Workflow authoring tools: guide, validate, plan, create a draft'),
+    codeMode: z.boolean().optional().describe('Code mode: run_code scripts that call the session tools'),
   })
   .strict()
   .describe('Tool-group delta over the bound agent');

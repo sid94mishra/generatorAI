@@ -59,6 +59,11 @@ export interface AgentToolPolicy {
   workflows: boolean;
   /** The workflow authoring tools (guide, validate, plan, create a draft). Granted per agent, never a default. */
   workflowAuthoring: boolean;
+  /**
+   * Code mode (D-182): `run_code`, a QuickJS-wasm script that calls the session's other tools as functions.
+   * Off by default; turned on per agent or stage.
+   */
+  codeMode: boolean;
 }
 
 export const AGENT_TOOL_GROUPS: readonly (keyof AgentToolPolicy)[] = [
@@ -72,6 +77,7 @@ export const AGENT_TOOL_GROUPS: readonly (keyof AgentToolPolicy)[] = [
   'web',
   'workflows',
   'workflowAuthoring',
+  'codeMode',
 ] as const;
 
 /** Platform defaults (L0) when no level expresses an opinion. */
@@ -93,6 +99,8 @@ export const DEFAULT_AGENT_TOOL_POLICY: AgentToolPolicy = {
   // Like extensionAuthoring: an agent must be granted it. Agent-authored
   // workflows are drafts a person publishes (PD-14).
   workflowAuthoring: false,
+  // Opt-in (D-182): one more tool and a long description on every turn.
+  codeMode: false,
 };
 
 export interface AgentRuntimePolicy {

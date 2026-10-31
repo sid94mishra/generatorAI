@@ -106,6 +106,8 @@ export const TOOL_VERB_OVERRIDES: Readonly<Record<string, { done: string; live: 
   github_comment_issue: { done: 'Commented on issue', live: 'Commenting on issue' },
   github_close_issue: { done: 'Closed issue', live: 'Closing issue' },
   github_merge_pull_request: { done: 'Merged pull request', live: 'Merging pull request' },
+  // D-182 — code mode: a script over the session's tools, not a shell command.
+  run_code: { done: 'Ran code', live: 'Running code' },
 };
 
 /**
@@ -129,6 +131,7 @@ const TOOL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
   github_comment_issue: 'Comment on GitHub issue',
   github_close_issue: 'Close GitHub issue',
   github_merge_pull_request: 'Merge pull request',
+  run_code: 'Run code',
 };
 
 /** The orchestrator's own bookkeeping tools (spawning is `delegate`): plain tool calls, not sub-agents. */
@@ -239,6 +242,8 @@ export function toolStepKind(toolName: string): StepKind {
   if (n === 'toolsearch' || ORCHESTRATOR_TOOLS.has(n)) return 'tool';
   // D-146 — before the substring rules, which would read `github_create_issue` as a file edit.
   if (n.startsWith('github_')) return 'tool';
+  // D-182 — before the substring rules, which would fold `run_code` into "Ran N commands".
+  if (n === 'run_code') return 'tool';
   if (n === 'todowrite' || n === 'update_plan' || n === 'exit_plan_mode') return 'plan';
   if (isShellTool(n)) return 'run';
   if (n.startsWith('computer_')) return 'computer';

@@ -164,6 +164,15 @@ Workflow tools stay as they are (already one registry).
   plan-mode refusals and audit apply unchanged.
 - The tool description lists the callable tools as TypeScript-style signatures generated from their JSON schemas.
 - Transcript card: the script (`CodeBlock`), each call (tool, ok/failed, ms), logs and result.
+- Built (2026-10-31): `packages/core/src/tools/codeMode/` (sandbox, signatures, `run_code`), bound by
+  `PlatformToolBinder.codeMode()` after every other tool set; card `blocks/transcript/ToolCallCard/RunCodeCard.tsx`.
+  QuickJS build: `quickjs-emscripten-core` + `@jitl/quickjs-singlefile-mjs-release-sync` 0.32.0 (MIT) with host
+  promises (`context.newPromise`), not asyncify: an asyncified host function cannot be called from a promise job (any
+  call after the script's first `await`), cannot nest and cannot overlap (`Promise.all`). The `singlefile` variant
+  embeds the wasm in its JS module, so esbuild inlines it into `server.mjs` and no `.wasm` file is located at runtime
+  (dev, tests, the bundle and the packaged desktop app alike). Calls go through the session's handlers, so handler-level
+  gates apply; a provider's own wrapper (Copilot's native prompt for host tools, the hook bridge, a transcript event
+  per call) does not run for calls made from a script — the `calls` trace stands in for the last.
 
 ## 7. Verification
 - Per feature: typecheck, lint, check:design, build, related unit tests, new tests for branchy logic.

@@ -192,6 +192,10 @@
                         "workflowAuthoring": {
                           "type": "boolean",
                           "description": "Workflow authoring tools: guide, validate, plan, create a draft"
+                        },
+                        "codeMode": {
+                          "type": "boolean",
+                          "description": "Code mode: run_code scripts that call the session tools"
                         }
                       },
                       "additionalProperties": false,

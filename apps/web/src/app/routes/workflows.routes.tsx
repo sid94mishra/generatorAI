@@ -35,8 +35,9 @@ export const workflowsRoutes: RouteObject[] = [
     () =>
       Promise.all([
         import('@/app/registries/workflowTranscriptCards.js'),
+        import('@/app/registries/codeModeTranscriptCards.js'),
         import('@/features/workflows/run/WorkflowRunPage.js'),
-      ]).then(([, m]) => ({ default: m.WorkflowRunPage })),
+      ]).then(([, , m]) => ({ default: m.WorkflowRunPage })),
     { nav: 'workflows', title: 'Workflow Run' },
   ),
 ];

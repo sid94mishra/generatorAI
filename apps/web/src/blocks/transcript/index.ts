@@ -20,6 +20,7 @@ export {
   type ToolCardContext,
   type ToolCardOpenIn,
 } from './ToolCallCard/toolCardRegistry.js';
+export { RunCodeCard, RUN_CODE_TOOL_CARD, parseRunCodeReport, type RunCodeReport, type RunCodeCall } from './ToolCallCard/RunCodeCard.js';
 export { AssistantText, type AssistantTextProps } from './AssistantText/AssistantText.js';
 export { jsonAnswerMarkdown, jsonBlock } from './AssistantText/jsonAnswer.js';
 export { PermissionCard, type PermissionCardProps } from './gates/PermissionCard.js';

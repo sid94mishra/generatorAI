@@ -71,6 +71,7 @@ function composedConfig(calls: string[]): CreateConversationParams {
       web: true,
       workflows: false,
       workflowAuthoring: false,
+      codeMode: false,
     },
   };
   binder.custom(cfg, target);
