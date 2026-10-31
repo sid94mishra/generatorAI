@@ -18,20 +18,24 @@ import * as path from 'node:path';
 import type { ILogger } from '@generatorai/shared';
 
 /**
- * The ffmpeg to spawn.
+ * The ffmpeg to spawn, as an absolute path, or null when there is none.
  *
- * Bare `'ffmpeg'` relies on PATH, and a dev server inherits the PATH of the
- * shell that launched it — routinely one that predates the install. The spawn
- * then fails with ENOENT *asynchronously*, so the cast reports itself started
- * and quietly produces no file. Falling back to the usual Windows install roots
- * is what makes video work without relaunching the server.
+ * Checked before spawning: a missing binary fails with ENOENT *asynchronously*, after the cast has already reported
+ * itself started, so the panel said "recording" and nothing was ever written. PATH alone is not enough either: a
+ * macOS app launched from the Dock gets launchd's PATH (no Homebrew), and a dev server inherits the PATH of the shell
+ * that launched it — routinely one that predates the install. So the usual install roots are searched too.
  */
-function resolveFfmpeg(): string {
-  if (process.platform !== 'win32') return 'ffmpeg';
-  for (const dir of (process.env['PATH'] ?? '').split(path.delimiter)) {
-    if (dir && fs.existsSync(path.join(dir, 'ffmpeg.exe'))) return 'ffmpeg';
+export function findFfmpeg(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env): string | null {
+  const exe = platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+  const dirs = (env['PATH'] ?? '').split(platform === 'win32' ? ';' : ':').filter(Boolean);
+  if (platform === 'darwin') dirs.push('/opt/homebrew/bin', '/usr/local/bin', '/opt/local/bin');
+  if (platform === 'linux') dirs.push('/usr/bin', '/usr/local/bin', '/snap/bin');
+  for (const dir of dirs) {
+    const candidate = path.join(dir, exe);
+    if (fs.existsSync(candidate)) return candidate;
   }
-  const local = process.env['LOCALAPPDATA'] ?? '';
+  if (platform !== 'win32') return null;
+  const local = env['LOCALAPPDATA'] ?? '';
   for (const root of [path.join(local, 'ffmpeg'), path.join(local, 'Microsoft', 'WinGet', 'Packages')]) {
     let entries: string[];
     try {
@@ -40,11 +44,56 @@ function resolveFfmpeg(): string {
       continue;
     }
     for (const entry of entries) {
-      const exe = path.join(root, entry, 'bin', 'ffmpeg.exe');
-      if (fs.existsSync(exe)) return exe;
+      const candidate = path.join(root, entry, 'bin', 'ffmpeg.exe');
+      if (fs.existsSync(candidate)) return candidate;
     }
   }
-  return 'ffmpeg';
+  return null;
+}
+
+/** How to get ffmpeg on this OS — said when Screen video cannot start without it. */
+export function ffmpegInstallHint(platform: NodeJS.Platform = process.platform): string {
+  const how =
+    platform === 'darwin'
+      ? 'brew install ffmpeg'
+      : platform === 'win32'
+        ? 'winget install ffmpeg'
+        : 'your package manager, e.g. sudo apt install ffmpeg';
+  return `Screen video needs ffmpeg, which is not installed. Install it (${how}), then try again. Live preview works without it.`;
+}
+
+/**
+ * ffmpeg's capture input for this OS, or a reason it has none.
+ *
+ *  - Windows: `gdigrab`, the named window or the primary display.
+ *  - macOS: `avfoundation`'s first screen (it cannot capture one window); needs the Screen Recording permission.
+ *  - Linux: `x11grab` on `$DISPLAY`. Wayland exposes no screen to ffmpeg without a portal, so it is refused.
+ */
+export function captureInput(
+  platform: NodeJS.Platform,
+  opts: { windowTitle?: string | undefined; bounds: { width: number; height: number } | null; env?: NodeJS.ProcessEnv },
+): { args: string[] } | { unsupported: string } {
+  const env = opts.env ?? process.env;
+  if (platform === 'win32') {
+    const source = opts.windowTitle ? `title=${opts.windowTitle}` : 'desktop';
+    const region =
+      !opts.windowTitle && opts.bounds
+        ? ['-offset_x', '0', '-offset_y', '0', '-video_size', `${opts.bounds.width}x${opts.bounds.height}`]
+        : [];
+    return { args: ['-f', 'gdigrab', '-framerate', '15', '-draw_mouse', '1', ...region, '-i', source] };
+  }
+  if (platform === 'darwin') {
+    return { args: ['-f', 'avfoundation', '-capture_cursor', '1', '-framerate', '15', '-i', 'Capture screen 0:none'] };
+  }
+  const display = env['DISPLAY'];
+  if (!display) {
+    return {
+      unsupported: env['WAYLAND_DISPLAY']
+        ? 'Screen video is not available on a Wayland session. Live preview still records each action.'
+        : 'Screen video needs an X display ($DISPLAY is not set). Live preview still records each action.',
+    };
+  }
+  return { args: ['-f', 'x11grab', '-draw_mouse', '1', '-framerate', '15', '-i', display.includes('.') ? display : `${display}.0`] };
 }
 
 /**
@@ -168,26 +217,21 @@ export class ScreenCast {
       // The recorder created it a moment ago; a race here is not a failure.
     }
 
-    // Capturing the target window rather than the desktop keeps the frame on
-    // what the agent is driving — a 4K desktop is mostly black bars and other
-    // people's windows. Falls back to the desktop when no window is named,
-    // which is the case before the agent has read anything.
-    const source = windowTitle ? `title=${windowTitle}` : 'desktop';
+    // Checked first: a missing ffmpeg fails asynchronously, after this cast had already said "recording".
+    const ffmpeg = findFfmpeg();
+    if (!ffmpeg) return { active: false, detail: ffmpegInstallHint() };
 
-    // `desktop` means the whole VIRTUAL desktop, so a second monitor is encoded
-    // as dead pixels: measured 5760x2160 for a 1920x1200 primary, and a 406 MB
-    // file that was mostly black. Bounding it to the main display is what the
-    // per-turn frames already show, and what the agent's coordinates refer to.
-    const region =
-      !windowTitle && bounds
-        ? ['-offset_x', '0', '-offset_y', '0', '-video_size', `${bounds.width}x${bounds.height}`]
-        : [];
+    // Windows captures the target window rather than the desktop, which keeps the frame on what the agent is
+    // driving; with no window named it is bounded to the primary display — `desktop` alone is the whole VIRTUAL
+    // desktop: measured 5760x2160 for a 1920x1200 primary, and a 406 MB file that was mostly black.
+    const input = captureInput(process.platform, { windowTitle, bounds });
+    if ('unsupported' in input) return { active: false, detail: input.unsupported };
 
     // `zerolatency` and a 2 s keyframe interval keep the first fragment close
     // behind the action — without them a viewer waits for the first GOP.
     const args = [
       '-y', '-loglevel', 'error',
-      '-f', 'gdigrab', '-framerate', '15', '-draw_mouse', '1', ...region, '-i', source,
+      ...input.args,
       // Even dimensions: libx264 rejects an odd width or height, and a window
       // can be any size the user dragged it to.
       '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
@@ -199,10 +243,10 @@ export class ScreenCast {
 
     let child: ChildProcess;
     try {
-      child = spawn(resolveFfmpeg(), args, { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true });
+      child = spawn(ffmpeg, args, { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true });
     } catch (err) {
       this.logger.warn?.(`[ScreenCast] ffmpeg could not start: ${String(err)}`);
-      return { active: false, detail: 'ffmpeg is not installed or not on PATH.' };
+      return { active: false, detail: ffmpegInstallHint() };
     }
 
     const cast: Cast = {
@@ -219,7 +263,7 @@ export class ScreenCast {
     try {
       fs.appendFileSync(
         path.join(outputDir, 'screencast.log'),
-        `capture region: ${region.length > 0 ? `${bounds?.width}x${bounds?.height}` : 'full virtual desktop (no screen size available)'}\n`,
+        `capture input: ${input.args.join(' ')}\n`,
       );
     } catch {
       // Diagnostics must never take the capture down with them.

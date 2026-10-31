@@ -1871,6 +1871,18 @@ onnxruntime binding is missing. The models still download on first use, into one
 overrides) — never inside the installed app. The guarded dynamic imports stay, so a
 broken install degrades to "voice input unavailable" instead of a server that will not start.
 
+### D-185 Computer use media and screen video on every OS (derived, 2026-10-31) — Final
+Live preview frames, replay frames and the screen video are fetched with the session's credentials and shown as blob
+URLs, like the Now frame — a media element cannot send them, and the desktop app's `<img>`/`<video>` were refused (401).
+The screen video is shown once the recording stops (a file still being written is not served whole). Screen video uses
+ffmpeg's `gdigrab` on Windows, `avfoundation`'s first screen on macOS (no per-window capture there; it needs Screen
+Recording) and `x11grab` on `$DISPLAY` on Linux; a Wayland-only session is refused with a reason. ffmpeg is looked up
+before spawning (PATH plus each OS's install roots — a Dock-launched macOS app has no Homebrew PATH), and a missing one
+is said in the Computer tab with the install command; the cast no longer reports "recording" while nothing is written.
+With no frontmost window the bridge reads the largest open window, and the driver's deliberate empty read
+(`ax_window_unresolved`) is a refusal carrying its advice. The approval card words actions for people ("Open
+Calculator?"), from `computerConsentTitle` in the shared contract.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

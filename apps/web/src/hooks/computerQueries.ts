@@ -62,6 +62,8 @@ export const computerKeys = {
   recording: (workspaceId: string) => ['computer', workspaceId, 'recording'] as const,
   turns: (workspaceId: string) => ['computer', workspaceId, 'turns'] as const,
   frame: (workspaceId: string, artifactId: string) => ['computer', workspaceId, 'frame', artifactId] as const,
+  turnFrame: (workspaceId: string, turn: string, kind: string) => ['computer', workspaceId, 'turn-frame', turn, kind] as const,
+  video: (workspaceId: string, nonce: number) => ['computer', workspaceId, 'video', nonce] as const,
 };
 
 /**
@@ -410,6 +412,29 @@ export function useComputerPreviewFeed(workspaceId: string | undefined, enabled:
   return feed;
 }
 
+/**
+ * A fetched capture as an object URL. The previous one stays up while the next loads (no blank flash), so a URL is
+ * revoked only when it is replaced, and on unmount.
+ */
+function useBlobUrl(blob: Blob | undefined): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  const current = useRef<string | null>(null);
+  useEffect(() => {
+    if (!blob) return;
+    const next = URL.createObjectURL(blob);
+    if (current.current) URL.revokeObjectURL(current.current);
+    current.current = next;
+    setUrl(next);
+  }, [blob]);
+  useEffect(
+    () => () => {
+      if (current.current) URL.revokeObjectURL(current.current);
+    },
+    [],
+  );
+  return url;
+}
+
 /** A window capture as an object URL (revoked when it changes or on unmount). */
 export function useComputerFrameUrl(workspaceId: string | undefined, artifactId: string | null): string | null {
   const platform = usePlatform();
@@ -420,35 +445,61 @@ export function useComputerFrameUrl(workspaceId: string | undefined, artifactId:
     staleTime: Infinity,
     gcTime: 60_000,
   });
-  const [url, setUrl] = useState<string | null>(null);
-  const current = useRef<string | null>(null);
-  // The previous frame stays up while the next one loads (no blank flash), so
-  // a URL is revoked only when it is replaced, and on unmount.
-  useEffect(() => {
-    if (!frame.data) return;
-    const next = URL.createObjectURL(frame.data);
-    if (current.current) URL.revokeObjectURL(current.current);
-    current.current = next;
-    setUrl(next);
-  }, [frame.data]);
-  useEffect(
-    () => () => {
-      if (current.current) URL.revokeObjectURL(current.current);
-    },
-    [],
-  );
-  return url;
+  return useBlobUrl(frame.data);
 }
 
-/** `src` builders for replay frames and the screen-cast video. */
-export function useComputerMediaUrls(workspaceId: string | undefined) {
+/**
+ * A replay turn frame as an object URL. Media elements cannot carry the session's credentials, so captures are
+ * fetched and handed over as blobs — given the bare URL, the desktop app's images were refused (401).
+ */
+export function useComputerTurnFrameUrl(
+  workspaceId: string | undefined,
+  frame: { turn: string; kind: ComputerReplayFrameKind } | null,
+): string | null {
   const platform = usePlatform();
+  const query = useQuery({
+    queryKey: computerKeys.turnFrame(workspaceId ?? '', frame?.turn ?? '', frame?.kind ?? ''),
+    queryFn: () => platform.getComputerMedia(workspaceId!, frame!),
+    enabled: Boolean(workspaceId && frame),
+    staleTime: Infinity,
+    gcTime: 60_000,
+  });
+  return useBlobUrl(query.data);
+}
+
+/** Fetch a turn frame ahead of showing it, so stepping through a replay does not flash. */
+export function usePrefetchComputerTurnFrame(workspaceId: string | undefined) {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
   return useMemo(
-    () => ({
-      turnFrame: (turn: string, kind: ComputerReplayFrameKind) =>
-        workspaceId ? platform.computerMediaUrl(workspaceId, { turn, kind }) : '',
-      video: (nonce: number) => (workspaceId ? platform.computerMediaUrl(workspaceId, { video: nonce }) : ''),
-    }),
-    [platform, workspaceId],
+    () => (frame: { turn: string; kind: ComputerReplayFrameKind }) => {
+      if (!workspaceId) return;
+      void queryClient.prefetchQuery({
+        queryKey: computerKeys.turnFrame(workspaceId, frame.turn, frame.kind),
+        queryFn: () => platform.getComputerMedia(workspaceId, frame),
+        staleTime: Infinity,
+      });
+    },
+    [platform, queryClient, workspaceId],
   );
+}
+
+/**
+ * The finished screen video as an object URL — read once the recording stops (`enabled`); a file still being
+ * written is not served whole.
+ */
+export function useComputerVideoUrl(workspaceId: string | undefined, nonce: number, enabled: boolean): {
+  url: string | null;
+  error: boolean;
+} {
+  const platform = usePlatform();
+  const query = useQuery({
+    queryKey: computerKeys.video(workspaceId ?? '', nonce),
+    queryFn: () => platform.getComputerMedia(workspaceId!, { video: nonce }),
+    enabled: Boolean(workspaceId) && enabled,
+    staleTime: Infinity,
+    gcTime: 30_000,
+    retry: false,
+  });
+  return { url: useBlobUrl(query.data), error: query.isError };
 }

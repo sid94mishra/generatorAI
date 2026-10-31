@@ -2773,7 +2773,20 @@ export class HttpPlatformClient implements IPlatformClient {
     return response.blob();
   }
 
-  /** `src` for a replay turn frame or the screen-cast video (media elements load it themselves). */
+  /**
+   * A replay turn frame or the screen-cast video, fetched with the session's credentials. A media element cannot
+   * send them itself: given the bare URL the desktop app's `<img>`/`<video>` were refused (401).
+   */
+  async getComputerMedia(
+    workspaceId: string,
+    media: { turn: string; kind: ComputerReplayFrameKind } | { video: number },
+  ): Promise<Blob> {
+    const response = await getAuthRuntime().fetch(this.computerMediaUrl(workspaceId, media), { cache: 'no-store' });
+    if (!response.ok) throw new ApiError(response.status, `HTTP_${String(response.status)}`, 'Capture not available');
+    return response.blob();
+  }
+
+  /** The URL of a replay turn frame or the screen-cast video (read through `getComputerMedia`). */
   computerMediaUrl(
     workspaceId: string,
     media: { turn: string; kind: ComputerReplayFrameKind } | { video: number },

@@ -25,7 +25,7 @@ import {
   useComputerActivity,
   useComputerDesk,
   useComputerFrameUrl,
-  useComputerMediaUrls,
+  useComputerTurnFrameUrl,
   useComputerPreviewFeed,
   useComputerRecording,
   useComputerRuntime,
@@ -93,7 +93,6 @@ function ComputerDesk({ workspaceId, active }: { workspaceId: string; active: bo
   const desk = useComputerDesk(workspaceId).data;
   const setControl = useSetComputerControl(workspaceId);
   const preview = useComputerPreviewFeed(workspaceId, recording.recording && active);
-  const media = useComputerMediaUrls(workspaceId);
   const frameUrl = useComputerFrameUrl(workspaceId, pinned?.artifactId ?? activity.latestFrameId);
 
   const now = useExpiryTick(desk?.pending.map((p) => p.expiresAt) ?? []);
@@ -152,6 +151,7 @@ function ComputerDesk({ workspaceId, active }: { workspaceId: string; active: bo
   }, [preview.frame, preview.cursor, preview.window, frameSize]);
 
   const livePreview = view === 'now' && recording.recording && preview.frame && !pinned ? preview.frame : null;
+  const liveSrc = useComputerTurnFrameUrl(workspaceId, livePreview ? { turn: livePreview.turn, kind: livePreview.kind } : null);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface" data-testid="computer-panel">
@@ -201,6 +201,12 @@ function ComputerDesk({ workspaceId, active }: { workspaceId: string; active: bo
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="flex flex-col gap-2 p-3">
           {recording.refusal ? <Callout tone="warn">{recording.refusal.message}</Callout> : null}
+          {/* Screen video asked for but not running (no ffmpeg, an unsupported display): say so — the preview runs on. */}
+          {recording.cast && !recording.cast.active && recording.cast.detail ? (
+            <Callout tone="warn" title="No screen video">
+              {recording.cast.detail}
+            </Callout>
+          ) : null}
           {recording.detail && !recording.recording ? <Callout tone="warn">{recording.detail}</Callout> : null}
           {runtime && runtime.enabled && runtime.state !== 'ready' ? (
             <Callout
@@ -255,12 +261,12 @@ function ComputerDesk({ workspaceId, active }: { workspaceId: string; active: bo
                   entries={activity.entries}
                   videoNonce={videoNonce}
                 />
-              ) : livePreview ? (
+              ) : livePreview && liveSrc ? (
                 // The cursor is an overlay window, never in the capture — which
                 // is exactly why it travels as coordinates.
                 <div className="relative inline-block max-w-full">
                   <img
-                    src={media.turnFrame(livePreview.turn, livePreview.kind)}
+                    src={liveSrc}
                     alt={`Live — ${livePreview.tool ?? 'window'}`}
                     onLoad={(e) => setFrameSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
                     className="max-h-96 max-w-full rounded-control border border-line-soft object-contain"

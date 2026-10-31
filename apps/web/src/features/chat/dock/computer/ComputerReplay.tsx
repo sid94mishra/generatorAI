@@ -13,8 +13,10 @@ import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { Slider } from '@/ui/primitives/Slider/Slider.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import {
-  useComputerMediaUrls,
   useComputerReplayTurns,
+  useComputerTurnFrameUrl,
+  useComputerVideoUrl,
+  usePrefetchComputerTurnFrame,
   type ComputerRecordingState,
   type ComputerReplayTurn,
 } from '@/hooks/computerQueries.js';
@@ -53,7 +55,8 @@ export function ComputerReplay({ workspaceId, recording, entries, videoNonce }: 
 }
 
 function CastReplay({ workspaceId, recording, entries, videoNonce }: ComputerReplayProps) {
-  const media = useComputerMediaUrls(workspaceId);
+  // Read once the recording stops: a file still being written is not served whole.
+  const video = useComputerVideoUrl(workspaceId, videoNonce, !recording.recording);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [duration, setDuration] = useState(0);
   const [time, setTime] = useState(0);
@@ -81,18 +84,29 @@ function CastReplay({ workspaceId, recording, entries, videoNonce }: ComputerRep
 
   return (
     <div className="flex w-full flex-col gap-2">
-      <video
-        key={videoNonce}
-        ref={videoRef}
-        autoPlay={recording.recording}
-        muted
-        playsInline
-        controls={!recording.recording}
-        onDurationChange={(e) => setDuration(e.currentTarget.duration || 0)}
-        onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
-        className="max-h-96 w-full rounded-control border border-line-soft bg-sunken object-contain"
-        src={media.video(videoNonce)}
-      />
+      {recording.recording ? (
+        <EmptyState
+          icon="history"
+          title="Recording the screen"
+          description="The video appears here when you stop the preview. Now shows each action as it happens."
+        />
+      ) : video.url ? (
+        <video
+          key={videoNonce}
+          ref={videoRef}
+          muted
+          playsInline
+          controls
+          onDurationChange={(e) => setDuration(e.currentTarget.duration || 0)}
+          onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
+          className="max-h-96 w-full rounded-control border border-line-soft bg-sunken object-contain"
+          src={video.url}
+        />
+      ) : video.error ? (
+        <EmptyState icon="history" title="No screen video" description="The recording produced no video file." />
+      ) : (
+        <EmptyState icon="history" title="Loading the video…" />
+      )}
       {markers.length > 0 ? (
         <>
           <Slider
@@ -133,7 +147,7 @@ function CastReplay({ workspaceId, recording, entries, videoNonce }: ComputerRep
 }
 
 function TurnReplay({ workspaceId, recording, videoNonce }: Omit<ComputerReplayProps, 'entries'>) {
-  const media = useComputerMediaUrls(workspaceId);
+  const prefetch = usePrefetchComputerTurnFrame(workspaceId);
   const { data } = useComputerReplayTurns(workspaceId, { enabled: true, live: recording.recording });
   const turns = useMemo(() => data ?? [], [data]);
   const [playhead, setPlayhead] = useState(0);
@@ -166,14 +180,13 @@ function TurnReplay({ workspaceId, recording, videoNonce }: Omit<ComputerReplayP
 
   const index = Math.min(playhead, Math.max(0, turns.length - 1));
   const active = turns[index] ?? null;
+  const activeSrc = useComputerTurnFrameUrl(workspaceId, active ? { turn: active.turn, kind: bestFrame(active) } : null);
 
-  // Decode the next frame before it is shown, so stepping does not flash.
+  // Fetch the next frame before it is shown, so stepping does not flash.
   useEffect(() => {
     const upcoming = turns[index + 1];
-    if (!upcoming) return;
-    const img = new window.Image();
-    img.src = media.turnFrame(upcoming.turn, bestFrame(upcoming));
-  }, [turns, index, media]);
+    if (upcoming) prefetch({ turn: upcoming.turn, kind: bestFrame(upcoming) });
+  }, [turns, index, prefetch]);
 
   if (!active) {
     return (
@@ -188,11 +201,13 @@ function TurnReplay({ workspaceId, recording, videoNonce }: Omit<ComputerReplayP
   return (
     <div className="flex w-full flex-col gap-2">
       <div className="flex min-h-40 items-center justify-center">
-        <img
-          src={media.turnFrame(active.turn, bestFrame(active))}
-          alt={`Turn ${index + 1} — ${active.tool ?? 'window'}`}
-          className="max-h-96 max-w-full rounded-control border border-line-soft object-contain"
-        />
+        {activeSrc ? (
+          <img
+            src={activeSrc}
+            alt={`Turn ${index + 1} — ${active.tool ?? 'window'}`}
+            className="max-h-96 max-w-full rounded-control border border-line-soft object-contain"
+          />
+        ) : null}
       </div>
       <div className="flex items-center gap-2">
         <IconButton
