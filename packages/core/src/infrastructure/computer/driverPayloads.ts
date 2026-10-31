@@ -14,6 +14,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ComputerAppInfo, ComputerElement, ComputerWindowInfo } from '@generatorai/shared';
+import type { ComputerRefusal } from '../../domain/ports/IComputerBridge.js';
 
 type Json = Record<string, unknown>;
 
@@ -322,5 +323,28 @@ export function parseWindowState(structuredJson: string, filtered = false): Pars
       width !== undefined && height !== undefined
         ? { width, height, mimeType: asString(root['screenshot_mime_type']) ?? 'image/png' }
         : null,
+  };
+}
+
+/**
+ * `get_window_state` answered `degraded` with no snapshot and no elements: the driver refused to guess which
+ * accessibility tree belongs to the window (`ax_window_unresolved`), and its `escalation` says what would work —
+ * usually foreground delivery. A refusal, never an unrecognised payload. Null for any readable state.
+ */
+export function unreadableWindow(structuredJson: string): ComputerRefusal | null {
+  const root = parseJson('get_window_state', structuredJson);
+  const elements = root['elements'];
+  if (root['degraded'] !== true || root['snapshot_id'] !== undefined) return null;
+  if (Array.isArray(elements) && elements.length > 0) return null;
+  const reason = (asString(root['degraded_reason']) ?? '').split(/(?<=\.)\s/)[0]?.trim();
+  const escalation = isObject(root['escalation']) ? (root['escalation'] as Json) : undefined;
+  const foreground = escalation ? asString(escalation['recommended']) === 'foreground' : false;
+  return {
+    code: foreground ? 'background_unavailable' : 'target_lost',
+    message:
+      `The driver could not read this window's controls${reason ? ` (${reason})` : ''}. ` +
+      (foreground
+        ? 'It recommends foreground delivery: bring the window to the front, or pick a different window of this app, then snapshot again.'
+        : 'Snapshot again once the app settles, or pick a different window of this app.'),
   };
 }

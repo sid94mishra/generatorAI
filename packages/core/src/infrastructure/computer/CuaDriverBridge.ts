@@ -42,6 +42,7 @@ import type {
   ComputerElement,
   ComputerRefusalCode,
   ComputerSnapshot,
+  ComputerWindowInfo,
   ILogger,
 } from '@generatorai/shared';
 import type {
@@ -71,6 +72,7 @@ import {
   parseRecordingState,
   parseVerifyState,
   parseWindowState,
+  unreadableWindow,
 } from './driverPayloads.js';
 
 /**
@@ -715,7 +717,12 @@ export class CuaDriverBridge implements IComputerBridge {
       const refusal = this.refusalFor(result);
       if (refusal) return refuse(refusal);
 
-      const state = parseWindowState(this.requireStructured(result), req.query !== undefined);
+      const structured = this.requireStructured(result);
+      // The driver's deliberate empty read (it could not tie the window to its accessibility tree): say why, and
+      // what it recommends, instead of reporting a payload this build "does not recognise".
+      const unreadable = unreadableWindow(structured);
+      if (unreadable) return refuse(unreadable);
+      const state = parseWindowState(structured, req.query !== undefined);
       const windows = await this.windowsFor(connection, req.app.pid);
       const window = windows.find((w) => w.id === state.windowId);
 
@@ -1232,10 +1239,10 @@ export class CuaDriverBridge implements IComputerBridge {
     // `focused` is the frontmost on-screen window by the driver's stacking
     // order. Falling back past it matters: a newly created window that has not
     // been raised yet is still addressable, because input does not need focus.
-    return (windows.find((w) => w.focused) ?? windows.find((w) => !w.minimised) ?? windows[0])?.id ?? null;
+    return (windows.find((w) => w.focused) ?? largestOpenWindow(windows) ?? windows[0])?.id ?? null;
   }
 
-  private async windowsFor(connection: Connection, pid: number) {
+  private async windowsFor(connection: Connection, pid: number): Promise<ComputerWindowInfo[]> {
     const result = await this.call(connection, 'list_windows', { pid, on_screen_only: false });
     if (result.isError || !result.structuredJson) return [];
     return parseListWindows(result.structuredJson).get(pid) ?? [];
@@ -1794,4 +1801,24 @@ function mapRoute(route: number | undefined): ComputerActionPath {
 export function embeddedIdentity(check: ComputerRuntimeCheck, platform: NodeJS.Platform = process.platform): ComputerRuntimeCheck {
   if (platform !== 'darwin' || check.name !== 'bundle_identity' || check.status !== 'fail') return check;
   return { ...check, status: 'skip', message: 'Runs inside GeneratorAI.app, which holds its macOS permissions.' };
+}
+
+/**
+ * With no stacking order, the app's real window is the biggest one that is not minimised. List order is not a
+ * signal: measured on macOS Calculator without Screen Recording, every window reported off screen and the first
+ * five were 30 px tab-bar strips the accessibility layer cannot resolve — reading one returned an empty tree.
+ * Windows without bounds rank last, in list order.
+ */
+export function largestOpenWindow(windows: readonly ComputerWindowInfo[]): ComputerWindowInfo | undefined {
+  let best: ComputerWindowInfo | undefined;
+  let bestArea = -1;
+  for (const w of windows) {
+    if (w.minimised) continue;
+    const area = w.bounds ? Math.max(0, w.bounds.w) * Math.max(0, w.bounds.h) : 0;
+    if (area > bestArea) {
+      best = w;
+      bestArea = area;
+    }
+  }
+  return best;
 }

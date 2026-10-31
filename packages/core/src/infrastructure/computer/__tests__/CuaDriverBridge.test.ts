@@ -232,6 +232,65 @@ describe('CuaDriverBridge window selection', () => {
 
     expect(snapshots[0]?.['window_id']).toBe(22);
   });
+
+  it('takes the largest window when none is frontmost, not the first in the list', async () => {
+    // Measured on macOS Calculator without Screen Recording: every window off screen, the first ones 30 px strips.
+    const snapshots: Record<string, unknown>[] = [];
+    const fake = makeBridge({
+      reply: (tool, args) => {
+        if (tool === 'list_windows') {
+          return ok({
+            windows: [
+              { window_id: 1704, pid: 42, title: '', is_on_screen: false, bounds: { x: -570, y: -1080, width: 1920, height: 30 } },
+              { window_id: 745, pid: 42, title: '', is_on_screen: false, bounds: { x: 0, y: 0, width: 1280, height: 30 } },
+              { window_id: 120, pid: 42, title: '', is_on_screen: false, bounds: { x: 830, y: 392, width: 230, height: 408 } },
+            ],
+          });
+        }
+        if (tool === 'get_window_state') {
+          snapshots.push(args);
+          return ok({ ...SNAPSHOT_PAYLOAD, window_id: args['window_id'] });
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    await fake.bridge.snapshot(handle, { app: { appId: 'calculator', name: 'Calculator', pid: 42 }, window: { by: 'focused' } });
+
+    expect(snapshots[0]?.['window_id']).toBe(120);
+  });
+
+  it("reports the driver's deliberate empty read as a refusal with its advice", async () => {
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'list_windows') return ok(WINDOWS);
+        if (tool === 'get_window_state') {
+          return ok({
+            degraded: true,
+            degraded_reason:
+              'ax_window_unresolved: window_id 7 exists and is owned by pid 42, but none of the AXWindow elements reports it. The tree is returned EMPTY on purpose.',
+            elements: [],
+            elements_complete: false,
+            escalation: { reason: 'observation-only', recommended: 'foreground' },
+            pid: 42,
+            window_id: 7,
+            tree_markdown: '',
+          });
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    const result = await fake.bridge.snapshot(handle, { app: { appId: 'notepad', name: 'Notepad', pid: 42 }, window: { by: 'focused' } });
+
+    expect(result.ok).toBe(false);
+    expect(result.refusal?.code).toBe('background_unavailable');
+    expect(result.refusal?.message).toMatch(/ax_window_unresolved/);
+    expect(result.refusal?.message).toMatch(/foreground/);
+    expect(result.refusal?.message).not.toMatch(/does not recognise/);
+  });
 });
 
 describe('CuaDriverBridge session recovery', () => {
