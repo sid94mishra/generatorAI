@@ -41,6 +41,8 @@ export interface SideChatDockContextValue {
   discard: (chatId: string) => void;
   /** Close the tab of a side chat that no longer exists. */
   closeTab: (chatId: string) => void;
+  /** A message went out: its first one names the side chat (tab label, chip). */
+  refresh: (chatId: string) => void;
 }
 
 export const SideChatDockContext = createContext<SideChatDockContextValue | null>(null);
@@ -69,8 +71,9 @@ function SideChatView({ chatId }: { chatId: string }) {
   const send = useCallback(
     async ({ prompt, attachments, mode, chatRefs }: { prompt: string; attachments: File[]; mode?: 'auto' | 'plan'; chatRefs?: Array<{ chatId: string; mode: 'auto' | 'summary' | 'recent' | 'full' }> }) => {
       await sendPrompt({ prompt, attachments, ...(mode ? { mode } : {}), ...(chatRefs?.length ? { chatRefs } : {}) });
+      ctx.refresh(chatId);
     },
-    [sendPrompt],
+    [sendPrompt, ctx, chatId],
   );
 
   if (workspace.chatLoading) {

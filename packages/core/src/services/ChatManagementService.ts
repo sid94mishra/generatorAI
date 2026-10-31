@@ -2061,6 +2061,8 @@ export class ChatManagementService {
     this.cancelledTurns.delete(chatId);
     try {
 
+    await this.nameSideChatFromPrompt(chat, prompt);
+
     const agentMode = this.resolveAgentMode(chat, options?.mode);
 
     // The static pre-step: worktrees created, branches checked out, shadow
@@ -3049,6 +3051,21 @@ export class ChatManagementService {
       });
     }
     return created;
+  }
+
+  /**
+   * D-180 — a side chat opened without a prompt still carries its placeholder name ("Side chat", "Fork"); its first
+   * message names it, so its tab and a chip attaching it elsewhere say what it is about. Idempotent: the prompt
+   * route calls it before answering (so the client's refresh sees the name) and `sendPrompt` again for every caller.
+   */
+  async nameSideChatFromPrompt(chatOrId: Chat | string, prompt: string): Promise<void> {
+    const chat = typeof chatOrId === 'string' ? await this.chatRepo.getById(chatOrId) : chatOrId;
+    if (!chat.sideOfChatId || !chat.sideMode || chat.name !== sideChatName(chat.sideMode)) return;
+    const name = sideChatName(chat.sideMode, prompt);
+    if (name === chat.name) return;
+    chat.name = name;
+    await this.chatRepo.update(chat.id, { name });
+    await this.eventBus.emitGlobal({ kind: 'chat.updated', data: { chatId: chat.id } }).catch(() => undefined);
   }
 
   /** D-180 — the side chats open beside `chatId`. */

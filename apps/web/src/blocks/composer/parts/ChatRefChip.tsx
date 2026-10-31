@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // ChatRefChip — a chat attached to the draft as context (D-179): the same
-// chip as a file (`composer-attachment` size, radius, ×) with the `message`
-// glyph, the chat's name and its mode. Clicking it opens the mode popover:
+// chip as a file (`composer-attachment` size, radius, ×): the `message` glyph
+// and the chat's name (full name on hover) in one row, then its mode. Clicking it opens the mode popover:
 // Auto / Summary / Recent / Full and what that mode includes.
 // ────────────────────────────────────────────────────────────────
 
@@ -50,18 +50,18 @@ export function ChatRefChip({ chatRef, onModeChange, onRemove }: ChatRefChipProp
       data-testid="composer-chat-ref"
       className="inline-flex h-control-sm max-w-full min-w-0 items-center gap-1 rounded-control-sm border border-line bg-raised pr-0.5 pl-2 text-small text-fg"
     >
+      <Icon concept="message" size={12} className="shrink-0 text-fg-3" />
       <PopoverRoot open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           render={
             <Button
               variant="ghost"
               size="sm"
-              className="h-auto min-w-0 gap-1.5 border-0 px-0 text-fg hover:not-disabled:bg-transparent"
+              className="h-auto max-w-56 min-w-0 shrink gap-1.5 border-0 px-0 font-normal text-fg hover:not-disabled:bg-transparent"
+              title={chatRef.name}
               aria-label={`Attached chat ${chatRef.name}, ${CHAT_REFERENCE_MODE_LABEL[chatRef.mode]}. Change what is included`}
             >
-              <Icon concept="message" size={12} className="shrink-0 text-fg-3" />
-              <span className="max-w-43 truncate">{chatRef.name}</span>
-              <span className="shrink-0 text-micro text-fg-3">{CHAT_REFERENCE_MODE_LABEL[chatRef.mode]}</span>
+              {chatRef.name}
             </Button>
           }
         />
@@ -89,6 +89,9 @@ export function ChatRefChip({ chatRef, onModeChange, onRemove }: ChatRefChipProp
           </p>
         </PopoverPopup>
       </PopoverRoot>
+      <span aria-hidden className="shrink-0 rounded-control-sm bg-hover px-1 text-micro text-fg-3">
+        {CHAT_REFERENCE_MODE_LABEL[chatRef.mode]}
+      </span>
       <IconButton icon="x" size="sm" label={`Remove ${chatRef.name}`} tooltip={false} onClick={onRemove} className="size-4" />
     </div>
   );

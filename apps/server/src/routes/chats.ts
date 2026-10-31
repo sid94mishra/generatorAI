@@ -1020,6 +1020,9 @@ export function createChatApiRoutes(container: Container): Router {
           });
         }
 
+        // A side chat's first message names it before we answer, so the client's refresh shows the name (D-180).
+        await chatManagementService.nameSideChatFromPrompt(chatId, prompt).catch(() => undefined);
+
         // Send prompt asynchronously (fire and forget, events stream via SSE)
         chatManagementService
           .sendPrompt(chatId, prompt, attachmentRefs, {

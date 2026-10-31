@@ -817,26 +817,30 @@ export function useSideChats(chatId: string | undefined) {
 export function useSideChatActions(parentChatId: string | undefined) {
   const platform = usePlatform() as HttpPlatformClient;
   const queryClient = useQueryClient();
-  const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: ['side-chats', parentChatId] });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.chats });
-  };
+  const refresh = useCallback(
+    (sideChatId?: string) => {
+      void queryClient.invalidateQueries({ queryKey: ['side-chats', parentChatId] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chats });
+      if (sideChatId) void queryClient.invalidateQueries({ queryKey: queryKeys.chat(sideChatId) });
+    },
+    [queryClient, parentChatId],
+  );
   const create = useMutation({
     mutationFn: (input: { mode: SideChatMode; prompt?: string }) => platform.createSideChat(parentChatId!, input),
-    onSuccess: refresh,
+    onSuccess: () => refresh(),
     meta: { errorTitle: 'Could not open a side chat' },
   });
   const keep = useMutation({
     mutationFn: (chatId: string) => platform.keepSideChat(chatId),
-    onSuccess: refresh,
+    onSuccess: () => refresh(),
     meta: { errorTitle: 'Could not keep the side chat' },
   });
   const discard = useMutation({
     mutationFn: (chatId: string) => platform.deleteChat(chatId),
-    onSuccess: refresh,
+    onSuccess: () => refresh(),
     meta: { errorTitle: 'Could not discard the side chat' },
   });
-  return { create, keep, discard };
+  return { create, keep, discard, refresh };
 }
 
 /** D-179 — what attaching `chatId` to a message in `mode` would include (the chat reference chip). */

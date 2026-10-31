@@ -196,13 +196,16 @@ export function ChatPage() {
   const pushInbox = useChatRefInboxStore((st) => st.push);
   const keepSide = sideActions.keep.mutate;
   const discardSide = sideActions.discard.mutate;
+  const refreshSide = sideActions.refresh;
   const sideList = sideChats.data;
   const confirmSide = confirmer.confirm;
   const sideDock = useMemo<SideChatDockContextValue>(
     () => ({
       parentChatId: chatId,
+      // The side list carries the latest name (a side chat is named by its first message).
       sendToMain: (c) => {
-        if (chatId) pushInbox(chatId, { chatId: c.id, name: c.name, mode: 'auto' });
+        const name = sideList?.find((s) => s.id === c.id)?.name ?? c.name;
+        if (chatId) pushInbox(chatId, { chatId: c.id, name, mode: 'auto' });
       },
       keep: (id) => keepSide(id),
       // A fork or new side chat may have changed files: discarding it asks first (a quick question never writes).
@@ -218,8 +221,9 @@ export function ChatPage() {
         }).then((ok) => (ok ? run() : undefined));
       },
       closeTab: closeSideTab,
+      refresh: refreshSide,
     }),
-    [chatId, pushInbox, keepSide, discardSide, closeSideTab, sideList, confirmSide],
+    [chatId, pushInbox, keepSide, discardSide, closeSideTab, sideList, confirmSide, refreshSide],
   );
 
   // Closing a tab for good drops whatever that tab remembered.
