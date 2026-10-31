@@ -341,6 +341,24 @@ describe('snapshotPayload', () => {
     expect(String(payload['filterNote'])).toMatch(/NOT the whole window/);
   });
 
+  // Measured on ChatGPT: query "dots" against a conversation labelled "Your
+  // dot" matched 0 of 212 elements, the payload said the window had NO
+  // accessibility tree and to stop, and the agent told the user the app could
+  // not be driven.
+  it('never reads a filter that matched nothing as a window without controls', () => {
+    const empty = result([]);
+    (empty.snapshot as { totalElements?: number }).totalElements = 212;
+    const payload = snapshotPayload(empty, 'dots');
+    expect(payload['windowElementCount']).toBe(212);
+    expect(String(payload['note'])).toMatch(/Nothing in this window matches "dots"/);
+    expect(String(payload['note'])).toMatch(/HAS 212 elements/);
+    expect(String(payload['note'])).not.toMatch(/NO accessibility tree/);
+  });
+
+  it('still says a window with no tree at all has none', () => {
+    expect(String(snapshotPayload(result([]))['note'])).toMatch(/NO accessibility tree/);
+  });
+
   it('stays silent about filtering when nothing was filtered', () => {
     const payload = snapshotPayload(result([cell(1)]));
     expect(payload).not.toHaveProperty('filteredBy');

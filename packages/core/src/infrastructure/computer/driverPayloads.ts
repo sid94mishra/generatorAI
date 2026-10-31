@@ -216,6 +216,7 @@ export function parseListWindows(structuredJson: string): Map<number, ComputerWi
         focused: false,
         minimised: asBool(entry['minimized']),
         bounds: parseFrame(entry),
+        onScreen: asBool(entry['is_on_screen']),
       },
       z: asBool(entry['is_on_screen']) ? asNumber(entry['z_index']) : undefined,
     });
@@ -245,6 +246,8 @@ export interface ParsedWindowState {
   screenshot: { width: number; height: number; mimeType: string } | null;
   /** Read-only text the driver lists only in `tree_markdown` (no index): `readOnlyText`. */
   text: string[];
+  /** Elements in the whole walk — more than `elements` under a `query` projection. */
+  total: number;
 }
 
 /** Bounds on the read-only text handed to the model: it is untrusted, and a long document should not flood it. */
@@ -350,6 +353,7 @@ export function parseWindowState(structuredJson: string, filtered = false): Pars
     elements,
     truncated,
     text: readOnlyText(asString(root['tree_markdown']) ?? ''),
+    total,
     screenshot:
       width !== undefined && height !== undefined
         ? { width, height, mimeType: asString(root['screenshot_mime_type']) ?? 'image/png' }

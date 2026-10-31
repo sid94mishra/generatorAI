@@ -860,7 +860,58 @@ describe('CuaDriverBridge snapshot projection', () => {
   });
 });
 
-describe('CuaDriverBridge app launching', () => {  it('asks for a separate instance only when the caller wants one', async () => {
+describe('CuaDriverBridge app launching', () => {
+  // Measured on macOS ChatGPT (a Chromium app): a dozen 30 px helper strips
+  // and a hidden 960×720 window around the one real window, on a monitor above
+  // the main display. Launching it again while it ran answered with fresh
+  // strips, the bridge named a strip "the new window", and the main window sat
+  // on its splash logo for every read that followed.
+  const CHATGPT = {
+    windows: [
+      { window_id: 1715, pid: 694, title: '', minimized: false, is_on_screen: false, bounds: { x: -570, y: -1080, width: 1920, height: 30 } },
+      { window_id: 288, pid: 694, title: '', minimized: false, is_on_screen: false, bounds: { x: 0, y: 0, width: 960, height: 720 } },
+      { window_id: 246, pid: 694, title: 'ChatGPT', minimized: false, is_on_screen: true, bounds: { x: -493, y: -1050, width: 1909, height: 1050 } },
+      { window_id: 2459, pid: 694, title: 'Window', minimized: false, is_on_screen: true, bounds: { x: -480, y: -1038, width: 66, height: 20 } },
+    ],
+  };
+  const CHATGPT_APP = { apps: [{ name: 'ChatGPT', pid: 694, running: true, bundle_id: 'com.openai.codex' }] };
+
+  it('hands back the main window of an app that is already running, without relaunching it', async () => {
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'list_windows') return ok(CHATGPT);
+        if (tool === 'list_apps') return ok(CHATGPT_APP);
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    const launched = await fake.bridge.launchApp(handle, 'ChatGPT');
+
+    expect(fake.calls.filter((c) => c.tool === 'launch_app')).toHaveLength(0);
+    expect(launched.window).toEqual({ id: 246, title: 'ChatGPT' });
+  });
+
+  it('names the real window a launch opened, not a helper strip that came with it', async () => {
+    let launched = false;
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'launch_app') {
+          launched = true;
+          return ok({});
+        }
+        if (tool === 'list_apps') return ok(launched ? CHATGPT_APP : { apps: [] });
+        if (tool === 'list_windows') return ok(launched ? CHATGPT : { windows: [] });
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    const result = await fake.bridge.launchApp(handle, 'ChatGPT');
+
+    expect(result.window?.id).toBe(246);
+  });
+  it('asks for a separate instance only when the caller wants one', async () => {
     const fake = makeBridge({
       reply: (tool) => {
         if (tool === 'list_windows') return ok(WINDOWS);
@@ -872,9 +923,9 @@ describe('CuaDriverBridge app launching', () => {  it('asks for a separate insta
     });
     const handle = await started(fake);
 
+    // Running with a window and asked for nothing new: found, not launched again.
     await fake.bridge.launchApp(handle, 'Notepad');
-    expect(fake.calls.find((c) => c.tool === 'launch_app')?.args)
-      .not.toHaveProperty('creates_new_application_instance');
+    expect(fake.calls.filter((c) => c.tool === 'launch_app')).toHaveLength(0);
 
     await fake.bridge.launchApp(handle, 'Notepad', { newInstance: true });
     const launches = fake.calls.filter((c) => c.tool === 'launch_app');
@@ -1010,5 +1061,40 @@ describe('CuaDriverBridge endpoint resolution', () => {
 
     await fake.bridge.dispose();
     expect(fake.stoppedCount()).toBe(1);
+  });
+});
+
+describe('CuaDriverBridge bring to front', () => {
+  const WINDOWS_WITH_STRIP = {
+    windows: [
+      { window_id: 5, pid: 42, title: '', minimized: false, is_on_screen: true, bounds: { x: 0, y: 0, width: 1280, height: 30 } },
+      { window_id: 9, pid: 42, title: 'Main', minimized: false, is_on_screen: true, bounds: { x: 0, y: 40, width: 1200, height: 800 } },
+      { window_id: 12, pid: 42, title: 'Other', minimized: false, is_on_screen: true, bounds: { x: 0, y: 40, width: 600, height: 400 } },
+    ],
+  };
+  const raised = (fake: ReturnType<typeof makeBridge>) =>
+    fake.calls.filter((c) => c.tool === 'bring_to_front').map((c) => c.args['window_id']);
+  const app = { appId: 'app', name: 'App', pid: 42 };
+
+  it('raises the window asked for', async () => {
+    const fake = makeBridge({ reply: (tool) => (tool === 'list_windows' ? ok(WINDOWS_WITH_STRIP) : ok({})) });
+    const handle = await started(fake);
+    await fake.bridge.bringToFront(handle, app, undefined, 12);
+    expect(raised(fake)).toEqual([12]);
+  });
+
+  it('raises the main window, not the first helper strip, when none is named', async () => {
+    const fake = makeBridge({ reply: (tool) => (tool === 'list_windows' ? ok(WINDOWS_WITH_STRIP) : ok({})) });
+    const handle = await started(fake);
+    await fake.bridge.bringToFront(handle, app);
+    expect(raised(fake)).toEqual([9]);
+  });
+
+  it('refuses a window the app does not have', async () => {
+    const fake = makeBridge({ reply: (tool) => (tool === 'list_windows' ? ok(WINDOWS_WITH_STRIP) : ok({})) });
+    const handle = await started(fake);
+    const result = await fake.bridge.bringToFront(handle, app, undefined, 77);
+    expect(result.refusal?.code).toBe('target_lost');
+    expect(raised(fake)).toEqual([]);
   });
 });

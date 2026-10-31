@@ -200,6 +200,7 @@ export function snapshotPayload(
     snapshotId: snapshot.snapshotId,
     window: { id: snapshot.window.id, title: snapshot.window.title, focused: snapshot.window.focused },
     elementCount: snapshot.elements.length,
+    ...(query && snapshot.totalElements !== undefined ? { windowElementCount: snapshot.totalElements } : {}),
     truncated: snapshot.truncated ?? undefined,
     elements,
     // Read-only text (a display, a status line): read it here, it has no index to act on.
@@ -240,10 +241,25 @@ export function snapshotPayload(
     // scripted automation that bypasses every gate here. The honest answer is
     // that this window has no accessibility surface, and it will not grow one.
     note:
-      snapshot.elements.length === 0
+      snapshot.elements.length === 0 && query
+        ? emptyFilterNote(query, snapshot.totalElements)
+        : snapshot.elements.length === 0
         ? 'This window exposes NO accessibility tree — a common trait of packaged/UWP apps hosted by ApplicationFrameHost and of custom-drawn UIs. Retrying, re-focusing, or picking a sibling window will not change it. Stop here, tell the user this application cannot be driven on this machine, and do not fall back to shell-based UI automation.'
         : 'Element indices are valid only for this snapshotId. Any action invalidates it — take a new snapshot before addressing elements again. When a window is large, pass `query` to read only the part you need.',
   };
+}
+
+/**
+ * A `query` that matched nothing says nothing about the window. Read as "no accessibility tree", it sent the agent
+ * home from ChatGPT: it searched "dots", the conversation is labelled "Your dot", and 212 elements went unread.
+ */
+function emptyFilterNote(query: string, total: number | undefined): string {
+  const size = total && total > 0 ? `This window HAS ${total} elements; ` : '';
+  return (
+    `Nothing in this window matches "${query}". ${size}labels rarely use your words exactly (plural, other ` +
+    'wording, an icon with a short name). Try a shorter or different word, or snapshot WITHOUT `query` and read ' +
+    'the list, before concluding the control is missing.'
+  );
 }
 
 /** Actions that change something, and therefore have to be believed or not. */

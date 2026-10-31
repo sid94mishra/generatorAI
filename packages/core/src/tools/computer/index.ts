@@ -811,13 +811,16 @@ const createBringToFrontTool: ComputerToolFactory = (ctx): ToolDefinition => ({
   requiredPermissions: permission('Focus a desktop application window'),
   parametersSchema: {
     type: 'object',
-    properties: { ...APP_TARGET_PROPERTIES },
+    properties: {
+      ...APP_TARGET_PROPERTIES,
+      windowId: { type: 'number', description: 'Window id from computer_list_windows. Defaults to the app’s main window.' },
+    },
     additionalProperties: false,
   },
   handler: async (args) => {
     const ref = toAppRef(args);
     if ('error' in ref) return { ok: false, error: ref.error };
-    return actionPayload(await ctx.computerService.bringToFront(callContext(ctx), ref));
+    return actionPayload(await ctx.computerService.bringToFront(callContext(ctx), ref, coerceInt(args['windowId'])));
   },
 });
 

@@ -1034,7 +1034,7 @@ export class ComputerService {
   }
 
   /** Restores and foregrounds an app's window so it can actually be driven. */
-  async bringToFront(ctx: ComputerCallContext, ref: ComputerAppRef): Promise<ComputerActionResult> {
+  async bringToFront(ctx: ComputerCallContext, ref: ComputerAppRef, windowId?: number): Promise<ComputerActionResult> {
     const gate = this.featureGate(ctx.workspaceId);
     if (gate) {
       await this.auditGateRefusal(ctx, 'bring_to_front', gate, describeRef(ref));
@@ -1052,7 +1052,7 @@ export class ComputerService {
     }
 
     const result = await this.withPermit(session, (signal) =>
-      session.bridge.bringToFront(session.handle, resolved.app, signal),
+      session.bridge.bringToFront(session.handle, resolved.app, signal, windowId),
     );
     if (result.refusal) {
       await this.recordRefusal(ctx, resolved.app, 'bring_to_front', result.refusal);

@@ -400,7 +400,13 @@ export interface IComputerBridge {
    * edits against it report success and are then discarded. Without this the
    * agent can launch an app it is then unable to drive.
    */
-  bringToFront(handle: ComputerHandle, app: ComputerAppIdentity, signal?: AbortSignal): Promise<ComputerActionResult>;
+  bringToFront(
+    handle: ComputerHandle,
+    app: ComputerAppIdentity,
+    signal?: AbortSignal,
+    /** The window to raise; without it, the app's main (largest open) window. */
+    windowId?: number,
+  ): Promise<ComputerActionResult>;
 
   listWindows(handle: ComputerHandle, app: ComputerAppIdentity): Promise<ListWindowsResult>;
 

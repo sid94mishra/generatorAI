@@ -738,6 +738,7 @@ export class CuaDriverBridge implements IComputerBridge {
         },
         elements: state.elements,
         ...(state.text.length > 0 ? { text: state.text } : {}),
+        ...(req.query !== undefined ? { totalElements: state.total } : {}),
         // A laddered read answered a *smaller question* — the driver reports it
         // as complete because it returned everything within the reduced caps.
         // Without saying so, the agent takes a depth-3 chrome-only tree for the
@@ -1282,12 +1283,26 @@ export class CuaDriverBridge implements IComputerBridge {
       // Windows already on screen for this executable, so the one the launch
       // adds can be told apart from the user's existing windows.
       const before = new Set<number>();
+      const asksForSomething = Boolean(opts.url || opts.newInstance || (opts.args?.length ?? 0) > 0);
       try {
         const existing = await this.call(connection, 'list_apps', {});
         if (existing.structuredJson) {
           for (const app of parseListApps(existing.structuredJson)) {
             if (!matchesLaunchName(app, name)) continue;
-            for (const w of await this.windowsFor(connection, app.pid)) before.add(w.id);
+            const windows = await this.windowsFor(connection, app.pid);
+            for (const w of windows) before.add(w.id);
+            // Already running with a window to work in, and asked for nothing
+            // new: hand back that window. Launching again sends the app a
+            // reopen, which a Chromium app (ChatGPT) answers with a dozen new
+            // helper windows and a main window back on its splash screen —
+            // the agent then read a blank logo for the rest of the run.
+            const main = mainWindow(windows);
+            if (!asksForSomething && main) {
+              return {
+                app: { appId: app.id, name: app.name, pid: app.pid },
+                window: { id: main.id, title: main.title },
+              };
+            }
           }
         }
       } catch {
@@ -1335,9 +1350,9 @@ export class CuaDriverBridge implements IComputerBridge {
               // reading and clicking work on a background window; only a write
               // to a MINIMISED window is unsafe, and that path refuses on its own.
               const app = { appId: match.id, name: match.name, pid: match.pid };
-              const fresh = windows.find((w) => !before.has(w.id));
+              const fresh = mainWindow(windows.filter((w) => !before.has(w.id)));
               if (fresh) return { app, window: { id: fresh.id, title: fresh.title } };
-              const chosen = windows.find((w) => w.focused) ?? windows[0];
+              const chosen = mainWindow(windows) ?? windows.find((w) => w.focused) ?? windows[0];
               fallback = { app, ...(chosen ? { window: { id: chosen.id, title: chosen.title } } : {}) };
               if (!wantsNewWindow || before.size === 0 || Date.now() >= freshDeadline) return fallback;
             }
@@ -1361,6 +1376,7 @@ export class CuaDriverBridge implements IComputerBridge {
     handle: ComputerHandle,
     app: ComputerAppIdentity,
     signal?: AbortSignal,
+    windowId?: number,
   ): Promise<ComputerActionResult> {
     const connection = this.connections.get(handle.workspaceId);
     if (!connection) return refuse(disconnected());
@@ -1369,9 +1385,15 @@ export class CuaDriverBridge implements IComputerBridge {
       if (windows.length === 0) {
         return refuse({ code: 'target_lost', message: 'That application has no windows.' });
       }
-      // Prefer a window the user would consider "the" window: the last one
-      // restored wins, so pick the largest non-minimised, else the first.
-      const target = windows.find((w) => !w.minimised) ?? windows[0]!;
+      if (windowId !== undefined && !windows.some((w) => w.id === windowId)) {
+        return refuse({ code: 'target_lost', message: `Window ${windowId} is not open in ${app.name}.` });
+      }
+      // The window asked for, else the app's main window. "First not
+      // minimised" raised a 30 px helper strip of a Chromium app (ChatGPT
+      // lists a dozen of them ahead of its real window) and left the window
+      // the agent was working in exactly where it was.
+      const target =
+        windows.find((w) => w.id === windowId) ?? largestOpenWindow(windows) ?? windows[0]!;
       const result = await this.call(
         connection,
         'bring_to_front',
@@ -1810,6 +1832,29 @@ export function embeddedIdentity(check: ComputerRuntimeCheck, platform: NodeJS.P
  * five were 30 px tab-bar strips the accessibility layer cannot resolve — reading one returned an empty tree.
  * Windows without bounds rank last, in list order.
  */
+/**
+ * Below this edge a window is a helper surface — a tab strip, a drag handle, a
+ * status overlay — never the one a person works in. Chromium apps open several
+ * 30 px strips; ChatGPT's launch reported one of them as "the new window".
+ */
+const MIN_WORK_WINDOW_EDGE = 100;
+
+/**
+ * The window a person would call the app's window: the largest open one that is
+ * big enough to work in, among those on screen when the driver can tell (an
+ * app keeps hidden full-size windows too: ChatGPT holds a 960×720 one off
+ * screen). Windows without bounds count only when no window has bounds at all
+ * (a driver that reports none), so a sized strip never beats them.
+ */
+export function mainWindow(windows: readonly ComputerWindowInfo[]): ComputerWindowInfo | undefined {
+  const visible = windows.some((w) => w.onScreen) ? windows.filter((w) => w.onScreen) : windows;
+  const sized = visible.filter((w) => w.bounds);
+  if (sized.length === 0) return visible.find((w) => !w.minimised);
+  return largestOpenWindow(
+    sized.filter((w) => w.bounds!.w >= MIN_WORK_WINDOW_EDGE && w.bounds!.h >= MIN_WORK_WINDOW_EDGE),
+  );
+}
+
 export function largestOpenWindow(windows: readonly ComputerWindowInfo[]): ComputerWindowInfo | undefined {
   let best: ComputerWindowInfo | undefined;
   let bestArea = -1;

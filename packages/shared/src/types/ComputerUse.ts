@@ -148,6 +148,11 @@ export interface ComputerWindowInfo {
   focused: boolean;
   minimised: boolean;
   bounds?: { x: number; y: number; w: number; h: number };
+  /**
+   * Whether the window server shows it. Only meaningful when some window of the app reports true: without Screen
+   * Recording (macOS) every window reads false.
+   */
+  onScreen?: boolean;
 }
 
 export interface ComputerSnapshot {
@@ -164,6 +169,11 @@ export interface ComputerSnapshot {
    * driver indexes only what can be acted on, so without this the agent could press "=" and never see the answer.
    */
   text?: string[];
+  /**
+   * How many elements the whole window has, when `elements` is a `query` projection. A filter that matched nothing
+   * must not read as a window with no controls.
+   */
+  totalElements?: number;
   /** Non-null when caps clipped the tree — tells the agent to narrow scope. */
   truncated: { elements: number; depth: number } | null;
   capturedAt: number;
