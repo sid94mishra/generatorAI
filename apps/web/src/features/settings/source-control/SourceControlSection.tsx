@@ -132,7 +132,9 @@ export function SourceControlSection() {
       width: '1fr',
       cell: (account) => (
         <span className="flex min-w-0 items-center gap-2">
-          <Avatar name={account.login ?? account.label} src={account.avatarUrl} size={24} decorative />
+          {/* Initials, not the remote avatar: the CSP keeps images local (img-src 'self' data: blob:), and the
+              GitHub avatar URL logged a CSP violation and drew a broken image. */}
+          <Avatar name={account.login ?? account.label} size={24} decorative />
           <span className="flex min-w-0 flex-col">
             <span className="truncate text-fg">{account.login ?? account.label}</span>
             <span className="truncate text-small text-fg-3">
