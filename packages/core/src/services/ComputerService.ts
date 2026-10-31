@@ -73,6 +73,7 @@ import type {
   VerifyResult,
 } from '../domain/ports/IComputerBridge.js';
 import { readBoundedInt } from '@generatorai/shared';
+import { computerConsentDetail } from '@generatorai/shared/ui-contract';
 import { isElementAddressed } from '../domain/ports/IComputerBridge.js';
 import type { IWorkspaceArtifactRepository } from '../domain/ports/IWorkspaceArtifactRepository.js';
 import type { EventBus } from '../events/EventBus.js';
@@ -1635,7 +1636,7 @@ export class ComputerService {
       chatId: ctx.chatId,
       app,
       action,
-      summary: plan ? `${plan.length} actions in ${app.name}` : `${action} in ${app.name}`,
+      summary: computerConsentDetail(action, app.name, plan?.length),
       scope,
       target,
       ...(plan ? { plan } : {}),

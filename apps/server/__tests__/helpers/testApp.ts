@@ -248,6 +248,7 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     archiveChat: vi.fn().mockResolvedValue(undefined),
     deleteChat: vi.fn().mockResolvedValue(undefined),
     sendPrompt: vi.fn().mockResolvedValue(undefined),
+    nameSideChatFromPrompt: vi.fn().mockResolvedValue(undefined),
     // PLN-01 — the plan-decision route must delegate here rather than
     // resolving the gate itself (see chats-e2e "Plan decision" suite).
     decidePlan: vi.fn().mockResolvedValue({ ok: true }),

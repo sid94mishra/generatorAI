@@ -46,7 +46,7 @@ function build(opts: {
   );
 
   const service = new ChatManagementService(
-    { getById: async () => chat, delete: chatDelete } as never,
+    { getById: async () => chat, delete: chatDelete, listSideChats: async () => [] } as never,
     { getById: async () => session, delete: sessionDelete } as never,
     { deleteBySession: async () => {} } as never,
     {} as never,

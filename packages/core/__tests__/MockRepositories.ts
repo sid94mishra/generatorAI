@@ -87,6 +87,15 @@ export class MockChatRepository implements IChatRepository {
     this.store.clear();
   }
 
+  async listSideChats(chatId: string): Promise<Chat[]> {
+    return [...this.store.values()].filter((c) => c.sideOfChatId === chatId).map((c) => ({ ...c }));
+  }
+
+  async clearSideOf(id: string): Promise<void> {
+    const existing = this.store.get(id);
+    if (existing) delete existing.sideOfChatId;
+  }
+
   async getByProjectId(projectId: string): Promise<Chat[]> {
     return [...this.store.values()].filter((c) => c.projectId === projectId).map((c) => ({ ...c }));
   }

@@ -1027,7 +1027,7 @@ describe('ComputerService actPlan (G-07)', () => {
     const result = await service.actPlan(CTX, { by: 'appId', appId: SLACK.id }, steps);
     expect(result.ok).toBe(true);
     expect(consent.prompts).toHaveLength(1);
-    expect(consent.prompts[0]).toMatchObject({ scope: 'synthetic', summary: '3 actions in Slack' });
+    expect(consent.prompts[0]).toMatchObject({ scope: 'synthetic', summary: '3 actions in Slack, approved together.' });
     const plan = consent.prompts[0]!.plan as Array<{ action: string; target?: string }>;
     expect(plan.map((p) => p.action)).toEqual(['clickPoint', 'typeText', 'pressKey']);
     // The plan names actions and targets, never typed content.

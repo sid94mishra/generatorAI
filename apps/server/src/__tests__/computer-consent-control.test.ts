@@ -187,7 +187,7 @@ describe('G-07 consent scope over the routes', () => {
       { type: 'pressKey', target, key: 'Enter' },
     ]);
     const [p] = await waitForPending(app);
-    expect(p).toMatchObject({ summary: '3 actions in Queue Inspector', path: 'synthetic' });
+    expect(p).toMatchObject({ summary: '3 actions in Queue Inspector, approved together.', path: 'synthetic' });
     expect((p!['plan'] as Array<{ action: string }>).map((s) => s.action)).toEqual(['clickPoint', 'typeText', 'pressKey']);
     await request(app)
       .post(`/api/workspaces/${WS}/computer/consent`)

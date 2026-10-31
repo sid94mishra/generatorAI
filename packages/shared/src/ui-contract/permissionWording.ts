@@ -92,3 +92,41 @@ export function permissionWording(toolName: string, type: PermissionWordingType 
   if (kind === 'read') return { title: 'Read this?', kindLabel: 'Read' };
   return { title: `Allow ${display}?`, kindLabel: 'Tool' };
 }
+
+// ── Computer use consent (the Computer tab's approval card, desktop and mobile) ──
+// The driver's action names (`launch_app`, `setValue`, `plan`…) are not words a person reads.
+
+const COMPUTER_ACTION: Record<string, { verb: string; title: (app: string) => string; detail: string }> = {
+  launch_app: { verb: 'Open', title: (a) => `Open ${a}?`, detail: 'Starts the app, or finds it if it is already running.' },
+  snapshot: { verb: 'Read', title: (a) => `Read the ${a} window?`, detail: 'Reads the controls and text of this one window — never your whole screen.' },
+  list_windows: { verb: 'List', title: (a) => `List the ${a} windows?`, detail: 'Reads the titles and positions of its windows.' },
+  verify: { verb: 'Check', title: (a) => `Check the ${a} window?`, detail: 'Reads the window again to confirm the last step worked.' },
+  bring_to_front: { verb: 'Raise', title: (a) => `Bring ${a} to the front?`, detail: 'Moves its window in front of your other windows.' },
+  click: { verb: 'Click', title: (a) => `Click in ${a}?`, detail: 'Clicks one control in the window.' },
+  clickPoint: { verb: 'Click', title: (a) => `Click in ${a}?`, detail: 'Clicks a point in the window.' },
+  setValue: { verb: 'Fill', title: (a) => `Fill a field in ${a}?`, detail: 'Writes a value into one field.' },
+  performAction: { verb: 'Use', title: (a) => `Use a control in ${a}?`, detail: 'Triggers one control, such as pressing or expanding it.' },
+  typeText: { verb: 'Type', title: (a) => `Type in ${a}?`, detail: 'Types text into the window.' },
+  pressKey: { verb: 'Keys', title: (a) => `Press keys in ${a}?`, detail: 'Sends a key or shortcut to the window.' },
+  pasteText: { verb: 'Paste', title: (a) => `Paste into ${a}?`, detail: 'Pastes text into the window.' },
+  scroll: { verb: 'Scroll', title: (a) => `Scroll in ${a}?`, detail: 'Scrolls the window.' },
+  drag: { verb: 'Drag', title: (a) => `Drag in ${a}?`, detail: 'Drags from one point of the window to another.' },
+};
+
+/** "Open Calculator?" — the approval card's title for one computer action, or several (`steps`) in one request. */
+export function computerConsentTitle(action: string, appLabel: string, steps?: number): string {
+  const app = appLabel || 'this app';
+  if (action === 'plan' || steps) return `Run ${steps ?? 'these'} steps in ${app}?`;
+  return COMPUTER_ACTION[action]?.title(app) ?? `Use ${app}?`;
+}
+
+/** One sentence on what the action does — the card's line under the title. */
+export function computerConsentDetail(action: string, appLabel: string, steps?: number): string {
+  if (action === 'plan' || steps) return `${steps ?? 'Several'} actions in ${appLabel || 'this app'}, approved together.`;
+  return COMPUTER_ACTION[action]?.detail ?? `A desktop action in ${appLabel || 'this app'}.`;
+}
+
+/** A plan step's short verb ("Click", "Type"…), for the step list. */
+export function computerActionVerb(action: string): string {
+  return COMPUTER_ACTION[action]?.verb ?? action;
+}

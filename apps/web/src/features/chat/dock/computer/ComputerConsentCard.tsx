@@ -12,6 +12,7 @@
 
 import { useState } from 'react';
 import { consentAnswerOptions } from '@generatorai/client-core';
+import { computerActionVerb, computerConsentTitle } from '@generatorai/shared/ui-contract';
 import type { ComputerConsentDecision, ComputerConsentReach, ComputerPendingConsent } from '@generatorai/shared';
 import { GateCardFrame, type GateAction } from '@/ui/patterns/GateCardFrame/GateCardFrame.js';
 import { SegmentedControl } from '@/ui/primitives/SegmentedControl/SegmentedControl.js';
@@ -64,11 +65,7 @@ export function ComputerConsentCard({ workspaceId, prompt }: ComputerConsentCard
   return (
     <GateCardFrame
       icon="hand"
-      title={
-        <>
-          Allow {prompt.action} on {prompt.appLabel}?
-        </>
-      }
+      title={computerConsentTitle(prompt.action, prompt.appLabel, prompt.plan?.length)}
       meta={synthetic ? 'Keyboard & mouse' : 'Screen'}
       actions={actions}
       data-testid="computer-consent-card"
@@ -79,7 +76,7 @@ export function ComputerConsentCard({ workspaceId, prompt }: ComputerConsentCard
           {prompt.plan.map((step, i) => (
             <li key={i} className="flex min-w-0 gap-3">
               <span className="w-4 shrink-0 text-right text-fg-3">{i + 1}</span>
-              <span className="w-12 shrink-0">{step.action}</span>
+              <span className="w-12 shrink-0">{computerActionVerb(step.action)}</span>
               {step.target ? <span className="min-w-0 truncate">{step.target}</span> : null}
             </li>
           ))}
