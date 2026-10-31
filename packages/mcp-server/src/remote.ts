@@ -5,7 +5,8 @@
 // Pairing reuses device pairing (no service-account issuance): an operator
 // runs `generatorai device invite --platform mcp` (the mcp default grant:
 // read:status, read:workflows, stream:events, exec:agent, read:chats,
-// write:chats; add `--scopes …,write:workflows` to let it draft), then
+// write:chats, read:projects, read:activity, read:files; add
+// `--scopes …,write:workflows` to let it draft), then
 // `generatorai-mcp pair <code>` redeems it here. The device key and session
 // live in the encrypted vault of `@generatorai/secrets` (namespace
 // `mcp/<serverId>`), never in a plaintext file; `mcp-connection.json`
@@ -125,24 +126,13 @@ export function createMcpRuntime(connection: McpConnection, endpoint = connectio
   });
 }
 
-/** The MCP server's slice of the remote API, over client-core: chats, the workflow tools, the skill bundle. */
+/** The MCP server's slice of the remote API, over client-core: chats, the platform and workflow tools, the skill bundle. */
 export function remoteFacade(runtime: AuthenticatedClientRuntime): AiFacade {
   const fetchImpl = (p: string, init?: RequestInit) => runtime.fetch(p, init);
   const api = createApiClient(fetchImpl);
   const admin = createAdminApi(fetchImpl);
   return {
     chat: {
-      list: async (status, projectId) => {
-        // Chat list v2 (G-02): a page; the newest 200 chats of the status asked for.
-        const page = await api.chats.list({
-          ...(status === 'active' || status === 'archived' ? { status } : {}),
-          ...(projectId ? { projectId } : {}),
-          limit: 200,
-        });
-        return page.items
-          .filter((c) => !status || c.status === status)
-          .map((c) => ({ id: c.id, name: c.name, status: c.status, projectId: c.projectId ?? null }));
-      },
       create: async (options) => {
         const chat = await api.chats.create({ name: options.name, ...(options.projectId ? { projectId: options.projectId } : {}) });
         return { id: chat.id };
@@ -150,6 +140,10 @@ export function remoteFacade(runtime: AuthenticatedClientRuntime): AiFacade {
       send: async (chatId, message) => {
         await api.chats.send(chatId, { message });
       },
+    },
+    platformTools: {
+      list: async () => (await admin.platformTools.list()).tools,
+      call: async (name, args, opts) => (await admin.platformTools.call(name, args, opts)).result,
     },
     workflowTools: {
       list: async () => (await admin.workflowTools.list()).tools,

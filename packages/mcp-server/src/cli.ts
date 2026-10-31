@@ -6,15 +6,19 @@
 //   generatorai-mcp pair <code> [--name <device name>]
 //       Redeem a pairing code from `generatorai device invite --platform mcp`
 //       (default grant: read:status, read:workflows, stream:events,
-//       exec:agent, read:chats, write:chats; add `--scopes …,write:workflows`
-//       to let it draft), or Settings → Devices → Pair a device. The device
-//       key goes to the encrypted vault.
-//   generatorai-mcp [serve]
+//       exec:agent, read:chats, write:chats, read:projects, read:activity,
+//       read:files; add `--scopes …,write:workflows` to let it draft), or
+//       Settings → Security & devices → Pair a new device. The device key
+//       goes to the encrypted vault.
+//   generatorai-mcp [serve] [--toolsets <list>] [--read-only]
 //       Serve over stdio, the way a bundled MCP server is spawned: the
-//       server's workflow tools, two chat tools and the authoring skill as
-//       resources (P06 WP-6.8). Wire it into a client with
-//       `generatorai skill install --target claude|codex`, which prints the
-//       config snippet.
+//       server's platform tools (chats, projects, agents, automations,
+//       activity, files), its workflow tools, send_prompt and the authoring
+//       skill as resources (P06 WP-6.8, D-181). `--toolsets chats,files`
+//       serves only those toolsets (`workflows` names the workflow tools);
+//       `--read-only` drops every tool that creates, sends or runs. Wire it
+//       into a client with Settings → Security & devices → Connect an
+//       external agent, or `generatorai skill install --target claude|codex`.
 //
 // Env vars:
 //   GENERATORAI_URL             the server (default: the one paired with); a
@@ -29,13 +33,16 @@
 // ────────────────────────────────────────────────────────────────
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { GeneratorAiMcpServer } from './server.js';
+import { GeneratorAiMcpServer, MCP_TOOLSETS, parseServeArgs } from './server.js';
 import { assertSecretBackend, createMcpRuntime, loadConnection, pairMcp, remoteFacade } from './remote.js';
 
 const USAGE = [
   'Usage:',
   '  generatorai-mcp pair <pairing code or URL> [--name <device name>]',
-  '  generatorai-mcp [serve]      serve over stdio (spawned by an MCP client)',
+  '  generatorai-mcp [serve] [--toolsets <list>] [--read-only]',
+  '                               serve over stdio (spawned by an MCP client)',
+  `  --toolsets   comma-separated: ${MCP_TOOLSETS.join(', ')} (default all)`,
+  '  --read-only  only the tools that change nothing',
   '',
   'Env: GENERATORAI_URL, GENERATORAI_MCP_CONFIG_DIR, GENERATORAI_SECRET_KEY / GENERATORAI_SECRET_PASSPHRASE',
 ].join('\n');
@@ -55,14 +62,15 @@ async function pair(args: string[]): Promise<void> {
   log(`[generatorai-mcp] scopes: ${consent.requestedScopes.join(', ') || 'the server default for mcp'}`);
 }
 
-async function serve(): Promise<void> {
+async function serve(args: readonly string[]): Promise<void> {
+  const flags = parseServeArgs(args);
   const connection = loadConnection();
   if (!connection) {
     throw new Error('Not paired. Run `generatorai device invite --platform mcp` on the server, then `generatorai-mcp pair <code>`.');
   }
   assertSecretBackend(connection);
   const runtime = createMcpRuntime(connection, process.env['GENERATORAI_URL'] ?? connection.endpoint);
-  const server = new GeneratorAiMcpServer({ ai: remoteFacade(runtime), log });
+  const server = new GeneratorAiMcpServer({ ai: remoteFacade(runtime), log, ...flags });
   const transport = new StdioServerTransport();
   await server.connect(transport);
   log(`[generatorai-mcp] ready (${connection.serverName ?? connection.endpoint})`);
@@ -89,7 +97,9 @@ async function main(): Promise<void> {
     return;
   }
   if (command === 'pair') return pair(rest);
-  if (!command || command === 'serve') return serve();
+  if (!command || command === 'serve') return serve(rest);
+  // `generatorai-mcp --toolsets chats` — serve is the default command.
+  if (command.startsWith('--')) return serve([command, ...rest]);
   throw new Error(`Unknown command "${command}" (use: pair <code> | serve)`);
 }
 
