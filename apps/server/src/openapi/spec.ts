@@ -2717,6 +2717,25 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         responses: { '200': { description: '{result}' }, '404': { description: 'No such tool' } },
       },
     },
+    '/api/platform-tools': {
+      get: {
+        tags: ['Chats'],
+        summary:
+          'The platform tools of an external agent (D-181; the MCP server): `{tools: [{name, description, parametersSchema, toolset, readOnly, destructive, idempotent, scopes}]}`',
+        responses: { '200': { description: 'The tool list' } },
+      },
+    },
+    '/api/platform-tools/{name}': {
+      post: {
+        tags: ['Chats'],
+        summary: 'Call one platform tool as an external agent: `{arguments, idempotencyKey?, clientName?}` → `{result}`',
+        description:
+          'The same handlers as the in-app tools (chats, projects, agents, automations, Needs you, chat files). Refusals come back as ' +
+          '`result: {ok: false, code, error}`. Each tool checks its own scopes; chats an external agent starts are capped at acceptEdits.',
+        parameters: [{ in: 'path', name: 'name', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: '{result}' }, '404': { description: 'No such tool' } },
+      },
+    },
     '/api/workflow-invocations/plan': {
       post: {
         tags: ['Runs'],

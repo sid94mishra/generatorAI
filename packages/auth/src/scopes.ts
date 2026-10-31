@@ -129,12 +129,24 @@ export const DEFAULT_CLI_SCOPES: readonly Scope[] = [
 
 /**
  * Default grant for an MCP server in remote mode (PD-22): read and start
- * workflow runs and follow them, and list and prompt chats (the
- * `generatorai_list_chats` / `generatorai_send_prompt` tools). Authoring
+ * workflow runs and follow them, list and prompt chats (the
+ * `generatorai_list_chats` / `generatorai_send_prompt` tools), and the
+ * read-only platform tools (D-181: projects, Needs you, chat files). Authoring
  * (`write:workflows`) is asked for explicitly with
  * `device invite --platform mcp --scopes …`.
  */
-export const DEFAULT_MCP_SCOPES: readonly Scope[] = ['read:status', 'read:workflows', 'read:chats', 'write:chats', 'stream:events', 'exec:agent'];
+export const DEFAULT_MCP_SCOPES: readonly Scope[] = [
+  'read:status',
+  'read:workflows',
+  'read:chats',
+  'write:chats',
+  'stream:events',
+  'exec:agent',
+  // D-181 — the read-only platform tools: projects, Needs you, chat files.
+  'read:projects',
+  'read:activity',
+  'read:files',
+];
 
 /**
  * Never granted to an MCP device, whoever asks (CONVINV-R9): it is an agent

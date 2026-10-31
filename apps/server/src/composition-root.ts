@@ -116,6 +116,7 @@ import {
   RepoReadinessService,
   CodebaseRemoteResolver,
   GitHubToolHost,
+  PlatformToolHost,
   ScmTextGenerator,
   SourceControlFlowService,
   EditorLauncherService,
@@ -1939,6 +1940,24 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     attention: attentionService,
     logger,
   });
+  // D-181 — the platform tools' one implementation: in-app sessions bind it
+  // through the composer (by reference), `/api/platform-tools` serves it to
+  // external agents (`generatorai-mcp`).
+  const platformToolHost = new PlatformToolHost({
+    chats: chatManagementService,
+    chatRepo: chatEntityRepo,
+    projects: projectService,
+    agents: agentService,
+    automations: automationService,
+    attention: attentionService,
+    chatDirectories: async (workspaceId) => {
+      const info = await workspaceManager.getWorkspaceInfo(workspaceId);
+      if (!info) return [];
+      const mounts = info.mounts.filter((m) => m.status !== 'removed').map((m) => ({ alias: m.alias, dir: m.path }));
+      return mounts.length > 0 ? mounts : [{ alias: '.', dir: info.workingDirectory }];
+    },
+  });
+  chatExtensions.platformTools = platformToolHost;
   const chatListService = new ChatListService({
     modelMetadata: () => Object.values(harnessRegistry.statusSnapshot).flatMap((provider) => provider.models.map((model) => ({ ...model, provider: model.provider ?? provider.type }))),
     chats: chatEntityRepo,
@@ -2492,6 +2511,8 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     screenCast,
     // G-01 — attention feed
     attentionService,
+    // D-181 — the platform tools (`/api/platform-tools`)
+    platformToolHost,
     // G-02 — chat list v2
     chatListService,
     chatChangeStatsService,
@@ -2996,6 +3017,8 @@ export interface Container {
   computerConsentStore: PendingConsentStore;
   /** G-01 — Needs you + Running snapshot for `GET /api/attention`. */
   attentionService: AttentionService;
+  /** D-181 — the platform tools' one implementation; `/api/platform-tools` runs it for external agents. */
+  platformToolHost: PlatformToolHost;
   /** G-02 — one page of `GET /api/chats` with row summaries. */
   chatListService: ChatListService;
   /** G-02 — keeps each chat's "Changes ±" columns current. */

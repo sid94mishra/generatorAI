@@ -27,6 +27,7 @@ import { createWorkflowRunWorkspaceRoutes } from './workflowRunWorkspace.js';
 import { createAutomationRoutes } from './automations.js';
 import { createWorkflowCallbackRoutes } from './workflowCallbacks.js';
 import { createWorkflowToolRoutes } from './workflowTools.js';
+import { createPlatformToolRoutes } from './platformTools.js';
 import { createSessionRoutes } from './sessions.js';
 import { createOpenApiRoutes } from './openapi.js';
 import { createProjectRoutes } from './projects.js';
@@ -78,6 +79,7 @@ export function createApiRouter(container: Container): Router {
   router.use('/workflow-callbacks', createWorkflowCallbackRoutes(container));
   // P06 — the workflow tools for agents outside the server (the MCP server in remote mode).
   router.use('/workflow-tools', createWorkflowToolRoutes(container));
+  router.use('/platform-tools', createPlatformToolRoutes(container));
 
   // Projects — CRUD + codebases + configs + worktrees
   router.use('/projects', createProjectRoutes(container));
