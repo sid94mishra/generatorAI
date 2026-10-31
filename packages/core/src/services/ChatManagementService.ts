@@ -182,6 +182,22 @@ export interface ChatManagementServiceExtensions extends SessionComposerDeps {
 /** D-180 — side chats open beside one chat at most. */
 export const MAX_SIDE_CHATS = 4;
 
+/** D-180 — what a quick question is told (after the parent's history): answer, read-only, no plan. */
+const SIDE_QUESTION_NOTE =
+  '[This is a quick side question asked beside the conversation above, while it may still be running. Answer it ' +
+  'directly and briefly. You are read-only here: you may read files and run read-only commands, but change nothing. ' +
+  'Do not write or present a plan — just answer.]';
+
+/**
+ * D-180 — a side chat's name: short, since it sits beside its chat (the tab label). A question started with its
+ * text is named after it; keeping one prefixes the parent's name.
+ */
+export function sideChatName(mode: SideChatMode, prompt?: string): string {
+  const text = prompt?.replace(/\s+/g, ' ').trim();
+  if (text) return text.length > 48 ? `${text.slice(0, 47)}…` : text;
+  return mode === 'question' ? 'Side question' : mode === 'fork' ? 'Fork' : 'Side chat';
+}
+
 export class ChatManagementService {
   /**
    * Track active event subscriptions per chat to prevent leaks. An entry
@@ -2993,28 +3009,29 @@ export class ChatManagementService {
     };
     let created: Chat;
     if (input.mode === 'fork') {
-      created = (await this.forkChat(parentId, { whileBusy: true, side: { mode: 'fork' }, name: `${parent.name} · fork` })).chat;
+      created = (await this.forkChat(parentId, { whileBusy: true, side: { mode: 'fork' }, name: sideChatName('fork', input.prompt) })).chat;
     } else if (input.mode === 'question') {
       const messages = await this.messageRepo.getByChatId(parentId);
       const turns = groupTurns(messages);
       const finished = this.isTurnActive(parentId) ? turns.slice(0, -1) : turns;
       const kept = finished.length ? messages.slice(0, finished.at(-1)!.endIndex) : [];
-      const seed = buildConversationSeed(kept);
+      // Read-only is enforced by the plan permission mode; the note keeps the agent answering instead of planning.
+      const seed = [buildConversationSeed(kept), SIDE_QUESTION_NOTE].filter(Boolean).join('\n\n');
       created = await this.createChat({
         ...common,
-        name: `${parent.name} · question`,
+        name: sideChatName('question', input.prompt),
         ...(parent.workspaceId ? { workspaceId: parent.workspaceId } : {}),
         ...(parent.sources ? { sources: parent.sources } : {}),
         ...(parent.primarySource ? { primary: parent.primarySource } : {}),
         permissionMode: 'plan',
         forkedFromChatId: parentId,
-        ...(seed ? { conversationSeed: seed } : {}),
+        conversationSeed: seed,
         sideMode: 'question',
       });
     } else {
       created = await this.createChat({
         ...common,
-        name: `${parent.name} · side chat`,
+        name: sideChatName('new', input.prompt),
         ...(parent.sources ? { sources: parent.sources } : {}),
         ...(parent.primarySource ? { primary: parent.primarySource } : {}),
         ...(parent.permissionMode ? { permissionMode: parent.permissionMode } : {}),
@@ -3043,6 +3060,9 @@ export class ChatManagementService {
   async keepSideChat(chatId: string): Promise<Chat> {
     const chat = await this.chatRepo.getById(chatId);
     if (!chat.sideOfChatId) return chat;
+    // Beside its chat a short name was enough; in the list it says where it came from.
+    const parent = await this.chatRepo.getById(chat.sideOfChatId).catch(() => undefined);
+    if (parent) await this.chatRepo.update(chatId, { name: `${parent.name} · ${chat.name}` });
     await this.chatRepo.clearSideOf(chatId);
     await this.eventBus.emitGlobal({ kind: 'chat.updated', data: { chatId } }).catch(() => undefined);
     return this.chatRepo.getById(chatId);

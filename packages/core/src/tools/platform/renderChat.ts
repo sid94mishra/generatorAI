@@ -11,6 +11,7 @@
 
 import type { ChatMessage } from '@generatorai/shared';
 import { groupTurns, renderTurnForSeed } from '../../services/chatTranscript.js';
+import { whatChanged } from '../../services/chatReferences.js';
 
 export type ChatRenderMode = 'recent' | 'full';
 
@@ -65,8 +66,10 @@ export function renderChatForTool(
   const omitted = turns.length - rendered.length;
   const notice = dropped > 0 ? `\n[${dropped} older turn${dropped === 1 ? '' : 's'} omitted to fit]` : '';
   const body = rendered.length > 0 ? rendered.join('\n\n---\n\n') : '(no messages yet)';
+  // What the whole chat changed, whatever the mode keeps (D-179's section): a "recent" read missed earlier edits.
+  const changed = defuse(whatChanged(messages));
   return {
-    text: `${header(rendered.length)}${notice}\n\n${body}\n\n${END_MARK}`,
+    text: `${header(rendered.length)}${notice}\n\n## What changed\n${changed}\n\n## Conversation\n${body}\n\n${END_MARK}`,
     totalTurns: turns.length,
     turnsIncluded: rendered.length,
     omittedTurns: omitted,
