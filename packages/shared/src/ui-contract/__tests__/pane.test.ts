@@ -22,7 +22,8 @@ describe('dock contract (M-11, D-27, R-4)', () => {
   });
 
   it('keeps the caps of the pre-redesign code', () => {
-    expect(DOCK_TAB_CAPS).toEqual({ browser: 5, terminal: 4, file: 8, widget: 6 });
+    // D-180 adds side chats (four beside one chat).
+    expect(DOCK_TAB_CAPS).toEqual({ browser: 5, terminal: 4, file: 8, widget: 6, side: 4 });
   });
 
   it('parses the R-4 `?dock=` values and ignores anything else', () => {

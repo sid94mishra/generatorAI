@@ -77,6 +77,8 @@ export const COMMANDS = {
   'nav.forward': { label: 'Forward', group: 'navigate', scope: 'global', runsIn: 'renderer', web: null, desktopMac: 'Cmd+]', desktopWinLinux: 'Alt+Right', icon: 'forward', palette: true },
   'app.settings': { label: 'Open settings', group: 'app', scope: 'global', runsIn: 'renderer', web: 'G ,', desktopMac: 'Cmd+,', desktopWinLinux: 'Ctrl+,', icon: 'settings', palette: true },
   'chat.new': { label: 'New chat', group: 'create', scope: 'global', runsIn: 'renderer', web: 'N', desktopMac: 'Cmd+N', desktopWinLinux: 'Ctrl+N', icon: 'plus', palette: true, deepLink: true },
+  // D-180: a quick side question beside the chat on screen (the chat page registers the controller).
+  'chat.sideQuestion': { label: 'Ask a side question', group: 'create', scope: 'global', runsIn: 'renderer', web: 'Mod+;', desktopMac: 'Cmd+;', desktopWinLinux: 'Ctrl+;', icon: 'message', palette: true },
   'workflow.new': { label: 'New workflow', group: 'create', scope: 'global', runsIn: 'renderer', web: 'Shift+N', desktopMac: 'Cmd+Shift+N', desktopWinLinux: 'Ctrl+Shift+N', icon: 'plus', palette: true, deepLink: true },
   'project.new': { label: 'New project', group: 'create', scope: 'global', runsIn: 'renderer', web: null, desktopMac: null, desktopWinLinux: null, icon: 'plus', palette: true },
   'automation.new': { label: 'New automation', group: 'create', scope: 'global', runsIn: 'renderer', web: null, desktopMac: null, desktopWinLinux: null, icon: 'plus', palette: true },

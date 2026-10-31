@@ -1,4 +1,4 @@
-import type { ChatReferenceInput, ChatReferenceMode, ChatReferencePreview, HarnessProviderId, ScriptAllowlist } from '@generatorai/shared';
+import type { ChatReferenceInput, ChatReferenceMode, ChatReferencePreview, HarnessProviderId, ScriptAllowlist, SideChatMode } from '@generatorai/shared';
 // ────────────────────────────────────────────────────────────────
 // HttpPlatformClient — Web platform IPlatformClient implementation
 // Communicates with the server via REST + SSE
@@ -891,6 +891,25 @@ export class HttpPlatformClient implements IPlatformClient {
 
   async deleteChat(chatId: string): Promise<void> {
     await apiFetch(`${this.baseUrl}/api/chats/${chatId}`, { method: 'DELETE' });
+  }
+
+  /** D-180 — open a side chat beside `chatId`. */
+  async createSideChat(chatId: string, input: { mode: SideChatMode; prompt?: string }): Promise<Chat> {
+    return apiFetch<Chat>(`${this.baseUrl}/api/chats/${chatId}/side-chats`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+  }
+
+  /** D-180 — the side chats open beside `chatId`. */
+  async listSideChats(chatId: string): Promise<Chat[]> {
+    return apiFetch<Chat[]>(`${this.baseUrl}/api/chats/${chatId}/side-chats`);
+  }
+
+  /** D-180 — keep a side chat: it joins the chat list. */
+  async keepSideChat(chatId: string): Promise<Chat> {
+    return apiFetch<Chat>(`${this.baseUrl}/api/chats/${chatId}/keep`, { method: 'POST' });
   }
 
   /**

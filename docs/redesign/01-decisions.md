@@ -1834,7 +1834,7 @@ the rendered text.
 A quick question copies the finished turns, shares the main chat's workspace and runs read-only (plan permission mode),
 even while the main chat runs. A fork copies the history and the files into its own worktree; a new side chat starts
 blank in the same project. Side chats open as dock tabs (at most four), stay out of the chat list, and are kept (a
-normal chat linked to its parent), opened as the main chat, sent back as a chat reference, or discarded.
+normal chat linked to its parent), opened as the main chat, sent back as a chat reference, or discarded. They open from the header's Side chat menu, `/btw <question>` in the composer, or Ctrl/⌘ ; outside text fields (P1-R1 keeps every chord but the palette's out of fields). Closing a quick question discards it; closing a fork or new side chat asks (Escape keeps it).
 
 ### D-181 One platform tool registry for in-app and external agents (owner, 2026-10-31) — Final
 Chats, projects, agents, automations, activity and chat files become platform tools (group `platform`, off by default,

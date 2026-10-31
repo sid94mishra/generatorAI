@@ -14,7 +14,7 @@
 // own UI state (pending captures, browser tab titles) and the dock registry.
 // ────────────────────────────────────────────────────────────────
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { awaitsUserDecision, type ScmResultBlock, type WidgetBlock } from '@generatorai/client-core';
 import { composerPromptPlaceholder, harnessProviderLabel, TRANSCRIPT_COPY, type ApprovalMode } from '@generatorai/shared/ui-contract';
@@ -26,11 +26,17 @@ import {
   useClearProjectPermissionRules,
   useProjectPermissionRules,
   useSetChatPermissionMode,
+  useSideChatActions,
+  useSideChats,
   useUnarchiveChat,
 } from '@/hooks/queries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useEditSourcesStore } from '@/stores/editSourcesStore.js';
 import { useChatRefInboxStore } from '@/stores/chatRefInboxStore.js';
+import { useSideChatStore } from '@/stores/sideChatStore.js';
+import { parseSideTabId, sideTabId } from '@/lib/sideTabId.js';
+import { useConfirm } from '@/ui/primitives/AlertDialog/AlertDialog.js';
+import { SideChatDockContext, SideChatDockPanel, type SideChatDockContextValue } from './side/SideChatPanel.js';
 import { parseWidgetTabId } from '@/lib/widgetTabId.js';
 import { PathRootsContext } from '@/blocks/changes/changePaths.js';
 import { ChangesDockContext, ChangesDockPanel } from '@/blocks/changes/ChangesDockPanel.js';
@@ -140,11 +146,94 @@ export function ChatPage() {
     sources: filesSources,
   });
 
+  // ── D-180: side chats (dock tabs beside this chat) ──
+  const sideChats = useSideChats(chatId);
+  const sideActions = useSideChatActions(chatId);
+  const confirmer = useConfirm();
+  const [closeTabRequest, setCloseTabRequest] = useState<{ tabId: string; token: number } | null>(null);
+  // Names outlive the side list (a kept side chat leaves it but keeps its tab and label).
+  const [sideNames, setSideNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const list = sideChats.data;
+    if (!list?.length) return;
+    setSideNames((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const c of list) {
+        const key = sideTabId(c.id);
+        if (next[key] !== c.name) {
+          next[key] = c.name;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [sideChats.data]);
+  const closeSideTab = useCallback((id: string) => setCloseTabRequest({ tabId: sideTabId(id), token: Date.now() }), []);
+  const createSide = sideActions.create.mutateAsync;
+  const openSideChat = useCallback(
+    async (mode: 'question' | 'fork' | 'new', prompt?: string) => {
+      const created = await createSide({ mode, ...(prompt ? { prompt } : {}) });
+      setSideNames((prev) => ({ ...prev, [sideTabId(created.id)]: created.name }));
+      setDockOpen(true);
+      dock.requestFocus({ type: 'side', token: Date.now(), tabId: sideTabId(created.id) });
+    },
+    [createSide, setDockOpen, dock],
+  );
+  const reopenSideChat = useCallback(
+    (id: string) => {
+      setDockOpen(true);
+      dock.requestFocus({ type: 'side', token: Date.now(), tabId: sideTabId(id) });
+    },
+    [setDockOpen, dock],
+  );
+  // Ctrl/⌘ ; and the palette open a quick question beside the chat on screen.
+  const setSideController = useSideChatStore((st) => st.setController);
+  useEffect(() => {
+    setSideController({ quickQuestion: () => void openSideChat('question').catch(() => undefined) });
+    return () => setSideController(null);
+  }, [setSideController, openSideChat]);
+  const pushInbox = useChatRefInboxStore((st) => st.push);
+  const keepSide = sideActions.keep.mutate;
+  const discardSide = sideActions.discard.mutate;
+  const sideDock = useMemo<SideChatDockContextValue>(
+    () => ({
+      parentChatId: chatId,
+      sendToMain: (c) => {
+        if (chatId) pushInbox(chatId, { chatId: c.id, name: c.name, mode: 'auto' });
+      },
+      keep: (id) => keepSide(id),
+      discard: (id) => discardSide(id, { onSuccess: () => closeSideTab(id) }),
+      closeTab: closeSideTab,
+    }),
+    [chatId, pushInbox, keepSide, discardSide, closeSideTab],
+  );
+
   // Closing a tab for good drops whatever that tab remembered.
   const forgetFileTab = fileTabs.forgetTab;
   const forgetBrowserTab = dock.forgetBrowserTab;
+  const sideList = sideChats.data;
+  const confirmSide = confirmer.confirm;
   const handleDockTabClose = useCallback(
     (tab: { id: string; type: string }) => {
+      if (tab.type === 'side') {
+        // A quick question is throwaway; a fork or new side chat asks (Escape keeps it).
+        const id = parseSideTabId(tab.id);
+        const side = id ? sideList?.find((c) => c.id === id) : undefined;
+        if (!side) return;
+        if (side.sideMode === 'question') {
+          discardSide(side.id);
+          return;
+        }
+        void confirmSide({
+          title: 'Discard this side chat?',
+          description: 'Discarding deletes it and anything it changed. Keep it to find it in your chat list.',
+          confirmLabel: 'Discard',
+          cancelLabel: 'Keep',
+          tone: 'danger',
+        }).then((discard) => (discard ? discardSide(side.id) : keepSide(side.id)));
+        return;
+      }
       if (tab.type === 'files') {
         forgetFileTab(tab.id);
         return;
@@ -158,7 +247,7 @@ export function ChatPage() {
         return next;
       });
     },
-    [forgetBrowserTab, forgetFileTab],
+    [forgetBrowserTab, forgetFileTab, sideList, discardSide, keepSide, confirmSide],
   );
 
   const isOrchestrator = view.isOrchestrator;
@@ -361,6 +450,16 @@ export function ChatPage() {
         getTabCount: () => (runningTaskCount > 0 ? runningTaskCount : undefined),
         Component: ChatTasksDockPanel,
       },
+      // D-180 — one tab per side chat, opened from the header, Ctrl/⌘ ; or `/btw`.
+      side: {
+        label: 'Side chat',
+        description: 'A quick question, fork or new chat beside this one',
+        icon: 'message',
+        allowMultiple: true,
+        maxInstances: CHAT_DOCK_TAB_CAPS.side,
+        getTabLabel: ({ id }) => sideNames[id] ?? 'Side chat',
+        Component: SideChatDockPanel,
+      },
       // PLN-01 — auto-opens when the agent asks for a review; addable to revisit a plan.
       plan: {
         label: 'Plan',
@@ -371,7 +470,7 @@ export function ChatPage() {
     };
     // Only the types this chat has on this surface (Tasks for orchestrators, Computer when enabled …).
     return Object.fromEntries(dockTypes.flatMap((type) => (registry[type] ? [[type, registry[type]]] : [])));
-  }, [dockTypes, chat?.workspaceId, sessionId, fileTabs.filesTabLabel, fileTabs.fileTabLabel, browserTabs, runningTaskCount, widgetTitlesKey]);
+  }, [dockTypes, chat?.workspaceId, sessionId, fileTabs.filesTabLabel, fileTabs.fileTabLabel, browserTabs, runningTaskCount, widgetTitlesKey, sideNames]);
 
   // Transcript host slots.
   const renderTranscriptWidget = useCallback((block: WidgetBlock, sid: string) => <WidgetFrame block={block} sessionId={sid} />, []);
@@ -476,6 +575,7 @@ export function ChatPage() {
         stopState={stop}
         onStop={stop.press}
         chatReferences={chatReferences}
+        onSideQuestion={(question) => void openSideChat('question', question).catch(() => undefined)}
         customSendFn={async ({ prompt, attachments, mode, chatRefs }) => {
           const merged = pendingCaptures.length ? [...attachments, ...pendingCaptures.map((c) => c.file)] : attachments;
           await view.sendPrompt({ prompt, attachments: merged, ...(mode ? { mode } : {}), ...(chatRefs?.length ? { chatRefs } : {}) });
@@ -517,6 +617,8 @@ export function ChatPage() {
           <FilesDockProvider value={fileTabs.dockContext}>
             <TerminalDockProvider value={terminalDock}>
               <BrowserDockProvider value={browserDock}>
+                <SideChatDockContext.Provider value={sideDock}>
+                {confirmer.dialog}
                 <Workspace
                   bare
                   data-testid="chat-workspace"
@@ -527,6 +629,12 @@ export function ChatPage() {
                       awaitingUser={awaitingUserDecision}
                       dockOpen={dockOpen}
                       onToggleDock={toggleDock}
+                      sideChat={{
+                        open: (mode) => void openSideChat(mode).catch(() => undefined),
+                        existing: sideChats.data ?? [],
+                        reopen: reopenSideChat,
+                        busy: sideActions.create.isPending,
+                      }}
                     />
                   }
                   main={
@@ -586,12 +694,14 @@ export function ChatPage() {
                       defaultTabType={surfaceTabs.defaultTab}
                       addableTabTypes={surfaceTabs.addable}
                       focusTabRequest={dock.focusRequest}
+                      closeTabRequest={closeTabRequest}
                       onTabClose={handleDockTabClose}
                       tabs={tabs}
                       main={column}
                     />
                   )}
                 />
+                </SideChatDockContext.Provider>
               </BrowserDockProvider>
             </TerminalDockProvider>
           </FilesDockProvider>

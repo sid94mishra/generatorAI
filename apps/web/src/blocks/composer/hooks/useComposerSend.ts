@@ -57,6 +57,8 @@ export interface UseComposerSendOptions {
   agentMode: AgentMode;
   onBeforeSend: (() => Promise<void>) | undefined;
   customSendFn: ComposerSendFn | undefined;
+  /** D-180 — open a side question with this text (`/btw`); absent where side chats aren't available. */
+  onSideQuestion?: ((question: string) => void) | undefined;
   onBuiltinCommand: ((commandId: string) => void | Promise<void>) | undefined;
   /** Whether the host shows a Stop control (a turn is streaming and there is a stop handler). */
   turnLive: boolean;
@@ -96,6 +98,7 @@ export function useComposerSend({
   agentMode,
   onBeforeSend,
   customSendFn,
+  onSideQuestion,
   onBuiltinCommand,
   turnLive,
   stopState,
@@ -142,6 +145,15 @@ export function useComposerSend({
 
     const cmd = activeCommand;
     const rawInput = text.trim();
+    // D-180 — `/btw` goes to a side chat; this chat's turn is untouched.
+    if (cmd?.opensSideChat && onSideQuestion && rawInput) {
+      setText('');
+      setActiveCommand(null);
+      setMenu(null);
+      sendingRef.current = false;
+      onSideQuestion(rawInput);
+      return;
+    }
     const currentAttachments = attachments;
     const currentChatRefs = chatRefs;
 
@@ -257,6 +269,7 @@ export function useComposerSend({
     markSentAs,
     chatRefs,
     setChatRefs,
+    onSideQuestion,
   ]);
 
   return {

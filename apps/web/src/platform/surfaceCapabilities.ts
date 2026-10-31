@@ -72,6 +72,8 @@ export function dockTabTypes(
   tabs.push('plan');
   if (caps.widgetRendering.supported) tabs.push('widget');
   tabs.push('file');
+  // D-180: side chats open as dock tabs (their panel is a transcript and a composer; every surface can draw it).
+  tabs.push('side');
   return tabs;
 }
 

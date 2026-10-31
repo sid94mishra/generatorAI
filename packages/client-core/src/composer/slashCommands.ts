@@ -35,6 +35,11 @@ export interface SlashCommand {
   format: (input: string, template?: string) => string;
   /** Optional lazy loader for a prompt template's body (fetched on send). */
   loadTemplate?: () => Promise<string>;
+  /**
+   * D-180 — a host that can open side chats sends the input there instead of into this chat (`/btw`). A host that
+   * can't sends `format(input)` as usual.
+   */
+  opensSideChat?: true;
 }
 
 export type MentionFileSource = 'workspace' | 'source' | 'artifacts' | 'worktree';
@@ -89,6 +94,18 @@ export const BUILTIN_COMMANDS: SlashCommand[] = [
     takesInput: true,
     format: (input) =>
       `Use the integrated terminal to run the command(s) needed for the task below. Show the exact command(s) you run, then report the output and the result.\n\nTask: ${input.trim()}`,
+  },
+  {
+    id: 'builtin:btw',
+    name: 'btw',
+    description: 'Ask a side question in a side chat, without interrupting this one',
+    kind: 'command',
+    source: 'builtin',
+    argHint: 'Your side question…',
+    takesInput: true,
+    opensSideChat: true,
+    // Where side chats aren't available the question goes here, kept brief and read-only.
+    format: (input) => `Side question — answer briefly and do not change any files:\n\n${input.trim()}`,
   },
 ];
 

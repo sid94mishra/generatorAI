@@ -50,6 +50,8 @@ export interface DockProps {
   /** Types the "+" menu offers (extra instances, Widget). */
   addableTabTypes: readonly string[];
   focusTabRequest?: DockFocusRequest | null;
+  /** Close one tab from the page (a discarded side chat); `onTabClose` is not called for it. */
+  closeTabRequest?: { tabId: string; token: number } | null;
   /** A tab closed for good: drop what it remembered (a browser tab's URL). */
   onTabClose?: (tab: DockTabRef) => void;
   /** The page's main column. Omitted: the dock renders alone (tests, stories). */
@@ -97,6 +99,7 @@ export function Dock({
   defaultTabType,
   addableTabTypes,
   focusTabRequest,
+  closeTabRequest,
   onTabClose,
   main = null,
   defaultSize = 480,
@@ -107,6 +110,7 @@ export function Dock({
     registry,
     defaultTabType,
     focusRequest: focusTabRequest,
+    closeRequest: closeTabRequest,
     onTabClose,
   });
   const [mode, setHostWidth] = useDockMode();

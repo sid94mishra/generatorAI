@@ -19,7 +19,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router';
-import { chatActivity, resolveMapping, type Chat, type StreamStatus } from '@generatorai/shared';
+import { chatActivity, resolveMapping, type Chat, type SideChatMode, type StreamStatus } from '@generatorai/shared';
 import { displayChatTitle } from '@generatorai/shared/ui-contract';
 import { describeMount } from '@generatorai/client-core';
 import { useArchiveChat, useChat, useRenameChat } from '@/hooks/queries.js';
@@ -52,6 +52,13 @@ export interface ChatHeaderProps {
   awaitingUser: boolean;
   dockOpen: boolean;
   onToggleDock: () => void;
+  /** D-180 — open a side chat, or reopen one already open beside this chat. */
+  sideChat?: {
+    open: (mode: SideChatMode) => void;
+    existing: readonly Chat[];
+    reopen: (chatId: string) => void;
+    busy: boolean;
+  };
 }
 
 /** "Forked from <parent>" — where a branched conversation came from. */
@@ -115,7 +122,7 @@ function RenameDialog({ chat, open, onOpenChange }: { chat: Chat; open: boolean;
 }
 
 /** The chat workspace's page header. */
-export function ChatHeader({ chat, streamStatus, awaitingUser, dockOpen, onToggleDock }: ChatHeaderProps) {
+export function ChatHeader({ chat, streamStatus, awaitingUser, dockOpen, onToggleDock, sideChat }: ChatHeaderProps) {
   const narrow = useMediaQuery(RAIL_QUERY);
   const { data: project } = useProject(chat.projectId ?? undefined);
   const { data: workspaceInfo } = useWorkspaceInfo(chat.workspaceId);
@@ -219,6 +226,27 @@ export function ChatHeader({ chat, streamStatus, awaitingUser, dockOpen, onToggl
         actions={
           <>
             <OpenInEditorButton />
+            {sideChat && !chat.sideOfChatId && !chat.parentChatId && !archived ? (
+              <MenuButton
+                label="Side chat"
+                icon="message"
+                iconOnly
+                align="end"
+                disabled={sideChat.busy}
+                data-testid="chat-header-side-chat"
+                items={[
+                  { id: 'side-question', label: 'Ask a side question', icon: 'message', ...(shortcutFor('chat.sideQuestion') ? { shortcut: shortcutFor('chat.sideQuestion') } : {}), onSelect: () => sideChat.open('question') },
+                  { id: 'side-fork', label: 'Fork into a side chat', icon: 'branch', onSelect: () => sideChat.open('fork') },
+                  { id: 'side-new', label: 'New side chat', icon: 'plus', onSelect: () => sideChat.open('new') },
+                  ...(sideChat.existing.length
+                    ? [
+                        { type: 'separator' as const, id: 'sep-side' },
+                        ...sideChat.existing.map((c) => ({ id: `side-open-${c.id}`, label: `Open “${c.name}”`, icon: 'chats' as const, onSelect: () => sideChat.reopen(c.id) })),
+                      ]
+                    : []),
+                ]}
+              />
+            ) : null}
             <MenuButton label="More" icon="more" iconOnly items={items} align="end" data-testid="chat-header-more" />
           </>
         }

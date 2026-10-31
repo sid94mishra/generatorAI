@@ -27,6 +27,8 @@ export interface UseDockStateOptions {
   registry: DockRegistry;
   defaultTabType: string;
   focusRequest?: DockFocusRequest | null | undefined;
+  /** Close one tab from the page (a discarded side chat, D-180); one close per `token`, `onTabClose` not called. */
+  closeRequest?: { tabId: string; token: number } | null | undefined;
   /** A tab closed for good (not an unmount or a scope switch): drop what it remembered. */
   onTabClose?: ((tab: DockTabRef) => void) | undefined;
 }
@@ -44,6 +46,7 @@ export function useDockState({
   registry,
   defaultTabType,
   focusRequest,
+  closeRequest,
   onTabClose,
 }: UseDockStateOptions): DockStateApi {
   // The key is held WITH the data so a scope switch swaps both atomically;
@@ -150,6 +153,14 @@ export function useDockState({
     }
     update((prev) => focusDockTab(prev, focusRequest, reg));
   }, [focusRequest, update, announceCap]);
+
+  // The page closes a tab it already settled (no `onTabClose`: the page did what closing would do).
+  const lastCloseToken = useRef<number | null>(null);
+  useEffect(() => {
+    if (!closeRequest || lastCloseToken.current === closeRequest.token) return;
+    lastCloseToken.current = closeRequest.token;
+    if (stateRef.current.tabs.some((t) => t.id === closeRequest.tabId)) update((prev) => closeDockTab(prev, closeRequest.tabId));
+  }, [closeRequest, update]);
 
   return { state, capNotice, select, add, close };
 }

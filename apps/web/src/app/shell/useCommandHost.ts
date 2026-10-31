@@ -39,6 +39,7 @@ import { commandHost, isMacOS, onDesktopCommand } from '@/lib/desktop.js';
 import { registerCommandRunner } from '@/lib/commandRunner.js';
 import { useShellStore } from '@/stores/shellStore.js';
 import { useDockStore } from '@/stores/dockStore.js';
+import { useSideChatStore } from '@/stores/sideChatStore.js';
 import { useActivityStore } from '@/stores/activityStore.js';
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
 import { useNewChatStore } from '@/stores/newChatStore.js';
@@ -88,6 +89,7 @@ export const HANDLERS: Record<RendererCommandId, (ctx: CommandCtx) => void> = {
   'sidebar.toggle': () => useShellStore.getState().toggleSidebar(),
   'activity.toggle': () => useActivityStore.getState().toggle(),
   'dock.toggle': () => useDockStore.getState().controller?.toggle(),
+  'chat.sideQuestion': () => useSideChatStore.getState().controller?.quickQuestion(),
   'theme.toggle': (ctx) => ctx.toggleTheme(),
   // FindBar owns the find-in-page state and subscribes to these directly.
   'find.open': handledElsewhere,

@@ -108,6 +108,8 @@ export interface ComposerProps {
    * them and calls `onIncomingConsumed`.
    */
   chatReferences?: { currentChatId: string; incoming?: readonly ComposerChatRef[]; onIncomingConsumed?: () => void };
+  /** D-180 — `/btw <question>` opens a side question here instead of sending to this chat. */
+  onSideQuestion?: (question: string) => void;
   /** Start/clear the optimistic turn on `sessionId`'s stream (default true; a workflow stage passes false). */
   manageStream?: boolean;
   selectedModel?: string;
@@ -228,6 +230,7 @@ export function Composer({
   pendingCaptures,
   onRemovePendingCapture,
   chatReferences,
+  onSideQuestion,
   onBuiltinCommand,
   agentMode,
   onAgentModeChange,
@@ -305,6 +308,7 @@ export function Composer({
     agentMode: activeAgentMode,
     onBeforeSend,
     customSendFn,
+    onSideQuestion,
     onBuiltinCommand,
     turnLive: isStreaming && !!onStop,
     stopState,

@@ -6,7 +6,7 @@ import { useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import type { BackgroundTaskListItem, CreateChatParams } from '@generatorai/shared';
-import type { AgentMode, ChatReferenceInput, ChatReferenceMode, PlanAction } from '@generatorai/shared';
+import type { AgentMode, ChatReferenceInput, ChatReferenceMode, PlanAction, SideChatMode } from '@generatorai/shared';
 import type {
   ScmFlowRequest,
   ScmGenerateRequest,
@@ -801,6 +801,42 @@ export function useRewindChat(chatId: string, workspaceId?: string) {
       invalidateChatAndWorkspace(queryClient, chatId, workspaceId);
     },
   });
+}
+
+/** D-180 — the side chats open beside `chatId`. */
+export function useSideChats(chatId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: ['side-chats', chatId],
+    queryFn: () => platform.listSideChats(chatId!),
+    enabled: !!chatId,
+  });
+}
+
+/** D-180 — open, keep and discard side chats; each refreshes the parent's list. */
+export function useSideChatActions(parentChatId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ['side-chats', parentChatId] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.chats });
+  };
+  const create = useMutation({
+    mutationFn: (input: { mode: SideChatMode; prompt?: string }) => platform.createSideChat(parentChatId!, input),
+    onSuccess: refresh,
+    meta: { errorTitle: 'Could not open a side chat' },
+  });
+  const keep = useMutation({
+    mutationFn: (chatId: string) => platform.keepSideChat(chatId),
+    onSuccess: refresh,
+    meta: { errorTitle: 'Could not keep the side chat' },
+  });
+  const discard = useMutation({
+    mutationFn: (chatId: string) => platform.deleteChat(chatId),
+    onSuccess: refresh,
+    meta: { errorTitle: 'Could not discard the side chat' },
+  });
+  return { create, keep, discard };
 }
 
 /** D-179 — what attaching `chatId` to a message in `mode` would include (the chat reference chip). */
