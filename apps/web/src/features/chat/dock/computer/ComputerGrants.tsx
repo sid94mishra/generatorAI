@@ -1,13 +1,14 @@
 // Standing computer grants for this workspace (F-dock-05 "Grants"), with Revoke.
 
 import { COMPUTER_ANY_APP, type ComputerGrant } from '@generatorai/shared';
+import { computerScopeLabel } from '@generatorai/shared/ui-contract';
 import { SectionHeader } from '@/ui/patterns/SectionHeader/SectionHeader.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Icon } from '@/ui/icons/Icon.js';
 import { useComputerGrants, useRevokeComputerGrant } from '@/hooks/computerQueries.js';
 
 function scopeWord(scope: ComputerGrant['scope']): string {
-  return scope === 'read' ? 'Screen' : 'Keyboard & mouse';
+  return computerScopeLabel(scope);
 }
 
 export function ComputerGrants({ workspaceId }: { workspaceId: string }) {

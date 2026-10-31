@@ -303,7 +303,7 @@ export interface ComputerGrant {
   appIdentity: string;
   appLabel: string;
   decision: ComputerGrantDecision;
-  /** read = "Screen"; mutate / synthetic = "Keyboard & mouse". */
+  /** Worded by `computerScopeLabel`: read "Read only", mutate "Screen & accessibility", synthetic "Keyboard & mouse". */
   scope: 'read' | 'mutate' | 'synthetic';
   grantedAt: string;
   lastUsedAt: string | null;

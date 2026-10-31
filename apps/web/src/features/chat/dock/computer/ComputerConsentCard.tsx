@@ -12,7 +12,7 @@
 
 import { useState } from 'react';
 import { consentAnswerOptions } from '@generatorai/client-core';
-import { computerActionVerb, computerConsentTitle } from '@generatorai/shared/ui-contract';
+import { computerActionVerb, computerConsentTitle, computerPromptScope, computerScopeLabel } from '@generatorai/shared/ui-contract';
 import type { ComputerConsentDecision, ComputerConsentReach, ComputerPendingConsent } from '@generatorai/shared';
 import { GateCardFrame, type GateAction } from '@/ui/patterns/GateCardFrame/GateCardFrame.js';
 import { SegmentedControl } from '@/ui/primitives/SegmentedControl/SegmentedControl.js';
@@ -66,7 +66,7 @@ export function ComputerConsentCard({ workspaceId, prompt }: ComputerConsentCard
     <GateCardFrame
       icon="hand"
       title={computerConsentTitle(prompt.action, prompt.appLabel, prompt.plan?.length)}
-      meta={synthetic ? 'Keyboard & mouse' : 'Screen'}
+      meta={computerScopeLabel(computerPromptScope(prompt))}
       actions={actions}
       data-testid="computer-consent-card"
     >

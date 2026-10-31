@@ -113,6 +113,7 @@ export const COMPUTER_CONSENT_GATE_COPY = {
   title: (agent: string): string => `Allow ${agent} to control this computer?`,
   reachSynthetic: 'Keyboard & mouse',
   reachAccessibility: 'Screen & accessibility',
+  reachRead: 'Read only',
   actions: {
     consent_deny: 'Deny',
     consent_allow_once: 'Allow once',
@@ -240,3 +241,24 @@ export const EMPTY_STATE_COPY = {
 } as const satisfies Record<string, EmptyStateCopy>;
 
 export type EmptyStateKey = keyof typeof EMPTY_STATE_COPY;
+
+/**
+ * How far a computer-use answer or grant reaches, in the card's and the grants list's shared words: reading only,
+ * acting in the background through accessibility, or taking over the keyboard and mouse.
+ */
+export function computerScopeLabel(scope: 'read' | 'mutate' | 'synthetic'): string {
+  return scope === 'synthetic'
+    ? COMPUTER_CONSENT_GATE_COPY.reachSynthetic
+    : scope === 'mutate'
+      ? COMPUTER_CONSENT_GATE_COPY.reachAccessibility
+      : COMPUTER_CONSENT_GATE_COPY.reachRead;
+}
+
+/** Actions that only read a window: a prompt for one of them asks for "Read only". */
+const COMPUTER_READ_ACTIONS = new Set(['snapshot', 'list_windows', 'verify', 'list_apps']);
+
+/** The reach a pending prompt asks for: takeover input, reading only, or acting in the background. */
+export function computerPromptScope(prompt: { path: 'synthetic' | 'accessibility'; action: string }): 'read' | 'mutate' | 'synthetic' {
+  if (prompt.path === 'synthetic') return 'synthetic';
+  return COMPUTER_READ_ACTIONS.has(prompt.action) ? 'read' : 'mutate';
+}
