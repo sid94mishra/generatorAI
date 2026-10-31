@@ -212,6 +212,7 @@ export function ChatTranscript({
           chatId={owner}
           turnId={message.metadata?.turnId}
           alwaysVisible={latest}
+          text={message.content}
           {...(reviewable ? { review } : {})}
         />
       );

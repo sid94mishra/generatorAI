@@ -4,6 +4,8 @@
 //                     web and mobile agree byte for byte);
 //   Fork from here  — a new chat that remembers everything up to and including
 //                     this turn and nothing after it;
+//   Read aloud      — the response spoken by the local Kokoro engine, when voice output is on
+//                     (Settings › Audio); one speaker for the whole app, a second Read aloud barges in;
 //   Review with …   — on the newest Codex turn that changed files: the chat moves
 //                     to Claude and asks it to review those changes, editing nothing
 //                     (evaluation: a Sonnet review caught Codex's regressions every time).
@@ -14,8 +16,11 @@
 // ────────────────────────────────────────────────────────────────
 
 import { TRANSCRIPT_COPY } from '@generatorai/shared/ui-contract';
+import { useAudioSettings } from '@/hooks/audioQueries.js';
+import { useTextToSpeech } from '@/hooks/useTextToSpeech.js';
 import { cn } from '@/ui/lib/cn.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
+import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { useChatActions } from '../hooks/useChatActions.js';
 
 export interface MessageActionsProps {
@@ -26,11 +31,17 @@ export interface MessageActionsProps {
   alwaysVisible?: boolean;
   /** "Review with <model>": a second review of what this turn changed. */
   review?: { model: string; run: () => void; busy: boolean } | undefined;
+  /** The response's text, for Read aloud. */
+  text?: string | undefined;
 }
 
-export function MessageActions({ chatId, turnId, alwaysVisible = false, review }: MessageActionsProps) {
+export function MessageActions({ chatId, turnId, alwaysVisible = false, review, text }: MessageActionsProps) {
   const { copyTranscript, copying, copied, fork, forking } = useChatActions(chatId);
   const forkFromHere = () => fork(turnId);
+  const voiceOut = useAudioSettings().data?.ttsEnabled !== false;
+  const tts = useTextToSpeech({ onError: (message) => toast.error('Could not read aloud', { description: message }) });
+  const speaking = tts.status === 'connecting' || tts.status === 'speaking';
+  const canSpeak = voiceOut && tts.isSupported && Boolean(text?.trim());
 
   return (
     <div
@@ -68,6 +79,19 @@ export function MessageActions({ chatId, turnId, alwaysVisible = false, review }
       >
         Fork from here
       </Button>
+      {canSpeak ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={speaking ? 'stop' : 'play'}
+          loading={tts.status === 'connecting'}
+          onClick={() => (speaking ? tts.stop() : void tts.speak(text!))}
+          title={speaking ? 'Stop reading this response' : 'Read this response aloud'}
+          data-testid="read-aloud-button"
+        >
+          {speaking ? 'Stop reading' : 'Read aloud'}
+        </Button>
+      ) : null}
       {review ? (
         <Button
           variant="ghost"
