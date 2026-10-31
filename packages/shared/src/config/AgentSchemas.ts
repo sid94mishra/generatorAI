@@ -36,6 +36,7 @@ export const AgentToolPolicySchema = z
     web: z.boolean(),
     workflows: z.boolean(),
     workflowAuthoring: z.boolean(),
+    platform: z.boolean(),
   })
   .partial();
 

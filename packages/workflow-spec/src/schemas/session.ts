@@ -45,6 +45,7 @@ export const AgentToolPolicySchema = z
     web: z.boolean().optional().describe('Web fetch and search tools'),
     workflows: z.boolean().optional().describe('Workflow tools: list, describe, run, check, respond to an approval, cancel'),
     workflowAuthoring: z.boolean().optional().describe('Workflow authoring tools: guide, validate, plan, create a draft'),
+    platform: z.boolean().optional().describe('Platform tools: chats, projects, agents, automations, Needs you, chat files'),
   })
   .strict()
   .describe('Tool-group delta over the bound agent');

@@ -377,7 +377,7 @@ export function inheritWorkerCapabilitiesFrom(parent: {
   }
   const agentOverrides: AgentOverrides = {
     ...(extraDeny.length > 0 ? { extraDeny } : {}),
-    tools: { ...off, workflows: false, workflowAuthoring: false },
+    tools: { ...off, workflows: false, workflowAuthoring: false, platform: false },
   };
 
   return {

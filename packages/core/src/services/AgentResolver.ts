@@ -96,6 +96,7 @@ const GROUP_TOOL_NAMES: Record<keyof AgentToolPolicy, { copilot: string[]; claud
   // Platform tool sets: bound by the session composer, never built-ins.
   workflows: { copilot: [], claude: [] },
   workflowAuthoring: { copilot: [], claude: [] },
+  platform: { copilot: [], claude: [] },
 };
 
 export class AgentResolver {
@@ -407,6 +408,8 @@ export class AgentResolver {
       out.orchestration = true;
       // An orchestrator runs workflows by default (PD-23) unless a level says no.
       if (!levels.some((l) => typeof l?.workflows === 'boolean')) out.workflows = true;
+      // …and gets the platform tools (D-181) on the same terms.
+      if (!levels.some((l) => typeof l?.platform === 'boolean')) out.platform = true;
     }
     return out;
   }

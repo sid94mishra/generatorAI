@@ -156,7 +156,7 @@ const UNRECORDED_OWNER_SCOPES: readonly string[] = [
 ];
 
 /** Who a chat's tools act for: its recorded principal, else the local owner with the default grant. */
-function chatPrincipal(p: ChatPrincipal | undefined): InvocationPrincipal {
+export function chatPrincipal(p: ChatPrincipal | undefined): InvocationPrincipal {
   if (!p || (p.kind === 'local' && p.scopes.length === 0)) return { kind: 'local', id: 'local', scopes: [...UNRECORDED_OWNER_SCOPES] };
   return { kind: p.kind, id: p.id, scopes: [...p.scopes] };
 }

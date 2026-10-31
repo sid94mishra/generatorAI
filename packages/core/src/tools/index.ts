@@ -66,3 +66,6 @@ export type {
 
 // GitHub issue + merge tools (D-146) — bound into project sessions.
 export * from './github/index.js';
+
+// Platform tools (D-181) — chats, projects, agents, automations, activity, chat files; one implementation for chats, stages and MCP.
+export * from './platform/index.js';

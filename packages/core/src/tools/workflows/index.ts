@@ -19,6 +19,7 @@ import { toolError, type RunToolArgs, type WorkflowToolCaller, type WorkflowTool
 export {
   WorkflowToolHost,
   WorkflowToolRefusal,
+  chatPrincipal,
   DEFAULT_WORKFLOW_TOOL_LIMITS,
   compactDigest,
   compactPlan,

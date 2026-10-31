@@ -625,3 +625,7 @@ export type {
 } from './EntitySearch.js';
 export { SEARCH_ENTITY_TYPES } from './EntitySearch.js';
 export type { PushData, PushQuestion } from './Push.js';
+
+// ── Platform tools (D-181) ──
+export type { PlatformToolAdvert, PlatformToolset, ExternalAgentSetup } from './PlatformTools.js';
+export { PLATFORM_TOOLSETS, MCP_SERVER_COMMAND, MCP_SERVER_ARGS, externalAgentSetups } from './PlatformTools.js';

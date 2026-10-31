@@ -59,6 +59,12 @@ export interface AgentToolPolicy {
   workflows: boolean;
   /** The workflow authoring tools (guide, validate, plan, create a draft). Granted per agent, never a default. */
   workflowAuthoring: boolean;
+  /**
+   * The platform tools (D-181): chats, projects, agents, automations, Needs you
+   * and chat files. Off by default, on for orchestrator chats (set at
+   * creation), never for orchestrator workers.
+   */
+  platform: boolean;
 }
 
 export const AGENT_TOOL_GROUPS: readonly (keyof AgentToolPolicy)[] = [
@@ -72,6 +78,7 @@ export const AGENT_TOOL_GROUPS: readonly (keyof AgentToolPolicy)[] = [
   'web',
   'workflows',
   'workflowAuthoring',
+  'platform',
 ] as const;
 
 /** Platform defaults (L0) when no level expresses an opinion. */
@@ -93,6 +100,8 @@ export const DEFAULT_AGENT_TOOL_POLICY: AgentToolPolicy = {
   // Like extensionAuthoring: an agent must be granted it. Agent-authored
   // workflows are drafts a person publishes (PD-14).
   workflowAuthoring: false,
+  // D-181 — opt-in like the workflow tools; orchestrators get it on.
+  platform: false,
 };
 
 export interface AgentRuntimePolicy {

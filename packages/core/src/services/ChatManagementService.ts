@@ -1450,9 +1450,17 @@ export class ChatManagementService {
     // PD-23 — an orchestrator chat gets the workflow tools unless it says
     // otherwise. The default is written onto the chat, so a resume composes
     // the same tools and chats created before it keep theirs (R-10).
+    // D-181 — and the platform tools, on the same terms.
+    const ownTools = input.agentOverrides?.tools;
     const params: CreateChatParams & InternalCreateChatExtras =
-      input.orchestratorMode && !input.parentChatId && input.agentOverrides?.tools?.workflows === undefined
-        ? { ...input, agentOverrides: { ...(input.agentOverrides ?? {}), tools: { ...(input.agentOverrides?.tools ?? {}), workflows: true } } }
+      input.orchestratorMode && !input.parentChatId && (ownTools?.workflows === undefined || ownTools?.platform === undefined)
+        ? {
+            ...input,
+            agentOverrides: {
+              ...(input.agentOverrides ?? {}),
+              tools: { ...(ownTools ?? {}), workflows: ownTools?.workflows ?? true, platform: ownTools?.platform ?? true },
+            },
+          }
         : input;
     const chatId = generateId();
     const sessionId = generateId();
