@@ -198,6 +198,7 @@ function renderEntry(entry: TranscriptEntry, props: TranscriptTurnProps, started
           key={entry.key}
           content={entry.message.content}
           attachments={entry.message.attachments}
+          chatRefs={entry.message.metadata?.chatRefs}
           chatId={entry.message.chatId}
           timestamp={entry.message.timestamp}
           actions={props.renderUserActions?.(entry.message)}

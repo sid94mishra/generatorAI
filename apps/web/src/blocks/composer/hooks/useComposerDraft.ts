@@ -8,12 +8,15 @@
 import type React from 'react';
 import { useCallback, useState } from 'react';
 import type { SlashCommand } from '@generatorai/client-core';
-import type { ComposerAttachment, ComposerMenuState, CaptureSource } from '../model/types.js';
+import { MAX_CHAT_REFERENCES, type ChatReferenceMode } from '@generatorai/shared';
+import type { ComposerAttachment, ComposerChatRef, ComposerMenuState, CaptureSource } from '../model/types.js';
 import { COMPOSER } from './affordances.js';
 
 export interface UseComposerDraftOptions {
   /** Workspace id — `@` file mentions are only detected when there is one to search. */
   workspaceId: string | undefined;
+  /** D-179 — `@` also offers chats to attach, with or without a workspace. */
+  chatMentions?: boolean;
 }
 
 export interface ComposerDraft {
@@ -30,6 +33,12 @@ export interface ComposerDraft {
   /** Open, move or close the menu for the caret position in `value`. */
   detectMenu: (value: string, caret: number) => void;
   removeAttachment: (id: string) => void;
+  /** D-179 — chats attached as context (at most five, each once). */
+  chatRefs: ComposerChatRef[];
+  setChatRefs: React.Dispatch<React.SetStateAction<ComposerChatRef[]>>;
+  addChatRef: (ref: ComposerChatRef) => void;
+  removeChatRef: (chatId: string) => void;
+  setChatRefMode: (chatId: string, mode: ChatReferenceMode) => void;
   /** The hidden file input's change handler. */
   handleFilesChanged: (e: React.ChangeEvent<HTMLInputElement>) => void;
   handleDrop: (e: React.DragEvent) => void;
@@ -46,9 +55,18 @@ function asFileAttachments(prefix: 'file' | 'paste', files: File[]): ComposerAtt
   }));
 }
 
-export function useComposerDraft({ workspaceId }: UseComposerDraftOptions): ComposerDraft {
+export function useComposerDraft({ workspaceId, chatMentions = false }: UseComposerDraftOptions): ComposerDraft {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
+  const [chatRefs, setChatRefs] = useState<ComposerChatRef[]>([]);
+  const addChatRef = useCallback((ref: ComposerChatRef) => {
+    setChatRefs((prev) => (prev.some((r) => r.chatId === ref.chatId) || prev.length >= MAX_CHAT_REFERENCES ? prev : [...prev, ref]));
+  }, []);
+  const removeChatRef = useCallback((chatId: string) => setChatRefs((prev) => prev.filter((r) => r.chatId !== chatId)), []);
+  const setChatRefMode = useCallback(
+    (chatId: string, mode: ChatReferenceMode) => setChatRefs((prev) => prev.map((r) => (r.chatId === chatId ? { ...r, mode } : r))),
+    [],
+  );
   // ── Composer menu (`/` commands + `@` file mentions) ──
   const [activeCommand, setActiveCommand] = useState<SlashCommand | null>(null);
   const [menu, setMenu] = useState<ComposerMenuState | null>(null);
@@ -69,8 +87,8 @@ export function useComposerDraft({ workspaceId }: UseComposerDraftOptions): Comp
         }
       }
       // Mention: last '@' before the caret, preceded by start/whitespace, with
-      // no whitespace between it and the caret. Requires a workspace to search.
-      if (workspaceId) {
+      // no whitespace between it and the caret. Needs a workspace to search, or chats to offer.
+      if (workspaceId || chatMentions) {
         const upto = value.slice(0, caret);
         const at = upto.lastIndexOf('@');
         if (at !== -1) {
@@ -85,7 +103,7 @@ export function useComposerDraft({ workspaceId }: UseComposerDraftOptions): Comp
       }
       setMenu(null);
     },
-    [activeCommand, workspaceId],
+    [activeCommand, workspaceId, chatMentions],
   );
 
   const handleFilesChanged = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -150,6 +168,11 @@ export function useComposerDraft({ workspaceId }: UseComposerDraftOptions): Comp
     setMenuIndex,
     detectMenu,
     removeAttachment,
+    chatRefs,
+    setChatRefs,
+    addChatRef,
+    removeChatRef,
+    setChatRefMode,
     handleFilesChanged,
     handleDrop,
     handleDragOver,

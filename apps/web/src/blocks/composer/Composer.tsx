@@ -66,6 +66,10 @@ import { useComposerKeymap } from './hooks/useComposerKeymap.js';
 import { useToolbarCollapse } from './hooks/useToolbarCollapse.js';
 import { useComposerTools } from './toolToggles.js';
 import { AttachingChip, ComposerChip } from './parts/AttachmentChips.js';
+import { AttachChatDialog } from './parts/AttachChatDialog.js';
+import { ChatRefChip } from './parts/ChatRefChip.js';
+import type { ComposerChatRef } from './model/types.js';
+import type { ComposerSendFn } from './hooks/useComposerSend.js';
 import { AgentChip, OrchestratingChip, SkillsMcpChip, TeamRow } from './parts/Binding.js';
 import { BlockingBar } from './parts/BlockingBar.js';
 import { ComposerMenu, type ComposerMenuItem } from './parts/ComposerMenu.js';
@@ -97,7 +101,13 @@ export interface ComposerProps {
   variant?: Extract<ComposerVariant, 'chat' | 'stage'>;
   onBeforeSend?: () => Promise<void>;
   /** The host's send (the chat page merges its captures); without it the composer posts to the session. */
-  customSendFn?: (args: { prompt: string; attachments: File[]; mode?: AgentMode }) => Promise<void>;
+  customSendFn?: ComposerSendFn;
+  /**
+   * D-179 — chats can be attached as context: the `@` menu offers chats, an "Attach chat" button opens a picker.
+   * `incoming` are chats another surface asked to attach (a side chat's "Send to main chat"); the composer adds
+   * them and calls `onIncomingConsumed`.
+   */
+  chatReferences?: { currentChatId: string; incoming?: readonly ComposerChatRef[]; onIncomingConsumed?: () => void };
   /** Start/clear the optimistic turn on `sessionId`'s stream (default true; a workflow stage passes false). */
   manageStream?: boolean;
   selectedModel?: string;
@@ -217,6 +227,7 @@ export function Composer({
   stopState,
   pendingCaptures,
   onRemovePendingCapture,
+  chatReferences,
   onBuiltinCommand,
   agentMode,
   onAgentModeChange,
@@ -249,11 +260,27 @@ export function Composer({
   const menusRef = useRef<HTMLDivElement>(null);
 
   // ── Composer logic (03 §6.1) ──
-  const draft = useComposerDraft({ workspaceId });
+  const draft = useComposerDraft({ workspaceId, chatMentions: !!chatReferences });
   const { text, attachments, activeCommand, setActiveCommand, menu, setMenu, menuIndex, setMenuIndex } = draft;
   const history = useComposerHistory({ promptHistory, restoredDraft, draft, textareaRef });
-  const menus = useComposerMenus({ projectId, workspaceId, draft, textareaRef });
-  const { filteredCommands, filteredMentions, fileIndexLoading, mentionLoading, applyMenuSelection } = menus;
+  const menus = useComposerMenus({
+    projectId,
+    workspaceId,
+    draft,
+    textareaRef,
+    chatMentions: chatReferences ? { currentChatId: chatReferences.currentChatId } : undefined,
+  });
+  const { filteredCommands, filteredMentions, filteredChats, fileIndexLoading, mentionLoading, applyMenuSelection } = menus;
+  const [attachChatOpen, setAttachChatOpen] = useState(false);
+  // D-179 — chats another surface asked to attach land here once.
+  const incomingChatRefs = chatReferences?.incoming;
+  const onIncomingConsumed = chatReferences?.onIncomingConsumed;
+  const { addChatRef } = draft;
+  useEffect(() => {
+    if (!incomingChatRefs?.length) return;
+    for (const ref of incomingChatRefs) addChatRef(ref);
+    onIncomingConsumed?.();
+  }, [incomingChatRefs, onIncomingConsumed, addChatRef]);
   const models = useComposerModelControls({ sessionId, selectedModel, onModelChange, reasoningEffort, contextTier });
   const {
     modelsPending,
@@ -382,14 +409,24 @@ export function Composer({
         };
       });
     }
-    return filteredMentions.map((f) => ({
+    // D-179 — matching chats lead the `@` menu; files follow.
+    const chatRows: ComposerMenuItem[] = filteredChats.map((c, i) => ({
+      id: `chat:${c.id}`,
+      title: c.name,
+      subtitle: 'Attach as context',
+      icon: 'message' as const,
+      group: i === 0 ? 'Chats' : undefined,
+    }));
+    const fileRows: ComposerMenuItem[] = filteredMentions.map((f, i) => ({
       id: `${f.source}:${f.worktreeAlias ?? ''}:${f.path}`,
       title: f.label,
       subtitle: f.path,
       icon: 'file' as const,
       badge: f.source === 'worktree' ? f.worktreeAlias : undefined,
+      group: i === 0 && chatRows.length > 0 ? 'Files' : undefined,
     }));
-  }, [menu, filteredCommands, filteredMentions]);
+    return [...chatRows, ...fileRows];
+  }, [menu, filteredCommands, filteredMentions, filteredChats]);
   const highlightedCommand = menu?.type === 'slash' ? filteredCommands[menuIndex] : undefined;
 
   // Subtrees that do not change while typing are built once per input change,
@@ -513,8 +550,16 @@ export function Composer({
           />
 
           {/* Attachments: the row eases open when the first chip arrives (D-109). */}
-          <Reveal open={attachments.length > 0 || (pendingCaptures?.length ?? 0) > 0 || mentionLoading}>
+          <Reveal open={attachments.length > 0 || draft.chatRefs.length > 0 || (pendingCaptures?.length ?? 0) > 0 || mentionLoading}>
             <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
+              {draft.chatRefs.map((ref) => (
+                <ChatRefChip
+                  key={`chat:${ref.chatId}`}
+                  chatRef={ref}
+                  onModeChange={(mode) => draft.setChatRefMode(ref.chatId, mode)}
+                  onRemove={() => draft.removeChatRef(ref.chatId)}
+                />
+              ))}
               {attachments.map((att) => (
                 <ComposerChip
                   key={att.id}
@@ -589,6 +634,27 @@ export function Composer({
                   disabled={disabled}
                   onClick={() => fileInputRef.current?.click()}
                 />
+              ) : null}
+              {chatReferences ? (
+                <>
+                  <IconButton
+                    icon="message"
+                    label="Attach chat"
+                    tooltip="Attach a chat as context"
+                    disabled={disabled}
+                    onClick={() => setAttachChatOpen(true)}
+                  />
+                  <AttachChatDialog
+                    open={attachChatOpen}
+                    onOpenChange={setAttachChatOpen}
+                    currentChatId={chatReferences.currentChatId}
+                    attachedIds={draft.chatRefs.map((r) => r.chatId)}
+                    onPick={(c) => {
+                      draft.addChatRef({ chatId: c.id, name: c.name, mode: 'auto' });
+                      requestAnimationFrame(() => textareaRef.current?.focus());
+                    }}
+                  />
+                </>
               ) : null}
               <ToolsPopover
                 disabled={disabled}

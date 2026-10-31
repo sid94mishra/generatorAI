@@ -4,6 +4,8 @@
 // client-core (`SlashCommand`, `MentionFile`).
 // ────────────────────────────────────────────────────────────────
 
+import type { ChatReferenceMode } from '@generatorai/shared';
+
 export type CaptureSource = 'browser' | 'terminal' | 'file' | 'mention';
 
 /**
@@ -26,4 +28,12 @@ export interface ComposerMenuState {
   query: string;
   /** Caret index of the trigger char within the textarea value. */
   triggerIndex: number;
+}
+
+/** D-179 — a chat attached to the draft as context (a chip; the server renders it at send time). */
+export interface ComposerChatRef {
+  chatId: string;
+  /** The chat's name, for the chip. */
+  name: string;
+  mode: ChatReferenceMode;
 }

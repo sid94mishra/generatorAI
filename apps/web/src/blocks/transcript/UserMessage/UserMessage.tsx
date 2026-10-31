@@ -10,7 +10,7 @@
 
 import { Fragment, useState, type ReactNode } from 'react';
 import type { IconConcept } from '@generatorai/design-tokens';
-import type { ChatMessage } from '@generatorai/shared';
+import type { ChatMessage, ChatReferenceRecord } from '@generatorai/shared';
 import {
   TRANSCRIPT_COPY,
   parseReviewPrompt,
@@ -25,6 +25,7 @@ import { Button } from '@/ui/primitives/Button/Button.js';
 import { Icon } from '@/ui/icons/Icon.js';
 import { Collapsible } from '@/ui/primitives/Collapsible/Collapsible.js';
 import { AttachmentList } from './AttachmentList.js';
+import { ChatRefList } from './ChatRefList.js';
 import { formatTurnTime } from '../formatTime.js';
 
 /** `a `b` c` → text with InlineCode spans; an unmatched backtick stays literal. */
@@ -43,6 +44,8 @@ export function withInlineCode(text: string): ReactNode {
 export interface UserMessageProps {
   content: string;
   attachments?: ChatMessage['attachments'];
+  /** D-179 — chats attached to this message as context (chips linking to them). */
+  chatRefs?: readonly ChatReferenceRecord[] | undefined;
   /** Chat that owns the attachments (their URLs need it). */
   chatId?: string | undefined;
   /** When it was sent; omitted for a pending bubble. */
@@ -71,6 +74,7 @@ export function isLongMessage(content: string): boolean {
 export function UserMessage({
   content,
   attachments,
+  chatRefs,
   chatId,
   timestamp,
   pending = false,
@@ -130,6 +134,7 @@ export function UserMessage({
           </Button>
         ) : null}
         {stagePrompt ? <StagePromptFolds prompt={stagePrompt} /> : null}
+        {chatRefs && chatRefs.length > 0 ? <ChatRefList refs={chatRefs} /> : null}
         {attachments && attachments.length > 0 ? <AttachmentList attachments={attachments} chatId={chatId} /> : null}
         <div
           className={cn(

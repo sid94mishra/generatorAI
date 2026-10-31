@@ -30,6 +30,7 @@ import {
 } from '@/hooks/queries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useEditSourcesStore } from '@/stores/editSourcesStore.js';
+import { useChatRefInboxStore } from '@/stores/chatRefInboxStore.js';
 import { parseWidgetTabId } from '@/lib/widgetTabId.js';
 import { PathRootsContext } from '@/blocks/changes/changePaths.js';
 import { ChangesDockContext, ChangesDockPanel } from '@/blocks/changes/ChangesDockPanel.js';
@@ -394,6 +395,21 @@ export function ChatPage() {
   );
 
   // What the Tasks / Computer / Plan / Widget panels read.
+  // D-179 — chats can be attached as context; a side chat's "Send to main chat" arrives through the inbox.
+  const inboxRefs = useChatRefInboxStore((s) => (chatId ? s.inbox[chatId] : undefined));
+  const clearInbox = useChatRefInboxStore((s) => s.clear);
+  const chatReferences = useMemo(
+    () =>
+      chatId
+        ? {
+            currentChatId: chatId,
+            ...(inboxRefs?.length ? { incoming: inboxRefs } : {}),
+            onIncomingConsumed: () => clearInbox(chatId),
+          }
+        : undefined,
+    [chatId, inboxRefs, clearInbox],
+  );
+
   const chatDock = useMemo<ChatDockContextValue>(
     () => ({ chatId, chat, workspaceId: chat?.workspaceId, sessionId, activePlanId, openWidgetTab }),
     [chatId, chat, sessionId, activePlanId, openWidgetTab],
@@ -459,9 +475,10 @@ export function ChatPage() {
         onBuiltinCommand={dock.runBuiltinCommand}
         stopState={stop}
         onStop={stop.press}
-        customSendFn={async ({ prompt, attachments, mode }) => {
+        chatReferences={chatReferences}
+        customSendFn={async ({ prompt, attachments, mode, chatRefs }) => {
           const merged = pendingCaptures.length ? [...attachments, ...pendingCaptures.map((c) => c.file)] : attachments;
-          await view.sendPrompt({ prompt, attachments: merged, ...(mode ? { mode } : {}) });
+          await view.sendPrompt({ prompt, attachments: merged, ...(mode ? { mode } : {}), ...(chatRefs?.length ? { chatRefs } : {}) });
           if (pendingCaptures.length) setPendingCaptures([]);
         }}
         agentMode={gates.agentMode}

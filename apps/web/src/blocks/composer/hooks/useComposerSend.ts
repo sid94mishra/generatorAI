@@ -16,7 +16,7 @@
 
 import { BROWSER_COMMENTS_PROMPT, BROWSER_COMMENT_FILE } from '../../browser/browserAnnotations.js';
 import { useCallback, useRef } from 'react';
-import type { AgentMode, WorkspacePrepStatus } from '@generatorai/shared';
+import type { AgentMode, ChatReferenceInput, WorkspacePrepStatus } from '@generatorai/shared';
 import type { ComposerBlockingState, ComposerPrimaryAction } from '@generatorai/shared/ui-contract';
 import {
   canSendComposer,
@@ -32,6 +32,17 @@ import type { CaptureSource } from '../model/types.js';
 import type { ComposerDraft } from './useComposerDraft.js';
 import type { ComposerHistory } from './useComposerHistory.js';
 
+/** D-179 — what the composer hands a custom send. */
+export type ComposerSendFn = (args: {
+  prompt: string;
+  attachments: File[];
+  mode?: AgentMode;
+  chatRefs?: ChatReferenceInput[];
+}) => Promise<void>;
+
+/** The words sent when the message is only attached chats. */
+const CHAT_REFERENCES_PROMPT = 'Use the attached chat as context.';
+
 export interface UseComposerSendOptions {
   sessionId: string;
   draft: ComposerDraft;
@@ -45,7 +56,7 @@ export interface UseComposerSendOptions {
   /** The agent mode for this turn (already defaulted). */
   agentMode: AgentMode;
   onBeforeSend: (() => Promise<void>) | undefined;
-  customSendFn: ((args: { prompt: string; attachments: File[]; mode?: AgentMode }) => Promise<void>) | undefined;
+  customSendFn: ComposerSendFn | undefined;
   onBuiltinCommand: ((commandId: string) => void | Promise<void>) | undefined;
   /** Whether the host shows a Stop control (a turn is streaming and there is a stop handler). */
   turnLive: boolean;
@@ -90,7 +101,7 @@ export function useComposerSend({
   stopState,
   manageStream = true,
 }: UseComposerSendOptions): ComposerSend {
-  const { text, attachments, activeCommand, setText, setAttachments, setActiveCommand, setMenu } = draft;
+  const { text, attachments, activeCommand, setText, setAttachments, setActiveCommand, setMenu, chatRefs, setChatRefs } = draft;
   const { recordSent, markSentAs } = history;
   const sendMutation = useSendPrompt(sessionId);
   const startPending = useStreamStore((state) => state.startPending);
@@ -109,7 +120,8 @@ export function useComposerSend({
   const canSend = canSendComposer({
     text,
     hasCommand: activeCommand !== null,
-    attachmentCount: attachments.length,
+    // D-179 — an attached chat is content too.
+    attachmentCount: attachments.length + chatRefs.length,
     captureCount: pendingCaptures?.length ?? 0,
     disabled,
     sending: isLoading,
@@ -131,9 +143,11 @@ export function useComposerSend({
     const cmd = activeCommand;
     const rawInput = text.trim();
     const currentAttachments = attachments;
+    const currentChatRefs = chatRefs;
 
     setText('');
     setAttachments([]);
+    setChatRefs([]);
     setActiveCommand(null);
     setMenu(null);
     // Remember what was sent so ↑ works before the server echoes it back.
@@ -168,12 +182,14 @@ export function useComposerSend({
         );
         prompt = fromBrowser ? BROWSER_COMMENTS_PROMPT : ATTACHMENTS_PROMPT;
       }
+      if (!prompt.trim() && currentChatRefs.length > 0) prompt = CHAT_REFERENCES_PROMPT;
 
       if (!prompt.trim() && currentAttachments.length + captureFiles.length === 0) {
         // Nothing to send after formatting — restore and bail.
         setText(rawInput);
         setActiveCommand(cmd);
         setAttachments(currentAttachments);
+        setChatRefs(currentChatRefs);
         sendingRef.current = false;
         return;
       }
@@ -196,7 +212,12 @@ export function useComposerSend({
         await onBeforeSend();
       }
       if (customSendFn) {
-        await customSendFn({ prompt, attachments: files, mode: agentMode });
+        await customSendFn({
+          prompt,
+          attachments: files,
+          mode: agentMode,
+          ...(currentChatRefs.length ? { chatRefs: currentChatRefs.map((r) => ({ chatId: r.chatId, mode: r.mode })) } : {}),
+        });
       } else {
         await sendMutation.mutateAsync({ prompt, attachments: files });
       }
@@ -208,6 +229,7 @@ export function useComposerSend({
       setText(rawInput);
       setActiveCommand(cmd);
       setAttachments(currentAttachments);
+      setChatRefs(currentChatRefs);
       if (manageStream) clearStream(sessionId);
     } finally {
       sendingRef.current = false;
@@ -233,6 +255,8 @@ export function useComposerSend({
     setMenu,
     recordSent,
     markSentAs,
+    chatRefs,
+    setChatRefs,
   ]);
 
   return {

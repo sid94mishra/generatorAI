@@ -6,7 +6,7 @@ import { useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import type { BackgroundTaskListItem, CreateChatParams } from '@generatorai/shared';
-import type { AgentMode, PlanAction } from '@generatorai/shared';
+import type { AgentMode, ChatReferenceInput, ChatReferenceMode, PlanAction } from '@generatorai/shared';
 import type {
   ScmFlowRequest,
   ScmGenerateRequest,
@@ -715,15 +715,16 @@ export function useSendChatPrompt(chatId: string) {
 
   return useMutation({
     // PLN-01 — `mode` selects the per-turn agent mode from the composer.
-    mutationFn: (params: { prompt: string; attachments?: File[]; mode?: AgentMode }) => {
+    mutationFn: (params: { prompt: string; attachments?: File[]; mode?: AgentMode; chatRefs?: readonly ChatReferenceInput[] }) => {
       const client = platform as HttpPlatformClient;
       // v2 chat prompt endpoint — uses chatId, not sessionId
-      if (params.attachments?.length && 'sendChatPromptWithFiles' in client) {
+      if ((params.attachments?.length || params.chatRefs?.length) && 'sendChatPromptWithFiles' in client) {
         return client.sendChatPromptWithFiles(
           chatId,
           params.prompt,
           params.attachments,
           params.mode,
+          params.chatRefs,
         );
       }
       return platform.sendChatPrompt(chatId, params.prompt, undefined, params.mode);
@@ -799,6 +800,17 @@ export function useRewindChat(chatId: string, workspaceId?: string) {
     onSuccess: () => {
       invalidateChatAndWorkspace(queryClient, chatId, workspaceId);
     },
+  });
+}
+
+/** D-179 — what attaching `chatId` to a message in `mode` would include (the chat reference chip). */
+export function useChatReferencePreview(chatId: string | undefined, mode: ChatReferenceMode, options: { enabled?: boolean } = {}) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: ['chat-reference-preview', chatId, mode],
+    queryFn: () => platform.getChatReferencePreview(chatId!, mode),
+    enabled: !!chatId && options.enabled !== false,
+    staleTime: 30_000,
   });
 }
 

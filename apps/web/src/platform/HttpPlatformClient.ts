@@ -1,4 +1,4 @@
-import type { HarnessProviderId, ScriptAllowlist } from '@generatorai/shared';
+import type { ChatReferenceInput, ChatReferenceMode, ChatReferencePreview, HarnessProviderId, ScriptAllowlist } from '@generatorai/shared';
 // ────────────────────────────────────────────────────────────────
 // HttpPlatformClient — Web platform IPlatformClient implementation
 // Communicates with the server via REST + SSE
@@ -991,11 +991,14 @@ export class HttpPlatformClient implements IPlatformClient {
     prompt: string,
     files?: File[],
     mode?: AgentMode,
+    chatRefs?: readonly ChatReferenceInput[],
   ): Promise<void> {
     const formData = new FormData();
     formData.append('prompt', prompt);
     // PLN-01 — per-turn agent mode.
     if (mode) formData.append('mode', mode);
+    // D-179 — chats attached as context.
+    if (chatRefs?.length) formData.append('chatRefs', JSON.stringify(chatRefs));
 
     if (files?.length) {
       for (const file of files) {
@@ -1007,6 +1010,11 @@ export class HttpPlatformClient implements IPlatformClient {
       method: 'POST',
       body: formData,
     });
+  }
+
+  /** D-179 — what attaching `chatId` to a message in `mode` would include. */
+  async getChatReferencePreview(chatId: string, mode: ChatReferenceMode): Promise<ChatReferencePreview> {
+    return apiFetch<ChatReferencePreview>(`${this.baseUrl}/api/chats/${chatId}/reference-preview?mode=${mode}`);
   }
 
   // ── PLN-01: Plan mode ──
