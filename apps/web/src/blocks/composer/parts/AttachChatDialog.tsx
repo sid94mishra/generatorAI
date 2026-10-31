@@ -7,7 +7,6 @@
 import { useState } from 'react';
 import type { ChatListItem } from '@generatorai/shared';
 import { useChats } from '@/hooks/chatListQueries.js';
-import { Icon } from '@/ui/icons/Icon.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Dialog } from '@/ui/primitives/Dialog/Dialog.js';
 import { EmptyState } from '@/ui/primitives/EmptyState/EmptyState.js';
@@ -44,22 +43,24 @@ export function AttachChatDialog({ open, onOpenChange, currentChatId, attachedId
             chats.map((chat) => {
               const attached = attachedIds.includes(chat.id);
               return (
+                // The kit Button wraps children in one truncating label span: the glyph goes in `icon`, the
+                // status words stay inline after the name.
                 <Button
                   key={chat.id}
                   variant="ghost"
                   fullWidth
                   role="listitem"
+                  icon="message"
                   disabled={attached}
                   onClick={() => {
                     onPick(chat);
                     onOpenChange(false);
                   }}
-                  className="h-row justify-start gap-2.5 px-2 text-fg"
+                  className="h-row justify-start gap-2.5 px-2 text-left font-normal text-fg"
                 >
-                  <Icon concept="message" size={14} className="shrink-0 text-fg-3" />
-                  <span className="min-w-0 flex-1 truncate text-left">{chat.name}</span>
-                  {attached ? <span className="shrink-0 text-small text-fg-3">Attached</span> : null}
-                  {chat.status === 'archived' ? <span className="shrink-0 text-small text-fg-3">Archived</span> : null}
+                  {chat.name}
+                  {attached ? <span className="ml-2 text-small text-fg-3">Attached</span> : null}
+                  {chat.status === 'archived' ? <span className="ml-2 text-small text-fg-3">Archived</span> : null}
                 </Button>
               );
             })
