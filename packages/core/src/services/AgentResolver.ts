@@ -96,6 +96,7 @@ const GROUP_TOOL_NAMES: Record<keyof AgentToolPolicy, { copilot: string[]; claud
   // Platform tool sets: bound by the session composer, never built-ins.
   workflows: { copilot: [], claude: [] },
   workflowAuthoring: { copilot: [], claude: [] },
+  codeMode: { copilot: [], claude: [] },
 };
 
 export class AgentResolver {
