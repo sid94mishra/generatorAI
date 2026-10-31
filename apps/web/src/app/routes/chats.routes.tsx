@@ -27,8 +27,9 @@ export const chatsRoutes: RouteObject[] = [
       Promise.all([
         import('@/app/registries/tasksSections.js'),
         import('@/app/registries/workflowTranscriptCards.js'),
+        import('@/app/registries/codeModeTranscriptCards.js'),
         import('@/features/chat/ChatPage.js'),
-      ]).then(([, , m]) => ({
+      ]).then(([, , , m]) => ({
         default: m.ChatPage,
       })),
     // P4-12: the chat workspace renders its own ChatHeader (T-04).

@@ -75,6 +75,7 @@ describe('tool verbs', () => {
     ['mcp__github__list_issues', 'tool', 'List issues'],
     ['mcp__generatorai-tools__check_background_agents', 'tool', 'Check tasks'],
     ['ToolSearch', 'tool', 'Loaded tools'],
+    ['mcp__generatorai-tools__run_code', 'tool', 'Ran code'],
   ])('%s → %s / %s', (tool, kind, verb) => {
     expect(toolStepKind(tool)).toBe(kind);
     expect(toolStepVerb(tool, false)).toBe(verb);
@@ -83,6 +84,7 @@ describe('tool verbs', () => {
   it('has live verbs', () => {
     expect(toolStepVerb('Bash', true)).toBe('Running');
     expect(toolStepVerb('Read', true)).toBe('Reading');
+    expect(toolStepVerb('run_code', true)).toBe('Running code');
   });
 
   it('names tools the way a person reads them', () => {
