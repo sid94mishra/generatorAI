@@ -1,6 +1,6 @@
 // @generatorai/git — local git operations (ports/adapters)
 
-export { GitClient } from './GitClient.js';
+export { GitClient, DEFAULT_IGNORES } from './GitClient.js';
 export { isRemoteGitUrl } from './remoteUrl.js';
 export type {
   IGitClient,

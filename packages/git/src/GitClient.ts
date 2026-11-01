@@ -39,6 +39,30 @@ function firstLine(text: string): string {
   return text.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
 }
 
+
+/**
+ * What a repository GeneratorAI creates ignores from the start: dependencies, build output, secrets, logs and
+ * database sidecars — never worth a commit, and `.env` must never be pushed.
+ */
+export const DEFAULT_IGNORES: readonly string[] = [
+  'node_modules/',
+  'dist/',
+  'build/',
+  'coverage/',
+  '.next/',
+  '.turbo/',
+  '.cache/',
+  '.env',
+  '.env.local',
+  '.env.*.local',
+  '*.log',
+  '*.db-shm',
+  '*.db-wal',
+  '*.db-journal',
+  '.DS_Store',
+  'Thumbs.db',
+];
+
 /**
  * Runner decorator that pins every command to a shadow git directory.
  *
@@ -565,7 +589,7 @@ export class GitClient implements IGitClient {
 
   /**
    * Initialize an empty git repository at `dir` if it isn't already tracked.
-   * Writes a minimal `.gitignore` (if missing) and a placeholder identity.
+   * Ignores {@link DEFAULT_IGNORES} through `info/exclude` and sets a placeholder identity.
    * Returns true iff a new repo was created.
    */
   async initIfNeeded(dir: string): Promise<boolean> {
@@ -584,37 +608,15 @@ export class GitClient implements IGitClient {
       // the answer and need not spawn a process to learn it.
       this.repoProbeCache.set(dir, Date.now());
 
-      const gitignorePath = path.join(dir, '.gitignore');
+      // The defaults go to `info/exclude`, not a `.gitignore`: git honours both, but a file in the work tree
+      // is a change of its own — a new chat's folder offered "1 file not committed" before anything happened.
+      // A `.gitignore` the agent or the person writes still applies on top.
       try {
-        await fs.access(gitignorePath);
+        const infoDir = path.join(dir, '.git', 'info');
+        await fs.mkdir(infoDir, { recursive: true });
+        await fs.appendFile(path.join(infoDir, 'exclude'), ['', '# GeneratorAI defaults', ...DEFAULT_IGNORES, ''].join('\n'), 'utf-8');
       } catch {
-        const defaultIgnore = [
-          '# Auto-generated defaults',
-          'node_modules/',
-          'dist/',
-          'build/',
-          'coverage/',
-          '.next/',
-          '.turbo/',
-          '.cache/',
-          '.env',
-          '.env.local',
-          '.env.*.local',
-          '*.log',
-          '# SQLite WAL sidecars',
-          '*.db-shm',
-          '*.db-wal',
-          '*.db-journal',
-          '# OS junk',
-          '.DS_Store',
-          'Thumbs.db',
-          '',
-        ].join('\n');
-        try {
-          await fs.writeFile(gitignorePath, defaultIgnore, 'utf-8');
-        } catch {
-          /* ignore write errors — we still have a valid repo */
-        }
+        /* ignore write errors — we still have a valid repo */
       }
 
       // A placeholder identity only where git has none at all, so commits do not fail: a repo-local one would outrank

@@ -575,12 +575,13 @@ describe('ChangeSummaryService (real git)', () => {
   });
 
   it('"Uncommitted changes" on a repository with no commit yet lists every file, as the commit dialog does', async () => {
-    // A new chat's folder: `git init` plus the generated .gitignore, captured by the chat's baseline.
+    // A folder the person had before the chat, captured by the chat's baseline; then the agent's file.
+    await fs.writeFile(path.join(repoDir, 'readme.md'), 'theirs\n');
     await snapshot('baseline');
     await fs.writeFile(path.join(repoDir, 'notes.md'), 'by the agent\n');
 
     const uncommitted = await service.getSummary({ ...params(), base: { kind: 'ref', id: 'HEAD' } });
-    expect(uncommitted.repos[0]!.files.map((f) => f.path).sort()).toEqual(['.gitignore', 'notes.md']);
+    expect(uncommitted.repos[0]!.files.map((f) => f.path).sort()).toEqual(['notes.md', 'readme.md']);
     expect(uncommitted.repos[0]!.base.label).toBe('Last commit');
     // "This chat" still shows only what the chat changed.
     const sinceChat = await service.getSummary(params());

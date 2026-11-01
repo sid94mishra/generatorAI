@@ -103,18 +103,24 @@ afterEach(async () => {
 });
 
 describe('GitClient.initIfNeeded', () => {
-  it('initializes a repo and writes a default .gitignore', async () => {
+  it('initializes a repo that ignores the defaults through info/exclude — no .gitignore, nothing to commit', async () => {
     const dir = path.join(tmpRoot, 'proj');
     await fs.mkdir(dir, { recursive: true });
-    await writeFile(dir, 'index.js', 'console.log(1)\n');
 
     const created = await git.initIfNeeded(dir);
     expect(created).toBe(true);
     expect(await git.isGitRepo(dir)).toBe(true);
 
-    const ignore = await fs.readFile(path.join(dir, '.gitignore'), 'utf-8');
-    expect(ignore).toContain('node_modules/');
-    expect(ignore).toContain('dist/');
+    await expect(fs.access(path.join(dir, '.gitignore'))).rejects.toThrow();
+    const exclude = await fs.readFile(path.join(dir, '.git', 'info', 'exclude'), 'utf-8');
+    expect(exclude).toContain('node_modules/');
+    expect(exclude).toContain('.env');
+    // A fresh folder has nothing to commit; secrets and dependencies stay out once they appear.
+    expect(await git.getStatus(dir)).toBe('');
+    await writeFile(dir, '.env', 'TOKEN=x\n');
+    await writeFile(dir, 'node_modules/dep/index.js', 'x\n');
+    await writeFile(dir, 'index.js', 'console.log(1)\n');
+    expect((await git.getStatus(dir)).trim()).toBe('?? index.js');
   });
 
   it('returns false when the directory is already a repo', async () => {
@@ -248,10 +254,10 @@ describe('GitClient.firstCommit / diffNameStatus', () => {
 });
 
 describe('GitClient.lsFiles', () => {
-  it('lists tracked + untracked while honoring .gitignore', async () => {
+  it('lists tracked + untracked while honoring the ignores', async () => {
     const dir = path.join(tmpRoot, 'ls');
     await fs.mkdir(dir, { recursive: true });
-    await git.initIfNeeded(dir); // writes .gitignore with node_modules/
+    await git.initIfNeeded(dir); // ignores node_modules/ through info/exclude
     await writeFile(dir, 'src/app.ts', 'export {}\n');
     await writeFile(dir, 'node_modules/dep/index.js', 'ignored\n');
     const files = await git.lsFiles(dir);

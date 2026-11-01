@@ -38,7 +38,7 @@ import type {
   WorktreeRunType,
 } from '@generatorai/shared';
 import { ConflictError, NotFoundError, ValidationError, type MountableSourceSpec } from '@generatorai/shared';
-import type { IGitClient } from '@generatorai/git';
+import { DEFAULT_IGNORES, type IGitClient } from '@generatorai/git';
 import { shadowGitDirFor } from '@generatorai/changes';
 import type { IWorkspaceMountRepository } from '../domain/ports/IWorkspaceMountRepository.js';
 import type { IExecutionWorkspaceRepository } from '../domain/ports/IExecutionWorkspaceRepository.js';
@@ -139,25 +139,12 @@ export const SCRATCH_DIR = 'scratch';
 
 /**
  * Local-only ignore patterns for a mount's shadow store. The mount's own
- * `.gitignore` files still apply on top of these.
+ * `.gitignore` files still apply on top of these. A repository GeneratorAI
+ * created keeps its defaults in its own `info/exclude`, which the shadow store
+ * (a different git dir) does not read — so it takes the full list too.
  */
 const SHADOW_EXCLUDES_REPO = ['.generatorai/', 'node_modules/', '.DS_Store', 'Thumbs.db'];
-const SHADOW_EXCLUDES_FOLDER = [
-  ...SHADOW_EXCLUDES_REPO,
-  'dist/',
-  'build/',
-  'coverage/',
-  '.next/',
-  '.turbo/',
-  '.cache/',
-  '.env',
-  '.env.local',
-  '.env.*.local',
-  '*.log',
-  '*.db-shm',
-  '*.db-wal',
-  '*.db-journal',
-];
+const SHADOW_EXCLUDES_FOLDER = ['.generatorai/', ...DEFAULT_IGNORES];
 
 export class MountService {
   private readonly inflight = new Map<string, Promise<void>>();
@@ -642,7 +629,7 @@ export class MountService {
     if (mount.mode === 'generated') {
       await fs.mkdir(mount.path, { recursive: true });
       await git.initIfNeeded(mount.path);
-      await this.ensureShadow(workspace.rootPath, mount.alias, mount.path, true);
+      await this.ensureShadow(workspace.rootPath, mount.alias, mount.path, true, SHADOW_EXCLUDES_FOLDER);
       return { isRepo: true, branch: (await git.currentBranch(mount.path)) ?? undefined };
     }
 
@@ -776,7 +763,13 @@ export class MountService {
    * so unchanged blobs cost nothing; the effective `core.autocrlf` is copied
    * so EOL-normalised trees compare cleanly against real commits.
    */
-  private async ensureShadow(rootPath: string, alias: string, workTree: string, isRepo: boolean): Promise<void> {
+  private async ensureShadow(
+    rootPath: string,
+    alias: string,
+    workTree: string,
+    isRepo: boolean,
+    excludes: readonly string[] = isRepo ? SHADOW_EXCLUDES_REPO : SHADOW_EXCLUDES_FOLDER,
+  ): Promise<void> {
     const git = this.deps.git;
     const gitDir = shadowGitDirFor(rootPath, alias);
     const alternates = isRepo ? await git.commonObjectsDir(workTree) : null;
@@ -784,7 +777,7 @@ export class MountService {
     const ok = await git.initShadowRepo(gitDir, workTree, {
       ...(alternates ? { alternatesObjectsDir: alternates } : {}),
       autocrlf,
-      excludes: isRepo ? SHADOW_EXCLUDES_REPO : SHADOW_EXCLUDES_FOLDER,
+      excludes: [...excludes],
     });
     if (!ok) throw new Error(`could not create the checkpoint store for "${alias}"`);
   }
