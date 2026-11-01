@@ -14,7 +14,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { Link, useLocation } from 'react-router';
-import { NAV_DESTINATIONS, navDestinationFor } from '@generatorai/shared/ui-contract';
+import { MENU_DESTINATIONS, navDestinationFor } from '@generatorai/shared/ui-contract';
 import type { ShellLayout } from '@/lib/desktop.js';
 import { useAttentionCounts } from '@/hooks/attentionQueries.js';
 import { cn } from '@/ui/lib/cn.js';
@@ -109,7 +109,7 @@ export function ConnectedRail({
       />
       <RailDivider />
       <RailGroup role="navigation" aria-label="Main" data-testid="rail-nav">
-        {NAV_DESTINATIONS.map((d) => {
+        {MENU_DESTINATIONS.map((d) => {
           const isActive = active === d.id;
           const needsYou = d.id === 'home' && (counts?.needsYou ?? 0) > 0;
           return (

@@ -9,7 +9,7 @@
 //                 server already matched them (title, description, tags), so
 //                 the rows are `preMatched`; a chat already listed under
 //                 Recent chats is not repeated.
-//   Go to         NAV_DESTINATIONS (D-22 order) with the host's binding
+//   Go to         MENU_DESTINATIONS (D-22 order) with the host's binding
 //   Actions       `palette: true` registry commands that are not a
 //                 destination, board order first (New chat, New workflow,
 //                 Toggle theme, Open settings), then registry order
@@ -22,6 +22,7 @@
 
 import {
   COMMANDS,
+  MENU_DESTINATIONS,
   NAV_DESTINATIONS,
   RENDERER_COMMAND_IDS,
   bindingFor,
@@ -183,7 +184,7 @@ export function buildPaletteModel(input: PaletteModelInput): PaletteModel {
 
   groups.push({
     label: 'Go to',
-    items: NAV_DESTINATIONS.map((dest) => {
+    items: MENU_DESTINATIONS.map((dest) => {
       const value = `nav:${dest.id}`;
       entries.set(value, { kind: 'command', id: dest.command, path: dest.path });
       return {

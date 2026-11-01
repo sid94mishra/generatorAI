@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NAV_DESTINATIONS } from '@generatorai/shared/ui-contract';
+import { MENU_DESTINATIONS } from '@generatorai/shared/ui-contract';
 import { buildPaletteModel, paletteFooterHints } from '@/features/palette/paletteModel.js';
 
 const base = { resolvedTheme: 'dark' as const, recentChats: [] };
@@ -11,10 +11,11 @@ function group(model: ReturnType<typeof buildPaletteModel>, label: string) {
 }
 
 describe('buildPaletteModel', () => {
-  it('lists every destination under Go to, in the D-22 order, each running its nav command', () => {
+  it('lists every menu destination under Go to (Scripts hidden), in the D-22 order, each running its nav command', () => {
     const model = buildPaletteModel({ ...base, host: 'web', mac: false });
     const goTo = group(model, 'Go to');
-    expect(goTo.items.map((i) => i.label)).toEqual(NAV_DESTINATIONS.map((d) => d.label));
+    expect(goTo.items.map((i) => i.label)).toEqual(MENU_DESTINATIONS.map((d) => d.label));
+    expect(goTo.items.some((i) => i.label === 'Scripts')).toBe(false);
     expect(model.entries.get('nav:chats')).toEqual({ kind: 'command', id: 'nav.chats', path: '/chats' });
   });
 

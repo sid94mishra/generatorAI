@@ -14,7 +14,6 @@ import { useShellStatus } from '@/hooks/useShellStatus.js';
 import { useProjects } from '@/hooks/projectQueries.js';
 import { useAgents } from '@/hooks/agentQueries.js';
 import { useAutomations } from '@/hooks/automationQueries.js';
-import { useScripts } from '@/hooks/scriptQueries.js';
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
 import { KeyValueList, type KeyValueItem } from '@/ui/patterns/KeyValueList/KeyValueList.js';
 import { StatStrip, type StatTileItem } from '@/ui/patterns/StatStrip/StatStrip.js';
@@ -177,12 +176,10 @@ export function ShortcutsCard() {
   const projects = useProjects();
   const agents = useAgents();
   const automations = useAutomations();
-  const scripts = useScripts();
   const rows = [
     { label: 'Projects', icon: 'projects', to: '/projects', count: projects.data?.length },
     { label: 'Agents', icon: 'agents', to: '/agents', count: agents.data?.length },
     { label: 'Automations', icon: 'automations', to: '/automations', count: automations.data?.length },
-    { label: 'Scripts', icon: 'scripts', to: '/scripts', count: scripts.data?.length },
   ] as const;
   return (
     <Card className="p-1.5" data-testid="home-shortcuts">

@@ -6,9 +6,10 @@ import { test, expect } from '../helpers/test';
 //
 //   • The sidebar is `aside[data-testid="app-sidebar"]` with `data-collapsed`
 //     = `full` (232px) or `rail` (48px). Its `<nav aria-label="Main">`
-//     (`sidebar-nav`) holds exactly seven React Router links, in D-22 order:
-//     Home, Chats, Projects, Agents, Workflows, Automations, Scripts — each
-//     also carrying `sidebar-nav-<id>`.
+//     (`sidebar-nav`) holds exactly six React Router links, in D-22 order:
+//     Home, Chats, Projects, Agents, Workflows, Automations — each also
+//     carrying `sidebar-nav-<id>`. Scripts is hidden from the menus until it is
+//     revisited (MENU_DESTINATIONS).
 //   • Page titles are the <h1> inside <main> (`main-card`). `/` is Home
 //     (P5-10): its H1 is the live headline ("2 need you · 1 running",
 //     "Nothing needs you"), matched by HOME_HEADING.
@@ -29,7 +30,6 @@ const PAGES: Array<{ id: string; nav: string; urlRe: RegExp; heading: string | R
   { id: 'agents', nav: 'Agents', urlRe: /\/agents$/, heading: 'Agents' },
   { id: 'workflows', nav: 'Workflows', urlRe: /\/workflows$/, heading: 'Workflows' },
   { id: 'automations', nav: 'Automations', urlRe: /\/automations$/, heading: 'Automations' },
-  { id: 'scripts', nav: 'Scripts', urlRe: /\/scripts$/, heading: 'Scripts' },
 ];
 
 const SIDEBAR_FULL = '[data-testid="app-sidebar"][data-collapsed="full"]';

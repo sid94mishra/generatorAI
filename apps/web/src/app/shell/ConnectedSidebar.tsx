@@ -20,7 +20,7 @@
 import { Link, useLocation } from 'react-router';
 import type { AttentionItem } from '@generatorai/shared';
 import { isDesktop, type ShellLayout } from '@/lib/desktop.js';
-import { ACTIVITY_COPY, NAV_DESTINATIONS, navDestinationFor } from '@generatorai/shared/ui-contract';
+import { ACTIVITY_COPY, MENU_DESTINATIONS, navDestinationFor } from '@generatorai/shared/ui-contract';
 import { useAttention, useAttentionCounts } from '@/hooks/attentionQueries.js';
 import { useActivityStore } from '@/stores/activityStore.js';
 import { useRefetchAfterGap } from '@/hooks/useConnectionSummary.js';
@@ -129,7 +129,7 @@ export function ConnectedSidebar({ layout, inFlyout = false, activityOpen = fals
       }
       nav={
         <SidebarNav data-testid="sidebar-nav">
-          {NAV_DESTINATIONS.map((d) => (
+          {MENU_DESTINATIONS.map((d) => (
             <NavItem
               key={d.id}
               icon={d.icon}

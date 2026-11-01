@@ -252,7 +252,7 @@ test.describe('Home', () => {
     await expect(page.getByTestId('home-this-week').getByText('This week', { exact: true })).toBeVisible();
 
     const shortcuts = main.getByRole('navigation', { name: 'Shortcuts' });
-    for (const label of ['Projects', 'Agents', 'Automations', 'Scripts']) {
+    for (const label of ['Projects', 'Agents', 'Automations']) {
       await expect(shortcuts.getByRole('link', { name: new RegExp(`^${label}`) })).toBeVisible();
     }
   });

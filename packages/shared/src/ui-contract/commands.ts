@@ -188,6 +188,12 @@ export const NAV_DESTINATIONS = [
   tray: boolean;
 }>;
 
+/**
+ * The destinations the sidebar, rail, palette and Home shortcuts list. Scripts is left out until its
+ * implementation is revisited end to end (owner, 2026-11-01); its page stays reachable at /scripts.
+ */
+export const MENU_DESTINATIONS = NAV_DESTINATIONS.filter((d) => d.id !== 'scripts');
+
 export type NavDestination = (typeof NAV_DESTINATIONS)[number];
 export type NavDestinationId = NavDestination['id'];
 
