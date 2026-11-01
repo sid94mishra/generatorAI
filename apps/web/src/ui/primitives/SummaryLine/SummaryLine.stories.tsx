@@ -54,3 +54,25 @@ export const LongText: Story = {
     detail: 'a-very-long-host-name.example.com/with/a/deep/path/that/truncates',
   },
 };
+
+/** A command: runs something rather than opening a view — no chevron. */
+export const Command: Story = {
+  args: { icon: 'terminal', title: 'Open a terminal', detail: undefined, chevron: false },
+  play: async ({ canvasElement, args }) => {
+    const button = within(canvasElement).getByRole('button', { name: /Open a terminal/ });
+    await expect(button.querySelectorAll('svg')).toHaveLength(1);
+    await userEvent.click(button);
+    await expect(args.onClick).toHaveBeenCalled();
+  },
+};
+
+/** A custom glyph (an editor's mark) in place of the icon. */
+export const CustomGlyph: Story = {
+  args: {
+    icon: 'file',
+    glyph: <span className="size-3.5 rounded-badge bg-accent" />,
+    title: 'Open in VS Code',
+    detail: undefined,
+    chevron: false,
+  },
+};

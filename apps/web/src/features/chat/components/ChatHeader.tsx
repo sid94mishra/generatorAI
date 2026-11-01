@@ -252,7 +252,7 @@ export function ChatHeader({ chat, streamStatus, awaitingUser, dockOpen, onToggl
             ) : null}
             {summary ? (
               <IconButton
-                icon="info"
+                icon="summary"
                 label={summary.open ? 'Hide chat summary' : 'Show chat summary'}
                 pressed={summary.open}
                 onClick={summary.onToggle}

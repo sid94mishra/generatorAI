@@ -1,18 +1,19 @@
 // ────────────────────────────────────────────────────────────────
-// ChatGlance — the chat summary card beside the transcript: where the agent
-// works and what it has done, at a glance, each line one click from its dock
-// tab.
+// ChatGlance — the chat summary card, floating beside the transcript while the
+// side pane is closed: where the agent works, what it has done, and the
+// commands a person reaches for next. One P-48 card in three sections:
 //
-//   Working folder  the primary mount's live branch and what it was created
-//                   from (worktree / in place / chat folder), unpushed commits
-//   Changes         uncommitted files and lines (the Changes tab's default
-//                   view, same query) → Changes
-//   Background      the orchestrator's workers: running · done · failed → Tasks
-//   Browser         each page open in the dock: favicon, title, address → its tab
-//   Computer        the app and the last action the agent took → Computer
+//   Where      the machine and folder (Show in Finder / Copy path) · Open in
+//              the default editor, the chevron choosing another · the working
+//              folder's live branch and what it was created from
+//   Activity   uncommitted changes → Changes · background tasks → Tasks ·
+//              each page open in the browser → its tab · the computer's last
+//              action → Computer (lines for panels never used are left out,
+//              D-36)
+//   Commands   Open a terminal · Browse files
 //
-// Lines for panels the chat never used are left out (no fake state, D-36).
-// Shown and hidden from the header (`chatGlanceStore`, one device setting).
+// Shown and hidden from the header (`chatGlanceStore`, one device setting);
+// the page hides it while the side pane is open, which covers the same room.
 // ────────────────────────────────────────────────────────────────
 
 import { useMemo } from 'react';
@@ -20,16 +21,23 @@ import { describeMount } from '@generatorai/client-core';
 import { useBackgroundTasks, useWorkspaceChangeSummary, useWorkspaceReadiness } from '@/hooks/queries.js';
 import { useComputerActivity } from '@/hooks/computerQueries.js';
 import { COMPUTER_TIMELINE_MAX } from '@/hooks/computerTimeline.js';
+import { useShellStatus } from '@/hooks/useShellStatus.js';
 import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import type { BrowserTabState } from '@/blocks/browser/useBrowserTabState.js';
 import { browserDockTabDetail } from '@/blocks/browser/browserDock.js';
+import { EditorChoiceMenu, FALLBACK_EDITOR } from '@/blocks/editor/OpenInEditorButton.js';
+import { useEditorActions, FILE_MANAGER } from '@/blocks/editor/useEditorActions.js';
+import { EditorMark } from '@/ui/icons/vendor/VendorIcons.js';
 import { cn } from '@/ui/lib/cn.js';
 import { DiffStat } from '@/ui/patterns/DiffStat/DiffStat.js';
+import { Card } from '@/ui/primitives/Card/Card.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { SummaryLine } from '@/ui/primitives/SummaryLine/SummaryLine.js';
 
 /** The dock tabs a line opens. */
-export type ChatGlanceTarget = { type: 'changes' | 'tasks' | 'computer' } | { type: 'browser'; tabId: string };
+export type ChatGlanceTarget =
+  | { type: 'changes' | 'tasks' | 'computer' | 'terminal' | 'files' }
+  | { type: 'browser'; tabId: string };
 
 export interface ChatGlanceProps {
   chatId: string | undefined;
@@ -44,35 +52,100 @@ export interface ChatGlanceProps {
 }
 
 const RUNNING_TASKS = new Set(['spawned', 'running', 'needs_review']);
+const SECTION = 'gap-0.5 p-1.5';
 
 function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
+/** The last two segments of a path, enough to recognise the folder. */
+function shortPath(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : path;
+}
+
 export function ChatGlance({ chatId, workspaceId, isOrchestrator, computerUseEnabled, browserTabs, onOpen, onHide, className }: ChatGlanceProps) {
   const pages = Object.entries(browserTabs).filter(([, page]) => !!page.url && page.url !== 'about:blank');
   return (
-    <aside aria-label="Chat summary" className={cn('flex flex-col gap-0.5 p-1.5', className)} data-testid="chat-glance">
-      <div className="flex h-control items-center justify-between pl-2">
-        <span className="text-micro font-medium text-fg-3 uppercase">Chat summary</span>
+    <Card role="complementary" aria-label="Chat summary" className={cn('flex flex-col', className)} data-testid="chat-glance">
+      <div className="flex h-panel-bar items-center justify-between border-b border-line-soft pr-1.5 pl-3.5">
+        <span className="text-ui font-semibold text-fg">Summary</span>
         <IconButton size="sm" icon="x" label="Hide chat summary" onClick={onHide} />
       </div>
-      <WorkingFolder workspaceId={workspaceId} />
-      <ChangesLine workspaceId={workspaceId} onOpen={() => onOpen({ type: 'changes' })} />
-      {isOrchestrator ? <TasksLine chatId={chatId} onOpen={() => onOpen({ type: 'tasks' })} /> : null}
-      {pages.map(([tabId, page]) => (
-        <SummaryLine
-          key={tabId}
-          icon="browser"
-          image={page.favicon ?? undefined}
-          title={page.title?.trim() || 'Browser'}
-          detail={browserDockTabDetail(page)}
-          onClick={() => onOpen({ type: 'browser', tabId })}
-          data-testid="chat-glance-browser"
-        />
-      ))}
-      {computerUseEnabled ? <ComputerLine workspaceId={workspaceId} onOpen={() => onOpen({ type: 'computer' })} /> : null}
-    </aside>
+      <div className={cn('flex flex-col', SECTION)}>
+        <MachineLine />
+        <EditorLine />
+        <WorkingFolder workspaceId={workspaceId} />
+      </div>
+      <Card.Section className={SECTION} data-testid="chat-glance-activity">
+        <ChangesLine workspaceId={workspaceId} onOpen={() => onOpen({ type: 'changes' })} />
+        {isOrchestrator ? <TasksLine chatId={chatId} onOpen={() => onOpen({ type: 'tasks' })} /> : null}
+        {pages.map(([tabId, page]) => (
+          <SummaryLine
+            key={tabId}
+            icon="browser"
+            image={page.favicon ?? undefined}
+            title={page.title?.trim() || 'Browser'}
+            detail={browserDockTabDetail(page)}
+            onClick={() => onOpen({ type: 'browser', tabId })}
+            data-testid="chat-glance-browser"
+          />
+        ))}
+        {computerUseEnabled ? <ComputerLine workspaceId={workspaceId} onOpen={() => onOpen({ type: 'computer' })} /> : null}
+      </Card.Section>
+      {workspaceId ? (
+        <Card.Section className={SECTION} data-testid="chat-glance-commands">
+          <SummaryLine icon="terminal" title="Open a terminal" chevron={false} onClick={() => onOpen({ type: 'terminal' })} data-testid="chat-glance-terminal" />
+          <SummaryLine icon="files" title="Browse files" chevron={false} onClick={() => onOpen({ type: 'files' })} data-testid="chat-glance-files" />
+        </Card.Section>
+      ) : null}
+    </Card>
+  );
+}
+
+/** The server the chat runs on and its working folder: Show in Finder on the desktop, else Copy path. */
+function MachineLine() {
+  const { serverName } = useShellStatus();
+  const editor = useEditorActions();
+  const path = editor.target?.path;
+  const title = serverName ?? 'This computer';
+  if (!path) return <SummaryLine icon="computer" title={title} data-testid="chat-glance-machine" />;
+  const reveal = editor.reveal;
+  return (
+    <SummaryLine
+      icon="computer"
+      title={title}
+      detail={shortPath(path)}
+      chevron={false}
+      onClick={reveal ? () => void reveal() : () => void editor.copyPath()}
+      aria-label={reveal ? `${title}: show ${path} in ${FILE_MANAGER}` : `${title}: copy ${path}`}
+      data-testid="chat-glance-machine"
+    />
+  );
+}
+
+/** Open in the default editor; the chevron chooses another (the header's Open, as a line). */
+function EditorLine() {
+  const editor = useEditorActions();
+  if (!editor.target) return null;
+  const current = editor.preferred?.id ?? FALLBACK_EDITOR;
+  const name = editor.preferred?.name ?? 'VS Code';
+  return (
+    <div className="flex items-start" data-testid="chat-glance-editor">
+      <SummaryLine
+        icon="file"
+        glyph={<EditorMark editor={current} className="size-3.5 shrink-0" />}
+        title={`Open in ${name}`}
+        chevron={false}
+        onClick={() => editor.open(current)}
+        className="flex-1"
+      />
+      <EditorChoiceMenu
+        editor={editor}
+        current={current}
+        trigger={<IconButton size="sm" icon="chevron-down" label="Choose an editor" className="mt-1 mr-1 shrink-0" />}
+      />
+    </div>
   );
 }
 
@@ -92,6 +165,7 @@ function WorkingFolder({ workspaceId }: { workspaceId: string | undefined }) {
     base && base !== branch ? `from ${base}` : undefined,
     shown.modeLabel,
     repo?.unborn ? 'no commits yet' : undefined,
+    repo && !repo.isRepo ? 'not a git repository' : undefined,
     repo?.ahead ? `${plural(repo.ahead, 'commit')} not pushed` : undefined,
     mounts.length > 1 ? `+${plural(mounts.length - 1, 'source')}` : undefined,
   ].filter(Boolean);
@@ -115,7 +189,7 @@ function ChangesLine({ workspaceId, onOpen }: { workspaceId: string | undefined;
     <SummaryLine
       icon="changes"
       title={stats.files > 0 ? `${plural(stats.files, 'file')} changed` : 'No uncommitted changes'}
-      detail={stats.files > 0 ? 'Not committed yet' : 'Everything is committed'}
+      detail={stats.files > 0 ? 'Review and commit in Changes' : 'Everything is committed'}
       trailing={stats.additions > 0 || stats.deletions > 0 ? <DiffStat added={stats.additions} removed={stats.deletions} /> : null}
       onClick={onOpen}
       data-testid="chat-glance-changes"

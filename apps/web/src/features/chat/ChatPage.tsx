@@ -59,7 +59,6 @@ import { Button } from '@/ui/primitives/Button/Button.js';
 import { Skeleton } from '@/ui/primitives/Skeleton/Skeleton.js';
 import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 import { Icon } from '@/ui/icons/Icon.js';
-import { cn } from '@/ui/lib/cn.js';
 import { ChatGlance, type ChatGlanceTarget } from './components/ChatGlance.js';
 import { ChatHeader } from './components/ChatHeader.js';
 import { ChatTranscript } from './components/ChatTranscript.js';
@@ -510,6 +509,13 @@ export function ChatPage() {
   // The chat summary card beside the transcript; each of its lines opens a dock tab.
   const glanceOpen = useChatGlanceStore((s) => s.open);
   const toggleGlance = useChatGlanceStore((s) => s.toggle);
+  // The side pane covers the card's room: asking for the summary while it is open closes it.
+  const toggleSummary = useCallback(() => {
+    if (dockOpen) {
+      setDockOpen(false);
+      useChatGlanceStore.getState().setOpen(true);
+    } else toggleGlance();
+  }, [dockOpen, setDockOpen, toggleGlance]);
   const hideGlance = useCallback(() => useChatGlanceStore.getState().setOpen(false), []);
   const openFromGlance = useCallback(
     (target: ChatGlanceTarget) => {
@@ -655,7 +661,7 @@ export function ChatPage() {
                       awaitingUser={awaitingUserDecision}
                       dockOpen={dockOpen}
                       onToggleDock={toggleDock}
-                      summary={{ open: glanceOpen, onToggle: toggleGlance }}
+                      summary={{ open: glanceOpen && !dockOpen, onToggle: toggleSummary }}
                       sideChat={{
                         open: (mode) => void openSideChat(mode).catch(() => undefined),
                         existing: sideChats.data ?? [],
@@ -696,8 +702,8 @@ export function ChatPage() {
                           />
                         </div>
                       ) : null}
-                      {/* The summary card is a column beside the transcript where the chat has room
-                          (@2xl), and floats over its top-right corner where it has not. */}
+                      {/* The summary card floats in a gutter beside the transcript where the chat has room
+                          (@3xl), over its top-right corner where it has not; the side pane hides it. */}
                       <div className="@container/chat relative flex min-h-0 flex-1">
                       {/* LiveTurn inside owns the per-token subscription, so this page does not. */}
                       <ChatTranscript
@@ -712,20 +718,19 @@ export function ChatPage() {
                         focusDockTab={focusDockTab}
                         review={review}
                       />
-                      {glanceOpen ? (
-                        <ChatGlance
-                          chatId={chatId}
-                          workspaceId={chat.workspaceId}
-                          isOrchestrator={isOrchestrator}
-                          computerUseEnabled={view.computerUseEnabled}
-                          browserTabs={browserTabs}
-                          onOpen={openFromGlance}
-                          onHide={hideGlance}
-                          className={cn(
-                            'absolute top-12 right-3 z-sticky max-h-3/4 w-64 overflow-y-auto rounded-card border border-line bg-raised shadow-pop',
-                            '@2xl/chat:static @2xl/chat:max-h-none @2xl/chat:shrink-0 @2xl/chat:rounded-none @2xl/chat:border-0 @2xl/chat:border-l @2xl/chat:border-line-soft @2xl/chat:bg-surface @2xl/chat:shadow-none',
-                          )}
-                        />
+                      {glanceOpen && !dockOpen ? (
+                        <div className="absolute top-12 right-3 z-sticky flex max-h-3/4 w-72 @3xl/chat:static @3xl/chat:max-h-none @3xl/chat:w-80 @3xl/chat:shrink-0 @3xl/chat:items-start @3xl/chat:py-3 @3xl/chat:pr-4">
+                          <ChatGlance
+                            chatId={chatId}
+                            workspaceId={chat.workspaceId}
+                            isOrchestrator={isOrchestrator}
+                            computerUseEnabled={view.computerUseEnabled}
+                            browserTabs={browserTabs}
+                            onOpen={openFromGlance}
+                            onHide={hideGlance}
+                            className="max-h-full w-full overflow-y-auto shadow-pop @3xl/chat:shadow-none"
+                          />
+                        </div>
                       ) : null}
                       </div>
                     </>
