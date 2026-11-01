@@ -36,3 +36,22 @@ export const Matrix: Story = {
 };
 
 export const Compact: Story = { globals: { density: 'compact' }, render: Matrix.render };
+
+/** A flush label lines up with content that starts at the edge; a long hint wraps under the title instead of truncating. */
+export const FlushAndLongHint: Story = {
+  render: () => (
+    <div className="flex w-120 flex-col gap-3">
+      <div>
+        <SectionHeader variant="label" flush title="Experimental providers" />
+        <p className="text-small text-fg-3">Content that starts at the edge, like the caption above it.</p>
+      </div>
+      <SectionHeader
+        title="Accounts"
+        hint="Used to push branches and open pull requests. The account for a repository is picked by matching its remote host."
+      />
+    </div>
+  ),
+  play: async ({ canvas }) => {
+    await expect(canvas.getByText(/matching its remote host\./)).toBeVisible();
+  },
+};

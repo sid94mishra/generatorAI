@@ -82,11 +82,9 @@ export function SkillsSection() {
                   />
                 }
               >
-                <div className="rounded-control-sm border border-line bg-raised px-3 py-2.5">
-                  <SectionHeader variant="label" title="Description" />
-                  <p className="text-small text-fg-2">{a.description || 'No description provided for this skill.'}</p>
-                </div>
-                <div className="mt-2.5 flex justify-end">
+                {/* The row's card already frames the details: the full description, then the action — no inner box. */}
+                <p className="text-small text-fg-2">{a.description || 'No description provided for this skill.'}</p>
+                <div className="flex justify-end">
                   <Button variant="secondary" size="sm" icon="view" onClick={() => setPreview(a)}>
                     Preview full details
                   </Button>
@@ -122,7 +120,7 @@ function SkillPreview({ artifact, onBack }: { artifact: ArtifactWithSource; onBa
       </div>
 
       <div className="rounded-card border border-line bg-raised p-4">
-        <SectionHeader variant="label" title="Full details" />
+        <SectionHeader variant="label" flush title="Full details" />
         {isLoading ? (
           <div className="flex items-center gap-2 text-small text-fg-3">
             <Spinner size={14} /> Loading details…

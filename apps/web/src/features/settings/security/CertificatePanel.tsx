@@ -19,6 +19,7 @@ import { Link } from '@/ui/primitives/Link/Link.js';
 import { Textarea } from '@/ui/primitives/Textarea/Textarea.js';
 import { KeyValueList } from '@/ui/patterns/KeyValueList/KeyValueList.js';
 import { certificateDate, shortCertificateFingerprint } from './securityModel.js';
+import { SETTINGS_LABEL_WIDTH } from '../settingsLayout.js';
 
 /** Copy to the clipboard; `copied` is true for 1.5 s after. */
 export function useCopied(): [boolean, (text: string) => void] {
@@ -185,7 +186,7 @@ export function CertificateGroup({ tls, onError }: { tls: NetworkTls; onError: (
         <Badge tone={generated ? 'neutral' : 'ok'}>{generated ? 'Made by this computer' : 'Your certificate'}</Badge>
       </div>
       <KeyValueList
-        labelWidth={120}
+        labelWidth={SETTINGS_LABEL_WIDTH}
         dense
         items={[
           { label: 'Fingerprint', value: <CertificateFingerprint fingerprint={tls.fingerprintSha256} testId="security-certificate-fingerprint" /> },

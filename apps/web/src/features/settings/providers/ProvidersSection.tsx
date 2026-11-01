@@ -40,6 +40,7 @@ import { SectionHeader } from '@/ui/patterns/SectionHeader/SectionHeader.js';
 import { KeyValueList } from '@/ui/patterns/KeyValueList/KeyValueList.js';
 import { SettingsSection } from '@/ui/patterns/SettingsSection/SettingsSection.js';
 import { CatalogRow } from '../CatalogRow.js';
+import { SETTINGS_LABEL_WIDTH } from '../settingsLayout.js';
 
 const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   copilot: 'GitHub Copilot SDK — GPT, Claude, and Gemini models via your GitHub account.',
@@ -231,10 +232,7 @@ function ExperimentalProviders() {
 
   return (
     <div className="flex flex-col gap-2" data-testid="experimental-providers">
-      <SectionHeader
-        variant="label"
-        title="Experimental providers"
-      />
+      <SectionHeader variant="label" flush title="Experimental providers" />
       <p className="text-small text-fg-3">
         Not fully tested, so this server hides them from every app until revealed. Devices with admin:harnesses can change this.
       </p>
@@ -325,7 +323,7 @@ function ProviderDetails({
       </div>
 
       <KeyValueList
-        labelWidth={104}
+        labelWidth={SETTINGS_LABEL_WIDTH}
         dense
         items={[
           { label: 'Provider id', value: provider.type, mono: true },
@@ -345,7 +343,7 @@ function ProviderDetails({
       {provider.error ? <Callout tone="err">{provider.error}</Callout> : null}
 
       <div className="flex flex-col gap-1.5">
-        <SectionHeader variant="label" title={`Available models${provider.ready ? ` (${provider.modelCount})` : ''}`} />
+        <SectionHeader variant="label" flush title={`Available models${provider.ready ? ` (${provider.modelCount})` : ''}`} />
         {!provider.ready ? (
           <p className="text-small text-fg-3">
             {provider.installed
@@ -355,9 +353,10 @@ function ProviderDetails({
         ) : provider.models.length === 0 ? (
           <p className="text-small text-fg-3">No models available for this account.</p>
         ) : (
-          <div className="flex flex-col gap-1.5">
+          // One list inside the row's card: rows divided by hairlines, not a box per model.
+          <div className="flex flex-col divide-y divide-line-soft">
             {provider.models.map((model) => (
-              <div key={model.id} className="flex items-start gap-2.5 rounded-control-sm border border-line bg-sunken px-3 py-2">
+              <div key={model.id} className="flex items-start gap-2.5 py-2">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate text-ui font-medium text-fg">{model.name ?? model.id}</span>

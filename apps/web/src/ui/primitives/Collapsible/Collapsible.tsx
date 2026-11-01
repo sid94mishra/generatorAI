@@ -35,6 +35,11 @@
 //               corners, attached below ("Pair a new device").
 //   section     28h full-width section header, `text-ui` 600 `text-fg`,
 //               chevron-down at the end (flips when open).
+//   card        one P-48 card (`bg-raised`, 1px `line-soft`, card radius)
+//               holding the header row — trigger (hover `hover`) and any
+//               `endSlot` control, both inside the card — and, when open,
+//               the panel under a `line-soft` hairline: no second box (a
+//               settings catalog row: Skills, MCP servers, Model providers).
 // ────────────────────────────────────────────────────────────────
 
 import type { ComponentProps, ReactNode } from 'react';
@@ -46,7 +51,7 @@ import { focusRing, hitSlop, HIT_ATTRS } from '../../lib/focus.js';
 import { settleOnOpen } from '../../lib/motion.js';
 import { Icon } from '../../icons/Icon.js';
 
-export type CollapsibleVariant = 'disclosure' | 'attached' | 'section';
+export type CollapsibleVariant = 'disclosure' | 'attached' | 'section' | 'card';
 
 // ── Recipes (shared by Collapsible and Accordion) ──────────────
 
@@ -64,12 +69,22 @@ const TRIGGER: Record<CollapsibleVariant, string> = {
     'group flex h-control w-full cursor-pointer items-center gap-2 rounded-control-sm text-ui font-semibold text-fg select-none',
     'data-disabled:cursor-not-allowed data-disabled:text-fg-3',
   ),
+  card: cn(
+    // The card clips its corners: the focus ring is drawn inside the trigger, not outside it.
+    'group flex min-h-control-lg w-full cursor-pointer items-center gap-2 px-3 py-2 text-ui text-fg select-none focus-visible:-outline-offset-2',
+    'data-disabled:cursor-not-allowed data-disabled:text-fg-3',
+  ),
 };
+
+/** The card variant's frame (on the root) and its header row (trigger + endSlot). */
+const CARD_ROOT = 'overflow-hidden rounded-card border border-line-soft bg-raised';
+const CARD_HEADER = 'transition-control hover:bg-hover';
 
 const PANEL: Record<CollapsibleVariant, string> = {
   disclosure: 'pt-1',
   attached: 'rounded-b-card border border-t-0 border-line-soft bg-sunken px-3 py-2.5',
   section: 'pt-2',
+  card: 'flex flex-col gap-3 border-t border-line-soft px-3 py-3',
 };
 
 /** The chevron turns with the panel: same duration and easing as the height. */
@@ -79,6 +94,7 @@ const CHEVRON: Record<CollapsibleVariant, { concept: IconConcept; className: str
   disclosure: { concept: 'chevron-right', className: cn(chevronMotion, 'group-data-panel-open:rotate-90') },
   attached: { concept: 'chevron-down', className: cn(chevronMotion, 'ml-auto text-fg-3 group-data-panel-open:rotate-180') },
   section: { concept: 'chevron-down', className: cn(chevronMotion, 'ml-auto text-fg-3 group-data-panel-open:rotate-180') },
+  card: { concept: 'chevron-down', className: cn(chevronMotion, 'ml-auto text-fg-3 group-data-panel-open:rotate-180') },
 };
 
 /** Inert while closing: the content on its way out is not focusable or clickable. */
@@ -233,6 +249,7 @@ export function Collapsible({
         TRIGGER[variant],
         variant === 'disclosure' && 'self-start',
         endSlot != null && 'min-w-0 flex-1',
+        variant === 'card' && endSlot == null && CARD_HEADER,
         richContent && 'items-start',
         focusRing,
         triggerClassName,
@@ -245,9 +262,9 @@ export function Collapsible({
     </BaseCollapsible.Trigger>
   );
   return (
-    <BaseCollapsible.Root className={cn('flex min-w-0 flex-col items-stretch', className)} {...rest}>
+    <BaseCollapsible.Root className={cn('flex min-w-0 flex-col items-stretch', variant === 'card' && CARD_ROOT, className)} {...rest}>
       {endSlot != null ? (
-        <div className="flex items-center gap-2">
+        <div className={cn('flex items-center gap-2', variant === 'card' && cn(CARD_HEADER, 'pr-3'))}>
           {triggerNode}
           <div className="shrink-0">{endSlot}</div>
         </div>
@@ -292,7 +309,7 @@ export function Accordion({
 }: AccordionProps) {
   return (
     <BaseAccordion.Root<string>
-      className={cn('flex min-w-0 flex-col', variant === 'attached' ? 'gap-2' : 'gap-1', className)}
+      className={cn('flex min-w-0 flex-col', variant === 'attached' || variant === 'card' ? 'gap-2' : 'gap-1', className)}
       {...rest}
     >
       {items.map((item) => (
@@ -301,10 +318,13 @@ export function Accordion({
           value={item.value}
           disabled={item.disabled}
           data-testid={item['data-testid']}
-          className="flex min-w-0 flex-col items-stretch"
+          className={cn('flex min-w-0 flex-col items-stretch', variant === 'card' && CARD_ROOT)}
         >
           <BaseAccordion.Header className="flex min-w-0">
-            <BaseAccordion.Trigger className={cn(TRIGGER[variant], focusRing, triggerClassName)} {...triggerAttrs(variant)}>
+            <BaseAccordion.Trigger
+              className={cn(TRIGGER[variant], variant === 'card' && CARD_HEADER, focusRing, triggerClassName)}
+              {...triggerAttrs(variant)}
+            >
               <TriggerContent variant={variant} icon={item.icon}>
                 {item.trigger}
               </TriggerContent>

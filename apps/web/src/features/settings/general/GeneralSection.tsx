@@ -10,6 +10,7 @@ import { getDefaultChatModel, setDefaultChatModel } from '@/lib/appPreferences.j
 import { KeyValueList } from '@/ui/patterns/KeyValueList/KeyValueList.js';
 import { SectionHeader } from '@/ui/patterns/SectionHeader/SectionHeader.js';
 import { SettingRow, SettingsSection } from '@/ui/patterns/SettingsSection/SettingsSection.js';
+import { SETTINGS_LABEL_WIDTH } from '../settingsLayout.js';
 
 export function GeneralSection() {
   const [defaultModel, setDefaultModel] = useState<string>(() => getDefaultChatModel());
@@ -43,7 +44,7 @@ export function GeneralSection() {
           Codex and more, side by side. Supports multi-session workflow execution with real-time streaming.
         </p>
         <KeyValueList
-          labelWidth={64}
+          labelWidth={SETTINGS_LABEL_WIDTH}
           items={[
             { label: 'Version', value: __APP_VERSION__ },
             { label: 'Runtime', value: 'Node.js' },

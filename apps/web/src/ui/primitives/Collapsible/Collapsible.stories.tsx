@@ -3,9 +3,10 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent, waitFor } from 'storybook/test';
 import { assertTargetSize } from '../../lib/test/targetSize.js';
 import { IconButton } from '../IconButton/IconButton.js';
+import { Switch } from '../Switch/Switch.js';
 import { Accordion, Collapsible, Reveal, type CollapsibleVariant, type RevealMotion } from './Collapsible.js';
 
-const VARIANTS: CollapsibleVariant[] = ['disclosure', 'attached', 'section'];
+const VARIANTS: CollapsibleVariant[] = ['disclosure', 'attached', 'section', 'card'];
 
 const meta = {
   component: Collapsible,
@@ -208,4 +209,31 @@ export const RevealMotions: Story = {
 export const RevealReducedMotion: Story = {
   globals: { reduceMotion: 'on' },
   render: RevealMotions.render,
+};
+
+/** A catalog row (Skills, MCP servers): one card holding the trigger, its switch and the panel — no box in a box. */
+export const CardWithControl: Story = {
+  render: () => (
+    <Collapsible
+      variant="card"
+      richContent
+      trigger={
+        <span className="flex flex-col">
+          <span className="text-ui font-medium text-fg">code-generation</span>
+          <span className="text-small text-fg-3">Write or change production code in an existing codebase.</span>
+        </span>
+      }
+      endSlot={<Switch defaultChecked aria-label="Enable code-generation" />}
+    >
+      <p className="text-small text-fg-2">The full description, under a hairline in the same card.</p>
+    </Collapsible>
+  ),
+  play: async ({ canvas, canvasElement }) => {
+    const toggle = canvas.getByRole('switch', { name: 'Enable code-generation' });
+    const card = canvasElement.querySelector('.rounded-card');
+    // The switch is inside the card, not beside it.
+    await expect(card?.contains(toggle)).toBe(true);
+    await userEvent.click(canvas.getByRole('button', { name: /code-generation/ }));
+    await waitFor(() => expect(canvas.getByText(/under a hairline/)).toBeVisible());
+  },
 };

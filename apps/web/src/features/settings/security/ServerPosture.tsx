@@ -21,6 +21,7 @@ import { KeyValueList } from '@/ui/patterns/KeyValueList/KeyValueList.js';
 import { SectionHeader } from '@/ui/patterns/SectionHeader/SectionHeader.js';
 import { browserAddressFor, shortFingerprint, usableEndpoints } from './securityModel.js';
 import { CertificateGroup } from './CertificatePanel.js';
+import { SETTINGS_LABEL_WIDTH } from '../settingsLayout.js';
 
 export function ThisServerGroup({
   posture,
@@ -58,7 +59,7 @@ export function ThisServerGroup({
       {p ? (
         <>
           <KeyValueList
-            labelWidth={120}
+            labelWidth={SETTINGS_LABEL_WIDTH}
             dense
             items={[
               {

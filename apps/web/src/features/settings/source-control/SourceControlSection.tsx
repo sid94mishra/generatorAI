@@ -194,7 +194,7 @@ export function SourceControlSection() {
             />
 
             <div className="mt-2 flex flex-col gap-2 border-t border-line-soft pt-3">
-              <SectionHeader variant="label" title="Connect account" />
+              <SectionHeader variant="label" flush title="Connect account" />
               {loginMethods.length === 0 ? (
                 <p className="text-small text-fg-3">No sign-in method is available on this server.</p>
               ) : (

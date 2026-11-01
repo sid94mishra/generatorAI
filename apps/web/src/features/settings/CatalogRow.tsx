@@ -42,7 +42,7 @@ export function CatalogRow({
 }: CatalogRowProps) {
   return (
     <Collapsible
-      variant="attached"
+      variant="card"
       richContent
       open={open}
       onOpenChange={onOpenChange}

@@ -18,6 +18,7 @@ import { Switch } from '@/ui/primitives/Switch/Switch.js';
 import { KeyValueList, type KeyValueItem } from '@/ui/patterns/KeyValueList/KeyValueList.js';
 import { SectionHeader } from '@/ui/patterns/SectionHeader/SectionHeader.js';
 import { SettingRow, SettingsSection } from '@/ui/patterns/SettingsSection/SettingsSection.js';
+import { SETTINGS_LABEL_WIDTH } from '../settingsLayout.js';
 
 const RUNTIME_LABEL: Record<ComputerRuntime['state'], string> = {
   ready: 'Running',
@@ -37,7 +38,7 @@ function DriverStatusGroup({ runtime }: { runtime: ComputerRuntime }) {
   return (
     <section className="flex flex-col gap-2">
       <SectionHeader title="Desktop driver" level={3} />
-      <KeyValueList items={items} labelWidth={72} />
+      <KeyValueList items={items} labelWidth={SETTINGS_LABEL_WIDTH} />
       {runtime.detail ? <p className="text-small text-fg-3">{runtime.detail}</p> : null}
       {failed.length > 0 ? (
         <ul className="flex flex-col gap-1">
@@ -79,7 +80,7 @@ function MacPermissionsGroup() {
     <section className="flex flex-col gap-2" data-testid="computer-mac-permissions">
       <SectionHeader title="macOS permissions" level={3} />
       <KeyValueList
-        labelWidth={120}
+        labelWidth={SETTINGS_LABEL_WIDTH}
         items={[
           { label: 'Accessibility', value: granted(status.accessibility) },
           { label: 'Screen Recording', value: granted(status.screenRecording) },

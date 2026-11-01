@@ -18,6 +18,7 @@ import { StatusDot } from '@/ui/primitives/StatusDot/StatusDot.js';
 import { KeyValueList, type KeyValueItem } from '@/ui/patterns/KeyValueList/KeyValueList.js';
 import { SectionHeader } from '@/ui/patterns/SectionHeader/SectionHeader.js';
 import { SettingsSection } from '@/ui/patterns/SettingsSection/SettingsSection.js';
+import { SETTINGS_LABEL_WIDTH } from '../settingsLayout.js';
 
 function formatUptime(sec: number): string {
   const d = Math.floor(sec / 86400);
@@ -73,7 +74,7 @@ function SystemHealthGroup() {
         </div>
       ) : (
         <>
-          <KeyValueList items={items} labelWidth={80} />
+          <KeyValueList items={items} labelWidth={SETTINGS_LABEL_WIDTH} />
           {data.disk && data.disk.totalBytes > 0 ? (
             <ProgressBar
               value={data.disk.usedBytes}
@@ -129,7 +130,7 @@ export function DiagnosticsSection() {
             </div>
           ) : (
             <KeyValueList
-              labelWidth={100}
+              labelWidth={SETTINGS_LABEL_WIDTH}
               items={[
                 { label: 'OpenTelemetry', value: health.otel.enabled ? 'Enabled' : 'Disabled' },
                 ...(health.otel.serviceName ? [{ label: 'Service name', value: health.otel.serviceName, mono: true }] : []),
@@ -148,7 +149,7 @@ export function DiagnosticsSection() {
           ) : healthConfig ? (
             <>
               <KeyValueList
-                labelWidth={100}
+                labelWidth={SETTINGS_LABEL_WIDTH}
                 items={[
                   {
                     label: 'Status',
@@ -180,7 +181,7 @@ export function DiagnosticsSection() {
         <section className="flex flex-col gap-2">
           <SectionHeader title="Runtime" level={3} />
           <KeyValueList
-            labelWidth={100}
+            labelWidth={SETTINGS_LABEL_WIDTH}
             items={[
               { label: 'Database', value: 'SQLite (WAL)' },
               { label: 'Streaming', value: 'SSE (durable)' },
@@ -192,7 +193,7 @@ export function DiagnosticsSection() {
           <section className="flex flex-col gap-2">
             <SectionHeader title="Snapshot" level={3} />
             <KeyValueList
-              labelWidth={100}
+              labelWidth={SETTINGS_LABEL_WIDTH}
               items={[
                 { label: 'Server time', value: new Date(health.timestamp).toLocaleString(), mono: true },
                 { label: 'Running sessions', value: String(health.runningChatIds.length) },

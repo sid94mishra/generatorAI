@@ -72,7 +72,9 @@ function ExtensionRow({ extension, onError }: { extension: InstalledExtension; o
                 {!extension.enabled ? <Badge>Disabled</Badge> : null}
               </div>
               {manifest.description ? <p className="mt-0.5 text-small text-fg-3">{manifest.description}</p> : null}
-              <p className="mt-1 break-all font-mono text-micro text-fg-3">{extension.rootPath}</p>
+              <p className="mt-1 truncate font-mono text-micro text-fg-3" title={extension.rootPath}>
+                {extension.rootPath}
+              </p>
               {extension.errors && extension.errors.length > 0 ? (
                 <p className="mt-1 break-words text-micro text-err">{extension.errors.join('; ')}</p>
               ) : null}

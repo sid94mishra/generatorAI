@@ -210,8 +210,9 @@ function McpRow({
         <Switch checked={enabled} onCheckedChange={onToggle} aria-label={`${enabled ? 'Disable' : 'Enable'} MCP server ${server.name}`} />
       }
     >
-      <div className="rounded-control-sm border border-line bg-raised px-3 py-2.5 text-small">
-        {server.description ? <p className="mb-1.5 text-fg-2">{server.description}</p> : null}
+      {/* The row's card already frames the details — no inner box. */}
+      <div className="flex flex-col gap-2 text-small">
+        {server.description ? <p className="text-fg-2">{server.description}</p> : null}
         <dl className="flex flex-col gap-1">
           <DetailLine label="Type" value={server.serverType} />
           {server.url ? <DetailLine label="URL" value={server.url} mono /> : null}
@@ -278,8 +279,8 @@ function McpConfigureForm({ server }: { server: McpServerEntry }) {
     headerCreds.filter((c) => c.required !== false).length;
 
   return (
-    <div className="mt-2 flex flex-col gap-2 rounded-control-sm border border-dashed border-line bg-sunken px-3 py-2.5">
-      <SectionHeader variant="label" title="Setup required" />
+    <div className="flex flex-col gap-2 border-t border-line-soft pt-3">
+      <SectionHeader variant="label" flush title="Setup required" />
       {(server.inputs ?? []).map((i) => (
         <Field key={i.key} label={i.label} hint={i.description}>
           <Input
@@ -465,7 +466,7 @@ function McpAddForm({ onDone }: { onDone: () => void }) {
 function DetailLine({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex gap-2">
-      <dt className="w-20 shrink-0 text-fg-3">{label}</dt>
+      <dt className="w-24 shrink-0 text-fg-3">{label}</dt>
       <dd className={cn('min-w-0 break-words text-fg', mono && 'font-mono')}>{value}</dd>
     </div>
   );
