@@ -3,7 +3,11 @@
 // the composer (03-domain F-composer-02).
 //
 // The authoritative list comes from the workspace change summary (baseline →
-// working tree), the same data the Changes tab renders. While a turn is live,
+// working tree), the same data the Changes tab renders, narrowed to what is
+// still uncommitted (head → working tree): committed work is no longer
+// pending, so a commit empties the tray — and Undo all, which restores the
+// base revision, never offers to take back work already committed. A file
+// changed again after the commit is pending again. While a turn is live,
 // file ops arriving on the stream are overlaid immediately so the count moves
 // the moment the agent writes a file, before the summary has been refetched.
 //
@@ -157,7 +161,18 @@ export const ChangesTray = memo(function ChangesTray({
   const confirmer = useConfirm();
   // Root-workspace scaffolding is hidden while a codebase is linked (same
   // rule as the Changes tab), so the count here is the count of code changes.
-  const summary = useMemo(() => splitWorkspaceChanges(summaryQuery.data, false).visible, [summaryQuery.data]);
+  const chatSummary = useMemo(() => splitWorkspaceChanges(summaryQuery.data, false).visible, [summaryQuery.data]);
+  // What is not committed yet (the Changes tab's default view, same query). Until it loads, nothing is filtered.
+  const uncommittedQuery = useWorkspaceChangeSummary(workspaceId, { base: 'head', head: 'working' });
+  const summary = useMemo(() => {
+    const uncommitted = uncommittedQuery.data;
+    if (!chatSummary || !uncommitted) return chatSummary;
+    const pending = new Set(uncommitted.repos.flatMap((r) => r.files.map((f) => `${r.alias}\u0000${f.path}`)));
+    return {
+      ...chatSummary,
+      repos: chatSummary.repos.map((r) => ({ ...r, files: r.files.filter((f) => pending.has(`${r.alias}\u0000${f.path}`)) })),
+    };
+  }, [chatSummary, uncommittedQuery.data]);
   const codebaseAliases = useMemo(
     () => new Set((summaryQuery.data?.repos ?? []).filter((r) => r.kind !== 'root').map((r) => r.alias)),
     [summaryQuery.data],
