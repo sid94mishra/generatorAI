@@ -24,7 +24,7 @@ export function PendingCommentsBar({ pendingCount, submittedCount, addressedCoun
 
   return (
     <div className="flex h-strip shrink-0 items-center gap-2.5 border-b border-line-soft px-3 text-ui" data-testid="pending-comments-bar">
-      <Icon concept="message" size={14} className="text-fg-3" />
+      <Icon concept="comment" size={14} className="text-fg-3" />
       {pendingCount > 0 ? (
         <span className="font-medium text-fg">
           {pendingCount} pending comment{pendingCount === 1 ? '' : 's'}

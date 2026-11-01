@@ -228,7 +228,7 @@ export function ReviewThreadCard({
                     <IconButton icon="x" size="sm" label="Cancel reply" onClick={closeReply} />
                   </div>
                 ) : (
-                  <Button variant="ghost" size="sm" icon="message" onClick={() => setReplying(true)}>
+                  <Button variant="ghost" size="sm" icon="comment" onClick={() => setReplying(true)}>
                     Reply
                   </Button>
                 )

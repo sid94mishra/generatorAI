@@ -366,7 +366,7 @@ export function PlanPanel({ chatId, planId }: PlanPanelProps) {
                   <Button
                     size="sm"
                     variant="primary"
-                    icon="message"
+                    icon="comment"
                     disabled={!commentDraft.trim()}
                     loading={addComment.isPending}
                     onClick={() => void handleAddComment()}

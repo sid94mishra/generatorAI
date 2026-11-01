@@ -139,7 +139,7 @@ export function BrowserToolbar(p: BrowserToolbarProps): React.JSX.Element {
             <Button
               variant="ghost"
               size="sm"
-              icon="message"
+              icon="comment"
               pressed={p.commentsOpen}
               onClick={p.onToggleComments}
               title="Comments on this page"

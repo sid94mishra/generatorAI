@@ -70,7 +70,7 @@ export function BrowserCommentsPanel({
   return (
     <section aria-label="Browser comments" data-testid="browser-comments-panel" className="flex max-h-120 min-h-0 shrink-0 flex-col border-t border-line bg-surface">
       <header className="flex h-bar shrink-0 items-center gap-2 px-3">
-        <Icon concept="message" size={14} className="text-fg-3" />
+        <Icon concept="comment" size={14} className="text-fg-3" />
         <h3 className="text-ui font-semibold text-fg">Comments</h3>
         {count > 0 ? <span className="font-mono text-micro text-fg-3 tabular-nums">{count}</span> : null}
         {notice ? (

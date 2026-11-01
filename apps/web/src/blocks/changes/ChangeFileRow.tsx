@@ -147,7 +147,7 @@ export function ChangeFileRow({
           className="inline-flex shrink-0 items-center gap-0.5 rounded-badge bg-selected px-1 font-mono text-micro text-fg-2"
           title={`${commentCount} comment${commentCount === 1 ? '' : 's'} on this file`}
         >
-          <Icon concept="message" size={12} />
+          <Icon concept="comment" size={12} />
           {commentCount}
         </span>
       ) : null}
@@ -192,7 +192,7 @@ export function ChangeFileRow({
           {onComment ? (
             <IconButton
               size="sm"
-              icon="message"
+              icon="comment"
               label={`Comment on ${path}`}
               tooltip="Comment on a line range"
               disabled={commentDisabled}

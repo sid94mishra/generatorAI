@@ -191,7 +191,7 @@ function ReviewComments({ review }: { review: ParsedReviewPrompt }) {
   return (
     <div className="flex min-w-0 flex-col gap-2 pr-16" data-testid="user-review-comments">
       <p className="flex items-center gap-1.5 text-small text-fg-2">
-        <Icon concept="message" size={14} />
+        <Icon concept="comment" size={14} />
         {n === 1 ? 'Review comment' : `${n} review comments`}
       </p>
       <ul className="flex min-w-0 flex-col gap-1.5">

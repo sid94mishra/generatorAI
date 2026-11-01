@@ -56,7 +56,7 @@ export function CommentsPopover({
           <Button
             variant="ghost"
             size="sm"
-            icon="message"
+            icon="comment"
             title="Comments — review every note and send them to the agent"
             aria-label={`Comments (${total})`}
             className={total > 0 ? 'text-fg' : undefined}

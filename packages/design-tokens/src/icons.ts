@@ -128,6 +128,8 @@ const UI_CONCEPTS = {
   'external-link': { lucide: 'external-link', sfSymbol: 'arrow.up.right.square', material: 'open_in_new' },
   model: { lucide: 'cpu', sfSymbol: 'cpu', material: 'memory' },
   message: { lucide: 'message-square-text', sfSymbol: 'text.bubble', material: 'chat' },
+  /** A review comment or a page annotation — a note on something, never the chat bubble (`message`, a conversation). */
+  comment: { lucide: 'sticky-note', sfSymbol: 'note.text', material: 'sticky_note_2' },
   pointer: { lucide: 'mouse-pointer-2', sfSymbol: 'cursorarrow', material: 'arrow_selector_tool' },
   'zoom-in': { lucide: 'zoom-in', sfSymbol: 'plus.magnifyingglass', material: 'zoom_in' },
   'zoom-out': { lucide: 'zoom-out', sfSymbol: 'minus.magnifyingglass', material: 'zoom_out' },
