@@ -128,8 +128,11 @@ const UI_CONCEPTS = {
   'external-link': { lucide: 'external-link', sfSymbol: 'arrow.up.right.square', material: 'open_in_new' },
   model: { lucide: 'cpu', sfSymbol: 'cpu', material: 'memory' },
   message: { lucide: 'message-square-text', sfSymbol: 'text.bubble', material: 'chat' },
-  /** A review comment or a page annotation — a note on something, never the chat bubble (`message`, a conversation). */
-  comment: { lucide: 'sticky-note', sfSymbol: 'note.text', material: 'sticky_note_2' },
+  /**
+   * Annotate: a review comment on code or a note on a page element — a highlighter, never the chat bubble
+   * (`message`, a conversation) nor the pencil (`edit`, changing the thing itself).
+   */
+  comment: { lucide: 'highlighter', sfSymbol: 'highlighter', material: 'ink_highlighter' },
   /** A chat's summary card (its header toggle): what the chat is working on, at a glance. */
   summary: { lucide: 'notepad-text', sfSymbol: 'list.bullet.rectangle', material: 'summarize' },
   pointer: { lucide: 'mouse-pointer-2', sfSymbol: 'cursorarrow', material: 'arrow_selector_tool' },
