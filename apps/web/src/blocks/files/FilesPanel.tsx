@@ -8,19 +8,23 @@
 //   • the pinned Files tab — Sources header (host slot), a "Files" bar (tree
 //     toggle, source picker, refresh), the B-08 tree and, once a file is
 //     picked, the B-09 preview beside it;
-//   • a file-viewer tab (`initialFile`) — the tree starts hidden so the file
-//     gets the whole dock; the toggle brings it back.
+//   • a file-viewer tab (`initialFile`) — the file, with the tree beside it.
+// The tree's visibility and side and wrapped lines are one device setting for
+// every Files tab (`filesViewStore`, the View settings menu — as in Changes),
+// so a tab opened from the tree never has to have it re-opened.
 // Single click previews; double-click / Enter opens the file in its own tab.
 // ────────────────────────────────────────────────────────────────
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useWorkspaceChangeSummary, useWorkspaceTree, useWorkspaceTreeFile } from '@/hooks/queries.js';
 import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
+import { useFilesViewStore, type FilesTreePosition } from '@/stores/filesViewStore.js';
+import { cn } from '@/ui/lib/cn.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Callout } from '@/ui/primitives/Callout/Callout.js';
 import { EmptyState } from '@/ui/primitives/EmptyState/EmptyState.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
-import { MenuPopup, MenuRadioGroup, MenuRadioItem, MenuRoot, MenuTrigger } from '@/ui/primitives/Menu/Menu.js';
+import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuRoot, MenuTrigger } from '@/ui/primitives/Menu/Menu.js';
 import { KbdHintRow } from '@/ui/patterns/KbdHintRow/KbdHintRow.js';
 import type { FileTreeStatusEntry } from './FileTree.js';
 import { MountFileTree, type MountTreeSection } from './MountFileTree.js';
@@ -43,7 +47,7 @@ export interface FilesPanelProps {
 const MODE_LABEL: Record<string, string> = { worktree: 'Worktree', 'in-place': 'In place', generated: 'Generated' };
 
 export function FilesPanel({ workspaceId, initialFile, onOpenFile, onSelectionChange, sources }: FilesPanelProps) {
-  const [showTree, setShowTree] = useState(!initialFile);
+  const { showTree, toggleTree, treePosition, placeTree, wrapLines, toggleWrapLines } = useFilesViewStore();
   const [source, setSource] = useState<string>(initialFile?.alias ?? '*');
   const [selection, setSelection] = useState<FileTabRef | null>(initialFile ?? null);
 
@@ -138,14 +142,19 @@ export function FilesPanel({ workspaceId, initialFile, onOpenFile, onSelectionCh
     return <EmptyState icon="files" title="No workspace yet" description="Files appear once the agent starts working." className="h-full" />;
   }
 
+  // Without a file the tree IS the panel: it cannot be hidden then.
+  const treeVisible = showTree || !selection;
   const treeToggle = (
     <IconButton
       size="sm"
       icon="sidebar"
       label={showTree ? 'Hide file tree' : 'Show file tree'}
-      aria-pressed={showTree}
-      onClick={() => setShowTree((v) => !v)}
+      pressed={showTree}
+      onClick={toggleTree}
     />
+  );
+  const viewSettings = (
+    <FilesViewSettings wrapLines={wrapLines} onToggleWrapLines={toggleWrapLines} treePosition={treePosition} onPlaceTree={placeTree} />
   );
   const truncated = repos.some((r) => r.truncated);
 
@@ -153,10 +162,10 @@ export function FilesPanel({ workspaceId, initialFile, onOpenFile, onSelectionCh
     <div className="flex h-full min-h-0 flex-col bg-surface">
       {sources && !initialFile ? <div className="shrink-0 border-b border-line-soft">{sources}</div> : null}
       {selection ? null : (
-        <div className="flex h-panel-bar shrink-0 items-center gap-1.5 border-b border-line-soft px-2">
-          {treeToggle}
+        <div className="flex h-panel-bar shrink-0 items-center gap-1.5 border-b border-line-soft pr-2 pl-3">
           <span className="min-w-0 flex-1 truncate text-ui text-fg-2">Files</span>
           {repos.length > 1 ? <SourcePicker repos={repos.map((r) => r.alias)} value={source} onChange={(next) => { setSource(next); setSelection(null); }} /> : null}
+          {viewSettings}
           <IconButton size="sm" icon="refresh" label="Refresh" onClick={refresh} disabled={treeQuery.isRefetching} />
         </div>
       )}
@@ -167,8 +176,18 @@ export function FilesPanel({ workspaceId, initialFile, onOpenFile, onSelectionCh
       ) : null}
       <div className="flex min-h-0 flex-1">
         {/* Beside a preview the tree eases open and shut from its edge (D-109); one element either way, so the tree keeps its state. */}
-        <Reveal open={showTree} motion="width" className={selection ? 'flex shrink-0' : 'flex min-w-0 flex-1'}>
-          <div className={selection ? 'flex w-60 shrink-0 flex-col border-r border-line-soft' : 'flex min-w-0 flex-1 flex-col'}>
+        <Reveal
+          open={treeVisible}
+          motion="width"
+          className={selection ? cn('flex shrink-0', treePosition === 'right' && 'order-last') : 'flex min-w-0 flex-1'}
+        >
+          <div
+            className={
+              selection
+                ? cn('flex w-60 shrink-0 flex-col border-line-soft', treePosition === 'left' ? 'border-r' : 'border-l')
+                : 'flex min-w-0 flex-1 flex-col'
+            }
+          >
             <MountFileTree
               sections={sections}
               loading={treeQuery.isLoading}
@@ -188,6 +207,8 @@ export function FilesPanel({ workspaceId, initialFile, onOpenFile, onSelectionCh
             onRefresh={refresh}
             refreshing={treeQuery.isRefetching}
             leading={treeToggle}
+            trailing={viewSettings}
+            wrap={wrapLines}
           />
         ) : null}
       </div>
@@ -197,6 +218,40 @@ export function FilesPanel({ workspaceId, initialFile, onOpenFile, onSelectionCh
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** View settings, as in the Changes toolbar: Wrap lines and the file tree's side. */
+function FilesViewSettings({
+  wrapLines,
+  onToggleWrapLines,
+  treePosition,
+  onPlaceTree,
+}: {
+  wrapLines: boolean;
+  onToggleWrapLines: () => void;
+  treePosition: FilesTreePosition;
+  onPlaceTree: (position: FilesTreePosition) => void;
+}) {
+  return (
+    <Menu.Root modal={false}>
+      <Menu.Trigger render={<IconButton size="sm" icon="settings" label="View settings" />} />
+      <Menu.Popup align="end">
+        <Menu.CheckboxItem checked={wrapLines} onCheckedChange={onToggleWrapLines}>
+          Wrap lines
+        </Menu.CheckboxItem>
+        <Menu.Separator />
+        <Menu.Group>
+          <Menu.GroupLabel>File tree position</Menu.GroupLabel>
+          <Menu.CheckboxItem checked={treePosition === 'left'} onCheckedChange={() => onPlaceTree('left')}>
+            Left
+          </Menu.CheckboxItem>
+          <Menu.CheckboxItem checked={treePosition === 'right'} onCheckedChange={() => onPlaceTree('right')}>
+            Right
+          </Menu.CheckboxItem>
+        </Menu.Group>
+      </Menu.Popup>
+    </Menu.Root>
   );
 }
 

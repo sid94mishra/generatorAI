@@ -4,7 +4,8 @@
 //
 // Header: optional leading slot (the tree toggle), the path in mono with the
 // file name emphasised, size, a Preview / Source toggle for markdown (kit
-// Markdown), Wrap and Refresh. Body: the virtualized,
+// Markdown), Wrap (unless the host controls it from its own view settings, the
+// trailing slot) and Refresh. Body: the virtualized,
 // worker-highlighted code view (`FileCodeView`, line numbers) or the loading /
 // deleted / binary / too-large states.
 // ────────────────────────────────────────────────────────────────
@@ -40,6 +41,10 @@ export interface FileViewerProps {
   refreshing?: boolean;
   /** Before the path (the tree toggle). */
   leading?: ReactNode;
+  /** Before Refresh (the host's view settings). */
+  trailing?: ReactNode;
+  /** Wrapped lines, controlled by the host (its view settings); omitted, the viewer has its own Wrap button. */
+  wrap?: boolean;
 }
 
 const MARKDOWN_EXTENSIONS = new Set(['md', 'mdx', 'markdown']);
@@ -54,8 +59,20 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function FileViewer({ path, alias, file, loading, error, onRefresh, refreshing = false, leading }: FileViewerProps) {
-  const [wrap, setWrap] = useState(false);
+export function FileViewer({
+  path,
+  alias,
+  file,
+  loading,
+  error,
+  onRefresh,
+  refreshing = false,
+  leading,
+  trailing,
+  wrap: wrapControlled,
+}: FileViewerProps) {
+  const [wrapOwn, setWrap] = useState(false);
+  const wrap = wrapControlled ?? wrapOwn;
   const [markdownMode, setMarkdownMode] = useState<'preview' | 'source'>('preview');
   const markdown = isMarkdownPath(path);
   const slash = path.lastIndexOf('/');
@@ -84,11 +101,12 @@ export function FileViewer({ path, alias, file, loading, error, onRefresh, refre
             ]}
           />
         ) : null}
-        {showsCode ? (
+        {showsCode && wrapControlled === undefined ? (
           <Button variant="ghost" size="sm" pressed={wrap} onClick={() => setWrap((w) => !w)} aria-label={wrap ? 'Disable line wrap' : 'Wrap long lines'}>
             Wrap
           </Button>
         ) : null}
+        {trailing}
         <IconButton size="sm" icon="refresh" label="Refresh" onClick={onRefresh} disabled={refreshing} />
       </div>
       <FileBody
