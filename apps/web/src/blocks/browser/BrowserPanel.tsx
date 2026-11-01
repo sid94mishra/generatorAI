@@ -20,15 +20,13 @@
 // URL pill, scroll + Comment only).
 // ────────────────────────────────────────────────────────────────
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { annotationPalette } from '@generatorai/design-tokens';
 import { useWebBrowserInteractivity } from '@/lib/browserInteractivity.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
-import { Icon } from '@/ui/icons/Icon.js';
 import { cn } from '@/ui/lib/cn.js';
 import { Callout } from '@/ui/primitives/Callout/Callout.js';
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
-import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
 import { StatusDot, type DotTone } from '@/ui/primitives/StatusDot/StatusDot.js';
 import { AgentBrowsingStrip } from './AgentBrowsingStrip.js';
 import type { BrowserDescriptor } from './browserApi.js';
@@ -90,26 +88,6 @@ export interface BrowserPanelProps {
   visible?: boolean;
 }
 
-/**
- * Chrome-like tab icon for the Browser tab: a spinner while the page loads,
- * the page favicon once loaded (a globe if it fails), a globe when idle.
- */
-export function BrowserTabIcon({ state }: { state: BrowserTabState | null | undefined }): React.JSX.Element {
-  const [broken, setBroken] = useState(false);
-  const favicon = state?.favicon ?? null;
-  useEffect(() => { setBroken(false); }, [favicon]);
-  if (state?.loading) return <Spinner size={14} label="Page loading" />;
-  if (favicon && !broken) {
-    return <img src={favicon} alt="" className="size-3.5 shrink-0 rounded-badge object-contain" onError={() => setBroken(true)} />;
-  }
-  return <Icon concept="browser" size={14} />;
-}
-
-/** The tab label for the Browser tab: the page title, or "Browser". */
-export function browserTabLabel(state: BrowserTabState | null | undefined): string {
-  const t = (state?.title ?? '').trim();
-  return t || 'Browser';
-}
 
 // ── Status bar ───────────────────────────────────────────────
 

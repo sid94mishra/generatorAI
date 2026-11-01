@@ -200,3 +200,25 @@ export const TargetSize: Story = {
     assertTargetSize(canvasElement);
   },
 };
+
+const FAVICON =
+  'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="%23e2553c"/></svg>';
+
+/** A browser tab shows its page: the favicon in place of the icon, the title, and the address on hover. */
+export const PageTab: Story = {
+  args: {
+    tabs: [
+      TABS[0]!,
+      { id: 'browser', label: 'Example Domain', icon: 'browser', image: FAVICON, detail: 'example.com/docs', closable: true },
+      { id: 'browser-2', label: 'Broken icon', icon: 'browser', image: 'data:image/png;base64,broken', closable: true },
+    ],
+    value: 'browser',
+  },
+  play: async ({ canvas }) => {
+    const tab = canvas.getByRole('tab', { name: /Example Domain/ });
+    await expect(tab).toHaveAttribute('title', 'Example Domain\nexample.com/docs');
+    await expect(tab.querySelector('img')).not.toBeNull();
+    // A favicon that fails to load falls back to the icon.
+    await waitFor(() => expect(canvas.getByRole('tab', { name: /Broken icon/ }).querySelector('img')).toBeNull());
+  },
+};

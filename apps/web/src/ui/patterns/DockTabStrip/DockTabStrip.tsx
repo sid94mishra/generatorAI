@@ -41,6 +41,10 @@ export interface DockTab {
   id: string;
   label: string;
   icon: IconConcept;
+  /** An image drawn in place of `icon` (a page's favicon); `icon` again if it fails to load. */
+  image?: string;
+  /** Second line of the tab's hover title (a page's address). */
+  detail?: string;
   /** Trailing mono count (changed files, open problems). */
   count?: number;
   /** Trailing status dot; `label` is its accessible meaning (never colour alone). */
@@ -118,6 +122,15 @@ const tabClass = cn(
 
 // On IconButton sm (which keeps the 24px hitSlop): a 16px box inside the tab's right padding.
 const closeXClass = 'absolute top-1/2 right-1 size-4 -translate-y-1/2 rounded-badge text-fg-3';
+
+/** The tab's 14px glyph: its image (a favicon) while that loads, else its icon. */
+function TabGlyph({ icon, image }: { icon: IconConcept; image: string | undefined }) {
+  const [broken, setBroken] = useState<string | null>(null);
+  if (image && broken !== image) {
+    return <img src={image} alt="" className="size-3.5 shrink-0 rounded-badge object-contain" onError={() => setBroken(image)} />;
+  }
+  return <Icon concept={icon} size={14} />;
+}
 
 /**
  * Ids of the tabs not fully inside the scrolled tab row (re-measured on resize
@@ -249,8 +262,8 @@ export function DockTabStrip({
                 value={tab.id}
                 data-testid={tab.testId}
                 aria-label={iconOnly ? (tab.dot ? `${tab.label} (${tab.dot.label})` : tab.label) : undefined}
-                // Labels truncate at 120px (page titles, file names): the full one on hover.
-                title={iconOnly ? undefined : tab.label}
+                // Labels truncate at 120px (page titles, file names): the full one on hover, with its detail.
+                title={iconOnly ? undefined : tab.detail ? `${tab.label}\n${tab.detail}` : tab.label}
                 aria-keyshortcuts={closable ? 'Delete' : undefined}
                 onKeyDown={(event) => {
                   if (event.key === 'Delete' && closable) {
@@ -272,7 +285,7 @@ export function DockTabStrip({
                   overflowIds.includes(tab.id) && 'invisible',
                 )}
               >
-                <Icon concept={tab.icon} size={14} />
+                <TabGlyph icon={tab.icon} image={tab.image} />
                 {iconOnly ? (
                   tab.dot ? (
                     <span className="pointer-events-none absolute top-0.5 right-0.5 flex">

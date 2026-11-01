@@ -46,7 +46,7 @@ import { Dock, useDockOpen, useSurfaceDockTabs, type DockRegistry } from '@/bloc
 import { FileDockPanel, FilesDockPanel, FilesDockProvider, useFileTabs } from '@/blocks/files/useFileTabs.js';
 import { SourcesBlock } from '@/blocks/files/SourcesBlock.js';
 import { TerminalDockPanel, TerminalDockProvider, terminalTabLabel, type TerminalDockContextValue } from '@/blocks/terminal/terminalDock.js';
-import { BrowserDockPanel, BrowserDockProvider, browserDockTabLabel, type BrowserDockContextValue } from '@/blocks/browser/browserDock.js';
+import { BrowserDockPanel, BrowserDockProvider, browserDockTabDetail, browserDockTabLabel, type BrowserDockContextValue } from '@/blocks/browser/browserDock.js';
 import type { BrowserTabState } from '@/blocks/browser/useBrowserTabState.js';
 import { BROWSER_COMMENTS_PROMPT } from '@/blocks/browser/browserAnnotations.js';
 import type { BrowserSendHandler } from '@/blocks/browser/useBrowserAnnotations.js';
@@ -417,6 +417,8 @@ export function ChatPage() {
         maxInstances: CHAT_DOCK_TAB_CAPS.browser,
         getTabLabel: ({ id, index }) => browserDockTabLabel(browserTabs[id], index),
         getTabDot: ({ id }) => (browserTabs[id]?.loading ? { tone: 'run', label: 'Loading' } : undefined),
+        getTabImage: ({ id }) => browserTabs[id]?.favicon ?? undefined,
+        getTabDetail: ({ id }) => browserDockTabDetail(browserTabs[id]),
         ...noWorkspace,
         Component: BrowserDockPanel,
       },

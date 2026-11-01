@@ -69,6 +69,10 @@ export type DockTabDef = DockTabBody & {
   maxInstances?: number;
   getTabLabel?: (tab: DockTabInstance) => string;
   getTabIcon?: (tab: DockTabInstance) => IconConcept;
+  /** An image in place of the icon (a page's favicon). */
+  getTabImage?: (tab: DockTabInstance) => string | undefined;
+  /** Second line of the hover title (a page's address). */
+  getTabDetail?: (tab: DockTabInstance) => string | undefined;
   /** Trailing count (changed files, running tasks). */
   getTabCount?: (tab: DockTabInstance) => number | undefined;
   /** Trailing status dot with its accessible meaning (a loading page). */

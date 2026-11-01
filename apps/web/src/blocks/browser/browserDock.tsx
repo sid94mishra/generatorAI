@@ -31,6 +31,18 @@ export interface BrowserDockContextValue {
 const BrowserDockContext = createContext<BrowserDockContextValue | null>(null);
 export const BrowserDockProvider = BrowserDockContext.Provider;
 
+/** The tab's hover detail: the page's address (host and path), none for a blank tab. */
+export function browserDockTabDetail(state: BrowserTabState | null | undefined): string | undefined {
+  const url = state?.url;
+  if (!url || url === 'about:blank') return undefined;
+  try {
+    const u = new URL(url);
+    return u.protocol === 'http:' || u.protocol === 'https:' ? `${u.host}${u.pathname === '/' ? '' : u.pathname}` : url;
+  } catch {
+    return url;
+  }
+}
+
 /** The tab label: the page title, else "Browser" / "Browser 2". */
 export function browserDockTabLabel(state: BrowserTabState | null | undefined, index: number): string {
   const title = (state?.title ?? '').trim();

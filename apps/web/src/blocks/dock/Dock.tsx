@@ -144,6 +144,8 @@ export function Dock({
         const inst = { id: tab.id, index: index.get(tab.id) ?? 1 };
         const count = def.getTabCount?.(inst);
         const dot = def.getTabDot?.(inst);
+        const image = def.getTabImage?.(inst);
+        const detail = def.getTabDetail?.(inst);
         return [
           {
             id: tab.id,
@@ -151,6 +153,8 @@ export function Dock({
             icon: def.getTabIcon ? def.getTabIcon(inst) : def.icon,
             ...(count !== undefined ? { count } : {}),
             ...(dot ? { dot } : {}),
+            ...(image ? { image } : {}),
+            ...(detail ? { detail } : {}),
             closable: isClosable(state, tab.id, registry, defaultTabType),
             testId: `right-pane-tab-${tab.type}`,
             overflowTestId: `right-pane-overflow-${tab.type}`,
