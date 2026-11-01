@@ -3,7 +3,7 @@
 // side pane is closed: where the agent works, what it has done, and the
 // commands a person reaches for next. One P-48 card in three sections:
 //
-//   Where      the machine and folder (Show in Finder / Copy path) · Open in
+//   Where      the machine the chat runs on (its host name) and the working folder (Show in Finder / Copy path) · Open in
 //              the default editor, the chevron choosing another · the working
 //              folder's live branch and what it was created from
 //   Activity   uncommitted changes → Changes · background tasks → Tasks ·
@@ -12,7 +12,7 @@
 //              D-36)
 //   Commands   Open a terminal · Browse files
 //
-// Shown and hidden from the header (`chatGlanceStore`, one device setting);
+// No title bar: it is shown and hidden from the header (`chatGlanceStore`, one device setting);
 // the page hides it while the side pane is open, which covers the same room.
 // ────────────────────────────────────────────────────────────────
 
@@ -22,6 +22,7 @@ import { useBackgroundTasks, useWorkspaceChangeSummary, useWorkspaceReadiness } 
 import { useComputerActivity } from '@/hooks/computerQueries.js';
 import { COMPUTER_TIMELINE_MAX } from '@/hooks/computerTimeline.js';
 import { useShellStatus } from '@/hooks/useShellStatus.js';
+import { useSystemInfo } from '@/hooks/systemQueries.js';
 import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import type { BrowserTabState } from '@/blocks/browser/useBrowserTabState.js';
 import { browserDockTabDetail } from '@/blocks/browser/browserDock.js';
@@ -47,7 +48,6 @@ export interface ChatGlanceProps {
   /** The Browser dock tabs' pages, by tab id. */
   browserTabs: Readonly<Record<string, BrowserTabState>>;
   onOpen: (target: ChatGlanceTarget) => void;
-  onHide: () => void;
   className?: string;
 }
 
@@ -64,14 +64,10 @@ function shortPath(path: string): string {
   return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : path;
 }
 
-export function ChatGlance({ chatId, workspaceId, isOrchestrator, computerUseEnabled, browserTabs, onOpen, onHide, className }: ChatGlanceProps) {
+export function ChatGlance({ chatId, workspaceId, isOrchestrator, computerUseEnabled, browserTabs, onOpen, className }: ChatGlanceProps) {
   const pages = Object.entries(browserTabs).filter(([, page]) => !!page.url && page.url !== 'about:blank');
   return (
     <Card role="complementary" aria-label="Chat summary" className={cn('flex flex-col', className)} data-testid="chat-glance">
-      <div className="flex h-panel-bar items-center justify-between border-b border-line-soft pr-1.5 pl-3.5">
-        <span className="text-ui font-semibold text-fg">Summary</span>
-        <IconButton size="sm" icon="x" label="Hide chat summary" onClick={onHide} />
-      </div>
       <div className={cn('flex flex-col', SECTION)}>
         <MachineLine />
         <EditorLine />
@@ -103,12 +99,14 @@ export function ChatGlance({ chatId, workspaceId, isOrchestrator, computerUseEna
   );
 }
 
-/** The server the chat runs on and its working folder: Show in Finder on the desktop, else Copy path. */
+/** The machine the chat's server runs on (its host name) and the working folder: Show in Finder on the desktop, else Copy path. */
 function MachineLine() {
   const { serverName } = useShellStatus();
+  const system = useSystemInfo();
   const editor = useEditorActions();
   const path = editor.target?.path;
-  const title = serverName ?? 'This computer';
+  // The host's own name ("Siddharths-MacBook-Air"), not the connection's label ("This computer").
+  const title = system.data?.serverName.replace(/\.local$/i, '') ?? serverName ?? 'Server';
   if (!path) return <SummaryLine icon="computer" title={title} data-testid="chat-glance-machine" />;
   const reveal = editor.reveal;
   return (

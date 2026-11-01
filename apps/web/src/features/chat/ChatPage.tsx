@@ -516,7 +516,6 @@ export function ChatPage() {
       useChatGlanceStore.getState().setOpen(true);
     } else toggleGlance();
   }, [dockOpen, setDockOpen, toggleGlance]);
-  const hideGlance = useCallback(() => useChatGlanceStore.getState().setOpen(false), []);
   const openFromGlance = useCallback(
     (target: ChatGlanceTarget) => {
       setDockOpen(true);
@@ -727,7 +726,6 @@ export function ChatPage() {
                             computerUseEnabled={view.computerUseEnabled}
                             browserTabs={browserTabs}
                             onOpen={openFromGlance}
-                            onHide={hideGlance}
                             className="max-h-full w-full overflow-y-auto shadow-pop @3xl/chat:shadow-none"
                           />
                         </div>
@@ -735,7 +733,14 @@ export function ChatPage() {
                       </div>
                     </>
                   }
-                  bottom={composer}
+                  // Beside the summary card the composer keeps to the transcript's column (the card's gutter, @3xl).
+                  bottom={
+                    composer ? (
+                      <div className="@container/composer">
+                        <div className={glanceOpen && !dockOpen ? '@3xl/composer:pr-80' : undefined}>{composer}</div>
+                      </div>
+                    ) : null
+                  }
                   dockHost={(column) => (
                     <Dock
                       open={dockOpen}

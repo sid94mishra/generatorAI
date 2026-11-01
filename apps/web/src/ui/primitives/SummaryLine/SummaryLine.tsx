@@ -65,13 +65,14 @@ export function SummaryLine({
     ...(opens && !render ? { type: 'button' as const } : {}),
     ...(onClick ? { onClick } : {}),
     className: cn(
-      'flex w-full min-w-0 items-start gap-2 rounded-control px-2 py-1.5 text-left',
+      // text-small on the row: `h-lh` below is one line of the title, so the glyph and chevron centre on it.
+      'flex w-full min-w-0 items-start gap-2 rounded-control px-2 py-1.5 text-left text-small',
       opens && cn('cursor-pointer transition-control hover:bg-hover', focusRing),
       className,
     ),
     children: (
       <>
-        <span className="flex h-step shrink-0 items-center text-fg-3">
+        <span className="flex h-lh shrink-0 items-center text-fg-3">
           {glyph ?? <Glyph icon={icon} image={image} />}
         </span>
         <span className="flex min-w-0 flex-1 flex-col">
@@ -84,9 +85,9 @@ export function SummaryLine({
             </span>
           ) : null}
         </span>
-        {trailing ? <span className="flex h-step shrink-0 items-center">{trailing}</span> : null}
+        {trailing ? <span className="flex h-lh shrink-0 items-center">{trailing}</span> : null}
         {(chevron ?? opens) ? (
-          <span className="flex h-step shrink-0 items-center text-fg-3">
+          <span className="flex h-lh shrink-0 items-center text-fg-3">
             <Icon concept="chevron-right" size={12} />
           </span>
         ) : null}
