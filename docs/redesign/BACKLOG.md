@@ -40,3 +40,9 @@ They only run in CI, which needs `desktop_redesign` pushed (owner approval).
 
 ## B-3 VRT screenshot baselines (parked 2026-10-03)
 Web P1-R7 and mobile MV-26 / M10-03. This Mac has no Docker, and keeping VRT is undecided.
+
+## B-4 Scripts, end to end (parked 2026-11-01)
+The Scripts page was empty in the owner's app, so its menu entries are hidden: `MENU_DESTINATIONS` in
+`packages/shared/src/ui-contract/commands.ts` leaves it out of the sidebar, rail, palette and Home shortcuts. The page
+still answers at `/scripts`, and its shortcut (G S, ⇧⌘S, Ctrl+7) still works. To revisit: where scripts come from and why
+none were listed, then creating, running and editing one in the app. Then bring the entry back by dropping the filter.
