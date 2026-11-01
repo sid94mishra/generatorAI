@@ -63,7 +63,7 @@ const storedTabs = (chatId: string): Array<{ id: string; type: string }> =>
   (JSON.parse(window.localStorage.getItem(tabsKey(chatId)) ?? '{"tabs":[]}') as { tabs: Array<{ id: string; type: string }> }).tabs;
 
 function seedTabs(chatId: string, tabs: Array<{ id: string; type: string }>, active = tabs[tabs.length - 1]!.id) {
-  window.localStorage.setItem(tabsKey(chatId), JSON.stringify({ tabs, active }));
+  window.localStorage.setItem(tabsKey(chatId), JSON.stringify({ v: 2, tabs, active }));
 }
 function seedOpen(open = true) {
   window.localStorage.setItem(OPEN_KEY, open ? '1' : '0');
@@ -125,8 +125,8 @@ describe('right-pane persistence (09 §5.4; ChatPage.tsx:360, 390, 1609-1619)', 
     mount();
     expect(pane()).toBeInTheDocument();
     expect(isSelected('changes')).toBe(true);
-    // P4-06 (D-27): Files, Terminal and Browser are pinned after Changes.
-    expect(storedTabs(H.CHAT_ID).map((t) => t.type)).toEqual(['changes', 'files', 'terminal', 'browser']);
+    // The dock opens on Changes alone; every other panel is opened from "+".
+    expect(storedTabs(H.CHAT_ID).map((t) => t.type)).toEqual(['changes']);
   });
 
   it('tabs are per chat under `generatorai:dock:chat:<chatId>`; switching chats shows the other chat’s tabs', () => {
@@ -143,9 +143,9 @@ describe('right-pane persistence (09 §5.4; ChatPage.tsx:360, 390, 1609-1619)', 
     r.navigateTo('/chats/chat-2');
     expect(tabsOf('plan')).toHaveLength(0);
     expect(isSelected('changes')).toBe(true);
-    expect(storedTabs('chat-2').map((t) => t.type)).toEqual(['changes', 'files', 'terminal', 'browser']);
+    expect(storedTabs('chat-2').map((t) => t.type)).toEqual(['changes']);
     // chat-1's layout is untouched by the visit.
-    expect(storedTabs(H.CHAT_ID).map((t) => t.type)).toEqual(['changes', 'files', 'terminal', 'browser', 'plan']);
+    expect(storedTabs(H.CHAT_ID).map((t) => t.type)).toEqual(['changes', 'plan']);
 
     r.navigateTo(`/chats/${H.CHAT_ID}`);
     expect(tabsOf('plan')).toHaveLength(1);
@@ -194,7 +194,7 @@ describe('right-pane persistence (09 §5.4; ChatPage.tsx:360, 390, 1609-1619)', 
     r.navigateTo('/chats/worker-1');
     expect(pane()).toBeInTheDocument(); // open state is page-global
     expect(tabsOf('tasks')).toHaveLength(0);
-    expect(storedTabs('worker-1').map((t) => t.type)).toEqual(['changes', 'files', 'terminal', 'browser']);
+    expect(storedTabs('worker-1').map((t) => t.type)).toEqual(['changes']);
 
     // The once-per-chat latch was reset too: the next orchestrator auto-opens again.
     r.navigateTo('/chats/orch-2');
@@ -400,9 +400,8 @@ describe('auto-open: Background Tasks (03 §6.4 "once per chat, orchestrator onl
     H.setFakeData({ backgroundTasks: [task('t-1')] });
     expect(isSelected('tasks')).toBe(true);
 
-    // P4-06 (D-27): Tasks is pinned in orchestrator chats (no close x), so "only once"
-    // is pinned as: a later task does not take the selection back.
-    expect(screen.queryByLabelText('Close Tasks tab')).toBeNull();
+    // "Only once": the tab the first task opened is an ordinary (closable) tab, and a later
+    // task does not take the selection back.
     await userEvent.click(tabsOf('changes')[0]!);
     H.setFakeData({ backgroundTasks: [task('t-1'), task('t-2')] });
     expect(isSelected('changes')).toBe(true);
@@ -427,16 +426,17 @@ describe('tab caps and the addable ledger (09 §5.4 Tab caps; 1139-1297)', () =>
     { computerUseEnabled: true, isOrchestrator: false },
     { computerUseEnabled: false, isOrchestrator: true },
     { computerUseEnabled: true, isOrchestrator: true },
-  ])('the "+" menu is exactly dockAddableTabTypes(%o); Tasks only for orchestrators and Computer only when enabled, as pinned tabs', async (opts) => {
-    // P4-06 (D-27): the "+" menu offers Widget and extra Terminal/Browser instances only;
-    // Tasks and Computer are pinned tabs when relevant, never "+" entries.
+  ])('the "+" menu is exactly dockAddableTabTypes(%o); Tasks only for orchestrators and Computer only when enabled', async (opts) => {
+    // The dock opens on Changes alone and "+" offers every other panel this chat has:
+    // Tasks only for orchestrators, Computer only when computer use is on.
     seedOpen();
     H.setFakeData({ computerUseEnabled: opts.computerUseEnabled });
     mount(H.makeChat({ orchestratorMode: opts.isOrchestrator }));
     await openAddMenu();
     expect(addable()).toEqual(dockAddableTabTypes(dockTabTypes(opts)));
-    expect(tabsOf('tasks')).toHaveLength(opts.isOrchestrator ? 1 : 0);
-    expect(tabsOf('computer')).toHaveLength(opts.computerUseEnabled ? 1 : 0);
+    expect(addable().includes('tasks')).toBe(opts.isOrchestrator);
+    expect(addable().includes('computer')).toBe(opts.computerUseEnabled);
+    expect(tabsOf('computer')).toHaveLength(0);
   });
 
   it.each([

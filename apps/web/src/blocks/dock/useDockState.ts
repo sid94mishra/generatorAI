@@ -15,6 +15,7 @@ import {
   focusHitsCap,
   readDockState,
   reconcileDockState,
+  serializeDockState,
   type DockStoredState,
   type DockTabRef,
 } from './dockState.js';
@@ -77,7 +78,7 @@ export function useDockState({
   useEffect(() => {
     if (scoped.key !== storageKey) return;
     try {
-      window.localStorage.setItem(storageKey, JSON.stringify(scoped.data));
+      window.localStorage.setItem(storageKey, serializeDockState(scoped.data));
     } catch {
       /* quota / private mode: the layout is just not remembered */
     }

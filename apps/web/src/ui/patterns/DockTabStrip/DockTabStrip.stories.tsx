@@ -133,23 +133,27 @@ export const AddMenu: Story = {
   },
 };
 
-/** Too many tabs for the width: the hidden ones are listed under "More tabs" in the "+" menu. */
+/** Too many tabs for the width: the hidden ones are listed by their own button, next to "+". */
 export const Overflow: Story = {
   args: { tabs: MANY_TABS },
   render: (args) => <Controlled {...args} initial="changes" width="narrow" />,
   play: async ({ canvas }) => {
-    const add = await canvas.findByRole('button', { name: /^Add tab, \d+ more$/ });
-    await userEvent.click(add);
+    const more = await canvas.findByRole('button', { name: /^\d+ more tabs?$/ });
+    await userEvent.click(more);
     await screen.findByRole('menu');
     await waitFor(() => expect(screen.getByText('More tabs')).toBeVisible());
     await userEvent.click(screen.getByTestId('right-pane-overflow-browser'));
     const picked = canvas.getByRole('tab', { name: /Browser 2/ });
     await expect(picked).toHaveAttribute('aria-selected', 'true');
-    // Scrolled into view: the picked tab is no longer an overflow row.
-    await userEvent.click(canvas.getByRole('button', { name: /^Add tab/ }));
-    await screen.findByRole('menu');
-    await expect(screen.queryByTestId('right-pane-overflow-browser')).toBeNull();
-    await userEvent.keyboard('{Escape}');
+    // Scrolled into view: the picked tab is no longer listed as hidden.
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    const still = canvas.queryByRole('button', { name: /^\d+ more tabs?$/ });
+    if (still) {
+      await userEvent.click(still);
+      await screen.findByRole('menu');
+      await expect(screen.queryByTestId('right-pane-overflow-browser')).toBeNull();
+      await userEvent.keyboard('{Escape}');
+    }
   },
 };
 

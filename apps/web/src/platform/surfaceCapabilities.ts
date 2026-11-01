@@ -83,9 +83,12 @@ export function dockTabTypes(
   return tabs;
 }
 
-/** What the dock's "+" menu offers (D-27): extra Terminal / Browser instances and widgets. */
+/**
+ * What the dock's "+" menu offers. The dock opens on its default tab alone; every other panel this chat has is
+ * opened from here (or by the agent using it), and Terminal / Browser again for extra instances.
+ */
 export function dockAddableTabTypes(types: readonly ChatDockTabType[]): DockTabType[] {
-  return (['terminal', 'browser', 'widget'] as const).filter((t) => types.includes(t));
+  return (['files', 'terminal', 'browser', 'tasks', 'computer', 'widget'] as const).filter((t) => types.includes(t));
 }
 
 /**

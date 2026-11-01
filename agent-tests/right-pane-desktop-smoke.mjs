@@ -134,8 +134,8 @@ try {
   record('chat: Changes tab visible by default', true);
 
   if (await page.$('[data-testid="right-pane-tab-browser"]')) {
-    // Browser is a pinned chat dock tab (D-65): already in the strip, not in "+".
-    record('chat: Browser tab present (pinned)', true);
+    // Already opened in this chat (the dock remembers its tabs per chat).
+    record('chat: Browser tab present', true);
   } else {
   const addBtn = await page.$('[data-testid="right-pane-add-tab"]');
   await addBtn.click();

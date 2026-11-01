@@ -190,12 +190,15 @@ try {
 }
 if (!workspaceId) await finish(1);
 
-// Open the Browser tab in the dock. Since P4-06 (D-27) Browser is a pinned
-// dock tab (`right-pane-tab-browser`); the "+" menu only adds extra instances.
+// Open the Browser tab in the dock: it opens on Changes alone, and Browser is added from "+".
 try {
   const sidePaneBtn = await page.$('button[aria-label="Show side pane"]');
   if (sidePaneBtn) await sidePaneBtn.click();
   await page.waitForTimeout(300);
+  if (!(await page.$('[data-testid="right-pane-tab-browser"]'))) {
+    await page.click('[data-testid="right-pane-add-tab"]');
+    await page.click('[data-testid="right-pane-add-browser"]');
+  }
   await page.click('[data-testid="right-pane-tab-browser"]');
   const tabVisible = await page.waitForSelector('[role="tab"]:has-text("Browser")', { timeout: 10_000 })
     .then(() => true).catch(() => false);

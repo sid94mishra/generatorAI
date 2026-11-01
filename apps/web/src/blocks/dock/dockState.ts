@@ -76,16 +76,28 @@ export function reconcileDockState(
   return { tabs, active };
 }
 
-/** Reads and reconciles one scope's stored state (unavailable or corrupt storage → defaults). */
+/**
+ * The stored layout's version. 2: a dock opens on its default tab alone and the person adds the rest — a layout
+ * stored before then lists every tab that used to be pinned open, so it is not restored.
+ */
+export const DOCK_STATE_VERSION = 2;
+
+/** What is written to storage: the state, stamped with its version. */
+export function serializeDockState(state: DockStoredState): string {
+  return JSON.stringify({ v: DOCK_STATE_VERSION, ...state });
+}
+
+/** Reads and reconciles one scope's stored state (unavailable, corrupt or older storage → defaults). */
 export function readDockState(storageKey: string, registry: DockRegistry, defaultTabType: string): DockStoredState {
-  let raw: Partial<DockStoredState> | null = null;
+  let raw: (Partial<DockStoredState> & { v?: unknown }) | null = null;
   try {
     const text = window.localStorage.getItem(storageKey);
-    raw = text ? (JSON.parse(text) as Partial<DockStoredState>) : null;
+    raw = text ? (JSON.parse(text) as Partial<DockStoredState> & { v?: unknown }) : null;
   } catch {
     raw = null;
   }
-  return reconcileDockState(raw, registry, defaultTabType);
+  if (raw?.v !== DOCK_STATE_VERSION) raw = null;
+  return reconcileDockState(raw && { tabs: raw.tabs ?? [], active: raw.active ?? '' }, registry, defaultTabType);
 }
 
 /** Whether the tab at `id` may be closed: not the default tab, not a pinned type's first instance. */

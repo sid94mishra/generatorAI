@@ -393,12 +393,11 @@ export function ChatPage() {
 
     const registry: DockRegistry = {
       changes: { label: 'Changes', description: 'Files & changes for this chat', icon: 'changes', pinned: true, Component: ChangesDockPanel },
-      // D-27: Files is ONE pinned tab (the tree); opened files get `file` tabs.
+      // D-27: Files is ONE tab (the tree); opened files get `file` tabs.
       files: {
         label: 'Files',
         description: 'Browse every file in the workspace',
         icon: 'files',
-        pinned: true,
         getTabLabel: fileTabs.filesTabLabel,
         Component: FilesDockPanel,
       },
@@ -414,7 +413,6 @@ export function ChatPage() {
         label: 'Browser',
         description: 'Integrated browser for this chat',
         icon: 'browser',
-        pinned: true,
         allowMultiple: true,
         maxInstances: CHAT_DOCK_TAB_CAPS.browser,
         getTabLabel: ({ id, index }) => browserDockTabLabel(browserTabs[id], index),
@@ -426,7 +424,6 @@ export function ChatPage() {
         label: 'Terminal',
         description: 'Integrated shell in this workspace',
         icon: 'terminal',
-        pinned: true,
         allowMultiple: true,
         getTabLabel: terminalTabLabel,
         // Each xterm takes a WebGL context (browsers evict past ~16) and a PTY.
@@ -438,7 +435,6 @@ export function ChatPage() {
         label: 'Computer',
         description: 'Watch the desktop windows the agent reads and acts on',
         icon: 'computer',
-        pinned: true,
         ...noWorkspace,
         Component: ChatComputerDockPanel,
       },
@@ -461,7 +457,6 @@ export function ChatPage() {
         label: 'Tasks',
         description: 'Background agent tasks spawned by this orchestrator chat',
         icon: 'tasks',
-        pinned: true,
         getTabCount: () => (runningTaskCount > 0 ? runningTaskCount : undefined),
         Component: ChatTasksDockPanel,
       },

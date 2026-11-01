@@ -8,14 +8,15 @@
 // `right-pane`, `right-pane-tab-<type>`, `right-pane-add-tab`,
 // `right-pane-add-<type>`, `right-pane-fullscreen` (Maximize),
 // `right-pane-close` (sheet Close), `right-pane-cap-notice`,
-// `right-pane-overflow-<type>`, `right-pane-panel-<type>`; "Right side pane",
+// `right-pane-overflow-<type>`, `right-pane-tab-list`, `right-pane-panel-<type>`; "Right side pane",
 // "Right pane tabs", "Add tab", "Close <label> tab", "Resize right pane".
 // The sheet (window < 1200) is `dock-sheet` (09 §7.3).
 //
 // Behaviour:
 // - Tabs: the default tab first, then the pinned types, then the rest in open
-//   order; one selected; the "+" menu offers `addableTabTypes` (extra
-//   instances below their cap); overflowing tabs are listed in the "+" menu.
+//   order; one selected. The dock opens on the default tab alone: the "+" menu
+//   offers `addableTabTypes` (each panel, and extra instances below their cap);
+//   tabs the row cannot fit are listed by `right-pane-tab-list`.
 // - Panels mount the first time their tab is selected while the dock is open
 //   and then stay mounted — through tab switches, closing the dock and the
 //   1200px breakpoint — until their tab is closed.
@@ -205,7 +206,7 @@ export function Dock({
       {...(mode !== 'full' ? { onMaximize: () => setMaximized((m) => !m) } : {})}
       onClose={() => onOpenChange(false)}
       labels={{ tablist: 'Right pane tabs', close: 'Close right pane' }}
-      testIds={{ add: 'right-pane-add-tab', maximize: 'right-pane-fullscreen', close: 'right-pane-close' }}
+      testIds={{ add: 'right-pane-add-tab', overflow: 'right-pane-tab-list', maximize: 'right-pane-fullscreen', close: 'right-pane-close' }}
     />
   );
 

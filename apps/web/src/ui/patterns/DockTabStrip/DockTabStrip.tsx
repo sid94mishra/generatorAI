@@ -7,13 +7,15 @@
 // sm buttons at 28h (`h-control`): 14 icon · label · Count / dot; active
 // `bg-selected text-fg`, inactive ghost. `compact` (narrow sheet): inactive
 // tabs are icon-only (P-03 md square, label as name + tooltip) and a Close
-// ib-sm closes the dock. After the tabs: "+" ib-sm (a P-30 menu of
-// `addItems`, or a plain `onAdd` button), a spacer, Maximize ib-sm.
+// ib-sm closes the dock. After the tabs: the hidden-tabs list (only while some
+// are hidden), "+" ib-sm (a P-30 menu of `addItems`, or a plain `onAdd`
+// button), a spacer, Maximize ib-sm.
 //
 // Overflow: the tab row clips (`overflow-x-hidden`, no scrollbar); tabs that
-// are not fully visible are listed at the top of the "+" menu ("More tabs")
-// and the "+" button carries their count. Picking one selects it and the row
-// scrolls it into view (programmatically, as does keyboard focus).
+// are not fully visible are listed by their own button after the row — a
+// chevron carrying their count ("3 more tabs") — so "+" only ever opens new
+// panels. Picking one selects it and the row scrolls it into view
+// (programmatically, as does keyboard focus).
 //
 // Closable tabs: an inline x (pointer only, hover-revealed on inactive tabs)
 // plus Delete on the focused tab and middle-click. The x is `aria-hidden` and
@@ -68,8 +70,10 @@ export interface DockTabStripLabels {
   add?: string;
   /** Heading of the add group in the "+" menu. Default "Open another panel". */
   addGroup?: string;
-  /** Heading of the overflow group in the "+" menu. Default "More tabs". */
+  /** Heading of the hidden-tabs list. Default "More tabs". */
   overflowGroup?: string;
+  /** The hidden-tabs button. Default `${n} more tab(s)`. */
+  overflow?: (count: number) => string;
   /** Maximize button (not maximized). Default "Maximize". */
   maximize?: string;
   /** Maximize button while maximized. Default "Restore". */
@@ -102,7 +106,7 @@ export interface DockTabStripProps extends Omit<ComponentProps<'div'>, 'children
   compact?: boolean;
   labels?: DockTabStripLabels;
   /** `data-testid`s of the trailing buttons (`right-pane-add-tab` …). */
-  testIds?: { add?: string; maximize?: string; close?: string };
+  testIds?: { add?: string; overflow?: string; maximize?: string; close?: string };
 }
 
 const tabClass = cn(
@@ -181,7 +185,7 @@ function useOverflowIds(listRef: RefObject<HTMLDivElement | null>, layoutKey: st
   return ids;
 }
 
-/** The side dock tab bar: tabs, "+" menu (with overflow), Maximize, Close (narrow). */
+/** The side dock tab bar: tabs, the hidden-tabs list, "+" menu, Maximize, Close (narrow). */
 export function DockTabStrip({
   tabs,
   value,
@@ -215,10 +219,7 @@ export function DockTabStrip({
   );
 
   const hasAddItems = (addItems?.length ?? 0) > 0;
-  const menuMode = hasAddItems || overflowTabs.length > 0;
-  const showAdd = menuMode || onAdd !== undefined;
-  const addBadge = overflowTabs.length > 0 ? <Count bubble>{overflowTabs.length}</Count> : undefined;
-  const addName = overflowTabs.length > 0 ? `${addLabel}, ${overflowTabs.length} more` : addLabel;
+  const overflowName = labels?.overflow?.(overflowTabs.length) ?? `${overflowTabs.length} more tab${overflowTabs.length === 1 ? '' : 's'}`;
 
   return (
     <div
@@ -234,7 +235,7 @@ export function DockTabStrip({
         <Tabs.List
           ref={listRef}
           aria-label={labels?.tablist ?? 'Side dock'}
-          // Clips without a scrollbar: hidden tabs are reachable from the "+" menu.
+          // Clips without a scrollbar: hidden tabs are reachable from the hidden-tabs list.
           // px-1 / self-stretch leave room for the 2px focus-ring offset inside the clip.
           className="relative flex min-w-0 items-center gap-0.5 self-stretch overflow-x-hidden px-1"
         >
@@ -267,7 +268,7 @@ export function DockTabStrip({
                   tabClass,
                   iconOnly && 'relative size-control justify-center px-0',
                   showX && 'pr-6',
-                  // A tab the row cannot fit lives in the "+" menu; do not leave half of it showing.
+                  // A tab the row cannot fit lives in the hidden-tabs list; do not leave half of it showing.
                   overflowIds.includes(tab.id) && 'invisible',
                 )}
               >
@@ -312,65 +313,62 @@ export function DockTabStrip({
         </Tabs.List>
       </Tabs.Root>
 
-      {showAdd ? (
-        menuMode ? (
-          <Menu.Root>
-            <Menu.Trigger
-              render={
-                <IconButton
-                  size="sm"
-                  icon="plus"
-                  label={addName}
-                  badge={addBadge}
-                  tooltip={false}
-                  data-testid={testIds?.add}
-                />
-              }
-            />
-            <Menu.Popup align="start">
-              {overflowTabs.length > 0 ? (
-                <Menu.Group>
-                  <Menu.GroupLabel>{labels?.overflowGroup ?? 'More tabs'}</Menu.GroupLabel>
-                  {overflowTabs.map((tab) => (
-                    <Menu.Item
-                      key={tab.id}
-                      icon={tab.icon}
-                      data-testid={tab.overflowTestId}
-                      className={tab.id === value ? 'bg-selected' : undefined}
-                      onClick={() => onValueChange(tab.id)}
-                    >
-                      {tab.label}
-                    </Menu.Item>
-                  ))}
-                </Menu.Group>
-              ) : null}
-              {overflowTabs.length > 0 && (hasAddItems || onAdd) ? <Menu.Separator /> : null}
-              {hasAddItems ? (
-                <Menu.Group>
-                  <Menu.GroupLabel>{labels?.addGroup ?? 'Open another panel'}</Menu.GroupLabel>
-                  {addItems?.map((item) => (
-                    <Menu.Item
-                      key={item.value}
-                      icon={item.icon}
-                      description={item.description}
-                      disabled={item.disabled}
-                      data-testid={item.testId}
-                      onClick={() => onAddSelect?.(item.value)}
-                    >
-                      {item.label}
-                    </Menu.Item>
-                  ))}
-                </Menu.Group>
-              ) : onAdd ? (
-                <Menu.Item icon="plus" onClick={onAdd}>
-                  {addLabel}
+      {overflowTabs.length > 0 ? (
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <IconButton
+                size="sm"
+                icon="chevron-down"
+                label={overflowName}
+                badge={<Count bubble>{overflowTabs.length}</Count>}
+                tooltip={false}
+                data-testid={testIds?.overflow}
+              />
+            }
+          />
+          <Menu.Popup align="start">
+            <Menu.Group>
+              <Menu.GroupLabel>{labels?.overflowGroup ?? 'More tabs'}</Menu.GroupLabel>
+              {overflowTabs.map((tab) => (
+                <Menu.Item
+                  key={tab.id}
+                  icon={tab.icon}
+                  data-testid={tab.overflowTestId}
+                  className={tab.id === value ? 'bg-selected' : undefined}
+                  onClick={() => onValueChange(tab.id)}
+                >
+                  {tab.label}
                 </Menu.Item>
-              ) : null}
-            </Menu.Popup>
-          </Menu.Root>
-        ) : (
-          <IconButton size="sm" icon="plus" label={addLabel} onClick={onAdd} data-testid={testIds?.add} />
-        )
+              ))}
+            </Menu.Group>
+          </Menu.Popup>
+        </Menu.Root>
+      ) : null}
+
+      {hasAddItems ? (
+        <Menu.Root>
+          <Menu.Trigger render={<IconButton size="sm" icon="plus" label={addLabel} tooltip={false} data-testid={testIds?.add} />} />
+          <Menu.Popup align="start">
+            <Menu.Group>
+              <Menu.GroupLabel>{labels?.addGroup ?? 'Open another panel'}</Menu.GroupLabel>
+              {addItems?.map((item) => (
+                <Menu.Item
+                  key={item.value}
+                  icon={item.icon}
+                  description={item.description}
+                  disabled={item.disabled}
+                  data-testid={item.testId}
+                  onClick={() => onAddSelect?.(item.value)}
+                >
+                  {item.label}
+                </Menu.Item>
+              ))}
+            </Menu.Group>
+          </Menu.Popup>
+        </Menu.Root>
+      ) : onAdd ? (
+        <IconButton size="sm" icon="plus" label={addLabel} onClick={onAdd} data-testid={testIds?.add} />
       ) : null}
 
       <span className="min-w-0 flex-1" aria-hidden />

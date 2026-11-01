@@ -145,7 +145,7 @@ describe('RightPane characterization — reconcileState via stored localStorage 
   it('drops tabs whose type is no longer defined', () => {
     window.localStorage.setItem(
       'reconcile-unknown',
-      JSON.stringify({ tabs: [{ id: 'ghost-1', type: 'ghost' }], active: 'ghost-1' }),
+      JSON.stringify({ v: 2, tabs: [{ id: 'ghost-1', type: 'ghost' }], active: 'ghost-1' }),
     );
     const tabs = makeTabs({ labelBy: 'id' });
     render(
@@ -159,7 +159,7 @@ describe('RightPane characterization — reconcileState via stored localStorage 
   it('reinserts the required default as the first tab when it is missing from storage', () => {
     window.localStorage.setItem(
       'reconcile-missing-default',
-      JSON.stringify({ tabs: [{ id: 'terminal-1', type: 'terminal' }], active: 'terminal-1' }),
+      JSON.stringify({ v: 2, tabs: [{ id: 'terminal-1', type: 'terminal' }], active: 'terminal-1' }),
     );
     const tabs = makeTabs({ labelBy: 'id' });
     render(
@@ -177,6 +177,7 @@ describe('RightPane characterization — reconcileState via stored localStorage 
     window.localStorage.setItem(
       'reconcile-stale-active',
       JSON.stringify({
+        v: 2,
         tabs: [{ id: 'changes-1', type: 'changes' }, { id: 'terminal-1', type: 'terminal' }],
         active: 'terminal-999',
       }),
@@ -196,13 +197,14 @@ describe('RightPane characterization — storageKey scope switch (RightPane.tsx:
     window.localStorage.setItem(
       'scope-a',
       JSON.stringify({
+        v: 2,
         tabs: [{ id: 'changes-1', type: 'changes' }, { id: 'terminal-1', type: 'terminal' }],
         active: 'changes-1',
       }),
     );
     window.localStorage.setItem(
       'scope-b',
-      JSON.stringify({ tabs: [{ id: 'changes-1', type: 'changes' }], active: 'changes-1' }),
+      JSON.stringify({ v: 2, tabs: [{ id: 'changes-1', type: 'changes' }], active: 'changes-1' }),
     );
     const tabs = makeTabs({ labelBy: 'id' });
     const { rerender } = render(
@@ -260,6 +262,7 @@ describe('RightPane characterization — focusTabRequest (RightPane.tsx:452-507)
     window.localStorage.setItem(
       'explicit-focus',
       JSON.stringify({
+        v: 2,
         tabs: [
           { id: 'changes-1', type: 'changes' },
           { id: 'terminal-a', type: 'terminal' },
@@ -283,6 +286,7 @@ describe('RightPane characterization — focusTabRequest (RightPane.tsx:452-507)
     window.localStorage.setItem(
       'idempotent-focus',
       JSON.stringify({
+        v: 2,
         tabs: [
           { id: 'changes-1', type: 'changes' },
           { id: 'terminal-a', type: 'terminal' },
@@ -448,16 +452,15 @@ describe('RightPane characterization — tab-strip overflow menu (RightPane.tsx:
     // end = 301, i.e. 1px past the strip's right edge (300) — within TOL(2).
     Object.defineProperty(t1El, 'offsetWidth', { configurable: true, value: 301 });
     fireEvent.scroll(list);
-    expect(screen.getByTestId('right-pane-add-tab')).toHaveAttribute('aria-label', 'Add tab');
+    expect(screen.queryByTestId('right-pane-tab-list')).toBeNull();
 
     // end = 303, i.e. 3px past — over the tolerance, so it now counts.
     Object.defineProperty(t1El, 'offsetWidth', { configurable: true, value: 303 });
     fireEvent.scroll(list);
 
-    // P4-06 (C-19): clipped tabs are listed in the "+" menu, whose name counts them
-    // (the separate `right-pane-tab-overflow` button is gone).
-    const overflowBtn = screen.getByTestId('right-pane-add-tab');
-    expect(overflowBtn).toHaveAttribute('aria-label', 'Add tab, 1 more');
+    // Clipped tabs are listed by their own button, which counts them; "+" only opens new panels.
+    const overflowBtn = screen.getByTestId('right-pane-tab-list');
+    expect(overflowBtn).toHaveAttribute('aria-label', '1 more tab');
     fireEvent.click(overflowBtn);
     expect(screen.getByTestId('right-pane-overflow-terminal').textContent).toContain('T1');
   });
