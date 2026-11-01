@@ -28,7 +28,7 @@ import { Button } from '@/ui/primitives/Button/Button.js';
 import { SegmentedControl } from '@/ui/primitives/SegmentedControl/SegmentedControl.js';
 import { FindWidget } from '@/ui/patterns/FindWidget/FindWidget.js';
 import { useTranscriptFindStore } from '@/stores/transcriptFindStore.js';
-import { TranscriptTurn } from '../TranscriptTurn/TranscriptTurn.js';
+import { TranscriptTurn, type PendingUserParts } from '../TranscriptTurn/TranscriptTurn.js';
 import { useTranscriptFind } from './useTranscriptFind.js';
 
 /** Virtualize above this many turns (D-33 spike decision). */
@@ -60,6 +60,8 @@ export interface TranscriptViewProps {
   renderUserActions?: ((message: ChatMessage) => ReactNode) | undefined;
   renderResponseActions?: ((message: ChatMessage, engaged: boolean) => ReactNode) | undefined;
   renderLive?: (() => ReactNode) | undefined;
+  /** What the optimistic bubble's prompt carries until the server's copy of it is fetched. */
+  pendingUser?: PendingUserParts | undefined;
   /** `never` (default) renders every turn; `auto` virtualizes long transcripts (the D-33 spike). */
   virtualize?: 'auto' | 'never';
   /** D-33 fallback: collapse finished turns before the last N (0 = off). */
@@ -87,6 +89,7 @@ export function TranscriptView({
   renderUserActions,
   renderResponseActions,
   renderLive,
+  pendingUser,
   virtualize = 'never',
   collapseBeyond = 0,
   className,
@@ -177,9 +180,10 @@ export function TranscriptView({
         renderUserActions={renderUserActions}
         renderResponseActions={renderResponseActions}
         renderLive={turn.live ? renderLive : undefined}
+        pendingUser={turn.live ? pendingUser : undefined}
       />
     ),
-    [agentName, avatar, harnessProvider, collapseBeyond, turns.length, renderUserActions, renderResponseActions, renderLive],
+    [agentName, avatar, harnessProvider, collapseBeyond, turns.length, renderUserActions, renderResponseActions, renderLive, pendingUser],
   );
 
   return (

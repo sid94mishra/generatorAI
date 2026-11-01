@@ -33,6 +33,7 @@ import { AgentTurnHeader } from '../AgentTurnHeader/AgentTurnHeader.js';
 import { TurnBody } from '../TurnBody/TurnBody.js';
 import { AttachmentList } from '../UserMessage/AttachmentList.js';
 import { UserMessage } from '../UserMessage/UserMessage.js';
+import type { ChatRefChip } from '../UserMessage/ChatRefList.js';
 import { useTranscriptActions } from '../transcriptContext.js';
 import { useModelLabel } from '@/blocks/model-picker/useModelLabel.js';
 
@@ -56,6 +57,13 @@ export interface TranscriptTurnProps {
   renderResponseActions?: ((message: ChatMessage, engaged: boolean) => ReactNode) | undefined;
   /** The live stream's rendering, for a `live` entry. */
   renderLive?: (() => ReactNode) | undefined;
+  /** What the optimistic bubble's prompt carries (files, chats) until the server's copy of it is fetched. */
+  pendingUser?: PendingUserParts | undefined;
+}
+
+export interface PendingUserParts {
+  attachments: ChatMessage['attachments'];
+  chatRefs: readonly ChatRefChip[];
 }
 
 /** "Stopped before …" — a stopped turn is never a silent gap. */
@@ -206,7 +214,15 @@ function renderEntry(entry: TranscriptEntry, props: TranscriptTurnProps, started
         />
       );
     case 'pending_user':
-      return <UserMessage key={entry.key} content={entry.content} pending />;
+      return (
+        <UserMessage
+          key={entry.key}
+          content={entry.content}
+          attachments={props.pendingUser?.attachments}
+          chatRefs={props.pendingUser?.chatRefs}
+          pending
+        />
+      );
     case 'agent':
       return (
         <AgentResponse
@@ -265,5 +281,6 @@ export const TranscriptTurn = memo(
     a.defaultCollapsed === b.defaultCollapsed &&
     a.renderUserActions === b.renderUserActions &&
     a.renderResponseActions === b.renderResponseActions &&
-    a.renderLive === b.renderLive,
+    a.renderLive === b.renderLive &&
+    a.pendingUser === b.pendingUser,
 );

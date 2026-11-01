@@ -26,6 +26,7 @@ import {
   stopPhaseFromView,
 } from '@generatorai/client-core';
 import { useSendPrompt } from '@/hooks/queries.js';
+import { useSentMessageStore } from '@/stores/sentMessageStore.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { toast } from '@/ui/primitives/Toast/Toast.js';
 import type { CaptureSource } from '../model/types.js';
@@ -109,6 +110,7 @@ export function useComposerSend({
   const sendMutation = useSendPrompt(sessionId);
   const startPending = useStreamStore((state) => state.startPending);
   const clearStream = useStreamStore((state) => state.clearStream);
+  const recordSentMessage = useSentMessageStore((state) => state.record);
   const sendingRef = useRef(false);
 
   const isLoading = sendMutation.isPending;
@@ -206,8 +208,20 @@ export function useComposerSend({
         return;
       }
 
-      if (manageStream) startPending(sessionId, prompt);
       const files = currentAttachments.map((a) => a.file);
+      if (manageStream) {
+        // The bubble shows what is attached while the files upload, not only once the server has stored them.
+        recordSentMessage(sessionId, {
+          prompt,
+          attachments: [...files, ...captureFiles].map((f) => ({
+            name: f.name,
+            path: '',
+            mimeType: f.type || 'application/octet-stream',
+          })),
+          chatRefs: currentChatRefs.map(({ chatId, name }) => ({ chatId, name })),
+        });
+        startPending(sessionId, prompt);
+      }
 
       // Built-in commands (`/browser`, `/terminal`) surface their integrated
       // panel before the message is dispatched so the user can watch the agent
@@ -254,6 +268,7 @@ export function useComposerSend({
     sessionId,
     sendMutation,
     startPending,
+    recordSentMessage,
     clearStream,
     manageStream,
     onBeforeSend,

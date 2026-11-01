@@ -42,47 +42,49 @@ export function useChatTranscript(
 
   const isInActiveTurn = hasStream && streamStatus !== 'idle' && !!turnUserMessage;
 
-  const displayMessages = useMemo(() => {
-    if (!messages?.length) return messages ?? [];
-    if (!isInActiveTurn) return messages;
+  // The persisted copy of the message this turn is streaming takes the
+  // optimistic bubble's place as soon as it is fetched (the server stores it
+  // before the turn starts): it carries what the bubble cannot know — the
+  // stored attachments, the attached chats, the time and the rewind menu.
+  // Hiding it until the turn settled left a prompt's files off screen for the
+  // whole turn, and for good after a turn that stopped or failed. Rows
+  // persisted after it (a partial answer) stay hidden; the live stream shows them.
+  const { displayMessages, turnMessageShown } = useMemo(() => {
+    if (!messages?.length) return { displayMessages: messages ?? [], turnMessageShown: false };
+    if (!isInActiveTurn) return { displayMessages: messages, turnMessageShown: false };
 
-    // Hide the persisted copy of the message this turn is streaming, so it
-    // isn't rendered twice (the optimistic bubble already shows it).
-    //
     // Prefer the server-generated turnId (WEB-02): it identifies the current
     // turn's messages exactly. Content matching cannot — if the user repeats a
-    // prompt they sent earlier, the scan lands on the OLDER copy and slicing
+    // prompt they sent earlier, the scan lands on the OLDER copy and cutting
     // there hides every message after it, so the conversation appears to
-    // vanish until the turn ends and this dedup switches off.
+    // vanish until the turn ends.
     if (serverTurnId) {
       const idx = messages.findIndex(
         (m) => m.role === 'user'
           && (m as { metadata?: { turnId?: string } }).metadata?.turnId === serverTurnId,
       );
-      return idx >= 0 ? messages.slice(0, idx) : messages;
+      return idx >= 0
+        ? { displayMessages: messages.slice(0, idx + 1), turnMessageShown: true }
+        : { displayMessages: messages, turnMessageShown: false };
     }
 
     const targetContent = turnUserMessage?.trim();
 
     if (targetContent) {
-      // No turnId yet. Only dedup when the match is the very LAST message —
-      // that can only be the copy just persisted for this turn. A match
-      // anywhere earlier is an identical older prompt and must be left alone.
-      const lastIdx = messages.length - 1;
-      const last = messages[lastIdx];
-      if (last?.role === 'user' && last.content?.trim() === targetContent) {
-        return messages.slice(0, lastIdx);
-      }
-      return messages;
+      // No turnId yet. Only the very LAST message can be the copy just
+      // persisted for this turn; a match anywhere earlier is an identical
+      // older prompt.
+      const last = messages[messages.length - 1];
+      return { displayMessages: messages, turnMessageShown: last?.role === 'user' && last.content?.trim() === targetContent };
     }
 
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i]?.role === 'user') {
-        return messages.slice(0, i + 1);
+        return { displayMessages: messages.slice(0, i + 1), turnMessageShown: false };
       }
     }
 
-    return messages;
+    return { displayMessages: messages, turnMessageShown: false };
   }, [messages, isInActiveTurn, turnUserMessage, serverTurnId]);
 
   // ↑ / ↓ prompt history for the composer — every prompt the human typed in
@@ -107,7 +109,7 @@ export function useChatTranscript(
     return out;
   }, [messages, chatId]);
 
-  const showOptimisticUserMessage = !!turnUserMessage && streamStatus !== 'idle';
+  const showOptimisticUserMessage = !!turnUserMessage && streamStatus !== 'idle' && !turnMessageShown;
 
   // Stick-to-bottom: auto-follow while pinned near the bottom; surface a
   // "jump to latest" pill when the user scrolls up to read mid-stream.

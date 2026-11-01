@@ -21,6 +21,7 @@ import {
 } from '@generatorai/client-core';
 import type { ChatMessage } from '@generatorai/shared';
 import { TRANSCRIPT_COPY } from '@generatorai/shared/ui-contract';
+import { useSentMessageStore } from '@/stores/sentMessageStore.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useTranscriptPrefsStore, useTranscriptViewMode } from '@/stores/transcriptPrefsStore.js';
 import {
@@ -159,6 +160,16 @@ export function ChatTranscript({
         live: live && !!sessionId,
       }),
     [displayMessages, showOptimisticUserMessage, stream.turnUserMessage, live, sessionId],
+  );
+
+  // The optimistic bubble's chips: what the composer attached to the prompt it shows.
+  const sent = useSentMessageStore((s) => (sessionId ? s.sent[sessionId] : undefined));
+  const pendingUser = useMemo(
+    () =>
+      showOptimisticUserMessage && sent && sent.prompt === stream.turnUserMessage
+        ? { attachments: sent.attachments, chatRefs: sent.chatRefs }
+        : undefined,
+    [showOptimisticUserMessage, sent, stream.turnUserMessage],
   );
 
   // A boundary (a new user message, the live turn becoming its persisted message)
@@ -300,6 +311,7 @@ export function ChatTranscript({
         renderUserActions={renderUserActions}
         renderResponseActions={renderResponseActions}
         renderLive={renderLive}
+        pendingUser={pendingUser}
         // D-33 spike: no-go recorded in docs/redesign/reviews/P4-07-virtualization-spike.md —
         // every turn stays in the DOM (find, selection, a11y) and finished
         // responses before the last 20 turns start collapsed.

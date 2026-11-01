@@ -9,6 +9,9 @@ import { CHAT_REFERENCE_MODE_LABEL, type ChatReferenceRecord } from '@generatora
 import { cn } from '@/ui/lib/cn.js';
 import { Chip } from '@/ui/primitives/Chip/Chip.js';
 
+/** A sent message's record, or just the chat's name while the message is still being sent. */
+export type ChatRefChip = ChatReferenceRecord | Pick<ChatReferenceRecord, 'chatId' | 'name'>;
+
 function included(ref: ChatReferenceRecord): string {
   if (ref.resolvedMode === 'summary') {
     return ref.includedTurns > 0 ? `summary + last ${ref.includedTurns} of ${ref.totalTurns} turns` : `summary of ${ref.totalTurns} turns`;
@@ -16,7 +19,7 @@ function included(ref: ChatReferenceRecord): string {
   return `${ref.includedTurns} of ${ref.totalTurns} turns`;
 }
 
-export function ChatRefList({ refs, className }: { refs: readonly ChatReferenceRecord[]; className?: string }) {
+export function ChatRefList({ refs, className }: { refs: readonly ChatRefChip[]; className?: string }) {
   return (
     <div className={cn('flex flex-wrap gap-1.5', className)} data-testid="message-chat-refs">
       {refs.map((ref) => (
@@ -25,7 +28,11 @@ export function ChatRefList({ refs, className }: { refs: readonly ChatReferenceR
           size="sm"
           icon="message"
           data-testid="message-chat-ref"
-          title={`${ref.name} — ${CHAT_REFERENCE_MODE_LABEL[ref.mode]}: ${included(ref)}, as of ${new Date(ref.asOf).toLocaleString()}`}
+          title={
+            'asOf' in ref
+              ? `${ref.name} — ${CHAT_REFERENCE_MODE_LABEL[ref.mode]}: ${included(ref)}, as of ${new Date(ref.asOf).toLocaleString()}`
+              : ref.name
+          }
           render={<RouterLink to={`/chats/${ref.chatId}`} />}
         >
           {ref.name}

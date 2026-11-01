@@ -23,6 +23,7 @@ import { act, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage } from '@generatorai/shared';
+import { useSentMessageStore } from '@/stores/sentMessageStore.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import * as H from './helpers/chatPageFakes.js';
 import { currentLocation, renderChatPage } from './helpers/renderChatPage.js';
@@ -205,17 +206,47 @@ describe('optimistic bubble dedup (09 §5.4; 03 §6.4 "prefers serverTurnId, con
   const assistant = (content: string) => H.makeMessage('assistant', content);
   const count = (text: string) => screen.queryAllByText(text).length;
 
-  it('by turnId: hides the persisted copy of THIS turn only, even when an older identical prompt exists', () => {
+  it('by turnId: the persisted copy of THIS turn replaces the optimistic bubble, even when an older identical prompt exists', () => {
     mount(H.makeChat(), [user('same prompt', 't1'), assistant('first answer'), user('same prompt', 't2')]);
     expect(count('same prompt')).toBe(2);
     act(() => {
       store().startPending(H.SESSION_ID, 'same prompt');
       store().setServerTurnId(H.SESSION_ID, 't2');
     });
-    // Older persisted copy (t1) + the optimistic bubble; the t2 copy is hidden.
+    // Older persisted copy (t1) + this turn's persisted copy (t2); no optimistic bubble on top.
     expect(count('same prompt')).toBe(2);
     expect(screen.getByText('first answer')).toBeInTheDocument();
+    expect(screen.queryByText('just now')).not.toBeInTheDocument();
+  });
+
+  it("the turn's prompt shows its attachments while the turn runs: the bubble's from the send, then the stored ones", () => {
+    mount(H.makeChat(), [user('q1', 't1'), assistant('a1')]);
+    act(() => {
+      useSentMessageStore.getState().record(H.SESSION_ID, {
+        prompt: 'look at this',
+        attachments: [{ name: 'shot.png', path: '', mimeType: 'image/png' }],
+        chatRefs: [{ chatId: 'other-chat', name: 'Earlier chat' }],
+      });
+      store().startPending(H.SESSION_ID, 'look at this');
+    });
     expect(screen.getByText('just now')).toBeInTheDocument();
+    expect(screen.getByText('shot.png')).toBeInTheDocument();
+    expect(screen.getByText('Earlier chat')).toBeInTheDocument();
+  });
+
+  it("the stored copy's attachments show while its turn is still running", () => {
+    mount(H.makeChat(), [
+      H.makeMessage('user', 'read the note', {
+        metadata: { turnId: 't9' },
+        attachments: [{ name: 'note.txt', path: '/srv/a/note.txt', mimeType: 'text/plain', artifactId: 'art-1' }],
+      }),
+    ]);
+    act(() => {
+      store().startPending(H.SESSION_ID, 'read the note');
+      store().setServerTurnId(H.SESSION_ID, 't9');
+    });
+    expect(count('read the note')).toBe(1);
+    expect(screen.getByText('note.txt')).toBeInTheDocument();
   });
 
   it('by turnId: everything from the matching row on is hidden (slice before it)', () => {
@@ -225,17 +256,16 @@ describe('optimistic bubble dedup (09 §5.4; 03 §6.4 "prefers serverTurnId, con
       store().setServerTurnId(H.SESSION_ID, 't2');
     });
     expect(screen.queryByText('partial persisted')).not.toBeInTheDocument();
-    expect(count('q2')).toBe(1); // the optimistic bubble
+    expect(count('q2')).toBe(1); // the persisted copy, in place of the optimistic bubble
     expect(screen.getByText('a1')).toBeInTheDocument();
   });
 
-  it('content fallback (no turnId yet): hides the LAST message when it is the matching user prompt', () => {
+  it('content fallback (no turnId yet): the LAST message, when it is the matching user prompt, replaces the bubble', () => {
     mount(H.makeChat(), [user('hello'), assistant('hi'), user('again')]);
-    // The match is on trimmed content; the persisted copy is hidden and the
-    // one visible "again" is the optimistic bubble.
+    // The match is on trimmed content; the one visible "again" is the persisted copy.
     act(() => store().startPending(H.SESSION_ID, '  again  '));
     expect(screen.queryAllByText(/^\s*again\s*$/)).toHaveLength(1);
-    expect(screen.getByText('just now')).toBeInTheDocument();
+    expect(screen.queryByText('just now')).not.toBeInTheDocument();
     expect(screen.getByText('hi')).toBeInTheDocument();
   });
 
