@@ -280,6 +280,12 @@ function ShipHeader({ repos, selected, onSelectAlias, availability, mode, onMode
         className="self-start"
         data-testid="scm-mode"
       />
+      {selected.isRepo && !selected.hasRemote ? (
+        <p className="text-small text-fg-3" data-testid="scm-no-remote">
+          No remote yet: this folder is not linked to a GitHub repository, so it can commit but not push or open a pull
+          request.
+        </p>
+      ) : null}
       {availability.needsConnect && !availability.canOpenPr ? (
         <Callout
           tone="info"

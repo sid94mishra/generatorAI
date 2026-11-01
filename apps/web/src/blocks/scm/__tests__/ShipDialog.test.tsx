@@ -157,6 +157,8 @@ describe('ShipButton / ShipDialog', () => {
     expect(line).toHaveTextContent('main');
     expect(line).not.toHaveTextContent('detached');
     expect(screen.getByTestId('scm-no-commits')).toHaveTextContent('No commits yet');
+    // Why push and PR are off, without hovering them.
+    expect(screen.getByTestId('scm-no-remote')).toHaveTextContent('not linked to a GitHub repository');
     expect(screen.queryByText('Nothing to commit')).toBeNull();
     expect(screen.getByTestId('scm-run-flow')).toBeEnabled();
   });
