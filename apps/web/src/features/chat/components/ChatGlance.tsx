@@ -19,6 +19,7 @@ import { useMemo } from 'react';
 import { describeMount } from '@generatorai/client-core';
 import { useBackgroundTasks, useWorkspaceChangeSummary, useWorkspaceReadiness } from '@/hooks/queries.js';
 import { useComputerActivity } from '@/hooks/computerQueries.js';
+import { COMPUTER_TIMELINE_MAX } from '@/hooks/computerTimeline.js';
 import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import type { BrowserTabState } from '@/blocks/browser/useBrowserTabState.js';
 import { browserDockTabDetail } from '@/blocks/browser/browserDock.js';
@@ -158,7 +159,10 @@ function ComputerLine({ workspaceId, onOpen }: { workspaceId: string | undefined
     <SummaryLine
       icon="computer"
       title={app ? `Computer · ${app}` : 'Computer'}
-      detail={[step, plural(activity.entries.length, 'action')].filter(Boolean).join(' · ')}
+      // The log keeps the newest COMPUTER_TIMELINE_MAX: a full log means at least that many.
+      detail={[step, activity.entries.length >= COMPUTER_TIMELINE_MAX ? `${COMPUTER_TIMELINE_MAX}+ actions` : plural(activity.entries.length, 'action')]
+        .filter(Boolean)
+        .join(' · ')}
       onClick={onOpen}
       data-testid="chat-glance-computer"
     />
