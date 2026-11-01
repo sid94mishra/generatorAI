@@ -245,6 +245,11 @@ describe('activityPlacement (D-92)', () => {
     expect(activityPlacement({ windowWidth: 1440, sidebarWidth: 232, columnWidth: 400 })).toBe('docked');
     // The board's 1100px window: the rail's quick access, the column only as an overlay.
     expect(activityPlacement({ windowWidth: 1100, sidebarWidth: 48, columnWidth: 288 })).toBe('overlay');
+    // Beside an open side pane the card needs 760 inside its margins (or the pane covers the chat), not 720.
+    expect(activityPlacement({ windowWidth: 1280, sidebarWidth: 232, columnWidth: 288, besideDock: true })).toBe('overlay');
+    expect(activityPlacement({ windowWidth: 1260, sidebarWidth: 232, columnWidth: 288 })).toBe('docked');
+    expect(activityPlacement({ windowWidth: 1260, sidebarWidth: 232, columnWidth: 288, besideDock: true })).toBe('overlay');
+    expect(activityPlacement({ windowWidth: 1440, sidebarWidth: 232, columnWidth: 288, besideDock: true })).toBe('docked');
   });
 });
 

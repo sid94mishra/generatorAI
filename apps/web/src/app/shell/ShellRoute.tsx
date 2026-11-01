@@ -30,6 +30,7 @@ import { CommandPalette } from '@/features/palette/index.js';
 import { NewChatDialog } from '@/features/chats/create/NewChatDialog.js';
 import { CHROME } from '@generatorai/design-tokens';
 import { useActivityStore } from '@/stores/activityStore.js';
+import { useDockStore } from '@/stores/dockStore.js';
 import { ConnectedActivityColumn, useActivityPlacement } from './ConnectedActivityColumn.js';
 import { ConnectedRail } from './ConnectedRail.js';
 import { ConnectedSidebar } from './ConnectedSidebar.js';
@@ -69,7 +70,10 @@ export function ShellRoute() {
   const activityOpen = useActivityStore((s) => s.open);
   const activityWidth = useActivityStore((s) => s.width);
   const sidebarWidth = mode === 'expanded' ? CHROME.sidebarWidth : CHROME.railWidth;
-  const placement = useActivityPlacement(sidebarWidth, activityWidth);
+  // A page's open side pane needs its own room beside the main column: docking Activity into it would
+  // make the pane cover the chat.
+  const dockOpen = useDockStore((s) => s.controller?.open ?? false);
+  const placement = useActivityPlacement(sidebarWidth, activityWidth, dockOpen);
   const activityDocked = activityOpen && placement === 'docked';
 
   // Publishes window chrome, follows native route pushes, and mirrors UI
