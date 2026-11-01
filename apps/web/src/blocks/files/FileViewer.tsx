@@ -81,7 +81,8 @@ export function FileViewer({
   const showsCode = !markdown || markdownMode === 'source';
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    // min-w-0: long code lines scroll inside the view instead of widening it past the tree beside it.
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex h-panel-bar shrink-0 items-center gap-1.5 border-b border-line-soft px-2">
         {leading}
         <span className="min-w-0 flex-1 truncate font-mono text-small text-fg-3" title={alias && alias !== '.' ? `${alias}/${path}` : path}>

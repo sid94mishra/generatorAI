@@ -697,7 +697,7 @@ export function ChatPage() {
                         </div>
                       ) : null}
                       {/* The summary card is a column beside the transcript where the chat has room
-                          (@4xl), and floats over its top-right corner where it has not. */}
+                          (@2xl), and floats over its top-right corner where it has not. */}
                       <div className="@container/chat relative flex min-h-0 flex-1">
                       {/* LiveTurn inside owns the per-token subscription, so this page does not. */}
                       <ChatTranscript
@@ -722,8 +722,8 @@ export function ChatPage() {
                           onOpen={openFromGlance}
                           onHide={hideGlance}
                           className={cn(
-                            'absolute top-12 right-3 z-sticky max-h-3/4 w-72 overflow-y-auto rounded-card border border-line bg-raised shadow-pop',
-                            '@4xl/chat:static @4xl/chat:max-h-none @4xl/chat:shrink-0 @4xl/chat:rounded-none @4xl/chat:border-0 @4xl/chat:border-l @4xl/chat:border-line-soft @4xl/chat:bg-surface @4xl/chat:shadow-none',
+                            'absolute top-12 right-3 z-sticky max-h-3/4 w-64 overflow-y-auto rounded-card border border-line bg-raised shadow-pop',
+                            '@2xl/chat:static @2xl/chat:max-h-none @2xl/chat:shrink-0 @2xl/chat:rounded-none @2xl/chat:border-0 @2xl/chat:border-l @2xl/chat:border-line-soft @2xl/chat:bg-surface @2xl/chat:shadow-none',
                           )}
                         />
                       ) : null}
