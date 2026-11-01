@@ -34,6 +34,7 @@ import { useStreamStore } from '@/stores/streamStore.js';
 import { useEditSourcesStore } from '@/stores/editSourcesStore.js';
 import { useChatRefInboxStore } from '@/stores/chatRefInboxStore.js';
 import { useSideChatStore } from '@/stores/sideChatStore.js';
+import { useChatGlanceStore } from '@/stores/chatGlanceStore.js';
 import { parseSideTabId, sideTabId } from '@/lib/sideTabId.js';
 import { useConfirm } from '@/ui/primitives/AlertDialog/AlertDialog.js';
 import { SideChatDockContext, SideChatDockPanel, type SideChatDockContextValue } from './side/SideChatPanel.js';
@@ -58,6 +59,8 @@ import { Button } from '@/ui/primitives/Button/Button.js';
 import { Skeleton } from '@/ui/primitives/Skeleton/Skeleton.js';
 import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 import { Icon } from '@/ui/icons/Icon.js';
+import { cn } from '@/ui/lib/cn.js';
+import { ChatGlance, type ChatGlanceTarget } from './components/ChatGlance.js';
 import { ChatHeader } from './components/ChatHeader.js';
 import { ChatTranscript } from './components/ChatTranscript.js';
 import { LiveActivityLine, useRunningBackgroundTaskCount } from './components/LiveActivityLine.js';
@@ -504,6 +507,17 @@ export function ChatPage() {
     },
     [requestDockFocus, setDockOpen],
   );
+  // The chat summary card beside the transcript; each of its lines opens a dock tab.
+  const glanceOpen = useChatGlanceStore((s) => s.open);
+  const toggleGlance = useChatGlanceStore((s) => s.toggle);
+  const hideGlance = useCallback(() => useChatGlanceStore.getState().setOpen(false), []);
+  const openFromGlance = useCallback(
+    (target: ChatGlanceTarget) => {
+      setDockOpen(true);
+      requestDockFocus(target.type === 'browser' ? { type: 'browser', token: Date.now(), tabId: target.tabId } : { type: target.type, token: Date.now() });
+    },
+    [requestDockFocus, setDockOpen],
+  );
 
   // What the Tasks / Computer / Plan / Widget panels read.
   // D-179 — chats can be attached as context; a side chat's "Send to main chat" arrives through the inbox.
@@ -641,6 +655,7 @@ export function ChatPage() {
                       awaitingUser={awaitingUserDecision}
                       dockOpen={dockOpen}
                       onToggleDock={toggleDock}
+                      summary={{ open: glanceOpen, onToggle: toggleGlance }}
                       sideChat={{
                         open: (mode) => void openSideChat(mode).catch(() => undefined),
                         existing: sideChats.data ?? [],
@@ -681,6 +696,9 @@ export function ChatPage() {
                           />
                         </div>
                       ) : null}
+                      {/* The summary card is a column beside the transcript where the chat has room
+                          (@4xl), and floats over its top-right corner where it has not. */}
+                      <div className="@container/chat relative flex min-h-0 flex-1">
                       {/* LiveTurn inside owns the per-token subscription, so this page does not. */}
                       <ChatTranscript
                         view={view}
@@ -694,6 +712,22 @@ export function ChatPage() {
                         focusDockTab={focusDockTab}
                         review={review}
                       />
+                      {glanceOpen ? (
+                        <ChatGlance
+                          chatId={chatId}
+                          workspaceId={chat.workspaceId}
+                          isOrchestrator={isOrchestrator}
+                          computerUseEnabled={view.computerUseEnabled}
+                          browserTabs={browserTabs}
+                          onOpen={openFromGlance}
+                          onHide={hideGlance}
+                          className={cn(
+                            'absolute top-12 right-3 z-sticky max-h-3/4 w-72 overflow-y-auto rounded-card border border-line bg-raised shadow-pop',
+                            '@4xl/chat:static @4xl/chat:max-h-none @4xl/chat:shrink-0 @4xl/chat:rounded-none @4xl/chat:border-0 @4xl/chat:border-l @4xl/chat:border-line-soft @4xl/chat:bg-surface @4xl/chat:shadow-none',
+                          )}
+                        />
+                      ) : null}
+                      </div>
                     </>
                   }
                   bottom={composer}

@@ -13,6 +13,7 @@
 //               Code and Cursor), then More ▸ Copy path, Show in Finder on
 //               desktop, Rename…, Copy transcript, Fork, Archive… (confirm;
 //               active chats only)
+//               and Show / Hide chat summary (the card beside the transcript)
 //   dockToggle  "Show side pane" / "Hide side pane" (`dock-toggle`), pressed
 //               while the dock is open (09 §7.3)
 // ────────────────────────────────────────────────────────────────
@@ -52,6 +53,8 @@ export interface ChatHeaderProps {
   awaitingUser: boolean;
   dockOpen: boolean;
   onToggleDock: () => void;
+  /** The chat summary card beside the transcript. */
+  summary?: { open: boolean; onToggle: () => void };
   /** D-180 — open a side chat, or reopen one already open beside this chat. */
   sideChat?: {
     open: (mode: SideChatMode) => void;
@@ -122,7 +125,7 @@ function RenameDialog({ chat, open, onOpenChange }: { chat: Chat; open: boolean;
 }
 
 /** The chat workspace's page header. */
-export function ChatHeader({ chat, streamStatus, awaitingUser, dockOpen, onToggleDock, sideChat }: ChatHeaderProps) {
+export function ChatHeader({ chat, streamStatus, awaitingUser, dockOpen, onToggleDock, summary, sideChat }: ChatHeaderProps) {
   const narrow = useMediaQuery(RAIL_QUERY);
   const { data: project } = useProject(chat.projectId ?? undefined);
   const { data: workspaceInfo } = useWorkspaceInfo(chat.workspaceId);
@@ -245,6 +248,15 @@ export function ChatHeader({ chat, streamStatus, awaitingUser, dockOpen, onToggl
                       ]
                     : []),
                 ]}
+              />
+            ) : null}
+            {summary ? (
+              <IconButton
+                icon="info"
+                label={summary.open ? 'Hide chat summary' : 'Show chat summary'}
+                pressed={summary.open}
+                onClick={summary.onToggle}
+                data-testid="chat-header-summary"
               />
             ) : null}
             <MenuButton label="More" icon="more" iconOnly items={items} align="end" data-testid="chat-header-more" />

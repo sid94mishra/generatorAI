@@ -303,6 +303,8 @@ export class MockPlatformClient implements IPlatformClient {
   );
 
   listComputerGrants = vi.fn(async (_workspaceId: string): Promise<ComputerGrant[]> => []);
+  listComputerActivity = vi.fn(async (_workspaceId: string): Promise<unknown[]> => []);
+  listComputerFrames = vi.fn(async (_workspaceId: string): Promise<unknown[]> => []);
 
   revokeComputerGrant = vi.fn(async (_workspaceId: string, _appIdentity: string): Promise<void> => undefined);
 
