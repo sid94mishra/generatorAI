@@ -574,6 +574,19 @@ describe('ChangeSummaryService (real git)', () => {
     expect(notes.base.label).toBe('Session start');
   });
 
+  it('"Uncommitted changes" on a repository with no commit yet lists every file, as the commit dialog does', async () => {
+    // A new chat's folder: `git init` plus the generated .gitignore, captured by the chat's baseline.
+    await snapshot('baseline');
+    await fs.writeFile(path.join(repoDir, 'notes.md'), 'by the agent\n');
+
+    const uncommitted = await service.getSummary({ ...params(), base: { kind: 'ref', id: 'HEAD' } });
+    expect(uncommitted.repos[0]!.files.map((f) => f.path).sort()).toEqual(['.gitignore', 'notes.md']);
+    expect(uncommitted.repos[0]!.base.label).toBe('Last commit');
+    // "This chat" still shows only what the chat changed.
+    const sinceChat = await service.getSummary(params());
+    expect(sinceChat.repos[0]!.files.map((f) => f.path)).toEqual(['notes.md']);
+  });
+
   it('marks the first-commit fallback normalized, so a CRLF checkout is not all-changed', async () => {
     const g = (...args: string[]) =>
       realRunner.run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: repoDir, timeout: 15_000 });

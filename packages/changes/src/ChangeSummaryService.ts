@@ -625,15 +625,22 @@ export class ChangeSummaryService {
         // "Uncommitted changes" asks for each mount's own HEAD. HEAD lives in the mount's
         // repository, never in its shadow store (which only holds checkpoints, and reads the
         // repository's objects through `alternates`). A plain folder has no repository of its
-        // own — asking git there would find whatever repo encloses it — and an unborn branch
-        // has no commit yet: both compare against their baseline instead.
+        // own — asking git there would find whatever repo encloses it — so it compares against
+        // its baseline. An unborn branch (no commit yet) compares against the empty tree: every
+        // file in it is uncommitted, which is what the commit dialog counts too. Comparing it
+        // with the baseline said "Everything is committed" over files a commit would take.
         if (selector.id === 'HEAD') {
           const ownRepo = await fs
             .stat(path.join(repo.repoDir, '.git'))
             .then(() => true)
             .catch(() => false);
-          const head = ownRepo ? await this.git.revParse(repo.repoDir, 'HEAD') : null;
-          if (!head) return this.resolveBaseline(workspaceId, repo);
+          if (!ownRepo) return this.resolveBaseline(workspaceId, repo);
+          const head = await this.git.revParse(repo.repoDir, 'HEAD');
+          if (!head) {
+            return (await this.git.isUnborn(repo.repoDir).catch(() => false))
+              ? { kind: 'ref', id: 'HEAD', treeish: EMPTY_TREE_SHA, label: 'Last commit', normalized: true }
+              : this.resolveBaseline(workspaceId, repo);
+          }
           return { kind: 'ref', id: 'HEAD', treeish: head, label: 'Last commit', normalized: true };
         }
         const sha = selector.id ? await this.gitAt(repo.repoDir, repo.gitDir).revParse(repo.repoDir, selector.id) : null;
