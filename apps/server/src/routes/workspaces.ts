@@ -9,7 +9,8 @@ import * as path from 'node:path';
 import { changeFileEtag } from './changeFileEtag.js';
 import type { Container } from '../composition-root.js';
 import { recordScmOutcome, scmOutcomeFrom } from './scmOutcome.js';
-import { resolveWorktreePath, type WorkspaceTreeRepo } from '@generatorai/core';
+import { mountDirFor, resolveWorktreePath, scmMountTargets, type WorkspaceTreeRepo } from '@generatorai/core';
+import { NotFoundError } from '@generatorai/shared';
 import {
   stripAliasPrefix,
   type ChangeSummary,
@@ -244,18 +245,9 @@ export function createWorkspaceRoutes(container: Container): Router {
     return { info, worktrees, mounts, rootPath: ws.codeRoot ?? ws.rootPath };
   }
 
-  /** Directory behind a mount alias (nested `<alias>/<sub>` included). */
-  function mountDir(info: WorkspaceInfo, alias: string): string | null {
-    if (!alias || alias === '.') return info.workingDirectory;
-    const direct = info.mounts.find((m) => m.alias === alias);
-    if (direct) return direct.path;
-    const slash = alias.indexOf('/');
-    if (slash > 0) {
-      const parent = info.mounts.find((m) => m.alias === alias.slice(0, slash));
-      if (parent) return path.join(parent.path, alias.slice(slash + 1));
-    }
-    return null;
-  }
+  /** Directory behind a mount alias (a repository inside a mount is `<alias>/<path>`). */
+  const mountDir = mountDirFor;
+
 
   // ════════════════════════════════════════════════════════════════
   // Source control (doc §3 / §4) — readiness, the flow, conflicts
@@ -265,10 +257,9 @@ export function createWorkspaceRoutes(container: Container): Router {
    * Resolve `{ info, alias, repoDir }` for an SCM call, or send a 404.
    *
    * `alias` comes from the body first (POSTs) then the query (GETs) and
-   * defaults to `'.'`, the mount root. An alias that matches no mount falls
-   * back to the working directory rather than 404-ing: the flow's readiness
-   * step already answers "that is not a git repository" with a reason, which
-   * is a better error than "no such alias" for a client that just guessed.
+   * defaults to `'.'`, the working directory. An alias that names no mount or
+   * repository of this workspace is a 404: falling back to the working
+   * directory committed the wrong repository for a stale or mistyped alias.
    */
   async function scmTarget(req: { params: Record<string, string | undefined>; body?: Record<string, unknown>; query: Record<string, unknown> }, res: Response) {
     const id = String(req.params['id']);
@@ -279,7 +270,12 @@ export function createWorkspaceRoutes(container: Container): Router {
     }
     const raw = req.body?.['alias'] ?? req.query['alias'] ?? '.';
     const alias = typeof raw === 'string' && raw ? raw : '.';
-    return { id, info, alias, repoDir: mountDir(info, alias) ?? info.workingDirectory };
+    const repoDir = mountDir(info, alias);
+    if (!repoDir) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: `No repository called "${alias}" in this workspace` } });
+      return null;
+    }
+    return { id, info, alias, repoDir };
   }
 
   /**
@@ -329,19 +325,13 @@ export function createWorkspaceRoutes(container: Container): Router {
    * every other SCM call needs). The root is appended only when it is not
    * already one of them.
    */
-  function scmMounts(info: WorkspaceInfo): Array<{ alias: string; dir: string }> {
-    const out: Array<{ alias: string; dir: string }> = [];
-    const seen = new Set<string>();
-    for (const mount of info.mounts ?? []) {
-      const key = path.resolve(mount.path);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push({ alias: mount.alias, dir: mount.path });
-    }
-    const rootKey = path.resolve(info.workingDirectory);
-    if (!seen.has(rootKey)) out.push({ alias: '.', dir: info.workingDirectory });
-    return out;
+  const scmMounts = scmMountTargets;
+
+  /** A write naming no repository of the workspace (stale or mistyped alias): never the working directory instead. */
+  function unknownRepo(alias: string): never {
+    throw new NotFoundError('Repository', alias);
   }
+
 
   // GET /workspaces/:id/scm/readiness — can this mount commit / push / PR?
   //
@@ -359,12 +349,17 @@ export function createWorkspaceRoutes(container: Container): Router {
       const aliasQuery = req.query['alias'];
       const targets =
         typeof aliasQuery === 'string' && aliasQuery
-          ? [{ alias: aliasQuery, dir: mountDir(info, aliasQuery) ?? info.workingDirectory }]
+          ? [{ alias: aliasQuery, dir: mountDir(info, aliasQuery) }]
           : scmMounts(info);
+      const unknown = targets.find((t) => !t.dir);
+      if (unknown) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: `No repository called "${unknown.alias}" in this workspace` } });
+        return;
+      }
 
       const fetch = req.query['fetch'] === '1';
       const repos = await Promise.all(
-        targets.map((t) => repoReadinessService.readiness({ repoDir: t.dir, alias: t.alias, ...(fetch ? { fetch } : {}) })),
+        targets.map((t) => repoReadinessService.readiness({ repoDir: t.dir!, alias: t.alias, ...(fetch ? { fetch } : {}) })),
       );
       res.json({ workspaceId: id, repos });
     } catch (err) {
@@ -647,7 +642,7 @@ export function createWorkspaceRoutes(container: Container): Router {
       const message = typeof req.body?.message === 'string' ? req.body.message : undefined;
       const result = await sourceControlFlowService.run({
         workspaceId: id,
-        repoDir: mountDir(info, alias) ?? info.workingDirectory,
+        repoDir: mountDir(info, alias) ?? unknownRepo(alias),
         alias,
         request: {
           commit: { ...(message ? { message } : { generate: true }) },
@@ -1360,7 +1355,7 @@ export function createWorkspaceRoutes(container: Container): Router {
       const message = typeof req.body?.message === 'string' ? req.body.message : undefined;
       const result = await sourceControlFlowService.run({
         workspaceId: id,
-        repoDir: mountDir(info, alias) ?? info.workingDirectory,
+        repoDir: mountDir(info, alias) ?? unknownRepo(alias),
         alias,
         request: {
           ...(message ? { commit: { message } } : {}),

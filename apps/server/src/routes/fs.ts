@@ -153,22 +153,29 @@ export function createFsRoutes(container: Container): Router {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: `Not a directory: ${dir}` } });
         return;
       }
-      const isRepo = await fs
+      const ownRepo = await fs
         .access(path.join(dir, '.git'))
         .then(() => true)
         .catch(() => false);
-      const [nestedRepos, usedInPlaceBy] = await Promise.all([gitManager.nestedRepos(dir), inPlaceChats(dir)]);
+      // A folder inside a repository is linked as that repository (the agent starts in the folder), so its
+      // facts are the repository's, with where the repository is.
+      const top = ownRepo ? dir : await gitManager.repoTopLevel(dir).catch(() => null);
+      const repoRoot = top && top !== dir && dir.startsWith(top + path.sep) ? top : undefined;
+      const isRepo = ownRepo || !!repoRoot;
+      const [nestedRepos, usedInPlaceBy] = await Promise.all([gitManager.nestedRepos(dir), inPlaceChats(repoRoot ?? dir)]);
       if (!isRepo) {
         res.json({ path: dir, isRepo: false, currentBranch: null, branches: [], dirty: false, nestedRepos, usedInPlaceBy });
         return;
       }
+      const repoDir = repoRoot ?? dir;
       const [currentBranch, branches, clean] = await Promise.all([
-        gitManager.currentBranch(dir),
-        gitManager.getBranches(dir),
-        gitManager.isClean(dir).catch(() => true),
+        gitManager.currentBranch(repoDir),
+        gitManager.getBranches(repoDir),
+        gitManager.isClean(repoDir).catch(() => true),
       ]);
       res.json({
         path: dir,
+        ...(repoRoot ? { repoRoot } : {}),
         isRepo: true,
         currentBranch,
         branches: branches.filter((b) => !b.startsWith('origin/HEAD')).slice(0, 1000),

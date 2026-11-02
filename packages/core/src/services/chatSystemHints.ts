@@ -250,13 +250,22 @@ export interface WorkspaceHintInput {
 
 function describeMount(m: WorkspaceMount): string {
   const bits: string[] = [`mount "${m.alias}"`];
-  if (m.mode === 'worktree') bits.push('git worktree');
+  if (m.mode === 'worktree' && m.git?.isRepo === false) bits.push('a separate copy of a plain folder');
+  else if (m.mode === 'worktree') bits.push('git worktree');
   else if (m.mode === 'generated') bits.push('empty, generate the project here');
   else if (m.git?.isRepo) bits.push('git repository, edited in place');
   else bits.push('plain folder, edited in place');
   if (m.git?.branch) bits.push(`branch ${m.git.branch}`);
   if (m.git?.baseRef && m.git.baseRef !== m.git.branch && m.git.baseRef !== 'HEAD') bits.push(`from ${m.git.baseRef}`);
-  if (m.git?.nested?.length) bits.push(`contains repos: ${m.git.nested.join(', ')}`);
+  if (m.git?.nested?.length) {
+    const repos = m.git.nested.map((rel) => {
+      const state = m.git?.nestedState?.[rel];
+      const how = state?.mode === 'worktree' ? 'worktree' : 'in place';
+      return state?.branch ? `${rel} (${how}, branch ${state.branch})` : `${rel} (${how})`;
+    });
+    bits.push(`contains git repositories, each committed on its own: ${repos.join('; ')}`);
+    if (!m.git.isRepo && m.mode !== 'generated') bits.push('its files outside those repositories are not in git and cannot be committed');
+  }
   if (m.workdir) bits.push(`work in its ${m.workdir} directory`);
   return bits.join(', ');
 }

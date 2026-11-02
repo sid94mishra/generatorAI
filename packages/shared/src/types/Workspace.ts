@@ -43,14 +43,45 @@ export interface MountGitState {
   baseCommit?: string;
   /** True when GeneratorAI created `branch` for this mount. */
   createdBranch?: boolean;
-  /** Immediate sub-directories that are repositories of their own. */
+  /** Repositories inside the mount (`/`-separated paths relative to it, up to three levels deep). */
   nested?: string[];
+  /** How each repository in `nested` is set up, by its path (absent = left as it was, in place). */
+  nestedState?: Record<string, NestedRepoState>;
   /**
    * False for mounts backfilled from workspaces that predate shadow stores:
    * their checkpoints live in the mount's own `.git` and stay readable there.
    * New mounts always use a shadow store.
    */
   shadow?: boolean;
+}
+
+/** A repository inside a mount, as it was prepared. */
+export interface NestedRepoState {
+  /**
+   * in-place — the user's own checkout. In a mount that is a separate copy it is linked into the copy, so
+   *            the agent still edits the user's files.
+   * worktree — a `git worktree` of that repository, at the same path inside the separate copy.
+   */
+  mode: 'in-place' | 'worktree';
+  branch?: string;
+  baseRef?: string;
+  /** Commit SHA of `baseRef` (or HEAD) at prepare time — the "Branch base" diff anchor. */
+  baseCommit?: string;
+  /** True when GeneratorAI created `branch` for this repository. */
+  createdBranch?: boolean;
+}
+
+/**
+ * How one repository inside a linked folder is set up. `path` is relative to the folder, `/`-separated.
+ * A worktree needs the folder itself to be a separate copy (`mode: 'worktree'` on the source): the
+ * worktree takes the repository's place inside that copy, and the user's checkout is left alone.
+ */
+export interface NestedRepoSpec {
+  path: string;
+  mode?: 'in-place' | 'worktree';
+  branch?: string;
+  newBranch?: string;
+  baseRef?: string;
 }
 
 export interface WorkspaceMount {
@@ -102,15 +133,27 @@ export type ChatSourceSpec =
       newBranch?: string;
       baseRef?: string;
       alias?: string;
+      /** The repositories inside a local codebase and how each is set up (see `NestedRepoSpec`). */
+      repos?: NestedRepoSpec[];
     }
   | {
       kind: 'folder';
+      /**
+       * The folder the user picked. One inside a repository mounts that whole repository with the agent
+       * starting in the folder (`WorkspaceMount.workdir`), so its changes are tracked and committed with it.
+       */
       path: string;
+      /**
+       * worktree — a separate copy: a git worktree of the folder's repository, or, for a plain folder that
+       * holds repositories, a copy of its other files with each repository a worktree or linked in.
+       */
       mode?: 'in-place' | 'worktree';
       branch?: string;
       newBranch?: string;
       baseRef?: string;
       alias?: string;
+      /** The repositories inside the folder and how each is set up (see `NestedRepoSpec`). */
+      repos?: NestedRepoSpec[];
     }
   /**
    * The folder the chat owns — where a chat with no sources works ("Empty

@@ -68,12 +68,27 @@ const AgentHarnessConfigSchema = z.object({
 
 const branchName = z.string().min(1).max(200).regex(/^[^\s~^:?*[\]\\]+$/, 'Invalid git ref name');
 
-const sourceCommon = {
+const repoSetup = {
   mode: z.enum(['in-place', 'worktree']).optional(),
   branch: branchName.optional(),
   newBranch: branchName.optional(),
   baseRef: branchName.optional(),
+};
+
+/** A repository inside a linked folder: its path relative to the folder, and how it is set up. */
+const NestedRepoSpecSchema = z.object({
+  path: z
+    .string()
+    .min(1)
+    .max(500)
+    .refine((p) => !p.split(/[\\/]/).some((part) => part === '..' || part === '') && !/^[\\/]|^[A-Za-z]:/.test(p), 'Repository path must be relative to the folder'),
+  ...repoSetup,
+});
+
+const sourceCommon = {
+  ...repoSetup,
   alias: z.string().min(1).max(64).regex(/^[A-Za-z0-9._-]+$/, 'Alias may contain letters, digits, . _ -').optional(),
+  repos: z.array(NestedRepoSpecSchema).max(50).optional(),
 };
 
 /** One source to mount into a chat's workspace. */

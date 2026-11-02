@@ -67,7 +67,7 @@ import {
   type AutoScmFlowPort,
   type AutoScmReadinessPort,
 } from './scm/AutoSourceControlRunner.js';
-import { scmMountTargets } from './scm/workspaceMounts.js';
+import { commitOrder, scmMountTargets } from './scm/workspaceMounts.js';
 import { buildTurnHint } from './scm/turnHint.js';
 import { withDeadline } from '../utils/withDeadline.js';
 import type { PlatformToolBinder } from './session/PlatformToolBinder.js';
@@ -1369,11 +1369,30 @@ export class ChatManagementService {
       throw new ValidationError('Worker chats share their orchestrator\'s workspace; change the sources there');
     }
 
+    const current = await mounts.list(workspace.id);
+    const started = await this.messageRepo.getByChatId(chatId).then((m) => m.length > 0, () => false);
+    // The working directory is fixed once the chat has started: earlier turns, their paths and the
+    // "since the chat started" changes all refer to it. A chat still in its own empty folder chooses one
+    // real working directory once — after that it is fixed too. Additional sources stay editable.
+    const primaryNow = [...current].filter((m) => m.status !== 'removed').sort((a, b) => a.position - b.position)[0];
+    if (started && primaryNow && primaryNow.mode !== 'generated') {
+      const keeps = await mounts.keepsWorkingDirectory(workspace, chat.projectId, sources, {
+        ...(primary ? { primary } : {}),
+        branchSlug: branchSlugFor(chat.name, chatId),
+      });
+      if (!keeps) {
+        throw new ValidationError(
+          `The working directory (${primaryNow.alias}) is fixed once the chat has started. ` +
+            'Start a new chat to work in another folder or on another branch; you can still add or remove other sources here.',
+        );
+      }
+    }
+
     // D-141: the files the agent made in the chat folder are never deleted by
     // an edit that did not ask for it. Linking a folder keeps the chat folder
     // beside it; only `discardChatFolder` lets it go.
     let plan = sources;
-    const chatFolder = (await mounts.list(workspace.id)).find((m) => m.mode === 'generated');
+    const chatFolder = current.find((m) => m.mode === 'generated');
     if (chatFolder && !sources.some((s) => s.kind === 'chat-folder')) {
       if (opts.discardChatFolder) {
         // Asked for: gone now, so an empty plan starts a fresh, empty folder
@@ -1397,7 +1416,7 @@ export class ChatManagementService {
     // The cwd / hint changed: force the next turn to rebind the conversation,
     // and tell the agent the new layout in front of its next prompt.
     if (session.conversationId) this.conversationBindings.delete(session.conversationId);
-    if (await this.messageRepo.getByChatId(chatId).then((m) => m.length > 0, () => false)) this.sourcesEdited.add(chatId);
+    if (started) this.sourcesEdited.add(chatId);
     return updated;
   }
 
@@ -1958,7 +1977,7 @@ export class ChatManagementService {
 
       const info = await workspaceManager.getWorkspaceInfo(chat.workspaceId);
       if (!info) return;
-      const mounts = scmMountTargets(info);
+      const mounts = commitOrder(scmMountTargets(info));
       if (mounts.length === 0) return;
 
       const hint = buildTurnHint({
@@ -2454,14 +2473,19 @@ export class ChatManagementService {
           // the idle handler on disk I/O would only delay the UI.
           let afterCheckpoint: Promise<unknown> | undefined;
           if (chat.workspaceId && this.extensions.workspaceCheckpointService) {
-            afterCheckpoint = this.extensions.workspaceCheckpointService.capture({
-              workspaceId: chat.workspaceId,
+            const workspaceId = chat.workspaceId;
+            const checkpoints = this.extensions.workspaceCheckpointService;
+            // A repository the agent cloned or created this turn is tracked from here on (its own checkpoints,
+            // Changes group and commit), so look for new ones before the turn's closing snapshot.
+            const rescanned = this.extensions.mountService?.rescanNested(workspaceId).catch(() => undefined) ?? Promise.resolve();
+            afterCheckpoint = rescanned.then(() => checkpoints.capture({
+              workspaceId,
               kind: 'turn',
               turnId,
               chatId,
               sessionId: chat.sessionId,
               phase: 'after',
-            })
+            }))
               // `capture` swallows its own errors, but this promise is now
               // ALSO awaited by the source-control hook — an un-handled
               // rejection here would take the process down under

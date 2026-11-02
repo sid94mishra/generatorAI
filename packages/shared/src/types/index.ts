@@ -326,6 +326,8 @@ export type {
   MountStatus,
   MountGitState,
   WorkspaceMount,
+  NestedRepoSpec,
+  NestedRepoState,
   WorkspacePrepStatus,
   ChatSourceSpec,
   WorkspaceExposure,

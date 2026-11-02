@@ -22,6 +22,7 @@
 // tracked without being `git init`-ed.
 
 import * as path from 'node:path';
+import * as os from 'node:os';
 import * as fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { statSync, type Dirent } from 'node:fs';
@@ -31,6 +32,8 @@ import type {
   ExecutionWorkspace,
   ILogger,
   MountGitState,
+  NestedRepoSpec,
+  NestedRepoState,
   ProjectCodebase,
   WorkspaceExposure,
   WorkspaceMount,
@@ -46,6 +49,7 @@ import type { IProjectCodebaseRepository } from '../domain/ports/IProjectCodebas
 import type { IWorktreeRepository } from '../domain/ports/IWorktreeRepository.js';
 import type { EventBus } from '../events/EventBus.js';
 import { buildWorkspaceHint } from './chatSystemHints.js';
+import { copyFolderExcept, CopyTooLargeError, isLink, linkDir, nestedDir, unlinkNested } from './mountNested.js';
 
 /** A mount that has been validated but not yet materialised. */
 export interface PlannedMount {
@@ -73,7 +77,19 @@ export interface PlannedMount {
     baseRef?: string;
     /** Files copied into a fresh worktree (codebase `worktreeInclude`). */
     include?: string[];
+    /** The repositories inside the mount and how each is set up. */
+    nested?: NestedIntent[];
   };
+}
+
+/** A repository inside a mount, resolved: where it is and the branch it ends on. */
+export interface NestedIntent {
+  /** `/`-separated, relative to the mount. */
+  path: string;
+  mode: 'in-place' | 'worktree';
+  branch?: string;
+  newBranch?: string;
+  baseRef?: string;
 }
 
 export interface PlanOptions {
@@ -202,8 +218,10 @@ export class MountService {
       return alias;
     };
 
+    // macOS and Windows file systems ignore case by default: `~/Code` and `~/code` are one folder.
+    const foldCase = process.platform === 'darwin' || process.platform === 'win32';
     const claimPath = (p: string, label: string): void => {
-      const abs = path.resolve(p);
+      const abs = foldCase ? path.resolve(p).toLowerCase() : path.resolve(p);
       const name = (q: string) => path.basename(q) || q;
       for (const other of paths) {
         // Said the way the person sees their sources: by folder name, and how the two relate.
@@ -270,7 +288,7 @@ export class MountService {
             `Codebase "${codebase.alias}" is a remote clone with no working copy; mount it as a worktree`,
           );
         }
-        if (!isGit && mode === 'worktree') {
+        if (!isGit && mode === 'worktree' && (await this.deps.git.nestedRepos(originPath)).length === 0) {
           throw new ValidationError(
             `Codebase "${codebase.alias}" is a plain folder (not a git repository) and cannot be mounted as a worktree`,
           );
@@ -282,7 +300,7 @@ export class MountService {
         const mountPath = mode === 'worktree' ? path.join(resolvedRoot, SOURCE_DIR, alias) : path.resolve(originPath);
         claimPath(mountPath, `Codebase "${codebase.alias}"`);
 
-        const intent = isGit
+        const intent: PlannedMount['intent'] = isGit
           ? await this.resolveGitIntent(originPath, source, {
               mode,
               codebase,
@@ -291,6 +309,10 @@ export class MountService {
               mountPath,
             })
           : { isRepo: false };
+        if (codebase.type !== 'git-remote') {
+          const nested = await this.planNested(path.resolve(originPath), mountPath, mode, source.repos, opts.branchSlug, codebase.alias);
+          if (nested.length > 0) intent.nested = nested;
+        }
 
         planned.push({
           alias,
@@ -316,29 +338,47 @@ export class MountService {
       if (!path.isAbsolute(folder)) {
         throw new ValidationError(`Folder path must be absolute: ${folder}`);
       }
-      const abs = path.resolve(folder);
-      await assertDirectory(abs, 'Folder');
-      if (abs === managedRoot || abs.startsWith(managedRoot + path.sep)) {
+      const picked = path.resolve(folder);
+      await assertDirectory(picked, 'Folder');
+      if (picked === managedRoot || picked.startsWith(managedRoot + path.sep)) {
         throw new ValidationError('That folder is part of GeneratorAI\'s own workspaces, so it cannot be a source. Pick a folder of yours.');
       }
-      if (abs === resolvedRoot || abs.startsWith(resolvedRoot + path.sep)) {
+      if (picked === resolvedRoot || picked.startsWith(resolvedRoot + path.sep)) {
         throw new ValidationError('The workspace root itself cannot be mounted');
       }
-      const isRepo = await hasDotGit(abs);
+      if (picked === path.parse(picked).root || picked === path.resolve(os.homedir())) {
+        throw new ValidationError(`${picked} is too broad to work in. Pick the folder of a project inside it.`);
+      }
+      // A folder inside a repository is that repository with the agent starting in the folder: its changes
+      // are the repository's, and committing them commits the repository (`add -A` stages all of it).
+      let abs = picked;
+      let workdir: string | undefined;
+      let isRepo = await hasDotGit(picked);
+      if (!isRepo) {
+        const top = await this.deps.git.repoTopLevel(picked);
+        if (top && top !== picked && picked.startsWith(top + path.sep)) {
+          abs = top;
+          workdir = mountWorkdir(path.relative(top, picked));
+          isRepo = true;
+        }
+      }
       const mode = source.mode ?? 'in-place';
-      if (mode === 'worktree' && !isRepo) {
+      const nestedFound = isRepo || mode !== 'worktree' ? null : await this.deps.git.nestedRepos(abs);
+      if (mode === 'worktree' && !isRepo && nestedFound?.length === 0) {
         throw new ValidationError(`${abs} is not a git repository, so it cannot be mounted as a worktree`);
       }
       if (!isRepo && (source.branch || source.newBranch)) {
         throw new ValidationError(`${abs} is not a git repository; branches do not apply`);
       }
-      const alias = takeAlias(source.alias, path.basename(abs) || 'folder');
+      const alias = takeAlias(source.alias, path.basename(picked) || 'folder');
       const mountPath = mode === 'worktree' ? path.join(resolvedRoot, SOURCE_DIR, alias) : abs;
-      claimPath(mountPath, `Folder ${path.basename(abs) || abs}`);
+      claimPath(mountPath, `Folder ${path.basename(picked) || picked}`);
 
-      const intent = isRepo
+      const intent: PlannedMount['intent'] = isRepo
         ? await this.resolveGitIntent(abs, source, { mode, branchSlug: opts.branchSlug, isBare: false, mountPath })
         : { isRepo: false };
+      const nested = await this.planNested(abs, mountPath, mode, source.repos, opts.branchSlug, path.basename(picked));
+      if (nested.length > 0) intent.nested = nested;
 
       planned.push({
         alias,
@@ -347,6 +387,7 @@ export class MountService {
         originPath: abs,
         mode,
         path: mountPath,
+        ...(workdir ? { workdir } : {}),
         intent,
       });
     }
@@ -363,12 +404,55 @@ export class MountService {
   }
 
   /**
+   * The repositories inside a source and how each is set up. `specs` name the ones the person chose for;
+   * every other repository found keeps its defaults: as it is in place, or — in a separate copy — a
+   * worktree on a branch of its own (a separate copy leaves the person's checkouts alone).
+   */
+  private async planNested(
+    originDir: string,
+    mountPath: string,
+    mode: 'in-place' | 'worktree',
+    specs: NestedRepoSpec[] | undefined,
+    branchSlug: string | undefined,
+    label: string,
+  ): Promise<NestedIntent[]> {
+    const found = await this.deps.git.nestedRepos(originDir);
+    const byPath = new Map((specs ?? []).map((spec) => [spec.path.replace(/\\/g, '/'), spec]));
+    for (const p of byPath.keys()) {
+      if (!found.includes(p)) throw new ValidationError(`${p} is not a git repository inside ${label}.`);
+    }
+    const out: NestedIntent[] = [];
+    for (const rel of found) {
+      const spec = byPath.get(rel) ?? (mode === 'worktree' ? { path: rel, mode: 'worktree' as const } : { path: rel });
+      const repoMode = spec.mode ?? 'in-place';
+      if (repoMode === 'worktree' && mode !== 'worktree') {
+        throw new ValidationError(`${rel} can only get a separate copy when ${label} is a separate copy too.`);
+      }
+      const origin = nestedDir(originDir, rel);
+      const intent = await this.resolveGitIntent(origin, spec, {
+        mode: repoMode,
+        branchSlug,
+        isBare: false,
+        mountPath: repoMode === 'worktree' ? nestedDir(mountPath, rel) : origin,
+      });
+      out.push({
+        path: rel,
+        mode: repoMode,
+        ...(intent.branch ? { branch: intent.branch } : {}),
+        ...(intent.newBranch ? { newBranch: intent.newBranch } : {}),
+        ...(intent.baseRef ? { baseRef: intent.baseRef } : {}),
+      });
+    }
+    return out;
+  }
+
+  /**
    * Resolve branch intent for a git-backed source, validating refs against
    * the origin repository so a bad name fails at creation, not mid-prepare.
    */
   private async resolveGitIntent(
     originPath: string,
-    source: MountableSourceSpec,
+    source: Pick<MountableSourceSpec, 'branch' | 'newBranch' | 'baseRef'>,
     ctx: { mode: 'in-place' | 'worktree'; codebase?: ProjectCodebase; branchSlug?: string; isBare: boolean; mountPath: string },
   ): Promise<PlannedMount['intent']> {
     const git = this.deps.git;
@@ -437,7 +521,9 @@ export class MountService {
     // A switch of the user's own checkout is refused HERE, while the chat is being created, when the folder has
     // uncommitted work: refused only at prepare, the chat already existed — its first message lost and its header
     // naming a branch it never got.
-    const switching = !!newBranch || (!!branch && branch !== current);
+    // A new branch cut from where the checkout is keeps its uncommitted changes (`checkout -b`); only moving
+    // to another commit can collide with them.
+    const switching = (!!branch && branch !== current) || (!!newBranch && !startsHere(baseRef, current));
     if (switching && !(await git.isClean(originPath))) {
       const name = path.basename(originPath);
       throw new ValidationError(
@@ -521,6 +607,9 @@ export class MountService {
         ...(m.intent.branch ? { branch: m.intent.branch } : {}),
         ...(m.intent.newBranch ? { branch: m.intent.newBranch, createdBranch: true } : {}),
         ...(m.intent.baseRef ? { baseRef: m.intent.baseRef } : {}),
+        ...(m.intent.nested?.length
+          ? { nested: m.intent.nested.map((n) => n.path), nestedState: Object.fromEntries(m.intent.nested.map((n) => [n.path, plannedNestedState(n)])) }
+          : {}),
       },
       status: 'preparing',
       hasUncommittedChanges: false,
@@ -624,7 +713,9 @@ export class MountService {
       isRepo: mount.git?.isRepo ?? false,
       ...(mount.git?.createdBranch ? { newBranch: mount.git.branch } : mount.git?.branch ? { branch: mount.git.branch } : {}),
       ...(mount.git?.baseRef ? { baseRef: mount.git.baseRef } : {}),
+      ...(mount.git?.nestedState ? { nested: nestedIntentsOf(mount.git.nestedState) } : {}),
     };
+    const nestedIntents = intent.nested ?? [];
 
     if (mount.mode === 'generated') {
       await fs.mkdir(mount.path, { recursive: true });
@@ -634,78 +725,79 @@ export class MountService {
     }
 
     if (mount.mode === 'worktree') {
+      // A separate copy: a worktree of the source's repository, or a copy of a plain folder's files; the
+      // repositories inside it become worktrees or links to the person's checkouts (see mountNested.ts).
       const origin = mount.originPath;
       if (!origin) throw new Error('worktree mount has no origin repository');
-      const alreadyThere = await hasDotGit(mount.path);
-      if (!alreadyThere) {
-        // A previous, failed attempt may have left a non-worktree directory.
-        await fs.rm(mount.path, { recursive: true, force: true }).catch(() => undefined);
-        if (intent.newBranch && (await git.branchExists(origin, intent.newBranch))) {
-          // The branch exists (a retry after the worktree dir was lost):
-          // check it out rather than failing on "already exists".
-          await git.addWorktree(origin, mount.path, { branch: intent.newBranch });
-        } else {
-          // A project codebase cloned from a remote starts from the remote's
-          // CURRENT base (U-7): fetch it, and cut from `origin/<base>` — the
-          // clone's own `refs/heads/<base>` is only as fresh as the clone.
-          let base = intent.baseRef;
-          if (base && intent.codebaseType === 'git-remote' && !/^[0-9a-f]{7,40}$/i.test(base)) {
-            await git.fetchBranch(origin, 'origin', base).catch(() => undefined);
-            if (await git.revParse(origin, `refs/remotes/origin/${base}`)) base = `origin/${base}`;
+      const rootIsRepo = intent.isRepo;
+      const fresh = rootIsRepo ? !(await hasDotGit(mount.path)) : !(await pathExists(mount.path));
+      try {
+        if (fresh && rootIsRepo) {
+          // A previous, failed attempt may have left a non-worktree directory.
+          await this.clearMountDir(mount.path, nestedIntents.map((n) => n.path));
+          if (intent.newBranch && (await git.branchExists(origin, intent.newBranch))) {
+            // The branch exists (a retry after the worktree dir was lost):
+            // check it out rather than failing on "already exists".
+            await git.addWorktree(origin, mount.path, { branch: intent.newBranch });
+          } else {
+            // A project codebase cloned from a remote starts from the remote's
+            // CURRENT base (U-7): fetch it, and cut from `origin/<base>` — the
+            // clone's own `refs/heads/<base>` is only as fresh as the clone.
+            let base = intent.baseRef;
+            if (base && intent.codebaseType === 'git-remote' && !/^[0-9a-f]{7,40}$/i.test(base)) {
+              await git.fetchBranch(origin, 'origin', base).catch(() => undefined);
+              if (await git.revParse(origin, `refs/remotes/origin/${base}`)) base = `origin/${base}`;
+            }
+            await git.addWorktree(origin, mount.path, {
+              ...(intent.newBranch ? { newBranch: intent.newBranch } : {}),
+              ...(intent.branch ? { branch: intent.branch } : {}),
+              ...(base ? { base } : {}),
+            });
           }
-          await git.addWorktree(origin, mount.path, {
-            ...(intent.newBranch ? { newBranch: intent.newBranch } : {}),
-            ...(intent.branch ? { branch: intent.branch } : {}),
-            ...(base ? { base } : {}),
+          await this.copyIncludes(origin, mount.path, intent.include, mount.codebaseId);
+        } else if (fresh) {
+          await copyFolderExcept(origin, mount.path, nestedIntents.map((n) => n.path)).catch((err: unknown) => {
+            if (err instanceof CopyTooLargeError) {
+              throw new ValidationError(`${path.basename(origin)} has ${err.message} to copy. Work in it in place instead.`);
+            }
+            throw err;
           });
         }
-        await this.copyIncludes(origin, mount.path, intent.include, mount.codebaseId);
+        const nestedState = await this.prepareNested(mount.path, origin, nestedIntents, true);
+        await this.ensureShadow(workspace.rootPath, mount.alias, mount.path, rootIsRepo);
+        await this.ensureNestedShadows(workspace.rootPath, mount.alias, mount.path, Object.keys(nestedState));
+        const nested = Object.keys(nestedState);
+        if (!rootIsRepo) return { isRepo: false, ...(nested.length ? { nested, nestedState } : {}) };
+        const branch = (await git.currentBranch(mount.path)) ?? undefined;
+        const baseCommit = intent.baseRef ? await git.revParse(origin, intent.baseRef) : await git.revParse(mount.path, 'HEAD');
+        return {
+          isRepo: true,
+          ...(branch ? { branch } : {}),
+          ...(intent.baseRef ? { baseRef: intent.baseRef } : {}),
+          ...(baseCommit ? { baseCommit } : {}),
+          ...(intent.newBranch ? { createdBranch: true } : {}),
+          ...(nested.length ? { nested, nestedState } : {}),
+        };
+      } catch (err) {
+        // A half-built copy of a plain folder is not reused by the retry (only `pathExists` is checked): clear it.
+        if (fresh && !rootIsRepo) await this.clearMountDir(mount.path, nestedIntents.map((n) => n.path)).catch(() => undefined);
+        throw err;
       }
-      await this.ensureShadow(workspace.rootPath, mount.alias, mount.path, true);
-      const branch = (await git.currentBranch(mount.path)) ?? undefined;
-      const baseCommit = intent.baseRef ? await git.revParse(origin, intent.baseRef) : await git.revParse(mount.path, 'HEAD');
-      return {
-        isRepo: true,
-        ...(branch ? { branch } : {}),
-        ...(intent.baseRef ? { baseRef: intent.baseRef } : {}),
-        ...(baseCommit ? { baseCommit } : {}),
-        ...(intent.newBranch ? { createdBranch: true } : {}),
-      };
     }
 
     // ── in-place ──
     await assertDirectory(mount.path, `Mount "${mount.alias}"`);
-    if (!intent.isRepo) {
-      const nested = await git.nestedRepos(mount.path);
-      await this.ensureShadow(workspace.rootPath, mount.alias, mount.path, false);
-      for (const sub of nested) {
-        await this.ensureShadow(workspace.rootPath, `${mount.alias}/${sub}`, path.join(mount.path, sub), true);
-      }
-      return { isRepo: false, ...(nested.length ? { nested } : {}) };
+    if (intent.isRepo) await this.switchInPlace(mount.path, intent);
+    const nestedState = await this.prepareNested(mount.path, mount.path, nestedIntents, false);
+    // Repositories that appeared since the plan (or that a client without `repos` never named) are tracked as they are.
+    for (const rel of await git.nestedRepos(mount.path)) {
+      if (!nestedState[rel]) nestedState[rel] = await this.nestedStateOf(nestedDir(mount.path, rel), 'in-place');
     }
-
-    const current = await git.currentBranch(mount.path);
-    if (intent.newBranch) {
-      if (!(await git.isClean(mount.path))) {
-        throw new ConflictError(
-          `${mount.path} has uncommitted changes; commit or stash them before creating branch "${intent.newBranch}"`,
-        );
-      }
-      await git.createBranch(mount.path, intent.newBranch, intent.baseRef === 'HEAD' ? undefined : intent.baseRef);
-      await git.checkoutBranch(mount.path, intent.newBranch);
-    } else if (intent.branch && intent.branch !== current) {
-      if (!(await git.isClean(mount.path))) {
-        throw new ConflictError(
-          `${mount.path} has uncommitted changes; commit or stash them before switching to "${intent.branch}"`,
-        );
-      }
-      await git.checkoutBranch(mount.path, intent.branch);
-    }
-    await this.ensureShadow(workspace.rootPath, mount.alias, mount.path, true);
-    const nested = await git.nestedRepos(mount.path);
-    for (const sub of nested) {
-      await this.ensureShadow(workspace.rootPath, `${mount.alias}/${sub}`, path.join(mount.path, sub), true);
-    }
+    await this.ensureShadow(workspace.rootPath, mount.alias, mount.path, intent.isRepo);
+    const nested = Object.keys(nestedState).sort();
+    await this.ensureNestedShadows(workspace.rootPath, mount.alias, mount.path, nested);
+    const nestedFields = nested.length ? { nested, nestedState } : {};
+    if (!intent.isRepo) return { isRepo: false, ...nestedFields };
     const branch = (await git.currentBranch(mount.path)) ?? undefined;
     const baseCommit = await git.revParse(mount.path, 'HEAD');
     return {
@@ -714,8 +806,158 @@ export class MountService {
       baseRef: intent.baseRef ?? branch ?? 'HEAD',
       ...(baseCommit ? { baseCommit } : {}),
       ...(intent.newBranch ? { createdBranch: true } : {}),
-      ...(nested.length ? { nested } : {}),
+      ...nestedFields,
     };
+  }
+
+  /**
+   * Put an in-place checkout on the branch its intent asks for. A new branch cut from where the checkout
+   * is keeps its uncommitted changes; anything that moves to another commit needs a clean tree.
+   */
+  private async switchInPlace(dir: string, intent: { newBranch?: string; branch?: string; baseRef?: string }): Promise<void> {
+    const git = this.deps.git;
+    const current = await git.currentBranch(dir);
+    if (intent.newBranch) {
+      if (current === intent.newBranch) return;
+      if (await git.branchExists(dir, intent.newBranch)) {
+        // A retry after the branch was created.
+        if (!(await git.isClean(dir))) {
+          throw new ConflictError(`${dir} has uncommitted changes; commit or stash them before switching to "${intent.newBranch}"`);
+        }
+        await git.checkoutBranch(dir, intent.newBranch);
+        return;
+      }
+      if (!startsHere(intent.baseRef, current) && !(await git.isClean(dir))) {
+        throw new ConflictError(
+          `${dir} has uncommitted changes; commit or stash them before creating branch "${intent.newBranch}" from ${intent.baseRef}`,
+        );
+      }
+      await git.createBranch(dir, intent.newBranch, startsHere(intent.baseRef, current) ? undefined : intent.baseRef);
+      await git.checkoutBranch(dir, intent.newBranch);
+    } else if (intent.branch && intent.branch !== current) {
+      if (!(await git.isClean(dir))) {
+        throw new ConflictError(`${dir} has uncommitted changes; commit or stash them before switching to "${intent.branch}"`);
+      }
+      await git.checkoutBranch(dir, intent.branch);
+    }
+  }
+
+  /**
+   * Set up the repositories inside a mount. `inCopy`: the mount is a separate copy at `mountDir` of the
+   * folder at `originDir` — a worktree takes the repository's place in it, an in-place one is linked in.
+   * Otherwise the mount IS the folder and every repository is switched where it is.
+   */
+  private async prepareNested(
+    mountDir: string,
+    originDir: string,
+    intents: readonly NestedIntent[],
+    inCopy: boolean,
+  ): Promise<Record<string, NestedRepoState>> {
+    const git = this.deps.git;
+    const out: Record<string, NestedRepoState> = {};
+    for (const n of intents) {
+      const origin = nestedDir(originDir, n.path);
+      const at = nestedDir(mountDir, n.path);
+      if (n.mode === 'worktree' && inCopy) {
+        if (!(await hasDotGit(at))) {
+          // A submodule leaves an empty directory in its parent's worktree; anything else there is not ours to replace.
+          if (await pathExists(at)) {
+            const left = await fs.readdir(at).catch(() => ['?']);
+            if (left.length > 0) throw new Error(`${n.path} already exists in the copy and is not a repository`);
+            await fs.rmdir(at);
+          }
+          if (n.newBranch && (await git.branchExists(origin, n.newBranch))) {
+            await git.addWorktree(origin, at, { branch: n.newBranch });
+          } else {
+            await git.addWorktree(origin, at, {
+              ...(n.newBranch ? { newBranch: n.newBranch } : {}),
+              ...(n.branch ? { branch: n.branch } : {}),
+              ...(n.baseRef ? { base: n.baseRef } : {}),
+            });
+          }
+        }
+      } else {
+        if (inCopy && !(await isLink(at)) && !(await pathExists(at))) await linkDir(origin, at);
+        await this.switchInPlace(origin, n);
+      }
+      out[n.path] = {
+        ...(await this.nestedStateOf(at, n.mode, n.baseRef ? await git.revParse(origin, n.baseRef) : null)),
+        ...(n.baseRef ? { baseRef: n.baseRef } : {}),
+        ...(n.newBranch ? { createdBranch: true } : {}),
+      };
+    }
+    return out;
+  }
+
+  /** A nested repository's branch and base commit as it is now. */
+  private async nestedStateOf(dir: string, mode: NestedRepoState['mode'], base?: string | null): Promise<NestedRepoState> {
+    const branch = (await this.deps.git.currentBranch(dir).catch(() => null)) ?? undefined;
+    const baseCommit = base ?? (await this.deps.git.revParse(dir, 'HEAD').catch(() => null));
+    return { mode, ...(branch ? { branch } : {}), ...(baseCommit ? { baseCommit } : {}) };
+  }
+
+  private async ensureNestedShadows(rootPath: string, alias: string, mountDir: string, rels: readonly string[]): Promise<void> {
+    for (const rel of rels) await this.ensureShadow(rootPath, `${alias}/${rel}`, nestedDir(mountDir, rel), true);
+  }
+
+  /** Delete a managed mount directory — its links to the person's checkouts first, so nothing walks into them. */
+  private async clearMountDir(dir: string, nested: readonly string[]): Promise<void> {
+    await unlinkNested(dir, nested);
+    await rmWithRetry(dir);
+  }
+
+  /**
+   * Take a separate copy's repositories apart before the copy itself goes: links are unlinked (the
+   * person's checkout stays), worktrees are unregistered from their repositories, and branches GeneratorAI
+   * created go too when asked.
+   */
+  private async teardownNested(mount: WorkspaceMount, opts: { deleteBranch?: boolean }): Promise<void> {
+    if (mount.mode !== 'worktree') return;
+    const states = mount.git?.nestedState ?? {};
+    const rels = [...new Set([...Object.keys(states), ...(mount.git?.nested ?? [])])];
+    await unlinkNested(mount.path, rels);
+    if (!mount.originPath) return;
+    for (const rel of rels) {
+      const state = states[rel];
+      if (state?.mode !== 'worktree') continue;
+      const origin = nestedDir(mount.originPath, rel);
+      try {
+        await this.deps.git.removeWorktree(origin, nestedDir(mount.path, rel));
+        await this.deps.git.pruneWorktrees(origin);
+      } catch (err) {
+        this.deps.logger.warn(`[Mounts] worktree remove failed for ${rel} of ${mount.alias}: ${err}`);
+      }
+      if (opts.deleteBranch && state.createdBranch && state.branch) await this.deleteBranch(origin, state.branch);
+    }
+  }
+
+  /**
+   * Track the repositories that appeared in (or left) a mount since it was prepared — one the agent
+   * cloned or `git init`-ed — so their changes are listed, checkpointed and committable. Run before a
+   * turn's closing checkpoint.
+   */
+  async rescanNested(workspaceId: string): Promise<void> {
+    const workspace = await this.deps.workspaceRepo.findById(workspaceId);
+    if (!workspace) return;
+    for (const m of await this.deps.mountRepo.findByWorkspace(workspaceId)) {
+      if (m.status !== 'ready') continue;
+      try {
+        const found = await this.deps.git.nestedRepos(m.path);
+        const known = m.git?.nested ?? [];
+        if (found.length === known.length && found.every((p, i) => p === known[i])) continue;
+        const states: Record<string, NestedRepoState> = {};
+        for (const rel of found) {
+          states[rel] = m.git?.nestedState?.[rel] ?? (await this.nestedStateOf(nestedDir(m.path, rel), 'in-place'));
+        }
+        await this.ensureNestedShadows(workspace.rootPath, m.alias, m.path, found.filter((p) => !known.includes(p)));
+        const { nested: _n, nestedState: _s, ...rest } = m.git ?? { isRepo: false };
+        await this.deps.mountRepo.update(m.id, {
+          git: { ...rest, ...(found.length ? { nested: found, nestedState: states } : {}) },
+        });
+      } catch (err) {
+        this.deps.logger.warn(`[Mounts] Could not rescan ${m.alias} for repositories: ${err}`);
+      }
+    }
   }
 
   /**
@@ -1062,8 +1304,7 @@ export class MountService {
     const planned = await this.plan(workspace.rootPath, projectId, sources, opts);
     const existing = await this.deps.mountRepo.findByWorkspace(workspace.id);
 
-    const keyOf = (m: { originPath?: string; mode: string; path: string; alias: string }) =>
-      `${m.alias}\u0000${m.mode}\u0000${path.resolve(m.path)}\u0000${m.originPath ? path.resolve(m.originPath) : ''}`;
+    const keyOf = mountKey;
     const plannedKeys = new Map(planned.map((p) => [keyOf(p), p]));
 
     for (const m of existing) {
@@ -1083,6 +1324,25 @@ export class MountService {
   }
 
   /**
+   * Whether `sources` keep the workspace's working directory exactly as it is: the same folder, set up
+   * the same way (mode, branch, the repositories inside). A chat that has started may not change it.
+   * Validates the plan as `replace` would, so a bad plan fails here with its own message.
+   */
+  async keepsWorkingDirectory(
+    workspace: ExecutionWorkspace,
+    projectId: string | undefined,
+    sources: ChatSourceSpec[],
+    opts: PlanOptions = {},
+  ): Promise<boolean> {
+    const current = (await this.deps.mountRepo.findByWorkspace(workspace.id))
+      .filter((m) => m.status !== 'removed')
+      .sort((a, b) => a.position - b.position)[0];
+    if (!current) return true;
+    const next = (await this.plan(workspace.rootPath, projectId, sources, opts))[0];
+    return !!next && mountKey(current) === mountKey(next) && sameBranchIntent(current, next);
+  }
+
+  /**
    * Remove one mount. A worktree is unregistered from its origin and its
    * directory deleted; an in-place mount is only forgotten — the user's
    * folder is never touched. The shadow store goes in both cases.
@@ -1094,11 +1354,14 @@ export class MountService {
     const git = this.deps.git;
 
     if (mount.mode === 'worktree' && mount.originPath) {
-      try {
-        await git.removeWorktree(mount.originPath, mount.path);
-        await git.pruneWorktrees(mount.originPath);
-      } catch (err) {
-        this.deps.logger.warn(`[Mounts] worktree remove failed for ${mount.path}: ${err}`);
+      await this.teardownNested(mount, opts);
+      if (mount.git?.isRepo !== false) {
+        try {
+          await git.removeWorktree(mount.originPath, mount.path);
+          await git.pruneWorktrees(mount.originPath);
+        } catch (err) {
+          this.deps.logger.warn(`[Mounts] worktree remove failed for ${mount.path}: ${err}`);
+        }
       }
       await rmWithRetry(mount.path);
       if (opts.deleteBranch && mount.git?.createdBranch && mount.git.branch) {
@@ -1155,7 +1418,9 @@ export class MountService {
    */
   async restoreReleased(workspaceId: string, scope: PrepareScope = {}): Promise<number> {
     const mounts = await this.deps.mountRepo.findByWorkspace(workspaceId, { includeRemoved: true });
-    const released = mounts.filter((m) => m.mode === 'worktree' && m.status === 'removed' && !!m.originPath && !!m.git?.branch);
+    const released = mounts.filter(
+      (m) => m.mode === 'worktree' && m.status === 'removed' && !!m.originPath && (!!m.git?.branch || !!m.git?.nested?.length),
+    );
     for (const m of released) await this.deps.mountRepo.update(m.id, { status: 'preparing', error: null });
     if (released.length > 0) {
       await this.deps.workspaceRepo.updatePrep(workspaceId, 'pending', null);
@@ -1192,8 +1457,11 @@ export class MountService {
       return false;
     }
     try {
-      await this.deps.git.removeWorktree(m.originPath, m.path);
-      await this.deps.git.pruneWorktrees(m.originPath);
+      await this.teardownNested(m, {});
+      if (m.git?.isRepo !== false) {
+        await this.deps.git.removeWorktree(m.originPath, m.path);
+        await this.deps.git.pruneWorktrees(m.originPath);
+      }
       await rmWithRetry(m.path);
       await this.deps.mountRepo.update(m.id, { status: 'removed' });
       await this.forgetWorktree(m.id);
@@ -1326,10 +1594,50 @@ function sanitizeAlias(raw: string): string {
   return cleaned.length > 0 ? cleaned.slice(0, 64) : 'mount';
 }
 
+/** What decides that a kept mount is the same directory: its alias, mode, path and origin. */
+function mountKey(m: { originPath?: string; mode: string; path: string; alias: string }): string {
+  return `${m.alias}\u0000${m.mode}\u0000${path.resolve(m.path)}\u0000${m.originPath ? path.resolve(m.originPath) : ''}`;
+}
+
 function sameBranchIntent(m: WorkspaceMount, p: PlannedMount): boolean {
   const want = p.intent.newBranch ?? p.intent.branch;
-  if (!want) return true;
-  return m.git?.branch === want;
+  if (want && m.git?.branch !== want) return false;
+  // The repositories inside must be set up the same way too (mode and branch).
+  for (const n of p.intent.nested ?? []) {
+    const state = m.git?.nestedState?.[n.path];
+    if (!state) {
+      if (n.mode === 'worktree' || n.newBranch || n.branch) return false;
+      continue;
+    }
+    if (state.mode !== n.mode) return false;
+    const wanted = n.newBranch ?? n.branch;
+    if (wanted && state.branch !== wanted) return false;
+  }
+  return true;
+}
+
+/** True when a branch cut from `base` starts at the commit `current` already has checked out. */
+function startsHere(base: string | undefined, current: string | null): boolean {
+  return !base || base === 'HEAD' || (!!current && base === current);
+}
+
+/** A planned nested repository as the row records it before preparation. */
+function plannedNestedState(n: NestedIntent): NestedRepoState {
+  return {
+    mode: n.mode,
+    ...(n.newBranch ? { branch: n.newBranch, createdBranch: true } : n.branch ? { branch: n.branch } : {}),
+    ...(n.baseRef ? { baseRef: n.baseRef } : {}),
+  };
+}
+
+/** Back from the row to intents (a prepare after a restart, or a retry). */
+function nestedIntentsOf(states: Record<string, NestedRepoState>): NestedIntent[] {
+  return Object.entries(states).map(([rel, st]) => ({
+    path: rel,
+    mode: st.mode,
+    ...(st.createdBranch && st.branch ? { newBranch: st.branch } : st.branch ? { branch: st.branch } : {}),
+    ...(st.baseRef ? { baseRef: st.baseRef } : {}),
+  }));
 }
 
 async function assertDirectory(p: string, label: string): Promise<void> {

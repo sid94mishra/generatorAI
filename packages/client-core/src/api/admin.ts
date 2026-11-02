@@ -282,7 +282,10 @@ export interface FsGitInfo {
   currentBranch: string | null;
   branches: string[];
   dirty: boolean;
+  /** Repositories inside the folder, `/`-separated paths relative to it (up to three levels deep). */
   nestedRepos: string[];
+  /** The folder is inside this repository (not its root): linking it links the repository, starting in the folder. */
+  repoRoot?: string;
 }
 
 export function createAdminApi(fetchImpl: ApiFetch) {

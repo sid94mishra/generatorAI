@@ -9,6 +9,7 @@
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
 import type { ILogger } from '@generatorai/shared';
 import { GitError } from '@generatorai/shared';
 import type { GitProcessRunOptions, IGitProcessRunner } from './ports/IGitProcessRunner.js';
@@ -39,6 +40,22 @@ function firstLine(text: string): string {
   return text.split('\n').map((l) => l.trim()).find(Boolean) ?? '';
 }
 
+
+/** How deep `nestedRepos` looks for repositories inside a folder (`services/api` is two). */
+const NESTED_REPO_DEPTH = 3;
+/** Directories `nestedRepos` visits at most, so linking a huge folder stays cheap. */
+const NESTED_REPO_MAX_DIRS = 4000;
+/** Never searched for repositories: dependencies, build output, virtualenvs. */
+const NESTED_REPO_SKIP = new Set(['node_modules', 'dist', 'build', 'coverage', 'target', 'vendor', 'venv', '__pycache__', 'Pods']);
+
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * What a repository GeneratorAI creates ignores from the start: dependencies, build output, secrets, logs and
@@ -224,14 +241,20 @@ export class GitClient implements IGitClient {
   }
 
   async isClean(repoDir: string): Promise<boolean> {
-    const result = await this.runner.run('git', ['status', '--porcelain', '--untracked-files=normal'], {
+    const result = await this.runner.run('git', ['status', '--porcelain', '--untracked-files=normal', '-z'], {
       cwd: repoDir,
       timeout: 30_000,
     });
     if (result.exitCode !== 0) {
       throw new GitError(`Failed to read status in ${repoDir}: ${result.stderr}`);
     }
-    return result.stdout.trim().length === 0;
+    // A repository inside this one shows as one untracked directory; it is not this repo's change.
+    for (const record of result.stdout.split('\0')) {
+      if (!record) continue;
+      if (record.startsWith('?? ') && record.endsWith('/') && (await pathExists(path.join(repoDir, record.slice(3, -1), '.git')))) continue;
+      return false;
+    }
+    return true;
   }
 
   async branchExists(repoDir: string, branch: string): Promise<boolean> {
@@ -343,22 +366,60 @@ export class GitClient implements IGitClient {
   }
 
   async nestedRepos(dir: string): Promise<string[]> {
+    // Breadth-first to NESTED_REPO_DEPTH levels; a repository found is not searched further (its own
+    // nested repositories are its business), and a bound on directories visited keeps a huge folder cheap.
     const out: string[] = [];
-    try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (!entry.isDirectory() || entry.name === '.git' || entry.name === 'node_modules') continue;
+    let level: string[] = [''];
+    let visited = 0;
+    for (let depth = 1; depth <= NESTED_REPO_DEPTH && level.length > 0; depth++) {
+      const next: string[] = [];
+      for (const rel of level) {
+        let entries: Dirent[];
         try {
-          await fs.access(path.join(dir, entry.name, '.git'));
-          out.push(entry.name);
+          entries = await fs.readdir(path.join(dir, rel), { withFileTypes: true });
         } catch {
-          /* not a repo */
+          continue;
+        }
+        for (const entry of entries) {
+          if (!entry.isDirectory() || NESTED_REPO_SKIP.has(entry.name) || entry.name.startsWith('.')) continue;
+          if (++visited > NESTED_REPO_MAX_DIRS) return out.sort();
+          const child = rel ? `${rel}/${entry.name}` : entry.name;
+          if (await pathExists(path.join(dir, child, '.git'))) out.push(child);
+          else next.push(child);
         }
       }
-    } catch {
-      /* unreadable */
+      level = next;
     }
     return out.sort();
+  }
+
+  async repoTopLevel(dir: string): Promise<string | null> {
+    const result = await this.runner.run('git', ['rev-parse', '--show-toplevel'], { cwd: dir, timeout: 5_000 }).catch(() => null);
+    if (!result || result.exitCode !== 0) return null;
+    const top = result.stdout.trim();
+    return top ? path.resolve(top) : null;
+  }
+
+  /**
+   * Repositories inside `repoDir` that it does not track (no submodule): git reports each as one
+   * untracked directory, and `add -A` would record it as a broken embedded repository — clones of
+   * the outer repo then hold an empty folder. Paths are relative to `repoDir`, without the slash.
+   */
+  async embeddedRepos(repoDir: string): Promise<string[]> {
+    const result = await this.runner
+      .run('git', ['ls-files', '--others', '--exclude-standard', '--directory', '--no-empty-directory', '-z'], {
+        cwd: repoDir,
+        timeout: 30_000,
+      })
+      .catch(() => null);
+    if (!result || result.exitCode !== 0) return [];
+    const out: string[] = [];
+    for (const entry of result.stdout.split('\0')) {
+      if (!entry.endsWith('/')) continue;
+      const rel = entry.slice(0, -1);
+      if (await pathExists(path.join(repoDir, rel, '.git'))) out.push(rel);
+    }
+    return out;
   }
 
   /**
@@ -464,7 +525,7 @@ export class GitClient implements IGitClient {
    * commit (clean working tree), `true` when a commit was created.
    */
   async commit(repoDir: string, message: string): Promise<boolean> {
-    let result = await this.runner.run('git', ['add', '-A'], {
+    let result = await this.runner.run('git', await this.stageAllArgs(repoDir), {
       cwd: repoDir,
       timeout: 30_000,
     });
@@ -1974,10 +2035,16 @@ export class GitClient implements IGitClient {
   }
 
   async addAll(repoDir: string): Promise<void> {
-    const result = await this.runner.run('git', ['add', '-A'], { cwd: repoDir, timeout: 60_000 });
+    const result = await this.runner.run('git', await this.stageAllArgs(repoDir), { cwd: repoDir, timeout: 60_000 });
     if (result.exitCode !== 0) {
       throw new GitError(`Failed to stage files in ${repoDir}: ${result.stderr}`);
     }
+  }
+
+  /** `add -A` for everything in `repoDir` except the repositories inside it (see `embeddedRepos`). */
+  private async stageAllArgs(repoDir: string): Promise<string[]> {
+    const embedded = await this.embeddedRepos(repoDir);
+    return embedded.length === 0 ? ['add', '-A'] : ['add', '-A', '--', '.', ...embedded.map((p) => `:(exclude,literal)${p}`)];
   }
 
   async commitWithSha(repoDir: string, message: string): Promise<GitCommitResult | null> {
@@ -2092,6 +2159,8 @@ export class GitClient implements IGitClient {
       if (!filePath) continue;
 
       if (index === '?' || worktree === '?') {
+        // `-uall` lists untracked files one by one, so a directory here is a repository of its own.
+        if (filePath.endsWith('/')) continue;
         out.push({ code: 'A', path: filePath });
         continue;
       }

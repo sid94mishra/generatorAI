@@ -107,6 +107,7 @@ export async function discoverRepos(
           repoDir: path.join(m.path, sub.name),
           kind: 'nested',
           ...(sub.gitDir ? { gitDir: sub.gitDir } : {}),
+          ...(sub.baseCommit ? { baseCommit: sub.baseCommit } : {}),
         });
         seen.add(alias);
       }

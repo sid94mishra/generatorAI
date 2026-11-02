@@ -191,8 +191,15 @@ export interface IGitClient {
   commonObjectsDir(repoDir: string): Promise<string | null>;
   /** One config value (`git config --get`), or null when unset. */
   getConfig(repoDir: string, key: string): Promise<string | null>;
-  /** Immediate child directories of `dir` that are git repositories of their own. */
+  /**
+   * Repositories inside `dir` (submodules included), as `/`-separated paths relative to it, up to three
+   * levels deep; a repository found is not searched further.
+   */
   nestedRepos(dir: string): Promise<string[]>;
+  /** The root of the repository `dir` is in (itself or an enclosing one), or null outside any. */
+  repoTopLevel(dir: string): Promise<string | null>;
+  /** Untracked repositories inside `repoDir` (not submodules), relative to it — never staged by `addAll`. */
+  embeddedRepos(repoDir: string): Promise<string[]>;
   /**
    * Remove everything an earlier GeneratorAI wrote into a repository's own
    * git dir: `refs/generatorai/**` and the `generatorai-*.index` files.

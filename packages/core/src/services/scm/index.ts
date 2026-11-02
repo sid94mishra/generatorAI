@@ -75,7 +75,7 @@ export type {
   AutoSourceControlInput,
 } from './AutoSourceControlRunner.js';
 
-export { mountDirFor, scmMountTargets } from './workspaceMounts.js';
+export { commitOrder, mountDirFor, scmMountTargets } from './workspaceMounts.js';
 export type { ScmMountTarget } from './workspaceMounts.js';
 
 export { buildTurnHint, extractSummaryLine, TURN_HINT_MAX_CHARS } from './turnHint.js';

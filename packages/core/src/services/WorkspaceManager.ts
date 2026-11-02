@@ -429,10 +429,14 @@ export class WorkspaceManager {
           ...(m.git?.baseCommit ? { baseCommit: m.git.baseCommit } : {}),
           ...(m.git?.nested?.length
             ? {
-                nested: m.git.nested.map((name) => ({
-                  name,
-                  gitDir: shadowGitDirFor(workspace.rootPath, `${m.alias}/${name}`),
-                })),
+                nested: m.git.nested.map((name) => {
+                  const baseCommit = m.git?.nestedState?.[name]?.baseCommit;
+                  return {
+                    name,
+                    gitDir: shadowGitDirFor(workspace.rootPath, `${m.alias}/${name}`),
+                    ...(baseCommit ? { baseCommit } : {}),
+                  };
+                }),
               }
             : {}),
         };

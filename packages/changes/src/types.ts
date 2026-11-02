@@ -16,7 +16,7 @@ export interface ChangedFile {
 export type ChangeRepoKind =
   /** A workspace mount (the directory the agent was asked to work in). */
   | 'mount'
-  /** A repository nested one level inside a mount (multi-repo folder). */
+  /** A repository inside a mount (multi-repo folder), up to three levels deep. */
   | 'nested'
   /** Legacy: a registered worktree. */
   | 'linked'
@@ -38,7 +38,8 @@ export interface MountRef {
   /** Commit the mount's branch started from / HEAD when it was mounted. */
   baseCommit?: string;
   /** Immediate child repositories, each with its own shadow store. */
-  nested?: Array<{ name: string; gitDir?: string }>;
+  /** `name` is the `/`-separated path inside the mount. */
+  nested?: Array<{ name: string; gitDir?: string; baseCommit?: string }>;
 }
 
 /** All changes within one repository/worktree inside a workspace. */

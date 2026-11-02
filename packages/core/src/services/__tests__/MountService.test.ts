@@ -49,6 +49,7 @@ function makeGit() {
     isClean: vi.fn(async () => true),
     currentBranch: vi.fn(async (): Promise<string | null> => 'main'),
     nestedRepos: vi.fn(async () => []),
+    repoTopLevel: vi.fn(async (): Promise<string | null> => null),
     createBranch: vi.fn(async () => {}),
     checkoutBranch: vi.fn(async () => {}),
     detachHead: vi.fn(async () => {}),
@@ -138,18 +139,22 @@ describe('MountService.plan validation', () => {
     ).rejects.toThrow(/does not exist/);
   });
 
-  it('refuses to switch the branch of a dirty folder in place while the chat is created, not later', async () => {
+  it('refuses to move the branch of a dirty folder in place while the chat is created, not later', async () => {
     const workspacesDir = await tmpDir();
     const mine = await tmpDir();
     await fs.mkdir(path.join(mine, '.git'));
     const { service, git } = makeService({ workspacesDir });
     git.isClean.mockResolvedValue(false);
+    git.branchExists.mockImplementation(async (...args: unknown[]) => args[1] === 'develop');
     const plan = (spec: ChatSourceSpec) => service.plan(path.join(workspacesDir, 'executions', 'chat-1'), undefined, [spec]);
 
-    await expect(plan({ kind: 'folder', path: mine, mode: 'in-place', newBranch: 'feature/x' })).rejects.toThrow(
+    // Another commit would collide with the uncommitted changes.
+    await expect(plan({ kind: 'folder', path: mine, mode: 'in-place', newBranch: 'feature/x', baseRef: 'develop' })).rejects.toThrow(
       /uncommitted changes, so its branch cannot be switched/,
     );
-    // Staying on the current branch needs no clean tree.
+    await expect(plan({ kind: 'folder', path: mine, mode: 'in-place', branch: 'develop' })).rejects.toThrow(/uncommitted changes/);
+    // A new branch from where it is takes the changes along; staying needs no clean tree either.
+    await expect(plan({ kind: 'folder', path: mine, mode: 'in-place', newBranch: 'feature/x' })).resolves.toHaveLength(1);
     await expect(plan({ kind: 'folder', path: mine, mode: 'in-place' })).resolves.toHaveLength(1);
   });
 
