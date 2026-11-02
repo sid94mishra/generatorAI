@@ -40,6 +40,8 @@ export interface DiscoveredRepo {
   gitDir?: string;
   /** Commit the mount was cut from — the "Branch base" diff anchor. */
   baseCommit?: string;
+  /** A repository created during the chat: "since the start" is the empty tree. */
+  appeared?: boolean;
 }
 
 export interface DiscoverReposParams {
@@ -108,6 +110,7 @@ export async function discoverRepos(
           kind: 'nested',
           ...(sub.gitDir ? { gitDir: sub.gitDir } : {}),
           ...(sub.baseCommit ? { baseCommit: sub.baseCommit } : {}),
+          ...(sub.appeared ? { appeared: true } : {}),
         });
         seen.add(alias);
       }

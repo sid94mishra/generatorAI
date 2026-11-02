@@ -381,11 +381,15 @@ export class GitClient implements IGitClient {
           continue;
         }
         for (const entry of entries) {
-          if (!entry.isDirectory() || NESTED_REPO_SKIP.has(entry.name) || entry.name.startsWith('.')) continue;
+          if (NESTED_REPO_SKIP.has(entry.name) || entry.name.startsWith('.')) continue;
+          // A link to a directory counts when it is a repository (a separate copy links the person's checkout
+          // in), but is never searched through: a link can lead anywhere, itself included.
+          const link = entry.isSymbolicLink();
+          if (!entry.isDirectory() && !(link && (await fs.stat(path.join(dir, rel, entry.name)).then((st) => st.isDirectory(), () => false)))) continue;
           if (++visited > NESTED_REPO_MAX_DIRS) return out.sort();
           const child = rel ? `${rel}/${entry.name}` : entry.name;
           if (await pathExists(path.join(dir, child, '.git'))) out.push(child);
-          else next.push(child);
+          else if (!link) next.push(child);
         }
       }
       level = next;

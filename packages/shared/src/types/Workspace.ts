@@ -69,6 +69,8 @@ export interface NestedRepoState {
   baseCommit?: string;
   /** True when GeneratorAI created `branch` for this repository. */
   createdBranch?: boolean;
+  /** Created after the chat started (the agent cloned or `git init`-ed it): everything in it is the chat's change. */
+  appeared?: boolean;
 }
 
 /**

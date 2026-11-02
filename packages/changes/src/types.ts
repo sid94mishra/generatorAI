@@ -39,7 +39,7 @@ export interface MountRef {
   baseCommit?: string;
   /** Immediate child repositories, each with its own shadow store. */
   /** `name` is the `/`-separated path inside the mount. */
-  nested?: Array<{ name: string; gitDir?: string; baseCommit?: string }>;
+  nested?: Array<{ name: string; gitDir?: string; baseCommit?: string; appeared?: boolean }>;
 }
 
 /** All changes within one repository/worktree inside a workspace. */

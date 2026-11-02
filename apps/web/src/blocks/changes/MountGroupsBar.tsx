@@ -31,44 +31,55 @@ export interface MountGroupsBarProps {
 }
 
 export function MountGroupsBar({ groups, onJump }: MountGroupsBarProps) {
+  // One row per repository, so a long branch name truncates instead of widening the pane.
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-line-soft px-3 py-1.5" data-testid="mount-groups">
+    <ul className="flex shrink-0 flex-col border-b border-line-soft px-1.5 py-1" data-testid="mount-groups" aria-label="Repositories">
       {groups.map((group) => {
         const name = group.alias === '.' ? 'workspace' : group.alias;
         return (
-          <span key={group.alias} className="inline-flex items-center gap-0.5" data-testid="mount-group" data-alias={group.alias}>
+          <li key={group.alias} className="flex min-w-0 items-center gap-1" data-testid="mount-group" data-alias={group.alias}>
             <Button
               size="sm"
-              variant="secondary"
+              variant="ghost"
               disabled={!group.firstId}
               title={group.path ?? group.alias}
               onClick={() => {
                 if (group.firstId) onJump(group.firstId);
               }}
+              className="min-w-0 flex-1 justify-start"
+              aria-label={`${name}: ${group.stats.files} ${group.stats.files === 1 ? 'file' : 'files'}${group.branch ? ` on ${group.branch}` : ''}`}
             >
-              <span className="flex items-center gap-1.5">
-                <span className="text-fg">{name}</span>
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="shrink-0 text-fg">{name}</span>
                 {group.branch ? (
-                  <span className="inline-flex items-center gap-0.5 font-mono text-micro font-normal text-fg-3">
-                    <Icon concept="branch" size={12} />
-                    {group.branch}
+                  <span className="inline-flex min-w-0 items-center gap-0.5 font-mono text-micro font-normal text-fg-3">
+                    <Icon concept="branch" size={12} className="shrink-0" />
+                    <span className="truncate">{group.branch}</span>
                   </span>
                 ) : null}
-                <span className="font-normal text-fg-3">
-                  {group.stats.files} {group.stats.files === 1 ? 'file' : 'files'}
-                </span>
-                <DiffStat added={group.stats.additions} removed={group.stats.deletions} />
-                {group.note ? <span className="font-normal text-fg-3">· {group.note}</span> : null}
+                {group.note ? <span className="truncate font-normal text-fg-3">· {group.note}</span> : null}
               </span>
             </Button>
+            <span className="shrink-0 text-small text-fg-3">
+              {group.stats.files} {group.stats.files === 1 ? 'file' : 'files'}
+            </span>
+            <DiffStat added={group.stats.additions} removed={group.stats.deletions} className="shrink-0" />
             {group.action ? (
-              <Button size="sm" variant="ghost" icon="commit" onClick={group.action.onClick} aria-label={`${group.action.label} ${name}`} data-testid="mount-group-ship">
+              <Button
+                size="sm"
+                variant="secondary"
+                icon="commit"
+                onClick={group.action.onClick}
+                aria-label={`${group.action.label} ${name}`}
+                className="shrink-0"
+                data-testid="mount-group-ship"
+              >
                 {group.action.label}
               </Button>
             ) : null}
-          </span>
+          </li>
         );
       })}
-    </div>
+    </ul>
   );
 }

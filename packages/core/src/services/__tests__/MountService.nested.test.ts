@@ -139,8 +139,30 @@ describe('repositories inside a linked folder', () => {
     expect(await fs.readFile(path.join(mount.path, 'docker-compose.yml'), 'utf8')).toContain('services');
     expect(await git(path.join(mount.path, 'api'), 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('generatorai/fix');
     expect((await fs.lstat(path.join(mount.path, 'web'))).isSymbolicLink()).toBe(true);
+    // A later rescan (after a turn) still sees the linked repository.
+    await service.rescanNested(workspace.id);
+    expect([...rows.values()][0]?.git?.nested).toEqual(['api', 'web']);
     // The person's checkout of api did not move.
     expect(await git(path.join(acme, 'api'), 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main');
+
+    // The chat has started: the same plan keeps the working directory; another setup of it does not.
+    const sameSpec = {
+      kind: 'folder' as const,
+      path: acme,
+      mode: 'worktree' as const,
+      alias: 'acme',
+      repos: [
+        { path: 'api', mode: 'worktree' as const, newBranch: 'generatorai/fix' },
+        { path: 'web', mode: 'in-place' as const },
+      ],
+    };
+    expect(await service.keepsWorkingDirectory(workspace, undefined, [sameSpec])).toBe(true);
+    expect(await service.keepsWorkingDirectory(workspace, undefined, [{ ...sameSpec, mode: 'in-place', repos: [] }])).toBe(false);
+
+    // Deleting the chat's workspace first takes the copy apart: the link is gone, the checkout behind it whole.
+    await service.teardownSeparateCopies(workspace.id);
+    await expect(fs.lstat(path.join(mount.path, 'web'))).rejects.toThrow();
+    expect(await fs.readFile(path.join(acme, 'web', 'README.md'), 'utf8')).toBe('hello\n');
 
     // Removing the mount: the link goes, the person's web checkout stays whole; api's worktree and branch go.
     await service.remove(mount.id, { deleteBranch: true });
@@ -168,6 +190,14 @@ describe('repositories inside a linked folder', () => {
     expect([...rows.values()][0]?.status).toBe('ready');
     expect(await git(path.join(acme, 'api'), 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('generatorai/try');
     expect(await fs.readFile(path.join(acme, 'api', 'README.md'), 'utf8')).toBe('edited\n');
+
+    // A repository created during the chat is tracked after the turn, as the chat's own.
+    await repo(path.join(acme, 'newlib'));
+    await service.rescanNested(workspace.id);
+    const after = [...rows.values()][0]!;
+    expect(after.git?.nested).toEqual(['api', 'newlib']);
+    expect(after.git?.nestedState?.['newlib']?.appeared).toBe(true);
+    expect(after.git?.nestedState?.['api']?.appeared).toBeUndefined();
   });
 
   it('refuses a separate copy of one repository while its folder is edited in place, and a path that is no repository', async () => {

@@ -32,4 +32,10 @@ describe('workspace source-control targets', () => {
   it('commits a repository before the one that contains it', () => {
     expect(commitOrder(scmMountTargets(info())).map((t) => t.alias)).toEqual(['acme/services/billing', 'acme/api', 'acme', 'docs']);
   });
+
+  it('does not list a working directory inside a mount as a repository of its own', () => {
+    const i = info();
+    (i as { workingDirectory: string }).workingDirectory = path.join(root, 'apps', 'web');
+    expect(scmMountTargets(i).map((t) => t.alias)).toEqual(['acme', 'acme/api', 'acme/services/billing', 'docs']);
+  });
 });

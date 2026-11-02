@@ -104,7 +104,7 @@ export function ShipButton(props: ShipDialogProps & { request?: ShipRequest | nu
           title={waiting > 1 ? `${waiting} repositories have changes to ship — each is committed on its own` : undefined}
           data-testid="scm-open-dialog"
         >
-          {waiting > 1 ? `${action.label} · ${waiting} repos` : action.label}
+          {waiting > 1 ? `${action.label} (${waiting})` : action.label}
         </Button>
       ) : null}
       {opened ? (

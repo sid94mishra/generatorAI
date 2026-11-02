@@ -63,8 +63,11 @@ export function scmMountTargets(info: WorkspaceInfo): ScmMountTarget[] {
     add(mount.alias, mount.path);
     for (const rel of mount.git?.nested ?? []) add(`${mount.alias}/${rel}`, path.join(mount.path, ...rel.split('/')));
   }
+  // The working directory is its own target only outside every mount: one inside a mount (a folder picked inside
+  // a repository, a codebase's subdirectory) is that mount's repository, already listed.
   const rootKey = path.resolve(info.workingDirectory);
-  if (!seen.has(rootKey)) out.push({ alias: '.', dir: info.workingDirectory });
+  const inside = [...seen].some((dir) => rootKey === dir || rootKey.startsWith(dir + path.sep));
+  if (!inside) out.push({ alias: '.', dir: info.workingDirectory });
   return out;
 }
 

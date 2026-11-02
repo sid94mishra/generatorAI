@@ -189,8 +189,8 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
       <DialogBody className="gap-6">
         <div className="flex flex-col gap-3">
           <p className="text-small text-fg-3">
-            What this chat works on. {lockPrimary ? 'You can add or remove other sources; ' : ''}Changes apply from your next message, and sources you
-            keep are left as they are.
+            What this chat works on. {lockPrimary ? 'Its working directory is fixed; other sources can still be added or removed. ' : ''}Changes apply
+            from your next message, and sources you keep are left as they are.
           </p>
           <SourcePicker
             chatId={chat.id}

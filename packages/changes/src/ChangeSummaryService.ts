@@ -769,6 +769,8 @@ export class ChangeSummaryService {
     workspaceId: string,
     repo: DiscoveredRepo,
   ): Promise<ChangeRevision> {
+    // A repository the agent created during the chat did not exist at its start: all of it is the chat's change.
+    if (repo.appeared) return { kind: 'baseline', treeish: EMPTY_TREE_SHA, label: 'Session start' };
     const baseline = await this.checkpoints.getBaseline(workspaceId, repo.alias);
     if (baseline) {
       return {

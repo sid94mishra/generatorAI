@@ -1396,6 +1396,9 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     workspaceCheckpointService.capture({ workspaceId, kind: 'baseline' }),
   );
   mountService.setStoreForgotten((workspaceId, alias) => workspaceCheckpointService.forgetRepo(workspaceId, alias));
+  // A separate copy links the person's in-place checkouts in: unlink them (and unregister its nested worktrees)
+  // before the workspace tree is deleted, so the deletion can never reach into a checkout.
+  workspaceManager.registerBeforeDelete((workspaceId) => mountService.teardownSeparateCopies(workspaceId), 'storage');
   // Archived chats: reclaim worktree directories after the project's
   // retention (default 24h), keeping branches so the work is recoverable.
   worktreeCleanupService.setArchivedReleaser(async () => {

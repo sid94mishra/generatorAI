@@ -931,6 +931,14 @@ export class MountService {
     }
   }
 
+  /** Take apart every separate copy of a workspace (links unlinked, nested worktrees unregistered) before it is deleted. */
+  async teardownSeparateCopies(workspaceId: string): Promise<void> {
+    for (const m of await this.deps.mountRepo.findByWorkspace(workspaceId)) {
+      if (m.mode !== 'worktree' || !m.git?.nested?.length) continue;
+      await this.teardownNested(m, {}).catch((err: unknown) => this.deps.logger.warn(`[Mounts] teardown of ${m.alias} failed: ${err}`));
+    }
+  }
+
   /**
    * Track the repositories that appeared in (or left) a mount since it was prepared — one the agent
    * cloned or `git init`-ed — so their changes are listed, checkpointed and committable. Run before a
@@ -947,7 +955,16 @@ export class MountService {
         if (found.length === known.length && found.every((p, i) => p === known[i])) continue;
         const states: Record<string, NestedRepoState> = {};
         for (const rel of found) {
-          states[rel] = m.git?.nestedState?.[rel] ?? (await this.nestedStateOf(nestedDir(m.path, rel), 'in-place'));
+          const known = m.git?.nestedState?.[rel];
+          if (known) {
+            states[rel] = known;
+            continue;
+          }
+          // Newer than the mount: created during the chat (cloned, `git init`), so all of it is the chat's change.
+          // Older: it was there all along and only went unseen (a mount prepared before it was looked for).
+          const born = await fs.stat(path.join(nestedDir(m.path, rel), '.git')).then((st) => st.birthtimeMs || st.ctimeMs, () => 0);
+          const appeared = born > new Date(m.createdAt).getTime();
+          states[rel] = { ...(await this.nestedStateOf(nestedDir(m.path, rel), 'in-place')), ...(appeared ? { appeared: true } : {}) };
         }
         await this.ensureNestedShadows(workspace.rootPath, m.alias, m.path, found.filter((p) => !known.includes(p)));
         const { nested: _n, nestedState: _s, ...rest } = m.git ?? { isRepo: false };
@@ -1606,7 +1623,8 @@ function sameBranchIntent(m: WorkspaceMount, p: PlannedMount): boolean {
   for (const n of p.intent.nested ?? []) {
     const state = m.git?.nestedState?.[n.path];
     if (!state) {
-      if (n.mode === 'worktree' || n.newBranch || n.branch) return false;
+      // Not recorded yet (found after preparation): as it is in place, it is unchanged; anything else is new.
+      if (n.mode === 'worktree' || n.newBranch) return false;
       continue;
     }
     if (state.mode !== n.mode) return false;
