@@ -45,13 +45,15 @@ export interface UseShipFlowOptions {
   open: boolean;
   /** The mode the dialog opens in (the toolbar button's verb). */
   initialMode: ShipMode;
+  /** The repository it opens on (a repository's own Commit in the Changes groups); else the first with changes. */
+  initialAlias?: string;
 }
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-export function useShipFlow({ workspaceId, hint, open, initialMode }: UseShipFlowOptions) {
+export function useShipFlow({ workspaceId, hint, open, initialMode, initialAlias }: UseShipFlowOptions) {
   const readiness = useWorkspaceReadiness(workspaceId);
   // Each opening asks the remote first, so ahead/behind are current.
   const fetched = useFetchedReadiness(workspaceId, open);
@@ -88,8 +90,9 @@ export function useShipFlow({ workspaceId, hint, open, initialMode }: UseShipFlo
     if (open) {
       setMode(initialMode);
       setResult(null);
+      if (initialAlias) setAlias(initialAlias);
     }
-  }, [open, initialMode]);
+  }, [open, initialMode, initialAlias]);
 
   // Follow the selected repo's default branch until the user picks one.
   useEffect(() => {

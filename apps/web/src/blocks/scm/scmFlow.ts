@@ -136,7 +136,10 @@ export function composeFlowRequest(selected: RepoReadiness | undefined, form: Sh
  * it. A merge in progress is finished one repo at a time, in the single-repo form.
  */
 export function shipAllTargets(repos: readonly RepoReadiness[], mode: ShipMode): RepoReadiness[] {
-  return repos.filter((r) => {
+  // A repository inside another first (`acme/api` before `acme`): a parent that tracks it as a submodule then
+  // commits its new commit, not the old one.
+  const depth = (alias: string) => (alias === '.' ? 0 : alias.split('/').length);
+  return [...repos].sort((a, b) => depth(b.alias) - depth(a.alias)).filter((r) => {
     if (!r.isRepo || r.mergeInProgress) return false;
     const work = r.dirty || (r.ahead ?? 0) > 0;
     if (mode === 'commit') return r.dirty;

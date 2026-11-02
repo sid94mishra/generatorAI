@@ -23,7 +23,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Chat, ChatSourceControlOptions } from '@generatorai/shared';
 import { useProjectCodebases } from '@/hooks/projectQueries.js';
 import { useUpdateChatSources, useWorkspaceInfo } from '@/hooks/sourceQueries.js';
-import { useUpdateChatSourceControl } from '@/hooks/queries.js';
+import { useChatMessages, useUpdateChatSourceControl } from '@/hooks/queries.js';
+import { useNewChatStore } from '@/stores/newChatStore.js';
 import {
   SourcePicker,
   chatFolderFiles,
@@ -97,6 +98,18 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
 
   const busy = update.isPending || updateSourceControl.isPending;
 
+  // Once the chat has started its working directory is fixed; a chat still in its own empty folder picks one once.
+  const messages = useChatMessages(open ? chat.id : undefined, 1);
+  const started = (messages.data?.length ?? 0) > 0;
+  const primaryMount = [...(mounts ?? [])].filter((m) => m.status !== 'removed').sort((a, b) => a.position - b.position)[0];
+  const inChatFolder = !primaryMount || primaryMount.mode === 'generated';
+  const lockPrimary = started && !inChatFolder;
+  const chooseOnce = started && inChatFolder;
+  const startNewChat = () => {
+    onClose();
+    useNewChatStore.getState().open(chat.projectId ? { projectId: chat.projectId } : {});
+  };
+
   // What the dialog opened with, to tell an edit from a no-op and to count
   // the worktrees saving would rebuild (MountService.replace, D-166).
   const changed = opened !== null && snapshotOf(drafts, primary, sourceControl) !== opened.snapshot;
@@ -126,8 +139,15 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
     }
     setError(null);
     try {
+      const sources = draftsToSources(drafts, chat.name);
+      // The fixed working directory goes back exactly as it was saved, so re-deriving its spec can never read as a change.
+      if (lockPrimary) {
+        const kept = chat.sources?.find((spec) => spec.kind !== 'chat-folder' && spec.alias === (primary ?? chat.primarySource));
+        const at = sources.findIndex((spec) => spec.kind !== 'chat-folder' && spec.alias === (primary ?? chat.primarySource));
+        if (kept && at >= 0) sources[at] = kept;
+      }
       await update.mutateAsync({
-        sources: draftsToSources(drafts, chat.name),
+        sources,
         ...(primary ? { primary } : {}),
         ...(discardChatFolder ? { discardChatFolder: true } : {}),
       });
@@ -168,7 +188,10 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
     >
       <DialogBody className="gap-6">
         <div className="flex flex-col gap-3">
-          <p className="text-small text-fg-3">What this chat works on. Changes apply from your next message; sources you keep are left as they are.</p>
+          <p className="text-small text-fg-3">
+            What this chat works on. {lockPrimary ? 'You can add or remove other sources; ' : ''}Changes apply from your next message, and sources you
+            keep are left as they are.
+          </p>
           <SourcePicker
             chatId={chat.id}
             chatName={chat.name}
@@ -182,6 +205,9 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
             disabled={busy}
             live
             chatFolderFiles={chatFiles}
+            lockPrimary={lockPrimary}
+            chooseOnce={chooseOnce}
+            onStartNewChat={startNewChat}
           />
           {discardChatFolder ? (
             <Callout tone="warn" data-testid="chat-folder-discard">

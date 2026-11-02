@@ -32,6 +32,7 @@ import {
 } from '@/hooks/queries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useEditSourcesStore } from '@/stores/editSourcesStore.js';
+import { useNoSourceNotice } from './hooks/useNoSourceNotice.js';
 import { useChatRefInboxStore } from '@/stores/chatRefInboxStore.js';
 import { useSideChatStore } from '@/stores/sideChatStore.js';
 import { useChatGlanceStore } from '@/stores/chatGlanceStore.js';
@@ -340,6 +341,7 @@ export function ChatPage() {
   );
   // A shell opens in the working directory; with several sources its "cd" menu reaches the others.
   const workspaceMounts = useWorkspaceInfo(chat?.workspaceId).data?.mounts;
+  useNoSourceNotice(chat, workspaceMounts, (messages?.length ?? 0) > 0, editSources);
   const terminalMounts = useMemo(
     () =>
       workspaceMounts && workspaceMounts.filter((m) => m.status !== 'removed').length > 1

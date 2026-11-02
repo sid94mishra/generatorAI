@@ -33,8 +33,20 @@ export interface ShipDialogProps {
   changesKey?: string;
 }
 
-/** The toolbar button; renders nothing when the workspace has nothing to commit, push or propose. */
-export function ShipButton(props: ShipDialogProps) {
+/** Open the dialog on one repository in one mode (a repository's own step in the Changes groups). */
+export interface ShipRequest {
+  alias: string;
+  mode: ShipMode;
+  /** A new value re-opens it, even for the same repository. */
+  nonce: number;
+}
+
+/**
+ * The toolbar button; renders nothing when the workspace has nothing to commit, push or propose. With
+ * several repositories it names how many have a step to take; `request` opens it on one of them.
+ */
+export function ShipButton(props: ShipDialogProps & { request?: ShipRequest | null }) {
+  const { request, ...dialogProps } = props;
   const readiness = useWorkspaceReadiness(props.workspaceId);
   const seenKey = useRef(props.changesKey);
   const { refetch } = readiness;
@@ -46,12 +58,24 @@ export function ShipButton(props: ShipDialogProps) {
   const repos = readiness.data?.repos ?? [];
   const repo = repos.find((r) => r.alias === pickDefaultAlias(repos));
   const action = shipActionOf(repo);
+  const waiting = repos.filter((r) => {
+    const a = shipActionOf(r);
+    return !!a && !a.href;
+  }).length;
   const [open, setOpen] = useState(false);
   // The mode is fixed when the dialog opens: the button's verb changes as the flow runs
   // (Commit → PR #12), and the dialog must keep showing that run's outcome.
   const [openMode, setOpenMode] = useState<ShipMode>('commit');
+  const [openAlias, setOpenAlias] = useState<string | undefined>(undefined);
   // Mounted from the first open on, so a closed dialog keeps what was typed into it.
   const [opened, setOpened] = useState(false);
+  useEffect(() => {
+    if (!request) return;
+    setOpenMode(request.mode);
+    setOpenAlias(request.alias);
+    setOpened(true);
+    setOpen(true);
+  }, [request]);
   return (
     <>
       {action?.href ? (
@@ -73,15 +97,19 @@ export function ShipButton(props: ShipDialogProps) {
           onClick={() => {
             // Finishing a merge resumes the run that hit it (a PR stays a PR, its form as it was).
             if (!(repo?.mergeInProgress && opened)) setOpenMode(action.mode);
+            setOpenAlias(undefined);
             setOpened(true);
             setOpen(true);
           }}
+          title={waiting > 1 ? `${waiting} repositories have changes to ship — each is committed on its own` : undefined}
           data-testid="scm-open-dialog"
         >
-          {action.label}
+          {waiting > 1 ? `${action.label} · ${waiting} repos` : action.label}
         </Button>
       ) : null}
-      {opened ? <ShipDialog {...props} open={open} onOpenChange={setOpen} initialMode={openMode} /> : null}
+      {opened ? (
+        <ShipDialog {...dialogProps} open={open} onOpenChange={setOpen} initialMode={openMode} {...(openAlias ? { initialAlias: openAlias } : {})} />
+      ) : null}
     </>
   );
 }
@@ -94,8 +122,9 @@ function ShipDialog({
   open,
   onOpenChange,
   initialMode,
-}: ShipDialogProps & { open: boolean; onOpenChange: (open: boolean) => void; initialMode: ShipMode }) {
-  const flow = useShipFlow({ workspaceId, ...(hint ? { hint } : {}), open, initialMode });
+  initialAlias,
+}: ShipDialogProps & { open: boolean; onOpenChange: (open: boolean) => void; initialMode: ShipMode; initialAlias?: string }) {
+  const flow = useShipFlow({ workspaceId, ...(hint ? { hint } : {}), open, initialMode, ...(initialAlias ? { initialAlias } : {}) });
   const { selected, result } = flow;
   if (!selected) return null;
 

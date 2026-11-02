@@ -32,7 +32,9 @@ import { useDiffPainted } from '@/blocks/diff/useDiffPainted.js';
 import { ReviewComposerPopover } from '@/blocks/diff/review/ReviewComposerPopover.js';
 import { ReviewThreadCard } from '@/blocks/diff/review/ReviewThreadCard.js';
 import { FileTree } from '@/blocks/files/FileTree.js';
-import { ShipButton } from '@/blocks/scm/ShipDialog.js';
+import { ShipButton, type ShipRequest } from '@/blocks/scm/ShipDialog.js';
+import { shipActionOf } from '@/blocks/scm/scmFlow.js';
+import { useWorkspaceReadiness } from '@/hooks/queries.js';
 import type { ReviewIntent, ReviewScope, ReviewSubmitTarget } from '@/types/review.js';
 import { ChangeFileRow } from './ChangeFileRow.js';
 import { CompareBar } from './CompareBar.js';
@@ -121,6 +123,30 @@ export function ChangesPanel({
   const model = useChangesModel({ workspaceId, base: requestedBase, scope });
   const { base } = model;
   const { summary, multiMount, display, revisionsByAlias } = model;
+
+  // Each repository is committed on its own: its group carries its own next step, which opens the ship dialog on it.
+  const readiness = useWorkspaceReadiness(workspaceId);
+  const [shipRequest, setShipRequest] = useState<ShipRequest | null>(null);
+  const repoGroups = useMemo(() => {
+    const byAlias = new Map((readiness.data?.repos ?? []).map((r) => [r.alias, r]));
+    return model.mountGroups.map((group) => {
+      const ready = byAlias.get(group.alias);
+      const action = shipActionOf(ready);
+      const branch = ready?.branch ?? group.repo?.branch;
+      const path = group.repo?.path ?? group.mount?.path;
+      return {
+        alias: group.alias,
+        stats: group.stats,
+        firstId: group.firstId,
+        ...(path ? { path } : {}),
+        ...(branch ? { branch } : {}),
+        ...(action && !action.href
+          ? { action: { label: action.label, onClick: () => setShipRequest({ alias: group.alias, mode: action.mode, nonce: Date.now() }) } }
+          : {}),
+        ...(ready && !ready.isRepo && group.stats.files > 0 ? { note: 'not a git repository' } : {}),
+      };
+    });
+  }, [model.mountGroups, readiness.data]);
   const editor = useChangesEditor(model.mounts);
   const { canOpenInEditor, openFile: openFileInEditor } = editor;
 
@@ -353,6 +379,7 @@ export function ChangesPanel({
         onRefresh={() => void model.refetch()}
         actionSlot={
           <ShipButton
+            request={shipRequest}
             workspaceId={workspaceId}
             {...(chatId ? { chatId } : {})}
             {...(scmHint ? { hint: scmHint } : {})}
@@ -376,18 +403,7 @@ export function ChangesPanel({
         onUndoAll={() => void undoAll()}
       />
 
-      {multiMount && stats.files > 0 ? (
-        <MountGroupsBar
-          groups={model.mountGroups.map((group) => ({
-            alias: group.alias,
-            stats: group.stats,
-            firstId: group.firstId,
-            ...(group.mount?.path ? { path: group.mount.path } : {}),
-            ...(group.mount?.git?.branch ? { branch: group.mount.git.branch } : {}),
-          }))}
-          onJump={nav.jumpToGroup}
-        />
-      ) : null}
+      {multiMount && repoGroups.some((g) => g.stats.files > 0 || g.action) ? <MountGroupsBar groups={repoGroups} onJump={nav.jumpToGroup} /> : null}
 
       {reviewEnabled ? (
         <>

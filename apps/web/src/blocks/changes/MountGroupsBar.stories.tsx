@@ -37,3 +37,21 @@ export const Default: Story = {
     await expect(args.onJump).toHaveBeenCalledWith('web::src/x.ts');
   },
 };
+
+/** Repositories inside one folder: each with its own next step; the folder itself, no repository, says so. */
+export const PerRepositoryActions: Story = {
+  args: {
+    groups: [
+      { alias: 'acme/api', stats: { files: 2, additions: 12, deletions: 3 }, firstId: 'acme/api::src/a.ts', branch: 'generatorai/fix', action: { label: 'Commit', onClick: fn() } },
+      { alias: 'acme/web', stats: { files: 1, additions: 1, deletions: 0 }, firstId: 'acme/web::x.ts', branch: 'main', action: { label: 'Push', onClick: fn() } },
+      { alias: 'acme', stats: { files: 1, additions: 2, deletions: 0 }, firstId: 'acme::docker-compose.yml', note: 'not a git repository' },
+    ],
+  },
+  play: async ({ canvasElement, args }) => {
+    const bar = within(canvasElement).getByTestId('mount-groups');
+    await expect(within(bar).getAllByTestId('mount-group-ship')).toHaveLength(2);
+    await expect(bar).toHaveTextContent('not a git repository');
+    await userEvent.click(within(bar).getByRole('button', { name: 'Commit acme/api' }));
+    await expect(args.groups[0]!.action!.onClick).toHaveBeenCalled();
+  },
+};

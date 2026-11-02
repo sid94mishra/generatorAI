@@ -13,7 +13,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useWorkspaceChangeSummary, useWorkspaceCheckpoints } from '@/hooks/queries.js';
 import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import type { ChangeStatus } from '@/types/changes.js';
-import { shouldPrefixAlias, withAliasPrefix } from './changePaths.js';
+import { joinPath, repoRootsOf, shouldPrefixAlias, withAliasPrefix } from './changePaths.js';
 import { groupCheckpoints } from './checkpoints/checkpointGroups.js';
 import { compareChoices, effectiveCompareBase, type CompareOption } from './compareChoices.js';
 import { splitWorkspaceChanges } from './changeVisibility.js';
@@ -69,7 +69,8 @@ export function useChangesModel({ workspaceId, base: requestedBase, scope }: Use
    * into a terminal. Falls back to the summary's repo count while the
    * workspace document is still loading, so the prefix never flickers on.
    */
-  const mountCount = mounts.length || (summary?.repos.length ?? 0);
+  // Repositories, not mounts: one folder holding two repositories lists each on its own.
+  const mountCount = Math.max(repoRootsOf(mounts).length, summary?.repos.length ?? 0);
   const multiMount = shouldPrefixAlias(mountCount);
   const display = useCallback(
     (alias: string, path: string) => withAliasPrefix(alias, path, multiMount),
@@ -79,12 +80,22 @@ export function useChangesModel({ workspaceId, base: requestedBase, scope }: Use
   /** Per-mount roll-up for the group bar: what changed, and where. */
   const mountGroups = useMemo(() => {
     const byAlias = new Map(mounts.map((m) => [m.alias, m]));
+    const repoOf = (alias: string) => {
+      const direct = byAlias.get(alias);
+      if (direct) return { path: direct.path, branch: direct.git?.branch, isRepo: direct.git?.isRepo };
+      const slash = alias.indexOf('/');
+      const parent = slash > 0 ? byAlias.get(alias.slice(0, slash)) : undefined;
+      const rel = alias.slice(slash + 1);
+      if (!parent) return undefined;
+      return { path: joinPath(parent.path, rel), branch: parent.git?.nestedState?.[rel]?.branch, isRepo: true };
+    };
     return (summary?.repos ?? []).map((repo) => ({
       alias: repo.alias,
       kind: repo.kind,
       stats: repo.stats,
       firstId: repo.files[0] ? diffSourceId(repo.alias, repo.files[0].path) : null,
       mount: byAlias.get(repo.alias),
+      repo: repoOf(repo.alias),
     }));
   }, [summary, mounts]);
 

@@ -16,6 +16,9 @@ import {
   uniqueAlias,
   validateDrafts,
   type DraftSource,
+  setRepoSetup,
+  setSourceMode,
+  setAllRepos,
 } from '../model.js';
 
 const CHAT = 'Cart fix!';
@@ -327,5 +330,70 @@ describe('autoIncludedCodebase (D-108)', () => {
     expect(autoIncludedCodebase([], [])).toBeUndefined();
     expect(autoIncludedCodebase(undefined, [])).toBeUndefined();
     expect(autoIncludedCodebase([{ id: 'a' }], [{ kind: 'folder' } as never])).toBeUndefined();
+  });
+});
+
+describe('repositories inside a source', () => {
+  const folder = () =>
+    draftFromFolder('/home/me/acme', { isRepo: false, currentBranch: null, branches: [], dirty: false, nestedRepos: ['api', 'web'] }, []);
+
+  it('lists them as they are, and lets a plain folder that holds them be a separate copy', () => {
+    const d = folder();
+    expect(d.repos?.map((r) => [r.path, r.mode, r.branchMode])).toEqual([
+      ['api', 'in-place', 'current'],
+      ['web', 'in-place', 'current'],
+    ]);
+    expect(d.meta.allowWorktree).toBe(true);
+  });
+
+  it('a worktree for one repository makes the source a separate copy; the others stay as they are', () => {
+    const d = folder();
+    const next = setRepoSetup(d, 'api', { ...d.repos![0]!, mode: 'worktree', branchMode: 'new' });
+    expect(next.mode).toBe('worktree');
+    expect(next.repos?.map((r) => r.mode)).toEqual(['worktree', 'in-place']);
+    // Back in place, no repository can be a worktree.
+    expect(setSourceMode(next, 'in-place').repos?.map((r) => r.mode)).toEqual(['in-place', 'in-place']);
+  });
+
+  it('sets every repository at once', () => {
+    const separate = setAllRepos(folder(), 'separate');
+    expect(separate.mode).toBe('worktree');
+    expect(separate.repos?.every((r) => r.mode === 'worktree' && r.branchMode === 'new')).toBe(true);
+    expect(setAllRepos(separate, 'as-is').repos?.every((r) => r.mode === 'in-place' && r.branchMode === 'current')).toBe(true);
+  });
+
+  it('sends each repository with its branch, and no branch for the plain folder itself', () => {
+    const d = setRepoSetup(folder(), 'api', { path: 'api', mode: 'worktree', branchMode: 'new', newBranch: '', branch: '', baseRef: '' });
+    const [spec] = draftsToSources([d], 'Fix login');
+    expect(spec).toEqual({
+      kind: 'folder',
+      path: '/home/me/acme',
+      mode: 'worktree',
+      alias: 'acme',
+      repos: [
+        { path: 'api', mode: 'worktree', newBranch: 'generatorai/fix-login' },
+        { path: 'web', mode: 'in-place' },
+      ],
+    });
+    expect(validateDrafts([d])).toBeNull();
+  });
+
+  it('restores the chosen setups, and a repository found later as it is', () => {
+    const mount = {
+      alias: 'acme',
+      mode: 'worktree',
+      status: 'ready',
+      originPath: '/home/me/acme',
+      hasUncommittedChanges: false,
+      git: { isRepo: false, nested: ['api', 'tools'], nestedState: { api: { mode: 'worktree', branch: 'generatorai/x', createdBranch: true }, tools: { mode: 'in-place' } } },
+    } as unknown as WorkspaceMount;
+    const [d] = draftsFromSpecs(
+      [{ kind: 'folder', path: '/home/me/acme', alias: 'acme', mode: 'worktree', repos: [{ path: 'api', mode: 'worktree', newBranch: 'generatorai/x' }] }],
+      { mounts: [mount] },
+    );
+    expect(d?.repos?.map((r) => [r.path, r.mode, r.branchMode, r.newBranch])).toEqual([
+      ['api', 'worktree', 'new', 'generatorai/x'],
+      ['tools', 'in-place', 'current', ''],
+    ]);
   });
 });

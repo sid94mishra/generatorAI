@@ -63,6 +63,12 @@ import {
   draftFromChatFolder,
   draftSetupKey,
   effectiveBranch,
+  effectiveRepoBranch,
+  setAllRepos,
+  setRepoSetup,
+  setSourceMode,
+  withRepos,
+  type DraftRepo,
 } from './model.js';
 
 export interface SourcePickerProps {
@@ -98,6 +104,14 @@ export interface SourcePickerProps {
   chatFolderFiles?: number;
   /** The chat being edited, when there is one (see `SourceRowProps.chatId`). */
   chatId?: string;
+  /**
+   * The chat has started: its working directory is fixed (folder, mode, branch, the repositories inside).
+   * Other sources stay editable; `onStartNewChat` offers working somewhere else.
+   */
+  lockPrimary?: boolean;
+  /** The chat has started in its own empty folder: it may choose a working directory once. */
+  chooseOnce?: boolean;
+  onStartNewChat?: () => void;
 }
 
 /** Base UI Select treats `''` poorly as a value; these stand in for "none". */
@@ -144,6 +158,9 @@ export function SourcePicker({
   live = false,
   chatFolderFiles = 0,
   chatId,
+  lockPrimary = false,
+  chooseOnce = false,
+  onStartNewChat,
 }: SourcePickerProps) {
   const readGitInfo = useReadFsGitInfo();
   const { data: projects } = useProjects();
@@ -306,20 +323,48 @@ export function SourcePicker({
     <span className="text-small text-fg-3">Maximum of {maxSources} sources reached.</span>
   ) : null;
 
-  const rowProps = (draft: DraftSource, index: number): SourceRowProps => ({
-    draft,
-    index,
-    total: drafts.length,
-    chatName,
-    projectId,
-    disabled,
-    live,
-    chatId,
-    isPrimary: draft.alias === effectivePrimary,
-    onChange: (next) => replaceAt(index, next),
-    onRemove: () => removeAt(index),
-    onMakePrimary: () => onPrimaryChange(draft.alias),
-  });
+  const rowProps = (draft: DraftSource, index: number): SourceRowProps => {
+    const isPrimary = draft.alias === effectivePrimary;
+    const locked = lockPrimary && isPrimary;
+    return {
+      draft,
+      index,
+      total: drafts.length,
+      chatName,
+      projectId,
+      disabled: disabled || locked,
+      live,
+      chatId,
+      isPrimary,
+      locked,
+      // A started chat keeps its working directory: no other source can take its place.
+      canMakePrimary: !lockPrimary,
+      onChange: (next) => replaceAt(index, next),
+      onRemove: () => removeAt(index),
+      onMakePrimary: () => onPrimaryChange(draft.alias),
+    };
+  };
+
+  // The working directory first, under its own heading; everything else is "also available".
+  const ordered = drafts.map((draft, index) => ({ draft, index }));
+  const primaryEntry = ordered.find((e) => e.draft.alias === effectivePrimary);
+  const others = ordered.filter((e) => e !== primaryEntry);
+  const lockNote = lockPrimary ? (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-small text-fg-3" data-testid="source-workdir-locked">
+      <Icon concept="lock" size={14} className="shrink-0" />
+      <span className="min-w-0 flex-1">Fixed once the chat has started — earlier turns and their changes refer to it.</span>
+      {onStartNewChat ? (
+        <Button variant="ghost" size="sm" icon="plus" onClick={onStartNewChat} data-testid="source-start-new-chat">
+          New chat somewhere else
+        </Button>
+      ) : null}
+    </div>
+  ) : chooseOnce ? (
+    <p className="flex items-start gap-2 text-small text-fg-3" data-testid="source-choose-once">
+      <Icon concept="info" size={14} className="mt-0.5 shrink-0" />
+      <span>This chat started in an empty folder of its own. You can choose its working directory once; after that it stays fixed.</span>
+    </p>
+  ) : null;
 
   const codebaseStatus = projectId ? (
     codebasesLoading ? (
@@ -390,7 +435,23 @@ export function SourcePicker({
             </Button>
           </li>
           {codebaseStatus ? <li className="border-b border-line-soft px-3 py-2.5">{codebaseStatus}</li> : null}
-          {drafts.map((draft, index) => (
+          <SectionHeading title="Working directory" hint="Where the agent works" />
+          {primaryEntry ? (
+            <li key={primaryEntry.draft.key} className="border-b border-line-soft">
+              {primaryEntry.draft.kind === 'chat-folder' ? (
+                <ChatFolderListRow {...rowProps(primaryEntry.draft, primaryEntry.index)} />
+              ) : (
+                <SourceRow {...rowProps(primaryEntry.draft, primaryEntry.index)} />
+              )}
+            </li>
+          ) : (
+            <li className="border-b border-line-soft px-3 py-2.5 text-small text-fg-3" data-testid="source-workdir-empty">
+              {notIncluded.length > 0 ? EMPTY_HINT_WITH_CODEBASES : EMPTY_HINT}
+            </li>
+          )}
+          {lockNote ? <li className="border-b border-line-soft px-3 py-2">{lockNote}</li> : null}
+          <SectionHeading title="Also available to the agent" hint="It can read and edit these too" />
+          {others.map(({ draft, index }) => (
             <li key={draft.key} className="border-b border-line-soft last:border-b-0">
               {draft.kind === 'chat-folder' ? <ChatFolderListRow {...rowProps(draft, index)} /> : <SourceRow {...rowProps(draft, index)} />}
             </li>
@@ -414,8 +475,8 @@ export function SourcePicker({
               />
             </li>
           ) : null}
-          {drafts.length === 0 && notIncluded.length === 0 && !keepChatFolder && (
-            <li className="px-3 py-2.5 text-small text-fg-3">{EMPTY_HINT}</li>
+          {others.length === 0 && notIncluded.length === 0 && !keepChatFolder && (
+            <li className="px-3 py-2.5 text-small text-fg-3">Nothing else yet — tick a codebase or add a local folder.</li>
           )}
         </ul>
         {footer}
@@ -432,7 +493,23 @@ export function SourcePicker({
       <div className="flex flex-col gap-2">
         {codebaseStatus}
         <ul className="overflow-hidden rounded-card border border-line" data-testid="source-list">
-          {drafts.map((draft, index) => (
+          <SectionHeading title="Working directory" hint="Where the agent works" strong />
+          {primaryEntry ? (
+            <li key={primaryEntry.draft.key} className="border-b border-line">
+              {primaryEntry.draft.kind === 'chat-folder' ? (
+                <ChatFolderRow {...rowProps(primaryEntry.draft, primaryEntry.index)} />
+              ) : (
+                <Row {...rowProps(primaryEntry.draft, primaryEntry.index)} />
+              )}
+            </li>
+          ) : (
+            <li className="border-b border-line px-3 py-2.5 text-small text-fg-3" data-testid="source-workdir-empty">
+              {notIncluded.length > 0 ? EMPTY_HINT_WITH_CODEBASES : EMPTY_HINT}
+            </li>
+          )}
+          {lockNote ? <li className="border-b border-line px-3 py-2">{lockNote}</li> : null}
+          <SectionHeading title="Also available to the agent" hint="It can read and edit these too" strong />
+          {others.map(({ draft, index }) => (
             <li key={draft.key} className="border-b border-line">
               {draft.kind === 'chat-folder' ? <ChatFolderRow {...rowProps(draft, index)} /> : <Row {...rowProps(draft, index)} />}
             </li>
@@ -447,11 +524,6 @@ export function SourcePicker({
               />
             </li>
           ))}
-          {drafts.length === 0 && (
-            <li className="border-b border-line px-3 py-2.5 text-small text-fg-3">
-              {notIncluded.length > 0 ? EMPTY_HINT_WITH_CODEBASES : EMPTY_HINT}
-            </li>
-          )}
           <li className="flex items-center gap-2 px-1.5 py-1.5">
             {addFolderButton}
             {limitNote}
@@ -460,6 +532,18 @@ export function SourcePicker({
         {footer}
       </div>
     </div>
+  );
+}
+
+// ── Section heading inside the list ───────────────────────────
+
+/** "Working directory" / "Also available to the agent": a quiet heading row of the one list. */
+function SectionHeading({ title, hint, strong = false }: { title: string; hint: string; strong?: boolean }) {
+  return (
+    <li className={cn('flex items-baseline gap-2 border-b px-3 pt-2 pb-1.5', strong ? 'border-line' : 'border-line-soft')} role="presentation">
+      <span className="shrink-0 text-small font-medium text-fg-2">{title}</span>
+      <span className="truncate text-small text-fg-3">{hint}</span>
+    </li>
   );
 }
 
@@ -518,6 +602,10 @@ interface SourceRowProps {
   /** The chat being edited ("Edit sources"), left out of "also edited in place by". */
   chatId?: string | undefined;
   isPrimary: boolean;
+  /** The working directory of a started chat: shown, not editable. */
+  locked?: boolean;
+  /** Whether "Make working directory" is offered (not once the chat has started). */
+  canMakePrimary?: boolean;
   onChange: (next: DraftSource) => void;
   onRemove: () => void;
   onMakePrimary: () => void;
@@ -533,7 +621,9 @@ function useSourceFacts(draft: DraftSource, projectId: string) {
     draft.kind === 'codebase' && projectId ? projectId : undefined,
     draft.kind === 'codebase' ? draft.codebaseId : undefined,
   );
-  const folderInfo = useFsGitInfo(draft.kind === 'folder' ? draft.path : undefined);
+  // A local codebase is a folder on this machine too: its repositories inside are read the same way.
+  const localPath = draft.kind === 'folder' ? draft.path : draft.kind === 'codebase' && draft.meta.origin && !/^[a-z][a-z0-9+.-]*:\/\/|^git@/i.test(draft.meta.origin) ? draft.meta.origin : undefined;
+  const folderInfo = useFsGitInfo(localPath);
 
   const branches = useMemo(() => {
     const set = new Set<string>(draft.meta.branches);
@@ -549,7 +639,29 @@ function useSourceFacts(draft: DraftSource, projectId: string) {
     nested: folderInfo.data?.nestedRepos ?? draft.meta.nestedRepos ?? [],
     currentBranch: folderInfo.data?.currentBranch ?? draft.meta.defaultBranch ?? null,
     usedInPlaceBy: folderInfo.data?.usedInPlaceBy ?? [],
+    repoRoot: folderInfo.data?.repoRoot ?? draft.meta.repoRoot,
+    loaded: !!folderInfo.data,
   };
+}
+
+/**
+ * Keep the draft's repositories in step with the ones the folder holds (a codebase's are only known once its
+ * folder is read; a folder may have gained one). Kept repositories keep their setup.
+ */
+function useRepoSync(draft: DraftSource, facts: SourceFacts, onChange: (next: DraftSource) => void) {
+  const nestedKey = facts.nested.join('\u0000');
+  useEffect(() => {
+    if (!facts.loaded || draft.kind === 'chat-folder') return;
+    const have = (draft.repos ?? []).map((r) => r.path).join('\u0000');
+    if (have === nestedKey) return;
+    let next = withRepos(draft, facts.nested);
+    // A plain folder that holds repositories can be a separate copy of itself.
+    if (!draft.meta.isGit && facts.nested.length > 0 && !next.meta.allowWorktree) {
+      next = { ...next, meta: { ...next.meta, allowWorktree: true } };
+    }
+    onChange(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reconciled when the folder's repositories change
+  }, [nestedKey, facts.loaded]);
 }
 
 type SourceFacts = ReturnType<typeof useSourceFacts>;
@@ -571,12 +683,7 @@ function segItem<V extends string>(
 }
 
 function ModeControl({ draft, disabled, onChange }: Pick<SourceRowProps, 'draft' | 'disabled' | 'onChange'>) {
-  const setMode = (mode: SourceMode) => {
-    // A worktree always lands on a branch of its own, so "leave it where it
-    // is" is not a coherent answer once the mode flips.
-    const branchMode: BranchMode = mode === 'worktree' && draft.branchMode === 'current' ? 'new' : draft.branchMode;
-    onChange({ ...draft, mode, branchMode });
-  };
+  const setMode = (mode: SourceMode) => onChange(setSourceMode(draft, mode));
   return (
     <SegmentedControl<SourceMode>
       label={`Mode for ${draft.alias}`}
@@ -689,6 +796,14 @@ function RowNotes({ draft, facts, chatId, className }: { draft: DraftSource; fac
       </p>,
     );
   }
+  if (facts.repoRoot) {
+    notes.push(
+      <p key="in-repo" className="text-small text-fg-3" data-testid="source-in-repo">
+        Part of the {basename(facts.repoRoot)} repository: the agent starts in this folder, and its changes are tracked and committed with the
+        whole repository.
+      </p>,
+    );
+  }
   if (draft.meta.error) {
     notes.push(
       <p key="error" className="text-small text-err">
@@ -724,7 +839,7 @@ function WorkingDirectoryBadge() {
  * The folder this chat owns, once the agent has made files in it. Kept beside
  * the user's sources by default; removing it says what will be deleted.
  */
-function ChatFolderRow({ draft, disabled, isPrimary, onRemove, onMakePrimary }: SourceRowProps) {
+function ChatFolderRow({ draft, disabled, isPrimary, canMakePrimary = true, onRemove, onMakePrimary }: SourceRowProps) {
   const files = draft.meta.files ?? 0;
   return (
     <div className="flex items-center gap-2.5 py-2.5 pr-2.5 pl-3" data-testid="source-chat-folder">
@@ -737,11 +852,11 @@ function ChatFolderRow({ draft, disabled, isPrimary, onRemove, onMakePrimary }: 
       </div>
       {isPrimary ? (
         <WorkingDirectoryBadge />
-      ) : (
+      ) : canMakePrimary ? (
         <Button variant="ghost" size="sm" icon="home" disabled={disabled} onClick={onMakePrimary} title="The agent's working directory">
           Make working directory
         </Button>
-      )}
+      ) : null}
       <span className="flex-1" />
       <IconButton icon="trash" size="sm" label="Remove the chat folder" tooltip="Remove — deletes its files" disabled={disabled} onClick={onRemove} />
     </div>
@@ -751,8 +866,9 @@ function ChatFolderRow({ draft, disabled, isPrimary, onRemove, onMakePrimary }: 
 // ── Compact row (NewChat) ─────────────────────────────────────
 
 function CompactSourceRow(props: SourceRowProps) {
-  const { draft, total, chatName, disabled, isPrimary, onRemove, onMakePrimary } = props;
+  const { draft, total, chatName, disabled, isPrimary, locked = false, canMakePrimary = true, onRemove, onMakePrimary } = props;
   const facts = useSourceFacts(draft, props.projectId);
+  useRepoSync(draft, facts, props.onChange);
   // The defaults fit most people (your folder as it is; a codebase on a branch of its own), so the setup reads
   // as one sentence and its controls wait behind "Change". A row that needs an answer opens by itself.
   const needsAnswer = !!draft.meta.error || (draft.branchMode === 'existing' && !draft.branch);
@@ -772,12 +888,12 @@ function CompactSourceRow(props: SourceRowProps) {
         {isPrimary && total > 1 ? <WorkingDirectoryBadge /> : null}
         <DirtyMark dirty={facts.dirty} />
         <span className="flex-1" />
-        {!isPrimary && total > 1 ? (
+        {!isPrimary && total > 1 && canMakePrimary ? (
           <Button variant="ghost" size="sm" icon="home" disabled={disabled} onClick={onMakePrimary} data-testid="source-make-primary">
             Make working directory
           </Button>
         ) : null}
-        {draft.meta.isGit && !needsAnswer ? (
+        {(draft.meta.isGit || draft.meta.allowWorktree) && !needsAnswer && !locked ? (
           <Button
             variant="ghost"
             size="sm"
@@ -794,12 +910,14 @@ function CompactSourceRow(props: SourceRowProps) {
       <p className="pl-6 text-small text-fg-3" data-testid="source-setup-sentence">
         {plainSetup(draft, chatName, facts.currentBranch)}
       </p>
-      {expanded && draft.meta.isGit ? (
+      {expanded && (draft.meta.isGit || draft.meta.allowWorktree) ? (
         <div className="flex flex-col gap-2 pl-6">
           <ModeControl {...props} />
-          <div className="flex flex-wrap items-center gap-2">
-            <BranchControls {...props} facts={facts} />
-          </div>
+          {draft.meta.isGit ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <BranchControls {...props} facts={facts} />
+            </div>
+          ) : null}
           {draft.mode === 'in-place' && draft.branchMode !== 'current' ? (
             <p className="flex items-start gap-2 text-small text-warn" data-testid="source-branch-in-place-warning">
               <Icon concept="warning" size={14} className="mt-0.5 shrink-0" />
@@ -808,7 +926,136 @@ function CompactSourceRow(props: SourceRowProps) {
           ) : null}
         </div>
       ) : null}
+      {draft.repos?.length ? <RepoList draft={draft} chatName={chatName} disabled={disabled} onChange={props.onChange} /> : null}
       <RowNotes draft={draft} facts={facts} chatId={props.chatId} className="pl-6" />
+    </div>
+  );
+}
+
+// ── Repositories inside a source ──────────────────────────────
+
+/** `root` + `rel` on the separator `root` uses. */
+function joinPath(root: string, rel: string): string {
+  const sep = root.includes('\\') && !root.includes('/') ? '\\' : '/';
+  return `${root.replace(/[\\/]+$/, '')}${sep}${rel.split('/').join(sep)}`;
+}
+
+/**
+ * The repositories inside a source, each with its own setup: as it is (in place, on its current branch or
+ * another), or a worktree on a branch of its own in a separate copy of the source. "Set all" does every
+ * repository at once.
+ */
+function RepoList({ draft, chatName, disabled, onChange }: { draft: DraftSource; chatName: string; disabled: boolean; onChange: (next: DraftSource) => void }) {
+  const repos = draft.repos ?? [];
+  const root = draft.kind === 'folder' ? draft.path : draft.meta.origin;
+  return (
+    <div className="ml-6 flex flex-col gap-1 rounded-control border border-line-soft px-2.5 py-2" data-testid="source-repos" aria-label={`Repositories inside ${draft.alias}`}>
+      <div className="flex items-center gap-2">
+        <span className="text-small font-medium text-fg-2">
+          {repos.length} {repos.length === 1 ? 'repository' : 'repositories'} inside · each committed on its own
+        </span>
+        <span className="flex-1" />
+        {repos.length > 1 ? (
+          <Menu.Root>
+            <Menu.Trigger
+              render={
+                <Button variant="ghost" size="sm" trailingIcon="chevron-down" disabled={disabled} data-testid="source-repos-set-all">
+                  Set all
+                </Button>
+              }
+            />
+            <Menu.Popup align="end" className="w-80">
+              <Menu.Item onClick={() => onChange(setAllRepos(draft, 'as-is'))} description="Each stays on its current branch, in your folder." descriptionFont="sans">
+                Use them as they are
+              </Menu.Item>
+              <Menu.Item
+                onClick={() => onChange(setAllRepos(draft, 'separate'))}
+                description="A worktree of each on a new branch. Your checkouts are not touched."
+                descriptionFont="sans"
+              >
+                A separate copy of each
+              </Menu.Item>
+            </Menu.Popup>
+          </Menu.Root>
+        ) : null}
+      </div>
+      {repos.map((repo) => (
+        <RepoRow key={repo.path} draft={draft} repo={repo} root={root} chatName={chatName} disabled={disabled} onChange={onChange} />
+      ))}
+    </div>
+  );
+}
+
+function RepoRow({
+  draft,
+  repo,
+  root,
+  chatName,
+  disabled,
+  onChange,
+}: {
+  draft: DraftSource;
+  repo: DraftRepo;
+  root: string | undefined;
+  chatName: string;
+  disabled: boolean;
+  onChange: (next: DraftSource) => void;
+}) {
+  const dir = root ? joinPath(root, repo.path) : undefined;
+  const info = useFsGitInfo(dir);
+  const currentBranch = info.data?.currentBranch ?? null;
+  const branches = useMemo(() => (info.data?.branches ?? []).slice().sort((a, b) => a.localeCompare(b)), [info.data]);
+  const facts: SourceFacts = {
+    branches,
+    dirty: info.data?.dirty ?? false,
+    nested: [],
+    currentBranch,
+    usedInPlaceBy: [],
+    repoRoot: undefined,
+    loaded: !!info.data,
+  };
+  // The repository through the same tokens a source uses.
+  const asSource: DraftSource = {
+    key: `${draft.key}:${repo.path}`,
+    kind: 'folder',
+    ...(dir ? { path: dir } : {}),
+    alias: repo.path,
+    mode: repo.mode,
+    branchMode: repo.branchMode,
+    newBranch: repo.newBranch,
+    branch: repo.branch,
+    baseRef: repo.baseRef,
+    meta: { label: repo.path, isGit: true, allowInPlace: true, allowWorktree: true, branches, ...(currentBranch ? { defaultBranch: currentBranch } : {}) },
+  };
+  const apply = (next: DraftSource) =>
+    onChange(
+      setRepoSetup(draft, repo.path, {
+        path: repo.path,
+        mode: next.mode,
+        branchMode: next.branchMode,
+        newBranch: next.newBranch,
+        branch: next.branch,
+        baseRef: next.baseRef,
+      }),
+    );
+  const words = repo.branchMode === 'new' ? 'on new branch' : repo.branchMode === 'existing' ? 'on' : 'stays on';
+  const ends = effectiveRepoBranch(repo, chatName);
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-small text-fg-3" data-testid="source-repo-row" data-repo={repo.path}>
+      <Icon concept="branch" size={14} className="shrink-0" />
+      <span className="mr-1 shrink-0 font-mono text-ui text-fg" title={dir}>
+        {repo.path}
+      </span>
+      <ModeToken draft={asSource} disabled={disabled} onChange={apply} />
+      <span>{words}</span>
+      <BranchToken draft={asSource} chatName={chatName} disabled={disabled} onChange={apply} facts={facts} />
+      {repo.branchMode === 'new' && (repo.baseRef.trim() || currentBranch) ? (
+        <>
+          <span>from</span>
+          <span className="font-mono text-fg-2">{repo.baseRef.trim() || currentBranch}</span>
+        </>
+      ) : null}
+      <DirtyMark dirty={facts.dirty && repo.mode === 'in-place' && !!ends && ends !== currentBranch} />
     </div>
   );
 }
@@ -870,13 +1117,15 @@ const MODE_DESCRIPTION: Record<SourceMode, string> = {
   'in-place': 'Edits your checkout directly, on the branch it is on.',
 };
 
+/** A plain folder's separate copy is no worktree of its own: its repositories are. */
+function modeLabel(draft: DraftSource): string {
+  if (draft.mode === 'in-place') return 'In place';
+  return draft.meta.isGit ? 'Worktree' : 'Separate copy';
+}
+
 /** "Worktree ▾" — where the agent works, as a token in the source's sentence. */
 function ModeToken({ draft, disabled, onChange }: Pick<SourceRowProps, 'draft' | 'disabled' | 'onChange'>) {
-  const setMode = (mode: SourceMode) => {
-    // A worktree always lands on a branch of its own (see ModeControl).
-    const branchMode: BranchMode = mode === 'worktree' && draft.branchMode === 'current' ? 'new' : draft.branchMode;
-    onChange({ ...draft, mode, branchMode });
-  };
+  const setMode = (mode: SourceMode) => onChange(setSourceMode(draft, mode));
   const option = (mode: SourceMode, label: string, allowed: boolean, reason?: string) => (
     <Menu.RadioItem value={mode} disabled={!allowed} description={allowed ? MODE_DESCRIPTION[mode] : (reason ?? MODE_DESCRIPTION[mode])} descriptionFont="sans">
       {label}
@@ -886,12 +1135,12 @@ function ModeToken({ draft, disabled, onChange }: Pick<SourceRowProps, 'draft' |
     <Menu.Root>
       <Menu.Trigger
         disabled={disabled}
-        render={<Chip dropdown>{draft.mode === 'worktree' ? 'Worktree' : 'In place'}</Chip>}
-        aria-label={`Where the agent works: ${draft.mode === 'worktree' ? 'Worktree' : 'In place'}`}
+        render={<Chip dropdown>{modeLabel(draft)}</Chip>}
+        aria-label={`Where the agent works in ${draft.alias}: ${modeLabel(draft)}`}
       />
       <Menu.Popup className="w-80">
         <Menu.RadioGroup value={draft.mode} onValueChange={(v) => setMode(v as SourceMode)}>
-          {option('worktree', 'Worktree', draft.meta.allowWorktree, draft.meta.allowWorktreeReason)}
+          {option('worktree', draft.meta.isGit ? 'Worktree' : 'Separate copy', draft.meta.allowWorktree, draft.meta.allowWorktreeReason)}
           {option('in-place', 'In place', draft.meta.allowInPlace, draft.meta.allowInPlaceReason)}
         </Menu.RadioGroup>
       </Menu.Popup>
@@ -996,7 +1245,19 @@ function BranchToken({
 function SourceSentence(props: SourceRowProps & { facts: SourceFacts }) {
   const { draft, facts } = props;
   if (!draft.meta.isGit) {
-    return <p className="pl-6 text-small text-fg-3">In place · not a git repository, so the agent edits the folder itself</p>;
+    if (!draft.meta.allowWorktree) {
+      return <p className="pl-6 text-small text-fg-3">In place · not a git repository, so the agent edits the folder itself</p>;
+    }
+    return (
+      <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 pl-6 text-small text-fg-3" data-testid="source-setup">
+        <ModeToken {...props} />
+        <span>
+          {draft.mode === 'worktree'
+            ? '· its files are copied, your folder stays as it is'
+            : '· not a git repository itself, so the agent edits the folder directly'}
+        </span>
+      </div>
+    );
   }
   const words = draft.branchMode === 'new' ? 'on new branch' : draft.branchMode === 'existing' ? 'on' : 'stays on';
   const base = draft.baseRef.trim() || facts.currentBranch;
@@ -1021,8 +1282,9 @@ function SourceSentence(props: SourceRowProps & { facts: SourceFacts }) {
  * origin, its state, a ⋯ menu for the rare actions, then the sentence.
  */
 function SourceRow(props: SourceRowProps) {
-  const { draft, total, disabled, live, isPrimary, onChange, onRemove, onMakePrimary } = props;
+  const { draft, total, disabled, live, isPrimary, canMakePrimary = true, onChange, onRemove, onMakePrimary } = props;
   const facts = useSourceFacts(draft, props.projectId);
+  useRepoSync(draft, facts, onChange);
   const { nested } = facts;
   const origin = draft.meta.origin ?? draft.path;
   const [renaming, setRenaming] = useState(false);
@@ -1065,7 +1327,7 @@ function SourceRow(props: SourceRowProps) {
         <span className="flex-1" />
         {/* With one source it is the working directory by definition; the badge only tells several apart. */}
         {isPrimary && total > 1 ? <WorkingDirectoryBadge /> : null}
-        {nested.length > 0 && (
+        {nested.length > 0 && !draft.repos?.length && (
           <Tooltip content={`Nested repositories: ${nested.join(', ')}`}>
             <span className="shrink-0 text-small text-fg-3">
               {nested.length} nested {nested.length === 1 ? 'repo' : 'repos'}
@@ -1079,7 +1341,7 @@ function SourceRow(props: SourceRowProps) {
             <Menu.Item icon="edit" onClick={() => setRenaming(true)}>
               Rename…
             </Menu.Item>
-            {total > 1 && !isPrimary ? (
+            {total > 1 && !isPrimary && canMakePrimary ? (
               <Menu.Item icon="home" onClick={onMakePrimary}>
                 Make working directory
               </Menu.Item>
@@ -1094,6 +1356,7 @@ function SourceRow(props: SourceRowProps) {
       </div>
 
       <SourceSentence {...props} facts={facts} />
+      {draft.repos?.length ? <RepoList draft={draft} chatName={props.chatName} disabled={disabled} onChange={onChange} /> : null}
 
       {rebuilt && facts.dirty ? (
         <div className="ml-6 flex items-start gap-2 rounded-control bg-warn-bg px-2.5 py-1.5 text-small text-warn" data-testid="source-rebuild-dirty">
@@ -1107,7 +1370,7 @@ function SourceRow(props: SourceRowProps) {
 }
 
 /** The chat folder in the full list: ticked = kept (D-141). */
-function ChatFolderListRow({ draft, total, disabled, isPrimary, onRemove, onMakePrimary }: SourceRowProps) {
+function ChatFolderListRow({ draft, total, disabled, isPrimary, canMakePrimary = true, onRemove, onMakePrimary }: SourceRowProps) {
   const files = draft.meta.files ?? 0;
   return (
     <div className="flex h-row items-center gap-2.5 pr-2 pl-3" data-testid="source-chat-folder">
@@ -1120,7 +1383,7 @@ function ChatFolderListRow({ draft, total, disabled, isPrimary, onRemove, onMake
       <span className="flex-1" />
       {isPrimary && total > 1 ? <WorkingDirectoryBadge /> : null}
       <span className="shrink-0 text-small text-fg-3">In place</span>
-      {total > 1 && !isPrimary ? (
+      {total > 1 && !isPrimary && canMakePrimary ? (
         <Menu.Root>
           <Menu.Trigger render={<IconButton icon="more" size="sm" label="More for the chat folder" disabled={disabled} />} />
           <Menu.Popup align="end">

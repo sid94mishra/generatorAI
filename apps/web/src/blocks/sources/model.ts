@@ -13,7 +13,7 @@
 // where the real bugs live (aliases colliding, a default branch name that
 // does not match the placeholder the user was shown) — can be unit-tested.
 
-import { CHAT_FOLDER_ALIAS, type ChatSourceSpec, type WorkspaceMount } from '@generatorai/shared';
+import { CHAT_FOLDER_ALIAS, type ChatSourceSpec, type NestedRepoSpec, type WorkspaceMount } from '@generatorai/shared';
 import { CHAT_FOLDER_LABEL } from '@generatorai/client-core';
 
 /** The chat folder as a row of the picker (D-141): kept unless removed. */
@@ -74,6 +74,25 @@ export interface DraftMeta {
   error?: string;
   /** The chat folder only: how many files it holds (D-141). */
   files?: number;
+  /**
+   * The folder is inside this repository (not its root): linking it links the whole repository, the
+   * agent starting in the folder, and its changes are committed with the repository.
+   */
+  repoRoot?: string;
+}
+
+/**
+ * One repository inside a source (`acme/api`): set up on its own. A worktree needs the source itself to
+ * be a separate copy, which choosing one turns on (`setRepoSetup`).
+ */
+export interface DraftRepo {
+  /** `/`-separated, relative to the source. */
+  path: string;
+  mode: SourceMode;
+  branchMode: BranchMode;
+  newBranch: string;
+  branch: string;
+  baseRef: string;
 }
 
 /** One row of the picker. */
@@ -95,6 +114,87 @@ export interface DraftSource {
   /** What a new branch is cut from (branchMode `new`). */
   baseRef: string;
   meta: DraftMeta;
+  /** The repositories inside it and how each is set up (absent: none, or not known yet). */
+  repos?: DraftRepo[];
+}
+
+/** A repository inside a source, as it starts: as it is (in place), or a worktree on a new branch in a separate copy. */
+export function draftRepo(path: string, separateCopy: boolean): DraftRepo {
+  return separateCopy
+    ? { path, mode: 'worktree', branchMode: 'new', newBranch: '', branch: '', baseRef: '' }
+    : { path, mode: 'in-place', branchMode: 'current', newBranch: '', branch: '', baseRef: '' };
+}
+
+/** The draft with its repositories set to `paths` (kept ones keep their setup). */
+export function withRepos(draft: DraftSource, paths: readonly string[]): DraftSource {
+  if (paths.length === 0) {
+    if (!draft.repos) return draft;
+    const rest = { ...draft };
+    delete rest.repos;
+    return rest;
+  }
+  const byPath = new Map((draft.repos ?? []).map((r) => [r.path, r]));
+  return { ...draft, repos: paths.map((p) => byPath.get(p) ?? draftRepo(p, draft.mode === 'worktree')) };
+}
+
+/**
+ * Change how one repository inside a source is set up. A worktree makes the source a separate copy
+ * (in place there is nowhere to put it); the other repositories keep their setup — in place they stay
+ * the person's own checkouts, linked into the copy.
+ */
+export function setRepoSetup(draft: DraftSource, path: string, next: DraftRepo): DraftSource {
+  const repos = (draft.repos ?? []).map((r) => (r.path === path ? next : r));
+  if (next.mode === 'worktree' && draft.mode !== 'worktree') {
+    return { ...setSourceMode(draft, 'worktree'), repos };
+  }
+  return { ...draft, repos };
+}
+
+/**
+ * The source's own mode. Back to in place, its repositories can no longer be worktrees, so they go back
+ * to being as they are.
+ */
+export function setSourceMode(draft: DraftSource, mode: SourceMode): DraftSource {
+  // A worktree always lands on a branch of its own, so "leave it where it is" is not a coherent answer once the mode flips.
+  const branchMode: BranchMode = mode === 'worktree' && draft.meta.isGit && draft.branchMode === 'current' ? 'new' : draft.branchMode;
+  const repos = draft.repos?.map((r) => (mode === 'in-place' && r.mode === 'worktree' ? draftRepo(r.path, false) : r));
+  return { ...draft, mode, branchMode, ...(repos ? { repos } : {}) };
+}
+
+/** "Use what is there" for every repository, or a separate copy of each on a new branch. */
+export function setAllRepos(draft: DraftSource, preset: 'as-is' | 'separate'): DraftSource {
+  if (!draft.repos?.length) return draft;
+  if (preset === 'as-is') return { ...draft, repos: draft.repos.map((r) => draftRepo(r.path, false)) };
+  return { ...setSourceMode(draft, 'worktree'), repos: draft.repos.map((r) => draftRepo(r.path, true)) };
+}
+
+/** The branch a repository inside a source will end up on, or null for "its current one". */
+export function effectiveRepoBranch(repo: DraftRepo, chatName: string): string | null {
+  if (repo.branchMode === 'new') return repo.newBranch.trim() || defaultNewBranch(chatName);
+  if (repo.branchMode === 'existing') return repo.branch || null;
+  return null;
+}
+
+function repoToSpec(r: DraftRepo, chatName: string): NestedRepoSpec {
+  const out: NestedRepoSpec = { path: r.path, mode: r.mode };
+  if (r.branchMode === 'new') {
+    out.newBranch = r.newBranch.trim() || defaultNewBranch(chatName);
+    if (r.baseRef.trim()) out.baseRef = r.baseRef.trim();
+  } else if (r.branchMode === 'existing' && r.branch.trim()) {
+    out.branch = r.branch.trim();
+  }
+  return out;
+}
+
+function repoFromSpec(spec: NestedRepoSpec): DraftRepo {
+  return {
+    path: spec.path,
+    mode: spec.mode ?? 'in-place',
+    branchMode: spec.newBranch ? 'new' : spec.branch ? 'existing' : 'current',
+    newBranch: spec.newBranch ?? '',
+    branch: spec.branch ?? '',
+    baseRef: spec.baseRef ?? '',
+  };
 }
 
 const ALIAS_OK = /^[A-Za-z0-9._-]+$/;
@@ -172,9 +272,16 @@ export function draftsToSources(drafts: DraftSource[], chatName: string): ChatSo
     } else if (d.branchMode === 'existing' && d.branch.trim()) {
       common.branch = d.branch.trim();
     }
+    // A plain folder has no branch of its own: only its repositories do.
+    if (!d.meta.isGit) {
+      delete common.branch;
+      delete common.newBranch;
+      delete common.baseRef;
+    }
+    const repos = d.repos?.length ? { repos: d.repos.map((r) => repoToSpec(r, chatName)) } : {};
     return d.kind === 'codebase'
-      ? ({ kind: 'codebase', codebaseId: d.codebaseId ?? '', ...common } as ChatSourceSpec)
-      : ({ kind: 'folder', path: d.path ?? '', ...common } as ChatSourceSpec);
+      ? ({ kind: 'codebase', codebaseId: d.codebaseId ?? '', ...common, ...repos } as ChatSourceSpec)
+      : ({ kind: 'folder', path: d.path ?? '', ...common, ...repos } as ChatSourceSpec);
   });
 }
 
@@ -184,7 +291,8 @@ export function draftsToSources(drafts: DraftSource[], chatName: string): ChatSo
  * picker compares these to say so (D-166).
  */
 export function draftSetupKey(d: DraftSource): string {
-  return [d.alias, d.mode, d.branchMode, d.newBranch.trim(), d.branch, d.baseRef.trim()].join('\u0000');
+  const repos = (d.repos ?? []).map((r) => [r.path, r.mode, r.branchMode, r.newBranch.trim(), r.branch, r.baseRef.trim()].join('\u0002'));
+  return [d.alias, d.mode, d.branchMode, d.newBranch.trim(), d.branch, d.baseRef.trim(), ...repos].join('\u0000');
 }
 
 /** `frontend → worktree on generatorai/cart-fix from main` */
@@ -205,7 +313,11 @@ export function describeDraft(draft: DraftSource, chatName: string): string {
  */
 export function plainSetup(draft: DraftSource, chatName: string, currentBranch?: string | null): string {
   if (draft.kind === 'chat-folder') return 'The folder this chat made. It is kept.';
-  if (!draft.meta.isGit) return 'Edits this folder directly.';
+  if (!draft.meta.isGit) {
+    return draft.mode === 'worktree'
+      ? 'Works in a separate copy of this folder: its files are copied, and each repository inside is set up below. Your folder stays as it is.'
+      : 'Edits this folder directly.';
+  }
   const branch = effectiveBranch(draft, chatName);
   if (draft.mode === 'in-place') {
     if (draft.branchMode === 'current') {
@@ -248,6 +360,14 @@ export function validateDrafts(drafts: DraftSource[]): string | null {
     }
     if (d.branchMode === 'existing' && !d.branch.trim()) {
       return `Choose a branch for ${d.alias}, or leave it on its current one.`;
+    }
+    for (const r of d.repos ?? []) {
+      if (r.mode === 'worktree' && d.mode !== 'worktree') return `${r.path} can only be a separate copy when ${d.alias} is one too.`;
+      if (r.mode === 'worktree' && r.branchMode === 'current') return `Choose a branch for ${d.alias}/${r.path}: a separate copy works on a branch of its own.`;
+      if (r.branchMode === 'existing' && !r.branch.trim()) return `Choose a branch for ${d.alias}/${r.path}, or leave it on its current one.`;
+      if (r.branchMode === 'new' && r.newBranch.trim() && /[\s~^:?*[\]\\]/.test(r.newBranch.trim())) {
+        return `"${r.newBranch.trim()}" is not a valid branch name.`;
+      }
     }
   }
   return null;
@@ -309,6 +429,7 @@ export interface FolderGitInfo {
   branches: string[];
   dirty: boolean;
   nestedRepos: string[];
+  repoRoot?: string;
 }
 
 /** A local folder the user just picked. */
@@ -318,7 +439,10 @@ export function draftFromFolder(
   taken: Iterable<string>,
 ): DraftSource {
   const isGit = info?.isRepo === true;
-  return {
+  const nested = info?.nestedRepos ?? [];
+  // A plain folder that holds repositories can still be a separate copy: they become worktrees in it.
+  const canCopy = isGit || nested.length > 0;
+  const draft: DraftSource = {
     key: `folder:${path}`,
     kind: 'folder',
     path,
@@ -335,13 +459,15 @@ export function draftFromFolder(
       origin: path,
       isGit,
       allowInPlace: true,
-      allowWorktree: isGit,
-      ...(isGit ? {} : { allowWorktreeReason: 'This folder is not a git repository.' }),
+      allowWorktree: canCopy,
+      ...(canCopy ? {} : { allowWorktreeReason: 'This folder is not a git repository.' }),
       ...(info?.currentBranch ? { defaultBranch: info.currentBranch } : {}),
       branches: info?.branches ?? [],
       ...(info ? { dirty: info.dirty, nestedRepos: info.nestedRepos } : { loading: true }),
+      ...(info?.repoRoot ? { repoRoot: info.repoRoot } : {}),
     },
   };
+  return withRepos(draft, nested);
 }
 
 // ── Prefill (editing an existing chat) ──────────────────────────
@@ -441,9 +567,32 @@ export function draftsFromSpecs(
         ...(mount?.git?.branch ? { defaultBranch: mount.git.branch } : {}),
         ...(mount ? { dirty: mount.hasUncommittedChanges } : {}),
         ...(mount?.git?.nested ? { nestedRepos: mount.git.nested } : {}),
+        ...(spec.kind === 'folder' && mount?.workdir ? { repoRoot: mount.originPath } : {}),
       },
+      ...reposFromPlan(spec.repos, mount),
     };
   });
+}
+
+/**
+ * The repositories of a saved source: what the plan chose, then what the mount found (a repository that
+ * appeared later is as it was found — in place, on its branch).
+ */
+function reposFromPlan(specs: readonly NestedRepoSpec[] | undefined, mount: WorkspaceMount | undefined): { repos?: DraftRepo[] } {
+  const chosen = new Map((specs ?? []).map((r) => [r.path, repoFromSpec(r)]));
+  const paths = [...new Set([...(specs ?? []).map((r) => r.path), ...(mount?.git?.nested ?? [])])];
+  if (paths.length === 0) return {};
+  return {
+    repos: paths.map((p) => {
+      const known = chosen.get(p);
+      if (known) return known;
+      const state = mount?.git?.nestedState?.[p];
+      if (state?.mode === 'worktree' && state.branch) {
+        return { path: p, mode: 'worktree', branchMode: 'existing', newBranch: '', branch: state.branch, baseRef: '' };
+      }
+      return draftRepo(p, false);
+    }),
+  };
 }
 
 function draftFromMount(mount: WorkspaceMount, byId: Map<string, CodebaseLike>): DraftSource {

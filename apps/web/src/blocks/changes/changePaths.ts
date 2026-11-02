@@ -57,6 +57,28 @@ export function shouldPrefixAlias(mountCount: number): boolean {
   return mountCount > 1;
 }
 
+/** The fields of a workspace mount the naming layer reads. */
+interface MountLike {
+  alias: string;
+  path: string;
+  status?: string;
+  git?: { nested?: string[] } | undefined;
+}
+
+/**
+ * Every repository a chat's changes are named under: each mount, then each repository inside it
+ * (`acme/api`) — the Changes tab lists those as repositories of their own, so a file in one is
+ * `acme/api/src/x.ts` everywhere.
+ */
+export function repoRootsOf(mounts: readonly MountLike[]): MountRoot[] {
+  return mounts
+    .filter((m) => m.status !== 'removed')
+    .flatMap((m) => [
+      { alias: m.alias, path: m.path },
+      ...(m.git?.nested ?? []).map((rel) => ({ alias: `${m.alias}/${rel}`, path: joinPath(m.path, rel) })),
+    ]);
+}
+
 /**
  * `<alias>/<path>` or `<path>`, by the rule above. The workspace root
  * (alias `.`) is never prefixed.

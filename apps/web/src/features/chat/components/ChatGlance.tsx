@@ -54,8 +54,8 @@ export interface ChatGlanceProps {
 const RUNNING_TASKS = new Set(['spawned', 'running', 'needs_review']);
 const SECTION = 'gap-0.5 p-1.5';
 
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`;
+function plural(n: number, word: string, many = `${word}s`): string {
+  return `${n} ${n === 1 ? word : many}`;
 }
 
 /** The last two segments of a path, enough to recognise the folder. */
@@ -165,6 +165,7 @@ function WorkingFolder({ workspaceId }: { workspaceId: string | undefined }) {
     repo?.unborn ? 'no commits yet' : undefined,
     repo && !repo.isRepo ? 'not a git repository' : undefined,
     repo?.ahead ? `${plural(repo.ahead, 'commit')} not pushed` : undefined,
+    primary.git?.nested?.length ? `${plural(primary.git.nested.length, 'repository', 'repositories')} inside` : undefined,
     mounts.length > 1 ? `+${plural(mounts.length - 1, 'source')}` : undefined,
   ].filter(Boolean);
   return (
@@ -183,11 +184,20 @@ function ChangesLine({ workspaceId, onOpen }: { workspaceId: string | undefined;
   const summary = useWorkspaceChangeSummary(workspaceId, { base: 'head', head: 'working' });
   const stats = summary.data?.stats;
   if (!workspaceId || !stats) return null;
+  // Each repository is committed on its own, so say which ones have work.
+  const changed = (summary.data?.repos ?? []).filter((r) => r.stats.files > 0).map((r) => (r.alias === '.' ? 'workspace' : r.alias));
+  const where = changed.length > 1 ? ` in ${plural(changed.length, 'repository', 'repositories')}` : '';
+  const detail =
+    stats.files === 0
+      ? 'Everything is committed'
+      : changed.length > 1
+        ? `${changed.slice(0, 3).join(', ')}${changed.length > 3 ? ` +${changed.length - 3}` : ''} · each committed on its own`
+        : 'Review and commit in Changes';
   return (
     <SummaryLine
       icon="changes"
-      title={stats.files > 0 ? `${plural(stats.files, 'file')} changed` : 'No uncommitted changes'}
-      detail={stats.files > 0 ? 'Review and commit in Changes' : 'Everything is committed'}
+      title={stats.files > 0 ? `${plural(stats.files, 'file')} changed${where}` : 'No uncommitted changes'}
+      detail={detail}
       trailing={stats.additions > 0 || stats.deletions > 0 ? <DiffStat added={stats.additions} removed={stats.deletions} /> : null}
       onClick={onOpen}
       data-testid="chat-glance-changes"

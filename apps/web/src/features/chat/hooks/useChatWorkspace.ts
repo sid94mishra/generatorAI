@@ -15,7 +15,7 @@ import { usePrepareChatWorkspace, useWorkspaceInfo } from '@/hooks/sourceQueries
 import { usePageTitle } from '@/hooks/usePageTitle.js';
 import { useChatStore } from '@/stores/chatStore.js';
 import { useEditorTarget } from '@/stores/editorTargetStore.js';
-import type { PathRoot } from '@/blocks/changes/changePaths.js';
+import { repoRootsOf, type PathRoot } from '@/blocks/changes/changePaths.js';
 
 export function useChatWorkspace(chatId: string | undefined) {
   const { data: chat, isLoading: chatLoading, error: chatError } = useChat(chatId);
@@ -68,7 +68,7 @@ export function useChatWorkspace(chatId: string | undefined) {
   const legacyFolders = chat?.gitRepositories;
   const pathRoots = useMemo<PathRoot[]>(() => {
     const mounts = (workspaceMounts ?? []).filter((m) => m.status !== 'removed');
-    if (mounts.length > 0) return mounts.map((m) => ({ alias: m.alias, path: m.path }));
+    if (mounts.length > 0) return repoRootsOf(mounts);
     return (legacyFolders ?? []).map((r) => r.url).filter((u): u is string => !!u);
   }, [workspaceMounts, legacyFolders]);
 
