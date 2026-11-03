@@ -521,11 +521,13 @@ export class ServerManager extends EventEmitter {
       // Data paths default to the per-user app-data dir, but honour an
       // explicit override from the launch environment so a developer can
       // point the desktop shell at the repo/dev database (e.g. to inspect
-      // existing chats/workflows) without a rebuild.
+      // existing chats/workflows) without a rebuild. The templates (system skills and prompts) likewise, so a
+      // skill can be revised in the repo and tried in the installed app (`open --env TEMPLATES_DIR=…`) — a
+      // rebuild resets the macOS permissions computer use needs.
       DB_PATH: process.env['DB_PATH'] ?? this.paths.dbPath,
       WORKSPACES_DIR: process.env['WORKSPACES_DIR'] ?? this.paths.workspacesDir,
       ARTIFACTS_DIR: process.env['ARTIFACTS_DIR'] ?? this.paths.artifactsDir,
-      TEMPLATES_DIR: this.paths.templatesDir,
+      TEMPLATES_DIR: process.env['TEMPLATES_DIR'] ?? this.paths.templatesDir,
       // Deterministic web-dist resolution regardless of packaged layout.
       WEB_DIST_DIR: this.paths.webDist,
       CORS_ORIGINS: origins,
