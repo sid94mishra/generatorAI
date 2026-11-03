@@ -245,11 +245,13 @@ function promptLine(turn: ChatTurn): string {
 }
 
 /**
- * A provider's background commands (a dev server, a watcher) end with its session: after a move the history
- * still says "the server is running on 4817" when nothing listens there.
+ * Background commands the previous session started (a dev server, a watcher) either ended with it — the history
+ * still says "the server is running on 4817" when nothing listens there — or outlived it as a process this
+ * session did not start and may not be allowed to stop (Codex's sandbox could not restart Claude's server).
  */
 const PROCESSES_NOTE =
-  'Commands started in the background earlier (servers, watchers) are not running in this session: check, and start again what you need.';
+  'Commands started in the background earlier (servers, watchers) may have stopped with the previous session, or still run outside yours ' +
+  "where you may not be able to stop them: check before relying on them, and say so if one is in your way.";
 
 export interface ConversationSeedOptions {
   /**
