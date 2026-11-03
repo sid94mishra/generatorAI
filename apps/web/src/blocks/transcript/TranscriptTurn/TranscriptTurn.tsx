@@ -22,7 +22,7 @@ import {
   type TranscriptTurn as TurnModel,
 } from '@generatorai/client-core';
 import type { ChatMessage } from '@generatorai/shared';
-import { TRANSCRIPT_COPY, TURN_ROLE_LABELS } from '@generatorai/shared/ui-contract';
+import { harnessProviderLabel, TRANSCRIPT_COPY, TURN_ROLE_LABELS } from '@generatorai/shared/ui-contract';
 import type { IconConcept } from '@generatorai/design-tokens';
 import { cn } from '@/ui/lib/cn.js';
 import { Callout } from '@/ui/primitives/Callout/Callout.js';
@@ -108,6 +108,9 @@ function AgentResponse({
   // recorded before it was kept, or when the provider reported no usage).
   const turnModel = message.metadata?.model;
   const turnProvider = message.metadata?.provider;
+  // With no named agent the provider answers as itself: a chat moved between providers names each turn's own
+  // ("Claude Code · Sonnet 5.5"), not the one it runs on now ("Codex · Sonnet 5.5").
+  const headerName = harnessProvider && turnProvider ? harnessProviderLabel(turnProvider) : agentName;
   const modelName = useModelLabel(turnModel);
   const partial = message.metadata?.partial === true;
   const folded = collapsed && !summary;
@@ -128,7 +131,7 @@ function AgentResponse({
     >
       {isTool ? null : (
         <AgentTurnHeader
-          agentName={agentName}
+          agentName={headerName}
           avatar={avatar}
           avatarProvider={harnessProvider ? (turnProvider ?? harnessProvider) : undefined}
           model={turnModel ? (modelName ?? turnModel) : undefined}
