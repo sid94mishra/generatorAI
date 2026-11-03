@@ -890,3 +890,32 @@ describe('GitClient.importTree', () => {
     expect(await git.importTree(from, to, 'f'.repeat(40))).toBe(false);
   });
 });
+
+describe('GitClient.writeTreeFromWorktree — repositories inside', () => {
+  it('leaves out a repository inside and a linked checkout, also when an earlier snapshot recorded them', async () => {
+    const folder = path.join(tmpRoot, 'folder');
+    const inner = path.join(folder, 'api');
+    const elsewhere = path.join(tmpRoot, 'web');
+    for (const dir of [inner, elsewhere]) {
+      await fs.mkdir(dir, { recursive: true });
+      await runGit(dir, ['init', '-q', '-b', 'main']);
+      await writeFile(dir, 'README.md', 'hi\n');
+    }
+    await writeFile(folder, 'NOTES.md', 'notes\n');
+    await fs.symlink(elsewhere, path.join(folder, 'web'), process.platform === 'win32' ? 'junction' : 'dir');
+    const store = path.join(tmpRoot, 'shadow.git');
+    expect(await git.initShadowRepo(store, folder)).toBe(true);
+    const shadow = git.withGitDir(store);
+    const index = path.join(store, 'snap.index');
+    // An index an older snapshot left with the link in it.
+    const env = { ...process.env, GIT_DIR: store, GIT_WORK_TREE: folder, GIT_INDEX_FILE: index };
+    await writeFile(tmpRoot, 'link.txt', elsewhere);
+    const blob = (await execFileAsync('git', ['hash-object', '-w', path.join(tmpRoot, 'link.txt')], { cwd: folder, env })).stdout.trim();
+    await execFileAsync('git', ['update-index', '--add', '--cacheinfo', `120000,${blob},web`], { cwd: folder, env });
+
+    const tree = await shadow.writeTreeFromWorktree(folder, index);
+    expect(tree).toBeTruthy();
+    const names = await runGit(tmpRoot, [`--git-dir=${store}`, 'ls-tree', '-r', '--name-only', tree!]);
+    expect(names.trim().split('\n')).toEqual(['NOTES.md']);
+  });
+});

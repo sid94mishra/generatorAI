@@ -365,10 +365,19 @@ export class CheckpointService {
       }
     }
 
+    // Never into a repository inside this one (it has snapshots of its own) or through a linked folder: a
+    // separate copy links the person's checkouts in, and a write there would land in their files.
+    const nested = await this.store.gitFor(repoDir).nestedRepos(repoDir).catch(() => [] as string[]);
+    const outside = async (rel: string): Promise<string | null> => {
+      const posix = rel.replace(/\\/g, '/');
+      if (nested.some((n) => posix === n || posix.startsWith(`${n}/`))) return 'inside a repository of its own';
+      return linkOnTheWay(repoDir, posix);
+    };
+
     const safeDelete: string[] = [];
     for (const rel of toDelete) {
       const full = path.join(repoDir, rel);
-      const verdict = await classifyPath(full);
+      const verdict = (await outside(rel)) ?? (await classifyPath(full));
       if (verdict) {
         skipped.push({ path: rel, reason: verdict });
         continue;
@@ -379,7 +388,7 @@ export class CheckpointService {
     const safeRestore: string[] = [];
     for (const rel of toRestore) {
       const full = path.join(repoDir, rel);
-      const verdict = await classifyPath(full);
+      const verdict = (await outside(rel)) ?? (await classifyPath(full));
       if (verdict) {
         skipped.push({ path: rel, reason: verdict });
         continue;
@@ -527,6 +536,19 @@ export class CheckpointService {
 export const EMPTY_TREE_SHA = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 /** Returns a skip reason when the path must not be written through. */
+/** 'inside a linked folder' when a folder on the way from `repoDir` to `rel` is a link. */
+async function linkOnTheWay(repoDir: string, rel: string): Promise<string | null> {
+  const parts = rel.split('/').slice(0, -1);
+  let at = repoDir;
+  for (const part of parts) {
+    at = path.join(at, part);
+    const st = await fs.lstat(at).catch(() => null);
+    if (!st) return null;
+    if (st.isSymbolicLink()) return 'inside a linked folder';
+  }
+  return null;
+}
+
 async function classifyPath(fullPath: string): Promise<string | null> {
   try {
     const stat = await fs.lstat(fullPath);

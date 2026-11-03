@@ -1212,7 +1212,13 @@ export class GitClient implements IGitClient {
       // `add -A` against the throwaway index picks up creations, edits and
       // deletions while still honouring .gitignore. With `honourEol` the
       // repo's own autocrlf applies, so the tree is comparable to a commit.
-      const addArgs = ['add', '-A', '--', '.'];
+      // The repositories inside (a separate copy's worktrees, the person's
+      // checkouts linked into it) are left out: each has a snapshot of its
+      // own, and recorded here as a link or an embedded repository a restore
+      // of this tree would put the link back over a worktree — and the next
+      // write would land in the person's checkout.
+      const nested = await this.nestedRepos(repoDir);
+      const addArgs = ['add', '-A', '--', '.', ...nested.map((p) => `:(exclude,literal)${p}`)];
       const add = await this.runner.run('git', opts?.honourEol ? addArgs : this.snapshotArgs(addArgs), {
         cwd: repoDir,
         timeout: 120_000,
@@ -1221,6 +1227,15 @@ export class GitClient implements IGitClient {
       if (add.exitCode !== 0) {
         this.logger.warn(`[Git] snapshot add failed in ${repoDir}: ${add.stderr}`);
         return null;
+      }
+      if (nested.length) {
+        // The index is reused between snapshots: an entry an earlier one recorded for them goes.
+        const rmArgs = ['rm', '-r', '-q', '--cached', '--ignore-unmatch', '--', ...nested.map((p) => `:(literal)${p}`)];
+        await this.runner.run('git', opts?.honourEol ? rmArgs : this.snapshotArgs(rmArgs), {
+          cwd: repoDir,
+          timeout: 60_000,
+          env: this.snapshotEnv(indexFile),
+        });
       }
 
       // Files a sparse checkout keeps off disk are not deleted: every snapshot (checkpoints, the session start,

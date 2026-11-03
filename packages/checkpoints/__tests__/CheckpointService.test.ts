@@ -345,6 +345,42 @@ describe('CheckpointService (real git)', () => {
     await expect(fs.access(path.join(repoDir, 'added.txt'))).rejects.toThrow();
   });
 
+  it('never restores into a repository inside the folder or through a linked checkout, even from an old tree that recorded them', async () => {
+    const g = (cwd: string, ...args: string[]) =>
+      realRunner.run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, timeout: 15_000 });
+    // A separate copy: loose files, a worktree-like repository inside, and the person's checkout linked in.
+    const outside = path.join(tmpRoot, 'web');
+    await fs.mkdir(path.join(outside, 'forky'), { recursive: true });
+    await g(outside, 'init', '-q');
+    await fs.writeFile(path.join(outside, 'forky', 'two.md'), 'two\n');
+    await fs.mkdir(path.join(repoDir, 'api'), { recursive: true });
+    await g(path.join(repoDir, 'api'), 'init', '-q');
+    await fs.writeFile(path.join(repoDir, 'api', 'new.md'), 'new\n');
+    await fs.writeFile(path.join(repoDir, 'NOTES.md'), 'one\ntwo\n');
+    await fs.symlink(outside, path.join(repoDir, 'web'), process.platform === 'win32' ? 'junction' : 'dir');
+    const shadow = path.join(tmpRoot, 'shadow.git');
+    expect(await git.initShadowRepo(shadow, repoDir)).toBe(true);
+    service.registerShadow(repoDir, shadow);
+
+    // The tree an older snapshot wrote: NOTES.md as it was, the link as a link, api's files as plain entries.
+    const env = { GIT_DIR: shadow, GIT_INDEX_FILE: path.join(tmpRoot, 'old.index') };
+    const run = (args: string[]) => realRunner.run('git', args, { cwd: tmpRoot, timeout: 15_000, env });
+    await fs.writeFile(path.join(tmpRoot, 'notes-v1'), 'one\n');
+    await fs.writeFile(path.join(tmpRoot, 'link'), '/elsewhere');
+    const notes = (await run(['hash-object', '-w', path.join(tmpRoot, 'notes-v1')])).stdout.trim();
+    const link = (await run(['hash-object', '-w', path.join(tmpRoot, 'link')])).stdout.trim();
+    await run(['update-index', '--add', '--cacheinfo', `100644,${notes},NOTES.md`]);
+    await run(['update-index', '--add', '--cacheinfo', `120000,${link},web`]);
+    const tree = (await run(['write-tree'])).stdout.trim();
+
+    const result = await service.restoreFromRevision(WORKSPACE_ID, 'copy', repoDir, tree);
+    expect(await fs.readFile(path.join(repoDir, 'NOTES.md'), 'utf8')).toBe('one\n');
+    expect(await fs.readFile(path.join(repoDir, 'api', 'new.md'), 'utf8')).toBe('new\n');
+    expect((await fs.lstat(path.join(repoDir, 'web'))).isSymbolicLink()).toBe(true);
+    expect(await fs.readFile(path.join(outside, 'forky', 'two.md'), 'utf8')).toBe('two\n');
+    expect(result.restoredPaths).toEqual(['NOTES.md']);
+  });
+
   it('round-trips line endings byte-exactly (no autocrlf rewriting)', async () => {
     // Regression: with the user's global `core.autocrlf=true` (the Windows
     // default), `add` normalises CRLF→LF and `checkout-index` re-expands
