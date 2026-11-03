@@ -141,3 +141,38 @@ describe('ChatManagementService.deleteChat (P0-d)', () => {
     warn.mockRestore();
   });
 });
+
+describe('ChatManagementService.deleteChat — provider sessions', () => {
+  it('deletes the session the chat runs on and every session it left on another provider', async () => {
+    const chat = { id: 'chat-1', name: 't', sessionId: 'sess-1', tags: [], status: 'active' } as unknown as Chat;
+    const session = { id: 'sess-1', conversationId: 'conv-1', providerSessionId: 'claude-current' } as unknown as Session;
+    let owner: string | undefined = 'claude-agent';
+    const deleted: Array<[string, string | undefined]> = [];
+    const harness = {
+      abortConversation: async () => {},
+      // The router forgets the conversation once it is deleted.
+      deleteConversation: async () => void (owner = undefined),
+      conversationHarness: () => owner ?? 'copilot',
+      deleteProviderSession: async (id: string, type?: string) => void deleted.push([id, type]),
+    };
+    const messages = [
+      { id: 'm1', role: 'assistant', metadata: { leftProviderSession: { harnessType: 'claude-agent', providerSessionId: 'claude-current' } } },
+      { id: 'm2', role: 'assistant', metadata: { leftProviderSession: { harnessType: 'codex', providerSessionId: 'codex-thread' } } },
+    ];
+    const service = new ChatManagementService(
+      { getById: async () => chat, delete: async () => {}, listSideChats: async () => [] } as never,
+      { getById: async () => session, delete: async () => {} } as never,
+      { deleteBySession: async () => {}, getByChatId: async () => messages } as never,
+      harness as never,
+      { deleteSessionEvents: async () => {}, emitGlobal: async () => {} } as never,
+      {},
+    );
+
+    await service.deleteChat('chat-1');
+
+    expect(deleted).toEqual([
+      ['claude-current', 'claude-agent'],
+      ['codex-thread', 'codex'],
+    ]);
+  });
+});

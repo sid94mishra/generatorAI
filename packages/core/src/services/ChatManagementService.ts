@@ -3589,6 +3589,8 @@ export class ChatManagementService {
       }
     }
     const session = await this.sessionRepo.getById(chat.sessionId);
+    // Read before the conversation is deleted: the router forgets it then.
+    const owner = session.conversationId ? this.harness.conversationHarness?.(session.conversationId) : undefined;
 
     // Cleanup SDK
     if (session.conversationId) {
@@ -3603,9 +3605,11 @@ export class ChatManagementService {
         // May already be deleted
       }
     }
-    // The sessions the chat left on other providers when it moved (and could have gone back to) go with it.
+    // The sessions the chat left on other providers when it moved (and could have gone back to) go with it, and
+    // the one it runs on by its stored id too: after a restart no adapter holds the conversation to delete it by.
     if (this.harness.deleteProviderSession) {
       const left = new Map<string, string>();
+      if (session.providerSessionId && owner && owner !== 'faux') left.set(session.providerSessionId, owner);
       for (const m of await this.messageRepo.getByChatId(chatId).catch(() => [] as ChatMessage[])) {
         const mark = m.metadata?.leftProviderSession;
         if (mark) left.set(mark.providerSessionId, mark.harnessType);
