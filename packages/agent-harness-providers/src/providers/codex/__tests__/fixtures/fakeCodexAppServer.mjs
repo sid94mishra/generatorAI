@@ -680,8 +680,11 @@ rl.on('line', (line) => {
 
     case 'thread/turns/list': {
       turnsListCalls.push(params ?? null);
-      // Newest first, like the real server's default.
-      const all = ['turn_3', 'turn_2', 'turn_1'].map((tid) => ({ id: tid, items: [], status: 'completed' }));
+      // Newest first, like the real server's default. A forked thread numbers its copied turns afresh.
+      const forked = forkCalls.some((f) => f.threadId === params?.threadId);
+      const oldest = ['turn_1', 'turn_2', 'turn_3'].map((tid) => (forked ? `${params.threadId}_${tid}` : tid));
+      const ordered = params?.sortDirection === 'asc' ? oldest : [...oldest].reverse();
+      const all = ordered.map((tid) => ({ id: tid, items: [], status: 'completed' }));
       respond(id, { data: all.slice(0, params?.limit ?? all.length), nextCursor: null, backwardsCursor: null });
       return;
     }

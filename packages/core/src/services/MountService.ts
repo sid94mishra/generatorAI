@@ -49,7 +49,7 @@ import type { IProjectCodebaseRepository } from '../domain/ports/IProjectCodebas
 import type { IWorktreeRepository } from '../domain/ports/IWorktreeRepository.js';
 import type { EventBus } from '../events/EventBus.js';
 import { buildWorkspaceHint } from './chatSystemHints.js';
-import { copyFolderExcept, CopyTooLargeError, isLink, linkDir, nestedDir, unlinkNested } from './mountNested.js';
+import { copyFolderExcept, CopyTooLargeError, isLink, linkDir, mirrorFolder, nestedDir, unlinkNested } from './mountNested.js';
 
 /** A mount that has been validated but not yet materialised. */
 export interface PlannedMount {
@@ -1137,22 +1137,16 @@ export class MountService {
   //               it lives", and there is only one of it to edit.
 
   /**
-   * The sources a fork of `parentWorkspaceId` should be created with: the
-   * parent's own, with every worktree re-pointed at a NEW branch that starts
-   * from the commit the parent's worktree is on right now.
+   * The sources a fork (or an isolated orchestrator worker) of `parentWorkspaceId` is created with: the
+   * parent's own, with every repository given a copy of its own — a worktree on a NEW branch cut from the
+   * commit the parent's checkout of it is on right now, the repositories inside a folder included. The
+   * parent's uncommitted work is brought over afterwards by `seedFrom`.
+   *
+   * A plain folder the parent works in IN PLACE stays shared (it has no git to branch, and a copy would
+   * keep the fork's edits away from the person's folder for good); `sharedWithParent` lists them.
    */
-  async sourcesForFork(
-    parentWorkspaceId: string,
-    sources: ChatSourceSpec[],
-    opts: {
-      /**
-       * Also give an in-place git mount a worktree of its own (an isolated
-       * orchestrator worker): without it two parallel workers still edit the
-       * one folder. A plain folder has no git to cut a worktree from and stays shared.
-       */
-      isolateInPlace?: boolean;
-    } = {},
-  ): Promise<ChatSourceSpec[]> {
+  async sourcesForFork(parentWorkspaceId: string, sources: ChatSourceSpec[]): Promise<ChatSourceSpec[]> {
+    const git = this.deps.git;
     const mounts = await this.list(parentWorkspaceId);
     const out: ChatSourceSpec[] = [];
     for (const spec of sources) {
@@ -1160,40 +1154,73 @@ export class MountService {
         out.push(spec);
         continue;
       }
-      const mount = mounts.find((m) =>
-        spec.kind === 'codebase'
-          ? m.codebaseId === spec.codebaseId || (!!spec.alias && m.alias === spec.alias)
-          : (!!m.originPath && path.resolve(m.originPath) === path.resolve(spec.path)) ||
-            (!!spec.alias && m.alias === spec.alias),
-      );
-      const cut = mount?.mode === 'worktree' || (opts.isolateInPlace === true && mount?.mode === 'in-place');
-      if (!mount || !cut || !mount.git?.isRepo) {
+      const mount = mounts.find((m) => sourceIsMount(spec, m));
+      const rootIsRepo = !!mount?.git?.isRepo;
+      if (!mount || (mount.mode === 'in-place' && !rootIsRepo) || (mount.mode !== 'in-place' && mount.mode !== 'worktree')) {
         out.push(spec);
         continue;
       }
-      const head = await this.deps.git.revParse(mount.path, 'HEAD').catch(() => null);
-      // `branch` / `newBranch` dropped on purpose: the parent holds its branch
-      // (a branch lives in one worktree), and the default name is derived from
-      // the fork's own title.
-      const { branch: _branch, newBranch: _newBranch, baseRef: _baseRef, ...rest } = spec;
+      const head = rootIsRepo ? await git.revParse(mount.path, 'HEAD').catch(() => null) : null;
+      // Repositories inside: each a worktree from where the parent's checkout of it is. Only those the
+      // person's folder has (one the parent's agent created exists only in the parent's copy, and is
+      // copied whole by `seedFrom`).
+      const origin = mount.originPath ?? mount.path;
+      const atOrigin = new Set(await git.nestedRepos(origin).catch(() => [] as string[]));
+      const repos: NestedRepoSpec[] = [];
+      for (const rel of mount.git?.nested ?? []) {
+        if (!atOrigin.has(rel)) continue;
+        const nestedHead = await git.revParse(nestedDir(mount.path, rel), 'HEAD').catch(() => null);
+        repos.push({ path: rel, mode: 'worktree', ...(nestedHead ? { baseRef: nestedHead } : {}) });
+      }
+      // `branch` / `newBranch` dropped on purpose: the parent holds its branch (a branch lives in one
+      // worktree), and the default name is derived from the fork's own title.
+      const { branch: _branch, newBranch: _newBranch, baseRef: _baseRef, repos: _repos, ...rest } = spec;
       out.push({
         ...rest,
         mode: 'worktree',
         alias: mount.alias,
-        ...(head ? { baseRef: head } : mount.git.branch ? { baseRef: mount.git.branch } : {}),
+        ...(head ? { baseRef: head } : rootIsRepo && mount.git?.branch ? { baseRef: mount.git.branch } : {}),
+        ...(repos.length ? { repos } : {}),
       } as ChatSourceSpec);
     }
     return out;
   }
 
+  /** The aliases of the parent's mounts a fork created with `sourcesForFork` works in too (shared folders). */
+  async sharedWithParent(parentWorkspaceId: string, childWorkspaceId: string): Promise<string[]> {
+    const [parents, children] = await Promise.all([this.list(parentWorkspaceId), this.list(childWorkspaceId)]);
+    return children
+      .filter((c) => c.mode === 'in-place' && parents.some((p) => path.resolve(p.path) === path.resolve(c.path)))
+      .map((c) => c.alias);
+  }
+
   /**
-   * Make a freshly prepared fork workspace look like its parent's working
-   * tree. Best effort per file: one unreadable file must not cost the fork the
-   * rest. Returns how many paths were brought across.
+   * Make a freshly prepared fork workspace look like its parent's working tree: what each repository has
+   * uncommitted (its branch already carries what was committed), the files of a separate copy, the chat
+   * folder, and repositories the parent's agent created inside a copy. Best effort per file: one
+   * unreadable file must not cost the fork the rest. Returns how many paths were brought across.
    */
   async seedFrom(parentWorkspaceId: string, childWorkspaceId: string): Promise<number> {
     const [parents, children] = await Promise.all([this.list(parentWorkspaceId), this.list(childWorkspaceId)]);
     let copied = 0;
+    let wholeRepos = false;
+    const carry = async (from: string, to: string): Promise<void> => {
+      for (const entry of await this.deps.git.changedFilesSummary(from).catch(() => [])) {
+        const at = path.join(to, entry.path);
+        try {
+          if (entry.oldPath) await fs.rm(path.join(to, entry.oldPath), { force: true });
+          if (entry.code === 'D') {
+            await fs.rm(at, { force: true });
+          } else {
+            await fs.mkdir(path.dirname(at), { recursive: true });
+            await fs.copyFile(path.join(from, entry.path), at);
+          }
+          copied += 1;
+        } catch (err) {
+          this.deps.logger.warn(`[Mounts] fork: could not carry over ${entry.path}: ${String(err)}`);
+        }
+      }
+    };
     for (const child of children) {
       const parent = parents.find((m) => m.alias === child.alias);
       if (!parent || child.mode === 'in-place' || path.resolve(parent.path) === path.resolve(child.path)) continue;
@@ -1214,24 +1241,38 @@ export class MountService {
         continue;
       }
 
-      // Worktree: the branch already carries what was committed; bring over
-      // exactly what `git status` says differs from it.
-      for (const entry of await this.deps.git.changedFilesSummary(parent.path)) {
-        const to = path.join(child.path, entry.path);
+      const parentNested = parent.git?.nested ?? [];
+      const childNested = child.git?.nested ?? [];
+      if (child.git?.isRepo) {
+        await carry(parent.path, child.path);
+      } else {
+        // A separate copy of a plain folder: its files as the parent's copy has them.
         try {
-          if (entry.oldPath) await fs.rm(path.join(child.path, entry.oldPath), { force: true });
-          if (entry.code === 'D') {
-            await fs.rm(to, { force: true });
-          } else {
-            await fs.mkdir(path.dirname(to), { recursive: true });
-            await fs.copyFile(path.join(parent.path, entry.path), to);
-          }
-          copied += 1;
+          copied += await mirrorFolder(parent.path, child.path, [...new Set([...parentNested, ...childNested])]);
         } catch (err) {
-          this.deps.logger.warn(`[Mounts] fork: could not carry over ${entry.path}: ${String(err)}`);
+          this.deps.logger.warn(`[Mounts] fork: could not copy the files of ${parent.alias}: ${String(err)}`);
+        }
+      }
+      for (const rel of parentNested) {
+        const from = nestedDir(parent.path, rel);
+        const to = nestedDir(child.path, rel);
+        if (childNested.includes(rel)) {
+          if (child.git?.nestedState?.[rel]?.mode === 'worktree') await carry(from, to);
+        } else if (!(await pathExists(to))) {
+          // Created by the parent's agent inside its copy: the person's folder has no such repository to
+          // branch, so it comes across whole, history included.
+          try {
+            await fs.cp(from, to, { recursive: true, force: true, filter: (src) => path.basename(src) !== 'node_modules' });
+            copied += 1;
+            wholeRepos = true;
+          } catch (err) {
+            this.deps.logger.warn(`[Mounts] fork: could not copy ${rel} of ${parent.alias}: ${String(err)}`);
+          }
         }
       }
     }
+    // Tracked from now on, like a repository the fork's own agent created.
+    if (wholeRepos) await this.rescanNested(childWorkspaceId);
     return copied;
   }
 
@@ -1612,6 +1653,15 @@ function sanitizeAlias(raw: string): string {
 }
 
 /** What decides that a kept mount is the same directory: its alias, mode, path and origin. */
+/** Whether the mount was prepared from `spec` (a folder picked inside a repository is that repository, started in the folder). */
+function sourceIsMount(spec: Exclude<ChatSourceSpec, { kind: 'chat-folder' }>, m: WorkspaceMount): boolean {
+  if (spec.alias && m.alias === spec.alias) return true;
+  if (spec.kind === 'codebase') return m.codebaseId === spec.codebaseId;
+  if (!m.originPath) return false;
+  const picked = path.resolve(spec.path);
+  return path.resolve(m.originPath) === picked || (!!m.workdir && path.resolve(m.originPath, m.workdir) === picked);
+}
+
 function mountKey(m: { originPath?: string; mode: string; path: string; alias: string }): string {
   return `${m.alias}\u0000${m.mode}\u0000${path.resolve(m.path)}\u0000${m.originPath ? path.resolve(m.originPath) : ''}`;
 }

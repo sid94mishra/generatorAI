@@ -20,7 +20,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router';
-import { chatActivity, resolveMapping, type Chat, type SideChatMode, type StreamStatus } from '@generatorai/shared';
+import { chatActivity, resolveMapping, type Chat, type SideChatMode, type StreamStatus, type WorkspaceMount } from '@generatorai/shared';
 import { displayChatTitle } from '@generatorai/shared/ui-contract';
 import { describeMount } from '@generatorai/client-core';
 import { useArchiveChat, useChat, useRenameChat } from '@/hooks/queries.js';
@@ -64,8 +64,19 @@ export interface ChatHeaderProps {
   };
 }
 
+/**
+ * What a fork shares: each repository is its own copy on its own branch, but a plain folder worked on in
+ * place (no git to branch) is the same folder the chat it came from edits.
+ */
+function forkFilesNote(mounts: readonly WorkspaceMount[] | undefined): string {
+  const inPlace = (mounts ?? []).filter((m) => m.status !== 'removed' && m.mode === 'in-place').map((m) => m.alias);
+  if (inPlace.length === 0) return 'The fork has its own copy of the files, on its own branch.';
+  const names = inPlace.join(', ');
+  return `Each repository has its own copy, on its own branch; ${names} ${inPlace.length === 1 ? 'is a folder' : 'are folders'} without git, so the fork and the chat it came from edit the same files there.`;
+}
+
 /** "Forked from <parent>" — where a branched conversation came from. */
-function ForkProvenance({ parentChatId }: { parentChatId: string }) {
+function ForkProvenance({ parentChatId, mounts }: { parentChatId: string; mounts: readonly WorkspaceMount[] | undefined }) {
   const navigate = useNavigate();
   // The parent's name is fetched lazily (only on a fork) and falls back to a
   // neutral label rather than an id: a chat the user can no longer read is
@@ -78,7 +89,7 @@ function ForkProvenance({ parentChatId }: { parentChatId: string }) {
       icon="branch"
       data-testid="fork-provenance"
       onClick={() => navigate(`/chats/${parentChatId}`)}
-      title="Open the chat this one branched from. The fork has its own copy of the files, on its own branch."
+      title={`Open the chat this one branched from. ${forkFilesNote(mounts)}`}
       className="max-w-60 min-w-0 text-fg-3"
     >
       <span className="truncate">{parent?.name ? `Forked from ${parent.name}` : 'Forked chat'}</span>
@@ -218,7 +229,7 @@ export function ChatHeader({ chat, streamStatus, awaitingUser, dockOpen, onToggl
         }
         meta={
           <>
-            {chat.forkedFromChatId ? <ForkProvenance parentChatId={chat.forkedFromChatId} /> : null}
+            {chat.forkedFromChatId ? <ForkProvenance parentChatId={chat.forkedFromChatId} mounts={workspaceInfo?.mounts} /> : null}
             {branch && !narrow ? (
               <Chip mono size="sm" icon="branch" className="max-w-60" title={branch}>
                 <span className="truncate">{branch}</span>

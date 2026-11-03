@@ -98,3 +98,46 @@ export async function copyFolderExcept(src: string, dest: string, exclude: reado
   await walk('');
   return files;
 }
+
+/**
+ * Make `dest` hold what `src` holds, as `copyFolderExcept` takes it (the same skips, the repositories at
+ * `exclude` left alone on both sides): every file copied over, anything `src` no longer has removed. A
+ * fork of a chat that works in a separate copy starts from the parent's copy this way. Returns the
+ * number of files written or removed.
+ */
+export async function mirrorFolder(src: string, dest: string, exclude: readonly string[]): Promise<number> {
+  const skip = new Set(exclude);
+  let changed = 0;
+  const list = (dir: string): Promise<Dirent[]> => fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+  const walk = async (rel: string): Promise<void> => {
+    const from = rel ? nestedDir(src, rel) : src;
+    const to = rel ? nestedDir(dest, rel) : dest;
+    const [have, had] = await Promise.all([list(from), list(to)]);
+    const kept = (name: string) => !COPY_SKIP.has(name) && !skip.has(rel ? `${rel}/${name}` : name);
+    const kind = (e: Dirent) => (e.isSymbolicLink() ? 'link' : e.isDirectory() ? 'dir' : e.isFile() ? 'file' : 'other');
+    const wanted = new Map(have.filter((e) => kept(e.name)).map((e) => [e.name, kind(e)] as const));
+    for (const e of had) {
+      if (!kept(e.name) || wanted.get(e.name) === kind(e)) continue;
+      await fs.rm(path.join(to, e.name), { recursive: true, force: true });
+      changed += 1;
+    }
+    await fs.mkdir(to, { recursive: true });
+    for (const e of have) {
+      if (!kept(e.name)) continue;
+      const child = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isSymbolicLink()) {
+        const target = await fs.readlink(path.join(from, e.name)).catch(() => null);
+        if (!target) continue;
+        await fs.rm(path.join(to, e.name), { force: true });
+        await fs.symlink(target, path.join(to, e.name)).catch(() => undefined);
+      } else if (e.isDirectory()) {
+        await walk(child);
+      } else if (e.isFile()) {
+        await fs.copyFile(path.join(from, e.name), path.join(to, e.name));
+        changed += 1;
+      }
+    }
+  };
+  await walk('');
+  return changed;
+}

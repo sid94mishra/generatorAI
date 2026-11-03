@@ -33,6 +33,9 @@ class ScriptedProvider {
   readonly destroyed: string[] = [];
   /** The next turn fails the way a provider does: error, then idle. */
   failNext = false;
+  /** Sessions stay on disk after the conversation is retired (Claude's session files, Codex threads). */
+  keepsSessions = false;
+  readonly issued = new Set<string>();
   private readonly live = new Map<string, string>();
   private readonly handlers = new Map<string, Set<Handler>>();
   private seq = 0;
@@ -46,8 +49,13 @@ class ScriptedProvider {
     if (p.resumeProviderSessionId && !p.resumeProviderSessionId.startsWith(`${this.type}-`)) {
       throw new Error(`No conversation found with session ID: ${p.resumeProviderSessionId}`);
     }
-    this.live.set(id, p.resumeProviderSessionId ?? `${this.type}-session-${++this.seq}`);
+    const session = p.resumeProviderSessionId ?? `${this.type}-session-${++this.seq}`;
+    this.issued.add(session);
+    this.live.set(id, session);
     return id;
+  }
+  async providerSessionExists(session: string): Promise<boolean> {
+    return this.keepsSessions && this.issued.has(session);
   }
   async resumeConversation(id: string, p?: CreateConversationParams): Promise<void> {
     if (!this.live.has(id)) await this.createConversation({ ...p, conversationId: id } as CreateConversationParams);
@@ -127,6 +135,10 @@ function memoryRepos() {
     create: async (m: ChatMessage) => (messages.push({ ...m }), { ...m }),
     getByChatId: async (chatId: string) => messages.filter((m) => m.chatId === chatId),
     getBySessionId: async (sid: string) => messages.filter((m) => m.sessionId === sid),
+    updateMetadata: async (id: string, metadata: ChatMessage['metadata']) => {
+      const m = messages.find((x) => x.id === id);
+      if (m) m.metadata = metadata;
+    },
   } as unknown as IChatMessageRepository;
   return { chatRepo, sessionRepo, messageRepo, messages };
 }
@@ -198,6 +210,45 @@ describe('one chat moved between providers', () => {
       'claude-sonnet-5-5/claude-agent',
       'gpt-5.6-terra/codex',
     ]);
+  });
+
+  it('moving back resumes the session the chat left on that provider, which hears only what was said since', async () => {
+    codex.keepsSessions = true;
+    claude.keepsSessions = true;
+    const chat = await service.createChat({ name: 'round trip', model: 'gpt-5.6-terra', harnessConfig: { harnessType: 'codex' } } as never);
+    await turn(chat.id, 'Add formatDuration.');
+    const codexSession = [...codex.issued][0]!;
+
+    await pick(chat.id, 'claude-sonnet-5-5', 'claude-agent');
+    await turn(chat.id, 'Review what Codex just did.');
+    expect(claude.created.at(-1)?.resumeProviderSessionId).toBeUndefined();
+    expect(claude.prompts.at(-1)).toContain('Added formatDuration (ms).');
+    const claudeSession = [...claude.issued][0]!;
+
+    // Back to Codex: its own session again — it remembers its turn exactly, and is told only about Claude's.
+    await pick(chat.id, 'gpt-5.6-terra', 'codex');
+    await turn(chat.id, 'Summarise the chat.');
+    expect(codex.created.at(-1)?.resumeProviderSessionId).toBe(codexSession);
+    const back = codex.prompts.at(-1)!;
+    expect(back).toContain('[While you were away');
+    expect(back).toContain('Claude: reviewed, fixed the NaN case.');
+    expect(back).not.toContain('Added formatDuration (ms).');
+    expect(back).toContain('Summarise the chat.');
+
+    // And back to Claude the same way.
+    await pick(chat.id, 'claude-sonnet-5-5', 'claude-agent');
+    await turn(chat.id, 'One more check.');
+    expect(claude.created.at(-1)?.resumeProviderSessionId).toBe(claudeSession);
+    expect(claude.prompts.at(-1)).toContain('Summarise the chat.');
+    expect(claude.prompts.at(-1)).not.toContain('Added formatDuration (ms).');
+
+    // A session the provider no longer has: a fresh one, with the whole history.
+    codex.keepsSessions = false;
+    await pick(chat.id, 'gpt-5.6-terra', 'codex');
+    await turn(chat.id, 'Last one.');
+    expect(codex.created.at(-1)?.resumeProviderSessionId).toBeUndefined();
+    expect(codex.prompts.at(-1)).toContain('[Conversation history');
+    expect(codex.prompts.at(-1)).toContain('Added formatDuration (ms).');
   });
 
   it('a switched turn that fails ends the turn and keeps the history for the retry (E-8, E-10)', async () => {

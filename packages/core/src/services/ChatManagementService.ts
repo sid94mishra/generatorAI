@@ -136,6 +136,8 @@ export interface ForkChatResult {
   chat: Chat;
   turnId?: string;
   conversation: 'native' | 'synthetic';
+  /** Aliases of the parent's folders the fork works in too: plain folders used in place have no git to branch. */
+  sharedSources?: string[];
 }
 
 export interface CancelTurnOptions {
@@ -1899,7 +1901,41 @@ export class ChatManagementService {
       },
     });
     await this.emitComposeWarnings(chat.sessionId, chat.id, composed.warnings);
-    return composed.params;
+    // The stored session id is the one the conversation's provider issued: a router must not hand it to another.
+    const issuer = session?.providerSessionId ? this.harness.conversationHarness?.(conversationId) : undefined;
+    return issuer ? { ...composed.params, resumeProviderSessionHarness: issuer } : composed.params;
+  }
+
+  /**
+   * The chat is leaving `provider`: its session `providerSessionId` holds the transcript through the last
+   * message, so that message is marked with it — a later move back resumes the session (`sessionToReturnTo`).
+   */
+  private async markLeftSession(transcript: readonly ChatMessage[], provider: string, providerSessionId: string | undefined): Promise<void> {
+    const last = transcript[transcript.length - 1];
+    if (!last || !providerSessionId) return;
+    const metadata = { ...(last.metadata ?? {}), leftProviderSession: { harnessType: provider, providerSessionId } };
+    await this.messageRepo.updateMetadata(last.id, metadata).catch((err: unknown) =>
+      console.warn(`[ChatManagement] could not record the ${provider} session chat ${last.chatId} left:`, err),
+    );
+    last.metadata = metadata;
+  }
+
+  /**
+   * The session `provider` had when the chat last left it, when it still holds this chat's history: its
+   * mark is on a message still in the transcript (a rewind past it dropped it) and the provider still has
+   * it. `after` is the index of the first message it has not seen.
+   */
+  private async sessionToReturnTo(
+    transcript: readonly ChatMessage[],
+    provider: string,
+  ): Promise<{ providerSessionId: string; after: number } | undefined> {
+    for (let i = transcript.length - 1; i >= 0; i -= 1) {
+      const left = transcript[i]!.metadata?.leftProviderSession;
+      if (left?.harnessType !== provider) continue;
+      const exists = await this.harness.providerSessionExists?.(left.providerSessionId, provider).catch(() => false);
+      return exists ? { providerSessionId: left.providerSessionId, after: i + 1 } : undefined;
+    }
+    return undefined;
   }
 
   /**
@@ -2126,14 +2162,31 @@ export class ChatManagementService {
       // memory of it. Seed it with the transcript once, exactly as a synthetic fork or rewind does.
       const pinned = chat.harnessConfig?.harnessType;
       const owner = this.harness.conversationHarness?.(session.conversationId);
-      if (pinned && owner && pinned !== owner && !chat.conversationSeed) {
-        const seed = buildConversationSeed(await this.messageRepo.getByChatId(chatId));
-        if (seed) {
-          chat.conversationSeed = seed;
-          await this.chatRepo.update(chatId, { conversationSeed: seed });
+      // Back to a provider the chat ran on before: it resumes the session it left, and hears only what was
+      // said since — it already remembers the rest exactly.
+      let returning: { providerSessionId: string; transcript: ChatMessage[] } | undefined;
+      if (pinned && owner && pinned !== owner) {
+        const transcript = await this.messageRepo.getByChatId(chatId);
+        await this.markLeftSession(transcript, owner, session.providerSessionId);
+        // From here that id lives on the mark only: no recovery path may hand it to the provider the chat moves to.
+        if (session.providerSessionId) {
+          await this.sessionRepo.update(session.id, { providerSessionId: '' });
+          session.providerSessionId = undefined;
+        }
+        if (!chat.conversationSeed) {
+          const back = await this.sessionToReturnTo(transcript, pinned);
+          if (back) returning = { providerSessionId: back.providerSessionId, transcript };
+          const seed = back ? buildConversationSeed(transcript.slice(back.after), { since: true }) : buildConversationSeed(transcript);
+          if (seed) {
+            chat.conversationSeed = seed;
+            await this.chatRepo.update(chatId, { conversationSeed: seed });
+          }
         }
       }
-      const cfg = await this.buildConversationConfig(chat, session.conversationId);
+      const cfg = {
+        ...(await this.buildConversationConfig(chat, session.conversationId)),
+        ...(returning ? { resumeProviderSessionId: returning.providerSessionId, resumeProviderSessionHarness: pinned } : {}),
+      };
       try {
         await withDeadline(
           this.harness.resumeConversation(
@@ -2146,6 +2199,12 @@ export class ChatManagementService {
         this.conversationBindings.set(session.conversationId, desiredBinding);
         await this.seedIfRestarted(chat, session.conversationId);
       } catch {
+        if (returning) {
+          // The session it left could not be resumed after all: a fresh one gets the whole history.
+          const seed = buildConversationSeed(returning.transcript);
+          chat.conversationSeed = seed;
+          await this.chatRepo.update(chatId, { conversationSeed: seed });
+        }
         try {
           await withDeadline(
             this.ensureConversation(chat, session.conversationId),
@@ -2922,7 +2981,7 @@ export class ChatManagementService {
     const parent = await this.chatRepo.getById(parentChatId);
     const mounts = this.extensions.mountService;
     if (!mounts || !parent.workspaceId || !parent.sources?.length) return undefined;
-    return mounts.sourcesForFork(parent.workspaceId, parent.sources, { isolateInPlace: true });
+    return mounts.sourcesForFork(parent.workspaceId, parent.sources);
   }
 
   /**
@@ -3167,7 +3226,7 @@ export class ChatManagementService {
       caps.conversationFork === true &&
       typeof this.harness.forkConversation === 'function' &&
       // The whole history can be copied without an anchor; a cut needs one.
-      (!keptHasReplies || (throughAnchor !== undefined && (cut === turns.length - 1 || true)));
+      (!keptHasReplies || throughAnchor !== undefined);
     let providerSessionId: string | undefined;
     let anchorMap: Record<string, string> | undefined;
     let mode: 'native' | 'synthetic' = native ? 'native' : 'synthetic';
@@ -3237,13 +3296,16 @@ export class ChatManagementService {
       });
     }
 
-    // Bring the parent's working tree across BEFORE anyone can prompt the
-    // fork. A failure here leaves a usable fork on a clean branch, so it is
-    // reported rather than thrown.
+    // Bring the parent's files across BEFORE anyone can prompt the fork. A
+    // failure here leaves a usable fork on a clean branch, so it is reported
+    // rather than thrown.
+    let shared: string[] = [];
     if (mountService && source.workspaceId && created.workspaceId && created.workspaceId !== source.workspaceId) {
       try {
         await mountService.ready(created.workspaceId);
         await mountService.seedFrom(source.workspaceId, created.workspaceId);
+        shared = await mountService.sharedWithParent(source.workspaceId, created.workspaceId);
+        await this.rollForkBackTo(source, created, turns[cut + 1]?.turnId, shared);
         await mountService.refreshStatus(created.workspaceId).catch(() => undefined);
       } catch (err) {
         console.warn(
@@ -3254,17 +3316,19 @@ export class ChatManagementService {
     }
 
     // Copy the transcript rows into the fork. Anchors are re-keyed when the
-    // provider minted fresh ids for the copied history.
+    // provider minted fresh ids for the copied history; the sessions the
+    // parent left on other providers stay the parent's (see `leftProviderSession`).
     for (const m of kept) {
       const anchor = m.metadata?.providerAnchor;
       const mapped = anchor && anchorMap?.[anchor.id];
+      const { leftProviderSession: _left, ...metadata } = m.metadata ?? {};
       await this.messageRepo.create({
         ...m,
         id: generateId(),
         chatId: created.id,
         sessionId: created.sessionId,
-        ...(mapped
-          ? { metadata: { ...m.metadata, providerAnchor: { kind: anchor.kind, id: mapped } } }
+        ...(m.metadata
+          ? { metadata: mapped ? { ...metadata, providerAnchor: { kind: anchor.kind, id: mapped } } : metadata }
           : {}),
       });
     }
@@ -3276,7 +3340,42 @@ export class ChatManagementService {
       kind: 'chat.forked',
       data: { chatId, forkChatId: created.id, ...(cutTurnId ? { turnId: cutTurnId } : {}), conversation: mode },
     } as AgentEvent);
-    return { chat: created, conversation: mode, ...(cutTurnId ? { turnId: cutTurnId } : {}) };
+    return {
+      chat: created,
+      conversation: mode,
+      ...(cutTurnId ? { turnId: cutTurnId } : {}),
+      ...(shared.length ? { sharedSources: shared } : {}),
+    };
+  }
+
+  /**
+   * A fork's files are the parent's as they were when its history ends: a fork from an earlier turn (or
+   * one beside a turn still running) goes back to the snapshot taken as the next turn began, from the
+   * parent's (or an older ancestor's) checkpoints — never in a folder it shares with the parent. Then the
+   * fork's "since it started" is recorded afresh, so its Changes are its own work, not what it inherited.
+   */
+  private async rollForkBackTo(
+    parent: Chat,
+    fork: Chat,
+    nextTurnId: string | undefined,
+    shared: readonly string[],
+  ): Promise<void> {
+    const checkpoints = this.extensions.workspaceCheckpointService;
+    if (!checkpoints || !fork.workspaceId || !parent.workspaceId) return;
+    if (nextTurnId) {
+      const r = await checkpoints.restoreTurn(
+        fork.workspaceId,
+        nextTurnId,
+        { chatId: fork.id, sessionId: fork.sessionId },
+        'before',
+        { ancestorWorkspaceIds: [parent.workspaceId, ...(await this.ancestorWorkspaceIds(parent))], skip: shared },
+      );
+      for (const m of r.mounts.filter((x) => !x.ok)) {
+        console.warn(`[ChatManagement] fork ${fork.id}: ${m.alias} keeps the parent's latest files (${m.error ?? 'no snapshot'})`);
+      }
+    }
+    await checkpoints.forget(fork.workspaceId);
+    await checkpoints.capture({ workspaceId: fork.workspaceId, kind: 'baseline' });
   }
 
   async cancelTurn(chatId: string, options: CancelTurnOptions = {}): Promise<void> {
@@ -3502,6 +3601,17 @@ export class ChatManagementService {
         await this.harness.deleteConversation(session.conversationId);
       } catch {
         // May already be deleted
+      }
+    }
+    // The sessions the chat left on other providers when it moved (and could have gone back to) go with it.
+    if (this.harness.deleteProviderSession) {
+      const left = new Map<string, string>();
+      for (const m of await this.messageRepo.getByChatId(chatId).catch(() => [] as ChatMessage[])) {
+        const mark = m.metadata?.leftProviderSession;
+        if (mark) left.set(mark.providerSessionId, mark.harnessType);
+      }
+      for (const [providerSessionId, harnessType] of left) {
+        await this.harness.deleteProviderSession(providerSessionId, harnessType).catch(() => undefined);
       }
     }
 

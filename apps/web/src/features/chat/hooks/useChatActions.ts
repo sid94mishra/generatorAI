@@ -12,7 +12,7 @@ import { toast } from '@/ui/primitives/Toast/Toast.js';
 
 /** The provider could not branch its own history, so the fork carries a digest. */
 const SYNTHETIC_FORK_NOTE =
-  'The provider does not support native rewind; the model will receive a summary of the surviving conversation with your next message.';
+  "This model's provider can't copy its own history, so the fork's agent gets a summary of the conversation with your next message.";
 
 function errorCode(error: unknown): string | undefined {
   return error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : undefined;

@@ -71,6 +71,9 @@ describe('CodexProvider — fork', () => {
     expect(calls.forkCalls[0]!.params).toMatchObject({ threadId: srcThread, lastTurnId: 'turn_7', excludeTurns: true });
     expect(result.providerSessionId).toBe(calls.forkCalls[0]!.threadId);
     expect(p.getProviderSessionId('branch')).toBe(result.providerSessionId);
+    // The copied turns' new ids, oldest first, so the chat's anchors can be re-keyed.
+    const fork = result.providerSessionId!;
+    expect(result.anchorMap).toEqual({ turn_1: `${fork}_turn_1`, turn_2: `${fork}_turn_2`, turn_3: `${fork}_turn_3` });
     // The source keeps its own thread.
     expect(p.getProviderSessionId('src')).toBe(srcThread);
     // The branch can take a turn.

@@ -54,7 +54,7 @@ describe('sourcesForFork', () => {
   it('cuts a NEW branch from the commit the parent is on, never reusing the parent branch', async () => {
     const svc = service(
       { parent: [mount({ codebaseId: 'cb1', path: '/parent/shop' })] },
-      { revParse: vi.fn(async () => 'abc1234') },
+      { revParse: vi.fn(async () => 'abc1234'), nestedRepos: vi.fn(async () => []) },
     );
     const out = await svc.sourcesForFork('parent', [
       { kind: 'codebase', codebaseId: 'cb1', mode: 'worktree', newBranch: 'generatorai/parent', baseRef: 'main' },
@@ -62,10 +62,10 @@ describe('sourcesForFork', () => {
     expect(out).toEqual([{ kind: 'codebase', codebaseId: 'cb1', mode: 'worktree', alias: 'shop', baseRef: 'abc1234' }]);
   });
 
-  it('leaves an in-place source alone — there is only one of the user\'s folder', async () => {
+  it('leaves a plain folder used in place alone — it has no git to branch, so the fork shares it', async () => {
     const svc = service(
-      { parent: [mount({ mode: 'in-place', originKind: 'folder', originPath: '/home/me/app', path: '/home/me/app' })] },
-      { revParse: vi.fn(async () => 'abc') },
+      { parent: [mount({ mode: 'in-place', originKind: 'folder', originPath: '/home/me/app', path: '/home/me/app', git: { isRepo: false } })] },
+      { revParse: vi.fn(async () => 'abc'), nestedRepos: vi.fn(async () => []) },
     );
     const spec = { kind: 'folder' as const, path: '/home/me/app', mode: 'in-place' as const };
     expect(await svc.sourcesForFork('parent', [spec])).toEqual([spec]);

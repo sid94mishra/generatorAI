@@ -859,3 +859,34 @@ describe('bare clone of a remote codebase', () => {
     expect((await runGit(bare, ['rev-parse', 'refs/heads/develop'])).trim()).toBe(localSha);
   });
 });
+
+describe('GitClient.importTree', () => {
+  it('copies a snapshot tree another store holds — only what the destination lacks — so it can be read there', async () => {
+    const repo = path.join(tmpRoot, 'repo');
+    await fs.mkdir(repo, { recursive: true });
+    await runGit(repo, ['init', '-q', '-b', 'main']);
+    await writeFile(repo, 'a.txt', 'a\n');
+    await runGit(repo, ['add', '-A']);
+    await runGit(repo, ['commit', '-q', '-m', 'init']);
+    const headTree = (await runGit(repo, ['rev-parse', 'HEAD^{tree}'])).trim();
+    // A snapshot written into one chat's store (alternates → the repository) …
+    const from = path.join(tmpRoot, 'parent.git');
+    const to = path.join(tmpRoot, 'fork.git');
+    for (const store of [from, to]) {
+      await runGit(tmpRoot, ['init', '-q', '--bare', store]);
+      await fs.writeFile(path.join(store, 'objects', 'info', 'alternates'), path.join(repo, '.git', 'objects') + '\n');
+    }
+    await writeFile(repo, 'b/c.txt', 'c\n');
+    const env = { ...process.env, GIT_DIR: from, GIT_WORK_TREE: repo, GIT_INDEX_FILE: path.join(from, 'snap.index') };
+    await execFileAsync('git', ['add', '-A'], { cwd: repo, env });
+    const tree = (await execFileAsync('git', ['write-tree'], { cwd: repo, env })).stdout.trim();
+    await expect(runGit(tmpRoot, [`--git-dir=${to}`, 'cat-file', '-e', `${tree}^{tree}`])).rejects.toThrow();
+
+    // … is readable from another's afterwards.
+    expect(await git.importTree(from, to, tree, [headTree])).toBe(true);
+    expect(await runGit(tmpRoot, [`--git-dir=${to}`, 'ls-tree', '-r', '--name-only', tree])).toBe('a.txt\nb/c.txt\n');
+    // Already there: nothing to copy.
+    expect(await git.importTree(from, to, tree)).toBe(true);
+    expect(await git.importTree(from, to, 'f'.repeat(40))).toBe(false);
+  });
+});

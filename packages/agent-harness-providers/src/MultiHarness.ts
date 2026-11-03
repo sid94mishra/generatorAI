@@ -256,9 +256,26 @@ export class MultiHarness implements IAgentHarness {
    * caller's `resumeProviderSessionId` is the old provider's handle — a Codex thread id handed to Claude failed the
    * turn with "No conversation found with session ID" (E-4, 2026-10-17) — so it never crosses over.
    */
-  private freshParamsFor(target: HarnessType, params: CreateConversationParams | undefined): Partial<CreateConversationParams> {
-    const { resumeProviderSessionId: _foreign, ...rest } = this.withModelSupportedBy(target, params) ?? {};
+  private freshParamsFor(
+    target: HarnessType,
+    params: CreateConversationParams | undefined,
+    opts: { keepOwnSession?: boolean } = { keepOwnSession: true },
+  ): Partial<CreateConversationParams> {
+    const own = this.ownSessionParams(target, params);
+    if (opts.keepOwnSession && own?.resumeProviderSessionId && own.resumeProviderSessionHarness === target) return own;
+    const { resumeProviderSessionId: _foreign, resumeProviderSessionHarness: _issuer, ...rest } = own ?? {};
     return rest;
+  }
+
+  /**
+   * `params` for `target`, without a session id another provider issued: one the caller says is `target`'s
+   * own (a chat moving BACK to a provider it ran on, which resumes that session) is kept.
+   */
+  private ownSessionParams(target: HarnessType, params: CreateConversationParams | undefined): CreateConversationParams | undefined {
+    const fitted = this.withModelSupportedBy(target, params);
+    if (!fitted?.resumeProviderSessionHarness || fitted.resumeProviderSessionHarness === target) return fitted;
+    const { resumeProviderSessionId: _foreign, resumeProviderSessionHarness: _issuer, ...rest } = fitted;
+    return rest as CreateConversationParams;
   }
 
   /**
@@ -502,7 +519,7 @@ export class MultiHarness implements IAgentHarness {
     const target = await this.resolveTarget(params, this.existingOwnerFor(params.conversationId));
     const adapter = await this.registry.get(target);
     const id = await adapter.createConversation(
-      this.withModelSupportedBy(target, params) as CreateConversationParams,
+      this.ownSessionParams(target, params) as CreateConversationParams,
     );
     this.owners.set(id, target);
     // Also key by the requested id: some providers echo back a different id,
@@ -566,7 +583,7 @@ export class MultiHarness implements IAgentHarness {
       );
       const freshAdapter = await this.registry.get(target);
       await freshAdapter.createConversation({
-        ...this.freshParamsFor(target, params),
+        ...this.freshParamsFor(target, params, { keepOwnSession: false }),
         conversationId,
       } as CreateConversationParams);
       return;
@@ -601,7 +618,17 @@ export class MultiHarness implements IAgentHarness {
 
     this.owners.set(conversationId, target);
     const adapter = await this.registry.get(target);
-    return adapter.resumeConversation(conversationId, this.withModelSupportedBy(target, params));
+    return adapter.resumeConversation(conversationId, this.ownSessionParams(target, params));
+  }
+
+  async providerSessionExists(providerSessionId: string, harnessType?: string): Promise<boolean> {
+    const adapter = await this.registry.get((harnessType as HarnessType | undefined) ?? this.registry.primary);
+    return (await adapter.providerSessionExists?.(providerSessionId)) ?? false;
+  }
+
+  async deleteProviderSession(providerSessionId: string, harnessType?: string): Promise<void> {
+    const adapter = await this.registry.get((harnessType as HarnessType | undefined) ?? this.registry.primary);
+    await adapter.deleteProviderSession?.(providerSessionId);
   }
 
   conversationHarness(conversationId: string): HarnessType {

@@ -1800,11 +1800,25 @@ export class ClaudeAgentProvider implements IAgentHarness {
   }
 
   async deleteConversation(conversationId: string): Promise<void> {
+    // The SDK session is the one the conversation runs on now (a fork or rewind moved it off the first id).
+    const sessionId = this.conversations.get(conversationId)?.sdkSessionId ?? this.evictedSessionIds.get(conversationId) ?? conversationId;
     this.cleanupConversation(conversationId);
-    // Also try to delete the SDK session
+    await this.deleteProviderSession(sessionId);
+  }
+
+  async providerSessionExists(providerSessionId: string): Promise<boolean> {
+    try {
+      const { getSessionInfo } = await loadClaudeSdk(); // W41
+      return !!(await getSessionInfo(providerSessionId, {}));
+    } catch {
+      return false;
+    }
+  }
+
+  async deleteProviderSession(providerSessionId: string): Promise<void> {
     try {
       const { deleteSession } = await loadClaudeSdk(); // W41
-      await deleteSession(conversationId, {});
+      await deleteSession(providerSessionId, {});
     } catch {
       // Session may not exist on disk — that's fine
     }

@@ -17,7 +17,7 @@ import type {
   ILogger,
 } from '@generatorai/shared';
 import type { CheckpointService } from '@generatorai/checkpoints';
-import { discoverRepos, type DiscoveredRepo, type MountRef } from '@generatorai/changes';
+import { discoverRepos, shadowGitDirFor, type DiscoveredRepo, type MountRef } from '@generatorai/changes';
 import type { IGitClient } from '@generatorai/git';
 import type { IExecutionWorkspaceRepository } from '../domain/ports/IExecutionWorkspaceRepository.js';
 import type { EventBus } from '../events/EventBus.js';
@@ -134,12 +134,17 @@ export class WorkspaceCheckpointService {
     turnId: string,
     scope: CheckpointEventScope = {},
     phase: 'before' | 'after' = 'before',
-    options: { ancestorWorkspaceIds?: readonly string[] } = {},
+    options: {
+      ancestorWorkspaceIds?: readonly string[];
+      /** Mounts left alone, with the repositories inside them (a fork's folders it shares with its parent). */
+      skip?: readonly string[];
+    } = {},
   ): Promise<RestoreTurnResult> {
     const result: RestoreTurnResult = { mounts: [], restored: 0, deleted: 0, skipped: 0 };
     const workspace = await this.workspaceRepo.findById(workspaceId);
     if (!workspace) return result;
-    const repos = await this.resolveRepos(workspace);
+    const skip = options.skip ?? [];
+    const repos = (await this.resolveRepos(workspace)).filter((r) => !skip.some((a) => r.alias === a || r.alias.startsWith(`${a}/`)));
     const all = await this.checkpoints.list({ workspaceId, limit: 5_000, excludeLive: true });
     const exact = all.filter((c) => c.turnId === turnId && (c.phase ?? 'before') === phase);
     // Every mount's snapshot of the turn shares one capture moment; a mount
@@ -160,10 +165,9 @@ export class WorkspaceCheckpointService {
         // before the fork ran in an ancestor's workspace, so their snapshots
         // are recorded there. Rewinding the fork to one of them used to drop
         // the conversation and leave every file as it was, saying nothing.
-        // A worktree fork shares its parent's git object database (and a
-        // copied generated mount carries the objects with it), so the
-        // ancestor's tree can be applied to THIS mount — as a revision
-        // restore, which still snapshots first and stays undoable.
+        // The snapshot's tree lives in the ancestor's checkpoint store: it is
+        // copied into this mount's store, then applied to THIS mount as a
+        // revision restore, which still snapshots first and stays undoable.
         const inherited = await this.inheritedTurnSnapshot(
           options.ancestorWorkspaceIds ?? [],
           turnId,
@@ -264,15 +268,16 @@ export class WorkspaceCheckpointService {
 
   /**
    * The snapshot an ANCESTOR workspace took for `turnId` on the mount with
-   * this alias — nearest ancestor first — provided its tree is reachable from
-   * this mount's repository. Null when there is none, or when the objects are
-   * not here (a mount that was not forked from the ancestor's repository).
+   * this alias — nearest ancestor first — once its tree is readable from this
+   * mount's checkpoint store. Each chat's snapshots live in its own store, so
+   * the tree is copied over from the ancestor's (only the objects this store
+   * lacks). Null when there is none, or when it cannot be brought here.
    */
   private async inheritedTurnSnapshot(
     ancestorWorkspaceIds: readonly string[],
     turnId: string,
     phase: 'before' | 'after',
-    repo: { alias: string; repoDir: string },
+    repo: { alias: string; repoDir: string; gitDir?: string },
   ): Promise<CheckpointRecord | null> {
     for (const ancestorId of ancestorWorkspaceIds) {
       const all = await this.checkpoints.list({ workspaceId: ancestorId, limit: 5_000, excludeLive: true });
@@ -285,9 +290,20 @@ export class WorkspaceCheckpointService {
           .filter((c) => c.repoAlias === repo.alias && c.createdAt.getTime() <= momentMs)
           .sort((a, b) => b.seq - a.seq)[0];
       if (!candidate) continue;
-      if (await this.git.objectExists(repo.repoDir, candidate.treeSha).catch(() => false)) return candidate;
+      if (await this.bringTree(ancestorId, candidate.treeSha, repo)) return candidate;
     }
     return null;
+  }
+
+  /** Make an ancestor's snapshot tree readable where this mount's snapshots are kept. */
+  private async bringTree(ancestorWorkspaceId: string, treeSha: string, repo: { alias: string; repoDir: string; gitDir?: string }): Promise<boolean> {
+    if (!repo.gitDir) return this.git.objectExists(repo.repoDir, treeSha).catch(() => false);
+    const ancestor = await this.workspaceRepo.findById(ancestorWorkspaceId).catch(() => null);
+    if (!ancestor) return false;
+    const from = shadowGitDirFor(ancestor.rootPath, repo.alias);
+    // The mount's own HEAD is in both stores (the ancestor's reaches the same repository): it prunes the copy.
+    const head = await this.git.revParse(repo.repoDir, 'HEAD^{tree}').catch(() => null);
+    return this.git.importTree(from, repo.gitDir, treeSha, head ? [head] : []).catch(() => false);
   }
 
   /**

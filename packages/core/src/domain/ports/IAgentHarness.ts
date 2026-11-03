@@ -478,6 +478,12 @@ export interface CreateConversationParams {
    * the conversation; a live adapter's own session always wins.
    */
   resumeProviderSessionId?: string;
+  /**
+   * The provider that issued `resumeProviderSessionId`. A session id only means something to the provider
+   * that issued it (a Codex thread id handed to Claude fails the turn), so a router passes it on only to that
+   * provider. Unset: the id is the conversation's current provider's.
+   */
+  resumeProviderSessionHarness?: string;
 
   // ── System Message ──
   systemMessage?: SystemMessageConfig;
@@ -769,6 +775,16 @@ export interface IHarnessConversationLifecycle {
    * callers must treat the move as a cold start rather than assume continuity.
    */
   getProviderSessionId?(conversationId: string): string | undefined;
+  /**
+   * Whether a session this provider issued (an id `getProviderSessionId` returned once) can still be resumed.
+   * A router asks the provider named by `harnessType`; an adapter answers for itself and ignores it.
+   */
+  providerSessionExists?(providerSessionId: string, harnessType?: string): Promise<boolean>;
+  /**
+   * Delete a session this provider issued that no conversation runs on any more (the one a chat left when it
+   * moved to another provider). Best effort. `harnessType` as for `providerSessionExists`.
+   */
+  deleteProviderSession?(providerSessionId: string, harnessType?: string): Promise<void>;
   /**
    * The provider that actually runs `conversationId` — the router's answer,
    * which may differ from the configured `harnessType` (unset, or picked by

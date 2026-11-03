@@ -5,6 +5,7 @@
 // tree is reachable from the fork's repository.
 
 import { describe, expect, it, vi } from 'vitest';
+import * as path from 'node:path';
 
 import { WorkspaceCheckpointService } from '../WorkspaceCheckpointService.js';
 
@@ -22,7 +23,7 @@ const record = (over: Record<string, unknown>) => ({
   ...over,
 });
 
-function makeService(opts: { byWorkspace: Record<string, unknown[]>; objectExists: boolean }) {
+function makeService(opts: { byWorkspace: Record<string, unknown[]>; objectExists: boolean; gitDir?: string }) {
   const restored = { restoredPaths: ['a.ts', 'b.ts'], deletedPaths: [], skipped: [], preRestoreCheckpointId: 'pre1' };
   const checkpoints = {
     list: vi.fn(async ({ workspaceId }: { workspaceId: string }) => opts.byWorkspace[workspaceId] ?? []),
@@ -30,8 +31,12 @@ function makeService(opts: { byWorkspace: Record<string, unknown[]>; objectExist
     restoreFromRevision: vi.fn(async () => restored),
     registerShadow: vi.fn(),
   };
-  const workspaceRepo = { findById: vi.fn(async (id: string) => ({ id, rootPath: '/ws', ownerType: 'chat' })) };
-  const git = { objectExists: vi.fn(async () => opts.objectExists) };
+  const workspaceRepo = { findById: vi.fn(async (id: string) => ({ id, rootPath: `/ws/${id}`, ownerType: 'chat' })) };
+  const git = {
+    objectExists: vi.fn(async () => opts.objectExists),
+    importTree: vi.fn(async () => opts.objectExists),
+    revParse: vi.fn(async () => 'head-tree'),
+  };
   const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const service = new WorkspaceCheckpointService(
     checkpoints as never,
@@ -40,7 +45,9 @@ function makeService(opts: { byWorkspace: Record<string, unknown[]>; objectExist
     git as never,
     logger as never,
   );
-  vi.spyOn(service, 'resolveRepos').mockResolvedValue([{ alias: 'shopkit', repoDir: '/ws/fork/shopkit' }] as never);
+  vi.spyOn(service, 'resolveRepos').mockResolvedValue([
+    { alias: 'shopkit', repoDir: '/ws/fork/shopkit', ...(opts.gitDir ? { gitDir: opts.gitDir } : {}) },
+  ] as never);
   return { service, checkpoints, git };
 }
 
@@ -79,6 +86,32 @@ describe('restoreTurn — turns inherited by a fork', () => {
     expect(checkpoints.restoreFromRevision).toHaveBeenCalledWith(
       'fork', 'shopkit', '/ws/fork/shopkit', 'gp-tree', undefined, expect.any(String),
     );
+  });
+
+  it('copies the ancestor\'s snapshot into this mount\'s own checkpoint store before applying it', async () => {
+    const { service, checkpoints, git } = makeService({
+      byWorkspace: { fork: [], parent: [record({})] },
+      objectExists: true,
+      gitDir: '/ws/fork/.checkpoints/shopkit.git',
+    });
+
+    await service.restoreTurn('fork', 't1', {}, 'before', { ancestorWorkspaceIds: ['parent'] });
+
+    expect(git.importTree).toHaveBeenCalledWith(
+      path.join('/ws/parent', '.checkpoints', 'shopkit.git'), '/ws/fork/.checkpoints/shopkit.git', 'tree-before-t1', ['head-tree'],
+    );
+    expect(checkpoints.restoreFromRevision).toHaveBeenCalledWith(
+      'fork', 'shopkit', '/ws/fork/shopkit', 'tree-before-t1', undefined, 'Before: add coupons',
+    );
+  });
+
+  it('leaves the mounts it is told to skip alone (a fork\'s folder shared with its parent)', async () => {
+    const { service, checkpoints } = makeService({ byWorkspace: { fork: [], parent: [record({})] }, objectExists: true });
+
+    const result = await service.restoreTurn('fork', 't1', {}, 'before', { ancestorWorkspaceIds: ['parent'], skip: ['shopkit'] });
+
+    expect(checkpoints.restoreFromRevision).not.toHaveBeenCalled();
+    expect(result.mounts).toEqual([]);
   });
 
   it('reports the mount, rather than restoring, when the ancestor’s tree is not in this repository', async () => {

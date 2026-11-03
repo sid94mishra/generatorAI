@@ -1883,6 +1883,21 @@ With no frontmost window the bridge reads the largest open window, and the drive
 (`ax_window_unresolved`) is a refusal carrying its advice. The approval card words actions for people ("Open
 Calculator?"), from `computerConsentTitle` in the shared contract.
 
+### D-186 Forks branch files with the conversation; a provider move keeps each provider's own session (owner + derived, 2026-11-03) — Final
+A fork (Fork from here, a side-chat fork, an orchestrator worker) gets its own copy of every repository: each git source
+— worked on in place or as a worktree, and each repository inside a linked folder — becomes a worktree on a new branch cut
+from where the parent's checkout of it is, with the parent's uncommitted work carried over. A plain folder worked on in place
+stays shared (no git to branch, and a copy would keep the fork's edits out of the person's folder); the fork link's tooltip
+names it. A fork from an earlier turn (or beside a running one) holds the files as they were when the next turn began, taken
+from the parent's (or an older ancestor's) snapshots, which are copied into the fork's own checkpoint store — the same copy
+makes rewinding a fork to an inherited turn restore its files. The fork's "since it started" is recorded after that, so its
+Changes are only its own work. When a chat moves to another provider, the last message is marked with the session it left;
+moving back resumes that session and sends only what was said since (a rewind past the mark, or a session the provider no
+longer has, falls back to a fresh session with the whole history). The carried history gives the newest four turns in full
+(every text, each action with the start of its output, plans and answered questions) within 100k characters, older turns as a
+digest, then as their prompt. A model change from any client settles the provider (the chat's own when it offers the model)
+and an effort level the model takes (Codex has no `max`). Deleting a chat deletes the sessions it left on other providers.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

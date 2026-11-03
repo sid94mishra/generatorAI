@@ -1364,6 +1364,32 @@ export class GitClient implements IGitClient {
     }
   }
 
+  async importTree(fromGitDir: string, toGitDir: string, treeSha: string, haveTrees: readonly string[] = []): Promise<boolean> {
+    const run = (gitDir: string, args: string[], stdin?: string) =>
+      this.baseRunner.run('git', [`--git-dir=${gitDir}`, ...args], {
+        cwd: gitDir,
+        timeout: 120_000,
+        ...(stdin !== undefined ? { stdin } : {}),
+      });
+    const present = async () => (await run(toGitDir, ['cat-file', '-e', `${treeSha}^{tree}`]).catch(() => null))?.exitCode === 0;
+    try {
+      if (await present()) return true;
+      // Only what the destination lacks: trees it already has (its HEAD's) prune the walk.
+      let list = await run(fromGitDir, ['rev-list', '--objects', treeSha, ...(haveTrees.length ? ['--not', ...haveTrees] : [])]);
+      if (list.exitCode !== 0 && haveTrees.length) list = await run(fromGitDir, ['rev-list', '--objects', treeSha]);
+      if (list.exitCode !== 0) return false;
+      const pack = await run(fromGitDir, ['pack-objects', '-q', path.join(toGitDir, 'objects', 'pack', 'pack')], list.stdout);
+      if (pack.exitCode !== 0) {
+        this.logger.warn(`[Git] could not copy tree ${treeSha} into ${toGitDir}: ${pack.stderr}`);
+        return false;
+      }
+      return await present();
+    } catch (err) {
+      this.logger.warn(`[Git] could not copy tree ${treeSha} into ${toGitDir}: ${String(err)}`);
+      return false;
+    }
+  }
+
   async objectExists(repoDir: string, sha: string): Promise<boolean> {
     try {
       const result = await this.runner.run('git', ['cat-file', '-e', `${sha}^{object}`], {

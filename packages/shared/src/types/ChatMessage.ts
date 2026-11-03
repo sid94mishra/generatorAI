@@ -85,6 +85,13 @@ export interface ChatMessageMetadata {
    * anchors were captured — those fall back to the synthetic rewind.
    */
   providerAnchor?: { kind: 'message' | 'turn'; id: string };
+  /**
+   * Set on the last message of the chat when its conversation moved to another provider: the session the
+   * provider it left (`harnessType`) had then holds exactly the transcript through this message. Moving back
+   * resumes that session and sends only what was said since. A rewind that drops this message drops the
+   * mark with it; a fork never copies it (the session stays the parent's).
+   */
+  leftProviderSession?: { harnessType: string; providerSessionId: string };
   /** Assistant messages: the model id and provider the turn ran on, as the
    *  provider's own usage report named them. The transcript heads a past turn
    *  with them; absent when the provider reported no usage. */

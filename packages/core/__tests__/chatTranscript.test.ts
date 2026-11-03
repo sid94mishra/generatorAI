@@ -126,7 +126,7 @@ describe('buildConversationSeed', () => {
     expect(seed).toContain('Assistant [gpt-5.6-terra · codex]:\nAdded.');
   });
 
-  it('is empty for an empty transcript and bounded for a huge one, dropping the OLDEST turns', () => {
+  it('is empty for an empty transcript and bounded for a huge one: the oldest turns shrink to their prompt, then go', () => {
     expect(buildConversationSeed([])).toBe('');
     const rows: ChatMessage[] = [];
     for (let i = 0; i < 40; i += 1) {
@@ -135,9 +135,55 @@ describe('buildConversationSeed', () => {
     }
     const seed = buildConversationSeed(rows);
     expect(seed.length).toBeLessThan(SEED_MAX_CHARS + 2_000);
-    expect(seed).toContain('earlier turn');
-    expect(seed).toContain('question 39');
-    expect(seed).not.toContain('question 0 ');
+    expect(seed).toContain("[Earlier turns — the user's prompts only]\n- question 0 ");
+    expect(seed).not.toContain('answer 0 ');
+    expect(seed).toContain('answer 39');
+
+    const huge: ChatMessage[] = [];
+    for (let i = 0; i < 2_000; i += 1) {
+      huge.push(msg('user', `q${i} ` + 'x'.repeat(1_500), { turnId: `h${i}` }));
+      huge.push(msg('assistant', `a${i} ` + 'y'.repeat(1_500), { turnId: `h${i}` }));
+    }
+    const bounded = buildConversationSeed(huge);
+    expect(bounded.length).toBeLessThan(SEED_MAX_CHARS + 2_000);
+    expect(bounded).toMatch(/\[\d+ earlier turns omitted\]/);
+    expect(bounded).toContain('a1999');
+  });
+
+  it('gives the newest turns in full: every text, each action with what it returned, plans and the answers given', () => {
+    const seed = buildConversationSeed([
+      msg('user', 'Why does the build fail?', { turnId: 't1' }),
+      msg('assistant', 'Fixed: the import path was wrong.', {
+        turnId: 't1',
+        textSegments: [
+          { content: 'Let me run the build.', sequence: 0 },
+          { content: 'Fixed: the import path was wrong.', sequence: 3 },
+        ],
+        toolCalls: [
+          { id: '1', tool: 'Bash', args: { command: 'pnpm build' }, result: 'error TS2307: Cannot find module ./utls', status: 'complete', sequence: 1, success: false },
+          { id: '2', tool: 'Edit', args: { file_path: 'src/index.ts' }, result: [{ type: 'text', text: 'edited' }], status: 'complete', sequence: 2 },
+        ],
+        questionCards: [
+          {
+            interactionId: 'q',
+            status: 'answered',
+            sequence: 4,
+            questions: [{ id: 'q1', header: 'Tests', question: 'Add a test for it?', options: [], multiSelect: false, allowFreeform: true }],
+            response: { answers: { q1: ['Yes'] } },
+          },
+        ],
+      }),
+    ]);
+    const order = ['Let me run the build.', '- Bash: pnpm build [failed]', 'Cannot find module ./utls', '- Edit: src/index.ts', 'edited', 'Fixed: the import path', 'Add a test for it? → Yes'];
+    const at = order.map((t) => seed.indexOf(t));
+    expect(at.every((i) => i >= 0)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+  });
+
+  it('says only what was said since, for a provider that resumes its own session', () => {
+    const seed = buildConversationSeed([msg('user', 'Review it', { turnId: 't1' }), msg('assistant', 'Looks good.', { turnId: 't1', provider: 'codex' })], { since: true });
+    expect(seed).toContain('[While you were away');
+    expect(seed).toContain('Looks good.');
   });
 
   it('applyConversationSeed prefixes the prompt and is a no-op for an empty seed', () => {

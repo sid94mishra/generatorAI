@@ -123,6 +123,8 @@ import type {
   V2ThreadForkParams,
   V2ThreadForkResponse,
   V2ThreadRevertParams,
+  V2ThreadReadParams,
+  V2ThreadDeleteParams,
   V2ThreadTurnsListParams,
   V2ThreadTurnsListResponse,
   V2ThreadStartParams,
@@ -1506,7 +1508,43 @@ export class CodexProvider implements IAgentHarness {
       conversationId: options.newConversationId,
       resumeProviderSessionId: forked.thread.id,
     });
-    return { providerSessionId: forked.thread.id };
+    const anchorMap = await this.alignForkedTurns(threadId, forked.thread.id);
+    return { providerSessionId: forked.thread.id, ...(anchorMap ? { anchorMap } : {}) };
+  }
+
+  /**
+   * The chat keeps each turn's Codex id as its anchor. A forked thread may number its copied turns afresh,
+   * so the two threads are lined up oldest first and an old→new map is handed back (as the Claude adapter
+   * does for message uuids); nothing when the ids are kept, or when the turns cannot be read.
+   */
+  private async alignForkedTurns(sourceThreadId: string, forkThreadId: string): Promise<Record<string, string> | undefined> {
+    try {
+      const ids = async (threadId: string, max: number): Promise<string[]> => {
+        const out: string[] = [];
+        let cursor: string | null | undefined;
+        do {
+          const page = await this.rpc<V2ThreadTurnsListResponse>('thread/turns/list', {
+            threadId,
+            sortDirection: 'asc',
+            limit: 100,
+            ...(cursor ? { cursor } : {}),
+          } satisfies V2ThreadTurnsListParams);
+          for (const t of page.data ?? []) if (t.id) out.push(t.id);
+          cursor = page.nextCursor;
+        } while (cursor && out.length < max);
+        return out.slice(0, max);
+      };
+      const forked = await ids(forkThreadId, Number.MAX_SAFE_INTEGER);
+      const source = await ids(sourceThreadId, forked.length);
+      const map: Record<string, string> = {};
+      for (let i = 0; i < forked.length && i < source.length; i += 1) {
+        if (source[i] !== forked[i]) map[source[i]!] = forked[i]!;
+      }
+      return Object.keys(map).length ? map : undefined;
+    } catch {
+      // A fork whose turns cannot be listed still succeeds, just without the map.
+      return undefined;
+    }
   }
 
   /**
@@ -1564,6 +1602,21 @@ export class CodexProvider implements IAgentHarness {
     }
     await this.rpc('thread/revert', { threadId, beforeTurnId } satisfies V2ThreadRevertParams);
     return { providerSessionId: threadId };
+  }
+
+  async providerSessionExists(providerSessionId: string): Promise<boolean> {
+    try {
+      await this.rpc('thread/read', { threadId: providerSessionId } satisfies V2ThreadReadParams);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async deleteProviderSession(providerSessionId: string): Promise<void> {
+    try {
+      await this.rpc('thread/delete', { threadId: providerSessionId } satisfies V2ThreadDeleteParams);
+    } catch { /* best effort */ }
   }
 
   async deleteConversation(conversationId: string): Promise<void> {

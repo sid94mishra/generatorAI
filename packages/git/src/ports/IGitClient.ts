@@ -272,6 +272,12 @@ export interface IGitClient {
   revParse(repoDir: string, rev: string): Promise<string | null>;
   /** Whether an object exists in the repository. */
   objectExists(repoDir: string, sha: string): Promise<boolean>;
+  /**
+   * Make `treeSha` (and everything in it) readable from the git dir `toGitDir` by copying the objects it lacks
+   * from `fromGitDir` as one pack. `haveTrees` are trees the destination already has (they prune the copy). True
+   * when the tree is readable there afterwards.
+   */
+  importTree(fromGitDir: string, toGitDir: string, treeSha: string, haveTrees?: readonly string[]): Promise<boolean>;
   /** `git diff --numstat -z --find-renames` between two tree-ishes. */
   diffNumstat(
     repoDir: string,
