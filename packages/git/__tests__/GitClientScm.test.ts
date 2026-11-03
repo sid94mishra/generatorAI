@@ -919,3 +919,52 @@ describe('GitClient.writeTreeFromWorktree — repositories inside', () => {
     expect(names.trim().split('\n')).toEqual(['NOTES.md']);
   });
 });
+
+describe('GitClient.writeTreeFromWorktree — compared with commits (honourEol)', () => {
+  it('reads a file again only when git would: a CRLF file under eol=lf is unchanged until it is edited', async () => {
+    const repo = path.join(tmpRoot, 'eol');
+    await fs.mkdir(repo, { recursive: true });
+    await runGit(repo, ['init', '-q', '-b', 'main']);
+    await runGit(repo, ['config', 'core.autocrlf', 'false']);
+    // Committed with CRLF before the attributes asked for LF (a common history).
+    await writeFile(repo, 'LICENSE', 'line one\r\nline two\r\n');
+    await writeFile(repo, 'app.js', 'x\n');
+    await runGit(repo, ['add', '-A']);
+    await runGit(repo, ['commit', '-q', '-m', 'init']);
+    await writeFile(repo, '.gitattributes', '* text=auto eol=lf\n');
+    await runGit(repo, ['add', '.gitattributes']);
+    await runGit(repo, ['commit', '-q', '-m', 'attributes']);
+    const head = (await runGit(repo, ['rev-parse', 'HEAD^{tree}'])).trim();
+    const index = path.join(tmpRoot, 'cmp.index');
+
+    expect(await git.writeTreeFromWorktree(repo, index, { honourEol: true })).toBe(head);
+
+    await writeFile(repo, 'app.js', 'y\n');
+    await writeFile(repo, 'new.js', 'n\n');
+    const tree = await git.writeTreeFromWorktree(repo, index, { honourEol: true });
+    expect((await runGit(repo, ['diff-tree', '-r', '--name-only', head, tree!])).trim().split('\n')).toEqual(['app.js', 'new.js']);
+  });
+
+  it('keeps a submodule and leaves out an untracked repository inside, as a commit does', async () => {
+    const lib = path.join(tmpRoot, 'lib');
+    await fs.mkdir(lib, { recursive: true });
+    await runGit(lib, ['init', '-q', '-b', 'main']);
+    await writeFile(lib, 'lib.js', 'l\n');
+    await runGit(lib, ['add', '-A']);
+    await runGit(lib, ['commit', '-q', '-m', 'lib']);
+    const repo = path.join(tmpRoot, 'outer');
+    await fs.mkdir(repo, { recursive: true });
+    await runGit(repo, ['init', '-q', '-b', 'main']);
+    await writeFile(repo, 'a.js', 'a\n');
+    await runGit(repo, ['-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', lib, 'vendor/lib']);
+    await runGit(repo, ['add', '-A']);
+    await runGit(repo, ['commit', '-q', '-m', 'with submodule']);
+    const head = (await runGit(repo, ['rev-parse', 'HEAD^{tree}'])).trim();
+    const scratch = path.join(repo, 'scratch');
+    await fs.mkdir(scratch);
+    await runGit(scratch, ['init', '-q']);
+    await writeFile(scratch, 's.txt', 's\n');
+
+    expect(await git.writeTreeFromWorktree(repo, path.join(tmpRoot, 'sub.index'), { honourEol: true })).toBe(head);
+  });
+});

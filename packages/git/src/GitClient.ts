@@ -410,7 +410,12 @@ export class GitClient implements IGitClient {
    * the outer repo then hold an empty folder. Paths are relative to `repoDir`, without the slash.
    */
   async embeddedRepos(repoDir: string): Promise<string[]> {
-    const result = await this.runner
+    return this.embeddedReposIn(this.runner, repoDir);
+  }
+
+  /** `embeddedRepos` asked through `runner` — the repository's own git when this client writes to a snapshot store. */
+  private async embeddedReposIn(runner: IGitProcessRunner, repoDir: string): Promise<string[]> {
+    const result = await runner
       .run('git', ['ls-files', '--others', '--exclude-standard', '--directory', '--no-empty-directory', '-z'], {
         cwd: repoDir,
         timeout: 30_000,
@@ -1205,6 +1210,18 @@ export class GitClient implements IGitClient {
     return run;
   }
 
+  /** Copy the repository's own index to `indexFile`; false (and no index there) when it has none. */
+  private async seedIndexFromRepo(repoDir: string, indexFile: string): Promise<boolean> {
+    const where = await this.baseRunner
+      .run('git', ['rev-parse', '--git-path', 'index'], { cwd: repoDir, timeout: 5_000 })
+      .catch(() => null);
+    const rel = where?.exitCode === 0 ? where.stdout.trim() : '';
+    const real = rel ? path.resolve(repoDir, rel) : '';
+    if (real && real !== path.resolve(indexFile) && (await fs.copyFile(real, indexFile).then(() => true, () => false))) return true;
+    await fs.rm(indexFile, { force: true });
+    return false;
+  }
+
   private async writeTreeFromWorktreeNow(repoDir: string, indexFile: string, opts?: WriteTreeOptions): Promise<string | null> {
     try {
       await fs.mkdir(path.dirname(indexFile), { recursive: true });
@@ -1212,26 +1229,41 @@ export class GitClient implements IGitClient {
       // `add -A` against the throwaway index picks up creations, edits and
       // deletions while still honouring .gitignore. With `honourEol` the
       // repo's own autocrlf applies, so the tree is comparable to a commit.
-      // The repositories inside (a separate copy's worktrees, the person's
-      // checkouts linked into it) are left out: each has a snapshot of its
-      // own, and recorded here as a link or an embedded repository a restore
-      // of this tree would put the link back over a worktree — and the next
-      // write would land in the person's checkout.
-      const nested = await this.nestedRepos(repoDir);
+      //
+      // Repositories inside: a snapshot leaves every one out (a separate
+      // copy's worktrees, the person's checkouts linked into it) — each has a
+      // snapshot of its own, and recorded here as a link or an embedded
+      // repository, a restore of this tree would put the link back over a
+      // worktree and the next write would land in the person's checkout. A
+      // tree compared with commits leaves out what a commit leaves out: the
+      // ones the repository does not track; its submodules stay, as gitlinks.
+      const nested = opts?.honourEol ? await this.embeddedReposIn(this.baseRunner, repoDir) : await this.nestedRepos(repoDir);
       const addArgs = ['add', '-A', '--', '.', ...nested.map((p) => `:(exclude,literal)${p}`)];
-      const add = await this.runner.run('git', opts?.honourEol ? addArgs : this.snapshotArgs(addArgs), {
-        cwd: repoDir,
-        timeout: 120_000,
-        env: this.snapshotEnv(indexFile),
-      });
+      // A tree compared with commits (`honourEol`) starts from the repository's own index, so a file is read
+      // again only when git itself would: a fresh index re-reads every file through .gitattributes, and a
+      // file committed with CRLF under `eol=lf` came out changed in full though `git status` is clean and a
+      // commit leaves it alone.
+      const seeded = opts?.honourEol ? await this.seedIndexFromRepo(repoDir, indexFile) : false;
+      const runAdd = () =>
+        this.runner.run('git', opts?.honourEol ? addArgs : this.snapshotArgs(addArgs), {
+          cwd: repoDir,
+          timeout: 120_000,
+          env: this.snapshotEnv(indexFile),
+        });
+      let add = await runAdd();
+      if (add.exitCode !== 0 && seeded) {
+        // An index this store cannot read (a split index keeps its other half in the repository's git dir).
+        await fs.rm(indexFile, { force: true });
+        add = await runAdd();
+      }
       if (add.exitCode !== 0) {
         this.logger.warn(`[Git] snapshot add failed in ${repoDir}: ${add.stderr}`);
         return null;
       }
-      if (nested.length) {
+      if (nested.length && !opts?.honourEol) {
         // The index is reused between snapshots: an entry an earlier one recorded for them goes.
         const rmArgs = ['rm', '-r', '-q', '--cached', '--ignore-unmatch', '--', ...nested.map((p) => `:(literal)${p}`)];
-        await this.runner.run('git', opts?.honourEol ? rmArgs : this.snapshotArgs(rmArgs), {
+        await this.runner.run('git', this.snapshotArgs(rmArgs), {
           cwd: repoDir,
           timeout: 60_000,
           env: this.snapshotEnv(indexFile),
