@@ -52,6 +52,10 @@ export type {
   WidgetToolName,
 } from './widgetTools.js';
 
+// D-187 — stop what listens on a local port, outside any agent sandbox.
+export { buildStopPortListenerTool, createOsProcessControl, STOP_PORT_LISTENER_TOOL_NAME } from './processTools.js';
+export type { PortListener, ProcessControl } from './processTools.js';
+
 // Extension-author tools — scaffold + reload user extensions from chat.
 export {
   buildWriteExtensionTool,

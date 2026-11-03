@@ -1898,6 +1898,20 @@ longer has, falls back to a fresh session with the whole history). The carried h
 digest, then as their prompt. A model change from any client settles the provider (the chat's own when it offers the model)
 and an effort level the model takes (Codex has no `max`). Deleting a chat deletes the sessions it left on other providers.
 
+### D-187 Agents stop a server left on a port through the host (owner + derived, 2026-11-03) — Final
+A chat moved between providers can find a server the previous agent started (`nohup … &`) still holding its port. Codex's
+sandbox signals only processes inside it, so the agent that took over could neither restart the server nor free the port.
+The app cannot tell such a process from one the person started (it is reparented away from the agent, in a process group
+of a shell that already exited), so nothing is stopped automatically at a switch. Instead every attended chat or stage
+that works in a workspace gets `stop_port_listener`: the host stops what listens on one local TCP port (1024 and up,
+never the app's own processes), SIGTERM then SIGKILL after three seconds; `lsof` (macOS, Linux; `ss` when Linux has no
+lsof) or `Get-NetTCPConnection` (Windows). It is gated like other tools that change things outside the workspace: asked
+in the asking modes, run when the chat asks for nothing, refused while planning; workers never get it. Codex's sandbox
+itself is unchanged. The history a provider takes over with says background commands may have stopped or may still run
+where its shell cannot stop them, and names the tool. A tree compared with commits (Changes "since last commit", stage
+isolation) starts from the repository's own index, so a file is read again only when git would: files committed with
+CRLF under `eol=lf` no longer show as changed in full.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

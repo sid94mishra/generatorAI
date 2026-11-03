@@ -7,6 +7,7 @@
 // to the model and when (the chat turn loop, the stage script).
 // ────────────────────────────────────────────────────────────────
 
+import type { ProcessControl } from '../../tools/processTools.js';
 import type { AgentMode, AgentToolPolicy, PermissionCardSummary, PlanCardNote } from '@generatorai/shared';
 import type { HookBridge } from '../../domain/ports/IHookBridge.js';
 import type { HarnessPermissionMode } from '../../domain/ports/IAgentHarness.js';
@@ -98,6 +99,8 @@ export interface SessionComposerDeps {
   permissionRules?: PermissionRuleService;
   /** The platform tools (D-181): bound when the owner's `platform` group is on. */
   platformTools?: PlatformToolHost;
+  /** D-187: stops what listens on a local port, outside any agent sandbox (`stop_port_listener`). */
+  processControl?: ProcessControl;
 }
 
 /**

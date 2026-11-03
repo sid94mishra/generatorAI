@@ -359,6 +359,13 @@ export class SessionComposer {
         gateTurnOf: () => this.turns.get(i.conversationId),
       });
     }
+    // D-187 — stop what listens on a port, after the platform tools (R-10). Workers never (nobody to ask).
+    if (!isWorker) {
+      this.binder.processes(cfg, target, {
+        port: i.gates && i.attended ? withAgentToolPolicy(i.gates, projection.toolPolicy.groups) : undefined,
+        turnOf: () => this.turns.get(i.conversationId),
+      });
+    }
     this.binder.hooks(cfg, target);
     // D-182 — code mode LAST: `run_code` lists and calls every tool bound above.
     this.binder.codeMode(cfg, target);

@@ -251,7 +251,8 @@ function promptLine(turn: ChatTurn): string {
  */
 const PROCESSES_NOTE =
   'Commands started in the background earlier (servers, watchers) may have stopped with the previous session, or still run outside yours ' +
-  "where you may not be able to stop them: check before relying on them, and say so if one is in your way.";
+  'where your shell may not be allowed to stop them: check before relying on them, and if one holds a port you need, stop it with the ' +
+  'stop_port_listener tool.';
 
 export interface ConversationSeedOptions {
   /**

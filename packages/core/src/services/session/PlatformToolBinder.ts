@@ -22,6 +22,7 @@ import { buildWorkflowToolSet, WORKFLOW_AUTHORING_HINT, type WorkflowToolCaller,
 import { buildGitHubToolSet, GITHUB_MERGE_TOOL_NAME, GITHUB_READ_TOOL_NAMES, GITHUB_TOOLS_HINT } from '../../tools/github/index.js';
 import { buildPlatformToolSet, PLATFORM_WRITE_TOOL_NAMES, type PlatformToolCaller, type PlatformToolTurn } from '../../tools/platform/index.js';
 import { buildCodeModeTool } from '../../tools/codeMode/index.js';
+import { buildStopPortListenerTool } from '../../tools/processTools.js';
 
 import type { ToolCallContext, ToolDefinition } from '../../domain/ports/IAgentHarness.js';
 import { askBeforeActing, askBeforeRunning, type GatePort } from './gates.js';
@@ -342,6 +343,18 @@ export class PlatformToolBinder {
       { turnOf: opts.gateTurnOf, port: opts.port, always: new Set() },
     );
     appendTools(cfg, all.map((tool) => writes.find((w) => w.name === tool.name) ?? tool));
+  }
+
+  /**
+   * D-187 — `stop_port_listener`, for a session that works in a workspace: a server another session (or agent)
+   * left on a port is a process the agent's own sandbox may not let it stop. Asked in the asking modes, refused
+   * while planning (`askBeforeActing`); never this app's own processes. Appended after the platform tools (R-10).
+   */
+  processes(cfg: ConversationConfig, t: BindTarget, opts: { port: GatePort | undefined; turnOf: () => TurnContext | undefined }): void {
+    const control = this.deps.processControl;
+    if (!control || !t.workspaceId) return;
+    const tool = buildStopPortListenerTool(control, { owner: ownerTag(t.owner), protectedPids: [process.pid, process.ppid] });
+    appendTools(cfg, askBeforeActing([tool], { turnOf: opts.turnOf, port: opts.port, always: new Set() }));
   }
 
   /**

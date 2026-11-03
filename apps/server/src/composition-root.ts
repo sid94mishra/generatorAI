@@ -16,7 +16,7 @@ import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, Age
 import type { ProviderInstanceId } from '@generatorai/core';
 import { readWorkspaceRetentionPreferences } from './settings/workspaceRetention.js';
 import { defaultSttLanguage, readAudioPreferences } from './settings/audio.js';
-import { AgentHostClient, HostSupervisor, resolveWorktreePath, sessionHookBridgeFactory } from '@generatorai/core';
+import { AgentHostClient, createOsProcessControl, HostSupervisor, resolveWorktreePath, sessionHookBridgeFactory } from '@generatorai/core';
 import { parentChannel } from './parentChannel.js';
 import { applyReachabilityToPermissionDefault, createSecurityContext, type SecurityContext } from './composition/security.js';
 import { TailscaleAccess } from './network/tailscale/TailscaleAccess.js';
@@ -1962,6 +1962,8 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     },
   });
   chatExtensions.platformTools = platformToolHost;
+  // D-187 — a server another agent left on a port can be stopped from outside the agent's sandbox.
+  chatExtensions.processControl = createOsProcessControl();
   const chatListService = new ChatListService({
     modelMetadata: () => Object.values(harnessRegistry.statusSnapshot).flatMap((provider) => provider.models.map((model) => ({ ...model, provider: model.provider ?? provider.type }))),
     chats: chatEntityRepo,
