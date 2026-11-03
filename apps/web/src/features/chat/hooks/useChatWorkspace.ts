@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AgentMode } from '@generatorai/shared';
+import { settleModelChange } from '@generatorai/shared/ui-contract';
 import { pickReviewModel } from '@generatorai/client-core';
 import { useChat, useHarnessConfig, useUpdateChat } from '@/hooks/queries.js';
 import { useModels } from '@/hooks/harnessQueries.js';
@@ -101,30 +102,45 @@ export function useChatWorkspace(chatId: string | undefined) {
   // E-4: a model is sent with its provider. Without it the server — rightly — never lets a model name alone move an
   // established conversation to another provider, so picking Sonnet in a Codex chat showed "Sonnet 5.5" while the
   // next turn kept running on Codex.
+  // The provider is the chat's own when it offers the model, and the effort one the model takes (Codex has no
+  // `max`) — settled the same way the server settles a model change from any client.
   const modelPatch = useCallback(
     (model: string) => {
-      const provider = catalogModels?.find((m) => m.id === model)?.provider;
       const cfg = chat?.harnessConfig ?? {};
+      const settled = settleModelChange({
+        model,
+        currentProvider: cfg.harnessType,
+        effort: cfg.reasoningEffort,
+        catalog: catalogModels ?? [],
+      });
+      const { reasoningEffort: _effort, ...rest } = cfg;
       return {
         model,
-        ...(provider
-          ? { harnessConfig: { ...cfg, harnessType: provider as NonNullable<typeof cfg.harnessType>, ...(cfg.model ? { model } : {}) } }
-          : {}),
+        harnessConfig: {
+          ...rest,
+          ...(settled.provider ? { harnessType: settled.provider as NonNullable<typeof cfg.harnessType> } : {}),
+          ...(settled.effort ? { reasoningEffort: settled.effort } : {}),
+          ...(cfg.model ? { model } : {}),
+        },
       };
     },
     [chat?.harnessConfig, catalogModels],
   );
+  const applyModel = useCallback((model: string) => {
+    const patch = modelPatch(model);
+    setSelectedModel(model);
+    setReasoningEffort(patch.harnessConfig.reasoningEffort);
+    return patch;
+  }, [modelPatch]);
   const changeModel = useCallback((model: string) => {
     if (!chat) return;
-    setSelectedModel(model);
-    updateChatMutation.mutate(modelPatch(model));
-  }, [chat, modelPatch, updateChatMutation]);
+    updateChatMutation.mutate(applyModel(model));
+  }, [chat, applyModel, updateChatMutation]);
   /** The same move, awaited: a prompt sent right after must already run on the new provider. */
   const switchModel = useCallback(async (model: string) => {
     if (!chat) return;
-    setSelectedModel(model);
-    await updateChatMutation.mutateAsync(modelPatch(model));
-  }, [chat, modelPatch, updateChatMutation]);
+    await updateChatMutation.mutateAsync(applyModel(model));
+  }, [chat, applyModel, updateChatMutation]);
   // Evaluation: where "Review with Sonnet" sends a Codex turn's changes.
   const reviewModel = useMemo(() => pickReviewModel(catalogModels), [catalogModels]);
 

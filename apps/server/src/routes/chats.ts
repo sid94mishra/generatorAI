@@ -46,6 +46,7 @@ import type {
   PlanDocument,
 } from '@generatorai/shared';
 import { chatModelSummary, type ChatListRequest } from '@generatorai/core';
+import { settleModelChange } from '@generatorai/shared/ui-contract';
 import { checkApprovalProof } from '../middleware/approvalProof.js';
 
 /**
@@ -782,6 +783,26 @@ export function createChatApiRoutes(container: Container): Router {
           }
         }
         updates.harnessConfig = harnessConfig;
+      }
+      // A model belongs to a provider: the record says which (the conversation moves only when it does, E-4),
+      // and keeps an effort level the model takes — whoever changed the model, with or without the provider.
+      if (typeof model === 'string' && model) {
+        const current = await container.chatEntityRepo.getById(chatId);
+        const cfg: Record<string, unknown> = { ...((updates.harnessConfig as Record<string, unknown> | undefined) ?? current.harnessConfig ?? {}) };
+        const requested = (harnessConfig as { harnessType?: unknown } | undefined)?.harnessType;
+        const settled = settleModelChange({
+          model,
+          requestedProvider: typeof requested === 'string' && requested ? requested : undefined,
+          currentProvider: current.harnessConfig?.harnessType,
+          effort: typeof cfg['reasoningEffort'] === 'string' ? cfg['reasoningEffort'] : undefined,
+          // The provider type, as the record's `harnessType` names it (the merged catalog's own `provider` is the vendor's label).
+          catalog: Object.values(container.harnessRegistry?.statusSnapshot ?? {}).flatMap((p) => p.models.map((m) => ({ ...m, provider: p.type }))),
+        });
+        if (settled.provider) cfg['harnessType'] = settled.provider;
+        if (settled.effort) cfg['reasoningEffort'] = settled.effort;
+        else delete cfg['reasoningEffort'];
+        if (cfg['model'] !== undefined) cfg['model'] = model;
+        updates.harnessConfig = cfg;
       }
       // Reopening an archived chat also brings its workspace and released worktrees back.
       if (status === 'active') await chatManagementService.unarchiveChat(chatId);
