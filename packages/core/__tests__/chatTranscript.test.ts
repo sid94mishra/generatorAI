@@ -183,6 +183,7 @@ describe('buildConversationSeed', () => {
   it('says only what was said since, for a provider that resumes its own session', () => {
     const seed = buildConversationSeed([msg('user', 'Review it', { turnId: 't1' }), msg('assistant', 'Looks good.', { turnId: 't1', provider: 'codex' })], { since: true });
     expect(seed).toContain('[While you were away');
+    expect(seed).toContain('are not running in this session');
     expect(seed).toContain('Looks good.');
   });
 

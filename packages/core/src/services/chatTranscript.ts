@@ -244,6 +244,13 @@ function promptLine(turn: ChatTurn): string {
   return `- ${text.length > SEED_PROMPT_LINE_MAX ? `${text.slice(0, SEED_PROMPT_LINE_MAX)}…` : text || '(no prompt)'}`;
 }
 
+/**
+ * A provider's background commands (a dev server, a watcher) end with its session: after a move the history
+ * still says "the server is running on 4817" when nothing listens there.
+ */
+const PROCESSES_NOTE =
+  'Commands started in the background earlier (servers, watchers) are not running in this session: check, and start again what you need.';
+
 export interface ConversationSeedOptions {
   /**
    * The provider resumes its own session, which remembers the chat up to its last reply: the seed is only what
@@ -287,10 +294,10 @@ export function buildConversationSeed(messages: readonly ChatMessage[], options:
   const header = options.since
     ? '[While you were away — this chat went on with another model. You still remember the chat up to your own last reply; ' +
       'this is what was said after it, so treat it as part of the same conversation and continue from here. ' +
-      'Files on disk reflect the current state, not necessarily every action below.]'
+      `Files on disk reflect the current state, not necessarily every action below. ${PROCESSES_NOTE}]`
     : '[Conversation history — this chat continues in a fresh agent session (it was rewound, branched, or moved to another model provider). ' +
       'This is what was said so far in this chat; treat it as your own memory and continue from here. ' +
-      'Files on disk reflect the current state, not necessarily every action below.]';
+      `Files on disk reflect the current state, not necessarily every action below. ${PROCESSES_NOTE}]`;
   const omitted = dropped > 0 ? `\n[${dropped} earlier turn${dropped === 1 ? '' : 's'} omitted]` : '';
   const earlier = index.length ? `\n\n[Earlier turns — the user's prompts only]\n${index.join('\n')}` : '';
   return `${header}${omitted}${earlier}\n\n${body.join('\n\n---\n\n')}\n\n[End of restored history]`;
