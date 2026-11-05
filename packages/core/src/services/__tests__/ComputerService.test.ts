@@ -1066,6 +1066,62 @@ describe('ComputerService consent reach (G-07)', () => {
   });
 });
 
+describe('ComputerService plans through a provider batch', () => {
+  const enabled = () => ({ ...baseConfig(), enabled: true, allowSyntheticFallback: true });
+
+  it('fences every element step first, then sends the plan in one batch and records each step', async () => {
+    const { service, bridge, consent, audit } = makeService([SLACK], enabled());
+    consent.answer = 'allow_run';
+    bridge.elements = [
+      { index: 0, role: 'button', label: '1', secure: false, value: null, traits: [], actions: ['AXPress'], childCount: 0, token: 's:0' },
+    ];
+    const batches: ActionRequest[][] = [];
+    (bridge as unknown as { actBatch: (h: unknown, reqs: ActionRequest[]) => Promise<ComputerActionResult[]> }).actBatch = async (_h, reqs) => {
+      batches.push(reqs);
+      return reqs.map((_r, i) => ({
+        ok: true,
+        snapshot: null,
+        screenshot: null,
+        action: { path: 'accessibility' as const },
+        ...(i === reqs.length - 1 ? { changes: { diff: '~ [9] AXStaticText = "3"', reindexed: false, unchanged: false } } : {}),
+      }));
+    };
+    const snap = await service.snapshot(CTX, { by: 'appId', appId: SLACK.id });
+    const target = { app: { appId: '', name: '', pid: 0 }, window: { by: 'focused' as const } };
+
+    const plan = await service.actPlan(CTX, { by: 'appId', appId: SLACK.id }, [
+      { type: 'click', snapshotId: snap.snapshot!.snapshotId, elementIndex: 0 },
+      { type: 'clickNamed', target, name: 'Add' },
+      { type: 'clickNamed', target, name: 'Equals' },
+    ]);
+
+    expect(plan.ok).toBe(true);
+    expect(batches).toHaveLength(1);
+    expect(batches[0]!.map((r) => r.type)).toEqual(['click', 'clickNamed', 'clickNamed']);
+    expect(plan.results.at(-1)?.changes?.diff).toContain('"3"');
+    expect(audit.entries.filter((e) => e.action === 'clickNamed').map((e) => e.target)).toEqual(['Add', 'Equals']);
+  });
+
+  it('refuses a stale index before anything is sent', async () => {
+    const { service, bridge, consent } = makeService([SLACK], enabled());
+    consent.answer = 'allow_run';
+    let sent = 0;
+    (bridge as unknown as { actBatch: () => Promise<ComputerActionResult[]> }).actBatch = async () => {
+      sent += 1;
+      return [];
+    };
+    const target = { app: { appId: '', name: '', pid: 0 }, window: { by: 'focused' as const } };
+
+    const plan = await service.actPlan(CTX, { by: 'appId', appId: SLACK.id }, [
+      { type: 'clickNamed', target, name: 'Add' },
+      { type: 'click', snapshotId: 'never-issued', elementIndex: 0 },
+    ]);
+
+    expect(plan).toMatchObject({ ok: false, refusal: { code: 'stale_snapshot' }, stoppedAt: 1 });
+    expect(sent).toBe(0);
+  });
+});
+
 describe('ComputerService actPlan (G-07)', () => {
   beforeEach(() => { delete process.env['GENERATORAI_COMPUTER_USE']; });
   const enabled = () => ({ ...baseConfig(), enabled: true, allowSyntheticFallback: true });
@@ -1135,7 +1191,7 @@ describe('ComputerService actPlan (G-07)', () => {
     const tooMany = await service.actPlan(
       CTX,
       { by: 'appId', appId: SLACK.id },
-      Array.from({ length: 21 }, () => steps[2]!),
+      Array.from({ length: 41 }, () => steps[2]!),
     );
     expect(tooMany.refusal?.code).toBe('unsupported_action');
     expect(consent.prompts).toHaveLength(0);

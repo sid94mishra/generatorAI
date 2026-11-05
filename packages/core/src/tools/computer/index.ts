@@ -11,6 +11,7 @@
 // gate for providers (OpenAI) that emit no permission requests of their own.
 // ────────────────────────────────────────────────────────────────
 
+import * as path from 'node:path';
 import type { ToolDefinition } from '../../domain/ports/IAgentHarness.js';
 import { TOOL_BINARY_KEY } from '../../domain/ports/IAgentHarness.js';
 import type { ActionRequest } from '../../domain/ports/IComputerBridge.js';
@@ -31,83 +32,6 @@ import {
 function permission(description: string, resource?: string) {
   return [{ kind: 'computer_use' as const, resource, description }];
 }
-
-const createCapabilitiesTool: ComputerToolFactory = (ctx): ToolDefinition => ({
-  name: 'computer_capabilities',
-  description:
-    'Report what desktop automation is available on this machine: platform, provider, which operations are ' +
-    'supported, and any limitations. Call this once before planning desktop work — on some systems element ' +
-    'targeting or dragging is unavailable and you must choose a different approach.',
-  owner: ctx.owner ?? 'computer-tools',
-  // A capability probe reveals nothing about the user's screen, and gating it
-  // would mean the model cannot discover the feature is off without a denial.
-  skipPermission: true,
-  parametersSchema: { type: 'object', properties: {}, additionalProperties: false },
-  handler: async () => {
-    const caps = await ctx.computerService.capabilities(callContext(ctx));
-    return {
-      ok: true,
-      platform: caps.platform,
-      provider: caps.provider,
-      displayServer: caps.displayServer,
-      supports: caps.supports,
-      limitations: caps.limitations,
-    };
-  },
-});
-
-const createListAppsTool: ComputerToolFactory = (ctx): ToolDefinition => ({
-  name: 'computer_list_apps',
-  description:
-    'List running desktop applications. Use the returned `appId` to target every other computer_* tool. ' +
-    'Some applications are permanently excluded for security and will never appear.',
-  owner: ctx.owner ?? 'computer-tools',
-  requiredPermissions: permission('List running desktop applications'),
-  parametersSchema: { type: 'object', properties: {}, additionalProperties: false },
-  handler: async () => {
-    const { apps, refusal } = await ctx.computerService.listApps(callContext(ctx));
-    if (refusal) return { ok: false, refusal: refusal.code, message: refusal.message };
-    return {
-      ok: true,
-      apps: apps.map((app) => ({
-        appId: app.id,
-        name: app.name,
-        pid: app.pid,
-        frontmost: app.frontmost,
-        windowCount: app.windowCount,
-      })),
-    };
-  },
-});
-
-const createListWindowsTool: ComputerToolFactory = (ctx): ToolDefinition => ({
-  name: 'computer_list_windows',
-  description:
-    'List the windows of one application, with their ids and titles. Use this to pick a `windowId` when an ' +
-    'application has several windows open.',
-  owner: ctx.owner ?? 'computer-tools',
-  requiredPermissions: permission('List an application\u2019s windows'),
-  parametersSchema: {
-    type: 'object',
-    properties: { ...APP_TARGET_PROPERTIES },
-    additionalProperties: false,
-  },
-  handler: async (args) => {
-    const ref = toAppRef(args);
-    if ('error' in ref) return { ok: false, error: ref.error };
-    const { windows, refusal } = await ctx.computerService.listWindows(callContext(ctx), ref);
-    if (refusal) return { ok: false, refusal: refusal.code, message: refusal.message };
-    return {
-      ok: true,
-      windows: windows.map((w) => ({
-        windowId: w.id,
-        title: w.title,
-        focused: w.focused,
-        minimised: w.minimised,
-      })),
-    };
-  },
-});
 
 const createSnapshotTool: ComputerToolFactory = (ctx): ToolDefinition => ({
   name: 'computer_snapshot',
@@ -517,240 +441,6 @@ const createPressKeyTool: ComputerToolFactory = (ctx): ToolDefinition => ({
   },
 });
 
-const createPasteTextTool: ComputerToolFactory = (ctx): ToolDefinition => ({
-  name: 'computer_paste_text',
-  description:
-    'Paste text via the system clipboard. Faster than typing for long text, but it REPLACES the user\u2019s ' +
-    `clipboard contents. ${SYNTHETIC_WARNING}`,
-  owner: ctx.owner ?? 'computer-tools',
-  requiredPermissions: permission('Paste text into a desktop application via the clipboard'),
-  parametersSchema: {
-    type: 'object',
-    properties: {
-      ...APP_TARGET_PROPERTIES,
-      windowId: { type: 'number', description: 'Target window. Defaults to the focused window.' },
-      text: { type: 'string', description: 'Text to place on the clipboard and paste.' },
-    },
-    required: ['text'],
-    additionalProperties: false,
-  },
-  handler: async (args) => {
-    const ref = toAppRef(args);
-    if ('error' in ref) return { ok: false, error: ref.error };
-    const text = typeof args['text'] === 'string' ? args['text'] : undefined;
-    if (text === undefined) return { ok: false, error: '`text` is required.' };
-    const result = await ctx.computerService.act(callContext(ctx), ref, {
-      type: 'pasteText',
-      target: windowTarget(args),
-      text,
-    });
-    return actionPayload(result);
-  },
-});
-
-const createScrollTool: ComputerToolFactory = (ctx): ToolDefinition => ({
-  name: 'computer_scroll',
-  description: `Scroll within a window. ${SYNTHETIC_WARNING}`,
-  owner: ctx.owner ?? 'computer-tools',
-  requiredPermissions: permission('Scroll a desktop application'),
-  parametersSchema: {
-    type: 'object',
-    properties: {
-      ...APP_TARGET_PROPERTIES,
-      windowId: { type: 'number', description: 'Target window. Defaults to the focused window.' },
-      deltaX: { type: 'number', description: 'Horizontal scroll amount in pixels.' },
-      deltaY: { type: 'number', description: 'Vertical scroll amount in pixels. Negative scrolls up.' },
-      x: { type: 'number', description: 'Optional pointer x for the scroll origin.' },
-      y: { type: 'number', description: 'Optional pointer y for the scroll origin.' },
-    },
-    required: ['deltaY'],
-    additionalProperties: false,
-  },
-  handler: async (args) => {
-    const ref = toAppRef(args);
-    if ('error' in ref) return { ok: false, error: ref.error };
-    const result = await ctx.computerService.act(callContext(ctx), ref, {
-      type: 'scroll',
-      target: windowTarget(args),
-      deltaX: coerceInt(args['deltaX']) ?? 0,
-      deltaY: coerceInt(args['deltaY']) ?? 0,
-      x: coerceInt(args['x']),
-      y: coerceInt(args['y']),
-    });
-    return actionPayload(result);
-  },
-});
-
-const createDragTool: ComputerToolFactory = (ctx): ToolDefinition => ({
-  name: 'computer_drag',
-  description: `Drag from one point to another within a window. ${SYNTHETIC_WARNING}`,
-  owner: ctx.owner ?? 'computer-tools',
-  requiredPermissions: permission('Drag within a desktop application'),
-  parametersSchema: {
-    type: 'object',
-    properties: {
-      ...APP_TARGET_PROPERTIES,
-      windowId: { type: 'number', description: 'Target window. Defaults to the focused window.' },
-      fromX: { type: 'number' },
-      fromY: { type: 'number' },
-      toX: { type: 'number' },
-      toY: { type: 'number' },
-    },
-    required: ['fromX', 'fromY', 'toX', 'toY'],
-    additionalProperties: false,
-  },
-  handler: async (args) => {
-    const ref = toAppRef(args);
-    if ('error' in ref) return { ok: false, error: ref.error };
-    const from = { x: coerceInt(args['fromX']), y: coerceInt(args['fromY']) };
-    const to = { x: coerceInt(args['toX']), y: coerceInt(args['toY']) };
-    if (from.x === undefined || from.y === undefined || to.x === undefined || to.y === undefined) {
-      return { ok: false, error: '`fromX`, `fromY`, `toX`, and `toY` are all required.' };
-    }
-    const result = await ctx.computerService.act(callContext(ctx), ref, {
-      type: 'drag',
-      target: windowTarget(args),
-      from: { x: from.x, y: from.y },
-      to: { x: to.x, y: to.y },
-    });
-    return actionPayload(result);
-  },
-});
-
-const createClickPointTool: ComputerToolFactory = (ctx): ToolDefinition => ({
-  name: 'computer_click_point',
-  description:
-    'Click at raw screen coordinates. LAST RESORT \u2014 only when the control does not appear in a ' +
-    `computer_snapshot at all. ${SYNTHETIC_WARNING}`,
-  owner: ctx.owner ?? 'computer-tools',
-  requiredPermissions: permission('Click at screen coordinates'),
-  parametersSchema: {
-    type: 'object',
-    properties: {
-      ...APP_TARGET_PROPERTIES,
-      windowId: { type: 'number', description: 'Target window. Defaults to the focused window.' },
-      x: { type: 'number' },
-      y: { type: 'number' },
-      button: { type: 'string', enum: ['left', 'right'] },
-    },
-    required: ['x', 'y'],
-    additionalProperties: false,
-  },
-  handler: async (args) => {
-    const ref = toAppRef(args);
-    if ('error' in ref) return { ok: false, error: ref.error };
-    const x = coerceInt(args['x']);
-    const y = coerceInt(args['y']);
-    if (x === undefined || y === undefined) return { ok: false, error: '`x` and `y` are required.' };
-    const result = await ctx.computerService.act(callContext(ctx), ref, {
-      type: 'clickPoint',
-      target: windowTarget(args),
-      x,
-      y,
-      button: args['button'] === 'right' ? 'right' : 'left',
-    });
-    return actionPayload(result);
-  },
-});
-
-const createVerifyTool: ComputerToolFactory = (ctx): ToolDefinition => ({
-  name: 'computer_verify',
-  description:
-    'Check whether a window really is in the state you expect, and get a definitive answer. Use this INSTEAD of ' +
-    're-reading a value you just wrote: a write returns "unverified" on most applications, and reading it back ' +
-    'goes through the same layer that may have discarded it. Returns "satisfied", "unsatisfied", or "unknown" — ' +
-    'and unknown NEVER means success. If it comes back unknown twice, stop and tell the user you could not ' +
-    'confirm it. Make the label specific: "A1" also matches "A10", which returns unknown (multi_match).',
-  owner: ctx.owner ?? 'computer-tools',
-  requiredPermissions: permission('Check the state of a desktop window'),
-  parametersSchema: {
-    type: 'object',
-    properties: {
-      ...APP_TARGET_PROPERTIES,
-      windowId: { type: 'number', description: 'Window id. Defaults to the focused window.' },
-      timeoutMs: {
-        type: 'number',
-        description:
-          'How long to wait for the condition, in ms (0–10000, default 5000). A verify costs roughly this ' +
-          'long on a slow application, so lower it for a check you expect to pass immediately.',
-      },
-      stableSamples: {
-        type: 'number',
-        description:
-          'Consecutive matching reads required before reporting satisfied (1–5, default 2). Use 1 for a ' +
-          'settled window; leave the default when something may still be animating.',
-      },
-      expect: {
-        type: 'array',
-        description: 'One to eight conditions, all of which must hold.',
-        items: {
-          type: 'object',
-          properties: {
-            role: { type: 'string', description: 'Accessibility role of the element, e.g. "Edit", "DataItem".' },
-            labelContains: { type: 'string', description: 'Substring of the element label. Be specific.' },
-            valueEquals: { type: 'string', description: 'The exact value the element should hold.' },
-            exists: { type: 'boolean', description: 'Assert the element is present. Only `true` is meaningful.' },
-            enabled: { type: 'boolean' },
-            selected: { type: 'boolean' },
-          },
-          additionalProperties: false,
-        },
-      },
-    },
-    required: ['expect'],
-    additionalProperties: false,
-  },
-  handler: async (args) => {
-    const ref = toAppRef(args);
-    if ('error' in ref) return { ok: false, error: ref.error };
-    const raw = Array.isArray(args['expect']) ? args['expect'] : [];
-    if (raw.length === 0) return { ok: false, error: '`expect` needs at least one condition.' };
-
-    const expect = raw.slice(0, 8).map((entry) => {
-      const e = (entry ?? {}) as Record<string, unknown>;
-      return {
-        selector: {
-          ...(typeof e['role'] === 'string' ? { role: e['role'] } : {}),
-          ...(typeof e['labelContains'] === 'string' ? { labelContains: e['labelContains'] } : {}),
-        },
-        ...(typeof e['valueEquals'] === 'string' ? { valueEquals: e['valueEquals'] } : {}),
-        ...(e['exists'] === true ? { exists: true as const } : {}),
-        ...(typeof e['enabled'] === 'boolean' ? { enabled: e['enabled'] } : {}),
-        ...(typeof e['selected'] === 'boolean' ? { selected: e['selected'] } : {}),
-      };
-    });
-
-    const result = await ctx.computerService.verify(callContext(ctx), ref, expect, {
-      windowId: coerceInt(args['windowId']),
-      ...(coerceInt(args['timeoutMs']) !== undefined ? { timeoutMs: coerceInt(args['timeoutMs']) as number } : {}),
-      ...(coerceInt(args['stableSamples']) !== undefined
-        ? { stableSamples: coerceInt(args['stableSamples']) as number }
-        : {}),
-    });
-    if (result.refusal) {
-      return { ok: false, refusal: result.refusal.code, message: result.refusal.message };
-    }
-    const ambiguous = result.results.find((r) => r.detail === 'multi_match');
-    return {
-      ok: true,
-      outcome: result.outcome,
-      conditions: result.results,
-      ...(result.outcome === 'unknown'
-        ? {
-            note: ambiguous
-              ? `UNKNOWN is not success. The label matched ${ambiguous.matches ?? 'several'} elements, so the ` +
-                'value could not be attributed to one of them. Labels are matched by substring and there is no ' +
-                'exact-match option, so a spreadsheet address like "A1" can never be separated from "A10".."A19" — ' +
-                'if that is your case, no narrowing will help. Tell the user you could not confirm it.'
-              : 'UNKNOWN is not success. The window could not be observed well enough to decide — the provider ' +
-                'did not answer, or the predicate is unsupported for that element. Tell the user it could not be ' +
-                'confirmed. Do not assume it worked.',
-          }
-        : {}),
-    };
-  },
-});
-
 const createLaunchAppTool: ComputerToolFactory = (ctx): ToolDefinition => ({
   name: 'computer_launch_app',
   description:
@@ -826,32 +516,6 @@ const createLaunchAppTool: ComputerToolFactory = (ctx): ToolDefinition => ({
   },
 });
 
-const createBringToFrontTool: ComputerToolFactory = (ctx): ToolDefinition => ({
-  name: 'computer_bring_to_front',
-  description:
-    'Restore and focus an application’s window. This DELIBERATELY takes the foreground away from whatever the ' +
-    'user is doing, so it is not part of the normal flow: clicking and setting values work on a background ' +
-    'window, and tools that need focus acquire and release it themselves for that one action. Use this only ' +
-    'when a tool refuses because the window is minimised, or for a surface that must stay foreground across ' +
-    'several calls, such as a remote-desktop session.',
-  owner: ctx.owner ?? 'computer-tools',
-  requiredPermissions: permission('Focus a desktop application window'),
-  parametersSchema: {
-    type: 'object',
-    properties: {
-      ...APP_TARGET_PROPERTIES,
-      windowId: { type: 'number', description: 'Window id from computer_list_windows. Defaults to the app’s main window.' },
-    },
-    additionalProperties: false,
-  },
-  handler: async (args) => {
-    const ref = toAppRef(args);
-    if ('error' in ref) return { ok: false, error: ref.error };
-    return actionPayload(await ctx.computerService.bringToFront(callContext(ctx), ref, coerceInt(args['windowId'])));
-  },
-});
-
-
 /** One step of `computer_run_steps`, as the model writes it. */
 function planStep(
   raw: unknown,
@@ -861,12 +525,17 @@ function planStep(
   if (!raw || typeof raw !== 'object') return { error: 'Each step must be an object.' };
   const step = raw as Record<string, unknown>;
   const elementIndex = coerceInt(step['elementIndex']);
+  const name = coerceString(step['name']);
+  const byName = elementIndex === undefined && name !== undefined
+    ? { name, ...(coerceString(step['role']) ? { role: coerceString(step['role'])! } : {}), ...(coerceInt(step['nth']) !== undefined ? { nth: coerceInt(step['nth'])! } : {}) }
+    : undefined;
   const element = () =>
     snapshotId === undefined || elementIndex === undefined
-      ? { error: `${String(step['kind'])} needs \`elementIndex\` and the call needs \`snapshotId\`.` }
+      ? { error: `${String(step['kind'])} needs \`elementIndex\` (with the call's \`snapshotId\`) or the element's \`name\`.` }
       : null;
   switch (step['kind']) {
     case 'click': {
+      if (byName) return { step: { type: 'clickNamed', target, ...byName } };
       const missing = element();
       if (missing) return missing;
       return {
@@ -880,10 +549,11 @@ function planStep(
       };
     }
     case 'set_value': {
-      const missing = element();
-      if (missing) return missing;
       const value = typeof step['value'] === 'string' ? step['value'] : undefined;
       if (value === undefined) return { error: 'set_value needs `value`.' };
+      if (byName) return { step: { type: 'setValueNamed', target, ...byName, value } };
+      const missing = element();
+      if (missing) return missing;
       return { step: { type: 'setValue', snapshotId: snapshotId!, elementIndex: elementIndex!, value } };
     }
     case 'menu': {
@@ -924,6 +594,16 @@ function planStep(
         },
       };
     }
+    case 'drag': {
+      const fromX = coerceInt(step['x']);
+      const fromY = coerceInt(step['y']);
+      const toX = coerceInt(step['toX']);
+      const toY = coerceInt(step['toY']);
+      if (fromX === undefined || fromY === undefined || toX === undefined || toY === undefined) {
+        return { error: 'drag needs `x`, `y` (from) and `toX`, `toY`.' };
+      }
+      return { step: { type: 'drag', target, from: { x: fromX, y: fromY }, to: { x: toX, y: toY } } };
+    }
     case 'scroll':
       return {
         step: {
@@ -943,41 +623,45 @@ function planStep(
 const createRunStepsTool: ComputerToolFactory = (ctx): ToolDefinition => ({
   name: 'computer_run_steps',
   description:
-    'Run a fixed sequence of up to 20 steps against ONE window in ONE call — a keypad sequence, a form, a row of ' +
-    'cells, a menu command and the keys after it. Steps: click / set_value (an element of `snapshotId`, by ' +
-    '`elementIndex`), menu (`path` such as "File>Save…"), type_text (into an element with `elementIndex`, else the ' +
-    'focused field), press_key, paste_text, click_point, scroll. Use it whenever you already know the next steps — ' +
-    'it replaces a call per step. Stops at the first step that fails or is refused. Returns what changed in the ' +
-    'window after the last step.',
+    'THE way to act: up to 40 steps against one window in ONE call, then what changed in the window. Steps: ' +
+    'click / set_value — an element by `elementIndex` (with `snapshotId`) or by its label `name` (+ optional `role`, ' +
+    '`nth`; no snapshot needed: {kind:"click", name:"Equals"}); menu (`path` "File>New"); type_text (into ' +
+    '`elementIndex`, else the focused field; "\\n" = new line); press_key ("Return", "Tab", "Meta+S"); ' +
+    'paste_text; click_point / drag (`x`,`y` → `toX`,`toY`, pixels of a snapshot screenshot); scroll. Put every step ' +
+    'you already know in one call. Stops at the first step that fails and says which.',
   owner: ctx.owner ?? 'computer-tools',
   requiredPermissions: permission('Run several steps in a desktop application'),
   parametersSchema: {
     type: 'object',
     properties: {
       ...APP_TARGET_PROPERTIES,
-      windowId: { type: 'number', description: 'Target window. Defaults to the focused window.' },
-      snapshotId: { type: 'string', description: 'The snapshot whose elementIndex values the element steps use.' },
+      windowId: { type: 'number', description: 'Target window.' },
+      snapshotId: { type: 'string', description: 'The snapshot the steps\u2019 elementIndex values come from.' },
       steps: {
         type: 'array',
         minItems: 1,
-        maxItems: 20,
-        description: 'The steps, in order (1 to 20).',
+        maxItems: 40,
         items: {
           type: 'object',
           properties: {
             kind: {
               type: 'string',
-              enum: ['click', 'set_value', 'menu', 'type_text', 'press_key', 'paste_text', 'click_point', 'scroll'],
+              enum: ['click', 'set_value', 'menu', 'type_text', 'press_key', 'paste_text', 'click_point', 'drag', 'scroll'],
             },
             elementIndex: { type: 'number' },
+            name: { type: 'string', description: 'Element label, instead of elementIndex.' },
+            role: { type: 'string', description: 'With name: button, textfield, cell, menuitem, checkbox…' },
+            nth: { type: 'number', description: 'With name: which match, 0-based.' },
             value: { type: 'string' },
-            path: { type: 'string', description: 'Menu path for kind "menu", e.g. "Format>Font>Bold".' },
+            path: { type: 'string' },
+            text: { type: 'string' },
+            key: { type: 'string' },
             x: { type: 'number' },
             y: { type: 'number' },
+            toX: { type: 'number' },
+            toY: { type: 'number' },
             button: { type: 'string', enum: ['left', 'right'] },
             clickCount: { type: 'number' },
-            text: { type: 'string' },
-            key: { type: 'string', description: 'Key name or chord, e.g. "Return", "Tab" or "Meta+S".' },
             deltaX: { type: 'number' },
             deltaY: { type: 'number' },
           },
@@ -1016,52 +700,83 @@ const createRunStepsTool: ComputerToolFactory = (ctx): ToolDefinition => ({
   },
 });
 
+const createSaveAsTool: ComputerToolFactory = (ctx): ToolDefinition => ({
+  name: 'computer_save_as',
+  description:
+    'Save or export the document in a window to an exact folder and file name in ONE call, through the app\u2019s own ' +
+    'save dialog, and confirm the file exists on disk. Use it for every Save, Save As and Export: it opens the ' +
+    'dialog with `menu` (default "File>Save…"; e.g. "File>Export To>CSV…", "File>Export To>PDF…"), goes to the ' +
+    'folder, sets the name and the File Format, presses Save/Export, and checks the file. Do not drive save ' +
+    'dialogs by hand.',
+  owner: ctx.owner ?? 'computer-tools',
+  requiredPermissions: permission('Save a document from a desktop application'),
+  parametersSchema: {
+    type: 'object',
+    properties: {
+      ...APP_TARGET_PROPERTIES,
+      windowId: { type: 'number', description: 'The document\u2019s window.' },
+      folder: { type: 'string', description: 'Absolute folder path the file must land in.' },
+      name: { type: 'string', description: 'File name with extension, e.g. "budget.csv". Never a path.' },
+      menu: { type: 'string', description: 'Menu path that opens the dialog, e.g. "File>Export To>CSV…". Default "File>Save…".' },
+      format: { type: 'string', description: 'File Format popup item, when the dialog has one, e.g. "Plain Text".' },
+      replace: { type: 'boolean', description: 'Overwrite a file that already exists there. Default false.' },
+    },
+    required: ['windowId', 'folder', 'name'],
+    additionalProperties: false,
+  },
+  handler: async (args) => {
+    const ref = toAppRef(args);
+    if ('error' in ref) return { ok: false, error: ref.error };
+    const windowId = coerceInt(args['windowId']);
+    const folder = coerceString(args['folder']);
+    const name = coerceString(args['name']);
+    if (windowId === undefined || !folder || !name) return { ok: false, error: '`windowId`, `folder` and `name` are required.' };
+    if (!path.isAbsolute(folder)) return { ok: false, error: '`folder` must be an absolute path.' };
+    if (name.includes('/') || name.includes('\\')) return { ok: false, error: '`name` is a file name, not a path; put the folder in `folder`.' };
+    const menu = coerceString(args['menu'])?.split('>').map((part) => part.trim()).filter(Boolean);
+    const result = await ctx.computerService.saveAs(callContext(ctx), ref, windowId, {
+      folder,
+      name,
+      ...(menu && menu.length > 1 ? { menu } : {}),
+      ...(coerceString(args['format']) ? { format: coerceString(args['format'])! } : {}),
+      ...(args['replace'] === true ? { replace: true } : {}),
+    });
+    return result.ok
+      ? { ok: true, saved: result.path, steps: result.steps.join(' → '), reindexed: 'The window changed: snapshot it again before addressing elements.' }
+      : { ok: false, refusal: result.refusal?.code, message: result.refusal?.message };
+  },
+});
+
 const FACTORIES: readonly ComputerToolFactory[] = [
-  createCapabilitiesTool,
-  createListAppsTool,
   createLaunchAppTool,
-  createBringToFrontTool,
-  createListWindowsTool,
   createSnapshotTool,
-  createVerifyTool,
   createClickTool,
   createSetValueTool,
   createPerformActionTool,
   createTypeTextTool,
   createPressKeyTool,
-  createPasteTextTool,
-  createScrollTool,
-  createDragTool,
-  createClickPointTool,
   createRunStepsTool,
+  createSaveAsTool,
 ];
 
 export function buildComputerToolSet(ctx: ComputerToolContext): ToolDefinition[] {
   // Guarding centrally rather than per-tool so a new factory cannot forget it.
   return FACTORIES.map((factory) => {
     const tool = factory(ctx);
-    return { ...tool, handler: guard(tool.name, tool.handler) };
+    return { ...tool, alwaysLoad: true, handler: guard(tool.name, tool.handler) };
   });
 }
 
 export const COMPUTER_TOOL_NAMES = [
-  'computer_capabilities',
-  'computer_list_apps',
   'computer_launch_app',
-  'computer_bring_to_front',
-  'computer_list_windows',
   'computer_snapshot',
-  'computer_verify',
   'computer_click',
   'computer_set_value',
   'computer_perform_action',
   'computer_type_text',
   'computer_press_key',
-  'computer_paste_text',
-  'computer_scroll',
-  'computer_drag',
-  'computer_click_point',
   'computer_run_steps',
+  'computer_save_as',
 ] as const;
 
 export type ComputerToolName = (typeof COMPUTER_TOOL_NAMES)[number];

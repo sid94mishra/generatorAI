@@ -204,6 +204,11 @@ export type ActionRequest =
   // invoked through accessibility one level at a time, so it needs no snapshot
   // and never moves the pointer.
   | { type: 'invokeMenu'; target: ComputerWindowTarget; path: readonly string[] }
+  // An element named by its label (and optionally its role) instead of a
+  // snapshot index: the provider finds it in the window at action time, so a
+  // plan can press "Equals" or fill "Email" without reading the window first.
+  | { type: 'clickNamed'; target: ComputerWindowTarget; name: string; role?: string; nth?: number }
+  | { type: 'setValueNamed'; target: ComputerWindowTarget; name: string; role?: string; nth?: number; value: string }
   // `focus` is the driver's Chromium/Electron form: it pixel-clicks that point
   // to establish real renderer focus first, because posted input never reaches
   // those surfaces. Window-local screenshot pixels, same convention as click.
@@ -235,6 +240,29 @@ export type ActionRequest =
     };
 
 export type ActionRequestType = ActionRequest['type'];
+
+/** `saveAs`: where the document goes and how the dialog is opened. */
+export interface SaveAsRequest {
+  /** Absolute folder the file must land in. */
+  folder: string;
+  /** File name with its extension. */
+  name: string;
+  /** Menu path that opens the dialog, e.g. "File>Export To>CSV…". Default "File>Save…"; skipped when a dialog is already open. */
+  menu?: readonly string[];
+  /** Title of the File Format popup item to choose, when the dialog has one. */
+  format?: string;
+  /** Replace an existing file at that path. */
+  replace?: boolean;
+}
+
+export interface SaveAsResult {
+  ok: boolean;
+  /** The absolute path written, when it was confirmed on disk. */
+  path?: string;
+  /** What was done, step by step — handed to the agent as evidence. */
+  steps: string[];
+  refusal?: ComputerRefusal;
+}
 
 /**
  * The single source of truth for which variants are snapshot-fenced.
@@ -390,6 +418,13 @@ export interface IComputerBridge {
    * therefore blocklists the NAME first, and re-blocklists the resolved
    * identity after launch, before anything may drive it.
    */
+  /**
+   * Saves or exports the window's document to `folder`/`name` through the
+   * app's own save dialog, and confirms the file exists. Optional: a provider
+   * without it leaves saving to the agent's own steps.
+   */
+  saveAs?(handle: ComputerHandle, app: ComputerAppIdentity, windowId: number, opts: SaveAsRequest, signal?: AbortSignal): Promise<SaveAsResult>;
+
   launchApp(
     handle: ComputerHandle,
     name: string,
@@ -431,6 +466,14 @@ export interface IComputerBridge {
     signal?: AbortSignal,
     opts?: { observe?: boolean },
   ): Promise<ComputerActionResult>;
+
+  /**
+   * Runs several actions in as few provider round trips as it can, in order,
+   * stopping at the first that fails; one result per step that ran, the last
+   * carrying what the window shows changed. Optional: without it a plan runs
+   * one `act` per step.
+   */
+  actBatch?(handle: ComputerHandle, reqs: readonly ActionRequest[], signal?: AbortSignal): Promise<ComputerActionResult[]>;
 
   /**
    * Checks predicates against a window and answers definitively.

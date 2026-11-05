@@ -1959,6 +1959,21 @@ visible for the session. On macOS: Numbers/Pages/Keynote crash when their templa
 accessibility (Apple bug) — the skill presses Return on it; a save folder is chosen with the Where popup or Go to
 folder, never a path in the name field.
 
+### D-192 Computer use cycle one: fewer turns, one-call saves, a lean tool set (owner, 2026-11-05) — Final
+From the independent evaluation (ours ≈4.5/10 against Codex ≈8): turns are the cost (≈40k tokens each), so the work
+removes turns. The embedded driver runs with `CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS=300` and `CUA_DRIVER_KEY_GAP_MS=3`
+(`CUA_DRIVER_PACING_ENVIRONMENT`; the driver's own measurements: 1153 → ~325 ms per background click, 3650 → ~980 ms
+for 185 typed characters). `computer_run_steps` goes to the driver's `run_steps` in one call per segment (menus split
+it; one diff read after the last step) and takes up to 40 steps, with elements named by label as well as by index, so a
+task whose controls are known needs no snapshot. `computer_save_as` saves or exports through the app's own dialog to an
+exact folder and name (macOS: menu → Next… → Go to folder → name → format → Save → Replace only when asked) and
+succeeds only when the file is on disk. The tool set is nine (launch, snapshot, click, set_value, perform_action,
+type_text, press_key, run_steps, save_as); capabilities, list_apps, list_windows, verify, bring_to_front, paste_text,
+scroll, drag and click_point are gone (their work is run_steps steps or the bridge's own). The computer tools are
+always loaded (`alwaysLoad`) instead of deferred behind tool search, and the standing system hint carries the
+efficient loop, so a simple task needs neither a ToolSearch nor a Skill turn; the skill keeps the app recipes. The
+unused transcript consent card is removed; the Computer dock still opens itself for a consent prompt.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

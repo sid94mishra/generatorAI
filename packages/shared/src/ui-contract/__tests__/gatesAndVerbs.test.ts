@@ -67,7 +67,7 @@ describe('tool verbs', () => {
     ['Write', 'edit', 'Edited'],
     ['mcp__generatorai-tools__navigate_page', 'browser', 'Opened browser'],
     ['screenshot_page', 'browser', 'Took screenshot'],
-    ['computer_bring_to_front', 'computer', 'Focused window'],
+    ['computer_save_as', 'computer', 'Saved file'],
     ['spawn_background_agent', 'delegate', 'Delegated'],
     ['TodoWrite', 'plan', 'Revised plan'],
     ['Task', 'subagent', 'Task'],

@@ -130,10 +130,6 @@ const REPLAY_SAFE_TOOLS: ReadonlySet<string> = new Set([
   'screenshot_page',
   // Computer use — the reader half of the reader/writer split (W17).
   'computer_snapshot',
-  'computer_capabilities',
-  'computer_list_apps',
-  'computer_list_windows',
-  'computer_verify',
   // Widgets — inspection only.
   'read_widget',
   'describe_widget',

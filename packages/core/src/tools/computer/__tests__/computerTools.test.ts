@@ -206,14 +206,17 @@ describe('computer tool set', () => {
     expect([...(request.modifiers ?? [])].sort()).toEqual(['Meta', 'Shift']);
   });
 
-  it('steers the model toward snapshot addressing in its descriptions', () => {
+  it('is a lean, always-loaded set that steers the model to batches and one-call saves', () => {
     const { ctx } = makeCtx();
     const tools = buildComputerToolSet(ctx);
+    expect(tools.map((t) => t.name)).toEqual([...COMPUTER_TOOL_NAMES]);
+    expect(tools).toHaveLength(9);
+    // Deferred behind tool search, the family cost a ToolSearch turn before every task.
+    expect(tools.every((t) => t.alwaysLoad === true)).toBe(true);
     const byName = new Map(tools.map((t) => [t.name, t.description]));
-    expect(byName.get('computer_click')).toMatch(/ALWAYS prefer this over coordinates/);
-    expect(byName.get('computer_set_value')).toMatch(/STRONGLY PREFERRED over computer_type_text/);
-    expect(byName.get('computer_click_point')).toMatch(/LAST RESORT/);
-    for (const name of ['computer_type_text', 'computer_press_key', 'computer_paste_text', 'computer_scroll', 'computer_drag']) {
+    expect(byName.get('computer_run_steps')).toMatch(/THE way to act/);
+    expect(byName.get('computer_save_as')).toMatch(/confirm the file exists on disk/);
+    for (const name of ['computer_type_text', 'computer_press_key']) {
       expect(byName.get(name)).toMatch(/real keyboard\/mouse input/);
     }
   });
@@ -250,6 +253,37 @@ describe('computer tool set', () => {
     const { tool: press, calls } = tool('computer_press_key');
     await press.handler({ appId: 'a', key: 'g', modifiers: ['cmd', 'Shift', 'bogus'] });
     expect(calls[0]?.args[2]).toMatchObject({ type: 'pressKey', key: 'g', modifiers: ['Meta', 'Shift'] });
+  });
+
+  it('turns named and drag steps into plan steps', async () => {
+    const actPlan = vi.fn(async () => ({ ok: true, results: [] }));
+    const { ctx } = makeCtx({ actPlan });
+    const run = buildComputerToolSet(ctx).find((t) => t.name === 'computer_run_steps')!;
+    await run.handler({
+      appId: 'a',
+      windowId: 9,
+      steps: [
+        { kind: 'click', name: 'Equals', role: 'button' },
+        { kind: 'set_value', name: 'Email', value: 'a@b.c' },
+        { kind: 'drag', x: 1, y: 2, toX: 30, toY: 40 },
+      ],
+    });
+    const [, , steps] = actPlan.mock.calls[0] as unknown as [unknown, unknown, Array<Record<string, unknown>>];
+    expect(steps.map((s) => s['type'])).toEqual(['clickNamed', 'setValueNamed', 'drag']);
+    expect(steps[0]).toMatchObject({ name: 'Equals', role: 'button' });
+    expect(steps[2]).toMatchObject({ from: { x: 1, y: 2 }, to: { x: 30, y: 40 } });
+  });
+
+  it('save_as takes a folder and a bare file name, never a path in the name', async () => {
+    const saveAs = vi.fn(async () => ({ ok: true, path: '/tmp/out/a.csv', steps: ['menu File>Export To>CSV…', 'Save'] }));
+    const { ctx } = makeCtx({ saveAs });
+    const save = buildComputerToolSet(ctx).find((t) => t.name === 'computer_save_as')!;
+    expect(await save.handler({ appId: 'a', windowId: 9, folder: 'relative/dir', name: 'a.csv' })).toMatchObject({ ok: false });
+    expect(await save.handler({ appId: 'a', windowId: 9, folder: '/tmp/out', name: 'x/a.csv' })).toMatchObject({ ok: false });
+    expect(saveAs).not.toHaveBeenCalled();
+    const ok = await save.handler({ appId: 'a', windowId: 9, folder: '/tmp/out', name: 'a.csv', menu: 'File>Export To>CSV…' });
+    expect(ok).toMatchObject({ ok: true, saved: '/tmp/out/a.csv' });
+    expect(saveAs.mock.calls[0]).toEqual([expect.anything(), { by: 'appId', appId: 'a' }, 9, { folder: '/tmp/out', name: 'a.csv', menu: ['File', 'Export To', 'CSV…'] }]);
   });
 
   it('recognises its own tool names', () => {

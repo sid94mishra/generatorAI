@@ -67,6 +67,8 @@ import type {
   ComputerRuntimeStatus,
   ComputerWindowTarget,
   IComputerBridge,
+  SaveAsRequest,
+  SaveAsResult,
   RecordingRequest,
   RecordingState,
   VerifyPredicate,
@@ -250,7 +252,7 @@ const REFUSAL_MESSAGES: Record<ComputerRefusalCode, string> = {
 };
 
 /** Most actions one `actPlan` (the `computer_run_steps` tool) may carry. */
-export const MAX_PLAN_STEPS = 20;
+export const MAX_PLAN_STEPS = 40;
 
 /**
  * What a plan may carry. Element steps are allowed because an element the
@@ -266,6 +268,8 @@ const PLAN_STEP_TYPES: ReadonlySet<ActionRequest['type']> = new Set([
   'click',
   'setValue',
   'invokeMenu',
+  'clickNamed',
+  'setValueNamed',
 ]);
 
 /** One run-scoped consent (`allow_run`). `appIdentity` absent = any app. */
@@ -1234,6 +1238,66 @@ export class ComputerService {
    * consent and the blocklist are decided on the app the CALLER named, and the
    * snapshot fence then proves that app owns the element.
    */
+  /**
+   * Saves or exports a window's document through the app's own save dialog to
+   * an exact folder and name, and confirms the file on disk. One call for what
+   * took the agent 8–40 by hand. Gated like an action on that app.
+   */
+  async saveAs(
+    ctx: ComputerCallContext,
+    ref: ComputerAppRef,
+    windowId: number,
+    opts: SaveAsRequest,
+  ): Promise<SaveAsResult> {
+    const gate = this.featureGate(ctx.workspaceId);
+    if (gate) {
+      await this.auditGateRefusal(ctx, 'saveAs', gate, describeRef(ref));
+      return { ok: false, steps: [], refusal: gate };
+    }
+    const session = await this.ensureSession(ctx);
+    if (!session.bridge.saveAs) {
+      return { ok: false, steps: [], refusal: this.refusal('unsupported_action', 'This desktop provider cannot drive save dialogs; save with menu and key steps.') };
+    }
+    const resolved = await this.resolveApp(ctx, session, ref, 'saveAs');
+    if ('refusal' in resolved) return { ok: false, steps: [], refusal: resolved.refusal };
+    const app = resolved.app;
+    const denied = await this.checkConsent(ctx, app, 'saveAs', 'mutate');
+    if (denied) {
+      await this.recordRefusal(ctx, app, 'saveAs', denied);
+      return { ok: false, steps: [], refusal: denied };
+    }
+    const result = await this.withPermitFor<SaveAsResult>(
+      session,
+      async (signal) => {
+        const fresh = await this.reResolve(session, app);
+        if (!fresh) return { ok: false, steps: [], refusal: this.refusal('target_lost') };
+        const outcome = await session.bridge.saveAs!(session.handle, fresh, windowId, opts, signal);
+        // The dialog's reads replaced the window's snapshot.
+        this.invalidateSnapshots(session, fresh, true);
+        return outcome;
+      },
+      (refusal) => ({ ok: false, steps: [], refusal }),
+      Math.max(this.computerConfig.actionTimeoutMs, 60_000),
+    );
+    session.lastActivityAt = Date.now();
+    if (result.refusal) {
+      await this.recordRefusal(ctx, app, 'saveAs', result.refusal);
+      return result;
+    }
+    await this.writeAudit({
+      workspaceId: ctx.workspaceId,
+      chatId: ctx.chatId,
+      appIdentity: app.appId,
+      appLabel: app.name,
+      action: 'saveAs',
+      target: result.path,
+      path: 'accessibility',
+      verified: true,
+      createdAt: new Date(),
+    });
+    return result;
+  }
+
   async act(ctx: ComputerCallContext, ref: ComputerAppRef, req: ActionRequest): Promise<ComputerActionResult> {
     const gate = this.featureGate(ctx.workspaceId);
     if (gate) {
@@ -1353,6 +1417,8 @@ export class ComputerService {
       await this.recordRefusal(ctx, app, 'plan', refusal);
       return refuse(refusal, 0);
     }
+    if (session.bridge.actBatch) return this.dispatchBatch(ctx, session, app, steps, synthetic);
+
     const results: ComputerActionResult[] = [];
     const countPlan = () => {
       if (!results.some((r) => r.action?.path === 'synthetic')) return;
@@ -1376,6 +1442,53 @@ export class ComputerService {
     }
     countPlan();
     return { ok: true, results };
+  }
+
+  /**
+   * A whole plan in one provider batch: every element step is fenced first (a
+   * stale index refuses before anything runs), then the steps go out together
+   * and each one that ran is recorded like a single action.
+   */
+  private async dispatchBatch(
+    ctx: ComputerCallContext,
+    session: SessionRecord,
+    app: ComputerAppIdentity,
+    steps: readonly ActionRequest[],
+    synthetic: boolean,
+  ): Promise<ComputerPlanResult> {
+    const started = Date.now();
+    const labels = steps.map((step) => this.describeTarget(session, step));
+    type BatchOutcome = { results: ComputerActionResult[]; stoppedBefore?: number };
+    const outcome = await this.withPermitFor<BatchOutcome>(session, async (signal) => {
+      const fresh = await this.reResolve(session, app);
+      if (!fresh) return { results: [refusalResult(this.refusal('target_lost'))] };
+      for (const [index, step] of steps.entries()) {
+        const fence = this.checkFence(session, fresh, step);
+        if (fence) return { results: [refusalResult(fence)], stoppedBefore: index };
+      }
+      const results = await session.bridge.actBatch!(
+        session.handle,
+        steps.map((step) => scalePointsToDriverSpace(this.withResolvedApp(step, fresh), session.captureDownscale)),
+        signal,
+      );
+      this.invalidateSnapshots(session, fresh, results.at(-1)?.changes?.reindexed === true);
+      return { results };
+    }, (refusal) => ({ results: [refusalResult(refusal)] }),
+    // The driver bounds a batch at 60 s; ours must not cut it short.
+    Math.max(this.computerConfig.actionTimeoutMs, 65_000));
+    const offset = outcome.stoppedBefore ?? 0;
+    const recorded: ComputerActionResult[] = [];
+    for (const [n, result] of outcome.results.entries()) {
+      const index = offset + n;
+      recorded.push(await this.recordOutcome(ctx, session, app, steps[index]!, labels[index], result, started, true));
+    }
+    if (synthetic && recorded.some((r) => r.action?.path === 'synthetic')) {
+      const confirmed = recorded.some((r) => r.action?.path === 'synthetic' && r.action.verification?.state === 'verified');
+      session.blindStreak = confirmed ? 0 : session.blindStreak + 1;
+    }
+    const failed = recorded.findIndex((r) => !r.ok);
+    if (failed === -1) return { ok: true, results: recorded };
+    return { ok: false, results: recorded, refusal: recorded[failed]!.refusal ?? this.refusal('target_lost'), stoppedAt: offset + failed };
   }
 
   /** Everything after consent: dispatch under a permit, persist, audit, emit. */
@@ -1422,6 +1535,20 @@ export class ComputerService {
       return outcome;
     });
 
+    return this.recordOutcome(ctx, session, app, req, targetLabel, result, started, planStep);
+  }
+
+  /** After an action: its frame, the refusal or the audit row, the blind-input count and the live event. */
+  private async recordOutcome(
+    ctx: ComputerCallContext,
+    session: SessionRecord,
+    app: ComputerAppIdentity,
+    req: ActionRequest,
+    targetLabel: string | undefined,
+    result: ComputerActionResult,
+    started: number,
+    planStep: boolean,
+  ): Promise<ComputerActionResult> {
     session.lastActivityAt = Date.now();
     const artifact = await this.persistScreenshot(session, result);
 
@@ -1962,6 +2089,7 @@ export class ComputerService {
   }
 
   private describeTarget(session: SessionRecord, req: ActionRequest): string | undefined {
+    if (req.type === 'clickNamed' || req.type === 'setValueNamed') return req.name;
     if (!isElementAddressed(req)) return undefined;
     const windowKey = session.snapshotIndex.get(req.snapshotId);
     const entry = windowKey ? session.snapshots.get(windowKey) : undefined;

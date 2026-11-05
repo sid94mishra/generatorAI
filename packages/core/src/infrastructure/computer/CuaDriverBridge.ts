@@ -45,6 +45,7 @@ import type {
   ComputerWindowInfo,
   ILogger,
 } from '@generatorai/shared';
+import { CUA_DRIVER_PACING_ENVIRONMENT } from '@generatorai/shared';
 import type {
   ActionRequest,
   ComputerAppIdentity,
@@ -64,6 +65,7 @@ import type {
   VerifyRequest,
   VerifyResult,
 } from '../../domain/ports/IComputerBridge.js';
+import type { SaveAsRequest, SaveAsResult } from '../../domain/ports/IComputerBridge.js';
 import { isElementAddressed } from '../../domain/ports/IComputerBridge.js';
 import {
   UnrecognisedDriverPayloadError,
@@ -1205,6 +1207,10 @@ export class CuaDriverBridge implements IComputerBridge {
         };
       case 'invokeMenu':
         return { tool: 'invoke_menu', args: { ...target, path: [...req.path] } };
+      case 'clickNamed':
+        return { tool: 'click', args: { ...target, ...named(req) } };
+      case 'setValueNamed':
+        return { tool: 'set_value', args: { ...target, ...named(req), value: req.value } };
       case 'typeText': {
         // XAML/WinUI hosts drop WM_CHAR, so the driver needs the element to
         // write through ValuePattern instead. It rejects the pair unless the
@@ -1402,6 +1408,105 @@ export class CuaDriverBridge implements IComputerBridge {
     return this.call(connection, 'invoke_menu', { ...args, path: corrected }, signal);
   }
 
+  /**
+   * A plan in as few driver calls as possible: consecutive steps go to the
+   * driver's own `run_steps` in one call (it validates every step first, stops
+   * at the first failure, retries a stale token on the same role and label,
+   * re-sends a background-refused step in front once, and shortens its waits
+   * inside the batch); a menu command, which `run_steps` does not carry, is
+   * its own call between segments. One diff read follows the last step.
+   */
+  async actBatch(handle: ComputerHandle, reqs: readonly ActionRequest[], signal?: AbortSignal): Promise<ComputerActionResult[]> {
+    const connection = this.connections.get(handle.workspaceId);
+    if (!connection) return [refuse(disconnected())];
+    const results: ComputerActionResult[] = [];
+    const started = Date.now();
+    let lastWindow: { pid: number; windowId: number } | undefined;
+    const done = (req: ActionRequest, tool: string, ok: boolean, message?: string): ComputerActionResult =>
+      ok
+        ? {
+            ok: true,
+            snapshot: null,
+            screenshot: null,
+            action: {
+              path: SYNTHETIC_TOOLS.has(tool) ? 'synthetic' : 'accessibility',
+              actionName: tool,
+              verification: { state: 'unverified', reason: req.type === 'pasteText' ? 'clipboard_paste' : 'synthetic_input' },
+              durationMs: Date.now() - started,
+            },
+          }
+        : refuse({
+            code: /stale|superseded|no longer/i.test(message ?? '') ? 'stale_snapshot' : 'provider_unavailable',
+            message: message ?? `${tool} failed.`,
+          });
+    try {
+      let i = 0;
+      while (i < reqs.length) {
+        const req = reqs[i]!;
+        // Menus and paste are not batch steps: run them through `act`, which
+        // already carries the menu-label correction and the clipboard restore.
+        if (req.type === 'invokeMenu' || req.type === 'pasteText') {
+          const single = await this.act(handle, req, signal, { observe: false });
+          results.push(single);
+          if (!single.ok) return results;
+          if (req.target.window.by === 'id') lastWindow = { pid: req.target.app.pid, windowId: req.target.window.id };
+          i += 1;
+          continue;
+        }
+        const segment: Array<{ req: ActionRequest; call: { tool: string; args: Json } }> = [];
+        while (i < reqs.length && reqs[i]!.type !== 'invokeMenu' && reqs[i]!.type !== 'pasteText') {
+          const call = await this.buildCall(connection, reqs[i]!);
+          if ('refusal' in call) {
+            // Run what came before, then report the step that could not be built.
+            if (segment.length > 0) {
+              const ran = await this.runSegment(connection, segment, signal, done);
+              results.push(...ran);
+              if (ran.some((r) => !r.ok)) return results;
+            }
+            results.push(refuse(call.refusal));
+            return results;
+          }
+          segment.push({ req: reqs[i]!, call });
+          i += 1;
+        }
+        const ran = await this.runSegment(connection, segment, signal, done);
+        results.push(...ran);
+        const tail = segment[Math.min(ran.length, segment.length) - 1];
+        if (tail) lastWindow = this.actionWindow(tail.req, tail.call.args) ?? lastWindow;
+        if (ran.some((r) => !r.ok)) return results;
+      }
+      const last = results.at(-1);
+      if (last?.ok && lastWindow) {
+        const changes = await this.observe(connection, lastWindow.pid, lastWindow.windowId, signal);
+        if (changes) results[results.length - 1] = { ...last, changes };
+      }
+      return results;
+    } catch (err) {
+      results.push(refuse(this.errorRefusal(err)));
+      return results;
+    }
+  }
+
+  /** One `run_steps` call; one result per step that ran, the failing one last. */
+  private async runSegment(
+    connection: Connection,
+    segment: ReadonlyArray<{ req: ActionRequest; call: { tool: string; args: Json } }>,
+    signal: AbortSignal | undefined,
+    done: (req: ActionRequest, tool: string, ok: boolean, message?: string) => ComputerActionResult,
+  ): Promise<ComputerActionResult[]> {
+    const result = await this.call(
+      connection,
+      'run_steps',
+      {
+        steps: segment.map(({ call }) => ({ tool: call.tool, args: stripDeliveryFor(call.tool, call.args) })),
+        foreground_fallback: true,
+      },
+      signal,
+    );
+    const outcome = parseRunSteps(result, segment.length);
+    return outcome.map((step, n) => done(segment[n]!.req, segment[n]!.call.tool, step.ok, step.message));
+  }
+
   /** The element's token against the driver's newest read of its window, while the rows keep their indices. */
   private liveToken(scope: { pid: number; windowId: number; tokens: Map<number, string>; epoch: number }, index: number): string | undefined {
     const token = scope.tokens.get(index);
@@ -1514,6 +1619,221 @@ export class CuaDriverBridge implements IComputerBridge {
       extra.push({ ...app, frontmost: false, windowCount: 0 });
     }
     return extra.length > 0 ? [...apps, ...extra] : apps;
+  }
+
+  /**
+   * The app's own save dialog, driven the way it was measured to work on
+   * macOS 26/27 with cua-driver 0.38, end to end, then the file checked on
+   * disk. By hand the agent spent 8–40 calls here and sometimes saved into
+   * the wrong folder (a path typed into the name field is taken as a name).
+   *
+   * macOS: menu → (an export's options sheet: Next…) → Go to folder (⌘⇧G,
+   * aimed at the sheet's window, in front — the only route that reaches any
+   * folder) → the folder path, committed with Return → the name → the format
+   * popup → Save/Export → Replace if asked to → the file on disk.
+   * Windows and Linux: the file-name field takes a full path, then Return.
+   */
+  async saveAs(
+    handle: ComputerHandle,
+    app: ComputerAppIdentity,
+    windowId: number,
+    opts: SaveAsRequest,
+    signal?: AbortSignal,
+  ): Promise<SaveAsResult> {
+    const connection = this.connections.get(handle.workspaceId);
+    const steps: string[] = [];
+    const fail = (message: string, code: ComputerRefusalCode = 'provider_unavailable'): SaveAsResult => ({
+      ok: false,
+      steps,
+      refusal: { code, message: `${message} Steps done: ${steps.join(' → ') || 'none'}.` },
+    });
+    if (!connection) return fail('The driver is not connected.');
+    const target = path.join(opts.folder, opts.name);
+    const pid = app.pid;
+    // Reads below replace the window's snapshot: the agent's indices are new after this.
+    this.bumpEpoch(pid, windowId);
+    try {
+      if (process.platform !== 'darwin') {
+        if (opts.menu) await this.menuOrFail(connection, pid, windowId, opts.menu, signal);
+        const field =
+          (await this.waitForRow(connection, pid, windowId, 'File name', ['Edit', 'ComboBox', 'AXTextField'], 5_000, signal)) ??
+          (await this.waitForRow(connection, pid, windowId, 'Name', ['Edit', 'ComboBox', 'AXTextField', 'text'], 2_000, signal));
+        if (!field) return fail('No save dialog with a file-name field appeared.');
+        await this.callOk(connection, 'set_value', { element_token: field, value: target }, signal);
+        steps.push(`file name ${target}`);
+        await this.callOk(connection, 'press_key', { pid, window_id: windowId, key: 'return' }, signal);
+        steps.push('Return');
+      } else {
+        // 1. The dialog.
+        let nameField = await this.waitForRow(connection, pid, windowId, 'saveAsNameTextField', ['AXTextField'], 600, signal);
+        if (!nameField) {
+          const menu = opts.menu && opts.menu.length > 0 ? [...opts.menu] : ['File', 'Save…'];
+          await this.menuOrFail(connection, pid, windowId, menu, signal);
+          steps.push(`menu ${menu.join('>')}`);
+          nameField = await this.waitForRow(connection, pid, windowId, 'saveAsNameTextField', ['AXTextField'], 2_500, signal);
+          if (!nameField) {
+            // An export's options sheet comes first.
+            const next = await this.waitForRow(connection, pid, windowId, 'Next', ['AXButton'], 2_000, signal);
+            if (next) {
+              await this.callOk(connection, 'click', { element_token: next }, signal);
+              steps.push('Next…');
+              nameField = await this.waitForRow(connection, pid, windowId, 'saveAsNameTextField', ['AXTextField'], 4_000, signal);
+            }
+          }
+        }
+        if (!nameField) return fail('The save dialog did not open.');
+        // 2. The folder, through Go to folder.
+        await this.keysToDialog(connection, pid, windowId, { tool: 'hotkey', args: { keys: ['cmd', 'shift', 'g'] } }, signal);
+        const pathField = await this.findRow(connection, pid, windowId, 'PathTextField', ['AXTextField'], 3_000, signal);
+        if (!pathField) return fail('Go to folder did not open in the save dialog.');
+        // A value equal to the current one is not an edit, and Return then goes nowhere: make it one.
+        const folderValue = pathField.value === opts.folder ? `${opts.folder.replace(/\/+$/u, '')}/` : opts.folder;
+        await this.callOk(connection, 'set_value', { element_token: pathField.token, value: folderValue }, signal);
+        await this.keysToDialog(connection, pid, windowId, { tool: 'press_key', args: { key: 'return' } }, signal);
+        steps.push(`folder ${opts.folder}`);
+        const where = await this.rowValue(connection, pid, windowId, 'where popup', signal, 1_500);
+        const folderName = path.basename(opts.folder);
+        if (where !== undefined && where.replace(/[\u2068\u2069]/gu, '').trim() !== folderName) {
+          return fail(`The dialog shows the folder "${where}", not "${folderName}".`);
+        }
+        // 3. Name and format.
+        const field = await this.waitForRow(connection, pid, windowId, 'saveAsNameTextField', ['AXTextField'], 2_000, signal);
+        if (!field) return fail('The name field went away.');
+        await this.callOk(connection, 'set_value', { element_token: field, value: opts.name }, signal);
+        steps.push(`name ${opts.name}`);
+        if (opts.format) {
+          const popup = await this.waitForRow(connection, pid, windowId, 'File Format', ['AXPopUpButton'], 1_500, signal);
+          if (!popup) return fail(`The dialog has no File Format popup for "${opts.format}".`);
+          await this.callOk(connection, 'set_value', { element_token: popup, value: opts.format }, signal);
+          steps.push(`format ${opts.format}`);
+        }
+        // 4. Save.
+        const ok = await this.waitForRow(connection, pid, windowId, 'OKButton', ['AXButton'], 1_500, signal);
+        if (!ok) return fail('The dialog has no Save button.');
+        await this.callOk(connection, 'click', { element_token: ok }, signal);
+        steps.push('Save');
+        const replaceButton = await this.waitForRow(connection, pid, windowId, 'Replace', ['AXButton'], 900, signal);
+        if (replaceButton) {
+          if (!opts.replace) {
+            const cancel = await this.waitForRow(connection, pid, windowId, 'Cancel', ['AXButton'], 500, signal);
+            if (cancel) await this.callOk(connection, 'click', { element_token: cancel }, signal).catch(() => undefined);
+            return fail(`${target} already exists; pass replace: true to overwrite it.`);
+          }
+          await this.callOk(connection, 'click', { element_token: replaceButton }, signal);
+          steps.push('Replace');
+        }
+      }
+      // 5. The file on disk — the only proof that counts.
+      for (let waited = 0; waited <= 6_000; waited += 300) {
+        if (existsSync(target)) return { ok: true, path: target, steps };
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      return fail(`The dialog closed but ${target} did not appear.`);
+    } catch (err) {
+      const refusal = this.errorRefusal(err);
+      return fail(refusal.message, refusal.code);
+    }
+  }
+
+  /** A menu path, with the label correction `act` applies; throws when it cannot run. */
+  private async menuOrFail(connection: Connection, pid: number, windowId: number, menu: readonly string[], signal?: AbortSignal): Promise<void> {
+    const args = { pid, window_id: windowId, path: [...menu] };
+    let result = await this.call(connection, 'invoke_menu', args, signal);
+    if (this.refusalFor(result)) {
+      const retried = await this.retryMenuPath(connection, args, result, signal);
+      if (retried) result = retried;
+    }
+    const refusal = this.refusalFor(result);
+    if (refusal) throw new Error(refusal.message);
+  }
+
+  /** A driver call that must succeed; its refusal becomes an error. */
+  private async callOk(connection: Connection, tool: string, args: Json, signal?: AbortSignal): Promise<DriverToolResult> {
+    const result = await this.call(connection, tool, args, signal);
+    const refusal = this.refusalFor(result);
+    if (refusal) throw new Error(`${tool}: ${refusal.message}`);
+    return result;
+  }
+
+  /**
+   * Keys for a sheet: the sheet's own window holds focus, and the driver only
+   * delivers there in front. Aimed at the document first; the refusal names
+   * the window that has focus.
+   */
+  private async keysToDialog(
+    connection: Connection,
+    pid: number,
+    windowId: number,
+    key: { tool: 'hotkey' | 'press_key'; args: Json },
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const first = await this.call(connection, key.tool, { ...key.args, pid, window_id: windowId, delivery_mode: 'foreground' }, signal);
+    if (!this.refusalFor(first)) return;
+    const holder = focusHolder(first, windowId);
+    if (holder === undefined) throw new Error(`${key.tool}: ${first.text}`);
+    await this.callOk(connection, key.tool, { ...key.args, pid, window_id: holder, delivery_mode: 'foreground' }, signal);
+  }
+
+  /** Polls the window for a row matching `query` with one of `roles`; its token, or undefined after `timeoutMs`. */
+  private async waitForRow(
+    connection: Connection,
+    pid: number,
+    windowId: number,
+    query: string,
+    roles: readonly string[],
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    return (await this.findRow(connection, pid, windowId, query, roles, timeoutMs, signal))?.token;
+  }
+
+  private async rowValue(
+    connection: Connection,
+    pid: number,
+    windowId: number,
+    query: string,
+    signal?: AbortSignal,
+    timeoutMs = 600,
+  ): Promise<string | undefined> {
+    return (await this.findRow(connection, pid, windowId, query, ['AXTextField', 'AXPopUpButton'], timeoutMs, signal))?.value;
+  }
+
+  private async findRow(
+    connection: Connection,
+    pid: number,
+    windowId: number,
+    query: string,
+    roles: readonly string[],
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<{ token: string; value?: string } | undefined> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const result = await this.call(
+        connection,
+        'get_window_state',
+        { pid, window_id: windowId, query, tree_format: 'elements', include_screenshot: false, timeout_ms: SNAPSHOT_WALK_MS },
+        signal,
+      );
+      if (!result.isError && result.structuredJson) {
+        const root = JSON.parse(result.structuredJson) as { elements?: Array<Record<string, unknown>> };
+        // The match is the deepest row; the rest are its ancestors. Menu-bar rows match too, and are skipped.
+        const rows = (root.elements ?? []).filter((e) => roles.includes(String(e['role'])));
+        const row = rows.at(-1);
+        if (row && typeof row['element_token'] === 'string') {
+          return { token: row['element_token'], ...(typeof row['value'] === 'string' ? { value: row['value'] } : {}) };
+        }
+      }
+      if (Date.now() >= deadline) return undefined;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+
+  /** Reads outside the agent's own snapshot start a new epoch: its indices are not rewritten onto them. */
+  private bumpEpoch(pid: number, windowId: number): void {
+    const key = `${pid}:${windowId}`;
+    const read = this.windowReads.get(key);
+    if (read) this.windowReads.set(key, { ...read, epoch: read.epoch + 1 });
   }
 
   async launchApp(
@@ -1947,7 +2267,7 @@ function findFfmpegDir(): string | null {
 }
 
 function daemonEnvironment(): Array<{ name: string; value: string }> {
-  const env: Array<{ name: string; value: string }> = [];
+  const env: Array<{ name: string; value: string }> = [...CUA_DRIVER_PACING_ENVIRONMENT];
   for (const name of DAEMON_ENV_ALLOWLIST) {
     const value = process.env[name];
     if (value) env.push({ name, value });
@@ -2201,6 +2521,50 @@ function windowShowsFile(title: string, target: string): boolean {
   const stem = base.replace(/\.[^.]+$/, '');
   const t = title.trim();
   return t === base || t.startsWith(`${base} `) || t === stem || t.startsWith(`${stem} —`);
+}
+
+/** A target named by label rather than snapshot index, as `run_steps` takes it. */
+function named(req: { name: string; role?: string; nth?: number }): Json {
+  return { name: req.name, ...(req.role ? { role: req.role } : {}), ...(req.nth !== undefined ? { nth: req.nth } : {}) };
+}
+
+/** Driver tools whose input is real keyboard/mouse events rather than an accessibility action. */
+const SYNTHETIC_TOOLS: ReadonlySet<string> = new Set(['type_text', 'press_key', 'hotkey', 'scroll', 'drag']);
+
+/** A step's own delivery mode stays only where the tool takes one; set_value refuses it. */
+function stripDeliveryFor(tool: string, args: Json): Json {
+  if (FOREGROUND_CAPABLE.has(tool) || args['delivery_mode'] === undefined) return args;
+  const rest = { ...args };
+  delete rest['delivery_mode'];
+  return rest;
+}
+
+/**
+ * `run_steps`' per-step outcome: `steps[].ok` and `failed_step`, per the
+ * driver's workflow guide. A whole-call error with no step list fails the first
+ * step; a success with no step list counts every step as run.
+ */
+export function parseRunSteps(result: DriverToolResult, count: number): Array<{ ok: boolean; message?: string }> {
+  let root: Record<string, unknown> = {};
+  try {
+    root = JSON.parse(result.structuredJson ?? '{}') as Record<string, unknown>;
+  } catch {
+    root = {};
+  }
+  const steps = Array.isArray(root['steps']) ? (root['steps'] as unknown[]) : undefined;
+  if (!steps) {
+    if (result.isError) return [{ ok: false, message: result.text || 'The batch was refused.' }];
+    return Array.from({ length: count }, () => ({ ok: true }));
+  }
+  const out: Array<{ ok: boolean; message?: string }> = [];
+  for (const raw of steps.slice(0, count)) {
+    const step = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const ok = step['ok'] === true || step['status'] === 'ok';
+    const message = [step['error'], step['message'], step['status']].find((v): v is string => typeof v === 'string' && v !== 'ok');
+    out.push(ok ? { ok } : { ok, message: message ?? 'The step failed.' });
+    if (!ok) break;
+  }
+  return out;
 }
 
 /** Driver tools that take `delivery_mode` (set_value and invoke_menu do not, and refuse it). */

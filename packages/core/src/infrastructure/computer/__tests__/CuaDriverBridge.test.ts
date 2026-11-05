@@ -14,7 +14,10 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ILogger } from '@generatorai/shared';
-import { CuaDriverBridge, closestMenuItem, focusHolder, splitLaunchArguments } from '../CuaDriverBridge.js';
+import { CuaDriverBridge, closestMenuItem, focusHolder, parseRunSteps, splitLaunchArguments } from '../CuaDriverBridge.js';
+import * as nodeFs from 'node:fs';
+import * as nodeOs from 'node:os';
+import * as nodePath from 'node:path';
 
 const logger: ILogger = {
   info() {},
@@ -1397,4 +1400,120 @@ describe('CuaDriverBridge keys for a sheet that holds focus', () => {
     expect(result.ok).toBe(true);
     expect(sent.map((a) => [a['window_id'], a['delivery_mode']])).toEqual([[7, undefined], [7, 'foreground'], [4806, 'foreground']]);
   });
+});
+
+describe('CuaDriverBridge batches through the driver\u2019s run_steps', () => {
+  const target = { app: { appId: 'calc', name: 'Calculator', pid: 42 }, window: { by: 'id' as const, id: 7 } };
+
+  it('reads per-step outcomes', () => {
+    const ok = { text: '', isError: false, degraded: false, structuredJson: JSON.stringify({ steps: [{ ok: true }, { ok: true }] }) };
+    const failed = {
+      text: '',
+      isError: false,
+      degraded: false,
+      structuredJson: JSON.stringify({ steps: [{ ok: true }, { ok: false, error: 'element_token is stale' }], failed_step: 1 }),
+    };
+    expect(parseRunSteps(ok, 2)).toEqual([{ ok: true }, { ok: true }]);
+    expect(parseRunSteps(failed, 3)).toEqual([{ ok: true }, { ok: false, message: 'element_token is stale' }]);
+    expect(parseRunSteps({ text: 'refused', isError: true, degraded: false }, 2)).toEqual([{ ok: false, message: 'refused' }]);
+  });
+
+  it('sends named clicks as one run_steps call, splits at a menu, and diffs once at the end', async () => {
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'list_windows') return ok(WINDOWS);
+        if (tool === 'run_steps') return ok({ steps: [{ ok: true }, { ok: true }] });
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    const results = await fake.bridge.actBatch!(handle, [
+      { type: 'clickNamed', target, name: '1', role: 'button' },
+      { type: 'clickNamed', target, name: 'Equals' },
+      { type: 'invokeMenu', target, path: ['Edit', 'Copy'] },
+      { type: 'pressKey', target, key: 'Escape' },
+    ]);
+
+    expect(results.map((r) => r.ok)).toEqual([true, true, true, true]);
+    const tools = fake.calls.map((c) => c.tool).filter((t) => ['run_steps', 'invoke_menu', 'click', 'press_key'].includes(t));
+    expect(tools).toEqual(['run_steps', 'invoke_menu', 'run_steps']);
+    const first = fake.calls.find((c) => c.tool === 'run_steps')!.args as { steps: Array<{ tool: string; args: Record<string, unknown> }> };
+    expect(first.steps.map((s) => [s.tool, s.args['name'], s.args['role']])).toEqual([['click', '1', 'button'], ['click', 'Equals', undefined]]);
+  });
+
+  it('stops at the failing step and names it stale when the driver says so', async () => {
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'list_windows') return ok(WINDOWS);
+        if (tool === 'run_steps') return ok({ steps: [{ ok: true }, { ok: false, error: 'element_token is stale' }], failed_step: 1 });
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    const results = await fake.bridge.actBatch!(handle, [
+      { type: 'clickNamed', target, name: '1' },
+      { type: 'clickNamed', target, name: '2' },
+      { type: 'clickNamed', target, name: '3' },
+    ]);
+
+    expect(results.map((r) => r.ok)).toEqual([true, false]);
+    expect(results[1]!.refusal?.code).toBe('stale_snapshot');
+  });
+});
+
+describe('CuaDriverBridge saveAs on macOS', () => {
+  const platform = process.platform;
+  afterEach(() => Object.defineProperty(process, 'platform', { value: platform }));
+
+  it('opens the dialog, goes to the folder, names the file, saves and finds it on disk', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    const folder = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'gai-saveas-'));
+    let dialog = false;
+    let goTo = false;
+    let where = 'Documents';
+    let name = 'Untitled.csv';
+    const row = (role: string, label: string, value?: string) => [{ role, label, element_token: `s1:${label}`, ...(value !== undefined ? { value } : {}) }];
+    const fake = makeBridge({
+      reply: (tool, args) => {
+        if (tool === 'list_windows') return ok(WINDOWS);
+        if (tool === 'invoke_menu') { dialog = true; return ok({}); }
+        if (tool === 'hotkey') { goTo = true; return ok({}); }
+        if (tool === 'press_key' && args['key'] === 'return') { goTo = false; return ok({}); }
+        if (tool === 'set_value') {
+          if (args['element_token'] === 's1:PathTextField') where = nodePath.basename(String(args['value']).replace(/\/$/, ''));
+          if (args['element_token'] === 's1:saveAsNameTextField') name = String(args['value']);
+          return ok({});
+        }
+        if (tool === 'click' && args['element_token'] === 's1:OKButton') {
+          nodeFs.writeFileSync(nodePath.join(folder, name), 'a,b');
+          dialog = false;
+          return ok({});
+        }
+        if (tool === 'get_window_state') {
+          const q = String(args['query']);
+          if (!dialog) return ok({ snapshot_id: 's1', pid: 42, window_id: 7, elements: [] });
+          if (q === 'saveAsNameTextField') return ok({ snapshot_id: 's1', pid: 42, window_id: 7, elements: row('AXTextField', 'saveAsNameTextField', name) });
+          if (q === 'PathTextField' && goTo) return ok({ snapshot_id: 's1', pid: 42, window_id: 7, elements: row('AXTextField', 'PathTextField', '/tmp') });
+          if (q === 'where popup') return ok({ snapshot_id: 's1', pid: 42, window_id: 7, elements: row('AXPopUpButton', 'where popup', where) });
+          if (q === 'OKButton') return ok({ snapshot_id: 's1', pid: 42, window_id: 7, elements: row('AXButton', 'OKButton') });
+          return ok({ snapshot_id: 's1', pid: 42, window_id: 7, elements: [] });
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    const result = await fake.bridge.saveAs!(handle, { appId: 'numbers', name: 'Numbers', pid: 42 }, 7, {
+      folder,
+      name: 'budget.csv',
+      menu: ['File', 'Export To', 'CSV…'],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.path).toBe(nodePath.join(folder, 'budget.csv'));
+    expect(fake.calls.find((c) => c.tool === 'hotkey')?.args).toMatchObject({ keys: ['cmd', 'shift', 'g'], delivery_mode: 'foreground' });
+    nodeFs.rmSync(folder, { recursive: true, force: true });
+  }, 30_000);
 });

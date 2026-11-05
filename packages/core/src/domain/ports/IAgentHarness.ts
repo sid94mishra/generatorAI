@@ -397,6 +397,12 @@ export interface ToolDefinition {
    * natively via `Tool.skipPermission`; adapters without native support
    * should still skip the domain-side gate (`evaluateToolPermissions`).
    */
+  /**
+   * Always in the model's tool list, never deferred behind tool search. For a
+   * family that is useless one tool at a time: deferred, the computer tools
+   * cost a ToolSearch turn (~11k tokens) before every desktop task.
+   */
+  alwaysLoad?: boolean;
   skipPermission?: boolean;
   /**
    * The tool's own run budget (ms) when it legitimately blocks longer than the provider's per-tool default
