@@ -39,7 +39,7 @@ export function resolveCuaDriverBinary(): string | null {
   return null;
 }
 
-export const AGENT_CURSOR_THEME_ID = 'generatorai.red';
+export const AGENT_CURSOR_THEME_ID = 'generatorai.agent';
 
 // ────────────────────────────────────────────────────────────────
 // The agent cursor renders whichever theme is installed in the driver's own
@@ -65,9 +65,9 @@ export function installAgentCursorTheme(logger: {
     path.resolve(process.cwd(), '..', '..', 'apps', 'desktop', 'resources', 'cua-driver', target, builderName),
   ]);
   const theme = firstExisting([
-    path.resolve(here, '..', 'cursor-themes', 'generatorai-red.cua-theme'),
-    path.resolve(process.cwd(), 'apps', 'desktop', 'resources', 'cursor-themes', 'generatorai-red.cua-theme'),
-    path.resolve(process.cwd(), '..', '..', 'apps', 'desktop', 'resources', 'cursor-themes', 'generatorai-red.cua-theme'),
+    path.resolve(here, '..', 'cursor-themes', 'generatorai-agent.cua-theme'),
+    path.resolve(process.cwd(), 'apps', 'desktop', 'resources', 'cursor-themes', 'generatorai-agent.cua-theme'),
+    path.resolve(process.cwd(), '..', '..', 'apps', 'desktop', 'resources', 'cursor-themes', 'generatorai-agent.cua-theme'),
   ]);
   if (!builder || !theme) return null;
 

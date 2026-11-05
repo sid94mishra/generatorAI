@@ -1,4 +1,4 @@
-// Builds and installs the GeneratorAI agent-cursor theme: a red arrow with a
+// Builds and installs the GeneratorAI agent-cursor theme: a run-blue arrow with a
 // "GAI" badge, so the person can tell the agent's pointer from their own at a
 // glance while theirs stays free.
 //
@@ -54,25 +54,27 @@ const PULSE = {
   system: { from: 100, to: 108 },
 };
 
-const RED = [0.898, 0.11, 0.141, 1];
-const SCALE = 2.6;
+// The design system's "run" status (an agent at work) in its emphasis shade:
+// Instrument's accentEmphasis blue #2f6fed, the shade white text clears 4.5:1
+// on — the cursor sits over light and dark windows alike.
+const RUN = [0x2f / 255, 0x6f / 255, 0xed / 255, 1];
+const SCALE = 1.9;
 const OUTLINE = [[0, 0], [0, 34], [9, 26], [15, 40], [22, 37], [16, 23], [27, 23]].map(
   ([x, y]) => [Math.round(x * SCALE * 100) / 100, Math.round(y * SCALE * 100) / 100],
 );
 const TANGENTS = OUTLINE.map(() => [0, 0]);
 
 // The badge sits below and right of the tip, clear of the hotspot at (0, 0).
-const BADGE_FILL = [0.11, 0.11, 0.13, 1];
 const WHITE = [1, 1, 1, 1];
-const BADGE = roundedRect(58, 74, 66, 30, 9);
-// "GAI" as open strokes, 16 px tall.
+const BADGE = roundedRect(43, 55, 47, 24, 7);
+// "GAI" as open strokes, 12 px tall.
 const LETTERS = [
-  [[80, 85], [77, 82], [69, 82], [65, 86], [65, 94], [69, 98], [77, 98], [80, 95], [80, 91], [73, 91]], // G
-  [[85, 98], [92, 82], [99, 98]], // A
-  [[88, 93], [96, 93]], // A crossbar
-  [[105, 82], [113, 82]], // I top
-  [[109, 82], [109, 98]], // I stem
-  [[105, 98], [113, 98]], // I foot
+  [[60, 63], [58, 61], [52, 61], [49, 64], [49, 70], [52, 73], [58, 73], [60, 71], [60, 68], [55, 68]], // G
+  [[64, 73], [69, 61], [74, 73]], // A
+  [[66, 69], [72, 69]], // A crossbar
+  [[78, 61], [84, 61]], // I top
+  [[81, 61], [81, 73]], // I stem
+  [[78, 73], [84, 73]], // I foot
 ];
 
 function roundedRect(x, y, w, h, r) {
@@ -141,23 +143,23 @@ function animation(action) {
     op: 30,
     w: 128,
     h: 128,
-    nm: `generatorai-red-${action}`,
+    nm: `generatorai-agent-${action}`,
     ddd: 0,
     assets: [],
     layers: [
       layer(1, `${action}-letters`, scale, [
         ...LETTERS.map((points, n) => pathItem(`letter-${n}`, points, false)),
-        { ty: 'st', nm: 'letters', c: { a: 0, k: WHITE }, o: { a: 0, k: 100 }, w: { a: 0, k: 3.2 }, lc: 2, lj: 2 },
+        { ty: 'st', nm: 'letters', c: { a: 0, k: WHITE }, o: { a: 0, k: 100 }, w: { a: 0, k: 2.4 }, lc: 2, lj: 2 },
       ]),
       layer(2, `${action}-badge`, scale, [
         pathItem('badge', BADGE.v, true, BADGE),
-        { ty: 'fl', nm: 'badge-fill', c: { a: 0, k: BADGE_FILL }, o: { a: 0, k: 92 }, r: 1 },
-        { ty: 'st', nm: 'badge-edge', c: { a: 0, k: RED }, o: { a: 0, k: 100 }, w: { a: 0, k: 2.5 }, lc: 2, lj: 2 },
+        { ty: 'fl', nm: 'badge-fill', c: { a: 0, k: RUN }, o: { a: 0, k: 100 }, r: 1 },
+        { ty: 'st', nm: 'badge-edge', c: { a: 0, k: WHITE }, o: { a: 0, k: 100 }, w: { a: 0, k: 2 }, lc: 2, lj: 2 },
       ]),
       layer(3, action, scale, [
         pathItem('path', OUTLINE, true, { i: TANGENTS, o: TANGENTS }),
-        { ty: 'fl', nm: 'fill', c: { a: 0, k: RED }, o: { a: 0, k: 100 }, r: 1 },
-        { ty: 'st', nm: 'stroke', c: { a: 0, k: WHITE }, o: { a: 0, k: 100 }, w: { a: 0, k: 4 }, lc: 2, lj: 2 },
+        { ty: 'fl', nm: 'fill', c: { a: 0, k: RUN }, o: { a: 0, k: 100 }, r: 1 },
+        { ty: 'st', nm: 'stroke', c: { a: 0, k: WHITE }, o: { a: 0, k: 100 }, w: { a: 0, k: 3 }, lc: 2, lj: 2 },
       ]),
     ],
   };
@@ -166,7 +168,7 @@ function animation(action) {
 function themeJson(version) {
   return {
     schema: 'cua.cursor-theme/2',
-    id: 'generatorai.red',
+    id: 'generatorai.agent',
     name: 'GeneratorAI (GAI)',
     version,
     author: 'GeneratorAI',
@@ -224,19 +226,19 @@ fs.writeFileSync(
 );
 fs.writeFileSync(
   path.join(work, 'src', 'cua', 'theme.json'),
-  JSON.stringify(themeJson('1.1.0'), null, 2),
+  JSON.stringify(themeJson('1.2.0'), null, 2),
 );
 
-const source = path.join(work, 'generatorai-red.lottie');
-zip(path.join(work, 'src'), path.join(work, 'generatorai-red.zip'));
-fs.renameSync(path.join(work, 'generatorai-red.zip'), source);
+const source = path.join(work, 'generatorai-agent.lottie');
+zip(path.join(work, 'src'), path.join(work, 'generatorai-agent.zip'));
+fs.renameSync(path.join(work, 'generatorai-agent.zip'), source);
 
 const exe = cursorThemeExe();
 console.log(execFileSync(exe, ['validate', source], { encoding: 'utf8' }).trim());
 
 const outDir = path.join(repoRoot, 'apps', 'desktop', 'resources', 'cursor-themes');
 fs.mkdirSync(outDir, { recursive: true });
-const built = path.join(outDir, 'generatorai-red.cua-theme');
+const built = path.join(outDir, 'generatorai-agent.cua-theme');
 execFileSync(exe, ['build', source, '--output', built], { stdio: 'inherit' });
 
 if (process.argv.includes('--install')) {
