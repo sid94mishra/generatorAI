@@ -1504,6 +1504,20 @@ export class CuaDriverBridge implements IComputerBridge {
       signal,
     );
     const outcome = parseRunSteps(result, segment.length);
+    const failedAt = outcome.findIndex((step) => !step.ok);
+    // A label that also names a menu item ("1" on Calculator's keypad and in
+    // its Edit menu) is ambiguous to the driver. The window's own control is
+    // what a step means: pick the first candidate that is not a menu item and
+    // run the rest of the segment from there, once.
+    if (failedAt !== -1) {
+      const nth = firstNonMenuCandidate(outcome[failedAt]!.message);
+      const step = segment[failedAt];
+      if (nth !== undefined && step && step.call.args['nth'] === undefined && typeof step.call.args['name'] === 'string') {
+        const rest = [{ req: step.req, call: { tool: step.call.tool, args: { ...step.call.args, nth } } }, ...segment.slice(failedAt + 1)];
+        const retried = await this.runSegment(connection, rest, signal, done);
+        return [...outcome.slice(0, failedAt).map((s, n) => done(segment[n]!.req, segment[n]!.call.tool, s.ok, s.message)), ...retried];
+      }
+    }
     return outcome.map((step, n) => done(segment[n]!.req, segment[n]!.call.tool, step.ok, step.message));
   }
 
@@ -2521,6 +2535,18 @@ function windowShowsFile(title: string, target: string): boolean {
   const stem = base.replace(/\.[^.]+$/, '');
   const t = title.trim();
   return t === base || t.startsWith(`${base} `) || t === stem || t.startsWith(`${stem} —`);
+}
+
+/**
+ * The driver's "several elements match" refusal lists candidates as
+ * `nth K: [row] ROLE "label"`; the first that is not a menu item, or undefined.
+ */
+export function firstNonMenuCandidate(message: string | undefined): number | undefined {
+  if (!message || !/elements match/i.test(message)) return undefined;
+  for (const m of message.matchAll(/nth (\d+): \[\d+\] (\S+)/g)) {
+    if (!/^AXMenu|^MenuItem$|^menu/i.test(m[2]!)) return Number(m[1]);
+  }
+  return undefined;
 }
 
 /** A target named by label rather than snapshot index, as `run_steps` takes it. */

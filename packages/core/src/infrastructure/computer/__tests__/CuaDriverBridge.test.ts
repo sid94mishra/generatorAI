@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ILogger } from '@generatorai/shared';
-import { CuaDriverBridge, closestMenuItem, focusHolder, parseRunSteps, splitLaunchArguments } from '../CuaDriverBridge.js';
+import { CuaDriverBridge, closestMenuItem, firstNonMenuCandidate, focusHolder, parseRunSteps, splitLaunchArguments } from '../CuaDriverBridge.js';
 import * as nodeFs from 'node:fs';
 import * as nodeOs from 'node:os';
 import * as nodePath from 'node:path';
@@ -1516,4 +1516,40 @@ describe('CuaDriverBridge saveAs on macOS', () => {
     expect(fake.calls.find((c) => c.tool === 'hotkey')?.args).toMatchObject({ keys: ['cmd', 'shift', 'g'], delivery_mode: 'foreground' });
     nodeFs.rmSync(folder, { recursive: true, force: true });
   }, 30_000);
+});
+
+describe('CuaDriverBridge named steps that also name a menu item', () => {
+  it('picks the window control over the menu item', () => {
+    const message = '2 elements match element "1" in window 4946; add `nth` or a more exact name: nth 0: [122] AXMenuItem "1"; nth 1: [13] AXButton "1"';
+    expect(firstNonMenuCandidate(message)).toBe(1);
+    expect(firstNonMenuCandidate('element_token is stale')).toBeUndefined();
+  });
+
+  it('re-runs the rest of the batch from the ambiguous step with that choice', async () => {
+    const batches: Array<Array<Record<string, unknown>>> = [];
+    const fake = makeBridge({
+      reply: (tool, args) => {
+        if (tool === 'list_windows') return ok(WINDOWS);
+        if (tool === 'run_steps') {
+          const steps = (args['steps'] as Array<{ args: Record<string, unknown> }>).map((s) => s.args);
+          batches.push(steps);
+          if (steps[0]!['nth'] === undefined && steps[0]!['name'] === '1') {
+            return ok({ steps: [{ ok: false, error: '2 elements match element "1" in window 7; add `nth` or a more exact name: nth 0: [13] AXButton "1"; nth 1: [122] AXMenuItem "1"' }], failed_step: 0 });
+          }
+          return ok({ steps: steps.map(() => ({ ok: true })) });
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+    const target = { app: { appId: 'calc', name: 'Calculator', pid: 42 }, window: { by: 'id' as const, id: 7 } };
+
+    const results = await fake.bridge.actBatch!(handle, [
+      { type: 'clickNamed', target, name: '1' },
+      { type: 'clickNamed', target, name: 'Equals' },
+    ]);
+
+    expect(results.map((r) => r.ok)).toEqual([true, true]);
+    expect(batches[1]!.map((s) => [s['name'], s['nth']])).toEqual([['1', 0], ['Equals', undefined]]);
+  });
 });
