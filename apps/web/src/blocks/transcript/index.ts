@@ -26,7 +26,6 @@ export { jsonAnswerMarkdown, jsonBlock } from './AssistantText/jsonAnswer.js';
 export { PermissionCard, type PermissionCardProps } from './gates/PermissionCard.js';
 export { QuestionCard, type QuestionCardProps } from './gates/QuestionCard.js';
 export { PlanReadyCard, toPlainText, type PlanReadyCardProps } from './gates/PlanReadyCard.js';
-export { ComputerConsentCard, type ComputerConsentCardProps } from './gates/ComputerConsentCard.js';
 export { InlineError, type InlineErrorProps } from './InlineError/InlineError.js';
 export { taskTitle } from './taskTitle.js';
 export { DelegationGroup, delegationTasks, delegationSummary, type DelegatedTask, type DelegationGroupProps } from './DelegationGroup/DelegationGroup.js';
