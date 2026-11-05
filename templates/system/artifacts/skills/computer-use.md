@@ -116,6 +116,9 @@ computer_perform_action  appId: "Code.exe"  actionName: "Terminal>New Terminal"
   typing a stray letter.
 * A menu command that opens a dialog or sheet changes the window: snapshot it
   next (with `query`).
+* A menu item reported **disabled** usually means a popup menu is still open
+  (one you pressed and never chose from): press `Escape`, then run the path
+  again.
 
 `computer_perform_action` with `snapshotId` + `elementIndex` presses an element
 using an action it advertised (`"AXPress"`, `"Invoke"`) — the same as
@@ -128,7 +131,7 @@ using an action it advertised (`"AXPress"`, `"Invoke"`) — the same as
 | Tool | Use for |
 |---|---|
 | `computer_click` | Buttons, checkboxes, list rows, tabs, keypad keys. `button: "right"`, `clickCount: 2` supported. |
-| `computer_set_value` | A text field or combo box whose whole value you are replacing (a file name, a search box). One call, read back. **Refused on spreadsheet cells.** |
+| `computer_set_value` | A text field or combo box whose whole value you are replacing (a file name, a search box). On a **popup button** (File Format, a list style, a font) it chooses the item with that title in one call — do not press the popup open and hunt for the item. One call, read back. **Refused on spreadsheet cells.** |
 | `computer_type_text` | Writing into a document or a cell. Pass `snapshotId` + `elementIndex` of the text area to write straight into it. Newlines (`\n`) start new lines/paragraphs. |
 | `computer_press_key` | Keys and shortcuts: `"Return"`, `"Tab"`, `"Escape"`, `"Meta+S"`. `Meta` is ⌘ on macOS and the Windows key elsewhere; `cmd`, `ctrl`, `option`, `shift` are accepted. |
 | `computer_paste_text` | Long text where typing is slow. Replaces the user's clipboard for a moment and restores it. |
@@ -153,9 +156,10 @@ several tool calls in one turn) rather than snapshotting between each.
   off — e.g. `Format>Font>Bold` (or `Meta+B`), type the title, `Format>Font>Bold`
   again, `\n`, then continue. Selecting text afterwards with the keyboard is
   slower and error-prone.
-* **Lists:** use the app's list command before typing the items (TextEdit:
-  `Format>List…` and choose a bullet style; Word/Pages: the Bullets control),
-  then type the items separated by `\n`. Return on an empty bullet ends the list.
+* **Lists:** turn the list on before typing the items — TextEdit: `computer_set_value`
+  on the format bar's `list style` popup with `"•"`; Word/Pages: the Bullets
+  control — then type the items separated by `\n`. Return on an empty bullet
+  ends the list.
 * **Headings / styles** (Word, Pages): choose the paragraph style (e.g.
   "Heading 1") from the style control or menu before typing the heading.
 * **Plain vs rich text (TextEdit):** a `.txt` opened in TextEdit stays plain
@@ -218,7 +222,7 @@ document window. Snapshot it with `query: "Save As"`.
 2. To choose the folder, press `Meta+Shift+G` — a "Go to folder" field opens —
    type the **folder** path, press `Return`.
 3. If the sheet has a **File Format** popup (TextEdit: Rich Text / Plain Text;
-   Numbers export options), set it before saving.
+   Numbers export options), set it with `computer_set_value` before saving.
 4. Click `Save` (or press `Return`). If asked to replace an existing file and
    the task said to write that file, confirm `Replace`.
 
