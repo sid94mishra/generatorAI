@@ -13,6 +13,6 @@
   },
   "dependencies": {
     "@generatorai/shared": "workspace:*",
-    "@trycua/cua-driver": "0.19.3"
+    "@trycua/cua-driver": "0.38.0"
   }
 }

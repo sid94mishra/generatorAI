@@ -1936,6 +1936,16 @@ The computer-use skill covers macOS, Windows and Linux: plan first, menu paths o
 new documents and template choosers, text, spreadsheet and canvas work, save sheets (⌘⇧G), exports, and checking the
 file on disk.
 
+### D-190 cua-driver 0.38.0 (owner, 2026-11-05) — Final
+The bundled driver moves from 0.19.3 to 0.38.0 (`@trycua/cua-driver` in core, desktop and cua-host; the binary is staged at
+the same version). 0.19.3 could read the Save/Export sheets of Apple's sandboxed apps (TextEdit, Numbers, Pages,
+Freeform) but refused to act on them ("element could not be proven to belong to window"), so no document task could save;
+0.33 resolves sheet elements to their parent window. The bridge follows the new contract: an element is addressed by its
+`element_token` alone, a snapshot asks for `tree_format: "elements"` and a screenshot only when one was wanted (every
+read used to carry an unused image), the walk gets a 4 s budget, and `computer_perform_action` sends the advertised
+action (press, show_menu, pick, confirm, cancel, open) as the click's `action`. The embedded host passes the two options
+0.38 requires (`approveCapabilityManifest: false`, `noOverlay: false`).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

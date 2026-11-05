@@ -135,6 +135,8 @@ export class ComputerHost {
       // `standard` still gates every destructive tool behind the driver's own
       // approval; `approveSessionPolicy` is rejected outside bounded mode.
       permissionMode: PERMISSION_MODE_STANDARD,
+      // No manifest is shipped, so there is nothing to pre-approve.
+      approveCapabilityManifest: false,
       approveSessionPolicy: false,
       // Never true. It disables the driver's own approval gate, which is the
       // last line of defence if our service-side gates are ever bypassed.
@@ -144,6 +146,8 @@ export class ComputerHost {
       // driver has no business seeing either.
       environment: [],
       inheritStderr: false,
+      // The agent cursor overlay shows the person where the agent is acting.
+      noOverlay: false,
     });
 
     const connection = await host.start();

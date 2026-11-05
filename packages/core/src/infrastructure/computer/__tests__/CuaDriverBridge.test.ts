@@ -163,7 +163,7 @@ const SNAPSHOT_PAYLOAD = {
   snapshot_id: 's1',
   pid: 42,
   window_id: 7,
-  elements: [{ element_index: 3, role: 'Button', label: 'Save' }],
+  elements: [{ element_index: 3, role: 'Button', label: 'Save', element_token: 's1:3' }],
 };
 
 describe('CuaDriverBridge window selection', () => {
@@ -677,8 +677,8 @@ describe('CuaDriverBridge phantom value writes', () => {
     pid: 42,
     window_id: 7,
     elements: [
-      { element_index: 3, role: 'DataItem', label: 'A1' },
-      { element_index: 4, role: 'Edit', label: 'Name Box' },
+      { element_index: 3, role: 'DataItem', label: 'A1', element_token: 's1:3' },
+      { element_index: 4, role: 'Edit', label: 'Name Box', element_token: 's1:4' },
     ],
   };
 
@@ -752,26 +752,24 @@ describe('CuaDriverBridge element addressing', () => {
     await fake.bridge.act(handle, CLICK as never);
 
     const click = fake.calls.find((c) => c.tool === 'click');
-    expect(click?.args['element_token']).toBe('s00000001:3');
-    // Index rides along for a provider that minted no token.
-    expect(click?.args['element_index']).toBe(3);
+    // The token is the whole address: the driver's schema takes nothing else for an element.
+    expect(click?.args).toEqual({ element_token: 's00000001:3', session: 'generatorai-ws' });
   });
 
-  it('falls back to the index when the provider minted no token', async () => {
+  it('asks for a fresh read when an element came without a handle', async () => {
     const fake = makeBridge({
       reply: (tool) => {
         if (tool === 'list_windows') return ok(WINDOWS);
-        if (tool === 'get_window_state') return ok(SNAPSHOT_PAYLOAD);
+        if (tool === 'get_window_state') return ok({ ...SNAPSHOT_PAYLOAD, elements: [{ element_index: 3, role: 'Button', label: 'Save' }] });
         return ok({});
       },
     });
     const handle = await started(fake);
     await seedSnapshot(fake, handle);
-    await fake.bridge.act(handle, CLICK as never);
+    const result = await fake.bridge.act(handle, CLICK as never);
 
-    const click = fake.calls.find((c) => c.tool === 'click');
-    expect(click?.args['element_token']).toBeUndefined();
-    expect(click?.args['element_index']).toBe(3);
+    expect(result.refusal?.code).toBe('stale_snapshot');
+    expect(fake.calls.some((c) => c.tool === 'click')).toBe(false);
   });
 
   it('reads a retired handle as "re-snapshot", not as a dead route', async () => {

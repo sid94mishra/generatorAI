@@ -113,10 +113,12 @@ interface DriverModule {
       binaryPath: string;
       hostBundleId: string;
       permissionMode?: number;
+      approveCapabilityManifest: boolean;
       approveSessionPolicy: boolean;
       dangerouslyBypassApprovals: boolean;
       environment: unknown[];
       inheritStderr: boolean;
+      noOverlay: boolean;
     }): EmbeddedHost;
   };
 }
@@ -347,6 +349,8 @@ export class CuaDriverBridge implements IComputerBridge {
           // do not ship yet. `standard` still gates destructive tools behind
           // the driver's own approval.
           permissionMode: 0,
+          // No manifest is shipped, so there is nothing to pre-approve.
+          approveCapabilityManifest: false,
           approveSessionPolicy: false,
           // Never true — it disables the driver's own approval gate, the last
           // line of defence if our service-side gates are ever bypassed.
@@ -355,6 +359,8 @@ export class CuaDriverBridge implements IComputerBridge {
           // provider tokens the driver has no business seeing.
           environment: daemonEnvironment(),
           inheritStderr: false,
+          // The agent cursor overlay shows the person where the agent is acting.
+          noOverlay: false,
         });
         const connection = await host.start();
         const endpoint: CuaDriverEndpoint = {
@@ -699,8 +705,16 @@ export class CuaDriverBridge implements IComputerBridge {
         window_id: windowId,
         max_elements: maxElements,
         max_depth: maxDepth,
+        // The structured rows are what we parse; the driver's default is a
+        // Markdown rendering with no `elements` array at all.
+        tree_format: 'elements',
+        // The driver captures a screenshot unless told not to — every read paid
+        // for an image nobody asked for.
+        include_screenshot: Boolean(screenshotPath),
+        // Its default budget (1 s) cuts Numbers' and Xcode's trees short.
+        timeout_ms: SNAPSHOT_WALK_MS,
         ...(req.query ? { query: req.query } : {}),
-        ...(screenshotPath ? { include_screenshot: true, screenshot_out_file: screenshotPath } : {}),
+        ...(screenshotPath ? { screenshot_out_file: screenshotPath } : {}),
       });
 
       let result = await this.call(
@@ -1072,14 +1086,14 @@ export class CuaDriverBridge implements IComputerBridge {
         const dead = await this.ensureLiveWindow(connection, cached.pid, cached.windowId);
         if (dead) return { refusal: dead };
       }
-      const scope = { pid: cached.pid, window_id: cached.windowId, snapshot_id: req.snapshotId };
-      // The token carries (index, snapshot, window) in one handle the driver
-      // can invalidate on its own terms. Index is kept alongside it as the
-      // compatibility path for a provider that minted no token.
+      // The token is the whole address: it carries pid, window and snapshot,
+      // and the driver refuses it once a newer read of the window supersedes
+      // it. The driver takes nothing else for an element.
       const token = cached.tokens.get(req.elementIndex);
-      const addressed = token
-        ? { ...scope, element_token: token, element_index: req.elementIndex }
-        : { ...scope, element_index: req.elementIndex };
+      if (!token) {
+        return { refusal: { code: 'stale_snapshot', message: 'That element has no handle in this snapshot. Take a new computer_snapshot.' } };
+      }
+      const addressed = { element_token: token };
 
       if (req.type === 'click') {
         return {
@@ -1096,17 +1110,18 @@ export class CuaDriverBridge implements IComputerBridge {
       // The driver has no named-action call: its element click IS the
       // accessibility press, and nothing else an element advertises can be
       // sent. (Menus are `invokeMenu`, which needs no element at all.)
-      if (!PRESS_ACTIONS.has(req.actionName)) {
+      const action = CLICK_ACTIONS.get(req.actionName);
+      if (!action) {
         return {
           refusal: {
             code: 'unsupported_action',
             message:
-              `The driver cannot send "${req.actionName}" by name. computer_click presses the element; ` +
+              `The driver cannot send "${req.actionName}". It sends ${[...CLICK_ACTIONS.keys()].join(', ')}; ` +
               'a menu command goes to computer_perform_action as a path such as "File>New".',
           },
         };
       }
-      return { tool: 'click', args: addressed };
+      return { tool: 'click', args: { ...addressed, ...(action === 'press' ? {} : { action }) } };
     }
 
     const pid = req.target.app.pid;
@@ -1138,18 +1153,11 @@ export class CuaDriverBridge implements IComputerBridge {
             refusal: { code: 'stale_snapshot', message: 'That snapshot is no longer held by the driver client.' },
           };
         }
-        const addressed =
-          req.element && cached
-            ? {
-                pid: cached.pid,
-                window_id: cached.windowId,
-                snapshot_id: req.element.snapshotId,
-                element_index: req.element.elementIndex,
-                ...(cached.tokens.get(req.element.elementIndex)
-                  ? { element_token: cached.tokens.get(req.element.elementIndex) }
-                  : {}),
-              }
-            : target;
+        const elementToken = req.element && cached ? cached.tokens.get(req.element.elementIndex) : undefined;
+        if (req.element && !elementToken) {
+          return { refusal: { code: 'stale_snapshot', message: 'That element has no handle in this snapshot. Take a new computer_snapshot.' } };
+        }
+        const addressed = elementToken ? { element_token: elementToken } : target;
         return {
           tool: 'type_text',
           args: { ...addressed, text: req.text, ...(req.focus ? { x: req.focus.x, y: req.focus.y } : {}) },
@@ -1971,8 +1979,21 @@ function processAlive(pid: number): boolean {
   }
 }
 
-/** Advertised accessibility actions the driver's element click performs (AXPress on macOS, Invoke on Windows). */
-const PRESS_ACTIONS: ReadonlySet<string> = new Set(['AXPress', 'AXConfirm', 'AXPick', 'AXOpen', 'Invoke', 'press', 'Press']);
+/** Advertised accessibility actions → the driver's `click` `action` (macOS AX names; Windows UIA "Invoke" is a press). */
+const CLICK_ACTIONS: ReadonlyMap<string, string> = new Map([
+  ['AXPress', 'press'],
+  ['Invoke', 'press'],
+  ['AXShowMenu', 'show_menu'],
+  ['AXPick', 'pick'],
+  ['AXConfirm', 'confirm'],
+  ['AXCancel', 'cancel'],
+  ['AXOpen', 'open'],
+  ['AXShowAlternateUI', 'show_alternate_ui'],
+  ['AXShowDefaultUI', 'show_default_ui'],
+]);
+
+/** Budget for one accessibility-tree walk. */
+const SNAPSHOT_WALK_MS = 4_000;
 
 /** How long a freshly launched macOS app may sit windowless before each nudge (activate, then ⌘N). */
 const WINDOWLESS_NUDGE_MS = 4_000;
