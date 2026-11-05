@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ILogger } from '@generatorai/shared';
-import { CuaDriverBridge, closestMenuItem, firstNonMenuCandidate, focusHolder, parseRunSteps, splitLaunchArguments } from '../CuaDriverBridge.js';
+import { CuaDriverBridge, closestMenuItem, firstNonMenuCandidate, focusHolder, mainWindow, parseRunSteps, splitLaunchArguments } from '../CuaDriverBridge.js';
 import * as nodeFs from 'node:fs';
 import * as nodeOs from 'node:os';
 import * as nodePath from 'node:path';
@@ -1294,6 +1294,7 @@ describe('CuaDriverBridge menu path correction', () => {
     expect(closestMenuItem('Save…', ['New', 'Save', 'Save As…'])).toBe('Save');
     expect(closestMenuItem('export to', ['Export To', 'Print…'])).toBe('Export To');
     expect(closestMenuItem('Quit', ['New', 'Save'])).toBeUndefined();
+    expect(closestMenuItem('Undo', ['Undo Insert', 'Redo', 'Cut'])).toBe('Undo Insert');
   });
 
   const menuBridge = (onMenu: (path: string[]) => unknown) =>
@@ -1551,5 +1552,55 @@ describe('CuaDriverBridge named steps that also name a menu item', () => {
 
     expect(results.map((r) => r.ok)).toEqual([true, true]);
     expect(batches[1]!.map((s) => [s['name'], s['nth']])).toEqual([['1', 0], ['Equals', undefined]]);
+  });
+});
+
+describe('CuaDriverBridge menus a background app will not run', () => {
+  const menu = { type: 'invokeMenu' as const, path: ['File', 'New'], target: { app: { appId: 'te', name: 'TextEdit', pid: 42 }, window: { by: 'id' as const, id: 7 } } };
+
+  it('brings the window in front and runs the command once more when the driver will not pick a document', async () => {
+    let attempts = 0;
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'list_windows') return ok(WINDOWS);
+        if (tool === 'invoke_menu') {
+          attempts += 1;
+          return attempts === 1 ? driverError('Background input refused (window_not_key): invoke_menu: requested window 7 is not the confirmed document menu context (focused=None, main=None)') : ok({});
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+    expect((await fake.bridge.act(handle, menu)).ok).toBe(true);
+    expect(fake.calls.map((c) => c.tool).filter((t) => t === 'bring_to_front' || t === 'invoke_menu')).toEqual(['invoke_menu', 'bring_to_front', 'invoke_menu']);
+  });
+
+  it('presses the enabled item under the right menu when two share the label', async () => {
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'list_windows') return ok(WINDOWS);
+        if (tool === 'invoke_menu') return driverError('invoke_menu: path segment 1 is ambiguous');
+        if (tool === 'get_window_state') {
+          return ok({ snapshot_id: 's9', pid: 42, window_id: 7, elements: [
+            { element_index: 1, role: 'AXMenuBarItem', label: 'File', element_token: 's9:1' },
+            { element_index: 2, role: 'AXMenu', parent_index: 1, element_token: 's9:2' },
+            { element_index: 3, role: 'AXMenuItem', label: 'New', parent_index: 2, enabled: false, element_token: 's9:3' },
+            { element_index: 4, role: 'AXMenuItem', label: 'New', parent_index: 2, element_token: 's9:4' },
+            { element_index: 5, role: 'AXMenuBarItem', label: 'Edit', element_token: 's9:5' },
+            { element_index: 6, role: 'AXMenuItem', label: 'New', parent_index: 5, element_token: 's9:6' },
+          ] });
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+    expect((await fake.bridge.act(handle, menu)).ok).toBe(true);
+    expect(fake.calls.find((c) => c.tool === 'click')?.args['element_token']).toBe('s9:4');
+  });
+
+  it('never picks a palette as the main window', () => {
+    const doc = { id: 1, title: 'Untitled', index: 0, focused: false, minimised: false, onScreen: true, bounds: { x: 0, y: 0, w: 900, h: 700 } };
+    const palette = { id: 2, title: 'Colours', index: 1, focused: true, minimised: false, onScreen: true, floating: true, bounds: { x: 0, y: 0, w: 1200, h: 900 } };
+    expect(mainWindow([palette, doc])?.id).toBe(1);
   });
 });

@@ -623,7 +623,7 @@ function planStep(
 const createRunStepsTool: ComputerToolFactory = (ctx): ToolDefinition => ({
   name: 'computer_run_steps',
   description:
-    'THE way to act: up to 40 steps against one window in ONE call, then what changed in the window. Steps: ' +
+    'THE way to act: up to 64 steps against one window in ONE call, then what changed in the window. Steps: ' +
     'click / set_value — an element by `elementIndex` (with `snapshotId`) or by its label `name` (+ optional `role`, ' +
     '`nth`; no snapshot needed: {kind:"click", name:"Equals"}); menu (`path` "File>New"); type_text (into ' +
     '`elementIndex`, else the focused field; "\\n" = new line); press_key ("Return", "Tab", "Meta+S"); ' +
@@ -640,7 +640,7 @@ const createRunStepsTool: ComputerToolFactory = (ctx): ToolDefinition => ({
       steps: {
         type: 'array',
         minItems: 1,
-        maxItems: 40,
+        maxItems: 64,
         items: {
           type: 'object',
           properties: {

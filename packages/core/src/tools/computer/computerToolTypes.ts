@@ -272,6 +272,7 @@ function treePayload(
     ok: true,
     snapshotId: snapshot.snapshotId,
     window: { id: snapshot.window.id, title: snapshot.window.title },
+    ...(snapshot.otherWindows ? { otherWindows: snapshot.otherWindows } : {}),
     tree,
     ...(clipped
       ? { clipped: 'The window is larger than shown. Pass `query` to read the part you need; repeating this call returns the same page.' }

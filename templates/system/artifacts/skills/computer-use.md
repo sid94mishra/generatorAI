@@ -17,7 +17,7 @@ a small task is **2–5 calls**, a document or spreadsheet task **5–10**.
 |---|---|
 | `computer_launch_app` | Start or attach to an app → `appId`, `windowId`. A file path in `arguments` opens that file. |
 | `computer_snapshot` | Read a window once → `snapshotId` + `tree` (rows `[N]` = elementIndex, values, read-only text). `query` filters; `includeScreenshot` only for what the tree lacks. |
-| `computer_run_steps` | **The way to act**: up to 40 steps in one call, then `changes`. |
+| `computer_run_steps` | **The way to act**: up to 64 steps in one call, then `changes`. |
 | `computer_save_as` | Every Save / Save As / Export: folder + name (+ `menu`, `format`) in one call, checked on disk. |
 | `computer_perform_action` | One menu command (`"File>New"`), or an action a row lists (`show_menu`, `confirm`, `cancel`). |
 | `computer_click` / `computer_set_value` / `computer_type_text` / `computer_press_key` | A single action when there is exactly one to do. |
@@ -73,10 +73,14 @@ snapshot it before using indices again. `verified: false` is normal for keys.
 
 ## Spreadsheets (Numbers, Excel)
 
-* Click the first cell by the snapshot's cell index, then type the whole table
-  in one plan: `type_text`, `press_key Tab`, …, `press_key Return` per row.
+* Click the first cell by the snapshot's cell index, then type the values in
+  one plan: `type_text`, `press_key Tab`, …, `press_key Return` per row.
   `\t` inside typed text does not move cells.
-* Formulas start with `=` (`=B2*C2`, `=SUM(D2:D5)`); Return commits.
+* **Formulas last, down a column:** after the values, click the first formula
+  cell and send `type_text "=B2*C2"`, `press_key Return`, `type_text "=B3*C3"`,
+  `press_key Return`, … — Return commits a formula and moves down. Tab inside a
+  formula does not leave the formula editor, so a formula typed mid-row
+  swallows the rest of the row.
 * `set_value` on a cell is refused (grids accept the write and show nothing).
 * Numbers' blank table has a header row: your header goes in row 1.
 * Charts (Numbers): select the data first, then `menu "Insert>Chart>2D Column"`

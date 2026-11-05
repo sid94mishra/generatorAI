@@ -153,6 +153,8 @@ export interface ComputerWindowInfo {
    * Recording (macOS) every window reads false.
    */
   onScreen?: boolean;
+  /** A panel above the document layer (a Colours or Fonts palette, an inspector): never the window to work in. */
+  floating?: boolean;
 }
 
 export interface ComputerSnapshot {
@@ -184,6 +186,8 @@ export interface ComputerSnapshot {
    * checks against.
    */
   tree?: string;
+  /** The app's other document windows, so a new document's window is never lost. */
+  otherWindows?: Array<{ id: number; title: string }>;
 }
 
 export interface ComputerScreenshot {

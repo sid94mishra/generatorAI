@@ -252,7 +252,7 @@ const REFUSAL_MESSAGES: Record<ComputerRefusalCode, string> = {
 };
 
 /** Most actions one `actPlan` (the `computer_run_steps` tool) may carry. */
-export const MAX_PLAN_STEPS = 40;
+export const MAX_PLAN_STEPS = 64;
 
 /**
  * What a plan may carry. Element steps are allowed because an element the
@@ -270,6 +270,7 @@ const PLAN_STEP_TYPES: ReadonlySet<ActionRequest['type']> = new Set([
   'invokeMenu',
   'clickNamed',
   'setValueNamed',
+  'drag',
 ]);
 
 /** One run-scoped consent (`allow_run`). `appIdentity` absent = any app. */
@@ -1368,7 +1369,7 @@ export class ComputerService {
       return refuse(
         this.refusal(
           'unsupported_action',
-          'A plan may contain click, set_value, menu, type_text, press_key, paste_text, click_point and scroll steps.',
+          'A plan may contain click, set_value, menu, type_text, press_key, paste_text, click_point, drag and scroll steps.',
         ),
         unsupported,
       );

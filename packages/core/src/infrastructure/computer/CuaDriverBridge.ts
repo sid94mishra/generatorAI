@@ -778,6 +778,10 @@ export class CuaDriverBridge implements IComputerBridge {
         },
         elements: state.elements,
         ...(state.tree ? { tree: state.tree } : {}),
+        ...(() => {
+          const others = windows.filter((w) => w.id !== state.windowId && !w.floating && !w.minimised);
+          return others.length > 0 ? { otherWindows: others.map((w) => ({ id: w.id, title: w.title })) } : {};
+        })(),
         ...(state.text.length > 0 ? { text: state.text } : {}),
         ...(req.query !== undefined ? { totalElements: state.total } : {}),
         // A laddered read answered a *smaller question* — the driver reports it
@@ -1389,6 +1393,20 @@ export class CuaDriverBridge implements IComputerBridge {
   ): Promise<DriverToolResult | null> {
     const path = Array.isArray(args['path']) ? (args['path'] as string[]) : [];
     const text = failed.text ?? '';
+    // The app is in the background with no main window, and the driver will
+    // not guess which document a menu command is for: bring the window the
+    // command names in front, as a person would click it, and run it once more.
+    if (/window_not_key|not the confirmed document menu context/i.test(text)) {
+      await this.call(connection, 'bring_to_front', { pid: args['pid'], window_id: args['window_id'] }, signal).catch(() => undefined);
+      return this.call(connection, 'invoke_menu', args, signal);
+    }
+    // Two items share the label (Numbers' File menu has more than one "New").
+    // Find them in the menu bar and press the enabled one under the right menu.
+    if (/is ambiguous/i.test(text) && path.length >= 2) {
+      const token = await this.menuItemToken(connection, Number(args['pid']), Number(args['window_id']), path, signal);
+      if (token) return this.call(connection, 'click', { element_token: token }, signal);
+      return null;
+    }
     const disabled = /path segment (\d+) is disabled/i.exec(text);
     if (disabled) {
       await this.call(connection, 'press_key', { pid: args['pid'], window_id: args['window_id'], key: 'escape' }, signal).catch(
@@ -1519,6 +1537,47 @@ export class CuaDriverBridge implements IComputerBridge {
       }
     }
     return outcome.map((step, n) => done(segment[n]!.req, segment[n]!.call.tool, step.ok, step.message));
+  }
+
+  /**
+   * The first enabled menu item labelled like the path's last segment whose
+   * top-level menu is the path's first, read from the window's menu bar.
+   */
+  private async menuItemToken(
+    connection: Connection,
+    pid: number,
+    windowId: number,
+    path: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    const norm = (label: unknown) => String(label ?? '').toLowerCase().replace(/…|\.{3}/g, '').trim();
+    this.bumpEpoch(pid, windowId);
+    const result = await this.call(
+      connection,
+      'get_window_state',
+      { pid, window_id: windowId, query: path.at(-1), tree_format: 'elements', include_screenshot: false, timeout_ms: SNAPSHOT_WALK_MS },
+      signal,
+    );
+    if (result.isError || !result.structuredJson) return undefined;
+    const rows = ((JSON.parse(result.structuredJson) as { elements?: Array<Record<string, unknown>> }).elements ?? []);
+    const byIndex = new Map(rows.map((r) => [r['element_index'], r]));
+    const top = (row: Record<string, unknown>): string | undefined => {
+      let current: Record<string, unknown> | undefined = row;
+      for (let hops = 0; current && hops < 12; hops += 1) {
+        if (current['role'] === 'AXMenuBarItem') return norm(current['label']);
+        current = byIndex.get(current['parent_index']);
+      }
+      return undefined;
+    };
+    const match = rows.find(
+      (r) =>
+        r['role'] === 'AXMenuItem' &&
+        norm(r['label']) === norm(path.at(-1)) &&
+        r['enabled'] !== false &&
+        top(r) === norm(path[0]) &&
+        typeof r['element_token'] === 'string',
+    );
+    return match?.['element_token'] as string | undefined;
   }
 
   /** The element's token against the driver's newest read of its window, while the rows keep their indices. */
@@ -2609,7 +2668,11 @@ const FOREGROUND_CAPABLE: ReadonlySet<string> = new Set([
 export function closestMenuItem(wanted: string, items: readonly string[]): string | undefined {
   const norm = (label: string) => label.toLowerCase().replace(/…|\.{3}/g, '').replace(/\s+/g, ' ').trim();
   const target = norm(wanted);
-  return items.find((item) => norm(item) === target);
+  const exact = items.find((item) => norm(item) === target);
+  if (exact) return exact;
+  // "Undo" for "Undo Insert": an item whose title starts with the label, when exactly one does.
+  const prefixed = items.filter((item) => norm(item).startsWith(`${target} `));
+  return prefixed.length === 1 ? prefixed[0] : undefined;
 }
 
 /** The most of a diff handed back with an action; a bigger change is better read with a snapshot. */
@@ -2694,7 +2757,9 @@ const MIN_WORK_WINDOW_EDGE = 100;
  * (a driver that reports none), so a sized strip never beats them.
  */
 export function mainWindow(windows: readonly ComputerWindowInfo[]): ComputerWindowInfo | undefined {
-  const visible = windows.some((w) => w.onScreen) ? windows.filter((w) => w.onScreen) : windows;
+  // A palette (Numbers' Colours) is never the document: launching Numbers named it the new window.
+  const documents = windows.some((w) => !w.floating) ? windows.filter((w) => !w.floating) : windows;
+  const visible = documents.some((w) => w.onScreen) ? documents.filter((w) => w.onScreen) : documents;
   const sized = visible.filter((w) => w.bounds);
   if (sized.length === 0) return visible.find((w) => !w.minimised);
   return largestOpenWindow(

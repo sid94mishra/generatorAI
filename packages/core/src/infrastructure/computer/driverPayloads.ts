@@ -217,6 +217,7 @@ export function parseListWindows(structuredJson: string): Map<number, ComputerWi
         minimised: asBool(entry['minimized']),
         bounds: parseFrame(entry),
         onScreen: asBool(entry['is_on_screen']),
+        ...(typeof entry['layer'] === 'number' && entry['layer'] !== 0 ? { floating: true } : {}),
       },
       z: asBool(entry['is_on_screen']) ? asNumber(entry['z_index']) : undefined,
     });

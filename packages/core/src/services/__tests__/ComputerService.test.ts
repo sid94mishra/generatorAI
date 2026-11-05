@@ -1191,7 +1191,7 @@ describe('ComputerService actPlan (G-07)', () => {
     const tooMany = await service.actPlan(
       CTX,
       { by: 'appId', appId: SLACK.id },
-      Array.from({ length: 41 }, () => steps[2]!),
+      Array.from({ length: 65 }, () => steps[2]!),
     );
     expect(tooMany.refusal?.code).toBe('unsupported_action');
     expect(consent.prompts).toHaveLength(0);
