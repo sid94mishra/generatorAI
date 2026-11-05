@@ -253,6 +253,14 @@ export class CuaDriverBridge implements IComputerBridge {
    * explicit `stale_element_token` refusal instead of acting on whatever now
    * sits at that index.
    */
+  /**
+   * Apps this bridge launched, by pid, kept while the process lives. macOS can
+   * leave a relaunched app out of its running-apps list: TextEdit, revived
+   * under the identity of an instance the system had automatically
+   * terminated, ran with its document open while `list_apps` called it
+   * stopped — every later call then answered "no app matched".
+   */
+  private readonly launched = new Map<number, ComputerAppInfo>();
   private readonly snapshotScopes = new Map<
     string,
     { pid: number; windowId: number; tokens: Map<number, string>; roles: Map<number, string> }
@@ -630,8 +638,12 @@ export class CuaDriverBridge implements IComputerBridge {
       const winRefusal = this.refusalFor(winResult);
       if (winRefusal) return { apps: [], refusal: winRefusal };
 
-      const apps = parseListApps(this.requireStructured(appsResult));
       const windowsByPid = parseListWindows(this.requireStructured(winResult));
+      const apps = withWindowOwners(
+        this.withLaunched(parseListApps(this.requireStructured(appsResult))),
+        appsResult.structuredJson,
+        winResult.structuredJson,
+      );
       // `list_apps` reports `windows: []` for every entry, so the real count
       // comes from the window enumeration.
       for (const app of apps) app.windowCount = windowsByPid.get(app.pid)?.length ?? 0;
@@ -979,6 +991,16 @@ export class CuaDriverBridge implements IComputerBridge {
 
       let result = await this.call(connection, call.tool, call.args, signal);
       let refusal = this.refusalFor(result);
+      // Not an error, yet not delivered: a keystroke posted to a native macOS
+      // window in the background comes back "unverifiable" with an escalation
+      // saying delivery failed and naming foreground. Reported as success, the
+      // agent believed ⌘⇧G had opened "Go to folder" and typed a path into
+      // nothing. Same rule as a refusal: the driver's own advice, once.
+      if (!refusal && call.args['delivery_mode'] !== 'foreground' && deliveryFailed(result)) {
+        result = await this.call(connection, call.tool, { ...call.args, delivery_mode: 'foreground' }, signal);
+        refusal = this.refusalFor(result);
+        if (refusal) return refuse(await this.explainForegroundFailure(connection, refusal));
+      }
       if (refusal) {
         // Some window classes only accept real input — Chrome's
         // `Chrome_WidgetWin_1` ignores posted keystrokes entirely — and the
@@ -1295,6 +1317,21 @@ export class CuaDriverBridge implements IComputerBridge {
     }
   }
 
+  /** The driver's running apps, plus any app this bridge launched that is still alive but missing from them. */
+  private withLaunched(apps: ComputerAppInfo[]): ComputerAppInfo[] {
+    const listed = new Set(apps.map((a) => a.pid));
+    const extra: ComputerAppInfo[] = [];
+    for (const [pid, app] of this.launched) {
+      if (listed.has(pid)) continue;
+      if (!processAlive(pid)) {
+        this.launched.delete(pid);
+        continue;
+      }
+      extra.push({ ...app, frontmost: false, windowCount: 0 });
+    }
+    return extra.length > 0 ? [...apps, ...extra] : apps;
+  }
+
   async launchApp(
     handle: ComputerHandle,
     name: string,
@@ -1349,6 +1386,8 @@ export class CuaDriverBridge implements IComputerBridge {
       );
       const refusal = this.refusalFor(result);
       if (refusal) return { refusal };
+      const started = launchedIdentity(result.structuredJson, name);
+      if (started) this.launched.set(started.pid, started);
 
       // The driver returns once the process is spawned, which is well before
       // the window exists. Poll rather than sleep a fixed amount: Office cold
@@ -1373,8 +1412,10 @@ export class CuaDriverBridge implements IComputerBridge {
       while (Date.now() < deadline) {
         const listed = await this.call(connection, 'list_apps', {});
         if (listed.structuredJson) {
-          const apps = parseListApps(listed.structuredJson);
-          const match = apps.find((a: ComputerAppInfo) => matchesLaunchName(a, name));
+          const apps = this.withLaunched(parseListApps(listed.structuredJson));
+          const match =
+            (started && apps.find((a: ComputerAppInfo) => a.pid === started.pid)) ??
+            apps.find((a: ComputerAppInfo) => matchesLaunchName(a, name));
           if (match) {
             const windows = await this.windowsFor(connection, match.pid);
             if (windows.length === 0 && nudgeWindowless) {
@@ -1749,9 +1790,10 @@ function nextStepFrom(
   if (!result.structuredJson) return null;
   try {
     const root = JSON.parse(result.structuredJson) as {
-      escalation?: { recommended?: unknown; reason?: unknown };
+      escalation?: { recommended?: unknown; target?: unknown; reason?: unknown };
     };
-    const recommended = root.escalation?.recommended;
+    // `recommended` on refusals; a delivered-but-failed input names `target`.
+    const recommended = root.escalation?.recommended ?? root.escalation?.target;
     const reason = typeof root.escalation?.reason === 'string' ? root.escalation.reason : '';
     if (recommended === 'px') return { rung: 'coordinate', reason };
     if (recommended === 'foreground') return { rung: 'foreground', reason };
@@ -1770,6 +1812,17 @@ function nextStepFrom(
  * driver's own instruction either way, so we never escalate to foreground for
  * a refusal the driver did not say foreground would fix.
  */
+/** A result the driver accepted but says did not reach the target, with foreground as the fix. */
+function deliveryFailed(result: DriverToolResult): boolean {
+  if (result.isError || !result.structuredJson) return false;
+  try {
+    const root = JSON.parse(result.structuredJson) as { escalation?: { reason?: unknown; target?: unknown } };
+    return root.escalation?.reason === 'delivery_failed' && root.escalation.target === 'foreground';
+  } catch {
+    return false;
+  }
+}
+
 function wantsForegroundDelivery(result: DriverToolResult): boolean {
   if (nextStepFrom(result)?.rung === 'foreground') return true;
   return /delivery_mode\s*[:=]\s*"?foreground/i.test(result.text ?? '');
@@ -1856,6 +1909,66 @@ function matchesLaunchName(
   return [app.name, app.id, app.executablePath ?? '']
     .map((v) => v.toLowerCase())
     .some((h) => h.length > 0 && h.includes(needle));
+}
+
+/** `launch_app`'s own answer: the process it started, identified as the driver lists apps. */
+function launchedIdentity(structuredJson: string | undefined, requested: string): ComputerAppInfo | undefined {
+  if (!structuredJson) return undefined;
+  try {
+    const root = JSON.parse(structuredJson) as Record<string, unknown>;
+    const pid = typeof root['pid'] === 'number' ? root['pid'] : undefined;
+    if (!pid || pid <= 0) return undefined;
+    const name = typeof root['name'] === 'string' && root['name'] ? root['name'] : requested;
+    const id = typeof root['bundle_id'] === 'string' && root['bundle_id'] ? root['bundle_id'] : name;
+    return { id, name, pid, frontmost: false, windowCount: 0 };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Adds a process that owns windows but is missing from `list_apps`, named by
+ * the stopped entry `list_apps` keeps for the same app: the same macOS gap as
+ * `launched`, for an app the user started rather than this bridge.
+ */
+function withWindowOwners(
+  apps: ComputerAppInfo[],
+  appsJson: string | undefined,
+  windowsJson: string | undefined,
+): ComputerAppInfo[] {
+  if (!appsJson || !windowsJson) return apps;
+  try {
+    const listed = new Set(apps.map((a) => a.pid));
+    const owners = new Map<number, string>();
+    for (const w of ((JSON.parse(windowsJson) as { windows?: unknown[] }).windows ?? []) as Record<string, unknown>[]) {
+      const pid = typeof w['pid'] === 'number' ? w['pid'] : undefined;
+      const owner = typeof w['app_name'] === 'string' ? w['app_name'] : undefined;
+      if (pid && owner && !listed.has(pid) && w['layer'] === 0) owners.set(pid, owner);
+    }
+    if (owners.size === 0) return apps;
+    const stopped = ((JSON.parse(appsJson) as { apps?: unknown[] }).apps ?? []) as Record<string, unknown>[];
+    const extra: ComputerAppInfo[] = [];
+    for (const [pid, owner] of owners) {
+      const entry = stopped.find((a) => a['running'] !== true && a['name'] === owner);
+      const id = entry && typeof entry['bundle_id'] === 'string' ? entry['bundle_id'] : undefined;
+      if (!id) continue;
+      const launchPath = typeof entry?.['launch_path'] === 'string' ? entry['launch_path'] : undefined;
+      extra.push({ id, name: owner, pid, frontmost: false, windowCount: 0, ...(launchPath ? { executablePath: launchPath } : {}) });
+    }
+    return extra.length > 0 ? [...apps, ...extra] : apps;
+  } catch {
+    return apps;
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM: alive, owned by someone else — not one of ours, but not gone either.
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
 }
 
 /** Advertised accessibility actions the driver's element click performs (AXPress on macOS, Invoke on Windows). */

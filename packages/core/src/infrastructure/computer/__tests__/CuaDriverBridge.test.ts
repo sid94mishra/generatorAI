@@ -394,6 +394,36 @@ describe('CuaDriverBridge foreground escalation', () => {
     expect(pressCalls[1]?.['delivery_mode']).toBe('foreground');
   });
 
+  it('retries in the foreground when a background keystroke was accepted but not delivered', async () => {
+    // Measured on TextEdit's save sheet: ⌘⇧G came back "unverifiable" with
+    // escalation {reason: delivery_failed, target: foreground} — no error — and
+    // was reported as done.
+    const hotkeys: Record<string, unknown>[] = [];
+    const fake = makeBridge({
+      reply: (tool, args) => {
+        if (tool === 'list_windows') return ok(WINDOWS);
+        if (tool === 'hotkey') {
+          hotkeys.push(args);
+          return args['delivery_mode'] === 'foreground'
+            ? ok({ effect: 'unverifiable', delivery: { mode: 'foreground' } })
+            : ok({ effect: 'unverifiable', escalation: { reason: 'delivery_failed', target: 'foreground' } });
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    const result = await fake.bridge.act(handle, {
+      type: 'pressKey',
+      key: 'g',
+      modifiers: ['Meta', 'Shift'],
+      target: { app: { appId: 'textedit', name: 'TextEdit', pid: 42 }, window: { by: 'id', id: 7 } },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(hotkeys.map((h) => h['delivery_mode'])).toEqual([undefined, 'foreground']);
+  });
+
   it('never escalates for a refusal that did not name foreground delivery', async () => {
     const attempts: string[] = [];
     const fake = makeBridge({
@@ -1201,5 +1231,59 @@ describe('CuaDriverBridge windowless launch on macOS', () => {
 
     expect(fake.calls.map((c) => c.tool).filter((t) => t === 'bring_to_front' || t === 'hotkey')).toEqual(['bring_to_front', 'hotkey']);
     expect(result.window).toEqual({ id: 9, title: 'Untitled' });
+  });
+});
+
+describe('CuaDriverBridge apps macOS leaves out of its running list', () => {
+  it('finds a launched app by the pid launch_app reported, and keeps listing it while it lives', async () => {
+    // Measured: TextEdit revived under an automatically terminated instance's
+    // identity ran with its document open while list_apps called it stopped.
+    const pid = process.pid; // any live process stands in for it
+    const fake = makeBridge({
+      reply: (tool, args) => {
+        if (tool === 'launch_app') return ok({ pid, bundle_id: 'com.apple.TextEdit', name: 'TextEdit', launch_state: { process_running: true } });
+        if (tool === 'list_apps') return ok({ apps: [{ name: 'TextEdit', pid: 0, running: false, bundle_id: 'com.apple.TextEdit' }] });
+        if (tool === 'list_windows') {
+          const draft = { window_id: 31, pid, title: 'draft.txt', minimized: false, is_on_screen: true, z_index: 5 };
+          return ok({ windows: args['pid'] === undefined || args['pid'] === pid ? [draft] : [] });
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    const launched = await fake.bridge.launchApp(handle, 'TextEdit', { args: ['/tmp/draft.txt'] });
+    expect(launched.app).toMatchObject({ appId: 'com.apple.TextEdit', pid });
+    expect(launched.window).toEqual({ id: 31, title: 'draft.txt' });
+
+    const listed = await fake.bridge.listApps(handle);
+    expect(listed.apps.find((a) => a.id === 'com.apple.TextEdit')).toMatchObject({ pid, windowCount: 1 });
+  }, 20_000);
+
+  it('lists an app the user started that owns windows but list_apps calls stopped', async () => {
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'list_apps') {
+          return ok({ apps: [
+            { name: 'Numbers', pid: 0, running: false, bundle_id: 'com.apple.iWork.Numbers', launch_path: '/Applications/Numbers.app' },
+            { name: 'Notes', pid: 0, running: false, bundle_id: 'com.apple.Notes' },
+          ] });
+        }
+        if (tool === 'list_windows') {
+          return ok({ windows: [
+            { window_id: 40, pid: 4740, app_name: 'Numbers', title: 'Choose a Template', layer: 0, is_on_screen: true },
+            { window_id: 41, pid: 999, app_name: 'Dock', title: '', layer: 20, is_on_screen: true },
+          ] });
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    const listed = await fake.bridge.listApps(handle);
+
+    expect(listed.apps).toEqual([
+      expect.objectContaining({ id: 'com.apple.iWork.Numbers', name: 'Numbers', pid: 4740, windowCount: 1 }),
+    ]);
   });
 });
