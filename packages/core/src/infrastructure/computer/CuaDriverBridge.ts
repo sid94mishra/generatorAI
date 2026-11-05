@@ -1068,8 +1068,24 @@ export class CuaDriverBridge implements IComputerBridge {
       if (refusal) {
         result = await this.call(connection, call.tool, { ...call.args, delivery_mode: 'foreground' }, signal);
         refusal = this.refusalFor(result);
-        if (refusal) return refuse(await this.explainForegroundFailure(connection, refusal));
       }
+      // A sheet or dialog of the same app holds the keyboard — a Save sheet's
+      // "Go to folder" panel, an export options sheet. Keys aimed at the
+      // document window are refused, and the driver names the window that has
+      // focus. That window is part of the same task; aim there, once.
+      if (refusal && FOREGROUND_CAPABLE.has(call.tool)) {
+        const holder = focusHolder(result, call.args['window_id']);
+        if (holder !== undefined) {
+          result = await this.call(
+            connection,
+            call.tool,
+            { ...call.args, window_id: holder, delivery_mode: 'foreground' },
+            signal,
+          );
+          refusal = this.refusalFor(result);
+        }
+      }
+      if (refusal) return refuse(await this.explainForegroundFailure(connection, refusal));
 
       const at = this.actionWindow(req, call.args);
       const changes = opts.observe !== false && at ? await this.observe(connection, at.pid, at.windowId, signal) : undefined;
@@ -1995,6 +2011,18 @@ function nextStepFrom(
  * driver's own instruction either way, so we never escalate to foreground for
  * a refusal the driver did not say foreground would fix.
  */
+/**
+ * The window of the same app that holds focus, when the driver refused input
+ * for another one: "window_id 4806 \"Save\" of the same app holds focus" or
+ * "the app's focused window is Some(4806)".
+ */
+export function focusHolder(result: DriverToolResult, aimed: unknown): number | undefined {
+  const text = `${result.text ?? ''} ${result.structuredJson ?? ''}`;
+  const match = /window_id (\d+) "[^"]*" of the same app holds focus/.exec(text) ?? /focused window is Some\((\d+)\)/.exec(text);
+  const id = match ? Number(match[1]) : undefined;
+  return id !== undefined && id !== aimed ? id : undefined;
+}
+
 /** A result the driver accepted but says did not reach the target, with foreground as the fix. */
 function deliveryFailed(result: DriverToolResult): boolean {
   if (result.isError || !result.structuredJson) return false;

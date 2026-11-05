@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ILogger } from '@generatorai/shared';
-import { CuaDriverBridge, closestMenuItem, splitLaunchArguments } from '../CuaDriverBridge.js';
+import { CuaDriverBridge, closestMenuItem, focusHolder, splitLaunchArguments } from '../CuaDriverBridge.js';
 
 const logger: ILogger = {
   info() {},
@@ -1359,4 +1359,42 @@ describe('CuaDriverBridge menu path correction', () => {
 
     expect(result.window).toEqual({ id: 4, title: 'draft.txt' });
   }, 20_000);
+});
+
+describe('CuaDriverBridge keys for a sheet that holds focus', () => {
+  it('reads the window the driver names as holding focus', () => {
+    const fg = { text: 'hotkey failed: exact target window did not become focused for foreground HID delivery: window_id 4806 "Save" of the same app holds focus (an open dialog or panel); act on that window_id, or close it first', isError: true, degraded: false };
+    const bg = { text: "Background input refused (window_not_key): window 4785 could not be confirmed as the app's key window (the app's focused window is Some(4806), its focused element is in window None)", isError: true, degraded: false };
+    expect(focusHolder(fg, 4785)).toBe(4806);
+    expect(focusHolder(bg, 4785)).toBe(4806);
+    expect(focusHolder(fg, 4806)).toBeUndefined();
+  });
+
+  it('sends the keys to the sheet when the document window is refused', async () => {
+    const sent: Record<string, unknown>[] = [];
+    const fake = makeBridge({
+      reply: (tool, args) => {
+        if (tool === 'list_windows') return ok(WINDOWS);
+        if (tool === 'hotkey') {
+          sent.push(args);
+          if (args['window_id'] === 4806) return ok({ effect: 'unverifiable' });
+          return args['delivery_mode'] === 'foreground'
+            ? driverError('hotkey failed: exact target window did not become focused for foreground HID delivery: window_id 4806 "Save" of the same app holds focus (an open dialog or panel); act on that window_id, or close it first')
+            : driverError('Background input refused (window_not_key): retry with delivery_mode:"foreground"');
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    const result = await fake.bridge.act(handle, {
+      type: 'pressKey',
+      key: 'g',
+      modifiers: ['Meta', 'Shift'],
+      target: { app: { appId: 'numbers', name: 'Numbers', pid: 42 }, window: { by: 'id', id: 7 } },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(sent.map((a) => [a['window_id'], a['delivery_mode']])).toEqual([[7, undefined], [7, 'foreground'], [4806, 'foreground']]);
+  });
 });

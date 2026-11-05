@@ -1946,6 +1946,19 @@ read used to carry an unused image), the walk gets a 4 s budget, and `computer_p
 action (press, show_menu, pick, confirm, cancel, open) as the click's `action`. The embedded host passes the two options
 0.38 requires (`approveCapabilityManifest: false`, `noOverlay: false`).
 
+### D-191 Computer use reads once and acts in batches (owner + derived, 2026-11-05) — Final
+The owner's bar: token-efficient, quick on small tasks, accessibility first with a screenshot fallback, a dedicated
+agent cursor so the user's stays free. Measured before: a Calculator sum took 49 calls (a snapshot before every click,
+a screenshot to read the display), and every action result told the model to screenshot. Now a snapshot is the driver's
+compact Markdown tree (read-only text inline, menus folded); every action returns `changes`, the driver's diff against
+the window's last read, so the agent sees the result without re-reading; its snapshot id stays usable until a change
+re-indexes the window (the bridge addresses the driver's newest read); `computer_run_steps` carries up to 20 element,
+value, menu and key steps in one call; a screenshot is only for what the tree lacks. Keys refused because a sheet of the
+same app holds focus go to that sheet. The agent cursor carries a "GAI" badge, moves at distance-based speed and stays
+visible for the session. On macOS: Numbers/Pages/Keynote crash when their template chooser is read through
+accessibility (Apple bug) — the skill presses Return on it; a save folder is chosen with the Where popup or Go to
+folder, never a path in the name field.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

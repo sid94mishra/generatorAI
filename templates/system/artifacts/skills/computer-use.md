@@ -88,10 +88,15 @@ spreadsheet row is `type_text, press_key Tab, type_text, … press_key Return`
 * **Open a file in one call:** `computer_launch_app name: "TextEdit"
   arguments: ["/abs/path/draft.txt"]`. Never drive an Open dialog for a path
   you know. The result names the file's window.
-* **New document:** launch the app bare. A macOS document app is given a new
-  document for you. A **template chooser** (Numbers, Pages, Keynote): click
-  the blank template, then `Create`. An **Open panel** (TextEdit): click
-  `New Document`.
+* **New document:** if the app is already open, run `File>New` — never type
+  into a window you did not create (it may be the user's, or a document
+  restored from yesterday). Launched bare, an app may show an **Open panel**
+  (TextEdit, Numbers, Pages): click its `New Document` button
+  (`query: "New Document"`).
+* **Numbers, Pages, Keynote template chooser:** after `New Document` the
+  chooser opens with **Blank** already selected. Press `Return` (aimed at the
+  app's window) and the blank document opens. **Never snapshot the template
+  chooser** — reading it crashes the app (an Apple bug).
 * `newInstance` only when the user's own work is open in that app.
 * No `computer_capabilities` / `computer_list_apps` when you know the app.
   `computer_list_windows` only when you lost track of which window is yours.
@@ -184,12 +189,20 @@ it, then `Escape`.
 ## Saving and exporting
 
 * **Save in place:** `File>Save` (menu path) — no dialog for an existing file.
-* **Save As / Export (macOS sheet):** the menu command reports `reindexed`;
-  snapshot with `query: "Save"`. Then in ONE `computer_run_steps`:
-  `set_value` the name field to the **file name**, `press_key Meta+Shift+G`,
-  `type_text` the **folder** path, `press_key Return`, then `click` Save. A
-  File Format popup: `set_value` it with the format title. Numbers/Pages
-  exports start with an options dialog — click `Next…` first.
+* **Save As / Export (macOS sheet):** `File>Save…`, `File>Export To>CSV…` /
+  `PDF…` / `Word…`. Numbers/Pages exports first show an options sheet: click
+  `Next…`. Then snapshot the sheet with `query: "save-panel"` (or the field
+  you need) and, in ONE `computer_run_steps`:
+  1. **Folder** — `set_value` the `Where:` popup with the folder's name when it
+     is a favourite or recent one (Desktop, Documents, Downloads, a folder used
+     before). Otherwise `press_key Meta+Shift+G`, then snapshot with
+     `query: "PathTextField"`, `set_value` that field with the folder path,
+     `press_key Return`, and check `Where:` shows the folder.
+  2. **Name** — `set_value` the name field (`saveAsNameTextField`) with the
+     **file name only**. A path there is taken as a name and saves in the
+     wrong folder.
+  3. **Format** — a `File Format` popup: `set_value` it with the format title.
+  4. `click` `Save` / `Export`.
 * **Windows:** type the **full path** into the file name box, press Enter.
 * **Check the file on disk** with your file tools — the definitive check.
 * `File>Close` after saving; never "Don't Save" on work the task keeps.
