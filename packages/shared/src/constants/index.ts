@@ -73,6 +73,21 @@ export const COMPUTER_USE_DISABLE_TOKENS: readonly string[] = Object.freeze([
 export const COMPUTER_USE_SKILL_ID = 'system-skill-computer-use';
 
 /**
+ * Pacing for the embedded cua-driver daemon, set at trusted launch (the driver
+ * reads them only from its own environment; no tool argument can change them).
+ * Defaults wait up to 1 s after every action for a window change and 8 ms
+ * between synthesized keys: measured by the driver's authors, a background
+ * Calculator click took 1153 ms at the default and 325 ms at 200 ms, and a
+ * 185-character string typed in 3650 ms at 8 ms and 980 ms at 2 ms, read back
+ * exactly. 300 ms keeps the dialog-opened report (the result waits that long
+ * anyway); 3 ms leaves headroom over the 2 ms floor. Windows ignores both.
+ */
+export const CUA_DRIVER_PACING_ENVIRONMENT: ReadonlyArray<{ name: string; value: string }> = [
+  { name: 'CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS', value: '300' },
+  { name: 'CUA_DRIVER_KEY_GAP_MS', value: '3' },
+];
+
+/**
  * The name this skill is STAGED and REGISTERED under with the harness.
  *
  * Deliberately not `computer-use`: Orca ships a user-level skill by that exact

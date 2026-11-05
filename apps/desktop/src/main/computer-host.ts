@@ -20,6 +20,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { app, desktopCapturer, shell, systemPreferences } from 'electron';
+import { CUA_DRIVER_PACING_ENVIRONMENT } from '@generatorai/shared';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -144,7 +145,8 @@ export class ComputerHost {
       // Empty rather than inherited: Electron main's environment holds
       // GENERATORAI_ELECTRON_IPC_TOKEN and the desktop admin token, and the
       // driver has no business seeing either.
-      environment: [],
+      // Pacing only (CUA_DRIVER_PACING_ENVIRONMENT).
+      environment: [...CUA_DRIVER_PACING_ENVIRONMENT],
       inheritStderr: false,
       // The agent cursor overlay shows the person where the agent is acting.
       noOverlay: false,
