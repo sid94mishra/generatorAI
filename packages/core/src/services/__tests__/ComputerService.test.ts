@@ -8,6 +8,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type {
+  ComputerElement,
   AgentEvent,
   ComputerActionResult,
   ComputerCapabilities,
@@ -65,7 +66,7 @@ class FakeBridge implements IComputerBridge {
   actCalls: ActionRequest[] = [];
   snapshotCalls: SnapshotRequest[] = [];
   nextSnapshotId = 'snap-1';
-  elements = [
+  elements: ComputerElement[] = [
     { index: 0, role: 'button', label: 'Send', secure: false, value: null, traits: [], actions: ['AXPress'], childCount: 0 },
     { index: 1, role: 'textField', label: 'Message', secure: false, value: '', traits: [], actions: ['AXConfirm'], childCount: 0 },
   ];
@@ -466,6 +467,25 @@ describe('ComputerService blind input', () => {
     }
   });
 
+  it('counts an approved plan as one unconfirmed input, not one per step', async () => {
+    // Typing a spreadsheet row is a dozen keystrokes nothing can confirm one by
+    // one; counted per step, every plan past five was cut off halfway.
+    const { service, bridge, consent } = makeService([SLACK], { ...enabled(), allowSyntheticFallback: true });
+    consent.answer = 'allow_run';
+    goBlind(bridge);
+    const row = Array.from({ length: 8 }, () => press);
+
+    const first = await service.actPlan(CTX, { by: 'appId', appId: SLACK.id }, row);
+    expect(first.ok).toBe(true);
+    expect(bridge.actCalls).toHaveLength(8);
+
+    for (let i = 0; i < 4; i += 1) expect((await service.actPlan(CTX, { by: 'appId', appId: SLACK.id }, row)).ok).toBe(true);
+    // Five blind plans in a row is still a blind session.
+    const blocked = await service.actPlan(CTX, { by: 'appId', appId: SLACK.id }, row);
+    expect(blocked.refusal?.code).toBe('provider_unavailable');
+    expect(bridge.actCalls).toHaveLength(40);
+  });
+
   it('records the stop in the audit trail', async () => {
     const { service, bridge, audit } = makeService([SLACK], enabled());
     goBlind(bridge);
@@ -703,7 +723,7 @@ describe('ComputerService consent', () => {
       target: { app: { appId: SLACK.id, name: SLACK.name, pid: SLACK.pid }, window: { by: 'focused' } },
       text: 'hello',
     });
-    expect(consent.stored.size).toBe(0);
+    expect(consent.stored.get(`${CTX.workspaceId}:${SLACK.id}`)).toEqual({ decision: 'always_allow', scope: 'synthetic' });
   });
 });
 
@@ -737,6 +757,27 @@ describe('ComputerService snapshot fencing', () => {
     });
     expect(second.refusal?.code).toBe('stale_snapshot');
     expect(bridge.actCalls).toHaveLength(1);
+  });
+
+  it('keeps elements the provider holds a handle for addressable after an action', async () => {
+    // The driver re-checks a handle on every use and refuses one whose element
+    // is gone, so a Calculator sum no longer needs a fresh read per button.
+    const harness = makeService([SLACK], enabled());
+    harness.consent.answer = 'always_allow';
+    harness.bridge.elements = [
+      { index: 0, role: 'button', label: '1', secure: false, value: null, traits: [], actions: ['AXPress'], childCount: 0, token: 's1:0' },
+      { index: 1, role: 'button', label: '2', secure: false, value: null, traits: [], actions: ['AXPress'], childCount: 0 },
+    ];
+    const snap = await harness.service.snapshot(CTX, { by: 'appId', appId: SLACK.id });
+    const snapshotId = snap.snapshot!.snapshotId;
+    const click = (elementIndex: number) =>
+      harness.service.act(CTX, { by: 'appId', appId: SLACK.id }, { type: 'click', snapshotId, elementIndex });
+
+    expect((await click(0)).ok).toBe(true);
+    expect((await click(0)).ok).toBe(true);
+    // No handle: after an action its index could name anything.
+    expect((await click(1)).refusal?.code).toBe('stale_snapshot');
+    expect(harness.bridge.actCalls).toHaveLength(2);
   });
 
   it('rejects an element index outside the snapshot', async () => {

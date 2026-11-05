@@ -1913,13 +1913,28 @@ isolation) starts from the repository's own index, so a file is read again only 
 CRLF under `eol=lf` no longer show as changed in full.
 
 ### D-188 Computer use asks once per app (owner, 2026-11-05) — Final
-A desktop task asked for every kind of action separately — open, read, click, then every keystroke — so a Calculator sum
-raised 46 consent cards. The owner's rule: a person who allows an app is not asked about that app again. "Allow for this
+A desktop task asked for every kind of action separately — open, read, click, then every keystroke: "Always allow" was
+stored only for the kind of action it answered and never covered keyboard and mouse. The owner's rule: a person who allows an app is not asked about that app again. "Allow for this
 chat" covers every action in that app (or any app, with the Scope segment) for the rest of the chat; it survives the
 desktop session going idle between turns and ends when the person stops computer use or switches it off (twelve hours at
 most). "Always allow" is stored at the widest scope and covers every later action in that app (or any app), keyboard and
 mouse included, until it is revoked in Settings; every prompt offers it. A per-app deny still beats an any-app grant, and
 "Allow once" still asks next time. The card's answer reads "Allow for this chat" everywhere.
+
+### D-189 Computer use drives macOS apps the way a person does (derived, 2026-11-05) — Final
+Measured in the installed app on macOS (TextEdit, Numbers, Freeform, Calculator), every document task failed before its
+first edit. The tools now: hand a file path to a macOS app as an open target (`open <path>`), not as a command-line
+argument it ignores; activate a macOS app that launched without a window and, if it still has none, send ⌘N — a
+windowless app left the agent nothing to aim a snapshot, menu or key at; report an app that stays windowless as launched,
+not as lost. `computer_perform_action` takes a menu path ("File>Export To>CSV…") with no snapshot and runs it through
+accessibility (`invokeMenu`); an element action it can only send as a press, anything else is refused instead of being
+sent as a menu. Paste is ⌘V on macOS. Modifiers accept "cmd", "option" and the like. A drag on macOS is delivered with
+the window briefly in front, because a background window takes the mouse-down as activation. After an action, elements
+the driver holds a handle for stay addressable from the same snapshot (the driver refuses a handle whose element is
+gone); bare indices still expire. One `computer_run_steps` plan counts as one unconfirmed input for the blind-input stop.
+The computer-use skill covers macOS, Windows and Linux: plan first, menu paths over shortcuts, opening files by path,
+new documents and template choosers, text, spreadsheet and canvas work, save sheets (⌘⇧G), exports, and checking the
+file on disk.
 
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)

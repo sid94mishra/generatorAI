@@ -200,6 +200,10 @@ export type ActionRequest =
   | { type: 'setValue'; snapshotId: string; elementIndex: number; value: string }
   | { type: 'performAction'; snapshotId: string; elementIndex: number; actionName: string }
   | { type: 'clickPoint'; target: ComputerWindowTarget; x: number; y: number; button?: 'left' | 'right' }
+  // A command from the app's menu bar, e.g. ['File', 'New']. Resolved and
+  // invoked through accessibility one level at a time, so it needs no snapshot
+  // and never moves the pointer.
+  | { type: 'invokeMenu'; target: ComputerWindowTarget; path: readonly string[] }
   // `focus` is the driver's Chromium/Electron form: it pixel-clicks that point
   // to establish real renderer focus first, because posted input never reaches
   // those surfaces. Window-local screenshot pixels, same convention as click.

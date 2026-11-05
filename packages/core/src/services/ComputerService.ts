@@ -137,6 +137,10 @@ interface SnapshotEntry {
   /** Advertised actions per element index — the allowlist for performAction. */
   actions: Map<number, readonly string[]>;
   labels: Map<number, string>;
+  /** Elements the provider minted a handle for: it re-checks those itself on every use. */
+  handles: Set<number>;
+  /** An action ran in this app since the snapshot; only `handles` elements may still be addressed. */
+  acted: boolean;
 }
 
 interface SessionRecord {
@@ -152,7 +156,7 @@ interface SessionRecord {
   snapshotIndex: Map<string, string>;
   /**
    * Window the agent last looked at. Kept apart from `snapshots`, which is
-   * emptied after every action to invalidate element indices — the preview
+   * fenced after every action to invalidate element indices — the preview
    * still needs to know what it is showing between those.
    */
   lastTarget?: { app: ComputerAppIdentity; windowId: number };
@@ -1322,17 +1326,40 @@ export class ComputerService {
       return refuse(denied, 0);
     }
 
+    // A plan is one approved, fixed sequence — typing a spreadsheet row is a
+    // dozen keystrokes no driver can confirm one by one — so it counts as ONE
+    // unconfirmed input. Counted per step, every plan longer than the limit
+    // was cut off halfway, and the agent snapshotted after every five keys.
+    if (synthetic && session.blindStreak >= BLIND_INPUT_LIMIT) {
+      const refusal = this.refusal(
+        'provider_unavailable',
+        `The last ${session.blindStreak} keystrokes and clicks were delivered but could not be confirmed. ` +
+          'Stop sending input and take a computer_snapshot of the target window.',
+      );
+      await this.recordRefusal(ctx, app, 'plan', refusal);
+      return refuse(refusal, 0);
+    }
     const results: ComputerActionResult[] = [];
+    const countPlan = () => {
+      if (!results.some((r) => r.action?.path === 'synthetic')) return;
+      const confirmed = results.some((r) => r.action?.path === 'synthetic' && r.action.verification?.state === 'verified');
+      session.blindStreak = confirmed ? 0 : session.blindStreak + 1;
+    };
     for (const [index, step] of steps.entries()) {
       const control = this.featureGate(ctx.workspaceId);
       if (control) {
         await this.recordRefusal(ctx, app, step.type, control);
+        countPlan();
         return refuse(control, index, results);
       }
-      const result = await this.dispatch(ctx, session, app, step, this.describeTarget(session, step));
+      const result = await this.dispatch(ctx, session, app, step, this.describeTarget(session, step), true);
       results.push(result);
-      if (!result.ok) return refuse(result.refusal ?? this.refusal('target_lost'), index, results);
+      if (!result.ok) {
+        countPlan();
+        return refuse(result.refusal ?? this.refusal('target_lost'), index, results);
+      }
     }
+    countPlan();
     return { ok: true, results };
   }
 
@@ -1343,9 +1370,11 @@ export class ComputerService {
     app: ComputerAppIdentity,
     req: ActionRequest,
     targetLabel: string | undefined,
+    /** A step of an approved plan: the plan as a whole is gated and counted, not each step. */
+    planStep = false,
   ): Promise<ComputerActionResult> {
     const synthetic = SYNTHETIC_ACTIONS.has(req.type);
-    if (synthetic && session.blindStreak >= BLIND_INPUT_LIMIT) {
+    if (synthetic && !planStep && session.blindStreak >= BLIND_INPUT_LIMIT) {
       const refusal = this.refusal(
         'provider_unavailable',
         `The last ${session.blindStreak} keystrokes and clicks were delivered but could not be confirmed. ` +
@@ -1389,7 +1418,7 @@ export class ComputerService {
     // A verified accessibility action does NOT clear the streak — reads and
     // focus changes can keep succeeding while every keystroke misses, which is
     // exactly the pattern seen when Windows refuses the foreground swap.
-    if (result.action?.path === 'synthetic') {
+    if (result.action?.path === 'synthetic' && !planStep) {
       session.blindStreak = verified ? 0 : session.blindStreak + 1;
     }
     await this.writeAudit({
@@ -1747,6 +1776,12 @@ export class ComputerService {
     if (!Number.isInteger(req.elementIndex) || !entry.actions.has(req.elementIndex)) {
       return this.refusal('stale_snapshot', `Element ${req.elementIndex} is not in snapshot ${req.snapshotId}.`);
     }
+    // After an action only an element the provider holds a handle for may be
+    // addressed again: the provider refuses a handle whose element is gone,
+    // where a bare index would land on whatever moved into its place.
+    if (entry.acted && !entry.handles.has(req.elementIndex)) {
+      return this.refusal('stale_snapshot');
+    }
     if (req.type === 'performAction') {
       const advertised = entry.actions.get(req.elementIndex) ?? [];
       if (!advertised.includes(req.actionName)) {
@@ -1836,9 +1871,11 @@ export class ComputerService {
 
     const actions = new Map<number, readonly string[]>();
     const labels = new Map<number, string>();
+    const handles = new Set<number>();
     for (const element of snapshot.elements) {
       actions.set(element.index, element.actions);
       labels.set(element.index, element.label ?? element.title ?? element.role);
+      if (element.token) handles.add(element.index);
     }
     session.snapshots.set(windowKey, {
       snapshotId: snapshot.snapshotId,
@@ -1846,6 +1883,8 @@ export class ComputerService {
       windowKey,
       actions,
       labels,
+      handles,
+      acted: false,
     });
     session.snapshotIndex.set(snapshot.snapshotId, windowKey);
 
@@ -1861,9 +1900,19 @@ export class ComputerService {
     }
   }
 
+  /**
+   * After an action the app's snapshots keep only the elements the provider
+   * can re-check by handle. Dropping them whole made every button of a
+   * Calculator sum cost a fresh read of the window (47 calls for one sum),
+   * though the driver already refuses a handle whose element has gone.
+   */
   private invalidateSnapshots(session: SessionRecord, app: ComputerAppIdentity): void {
     for (const [key, entry] of session.snapshots) {
       if (entry.app.pid !== app.pid || entry.app.appId !== app.appId) continue;
+      if (entry.handles.size > 0) {
+        entry.acted = true;
+        continue;
+      }
       session.snapshots.delete(key);
       session.snapshotIndex.delete(entry.snapshotId);
     }

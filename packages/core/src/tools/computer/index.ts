@@ -273,29 +273,50 @@ const createSetValueTool: ComputerToolFactory = (ctx): ToolDefinition => ({
 const createPerformActionTool: ComputerToolFactory = (ctx): ToolDefinition => ({
   name: 'computer_perform_action',
   description:
-    'Invoke an accessibility action that an element advertised in its `actions` array (for example "AXPress", ' +
-    '"AXConfirm", "Expand"). Only actions listed on that element in that snapshot are permitted.',
+    'Choose a command from the app\u2019s menu bar, or press an element. A menu command is a path of menu titles ' +
+    'joined by ">", exactly as the menus read — "File>New", "Format>Font>Bold", "File>Export To>CSV…" — and needs ' +
+    'only the app (plus windowId when it has several windows), no snapshot. It runs through accessibility: no ' +
+    'pointer, no focus change, no keystroke. Prefer it to keyboard shortcuts for app commands. Otherwise pass ' +
+    'snapshotId + elementIndex with an action the element advertised in its `actions` array, e.g. "AXPress".',
   owner: ctx.owner ?? 'computer-tools',
-  requiredPermissions: permission('Invoke an accessibility action on a control'),
+  requiredPermissions: permission('Use a menu command or a control in a desktop application'),
   parametersSchema: {
     type: 'object',
     properties: {
       ...APP_TARGET_PROPERTIES,
-      snapshotId: { type: 'string', description: 'snapshotId from the computer_snapshot that produced elementIndex.' },
-      elementIndex: { type: 'number', description: 'Element index within that snapshot.' },
-      actionName: { type: 'string', description: 'Must be a member of that element\u2019s `actions` array.' },
+      windowId: { type: 'number', description: 'For a menu command: the window it applies to. Defaults to the focused window.' },
+      snapshotId: { type: 'string', description: 'For an element action: snapshotId from the computer_snapshot that produced elementIndex.' },
+      elementIndex: { type: 'number', description: 'For an element action: element index within that snapshot.' },
+      actionName: {
+        type: 'string',
+        description: 'A menu path such as "File>Save As…", or an action from that element\u2019s `actions` array.',
+      },
     },
-    required: ['snapshotId', 'elementIndex', 'actionName'],
+    required: ['actionName'],
     additionalProperties: false,
   },
   handler: async (args) => {
     const ref = toAppRef(args);
     if ('error' in ref) return { ok: false, error: ref.error };
+    const actionName = coerceString(args['actionName']);
+    if (!actionName) return { ok: false, error: '`actionName` is required.' };
+    if (actionName.includes('>')) {
+      const path = actionName.split('>').map((part) => part.trim()).filter((part) => part.length > 0);
+      if (path.length < 2) return { ok: false, error: 'A menu path names a menu and an item, e.g. "File>New".' };
+      const result = await ctx.computerService.act(callContext(ctx), ref, {
+        type: 'invokeMenu',
+        target: windowTarget(args),
+        path,
+      });
+      return actionPayload(result);
+    }
     const snapshotId = coerceString(args['snapshotId']);
     const elementIndex = coerceInt(args['elementIndex']);
-    const actionName = coerceString(args['actionName']);
-    if (!snapshotId || elementIndex === undefined || !actionName) {
-      return { ok: false, error: '`snapshotId`, `elementIndex`, and `actionName` are required.' };
+    if (!snapshotId || elementIndex === undefined) {
+      return {
+        ok: false,
+        error: 'An element action needs `snapshotId` and `elementIndex`; a menu command is a path such as "File>New".',
+      };
     }
     const result = await ctx.computerService.act(callContext(ctx), ref, {
       type: 'performAction',
@@ -319,9 +340,9 @@ function windowTarget(args: Record<string, unknown>) {
 }
 
 const SYNTHETIC_WARNING =
-  'This takes over the user\u2019s real keyboard/mouse, cannot be verified, and requires the window to be ' +
-  'focused. It is disabled by default and always asks the user. Use the snapshot-based tools instead ' +
-  'wherever the control appears in a snapshot.';
+  'This is real keyboard/mouse input aimed at the window: it cannot be verified by itself, so check the ' +
+  'outcome once when the sequence is done. Use a menu path (computer_perform_action) or the snapshot-based ' +
+  'tools instead wherever the command or control is reachable that way.';
 
 /**
  * The driver's Chromium/Electron escape hatch: it pixel-clicks this point to
@@ -461,8 +482,10 @@ const createPressKeyTool: ComputerToolFactory = (ctx): ToolDefinition => ({
       },
       modifiers: {
         type: 'array',
-        items: { type: 'string', enum: ['Alt', 'Control', 'Meta', 'Shift'] },
-        description: 'Modifiers held during the press.',
+        items: { type: 'string' },
+        description:
+          'Modifiers held during the press: Meta (⌘ Command on macOS, the Windows key elsewhere), Control, Alt ' +
+          '(⌥ Option), Shift. "cmd", "ctrl", "option" and the like are accepted too.',
       },
       ...FOCUS_POINT_PROPERTIES,
     },
@@ -476,10 +499,10 @@ const createPressKeyTool: ComputerToolFactory = (ctx): ToolDefinition => ({
     if (!rawKey) return { ok: false, error: '`key` is required.' };
     const chord = parseKeyChord(rawKey);
     const raw = Array.isArray(args['modifiers']) ? args['modifiers'] : [];
-    const declared = raw.filter(
-      (m): m is 'Alt' | 'Control' | 'Meta' | 'Shift' =>
-        m === 'Alt' || m === 'Control' || m === 'Meta' || m === 'Shift',
-    );
+    const declared = raw.flatMap((m) => {
+      const found = typeof m === 'string' ? MODIFIER_ALIASES.get(m.trim().toLowerCase()) : undefined;
+      return found ? [found] : [];
+    });
     const modifiers = [...new Set([...declared, ...chord.modifiers])];
     const focus = focusPoint(args);
     const result = await ctx.computerService.act(callContext(ctx), ref, {
@@ -733,8 +756,9 @@ const createLaunchAppTool: ComputerToolFactory = (ctx): ToolDefinition => ({
     'Start a desktop application that is not currently running, and wait until it has a window. Use this when ' +
     'computer_list_apps does not show the app you need. Give the display name, e.g. "Excel", "Notepad", ' +
     '"Calculator". Pass `url` to open a web page in the default browser instead of navigating one by hand. ' +
-    'To open a SPECIFIC file or folder, pass its path in `arguments` — e.g. name "Code" with ' +
-    'arguments ["C:\\\\src\\\\myrepo"] opens that folder in one call. Launching the app bare and then ' +
+    'To open a SPECIFIC file or folder, pass its absolute path in `arguments` — e.g. name "TextEdit" with ' +
+    'arguments ["/Users/me/notes.txt"], or name "Code" with arguments ["C:\\\\src\\\\myrepo"], opens it in ' +
+    'one call. A macOS document app started bare is given a new untitled document. Launching the app bare and then ' +
     'clicking through its Recent list or a file manager costs many more calls and usually lands on the ' +
     'wrong window. Returns the appId to use with the other computer_* tools.',
   owner: ctx.owner ?? 'computer-tools',
@@ -794,7 +818,9 @@ const createLaunchAppTool: ComputerToolFactory = (ctx): ToolDefinition => ({
           'later call: this app can host several windows in one process, and without the id you will ' +
           'read or click whichever one the user happens to have in front. Take a computer_snapshot ' +
           'next — clicking and setting values work without focusing it.'
-        : 'The window is ready to drive. Take a computer_snapshot next — clicking and setting values work without focusing it, so there is usually no need to bring it to the front.',
+        : `${app.name} is running but has no window, even after it was activated and asked for a new ` +
+          'document. Open the document you need by launching it again with the file path in `arguments`, ' +
+          'or tell the user the app shows no window — a snapshot, menu or key has nothing to aim at.',
     };
   },
 });

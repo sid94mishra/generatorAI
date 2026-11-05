@@ -214,7 +214,7 @@ describe('computer tool set', () => {
     expect(byName.get('computer_set_value')).toMatch(/STRONGLY PREFERRED over computer_type_text/);
     expect(byName.get('computer_click_point')).toMatch(/LAST RESORT/);
     for (const name of ['computer_type_text', 'computer_press_key', 'computer_paste_text', 'computer_scroll', 'computer_drag']) {
-      expect(byName.get(name)).toMatch(/takes over the user/);
+      expect(byName.get(name)).toMatch(/real keyboard\/mouse input/);
     }
   });
 
@@ -231,6 +231,25 @@ describe('computer tool set', () => {
     const { tool: launch, calls } = tool('computer_launch_app');
     await launch.handler({ name: 'explorer.exe', arguments: ['C:\\ok', 7, null] });
     expect(calls[0]?.args[4]).toEqual(['C:\\ok']);
+  });
+
+  it('runs a menu path with no snapshot', async () => {
+    const { tool: perform, calls } = tool('computer_perform_action');
+    await perform.handler({ appId: 'com.apple.TextEdit', actionName: 'Format > Font > Bold' });
+    expect(calls[0]?.args[2]).toMatchObject({ type: 'invokeMenu', path: ['Format', 'Font', 'Bold'] });
+  });
+
+  it('still needs a snapshot element for a named element action', async () => {
+    const { tool: perform, calls } = tool('computer_perform_action');
+    const result = await perform.handler({ appId: 'a', actionName: 'AXPress' });
+    expect(result).toMatchObject({ ok: false });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('accepts the modifier spellings a model writes on macOS', async () => {
+    const { tool: press, calls } = tool('computer_press_key');
+    await press.handler({ appId: 'a', key: 'g', modifiers: ['cmd', 'Shift', 'bogus'] });
+    expect(calls[0]?.args[2]).toMatchObject({ type: 'pressKey', key: 'g', modifiers: ['Meta', 'Shift'] });
   });
 
   it('recognises its own tool names', () => {

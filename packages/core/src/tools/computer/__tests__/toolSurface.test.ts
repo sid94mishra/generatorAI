@@ -11,12 +11,14 @@
 
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { COMPUTER_TOOL_NAMES } from '../index.js';
 
+// The shipped skill at the repository root — the file the app loads.
 const SKILL = path.resolve(
-  process.cwd(),
-  'templates/system/artifacts/skills/computer-use.md',
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../../../../../templates/system/artifacts/skills/computer-use.md',
 );
 
 function skillText(): string {

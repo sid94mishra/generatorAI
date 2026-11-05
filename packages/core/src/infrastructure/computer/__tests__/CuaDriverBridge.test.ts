@@ -12,9 +12,9 @@
 // what the bridge actually branches on.
 // ────────────────────────────────────────────────────────────────
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ILogger } from '@generatorai/shared';
-import { CuaDriverBridge } from '../CuaDriverBridge.js';
+import { CuaDriverBridge, splitLaunchArguments } from '../CuaDriverBridge.js';
 
 const logger: ILogger = {
   info() {},
@@ -1096,5 +1096,110 @@ describe('CuaDriverBridge bring to front', () => {
     const result = await fake.bridge.bringToFront(handle, app, undefined, 77);
     expect(result.refusal?.code).toBe('target_lost');
     expect(raised(fake)).toEqual([]);
+  });
+});
+
+describe('CuaDriverBridge menus and element actions', () => {
+  const TOKENED = {
+    snapshot_id: 's1',
+    pid: 42,
+    window_id: 7,
+    elements: [{ element_index: 3, role: 'AXButton', label: 'Save', element_token: 's00000001:3', actions: ['AXPress'] }],
+  };
+  const replies = (tool: string) => {
+    if (tool === 'list_windows') return ok(WINDOWS);
+    if (tool === 'get_window_state') return ok(TOKENED);
+    return ok({});
+  };
+
+  it('invokes a menu path on the app\u2019s window, with no snapshot', async () => {
+    const fake = makeBridge({ reply: replies });
+    const handle = await started(fake);
+
+    const result = await fake.bridge.act(handle, {
+      type: 'invokeMenu',
+      path: ['File', 'New'],
+      target: { app: { appId: 'notepad', name: 'Notepad', pid: 42 }, window: { by: 'focused' } },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fake.calls.find((c) => c.tool === 'invoke_menu')?.args).toMatchObject({ pid: 42, window_id: 7, path: ['File', 'New'] });
+  });
+
+  it('presses an element for an advertised press action — the driver has no call by action name', async () => {
+    const fake = makeBridge({ reply: replies });
+    const handle = await started(fake);
+    await seedSnapshot(fake, handle);
+
+    await fake.bridge.act(handle, { type: 'performAction', snapshotId: 's1', elementIndex: 3, actionName: 'AXPress' });
+
+    expect(fake.calls.find((c) => c.tool === 'click')?.args['element_token']).toBe('s00000001:3');
+    expect(fake.calls.some((c) => c.tool === 'invoke_menu')).toBe(false);
+  });
+
+  it('refuses an action it cannot send instead of sending it as a menu', async () => {
+    const fake = makeBridge({ reply: replies });
+    const handle = await started(fake);
+    await seedSnapshot(fake, handle);
+
+    const result = await fake.bridge.act(handle, { type: 'performAction', snapshotId: 's1', elementIndex: 3, actionName: 'AXIncrement' });
+
+    expect(result.refusal?.code).toBe('unsupported_action');
+    expect(fake.calls.some((c) => c.tool === 'invoke_menu' || c.tool === 'click')).toBe(false);
+  });
+});
+
+describe('splitLaunchArguments', () => {
+  it('hands macOS paths to the app as open targets and keeps flags on the command line', () => {
+    expect(splitLaunchArguments(['/Users/me/draft.txt', '--fresh', '"/tmp/a b.txt"'], 'darwin')).toEqual({
+      targets: ['/Users/me/draft.txt', '/tmp/a b.txt'],
+      argv: ['--fresh'],
+    });
+  });
+
+  it('keeps every argument on the command line elsewhere', () => {
+    expect(splitLaunchArguments(['C:\\src\\repo', '/home/me/notes.txt'], 'win32')).toEqual({
+      targets: [],
+      argv: ['C:\\src\\repo', '/home/me/notes.txt'],
+    });
+    expect(splitLaunchArguments(['/home/me/notes.txt'], 'linux').targets).toEqual([]);
+  });
+});
+
+describe('CuaDriverBridge windowless launch on macOS', () => {
+  const platform = process.platform;
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: platform });
+    vi.useRealTimers();
+  });
+
+  it('activates a document app that started without a window, then asks it for a new document', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    vi.useFakeTimers();
+    let launched = false;
+    let newDocument = false;
+    const TEXTEDIT = { apps: [{ name: 'TextEdit', pid: 60, running: true, bundle_id: 'com.apple.TextEdit' }] };
+    const fake = makeBridge({
+      reply: (tool, args) => {
+        if (tool === 'launch_app') {
+          launched = true;
+          return ok({});
+        }
+        if (tool === 'hotkey' && JSON.stringify(args['keys']) === '["cmd","n"]') newDocument = true;
+        if (tool === 'list_apps') return ok(launched ? TEXTEDIT : { apps: [] });
+        if (tool === 'list_windows') {
+          return ok(newDocument ? { windows: [{ window_id: 9, pid: 60, title: 'Untitled', minimized: false, focused: true, index: 0 }] } : { windows: [] });
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    const pending = fake.bridge.launchApp(handle, 'TextEdit');
+    await vi.advanceTimersByTimeAsync(15_000);
+    const result = await pending;
+
+    expect(fake.calls.map((c) => c.tool).filter((t) => t === 'bring_to_front' || t === 'hotkey')).toEqual(['bring_to_front', 'hotkey']);
+    expect(result.window).toEqual({ id: 9, title: 'Untitled' });
   });
 });

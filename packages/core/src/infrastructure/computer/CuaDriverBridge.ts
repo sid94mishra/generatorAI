@@ -1071,11 +1071,20 @@ export class CuaDriverBridge implements IComputerBridge {
           args: { ...addressed, value: req.value },
         };
       }
-      // The driver exposes menus, not arbitrary named accessibility actions.
-      return {
-        tool: 'invoke_menu',
-        args: { ...scope, path: req.actionName.split('>').map((s) => s.trim()) },
-      };
+      // The driver has no named-action call: its element click IS the
+      // accessibility press, and nothing else an element advertises can be
+      // sent. (Menus are `invokeMenu`, which needs no element at all.)
+      if (!PRESS_ACTIONS.has(req.actionName)) {
+        return {
+          refusal: {
+            code: 'unsupported_action',
+            message:
+              `The driver cannot send "${req.actionName}" by name. computer_click presses the element; ` +
+              'a menu command goes to computer_perform_action as a path such as "File>New".',
+          },
+        };
+      }
+      return { tool: 'click', args: addressed };
     }
 
     const pid = req.target.app.pid;
@@ -1095,6 +1104,8 @@ export class CuaDriverBridge implements IComputerBridge {
           tool: req.button === 'right' ? 'right_click' : 'click',
           args: { ...target, x: req.x, y: req.y },
         };
+      case 'invokeMenu':
+        return { tool: 'invoke_menu', args: { ...target, path: [...req.path] } };
       case 'typeText': {
         // XAML/WinUI hosts drop WM_CHAR, so the driver needs the element to
         // write through ValuePattern instead. It rejects the pair unless the
@@ -1148,7 +1159,19 @@ export class CuaDriverBridge implements IComputerBridge {
       case 'drag':
         return {
           tool: 'drag',
-          args: { ...target, from_x: req.from.x, from_y: req.from.y, to_x: req.to.x, to_y: req.to.y },
+          args: {
+            ...target,
+            from_x: req.from.x,
+            from_y: req.from.y,
+            to_x: req.to.x,
+            to_y: req.to.y,
+            // A macOS window that is not frontmost takes the mouse-down as
+            // "activate me" and drops the rest of the gesture: a background
+            // drag on a Freeform board reported success and moved nothing.
+            // The driver fronts the window for this one gesture and restores
+            // the user's foreground afterwards.
+            ...(process.platform === 'darwin' ? { delivery_mode: 'foreground' } : {}),
+          },
         };
     }
   }
@@ -1173,7 +1196,8 @@ export class CuaDriverBridge implements IComputerBridge {
       return await this.call(
         connection,
         'hotkey',
-        { pid: args['pid'], window_id: args['window_id'], keys: ['ctrl', 'v'] },
+        // Paste is ⌘V on macOS; Ctrl+V there is a different command or nothing at all.
+        { pid: args['pid'], window_id: args['window_id'], keys: [toDriverKey(PASTE_MODIFIER), 'v'] },
         signal,
       );
     } finally {
@@ -1308,15 +1332,15 @@ export class CuaDriverBridge implements IComputerBridge {
       } catch {
         // A failed pre-scan only costs us the ability to name the new window.
       }
+      const { targets, argv } = splitLaunchArguments(opts.args ?? []);
+      const urls = [...(opts.url ? [opts.url] : []), ...targets];
       const result = await this.call(
         connection,
         'launch_app',
         {
           name,
-          ...(opts.url ? { urls: [opts.url] } : {}),
-          ...(opts.args && opts.args.length > 0
-            ? { additional_arguments: opts.args.map(quoteArgument) }
-            : {}),
+          ...(urls.length > 0 ? { urls } : {}),
+          ...(argv.length > 0 ? { additional_arguments: argv.map(quoteArgument) } : {}),
           // Single-instance apps hand every caller the same window, so two
           // concurrent runs otherwise clobber each other's work.
           ...(opts.newInstance ? { creates_new_application_instance: true } : {}),
@@ -1337,6 +1361,15 @@ export class CuaDriverBridge implements IComputerBridge {
       const wantsNewWindow = (opts.args?.length ?? 0) > 0;
       const freshDeadline = Date.now() + 5_000;
       let fallback: LaunchAppResult | undefined;
+      // A macOS document app launched in the background (TextEdit, Pages,
+      // Numbers with iCloud on) starts with no window at all: AppKit makes the
+      // untitled document, or shows its Open panel, only once the app is
+      // activated. Measured: TextEdit ran windowless for the whole 30 s, and
+      // with no window there is nothing a snapshot, a menu or a key can be
+      // aimed at, so the agent was stuck. One activation, then ⌘N, is what a
+      // person does by clicking the Dock icon.
+      let windowless: { app: ComputerAppIdentity; since: number; nudges: number } | undefined;
+      const nudgeWindowless = process.platform === 'darwin' && targets.length === 0;
       while (Date.now() < deadline) {
         const listed = await this.call(connection, 'list_apps', {});
         if (listed.structuredJson) {
@@ -1344,6 +1377,18 @@ export class CuaDriverBridge implements IComputerBridge {
           const match = apps.find((a: ComputerAppInfo) => matchesLaunchName(a, name));
           if (match) {
             const windows = await this.windowsFor(connection, match.pid);
+            if (windows.length === 0 && nudgeWindowless) {
+              windowless ??= { app: { appId: match.id, name: match.name, pid: match.pid }, since: Date.now(), nudges: 0 };
+              if (Date.now() - windowless.since >= WINDOWLESS_NUDGE_MS * (windowless.nudges + 1) && windowless.nudges < 2) {
+                await this.call(
+                  connection,
+                  windowless.nudges === 0 ? 'bring_to_front' : 'hotkey',
+                  windowless.nudges === 0 ? { pid: match.pid } : { pid: match.pid, keys: ['cmd', 'n'] },
+                  signal,
+                ).catch(() => undefined);
+                windowless.nudges += 1;
+              }
+            }
             if (windows.length > 0) {
               // Deliberately NOT brought to front. The driver launches with
               // SW_SHOWNOACTIVATE precisely so the user keeps their screen, and
@@ -1361,6 +1406,9 @@ export class CuaDriverBridge implements IComputerBridge {
         await new Promise((r) => setTimeout(r, 750));
       }
       if (fallback) return fallback;
+      // Running without a window is still a launched app: say so instead of
+      // refusing, so the agent can open a document in it rather than give up.
+      if (windowless) return { app: windowless.app };
       return {
         refusal: {
           code: 'target_lost',
@@ -1759,6 +1807,31 @@ function wantsShallowScan(result: DriverToolResult): boolean {
  * working directory, creating stray folders there — while the run carried on
  * against whatever window it found.
  */
+/**
+ * On macOS a file or folder reaches an app as an open target (`urls`, what
+ * `open <path>` sends), never on its command line: TextEdit given
+ * `--args /path/draft.txt` started with no window at all. Elsewhere every
+ * argument stays on the command line, which is how Windows and Linux apps take
+ * a path.
+ */
+export function splitLaunchArguments(
+  args: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+): { targets: string[]; argv: string[] } {
+  if (platform !== 'darwin') return { targets: [], argv: [...args] };
+  const targets: string[] = [];
+  const argv: string[] = [];
+  for (const arg of args) {
+    const bare = arg.length > 1 && arg.startsWith('"') && arg.endsWith('"') ? arg.slice(1, -1) : arg;
+    if (bare.startsWith('/') || bare.startsWith('~/') || bare.startsWith('file://')) {
+      targets.push(bare.startsWith('~/') ? path.join(os.homedir(), bare.slice(2)) : bare);
+    } else {
+      argv.push(arg);
+    }
+  }
+  return { targets, argv };
+}
+
 function quoteArgument(arg: string): string {
   if (arg.startsWith('"') && arg.endsWith('"') && arg.length > 1) return arg;
   if (!/[\s"]/u.test(arg)) return arg;
@@ -1784,6 +1857,15 @@ function matchesLaunchName(
     .map((v) => v.toLowerCase())
     .some((h) => h.length > 0 && h.includes(needle));
 }
+
+/** Advertised accessibility actions the driver's element click performs (AXPress on macOS, Invoke on Windows). */
+const PRESS_ACTIONS: ReadonlySet<string> = new Set(['AXPress', 'AXConfirm', 'AXPick', 'AXOpen', 'Invoke', 'press', 'Press']);
+
+/** How long a freshly launched macOS app may sit windowless before each nudge (activate, then ⌘N). */
+const WINDOWLESS_NUDGE_MS = 4_000;
+
+/** The modifier the platform's paste shortcut uses. */
+const PASTE_MODIFIER = process.platform === 'darwin' ? 'Meta' : 'Control';
 
 /** Our closed modifier union → the driver's lower-case key names. */
 function toDriverKey(modifier: string): string {
