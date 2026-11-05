@@ -106,6 +106,7 @@ const COMPUTER_ACTION: Record<string, { verb: string; title: (app: string) => st
   clickPoint: { verb: 'Click', title: (a) => `Click in ${a}?`, detail: 'Clicks a point in the window.' },
   setValue: { verb: 'Fill', title: (a) => `Fill a field in ${a}?`, detail: 'Writes a value into one field.' },
   performAction: { verb: 'Use', title: (a) => `Use a control in ${a}?`, detail: 'Triggers one control, such as pressing or expanding it.' },
+  invokeMenu: { verb: 'Menu', title: (a) => `Use a menu command in ${a}?`, detail: 'Chooses one command from the app’s menu bar.' },
   typeText: { verb: 'Type', title: (a) => `Type in ${a}?`, detail: 'Types text into the window.' },
   pressKey: { verb: 'Keys', title: (a) => `Press keys in ${a}?`, detail: 'Sends a key or shortcut to the window.' },
   pasteText: { verb: 'Paste', title: (a) => `Paste into ${a}?`, detail: 'Pastes text into the window.' },
