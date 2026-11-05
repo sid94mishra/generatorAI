@@ -1604,3 +1604,34 @@ describe('CuaDriverBridge menus a background app will not run', () => {
     expect(mainWindow([palette, doc])?.id).toBe(1);
   });
 });
+
+describe('CuaDriverBridge pixels for a window with no tree', () => {
+  it('returns the captured image when one was asked for, so the agent can click by coordinates', async () => {
+    const fake = makeBridge({
+      reply: (tool, args) => {
+        if (tool === 'list_windows') return ok(WINDOWS);
+        if (tool === 'get_window_state') {
+          if (typeof args['screenshot_out_file'] === 'string') nodeFs.writeFileSync(args['screenshot_out_file'], 'png');
+          return ok({
+            degraded: true,
+            degraded_reason: 'ax_window_unresolved: window_id 7 exists and is owned by pid 42, but none of the AXWindow elements reports this CGWindowID.',
+            elements: [],
+            screenshot_width: 800,
+            screenshot_height: 600,
+            escalation: { recommended: 'foreground' },
+          });
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    const withImage = await fake.bridge.snapshot(handle, { app: { appId: 'ff', name: 'Freeform', pid: 42 }, window: { by: 'id', id: 7 }, includeScreenshot: true });
+    expect(withImage.ok).toBe(true);
+    expect(withImage.snapshot?.elements).toEqual([]);
+    expect(withImage.screenshot).toMatchObject({ width: 800, height: 600 });
+
+    const treeOnly = await fake.bridge.snapshot(handle, { app: { appId: 'ff', name: 'Freeform', pid: 42 }, window: { by: 'id', id: 7 } });
+    expect(treeOnly.refusal?.code).toBe('background_unavailable');
+  });
+});

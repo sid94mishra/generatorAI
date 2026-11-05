@@ -103,6 +103,14 @@ Word: `menu: "File>Export To>Word…"`. It reports the saved path. Save in place
 `menu "File>Save"` as a step. Close with `menu "File>Close"`; never "Don't
 Save" on work the task keeps.
 
+## When presses do nothing
+
+A press reported done but nothing changes usually means another window of the
+app is modal — an alert (an update offer, "Do you want to save?"), a sheet.
+`computer_snapshot` lists the app's `otherWindows`; snapshot the small untitled
+one and answer it safely: "No Thanks", "Not Now", "Cancel" — never install an
+update, buy, or discard the user's work to get past it.
+
 ## When the tree is not enough
 
 1. Element by index or name. 2. One `includeScreenshot` snapshot, then

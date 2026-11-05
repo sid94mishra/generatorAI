@@ -761,7 +761,39 @@ export class CuaDriverBridge implements IComputerBridge {
       // The driver's deliberate empty read (it could not tie the window to its accessibility tree): say why, and
       // what it recommends, instead of reporting a payload this build "does not recognise".
       const unreadable = unreadableWindow(structured);
-      if (unreadable) return refuse(unreadable);
+      if (unreadable) {
+        // No tree, but the driver still captured the window ("the screenshot in
+        // this response IS the requested window"). Asked for pixels, hand them
+        // over: that is the fallback for exactly this case — Freeform's welcome
+        // window, a custom-drawn dialog — and refusing left the agent with
+        // neither a tree nor an image to click by.
+        if (screenshotPath && existsSync(screenshotPath)) {
+          const root = JSON.parse(structured) as Record<string, unknown>;
+          const width = typeof root['screenshot_width'] === 'number' ? root['screenshot_width'] : 0;
+          const height = typeof root['screenshot_height'] === 'number' ? root['screenshot_height'] : 0;
+          return {
+            ok: true,
+            snapshot: {
+              snapshotId: `pixels-${windowId}-${Date.now()}`,
+              app: { id: req.app.appId, name: req.app.name, pid: req.app.pid },
+              window: { id: windowId, title: '', index: 0, focused: false },
+              elements: [],
+              tree: '',
+              truncated: null,
+              capturedAt: Date.now(),
+            },
+            screenshot: {
+              format: 'png',
+              width,
+              height,
+              scale: 1,
+              path: path.relative(connection.workspaceRoot, screenshotPath),
+              engine: this.id,
+            },
+          };
+        }
+        return refuse(unreadable);
+      }
       const state = parseWindowState(structured, req.query !== undefined);
       const windows = await this.windowsFor(connection, req.app.pid);
       const window = windows.find((w) => w.id === state.windowId);
