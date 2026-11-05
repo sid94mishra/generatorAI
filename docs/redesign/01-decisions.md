@@ -1912,6 +1912,15 @@ where its shell cannot stop them, and names the tool. A tree compared with commi
 isolation) starts from the repository's own index, so a file is read again only when git would: files committed with
 CRLF under `eol=lf` no longer show as changed in full.
 
+### D-188 Computer use asks once per app (owner, 2026-11-05) — Final
+A desktop task asked for every kind of action separately — open, read, click, then every keystroke — so a Calculator sum
+raised 46 consent cards. The owner's rule: a person who allows an app is not asked about that app again. "Allow for this
+chat" covers every action in that app (or any app, with the Scope segment) for the rest of the chat; it survives the
+desktop session going idle between turns and ends when the person stops computer use or switches it off (twelve hours at
+most). "Always allow" is stored at the widest scope and covers every later action in that app (or any app), keyboard and
+mouse included, until it is revoked in Settings; every prompt offers it. A per-app deny still beats an any-app grant, and
+"Allow once" still asks next time. The card's answer reads "Allow for this chat" everywhere.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

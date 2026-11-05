@@ -352,8 +352,8 @@ const BLIND_INPUT_LIMIT = 5;
 /** Cold-starting a large desktop app routinely outlives the per-action budget. */
 const LAUNCH_TIMEOUT_MS = 90_000;
 
-/** Ceiling on a "this run" consent answer, in case no session close clears it. */
-const RUN_GRANT_TTL_MS = 60 * 60 * 1000;
+/** Ceiling on a "for this chat" consent answer, in case nothing else clears it: a working day. */
+const RUN_GRANT_TTL_MS = 12 * 60 * 60 * 1000;
 
 /**
  * Stand-in identity for an audit row written before any app was resolved.
@@ -762,8 +762,10 @@ export class ComputerService {
   }
 
   async stop(workspaceId: string, reason?: string): Promise<void> {
-    // A run answer is scoped to the desktop session it was given during.
-    this.runGrants.delete(workspaceId);
+    // A "for this chat" answer outlives an idle desktop session — the next
+    // turn of the same chat must not ask again — and ends when the person
+    // stops computer use or it is switched off.
+    if (reason !== 'idle-timeout' && reason !== 'restart-requested') this.runGrants.delete(workspaceId);
     const record = this.sessions.get(workspaceId);
     if (!record) return;
     // The queue is captured before the record is dropped so the terminal event
@@ -1618,15 +1620,14 @@ export class ComputerService {
       return null;
     }
 
-    // A stored grant never covers synthetic input: it takes over the user's
-    // pointer and keyboard, so it re-asks every time. An "any app" grant
-    // (G-07) is stored under COMPUTER_ANY_APP and never beats a per-app deny.
-    if (scope !== 'synthetic') {
-      const covers = (g: ComputerStoredGrant | null) =>
-        g?.decision === 'always_allow' && SCOPE_RANK[g.scope] >= SCOPE_RANK[scope];
-      if (covers(stored)) return null;
-      if (covers(await this.consent.find(ctx.workspaceId, COMPUTER_ANY_APP))) return null;
-    }
+    // "Always allow" is an answer about the app, not about one kind of action
+    // (D-188): a person who said it was asked again for the next click, and
+    // again for every keystroke. An "any app" grant (G-07) is stored under
+    // COMPUTER_ANY_APP and never beats a per-app deny.
+    const covers = (g: ComputerStoredGrant | null) =>
+      g?.decision === 'always_allow' && SCOPE_RANK[g.scope] >= SCOPE_RANK[scope];
+    if (covers(stored)) return null;
+    if (covers(await this.consent.find(ctx.workspaceId, COMPUTER_ANY_APP))) return null;
 
     const requestId = randomUUID();
     const expiresAt = Date.now() + this.computerConfig.consentTtlSeconds * 1000;
@@ -1671,13 +1672,14 @@ export class ComputerService {
         },
       ]);
     }
-    if (decision === 'always_allow' && scope !== 'synthetic') {
+    if (decision === 'always_allow') {
+      // Stored at the widest scope: it covers whatever the agent does in that app next.
       await this.consent.save(
         ctx.workspaceId,
         anyApp ? COMPUTER_ANY_APP : app.appId,
         anyApp ? 'Any app' : app.name,
         'always_allow',
-        scope,
+        'synthetic',
       );
     }
     // Allowlist, not denylist: a store that returns undefined, '', or a value

@@ -5,7 +5,7 @@
 // one request carries several actions (answered once for the batch), the
 // Scope segment ("<app> only" / "Any app") for the answers that can reach
 // beyond this app, and the answers the server accepts for this prompt
-// (`consentAnswerOptions`: a synthetic prompt never offers "Always allow").
+// (`consentAnswerOptions`).
 // The card disappears when the prompt expires (an unanswered prompt is a
 // denial) — the caller filters with `selectPendingConsent`.
 // ────────────────────────────────────────────────────────────────
@@ -22,7 +22,7 @@ import { useAnswerComputerConsent } from '@/hooks/computerQueries.js';
 const DECISION_LABEL: Record<ComputerConsentDecision, string> = {
   deny: 'Deny',
   always_allow: 'Always allow',
-  allow_run: 'Allow this run',
+  allow_run: 'Allow for this chat',
   allow_once: 'Allow once',
 };
 
@@ -100,7 +100,7 @@ export function ComputerConsentCard({ workspaceId, prompt }: ComputerConsentCard
               { value: 'any', label: 'Any app' },
             ]}
           />
-          <span className="min-w-0 text-small text-fg-3">Applies to “Allow this run” and “Always allow”.</span>
+          <span className="min-w-0 text-small text-fg-3">Applies to “Allow for this chat” and “Always allow”.</span>
         </div>
       ) : null}
     </GateCardFrame>

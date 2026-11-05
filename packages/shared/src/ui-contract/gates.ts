@@ -55,8 +55,7 @@ export interface GateActionDef<A extends string = GateActionId> {
  * The actions each gate offers, in display order (left → right in the action
  * row). A card shows the subset that applies to its state — `confirm_deny` /
  * `cancel_deny` only while a deny reason is being typed, `approve_autopilot`
- * only when the plan's server `actions` include `implement_autopilot`,
- * `consent_always_allow` only when the prompt is not synthetic input.
+ * only when the plan's server `actions` include `implement_autopilot`.
  *
  * Keys follow the board (B-20): Esc = deny/dismiss, ↵ = the primary action,
  * Mod ↵ = approve where approve is not already ↵.

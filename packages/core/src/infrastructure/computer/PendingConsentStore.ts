@@ -44,8 +44,6 @@ interface Pending {
   workspaceId: string;
   appIdentity: string;
   expiresAt: number;
-  /** Tier 3 prompts may never be answered `always_allow`. */
-  synthetic: boolean;
   /** Kept so a UI that connects mid-prompt can render it without the event. */
   prompt: ComputerConsentPrompt;
 }
@@ -145,7 +143,6 @@ export class PendingConsentStore implements IComputerConsentStore {
         workspaceId: request.workspaceId,
         appIdentity: request.app.appId,
         expiresAt: request.expiresAt,
-        synthetic: request.scope === 'synthetic',
         prompt: request,
       });
     });
@@ -224,12 +221,9 @@ export class PendingConsentStore implements IComputerConsentStore {
       return false;
     }
     this.pending.delete(requestId);
-    // Downgraded rather than rejected: a UI that offers "always allow" on a
-    // Tier 3 prompt is a bug, but the user did mean to approve this one action.
-    const effective = entry.synthetic && decision === 'always_allow' ? 'allow_once' : decision;
     // A deny is always for this app: "deny any app" is not an answer anyone is offered.
-    const effectiveReach = effective === 'deny' ? 'app' : (reach ?? defaultConsentReach(effective));
-    entry.resolve({ decision: effective, reach: effectiveReach });
+    const effectiveReach = decision === 'deny' ? 'app' : (reach ?? defaultConsentReach(decision));
+    entry.resolve({ decision, reach: effectiveReach });
     return true;
   }
 

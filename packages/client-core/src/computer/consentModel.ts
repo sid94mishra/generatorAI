@@ -110,16 +110,15 @@ export interface ConsentAnswerOption {
 }
 
 /**
- * The answers a prompt may be given, mirroring the server's rules: a
- * synthetic (pointer/keyboard) prompt can never be answered `always_allow`,
- * and a deny or a one-off allow is always for this app.
+ * The answers a prompt may be given, mirroring the server's rules: every
+ * prompt can be answered for the chat or always (D-188), and a deny or a
+ * one-off allow is always for this app.
  */
-export function consentAnswerOptions(prompt: Pick<ComputerPendingConsent, 'path'>): ConsentAnswerOption[] {
-  const options: ConsentAnswerOption[] = [
+export function consentAnswerOptions(_prompt: Pick<ComputerPendingConsent, 'path'>): ConsentAnswerOption[] {
+  return [
     { decision: 'allow_once', scopes: ['app'] },
     { decision: 'allow_run', scopes: ['app', 'any'] },
+    { decision: 'always_allow', scopes: ['app', 'any'] },
+    { decision: 'deny', scopes: ['app'] },
   ];
-  if (prompt.path !== 'synthetic') options.push({ decision: 'always_allow', scopes: ['app', 'any'] });
-  options.push({ decision: 'deny', scopes: ['app'] });
-  return options;
 }

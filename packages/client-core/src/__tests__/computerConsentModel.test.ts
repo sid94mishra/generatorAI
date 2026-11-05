@@ -66,17 +66,14 @@ describe('computer desk read model', () => {
     expect(selectPendingConsent(s, { now: 500, chatId: 'chat-1' }).map((p) => p.requestId)).toEqual(['mine']);
   });
 
-  it('offers no always_allow on a synthetic prompt, and scope only where it applies', () => {
-    expect(consentAnswerOptions({ path: 'synthetic' })).toEqual([
-      { decision: 'allow_once', scopes: ['app'] },
-      { decision: 'allow_run', scopes: ['app', 'any'] },
-      { decision: 'deny', scopes: ['app'] },
-    ]);
-    expect(consentAnswerOptions({ path: 'accessibility' }).map((o) => o.decision)).toEqual([
-      'allow_once',
-      'allow_run',
-      'always_allow',
-      'deny',
-    ]);
+  it('offers every answer on every prompt, and scope only where it applies', () => {
+    for (const path of ['synthetic', 'accessibility'] as const) {
+      expect(consentAnswerOptions({ path })).toEqual([
+        { decision: 'allow_once', scopes: ['app'] },
+        { decision: 'allow_run', scopes: ['app', 'any'] },
+        { decision: 'always_allow', scopes: ['app', 'any'] },
+        { decision: 'deny', scopes: ['app'] },
+      ]);
+    }
   });
 });

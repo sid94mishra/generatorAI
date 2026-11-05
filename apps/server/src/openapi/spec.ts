@@ -4489,8 +4489,8 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         summary: 'Answer a prompt; `scope` app | any picks "this app only" or "any app" (G-07)',
         description:
           'Omitted `scope` keeps each decision’s own reach: allow_run any app, the rest this app. A deny is ' +
-          'always for the app. `always_allow` + `any` stores a grant on appIdentity `*`; synthetic prompts ' +
-          'downgrade `always_allow` to `allow_once`.',
+          'always for the app. `always_allow` stores a grant that covers every action in the app (D-188); ' +
+          '`always_allow` + `any` stores it on appIdentity `*`.',
         parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string' } }],
         requestBody: {
           required: true,

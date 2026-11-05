@@ -4,8 +4,7 @@
 // happen, the numbered planned actions of a batched request (mono), a Scope
 // segment "<App> only / Any app" for the answers that can reach further, and
 // Deny / Always allow / Allow for this chat / Allow once. The answer options
-// and their reaches come from client-core's `consentAnswerOptions` (a
-// synthetic pointer/keyboard prompt can never be answered "Always allow").
+// and their reaches come from client-core's `consentAnswerOptions`.
 //
 // Data: `ComputerPendingConsent` from the `computer:<ws>` scope. The prompt is
 // not a stream block (05 GAP: a `computer_consent` block would let the

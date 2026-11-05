@@ -68,11 +68,11 @@ describe('PendingConsentStore', () => {
     await expect(pending).resolves.toMatchObject({ decision: 'deny' });
   });
 
-  it('downgrades always_allow to allow_once for synthetic prompts', async () => {
+  it('keeps always_allow on a synthetic prompt (D-188)', async () => {
     const { store } = makeStore();
     const pending = store.prompt(prompt({ scope: 'synthetic' }));
     store.resolve('req-1', 'always_allow', 'com.example.app');
-    await expect(pending).resolves.toMatchObject({ decision: 'allow_once' });
+    await expect(pending).resolves.toMatchObject({ decision: 'always_allow' });
   });
 
   it('marks synthetic prompts as such in the event payload', async () => {

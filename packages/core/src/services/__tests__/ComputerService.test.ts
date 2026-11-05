@@ -558,9 +558,8 @@ describe('ComputerService run-scoped consent', () => {
   } satisfies ActionRequest;
 
   it('stops asking for the rest of the run, including synthetic input', async () => {
-    // A standing grant deliberately never covers synthetic, so before this the
-    // only way through a long task was answering a prompt every few actions —
-    // and an unanswered one expires as a denial and ends the run.
+    // Without it a long task meant answering a prompt every few actions — and
+    // an unanswered one expires as a denial and ends the run.
     const { service, consent } = makeService([SLACK], enabled());
     consent.answer = 'allow_run';
     await service.act(CTX, { by: 'appId', appId: SLACK.id }, press);
@@ -573,12 +572,24 @@ describe('ComputerService run-scoped consent', () => {
     expect(consent.prompts).toHaveLength(1);
   });
 
-  it('is dropped when the desktop session ends', async () => {
+  it('outlives an idle desktop session, so the next turn of the chat is not asked again', async () => {
     const { service, consent } = makeService([SLACK], enabled());
     consent.answer = 'allow_run';
     await service.act(CTX, { by: 'appId', appId: SLACK.id }, press);
 
-    await service.stop(CTX.workspaceId, 'idle');
+    await service.stop(CTX.workspaceId, 'idle-timeout');
+    consent.answer = 'deny';
+
+    expect((await service.act(CTX, { by: 'appId', appId: SLACK.id }, press)).refusal).toBeUndefined();
+    expect(consent.prompts).toHaveLength(1);
+  });
+
+  it('is dropped when the person stops computer use', async () => {
+    const { service, consent } = makeService([SLACK], enabled());
+    consent.answer = 'allow_run';
+    await service.act(CTX, { by: 'appId', appId: SLACK.id }, press);
+
+    await service.stop(CTX.workspaceId, 'user-requested');
     consent.answer = 'deny';
 
     expect((await service.act(CTX, { by: 'appId', appId: SLACK.id }, press)).refusal?.code).toBe(
@@ -634,22 +645,27 @@ describe('ComputerService consent', () => {
     await service.snapshot(CTX, { by: 'appId', appId: SLACK.id });
     expect(consent.stored.get(`${CTX.workspaceId}:${SLACK.id}`)).toEqual({
       decision: 'always_allow',
-      scope: 'read',
+      scope: 'synthetic',
     });
     consent.prompts.length = 0;
     await service.snapshot(CTX, { by: 'appId', appId: SLACK.id });
     expect(consent.prompts).toHaveLength(0);
   });
 
-  it('a read grant does not authorise a mutation', async () => {
-    const { service, consent } = makeService([SLACK], enabled());
+  it('an always_allow answered while reading covers clicks and keystrokes in that app (D-188)', async () => {
+    const { service, consent } = makeService([SLACK], { ...enabled(), allowSyntheticFallback: true });
     consent.answer = 'always_allow';
     const snap = await service.snapshot(CTX, { by: 'appId', appId: SLACK.id });
     consent.prompts.length = 0;
     await service.act(CTX, { by: 'appId', appId: SLACK.id }, {
       type: 'click', snapshotId: snap.snapshot!.snapshotId, elementIndex: 0,
     });
-    expect(consent.prompts.map((p) => p.scope)).toEqual(['mutate']);
+    await service.act(CTX, { by: 'appId', appId: SLACK.id }, {
+      type: 'typeText',
+      target: { app: { appId: SLACK.id, name: SLACK.name, pid: SLACK.pid }, window: { by: 'focused' } },
+      text: 'hello',
+    });
+    expect(consent.prompts).toHaveLength(0);
   });
 
   it('a hung prompt expires — reported as unanswered, not denied — instead of hanging the call', async () => {
@@ -679,22 +695,7 @@ describe('ComputerService consent', () => {
     expect(consent.stored.size).toBe(0);
   });
 
-  it('a stored grant never covers synthetic input', async () => {
-    const { service, consent } = makeService([SLACK], {
-      ...enabled(),
-      allowSyntheticFallback: true,
-    });
-    await consent.save(CTX.workspaceId, SLACK.id, 'Slack', 'always_allow', 'synthetic');
-    consent.answer = 'allow_once';
-    await service.act(CTX, { by: 'appId', appId: SLACK.id }, {
-      type: 'typeText',
-      target: { app: { appId: SLACK.id, name: SLACK.name, pid: SLACK.pid }, window: { by: 'focused' } },
-      text: 'hello',
-    });
-    expect(consent.prompts.map((p) => p.appId)).toContain(SLACK.id);
-  });
-
-  it('never persists an always_allow for synthetic input', async () => {
+  it('persists an always_allow answered on a synthetic prompt', async () => {
     const { service, consent } = makeService([SLACK], { ...enabled(), allowSyntheticFallback: true });
     consent.answer = 'always_allow';
     await service.act(CTX, { by: 'appId', appId: SLACK.id }, {
@@ -974,7 +975,7 @@ describe('ComputerService consent reach (G-07)', () => {
     consent.answer = 'always_allow';
     consent.reach = 'any';
     await service.snapshot(CTX, { by: 'appId', appId: SLACK.id });
-    expect(consent.stored.get(`${CTX.workspaceId}:*`)).toEqual({ decision: 'always_allow', scope: 'read' });
+    expect(consent.stored.get(`${CTX.workspaceId}:*`)).toEqual({ decision: 'always_allow', scope: 'synthetic' });
     consent.prompts.length = 0;
     await service.snapshot(CTX, { by: 'appId', appId: OTHER.id });
     expect(consent.prompts).toHaveLength(0);
