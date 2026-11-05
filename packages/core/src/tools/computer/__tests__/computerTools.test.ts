@@ -186,7 +186,7 @@ describe('computer tool set', () => {
     expect(steps.map((s) => s['type'])).toEqual(['clickPoint', 'typeText', 'pressKey', 'scroll']);
     expect(steps[2]).toMatchObject({ key: 's', modifiers: ['Control'] });
     expect(steps[0]).toMatchObject({ target: { window: { by: 'id', id: 9 } } });
-    expect(out).toMatchObject({ ok: false, completedSteps: 1, totalSteps: 4, refusal: 'user_in_control', stoppedAtStep: 2 });
+    expect(out).toMatchObject({ ok: false, done: '1/4', refusal: 'user_in_control', stoppedAtStep: 2 });
   });
 
   it('G-07: computer_run_steps rejects a malformed step before asking anyone', async () => {

@@ -617,6 +617,19 @@ describe('ComputerService run-scoped consent', () => {
     );
   });
 
+  it('carries over from the launch prompt, which only knew the name, to the app it started', async () => {
+    const { service, consent } = makeService([SLACK], enabled());
+    consent.answer = 'allow_run';
+    consent.reach = 'app';
+    const launched = await service.launchApp(CTX, 'Slack');
+    expect(launched.app?.appId).toBe(SLACK.id);
+    expect(consent.prompts.map((p) => p.appId)).toEqual(['Slack']);
+
+    consent.answer = 'deny';
+    expect((await service.snapshot(CTX, { by: 'appId', appId: SLACK.id })).refusal).toBeUndefined();
+    expect(consent.prompts).toHaveLength(1);
+  });
+
   it('does not leak to another chat', async () => {
     const { service, consent } = makeService([SLACK], enabled());
     consent.answer = 'allow_run';
@@ -1101,16 +1114,28 @@ describe('ComputerService actPlan (G-07)', () => {
     expect(result.results).toHaveLength(1);
   });
 
-  it('refuses element-addressed steps and oversized plans without prompting', async () => {
-    const { service, consent } = makeService([SLACK], enabled());
-    const element = await service.actPlan(CTX, { by: 'appId', appId: SLACK.id }, [
-      { type: 'click', snapshotId: 's', elementIndex: 0 },
+  it('runs element steps from a snapshot in one plan, and refuses an oversized plan without prompting', async () => {
+    const { service, consent, bridge } = makeService([SLACK], enabled());
+    consent.answer = 'allow_run';
+    bridge.elements = [
+      { index: 0, role: 'button', label: '1', secure: false, value: null, traits: [], actions: ['AXPress'], childCount: 0, token: 's:0' },
+      { index: 1, role: 'button', label: '2', secure: false, value: null, traits: [], actions: ['AXPress'], childCount: 0, token: 's:1' },
+    ];
+    const snap = await service.snapshot(CTX, { by: 'appId', appId: SLACK.id });
+    const snapshotId = snap.snapshot!.snapshotId;
+    const keypad = await service.actPlan(CTX, { by: 'appId', appId: SLACK.id }, [
+      { type: 'click', snapshotId, elementIndex: 0 },
+      { type: 'click', snapshotId, elementIndex: 1 },
+      { type: 'click', snapshotId, elementIndex: 0 },
     ]);
-    expect(element).toMatchObject({ ok: false, refusal: { code: 'unsupported_action' }, stoppedAt: 0 });
+    expect(keypad.ok).toBe(true);
+    expect(bridge.actCalls).toHaveLength(3);
+
+    consent.prompts.length = 0;
     const tooMany = await service.actPlan(
       CTX,
       { by: 'appId', appId: SLACK.id },
-      Array.from({ length: 11 }, () => steps[2]!),
+      Array.from({ length: 21 }, () => steps[2]!),
     );
     expect(tooMany.refusal?.code).toBe('unsupported_action');
     expect(consent.prompts).toHaveLength(0);

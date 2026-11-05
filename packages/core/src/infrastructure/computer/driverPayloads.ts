@@ -248,6 +248,29 @@ export interface ParsedWindowState {
   text: string[];
   /** Elements in the whole walk — more than `elements` under a `query` projection. */
   total: number;
+  /** The driver's compact Markdown rendering, tidied (`compactTree`). */
+  tree?: string;
+}
+
+/**
+ * The driver's Markdown tree, tidied for the agent: AppKit leaks raw action
+ * descriptors ("name:Move previous⏎target:0x0⏎selector:(null)") into the
+ * action list, split across lines, and `id=`/`help=` attributes repeat what the
+ * label already says. Both are dropped; the rows, indices, labels, values,
+ * read-only text and the remaining actions stay as the driver wrote them.
+ */
+export function compactTree(markdown: string): string {
+  return markdown
+    .replace(/,?name:[^\],]*?target:0x[0-9a-f]+\s*selector:\([^)]*\)/gi, '')
+    .replace(/ ?help="[^"]*"/g, '')
+    .replace(/(\[|\s)id=.*?(?=\s?actions=\[|\])/g, '$1')
+    .replace(/\[\s*actions=\[([^\]]*)\]\s*\]/g, (_m, list: string) => {
+      const kept = list.split(',').map((a) => a.trim()).filter((a) => a.length > 0);
+      return kept.length > 0 ? `[${kept.join(',')}]` : '';
+    })
+    .replace(/ ?\[\s*\]/g, '')
+    .replace(/[ \t]+$/gm, '')
+    .trim();
 }
 
 /** Bounds on the read-only text handed to the model: it is untrusted, and a long document should not flood it. */
@@ -324,9 +347,12 @@ export function parseWindowState(structuredJson: string, filtered = false): Pars
       value: secure ? null : value,
       placeholder: asString(entry['placeholder']),
       traits,
-      // The driver does not enumerate per-element actions; what an element
-      // supports is implied by its role plus the tool that targets it.
-      actions: [],
+      // The accessibility actions the element advertises (AXPress, AXShowMenu…)
+      // — the allowlist computer_perform_action is checked against. AppKit
+      // leaks raw descriptors ("Name:Move previous⏎Target:0x0…") in here.
+      actions: Array.isArray(entry['actions'])
+        ? entry['actions'].filter((a): a is string => typeof a === 'string' && /^[A-Za-z]+$/.test(a))
+        : [],
       childCount: asNumber(entry['child_count']) ?? 0,
       bounds: parseFrame(entry),
       ...(asString(entry['element_token']) ? { token: asString(entry['element_token']) } : {}),
@@ -353,6 +379,7 @@ export function parseWindowState(structuredJson: string, filtered = false): Pars
     elements,
     truncated,
     text: readOnlyText(asString(root['tree_markdown']) ?? ''),
+    ...(asString(root['tree_markdown']) ? { tree: compactTree(asString(root['tree_markdown'])!) } : {}),
     total,
     screenshot:
       width !== undefined && height !== undefined

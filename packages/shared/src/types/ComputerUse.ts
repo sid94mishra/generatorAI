@@ -177,6 +177,13 @@ export interface ComputerSnapshot {
   /** Non-null when caps clipped the tree — tells the agent to narrow scope. */
   truncated: { elements: number; depth: number } | null;
   capturedAt: number;
+  /**
+   * The provider's compact rendering of the same tree — one row per element,
+   * `[N]` being the index — including read-only text (a calculator's display)
+   * and with menus folded. What the agent reads; `elements` is what the fence
+   * checks against.
+   */
+  tree?: string;
 }
 
 export interface ComputerScreenshot {
@@ -227,6 +234,14 @@ export interface ComputerActionResult {
      */
     nextStep?: { rung: 'coordinate' | 'foreground' | 'browser'; reason: string };
   };
+  /**
+   * What changed in the window after the action, read back by the provider
+   * against the last snapshot: changed, added and removed rows. Lets the agent
+   * see the result (a display's new value, a dialog that opened) without
+   * another snapshot. `reindexed` means element indices moved — the agent must
+   * take a new snapshot before addressing anything.
+   */
+  changes?: { diff: string; reindexed: boolean; unchanged: boolean };
   refusal?: { code: ComputerRefusalCode; message: string };
 }
 

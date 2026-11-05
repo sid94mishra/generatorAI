@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ILogger } from '@generatorai/shared';
-import { CuaDriverBridge, splitLaunchArguments } from '../CuaDriverBridge.js';
+import { CuaDriverBridge, closestMenuItem, splitLaunchArguments } from '../CuaDriverBridge.js';
 
 const logger: ILogger = {
   info() {},
@@ -736,7 +736,7 @@ describe('CuaDriverBridge element addressing', () => {
     snapshot_id: 's1',
     pid: 42,
     window_id: 7,
-    elements: [{ element_index: 3, role: 'Button', label: 'Save', element_token: 's00000001:3' }],
+    elements: [{ element_index: 3, role: 'Button', label: 'Save', element_token: 's1:3' }],
   };
 
   it('sends the driver its own element handle, not just an index', async () => {
@@ -753,7 +753,7 @@ describe('CuaDriverBridge element addressing', () => {
 
     const click = fake.calls.find((c) => c.tool === 'click');
     // The token is the whole address: the driver's schema takes nothing else for an element.
-    expect(click?.args).toEqual({ element_token: 's00000001:3', session: 'generatorai-ws' });
+    expect(click?.args).toEqual({ element_token: 's1:3', session: 'generatorai-ws' });
   });
 
   it('asks for a fresh read when an element came without a handle', async () => {
@@ -1132,7 +1132,7 @@ describe('CuaDriverBridge menus and element actions', () => {
     snapshot_id: 's1',
     pid: 42,
     window_id: 7,
-    elements: [{ element_index: 3, role: 'AXButton', label: 'Save', element_token: 's00000001:3', actions: ['AXPress'] }],
+    elements: [{ element_index: 3, role: 'AXButton', label: 'Save', element_token: 's1:3', actions: ['AXPress'] }],
   };
   const replies = (tool: string) => {
     if (tool === 'list_windows') return ok(WINDOWS);
@@ -1161,7 +1161,7 @@ describe('CuaDriverBridge menus and element actions', () => {
 
     await fake.bridge.act(handle, { type: 'performAction', snapshotId: 's1', elementIndex: 3, actionName: 'AXPress' });
 
-    expect(fake.calls.find((c) => c.tool === 'click')?.args['element_token']).toBe('s00000001:3');
+    expect(fake.calls.find((c) => c.tool === 'click')?.args['element_token']).toBe('s1:3');
     expect(fake.calls.some((c) => c.tool === 'invoke_menu')).toBe(false);
   });
 
@@ -1284,4 +1284,79 @@ describe('CuaDriverBridge apps macOS leaves out of its running list', () => {
       expect.objectContaining({ id: 'com.apple.iWork.Numbers', name: 'Numbers', pid: 4740, windowCount: 1 }),
     ]);
   });
+});
+
+describe('CuaDriverBridge menu path correction', () => {
+  it('matches a label spelled differently from the menu', () => {
+    expect(closestMenuItem('Save…', ['New', 'Save', 'Save As…'])).toBe('Save');
+    expect(closestMenuItem('export to', ['Export To', 'Print…'])).toBe('Export To');
+    expect(closestMenuItem('Quit', ['New', 'Save'])).toBeUndefined();
+  });
+
+  const menuBridge = (onMenu: (path: string[]) => unknown) =>
+    makeBridge({
+      reply: (tool, args) => {
+        if (tool === 'list_windows') return ok(WINDOWS);
+        if (tool === 'invoke_menu') return onMenu(args['path'] as string[]);
+        return ok({});
+      },
+    });
+  const menu = (path: string[]) => ({
+    type: 'invokeMenu' as const,
+    path,
+    target: { app: { appId: 'textedit', name: 'TextEdit', pid: 42 }, window: { by: 'id' as const, id: 7 } },
+  });
+
+  it('retries once with the item the driver listed', async () => {
+    const paths: string[][] = [];
+    const fake = menuBridge((path) => {
+      paths.push(path);
+      return path[1] === 'Save'
+        ? ok({})
+        : driverError('invoke_menu: path segment 1 "Save…" was not found under "File". Items there: "New", "Open…", "Save", "Save As…"');
+    });
+    const handle = await started(fake);
+
+    const result = await fake.bridge.act(handle, menu(['File', 'Save…']));
+
+    expect(result.ok).toBe(true);
+    expect(paths).toEqual([['File', 'Save…'], ['File', 'Save']]);
+  });
+
+  it('closes a stray popup and retries when an item is disabled', async () => {
+    let attempts = 0;
+    const fake = menuBridge(() => (++attempts === 1 ? driverError('invoke_menu: path segment 1 is disabled') : ok({})));
+    const handle = await started(fake);
+
+    const result = await fake.bridge.act(handle, menu(['Format', 'List…']));
+
+    expect(result.ok).toBe(true);
+    expect(fake.calls.filter((c) => c.tool === 'press_key').map((c) => c.args['key'])).toEqual(['escape']);
+    expect(fake.calls.filter((c) => c.tool === 'invoke_menu').every((c) => c.args['delivery_mode'] === undefined)).toBe(true);
+  });
+
+  it('hands back the window showing the file it was asked to open', async () => {
+    let launched = false;
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'launch_app') {
+          launched = true;
+          return ok({ pid: 60, bundle_id: 'com.apple.TextEdit', name: 'TextEdit' });
+        }
+        if (tool === 'list_apps') return ok({ apps: launched ? [{ name: 'TextEdit', pid: 60, running: true, bundle_id: 'com.apple.TextEdit' }] : [] });
+        if (tool === 'list_windows') {
+          return ok({ windows: launched ? [
+            { window_id: 3, pid: 60, title: 'Untitled.rtf', is_on_screen: true, z_index: 9 },
+            { window_id: 4, pid: 60, title: 'draft.txt', is_on_screen: true, z_index: 8 },
+          ] : [] });
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    const result = await fake.bridge.launchApp(handle, 'TextEdit', { args: ['/tmp/notes/draft.txt'] });
+
+    expect(result.window).toEqual({ id: 4, title: 'draft.txt' });
+  }, 20_000);
 });

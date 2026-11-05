@@ -18,6 +18,7 @@ import type { ComputerToolContext, ComputerToolFactory } from './computerToolTyp
 import {
   APP_TARGET_PROPERTIES,
   actionPayload,
+  changesPayload,
   callContext,
   coerceInt,
   coerceString,
@@ -111,13 +112,12 @@ const createListWindowsTool: ComputerToolFactory = (ctx): ToolDefinition => ({
 const createSnapshotTool: ComputerToolFactory = (ctx): ToolDefinition => ({
   name: 'computer_snapshot',
   description:
-    'Read a window\u2019s accessibility tree as an indexed list of elements. This is the primary way to see a ' +
-    'desktop application: it is cheaper and far more reliable than a screenshot, and the returned element ' +
-    'indices are what every other tool targets. The indices are valid ONLY for the returned snapshotId, and ' +
-    'any action invalidates them \u2014 always snapshot again after acting. When you already know what you are ' +
-    'looking for, pass `query`: it filters at the source and can cut the response by 30x on a large grid. ' +
-    'A window too large to return whole comes back with only its first page of elements and a `clipped` ' +
-    'field \u2014 repeating the same call returns the same page, so narrow it with `query` instead.',
+    'Read a window\u2019s accessibility tree: one row per element, `[N]` being the elementIndex every other tool ' +
+    'takes, with read-only text (a display, a status line) inline and the menu bar folded (menus run by path ' +
+    'with computer_perform_action). Cheaper and more reliable than a screenshot. The snapshotId stays usable ' +
+    'after you act — every action returns what changed — until an action reports `reindexed`; then snapshot ' +
+    'again. Pass `query` when you know what you want ("Save", "A1"): it filters at the source. A window too ' +
+    'large to return whole is `clipped`; narrow it with `query`.',
   owner: ctx.owner ?? 'computer-tools',
   requiredPermissions: permission('Read the contents of a desktop window'),
   parametersSchema: {
@@ -236,7 +236,8 @@ const createSetValueTool: ComputerToolFactory = (ctx): ToolDefinition => ({
   name: 'computer_set_value',
   description:
     'Set a text field\u2019s value directly. STRONGLY PREFERRED over computer_type_text: it is atomic, does not ' +
-    'steal keyboard focus, and the result is verified by reading the value back. Never use it on a field ' +
+    'steal keyboard focus, and the result is verified by reading the value back. On a popup button (a file ' +
+    'format, a font, a list style) it chooses the item with that title in one call. Never use it on a field ' +
     'reported as `secure: true` \u2014 ask the user to enter credentials themselves.',
   owner: ctx.owner ?? 'computer-tools',
   requiredPermissions: permission('Set the value of a field in a desktop application'),
@@ -855,10 +856,41 @@ const createBringToFrontTool: ComputerToolFactory = (ctx): ToolDefinition => ({
 function planStep(
   raw: unknown,
   target: ReturnType<typeof windowTarget>,
+  snapshotId: string | undefined,
 ): { step: ActionRequest } | { error: string } {
   if (!raw || typeof raw !== 'object') return { error: 'Each step must be an object.' };
   const step = raw as Record<string, unknown>;
+  const elementIndex = coerceInt(step['elementIndex']);
+  const element = () =>
+    snapshotId === undefined || elementIndex === undefined
+      ? { error: `${String(step['kind'])} needs \`elementIndex\` and the call needs \`snapshotId\`.` }
+      : null;
   switch (step['kind']) {
+    case 'click': {
+      const missing = element();
+      if (missing) return missing;
+      return {
+        step: {
+          type: 'click',
+          snapshotId: snapshotId!,
+          elementIndex: elementIndex!,
+          ...(step['button'] === 'right' ? { button: 'right' as const } : {}),
+          ...(coerceInt(step['clickCount']) === 2 ? { clickCount: 2 } : {}),
+        },
+      };
+    }
+    case 'set_value': {
+      const missing = element();
+      if (missing) return missing;
+      const value = typeof step['value'] === 'string' ? step['value'] : undefined;
+      if (value === undefined) return { error: 'set_value needs `value`.' };
+      return { step: { type: 'setValue', snapshotId: snapshotId!, elementIndex: elementIndex!, value } };
+    }
+    case 'menu': {
+      const path = typeof step['path'] === 'string' ? step['path'].split('>').map((p) => p.trim()).filter(Boolean) : [];
+      if (path.length < 2) return { error: 'menu needs `path` such as "File>Save…".' };
+      return { step: { type: 'invokeMenu', target, path } };
+    }
     case 'click_point': {
       const x = coerceInt(step['x']);
       const y = coerceInt(step['y']);
@@ -869,7 +901,15 @@ function planStep(
     case 'paste_text': {
       const text = typeof step['text'] === 'string' ? step['text'] : undefined;
       if (text === undefined) return { error: `${String(step['kind'])} needs \`text\`.` };
-      return { step: step['kind'] === 'type_text' ? { type: 'typeText', target, text } : { type: 'pasteText', target, text } };
+      if (step['kind'] === 'paste_text') return { step: { type: 'pasteText', target, text } };
+      return {
+        step: {
+          type: 'typeText',
+          target,
+          text,
+          ...(snapshotId !== undefined && elementIndex !== undefined ? { element: { snapshotId, elementIndex } } : {}),
+        },
+      };
     }
     case 'press_key': {
       const rawKey = coerceString(step['key']);
@@ -903,30 +943,41 @@ function planStep(
 const createRunStepsTool: ComputerToolFactory = (ctx): ToolDefinition => ({
   name: 'computer_run_steps',
   description:
-    'Run a short, fixed sequence of coordinate/keyboard steps against ONE window (for example: click a field, type, ' +
-    'press Enter), approved by the user with ONE prompt that lists every step. Stops at the first step that fails ' +
-    `or is refused, and whenever the user pauses you or takes over. ${SYNTHETIC_WARNING}`,
+    'Run a fixed sequence of up to 20 steps against ONE window in ONE call — a keypad sequence, a form, a row of ' +
+    'cells, a menu command and the keys after it. Steps: click / set_value (an element of `snapshotId`, by ' +
+    '`elementIndex`), menu (`path` such as "File>Save…"), type_text (into an element with `elementIndex`, else the ' +
+    'focused field), press_key, paste_text, click_point, scroll. Use it whenever you already know the next steps — ' +
+    'it replaces a call per step. Stops at the first step that fails or is refused. Returns what changed in the ' +
+    'window after the last step.',
   owner: ctx.owner ?? 'computer-tools',
-  requiredPermissions: permission('Run several keyboard and mouse steps in a desktop application'),
+  requiredPermissions: permission('Run several steps in a desktop application'),
   parametersSchema: {
     type: 'object',
     properties: {
       ...APP_TARGET_PROPERTIES,
       windowId: { type: 'number', description: 'Target window. Defaults to the focused window.' },
+      snapshotId: { type: 'string', description: 'The snapshot whose elementIndex values the element steps use.' },
       steps: {
         type: 'array',
         minItems: 1,
-        maxItems: 10,
-        description: 'The steps, in order (1 to 10).',
+        maxItems: 20,
+        description: 'The steps, in order (1 to 20).',
         items: {
           type: 'object',
           properties: {
-            kind: { type: 'string', enum: ['click_point', 'type_text', 'paste_text', 'press_key', 'scroll'] },
+            kind: {
+              type: 'string',
+              enum: ['click', 'set_value', 'menu', 'type_text', 'press_key', 'paste_text', 'click_point', 'scroll'],
+            },
+            elementIndex: { type: 'number' },
+            value: { type: 'string' },
+            path: { type: 'string', description: 'Menu path for kind "menu", e.g. "Format>Font>Bold".' },
             x: { type: 'number' },
             y: { type: 'number' },
             button: { type: 'string', enum: ['left', 'right'] },
+            clickCount: { type: 'number' },
             text: { type: 'string' },
-            key: { type: 'string', description: 'Key name or chord, e.g. "Enter" or "Control+S".' },
+            key: { type: 'string', description: 'Key name or chord, e.g. "Return", "Tab" or "Meta+S".' },
             deltaX: { type: 'number' },
             deltaY: { type: 'number' },
           },
@@ -944,18 +995,20 @@ const createRunStepsTool: ComputerToolFactory = (ctx): ToolDefinition => ({
     const rawSteps = Array.isArray(args['steps']) ? args['steps'] : [];
     if (rawSteps.length === 0) return { ok: false, error: '`steps` needs at least one step.' };
     const target = windowTarget(args);
+    const snapshotId = coerceString(args['snapshotId']);
     const steps: ActionRequest[] = [];
     for (const [index, raw] of rawSteps.entries()) {
-      const parsed = planStep(raw, target);
+      const parsed = planStep(raw, target, snapshotId);
       if ('error' in parsed) return { ok: false, error: `Step ${index + 1}: ${parsed.error}` };
       steps.push(parsed.step);
     }
     const result = await ctx.computerService.actPlan(callContext(ctx), ref, steps);
+    const done = result.results.filter((r) => r.ok).length;
+    const last = result.results.at(-1);
     return {
       ok: result.ok,
-      completedSteps: result.results.filter((r) => r.ok).length,
-      totalSteps: steps.length,
-      steps: result.results.map((r) => actionPayload(r)),
+      done: `${done}/${steps.length}`,
+      ...(last?.ok ? changesPayload(last) : {}),
       ...(result.refusal
         ? { refusal: result.refusal.code, message: result.refusal.message, stoppedAtStep: (result.stoppedAt ?? 0) + 1 }
         : {}),

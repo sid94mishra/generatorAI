@@ -421,7 +421,16 @@ export interface IComputerBridge {
    */
   snapshot(handle: ComputerHandle, req: SnapshotRequest, signal?: AbortSignal): Promise<ComputerActionResult>;
 
-  act(handle: ComputerHandle, req: ActionRequest, signal?: AbortSignal): Promise<ComputerActionResult>;
+  /**
+   * `observe` (default true): read back what the action changed in the window
+   * (`changes`). A plan passes false for every step but its last.
+   */
+  act(
+    handle: ComputerHandle,
+    req: ActionRequest,
+    signal?: AbortSignal,
+    opts?: { observe?: boolean },
+  ): Promise<ComputerActionResult>;
 
   /**
    * Checks predicates against a window and answers definitively.

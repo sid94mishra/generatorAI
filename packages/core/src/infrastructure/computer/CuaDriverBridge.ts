@@ -141,14 +141,13 @@ const EFFECT_REFUSED = 4;
 const CAPTURE_WINDOW = 1;
 
 /**
- * How long the agent cursor stays visible while nothing moves.
+ * How long the agent cursor stays visible while nothing moves: 0 = never hides.
  *
- * The driver's default is 20 s, which is shorter than the gaps between a
- * model's tool calls — so the pointer disappears mid-task and the run looks
- * abandoned. 60 s is the driver's ceiling: it silently clamps anything larger,
- * so asking for more would only misreport what the user will actually see.
+ * The driver's default (15 s) is shorter than the gaps between a model's tool
+ * calls, so the pointer vanished mid-task and the run looked abandoned. It
+ * leaves with the session.
  */
-const AGENT_CURSOR_IDLE_HIDE_MS = 60_000;
+const AGENT_CURSOR_IDLE_HIDE_MS = 0;
 
 /**
  * Driver error codes → our refusal vocabulary. Codes observed in the contract
@@ -265,7 +264,19 @@ export class CuaDriverBridge implements IComputerBridge {
   private readonly launched = new Map<number, ComputerAppInfo>();
   private readonly snapshotScopes = new Map<
     string,
-    { pid: number; windowId: number; tokens: Map<number, string>; roles: Map<number, string> }
+    { pid: number; windowId: number; tokens: Map<number, string>; roles: Map<number, string>; epoch: number }
+  >();
+  /**
+   * Per window (`pid:windowId`): the driver's newest read of it and that
+   * read's shape. The driver stales every token once it reads the window
+   * again, and the read after each action (`observe`) is such a read — so an
+   * element from the agent's snapshot is addressed with the newest snapshot id
+   * while the rows keep their indices (`epoch` unchanged). A full read or a
+   * re-index starts a new epoch, and older snapshots are no longer rewritten.
+   */
+  private readonly windowReads = new Map<
+    string,
+    { latest: string; epoch: number; query?: string; maxElements: number; maxDepth: number }
   >();
   private modulePromise: Promise<DriverModule | null> | null = null;
   /**
@@ -705,9 +716,10 @@ export class CuaDriverBridge implements IComputerBridge {
         window_id: windowId,
         max_elements: maxElements,
         max_depth: maxDepth,
-        // The structured rows are what we parse; the driver's default is a
-        // Markdown rendering with no `elements` array at all.
-        tree_format: 'elements',
+        // The structured rows are what the fence checks; the Markdown rendering
+        // is what the agent reads — compact, with read-only text (a display)
+        // and menus folded.
+        tree_format: 'both',
         // The driver captures a screenshot unless told not to — every read paid
         // for an image nobody asked for.
         include_screenshot: Boolean(screenshotPath),
@@ -763,6 +775,7 @@ export class CuaDriverBridge implements IComputerBridge {
           focused: window?.focused ?? false,
         },
         elements: state.elements,
+        ...(state.tree ? { tree: state.tree } : {}),
         ...(state.text.length > 0 ? { text: state.text } : {}),
         ...(req.query !== undefined ? { totalElements: state.total } : {}),
         // A laddered read answered a *smaller question* — the driver reports it
@@ -773,7 +786,16 @@ export class CuaDriverBridge implements IComputerBridge {
           state.truncated ?? (laddered ? { elements: laddered[0], depth: laddered[1] } : null),
         capturedAt: Date.now(),
       };
-      this.rememberScope(state.snapshotId, state.pid, state.windowId, state.elements);
+      const windowKey = `${state.pid}:${state.windowId}`;
+      const epoch = (this.windowReads.get(windowKey)?.epoch ?? 0) + 1;
+      this.windowReads.set(windowKey, {
+        latest: state.snapshotId,
+        epoch,
+        ...(req.query ? { query: req.query } : {}),
+        maxElements: laddered?.[0] ?? req.maxElements ?? this.options.maxSnapshotElements,
+        maxDepth: laddered?.[1] ?? req.maxDepth ?? this.options.maxSnapshotDepth,
+      });
+      this.rememberScope(state.snapshotId, state.pid, state.windowId, state.elements, epoch);
 
       return {
         ok: true,
@@ -994,7 +1016,12 @@ export class CuaDriverBridge implements IComputerBridge {
     }
   }
 
-  async act(handle: ComputerHandle, req: ActionRequest, signal?: AbortSignal): Promise<ComputerActionResult> {
+  async act(
+    handle: ComputerHandle,
+    req: ActionRequest,
+    signal?: AbortSignal,
+    opts: { observe?: boolean } = {},
+  ): Promise<ComputerActionResult> {
     const connection = this.connections.get(handle.workspaceId);
     if (!connection) return refuse(disconnected());
     const started = Date.now();
@@ -1010,7 +1037,12 @@ export class CuaDriverBridge implements IComputerBridge {
       // saying delivery failed and naming foreground. Reported as success, the
       // agent believed ⌘⇧G had opened "Go to folder" and typed a path into
       // nothing. Same rule as a refusal: the driver's own advice, once.
-      if (!refusal && call.args['delivery_mode'] !== 'foreground' && deliveryFailed(result)) {
+      if (
+        !refusal &&
+        FOREGROUND_CAPABLE.has(call.tool) &&
+        call.args['delivery_mode'] !== 'foreground' &&
+        deliveryFailed(result)
+      ) {
         result = await this.call(connection, call.tool, { ...call.args, delivery_mode: 'foreground' }, signal);
         refusal = this.refusalFor(result);
         if (refusal) return refuse(await this.explainForegroundFailure(connection, refusal));
@@ -1022,16 +1054,30 @@ export class CuaDriverBridge implements IComputerBridge {
         // fix. It activates the target for the action and restores the previous
         // foreground afterwards, which is why this is safe to do automatically
         // for an action whose synthetic consent the user already granted.
-        if (!wantsForegroundDelivery(result)) return refuse(refusal);
+        if (call.tool === 'invoke_menu') {
+          const retried = await this.retryMenuPath(connection, call.args, result, signal);
+          if (retried) {
+            result = retried;
+            refusal = this.refusalFor(result);
+          }
+          if (refusal) return refuse(refusal);
+        } else if (!wantsForegroundDelivery(result) || !FOREGROUND_CAPABLE.has(call.tool)) {
+          return refuse(refusal);
+        }
+      }
+      if (refusal) {
         result = await this.call(connection, call.tool, { ...call.args, delivery_mode: 'foreground' }, signal);
         refusal = this.refusalFor(result);
         if (refusal) return refuse(await this.explainForegroundFailure(connection, refusal));
       }
 
+      const at = this.actionWindow(req, call.args);
+      const changes = opts.observe !== false && at ? await this.observe(connection, at.pid, at.windowId, signal) : undefined;
       return {
         ok: true,
         snapshot: null,
         screenshot: null,
+        ...(changes ? { changes } : {}),
         action: {
           path: mapRoute(result.action?.route),
           actionName: call.tool,
@@ -1089,7 +1135,7 @@ export class CuaDriverBridge implements IComputerBridge {
       // The token is the whole address: it carries pid, window and snapshot,
       // and the driver refuses it once a newer read of the window supersedes
       // it. The driver takes nothing else for an element.
-      const token = cached.tokens.get(req.elementIndex);
+      const token = this.liveToken(cached, req.elementIndex);
       if (!token) {
         return { refusal: { code: 'stale_snapshot', message: 'That element has no handle in this snapshot. Take a new computer_snapshot.' } };
       }
@@ -1153,7 +1199,7 @@ export class CuaDriverBridge implements IComputerBridge {
             refusal: { code: 'stale_snapshot', message: 'That snapshot is no longer held by the driver client.' },
           };
         }
-        const elementToken = req.element && cached ? cached.tokens.get(req.element.elementIndex) : undefined;
+        const elementToken = req.element && cached ? this.liveToken(cached, req.element.elementIndex) : undefined;
         if (req.element && !elementToken) {
           return { refusal: { code: 'stale_snapshot', message: 'That element has no handle in this snapshot. Take a new computer_snapshot.' } };
         }
@@ -1304,12 +1350,126 @@ export class CuaDriverBridge implements IComputerBridge {
     return parseListWindows(result.structuredJson).get(pid) ?? [];
   }
 
+  /**
+   * One corrected retry of a menu path the driver could not run.
+   *
+   * Not found: the driver lists the items at that level, and the label the
+   * agent wrote is usually one of them spelled differently — "Save…" for
+   * "Save", "Export to" for "Export To". Disabled: a popup menu the agent
+   * pressed and never chose from is still open and greys out the menu bar;
+   * Escape closes it. Measured: both cost a full extra round trip each.
+   */
+  private async retryMenuPath(
+    connection: Connection,
+    args: Json,
+    failed: DriverToolResult,
+    signal?: AbortSignal,
+  ): Promise<DriverToolResult | null> {
+    const path = Array.isArray(args['path']) ? (args['path'] as string[]) : [];
+    const text = failed.text ?? '';
+    const disabled = /path segment (\d+) is disabled/i.exec(text);
+    if (disabled) {
+      await this.call(connection, 'press_key', { pid: args['pid'], window_id: args['window_id'], key: 'escape' }, signal).catch(
+        () => undefined,
+      );
+      return this.call(connection, 'invoke_menu', args, signal);
+    }
+    const missing = /path segment (\d+)[^.]*?was not found[^.]*\.\s*Items there:\s*(.*)$/is.exec(text);
+    if (!missing) return null;
+    const at = Number(missing[1]);
+    const items = [...missing[2]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!);
+    const wanted = path[at];
+    if (wanted === undefined) return null;
+    const match = closestMenuItem(wanted, items);
+    if (!match || match === wanted) return null;
+    const corrected = path.map((segment, i) => (i === at ? match : segment));
+    return this.call(connection, 'invoke_menu', { ...args, path: corrected }, signal);
+  }
+
+  /** The element's token against the driver's newest read of its window, while the rows keep their indices. */
+  private liveToken(scope: { pid: number; windowId: number; tokens: Map<number, string>; epoch: number }, index: number): string | undefined {
+    const token = scope.tokens.get(index);
+    if (!token) return undefined;
+    const read = this.windowReads.get(`${scope.pid}:${scope.windowId}`);
+    return read && read.epoch === scope.epoch ? `${read.latest}:${index}` : token;
+  }
+
+  /** The window an action landed in, when it is known. */
+  private actionWindow(req: ActionRequest, args: Json): { pid: number; windowId: number } | undefined {
+    const snapshotId = isElementAddressed(req)
+      ? req.snapshotId
+      : req.type === 'typeText' && req.element
+        ? req.element.snapshotId
+        : undefined;
+    if (snapshotId) {
+      const scope = this.snapshotScopes.get(snapshotId);
+      return scope ? { pid: scope.pid, windowId: scope.windowId } : undefined;
+    }
+    const pid = args['pid'];
+    const windowId = args['window_id'];
+    return typeof pid === 'number' && typeof windowId === 'number' ? { pid, windowId } : undefined;
+  }
+
+  /**
+   * Reads back what the action changed, against the window's last read: the
+   * driver's diff (`since`) — changed, added and removed rows. One cheap read
+   * here replaces the snapshot the agent would otherwise take to see the
+   * result, which was most of its calls. Nothing to diff against (the window
+   * was never read) means nothing is reported.
+   */
+  private async observe(
+    connection: Connection,
+    pid: number,
+    windowId: number,
+    signal?: AbortSignal,
+  ): Promise<ComputerActionResult['changes']> {
+    const key = `${pid}:${windowId}`;
+    const read = this.windowReads.get(key);
+    if (!read) return undefined;
+    try {
+      const result = await this.call(
+        connection,
+        'get_window_state',
+        {
+          pid,
+          window_id: windowId,
+          since: read.latest,
+          max_elements: read.maxElements,
+          max_depth: read.maxDepth,
+          ...(read.query ? { query: read.query } : {}),
+          include_screenshot: false,
+          tree_format: 'markdown',
+          timeout_ms: SNAPSHOT_WALK_MS,
+        },
+        signal,
+      );
+      if (result.isError || !result.structuredJson) return undefined;
+      const root = JSON.parse(result.structuredJson) as Record<string, unknown>;
+      const next = typeof root['snapshot_id'] === 'string' ? root['snapshot_id'] : undefined;
+      const diff = typeof root['tree_diff'] === 'string' ? root['tree_diff'] : undefined;
+      if (!next) return undefined;
+      if (diff === undefined) {
+        // The driver fell back to a full read (the window changed shape, or the
+        // old read expired): its indices are new.
+        this.windowReads.set(key, { ...read, latest: next, epoch: read.epoch + 1 });
+        return { diff: 'The window changed too much to compare.', reindexed: true, unchanged: false };
+      }
+      const reindexed = /(^|\n)\s*reindexed:/i.test(diff);
+      this.windowReads.set(key, { ...read, latest: next, epoch: reindexed ? read.epoch + 1 : read.epoch });
+      const unchanged = root['since_status'] === 'no_change';
+      return { diff: unchanged ? '' : clipDiff(diff), reindexed, unchanged };
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Bounded so a long read-only session cannot grow this without limit. */
   private rememberScope(
     snapshotId: string,
     pid: number,
     windowId: number,
     elements: readonly ComputerElement[],
+    epoch: number,
   ): void {
     const tokens = new Map<number, string>();
     const roles = new Map<number, string>();
@@ -1317,7 +1477,7 @@ export class CuaDriverBridge implements IComputerBridge {
       if (element.token) tokens.set(element.index, element.token);
       roles.set(element.index, element.role);
     }
-    this.snapshotScopes.set(snapshotId, { pid, windowId, tokens, roles });
+    this.snapshotScopes.set(snapshotId, { pid, windowId, tokens, roles, epoch });
     while (this.snapshotScopes.size > 32) {
       const oldest = this.snapshotScopes.keys().next().value;
       if (oldest === undefined) break;
@@ -1444,6 +1604,11 @@ export class CuaDriverBridge implements IComputerBridge {
               // reading and clicking work on a background window; only a write
               // to a MINIMISED window is unsafe, and that path refuses on its own.
               const app = { appId: match.id, name: match.name, pid: match.pid };
+              // Asked to open a file: its window is the one titled with it. TextEdit
+              // restores yesterday's documents alongside, and the first new window
+              // was one of those.
+              const named = windows.find((w) => targets.some((t) => windowShowsFile(w.title, t)));
+              if (named) return { app, window: { id: named.id, title: named.title } };
               const fresh = mainWindow(windows.filter((w) => !before.has(w.id)));
               if (fresh) return { app, window: { id: fresh.id, title: fresh.title } };
               const chosen = mainWindow(windows) ?? windows.find((w) => w.focused) ?? windows[0];
@@ -1596,9 +1761,19 @@ export class CuaDriverBridge implements IComputerBridge {
       // run: the agent spends far longer reading trees and waiting on the model
       // than moving. The user then sees the pointer vanish and reads it as the
       // agent having stopped. Keep it on screen for the life of the session.
+      // Distance-based timing (`fitts`): a hop to the next keypad button is
+      // quick, a move across the screen still reads as a move. The default
+      // floor of 600 ms per move made a thirteen-press sum crawl.
       const motion = await client.callTool(
         'set_agent_cursor_motion',
-        JSON.stringify({ session: sessionId, idle_hide_ms: AGENT_CURSOR_IDLE_HIDE_MS }),
+        JSON.stringify({
+          session: sessionId,
+          idle_hide_ms: AGENT_CURSOR_IDLE_HIDE_MS,
+          style: 'signature_arc',
+          timing: 'fitts',
+          dwell_after_click_ms: 60,
+          effects: { ripple: 'on', glow: 'on' },
+        }),
       );
       if (motion.isError) {
         this.options.logger.debug?.(
@@ -1991,6 +2166,44 @@ const CLICK_ACTIONS: ReadonlyMap<string, string> = new Map([
   ['AXShowAlternateUI', 'show_alternate_ui'],
   ['AXShowDefaultUI', 'show_default_ui'],
 ]);
+
+/** A window title naming the file at `target` ("draft.txt", "draft.txt — Edited", "draft"). */
+function windowShowsFile(title: string, target: string): boolean {
+  const base = path.basename(target.replace(/^file:\/\//, ''));
+  const stem = base.replace(/\.[^.]+$/, '');
+  const t = title.trim();
+  return t === base || t.startsWith(`${base} `) || t === stem || t.startsWith(`${stem} —`);
+}
+
+/** Driver tools that take `delivery_mode` (set_value and invoke_menu do not, and refuse it). */
+const FOREGROUND_CAPABLE: ReadonlySet<string> = new Set([
+  'click',
+  'right_click',
+  'double_click',
+  'type_text',
+  'press_key',
+  'hotkey',
+  'scroll',
+  'drag',
+]);
+
+/** The menu item a label was meant to name: equal once case, ellipses and surrounding space are ignored. */
+export function closestMenuItem(wanted: string, items: readonly string[]): string | undefined {
+  const norm = (label: string) => label.toLowerCase().replace(/…|\.{3}/g, '').replace(/\s+/g, ' ').trim();
+  const target = norm(wanted);
+  return items.find((item) => norm(item) === target);
+}
+
+/** The most of a diff handed back with an action; a bigger change is better read with a snapshot. */
+const MAX_DIFF_CHARS = 2_500;
+
+function clipDiff(diff: string): string {
+  // The driver's trailer repeats which snapshot id to use; the agent keeps its own.
+  const body = diff.replace(/\n?Rows and indices are as before;[^\n]*$/u, '').trim();
+  return body.length <= MAX_DIFF_CHARS
+    ? body
+    : `${body.slice(0, MAX_DIFF_CHARS)}\n… (${body.length - MAX_DIFF_CHARS} more characters changed — take a snapshot to read the window)`;
+}
 
 /** Budget for one accessibility-tree walk. */
 const SNAPSHOT_WALK_MS = 4_000;

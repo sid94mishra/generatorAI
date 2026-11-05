@@ -250,10 +250,23 @@ const REFUSAL_MESSAGES: Record<ComputerRefusalCode, string> = {
 };
 
 /** Most actions one `actPlan` (the `computer_run_steps` tool) may carry. */
-export const MAX_PLAN_STEPS = 10;
+export const MAX_PLAN_STEPS = 20;
 
-/** Plans are coordinate/keyboard steps: every action invalidates snapshots, so an element-addressed step could only ever be the first. */
-const PLAN_STEP_TYPES: ReadonlySet<ActionRequest['type']> = new Set(['clickPoint', 'typeText', 'pressKey', 'scroll', 'pasteText']);
+/**
+ * What a plan may carry. Element steps are allowed because an element the
+ * driver holds a handle for stays addressable after an action — a keypad sum
+ * or a form is one plan instead of a call per control.
+ */
+const PLAN_STEP_TYPES: ReadonlySet<ActionRequest['type']> = new Set([
+  'clickPoint',
+  'typeText',
+  'pressKey',
+  'scroll',
+  'pasteText',
+  'click',
+  'setValue',
+  'invokeMenu',
+]);
 
 /** One run-scoped consent (`allow_run`). `appIdentity` absent = any app. */
 interface RunGrant {
@@ -965,6 +978,7 @@ export class ComputerService {
       await this.recordRefusal(ctx, launched, 'launch_app', this.refusal('app_blocked'));
       return { refusal: opaqueBlockRefusal() };
     }
+    await this.carryLaunchGrant(ctx, identity, after);
 
     await this.writeAudit({
       workspaceId: ctx.workspaceId,
@@ -1290,7 +1304,7 @@ export class ComputerService {
       return refuse(
         this.refusal(
           'unsupported_action',
-          'A plan may only contain click_point, type_text, press_key, paste_text and scroll steps. Use the snapshot-based tools one call at a time for element actions.',
+          'A plan may contain click, set_value, menu, type_text, press_key, paste_text, click_point and scroll steps.',
         ),
         unsupported,
       );
@@ -1352,7 +1366,8 @@ export class ComputerService {
         countPlan();
         return refuse(control, index, results);
       }
-      const result = await this.dispatch(ctx, session, app, step, this.describeTarget(session, step), true);
+      const last = index === steps.length - 1;
+      const result = await this.dispatch(ctx, session, app, step, this.describeTarget(session, step), true, last);
       results.push(result);
       if (!result.ok) {
         countPlan();
@@ -1372,6 +1387,8 @@ export class ComputerService {
     targetLabel: string | undefined,
     /** A step of an approved plan: the plan as a whole is gated and counted, not each step. */
     planStep = false,
+    /** Read back what changed afterwards — a plan does it once, after its last step. */
+    observe = true,
   ): Promise<ComputerActionResult> {
     const synthetic = SYNTHETIC_ACTIONS.has(req.type);
     if (synthetic && !planStep && session.blindStreak >= BLIND_INPUT_LIMIT) {
@@ -1396,10 +1413,11 @@ export class ComputerService {
         session.handle,
         scalePointsToDriverSpace(this.withResolvedApp(req, fresh), session.captureDownscale),
         signal,
+        { observe },
       );
       // Any action can move the UI, so every snapshot for this app is now
-      // suspect. Invalidating wholesale is cheap and cannot under-invalidate.
-      this.invalidateSnapshots(session, fresh);
+      // suspect; a window whose rows were re-indexed loses its snapshot outright.
+      this.invalidateSnapshots(session, fresh, outcome.changes?.reindexed === true);
       if (outcome.snapshot) this.rememberSnapshot(session, fresh, outcome);
       return outcome;
     });
@@ -1720,6 +1738,31 @@ export class ComputerService {
   }
 
   /**
+   * The launch prompt can only name the app the agent asked for ("Calculator"),
+   * while every later call carries its real identity (`com.apple.calculator`).
+   * An answer covering the app carries over to that identity — otherwise a
+   * person who chose "Allow for this chat" on "Open Calculator?" was asked
+   * again on the very next read.
+   */
+  private async carryLaunchGrant(
+    ctx: ComputerCallContext,
+    requested: ComputerAppIdentity,
+    resolved: ComputerAppIdentity,
+  ): Promise<void> {
+    if (requested.appId === resolved.appId) return;
+    const now = Date.now();
+    const grants = this.runGrants.get(ctx.workspaceId) ?? [];
+    const run = grants.find(
+      (g) => g.expiresAt > now && g.appIdentity === requested.appId && (g.chatId === undefined || g.chatId === ctx.chatId),
+    );
+    if (run) this.runGrants.set(ctx.workspaceId, [...grants, { ...run, appIdentity: resolved.appId }]);
+    const stored = await this.consent.find(ctx.workspaceId, requested.appId);
+    if (stored?.decision === 'always_allow' && !(await this.consent.find(ctx.workspaceId, resolved.appId))) {
+      await this.consent.save(ctx.workspaceId, resolved.appId, resolved.name, 'always_allow', stored.scope);
+    }
+  }
+
+  /**
    * The store's own contract says a timeout resolves `deny`, but the store is
    * an injected seam that talks to a UI — a hung prompt would otherwise hang
    * `act()` forever, holding nothing but blocking the caller indefinitely.
@@ -1906,10 +1949,10 @@ export class ComputerService {
    * Calculator sum cost a fresh read of the window (47 calls for one sum),
    * though the driver already refuses a handle whose element has gone.
    */
-  private invalidateSnapshots(session: SessionRecord, app: ComputerAppIdentity): void {
+  private invalidateSnapshots(session: SessionRecord, app: ComputerAppIdentity, reindexed = false): void {
     for (const [key, entry] of session.snapshots) {
       if (entry.app.pid !== app.pid || entry.app.appId !== app.appId) continue;
-      if (entry.handles.size > 0) {
+      if (entry.handles.size > 0 && !reindexed) {
         entry.acted = true;
         continue;
       }
