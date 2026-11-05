@@ -71,6 +71,7 @@ export function buildClaudeAgentMcpTools(
       name: def.name,
       description: def.description,
       inputSchema: jsonSchemaToZodShape(def.parametersSchema),
+      ...(def.alwaysLoad ? { _meta: { 'anthropic/alwaysLoad': true } } : {}),
       handler: async (args: Record<string, unknown>, extra?: unknown) => {
         // W13 — the whole ladder, not just the permit. See `runGuarded`.
         const toolCallId = toolUseIdOf(extra);
