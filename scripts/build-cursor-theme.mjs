@@ -1,8 +1,12 @@
-// Builds and installs the GeneratorAI red agent-cursor theme.
+// Builds and installs the GeneratorAI agent-cursor theme: a red arrow with a
+// "GAI" badge, so the person can tell the agent's pointer from their own at a
+// glance while theirs stays free.
 //
 // The driver's overlay renderer accepts a narrow Lottie subset: ungrouped
 // shape items only (`sh`/`fl`/`st`), a 128x128 canvas at 30 fps, and one
 // animation per action. `cua-driver-actions-v2` requires all twelve actions.
+// A fill paints every path before it in its layer, so the arrow, the badge and
+// the letters are separate layers (the first layer is drawn on top).
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -57,6 +61,65 @@ const OUTLINE = [[0, 0], [0, 34], [9, 26], [15, 40], [22, 37], [16, 23], [27, 23
 );
 const TANGENTS = OUTLINE.map(() => [0, 0]);
 
+// The badge sits below and right of the tip, clear of the hotspot at (0, 0).
+const BADGE_FILL = [0.11, 0.11, 0.13, 1];
+const WHITE = [1, 1, 1, 1];
+const BADGE = roundedRect(58, 74, 66, 30, 9);
+// "GAI" as open strokes, 16 px tall.
+const LETTERS = [
+  [[80, 85], [77, 82], [69, 82], [65, 86], [65, 94], [69, 98], [77, 98], [80, 95], [80, 91], [73, 91]], // G
+  [[85, 98], [92, 82], [99, 98]], // A
+  [[88, 93], [96, 93]], // A crossbar
+  [[105, 82], [113, 82]], // I top
+  [[109, 82], [109, 98]], // I stem
+  [[105, 98], [113, 98]], // I foot
+];
+
+function roundedRect(x, y, w, h, r) {
+  const k = r * 0.5523;
+  // Clockwise from the top edge, two vertices per corner with bezier handles.
+  const v = [
+    [x + r, y], [x + w - r, y], [x + w, y + r], [x + w, y + h - r],
+    [x + w - r, y + h], [x + r, y + h], [x, y + h - r], [x, y + r],
+  ];
+  const zero = [0, 0];
+  const i = [[-k, 0], zero, [0, -k], zero, [k, 0], zero, [0, k], zero];
+  const o = [zero, [k, 0], zero, [0, k], zero, [-k, 0], zero, [0, -k]];
+  return { v, i, o };
+}
+
+function pathItem(nm, points, closed, handles) {
+  const flat = points.map(() => [0, 0]);
+  return {
+    ty: 'sh',
+    nm,
+    ks: { a: 0, k: { c: closed, v: points, i: handles?.i ?? flat, o: handles?.o ?? flat } },
+  };
+}
+
+function layer(ind, nm, scale, shapes) {
+  return {
+    ddd: 0,
+    ind,
+    ty: 4,
+    nm,
+    sr: 1,
+    ks: {
+      o: { a: 0, k: 100 },
+      r: { a: 0, k: 0 },
+      p: { a: 0, k: [0, 0, 0] },
+      a: { a: 0, k: [0, 0, 0] },
+      s: scale,
+    },
+    ao: 0,
+    shapes,
+    ip: 0,
+    op: 30,
+    st: 0,
+    bm: 0,
+  };
+}
+
 function animation(action) {
   const pulse = PULSE[action] ?? { from: 100, to: 100 };
   const scale =
@@ -82,38 +145,20 @@ function animation(action) {
     ddd: 0,
     assets: [],
     layers: [
-      {
-        ddd: 0,
-        ind: 1,
-        ty: 4,
-        nm: action,
-        sr: 1,
-        ks: {
-          o: { a: 0, k: 100 },
-          r: { a: 0, k: 0 },
-          p: { a: 0, k: [0, 0, 0] },
-          a: { a: 0, k: [0, 0, 0] },
-          s: scale,
-        },
-        ao: 0,
-        shapes: [
-          { ty: 'sh', nm: 'path', ks: { a: 0, k: { c: true, v: OUTLINE, i: TANGENTS, o: TANGENTS } } },
-          { ty: 'fl', nm: 'fill', c: { a: 0, k: RED }, o: { a: 0, k: 100 }, r: 1 },
-          {
-            ty: 'st',
-            nm: 'stroke',
-            c: { a: 0, k: [1, 1, 1, 1] },
-            o: { a: 0, k: 100 },
-            w: { a: 0, k: 4 },
-            lc: 2,
-            lj: 2,
-          },
-        ],
-        ip: 0,
-        op: 30,
-        st: 0,
-        bm: 0,
-      },
+      layer(1, `${action}-letters`, scale, [
+        ...LETTERS.map((points, n) => pathItem(`letter-${n}`, points, false)),
+        { ty: 'st', nm: 'letters', c: { a: 0, k: WHITE }, o: { a: 0, k: 100 }, w: { a: 0, k: 3.2 }, lc: 2, lj: 2 },
+      ]),
+      layer(2, `${action}-badge`, scale, [
+        pathItem('badge', BADGE.v, true, BADGE),
+        { ty: 'fl', nm: 'badge-fill', c: { a: 0, k: BADGE_FILL }, o: { a: 0, k: 92 }, r: 1 },
+        { ty: 'st', nm: 'badge-edge', c: { a: 0, k: RED }, o: { a: 0, k: 100 }, w: { a: 0, k: 2.5 }, lc: 2, lj: 2 },
+      ]),
+      layer(3, action, scale, [
+        pathItem('path', OUTLINE, true, { i: TANGENTS, o: TANGENTS }),
+        { ty: 'fl', nm: 'fill', c: { a: 0, k: RED }, o: { a: 0, k: 100 }, r: 1 },
+        { ty: 'st', nm: 'stroke', c: { a: 0, k: WHITE }, o: { a: 0, k: 100 }, w: { a: 0, k: 4 }, lc: 2, lj: 2 },
+      ]),
     ],
   };
 }
@@ -122,7 +167,7 @@ function themeJson(version) {
   return {
     schema: 'cua.cursor-theme/2',
     id: 'generatorai.red',
-    name: 'GeneratorAI Red',
+    name: 'GeneratorAI (GAI)',
     version,
     author: 'GeneratorAI',
     license: 'MIT',
@@ -135,15 +180,20 @@ function themeJson(version) {
 }
 
 function zip(sourceDir, destination) {
-  execFileSync(
-    'powershell',
-    [
-      '-NoProfile',
-      '-Command',
-      `Compress-Archive -Path '${sourceDir}\\*' -DestinationPath '${destination}' -Force`,
-    ],
-    { stdio: 'inherit' },
-  );
+  if (process.platform === 'win32') {
+    execFileSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-Command',
+        `Compress-Archive -Path '${sourceDir}\\*' -DestinationPath '${destination}' -Force`,
+      ],
+      { stdio: 'inherit' },
+    );
+    return;
+  }
+  // The archive root must be the source folder's contents (manifest.json at the top).
+  execFileSync('zip', ['-r', '-X', '-q', destination, '.'], { cwd: sourceDir, stdio: 'inherit' });
 }
 
 function cursorThemeExe() {
@@ -174,7 +224,7 @@ fs.writeFileSync(
 );
 fs.writeFileSync(
   path.join(work, 'src', 'cua', 'theme.json'),
-  JSON.stringify(themeJson('1.0.0'), null, 2),
+  JSON.stringify(themeJson('1.1.0'), null, 2),
 );
 
 const source = path.join(work, 'generatorai-red.lottie');
