@@ -1473,8 +1473,10 @@ export class CuaDriverBridge implements IComputerBridge {
       await this.call(connection, 'bring_to_front', { pid: args['pid'], window_id: args['window_id'] }, signal).catch(() => undefined);
       // The app re-enables its menu items a moment after it comes to the front.
       let retried = await this.call(connection, 'invoke_menu', args, signal);
-      for (let attempt = 0; attempt < 2 && /disabled/i.test(this.refusalFor(retried)?.message ?? ''); attempt++) {
-        await new Promise((r) => setTimeout(r, 400));
+      for (let attempt = 0; attempt < 3 && /disabled|key and frontmost|window_not_key/i.test(this.refusalFor(retried)?.message ?? ''); attempt++) {
+        await new Promise((r) => setTimeout(r, 600));
+        // Measured on Preview: the window sometimes is not yet key on the first try.
+        await this.call(connection, 'bring_to_front', { pid: args['pid'], window_id: args['window_id'] }, signal).catch(() => undefined);
         retried = await this.call(connection, 'invoke_menu', args, signal);
       }
       return retried;
@@ -1928,14 +1930,16 @@ export class CuaDriverBridge implements IComputerBridge {
         await this.callOk(connection, 'set_value', { element_token: pathField.token, value: folderValue }, signal);
         await this.keysToDialog(connection, pid, windowId, { tool: 'press_key', args: { key: 'return' } }, signal);
         steps.push(`folder ${opts.folder}`);
+        // A dialog that is a window of its own can come back as a new window
+        // once Go to folder closes (measured: a new id, ~3 s later): find it again.
+        await new Promise((r) => setTimeout(r, 800));
+        windowId = (await this.findPanel(connection, pid, windowId, 6_000, signal)) ?? windowId;
         const where = await this.rowValue(connection, pid, windowId, 'where popup', signal, 1_500);
         const folderName = path.basename(opts.folder);
         if (where !== undefined && where.replace(/[\u2068\u2069]/gu, '').trim() !== folderName) {
           return fail(`The dialog shows the folder "${where}", not "${folderName}".`);
         }
-        // 3. Name and format. A dialog that is a window of its own can come
-        // back as a new window once Go to folder closes: find it again.
-        windowId = (await this.findPanel(connection, pid, windowId, 2_000, signal)) ?? windowId;
+        // 3. Name and format.
         const field = await this.waitForRow(connection, pid, windowId, 'saveAsNameTextField', ['AXTextField'], 2_000, signal);
         if (!field) return fail('The name field went away.');
         await this.callOk(connection, 'set_value', { element_token: field, value: opts.name }, signal);
