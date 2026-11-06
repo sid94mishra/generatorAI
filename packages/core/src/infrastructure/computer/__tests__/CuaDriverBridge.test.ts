@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ILogger } from '@generatorai/shared';
-import { CuaDriverBridge, closestMenuItem, firstNonMenuCandidate, focusHolder, formatNamesFor, mainWindow, openMenuLabels, parseRunSteps, pickNewDocumentButton, pickNewDocumentItem, splitLaunchArguments } from '../CuaDriverBridge.js';
+import { CuaDriverBridge, closestMenuItem, firstNonMenuCandidate, focusHolder, formatNamesFor, mainWindow, openMenuLabels, parseRunSteps, pickNewDocumentButton, pickNewDocumentItem, splitLaunchArguments, withPointFocus } from '../CuaDriverBridge.js';
 import * as nodeFs from 'node:fs';
 import * as nodeOs from 'node:os';
 import * as nodePath from 'node:path';
@@ -86,10 +86,14 @@ function makeBridge(opts: FakeOptions, bridgeOptions: Record<string, unknown> = 
   };
 
   let stopped = 0;
+  const reopened: string[] = [];
   const bridge = new CuaDriverBridge({
     logger,
     maxSnapshotElements: 100,
     maxSnapshotDepth: 8,
+    reopenApp: async (bundleId) => {
+      reopened.push(bundleId);
+    },
     driverModule: {
       CuaDriver: {
         create: () => {
@@ -135,6 +139,7 @@ function makeBridge(opts: FakeOptions, bridgeOptions: Record<string, unknown> = 
   });
 
   return {
+    reopened,
     bridge,
     calls,
     sessionStarts,
@@ -1233,7 +1238,8 @@ describe('CuaDriverBridge windowless launch on macOS', () => {
     await vi.advanceTimersByTimeAsync(15_000);
     const result = await pending;
 
-    expect(fake.calls.map((c) => c.tool).filter((t) => t === 'launch_app' || t === 'hotkey')).toEqual(['launch_app', 'launch_app', 'hotkey']);
+    expect(fake.calls.map((c) => c.tool).filter((t) => t === 'launch_app' || t === 'hotkey')).toEqual(['launch_app', 'hotkey']);
+    expect(fake.reopened).toEqual(['com.apple.TextEdit']);
     expect(result.window).toEqual({ id: 9, title: 'Untitled' });
   });
 });
@@ -1757,5 +1763,16 @@ describe('generic dialog and menu helpers', () => {
     expect(formatNamesFor('badge.jpg')).toContain('JPEG');
     expect(formatNamesFor('sine.PDF')).toEqual(['PDF']);
     expect(formatNamesFor('notes')).toEqual([]);
+  });
+});
+
+describe('withPointFocus', () => {
+  const target = { app: { appId: 'a', name: 'A', pid: 1 }, window: { by: 'id' as const, id: 2 } };
+  it('types where the pixel click before it landed', () => {
+    const click = { type: 'clickPoint' as const, target, x: 40, y: 50 };
+    const type = { type: 'typeText' as const, target, text: 'sin(x)' };
+    expect(withPointFocus(type as never, click as never)).toMatchObject({ focus: { x: 40, y: 50 } });
+    expect(withPointFocus(type as never, undefined)).toBe(type);
+    expect(withPointFocus({ ...type, focus: { x: 1, y: 2 } } as never, click as never)).toMatchObject({ focus: { x: 1, y: 2 } });
   });
 });

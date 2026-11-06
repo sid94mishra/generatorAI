@@ -41,6 +41,9 @@ export const COMPUTER_USE_SYSTEM_HINT =
   `4. Read \`changes\` in each result instead of snapshotting again; snapshot only ` +
   `after \`reindexed\` (a dialog, sheet or new document).\n` +
   `5. computer_save_as for every save and export — one call, checked on disk.\n` +
+  `A file you open to produce another file stays untouched: most apps autosave ` +
+  `every edit into the file they opened, so duplicate it (File>Duplicate) before ` +
+  `editing.\n` +
   `Menu commands: computer_perform_action "File>New". A screenshot ` +
   `(computer_snapshot includeScreenshot) only when the tree lacks the target; then ` +
   `click_point/drag steps. For documents, spreadsheets, presentations and drawings load the ` +

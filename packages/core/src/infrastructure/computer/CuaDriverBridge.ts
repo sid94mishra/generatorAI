@@ -32,6 +32,7 @@
 
 import * as fs from 'node:fs/promises';
 import { existsSync, readdirSync, statSync } from 'node:fs';
+import { execFile } from 'node:child_process';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type {
@@ -228,6 +229,8 @@ export interface CuaDriverBridgeOptions {
    * from driver responses, and none of them were reachable by a test.
    */
   driverModule?: DriverModule;
+  /** macOS: activates an app by bundle id as a Dock click does (LaunchServices). Replaced in tests. */
+  reopenApp?: (bundleId: string) => Promise<void>;
 }
 
 interface Connection {
@@ -1555,7 +1558,7 @@ export class CuaDriverBridge implements IComputerBridge {
         }
         const segment: Array<{ req: ActionRequest; call: { tool: string; args: Json } }> = [];
         while (i < reqs.length && reqs[i]!.type !== 'invokeMenu' && reqs[i]!.type !== 'pasteText') {
-          const call = await this.buildCall(connection, reqs[i]!);
+          const call = await this.buildCall(connection, withPointFocus(reqs[i]!, reqs[i - 1]));
           if ('refusal' in call) {
             // Run what came before, then report the step that could not be built.
             if (segment.length > 0) {
@@ -1775,6 +1778,13 @@ export class CuaDriverBridge implements IComputerBridge {
    * `bring_to_front` needs a window to aim at and is refused here.
    */
   private async reopen(connection: Connection, app: ComputerAppIdentity, signal?: AbortSignal): Promise<void> {
+    // Only macOS keeps document apps running with no window. The driver's
+    // launch keeps the app in the background, which is no reopen at all:
+    // LaunchServices (`open -b`) is the Dock click itself.
+    if (process.platform === 'darwin' && /^[\w-]+(\.[\w-]+)+$/.test(app.appId)) {
+      await (this.options.reopenApp ?? openBundle)(app.appId);
+      return;
+    }
     await this.call(connection, 'launch_app', { name: app.name }, signal).catch(() => undefined);
   }
 
@@ -1941,9 +1951,15 @@ export class CuaDriverBridge implements IComputerBridge {
         }
         // 4. Save.
         const ok = await this.waitForRow(connection, pid, windowId, 'OKButton', ['AXButton'], 1_500, signal);
-        if (!ok) return fail('The dialog has no Save button.');
-        await this.callOk(connection, 'click', { element_token: ok }, signal);
-        steps.push('Save');
+        if (ok) {
+          await this.callOk(connection, 'click', { element_token: ok }, signal);
+          steps.push('Save');
+        } else {
+          // A custom dialog ("Export", "Share") without the standard Save
+          // button: Return presses its default button.
+          await this.keysToDialog(connection, pid, windowId, { tool: 'press_key', args: { key: 'return' } }, signal);
+          steps.push('default button (Return)');
+        }
         const replaceButton = await this.waitForRow(connection, pid, windowId, 'Replace', ['AXButton'], 900, signal);
         if (replaceButton) {
           if (!opts.replace) {
@@ -2987,6 +3003,22 @@ export function firstNonMenuCandidate(message: string | undefined): number | und
     if (!/^AXMenu|^MenuItem$|^menu/i.test(m[2]!)) return Number(m[1]);
   }
   return undefined;
+}
+
+/** `open -b`: LaunchServices activates the app and sends it a reopen, as a Dock click does. */
+function openBundle(bundleId: string): Promise<void> {
+  return new Promise((resolve) => execFile('/usr/bin/open', ['-b', bundleId], { timeout: 10_000 }, () => resolve()));
+}
+
+/**
+ * A typing step right after a pixel click types where that click landed:
+ * custom-drawn fields (an equation editor, a canvas label) only take focus
+ * from the point, and the driver otherwise refuses keys with no text input
+ * focused.
+ */
+export function withPointFocus(req: ActionRequest, prev: ActionRequest | undefined): ActionRequest {
+  if (req.type !== 'typeText' || req.element || req.focus || prev?.type !== 'clickPoint') return req;
+  return { ...req, focus: { x: prev.x, y: prev.y } };
 }
 
 /** Labels of menu items that are not in the menu bar: the items of an open popup or context menu. */
