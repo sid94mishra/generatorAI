@@ -100,6 +100,8 @@ each button by name, then read the result in `changes`. Two calls in all.
     the last cell with `Tab` or `Shift+Tab` — Escape cancels the cell being
     edited in many apps.
   - Check one computed value with a `computer_snapshot` `query`, then save.
+* Table cells are cell rows in the tree (`AXCell`, `DataItem`), a cell's
+  text in its label: click a cell by its index — not by pixels — then type.
 * Editing existing cells: click the cell by index, type values with `Tab` /
   `Return` between them (`\t` inside typed text does not move cells).
   Formulas last, down a column: `type_text "=B2*C2"`, `press_key Return`,

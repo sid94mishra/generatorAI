@@ -1207,7 +1207,7 @@ describe('CuaDriverBridge windowless launch on macOS', () => {
     vi.useRealTimers();
   });
 
-  it('activates a document app that started without a window, then asks it for a new document', async () => {
+  it('reopens a document app that started without a window (as a Dock click does), then asks it for a new document', async () => {
     Object.defineProperty(process, 'platform', { value: 'darwin' });
     vi.useFakeTimers();
     let launched = false;
@@ -1233,7 +1233,7 @@ describe('CuaDriverBridge windowless launch on macOS', () => {
     await vi.advanceTimersByTimeAsync(15_000);
     const result = await pending;
 
-    expect(fake.calls.map((c) => c.tool).filter((t) => t === 'bring_to_front' || t === 'hotkey')).toEqual(['bring_to_front', 'hotkey']);
+    expect(fake.calls.map((c) => c.tool).filter((t) => t === 'launch_app' || t === 'hotkey')).toEqual(['launch_app', 'launch_app', 'hotkey']);
     expect(result.window).toEqual({ id: 9, title: 'Untitled' });
   });
 });

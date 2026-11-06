@@ -1746,11 +1746,12 @@ export class CuaDriverBridge implements IComputerBridge {
   /** What an open popup or context menu offers, or undefined when none is open. */
   private async openMenuNote(connection: Connection, pid: number, windowId: number, signal?: AbortSignal): Promise<string | undefined> {
     if (!(await this.windowsFor(connection, pid)).some((w) => w.menu)) return undefined;
+    // Popovers and tooltips sit at the same level; a menu is what lists items.
     const items = await this.openMenuItems(connection, pid, windowId, signal);
-    const listed = items.length > 0 ? `: ${items.map((i) => `"${i}"`).join(', ')}` : '';
+    if (items.length === 0) return undefined;
     return (
-      `A menu is open${listed}. Choose an item with a click step by its name, or press_key Escape — ` +
-      'an open menu blocks the app until one or the other.'
+      `A menu is open: ${items.map((i) => `"${i}"`).join(', ')}. Choose an item with a click step by its name, ` +
+      'or press_key Escape — an open menu blocks the app until one or the other.'
     );
   }
 
@@ -1765,6 +1766,16 @@ export class CuaDriverBridge implements IComputerBridge {
     if (!result?.structuredJson) return [];
     const rows = (JSON.parse(result.structuredJson) as { elements?: unknown }).elements;
     return openMenuLabels(Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : []);
+  }
+
+  /**
+   * Activates an app that has no window, the way a click on its Dock or
+   * taskbar icon does: launching it again reopens it, and a document app then
+   * shows a restored document, an Open panel or a start screen. A
+   * `bring_to_front` needs a window to aim at and is refused here.
+   */
+  private async reopen(connection: Connection, app: ComputerAppIdentity, signal?: AbortSignal): Promise<void> {
+    await this.call(connection, 'launch_app', { name: app.name }, signal).catch(() => undefined);
   }
 
   /**
@@ -1912,7 +1923,9 @@ export class CuaDriverBridge implements IComputerBridge {
         if (where !== undefined && where.replace(/[\u2068\u2069]/gu, '').trim() !== folderName) {
           return fail(`The dialog shows the folder "${where}", not "${folderName}".`);
         }
-        // 3. Name and format.
+        // 3. Name and format. A dialog that is a window of its own can come
+        // back as a new window once Go to folder closes: find it again.
+        windowId = (await this.findPanel(connection, pid, windowId, 2_000, signal)) ?? windowId;
         const field = await this.waitForRow(connection, pid, windowId, 'saveAsNameTextField', ['AXTextField'], 2_000, signal);
         if (!field) return fail('The name field went away.');
         await this.callOk(connection, 'set_value', { element_token: field, value: opts.name }, signal);
@@ -1998,7 +2011,7 @@ export class CuaDriverBridge implements IComputerBridge {
         // Windowless (a document app launched in the background): activation
         // brings up a restored document, an Open panel or a start screen.
         if (existing.length === 0) {
-          await this.call(connection, 'bring_to_front', { pid }, signal).catch(() => undefined);
+          await this.reopen(connection, app, signal);
           steps.push('activate');
         }
         for (let waited = 0; waited < 10_000 && !ready(existing); waited += 500) {
@@ -2370,12 +2383,8 @@ export class CuaDriverBridge implements IComputerBridge {
             if (windows.length === 0 && nudgeWindowless) {
               windowless ??= { app: { appId: match.id, name: match.name, pid: match.pid }, since: Date.now(), nudges: 0 };
               if (Date.now() - windowless.since >= WINDOWLESS_NUDGE_MS * (windowless.nudges + 1) && windowless.nudges < 2) {
-                await this.call(
-                  connection,
-                  windowless.nudges === 0 ? 'bring_to_front' : 'hotkey',
-                  windowless.nudges === 0 ? { pid: match.pid } : { pid: match.pid, keys: ['cmd', 'n'] },
-                  signal,
-                ).catch(() => undefined);
+                if (windowless.nudges === 0) await this.reopen(connection, windowless.app, signal);
+                else await this.call(connection, 'hotkey', { pid: match.pid, keys: ['cmd', 'n'] }, signal).catch(() => undefined);
                 windowless.nudges += 1;
               }
             }
