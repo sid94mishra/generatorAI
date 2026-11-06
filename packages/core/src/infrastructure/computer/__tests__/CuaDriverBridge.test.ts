@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ILogger } from '@generatorai/shared';
-import { CuaDriverBridge, closestMenuItem, firstNonMenuCandidate, focusHolder, formatNamesFor, mainWindow, openMenuLabels, parseRunSteps, pickNewDocumentButton, pickNewDocumentItem, splitLaunchArguments, withPointFocus } from '../CuaDriverBridge.js';
+import { CuaDriverBridge, closestMenuItem, firstNonMenuCandidate, focusHolder, formatNamesFor, mainWindow, openMenuLabels, parseRunSteps, pickNewDocumentButton, pickNewDocumentItem, splitLaunchArguments, typedNowhere, withPointFocus } from '../CuaDriverBridge.js';
 import * as nodeFs from 'node:fs';
 import * as nodeOs from 'node:os';
 import * as nodePath from 'node:path';
@@ -1774,5 +1774,14 @@ describe('withPointFocus', () => {
     expect(withPointFocus(type as never, click as never)).toMatchObject({ focus: { x: 40, y: 50 } });
     expect(withPointFocus(type as never, undefined)).toBe(type);
     expect(withPointFocus({ ...type, focus: { x: 1, y: 2 } } as never, click as never)).toMatchObject({ focus: { x: 1, y: 2 } });
+  });
+});
+
+describe('typedNowhere', () => {
+  it('recognises keys the driver could not deliver to a text input in the background', () => {
+    expect(typedNowhere('type_text incomplete: delivered 0 of 7 character(s) via CGEvent (30ms delay); retry only the remaining suffix')).toBe(true);
+    expect(typedNowhere('Background input refused (no_focused_text_input): the focused element in this window is not a text input')).toBe(true);
+    expect(typedNowhere('type_text incomplete: delivered 3 of 7 character(s)')).toBe(false);
+    expect(typedNowhere('That snapshot is out of date.')).toBe(false);
   });
 });

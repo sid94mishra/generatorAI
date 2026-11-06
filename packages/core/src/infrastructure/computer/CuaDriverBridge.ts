@@ -1134,7 +1134,7 @@ export class CuaDriverBridge implements IComputerBridge {
             refusal = this.refusalFor(result);
           }
           if (refusal) return refuse(refusal);
-        } else if (!wantsForegroundDelivery(result) || !FOREGROUND_CAPABLE.has(call.tool)) {
+        } else if (!(wantsForegroundDelivery(result) || typedNowhere(refusal.message)) || !FOREGROUND_CAPABLE.has(call.tool)) {
           return refuse(refusal);
         }
       }
@@ -1598,6 +1598,7 @@ export class CuaDriverBridge implements IComputerBridge {
     segment: ReadonlyArray<{ req: ActionRequest; call: { tool: string; args: Json } }>,
     signal: AbortSignal | undefined,
     done: (req: ActionRequest, tool: string, ok: boolean, message?: string) => ComputerActionResult,
+    foreground = false,
   ): Promise<ComputerActionResult[]> {
     const result = await this.call(
       connection,
@@ -1622,6 +1623,19 @@ export class CuaDriverBridge implements IComputerBridge {
         const retried = await this.runSegment(connection, rest, signal, done);
         return [...outcome.slice(0, failedAt).map((s, n) => done(segment[n]!.req, segment[n]!.call.tool, s.ok, s.message)), ...retried];
       }
+    }
+    // Keys that found no text input in the background — a canvas label, a
+    // table cell, a custom-drawn field only take focus from a real click —
+    // are what the driver says to send in the foreground. Replay from the
+    // click that focused the field, in front, once.
+    if (failedAt !== -1 && !foreground && typedNowhere(outcome[failedAt]!.message)) {
+      const from = lastFocusingStep(segment, failedAt);
+      const rest = segment.slice(from).map(({ req, call }) => ({
+        req,
+        call: { tool: call.tool, args: FOREGROUND_CAPABLE.has(call.tool) ? { ...call.args, delivery_mode: 'foreground' } : call.args },
+      }));
+      const retried = await this.runSegment(connection, rest, signal, done, true);
+      return [...outcome.slice(0, from).map((s, n) => done(segment[n]!.req, segment[n]!.call.tool, s.ok, s.message)), ...retried];
     }
     return outcome.map((step, n) => done(segment[n]!.req, segment[n]!.call.tool, step.ok, step.message));
   }
@@ -3136,6 +3150,20 @@ function named(req: { name: string; role?: string; nth?: number }): Json {
 const SYNTHETIC_TOOLS: ReadonlySet<string> = new Set(['type_text', 'press_key', 'hotkey', 'scroll', 'drag']);
 
 /** A step's own delivery mode stays only where the tool takes one; set_value refuses it. */
+/** A typing or key step the driver could not deliver to any text input in the background. */
+export function typedNowhere(message: string | undefined): boolean {
+  return /no_focused_text_input|delivered 0 of \d+ character|focused element in this window is not a text input/i.test(message ?? '');
+}
+
+/** The step that focused the field a failed key step was meant for: the nearest click before it, else the step itself. */
+function lastFocusingStep(segment: ReadonlyArray<{ call: { tool: string } }>, failedAt: number): number {
+  for (let n = failedAt - 1; n >= 0; n -= 1) {
+    if (/click$/.test(segment[n]!.call.tool)) return n;
+    if (!/^(type_text|press_key|hotkey)$/.test(segment[n]!.call.tool)) break;
+  }
+  return failedAt;
+}
+
 function stripDeliveryFor(tool: string, args: Json): Json {
   if (FOREGROUND_CAPABLE.has(tool) || args['delivery_mode'] === undefined) return args;
   const rest = { ...args };
