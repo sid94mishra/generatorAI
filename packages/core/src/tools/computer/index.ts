@@ -463,6 +463,13 @@ const createLaunchAppTool: ComputerToolFactory = (ctx): ToolDefinition => ({
         description:
           'Optional URL to open in the default browser. The page opens without stealing the foreground.',
       },
+      newDocument: {
+        type: 'boolean',
+        description:
+          'Also create a new blank document and return ITS window — File>New, an Open panel\u2019s New Document, an ' +
+          'iWork template chooser (Blank). Use it whenever the task makes a new document: never type into a window ' +
+          'the app already had open.',
+      },
       newInstance: {
         type: 'boolean',
         description:
@@ -488,15 +495,16 @@ const createLaunchAppTool: ComputerToolFactory = (ctx): ToolDefinition => ({
     const launchArgs = Array.isArray(args['arguments'])
       ? args['arguments'].filter((a): a is string => typeof a === 'string')
       : undefined;
-    const { app, window, refusal } = await ctx.computerService.launchApp(
+    const { app, window, refusal, steps } = await ctx.computerService.launchApp(
       callContext(ctx),
       name,
       url,
       args['newInstance'] === true,
       launchArgs,
+      args['newDocument'] === true,
     );
     if (refusal || !app) {
-      return { ok: false, refusal: refusal?.code, message: refusal?.message };
+      return { ok: false, refusal: refusal?.code, message: refusal?.message, ...(steps?.length ? { steps: steps.join(' → ') } : {}) };
     }
     return {
       ok: true,
@@ -504,6 +512,7 @@ const createLaunchAppTool: ComputerToolFactory = (ctx): ToolDefinition => ({
       name: app.name,
       pid: app.pid,
       ...(window ? { windowId: window.id, windowTitle: window.title } : {}),
+      ...(args['newDocument'] === true && window ? { newDocument: `Created "${window.title}" (${steps?.join(' → ') ?? ''}). Work only in this window.` } : {}),
       note: window
         ? `The launch opened window ${window.id} ("${window.title}"). Pass that windowId to every ` +
           'later call: this app can host several windows in one process, and without the id you will ' +

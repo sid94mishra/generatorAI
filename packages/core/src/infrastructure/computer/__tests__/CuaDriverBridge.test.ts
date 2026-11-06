@@ -1635,3 +1635,48 @@ describe('CuaDriverBridge pixels for a window with no tree', () => {
     expect(treeOnly.refusal?.code).toBe('background_unavailable');
   });
 });
+
+describe('CuaDriverBridge new blank document', () => {
+  it('makes a Numbers document: File>New (listed twice) by token, the chooser answered with Return, never read', async () => {
+    let stage: 'doc' | 'chooser' | 'new' = 'doc';
+    const reads: string[] = [];
+    const base = [{ window_id: 10, pid: 42, title: 'Fruit Count.numbers', is_on_screen: true, layer: 0, z_index: 5, bounds: { x: 0, y: 0, width: 900, height: 700 } }];
+    const fake = makeBridge({
+      reply: (tool, args) => {
+        if (tool === 'list_windows') {
+          const extra = stage === 'chooser'
+            ? [{ window_id: 11, pid: 42, title: '', is_on_screen: true, layer: 0, z_index: 9, bounds: { x: 0, y: 0, width: 1070, height: 740 } }]
+            : stage === 'new'
+              ? [{ window_id: 12, pid: 42, title: 'Untitled', is_on_screen: true, layer: 0, z_index: 9, bounds: { x: 0, y: 0, width: 1260, height: 870 } }]
+              : [];
+          return ok({ windows: [...base, ...extra] });
+        }
+        if (tool === 'invoke_menu') {
+          const path = args['path'] as string[];
+          return path[1] === 'New'
+            ? driverError('invoke_menu: path segment 1 "New" was not found under "File". Items there: "New…", "New…", "Open…"')
+            : driverError('invoke_menu: path segment 1 is ambiguous');
+        }
+        if (tool === 'get_window_state') {
+          reads.push(String(args['window_id']));
+          return ok({ snapshot_id: 's5', pid: 42, window_id: 10, elements: [
+            { element_index: 1, role: 'AXMenuBarItem', label: 'File', element_token: 's5:1' },
+            { element_index: 2, role: 'AXMenu', parent_index: 1, element_token: 's5:2' },
+            { element_index: 3, role: 'AXMenuItem', label: 'New…', parent_index: 2, element_token: 's5:3' },
+          ] });
+        }
+        if (tool === 'click' && args['element_token'] === 's5:3') { stage = 'chooser'; return ok({}); }
+        if (tool === 'press_key' && args['key'] === 'return') { stage = 'new'; return ok({}); }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    const made = await fake.bridge.newDocument!(handle, { appId: 'com.apple.iWork.Numbers', name: 'Numbers', pid: 42 });
+
+    expect(made.window).toEqual({ id: 12, title: 'Untitled' });
+    expect(made.steps).toEqual(['File>New', 'Blank template (Return)']);
+    expect(reads).not.toContain('11');
+    expect(fake.calls.find((c) => c.tool === 'press_key')?.args).toMatchObject({ window_id: 11, key: 'return', delivery_mode: 'foreground' });
+  }, 30_000);
+});

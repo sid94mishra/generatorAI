@@ -363,6 +363,16 @@ const SYNTHETIC_ACTIONS: ReadonlySet<ActionRequest['type']> = new Set([
 ]);
 
 /**
+ * The window visibly changed after the action — the input reached it. A
+ * keystroke is never "verified", but a diff showing the typed row or the moved
+ * shape is better evidence than verification: without this, a canvas task
+ * (Freeform, Keynote) locked itself out after five drags that all landed.
+ */
+function landed(result: ComputerActionResult): boolean {
+  return Boolean(result.changes && !result.changes.unchanged && result.changes.diff.trim().length > 0);
+}
+
+/**
  * Unconfirmed synthetic actions tolerated in a row before refusing more.
  *
  * Some individual actions are legitimately unverifiable, so this cannot be 1.
@@ -907,10 +917,12 @@ export class ComputerService {
     url?: string,
     newInstance?: boolean,
     args?: readonly string[],
+    newDocument?: boolean,
   ): Promise<{
     app?: ComputerAppIdentity;
     window?: { id: number; title: string };
     refusal?: ComputerRefusal;
+    steps?: string[];
   }> {
     const gate = this.featureGate(ctx.workspaceId);
     if (gate) {
@@ -984,6 +996,28 @@ export class ComputerService {
       return { refusal: opaqueBlockRefusal() };
     }
     await this.carryLaunchGrant(ctx, identity, after);
+    if (newDocument && session.bridge.newDocument) {
+      const made = await this.withPermitFor(
+        session,
+        (signal) => session.bridge.newDocument!(session.handle, after, signal),
+        (refusal) => ({ steps: [] as string[], refusal }),
+        LAUNCH_TIMEOUT_MS,
+      );
+      this.invalidateSnapshots(session, after, true);
+      await this.writeAudit({
+        workspaceId: ctx.workspaceId,
+        chatId: ctx.chatId,
+        appIdentity: after.appId,
+        appLabel: after.name,
+        action: 'newDocument',
+        target: made.window?.title,
+        verified: Boolean(made.window),
+        ...(made.refusal ? { refusalCode: made.refusal.code } : {}),
+        createdAt: new Date(),
+      });
+      if (!made.window) return { refusal: made.refusal ?? this.refusal('target_lost'), steps: made.steps };
+      return { app: after, window: made.window, steps: made.steps };
+    }
 
     await this.writeAudit({
       workspaceId: ctx.workspaceId,
@@ -1484,7 +1518,9 @@ export class ComputerService {
       recorded.push(await this.recordOutcome(ctx, session, app, steps[index]!, labels[index], result, started, true));
     }
     if (synthetic && recorded.some((r) => r.action?.path === 'synthetic')) {
-      const confirmed = recorded.some((r) => r.action?.path === 'synthetic' && r.action.verification?.state === 'verified');
+      const confirmed =
+        recorded.some((r) => r.action?.path === 'synthetic' && r.action.verification?.state === 'verified') ||
+        recorded.some(landed);
       session.blindStreak = confirmed ? 0 : session.blindStreak + 1;
     }
     const failed = recorded.findIndex((r) => !r.ok);
@@ -1565,7 +1601,7 @@ export class ComputerService {
     // focus changes can keep succeeding while every keystroke misses, which is
     // exactly the pattern seen when Windows refuses the foreground swap.
     if (result.action?.path === 'synthetic' && !planStep) {
-      session.blindStreak = verified ? 0 : session.blindStreak + 1;
+      session.blindStreak = verified || landed(result) ? 0 : session.blindStreak + 1;
     }
     await this.writeAudit({
       workspaceId: ctx.workspaceId,

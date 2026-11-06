@@ -31,8 +31,9 @@ export const COMPUTER_USE_SYSTEM_HINT =
   `request naming an application. Never reach for them to work around a missing ` +
   `file, browser, or terminal capability; those have their own tools.\n\n` +
   `Work in as few calls as possible — every call costs the user time:\n` +
-  `1. computer_launch_app (a file path in \`arguments\` opens that file; an app ` +
-  `already open: run File>New for a new document) → appId + windowId.\n` +
+  `1. computer_launch_app (a file path in \`arguments\` opens that file; ` +
+  `\`newDocument: true\` makes a blank document and returns its window — never ` +
+  `type into a window the app already had open) → appId + windowId.\n` +
   `2. computer_snapshot ONCE per window state → \`tree\` rows \`[N]\` (elementIndex). ` +
   `Skip it when you know the controls' labels: steps can name them.\n` +
   `3. computer_run_steps with every step you already know — clicks and values by ` +

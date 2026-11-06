@@ -1425,10 +1425,12 @@ export class CuaDriverBridge implements IComputerBridge {
   ): Promise<DriverToolResult | null> {
     const path = Array.isArray(args['path']) ? (args['path'] as string[]) : [];
     const text = failed.text ?? '';
-    // The app is in the background with no main window, and the driver will
-    // not guess which document a menu command is for: bring the window the
-    // command names in front, as a person would click it, and run it once more.
-    if (/window_not_key|not the confirmed document menu context/i.test(text)) {
+    // The app is in the background — with no main window the driver will not
+    // guess which document a menu command is for, and macOS keeps
+    // selection-dependent items (Table>Delete Column) disabled behind the
+    // user's window: bring the window the command names in front, as a person
+    // would click it, and run it once more.
+    if (/window_not_key|not the confirmed document menu context|disabled while the app is in the background/i.test(text)) {
       await this.call(connection, 'bring_to_front', { pid: args['pid'], window_id: args['window_id'] }, signal).catch(() => undefined);
       return this.call(connection, 'invoke_menu', args, signal);
     }
@@ -1455,7 +1457,13 @@ export class CuaDriverBridge implements IComputerBridge {
     const match = closestMenuItem(wanted, items);
     if (!match || match === wanted) return null;
     const corrected = path.map((segment, i) => (i === at ? match : segment));
-    return this.call(connection, 'invoke_menu', { ...args, path: corrected }, signal);
+    const retried = await this.call(connection, 'invoke_menu', { ...args, path: corrected }, signal);
+    // "New" → "New…", which Numbers lists twice: then press it by token.
+    if (this.refusalFor(retried) && /is ambiguous/i.test(retried.text ?? '')) {
+      const token = await this.menuItemToken(connection, Number(args['pid']), Number(args['window_id']), corrected, signal);
+      if (token) return this.call(connection, 'click', { element_token: token }, signal);
+    }
+    return retried;
   }
 
   /**
@@ -1837,6 +1845,70 @@ export class CuaDriverBridge implements IComputerBridge {
     } catch (err) {
       const refusal = this.errorRefusal(err);
       return fail(refusal.message, refusal.code);
+    }
+  }
+
+  /**
+   * A new blank document, the way each app makes one, measured on macOS:
+   * TextEdit and Freeform open it straight from File>New; Numbers, Pages and
+   * Keynote open a template chooser with Blank preselected, answered with
+   * Return and never read (reading it crashes them); an app showing its Open
+   * panel gets its New Document button. The agent used to fight these by
+   * hand and, failing, typed into documents that were already open.
+   */
+  async newDocument(
+    handle: ComputerHandle,
+    app: ComputerAppIdentity,
+    signal?: AbortSignal,
+  ): Promise<{ window?: { id: number; title: string }; steps: string[]; refusal?: ComputerRefusal }> {
+    const connection = this.connections.get(handle.workspaceId);
+    const steps: string[] = [];
+    if (!connection) return { steps, refusal: disconnected() };
+    const pid = app.pid;
+    const iwork = /^com\.apple\.iWork\./i.test(app.appId);
+    try {
+      const existing = await this.windowsFor(connection, pid);
+      const before = new Set(existing.map((w) => w.id));
+      const anchor = mainWindow(existing);
+      if (anchor) {
+        await this.menuOrFail(connection, pid, anchor.id, ['File', 'New'], signal);
+        steps.push('File>New');
+      } else {
+        await this.call(connection, 'bring_to_front', { pid }, signal).catch(() => undefined);
+        steps.push('activate');
+      }
+      const handled = new Set<number>();
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 600));
+        const windows = (await this.windowsFor(connection, pid)).filter((w) => !w.floating && !w.minimised);
+        const open = windows.find((w) => w.title === 'Open' && !handled.has(w.id));
+        if (open) {
+          handled.add(open.id);
+          const button = await this.waitForRow(connection, pid, open.id, 'New Document', ['AXButton'], 2_000, signal);
+          if (button) {
+            await this.callOk(connection, 'click', { element_token: button }, signal);
+            steps.push('New Document');
+            continue;
+          }
+        }
+        const fresh = windows.filter((w) => !before.has(w.id) && !handled.has(w.id) && w.title !== 'Open');
+        const chooser = iwork ? fresh.find((w) => w.title === '') : undefined;
+        if (chooser) {
+          handled.add(chooser.id);
+          await this.keysToDialog(connection, pid, chooser.id, { tool: 'press_key', args: { key: 'return' } }, signal);
+          steps.push('Blank template (Return)');
+          continue;
+        }
+        const doc = fresh.find((w) => w.title !== '');
+        if (doc) {
+          this.bumpEpoch(pid, doc.id);
+          return { window: { id: doc.id, title: doc.title }, steps };
+        }
+      }
+      return { steps, refusal: { code: 'target_lost', message: `No new document window appeared. Steps done: ${steps.join(' → ') || 'none'}.` } };
+    } catch (err) {
+      return { steps, refusal: this.errorRefusal(err) };
     }
   }
 

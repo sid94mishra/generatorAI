@@ -51,13 +51,15 @@ snapshot it before using indices again. `verified: false` is normal for keys.
 ## Opening documents
 
 * Open a file by path in `arguments`; never drive an Open dialog for a known path.
-* New document: an app already open → `computer_perform_action "File>New"`.
-  Never type into a window you did not create.
-* An **Open panel** (TextEdit, Numbers, Pages launched bare): click
-  `name: "New Document"`.
-* **Numbers / Pages / Keynote template chooser**: Blank is preselected — send
-  `press_key Return` to the app's window. **Never snapshot the chooser**:
-  reading it crashes the app (an Apple bug).
+* **A new document: `computer_launch_app { name, newDocument: true }`** — it
+  makes a blank document however the app does it (File>New, the Open panel's
+  New Document, the iWork template chooser's Blank) and returns ITS window.
+  Work only in that window.
+* Windows the app already had open — restored documents, other files — are
+  the user's. Never type into them, never present them as your work, never
+  close them unsaved. If you cannot get a new document, say so.
+* **Never snapshot an iWork template chooser** (an untitled window right after
+  File>New in Numbers, Pages, Keynote): reading it crashes the app.
 * Reading a file's contents: use your file tools; the app is for producing.
 
 ## Text documents (TextEdit, Pages, Word, Notepad)
@@ -83,6 +85,10 @@ snapshot it before using indices again. `verified: false` is normal for keys.
   swallows the rest of the row.
 * `set_value` on a cell is refused (grids accept the write and show nothing).
 * Numbers' blank table has a header row: your header goes in row 1.
+* **Before exporting a Numbers table, size it to the data**: in the Format
+  sidebar's Table tab, `set_value` the `Columns` field (and `Rows`) to the
+  data's size — the blank table has 7 columns and 22 rows, and a CSV keeps the
+  empty columns.
 * Charts (Numbers): select the data first, then `menu "Insert>Chart>2D Column"`
   (labels as the menu reads them).
 * Excel (Windows): click the cell, `press_key Escape`, then type.
@@ -104,6 +110,10 @@ Word: `menu: "File>Export To>Word…"`. It reports the saved path. Save in place
 Save" on work the task keeps.
 
 ## When presses do nothing
+
+A menu left open (a menu command that did not run, a popup you pressed) blocks
+the app — even quitting: `press_key Escape`.
+
 
 A press reported done but nothing changes usually means another window of the
 app is modal — an alert (an update offer, "Do you want to save?"), a sheet.

@@ -419,6 +419,13 @@ export interface IComputerBridge {
    * identity after launch, before anything may drive it.
    */
   /**
+   * Creates a new blank document in a running app and returns its window:
+   * File>New, an Open panel's New Document, an iWork template chooser
+   * answered with Return (never read — reading it crashes the app).
+   */
+  newDocument?(handle: ComputerHandle, app: ComputerAppIdentity, signal?: AbortSignal): Promise<{ window?: { id: number; title: string }; steps: string[]; refusal?: ComputerRefusal }>;
+
+  /**
    * Saves or exports the window's document to `folder`/`name` through the
    * app's own save dialog, and confirms the file exists. Optional: a provider
    * without it leaves saving to the agent's own steps.

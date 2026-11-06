@@ -486,6 +486,23 @@ describe('ComputerService blind input', () => {
     expect(bridge.actCalls).toHaveLength(40);
   });
 
+  it('is cleared by an action whose changes show the input landed', async () => {
+    const { service, bridge } = makeService([SLACK], enabled());
+    bridge.act = async (_h, req) => {
+      bridge.actCalls.push(req);
+      return {
+        ok: true,
+        snapshot: null,
+        screenshot: null,
+        action: { path: 'synthetic' as const, verification: { state: 'unverified' as const } },
+        changes: { diff: '~ [4] AXStaticText = "Start"', reindexed: false, unchanged: false },
+      };
+    };
+    for (let i = 0; i < 8; i += 1) {
+      expect((await service.act(CTX, { by: 'appId', appId: SLACK.id }, press)).refusal).toBeUndefined();
+    }
+  });
+
   it('records the stop in the audit trail', async () => {
     const { service, bridge, audit } = makeService([SLACK], enabled());
     goBlind(bridge);
