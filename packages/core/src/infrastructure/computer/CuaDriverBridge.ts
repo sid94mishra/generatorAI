@@ -1837,9 +1837,14 @@ export class CuaDriverBridge implements IComputerBridge {
         steps.push(`name ${opts.name}`);
         if (opts.format) {
           const popup = await this.waitForRow(connection, pid, windowId, 'File Format', ['AXPopUpButton'], 1_500, signal);
-          if (!popup) return fail(`The dialog has no File Format popup for "${opts.format}".`);
-          await this.callOk(connection, 'set_value', { element_token: popup, value: opts.format }, signal);
-          steps.push(`format ${opts.format}`);
+          if (popup) {
+            await this.callOk(connection, 'set_value', { element_token: popup, value: opts.format }, signal);
+            steps.push(`format ${opts.format}`);
+          } else {
+            // The dialog offers one format — TextEdit's plain-text document
+            // saves as text with no popup — so there is nothing to choose.
+            steps.push('format (only one offered)');
+          }
         }
         // 4. Save.
         const ok = await this.waitForRow(connection, pid, windowId, 'OKButton', ['AXButton'], 1_500, signal);
