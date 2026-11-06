@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ILogger } from '@generatorai/shared';
-import { CuaDriverBridge, closestMenuItem, firstNonMenuCandidate, focusHolder, mainWindow, parseRunSteps, splitLaunchArguments } from '../CuaDriverBridge.js';
+import { CuaDriverBridge, closestMenuItem, firstNonMenuCandidate, focusHolder, mainWindow, parseRunSteps, pickNewDocumentItem, splitLaunchArguments } from '../CuaDriverBridge.js';
 import * as nodeFs from 'node:fs';
 import * as nodeOs from 'node:os';
 import * as nodePath from 'node:path';
@@ -1679,4 +1679,12 @@ describe('CuaDriverBridge new blank document', () => {
     expect(reads).not.toContain('11');
     expect(fake.calls.find((c) => c.tool === 'press_key')?.args).toMatchObject({ window_id: 11, key: 'return', delivery_mode: 'foreground' });
   }, 30_000);
+});
+
+describe('pickNewDocumentItem', () => {
+  it('takes New or New… first, else the app\'s own New item, never a tab or window', () => {
+    expect(pickNewDocumentItem(['New…', 'New…', 'Open…'])).toBe('New…');
+    expect(pickNewDocumentItem(['New Board', 'New Tab', 'New Window', 'Close'])).toBe('New Board');
+    expect(pickNewDocumentItem(['New Tab', 'New Window'])).toBeUndefined();
+  });
 });

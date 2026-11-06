@@ -64,6 +64,12 @@ snapshot it before using indices again. `verified: false` is normal for keys.
 
 ## Text documents (TextEdit, Pages, Word, Notepad)
 
+* A Pages table: `menu "Insert>Table>Plain"` (or "Headers"), `set_value` the
+  sidebar's `Rows` and `Columns` fields to the size, click the first cell, then
+  type cells with `press_key Tab` between them, and end with
+  `press_key "Shift+Tab"` — it commits the last cell; Escape discards it.
+  A pasted tab-separated block becomes a text box in Pages, not a table.
+
 * Rewriting text: `set_value` on the text area with the whole new text —
   one verified step (typo fixes, an added last line).
 * New formatted text, in ONE `computer_run_steps`: `menu "Format>Font>Bold"`,
@@ -75,6 +81,24 @@ snapshot it before using indices again. `verified: false` is normal for keys.
 
 ## Spreadsheets (Numbers, Excel)
 
+**A new table is ONE paste.** Write the whole table as text — columns
+separated by `\t`, rows by `\n`, header first, formulas as `=B2*C2` (A1
+references; the header is row 1):
+
+* **Numbers**, in the `newDocument` window, one `computer_run_steps`:
+  `press_key Escape`, `press_key Escape`, `press_key "Meta+A"`,
+  `press_key Delete` (removes the blank 22×7 table), `paste_text "<the table>"`.
+  Numbers builds a table sized exactly to the data — header row, label
+  column, formulas computed — and leaves it selected: a chart is the next step
+  (`menu "Insert>Chart>2D Column"`). Check one computed value with a
+  `computer_snapshot` `query`, then export.
+* **Excel / LibreOffice Calc**: click cell A1, `press_key Escape`, then
+  `paste_text "<the table>"` — tabs split into cells, formulas compute.
+* Numbers renames an untitled document by itself ("Item Price List —
+  Suggested"): the same window, same `windowId`.
+
+Editing cells of an existing table:
+
 * Click the first cell by the snapshot's cell index, then type the values in
   one plan: `type_text`, `press_key Tab`, …, `press_key Return` per row.
   `\t` inside typed text does not move cells.
@@ -85,12 +109,11 @@ snapshot it before using indices again. `verified: false` is normal for keys.
   swallows the rest of the row.
 * `set_value` on a cell is refused (grids accept the write and show nothing).
 * Numbers' blank table has a header row: your header goes in row 1.
-* **Before exporting a Numbers table, size it to the data**: in the Format
-  sidebar's Table tab, `set_value` the `Columns` field (and `Rows`) to the
-  data's size — the blank table has 7 columns and 22 rows, and a CSV keeps the
-  empty columns.
-* Charts (Numbers): select the data first, then `menu "Insert>Chart>2D Column"`
-  (labels as the menu reads them).
+* A typed table must be sized to the data before export: the Format sidebar's
+  `Rows` / `Columns` fields (`set_value`). A CSV keeps empty columns.
+* Keep Numbers' header row and header column: the first column is then the
+  chart's categories. Never set header columns to 0.
+* Charts (Numbers): select the table, then `menu "Insert>Chart>2D Column"`.
 * Excel (Windows): click the cell, `press_key Escape`, then type.
 
 ## Drawing apps (Freeform, Paint)

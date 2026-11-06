@@ -709,6 +709,20 @@ export class CuaDriverBridge implements IComputerBridge {
       const dead = await this.ensureLiveWindow(connection, req.app.pid, windowId, signal);
       if (dead) return refuse(dead);
 
+      // Reading an iWork template chooser crashes the app (an Apple bug, every
+      // time): the skill said so and the agent read it anyway.
+      if (/^com\.apple\.iWork\./i.test(req.app.appId)) {
+        const shown = (await this.windowsFor(connection, req.app.pid)).find((w) => w.id === windowId);
+        if (shown && shown.title === '' && isChooserSized(shown)) {
+          return refuse({
+            code: 'unsupported_action',
+            message:
+              'This is the template chooser, and reading it crashes the app. Blank is preselected: send press_key Return ' +
+              'to this window — or use computer_launch_app { newDocument: true }, which does that for you.',
+          });
+        }
+      }
+
       const screenshotPath = req.includeScreenshot
         ? await this.screenshotPath(connection, handle.workspaceId)
         : undefined;
@@ -1327,13 +1341,17 @@ export class CuaDriverBridge implements IComputerBridge {
     try {
       const write = await this.call(connection, 'clipboard_write', { text: args['text'] }, signal);
       if (write.isError) return write;
-      return await this.call(
+      const pasted = await this.call(
         connection,
         'hotkey',
         // Paste is ⌘V on macOS; Ctrl+V there is a different command or nothing at all.
         { pid: args['pid'], window_id: args['window_id'], keys: [toDriverKey(PASTE_MODIFIER), 'v'] },
         signal,
       );
+      // The app reads the clipboard after the key arrives — Numbers parses a
+      // table first. Restoring at once pasted the user's clipboard instead.
+      await new Promise((r) => setTimeout(r, PASTE_SETTLE_MS));
+      return pasted;
     } finally {
       if (previous !== undefined) {
         await this.call(connection, 'clipboard_write', { text: previous }).catch(() => undefined);
@@ -1749,10 +1767,11 @@ export class CuaDriverBridge implements IComputerBridge {
   async saveAs(
     handle: ComputerHandle,
     app: ComputerAppIdentity,
-    windowId: number,
+    documentWindowId: number,
     opts: SaveAsRequest,
     signal?: AbortSignal,
   ): Promise<SaveAsResult> {
+    let windowId = documentWindowId;
     const connection = this.connections.get(handle.workspaceId);
     const steps: string[] = [];
     const fail = (message: string, code: ComputerRefusalCode = 'provider_unavailable'): SaveAsResult => ({
@@ -1777,24 +1796,26 @@ export class CuaDriverBridge implements IComputerBridge {
         await this.callOk(connection, 'press_key', { pid, window_id: windowId, key: 'return' }, signal);
         steps.push('Return');
       } else {
-        // 1. The dialog.
-        let nameField = await this.waitForRow(connection, pid, windowId, 'saveAsNameTextField', ['AXTextField'], 600, signal);
-        if (!nameField) {
+        // 1. The dialog: a sheet on the document (TextEdit, iWork) or a
+        // window of its own (Freeform's export) — look in every window.
+        let panel = await this.findPanel(connection, pid, windowId, 600, signal);
+        if (!panel) {
           const menu = opts.menu && opts.menu.length > 0 ? [...opts.menu] : ['File', 'Save…'];
           await this.menuOrFail(connection, pid, windowId, menu, signal);
           steps.push(`menu ${menu.join('>')}`);
-          nameField = await this.waitForRow(connection, pid, windowId, 'saveAsNameTextField', ['AXTextField'], 2_500, signal);
-          if (!nameField) {
-            // An export's options sheet comes first.
-            const next = await this.waitForRow(connection, pid, windowId, 'Next', ['AXButton'], 2_000, signal);
+          panel = await this.findPanel(connection, pid, windowId, 2_500, signal);
+          if (!panel) {
+            // An export's options sheet comes first ("Next…" exactly — not "Next Sheet").
+            const next = await this.findLabelled(connection, pid, windowId, 'Next…', ['AXButton'], 2_000, signal);
             if (next) {
               await this.callOk(connection, 'click', { element_token: next }, signal);
               steps.push('Next…');
-              nameField = await this.waitForRow(connection, pid, windowId, 'saveAsNameTextField', ['AXTextField'], 4_000, signal);
+              panel = await this.findPanel(connection, pid, windowId, 4_000, signal);
             }
           }
         }
-        if (!nameField) return fail('The save dialog did not open.');
+        if (!panel) return fail('The save dialog did not open.');
+        windowId = panel;
         // 2. The folder, through Go to folder.
         await this.keysToDialog(connection, pid, windowId, { tool: 'hotkey', args: { keys: ['cmd', 'shift', 'g'] } }, signal);
         const pathField = await this.findRow(connection, pid, windowId, 'PathTextField', ['AXTextField'], 3_000, signal);
@@ -1867,17 +1888,30 @@ export class CuaDriverBridge implements IComputerBridge {
     const pid = app.pid;
     const iwork = /^com\.apple\.iWork\./i.test(app.appId);
     try {
-      const existing = await this.windowsFor(connection, pid);
-      const before = new Set(existing.map((w) => w.id));
-      const anchor = mainWindow(existing);
-      if (anchor) {
-        await this.menuOrFail(connection, pid, anchor.id, ['File', 'New'], signal);
-        steps.push('File>New');
-      } else {
+      let existing = (await this.windowsFor(connection, pid)).filter((w) => !w.floating);
+      if (existing.length === 0) {
+        // Windowless (a document app launched in the background): activation
+        // brings up a restored document, its Open panel or its chooser. Wait
+        // for the first one; Keynote took several seconds.
         await this.call(connection, 'bring_to_front', { pid }, signal).catch(() => undefined);
         steps.push('activate');
+        for (let waited = 0; waited < 10_000 && existing.length === 0; waited += 500) {
+          await new Promise((r) => setTimeout(r, 500));
+          existing = (await this.windowsFor(connection, pid)).filter((w) => !w.floating);
+        }
       }
       const handled = new Set<number>();
+      // What appeared on activation may already be the way to a new document.
+      const firstChooser = iwork ? existing.find((w) => w.title === '' && isChooserSized(w)) : undefined;
+      const firstOpen = existing.find((w) => w.title === 'Open');
+      const before = new Set(existing.filter((w) => w !== firstChooser && w !== firstOpen).map((w) => w.id));
+      const anchor = mainWindow(existing.filter((w) => w !== firstChooser && w !== firstOpen));
+      if (!firstChooser && !firstOpen) {
+        if (!anchor) return { steps, refusal: { code: 'target_lost', message: 'The app shows no window to create a document from.' } };
+        const item = await this.newDocumentItem(connection, pid, anchor.id, signal);
+        await this.menuOrFail(connection, pid, anchor.id, ['File', item], signal);
+        steps.push(`File>${item}`);
+      }
       const deadline = Date.now() + 15_000;
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 600));
@@ -1893,7 +1927,7 @@ export class CuaDriverBridge implements IComputerBridge {
           }
         }
         const fresh = windows.filter((w) => !before.has(w.id) && !handled.has(w.id) && w.title !== 'Open');
-        const chooser = iwork ? fresh.find((w) => w.title === '') : undefined;
+        const chooser = iwork ? fresh.find((w) => w.title === '' && isChooserSized(w)) : undefined;
         if (chooser) {
           handled.add(chooser.id);
           await this.keysToDialog(connection, pid, chooser.id, { tool: 'press_key', args: { key: 'return' } }, signal);
@@ -1909,6 +1943,65 @@ export class CuaDriverBridge implements IComputerBridge {
       return { steps, refusal: { code: 'target_lost', message: `No new document window appeared. Steps done: ${steps.join(' → ') || 'none'}.` } };
     } catch (err) {
       return { steps, refusal: this.errorRefusal(err) };
+    }
+  }
+
+  /**
+   * The File-menu item that makes a new document: "New" or "New…" where the
+   * app has it, else "New Board" (Freeform), "New Document", "New
+   * Presentation"… — never a tab, window, folder or anything "from".
+   */
+  private async newDocumentItem(connection: Connection, pid: number, windowId: number, signal?: AbortSignal): Promise<string> {
+    const list = () => this.call(connection, 'invoke_menu', { pid, window_id: windowId, path: ['File', '__generatorai_list_items__'] }, signal);
+    let probe = await list();
+    if (!/Items there:/i.test(probe.text ?? '') && /window_not_key|background/i.test(probe.text ?? '')) {
+      await this.call(connection, 'bring_to_front', { pid, window_id: windowId }, signal).catch(() => undefined);
+      probe = await list();
+    }
+    const listed = /Items there:\s*(.*)$/is.exec(probe.text ?? '');
+    const items = listed ? [...listed[1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!) : [];
+    return pickNewDocumentItem(items) ?? 'New';
+  }
+
+  /** The window holding a save panel's name field: the given one first, then the app's other windows. */
+  private async findPanel(connection: Connection, pid: number, preferred: number, timeoutMs: number, signal?: AbortSignal): Promise<number | undefined> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const others = (await this.windowsFor(connection, pid)).filter((w) => w.id !== preferred && !w.floating).map((w) => w.id);
+      for (const id of [preferred, ...others]) {
+        if (await this.findRow(connection, pid, id, 'saveAsNameTextField', ['AXTextField'], 0, signal)) return id;
+      }
+      if (Date.now() >= deadline) return undefined;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+
+  /** A row whose label is exactly `label` (ellipsis-insensitive). */
+  private async findLabelled(
+    connection: Connection,
+    pid: number,
+    windowId: number,
+    label: string,
+    roles: readonly string[],
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    const norm = (v: unknown) => String(v ?? '').replace(/…|\.{3}/g, '').trim().toLowerCase();
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const result = await this.call(
+        connection,
+        'get_window_state',
+        { pid, window_id: windowId, query: label.replace(/…$/u, ''), tree_format: 'elements', include_screenshot: false, timeout_ms: SNAPSHOT_WALK_MS },
+        signal,
+      );
+      if (!result.isError && result.structuredJson) {
+        const rows = (JSON.parse(result.structuredJson) as { elements?: Array<Record<string, unknown>> }).elements ?? [];
+        const row = rows.find((r) => roles.includes(String(r['role'])) && norm(r['label']) === norm(label));
+        if (row && typeof row['element_token'] === 'string') return row['element_token'];
+      }
+      if (Date.now() >= deadline) return undefined;
+      await new Promise((r) => setTimeout(r, 300));
     }
   }
 
@@ -2712,6 +2805,20 @@ export function firstNonMenuCandidate(message: string | undefined): number | und
   return undefined;
 }
 
+/** The File-menu item that creates a new document, from the items the menu lists. */
+export function pickNewDocumentItem(items: readonly string[]): string | undefined {
+  const plain = items.find((i) => /^new(…|\.\.\.)?$/i.test(i.trim()));
+  if (plain) return plain;
+  return items.find(
+    (i) => /^new\b/i.test(i) && !/\b(tab|window|folder|smart|from|playlist|tag|group|private)\b/i.test(i),
+  );
+}
+
+/** An iWork template chooser: an untitled window the size of a document browser, not a small alert. */
+export function isChooserSized(w: ComputerWindowInfo): boolean {
+  return !w.bounds || (w.bounds.w >= 700 && w.bounds.h >= 450);
+}
+
 /** A target named by label rather than snapshot index, as `run_steps` takes it. */
 function named(req: { name: string; role?: string; nth?: number }): Json {
   return { name: req.name, ...(req.role ? { role: req.role } : {}), ...(req.nth !== undefined ? { nth: req.nth } : {}) };
@@ -2795,6 +2902,9 @@ const SNAPSHOT_WALK_MS = 4_000;
 
 /** How long a freshly launched macOS app may sit windowless before each nudge (activate, then ⌘N). */
 const WINDOWLESS_NUDGE_MS = 4_000;
+
+/** How long a paste keeps the agent's text on the clipboard before restoring the user's. */
+const PASTE_SETTLE_MS = 600;
 
 /** The modifier the platform's paste shortcut uses. */
 const PASTE_MODIFIER = process.platform === 'darwin' ? 'Meta' : 'Control';
