@@ -1873,6 +1873,9 @@ export class CuaDriverBridge implements IComputerBridge {
     signal?: AbortSignal,
   ): Promise<SaveAsResult> {
     let windowId = documentWindowId;
+    // The dialog this call opened: closed again when the call fails part-way,
+    // so the agent is not left with a modal panel that blocks the app.
+    let openDialog: number | undefined;
     const connection = this.connections.get(handle.workspaceId);
     const steps: string[] = [];
     const fail = (message: string, code: ComputerRefusalCode = 'provider_unavailable'): SaveAsResult => ({
@@ -1927,6 +1930,7 @@ export class CuaDriverBridge implements IComputerBridge {
         }
         if (!panel) return fail('The save dialog did not open.');
         windowId = panel;
+        openDialog = panel;
         // 2. The folder, through Go to folder.
         const goTo = async () => {
           await this.keysToDialog(connection, pid, windowId, { tool: 'hotkey', args: { keys: ['cmd', 'shift', 'g'] } }, signal);
@@ -1938,7 +1942,10 @@ export class CuaDriverBridge implements IComputerBridge {
           await this.call(connection, 'bring_to_front', { pid, window_id: windowId }, signal).catch(() => undefined);
           pathField = await goTo();
         }
-        if (!pathField) return fail('Go to folder did not open in the save dialog.');
+        if (!pathField) {
+          await this.dismissDialog(connection, pid, openDialog, signal);
+          return fail('Go to folder did not open in the save dialog.');
+        }
         // A value equal to the current one is not an edit, and Return then goes nowhere: make it one.
         const folderValue = pathField.value === opts.folder ? `${opts.folder.replace(/\/+$/u, '')}/` : opts.folder;
         await this.callOk(connection, 'set_value', { element_token: pathField.token, value: folderValue }, signal);
@@ -1951,11 +1958,15 @@ export class CuaDriverBridge implements IComputerBridge {
         const where = await this.rowValue(connection, pid, windowId, 'where popup', signal, 1_500);
         const folderName = path.basename(opts.folder);
         if (where !== undefined && where.replace(/[\u2068\u2069]/gu, '').trim() !== folderName) {
+          await this.dismissDialog(connection, pid, windowId, signal);
           return fail(`The dialog shows the folder "${where}", not "${folderName}".`);
         }
         // 3. Name and format.
         const field = await this.waitForRow(connection, pid, windowId, 'saveAsNameTextField', ['AXTextField'], 2_000, signal);
-        if (!field) return fail('The name field went away.');
+        if (!field) {
+          await this.dismissDialog(connection, pid, windowId, signal);
+          return fail('The name field went away.');
+        }
         await this.callOk(connection, 'set_value', { element_token: field, value: opts.name }, signal);
         steps.push(`name ${opts.name}`);
         // The format: the one asked for, else the one the name's extension
@@ -2013,7 +2024,17 @@ export class CuaDriverBridge implements IComputerBridge {
       return fail(`The dialog closed but ${target} did not appear.`);
     } catch (err) {
       const refusal = this.errorRefusal(err);
+      await this.dismissDialog(connection, pid, openDialog, signal);
       return fail(refusal.message, refusal.code);
+    }
+  }
+
+  /** Closes a save dialog left open by a failed save_as (Escape, twice for a Go to folder sheet on top). */
+  private async dismissDialog(connection: Connection, pid: number, windowId: number | undefined, signal?: AbortSignal): Promise<void> {
+    if (windowId === undefined) return;
+    for (let n = 0; n < 2; n += 1) {
+      if (!(await this.windowsFor(connection, pid)).some((w) => w.id === windowId)) return;
+      await this.keysToDialog(connection, pid, windowId, { tool: 'press_key', args: { key: 'escape' } }, signal).catch(() => undefined);
     }
   }
 
