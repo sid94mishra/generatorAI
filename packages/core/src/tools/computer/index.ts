@@ -19,6 +19,7 @@ import type { ComputerToolContext, ComputerToolFactory } from './computerToolTyp
 import {
   APP_TARGET_PROPERTIES,
   actionPayload,
+  agentFacing,
   changesPayload,
   callContext,
   coerceInt,
@@ -504,7 +505,7 @@ const createLaunchAppTool: ComputerToolFactory = (ctx): ToolDefinition => ({
       args['newDocument'] === true,
     );
     if (refusal || !app) {
-      return { ok: false, refusal: refusal?.code, message: refusal?.message, ...(steps?.length ? { steps: steps.join(' → ') } : {}) };
+      return { ok: false, refusal: refusal?.code, message: agentFacing(refusal?.message), ...(steps?.length ? { steps: steps.join(' → ') } : {}) };
     }
     return {
       ok: true,
@@ -513,6 +514,14 @@ const createLaunchAppTool: ComputerToolFactory = (ctx): ToolDefinition => ({
       pid: app.pid,
       ...(window ? { windowId: window.id, windowTitle: window.title } : {}),
       ...(args['newDocument'] === true && window ? { newDocument: `Created "${window.title}" (${steps?.join(' → ') ?? ''}). Work only in this window.` } : {}),
+      // An opened file is the user's: most apps autosave every edit into it.
+      ...(launchArgs?.some((a) => a.startsWith('/') || /^[A-Za-z]:[\\/]/.test(a))
+        ? {
+            openedFile:
+              'This app saves edits into the file it opened. If the task produces a different file and keeps this ' +
+              'one unchanged, duplicate it first (File>Duplicate) and work in the copy.',
+          }
+        : {}),
       note: window
         ? `The launch opened window ${window.id} ("${window.title}"). Pass that windowId to every ` +
           'later call: this app can host several windows in one process, and without the id you will ' +
@@ -703,7 +712,7 @@ const createRunStepsTool: ComputerToolFactory = (ctx): ToolDefinition => ({
       done: `${done}/${steps.length}`,
       ...(last?.ok ? changesPayload(last) : {}),
       ...(result.refusal
-        ? { refusal: result.refusal.code, message: result.refusal.message, stoppedAtStep: (result.stoppedAt ?? 0) + 1 }
+        ? { refusal: result.refusal.code, message: agentFacing(result.refusal.message), stoppedAtStep: (result.stoppedAt ?? 0) + 1 }
         : {}),
     };
   },
@@ -752,7 +761,7 @@ const createSaveAsTool: ComputerToolFactory = (ctx): ToolDefinition => ({
     });
     return result.ok
       ? { ok: true, saved: result.path, steps: result.steps.join(' → '), reindexed: 'The window changed: snapshot it again before addressing elements.' }
-      : { ok: false, refusal: result.refusal?.code, message: result.refusal?.message };
+      : { ok: false, refusal: result.refusal?.code, message: agentFacing(result.refusal?.message) };
   },
 });
 

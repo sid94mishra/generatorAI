@@ -103,8 +103,26 @@ export function refusalPayload(result: ComputerActionResult): Record<string, unk
   return {
     ok: false,
     refusal: result.refusal?.code,
-    message: result.refusal?.message,
+    message: agentFacing(result.refusal?.message),
   };
+}
+
+/**
+ * The driver's own advice names its internal calls (`get_window_state`,
+ * `bring_to_front`, `delivery_mode`), which the agent cannot make and spent
+ * turns trying to: say it in the terms of the tools the agent has.
+ */
+export function agentFacing(message: string | undefined): string | undefined {
+  if (!message) return message;
+  return message
+    .replace(/get_window_state\([^)]*\)/g, 'computer_snapshot')
+    .replace(/\bget_window_state\b/g, 'computer_snapshot')
+    .replace(/\bcall bring_to_front[^,.;]*/gi, 'bring the window to the front')
+    .replace(/\bbring_to_front\b/g, 'bringing the window to the front')
+    .replace(/(with |use |act with )?delivery_mode\s*:\s*\\?"foreground\\?"/g, 'in the foreground')
+    .replace(/\belement_token\b/g, 'elementIndex')
+    .replace(/\binvoke_menu\b/g, 'menu step')
+    .replace(/\bcomputer_click_point\b/g, 'a click_point step');
 }
 
 /**
@@ -328,8 +346,8 @@ export function actionPayload(result: ComputerActionResult): Record<string, unkn
       ? {
           tryNext:
             nextStep.rung === 'coordinate'
-              ? `This surface may not accept element-addressed actions. Take a snapshot with includeScreenshot, then use computer_click_point.${nextStep.reason ? ` The driver said: ${nextStep.reason}` : ''}`
-              : `This is browser page content, which the desktop tools cannot drive reliably.${nextStep.reason ? ` The driver said: ${nextStep.reason}` : ''}`,
+              ? `This surface may not accept element-addressed actions. Take a snapshot with includeScreenshot, then use click_point steps in computer_run_steps.${nextStep.reason ? ` The driver said: ${agentFacing(nextStep.reason)}` : ''}`
+              : `The provider suggests another route (${nextStep.rung}).${nextStep.reason ? ` It said: ${agentFacing(nextStep.reason)}` : ''}`,
         }
       : {}),
   };

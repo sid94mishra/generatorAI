@@ -59,9 +59,10 @@ each button by name, then read the result in `changes`. Two calls in all.
 * Do not snapshot an untitled full-size window that appears right after New
   (a template chooser or start screen): some apps crash when it is read.
   `press_key Return` accepts its default.
-* A new document from a template often holds placeholders — an empty table,
-  a title box, sample text. Remove what your content replaces before adding
-  it (`press_key Escape`, `press_key "Meta+A"` / `"Control+A"`, `press_key Delete`).
+* A new document from a template often holds placeholders — a title box,
+  sample text, an empty table. Replace placeholder text by selecting it and
+  typing over it; fill an empty table rather than adding a second one (see
+  Tables).
 * Apps that autosave write every edit into the file they opened. When the
   task keeps the original, work on a copy: `File>Duplicate` (or export to the
   new name first, then edit that). An edit made to the original by mistake:
@@ -88,10 +89,12 @@ each button by name, then read the result in `changes`. Two calls in all.
   - A grid spreadsheet: click the top-left cell, `press_key Escape`, then
     `paste_text` — the cells fill and formulas compute. A paste into a
     selected RANGE repeats to fill it: select one cell, or nothing.
-  - A spreadsheet whose sheet holds table objects: with no table selected
-    (`press_key Escape` twice), a paste creates a table sized to the data. A
-    blank template's empty placeholder table: `press_key "Meta+A"` (Ctrl+A),
-    `press_key Delete` first.
+  - A spreadsheet whose new sheet already holds an empty table: paste INTO
+    it — click its first cell, `press_key Escape`, `paste_text`; the table
+    grows to fit. Then set its row and column counts to the data's size (the
+    table's format controls), since exports keep empty rows and columns. A
+    paste beside it makes a second table, and the export becomes one file per
+    table.
   - A word processor usually keeps pasted tab-separated text as text: insert
     a table from its menu (Insert>Table, Table>Insert), size it with the
     app's row/column controls, click the first cell, then one `type_text`
@@ -101,7 +104,8 @@ each button by name, then read the result in `changes`. Two calls in all.
     edited in many apps.
   - Check one computed value with a `computer_snapshot` `query`, then save.
 * Table cells are cell rows in the tree (`AXCell`, `DataItem`), a cell's
-  text in its label: click a cell by its index — not by pixels — then type.
+  text in its label: click a cell by its index when the tree lists it, then
+  type; by pixels only when it does not.
 * Editing existing cells: click the cell by index, type values with `Tab` /
   `Return` between them (`\t` inside typed text does not move cells).
   Formulas last, down a column: `type_text "=B2*C2"`, `press_key Return`,

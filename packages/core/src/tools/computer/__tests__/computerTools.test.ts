@@ -450,3 +450,15 @@ describe('snapshotPayload', () => {
     expect(JSON.stringify(payload).length).toBeLessThan(20_000);
   });
 });
+
+describe('agentFacing', () => {
+  it('says the driver’s advice in the agent’s own tools', async () => {
+    const { agentFacing } = await import('../computerToolTypes.js');
+    const said = agentFacing(
+      'No screenshot of window 8 in this session. Call get_window_state(pid:1, window_id:8) and take x,y from it; or act with delivery_mode:"foreground", or call bring_to_front for this window first, then invoke_menu.',
+    );
+    expect(said).not.toMatch(/get_window_state|delivery_mode|bring_to_front|invoke_menu/);
+    expect(said).toContain('computer_snapshot');
+    expect(agentFacing(undefined)).toBeUndefined();
+  });
+});
