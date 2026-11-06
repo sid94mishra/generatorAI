@@ -725,7 +725,7 @@ const createSaveAsTool: ComputerToolFactory = (ctx): ToolDefinition => ({
       ...APP_TARGET_PROPERTIES,
       windowId: { type: 'number', description: 'The document\u2019s window.' },
       folder: { type: 'string', description: 'Absolute folder path the file must land in.' },
-      name: { type: 'string', description: 'File name with extension, e.g. "budget.csv". Never a path.' },
+      name: { type: 'string', description: 'File name with extension, e.g. "notes.csv". Never a path.' },
       menu: { type: 'string', description: 'Menu path that opens the dialog, e.g. "File>Export To>CSV…". Default "File>Save…".' },
       format: { type: 'string', description: 'File Format popup item, when the dialog has one, e.g. "Plain Text".' },
       replace: { type: 'boolean', description: 'Overwrite a file that already exists there. Default false.' },
