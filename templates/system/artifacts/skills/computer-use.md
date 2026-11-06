@@ -96,6 +96,8 @@ references; the header is row 1):
   `computer_snapshot` `query`, then export.
 * **Excel / LibreOffice Calc**: click cell A1, `press_key Escape`, then
   `paste_text "<the table>"` — tabs split into cells, formulas compute.
+* Numbers may show a short month ("Jan") as a full one: it is still the
+  label; do not fight the cell format.
 * Numbers renames an untitled document by itself ("Item Price List —
   Suggested"): the same window, same `windowId`.
 
