@@ -191,6 +191,9 @@ export function parseListApps(structuredJson: string): ComputerAppInfo[] {
 }
 
 /** `list_windows` → every top-level window, each carrying its owning pid. */
+/** The window level macOS draws popup and context menus at (kCGPopUpMenuWindowLevel). */
+const MENU_WINDOW_LAYER = 101;
+
 export function parseListWindows(structuredJson: string): Map<number, ComputerWindowInfo[]> {
   const root = parseJson('list_windows', structuredJson);
   const raw = root['windows'];
@@ -218,6 +221,8 @@ export function parseListWindows(structuredJson: string): Map<number, ComputerWi
         bounds: parseFrame(entry),
         onScreen: asBool(entry['is_on_screen']),
         ...(typeof entry['layer'] === 'number' && entry['layer'] !== 0 ? { floating: true } : {}),
+        // macOS draws popup and context menus at the pop-up menu level (101), untitled.
+        ...(typeof entry['layer'] === 'number' && entry['layer'] >= MENU_WINDOW_LAYER && !asString(entry['title']) ? { menu: true } : {}),
       },
       z: asBool(entry['is_on_screen']) ? asNumber(entry['z_index']) : undefined,
     });

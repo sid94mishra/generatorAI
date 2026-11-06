@@ -155,6 +155,8 @@ export interface ComputerWindowInfo {
   onScreen?: boolean;
   /** A panel above the document layer (a Colours or Fonts palette, an inspector): never the window to work in. */
   floating?: boolean;
+  /** An open popup or context menu: it holds the app's input until an item is chosen or it is dismissed. */
+  menu?: boolean;
 }
 
 export interface ComputerSnapshot {

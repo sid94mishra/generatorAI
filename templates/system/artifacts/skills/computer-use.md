@@ -59,6 +59,13 @@ each button by name, then read the result in `changes`. Two calls in all.
 * Do not snapshot an untitled full-size window that appears right after New
   (a template chooser or start screen): some apps crash when it is read.
   `press_key Return` accepts its default.
+* A new document from a template often holds placeholders — an empty table,
+  a title box, sample text. Remove what your content replaces before adding
+  it (`press_key Escape`, `press_key "Meta+A"` / `"Control+A"`, `press_key Delete`).
+* Apps that autosave write every edit into the file they opened. When the
+  task keeps the original, work on a copy: `File>Duplicate` (or export to the
+  new name first, then edit that). An edit made to the original by mistake:
+  `File>Revert To>Last Opened`.
 * Reading a file's contents: use your file tools; the app is for producing.
 * An app may retitle an untitled document by itself; the `windowId` stays.
 
@@ -79,16 +86,19 @@ each button by name, then read the result in `changes`. Two calls in all.
 * **Data goes in as ONE paste**: columns separated by `\t`, rows by `\n`,
   header first, formulas as `=B2*C2` (A1 references; the header is row 1).
   - A grid spreadsheet: click the top-left cell, `press_key Escape`, then
-    `paste_text` — the cells fill and formulas compute.
+    `paste_text` — the cells fill and formulas compute. A paste into a
+    selected RANGE repeats to fill it: select one cell, or nothing.
   - A spreadsheet whose sheet holds table objects: with no table selected
     (`press_key Escape` twice), a paste creates a table sized to the data. A
     blank template's empty placeholder table: `press_key "Meta+A"` (Ctrl+A),
     `press_key Delete` first.
   - A word processor usually keeps pasted tab-separated text as text: insert
     a table from its menu (Insert>Table, Table>Insert), size it with the
-    app's row/column controls, click the first cell, type cells with
-    `press_key Tab` between them, and leave the last cell with `Tab` or
-    `Shift+Tab` — Escape cancels the cell being edited in many apps.
+    app's row/column controls, click the first cell, then one `type_text`
+    per cell with a `press_key Tab` step between them (a `\t` inside typed
+    text inserts a tab character or a column, never moves cells), and leave
+    the last cell with `Tab` or `Shift+Tab` — Escape cancels the cell being
+    edited in many apps.
   - Check one computed value with a `computer_snapshot` `query`, then save.
 * Editing existing cells: click the cell by index, type values with `Tab` /
   `Return` between them (`\t` inside typed text does not move cells).
@@ -117,6 +127,12 @@ save in another format names the app's own menu item for it (`menu` — e.g. an
 dialog labels it ("Plain Text", "CSV"). It reports the saved path. Save in place:
 `menu "File>Save"` as a step. Close with `menu "File>Close"`; never "Don't
 Save" on work the task keeps.
+
+## Menus that open
+
+A press that opens a popup or context menu reports `A menu is open: "…", "…"`
+in `changes`: choose an item with a `click` step by that name, or
+`press_key Escape`. An open menu holds the app's input until one or the other.
 
 ## When presses do nothing
 

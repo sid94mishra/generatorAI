@@ -31,7 +31,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import * as fs from 'node:fs/promises';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type {
@@ -1096,6 +1096,9 @@ export class CuaDriverBridge implements IComputerBridge {
     try {
       const call = await this.buildCall(connection, req);
       if ('refusal' in call) return refuse(call.refusal);
+      if (call.tool === 'invoke_menu' && typeof call.args['pid'] === 'number' && typeof call.args['window_id'] === 'number') {
+        await this.closeStrayMenu(connection, call.args['pid'], call.args['window_id'], signal);
+      }
 
       let result = await this.call(connection, call.tool, call.args, signal);
       let refusal = this.refusalFor(result);
@@ -1465,7 +1468,13 @@ export class CuaDriverBridge implements IComputerBridge {
     // would click it, and run it once more.
     if (/window_not_key|not the confirmed document menu context|disabled while the app is in the background/i.test(text)) {
       await this.call(connection, 'bring_to_front', { pid: args['pid'], window_id: args['window_id'] }, signal).catch(() => undefined);
-      return this.call(connection, 'invoke_menu', args, signal);
+      // The app re-enables its menu items a moment after it comes to the front.
+      let retried = await this.call(connection, 'invoke_menu', args, signal);
+      for (let attempt = 0; attempt < 2 && /disabled/i.test(this.refusalFor(retried)?.message ?? ''); attempt++) {
+        await new Promise((r) => setTimeout(r, 400));
+        retried = await this.call(connection, 'invoke_menu', args, signal);
+      }
+      return retried;
     }
     // Two items share the label (Numbers' File menu has more than one "New").
     // Find them in the menu bar and press the enabled one under the right menu.
@@ -1724,10 +1733,50 @@ export class CuaDriverBridge implements IComputerBridge {
       const reindexed = /(^|\n)\s*reindexed:/i.test(diff);
       this.windowReads.set(key, { ...read, latest: next, epoch: reindexed ? read.epoch + 1 : read.epoch });
       const unchanged = root['since_status'] === 'no_change';
+      // A menu the action opened lives in a window of its own the agent cannot
+      // read, and it blocks the app until something is chosen: name its items.
+      const menu = await this.openMenuNote(connection, pid, windowId, signal);
+      if (menu) return { diff: unchanged ? menu : `${menu}\n${clipDiff(diff)}`, reindexed, unchanged: false };
       return { diff: unchanged ? '' : clipDiff(diff), reindexed, unchanged };
     } catch {
       return undefined;
     }
+  }
+
+  /** What an open popup or context menu offers, or undefined when none is open. */
+  private async openMenuNote(connection: Connection, pid: number, windowId: number, signal?: AbortSignal): Promise<string | undefined> {
+    if (!(await this.windowsFor(connection, pid)).some((w) => w.menu)) return undefined;
+    const items = await this.openMenuItems(connection, pid, windowId, signal);
+    const listed = items.length > 0 ? `: ${items.map((i) => `"${i}"`).join(', ')}` : '';
+    return (
+      `A menu is open${listed}. Choose an item with a click step by its name, or press_key Escape — ` +
+      'an open menu blocks the app until one or the other.'
+    );
+  }
+
+  /** Items of menus open in the window — every menu item that is not under the menu bar. */
+  private async openMenuItems(connection: Connection, pid: number, windowId: number, signal?: AbortSignal): Promise<string[]> {
+    const result = await this.call(
+      connection,
+      'get_window_state',
+      { pid, window_id: windowId, tree_format: 'elements', include_screenshot: false, timeout_ms: SNAPSHOT_WALK_MS },
+      signal,
+    ).catch(() => undefined);
+    if (!result?.structuredJson) return [];
+    const rows = (JSON.parse(result.structuredJson) as { elements?: unknown }).elements;
+    return openMenuLabels(Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : []);
+  }
+
+  /**
+   * A popup or context menu left open (an earlier press that chose nothing)
+   * holds the app's input: menu commands, New and saves then do nothing.
+   * Close it the way a person would — the window in front, Escape.
+   */
+  private async closeStrayMenu(connection: Connection, pid: number, windowId: number, signal?: AbortSignal): Promise<boolean> {
+    if (!(await this.windowsFor(connection, pid)).some((w) => w.menu)) return false;
+    await this.call(connection, 'bring_to_front', { pid, window_id: windowId }, signal).catch(() => undefined);
+    await this.call(connection, 'press_key', { pid, window_id: windowId, key: 'escape', delivery_mode: 'foreground' }, signal).catch(() => undefined);
+    return true;
   }
 
   /** Bounded so a long read-only session cannot grow this without limit. */
@@ -1808,6 +1857,11 @@ export class CuaDriverBridge implements IComputerBridge {
         if (!field) return fail('No save dialog with a file-name field appeared.');
         await this.callOk(connection, 'set_value', { element_token: field, value: target }, signal);
         steps.push(`file name ${target}`);
+        const formats = opts.format ? [opts.format] : formatNamesFor(opts.name);
+        if (formats.length > 0) {
+          const chosen = await this.chooseFormat(connection, pid, windowId, formats, signal);
+          if (chosen) steps.push(`format ${chosen}`);
+        }
         await this.callOk(connection, 'press_key', { pid, window_id: windowId, key: 'return' }, signal);
         steps.push('Return');
       } else {
@@ -1818,7 +1872,12 @@ export class CuaDriverBridge implements IComputerBridge {
           const menu = opts.menu && opts.menu.length > 0 ? [...opts.menu] : ['File', 'Save…'];
           await this.menuOrFail(connection, pid, windowId, menu, signal);
           steps.push(`menu ${menu.join('>')}`);
-          panel = await this.findPanel(connection, pid, windowId, 2_500, signal);
+          panel = await this.findPanel(connection, pid, windowId, 4_000, signal);
+          if (!panel) {
+            // Some apps put the dialog up only once they are in front.
+            await this.call(connection, 'bring_to_front', { pid, window_id: windowId }, signal).catch(() => undefined);
+            panel = await this.findPanel(connection, pid, windowId, 3_000, signal);
+          }
           if (!panel) {
             // An export's options sheet comes first ("Next…" exactly — not "Next Sheet").
             const next = await this.findLabelled(connection, pid, windowId, 'Next…', ['AXButton'], 2_000, signal);
@@ -1832,8 +1891,16 @@ export class CuaDriverBridge implements IComputerBridge {
         if (!panel) return fail('The save dialog did not open.');
         windowId = panel;
         // 2. The folder, through Go to folder.
-        await this.keysToDialog(connection, pid, windowId, { tool: 'hotkey', args: { keys: ['cmd', 'shift', 'g'] } }, signal);
-        const pathField = await this.findRow(connection, pid, windowId, 'PathTextField', ['AXTextField'], 3_000, signal);
+        const goTo = async () => {
+          await this.keysToDialog(connection, pid, windowId, { tool: 'hotkey', args: { keys: ['cmd', 'shift', 'g'] } }, signal);
+          return this.findRow(connection, pid, windowId, 'PathTextField', ['AXTextField'], 3_000, signal);
+        };
+        let pathField = await goTo();
+        if (!pathField) {
+          // The keys can land before the dialog takes focus: once more, with it in front.
+          await this.call(connection, 'bring_to_front', { pid, window_id: windowId }, signal).catch(() => undefined);
+          pathField = await goTo();
+        }
         if (!pathField) return fail('Go to folder did not open in the save dialog.');
         // A value equal to the current one is not an edit, and Return then goes nowhere: make it one.
         const folderValue = pathField.value === opts.folder ? `${opts.folder.replace(/\/+$/u, '')}/` : opts.folder;
@@ -1850,16 +1917,14 @@ export class CuaDriverBridge implements IComputerBridge {
         if (!field) return fail('The name field went away.');
         await this.callOk(connection, 'set_value', { element_token: field, value: opts.name }, signal);
         steps.push(`name ${opts.name}`);
-        if (opts.format) {
-          const popup = await this.waitForRow(connection, pid, windowId, 'File Format', ['AXPopUpButton'], 1_500, signal);
-          if (popup) {
-            await this.callOk(connection, 'set_value', { element_token: popup, value: opts.format }, signal);
-            steps.push(`format ${opts.format}`);
-          } else {
-            // The dialog offers one format — TextEdit's plain-text document
-            // saves as text with no popup — so there is nothing to choose.
-            steps.push('format (only one offered)');
-          }
+        // The format: the one asked for, else the one the name's extension
+        // implies, chosen in whichever popup of the dialog lists it — "File
+        // Format", "Format", "Save as type"… A dialog whose popup lists none
+        // of them keeps its own format, and the file check below says so.
+        const formats = opts.format ? [opts.format] : formatNamesFor(opts.name);
+        if (formats.length > 0) {
+          const chosen = await this.chooseFormat(connection, pid, windowId, formats, signal);
+          steps.push(chosen ? `format ${chosen}` : 'format (none of the dialog\u2019s popups lists it)');
         }
         // 4. Save.
         const ok = await this.waitForRow(connection, pid, windowId, 'OKButton', ['AXButton'], 1_500, signal);
@@ -1879,8 +1944,24 @@ export class CuaDriverBridge implements IComputerBridge {
       }
       // 5. The file on disk — the only proof that counts.
       for (let waited = 0; waited <= 6_000; waited += 300) {
-        if (existsSync(target)) return { ok: true, path: target, steps };
+        if (existsSync(target)) {
+          const folder = exportedFolder(target);
+          if (folder) {
+            return fail(
+              `${target} is a folder of ${folder.length} files (${folder.slice(0, 5).join(', ')}): the app exported one file per ` +
+                'table, sheet or page. Remove what should not be there (an empty placeholder table, an extra sheet) and export again with replace: true.',
+            );
+          }
+          return { ok: true, path: target, steps };
+        }
         await new Promise((r) => setTimeout(r, 300));
+      }
+      const instead = savedInstead(opts.folder, opts.name);
+      if (instead) {
+        return fail(
+          `The app saved ${instead} instead of ${opts.name}: the dialog kept its own format. Pass format as the dialog names it ` +
+            '(take a computer_snapshot of the dialog to see its format popup), and delete the stray file if the task does not want it.',
+        );
       }
       return fail(`The dialog closed but ${target} did not appear.`);
     } catch (err) {
@@ -1908,14 +1989,19 @@ export class CuaDriverBridge implements IComputerBridge {
     if (!connection) return { steps, refusal: disconnected() };
     const pid = app.pid;
     const visible = async () => (await this.windowsFor(connection, pid)).filter((w) => !w.floating && !w.minimised);
+    // Ready: a window to work from, or a start screen to answer. A window that
+    // has just appeared reports no size for a moment.
+    const ready = (ws: readonly ComputerWindowInfo[]) => ws.some(isIntermediateWindow) || mainWindow(ws) !== undefined;
     try {
       let existing = await visible();
-      if (existing.length === 0) {
+      if (!ready(existing)) {
         // Windowless (a document app launched in the background): activation
         // brings up a restored document, an Open panel or a start screen.
-        await this.call(connection, 'bring_to_front', { pid }, signal).catch(() => undefined);
-        steps.push('activate');
-        for (let waited = 0; waited < 10_000 && existing.length === 0; waited += 500) {
+        if (existing.length === 0) {
+          await this.call(connection, 'bring_to_front', { pid }, signal).catch(() => undefined);
+          steps.push('activate');
+        }
+        for (let waited = 0; waited < 10_000 && !ready(existing); waited += 500) {
           await new Promise((r) => setTimeout(r, 500));
           existing = await visible();
         }
@@ -1932,10 +2018,12 @@ export class CuaDriverBridge implements IComputerBridge {
       const anchor = mainWindow(existing.filter((w) => w !== shownChooser));
       if (!shownChooser) {
         if (!anchor) return { steps, refusal: { code: 'target_lost', message: 'The app shows no window to create a document from.' } };
+        if (await this.closeStrayMenu(connection, pid, anchor.id, signal)) steps.push('closed an open menu (Escape)');
         steps.push(await this.runNewCommand(connection, pid, anchor.id, signal));
       }
-      const deadline = Date.now() + 15_000;
-      while (Date.now() < deadline) {
+      let pressedButton = false;
+      const started = Date.now();
+      while (Date.now() - started < 15_000) {
         await new Promise((r) => setTimeout(r, 600));
         const windows = await visible();
         const fresh = windows.filter((w) => !before.has(w.id) && !handled.has(w.id));
@@ -1954,11 +2042,36 @@ export class CuaDriverBridge implements IComputerBridge {
           this.bumpEpoch(pid, made.id);
           return { window: { id: made.id, title: made.title }, steps };
         }
+        // Nothing yet: the window in front may be a start screen or an Open
+        // panel that ignores New and offers its own button instead.
+        if (!pressedButton && Date.now() - started > 4_000) {
+          pressedButton = true;
+          for (const w of windows.filter((x) => x.title !== '').slice(0, 3)) {
+            const button = await this.newDocumentButton(connection, pid, w.id, signal);
+            if (!button) continue;
+            await this.callOk(connection, 'click', { element_token: button.token }, signal);
+            steps.push(button.label);
+            break;
+          }
+        }
       }
       return { steps, refusal: { code: 'target_lost', message: `No new document window appeared. Steps done: ${steps.join(' → ') || 'none'}.` } };
     } catch (err) {
       return { steps, refusal: this.errorRefusal(err) };
     }
+  }
+
+  /** A start screen's or Open panel's own way to a blank document: "New Document", "Blank Document", "Create"… */
+  private async newDocumentButton(connection: Connection, pid: number, windowId: number, signal?: AbortSignal): Promise<{ token: string; label: string } | undefined> {
+    const result = await this.call(
+      connection,
+      'get_window_state',
+      { pid, window_id: windowId, tree_format: 'elements', include_screenshot: false, timeout_ms: SNAPSHOT_WALK_MS },
+      signal,
+    ).catch(() => undefined);
+    if (!result?.structuredJson) return undefined;
+    const rows = (JSON.parse(result.structuredJson) as { elements?: unknown }).elements;
+    return pickNewDocumentButton(Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : []);
   }
 
   /**
@@ -1998,6 +2111,31 @@ export class CuaDriverBridge implements IComputerBridge {
     const listed = /Items there:\s*(.*)$/is.exec(probe.text ?? '');
     const items = listed ? [...listed[1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!) : [];
     return pickNewDocumentItem(items);
+  }
+
+  /** Picks the first of `formats` that a popup of the dialog lists; the format-looking popups are tried first. */
+  private async chooseFormat(connection: Connection, pid: number, windowId: number, formats: readonly string[], signal?: AbortSignal): Promise<string | undefined> {
+    const result = await this.call(
+      connection,
+      'get_window_state',
+      { pid, window_id: windowId, tree_format: 'elements', include_screenshot: false, timeout_ms: SNAPSHOT_WALK_MS },
+      signal,
+    );
+    const rows = result.structuredJson ? (JSON.parse(result.structuredJson) as { elements?: unknown }).elements : undefined;
+    const popups = (Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [])
+      .filter((r) => /PopUpButton$|ComboBox$/.test(String(r['role'] ?? '')) && typeof r['element_token'] === 'string')
+      .filter((r) => !/where|location|folder|name/i.test(`${r['label'] ?? ''} ${r['identifier'] ?? ''}`))
+      .sort((a, b) => Number(/format|type/i.test(String(b['label'] ?? ''))) - Number(/format|type/i.test(String(a['label'] ?? ''))));
+    for (const popup of popups) {
+      const current = String(popup['value'] ?? '').trim().toLowerCase();
+      const already = formats.find((f) => current === f.toLowerCase());
+      if (already) return already;
+      for (const format of formats) {
+        const set = await this.call(connection, 'set_value', { element_token: popup['element_token'], value: format }, signal);
+        if (!this.refusalFor(set)) return format;
+      }
+    }
+    return undefined;
   }
 
   /** The window holding a save panel's name field: the given one first, then the app's other windows. */
@@ -2838,6 +2976,90 @@ export function firstNonMenuCandidate(message: string | undefined): number | und
   if (!message || !/elements match/i.test(message)) return undefined;
   for (const m of message.matchAll(/nth (\d+): \[\d+\] (\S+)/g)) {
     if (!/^AXMenu|^MenuItem$|^menu/i.test(m[2]!)) return Number(m[1]);
+  }
+  return undefined;
+}
+
+/** Labels of menu items that are not in the menu bar: the items of an open popup or context menu. */
+export function openMenuLabels(rows: ReadonlyArray<Record<string, unknown>>): string[] {
+  const byIndex = new Map<number, Record<string, unknown>>();
+  for (const row of rows) if (typeof row['element_index'] === 'number') byIndex.set(row['element_index'], row);
+  const inMenuBar = (row: Record<string, unknown>): boolean => {
+    for (let at: Record<string, unknown> | undefined = row, hops = 0; at && hops < 64; hops++) {
+      if (/^AXMenuBar/.test(String(at['role'] ?? ''))) return true;
+      at = typeof at['parent_index'] === 'number' ? byIndex.get(at['parent_index']) : undefined;
+    }
+    return false;
+  };
+  const labels: string[] = [];
+  for (const row of rows) {
+    const label = String(row['label'] ?? row['title'] ?? '').trim();
+    if (!/MenuItem$/.test(String(row['role'] ?? '')) || !label || inMenuBar(row) || labels.includes(label)) continue;
+    labels.push(label);
+    if (labels.length >= 40) break;
+  }
+  return labels;
+}
+
+/**
+ * The names save dialogs give the format a file extension stands for, most
+ * common first. Generic file types, not any one app: tried against whatever
+ * popups the dialog has.
+ */
+const FORMAT_NAMES: Readonly<Record<string, readonly string[]>> = {
+  pdf: ['PDF'],
+  jpg: ['JPEG', 'JPG'],
+  jpeg: ['JPEG', 'JPG'],
+  png: ['PNG'],
+  tif: ['TIFF'],
+  tiff: ['TIFF'],
+  heic: ['HEIC'],
+  gif: ['GIF'],
+  bmp: ['BMP'],
+  txt: ['Plain Text', 'Text', 'Text Documents', 'Unicode Text'],
+  rtf: ['Rich Text Format', 'Rich Text Format (RTF)', 'RTF', 'Rich Text'],
+  csv: ['CSV', 'CSV (Comma delimited)'],
+  html: ['HTML', 'Web Page'],
+  docx: ['Word Document', 'Word', 'Word Document (.docx)'],
+  xlsx: ['Excel Workbook', 'Excel', 'Excel Workbook (.xlsx)'],
+  pptx: ['PowerPoint Presentation', 'PowerPoint'],
+  odt: ['ODF Text Document'],
+  ods: ['ODF Spreadsheet'],
+  applescript: ['Text'],
+};
+
+/** The format names a file name's extension implies, if any. */
+export function formatNamesFor(name: string): readonly string[] {
+  const ext = path.extname(name).slice(1).toLowerCase();
+  return FORMAT_NAMES[ext] ?? [];
+}
+
+/** The files inside `target` when the export made it a folder (one file per table or page). */
+function exportedFolder(target: string): string[] | undefined {
+  try {
+    return statSync(target).isDirectory() ? readdirSync(target) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A file the dialog wrote under another name — the name plus the format's own extension ("sine.pdf.tiff"). */
+function savedInstead(folder: string, name: string): string | undefined {
+  try {
+    const stray = readdirSync(folder).find((f) => f !== name && f.startsWith(`${name}.`));
+    return stray ? path.join(folder, stray) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The button a start screen or Open panel offers for a blank document, best first. */
+export function pickNewDocumentButton(rows: ReadonlyArray<Record<string, unknown>>): { token: string; label: string } | undefined {
+  const wanted = [/^new document$/i, /^blank( document)?$/i, /^create$/i, /^new$/i];
+  const buttons = rows.filter((r) => /Button$/.test(String(r['role'] ?? '')) && typeof r['element_token'] === 'string' && r['enabled'] !== false);
+  for (const pattern of wanted) {
+    const hit = buttons.find((r) => pattern.test(String(r['label'] ?? r['title'] ?? '').replace(/…|\.{3}/g, '').trim()));
+    if (hit) return { token: String(hit['element_token']), label: String(hit['label'] ?? hit['title']) };
   }
   return undefined;
 }

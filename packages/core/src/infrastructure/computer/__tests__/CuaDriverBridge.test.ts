@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ILogger } from '@generatorai/shared';
-import { CuaDriverBridge, closestMenuItem, firstNonMenuCandidate, focusHolder, mainWindow, parseRunSteps, pickNewDocumentItem, splitLaunchArguments } from '../CuaDriverBridge.js';
+import { CuaDriverBridge, closestMenuItem, firstNonMenuCandidate, focusHolder, formatNamesFor, mainWindow, openMenuLabels, parseRunSteps, pickNewDocumentButton, pickNewDocumentItem, splitLaunchArguments } from '../CuaDriverBridge.js';
 import * as nodeFs from 'node:fs';
 import * as nodeOs from 'node:os';
 import * as nodePath from 'node:path';
@@ -1723,5 +1723,39 @@ describe('pickNewDocumentItem', () => {
     expect(pickNewDocumentItem(['New Board', 'New Tab', 'New Window', 'Close'])).toBe('New Board');
     expect(pickNewDocumentItem(['New Tab', 'New Window'])).toBeUndefined();
     expect(pickNewDocumentItem([])).toBeUndefined();
+  });
+});
+
+describe('generic dialog and menu helpers', () => {
+  it('lists the items of an open popup menu, never the menu bar\'s', () => {
+    const rows = [
+      { element_index: 1, role: 'AXMenuBar' },
+      { element_index: 2, role: 'AXMenuBarItem', label: 'File', parent_index: 1 },
+      { element_index: 3, role: 'AXMenu', parent_index: 2 },
+      { element_index: 4, role: 'AXMenuItem', label: 'New', parent_index: 3 },
+      { element_index: 10, role: 'AXMenuButton', label: 'list style' },
+      { element_index: 11, role: 'AXMenu', parent_index: 10 },
+      { element_index: 12, role: 'AXMenuItem', label: '•', parent_index: 11 },
+      { element_index: 13, role: 'AXMenuItem', label: '1. 2. 3.', parent_index: 11 },
+      { element_index: 14, role: 'AXMenuItem', label: '•', parent_index: 11 },
+    ];
+    expect(openMenuLabels(rows)).toEqual(['•', '1. 2. 3.']);
+  });
+
+  it('finds a start screen\'s or Open panel\'s blank-document button, best label first', () => {
+    const rows = [
+      { role: 'AXButton', label: 'Cancel', element_token: 's:1' },
+      { role: 'AXButton', label: 'Create', element_token: 's:2' },
+      { role: 'AXButton', label: 'New Document', element_token: 's:3' },
+    ];
+    expect(pickNewDocumentButton(rows)).toEqual({ token: 's:3', label: 'New Document' });
+    expect(pickNewDocumentButton(rows.slice(0, 2))).toEqual({ token: 's:2', label: 'Create' });
+    expect(pickNewDocumentButton([{ role: 'AXButton', label: 'New Equation', element_token: 's:9' }])).toBeUndefined();
+  });
+
+  it('names the format a file extension implies', () => {
+    expect(formatNamesFor('badge.jpg')).toContain('JPEG');
+    expect(formatNamesFor('sine.PDF')).toEqual(['PDF']);
+    expect(formatNamesFor('notes')).toEqual([]);
   });
 });
