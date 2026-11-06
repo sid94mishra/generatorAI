@@ -89,7 +89,9 @@ export function toAppRef(args: Record<string, unknown>): ComputerAppRef | { erro
   if (appName) return { by: 'appName', appName };
   const pid = coerceInt(args['pid']);
   if (pid !== undefined) return { by: 'pid', pid };
-  return { error: 'One of `appId`, `appName`, or `pid` is required. Call computer_list_apps first.' };
+  const windowId = coerceInt(args['windowId']);
+  if (windowId !== undefined) return { by: 'window', windowId };
+  return { error: 'One of `appId`, `appName`, `pid` or `windowId` is required. Call computer_list_apps first.' };
 }
 
 /** The app-targeting properties every window-scoped tool accepts. */

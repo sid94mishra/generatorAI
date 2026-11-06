@@ -1914,9 +1914,11 @@ export class CuaDriverBridge implements IComputerBridge {
           steps.push(`menu ${menu.join('>')}`);
           panel = await this.findPanel(connection, pid, windowId, 4_000, signal);
           if (!panel) {
-            // Some apps put the dialog up only once they are in front.
+            // Some apps put the dialog up only once they are in front, and an
+            // export that renders the document first takes its time (measured:
+            // a canvas board's export window ~8 s).
             await this.call(connection, 'bring_to_front', { pid, window_id: windowId }, signal).catch(() => undefined);
-            panel = await this.findPanel(connection, pid, windowId, 3_000, signal);
+            panel = await this.findPanel(connection, pid, windowId, 8_000, signal);
           }
           if (!panel) {
             // An export's options sheet comes first ("Next…" exactly — not "Next Sheet").

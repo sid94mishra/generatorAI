@@ -402,6 +402,7 @@ const UNRESOLVED_APP = '(unresolved)';
 function describeRef(ref: ComputerAppRef): { identity: string; label: string } {
   if (ref.by === 'appId') return { identity: ref.appId, label: ref.appId };
   if (ref.by === 'appName') return { identity: ref.appName, label: ref.appName };
+  if (ref.by === 'window') return { identity: `window:${ref.windowId}`, label: `window:${ref.windowId}` };
   return { identity: `pid:${ref.pid}`, label: `pid:${ref.pid}` };
 }
 
@@ -1706,7 +1707,11 @@ export class ComputerService {
       return { refusal: listed.refusal };
     }
 
-    const match = listed.apps.find((app) => matchesRef(app, ref));
+    const match = listed.apps.find((app) =>
+      ref.by === 'window'
+        ? (listed.windowsByPid?.get(app.pid) ?? []).some((w) => w.id === ref.windowId)
+        : matchesRef(app, ref),
+    );
     if (!match) {
       const refusal = this.refusal('target_lost');
       await this.auditGateRefusal(ctx, action, refusal, describeRef(ref));
@@ -2608,6 +2613,7 @@ export class ComputerService {
 function matchesRef(app: ComputerAppInfo, ref: ComputerAppRef): boolean {
   if (ref.by === 'appId') return app.id.toLowerCase() === ref.appId.toLowerCase();
   if (ref.by === 'pid') return app.pid === ref.pid;
+  if (ref.by === 'window') return false; // resolved against the window list, not the app
   return app.name.toLowerCase() === ref.appName.toLowerCase();
 }
 

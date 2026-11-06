@@ -462,3 +462,12 @@ describe('agentFacing', () => {
     expect(agentFacing(undefined)).toBeUndefined();
   });
 });
+
+describe('toAppRef', () => {
+  it('names the app by the window an earlier result returned when no app is given', async () => {
+    const { toAppRef } = await import('../computerToolTypes.js');
+    expect(toAppRef({ windowId: 12403 })).toEqual({ by: 'window', windowId: 12403 });
+    expect(toAppRef({ appId: 'a.b', windowId: 1 })).toEqual({ by: 'appId', appId: 'a.b' });
+    expect(toAppRef({})).toHaveProperty('error');
+  });
+});

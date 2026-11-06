@@ -78,7 +78,9 @@ export interface ComputerStartOptions {
 export type ComputerAppRef =
   | { by: 'appId'; appId: string }
   | { by: 'appName'; appName: string }
-  | { by: 'pid'; pid: number };
+  | { by: 'pid'; pid: number }
+  /** The app that owns this window — a windowId from an earlier result names its app too. */
+  | { by: 'window'; windowId: number };
 
 /** A single, unambiguous app. Every field refers to the same process. */
 export interface ComputerAppIdentity {
