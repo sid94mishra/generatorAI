@@ -72,10 +72,12 @@ snapshot it before using indices again. `verified: false` is normal for keys.
 
 * Rewriting text: `set_value` on the text area with the whole new text —
   one verified step (typo fixes, an added last line).
-* New formatted text, in ONE `computer_run_steps`: `menu "Format>Font>Bold"`,
-  `type_text "Title\n"`, `menu "Format>Font>Bold"` (bold off); a bulleted list:
-  `set_value` the `list style` popup with `"•"`, then `type_text` the items
-  separated by `\n`. Headings (Pages, Word): set the paragraph style first.
+* New formatted text in TextEdit is ONE `computer_run_steps`, no snapshot:
+  `menu "Format>Font>Bold"`, `type_text "Groceries\n"`, `menu "Format>Font>Bold"`
+  (bold off), `click name "list style"`, `click name "•"` (the bullet item of
+  the menu it opens), `type_text "Milk\nEggs\nBread"`. Then `computer_save_as`.
+  Do not check the formatting by screenshot: the saved file shows it.
+  Headings (Pages, Word): set the paragraph style first.
 * A menu item reported disabled: a popup is still open — `press_key Escape`,
   then retry.
 
