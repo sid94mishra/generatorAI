@@ -1,7 +1,7 @@
 ---
 name: computer-use
-description: Operate native desktop applications on this machine (macOS, Windows, Linux) — open apps and documents, read windows through the accessibility tree, press controls, choose menu commands, type, save and export, and verify the result. Use for tasks like "write a note in TextEdit and save it", "build this table in Numbers or Excel and export a CSV", "draw a diagram in Freeform", "compute this in Calculator".
-version: 4.0.0
+description: Operate native desktop applications on this machine (macOS, Windows, Linux) — open apps and documents, read windows through the accessibility tree, press controls, choose menu commands, type, save and export, and verify the result. Use for any desktop-app task — writing or editing a document, building a spreadsheet table or chart, drawing a diagram, operating a utility — and for saving or exporting what the app made.
+version: 5.0.0
 ---
 
 # Computer Use
@@ -26,11 +26,11 @@ a small task is **2–5 calls**, a document or spreadsheet task **5–10**.
 
 ```
 { kind: "click",      elementIndex: 13 }            // from the call's snapshotId
-{ kind: "click",      name: "Equals" }              // by label — no snapshot needed
+{ kind: "click",      name: "OK" }                  // by label — no snapshot needed
 { kind: "click",      name: "Bold", role: "checkbox" }
 { kind: "set_value",  name: "Email", value: "a@b.c" } // a field, or a popup by item title
 { kind: "menu",       path: "Format>Font>Bold" }
-{ kind: "type_text",  text: "Milk\nEggs" }           // into the focused field
+{ kind: "type_text",  text: "Line one\nLine two" }  // into the focused field
 { kind: "type_text",  elementIndex: 1, text: "…" }   // into that element
 { kind: "press_key",  key: "Tab" }                   // "Return", "Escape", "Meta+S"
 { kind: "click_point", x: 420, y: 310 }              // pixels of a snapshot screenshot
@@ -43,84 +43,66 @@ removed) — the display's new value, the typed line, the sheet that opened.
 Read it; do not snapshot to check. `reindexed` means the window was rebuilt:
 snapshot it before using indices again. `verified: false` is normal for keys.
 
-**Calculator, `(1234 × 56) − 789`:** `computer_launch_app` → one
-`computer_run_steps` clicking by name ("All Clear", "1", "2", "3", "4",
-"Multiply", "5", "6", "Subtract", "7", "8", "9", "Equals") → the result is in
-`changes` → answer. Two calls.
+A sequence of presses (a keypad, a toolbar): ONE `computer_run_steps` clicking
+each button by name, then read the result in `changes`. Two calls in all.
 
 ## Opening documents
 
 * Open a file by path in `arguments`; never drive an Open dialog for a known path.
 * **A new document: `computer_launch_app { name, newDocument: true }`** — it
-  makes a blank document however the app does it (File>New, the Open panel's
-  New Document, the iWork template chooser's Blank) and returns ITS window.
-  Work only in that window.
+  runs the app's own New command and accepts a template chooser or start
+  screen with its default, then returns the new document's window. Work only
+  in that window.
 * Windows the app already had open — restored documents, other files — are
   the user's. Never type into them, never present them as your work, never
   close them unsaved. If you cannot get a new document, say so.
-* **Never snapshot an iWork template chooser** (an untitled window right after
-  File>New in Numbers, Pages, Keynote): reading it crashes the app.
+* Do not snapshot an untitled full-size window that appears right after New
+  (a template chooser or start screen): some apps crash when it is read.
+  `press_key Return` accepts its default.
 * Reading a file's contents: use your file tools; the app is for producing.
+* An app may retitle an untitled document by itself; the `windowId` stays.
 
-## Text documents (TextEdit, Pages, Word, Notepad)
-
-* A Pages table: `menu "Insert>Table>Plain"` (or "Headers"), `set_value` the
-  sidebar's `Rows` and `Columns` fields to the size, click the first cell, then
-  type cells with `press_key Tab` between them, and end with
-  `press_key "Shift+Tab"` — it commits the last cell; Escape discards it.
-  A pasted tab-separated block becomes a text box in Pages, not a table.
+## Writing text
 
 * Rewriting text: `set_value` on the text area with the whole new text —
-  one verified step (typo fixes, an added last line).
-* New formatted text in TextEdit is ONE `computer_run_steps`, no snapshot:
-  `menu "Format>Font>Bold"`, `type_text "Groceries\n"`, `menu "Format>Font>Bold"`
-  (bold off), `click name "list style"`, `click name "•"` (the bullet item of
-  the menu it opens), `type_text "Milk\nEggs\nBread"`. Then `computer_save_as`.
-  Do not check the formatting by screenshot: the saved file shows it.
-  Headings (Pages, Word): set the paragraph style first.
-* A menu item reported disabled: a popup is still open — `press_key Escape`,
-  then retry.
+  one verified step.
+* Formatting is a toggle: turn a style on (the app's Format menu, e.g.
+  `menu "Format>Font>Bold"`, or its toolbar button) before typing and off
+  after. A list: the app's list control — a popup or menu button you click,
+  then click the item by its name — or its list menu item, then type the
+  items separated by `\n`. Text, styles and list in ONE `computer_run_steps`,
+  no snapshot in between. Headings: set the paragraph style first.
+* Do not verify formatting by screenshot: the saved file shows it.
 
-## Spreadsheets (Numbers, Excel)
+## Tables and spreadsheets
 
-**A new table is ONE paste.** Write the whole table as text — columns
-separated by `\t`, rows by `\n`, header first, formulas as `=B2*C2` (A1
-references; the header is row 1):
+* **Data goes in as ONE paste**: columns separated by `\t`, rows by `\n`,
+  header first, formulas as `=B2*C2` (A1 references; the header is row 1).
+  - A grid spreadsheet: click the top-left cell, `press_key Escape`, then
+    `paste_text` — the cells fill and formulas compute.
+  - A spreadsheet whose sheet holds table objects: with no table selected
+    (`press_key Escape` twice), a paste creates a table sized to the data. A
+    blank template's empty placeholder table: `press_key "Meta+A"` (Ctrl+A),
+    `press_key Delete` first.
+  - A word processor usually keeps pasted tab-separated text as text: insert
+    a table from its menu (Insert>Table, Table>Insert), size it with the
+    app's row/column controls, click the first cell, type cells with
+    `press_key Tab` between them, and leave the last cell with `Tab` or
+    `Shift+Tab` — Escape cancels the cell being edited in many apps.
+  - Check one computed value with a `computer_snapshot` `query`, then save.
+* Editing existing cells: click the cell by index, type values with `Tab` /
+  `Return` between them (`\t` inside typed text does not move cells).
+  Formulas last, down a column: `type_text "=B2*C2"`, `press_key Return`,
+  … — Tab inside a formula does not leave the formula editor.
+* `set_value` on a grid cell is refused (grids accept the write and show nothing).
+* A table must be sized to its data before export: exports keep empty rows
+  and columns.
+* Charts: select the data or table, then the app's Insert>Chart item. The
+  first column is the category axis: keep it a label column.
+* An app may show a value in its own display format (a month name in full,
+  a rounded number): the stored value is what you entered; do not fight it.
 
-* **Numbers**, in the `newDocument` window, one `computer_run_steps`:
-  `press_key Escape`, `press_key Escape`, `press_key "Meta+A"`,
-  `press_key Delete` (removes the blank 22×7 table), `paste_text "<the table>"`.
-  Numbers builds a table sized exactly to the data — header row, label
-  column, formulas computed — and leaves it selected: a chart is the next step
-  (`menu "Insert>Chart>2D Column"`). Check one computed value with a
-  `computer_snapshot` `query`, then export.
-* **Excel / LibreOffice Calc**: click cell A1, `press_key Escape`, then
-  `paste_text "<the table>"` — tabs split into cells, formulas compute.
-* Numbers may show a short month ("Jan") as a full one: it is still the
-  label; do not fight the cell format.
-* Numbers renames an untitled document by itself ("Item Price List —
-  Suggested"): the same window, same `windowId`.
-
-Editing cells of an existing table:
-
-* Click the first cell by the snapshot's cell index, then type the values in
-  one plan: `type_text`, `press_key Tab`, …, `press_key Return` per row.
-  `\t` inside typed text does not move cells.
-* **Formulas last, down a column:** after the values, click the first formula
-  cell and send `type_text "=B2*C2"`, `press_key Return`, `type_text "=B3*C3"`,
-  `press_key Return`, … — Return commits a formula and moves down. Tab inside a
-  formula does not leave the formula editor, so a formula typed mid-row
-  swallows the rest of the row.
-* `set_value` on a cell is refused (grids accept the write and show nothing).
-* Numbers' blank table has a header row: your header goes in row 1.
-* A typed table must be sized to the data before export: the Format sidebar's
-  `Rows` / `Columns` fields (`set_value`). A CSV keeps empty columns.
-* Keep Numbers' header row and header column: the first column is then the
-  chart's categories. Never set header columns to 0.
-* Charts (Numbers): select the table, then `menu "Insert>Chart>2D Column"`.
-* Excel (Windows): click the cell, `press_key Escape`, then type.
-
-## Drawing apps (Freeform, Paint)
+## Drawing apps
 
 Insert shapes with the app's menu (`Insert>Shape>…`) or toolbar. A new shape
 is selected: `type_text` labels it, `press_key Escape` deselects. Place shapes
@@ -129,10 +111,10 @@ place several before looking again.
 
 ## Saving and exporting
 
-`computer_save_as { windowId, folder, name, menu?, format?, replace? }`:
-TextEdit plain text: `format: "Plain Text"`; Numbers CSV:
-`menu: "File>Export To>CSV…"`; PDF: `menu: "File>Export To>PDF…"`; Pages to
-Word: `menu: "File>Export To>Word…"`. It reports the saved path. Save in place:
+`computer_save_as { windowId, folder, name, menu?, format?, replace? }`: a
+save in another format names the app's own menu item for it (`menu` — e.g. an
+"Export To>PDF…" or "Export…" item, else "Save As…") and `format` as the
+dialog labels it ("Plain Text", "CSV"). It reports the saved path. Save in place:
 `menu "File>Save"` as a step. Close with `menu "File>Close"`; never "Don't
 Save" on work the task keeps.
 

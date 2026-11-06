@@ -19,6 +19,9 @@ import * as nodeFs from 'node:fs';
 import * as nodeOs from 'node:os';
 import * as nodePath from 'node:path';
 
+// Screenshots land under the workspace root: keep them out of the package.
+const WORKSPACE_ROOT = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'cua-bridge-'));
+
 const logger: ILogger = {
   info() {},
   warn() {},
@@ -143,7 +146,7 @@ function makeBridge(opts: FakeOptions, bridgeOptions: Record<string, unknown> = 
 }
 
 async function started(fake: ReturnType<typeof makeBridge>) {
-  return fake.bridge.start({ workspaceId: 'ws', workspaceRoot: process.cwd() });
+  return fake.bridge.start({ workspaceId: 'ws', workspaceRoot: WORKSPACE_ROOT });
 }
 
 const CLICK = {
@@ -1016,7 +1019,7 @@ describe('CuaDriverBridge endpoint resolution', () => {
 
   it('spawns its own daemon when a binary is bundled', async () => {
     const fake = makeBridge(quiet, { driverBinaryPath: '/opt/cua-driver', allowInProcess: false });
-    const handle = await fake.bridge.start({ workspaceId: 'ws', workspaceRoot: process.cwd() });
+    const handle = await fake.bridge.start({ workspaceId: 'ws', workspaceRoot: WORKSPACE_ROOT });
 
     expect(fake.spawned).toEqual([{ binaryPath: '/opt/cua-driver' }]);
     expect(fake.connectedTo).toEqual(['/tmp/own.sock']);
@@ -1029,7 +1032,7 @@ describe('CuaDriverBridge endpoint resolution', () => {
       driverBinaryPath: '/opt/cua-driver',
       attachSocketPath: '\\\\.\\pipe\\managed',
     });
-    await fake.bridge.start({ workspaceId: 'ws', workspaceRoot: process.cwd() });
+    await fake.bridge.start({ workspaceId: 'ws', workspaceRoot: WORKSPACE_ROOT });
 
     expect(fake.spawned).toEqual([]);
     expect(fake.connectedTo).toEqual(['\\\\.\\pipe\\managed']);
@@ -1046,7 +1049,7 @@ describe('CuaDriverBridge endpoint resolution', () => {
       pid: 1,
       platform: 'win32',
     });
-    await fake.bridge.start({ workspaceId: 'ws', workspaceRoot: process.cwd() });
+    await fake.bridge.start({ workspaceId: 'ws', workspaceRoot: WORKSPACE_ROOT });
 
     expect(fake.spawned).toEqual([]);
     expect(fake.connectedTo).toEqual(['/tmp/pushed.sock']);
@@ -1063,13 +1066,13 @@ describe('CuaDriverBridge endpoint resolution', () => {
 
     if (process.platform === 'darwin') {
       await expect(
-        fake.bridge.start({ workspaceId: 'ws', workspaceRoot: process.cwd() }),
+        fake.bridge.start({ workspaceId: 'ws', workspaceRoot: WORKSPACE_ROOT }),
       ).rejects.toThrow(/No driver endpoint available/);
       expect(fake.inProcessCreated()).toBe(0);
       return;
     }
 
-    const handle = await fake.bridge.start({ workspaceId: 'ws', workspaceRoot: process.cwd() });
+    const handle = await fake.bridge.start({ workspaceId: 'ws', workspaceRoot: WORKSPACE_ROOT });
     expect(fake.spawned).toEqual([]);
     expect(fake.inProcessCreated()).toBe(1);
     expect(handle.hostRef).toBe('in-process');
@@ -1077,15 +1080,15 @@ describe('CuaDriverBridge endpoint resolution', () => {
 
   it('runs one daemon for every workspace, not one each', async () => {
     const fake = makeBridge(quiet, { driverBinaryPath: '/opt/cua-driver' });
-    await fake.bridge.start({ workspaceId: 'a', workspaceRoot: process.cwd() });
-    await fake.bridge.start({ workspaceId: 'b', workspaceRoot: process.cwd() });
+    await fake.bridge.start({ workspaceId: 'a', workspaceRoot: WORKSPACE_ROOT });
+    await fake.bridge.start({ workspaceId: 'b', workspaceRoot: WORKSPACE_ROOT });
 
     expect(fake.spawned).toHaveLength(1);
   });
 
   it('stops the daemon it owns, and only on dispose', async () => {
     const fake = makeBridge(quiet, { driverBinaryPath: '/opt/cua-driver' });
-    const handle = await fake.bridge.start({ workspaceId: 'ws', workspaceRoot: process.cwd() });
+    const handle = await fake.bridge.start({ workspaceId: 'ws', workspaceRoot: WORKSPACE_ROOT });
 
     await fake.bridge.stop(handle);
     expect(fake.stoppedCount()).toBe(0);
@@ -1637,10 +1640,10 @@ describe('CuaDriverBridge pixels for a window with no tree', () => {
 });
 
 describe('CuaDriverBridge new blank document', () => {
-  it('makes a Numbers document: File>New (listed twice) by token, the chooser answered with Return, never read', async () => {
+  it('runs the File menu\'s New item, accepts a template chooser with Return without reading it, and returns the new window', async () => {
     let stage: 'doc' | 'chooser' | 'new' = 'doc';
     const reads: string[] = [];
-    const base = [{ window_id: 10, pid: 42, title: 'Fruit Count.numbers', is_on_screen: true, layer: 0, z_index: 5, bounds: { x: 0, y: 0, width: 900, height: 700 } }];
+    const base = [{ window_id: 10, pid: 42, title: 'Notes.doc', is_on_screen: true, layer: 0, z_index: 5, bounds: { x: 0, y: 0, width: 900, height: 700 } }];
     const fake = makeBridge({
       reply: (tool, args) => {
         if (tool === 'list_windows') {
@@ -1653,32 +1656,65 @@ describe('CuaDriverBridge new blank document', () => {
         }
         if (tool === 'invoke_menu') {
           const path = args['path'] as string[];
-          return path[1] === 'New'
-            ? driverError('invoke_menu: path segment 1 "New" was not found under "File". Items there: "New…", "New…", "Open…"')
-            : driverError('invoke_menu: path segment 1 is ambiguous');
+          if (path[1] === 'New Document') { stage = 'chooser'; return ok({}); }
+          return driverError('invoke_menu: path segment 1 "__generatorai_list_items__" was not found under "File". Items there: "New Tab", "New Document", "Open…"');
         }
-        if (tool === 'get_window_state') {
-          reads.push(String(args['window_id']));
-          return ok({ snapshot_id: 's5', pid: 42, window_id: 10, elements: [
-            { element_index: 1, role: 'AXMenuBarItem', label: 'File', element_token: 's5:1' },
-            { element_index: 2, role: 'AXMenu', parent_index: 1, element_token: 's5:2' },
-            { element_index: 3, role: 'AXMenuItem', label: 'New…', parent_index: 2, element_token: 's5:3' },
-          ] });
-        }
-        if (tool === 'click' && args['element_token'] === 's5:3') { stage = 'chooser'; return ok({}); }
+        if (tool === 'get_window_state') reads.push(String(args['window_id']));
         if (tool === 'press_key' && args['key'] === 'return') { stage = 'new'; return ok({}); }
         return ok({});
       },
     });
     const handle = await started(fake);
 
-    const made = await fake.bridge.newDocument!(handle, { appId: 'com.apple.iWork.Numbers', name: 'Numbers', pid: 42 });
+    const made = await fake.bridge.newDocument!(handle, { appId: 'example.writer', name: 'Writer', pid: 42 });
 
     expect(made.window).toEqual({ id: 12, title: 'Untitled' });
-    expect(made.steps).toEqual(['File>New', 'Blank template (Return)']);
+    expect(made.steps).toEqual(['File>New Document', 'template default (Return)']);
     expect(reads).not.toContain('11');
-    expect(fake.calls.find((c) => c.tool === 'press_key')?.args).toMatchObject({ window_id: 11, key: 'return', delivery_mode: 'foreground' });
+    expect(fake.calls.find((c) => c.tool === 'press_key')?.args).toMatchObject({ window_id: 11, key: 'return' });
   }, 30_000);
+
+  it('falls back to the platform shortcut when the menu offers no New item, and takes a retitled window as a new tab', async () => {
+    let title = 'Draft.txt';
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'list_windows') return ok({ windows: [{ window_id: 10, pid: 42, title, is_on_screen: true, layer: 0, z_index: 5, bounds: { x: 0, y: 0, width: 900, height: 700 } }] });
+        if (tool === 'invoke_menu') return driverError('invoke_menu: the app has no menu bar');
+        if (tool === 'hotkey') { title = 'Untitled'; return ok({}); }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    const made = await fake.bridge.newDocument!(handle, { appId: 'example.editor', name: 'Editor', pid: 42 });
+
+    expect(made.window).toEqual({ id: 10, title: 'Untitled' });
+    expect(made.steps).toEqual([process.platform === 'darwin' ? 'Meta+N' : 'Control+N']);
+    expect(fake.calls.find((c) => c.tool === 'hotkey')?.args).toMatchObject({ keys: [process.platform === 'darwin' ? 'cmd' : 'ctrl', 'n'] });
+  }, 30_000);
+});
+
+describe('CuaDriverBridge untitled window that crashes its app when read', () => {
+  it('reports the crash and never reads that app\'s untitled windows again', async () => {
+    const gone = 2 ** 22 + 12_345; // no such process
+    const fake = makeBridge({
+      reply: (tool) => {
+        if (tool === 'list_windows') return ok({ windows: [{ window_id: 11, pid: gone, title: '', is_on_screen: true, layer: 0, z_index: 9, bounds: { x: 0, y: 0, width: 1070, height: 740 } }] });
+        if (tool === 'get_window_state') return ok({ snapshot_id: 's1', pid: gone, window_id: 11, elements: [] });
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+    const app = { appId: 'example.sheets', name: 'Sheets', pid: gone };
+
+    const first = await fake.bridge.snapshot(handle, { app, window: { by: 'id', id: 11 } });
+    expect(first.refusal?.code).toBe('target_lost');
+    const reads = fake.calls.filter((c) => c.tool === 'get_window_state').length;
+
+    const second = await fake.bridge.snapshot(handle, { app, window: { by: 'id', id: 11 } });
+    expect(second.refusal?.code).toBe('unsupported_action');
+    expect(fake.calls.filter((c) => c.tool === 'get_window_state')).toHaveLength(reads);
+  });
 });
 
 describe('pickNewDocumentItem', () => {
@@ -1686,5 +1722,6 @@ describe('pickNewDocumentItem', () => {
     expect(pickNewDocumentItem(['New…', 'New…', 'Open…'])).toBe('New…');
     expect(pickNewDocumentItem(['New Board', 'New Tab', 'New Window', 'Close'])).toBe('New Board');
     expect(pickNewDocumentItem(['New Tab', 'New Window'])).toBeUndefined();
+    expect(pickNewDocumentItem([])).toBeUndefined();
   });
 });

@@ -243,6 +243,8 @@ export class CuaDriverBridge implements IComputerBridge {
 
   private readonly endpoints = new Map<string, CuaDriverEndpoint>();
   private readonly connections = new Map<string, Connection>();
+  /** Apps a read of an untitled window crashed: their untitled windows are not read again. */
+  private readonly crashedOnRead = new Set<string>();
   private readonly observers = new Map<string, ComputerHostObserver>();
   /**
    * snapshotId → the window it was taken from, plus each element's opaque
@@ -709,18 +711,18 @@ export class CuaDriverBridge implements IComputerBridge {
       const dead = await this.ensureLiveWindow(connection, req.app.pid, windowId, signal);
       if (dead) return refuse(dead);
 
-      // Reading an iWork template chooser crashes the app (an Apple bug, every
-      // time): the skill said so and the agent read it anyway.
-      if (/^com\.apple\.iWork\./i.test(req.app.appId)) {
-        const shown = (await this.windowsFor(connection, req.app.pid)).find((w) => w.id === windowId);
-        if (shown && shown.title === '' && isChooserSized(shown)) {
-          return refuse({
-            code: 'unsupported_action',
-            message:
-              'This is the template chooser, and reading it crashes the app. Blank is preselected: send press_key Return ' +
-              'to this window — or use computer_launch_app { newDocument: true }, which does that for you.',
-          });
-        }
+      // Some apps crash when their template chooser or start screen is read
+      // through accessibility (measured: every read, even a filtered one).
+      // Once a read of an untitled window has taken an app down, that app's
+      // untitled windows are not read again.
+      const untitled = (await this.windowsFor(connection, req.app.pid)).find((w) => w.id === windowId)?.title === '';
+      if (untitled && this.crashedOnRead.has(req.app.appId)) {
+        return refuse({
+          code: 'unsupported_action',
+          message:
+            'Reading an untitled window of this app crashed it earlier. If it is a template chooser or start screen, ' +
+            'press_key Return accepts its default — or computer_launch_app { newDocument: true } does that for you.',
+        });
       }
 
       const screenshotPath = req.includeScreenshot
@@ -767,6 +769,19 @@ export class CuaDriverBridge implements IComputerBridge {
         );
         result = await this.call(connection, 'get_window_state', args(maxElements, maxDepth), signal);
         laddered = rung;
+      }
+      if (untitled) {
+        await new Promise((r) => setTimeout(r, CRASH_SETTLE_MS));
+        if (!processAlive(req.app.pid)) {
+          this.crashedOnRead.add(req.app.appId);
+          return refuse({
+            code: 'target_lost',
+            message:
+              'The app quit while this untitled window was being read — some apps crash when a template chooser or ' +
+              'start screen is read. Relaunch it with computer_launch_app { newDocument: true }, which accepts such ' +
+              'windows with Return without reading them.',
+          });
+        }
       }
       const refusal = this.refusalFor(result);
       if (refusal) return refuse(refusal);
@@ -1345,7 +1360,7 @@ export class CuaDriverBridge implements IComputerBridge {
         connection,
         'hotkey',
         // Paste is ⌘V on macOS; Ctrl+V there is a different command or nothing at all.
-        { pid: args['pid'], window_id: args['window_id'], keys: [toDriverKey(PASTE_MODIFIER), 'v'] },
+        { pid: args['pid'], window_id: args['window_id'], keys: [toDriverKey(PRIMARY_MODIFIER), 'v'] },
         signal,
       );
       // The app reads the clipboard after the key arrives — Numbers parses a
@@ -1875,12 +1890,13 @@ export class CuaDriverBridge implements IComputerBridge {
   }
 
   /**
-   * A new blank document, the way each app makes one, measured on macOS:
-   * TextEdit and Freeform open it straight from File>New; Numbers, Pages and
-   * Keynote open a template chooser with Blank preselected, answered with
-   * Return and never read (reading it crashes them); an app showing its Open
-   * panel gets its New Document button. The agent used to fight these by
-   * hand and, failing, typed into documents that were already open.
+   * A new blank document, for any app on any platform: the app's own "New…"
+   * command (its File menu, else the platform shortcut, ⌘N / Ctrl+N), then
+   * whatever the app shows on the way — a template chooser or start screen is
+   * accepted with Return (its default) and never read, since reading some of
+   * them crashes the app — until a new titled window appears, or the same
+   * window retitles itself (a tab). The agent used to fight these by hand and,
+   * failing, typed into documents that were already open.
    */
   async newDocument(
     handle: ComputerHandle,
@@ -1891,58 +1907,52 @@ export class CuaDriverBridge implements IComputerBridge {
     const steps: string[] = [];
     if (!connection) return { steps, refusal: disconnected() };
     const pid = app.pid;
-    const iwork = /^com\.apple\.iWork\./i.test(app.appId);
+    const visible = async () => (await this.windowsFor(connection, pid)).filter((w) => !w.floating && !w.minimised);
     try {
-      let existing = (await this.windowsFor(connection, pid)).filter((w) => !w.floating);
+      let existing = await visible();
       if (existing.length === 0) {
         // Windowless (a document app launched in the background): activation
-        // brings up a restored document, its Open panel or its chooser. Wait
-        // for the first one; Keynote took several seconds.
+        // brings up a restored document, an Open panel or a start screen.
         await this.call(connection, 'bring_to_front', { pid }, signal).catch(() => undefined);
         steps.push('activate');
         for (let waited = 0; waited < 10_000 && existing.length === 0; waited += 500) {
           await new Promise((r) => setTimeout(r, 500));
-          existing = (await this.windowsFor(connection, pid)).filter((w) => !w.floating);
+          existing = await visible();
         }
       }
       const handled = new Set<number>();
-      // What appeared on activation may already be the way to a new document.
-      const firstChooser = iwork ? existing.find((w) => w.title === '' && isChooserSized(w)) : undefined;
-      const firstOpen = existing.find((w) => w.title === 'Open');
-      const before = new Set(existing.filter((w) => w !== firstChooser && w !== firstOpen).map((w) => w.id));
-      const anchor = mainWindow(existing.filter((w) => w !== firstChooser && w !== firstOpen));
-      if (!firstChooser && !firstOpen) {
+      // A start screen shown on activation is already the way to a new document.
+      const shownChooser = existing.find(isIntermediateWindow);
+      if (shownChooser) {
+        handled.add(shownChooser.id);
+        await this.keysToDialog(connection, pid, shownChooser.id, { tool: 'press_key', args: { key: 'return' } }, signal);
+        steps.push('start screen default (Return)');
+      }
+      const before = new Map(existing.filter((w) => w !== shownChooser).map((w) => [w.id, w.title]));
+      const anchor = mainWindow(existing.filter((w) => w !== shownChooser));
+      if (!shownChooser) {
         if (!anchor) return { steps, refusal: { code: 'target_lost', message: 'The app shows no window to create a document from.' } };
-        const item = await this.newDocumentItem(connection, pid, anchor.id, signal);
-        await this.menuOrFail(connection, pid, anchor.id, ['File', item], signal);
-        steps.push(`File>${item}`);
+        steps.push(await this.runNewCommand(connection, pid, anchor.id, signal));
       }
       const deadline = Date.now() + 15_000;
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 600));
-        const windows = (await this.windowsFor(connection, pid)).filter((w) => !w.floating && !w.minimised);
-        const open = windows.find((w) => w.title === 'Open' && !handled.has(w.id));
-        if (open) {
-          handled.add(open.id);
-          const button = await this.waitForRow(connection, pid, open.id, 'New Document', ['AXButton'], 2_000, signal);
-          if (button) {
-            await this.callOk(connection, 'click', { element_token: button }, signal);
-            steps.push('New Document');
-            continue;
-          }
-        }
-        const fresh = windows.filter((w) => !before.has(w.id) && !handled.has(w.id) && w.title !== 'Open');
-        const chooser = iwork ? fresh.find((w) => w.title === '' && isChooserSized(w)) : undefined;
+        const windows = await visible();
+        const fresh = windows.filter((w) => !before.has(w.id) && !handled.has(w.id));
+        const chooser = fresh.find(isIntermediateWindow);
         if (chooser) {
           handled.add(chooser.id);
           await this.keysToDialog(connection, pid, chooser.id, { tool: 'press_key', args: { key: 'return' } }, signal);
-          steps.push('Blank template (Return)');
+          steps.push('template default (Return)');
           continue;
         }
         const doc = fresh.find((w) => w.title !== '');
-        if (doc) {
-          this.bumpEpoch(pid, doc.id);
-          return { window: { id: doc.id, title: doc.title }, steps };
+        // A tabbed app opens the document in the window it already has.
+        const tab = !doc && anchor ? windows.find((w) => w.id === anchor.id && w.title !== '' && w.title !== before.get(anchor.id)) : undefined;
+        const made = doc ?? tab;
+        if (made) {
+          this.bumpEpoch(pid, made.id);
+          return { window: { id: made.id, title: made.title }, steps };
         }
       }
       return { steps, refusal: { code: 'target_lost', message: `No new document window appeared. Steps done: ${steps.join(' → ') || 'none'}.` } };
@@ -1952,11 +1962,33 @@ export class CuaDriverBridge implements IComputerBridge {
   }
 
   /**
-   * The File-menu item that makes a new document: "New" or "New…" where the
-   * app has it, else "New Board" (Freeform), "New Document", "New
-   * Presentation"… — never a tab, window, folder or anything "from".
+   * The app's own new-document command: the File-menu item that makes one
+   * ("New", "New…", "New Board", "New Presentation"…), else the platform's
+   * shortcut — an app without a File menu, a ribbon, a localised menu.
    */
-  private async newDocumentItem(connection: Connection, pid: number, windowId: number, signal?: AbortSignal): Promise<string> {
+  private async runNewCommand(connection: Connection, pid: number, windowId: number, signal?: AbortSignal): Promise<string> {
+    const item = await this.newDocumentItem(connection, pid, windowId, signal);
+    if (item) {
+      try {
+        await this.menuOrFail(connection, pid, windowId, ['File', item], signal);
+        return `File>${item}`;
+      } catch {
+        // Fall through to the shortcut every platform's document apps share.
+      }
+    }
+    const keys = [toDriverKey(PRIMARY_MODIFIER), 'n'];
+    let sent = await this.call(connection, 'hotkey', { pid, window_id: windowId, keys }, signal);
+    if (this.refusalFor(sent)) {
+      await this.call(connection, 'bring_to_front', { pid, window_id: windowId }, signal).catch(() => undefined);
+      sent = await this.call(connection, 'hotkey', { pid, window_id: windowId, keys }, signal);
+    }
+    const refusal = this.refusalFor(sent);
+    if (refusal) throw new Error(refusal.message);
+    return `${PRIMARY_MODIFIER}+N`;
+  }
+
+  /** The File-menu item that makes a new document, if the app's menu lists one. */
+  private async newDocumentItem(connection: Connection, pid: number, windowId: number, signal?: AbortSignal): Promise<string | undefined> {
     const list = () => this.call(connection, 'invoke_menu', { pid, window_id: windowId, path: ['File', '__generatorai_list_items__'] }, signal);
     let probe = await list();
     if (!/Items there:/i.test(probe.text ?? '') && /window_not_key|background/i.test(probe.text ?? '')) {
@@ -1965,7 +1997,7 @@ export class CuaDriverBridge implements IComputerBridge {
     }
     const listed = /Items there:\s*(.*)$/is.exec(probe.text ?? '');
     const items = listed ? [...listed[1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!) : [];
-    return pickNewDocumentItem(items) ?? 'New';
+    return pickNewDocumentItem(items);
   }
 
   /** The window holding a save panel's name field: the given one first, then the app's other windows. */
@@ -2819,9 +2851,13 @@ export function pickNewDocumentItem(items: readonly string[]): string | undefine
   );
 }
 
-/** An iWork template chooser: an untitled window the size of a document browser, not a small alert. */
-export function isChooserSized(w: ComputerWindowInfo): boolean {
-  return !w.bounds || (w.bounds.w >= 700 && w.bounds.h >= 450);
+/**
+ * A template chooser or start screen: an untitled window the size of a
+ * document browser. A small untitled window is an alert, which is never
+ * answered blind.
+ */
+export function isIntermediateWindow(w: ComputerWindowInfo): boolean {
+  return w.title === '' && (!w.bounds || (w.bounds.w >= 700 && w.bounds.h >= 450));
 }
 
 /** A target named by label rather than snapshot index, as `run_steps` takes it. */
@@ -2904,6 +2940,8 @@ function clipDiff(diff: string): string {
 
 /** Budget for one accessibility-tree walk. */
 const SNAPSHOT_WALK_MS = 4_000;
+/** How long after reading an untitled window to check the app survived it (a crash lands within ~0.3 s). */
+const CRASH_SETTLE_MS = 500;
 
 /** How long a freshly launched macOS app may sit windowless before each nudge (activate, then ⌘N). */
 const WINDOWLESS_NUDGE_MS = 4_000;
@@ -2911,8 +2949,8 @@ const WINDOWLESS_NUDGE_MS = 4_000;
 /** How long a paste keeps the agent's text on the clipboard before restoring the user's. */
 const PASTE_SETTLE_MS = 600;
 
-/** The modifier the platform's paste shortcut uses. */
-const PASTE_MODIFIER = process.platform === 'darwin' ? 'Meta' : 'Control';
+/** The modifier of the platform's command shortcuts (paste, new): ⌘ on macOS, Ctrl elsewhere. */
+const PRIMARY_MODIFIER = process.platform === 'darwin' ? 'Meta' : 'Control';
 
 /** Our closed modifier union → the driver's lower-case key names. */
 function toDriverKey(modifier: string): string {

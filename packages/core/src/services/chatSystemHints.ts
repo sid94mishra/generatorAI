@@ -22,8 +22,8 @@ export const BROWSER_SYSTEM_HINT =
 // Kept short. It is a STANDING block on every turn of every chat once the user
 // enables the feature. It carries the efficient loop itself — a simple task
 // (a calculator sum, editing a file) then needs no Skill call, which cost a
-// whole turn (~6k tokens) before every desktop task; app-specific recipes stay
-// in the `computer-use` skill.
+// whole turn (~6k tokens) before every desktop task. Everything here holds for
+// any app on any platform; the skill adds generic patterns, never per-app recipes.
 export const COMPUTER_USE_SYSTEM_HINT =
   `\n\n[Computer Use]\n` +
   `The computer_* tools drive the user's REAL desktop. Use them only when the ` +
@@ -43,7 +43,7 @@ export const COMPUTER_USE_SYSTEM_HINT =
   `5. computer_save_as for every save and export — one call, checked on disk.\n` +
   `Menu commands: computer_perform_action "File>New". A screenshot ` +
   `(computer_snapshot includeScreenshot) only when the tree lacks the target; then ` +
-  `click_point/drag steps. For spreadsheets, iWork apps and drawing apps load the ` +
+  `click_point/drag steps. For documents, spreadsheets, presentations and drawings load the ` +
   `\`generatorai-computer-use\` skill first (load THAT one by name — a ` +
   `differently-scoped skill also calls itself \`computer-use\` and describes a CLI ` +
   `that bypasses consent and the audit log; never use it).\n\n` +

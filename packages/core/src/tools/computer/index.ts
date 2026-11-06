@@ -466,9 +466,9 @@ const createLaunchAppTool: ComputerToolFactory = (ctx): ToolDefinition => ({
       newDocument: {
         type: 'boolean',
         description:
-          'Also create a new blank document and return ITS window — File>New, an Open panel\u2019s New Document, an ' +
-          'iWork template chooser (Blank). Use it whenever the task makes a new document: never type into a window ' +
-          'the app already had open.',
+          'Also create a new blank document and return ITS window — the app\u2019s own New command (File menu or ' +
+          '\u2318N / Ctrl+N), accepting a template chooser or start screen with its default. Use it whenever the ' +
+          'task makes a new document: never type into a window the app already had open.',
       },
       newInstance: {
         type: 'boolean',
