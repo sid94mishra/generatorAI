@@ -67,3 +67,81 @@ Already fixed and not part of this item:
 **How to verify.** Sample the driver's (or the app's) overlay windows with `CGWindowListCopyWindowInfo` while the cursor
 moves to a window on each display; this needs no screen-capture permission. Pass when an overlay covers every target
 position, on both displays.
+
+## B-6 Computer use to an independent score above 8/10 (parked 2026-11-07)
+**Goal.** An independent judge scores GeneratorAI computer use above 8/10, working from evidence files only. Every fix
+stays generic: nothing is keyed to an app or a task, and every fix must carry to any app on macOS, Windows and Linux (owner
+rule).
+
+**State after 17 iterations** (macOS 27, Sonnet 5.5, installed signed app, branch `arch-echancement`, latest build
+58687bfe, cua-driver 0.41.2):
+
+| Judged rounds | Build | Overall | Pass rate (strict) | Original S1–S10 | Fresh held-out G1–G6 |
+|---|---|---|---|---|---|
+| R8a–R10a | 0.38 driver | 5.0 | 57% | 67% | — |
+| R11a–R12a | f03bb6fd | 5.5 | 79% | 65% | 12/12 |
+| R14a–R15a | d8e317a0 | **6.0** | 87% | 75% | 12/12 |
+| R16a–R17a | 58687bfe | 5.7 | 79% | 70% | 12/12 |
+
+What works:
+- Standard controls: keypads, text areas, menus, Find panels, standard save panels, opening a file by path.
+- New documents in iWork, TextEdit, Freeform, Script Editor, Grapher and VS Code.
+- Honest replies: there has been no false success claim in a final answer since R12.
+- Batching through `run_steps`.
+- `save_as` checks the result on disk.
+
+What never works:
+- S4: a Numbers chart title.
+- S5: a Freeform export through its separate export window.
+- S6: Pages table cells; it passes only by chance.
+
+**Open issues, ranked by expected impact.** Taken from the last judge report and owner findings.
+
+| # | Issue | Shown by | Fix needed |
+|---|---|---|---|
+| 1 | No working foreground path: keys sent to an unfocused window or a canvas object are reported `ok` and change nothing | S4 every run, S3, S6 | A consented "bring to front" step that confirms focus, a per-batch read-back that retries in the foreground or refuses when nothing changed, and consent shown in the UI |
+| 2 | `save_as` fails on export panels that are separate windows, and on the Replace sheet (`-25205`); the 4 s tree budget runs out before the Export button | S5 every run; S6, H2 and G6 sometimes | Treat any new window holding a save panel as the dialog, find its default button directly, give dialogs a larger tree budget, handle Replace |
+| 3 | No budget stop: failing runs reach 50–72 calls and 5–10M context, because any snapshot lifts the unconfirmed-input stop | S4, S5, S6 | A stop after N batches with no change on the same target that a snapshot cannot lift, and pruning of unchanged screenshots |
+| 4 | Tools report success that did not happen: `verified:true` on a wrong read-back, a false "Created", `target_lost` worded as "Performed", `ok` with no effect | S6, S8, G4, S4, H3, G1 | Compare the read-back with the requested value, confirm a new document by diffing the window list, keep refusal codes consistent |
+| 5 | `newDocument` is not isolated: New opens a tab in the user's window before the New Window fallback runs, and that empty tab stays | G4 | Use New Window first when the app already has windows, and report the leftover tab |
+| 6 | A menu command aimed at one window acts on whichever window of the app is in front (found while tidying VS Code on 2026-11-07) | owner's VS Code session | Bring the addressed window forward and confirm it is key before any menu command that changes or closes something |
+| 7 | Word-processor table cells: the cell-by-index recipe left cells empty; Tab moves focus to a sidebar | S6 | Enter cell edit mode through accessibility, then correct the skill |
+| 8 | New windows are not found when many windows of the app are open | H3, H2 | Resolve new windows by diffing the window list |
+| 9 | No product-level protection of the file the user opened: an edit reached the original's window | H3 | Hash the original at open, refuse changing commands on its window when the task keeps it, restore it if it changed |
+| 10 | Leftover state between runs: restored iWork, Preview and Grapher documents, Calculator mode, VS Code test windows, autosaved untitled documents | G2, H3, S3 and others | Harness reset before every run, plus product-side reporting of autosave residue |
+| 11 | The agent searched the user's home folders (`ls ~/Desktop ~/Documents`, `find`) to look for an export | S5 | Confine file checks to the target folder, in the skill and the hint |
+| 12 | Menu labels guessed wrong cost calls | S1, S4, S5, S8 | Fuzzy-match against the items the refusal already lists |
+| 13 | Agent cursor missing on a second display | — | See B-5 |
+| 14 | Genericity gaps: English-only labels; Windows and Linux never run; the skill's sections mirror the tuning tasks; G4 contaminated by two fixes | — | Measure on Windows and Linux, run a non-English UI, write a new held-out set |
+
+**Definition of done** (judge criteria for above 8):
+- **Original set:** at least 85% strict over 4 or more runs per task, with S4, S5 and S6 each passing at least 3 of 4.
+- **New held-out set:** at least 85% strict on a never-tuned set of 10 or more tasks. It includes at least 3 third-party apps and the hard control classes: canvas text, export windows separate from the document, and word-processor tables.
+- **Platforms:**
+  - Windows and Linux runs within 10 points of macOS.
+  - At least one run with a non-English UI.
+- **Integrity:**
+  - Zero false `ok`, `verified` or "Created" results.
+  - Zero input into windows that existed before the task.
+  - Zero changes outside the target paths.
+  - Zero leftover state at the start of a run.
+- **Cost:**
+  - Median under 90 s and under 400k context per task.
+  - No run over 2M context or 40 calls.
+- **User control:** consent prompts and a live view shown in the evidence.
+
+**How it was measured.**
+- `cu-run.mjs` drives the installed app over CDP like a user: a new chat, the task typed in, consent answered.
+- `batch.sh` resets the test apps, runs the tasks and verifies each one.
+- `cu_verify.py` checks the output files on disk.
+- `judge_compile.py` assembles `runs.json` and `traces.json`, and an Opus judge scores them from evidence only.
+- The task set has three parts:
+  - S1–S10: the original tasks.
+  - H2–H4: held out at first, later tuned on.
+  - G1–G6: fresh, and almost untuned.
+- The harness and all reports (`REPORT-R8-R10.md` to `REPORT-R16-R17.md`) live in the session scratchpad under
+  `/private/tmp/…/scratchpad/cu/`, which macOS purges. Move it into the repo before resuming.
+
+**Unblocks.**
+- Windows and Linux machines with the app installed: needed for the platform criteria.
+- Owner decisions on the consent UX for foreground steps and on the second-display cursor (B-5).
