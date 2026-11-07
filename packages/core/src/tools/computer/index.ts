@@ -603,12 +603,19 @@ function planStep(
       const rawKey = coerceString(step['key']);
       if (!rawKey) return { error: 'press_key needs `key`.' };
       const chord = parseKeyChord(rawKey);
+      // The single-key tool takes `modifiers`; a step written the same way
+      // pressed the bare key (⌘A typed "a" into a cell). Honour it here too.
+      const raw = Array.isArray(step['modifiers']) ? step['modifiers'] : [];
+      const unknown = raw.filter((m) => typeof m !== 'string' || !MODIFIER_ALIASES.has(m.trim().toLowerCase()));
+      if (unknown.length > 0) return { error: `press_key: unknown modifier ${JSON.stringify(unknown[0])}; use Meta, Control, Alt or Shift.` };
+      const declared = raw.map((m) => MODIFIER_ALIASES.get((m as string).trim().toLowerCase())!);
+      const modifiers = [...new Set([...declared, ...chord.modifiers])];
       return {
         step: {
           type: 'pressKey',
           target,
           key: chord.key,
-          modifiers: chord.modifiers.length > 0 ? chord.modifiers : undefined,
+          modifiers: modifiers.length > 0 ? modifiers : undefined,
         },
       };
     }

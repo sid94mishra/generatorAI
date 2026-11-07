@@ -2129,6 +2129,10 @@ export class CuaDriverBridge implements IComputerBridge {
           existing = await visible();
         }
       }
+      // Restoring documents takes a moment after the first window: wait until
+      // the window list holds still, or a restored document counts as new
+      // (measured: a board from an earlier run was reported "Created").
+      existing = await this.settledWindows(visible, existing);
       const handled = new Set<number>();
       // A start screen shown on activation is already the way to a new document.
       const shownChooser = existing.find(isIntermediateWindow);
@@ -2159,11 +2163,25 @@ export class CuaDriverBridge implements IComputerBridge {
         }
         const doc = fresh.find((w) => w.title !== '');
         // A tabbed app opens the document in the window it already has.
-        const tab = !doc && anchor ? windows.find((w) => w.id === anchor.id && w.title !== '' && w.title !== before.get(anchor.id)) : undefined;
-        const made = doc ?? tab;
-        if (made) {
-          this.bumpEpoch(pid, made.id);
-          return { window: { id: made.id, title: made.title }, steps };
+        const tab = !doc && anchor
+          ? windows.find((w) => w.id === anchor.id && w.title !== '' && titleCore(w.title) !== titleCore(before.get(anchor.id) ?? ''))
+          : undefined;
+        if (doc) {
+          this.bumpEpoch(pid, doc.id);
+          return { window: { id: doc.id, title: doc.title }, steps };
+        }
+        if (tab) {
+          // The new document opened as a tab inside a window that was already
+          // open — the user's. A window of its own keeps the work apart.
+          const own = await this.newDocumentInOwnWindow(connection, pid, tab.id, visible, signal);
+          if (own) {
+            steps.push(...own.steps);
+            this.bumpEpoch(pid, own.window.id);
+            return { window: own.window, steps };
+          }
+          steps.push(`a tab inside the existing window "${before.get(tab.id) ?? ''}"`);
+          this.bumpEpoch(pid, tab.id);
+          return { window: { id: tab.id, title: tab.title }, steps };
         }
         // Nothing yet: the window in front may be a start screen or an Open
         // panel that ignores New and offers its own button instead.
@@ -2195,6 +2213,61 @@ export class CuaDriverBridge implements IComputerBridge {
     if (!result?.structuredJson) return undefined;
     const rows = (JSON.parse(result.structuredJson) as { elements?: unknown }).elements;
     return pickNewDocumentButton(Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : []);
+  }
+
+  /** The window list once it has held still for a second (at most 5 s). */
+  private async settledWindows(
+    visible: () => Promise<ComputerWindowInfo[]>,
+    first: ComputerWindowInfo[],
+  ): Promise<ComputerWindowInfo[]> {
+    const key = (ws: readonly ComputerWindowInfo[]) => ws.map((w) => `${w.id}:${w.title}`).sort().join('|');
+    let last = first;
+    let stableSince = Date.now();
+    for (const started = Date.now(); Date.now() - started < 5_000 && Date.now() - stableSince < 1_000; ) {
+      await new Promise((r) => setTimeout(r, 300));
+      const now = await visible();
+      if (key(now) !== key(last)) stableSince = Date.now();
+      last = now;
+    }
+    return last;
+  }
+
+  /**
+   * A new document in a window of its own, when the app's New opened a tab in
+   * an existing window: the app's own "New Window", then New in it. Undefined
+   * when the app has no such item or no window appears.
+   */
+  private async newDocumentInOwnWindow(
+    connection: Connection,
+    pid: number,
+    tabWindowId: number,
+    visible: () => Promise<ComputerWindowInfo[]>,
+    signal?: AbortSignal,
+  ): Promise<{ window: { id: number; title: string }; steps: string[] } | undefined> {
+    const list = await this.call(connection, 'invoke_menu', { pid, window_id: tabWindowId, path: ['File', '__generatorai_list_items__'] }, signal);
+    const listed = /Items there:\s*(.*)$/is.exec(list.text ?? '');
+    const items = listed ? [...listed[1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!.trim()) : [];
+    const item = items.find((i) => /^new window$/i.test(i));
+    if (!item) return undefined;
+    // The empty tab New left in that window stays: closing "the active tab"
+    // risks closing one of the user's own if focus moved.
+    const before = new Set((await visible()).map((w) => w.id));
+    try {
+      await this.menuOrFail(connection, pid, tabWindowId, ['File', item], signal);
+    } catch {
+      return undefined;
+    }
+    for (let waited = 0; waited < 8_000; waited += 400) {
+      await new Promise((r) => setTimeout(r, 400));
+      const fresh = (await visible()).find((w) => !before.has(w.id));
+      if (!fresh) continue;
+      const titled = fresh.title;
+      const command = await this.runNewCommand(connection, pid, fresh.id, signal).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 800));
+      const now = (await visible()).find((w) => w.id === fresh.id);
+      return { window: { id: fresh.id, title: now?.title ?? titled }, steps: [`File>${item}`, ...(command ? [command] : [])] };
+    }
+    return undefined;
   }
 
   /**
@@ -3220,6 +3293,11 @@ export function savedInstead(folder: string, name: string, before: ReadonlySet<s
   const now = [...folderEntries(folder)].filter((f) => f !== name);
   const stray = now.find((f) => f.startsWith(`${name}.`)) ?? now.find((f) => !before.has(f) && !f.startsWith('.'));
   return stray ? path.join(folder, stray) : undefined;
+}
+
+/** A window title without the status marks some apps animate at its start ("◐ project", "● file"). */
+export function titleCore(title: string): string {
+  return title.replace(/^[^\p{L}\p{N}]+/u, '').trim();
 }
 
 /** The button a start screen or Open panel offers for a blank document, best first. */

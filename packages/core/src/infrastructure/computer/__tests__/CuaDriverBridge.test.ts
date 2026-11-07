@@ -1695,7 +1695,7 @@ describe('CuaDriverBridge new blank document', () => {
     const made = await fake.bridge.newDocument!(handle, { appId: 'example.editor', name: 'Editor', pid: 42 });
 
     expect(made.window).toEqual({ id: 10, title: 'Untitled' });
-    expect(made.steps).toEqual([process.platform === 'darwin' ? 'Meta+N' : 'Control+N']);
+    expect(made.steps).toEqual([process.platform === 'darwin' ? 'Meta+N' : 'Control+N', 'a tab inside the existing window "Draft.txt"']);
     expect(fake.calls.find((c) => c.tool === 'hotkey')?.args).toMatchObject({ keys: [process.platform === 'darwin' ? 'cmd' : 'ctrl', 'n'] });
   }, 30_000);
 });
@@ -1850,5 +1850,14 @@ describe('CuaDriverBridge agent cursor across turns', () => {
     const after = fake.calls.slice(fake.calls.findIndex((c) => c.tool === 'set_agent_cursor_enabled' && c.args['enabled'] === false) + 1).map((c) => c.tool);
     expect(after.indexOf('set_agent_cursor_enabled')).toBeLessThan(after.indexOf('run_steps'));
     expect(cursorCalls().slice(before)).toEqual([false, true]);
+  });
+});
+
+describe('titleCore', () => {
+  it('ignores the status marks an app animates at the start of a title', async () => {
+    const { titleCore } = await import('../CuaDriverBridge.js');
+    expect(titleCore('◐ Redesign — project')).toBe(titleCore('◑ Redesign — project'));
+    expect(titleCore('● notes.txt')).toBe('notes.txt');
+    expect(titleCore('Untitled-1 — project')).not.toBe(titleCore('Redesign — project'));
   });
 });

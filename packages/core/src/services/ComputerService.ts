@@ -1249,13 +1249,14 @@ export class ComputerService {
       return result;
     }
 
-    // A readable tree for a FOCUSED window is positive evidence that the
-    // accessibility layer is up and that synthetic keystrokes are reaching the
-    // window we think they are. Without this reset the blind-input tripwire is
-    // unescapable on Chromium/Electron hosts (VS Code, Chrome), which never
-    // confirm synthetic input: measured, the 5th keystroke always aborted the
-    // run with "the accessibility layer is down" while snapshots kept working.
-    if (result.snapshot?.window.focused) session.blindStreak = 0;
+    // A fresh read of the window is what the stop asks for: the agent sees
+    // whether its input landed before sending more. It used to count only when
+    // the window was FOCUSED, which a background window never is — the stop
+    // could not be lifted in the background mode everything runs in, although
+    // the skill says a snapshot lifts it. Keys cannot stray into another
+    // window meanwhile: the driver refuses them unless the addressed window
+    // holds the app's keyboard (window_not_key).
+    if (result.snapshot) session.blindStreak = 0;
 
     await this.writeAudit({
       workspaceId: ctx.workspaceId,
@@ -1373,12 +1374,9 @@ export class ComputerService {
     if (synthetic && session.blindStreak >= BLIND_INPUT_LIMIT) {
       const refusal = this.refusal(
         'provider_unavailable',
-        `The last ${session.blindStreak} keystrokes and clicks were delivered but could not be confirmed, ` +
-          'and no snapshot since then has found this window focused — so they may be landing in ' +
-          'another window. Stop sending input. Take a computer_snapshot of the target window: if it ' +
-          'comes back focused, the run can continue. If it does not, bring the window to the front ' +
-          'first, and if that also fails tell the user to restart the desktop driver from the ' +
-          'Computer panel.',
+        `The last ${session.blindStreak} keystrokes and clicks were delivered but could not be confirmed. ` +
+          'Stop sending input and take a computer_snapshot of the target window: check what landed, then ' +
+          'continue from there. If the window shows none of it, change approach rather than repeat it.',
       );
       await this.recordRefusal(ctx, app, req.type, refusal);
       return refusalResult(refusal);

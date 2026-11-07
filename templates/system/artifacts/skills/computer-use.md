@@ -97,11 +97,11 @@ each button by name, then read the result in `changes`. Two calls in all.
     table.
   - A word processor usually keeps pasted tab-separated text as text: insert
     a table from its menu (Insert>Table, Table>Insert), size it with the
-    app's row/column controls, click the first cell, then one `type_text`
-    per cell with a `press_key Tab` step between them (a `\t` inside typed
-    text inserts a tab character or a column, never moves cells), and leave
-    the last cell with `Tab` or `Shift+Tab` — Escape cancels the cell being
-    edited in many apps.
+    app's row/column controls (`set_value` the number in a Rows/Columns
+    field), then fill it cell by cell — `click` a cell by its index from a
+    snapshot, `type_text` its text, then click the next cell. Tab moves
+    focus out of the table in some apps (into a sidebar), so do not rely on
+    it; Escape cancels the cell being edited.
   - Check one computed value with a `computer_snapshot` `query`, then save.
 * Table cells are cell rows in the tree (`AXCell`, `DataItem`), a cell's
   text in its label: click a cell by its index when the tree lists it, then
@@ -172,7 +172,7 @@ change approach or stop and say which step failed.
 | `provider_unavailable` | Read the message; fix a menu label once, otherwise stop and report. |
 
 The service stops you after five unconfirmed keystroke batches in a row; a
-snapshot resets it.
+snapshot of the window lifts the stop — check what landed before going on.
 
 **Never route around the tools:** no `osascript`, AppleScript, `cua-driver`,
 `xdotool`, PowerShell UI Automation or SendKeys, and no script writing the file
