@@ -46,3 +46,24 @@ The Scripts page was empty in the owner's app, so its menu entries are hidden: `
 `packages/shared/src/ui-contract/commands.ts` leaves it out of the sidebar, rail, palette and Home shortcuts. The page
 still answers at `/scripts`, and its shortcut (G S, ⇧⌘S, Ctrl+7) still works. To revisit: where scripts come from and why
 none were listed, then creating, running and editing one in the app. Then bring the entry back by dropping the filter.
+
+## B-5 Agent cursor on a second display (parked 2026-11-07)
+**Situation.** cua-driver draws the computer-use agent cursor in a single overlay window that covers only the main display.
+Measured on the owner's Mac: the main display is 1440×900 at (0,0), and a second 2560×1440 monitor sits at (−570,−1440). The
+apps the agent drives open on the second monitor, and their cursor positions (y < 0) are never drawn. This holds on 0.38.0 and
+on 0.41.2, and the release notes up to 0.41.x mention no multi-display overlay. Actions on the second monitor therefore
+show no agent cursor at all.
+
+Already fixed and not part of this item:
+- stale cursors, now hidden at turn end (c2638d22);
+- effect-heavy motion, now a gentle arc with Fitts timing (9d399491, d8e317a0).
+
+**Options:**
+1. A GeneratorAI-drawn overlay: one transparent, click-through, always-on-top window per display in the desktop app. It
+   animates the agent cursor with the same motion model, driven by the action targets the bridge already knows, and the
+   driver's own cursor is switched off. This needs to work on Windows and Linux too.
+2. Report the bug upstream at trycua/cua and wait for a driver fix. That is outward-facing, so it needs the owner's OK.
+
+**How to verify.** Sample the driver's (or the app's) overlay windows with `CGWindowListCopyWindowInfo` while the cursor
+moves to a window on each display; this needs no screen-capture permission. Pass when an overlay covers every target
+position, on both displays.
