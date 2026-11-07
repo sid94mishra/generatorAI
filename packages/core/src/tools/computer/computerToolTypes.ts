@@ -121,7 +121,8 @@ export function agentFacing(message: string | undefined): string | undefined {
     .replace(/\bget_window_state\b/g, 'computer_snapshot')
     .replace(/\bcall bring_to_front[^,.;]*/gi, 'bring the window to the front')
     .replace(/\bbring_to_front\b/g, 'bringing the window to the front')
-    .replace(/(with |use |act with )?delivery_mode\s*:\s*\\?"foreground\\?"/g, 'in the foreground')
+    .replace(/(?:act with |use |with )delivery_mode\s*:\s*\\?"foreground\\?"/g, 'act in the foreground')
+    .replace(/delivery_mode\s*:\s*\\?"foreground\\?"/g, 'the foreground')
     .replace(/\belement_token\b/g, 'elementIndex')
     .replace(/\binvoke_menu\b/g, 'menu step')
     .replace(/\bcomputer_click_point\b/g, 'a click_point step');

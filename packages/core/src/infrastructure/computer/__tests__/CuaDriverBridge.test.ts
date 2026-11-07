@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ILogger } from '@generatorai/shared';
-import { CuaDriverBridge, closestMenuItem, firstNonMenuCandidate, focusHolder, formatNamesFor, mainWindow, openMenuLabels, parseRunSteps, pickNewDocumentButton, pickNewDocumentItem, splitLaunchArguments, typedNowhere, withPointFocus } from '../CuaDriverBridge.js';
+import { CuaDriverBridge, closestMenuItem, firstNonMenuCandidate, focusHolder, formatNamesFor, mainWindow, openMenuLabels, parseRunSteps, pickNewDocumentButton, pickNewDocumentItem, savedInstead, splitLaunchArguments, typedNowhere, withPointFocus } from '../CuaDriverBridge.js';
 import * as nodeFs from 'node:fs';
 import * as nodeOs from 'node:os';
 import * as nodePath from 'node:path';
@@ -1813,5 +1813,19 @@ describe('typedNowhere', () => {
     expect(typedNowhere('Background input refused (no_focused_text_input): the focused element in this window is not a text input')).toBe(true);
     expect(typedNowhere('type_text incomplete: delivered 3 of 7 character(s)')).toBe(false);
     expect(typedNowhere('That snapshot is out of date.')).toBe(false);
+  });
+});
+
+describe('savedInstead', () => {
+  it('finds the file a dialog wrote under its own name, by difference', () => {
+    const dir = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'saved-'));
+    nodeFs.writeFileSync(nodePath.join(dir, 'old.txt'), '');
+    const before = new Set(nodeFs.readdirSync(dir));
+    expect(savedInstead(dir, 'flow.pdf', before)).toBeUndefined();
+    nodeFs.writeFileSync(nodePath.join(dir, 'Untitled 10.pdf'), '');
+    expect(savedInstead(dir, 'flow.pdf', before)).toBe(nodePath.join(dir, 'Untitled 10.pdf'));
+    nodeFs.writeFileSync(nodePath.join(dir, 'sine.pdf.tiff'), '');
+    expect(savedInstead(dir, 'sine.pdf', before)).toBe(nodePath.join(dir, 'sine.pdf.tiff'));
+    expect(typedNowhere("Background input refused (window_not_key): window 10 could not be confirmed as the app's key window")).toBe(true);
   });
 });

@@ -1170,8 +1170,11 @@ export class CuaDriverBridge implements IComputerBridge {
         action: {
           path: mapRoute(result.action?.route),
           actionName: call.tool,
+          // The driver confirms by reading back the element it wrote; when the
+          // window shows no change at all, that read-back was of the wrong
+          // element (keys landed in a sidebar field) — not a verification.
           verification:
-            result.action?.effect === EFFECT_CONFIRMED
+            result.action?.effect === EFFECT_CONFIRMED && !changes?.unchanged
               ? { state: 'verified', property: req.type === 'setValue' ? 'value' : undefined }
               : { state: 'unverified', reason: req.type === 'pasteText' ? 'clipboard_paste' : 'synthetic_input' },
           durationMs: Date.now() - started,
@@ -1362,11 +1365,25 @@ export class CuaDriverBridge implements IComputerBridge {
     try {
       const write = await this.call(connection, 'clipboard_write', { text: args['text'] }, signal);
       if (write.isError) return write;
+      // A paste is a key chord, and the app hands it to ITS key window — which
+      // is not always the window addressed (measured: text aimed at a new
+      // editor window landed in another window of the same app). Bring the
+      // addressed window forward first when another one is in front.
+      const pid = typeof args['pid'] === 'number' ? args['pid'] : undefined;
+      const windowId = typeof args['window_id'] === 'number' ? args['window_id'] : undefined;
+      const front = pid !== undefined ? (await this.windowsFor(connection, pid)).find((w) => w.focused && !w.floating) : undefined;
+      const elsewhere = front !== undefined && windowId !== undefined && front.id !== windowId;
+      if (elsewhere) await this.call(connection, 'bring_to_front', { pid, window_id: windowId }, signal).catch(() => undefined);
       const pasted = await this.call(
         connection,
         'hotkey',
         // Paste is ⌘V on macOS; Ctrl+V there is a different command or nothing at all.
-        { pid: args['pid'], window_id: args['window_id'], keys: [toDriverKey(PRIMARY_MODIFIER), 'v'] },
+        {
+          pid: args['pid'],
+          window_id: args['window_id'],
+          keys: [toDriverKey(PRIMARY_MODIFIER), 'v'],
+          ...(elsewhere ? { delivery_mode: 'foreground' } : {}),
+        },
         signal,
       );
       // The app reads the clipboard after the key arrives — Numbers parses a
@@ -1886,6 +1903,9 @@ export class CuaDriverBridge implements IComputerBridge {
     if (!connection) return fail('The driver is not connected.');
     const target = path.join(opts.folder, opts.name);
     const pid = app.pid;
+    // What the folder held before: a file the dialog writes under another
+    // name ("Untitled 10.pdf", "Fruit Count 10.csv") is found by difference.
+    const filesBefore = folderEntries(opts.folder);
     // Reads below replace the window's snapshot: the agent's indices are new after this.
     this.bumpEpoch(pid, windowId);
     try {
@@ -2016,7 +2036,7 @@ export class CuaDriverBridge implements IComputerBridge {
         }
         await new Promise((r) => setTimeout(r, 300));
       }
-      const instead = savedInstead(opts.folder, opts.name);
+      const instead = savedInstead(opts.folder, opts.name, filesBefore);
       if (instead) {
         return fail(
           `The app saved ${instead} instead of ${opts.name}: the dialog kept its own format. Pass format as the dialog names it ` +
@@ -3141,14 +3161,24 @@ function exportedFolder(target: string): string[] | undefined {
   }
 }
 
-/** A file the dialog wrote under another name — the name plus the format's own extension ("sine.pdf.tiff"). */
-function savedInstead(folder: string, name: string): string | undefined {
+/** The names in a folder, or an empty set when it cannot be read. */
+function folderEntries(folder: string): Set<string> {
   try {
-    const stray = readdirSync(folder).find((f) => f !== name && f.startsWith(`${name}.`));
-    return stray ? path.join(folder, stray) : undefined;
+    return new Set(readdirSync(folder));
   } catch {
-    return undefined;
+    return new Set();
   }
+}
+
+/**
+ * A file the dialog wrote under another name: the name plus the format's own
+ * extension ("sine.pdf.tiff"), or any file new to the folder since the call
+ * began (the app's default name, "Untitled 10.pdf").
+ */
+export function savedInstead(folder: string, name: string, before: ReadonlySet<string>): string | undefined {
+  const now = [...folderEntries(folder)].filter((f) => f !== name);
+  const stray = now.find((f) => f.startsWith(`${name}.`)) ?? now.find((f) => !before.has(f) && !f.startsWith('.'));
+  return stray ? path.join(folder, stray) : undefined;
 }
 
 /** The button a start screen or Open panel offers for a blank document, best first. */
@@ -3189,9 +3219,14 @@ function named(req: { name: string; role?: string; nth?: number }): Json {
 const SYNTHETIC_TOOLS: ReadonlySet<string> = new Set(['type_text', 'press_key', 'hotkey', 'scroll', 'drag']);
 
 /** A step's own delivery mode stays only where the tool takes one; set_value refuses it. */
-/** A typing or key step the driver could not deliver to any text input in the background. */
+/**
+ * A typing or key step the driver could not deliver in the background: no
+ * text input had focus, nothing was delivered, or another window of the app
+ * held the keyboard (`window_not_key`). The driver's own advice for each is
+ * the foreground.
+ */
 export function typedNowhere(message: string | undefined): boolean {
-  return /no_focused_text_input|delivered 0 of \d+ character|focused element in this window is not a text input/i.test(message ?? '');
+  return /no_focused_text_input|delivered 0 of \d+ character|focused element in this window is not a text input|window_not_key/i.test(message ?? '');
 }
 
 /** The step that focused the field a failed key step was meant for: the nearest click before it, else the step itself. */
