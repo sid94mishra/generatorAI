@@ -2669,22 +2669,23 @@ export class CuaDriverBridge implements IComputerBridge {
         );
       }
 
-      // The driver hides the cursor after 20 s of stillness, which is most of a
-      // run: the agent spends far longer reading trees and waiting on the model
-      // than moving. The user then sees the pointer vanish and reads it as the
-      // agent having stopped. Keep it on screen for the life of the session.
-      // Distance-based timing (`fitts`): a hop to the next keypad button is
-      // quick, a move across the screen still reads as a move. The default
-      // floor of 600 ms per move made a thirteen-press sum crawl.
+      // Motion a person would make: one gently curved path (a hand's arc, not
+      // a swoop), timed by distance and target size (Fitts — a hop to the next
+      // key is quick, a move across the screen takes longer), and a short
+      // settle after a click. No glow or squish: they read as an animation,
+      // not a pointer. The click ripple stays so the press itself is visible.
+      // The cursor hides when the turn ends (`hideAgentCursor`); idle_hide_ms
+      // is the backstop.
       const motion = await client.callTool(
         'set_agent_cursor_motion',
         JSON.stringify({
           session: sessionId,
           idle_hide_ms: AGENT_CURSOR_IDLE_HIDE_MS,
           style: 'signature_arc',
+          arc_size: 0.12,
           timing: 'fitts',
-          dwell_after_click_ms: 60,
-          effects: { ripple: 'on', glow: 'on' },
+          dwell_after_click_ms: 140,
+          effects: { ripple: 'on', glow: 'off', squish: 'off', trail: 'off', magnet: 'off' },
         }),
       );
       if (motion.isError) {
