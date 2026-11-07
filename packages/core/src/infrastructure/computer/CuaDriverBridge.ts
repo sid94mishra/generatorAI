@@ -144,13 +144,20 @@ const EFFECT_REFUSED = 4;
 const CAPTURE_WINDOW = 1;
 
 /**
- * How long the agent cursor stays visible while nothing moves: 0 = never hides.
+ * How long the agent cursor stays visible while nothing moves.
  *
  * The driver's default (15 s) is shorter than the gaps between a model's tool
- * calls, so the pointer vanished mid-task and the run looked abandoned. It
- * leaves with the session.
+ * calls, so the pointer vanished mid-task and the run looked abandoned; never
+ * hiding left a pointer on screen for the life of every session, one per
+ * workspace that ever ran a task. A turn's end hides it at once
+ * (`hideAgentCursor`); this is the backstop for a run that ends any other way.
  */
-const AGENT_CURSOR_IDLE_HIDE_MS = 0;
+const AGENT_CURSOR_IDLE_HIDE_MS = 45_000;
+
+/** Driver calls that move or use the agent cursor: a hidden cursor comes back before them. */
+const CURSOR_ACTIONS: ReadonlySet<string> = new Set([
+  'click', 'right_click', 'double_click', 'drag', 'scroll', 'type_text', 'press_key', 'hotkey', 'set_value', 'run_steps', 'invoke_menu', 'move_cursor', 'paste',
+]);
 
 /**
  * Driver error codes → our refusal vocabulary. Codes observed in the contract
@@ -236,6 +243,8 @@ export interface CuaDriverBridgeOptions {
 interface Connection {
   client: DriverClient;
   sessionId: string;
+  /** The agent cursor was hidden at the end of a turn; the next action shows it again. */
+  cursorHidden?: boolean;
   workspaceRoot: string;
   driverVersion: string;
   inProcess: boolean;
@@ -635,6 +644,20 @@ export class CuaDriverBridge implements IComputerBridge {
       hostRef: endpoint?.socketPath ?? 'in-process',
       operational: true,
     };
+  }
+
+  /**
+   * Hides the agent cursor until the next action: a turn has ended, and a
+   * pointer left on screen afterwards reads as an agent still at work — one
+   * per workspace that ever ran a task, for as long as its session lives.
+   */
+  async hideAgentCursor(handle: ComputerHandle): Promise<void> {
+    const connection = this.connections.get(handle.workspaceId);
+    if (!connection || connection.cursorHidden) return;
+    connection.cursorHidden = true;
+    await connection.client
+      .callTool('set_agent_cursor_enabled', JSON.stringify({ session: connection.sessionId, enabled: false }))
+      .catch(() => undefined);
   }
 
   async stop(handle: ComputerHandle): Promise<void> {
@@ -2586,6 +2609,12 @@ export class CuaDriverBridge implements IComputerBridge {
     args: Json,
     signal?: AbortSignal,
   ): Promise<DriverToolResult> {
+    if (connection.cursorHidden && CURSOR_ACTIONS.has(tool)) {
+      connection.cursorHidden = false;
+      await connection.client
+        .callTool('set_agent_cursor_enabled', JSON.stringify({ session: connection.sessionId, enabled: true }))
+        .catch(() => undefined);
+    }
     if (tool === 'paste') return this.paste(connection, args, signal);
     const invoke = () => {
       const payload = JSON.stringify({ session: connection.sessionId, ...args });

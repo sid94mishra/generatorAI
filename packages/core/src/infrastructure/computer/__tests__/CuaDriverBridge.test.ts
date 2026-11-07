@@ -1829,3 +1829,26 @@ describe('savedInstead', () => {
     expect(typedNowhere("Background input refused (window_not_key): window 10 could not be confirmed as the app's key window")).toBe(true);
   });
 });
+
+describe('CuaDriverBridge agent cursor across turns', () => {
+  it('hides the cursor when a turn ends and shows it again before the next action', async () => {
+    const fake = makeBridge({
+      reply: (tool) =>
+        tool === 'list_windows'
+          ? ok({ windows: [{ window_id: 7, pid: 42, title: 'Doc', is_on_screen: true, layer: 0, z_index: 3, bounds: { x: 0, y: 0, width: 800, height: 600 } }] })
+          : ok({}),
+    });
+    const handle = await started(fake);
+    const cursorCalls = () => fake.calls.filter((c) => c.tool === 'set_agent_cursor_enabled').map((c) => c.args['enabled']);
+    const before = cursorCalls().length;
+
+    await fake.bridge.hideAgentCursor(handle);
+    await fake.bridge.hideAgentCursor(handle);
+    expect(cursorCalls().slice(before)).toEqual([false]);
+
+    await fake.bridge.act(handle, { type: 'clickNamed', target: { app: { appId: 'a', name: 'A', pid: 42 }, window: { by: 'id', id: 7 } }, name: 'OK' } as never, undefined, { observe: false });
+    const after = fake.calls.slice(fake.calls.findIndex((c) => c.tool === 'set_agent_cursor_enabled' && c.args['enabled'] === false) + 1).map((c) => c.tool);
+    expect(after.indexOf('set_agent_cursor_enabled')).toBeLessThan(after.indexOf('click'));
+    expect(cursorCalls().slice(before)).toEqual([false, true]);
+  });
+});

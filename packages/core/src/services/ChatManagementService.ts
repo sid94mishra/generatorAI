@@ -2397,6 +2397,8 @@ export class ChatManagementService {
       opts: { partial?: boolean; cancelled?: boolean; error?: string } = {},
     ): Promise<void> => {
       recordTurnOutcome(opts);
+      // The agent cursor belongs to the turn: left on screen after it, it reads as an agent still at work.
+      if (chat.workspaceId) void this.extensions.computerService?.turnEnded(chat.workspaceId).catch(() => undefined);
       // Every way a turn ends (idle, a stop, the shutdown flush) records the provider's session handle, so a
       // restart resumes the model's history — a turn cut short by a quit used to leave none.
       await rememberProviderSession(this.harness, this.sessionRepo, session);

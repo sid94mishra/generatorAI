@@ -794,6 +794,20 @@ export class ComputerService {
     throw new Error('[ComputerService] No available IComputerBridge; the chain must end in NullComputerBridge');
   }
 
+  /**
+   * A chat turn in this workspace ended: hide the agent cursor, which the
+   * next action brings back. The session itself stays for the next turn.
+   */
+  async turnEnded(workspaceId: string): Promise<void> {
+    const record = this.sessions.get(workspaceId);
+    if (!record?.bridge.hideAgentCursor) return;
+    try {
+      await record.bridge.hideAgentCursor(record.handle);
+    } catch (err) {
+      this.logger.debug?.(`[ComputerService] hiding the agent cursor failed for ${workspaceId}: ${(err as Error).message}`);
+    }
+  }
+
   async stop(workspaceId: string, reason?: string): Promise<void> {
     // A "for this chat" answer outlives an idle desktop session — the next
     // turn of the same chat must not ask again — and ends when the person

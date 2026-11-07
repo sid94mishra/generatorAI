@@ -510,6 +510,8 @@ export interface IComputerBridge {
    */
   startRecording?(handle: ComputerHandle, req: RecordingRequest): Promise<RecordingState>;
   stopRecording?(handle: ComputerHandle): Promise<RecordingState>;
+  /** Hides the agent cursor until the next action (a turn ended). */
+  hideAgentCursor?(handle: ComputerHandle): Promise<void>;
   recordingState?(handle: ComputerHandle): Promise<RecordingState>;
 
   /** Main display in physical pixels — the space screenshots and clicks use. */
