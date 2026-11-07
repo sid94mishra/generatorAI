@@ -2010,6 +2010,10 @@ export class ComputerService {
     }
     if (req.type === 'performAction') {
       const advertised = entry.actions.get(req.elementIndex) ?? [];
+      // "decrement", "press", "show_menu" name the element's own AXDecrement,
+      // AXPress, AXShowMenu: the agent kept writing them that way and lost a call each time.
+      const named = matchAdvertisedAction(req.actionName, advertised);
+      if (named) (req as { actionName: string }).actionName = named;
       if (!advertised.includes(req.actionName)) {
         // NOT a stale snapshot: the snapshot is current and the element is in
         // it. Reporting staleness sent the model off to re-snapshot, which
@@ -2622,6 +2626,13 @@ export class ComputerService {
       this.logger.error?.(`[ComputerService] audit write failed: ${(err as Error).message}`);
     }
   }
+}
+
+/** The advertised action a loosely written name means: case, an "AX" prefix and separators ignored. */
+export function matchAdvertisedAction(name: string, advertised: readonly string[]): string | undefined {
+  const norm = (v: string) => v.toLowerCase().replace(/^ax/, '').replace(/[^a-z]/g, '');
+  const wanted = norm(name);
+  return advertised.find((a) => a === name) ?? advertised.find((a) => norm(a) === wanted);
 }
 
 function matchesRef(app: ComputerAppInfo, ref: ComputerAppRef): boolean {

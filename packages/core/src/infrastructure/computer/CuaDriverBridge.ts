@@ -1283,8 +1283,12 @@ export class CuaDriverBridge implements IComputerBridge {
           refusal: {
             code: 'unsupported_action',
             message:
-              `The driver cannot send "${req.actionName}". It sends ${[...CLICK_ACTIONS.keys()].join(', ')}; ` +
-              'a menu command goes to computer_perform_action as a path such as "File>New".',
+              `The driver cannot send "${req.actionName}". ` +
+              (/increment|decrement/i.test(req.actionName)
+                ? 'For a stepper or slider, computer_set_value the number you want on it — the driver steps the control there.'
+                : /raise/i.test(req.actionName)
+                  ? 'A window comes to the front by itself when a command needs it: act on the element you want directly.'
+                  : `It sends ${[...CLICK_ACTIONS.keys()].join(', ')}; a menu command goes to computer_perform_action as a path such as "File>New".`),
           },
         };
       }

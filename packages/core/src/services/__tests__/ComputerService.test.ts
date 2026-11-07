@@ -1214,3 +1214,13 @@ describe('ComputerService actPlan (G-07)', () => {
     expect(consent.prompts).toHaveLength(0);
   });
 });
+
+describe('matchAdvertisedAction', () => {
+  it('reads a loosely written action as the element’s own name', async () => {
+    const { matchAdvertisedAction } = await import('../ComputerService.js');
+    expect(matchAdvertisedAction('decrement', ['AXIncrement', 'AXDecrement'])).toBe('AXDecrement');
+    expect(matchAdvertisedAction('show_menu', ['AXPress', 'AXShowMenu'])).toBe('AXShowMenu');
+    expect(matchAdvertisedAction('AXPress', ['AXPress'])).toBe('AXPress');
+    expect(matchAdvertisedAction('raise', ['AXPress'])).toBeUndefined();
+  });
+});
