@@ -1118,6 +1118,12 @@ export class CuaDriverBridge implements IComputerBridge {
     const connection = this.connections.get(handle.workspaceId);
     if (!connection) return refuse(disconnected());
     const started = Date.now();
+    // The driver resolves a control by name only inside run_steps — its
+    // `click` and `set_value` take a token or a point (cua-driver 0.41 says
+    // so: "unknown argument name"). One named action is a one-step batch.
+    if (req.type === 'clickNamed' || req.type === 'setValueNamed') {
+      return (await this.actBatch(handle, [req], signal)).at(-1) ?? refuse(disconnected());
+    }
 
     try {
       const call = await this.buildCall(connection, req);
@@ -2655,18 +2661,19 @@ export class CuaDriverBridge implements IComputerBridge {
         this.options.logger.debug?.(`[CuaDriverBridge] agent cursor refused: ${cursor.errorCode ?? cursor.text}`);
         return;
       }
-      if (!this.options.cursorThemeId) return;
 
       // A distinct colour is the whole point: the user has to be able to tell
       // the agent's pointer from their own at a glance.
-      const theme = await client.callTool(
-        'set_agent_cursor_theme',
-        JSON.stringify({ session: sessionId, theme_id: this.options.cursorThemeId }),
-      );
-      if (theme.isError) {
-        this.options.logger.warn?.(
-          `[CuaDriverBridge] cursor theme '${this.options.cursorThemeId}' refused: ${theme.errorCode ?? theme.text}`,
+      if (this.options.cursorThemeId) {
+        const theme = await client.callTool(
+          'set_agent_cursor_theme',
+          JSON.stringify({ session: sessionId, theme_id: this.options.cursorThemeId }),
         );
+        if (theme.isError) {
+          this.options.logger.warn?.(
+            `[CuaDriverBridge] cursor theme '${this.options.cursorThemeId}' refused: ${theme.errorCode ?? theme.text}`,
+          );
+        }
       }
 
       // Motion a person would make: one gently curved path (a hand's arc, not
@@ -2689,7 +2696,7 @@ export class CuaDriverBridge implements IComputerBridge {
         }),
       );
       if (motion.isError) {
-        this.options.logger.debug?.(
+        this.options.logger.warn?.(
           `[CuaDriverBridge] agent cursor motion refused: ${motion.errorCode ?? motion.text}`,
         );
       }

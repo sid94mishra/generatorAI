@@ -52,7 +52,7 @@
   },
   "optionalDependencies": {
     "@huggingface/transformers": "^3.7.6",
-    "@trycua/cua-driver": "0.38.0",
+    "@trycua/cua-driver": "0.41.2",
     "node-pty": "^1.1.0",
     "sharp": "^0.34.5"
   },

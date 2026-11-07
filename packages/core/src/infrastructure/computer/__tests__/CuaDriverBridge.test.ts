@@ -1848,7 +1848,7 @@ describe('CuaDriverBridge agent cursor across turns', () => {
 
     await fake.bridge.act(handle, { type: 'clickNamed', target: { app: { appId: 'a', name: 'A', pid: 42 }, window: { by: 'id', id: 7 } }, name: 'OK' } as never, undefined, { observe: false });
     const after = fake.calls.slice(fake.calls.findIndex((c) => c.tool === 'set_agent_cursor_enabled' && c.args['enabled'] === false) + 1).map((c) => c.tool);
-    expect(after.indexOf('set_agent_cursor_enabled')).toBeLessThan(after.indexOf('click'));
+    expect(after.indexOf('set_agent_cursor_enabled')).toBeLessThan(after.indexOf('run_steps'));
     expect(cursorCalls().slice(before)).toEqual([false, true]);
   });
 });
