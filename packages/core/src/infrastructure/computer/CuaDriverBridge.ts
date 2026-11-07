@@ -2155,12 +2155,28 @@ export class CuaDriverBridge implements IComputerBridge {
       try {
         await this.menuOrFail(connection, pid, windowId, ['File', item], signal);
         return `File>${item}`;
-      } catch {
+      } catch (err) {
+        // Another window of the app holds focus (a restored document): File
+        // is the app's menu, so run it through that window.
+        const holder = focusHolder({ text: (err as Error).message } as DriverToolResult, windowId);
+        if (holder !== undefined) {
+          try {
+            await this.menuOrFail(connection, pid, holder, ['File', item], signal);
+            return `File>${item}`;
+          } catch {
+            windowId = holder;
+          }
+        }
         // Fall through to the shortcut every platform's document apps share.
       }
     }
     const keys = [toDriverKey(PRIMARY_MODIFIER), 'n'];
     let sent = await this.call(connection, 'hotkey', { pid, window_id: windowId, keys }, signal);
+    const holder = this.refusalFor(sent) ? focusHolder(sent, windowId) : undefined;
+    if (holder !== undefined) {
+      windowId = holder;
+      sent = await this.call(connection, 'hotkey', { pid, window_id: windowId, keys }, signal);
+    }
     if (this.refusalFor(sent)) {
       await this.call(connection, 'bring_to_front', { pid, window_id: windowId }, signal).catch(() => undefined);
       sent = await this.call(connection, 'hotkey', { pid, window_id: windowId, keys }, signal);

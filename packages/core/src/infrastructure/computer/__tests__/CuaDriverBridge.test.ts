@@ -1700,6 +1700,36 @@ describe('CuaDriverBridge new blank document', () => {
   }, 30_000);
 });
 
+describe('CuaDriverBridge new document while another window holds focus', () => {
+  it('runs New through the window that holds focus when the one it aimed at is not key', async () => {
+    let made = false;
+    const base = [
+      { window_id: 10, pid: 42, title: 'Old.key', is_on_screen: true, layer: 0, z_index: 9, bounds: { x: 0, y: 0, width: 1400, height: 900 } },
+      { window_id: 11, pid: 42, title: 'Other.key', is_on_screen: true, layer: 0, z_index: 5, bounds: { x: 0, y: 0, width: 900, height: 700 } },
+    ];
+    const fake = makeBridge({
+      reply: (tool, args) => {
+        if (tool === 'list_windows') {
+          return ok({ windows: made ? [...base, { window_id: 12, pid: 42, title: 'Untitled', is_on_screen: true, layer: 0, z_index: 10, bounds: { x: 0, y: 0, width: 1400, height: 900 } }] : base });
+        }
+        if (tool === 'invoke_menu') {
+          const path = args['path'] as string[];
+          if (path[1] === '__generatorai_list_items__') return driverError('invoke_menu: path segment 1 was not found under "File". Items there: "New", "Open…"');
+          if (args['window_id'] === 11) { made = true; return ok({}); }
+          return driverError("Background input refused (window_not_key): window 10 could not be confirmed as the app's key window (the app's focused window is Some(11), its focused element is in window Some(11))");
+        }
+        return ok({});
+      },
+    });
+    const handle = await started(fake);
+
+    const result = await fake.bridge.newDocument!(handle, { appId: 'example.slides', name: 'Slides', pid: 42 });
+
+    expect(result.window).toEqual({ id: 12, title: 'Untitled' });
+    expect(result.steps).toContain('File>New');
+  }, 30_000);
+});
+
 describe('CuaDriverBridge untitled window that crashes its app when read', () => {
   it('reports the crash and never reads that app\'s untitled windows again', async () => {
     const gone = 2 ** 22 + 12_345; // no such process
