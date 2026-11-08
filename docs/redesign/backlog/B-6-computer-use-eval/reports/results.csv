@@ -1,0 +1,204 @@
+round,task,model,seconds,tool_calls,computer_calls,failed_calls,context_tokens,checks,failed_checks
+R6a,H1,sonnet,65,5,4,1,301785,0/1,docx saved
+R6a,H2,sonnet,177,43,40,7,4220428,3/3,
+R6a,H3,sonnet,103,16,12,2,1194680,3/4,original untouched
+R6a,H4,sonnet,148,23,20,8,1366058,3/3,
+R6a,S1,sonnet,110,33,32,5,2756419,0/1,file saved
+R6a,S10,sonnet,75,9,8,4,574352,0/1,pdf exported
+R6a,S2,sonnet,57,10,6,1,667684,3/3,
+R6a,S3,sonnet,119,19,16,2,1549956,,
+R6a,S4,sonnet,111,23,22,5,2205907,0/1,pdf exported
+R6a,S5,sonnet,245,43,39,6,4432032,2/2,
+R6a,S6,sonnet,179,28,27,5,2260297,0/1,docx saved
+R6a,S7,sonnet,67,8,8,1,427181,,
+R6a,S8,sonnet,79,10,7,0,580347,3/3,
+R6a,S9,sonnet,101,13,12,5,930820,0/1,file saved
+R7a,H1,sonnet,54,6,5,2,388340,0/1,docx saved
+R7a,H2,sonnet,133,26,25,5,2130223,3/3,
+R7a,H3,sonnet,75,10,8,1,775252,4/4,
+R7a,H4,sonnet,153,5,4,3,262209,0/1,script saved
+R7a,S1,sonnet,149,20,14,1,1455886,5/5,
+R7a,S10,sonnet,106,13,12,2,846725,3/3,
+R7a,S2,sonnet,79,9,6,1,550082,3/3,
+R7a,S3,sonnet,168,30,25,12,2788439,4/4,
+R7a,S4,sonnet,141,32,31,4,3764363,0/1,pdf exported
+R7a,S5,sonnet,220,34,26,9,3087204,0/1,pdf exported
+R7a,S6,sonnet,136,25,24,3,2732199,0/1,docx saved
+R7a,S7,sonnet,39,3,3,0,207828,,
+R7a,S8,sonnet,97,8,5,0,486870,3/3,
+R7a,S9,sonnet,204,22,19,6,1460686,5/5,
+R8a,H1,sonnet,52,3,2,1,188109,0/1,docx saved
+R8a,H2,sonnet,95,24,23,3,1782111,0/1,pdf exported
+R8a,H3,sonnet,69,6,4,1,383079,3/4,original untouched
+R8a,H4,sonnet,135,5,4,3,262280,0/1,script saved
+R8a,S1,sonnet,99,17,15,1,1184792,5/5,
+R8a,S10,sonnet,121,15,14,4,1053200,3/3,
+R8a,S2,sonnet,50,8,6,0,546349,3/3,
+R8a,S3,sonnet,169,17,14,3,1307257,4/4,
+R8a,S4,sonnet,115,21,20,0,2091207,0/1,pdf exported
+R8a,S5,sonnet,349,37,29,8,3889805,0/1,pdf exported
+R8a,S6,sonnet,221,31,30,6,2965902,0/1,docx saved
+R8a,S7,sonnet,50,4,3,0,186175,,
+R8a,S8,sonnet,82,7,6,0,438774,3/3,
+R8a,S9,sonnet,144,19,17,4,1291748,5/5,
+R9a,H1,sonnet,49,4,3,2,227179,0/1,docx saved
+R9a,H2,sonnet,143,37,35,4,3495788,3/3,
+R9a,H3,sonnet,109,13,8,2,987435,3/4,original untouched
+R9a,H4,sonnet,81,7,5,1,390065,3/3,
+R9a,S1,sonnet,198,39,28,1,2803771,5/5,
+R9a,S10,sonnet,127,15,12,2,933305,3/3,
+R9a,S2,sonnet,50,7,6,0,469056,3/3,
+R9a,S3,sonnet,227,48,47,8,5390353,1/5,a single CSV file; header; row totals; grand total 44.8
+R9a,S4,sonnet,156,34,33,1,3810981,0/1,pdf exported
+R9a,S5,sonnet,366,45,34,6,4794021,0/1,pdf exported
+R9a,S6,sonnet,331,50,48,7,6176528,6/6,
+R9a,S7,sonnet,57,4,4,0,245063,,
+R9a,S8,sonnet,93,8,5,0,439949,3/3,
+R9a,S9,sonnet,175,27,24,10,1840905,5/5,
+R10a,H1,sonnet,57,6,5,3,383288,0/1,docx saved
+R10a,H2,sonnet,62,12,11,1,912092,0/1,pdf exported
+R10a,H3,sonnet,66,7,5,0,509420,4/4,
+R10a,H4,sonnet,74,7,5,1,349064,3/3,
+R10a,S1,sonnet,90,15,14,1,1055129,5/5,
+R10a,S10,sonnet,121,14,13,2,910590,3/3,
+R10a,S2,sonnet,65,7,4,0,466572,3/3,
+R10a,S3,sonnet,168,21,19,3,1919843,1/5,a single CSV file; header; row totals; grand total 44.8
+R10a,S4,sonnet,139,25,24,3,2514972,0/1,pdf exported
+R10a,S5,sonnet,148,29,28,5,2965867,0/1,pdf exported
+R10a,S6,sonnet,122,20,19,3,1636829,0/1,docx saved
+R10a,S7,sonnet,47,4,4,0,244861,,
+R10a,S8,sonnet,97,8,5,0,440679,3/3,
+R10a,S9,sonnet,133,22,19,7,1436158,5/5,
+R11a,G1,sonnet,152,29,27,2,2009778,4/4,
+R11a,G2,sonnet,37,5,4,0,267004,,
+R11a,G3,sonnet,34,4,4,0,177143,,
+R11a,G4,sonnet,69,11,8,1,708251,2/2,
+R11a,G5,sonnet,62,3,2,0,186299,3/3,
+R11a,G6,sonnet,124,19,18,5,1281789,3/3,
+R11a,H2,sonnet,97,14,13,1,1083302,3/3,
+R11a,H3,sonnet,112,9,8,3,606676,4/4,
+R11a,H4,sonnet,74,7,5,0,348881,3/3,
+R11a,S1,sonnet,146,30,24,2,2222613,5/5,
+R11a,S10,sonnet,130,19,17,4,1556326,3/3,
+R11a,S2,sonnet,42,8,5,0,468234,3/3,
+R11a,S3,sonnet,316,37,33,5,3674515,4/4,
+R11a,S4,sonnet,200,25,24,11,2200147,0/1,pdf exported
+R11a,S5,sonnet,423,46,35,7,4603804,0/1,pdf exported
+R11a,S6,sonnet,236,36,35,2,3346349,0/1,docx saved
+R11a,S7,sonnet,34,3,3,0,136350,,
+R11a,S8,sonnet,244,38,36,7,3600403,3/3,
+R11a,S9,sonnet,133,20,17,5,1198378,5/5,
+R12a,G1,sonnet,64,14,12,2,749676,4/4,
+R12a,G2,sonnet,39,6,5,0,389411,,
+R12a,G3,sonnet,27,4,3,0,229710,,
+R12a,G4,sonnet,73,9,6,1,710956,2/2,
+R12a,G5,sonnet,50,3,2,0,186134,3/3,
+R12a,G6,sonnet,132,18,17,6,1293304,3/3,
+R12a,H2,sonnet,55,10,9,1,625112,0/1,pdf exported
+R12a,H3,sonnet,61,7,5,0,476070,4/4,
+R12a,H4,sonnet,62,7,4,0,429820,3/3,
+R12a,S1,sonnet,161,31,29,3,2447159,5/5,
+R12a,S10,sonnet,40,4,3,1,306387,0/1,pdf exported
+R12a,S2,sonnet,49,10,7,1,633740,3/3,
+R12a,S3,sonnet,146,17,15,5,1230353,4/4,
+R12a,S4,sonnet,277,51,50,3,7308202,0/1,pdf exported
+R12a,S5,sonnet,481,39,31,5,3953142,0/1,pdf exported
+R12a,S6,sonnet,166,27,26,3,2643679,0/1,docx saved
+R12a,S7,sonnet,42,4,4,0,284256,,
+R12a,S8,sonnet,217,29,23,2,2572127,3/3,
+R12a,S9,sonnet,156,20,17,5,1400007,5/5,
+R13a,G1,sonnet,76,23,22,2,1444044,4/4,
+R13a,G2,sonnet,49,10,10,1,589624,,
+R13a,G3,sonnet,27,3,3,0,175841,,
+R13a,G4,sonnet,51,6,3,1,264973,2/2,
+R13a,G5,sonnet,50,3,2,0,186167,3/3,
+R13a,G6,sonnet,152,18,17,5,1075350,3/3,
+R13a,H2,sonnet,58,10,9,1,676311,0/1,pdf exported
+R13a,H3,sonnet,65,11,11,6,760196,1/2,jpeg exported
+R13a,H4,sonnet,64,7,5,0,429987,3/3,
+R13a,S1,sonnet,284,60,52,11,5702746,5/5,
+R13a,S10,sonnet,259,35,34,4,3301217,3/3,
+R13a,S2,sonnet,40,7,6,0,470394,3/3,
+R13a,S3,sonnet,255,43,42,10,4895901,1/5,a single CSV file; header; row totals; grand total 44.8
+R13a,S4,sonnet,427,73,72,3,11714946,0/1,pdf exported
+R13a,S5,sonnet,488,44,33,10,4599938,0/1,pdf exported
+R13a,S6,sonnet,449,47,45,10,4943303,6/6,
+R13a,S7,sonnet,34,3,3,0,136942,,
+R13a,S8,sonnet,201,33,32,7,3321096,1/4,a single CSV file; header; sorted desc
+R13a,S9,sonnet,1117,18,16,7,1230833,0/1,file saved
+R14a,G1,sonnet,87,30,28,4,1981581,4/4,
+R14a,G2,sonnet,39,6,5,0,389450,,
+R14a,G3,sonnet,29,4,4,0,212002,,
+R14a,G4,sonnet,37,5,3,0,264738,2/2,
+R14a,G5,sonnet,45,3,2,0,186171,3/3,
+R14a,G6,sonnet,103,16,15,2,1127177,3/3,
+R14a,H2,sonnet,80,12,11,3,833621,3/3,
+R14a,H3,sonnet,67,7,5,0,513568,4/4,
+R14a,H4,sonnet,56,7,5,1,388589,3/3,
+R14a,S1,sonnet,105,18,17,1,1272535,5/5,
+R14a,S10,sonnet,98,12,11,1,752043,3/3,
+R14a,S2,sonnet,40,8,6,0,585854,3/3,
+R14a,S3,sonnet,103,14,12,1,999561,4/4,
+R14a,S4,sonnet,148,34,33,5,3692076,0/1,pdf exported
+R14a,S5,sonnet,303,41,30,6,5031062,0/1,pdf exported
+R14a,S6,sonnet,290,55,54,9,6291688,0/1,docx saved
+R14a,S7,sonnet,40,5,5,1,246727,,
+R14a,S8,sonnet,150,22,18,2,1945011,3/3,
+R14a,S9,sonnet,86,11,9,0,690535,5/5,
+R15a,G1,sonnet,74,21,19,6,1454270,4/4,
+R15a,G2,sonnet,29,5,4,0,267356,,
+R15a,G3,sonnet,24,3,3,0,175897,,
+R15a,G4,sonnet,37,5,3,0,264599,2/2,
+R15a,G5,sonnet,47,3,2,0,186440,3/3,
+R15a,G6,sonnet,101,12,11,1,731713,3/3,
+R15a,H2,sonnet,97,15,13,4,1092710,3/3,
+R15a,H3,sonnet,67,6,5,0,393157,4/4,
+R15a,H4,sonnet,61,7,5,0,349091,3/3,
+R15a,S1,sonnet,149,30,25,1,2460185,5/5,
+R15a,S10,sonnet,123,16,15,2,1056417,3/3,
+R15a,S2,sonnet,45,10,7,1,634557,3/3,
+R15a,S3,sonnet,176,38,36,9,3401951,4/4,
+R15a,S4,sonnet,217,44,43,6,5538631,0/1,pdf exported
+R15a,S5,sonnet,185,25,20,9,2082964,0/1,pdf exported
+R15a,S6,sonnet,213,32,30,1,2984880,6/6,
+R15a,S7,sonnet,40,4,4,0,174273,,
+R15a,S8,sonnet,105,10,7,0,670928,3/3,
+R15a,S9,sonnet,88,13,10,1,733635,5/5,
+R16a,G1,sonnet,50,13,11,0,770167,4/4,
+R16a,G2,sonnet,29,5,4,0,267269,,
+R16a,G3b,sonnet,37,7,7,0,424657,,
+R16a,G4,sonnet,92,13,10,3,851561,2/2,
+R16a,G5,sonnet,44,3,2,0,186243,3/3,
+R16a,G6,sonnet,95,11,10,1,673090,3/3,
+R16a,H2,sonnet,100,16,15,2,1194089,3/3,
+R16a,H3,sonnet,108,17,14,5,1275849,3/4,rotated 90 (300x500)
+R16a,H4,sonnet,75,8,5,0,513164,3/3,
+R16a,S1,sonnet,129,23,21,1,1713444,5/5,
+R16a,S10,sonnet,108,14,13,2,893505,3/3,
+R16a,S2,sonnet,42,8,6,0,548683,3/3,
+R16a,S3,sonnet,210,30,29,2,2965492,0/1,csv exported
+R16a,S4,sonnet,312,72,71,2,10563570,0/1,pdf exported
+R16a,S5,sonnet,450,48,37,3,5029189,0/1,pdf exported
+R16a,S6,sonnet,186,35,33,1,3223489,6/6,
+R16a,S7,sonnet,37,3,3,0,137326,,
+R16a,S8,sonnet,127,14,11,1,1115627,3/3,
+R16a,S9,sonnet,91,12,9,1,733461,5/5,
+R17a,G1,sonnet,89,28,26,5,1884838,4/4,
+R17a,G2,sonnet,34,5,4,0,262060,,
+R17a,G3,sonnet,27,3,3,0,138020,,
+R17a,G4,sonnet,55,5,4,0,279124,2/2,
+R17a,G5,sonnet,50,3,2,0,186276,3/3,
+R17a,G6,sonnet,231,18,14,2,1407799,3/3,
+R17a,H2,sonnet,72,9,8,1,513143,3/3,
+R17a,H3,sonnet,64,7,5,0,469614,4/4,
+R17a,H4,sonnet,59,7,5,1,389124,3/3,
+R17a,S1,sonnet,118,22,21,1,1648870,5/5,
+R17a,S10,sonnet,106,15,14,2,1027621,3/3,
+R17a,S2,sonnet,45,7,6,0,472611,3/3,
+R17a,S3,sonnet,199,32,30,4,3021327,4/4,
+R17a,S4,sonnet,163,31,30,3,3444649,0/1,pdf exported
+R17a,S5,sonnet,416,48,36,7,4984787,0/1,pdf exported
+R17a,S6,sonnet,380,58,54,4,6879706,5/6,table 3x3 values
+R17a,S7,sonnet,42,4,4,0,284232,,
+R17a,S8,sonnet,196,31,28,5,2569216,3/3,
+R17a,S9,sonnet,61,12,9,1,633261,5/5,

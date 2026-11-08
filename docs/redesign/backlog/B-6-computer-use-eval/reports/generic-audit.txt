@@ -1,0 +1,28 @@
+# App/task names in computer-use logic, comments excluded (grep, 2026-11-07)
+## packages/core/src/infrastructure/computer/CuaDriverBridge.ts
+2690:      return { code: 'capacity_exhausted', message: 'The action was cancelled after exceeding its time budget.' };
+3105:  docx: ['Word Document', 'Word', 'Word Document (.docx)'],
+3106:  xlsx: ['Excel Workbook', 'Excel', 'Excel Workbook (.xlsx)'],
+## packages/core/src/infrastructure/computer/driverPayloads.ts
+## packages/core/src/services/ComputerService.ts
+80:import type { IWorkspaceArtifactRepository } from '../domain/ports/IWorkspaceArtifactRepository.js';
+496:    private readonly artifactRepo: IWorkspaceArtifactRepository,
+2252:  async previewWindow(
+## packages/core/src/services/chatSystemHints.ts
+287:  '- When the request names a length (words, lines, pages, items), stay within about 10% of it. If the content truly ' +
+## packages/core/src/tools/computer/index.ts
+309:          'Snapshot the element came from. Pass with elementIndex for XAML/WinUI hosts (Windows 11 File Explorer, Settings, Calculator, modern Notepad), which drop plain typed characters and must be written through the element.',
+449:    'computer_list_apps does not show the app you need. Give the display name, e.g. "Excel", "Notepad", ' +
+450:    '"Calculator". Pass `url` to open a web page in the default browser instead of navigating one by hand. ' +
+451:    'To open a SPECIFIC file or folder, pass its absolute path in `arguments` — e.g. name "TextEdit" with ' +
+461:      name: { type: 'string', description: 'Application name, e.g. "Excel".' },
+## packages/core/src/tools/computer/computerToolTypes.ts
+187:const ELEMENT_BUDGET_BYTES = 12_000;
+189:function clipToBudget(
+195:    if (used > ELEMENT_BUDGET_BYTES) return { kept: elements.slice(0, i), clipped: true };
+208:  const { kept: elements, clipped } = clipToBudget(allElements);
+274:const TREE_BUDGET_CHARS = 12_000;
+287:  const clipped = full.length > TREE_BUDGET_CHARS;
+288:  const tree = clipped ? full.slice(0, full.lastIndexOf('\n', TREE_BUDGET_CHARS)) : full;
+326:    `Nothing in this window matches "${query}". ${size}labels rarely use your words exactly (plural, other ` +
+327:    'wording, an icon with a short name). Try a shorter or different word, or snapshot WITHOUT `query` and read ' +

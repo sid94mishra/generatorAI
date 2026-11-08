@@ -1,0 +1,5 @@
+The palette guide
+Use one accent colour per screen.
+Body text colour stays neutral.
+Never change the brand colour.
+Ship it.

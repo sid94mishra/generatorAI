@@ -139,8 +139,10 @@ What never works:
   - S1–S10: the original tasks.
   - H2–H4: held out at first, later tuned on.
   - G1–G6: fresh, and almost untuned.
-- The harness and all reports (`REPORT-R8-R10.md` to `REPORT-R16-R17.md`) live in the session scratchpad under
-  `/private/tmp/…/scratchpad/cu/`, which macOS purges. Move it into the repo before resuming.
+- The harness, the fixtures, the judge brief, all four reports and a per-run results table (R6a–R17a) are parked in
+  `docs/redesign/backlog/B-6-computer-use-eval/`. Its README lists what to do before resuming: port the harness to Node
+  under `agent-tests/`, reset properly between runs, and write a new held-out set. Raw traces were left out because they
+  contain listings of the owner's home folders.
 
 **Unblocks.**
 - Windows and Linux machines with the app installed: needed for the platform criteria.
