@@ -24,6 +24,7 @@ import type {
   HarnessVisibilityUpdate,
 } from '@generatorai/shared';
 import { usePlatform } from '../providers/PlatformProvider.js';
+import type { CompactionSettings, HttpPlatformClient } from '../platform/HttpPlatformClient.js';
 
 export const HARNESS_PROVIDERS_KEY = ['harness-providers'] as const;
 export const HARNESS_VISIBILITY_KEY = ['harness-visibility'] as const;
@@ -236,5 +237,23 @@ export function useSetHarnessVisibility() {
       queryClient.setQueryData(HARNESS_VISIBILITY_KEY, data);
       void queryClient.invalidateQueries({ queryKey: HARNESS_PROVIDERS_KEY });
     },
+  });
+}
+
+export const compactionSettingsKey = ['settings', 'compaction'] as const;
+
+/** Whether the providers compact a full conversation on their own, and at how full (Settings › Agents). */
+export function useCompactionSettings() {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({ queryKey: compactionSettingsKey, queryFn: () => platform.getCompactionSettings() });
+}
+
+/** Change the auto-compaction setting; each chat applies it from its next message. */
+export function useUpdateCompactionSettings() {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (update: Partial<CompactionSettings>) => platform.setCompactionSettings(update),
+    onSuccess: (next) => queryClient.setQueryData(compactionSettingsKey, next),
   });
 }

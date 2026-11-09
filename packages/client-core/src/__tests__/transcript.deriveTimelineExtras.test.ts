@@ -194,3 +194,23 @@ describe('a plan sent back for changes', () => {
     expect(steps.map((s) => s.status)).toEqual(['done', 'failed']);
   });
 });
+
+describe('compaction steps (docs/compaction)', () => {
+  const note = (message: string, label: string): StreamBlock =>
+    ({ type: 'system', blockId: nextId++, message, category: 'compaction', label }) as StreamBlock;
+
+  it('shows "Compacting" while it runs and settles the same row once compacted', () => {
+    const running = deriveTimeline([note('Compacting conversation…', 'Compacting')], { active: true });
+    expect(running).toMatchObject([{ kind: 'note', verb: 'Compacting', target: 'conversation…', status: 'running' }]);
+    const done = deriveTimeline(
+      [note('Compacting conversation…', 'Compacting'), note('Conversation compacted · 150K → 20K tokens', 'Compacted')],
+      { active: false },
+    );
+    expect(done).toMatchObject([{ verb: 'Compacted', target: '150K → 20K tokens', status: 'done' }]);
+  });
+
+  it('shows a compaction the provider did on its own as one settled row', () => {
+    const steps = deriveTimeline([note('Conversation compacted automatically', 'Compacted')], { active: false });
+    expect(steps).toMatchObject([{ verb: 'Compacted', status: 'done' }]);
+  });
+});

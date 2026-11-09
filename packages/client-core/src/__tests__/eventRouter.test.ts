@@ -358,9 +358,21 @@ describe('StreamEventRouter — session_info notices', () => {
     ]);
   });
 
-  it('records a compaction boundary, whichever provider reports it', () => {
-    const effects = run([info('compact_boundary', 'Context compacted (auto)')]);
-    expect(systemMessages(effects)).toEqual(['system:Context compacted (auto)']);
+  it('records a compaction as its own step, whichever provider reports it', () => {
+    const effects = run([
+      info('compaction_start', 'x', { trigger: 'manual' }),
+      info('compact_boundary', 'x', { trigger: 'manual', preTokens: 150_000, postTokens: 20_000 }),
+      info('compact_boundary', 'x', { trigger: 'auto' }),
+      info('compaction_failed', 'x', { trigger: 'manual', error: 'Not enough messages to compact.' }),
+      // A sub-agent's own context compacting is not the chat's.
+      info('compact_boundary', 'x', { trigger: 'auto', agentId: 'sub-1' }),
+    ]);
+    expect(systemMessages(effects)).toEqual([
+      'compaction:Compacting conversation…',
+      'compaction:Conversation compacted · 150K → 20K tokens',
+      'compaction:Conversation compacted automatically',
+      'warning:Compaction failed: Not enough messages to compact.',
+    ]);
   });
 
   it('stays silent for the high-volume informational types', () => {

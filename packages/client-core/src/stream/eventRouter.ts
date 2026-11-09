@@ -22,6 +22,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ScmFlowResult, TransportCapabilitySet } from '@generatorai/shared';
+import { COMPACTION_INFO, describeCompaction } from '@generatorai/shared';
 import { isSpawnWorkerTool, permissionWording, PERMISSION_GATE_COPY, PLAN_GATE_COPY } from '@generatorai/shared/ui-contract';
 import type { WorkflowRunCardEvent } from './workflowRuns.js';
 
@@ -1401,10 +1402,36 @@ export class StreamEventRouter {
       // below reach the transcript, and everything else (pending_messages,
       // tool_progress, turn_diff, rate_limits, …) is silent on purpose. The
       // types are provider-neutral — Claude and Codex both emit
-      // `compact_boundary` and `subagent_*`, so neither needs its own branch.
+      // `subagent_*`, so it needs no branch of its own (compactions have theirs, above).
       case 'harness.session_info': {
         if (internal) break;
         const infoType = optStr(data['infoType']);
+        // A compaction of the conversation (docs/compaction): its own step — "Compacting conversation…" while it
+        // runs, "Compacted · 150K → 20K tokens" once done (the label is the step's verb). A sub-agent's own context
+        // compacting (`agentId`) is not the chat's.
+        if (infoType === COMPACTION_INFO.start || infoType === COMPACTION_INFO.boundary || infoType === COMPACTION_INFO.failed) {
+          if (optStr(data['agentId'])) break;
+          const trigger = data['trigger'] === 'manual' ? 'manual' : 'auto';
+          this.flushKey(key, out);
+          if (infoType === COMPACTION_INFO.failed) {
+            const reason = optStr(data['error']);
+            out.push({ op: 'addSystemMessage', key, message: `Compaction failed${reason ? `: ${reason}` : ''}`, category: 'warning' });
+          } else if (infoType === COMPACTION_INFO.start) {
+            out.push({ op: 'addSystemMessage', key, message: trigger === 'auto' ? 'Compacting conversation automatically…' : 'Compacting conversation…', category: 'compaction', label: 'Compacting' });
+          } else {
+            const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+            const preTokens = num(data['preTokens']);
+            const postTokens = num(data['postTokens']);
+            out.push({
+              op: 'addSystemMessage',
+              key,
+              message: describeCompaction({ trigger, ...(preTokens != null ? { preTokens } : {}), ...(postTokens != null ? { postTokens } : {}) }),
+              category: 'compaction',
+              label: 'Compacted',
+            });
+          }
+          break;
+        }
         const notice: Record<string, { message: string; category: SystemCategory }> = {
           subagent_started: { message: 'Sub-agent started', category: 'subagent' },
           subagent_completed: { message: 'Sub-agent completed', category: 'subagent' },
@@ -1425,10 +1452,6 @@ export class StreamEventRouter {
           provider_warning: { message: 'Provider warning', category: 'warning' },
           provider_retry: { message: 'Retrying…', category: 'warning' },
           model_rerouted: { message: 'Model rerouted', category: 'warning' },
-          // Emitted by every provider that compacts (Claude's compact boundary
-          // and Codex's `thread/compacted` land on this same type), so the
-          // transcript records WHY the context gauge just dropped.
-          compact_boundary: { message: 'Context compacted', category: 'system' },
         };
         const match = infoType ? notice[infoType] : undefined;
         if (!match) break;

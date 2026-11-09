@@ -40,12 +40,13 @@ import {
 } from '@generatorai/shared/ui-contract';
 import {
   formatTokenLimit,
+  resolveContextUsage,
   slashCommandGroup,
   type SlashCommand,
   type SlashCommandGroup,
 } from '@generatorai/client-core';
 import { useProject, useProjectCodebases } from '@/hooks/projectQueries.js';
-import { useBackgroundTasks } from '@/hooks/queries.js';
+import { useBackgroundTasks, useCompactChat } from '@/hooks/queries.js';
 import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import { ModelPicker } from '@/blocks/model-picker/index.js';
 import { cn } from '@/ui/lib/cn.js';
@@ -75,6 +76,7 @@ import { BlockingBar } from './parts/BlockingBar.js';
 import { ComposerMenu, type ComposerMenuItem } from './parts/ComposerMenu.js';
 import { ComposerSkeleton } from './parts/ComposerSkeleton.js';
 import { ContextGauge } from './parts/ContextGauge.js';
+import { CompactControl } from './parts/CompactControl.js';
 import { DictationControl } from './parts/DictationControl.js';
 import { SendStopButton } from './parts/SendStopButton.js';
 import { SourcesChipView, type SourceFallback } from './parts/SourcesChip.js';
@@ -463,6 +465,8 @@ export function Composer({
       ) : null,
     [showModelSelector, activeModel, models.contextUsage, models.usage, effectiveTier, collapseControls],
   );
+  // docs/compaction — summarise the conversation so far; it then streams on the chat like a turn.
+  const compactChat = useCompactChat(chat?.id);
   const sourcesChip = useMemo(
     () =>
       compact ? null : (
@@ -484,6 +488,21 @@ export function Composer({
   if (modelsPending) return <ComposerSkeleton compact={compact} />;
 
   const { blocking, canSend, primaryAction, isLoading, handleSend } = send;
+  const compactControl =
+    !compact && chat?.id && showModelSelector && activeModel ? (
+      <CompactControl
+        disabled={disabled || isLoading || isStreaming}
+        fill={
+          resolveContextUsage({
+            snapshot: models.contextUsage ?? null,
+            usage: models.usage ?? null,
+            model: activeModel,
+            ...(effectiveTier ? { tier: effectiveTier } : {}),
+          }).pct
+        }
+        onCompact={(instructions) => compactChat.mutateAsync(instructions ? { instructions } : {})}
+      />
+    ) : null;
   const showPerTurn = showModelSelector && !!activeModel;
   const tierLabel = activeTierTokens ? formatTokenLimit(activeTierTokens) : 'Context';
 
@@ -840,6 +859,7 @@ export function Composer({
               </div>
 
               {gauge}
+              {compactControl}
             </div>
 
             <div className="flex shrink-0 items-center gap-1">

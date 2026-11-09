@@ -91,7 +91,7 @@ export interface ToolCallBlock {
  * as the user's bubble inside the stage transcript.
  */
 /** `permission` (U-16): a request a remembered "Allow for this chat / run" rule allowed without asking. */
-export type SystemCategory = 'system' | 'subagent' | 'error' | 'warning' | 'plan' | 'operator' | 'permission';
+export type SystemCategory = 'system' | 'subagent' | 'error' | 'warning' | 'plan' | 'operator' | 'permission' | 'compaction';
 
 export interface SystemBlock {
   type: 'system';

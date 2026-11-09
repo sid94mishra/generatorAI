@@ -803,6 +803,17 @@ export function useRewindChat(chatId: string, workspaceId?: string) {
   });
 }
 
+/**
+ * Compact the chat's conversation (docs/compaction). The server answers once it is accepted; the compaction itself
+ * streams on the chat like a turn, so the transcript and gauge follow from the stream.
+ */
+export function useCompactChat(chatId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useMutation({
+    mutationFn: (params: { instructions?: string } = {}) => platform.compactChat(chatId!, params),
+  });
+}
+
 /** D-180 — the side chats open beside `chatId`. */
 export function useSideChats(chatId: string | undefined) {
   const platform = usePlatform() as HttpPlatformClient;

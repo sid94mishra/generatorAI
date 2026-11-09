@@ -673,6 +673,34 @@ export function deriveTimeline(
           steps.push(errStep);
           break;
         }
+        if (b.category === 'compaction') {
+          // The conversation was summarised (docs/compaction): "Compacting conversation…" while it runs, then the
+          // same row settles to "Compacted · 150K → 20K tokens".
+          const running = b.label === 'Compacting';
+          const target = running ? b.message.replace(/^Compacting\s+/i, '') : b.message.replace(/^Conversation compacted\s*(·\s*)?/i, '') || 'conversation';
+          let open: TimelineStep | undefined;
+          for (let i = steps.length - 1; i >= 0 && !open; i -= 1) {
+            const s = steps[i]!;
+            if (s.id.startsWith('compact-') && s.status === 'running') open = s;
+          }
+          if (!running && open) {
+            open.verb = 'Compacted';
+            open.target = target;
+            open.status = 'done';
+            break;
+          }
+          const compactStep: TimelineStep = {
+            id: `compact-${b.blockId}`,
+            kind: 'note',
+            verb: running ? 'Compacting' : 'Compacted',
+            target,
+            mono: false,
+            status: running ? 'running' : 'done',
+          };
+          anchors.set(compactStep, { anchor: b, key: 'compaction' });
+          steps.push(compactStep);
+          break;
+        }
         // 'system' category — drop (noise once we have thinking/tools).
         break;
       }

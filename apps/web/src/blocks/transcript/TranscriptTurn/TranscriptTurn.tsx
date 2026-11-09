@@ -30,6 +30,7 @@ import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { Reveal } from '@/ui/primitives/Collapsible/Collapsible.js';
 import { Icon } from '@/ui/icons/Icon.js';
 import { AgentTurnHeader } from '../AgentTurnHeader/AgentTurnHeader.js';
+import { CompactionDivider } from '../CompactionDivider/CompactionDivider.js';
 import { TurnBody } from '../TurnBody/TurnBody.js';
 import { AttachmentList } from '../UserMessage/AttachmentList.js';
 import { UserMessage } from '../UserMessage/UserMessage.js';
@@ -240,6 +241,7 @@ function renderEntry(entry: TranscriptEntry, props: TranscriptTurnProps, started
         />
       );
     case 'system':
+      if (entry.message.metadata?.compaction) return <CompactionDivider key={entry.key} record={entry.message.metadata.compaction} />;
       return <SystemNote key={entry.key} text={entry.message.content} />;
     case 'live':
       return <div key={entry.key}>{props.renderLive?.()}</div>;

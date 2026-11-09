@@ -11,6 +11,7 @@ import { BlockingBar } from './parts/BlockingBar.js';
 import { ComposerMenu } from './parts/ComposerMenu.js';
 import { ComposerSkeleton } from './parts/ComposerSkeleton.js';
 import { ContextGauge, ContextUsageDetails } from './parts/ContextGauge.js';
+import { CompactControl } from './parts/CompactControl.js';
 import { PopoverRoot } from '@/ui/primitives/Popover/Popover.js';
 import { DictationControl } from './parts/DictationControl.js';
 import { SendStopButton } from './parts/SendStopButton.js';
@@ -310,3 +311,24 @@ export const ToolToggles: Story = {
     await waitFor(async () => expect(await body.findByRole('switch', { name: 'Workflows' })).toBeVisible());
   },
 };
+
+/** docs/compaction — the Compact icon beside the gauge: what it does, optional focus, and a refusal said in place. */
+export const Compact: Story = {
+  render: () => (
+    <div className="flex items-center gap-4 pt-64">
+      <CompactControl fill={0.82} onCompact={fn(async () => undefined)} />
+      <CompactControl fill={0.1} onCompact={async () => { throw new Error('There is nothing new to compact yet.'); }} />
+      <CompactControl disabled onCompact={fn(async () => undefined)} />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const triggers = within(canvasElement).getAllByRole('button', { name: 'Compact conversation' });
+    await expect(triggers[2]).toBeDisabled();
+    await userEvent.click(triggers[1]!);
+    const body = within(document.body);
+    await waitFor(() => expect(body.getByText(/The context window is 10% full/)).toBeVisible());
+    await userEvent.click(body.getByRole('button', { name: 'Compact' }));
+    await expect(await body.findByRole('alert')).toHaveTextContent('There is nothing new to compact yet.');
+  },
+};
+

@@ -39,6 +39,7 @@ import { Switch } from '@/ui/primitives/Switch/Switch.js';
 import { SectionHeader } from '@/ui/patterns/SectionHeader/SectionHeader.js';
 import { KeyValueList } from '@/ui/patterns/KeyValueList/KeyValueList.js';
 import { SettingsSection } from '@/ui/patterns/SettingsSection/SettingsSection.js';
+import { CompactionSettings } from './CompactionSettings.js';
 import { CatalogRow } from '../CatalogRow.js';
 import { SETTINGS_LABEL_WIDTH } from '../settingsLayout.js';
 
@@ -203,6 +204,8 @@ export function ProvidersSection() {
       )}
 
       {message ? <Callout tone={message.tone === 'ok' ? 'ok' : 'err'}>{message.text}</Callout> : null}
+
+      <CompactionSettings />
 
       <ExperimentalProviders />
     </SettingsSection>

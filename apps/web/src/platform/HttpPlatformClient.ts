@@ -388,6 +388,14 @@ export interface WorkflowEngineFlow {
   detail?: string;
 }
 
+/** Auto-compaction of full conversations (`/api/settings/compaction`, docs/compaction). */
+export interface CompactionSettings {
+  /** The providers compact a conversation on their own when its context window fills up. */
+  autoCompact: boolean;
+  /** At how full (percent, 20–95); null = each provider's own threshold. */
+  thresholdPct: number | null;
+}
+
 /** The workflow engine's settings (`/api/settings/workflow-engine`) and its live flows. */
 export interface WorkflowEngineSettings {
   settings: { flowLimits: Record<string, number>; summaryModel: string | null; triggerDebounceMs: number };
@@ -981,6 +989,19 @@ export class HttpPlatformClient implements IPlatformClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ turnId: input.turnId, scope: input.scope ?? 'all' }),
+    });
+  }
+
+  /**
+   * Compact the conversation: the history so far becomes a summary the agent continues from (docs/compaction).
+   * 202 once accepted — it streams on the chat like a turn. 409 `CHAT_BUSY` while a turn runs, `INTERACTION_PENDING`
+   * while a gate is open, `NOTHING_TO_COMPACT` when nothing was said since the last compaction.
+   */
+  async compactChat(chatId: string, input: { instructions?: string } = {}): Promise<{ chatId: string; turnId: string }> {
+    return apiFetch<{ chatId: string; turnId: string }>(`${this.baseUrl}/api/chats/${chatId}/compact`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input.instructions?.trim() ? { instructions: input.instructions.trim() } : {}),
     });
   }
 
@@ -2673,6 +2694,18 @@ export class HttpPlatformClient implements IPlatformClient {
         body: JSON.stringify(retentionDays === undefined ? {} : { retentionDays }),
       },
     );
+  }
+
+  // ── Auto-compaction (Settings › Agents) ──
+  async getCompactionSettings(): Promise<CompactionSettings> {
+    return apiFetch<CompactionSettings>(`${this.baseUrl}/api/settings/compaction`);
+  }
+
+  async setCompactionSettings(update: Partial<CompactionSettings>): Promise<CompactionSettings> {
+    return apiFetch<CompactionSettings>(`${this.baseUrl}/api/settings/compaction`, {
+      method: 'PUT',
+      body: JSON.stringify(update),
+    });
   }
 
   // ── Workflow engine (flow keys, summary model, trigger debounce) ──
