@@ -21,7 +21,7 @@ import * as path from 'node:path';
 import { Adb, AdbServerClient } from '@yume-chan/adb';
 import { AdbServerNodeTcpConnector } from '@yume-chan/adb-server-node-tcp';
 import { AdbScrcpyClient, AdbScrcpyOptionsLatest } from '@yume-chan/adb-scrcpy';
-import { DefaultServerPath, ScrcpyPointerId, type AndroidKeyCode } from '@yume-chan/scrcpy';
+import { DefaultServerPath, ScrcpyInstanceId, ScrcpyPointerId, type AndroidKeyCode } from '@yume-chan/scrcpy';
 import { ReadableStream, WritableStream } from '@yume-chan/stream-extra';
 import type { DeviceInputEvent, DeviceKey, DeviceButton, DeviceToolingStatus, ILogger } from '@generatorai/shared';
 import { DEVICE_FRAME_CODEC } from '@generatorai/shared';
@@ -367,6 +367,9 @@ export class AndroidBridge implements IDeviceBridge {
     }
     await this.wake(id);
     const options = new AdbScrcpyOptionsLatest({
+      // A session of its own: the default socket name is shared, and a stream
+      // reopened while the previous server is still exiting failed on it.
+      scid: ScrcpyInstanceId.random(),
       audio: false,
       control: true,
       maxSize: 1280,
