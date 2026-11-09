@@ -505,11 +505,17 @@ export class IosSimulatorBridge implements IDeviceBridge {
     // boot, an app launch or mid-transition (a pushed screen); a loaded screen
     // always has elements (the status bar at least), so an empty one is read
     // again for a while before it is reported.
+    // Right after a launch the helper may even answer that there is no frontmost app yet: the same loading state.
+    const read = () =>
+      this.readAx(id).catch((err: Error) => {
+        if (/noFrontmostApplication/i.test(err.message)) return { screen: { width: 0, height: 0, unit: 'pt' as const }, elements: [] };
+        throw err;
+      });
     const deadline = Date.now() + 3_000;
-    let parsed = await this.readAx(id);
+    let parsed = await read();
     while (parsed.elements.length === 0 && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 400));
-      parsed = await this.readAx(id);
+      parsed = await read();
     }
     return parsed;
   }
