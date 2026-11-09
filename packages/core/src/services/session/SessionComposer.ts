@@ -417,6 +417,7 @@ export class SessionComposer {
       permissionMode: i.permission.bindingMode,
       computerUseEnabled: this.deps.computerService?.isEnabled() ?? false,
       devicesEnabled: this.deps.deviceService?.isEnabled() ?? false,
+      autoCompact: this.deps.autoCompact?.(),
     });
 
     return {

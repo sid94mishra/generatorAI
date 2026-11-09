@@ -1275,6 +1275,7 @@ export class ChatManagementService {
       // must rebind, or it keeps (or lacks) desktop control.
       computerUseEnabled: this.extensions.computerService?.isEnabled() ?? false,
       devicesEnabled: this.extensions.deviceService?.isEnabled() ?? false,
+      autoCompact: this.extensions.autoCompact?.(),
       harnessType: chat.harnessConfig?.harnessType ?? '',
       model: chat.harnessConfig?.model ?? chat.model ?? '',
       // Agent ref + version only. Per-turn options must NOT participate, or

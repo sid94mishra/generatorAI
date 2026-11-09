@@ -130,7 +130,7 @@ describe('compactChat — synthetic (provider without a compaction of its own)',
   it('summarises the chat, ends the provider session and seeds the next prompt from the summary', async () => {
     const r = rig({ native: false });
     expect(await (await r.service.compactChat('chat-1', { instructions: 'the parser' })).done).toEqual({ mode: 'synthetic' });
-    expect(r.harness.sendPromptAndWait.mock.calls[0]![1]).toContain('focus on: the parser');
+    expect(r.harness.sendPromptAndWait!.mock.calls[0]![1]).toContain('focus on: the parser');
     expect(r.harness.destroyConversation).toHaveBeenCalledWith(CONV);
     const row = r.rows.find((m) => m.metadata?.compaction)!;
     expect(row.metadata?.compaction).toMatchObject({ trigger: 'manual', synthetic: true, summary: expect.stringContaining('SUMMARY') });
@@ -141,7 +141,7 @@ describe('compactChat — synthetic (provider without a compaction of its own)',
 
   it('fails without claiming a compaction when no summary could be written', async () => {
     const r = rig({ native: false });
-    r.harness.sendPromptAndWait.mockResolvedValueOnce({ content: '' });
+    r.harness.sendPromptAndWait!.mockResolvedValueOnce({ content: '' });
     await (await r.service.compactChat('chat-1')).done;
     expect(info(r.events)).toEqual([COMPACTION_INFO.start, COMPACTION_INFO.failed]);
     expect(r.rows.some((m) => m.metadata?.compaction)).toBe(false);

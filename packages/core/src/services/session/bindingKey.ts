@@ -20,10 +20,16 @@ export interface BindingKeyParts {
   computerUseEnabled: boolean;
   /** Settings › Mobile devices: also a live toggle that adds or removes tools. */
   devicesEnabled: boolean;
+  /**
+   * Settings › Context compaction: the provider takes it when the conversation is built (Claude's CLI environment,
+   * Codex's thread config), so a change rebinds — the setting says it applies from each chat's next message.
+   */
+  autoCompact?: { enabled: boolean; thresholdPct?: number } | undefined;
 }
 
 export function formatConversationBindingKey(parts: BindingKeyParts): string {
   const cu = parts.computerUseEnabled ? '1' : '0';
   const dv = parts.devicesEnabled ? '1' : '0';
-  return `${parts.harnessType}::${parts.model}::${parts.agentRef}::${parts.agentVersion}::cu${cu}::dv${dv}::pm${parts.permissionMode ?? '-'}`;
+  const ac = !parts.autoCompact ? 'd' : !parts.autoCompact.enabled ? '0' : String(parts.autoCompact.thresholdPct ?? 'on');
+  return `${parts.harnessType}::${parts.model}::${parts.agentRef}::${parts.agentVersion}::cu${cu}::dv${dv}::pm${parts.permissionMode ?? '-'}::ac${ac}`;
 }
