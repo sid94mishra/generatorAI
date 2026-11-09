@@ -159,6 +159,12 @@ interface ConversationState {
   threadId: string;
   params: CreateConversationParams;
   /**
+   * The `model_auto_compact_token_limit` the thread was opened with (undefined: Codex's own). A thread takes config
+   * only when it is started or resumed, so a different wanted limit — the setting changed, or a percentage became
+   * computable once Codex reported the model's window — reopens the thread (`resumeConversation`).
+   */
+  autoCompactLimit?: number;
+  /**
    * Per-turn sandbox override carrying the chat's extra writable roots.
    *
    * `V2ThreadStartParams` has no sandbox-policy field — only `sandbox`, a
@@ -1243,9 +1249,11 @@ export class CodexProvider implements IAgentHarness {
     // were simply missing and the model improvised around them.
     await this.collectMcpStartupWarnings(threadId, warnings);
 
+    const appliedLimit = this.autoCompactLimit(params, []);
     this.conversations.set(params.conversationId, {
       threadId,
       params,
+      ...(appliedLimit !== undefined ? { autoCompactLimit: appliedLimit } : {}),
       ...(this.buildSandboxPolicy(params, warnings)),
       listeners: new Set(),
       warnings,
@@ -1488,6 +1496,12 @@ export class CodexProvider implements IAgentHarness {
       if (params) await this.createConversation(params);
       return;
     }
+    // The auto-compaction limit is thread config: a different one reopens the thread with it (same thread, same
+    // history), between turns only.
+    if (params && !live.inFlight && this.autoCompactLimit(params, []) !== live.autoCompactLimit) {
+      await this.reopenThread(conversationId, live, params);
+      return;
+    }
     // Codex threads are server-side and stateful; a live one needs no resume —
     // but "Edit sources" may have moved its roots (D-137), and the user may have
     // picked another model or effort. `turn/start` takes the cwd, the writable
@@ -1507,7 +1521,25 @@ export class CodexProvider implements IAgentHarness {
   }
 
   hasLiveConversation(conversationId: string): boolean {
-    return this.conversations.has(conversationId);
+    const conv = this.conversations.get(conversationId);
+    if (!conv) return false;
+    // A percentage threshold that could not be applied when the thread opened (the model's window was not known yet)
+    // asks for a rebind once it is: the next prompt then reopens the thread with the limit.
+    return !(conv.autoCompactLimit === undefined && this.autoCompactLimit(conv.params, []) !== undefined);
+  }
+
+  /** Unload the thread and resume it with `params`' config, keeping its listeners. */
+  private async reopenThread(conversationId: string, live: ConversationState, params: CreateConversationParams): Promise<void> {
+    await this.rpc('thread/unsubscribe', { threadId: live.threadId }).catch(() => undefined);
+    this.conversations.delete(conversationId);
+    try {
+      await this.createConversation({ ...params, conversationId, resumeProviderSessionId: live.threadId });
+    } catch (err) {
+      this.conversations.set(conversationId, live);
+      throw err;
+    }
+    const next = this.conversations.get(conversationId);
+    if (next) for (const l of live.listeners) next.listeners.add(l);
   }
 
   async listConversations(): Promise<string[]> {

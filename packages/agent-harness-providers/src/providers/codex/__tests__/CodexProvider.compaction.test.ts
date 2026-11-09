@@ -158,4 +158,30 @@ describe('CodexProvider — the auto-compact setting', () => {
     expect(p.getConversationWarnings('second')).toEqual([]);
     expect((await threadConfig(p, 'second'))['model_auto_compact_token_limit']).toBe(100_000);
   }, 20_000);
+
+  it('the thread that could not take the percentage asks for a rebind, and the rebind reopens it with the limit', async () => {
+    const p = await started();
+    const params = CONV('early', { autoCompact: { enabled: true, thresholdPct: 50 } });
+    await p.createConversation(params);
+    const thread = p.getProviderSessionId('early');
+    expect(p.hasLiveConversation('early')).toBe(true);
+    await p.sendPromptAndWait('early', 'AUTO_COMPACT');
+    // The window is known now: the chat service sees "not live" and resumes with the full config.
+    expect(p.hasLiveConversation('early')).toBe(false);
+    const events: AgentEvent[] = [];
+    p.onConversationEvent('early', (e) => events.push(e));
+    await p.resumeConversation('early', params);
+    expect(p.hasLiveConversation('early')).toBe(true);
+    expect(p.getProviderSessionId('early')).toBe(thread);
+    expect((await threadConfig(p, 'early'))['model_auto_compact_token_limit']).toBe(100_000);
+    // The listener registered before the reopen still hears the thread.
+    expect(events.length).toBeGreaterThan(0);
+  }, 20_000);
+
+  it('a changed setting reopens a live thread with the new limit', async () => {
+    const p = await started();
+    await p.createConversation(CONV('chg', { autoCompact: { enabled: true } }));
+    await p.resumeConversation('chg', CONV('chg', { autoCompact: { enabled: false } }));
+    expect((await threadConfig(p, 'chg'))['model_auto_compact_token_limit']).toBe(Number.MAX_SAFE_INTEGER);
+  }, 20_000);
 });

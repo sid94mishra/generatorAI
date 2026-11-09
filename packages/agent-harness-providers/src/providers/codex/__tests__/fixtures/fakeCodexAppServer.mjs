@@ -904,6 +904,11 @@ rl.on('line', (line) => {
       });
       return;
 
+    case 'thread/unsubscribe':
+      // A thread is unloaded so it can be resumed with new config.
+      respond(id, {});
+      return;
+
     default:
       if (id != null) respondError(id, -32601, `unknown method ${method}`);
   }
