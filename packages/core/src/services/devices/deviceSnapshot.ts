@@ -69,8 +69,13 @@ export function elementLine(el: DeviceElement): string {
   return parts.join(' ');
 }
 
+/** What the agent reads for a screen without elements, and what to do about it. */
+const EMPTY_SCREEN =
+  'no elements yet: the screen is still loading or changing (or the app exposes none). Wait a moment (act wait with text) and snapshot again; device_screenshot shows what is on screen.';
+
 /** The agent's text form, capped so a long list cannot flood the context. */
 export function formatSnapshot(snapshot: DeviceSnapshot, maxLines = 250): string {
+  if (snapshot.elements.length === 0) return `App: ${snapshot.app ?? 'unknown'} · ${EMPTY_SCREEN}`;
   const head = `App: ${snapshot.app ?? 'unknown'} · screen ${snapshot.screen.width}×${snapshot.screen.height} ${snapshot.screen.unit} · ${snapshot.elements.length} elements (refs valid until the next snapshot)`;
   const depthOf = new Map<string, number>();
   const lines = snapshot.elements.slice(0, maxLines).map((el) => {
@@ -89,6 +94,10 @@ function identity(el: DeviceElement): string {
 /** What changed between two snapshots of one device: the act tool's feedback. */
 export function diffSnapshots(before: DeviceSnapshot | undefined, after: DeviceSnapshot, maxLines = 40): string {
   if (!before) return formatSnapshot(after, maxLines);
+  if (after.elements.length === 0) {
+    const app = before.app !== after.app ? `app: ${before.app ?? '?'} → ${after.app ?? '?'}\n` : '';
+    return `${app}${before.elements.length} element(s) gone; ${EMPTY_SCREEN}`;
+  }
   const lines: string[] = [];
   if (before.app !== after.app) lines.push(`app: ${before.app ?? '?'} → ${after.app ?? '?'}`);
   const prev = new Map<string, DeviceElement[]>();

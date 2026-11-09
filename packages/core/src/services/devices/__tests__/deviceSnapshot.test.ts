@@ -65,6 +65,13 @@ describe('diffSnapshots', () => {
     expect(text).toContain('- 1 element(s) gone');
   });
 
+  it('tells the agent to wait when the screen has no elements yet', () => {
+    const empty = buildSnapshot('ios:A', 'ios', { ...raw([]), screen: { width: 0, height: 0, unit: 'pt' } });
+    expect(formatSnapshot(empty)).toMatch(/no elements yet.*snapshot again/);
+    expect(formatSnapshot(empty)).not.toMatch(/0×0/);
+    expect(diffSnapshots(before, empty)).toMatch(/^\d+ element\(s\) gone; no elements yet/);
+  });
+
   it('says so when nothing changed', () => {
     expect(diffSnapshots(before, buildSnapshot('ios:A', 'ios', screen))).toMatch(/^No visible change/);
   });

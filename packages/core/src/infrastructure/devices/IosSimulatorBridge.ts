@@ -497,12 +497,17 @@ export class IosSimulatorBridge implements IDeviceBridge {
   }
 
   async snapshot(id: string): Promise<RawDeviceSnapshot> {
-    const parsed = await this.readAx(id);
-    // The simulator's accessibility service answers its first query after a
-    // boot or an app switch with an empty tree; the second is complete.
-    if (parsed.elements.length > 0) return parsed;
-    await new Promise((r) => setTimeout(r, 400));
-    return this.readAx(id);
+    // The simulator's accessibility service answers with an empty tree after a
+    // boot, an app launch or mid-transition (a pushed screen); a loaded screen
+    // always has elements (the status bar at least), so an empty one is read
+    // again for a while before it is reported.
+    const deadline = Date.now() + 3_000;
+    let parsed = await this.readAx(id);
+    while (parsed.elements.length === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 400));
+      parsed = await this.readAx(id);
+    }
+    return parsed;
   }
 
   private async readAx(id: string): Promise<RawDeviceSnapshot> {
