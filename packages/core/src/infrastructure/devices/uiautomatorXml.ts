@@ -68,6 +68,8 @@ export function roleForAndroidClass(cls: string, a: Map<string, string>): string
   const name = shortClass(cls);
   if (a.get('password') === 'true') return 'SecureTextField';
   const known = ROLE_BY_CLASS[name];
+  // A launcher icon or a list row is often a clickable TextView / ImageView: it acts as a button.
+  if ((known === 'StaticText' || known === 'Image') && a.get('clickable') === 'true') return 'Button';
   if (known) return known;
   if (a.get('checkable') === 'true') return 'CheckBox';
   if (a.get('clickable') === 'true') return 'Button';

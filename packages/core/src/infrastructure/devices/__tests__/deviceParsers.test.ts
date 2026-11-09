@@ -40,6 +40,13 @@ describe('parseUiautomatorDump', () => {
     expect(snap.elements.find((e) => e.label === 'Dark mode')).toMatchObject({ role: 'Switch', value: 'on' });
   });
 
+  it('treats a clickable TextView (a launcher icon) as a button', () => {
+    const icon = parseUiautomatorDump(
+      '<hierarchy><node class="android.widget.FrameLayout" package="l" bounds="[0,0][100,200]"><node text="Gmail" class="android.widget.TextView" package="l" clickable="true" bounds="[0,0][50,50]" /></node></hierarchy>',
+    );
+    expect(icon.elements.find((e) => e.label === 'Gmail')).toMatchObject({ role: 'Button', interactive: true });
+  });
+
   it('drops zero-size nodes and names the foreground app', () => {
     expect(snap.elements.every((e) => e.frame.w > 0 && e.frame.h > 0)).toBe(true);
     expect(snap.app).toBe('com.example.app');

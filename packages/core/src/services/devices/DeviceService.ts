@@ -459,6 +459,8 @@ export class DeviceService {
     this.ensureAgent(workspaceId, key, device.kind, device.name);
     const state = this.workspace(workspaceId);
     const before = state.snapshots.get(key);
+    let current = before;
+    let stale = 0;
     const results: string[] = [];
     let ok = true;
     for (const [i, step] of steps.entries()) {
@@ -475,7 +477,17 @@ export class DeviceService {
       }
       this.markAgentActive(workspaceId, key);
       try {
-        results.push(`${i + 1}. ${await this.runStep(bridge, device.id, key, before, step)}`);
+        // A step that moved the screen leaves positions stale: a later label target is
+        // resolved against a fresh read; a ref from before the batch no longer names it.
+        const target = 'target' in step ? step.target : undefined;
+        if (stale && target) {
+          if (/^e\d+$/.test(target)) throw new Error(`refs changed after step ${stale}; target by label or call device_snapshot`);
+          await new Promise((r) => setTimeout(r, 500));
+          current = buildSnapshot(key, bridge.platform, await bridge.snapshot(device.id));
+          stale = 0;
+        }
+        results.push(`${i + 1}. ${await this.runStep(bridge, device.id, key, current, step)}`);
+        if (step.action !== 'wait') stale = i + 1;
       } catch (err) {
         results.push(`${i + 1}. failed: ${(err as Error).message}`);
         ok = false;
@@ -525,8 +537,8 @@ export class DeviceService {
         const center = step.target ? this.point(snapshot, step) : { x: 0.5, y: 0.5 };
         // Scrolling DOWN shows content further down: the finger moves up.
         const opposite = { up: 'down', down: 'up', left: 'right', right: 'left' } as const;
-        const from = shift(center, opposite[step.direction], 0.25);
-        const to = shift(center, step.direction, 0.25);
+        const from = shift(center, step.direction, 0.25);
+        const to = shift(center, opposite[step.direction], 0.25);
         this.broadcastMark(key, { kind: 'swipe', x: from.x, y: from.y, toX: to.x, toY: to.y, by: 'agent', at });
         await bridge.swipe(id, from, to, 350);
         return `scrolled ${step.direction}`;

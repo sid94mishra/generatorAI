@@ -8,9 +8,10 @@
 //    and the agent's taps — through the `adb` / `emulator` executables, so
 //    an agent action never depends on a live view being open.
 //
-// Emulators boot headless (`-no-window`) with SwiftShader: a host-GPU
-// emulator without a window composites nothing, and both `screencap` and the
-// encoder then read black frames (measured, docs/devices §10.1).
+// Emulators boot headless (`-no-window`) with `-gpu auto`: the host GPU where
+// the emulator can use it, SwiftShader where it cannot (a headless Linux box).
+// A dozing emulator streams black frames whatever the renderer, so the bridge
+// wakes it before streaming (measured, docs/devices §10.1).
 // ────────────────────────────────────────────────────────────────
 
 import { spawn } from 'node:child_process';
@@ -283,7 +284,7 @@ export class AndroidBridge implements IDeviceBridge {
     const log = await fs.open(logFile, 'w');
     const child = spawn(
       emulator,
-      ['-avd', avd, '-no-window', '-no-audio', '-no-boot-anim', '-gpu', 'swiftshader_indirect', '-no-snapshot-save'],
+      ['-avd', avd, '-no-window', '-no-audio', '-no-boot-anim', '-gpu', 'auto', '-no-snapshot-save'],
       { detached: true, stdio: ['ignore', log.fd, log.fd], windowsHide: true },
     );
     child.unref();
@@ -547,8 +548,16 @@ export class AndroidBridge implements IDeviceBridge {
   async app(id: string, request: DeviceAppAction): Promise<string> {
     switch (request.action) {
       case 'launch': {
-        const out = await this.shell(id, `monkey -p ${shq(request.app)} -c android.intent.category.LAUNCHER 1`);
-        if (/No activities found|monkey aborted/i.test(out)) throw new Error(`${request.app} has no launchable activity or is not installed.`);
+        // The launcher activity, then `am start`: `monkey` aborts on emulators
+        // without physical keys.
+        const resolved = (await this.shell(id, `cmd package resolve-activity --brief -c android.intent.category.LAUNCHER ${shq(request.app)}`))
+          .trim()
+          .split(/\r?\n/)
+          .pop()
+          ?.trim();
+        if (!resolved || !resolved.includes('/')) throw new Error(`${request.app} is not installed or has no launcher activity.`);
+        const out = await this.shell(id, `am start -n ${shq(resolved)}`);
+        if (/Error|Exception/.test(out)) throw new Error(out.trim().split(/\r?\n/).slice(-2).join(' '));
         return `Launched ${request.app}.`;
       }
       case 'terminate':
