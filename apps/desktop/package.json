@@ -49,7 +49,7 @@
   },
   "optionalDependencies": {
     "@github/copilot": "1.0.75",
-    "@openai/codex": "0.162.1",
+    "@openai/codex": "0.167.0",
     "@trycua/cua-driver": "0.41.2"
   }
 }

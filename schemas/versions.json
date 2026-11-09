@@ -16,13 +16,13 @@
     "codex": {
       "status": "generated",
       "artifactPath": "schemas/codex/codex_app_server_protocol.schemas.json",
-      "version": "0.162.1",
+      "version": "0.167.0",
       "capturedBy": "node packages/agent-harness-providers/node_modules/@openai/codex/bin/codex.js app-server generate-json-schema --out <dir>  →  codex_app_server_protocol.schemas.json (the @openai/codex optionalDependency pinned in packages/agent-harness-providers/package.json)",
       "namespaces": ["v2"],
       "methodTable": "jsonrpc",
       "tableName": "CODEX",
       "output": "codex.generated.ts",
-      "_note": "One self-contained artifact: 82 top-level definitions (the JSON-RPC envelope, initialize, and the approval/elicitation server requests) plus definitions.v2.* holding the 604 types of the current thread/turn API. The v2 namespace is flattened with a `V2` prefix because the two namespaces genuinely disagree — `RequestId` is defined differently in each — so a bare merge would silently pick one."
+      "_note": "One self-contained artifact: 82 top-level definitions (the JSON-RPC envelope, initialize, and the approval/elicitation server requests) plus definitions.v2.* holding the 668 types of the current thread/turn API. The v2 namespace is flattened with a `V2` prefix because the two namespaces genuinely disagree — `RequestId` is defined differently in each — so a bare merge would silently pick one."
     },
 
     "opencode": {

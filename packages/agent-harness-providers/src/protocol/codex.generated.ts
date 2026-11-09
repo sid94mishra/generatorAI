@@ -1,9 +1,9 @@
 // AUTO-GENERATED — do not edit. Run `pnpm generate:schemas` to update.
 // Protocol:        codex
-// Source artifact: schemas/codex/codex_app_server_protocol.schemas.json@0.162.1
+// Source artifact: schemas/codex/codex_app_server_protocol.schemas.json@0.167.0
 // Captured by:     node packages/agent-harness-providers/node_modules/@openai/codex/bin/codex.js app-server generate-json-schema --out <dir>  →  codex_app_server_protocol.schemas.json (the @openai/codex optionalDependency pinned in packages/agent-harness-providers/package.json)
-// Artifact sha256: 71a94eab0d0b27f2aab30993097bc13d78314eb386801c105280b53f0963af44
-// Definitions:     732
+// Artifact sha256: 021462a9bacd117f4cd40c256a4888619d059cec6a65b795198d521ba660e554
+// Definitions:     750
 //
 // The sha256 above is of the upstream file itself. If the pinned dependency
 // changes, this hash and the types below change with it, and CI's
@@ -442,6 +442,10 @@ export type ClientRequest = {
   params: V2FeedbackUploadParams;
 } | {
   id: V2RequestId;
+  method: "feedback/save";
+  params: V2FeedbackSaveParams;
+} | {
+  id: V2RequestId;
   method: "command/exec";
   params: V2CommandExecParams;
 } | {
@@ -509,7 +513,7 @@ export type CommandExecutionApprovalDecision = "accept" | "acceptForSession" | {
 } | "decline" | "cancel";
 
 /** Distinguishes a command approval from input sent to an existing terminal. */
-export type CommandExecutionApprovalKind = "command" | "writeStdin";
+export type CommandExecutionApprovalKind = ("command" | "writeStdin") | "humanCommand";
 
 export type CommandExecutionRequestApprovalParams = {
   /**
@@ -664,6 +668,8 @@ export type InitializeCapabilities = {
   optOutNotificationMethods?: Array<string> | null;
   /** Opt into `attestation/generate` requests for upstream `x-oai-attestation`. */
   requestAttestation?: boolean;
+  /** Present `humanCommand` approvals to a person and return only a one-time decision. Requires `experimentalApi`. Pending requests can be replayed to compatible clients. */
+  requiredHumanApproval?: boolean;
 };
 
 export type InitializeParams = {
@@ -837,6 +843,15 @@ export type McpElicitationUntitledSingleSelectEnumSchema = {
 export type McpServerElicitationAction = "accept" | "decline" | "cancel";
 
 export type McpServerElicitationRequestParams = {
+  serverName: string;
+  threadId: string;
+  /**
+   * Active Codex turn when this elicitation was observed, if app-server could correlate one.
+   *
+   * This is nullable because MCP models elicitation as a standalone server-to-client request identified by the MCP server request id. It may be triggered during a turn, but turn context is app-server correlation rather than part of the protocol identity of the elicitation itself.
+   */
+  turnId?: string | null;
+} & ({
   _meta?: unknown;
   message: string;
   mode: "form";
@@ -857,7 +872,7 @@ export type McpServerElicitationRequestParams = {
   message: string;
   mode: "url";
   url: string;
-};
+});
 
 export type McpServerElicitationRequestResponse = {
   /** Optional client metadata for form-mode action handling. */
@@ -943,6 +958,9 @@ export type ReviewDecision = "approved" | {
 
 /** Notification sent from the server to the client. */
 export type ServerNotification = {
+  /** Unix timestamp (in milliseconds) when app-server emitted this notification. */
+  emittedAtMs?: number;
+} & ({
   method: "error";
   params: V2ErrorNotification;
 } | {
@@ -951,6 +969,9 @@ export type ServerNotification = {
 } | {
   method: "thread/status/changed";
   params: V2ThreadStatusChangedNotification;
+} | {
+  method: "thread/readState/changed";
+  params: V2ThreadReadStateChangedNotification;
 } | {
   method: "thread/archived";
   params: V2ThreadArchivedNotification;
@@ -972,6 +993,9 @@ export type ServerNotification = {
 } | {
   method: "thread/name/updated";
   params: V2ThreadNameUpdatedNotification;
+} | {
+  method: "thread/section/changed";
+  params: V2ThreadSectionChangedNotification;
 } | {
   method: "thread/attachment/updated";
   params: V2ThreadAttachmentUpdatedNotification;
@@ -1194,7 +1218,7 @@ export type ServerNotification = {
 } | {
   method: "account/login/completed";
   params: V2AccountLoginCompletedNotification;
-};
+});
 
 /** Request initiated from the server and sent to the client. */
 export type ServerRequest = {
@@ -1294,9 +1318,13 @@ export type V2Account = {
   email: string | null;
   planType: V2PlanType;
   type: "chatgpt";
+  /** Display name of the selected ChatGPT workspace, when available. */
+  workspaceName?: string | null;
 }) | {
   type: "amazonBedrock";
   usesCodexManagedCredentials?: boolean;
+} | {
+  type: "gcp";
 };
 
 export type V2AccountLoginCompletedNotification = {
@@ -1317,6 +1345,27 @@ export type V2AccountRateLimitsUpdatedNotification = {
 
 /** Backend routing policy. Wire values match the accounts/check contract. */
 export type V2AccountRoutingOverride = "NO_CONSTRAINT" | "us" | "us_cr";
+
+export type V2AccountSession = {
+  displayName?: string | null;
+  email?: string | null;
+  imageUrl?: string | null;
+  isActive: boolean;
+  lastUsedAt: number;
+  selectedWorkspaceAccountId?: string | null;
+  sessionId: string;
+  userId?: string | null;
+  workspaces: Array<V2AccountSessionWorkspace>;
+};
+
+export type V2AccountSessionWorkspace = {
+  accountId: string;
+  imageUrl?: string | null;
+  kind?: V2AccountSessionWorkspaceKind | null;
+  name?: string | null;
+};
+
+export type V2AccountSessionWorkspaceKind = "personal" | "workspace";
 
 export type V2AccountTokenUsageDailyBucket = {
   startDate: string;
@@ -1349,6 +1398,8 @@ export type V2AddCreditsNudgeEmailStatus = "sent" | "cooldown_active";
 
 export type V2AdditionalContextEntry = {
   kind: V2AdditionalContextKind;
+  /** Optional name for untrusted context, used to label its tool output. */
+  name?: string | null;
   value: string;
 };
 
@@ -1524,6 +1575,13 @@ export type V2ApplicationNetworkRequirements = {
 
 export type V2ApplicationRequirements = {
   network?: V2ApplicationNetworkRequirements | null;
+  storage?: V2ApplicationStorageRequirements | null;
+};
+
+/** Managed storage settings for new Desktop workspaces, not filesystem access restrictions. */
+export type V2ApplicationStorageRequirements = {
+  defaultProjectParent?: V2LegacyAppPathString | null;
+  projectlessWorkspaceRoot?: V2LegacyAppPathString | null;
 };
 
 /** Configures who approval requests are routed to for review. Examples include sandbox escapes, blocked network access, MCP approval prompts, and ARC escalations. Defaults to `user`. `auto_review` uses a carefully prompted subagent to gather relevant context and apply a risk-based decision framework before approving or denying the request. The legacy value `guardian_subagent` is accepted for compatibility. */
@@ -1694,7 +1752,7 @@ export type V2CliAuthCredentialsStoreMode = "file" | "keyring" | "auto" | "ephem
  *
  * When an upstream HTTP status is available (for example, from the Responses API or a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant.
  */
-export type V2CodexErrorInfo = ("contextWindowExceeded" | "sessionBudgetExceeded" | "usageLimitExceeded" | "rateLimitExceeded" | "flexUnavailable" | "serverOverloaded" | "cyberPolicy" | "misalignmentPolicyViolation" | "tooManyDenials" | "internalServerError" | "unauthorized" | "badRequest" | "threadRollbackFailed" | "sandboxError" | "other") | ({
+export type V2CodexErrorInfo = ("contextWindowExceeded" | "sessionBudgetExceeded" | "usageLimitExceeded" | "rateLimitExceeded" | "flexUnavailable" | "serverOverloaded" | "modelNotFound" | "policyCapacityUnavailable" | "cyberPolicy" | "misalignmentPolicyViolation" | "tooManyDenials" | "internalServerError" | "unauthorized" | "badRequest" | "threadRollbackFailed" | "sandboxError" | "other") | ({
   httpConnectionFailed: {
     httpStatusCode?: number | null;
   };
@@ -2111,6 +2169,7 @@ export type V2ConfigRequirements = {
   /** Complete required provider definitions, using config.toml field names. */
   modelProviders?: Record<string, unknown> | null;
   models?: V2ModelsRequirements | null;
+  otel?: V2OtelRequirements | null;
   sqliteHome?: string | null;
 };
 
@@ -2211,16 +2270,24 @@ export type V2ContentItem = {
   text: string;
   type: "input_text";
 } | ({
+  detail?: V2ImageDetail | null;
+  type: "input_image";
+} & ({
   image_url: string;
 } | {
   file_id: string;
-}) | {
-  audio_url: string;
+})) | ({
   type: "input_audio";
+} & ({
+  audio_url: string;
 } | {
+  file_id: string;
+})) | ({
+  annotations?: Array<unknown> | null;
+  logprobs?: Array<unknown> | null;
   text: string;
   type: "output_text";
-};
+});
 
 /** Deprecated: Use `ContextCompaction` item type instead. */
 export type V2ContextCompactedNotification = {
@@ -2485,6 +2552,24 @@ export type V2FeedbackRequirements = {
   enabled?: boolean | null;
 };
 
+export type V2FeedbackSaveParams = {
+  classification: string;
+  extraLogFiles?: Array<string> | null;
+  includeLogs?: boolean;
+  reason?: string | null;
+  /** Absolute, previously unused ZIP path on the app-server host. The caller owns this file, including after a disconnected RPC. */
+  savePath: V2LegacyAppPathString;
+  tags?: Record<string, string> | null;
+  threadId?: string | null;
+};
+
+export type V2FeedbackSaveResponse = {
+  /** Same prompt hash as feedback/upload; null when prompt metadata is absent. */
+  promptHash?: string | null;
+  savedPath: V2LegacyAppPathString;
+  threadId: string;
+};
+
 export type V2FeedbackUploadParams = {
   classification: string;
   extraLogFiles?: Array<string> | null;
@@ -2705,10 +2790,13 @@ export type V2FunctionCallOutputContentItem = {
   text: string;
   type: "input_text";
 } | ({
+  detail?: V2ImageDetail | null;
+  type: "input_image";
+} & ({
   image_url: string;
 } | {
   file_id: string;
-}) | {
+})) | {
   audio_url: string;
   type: "input_audio";
 } | {
@@ -2879,13 +2967,31 @@ export type V2HookErrorInfo = {
   path: string;
 };
 
-export type V2HookEventName = "preToolUse" | "permissionRequest" | "postToolUse" | "preCompact" | "postCompact" | "sessionStart" | "sessionEnd" | "userPromptSubmit" | "subagentStart" | "subagentStop" | "stop" | "interrupt";
+export type V2HookEventName = "preModelRequest" | "postModelRequest" | "preToolUse" | "permissionRequest" | "postToolUse" | "preCompact" | "postCompact" | "sessionStart" | "sessionEnd" | "userPromptSubmit" | "subagentStart" | "subagentStop" | "stop" | "interrupt";
 
 export type V2HookExecutionMode = "sync" | "async";
 
 export type V2HookHandlerType = "command" | "mcpTool" | "prompt" | "agent";
 
 export type V2HookMetadata = {
+  /** Configured `additionalContext` spill threshold. `null` uses 2,500 tokens; `0` disables spilling. */
+  additionalContextLimit?: number | null;
+  currentHash: string;
+  displayOrder: number;
+  enabled: boolean;
+  /** The owning execution environment, if this hook came from its requirements. */
+  environmentId?: string | null;
+  eventName: V2HookEventName;
+  isManaged: boolean;
+  key: string;
+  matcher?: string | null;
+  pluginId?: string | null;
+  source: V2HookSource;
+  sourcePath: V2AbsolutePathBuf;
+  statusMessage?: string | null;
+  timeoutSec: number;
+  trustStatus: V2HookTrustStatus;
+} & ({
   async?: boolean;
   command: string;
   handlerType: "command";
@@ -2897,7 +3003,7 @@ export type V2HookMetadata = {
   handlerType: "prompt";
 } | {
   handlerType: "agent";
-};
+});
 
 export type V2HookMigration = {
   name: string;
@@ -2928,7 +3034,7 @@ export type V2HookRunSummary = {
   id: string;
   scope: V2HookScope;
   source?: V2HookSource;
-  sourcePath: V2AbsolutePathBuf;
+  sourcePath: V2LegacyAppPathString;
   startedAt: number;
   status: V2HookRunStatus;
   statusMessage?: string | null;
@@ -2954,8 +3060,10 @@ export type V2HooksListEntry = {
 };
 
 export type V2HooksListParams = {
-  /** When empty, defaults to the current session working directory. */
+  /** Working directories to inspect when no thread is specified. An empty list uses the session cwd. */
   cwds?: Array<string>;
+  /** List a loaded thread's hooks, including its selected environments. Omit `cwds` in this mode. */
+  threadId?: string | null;
 };
 
 export type V2HooksListResponse = {
@@ -2969,6 +3077,13 @@ export type V2ImageGenerationFailure = ({
   resetsAt?: number | null;
   type: "usageLimitExceeded";
 });
+
+/** A local image file successfully read for this exact image-generation request. */
+export type V2ImageGenerationInputImage = {
+  path: V2AbsolutePathBuf;
+  /** Lowercase SHA-256 of the file bytes read before image normalization. */
+  sha256: string;
+};
 
 export type V2InAppBrowserRequirements = {
   allowExternalBrowserSettingsImport?: boolean | null;
@@ -3149,8 +3264,10 @@ export type V2ManagedHooksRequirements = {
   Interrupt?: Array<V2ConfiguredHookMatcherGroup>;
   PermissionRequest: Array<V2ConfiguredHookMatcherGroup>;
   PostCompact: Array<V2ConfiguredHookMatcherGroup>;
+  PostModelRequest?: Array<V2ConfiguredHookMatcherGroup>;
   PostToolUse: Array<V2ConfiguredHookMatcherGroup>;
   PreCompact: Array<V2ConfiguredHookMatcherGroup>;
+  PreModelRequest?: Array<V2ConfiguredHookMatcherGroup>;
   PreToolUse: Array<V2ConfiguredHookMatcherGroup>;
   SessionEnd?: Array<V2ConfiguredHookMatcherGroup>;
   SessionStart: Array<V2ConfiguredHookMatcherGroup>;
@@ -3311,6 +3428,8 @@ export type V2McpServerStatus = {
   /** Capabilities advertised by the initialized MCP server; null when unavailable. */
   serverCapabilities?: unknown;
   serverInfo?: V2McpServerInfo | null;
+  /** Opaque `_meta` from the first page of the corresponding MCP tool catalog. Null when unavailable. */
+  toolListMeta?: unknown;
   tools: Record<string, V2Tool>;
   /** Tool discovery failed and no catalog was returned. Null when a catalog is returned, including cached or empty catalogs. */
   toolsError?: string | null;
@@ -3477,6 +3596,20 @@ export type V2ModelProviderCapabilitiesReadResponse = {
   webSearch: boolean;
 };
 
+/** Structured JSON-RPC error data. Unknown errors must retain the client's normal fallback. */
+export type V2ModelProviderError = {
+  currentModelProvider: string;
+  modelProvider: string;
+  type: "modelProviderMismatch";
+} | {
+  modelProvider: string;
+  type: "modelProviderNotConfigured";
+} | {
+  modelProvider: string;
+  requiredModelProvider: string;
+  type: "modelProviderPolicyConflict";
+};
+
 export type V2ModelRerouteReason = "highRiskCyberActivity";
 
 export type V2ModelReroutedNotification = {
@@ -3549,14 +3682,16 @@ export type V2NetworkRequirements = {
   dangerouslyAllowNonLoopbackProxy?: boolean | null;
   /** Legacy compatibility view derived from `domains`. */
   deniedDomains?: Array<string> | null;
-  /** Canonical network permission map for `experimental_network`. */
+  /** Canonical managed network permission map. */
   domains?: Record<string, V2NetworkDomainPermission> | null;
   enabled?: boolean | null;
   httpPort?: number | null;
   /** When true, only managed allowlist entries are respected while managed network enforcement is active. */
   managedAllowedDomainsOnly?: boolean | null;
+  /** Host patterns routed to network approval before ordinary allow rules. */
+  reviewDomains?: Array<string> | null;
   socksPort?: number | null;
-  /** Canonical unix socket permission map for `experimental_network`. */
+  /** Canonical managed unix socket permission map. */
   unixSockets?: Record<string, V2NetworkUnixSocketPermission> | null;
 };
 
@@ -3573,6 +3708,49 @@ export type V2NonSteerableTurnKind = "review" | "compact";
 export type V2NullableGetAccountRateLimitsParams = V2GetAccountRateLimitsParams | null;
 
 export type V2NullableGetAccountTokenUsageParams = V2GetAccountTokenUsageParams | null;
+
+export type V2OtelExporter = ("none" | "statsig") | ({
+  "otlp-http": {
+    endpoint: string;
+    /** Header names are retained; values are redacted by the server. */
+    headers: Record<string, string>;
+    protocol: V2OtelHttpProtocol;
+    tls?: V2OtelTlsConfig | null;
+  };
+}) | ({
+  "otlp-grpc": {
+    endpoint: string;
+    /** Header names are retained; values are redacted by the server. */
+    headers: Record<string, string>;
+    tls?: V2OtelTlsConfig | null;
+  };
+});
+
+export type V2OtelHttpProtocol = "binary" | "json";
+
+export type V2OtelRequirements = {
+  environment?: string | null;
+  exporter?: V2OtelExporter | null;
+  log_agent_responses?: boolean | null;
+  log_guardian_assessments?: boolean | null;
+  log_sse_deltas?: boolean | null;
+  log_user_prompt?: boolean | null;
+  metrics_exporter?: V2OtelExporter | null;
+  span_attributes?: Record<string, string> | null;
+  tool_result?: V2OtelToolResultLogConfig | null;
+  trace_exporter?: V2OtelExporter | null;
+  tracestate?: Record<string, Record<string, string>> | null;
+};
+
+export type V2OtelTlsConfig = {
+  "ca-certificate"?: string | null;
+  "client-certificate"?: string | null;
+  "client-private-key"?: string | null;
+};
+
+export type V2OtelToolResultLogConfig = {
+  max_bytes: number;
+};
 
 export type V2OverriddenMetadata = {
   effectiveValue: unknown;
@@ -3628,7 +3806,7 @@ export type V2PlanDeltaNotification = {
   turnId: string;
 };
 
-export type V2PlanType = "free" | "go" | "plus" | "pro" | "prolite" | "promax" | "team" | "self_serve_business_prolite" | "self_serve_business_usage_based" | "business" | "ent26" | "enterprise_cbp_automation" | "enterprise_cbp_usage_based" | "enterprise" | "edu" | "edu_plus" | "edu_pro" | "unknown";
+export type V2PlanType = "free" | "go" | "plus" | "pro" | "prolite" | "promax" | "team" | "self_serve_business_prolite" | "self_serve_business_usage_based" | "business" | "ent26" | "enterprise_cbp_automation" | "enterprise_cbp_usage_based" | "enterprise" | "edu" | "edu_plus" | "edu_pro" | "sci" | "sci_plus" | "unknown";
 
 export type V2PluginAuthPolicy = "ON_INSTALL" | "ON_USE";
 
@@ -3951,6 +4129,8 @@ export type V2PluginsMigration = {
 export type V2ProcessExitedNotification = {
   /** Process exit code. */
   exitCode: number;
+  /** Whether output collection hit its post-exit deadline before seeing EOF or reaching the requested byte cap on either stream. Older servers omit this field. */
+  outputDrainTimedOut?: boolean | null;
   /** Client-supplied, connection-scoped `processHandle` from `process/spawn`. */
   processHandle: string;
   /**
@@ -4104,13 +4284,14 @@ export type V2RealtimeConversationVersion = "v1" | "v2" | "v3";
 
 export type V2RealtimeOutputModality = "text" | "audio";
 
-export type V2RealtimeVoice = "alloy" | "arbor" | "ash" | "ballad" | "breeze" | "cedar" | "coral" | "cove" | "echo" | "ember" | "juniper" | "maple" | "marin" | "sage" | "shimmer" | "sol" | "spruce" | "vale" | "verse";
+export type V2RealtimeVoice = "alloy" | "arbor" | "ash" | "aube" | "ballad" | "breeze" | "bubbie" | "cedar" | "coral" | "cove" | "echo" | "ember" | "haetsal" | "hanul" | "himari" | "juniper" | "leher" | "maple" | "marin" | "miko" | "neer" | "porto" | "rindo" | "rio" | "rivage" | "sage" | "selva" | "shimmer" | "sol" | "sonna" | "spruce" | "tinta" | "vale" | "verse" | "viola";
 
 export type V2RealtimeVoicesList = {
   defaultV1: V2RealtimeVoice;
   defaultV2: V2RealtimeVoice;
   v1: Array<V2RealtimeVoice>;
   v2: Array<V2RealtimeVoice>;
+  v3?: Array<V2RealtimeVoice>;
 };
 
 /** A non-empty reasoning effort value advertised by the model. */
@@ -4237,10 +4418,12 @@ export type V2ResponseItem = ({
   type: "additional_tools";
 }) | ({
   content: Array<V2ContentItem>;
+  encrypted_content?: string | null;
   id?: string | null;
   internal_chat_message_metadata_passthrough?: V2InternalChatMessageMetadataPassthrough | null;
   phase?: V2MessagePhase | null;
   role: string;
+  status?: string | null;
   type: "message";
 }) | ({
   author: string;
@@ -4260,6 +4443,7 @@ export type V2ResponseItem = ({
   action: V2LocalShellAction;
   /** Set when using the Responses API. */
   call_id?: string | null;
+  encrypted_content?: string | null;
   /** Legacy id field retained for compatibility with older payloads. */
   id?: string | null;
   internal_chat_message_metadata_passthrough?: V2InternalChatMessageMetadataPassthrough | null;
@@ -4268,15 +4452,18 @@ export type V2ResponseItem = ({
 }) | ({
   arguments: string;
   call_id: string;
+  encrypted_content?: string | null;
   encrypted_function_args?: Array<string> | null;
   id?: string | null;
   internal_chat_message_metadata_passthrough?: V2InternalChatMessageMetadataPassthrough | null;
   name: string;
   namespace?: string | null;
+  status?: string | null;
   type: "function_call";
 }) | ({
   arguments: unknown;
   call_id?: string | null;
+  encrypted_content?: string | null;
   execution: string;
   id?: string | null;
   internal_chat_message_metadata_passthrough?: V2InternalChatMessageMetadataPassthrough | null;
@@ -4292,6 +4479,7 @@ export type V2ResponseItem = ({
   type: "function_call_output";
 }) | ({
   call_id: string;
+  encrypted_content?: string | null;
   id?: string | null;
   input: string;
   internal_chat_message_metadata_passthrough?: V2InternalChatMessageMetadataPassthrough | null;
@@ -4316,11 +4504,13 @@ export type V2ResponseItem = ({
   type: "tool_search_output";
 }) | ({
   action?: V2ResponsesApiWebSearchAction | null;
+  encrypted_content?: string | null;
   id?: string | null;
   internal_chat_message_metadata_passthrough?: V2InternalChatMessageMetadataPassthrough | null;
   status?: string | null;
   type: "web_search_call";
 }) | ({
+  encrypted_content?: string | null;
   id?: string | null;
   internal_chat_message_metadata_passthrough?: V2InternalChatMessageMetadataPassthrough | null;
   result: string;
@@ -4367,21 +4557,17 @@ export type V2ResponsesApiWebSearchAction = ({
   type: "other";
 };
 
-export type V2ReviewDelivery = "inline" | "detached";
+export type V2ReviewDelivery = "inline";
 
 export type V2ReviewStartParams = {
-  /** Where to run the review: inline (default) on the current thread or detached on a new thread (returned in `reviewThreadId`). Detached delivery is deprecated and emits `deprecationNotice`. Use `thread/start` followed by an inline review for a separate review thread. */
+  /** Reviews run inline on the supplied thread. Omit this field or pass `inline`. To review on a separate thread, start a thread first and use its id. */
   delivery?: V2ReviewDelivery | null;
   target: V2ReviewTarget;
   threadId: string;
 };
 
 export type V2ReviewStartResponse = {
-  /**
-   * Identifies the thread where the review runs.
-   *
-   * For inline reviews, this is the original thread id. For detached reviews, this is the id of the new review thread.
-   */
+  /** The thread id supplied to `review/start`. */
   reviewThreadId: string;
   turn: V2Turn;
 };
@@ -4979,7 +5165,13 @@ export type V2ThreadInjectItemsParams = {
 
 export type V2ThreadInjectItemsResponse = Record<string, unknown>;
 
-export type V2ThreadItem = ({
+/** A thread item and its recorded lifecycle times. The payload stays flat on the wire. */
+export type V2ThreadItem = {
+  /** Unix timestamp in milliseconds when the item completed, if recorded. */
+  completedAtMs?: number | null;
+  /** Unix timestamp in milliseconds when the item started, if recorded. */
+  startedAtMs?: number | null;
+} & ({
   clientId?: string | null;
   content: Array<V2UserInput>;
   id: string;
@@ -5119,14 +5311,21 @@ export type V2ThreadItem = ({
   type: "sleep";
 } | ({
   failure?: V2ImageGenerationFailure | null;
+  /** Image generation identifier for the generated image, when provided by the image backend. */
+  generationId?: string | null;
   id: string;
-  result: string;
+  /** Observed local inputs for a completed generation, absent on older items. */
+  inputImages?: Array<V2ImageGenerationInputImage>;
   revisedPrompt?: string | null;
   savedPath?: V2AbsolutePathBuf | null;
   status: string;
   transparentBackground?: boolean | null;
   type: "imageGeneration";
-}) | {
+} & ({
+  fileId: string;
+} | {
+  result: string;
+})) | {
   id: string;
   review: string;
   type: "enteredReviewMode";
@@ -5187,6 +5386,8 @@ export type V2ThreadListParams = {
   cursor?: string | null;
   /** Optional cwd filter or filters; when set, only threads whose session cwd exactly matches one of these paths are returned. */
   cwd?: V2ThreadListCwdFilter | null;
+  /** Thread IDs to exclude before applying the result limit. Up to 100 entries; invalid IDs or a larger list are rejected, never truncated. Send the same exclusions on each page. Omitted, null, or empty means no exclusions. */
+  excludedThreadIds?: Array<string> | null;
   /** Optional page size; defaults to a reasonable server-side value. */
   limit?: number | null;
   /** Optional provider filter; when set, only sessions recorded under these providers are returned. When present but empty, includes all providers. */
@@ -5287,6 +5488,23 @@ export type V2ThreadReadResponse = {
   thread: V2Thread;
 };
 
+/** The first unread position in a durable local thread. A null position means read. The opaque revision guards edits against activity or marks the caller has not seen. */
+export type V2ThreadReadState = {
+  firstUnread?: V2ThreadUnreadPosition | null;
+  revision: string;
+};
+
+export type V2ThreadReadStateChangedNotification = {
+  readState: V2ThreadReadState;
+  threadId: string;
+};
+
+export type V2ThreadReadStateOperation = {
+  type: "read";
+} | {
+  type: "unread";
+};
+
 /** EXPERIMENTAL - thread realtime audio chunk. */
 export type V2ThreadRealtimeAudioChunk = {
   data: string;
@@ -5326,6 +5544,9 @@ export type V2ThreadRealtimeInitialItem = {
 
 /** EXPERIMENTAL - a thread-scoped realtime item in the canonical timeline. */
 export type V2ThreadRealtimeItem = {
+  id: string;
+  realtimeSessionId: string;
+} & ({
   type: "realtimeSessionStarted";
 } | {
   role: V2ThreadRealtimeTranscriptRole;
@@ -5339,7 +5560,7 @@ export type V2ThreadRealtimeItem = {
 } | {
   outcome: V2ThreadRealtimeSessionOutcome;
   type: "realtimeSessionClosed";
-};
+});
 
 /** EXPERIMENTAL - raw non-audio thread realtime item emitted by the backend. */
 export type V2ThreadRealtimeItemAddedNotification = {
@@ -5541,6 +5762,13 @@ export type V2ThreadSection = {
 export type V2ThreadSectionAppearance = {
   color?: string | null;
   icon?: string | null;
+};
+
+/** Broadcast after a successful move into, within, or out of a section. */
+export type V2ThreadSectionChangedNotification = {
+  /** Destination section, or `null` when the thread was removed from its section. */
+  sectionId: string | null;
+  threadId: string;
 };
 
 /** Parameters for creating an independently persisted thread section. */
@@ -5783,6 +6011,13 @@ export type V2ThreadUnarchivedNotification = {
   threadId: string;
 };
 
+export type V2ThreadUnreadPosition = {
+  type: "threadStart";
+} | {
+  turnId: string;
+  type: "turn";
+};
+
 export type V2ThreadUnsubscribeParams = {
   threadId: string;
 };
@@ -5797,6 +6032,8 @@ export type V2ThreadUsage = {
   estimatedUsageCreditsMicros: number;
   estimatedUsageUsdMicros?: number | null;
   groups: Array<V2ThreadUsageBreakdownGroup>;
+  /** Native dollar usage, independent of credit estimates. None means unknown, not zero. */
+  nativeUsageUsdMicros?: number | null;
   threadId: string;
 };
 
@@ -5988,6 +6225,8 @@ export type V2TurnToolOutput = {
   name: string;
   namespace?: string | null;
   output: V2FunctionCallOutputBody;
+  /** Requests retention of this output in the thread's model history. */
+  retain?: boolean;
 };
 
 export type V2TurnsPage = {
@@ -6002,17 +6241,23 @@ export type V2UserInput = {
   text_elements?: Array<V2TextElement>;
   type: "text";
 } | ({
+  detail?: V2ImageDetail | null;
+  type: "image";
+} & ({
   url: string;
 } | {
   fileId: string;
-}) | ({
+})) | ({
   detail?: V2ImageDetail | null;
   path: string;
   type: "localImage";
-}) | {
+}) | ({
   type: "audio";
+} & ({
   url: string;
 } | {
+  fileId: string;
+})) | {
   path: string;
   type: "localAudio";
 } | {
@@ -6158,6 +6403,7 @@ export const CODEX_METHODS = {
     "externalAgentConfig/import",
     "externalAgentConfig/import/readHistories",
     "externalAgentConfig/import/recordHistory",
+    "feedback/save",
     "feedback/upload",
     "fs/copy",
     "fs/createDirectory",
@@ -6294,6 +6540,7 @@ export const CODEX_METHODS = {
     "thread/prediction/updated",
     "thread/project/updated",
     "thread/queue/changed",
+    "thread/readState/changed",
     "thread/realtime/closed",
     "thread/realtime/error",
     "thread/realtime/item/completed",
@@ -6306,6 +6553,7 @@ export const CODEX_METHODS = {
     "thread/realtime/transcript/delta",
     "thread/realtime/transcript/done",
     "thread/reverted",
+    "thread/section/changed",
     "thread/settings/updated",
     "thread/started",
     "thread/status/changed",
