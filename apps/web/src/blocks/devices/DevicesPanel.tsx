@@ -166,12 +166,14 @@ export function DevicesPanel({
     if (running) clearActionError();
   }, [running, clearActionError]);
 
-  // Select mode reads the element tree once when it starts.
+  // Select mode reads the element tree once when it starts. Keyed on the device's key: the
+  // polled list hands back a new object every few seconds, which would cancel the read.
+  const selectedKey = running ? (device?.key ?? null) : null;
   useEffect(() => {
-    if (!selecting || !device || !running) return;
+    if (!selecting || !selectedKey) return;
     let cancelled = false;
     setSnapshot(null);
-    fetchDeviceSnapshot(workspaceId, device.key).then(
+    fetchDeviceSnapshot(workspaceId, selectedKey).then(
       (s) => {
         if (!cancelled) setSnapshot(s);
       },
@@ -185,7 +187,7 @@ export function DevicesPanel({
     return () => {
       cancelled = true;
     };
-  }, [selecting, device, running, workspaceId]);
+  }, [selecting, selectedKey, workspaceId]);
 
   const onPick = useCallback(
     async (el: DeviceElement) => {
@@ -554,6 +556,14 @@ export function DevicesPanel({
       {notice && (
         <div className="px-2 pt-2" role="status">
           <Callout tone="ok">{notice}</Callout>
+        </div>
+      )}
+
+      {selecting && !notice && (
+        <div className="px-2 pt-2" role="status" data-testid="device-select-hint">
+          <Callout tone="info">
+            {snapshot ? 'Click an element to add it to the message. Esc cancels.' : 'Reading the screen’s elements…'}
+          </Callout>
         </div>
       )}
 
