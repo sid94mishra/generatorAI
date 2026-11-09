@@ -59,6 +59,10 @@ export class HarnessError extends Error {
 const CLAUDE_ASSISTANT_ERRORS: Readonly<Record<string, StageErrorCode>> = {
   authentication_failed: 'auth',
   oauth_org_not_allowed: 'auth',
+  // SDK 0.3.319: the account needs the user's attention, and a cloud provider's (Bedrock / Vertex) credentials failed.
+  account_on_hold: 'auth',
+  verification_required: 'auth',
+  cloud_credential_error: 'auth',
   billing_error: 'quota_exhausted',
   rate_limit: 'rate_limited',
   overloaded: 'overloaded',

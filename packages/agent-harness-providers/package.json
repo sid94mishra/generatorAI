@@ -54,7 +54,7 @@
     "@opentelemetry/api": "^1.9.0"
   },
   "optionalDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.220",
+    "@anthropic-ai/claude-agent-sdk": "~0.3.319",
     "@github/copilot-sdk": "1.0.29",
     "@openai/codex": "0.167.0"
   },
