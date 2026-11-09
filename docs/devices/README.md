@@ -194,9 +194,9 @@ features/settings: Mobile devices                                            │
 | Decisions, design, journeys, tools, architecture (this file) | done |
 | Feasibility probes (§10.1) | done |
 | DV-P1 Core | done (d3514d70) |
-| DV-P2 Pane | done (e6f2efb5); walkthrough in progress |
-| DV-P3 Agent end to end | — |
-| DV-P4 Release and install | — |
+| DV-P2 Pane | done (e6f2efb5); walkthrough fixes 700a2639, 3fb3b030, 4d626c52, f553d901 |
+| DV-P3 Agent end to end | done in the installed app (§10.3); fixes 7bf87162, 375c55e3, 3f224b3d, 53aa2b4d |
+| DV-P4 Release and install | done on macOS; Windows and Linux runs open |
 
 ## 9. Build notes
 
@@ -211,6 +211,35 @@ features/settings: Mobile devices                                            │
 - **Android emulators boot headless with SwiftShader** and cold-boot when their snapshot was saved with another renderer.
 
 ## 10. Evidence
+
+### 10.3 Agent tasks in the installed app (2026-11-09, Claude Agent harness, Sonnet)
+
+| Task | Result |
+|---|---|
+| Existing install opens the Devices tab (the desktop device predated `exec:device`) | pass after the scope top-up (7bf87162) |
+| iOS: open "GAI Devices Test", Settings › General › About, read the version | pass: "iOS Version 27.0", 27 calls; the helper runs as a utility process in the packaged app (375c55e3) and exits when the simulator shuts down |
+| iOS: the element tree read empty after a launch and mid-transition (`0×0 · 0 elements`) | fixed: re-read for up to 3 s, and an empty screen tells the agent to wait (3f224b3d) |
+| Android: boot `gai-devices-test`, Settings, Notifications, back, scroll, About emulated device | pass: "Android 16", 20 calls |
+| Android: a system dialog (ANR prompt) was normalised against its own window, so taps by name missed | fixed: elements are placed by the display size (53aa2b4d) |
+| Android: About emulated device never settles for uiautomator ("could not get idle state") | reported to the agent as a screen to read from a screenshot and act on by points (53aa2b4d) |
+| Retest on the fixed build: iOS Settings › General › About | pass ("27.0"); the agent was told the screen was still loading and waited / used points |
+| A simulator booted a moment earlier was handed over half-ready (launch failed, `getpwuid_r`) | fixed: opening a device always waits for boot status (240a2a0f); "no frontmost app" reads as loading (b33eb970) |
+| Retest on the fixed build: Android Settings, Notifications, About | pass ("Android 16") in 12 calls (20 before); the snapshot reports the 1080×2400 display |
+| The pane follows: Devices tab focused on `device_open`, agent strip and tap marks on the stream | pass |
+
+### 10.2 Walkthrough in the isolated sandbox (2026-11-09)
+
+| Check | Result |
+|---|---|
+| "+" offers Devices; the device list shows 15 iOS simulators and 3 Android AVDs with state | pass |
+| iOS simulator live view in the pane (H.264 AVCC, 1206×2622) | pass |
+| Start an Android emulator from the pane: Starting…, then Running | pass after fixes (cold boot ~5 min on this machine) |
+| Android live view (H.264 Annex-B, 576×1280) | pass after the scrcpy instance-id fix |
+| Touch: clicking an app icon on the stream opens it; Home in the toolbar | pass |
+| Select → chat: hover outlines `Button · Gmail`, a click adds the JSON and PNG to the composer | pass after the Select fix |
+| The Devices tab and its device survive a reload | pass after the registration fix |
+| Settings › Mobile devices shows the switch, SDK path and this computer's checklist | pass |
+| Agent tools against the Android emulator (all eight; open Settings, scroll, tap Display, wait for Brightness) | pass after the launch, scroll and stale-target fixes |
 
 ### 10.1 Feasibility probes (2026-11-09, this Mac: macOS 27, Xcode 27.0, iOS 27 runtime, Android emulator 37)
 

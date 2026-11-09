@@ -114,3 +114,21 @@ Behaviour notes carried into the compaction work:
 Not done, for the owner to decide: **OpenCode 2** (`@opencode/cli`, 2.2.6) is a separate release line with a new HTTP
 API; supporting it is a port of the OpenCode adapter (or a switch to its `opencode acp` command through the ACP
 provider). The `opencode-ai` 1.x line we support is frozen at 1.19.5.
+
+## 7. Evidence — the installed app (2026-11-09, macOS; Claude Agent and Codex GPT-5.6-Terra)
+
+Copilot is not signed in on this machine; Copilot, OpenCode and ACP are covered by their unit suites (stand-in
+servers that speak each protocol). Every run drove the installed app like a user: the composer's Compact button,
+Settings › Context compaction, the model picker's move between providers.
+
+| Run | What | Result |
+|---|---|---|
+| C1 | Claude (Sonnet): two turns with facts, Compact with focus instructions, move to Codex, back to Claude, reload | 37K → 3K tokens with the summary; Codex and Claude both still knew the facts; the divider after a reload. Found: the chat did not show the compaction as running, so a message sent meanwhile was refused (fixed 2321afd4) |
+| C2 | Codex: the same through `thread/compact/start` | facts kept, divider after reload. Found: the gauge read 0 after it (fixed b603e4e4) |
+| S1 | the common fallback: a Claude chat moved to Codex and compacted before Codex's first turn | the app summarised it (Codex's model), Codex started a fresh session from the summary, every fact kept |
+| A1 | Claude auto-compaction at 20 % | never compacted: the CLI ignored `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` in an SDK session ("auto-compacts at 167K"). Probed the CLI directly: `autoCompactWindow` works (111K → 1.3K, trigger auto); the adapter uses it (c14b5714), headroom measured 33K (bb10f0d0) |
+| A1b | Claude auto-compaction at 20 %, after the fix | compacted on its own (92K → 26K, later 70K → 3K); the vault code survived |
+| A2 / A2b | Codex auto-compaction at 20 % (limit 52K of 258K) | compacted on its own inside the turn; the code survived. Found: "from 0 tokens" (fixed af18473e); a live thread never took a changed limit, and the first Codex chat after a launch no percentage (fixed 701dae1f) |
+| V1 | Claude manual compaction on the fixed build | "Compacting conversation…" live with Stop; the divider without a reload; facts kept |
+
+Unit suites at the end: agent-harness-providers 864, core services 590, client-core 879 (all passing).
