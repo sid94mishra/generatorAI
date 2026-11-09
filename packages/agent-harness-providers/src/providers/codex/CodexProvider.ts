@@ -1943,7 +1943,9 @@ export class CodexProvider implements IAgentHarness {
         set.delete(oldest);
       }
     }
-    const before = preTokens ?? conv.lastContextTokens;
+    // Unknown is said as unknown: a zero would read "compacted from 0 tokens".
+    const known = preTokens ?? conv.lastContextTokens;
+    const before = known && known > 0 ? known : undefined;
     this.broadcast(conv, {
       kind: 'harness.session_info',
       data: {
