@@ -751,3 +751,83 @@ describe('an OpenCode 2 server is refused with a reason, not a timeout', () => {
     expect(await p.ping()).toBe(false);
   });
 });
+
+describe('compaction (docs/compaction)', () => {
+  const infos = (events: AgentEvent[]) =>
+    events
+      .filter((e) => e.kind === 'harness.session_info')
+      .map((e) => (e.data as { infoType: string; trigger?: string }))
+      .filter((d) => d.infoType.startsWith('compact'))
+      .map((d) => `${d.infoType}:${d.trigger}`);
+  const baseOf = (p: OpenCodeProvider) => (p as unknown as { baseUrl: string }).baseUrl;
+
+  it('declares native compaction without instructions', async () => {
+    const p = makeProvider({ baseUrl: 'http://127.0.0.1:1' });
+    expect(p.capabilities()).toMatchObject({ conversationCompact: true, compactInstructions: false });
+  });
+
+  it('summarises with the conversation model and reports start, one boundary, then idle', async () => {
+    const p = await startedAgainstFixture();
+    await p.createConversation({ ...CONV('c-compact'), model: 'opencode/big' });
+    const { events } = collect(p, 'c-compact');
+    await p.compactConversation('c-compact');
+    // The stream's `session.compacted` may land after the request returned; give it a moment.
+    await new Promise((r) => setTimeout(r, 100));
+    expect(infos(events)).toEqual(['compaction_start:manual', 'compact_boundary:manual']);
+    expect(events.at(-1)?.kind === 'harness.idle' || events.some((e) => e.kind === 'harness.idle')).toBe(true);
+    // The summary message on the stream is not the agent's reply.
+    expect(events.some((e) => e.kind === 'harness.token')).toBe(false);
+    const sent = await (await fetch(`${baseOf(p)}/__fake/summarize`)).json();
+    expect(sent).toMatchObject({ providerID: 'opencode', modelID: 'big' });
+  });
+
+  it('falls back to the server default model for a session created without one', async () => {
+    const p = await startedAgainstFixture();
+    await p.createConversation(CONV('c-compact-default'));
+    await p.compactConversation('c-compact-default');
+    const sent = await (await fetch(`${baseOf(p)}/__fake/summarize`)).json();
+    expect(sent).toMatchObject({ providerID: 'opencode', modelID: 'big' });
+  });
+
+  it('rejects and reports a failed compaction', async () => {
+    const p = await startedAgainstFixture();
+    await p.createConversation({ ...CONV('c-compact-fail'), model: 'opencode/fail' });
+    const { events } = collect(p, 'c-compact-fail');
+    await expect(p.compactConversation('c-compact-fail')).rejects.toThrow(/summarize failed with 400/);
+    expect(infos(events)).toEqual(['compaction_start:manual', 'compaction_failed:manual']);
+    expect(events.some((e) => e.kind === 'harness.idle')).toBe(true);
+  });
+
+  it('stops a running compaction', async () => {
+    const p = await startedAgainstFixture();
+    await p.createConversation({ ...CONV('c-compact-slow'), model: 'opencode/slow' });
+    const { events } = collect(p, 'c-compact-slow');
+    const running = p.compactConversation('c-compact-slow');
+    await new Promise((r) => setTimeout(r, 150));
+    await p.abortConversation('c-compact-slow');
+    await expect(running).rejects.toThrow(/stopped/i);
+    expect(events.some((e) => e.kind === 'harness.cancelled')).toBe(true);
+    // The conversation takes a prompt again.
+    await expect(p.sendPromptAndWait('c-compact-slow', 'hi')).resolves.toMatchObject({ content: 'hello ' });
+  });
+
+  it("reports OpenCode's own compaction once, as auto, inside a turn", async () => {
+    const p = await startedAgainstFixture();
+    await p.createConversation(CONV('c-overflow'));
+    const { events } = collect(p, 'c-overflow');
+    await p.sendPromptAndWait('c-overflow', 'OVERFLOW');
+    expect(infos(events)).toEqual(['compaction_start:auto', 'compact_boundary:auto']);
+    const boundary = events.find((e) => (e.data as { infoType?: string }).infoType === 'compact_boundary');
+    expect((boundary?.data as { summary?: string }).summary).toBe('auto summary');
+  });
+
+  it('says the auto-compaction setting is not applied', async () => {
+    const p = await startedAgainstFixture();
+    await p.createConversation({ ...CONV('c-ac-off'), autoCompact: { enabled: false } });
+    await p.createConversation({ ...CONV('c-ac-default'), autoCompact: { enabled: true } });
+    expect(p.getConversationWarnings('c-ac-off')).toEqual([
+      expect.objectContaining({ code: 'FIELD_UNSUPPORTED_BY_PROVIDER', params: expect.objectContaining({ field: 'autoCompact' }) }),
+    ]);
+    expect(p.getConversationWarnings('c-ac-default')).toEqual([]);
+  });
+});

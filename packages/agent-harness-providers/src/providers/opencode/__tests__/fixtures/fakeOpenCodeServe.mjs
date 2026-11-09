@@ -31,6 +31,12 @@
 //   "HANG"          → a token, then nothing (no idle, no HTTP response)
 //   "ERROR"         → a session.error with a non-abort, non-truncation name
 //   "SERVER_CANCEL" → a MessageAbortedError
+//   "OVERFLOW"      → OpenCode compacts on its own first (session.next.compaction.started/ended + session.compacted),
+//                     then the ordinary reply
+//
+// `POST /session/{id}/summarize` streams a summary message, emits `session.compacted` and answers `true`; a modelID
+// of "fail" answers 400, and one of "slow" holds the answer until the session is aborted. The last summarize body
+// is readable at `GET /__fake/summarize`.
 //   anything else   → two text frames (proving cumulative text is diffed into
 //                     deltas rather than replayed whole), then idle
 // ────────────────────────────────────────────────────────────────
@@ -58,6 +64,10 @@ const sessions = new Map();
 const streams = new Set();
 /** sessionId → true while a turn is running, so abort has something to stop. */
 const running = new Map();
+/** The body of the last `POST /session/{id}/summarize`. */
+let lastSummarize = null;
+/** sessionId → the pending answer of a "slow" summarize, so abort can end it. */
+const summarizing = new Map();
 
 function emit(type, properties) {
   const frame = `data: ${JSON.stringify({ id: `evt_${++eventCount}`, type, properties })}\n\n`;
@@ -166,6 +176,12 @@ function runTurn(sessionID, prompt) {
       return; // never finishes
     }
 
+    if (prompt.includes('OVERFLOW')) {
+      emit('session.next.compaction.started', { timestamp: 0, sessionID, messageID: 'msg_c', reason: 'auto' });
+      emit('session.next.compaction.ended', { timestamp: 1, sessionID, messageID: 'msg_c', reason: 'auto', text: 'auto summary', recent: '' });
+      emit('session.compacted', { sessionID });
+    }
+
     if (prompt.includes('ERROR')) {
       fail('UnknownError', 'something broke');
       return;
@@ -203,6 +219,11 @@ const server = createServer(async (req, res) => {
     res.write(`data: ${JSON.stringify({ id: 'evt_0', type: 'server.connected', properties: {} })}\n\n`);
     streams.add(res);
     req.on('close', () => streams.delete(res));
+    return;
+  }
+
+  if (method === 'GET' && path === '/__fake/summarize') {
+    json(res, 200, lastSummarize);
     return;
   }
 
@@ -285,9 +306,28 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    if (method === 'POST' && rest === '/summarize') {
+      const body = await readBody(req);
+      lastSummarize = { sessionID, ...body };
+      if (body.modelID === 'fail') { json(res, 400, { name: 'BadRequestError', data: { message: 'no such model' } }); return; }
+      // The summary is an assistant message of its own on the stream.
+      const messageID = `msg_${++messageCount}`;
+      emit('message.updated', { sessionID, info: { id: messageID, sessionID, role: 'assistant', summary: true, time: { created: 0 } } });
+      emit('message.part.updated', { sessionID, time: 0, part: textPart(`prt_${++partCount}`, messageID, sessionID, 'the summary') });
+      if (body.modelID === 'slow') {
+        summarizing.set(sessionID, () => json(res, 200, false));
+        return;
+      }
+      emit('session.compacted', { sessionID });
+      json(res, 200, true);
+      return;
+    }
+
     if (method === 'POST' && rest === '/abort') {
       const state = running.get(sessionID);
       json(res, 200, true);
+      const pending = summarizing.get(sessionID);
+      if (pending) { summarizing.delete(sessionID); pending(); }
       if (state) {
         running.delete(sessionID);
         emit('session.error', { sessionID, error: { name: 'MessageAbortedError', data: { message: 'aborted' } } });

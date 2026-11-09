@@ -59,8 +59,10 @@ import type {
   ConversationWarning,
   HarnessAgentInfo,
   ProviderCapabilities,
+  CompactConversationOptions,
 } from '@generatorai/core';
-import type { AgentEvent } from '@generatorai/shared';
+import { COMPACTION_INFO, describeCompaction } from '@generatorai/shared';
+import type { AgentEvent, CompactionTrigger } from '@generatorai/shared';
 import { buildHarnessEnv } from '../../childEnv.js';
 import { rootsOf, sameRoots } from '../../conversationRoots.js';
 import type { AcpProviderOptions } from '../../types.js';
@@ -122,6 +124,52 @@ interface ConversationState {
   listeners: Set<Listener<AgentEvent>>;
   warnings: ConversationWarning[];
   inFlight: boolean;
+  /**
+   * The prompt turn reading the session's updates, while one runs. The session has ONE update queue
+   * (`nextUpdate`), read by one pump for the life of the session (`startPump`): during a turn it hands each
+   * message here, between turns it applies the update itself — agents announce their commands right after
+   * `session/new`, and compact or report usage between prompts.
+   */
+  turnSink: TurnSink | null;
+  /** Command names from the agent's latest `available_commands_update` (`compact` → native compaction). */
+  commands: Set<string>;
+  /** A `/compact` of ours in flight: whether its start / end were already reported. */
+  compacting: { startReported: boolean; endReported: boolean; summary: string } | null;
+  /** Summaries of compactions in progress, by compaction id (`compaction_summary_chunk`). */
+  compactionSummaries: Map<string, string>;
+}
+
+/** A turn's view of the session pump: messages in order, or the error that ended the prompt. */
+interface TurnSink {
+  push(message: acp.ActiveSessionMessage): void;
+  fail(err: unknown): void;
+  next(): Promise<acp.ActiveSessionMessage>;
+  /** Settles when the turn is over; the pump waits on it after handing over an error. */
+  done: Promise<void>;
+}
+
+function createTurnSink(): TurnSink & { finish(): void } {
+  const values: Array<{ ok: true; value: acp.ActiveSessionMessage } | { ok: false; error: unknown }> = [];
+  const waiters: Array<{ resolve: (m: acp.ActiveSessionMessage) => void; reject: (e: unknown) => void }> = [];
+  let finish!: () => void;
+  const done = new Promise<void>((r) => { finish = r; });
+  const deliver = (entry: (typeof values)[number]) => {
+    const waiter = waiters.shift();
+    if (!waiter) { values.push(entry); return; }
+    if (entry.ok) waiter.resolve(entry.value);
+    else waiter.reject(entry.error);
+  };
+  return {
+    push: (value) => deliver({ ok: true, value }),
+    fail: (error) => deliver({ ok: false, error }),
+    next: () => {
+      const entry = values.shift();
+      if (entry) return entry.ok ? Promise.resolve(entry.value) : Promise.reject(entry.error);
+      return new Promise((resolve, reject) => waiters.push({ resolve, reject }));
+    },
+    done,
+    finish: () => finish(),
+  };
 }
 
 /**
@@ -302,7 +350,9 @@ export class AcpProvider implements IAgentHarness {
         // `fs/*`/`terminal/*` handlers, so both stay false — an agent that
         // calls them anyway gets the SDK's own "Method not found" (-32601),
         // which is the honest answer, not a stub that pretends to comply.
-        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+        // `session.compaction`: we render `compaction_update` / `compaction_summary_chunk` (docs/compaction); without
+        // it an agent reports its compaction as a synthetic tool call, or not at all.
+        clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, session: { compaction: {} } },
         clientInfo: { name: 'GeneratorAI', version: '2.0.0' },
         }),
         this.opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
@@ -412,7 +462,16 @@ export class AcpProvider implements IAgentHarness {
       // (required by runCapabilityDeclarationConformance's L9 check) rather
       // than left undefined.
       computerUse: false,
+      // Per agent: only one that advertises a `compact` command can (see `capabilitiesFor`).
+      conversationCompact: false,
+      compactInstructions: false,
     };
+  }
+
+  /** `capabilities()`, plus what this conversation's agent advertised: `/compact` makes compaction native. */
+  capabilitiesFor(conversationId: string): ProviderCapabilities {
+    const canCompact = this.conversations.get(conversationId)?.commands.has('compact') === true;
+    return { ...this.capabilities(), conversationCompact: canCompact, compactInstructions: canCompact };
   }
 
   // ── Model discovery ───────────────────────────────────────────────
@@ -430,6 +489,12 @@ export class AcpProvider implements IAgentHarness {
     if (!this.connection) throw new Error('AcpProvider: not initialized (call initialize() first)');
 
     const warnings: ConversationWarning[] = [];
+    if (params.autoCompact && !(params.autoCompact.enabled && params.autoCompact.thresholdPct == null)) {
+      warnings.push({
+        code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+        params: { field: 'autoCompact', provider: 'acp', reason: 'ACP has no compaction setting; the agent compacts by its own rules' },
+      });
+    }
     if (this.opts.tierB ?? true) {
       warnings.push({
         code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
@@ -466,13 +531,19 @@ export class AcpProvider implements IAgentHarness {
       });
     }
 
-    this.conversations.set(params.conversationId, {
+    const conv: ConversationState = {
       session,
       params,
       listeners: new Set(),
       warnings,
       inFlight: false,
-    });
+      turnSink: null,
+      commands: new Set(),
+      compacting: null,
+      compactionSummaries: new Map(),
+    };
+    this.conversations.set(params.conversationId, conv);
+    if (session) this.startPump(conv, session);
     return params.conversationId;
   }
 
@@ -588,6 +659,8 @@ export class AcpProvider implements IAgentHarness {
 
     conv.inFlight = true;
     const session = conv.session;
+    const sink = createTurnSink();
+    conv.turnSink = sink;
     let assistantText = '';
     /** Tool calls announced but not yet resolved — see the W13-B1 guard below. */
     const openToolCallIds = new Set<string>();
@@ -615,9 +688,10 @@ export class AcpProvider implements IAgentHarness {
       promptPromise.catch(() => { /* see comment above */ });
 
       for (;;) {
-        const message = await session.nextUpdate();
+        const message = await sink.next();
         if (message.kind === 'stop') {
           if (message.stopReason === 'cancelled') {
+            this.endOwnCompaction(conv, 'Compaction stopped');
             this.broadcast(conv, { kind: 'harness.cancelled', data: { reason: 'user_abort', provider: 'acp' } });
           } else {
             // W13-B1 — ACP's `StopReason` includes `max_tokens`, and this
@@ -638,6 +712,7 @@ export class AcpProvider implements IAgentHarness {
                 });
               }
             }
+            this.endOwnCompaction(conv);
             this.broadcast(conv, { kind: 'harness.idle', data: {} });
           }
           break;
@@ -652,14 +727,124 @@ export class AcpProvider implements IAgentHarness {
       return { content: assistantText };
     } catch (err) {
       if (signal?.aborted) {
+        this.endOwnCompaction(conv, 'Compaction stopped');
         this.broadcast(conv, { kind: 'harness.cancelled', data: { reason: 'user_abort', provider: 'acp' } });
         return { content: assistantText };
       }
+      this.endOwnCompaction(conv, String(err));
       this.broadcast(conv, { kind: 'harness.error', data: { message: String(err), provider: 'acp' } });
       throw err;
     } finally {
       signal?.removeEventListener('abort', onAbort);
       conv.inFlight = false;
+      if (conv.turnSink === sink) conv.turnSink = null;
+      sink.finish();
+    }
+  }
+
+  /**
+   * The one reader of a session's update queue (see `ConversationState.turnSink`). Ends when the queue fails for
+   * good — the session was disposed or the connection closed — which is an error with no turn to hand it to.
+   */
+  private startPump(conv: ConversationState, session: acp.ActiveSession): void {
+    const idleTools = new Set<string>();
+    void (async () => {
+      for (;;) {
+        let message: acp.ActiveSessionMessage;
+        try {
+          message = await session.nextUpdate();
+        } catch (err) {
+          const sink = conv.turnSink;
+          if (!sink || conv.session !== session) return;
+          // A prompt's failure rejects the readers of the moment only; the turn decides, then reading resumes.
+          sink.fail(err);
+          await sink.done;
+          continue;
+        }
+        if (conv.turnSink) conv.turnSink.push(message);
+        else if (message.kind === 'session_update') this.applySessionUpdate(conv, message.update, idleTools);
+      }
+    })();
+  }
+
+  /**
+   * `/compact` as a prompt (an agent advertising the `compact` command, e.g. claude-agent-acp): resolves when that
+   * turn ends. The agent's `compaction_update`s report it; one that sends none is reported around the turn here.
+   */
+  async compactConversation(conversationId: string, options?: CompactConversationOptions): Promise<void> {
+    const conv = this.conversations.get(conversationId);
+    if (!conv) throw new Error(`AcpProvider: no conversation "${conversationId}"`);
+    if (!conv.commands.has('compact')) {
+      throw new Error('AcpProvider: this agent does not offer compaction (it advertises no `compact` command).');
+    }
+    if (conv.inFlight) throw new Error(`AcpProvider: conversation "${conversationId}" already has a turn in flight`);
+    const instructions = options?.instructions?.trim();
+    conv.compacting = { startReported: false, endReported: false, summary: '' };
+    this.reportCompaction(conv, COMPACTION_INFO.start, 'manual');
+    conv.compacting.startReported = true;
+    try {
+      await this.sendPromptAndWait(conversationId, `/compact${instructions ? ` ${instructions}` : ''}`);
+    } finally {
+      conv.compacting = null;
+    }
+  }
+
+  /** Our `/compact` turn ended: report its end unless the agent already did. */
+  private endOwnCompaction(conv: ConversationState, error?: string): void {
+    const ours = conv.compacting;
+    if (!ours || ours.endReported) return;
+    ours.endReported = true;
+    if (error) this.reportCompaction(conv, COMPACTION_INFO.failed, 'manual', { error });
+    else this.reportCompaction(conv, COMPACTION_INFO.boundary, 'manual', ours.summary ? { summary: ours.summary } : {});
+  }
+
+  private reportCompaction(
+    conv: ConversationState,
+    infoType: (typeof COMPACTION_INFO)[keyof typeof COMPACTION_INFO],
+    trigger: CompactionTrigger,
+    extra: { summary?: string; error?: string } = {},
+  ): void {
+    const message =
+      infoType === COMPACTION_INFO.start
+        ? 'Compacting conversation…'
+        : infoType === COMPACTION_INFO.failed
+          ? `Compaction failed${extra.error ? `: ${extra.error}` : ''}`
+          : describeCompaction({ trigger });
+    this.broadcast(conv, { kind: 'harness.session_info', data: { infoType, message, trigger, provider: 'acp', ...extra } });
+  }
+
+  /** `compaction_update` → the shared compaction events; ours (a `/compact` in flight) or the agent's own (auto). */
+  private applyCompactionUpdate(conv: ConversationState, update: acp.CompactionUpdate): void {
+    const ours = conv.compacting;
+    const trigger: CompactionTrigger = ours ? 'manual' : 'auto';
+    const summary = update.summary ? update.summary.map(textOf).join('') : conv.compactionSummaries.get(update.compactionId);
+    switch (update.status) {
+      case 'in_progress':
+        if (ours?.startReported) return;
+        if (ours) ours.startReported = true;
+        this.reportCompaction(conv, COMPACTION_INFO.start, trigger);
+        return;
+      case 'completed':
+        conv.compactionSummaries.delete(update.compactionId);
+        if (ours) {
+          if (ours.endReported) return;
+          ours.endReported = true;
+        }
+        this.reportCompaction(conv, COMPACTION_INFO.boundary, trigger, summary ? { summary } : {});
+        return;
+      case 'failed':
+      case 'cancelled':
+        conv.compactionSummaries.delete(update.compactionId);
+        if (ours) {
+          if (ours.endReported) return;
+          ours.endReported = true;
+        }
+        this.reportCompaction(conv, COMPACTION_INFO.failed, trigger, {
+          error: update.error ?? (update.status === 'cancelled' ? 'Compaction cancelled' : 'Compaction failed'),
+        });
+        return;
+      default:
+        return; // a future status: wait for one we know
     }
   }
 
@@ -711,6 +896,24 @@ export class AcpProvider implements IAgentHarness {
       case 'plan_removed':
         this.broadcast(conv, { kind: 'harness.plan_changed', data: { operation: update.sessionUpdate } });
         break;
+      case 'available_commands_update':
+        conv.commands = new Set(update.availableCommands.map((c) => c.name.replace(/^\//, '')));
+        break;
+      case 'usage_update':
+        this.broadcast(conv, {
+          kind: 'harness.context_usage',
+          data: { provider: 'acp', source: 'provider', currentTokens: update.used, promptTokenLimit: update.size },
+        });
+        break;
+      case 'compaction_update':
+        this.applyCompactionUpdate(conv, update);
+        break;
+      case 'compaction_summary_chunk': {
+        const text = textOf(update.content);
+        conv.compactionSummaries.set(update.compactionId, (conv.compactionSummaries.get(update.compactionId) ?? '') + text);
+        if (conv.compacting) conv.compacting.summary += text;
+        break;
+      }
       default:
         // available_commands_update / current_mode_update / config_option_update /
         // session_info_update / usage_update / compaction_update /

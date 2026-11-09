@@ -60,8 +60,10 @@ import type {
   ConversationWarning,
   HarnessAgentInfo,
   ProviderCapabilities,
+  CompactConversationOptions,
 } from '@generatorai/core';
-import type { AgentEvent } from '@generatorai/shared';
+import { COMPACTION_INFO, describeCompaction } from '@generatorai/shared';
+import type { AgentEvent, CompactionTrigger } from '@generatorai/shared';
 import { buildHarnessEnv } from '../../childEnv.js';
 import type { OpenCodeProviderOptions } from '../../types.js';
 import type {
@@ -144,6 +146,22 @@ interface ConversationState {
   listeners: Set<Listener<AgentEvent>>;
   warnings: ConversationWarning[];
   turn: TurnState | null;
+  /** A compaction this adapter started (`compactConversation`), while it runs. */
+  compacting: CompactionState | null;
+  /** The provider's own compaction seen on the stream (`session.next.compaction.started`), until it ends. */
+  autoCompacting: boolean;
+  /**
+   * When the last compaction (ours or the provider's) was reported: its v1 and v2 end events, which can trail the
+   * summarize answer, describe that same compaction.
+   */
+  lastCompactedAt?: number;
+}
+
+interface CompactionState {
+  /** Cancels the summarize request (Stop). */
+  abort: AbortController;
+  /** `compact_boundary` already emitted — the stream's `session.compacted` must not repeat it. */
+  boundaryEmitted: boolean;
 }
 
 /** Wall-clock deadline shared by every non-streaming call. */
@@ -452,6 +470,9 @@ export class OpenCodeProvider implements IAgentHarness {
       // Assistant messages carry `cost`; there is no budget ceiling to set.
       budgetTracking: false,
       computerUse: false,
+      // `POST /session/{id}/summarize` — no instructions field.
+      conversationCompact: true,
+      compactInstructions: false,
     };
   }
 
@@ -551,6 +572,8 @@ export class OpenCodeProvider implements IAgentHarness {
       });
     }
 
+    warnings.push(...autoCompactWarnings(params));
+
     let sessionId: string;
     if (params.resumeProviderSessionId) {
       // W12 — rejoin the existing server-side session rather than starting the
@@ -593,6 +616,8 @@ export class OpenCodeProvider implements IAgentHarness {
       listeners: new Set(),
       warnings,
       turn: null,
+      compacting: null,
+      autoCompacting: false,
     });
     this.sessionIndex.set(sessionId, params.conversationId);
     return params.conversationId;
@@ -604,7 +629,7 @@ export class OpenCodeProvider implements IAgentHarness {
       if (params) await this.createConversation(params);
       return;
     }
-    if (!params || live.turn) return;
+    if (!params || live.turn || live.compacting) return;
     // "Edit sources" on a live chat (D-137) rebinds with new roots and a new
     // `[Workspace]` system prompt. The system prompt and model ride on every
     // prompt, so they take effect from the stored state; the extra directories
@@ -624,7 +649,7 @@ export class OpenCodeProvider implements IAgentHarness {
       });
       return;
     }
-    const warnings: ConversationWarning[] = [];
+    const warnings: ConversationWarning[] = [...autoCompactWarnings(params)];
     const model = this.parseModelRef(params.model ?? this.opts.defaultModel);
     await this.setSessionPermission(live.sessionId, externalDirectoryRules(params.additionalDirectories), directory, warnings);
     live.params = params;
@@ -752,7 +777,7 @@ export class OpenCodeProvider implements IAgentHarness {
   ): Promise<ConversationResponse> {
     const conv = this.conversations.get(conversationId);
     if (!conv) throw new Error(`OpenCodeProvider: no conversation "${conversationId}"`);
-    if (conv.turn) throw new Error(`OpenCodeProvider: conversation "${conversationId}" already has a turn in flight`);
+    if (conv.turn || conv.compacting) throw new Error(`OpenCodeProvider: conversation "${conversationId}" already has a turn in flight`);
 
     // The stream must be live BEFORE the prompt is posted, or the first tokens
     // are emitted into a subscription that does not exist yet.
@@ -996,6 +1021,18 @@ export class OpenCodeProvider implements IAgentHarness {
 
   async abortConversation(conversationId: string): Promise<void> {
     const conv = this.conversations.get(conversationId);
+    if (conv?.compacting && !conv.turn) {
+      // A compaction is a server-side run of the session like a prompt: abort stops it there, and the summarize
+      // request is cancelled here so `compactConversation` settles at once.
+      const compaction = conv.compacting;
+      await this.fetch(
+        this.route(OPENCODE_OPERATIONS['session.abort'].path, { sessionID: conv.sessionId }),
+        { method: 'POST' },
+        conv.directory,
+      ).then((r) => r.arrayBuffer()).catch(() => undefined);
+      compaction.abort.abort();
+      return;
+    }
     if (!conv || !conv.turn) return;
     try {
       const resp = await this.fetch(
@@ -1008,6 +1045,92 @@ export class OpenCodeProvider implements IAgentHarness {
     // Settle locally too: waiting for the server to confirm is what left a
     // stopped conversation permanently "in flight" if the abort was lost.
     conv.turn.settle('cancelled');
+  }
+
+  // ── Compaction ────────────────────────────────────────────────────
+
+  /**
+   * `POST /session/{id}/summarize` — OpenCode summarises the session with the given model and continues it from the
+   * summary; the request returns when that is done. It takes no instructions. The summary streams as an assistant
+   * message on the event stream; with no turn in flight here those parts are not forwarded as the agent's reply.
+   */
+  async compactConversation(conversationId: string, _options?: CompactConversationOptions): Promise<void> {
+    const conv = this.conversations.get(conversationId);
+    if (!conv) throw new Error(`OpenCodeProvider: no conversation "${conversationId}"`);
+    if (conv.turn || conv.compacting) throw new Error(`OpenCodeProvider: conversation "${conversationId}" already has a turn in flight`);
+    const compaction: CompactionState = { abort: new AbortController(), boundaryEmitted: false };
+    conv.compacting = compaction;
+    this.broadcastCompaction(conv, COMPACTION_INFO.start, 'manual');
+    try {
+      await this.ensureEventStream();
+      const model = conv.model ?? (await this.serverDefaultModel());
+      if (!model) throw new Error('OpenCodeProvider: no model to summarise with (the session has none and the server names no default).');
+      // The summary is a model call over the whole session: bounded by the turn ceiling, not the 30 s request one.
+      const signal = this.turnTimeoutMs > 0
+        ? AbortSignal.any([compaction.abort.signal, AbortSignal.timeout(this.turnTimeoutMs)])
+        : compaction.abort.signal;
+      const resp = await this.fetch(
+        this.route(OPENCODE_OPERATIONS['session.summarize'].path, { sessionID: conv.sessionId }),
+        { method: 'POST', body: JSON.stringify({ providerID: model.providerID, modelID: model.modelID }), signal },
+        conv.directory,
+      );
+      const detail = await resp.text().catch(() => '');
+      if (!resp.ok) throw new Error(`OpenCodeProvider: summarize failed with ${resp.status}${detail ? `: ${detail.slice(0, 500)}` : ''}`);
+      if (detail.trim() === 'false') throw new Error('OpenCodeProvider: OpenCode did not summarise the session.');
+      if (!compaction.boundaryEmitted) {
+        compaction.boundaryEmitted = true;
+        this.broadcastCompaction(conv, COMPACTION_INFO.boundary, 'manual');
+      }
+      conv.lastCompactedAt = Date.now();
+      this.broadcast(conv, { kind: 'harness.idle', data: {} });
+    } catch (err) {
+      const stopped = compaction.abort.signal.aborted;
+      const message = stopped ? 'Compaction stopped' : err instanceof Error ? err.message : String(err);
+      this.broadcastCompaction(conv, COMPACTION_INFO.failed, 'manual', message);
+      this.broadcast(
+        conv,
+        stopped
+          ? { kind: 'harness.cancelled', data: { reason: 'user_abort', provider: 'opencode' } }
+          : { kind: 'harness.idle', data: {} },
+      );
+      throw stopped ? new Error(message) : err;
+    } finally {
+      conv.compacting = null;
+    }
+  }
+
+  /** The server's default model (`GET /config/providers` → `default`), for a session created without one. */
+  private async serverDefaultModel(): Promise<ModelRef | null> {
+    const fromOpts = this.parseModelRef(this.opts.defaultModel);
+    if (fromOpts) return fromOpts;
+    try {
+      const resp = await this.fetch(OPENCODE_OPERATIONS['config.providers'].path);
+      if (!resp.ok) return null;
+      const body = await resp.json() as { default?: Record<string, string> };
+      const preferred = this.opts.defaultProviderId;
+      const entry = (preferred && body.default?.[preferred] ? [preferred, body.default[preferred]] : Object.entries(body.default ?? {})[0]) as
+        | [string, string]
+        | undefined;
+      return entry ? { providerID: entry[0], modelID: entry[1] } : null;
+    } catch { return null; }
+  }
+
+  private broadcastCompaction(
+    conv: ConversationState,
+    infoType: (typeof COMPACTION_INFO)[keyof typeof COMPACTION_INFO],
+    trigger: CompactionTrigger,
+    error?: string,
+  ): void {
+    const message =
+      infoType === COMPACTION_INFO.start
+        ? 'Compacting conversation…'
+        : infoType === COMPACTION_INFO.failed
+          ? `Compaction failed${error ? `: ${error}` : ''}`
+          : describeCompaction({ trigger });
+    this.broadcast(conv, {
+      kind: 'harness.session_info',
+      data: { infoType, message, trigger, provider: 'opencode', ...(error ? { error } : {}) },
+    });
   }
 
   // ── Events ────────────────────────────────────────────────────────
@@ -1173,6 +1296,14 @@ export class OpenCodeProvider implements IAgentHarness {
     if (!conversationId) return;
     const conv = this.conversations.get(conversationId);
     if (!conv) return;
+
+    // Compaction is reported whether or not a turn is in flight: OpenCode compacts on its own when a prompt overflows
+    // the window, and the v2 events arrive for a summarize of ours too.
+    if (type === 'session.compacted' || type === 'session.next.compaction.started' || type === 'session.next.compaction.ended') {
+      this.handleCompactionEvent(conv, type, props);
+      return;
+    }
+
     const turn = conv.turn;
     if (!turn) return;
 
@@ -1221,6 +1352,41 @@ export class OpenCodeProvider implements IAgentHarness {
 
       default:
         break;
+    }
+  }
+
+  /** `session.compacted` / `session.next.compaction.*` → the shared compaction events (docs/compaction). */
+  private handleCompactionEvent(conv: ConversationState, type: string, props: Record<string, unknown>): void {
+    const ours = conv.compacting;
+    if (type === 'session.next.compaction.started') {
+      // Ours already announced its start; the provider's own (auto, overflow) is announced here.
+      if (ours || conv.autoCompacting) return;
+      conv.autoCompacting = true;
+      this.broadcastCompaction(conv, COMPACTION_INFO.start, 'auto');
+      return;
+    }
+    if (ours) {
+      if (ours.boundaryEmitted) return;
+      ours.boundaryEmitted = true;
+      conv.lastCompactedAt = Date.now();
+      const summary = type === 'session.next.compaction.ended' && typeof props['text'] === 'string' ? props['text'] : undefined;
+      this.broadcast(conv, {
+        kind: 'harness.session_info',
+        data: { infoType: COMPACTION_INFO.boundary, message: describeCompaction({ trigger: 'manual' }), trigger: 'manual', provider: 'opencode', ...(summary ? { summary } : {}) },
+      });
+      return;
+    }
+    // The provider's own. `session.compacted` (v1) and `session.next.compaction.ended` (v2) describe the same end:
+    // whichever comes first reports it.
+    const summary = type === 'session.next.compaction.ended' && typeof props['text'] === 'string' ? props['text'] : undefined;
+    if (type === 'session.compacted' || type === 'session.next.compaction.ended') {
+      if (!conv.autoCompacting && conv.lastCompactedAt != null && Date.now() - conv.lastCompactedAt < 5_000) return;
+      conv.autoCompacting = false;
+      conv.lastCompactedAt = Date.now();
+      this.broadcast(conv, {
+        kind: 'harness.session_info',
+        data: { infoType: COMPACTION_INFO.boundary, message: describeCompaction({ trigger: 'auto' }), trigger: 'auto', provider: 'opencode', ...(summary ? { summary } : {}) },
+      });
     }
   }
 
@@ -1365,6 +1531,24 @@ export class OpenCodeProvider implements IAgentHarness {
       headers: { ...headers, ...((init?.headers ?? {}) as Record<string, string>) },
     });
   }
+}
+
+/**
+ * OpenCode's automatic compaction is server configuration (`compaction.auto` in opencode.json), shared by every
+ * session of the server and fixed before any conversation exists; it has no threshold. The app's setting is
+ * reported as not applied rather than silently dropped.
+ */
+function autoCompactWarnings(params: CreateConversationParams): ConversationWarning[] {
+  const setting = params.autoCompact;
+  if (!setting || (setting.enabled && setting.thresholdPct == null)) return [];
+  return [{
+    code: 'FIELD_UNSUPPORTED_BY_PROVIDER',
+    params: {
+      field: 'autoCompact',
+      provider: 'opencode',
+      reason: "OpenCode's automatic compaction follows its own configuration (compaction.auto in opencode.json)",
+    },
+  }];
 }
 
 /**

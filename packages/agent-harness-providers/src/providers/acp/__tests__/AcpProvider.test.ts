@@ -435,3 +435,105 @@ describe('AcpProvider — session/new carries the chat workspace', () => {
     expect(none['additionalDirectories']).toBeUndefined();
   }, 20_000);
 });
+
+describe('AcpProvider — compaction (docs/compaction)', () => {
+  const live: AcpProvider[] = [];
+  afterEach(async () => {
+    await Promise.all(live.splice(0).map((p) => p.shutdown().catch(() => { /* best effort */ })));
+  });
+
+  async function started(env: Record<string, string> = {}): Promise<AcpProvider> {
+    const p = new AcpProvider({ command: process.execPath, args: [FIXTURE_AGENT], env });
+    live.push(p);
+    await p.initialize();
+    return p;
+  }
+  const infos = (events: AgentEvent[]) =>
+    events
+      .filter((e) => e.kind === 'harness.session_info')
+      .map((e) => e.data as { infoType: string; trigger?: string; summary?: string; error?: string })
+      .filter((d) => d.infoType.startsWith('compact'));
+  const tokens = (events: AgentEvent[]) =>
+    events.filter((e) => e.kind === 'harness.token').map((e) => (e.data as { text: string }).text).join('');
+  /** The agent's commands follow `session/new`; wait until the pump has applied them. */
+  async function untilCompactable(p: AcpProvider, id: string): Promise<void> {
+    for (let i = 0; i < 50 && !p.capabilitiesFor(id).conversationCompact; i++) await new Promise((r) => setTimeout(r, 20));
+  }
+
+  it('declares the session.compaction client capability', async () => {
+    const p = await started();
+    await p.createConversation({ conversationId: 'caps' } as CreateConversationParams);
+    const { events } = collect(p, 'caps');
+    await p.sendPromptAndWait('caps', 'ECHO_CLIENT_CAPS');
+    expect(JSON.parse(tokens(events))).toMatchObject({ session: { compaction: {} } });
+  }, 15_000);
+
+  it('offers compaction only for an agent advertising `compact`, read before any prompt', async () => {
+    const plain = await started();
+    await plain.createConversation({ conversationId: 'plain' } as CreateConversationParams);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(plain.capabilities().conversationCompact).toBe(false);
+    expect(plain.capabilitiesFor('plain').conversationCompact).toBe(false);
+    await expect(plain.compactConversation('plain')).rejects.toThrow(/no `compact` command/);
+
+    const p = await started({ FAKE_ACP_COMMANDS: 'compact' });
+    await p.createConversation({ conversationId: 'cmd' } as CreateConversationParams);
+    const { events } = collect(p, 'cmd');
+    await untilCompactable(p, 'cmd');
+    expect(p.capabilitiesFor('cmd')).toMatchObject({ conversationCompact: true, compactInstructions: true });
+    // The usage the agent reported between prompts reached the gauge.
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: 'harness.context_usage',
+      data: expect.objectContaining({ currentTokens: 90000, promptTokenLimit: 200000, source: 'provider' }),
+    }));
+  }, 15_000);
+
+  it("compacts with `/compact <instructions>` and reports the agent's compaction_update once", async () => {
+    const p = await started({ FAKE_ACP_COMMANDS: 'compact', FAKE_ACP_COMPACTION_UPDATES: '1' });
+    await p.createConversation({ conversationId: 'manual' } as CreateConversationParams);
+    await untilCompactable(p, 'manual');
+    const { events } = collect(p, 'manual');
+    await p.compactConversation('manual', { instructions: 'keep the API notes' });
+    expect(tokens(events)).toBe('ran /compact keep the API notes');
+    expect(infos(events).map((d) => `${d.infoType}:${d.trigger}`)).toEqual(['compaction_start:manual', 'compact_boundary:manual']);
+    expect(infos(events)[1]?.summary).toBe('the summary');
+    expect(events.at(-1)?.kind).toBe('harness.idle');
+    expect(events).toContainEqual(expect.objectContaining({ kind: 'harness.context_usage', data: expect.objectContaining({ currentTokens: 1200 }) }));
+  }, 15_000);
+
+  it('reports the end itself when the agent sends no compaction_update', async () => {
+    const p = await started({ FAKE_ACP_COMMANDS: 'compact' });
+    await p.createConversation({ conversationId: 'silent' } as CreateConversationParams);
+    await untilCompactable(p, 'silent');
+    const { events } = collect(p, 'silent');
+    await p.compactConversation('silent');
+    expect(infos(events).map((d) => d.infoType)).toEqual(['compaction_start', 'compact_boundary']);
+  }, 15_000);
+
+  it('reports a failed compaction', async () => {
+    const p = await started({ FAKE_ACP_COMMANDS: 'compact', FAKE_ACP_COMPACTION_UPDATES: '1', FAKE_ACP_COMPACTION_FAIL: '1' });
+    await p.createConversation({ conversationId: 'failing' } as CreateConversationParams);
+    await untilCompactable(p, 'failing');
+    const { events } = collect(p, 'failing');
+    await p.compactConversation('failing');
+    expect(infos(events).map((d) => d.infoType)).toEqual(['compaction_start', 'compaction_failed']);
+    expect(infos(events)[1]?.error).toBe('summary model unavailable');
+  }, 15_000);
+
+  it("reports the agent's own compaction inside a turn as auto", async () => {
+    const p = await started();
+    await p.createConversation({ conversationId: 'auto' } as CreateConversationParams);
+    const { events } = collect(p, 'auto');
+    await p.sendPromptAndWait('auto', 'AUTO_COMPACT');
+    expect(infos(events).map((d) => `${d.infoType}:${d.trigger}`)).toEqual(['compaction_start:auto', 'compact_boundary:auto']);
+    expect(tokens(events)).toBe('Hello from fake agent.');
+  }, 15_000);
+
+  it('says the auto-compaction setting is not applied', async () => {
+    const p = await started();
+    await p.createConversation({ conversationId: 'ac', autoCompact: { enabled: false } } as CreateConversationParams);
+    expect(p.getConversationWarnings('ac')).toContainEqual(
+      expect.objectContaining({ code: 'FIELD_UNSUPPORTED_BY_PROVIDER', params: expect.objectContaining({ field: 'autoCompact' }) }),
+    );
+  }, 15_000);
+});

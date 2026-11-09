@@ -21,6 +21,11 @@
 //     for a `session/cancel` notification and then returns
 //     `{ stopReason: 'cancelled' }` — exercising AcpProvider's real
 //     `abortConversation()` path end-to-end over the wire.
+//   - Compaction (docs/compaction): FAKE_ACP_COMMANDS=compact advertises a `compact` command right after
+//     `session/new`, and reports `usage_update` then. A `/compact …` prompt echoes its text and, with
+//     FAKE_ACP_COMPACTION_UPDATES=1, reports `compaction_update` in_progress → a summary chunk → completed
+//     (FAKE_ACP_COMPACTION_FAIL=1: failed). "AUTO_COMPACT" in a prompt reports the agent's own compaction.
+//     "ECHO_CLIENT_CAPS" replies with the client capabilities of `initialize`.
 //
 // This is a REAL child process speaking REAL ACP — the test suite proves
 // AcpProvider works against actual JSON-RPC-over-stdio, not a mocked
@@ -34,12 +39,49 @@ import { Readable, Writable } from 'node:stream';
 const pending = new Map();
 /** sessionId -> the `session/new` request that created it. */
 const sessionRequests = new Map();
+/** The client capabilities `initialize` declared. */
+let clientCapabilities = null;
+
+async function reportCompaction(cx, sessionId, compactionId, { fail = false } = {}) {
+  const update = (u) => cx.notify(acp.methods.client.session.update, { sessionId, update: u });
+  await update({ sessionUpdate: 'compaction_update', compactionId, status: 'in_progress' });
+  if (fail) {
+    await update({ sessionUpdate: 'compaction_update', compactionId, status: 'failed', error: 'summary model unavailable' });
+    return;
+  }
+  await update({ sessionUpdate: 'compaction_summary_chunk', compactionId, content: { type: 'text', text: 'the summary' } });
+  await update({ sessionUpdate: 'compaction_update', compactionId, status: 'completed' });
+  await update({ sessionUpdate: 'usage_update', used: 1200, size: 200000 });
+}
 
 async function handlePrompt(params, cx) {
   const sessionId = params.sessionId;
   const text = params.prompt.map((b) => (b.type === 'text' ? b.text : '')).join('');
   const ac = new AbortController();
   pending.set(sessionId, ac);
+
+  if (text.startsWith('/compact')) {
+    await cx.notify(acp.methods.client.session.update, {
+      sessionId,
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `ran ${text}` } },
+    });
+    if (process.env['FAKE_ACP_COMPACTION_UPDATES'] === '1') {
+      await reportCompaction(cx, sessionId, 'cmp_1', { fail: process.env['FAKE_ACP_COMPACTION_FAIL'] === '1' });
+    }
+    pending.delete(sessionId);
+    return { stopReason: 'end_turn' };
+  }
+
+  if (text.includes('AUTO_COMPACT')) await reportCompaction(cx, sessionId, 'cmp_auto');
+
+  if (text.includes('ECHO_CLIENT_CAPS')) {
+    await cx.notify(acp.methods.client.session.update, {
+      sessionId,
+      update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: JSON.stringify(clientCapabilities) } },
+    });
+    pending.delete(sessionId);
+    return { stopReason: 'end_turn' };
+  }
 
   // Answered BEFORE the greeting so the turn's whole content is the JSON — a
   // test can then parse it without stripping anything.
@@ -146,7 +188,8 @@ const never = () => new Promise(() => { /* deliberately never resolves */ });
 
 acp
   .agent({ name: 'fake-acp-agent' })
-  .onRequest(acp.methods.agent.initialize, async () => {
+  .onRequest(acp.methods.agent.initialize, async (ctx) => {
+    clientCapabilities = ctx.params?.clientCapabilities ?? null;
     // FAKE_ACP_NO_INIT: accept the handshake and never answer it. Without a
     // client-side deadline this hangs harness bring-up forever.
     if (process.env['FAKE_ACP_NO_INIT'] === '1') await never();
@@ -160,6 +203,16 @@ acp
     if (process.env['FAKE_ACP_NO_SESSION_NEW'] === '1') await never();
     const sessionId = crypto.randomUUID();
     sessionRequests.set(sessionId, ctx.params ?? null);
+    if (process.env['FAKE_ACP_COMMANDS'] === 'compact') {
+      // Like a real agent: the commands follow the session/new answer, before any prompt.
+      setTimeout(() => {
+        void ctx.client.notify(acp.methods.client.session.update, {
+          sessionId,
+          update: { sessionUpdate: 'available_commands_update', availableCommands: [{ name: 'compact', description: 'Compact the conversation' }] },
+        });
+        void ctx.client.notify(acp.methods.client.session.update, { sessionId, update: { sessionUpdate: 'usage_update', used: 90000, size: 200000 } });
+      }, 20);
+    }
     return { sessionId };
   })
   .onRequest(acp.methods.agent.session.prompt, (ctx) => handlePrompt(ctx.params, ctx.client))
