@@ -194,8 +194,10 @@ describe('Claude compaction on a persistent session', () => {
 
   it('maps the auto-compaction setting onto the CLI settings and environment', () => {
     const base = { conversationId: 'c4', workingDirectory: '/tmp' };
+    // 40 % of an unknown model's window (200K assumed) = 80K, plus the CLI's headroom, at least its 100K minimum.
     const lowered = internals.buildQueryOptions({ ...base, autoCompact: { enabled: true, thresholdPct: 40 } }, undefined, { persistent: true });
-    expect((lowered['env'] as Record<string, string>)['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE']).toBe('40');
+    expect((lowered['settings'] as Record<string, unknown>)['autoCompactWindow']).toBe(100_000);
+    expect((lowered['env'] as Record<string, string>)['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE']).toBeUndefined();
 
     const off = internals.buildQueryOptions({ ...base, autoCompact: { enabled: false } }, undefined, { persistent: true });
     expect((off['settings'] as Record<string, unknown>)['autoCompactEnabled']).toBe(false);
@@ -204,6 +206,17 @@ describe('Claude compaction on a persistent session', () => {
     const untouched = internals.buildQueryOptions(base, undefined, { persistent: true });
     expect((untouched['env'] as Record<string, string>)['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE']).toBeUndefined();
     expect((untouched['settings'] as Record<string, unknown> | undefined)?.['autoCompactEnabled']).toBeUndefined();
+    expect((untouched['settings'] as Record<string, unknown> | undefined)?.['autoCompactWindow']).toBeUndefined();
+  });
+
+  it('turns "compact at N % full" into the window the CLI compacts below', async () => {
+    const { autoCompactWindowFor } = await import('../src/providers/claude-agent/ClaudeAgentProvider.js');
+    expect(autoCompactWindowFor({ enabled: true, thresholdPct: 50 }, 1_000_000)).toBe(513_000);
+    expect(autoCompactWindowFor({ enabled: true, thresholdPct: 90 }, 200_000)).toBe(193_000);
+    expect(autoCompactWindowFor({ enabled: true, thresholdPct: 20 }, 200_000)).toBe(100_000);
+    expect(autoCompactWindowFor({ enabled: true, thresholdPct: 95 }, 200_000)).toBe(200_000);
+    expect(autoCompactWindowFor({ enabled: true }, 200_000)).toBeUndefined();
+    expect(autoCompactWindowFor({ enabled: false, thresholdPct: 50 }, 200_000)).toBeUndefined();
   });
 
   it('declares native compaction with instructions', () => {

@@ -296,17 +296,27 @@ function sameAutoCompact(a: AutoCompactSetting | undefined, b: AutoCompactSettin
   return (a?.enabled ?? true) === (b?.enabled ?? true) && a?.thresholdPct === b?.thresholdPct;
 }
 
-/**
- * The CLI's auto-compaction threshold, as a percentage of the window. `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` can only
- * lower it, which is all the setting offers; the on/off switch is `settings.autoCompactEnabled`
- * (`DISABLE_AUTO_COMPACT` as well, which leaves `/compact` working).
- */
+/** `DISABLE_AUTO_COMPACT` with the settings switch: off is off, whatever the CLI version reads (`/compact` still works). */
 function autoCompactEnv(setting: AutoCompactSetting | undefined): Record<string, string> {
-  if (!setting) return {};
-  if (!setting.enabled) return { DISABLE_AUTO_COMPACT: '1' };
-  const pct = setting.thresholdPct;
-  if (typeof pct !== 'number' || !Number.isFinite(pct)) return {};
-  return { CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(Math.min(99, Math.max(1, Math.round(pct)))) };
+  return setting && !setting.enabled ? { DISABLE_AUTO_COMPACT: '1' } : {};
+}
+
+/** The CLI fires its auto-compaction this far below the window it is given (its output reserve and buffer). */
+const AUTO_COMPACT_HEADROOM = 13_000;
+/** The smallest `autoCompactWindow` the CLI accepts. */
+const MIN_AUTO_COMPACT_WINDOW = 100_000;
+
+/**
+ * "Compact when the window is `pct`% full" as the CLI's `autoCompactWindow` setting: the CLI treats the context as
+ * that many tokens and compacts just below it. (`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` is not used: measured against CLI
+ * 2.1.316, an SDK session ignored it — it reported "auto-compacts at 167K" with the override at 20 % and never
+ * compacted, while `autoCompactWindow` compacted on its own at once.) Undefined: the CLI's default.
+ */
+export function autoCompactWindowFor(setting: AutoCompactSetting | undefined, modelWindow: number): number | undefined {
+  const pct = setting?.enabled ? setting.thresholdPct : undefined;
+  if (typeof pct !== 'number' || !Number.isFinite(pct) || pct <= 0 || pct >= 100) return undefined;
+  const target = Math.round((modelWindow * pct) / 100) + AUTO_COMPACT_HEADROOM;
+  return Math.min(modelWindow, Math.max(MIN_AUTO_COMPACT_WINDOW, target));
 }
 
 /**
@@ -1218,6 +1228,21 @@ export class ClaudeAgentProvider implements IAgentHarness {
         ...(typeof u.maxOutputTokens === 'number' ? { maxOutputTokens: u.maxOutputTokens } : {}),
       });
     }
+  }
+
+  /**
+   * The model's context window: what a `result` reported for it, else the catalog's figure, else 200K (the
+   * smallest window a current Claude model has, so a percentage is never applied to a window too large).
+   */
+  private contextWindowOf(model: string | undefined): number {
+    if (model) {
+      const observed = this.observedModelLimits.get(model)?.contextWindow;
+      if (observed) return observed;
+      const row = this.modelCache?.rows.find((r) => r.model.id === model || r.resolvedModel === model);
+      const fromCatalog = row ? this.applyObservedLimits(row.model, row.resolvedModel).contextWindow ?? row.model.contextWindow : undefined;
+      if (fromCatalog) return fromCatalog;
+    }
+    return 200_000;
   }
 
   /**
@@ -2950,6 +2975,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
     if (!(this.options.settingSources ?? []).includes('user')) settings['autoMemoryEnabled'] = false;
     // The app's auto-compaction switch (docs/compaction §3.6). Manual `/compact` keeps working either way.
     if (config.autoCompact?.enabled === false) settings['autoCompactEnabled'] = false;
+    const autoCompactWindow = autoCompactWindowFor(config.autoCompact, this.contextWindowOf(config.model));
+    if (autoCompactWindow != null) settings['autoCompactWindow'] = autoCompactWindow;
     if (Object.keys(settings).length > 0) (options as Record<string, unknown>)['settings'] = settings;
 
     // RV-9 — native structured output for THIS turn (a workflow stage's final
