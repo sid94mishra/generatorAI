@@ -1871,7 +1871,8 @@ export class CodexProvider implements IAgentHarness {
             break;
           case 'thread/tokenUsage/updated': {
             const usage = (params as V2ThreadTokenUsageUpdatedNotification).tokenUsage;
-            if (usage) this.broadcast(conv, this.contextUsageEvent(conv, usage, model));
+            const gauge = usage ? this.contextUsageEvent(conv, usage, model) : null;
+            if (gauge) this.broadcast(conv, gauge);
             break;
           }
           case 'error': {
@@ -1956,9 +1957,12 @@ export class CodexProvider implements IAgentHarness {
   }
 
   /** `thread/tokenUsage/updated` as the context gauge sees it; remembers the fill and the model's window. */
-  private contextUsageEvent(conv: ConversationState, usage: V2ThreadTokenUsage, model: string): AgentEvent {
-    conv.lastContextTokens = usage.last.inputTokens + usage.last.outputTokens;
+  private contextUsageEvent(conv: ConversationState, usage: V2ThreadTokenUsage, model: string): AgentEvent | null {
     if (model && usage.modelContextWindow) this.contextWindows.set(model, usage.modelContextWindow);
+    // A compact turn reports usage with no request behind it (`last` all zero): that is not an empty window, and the
+    // gauge read "0 / 258K" until the next turn. The next request reports the real fill.
+    if (usage.last.inputTokens + usage.last.outputTokens === 0) return null;
+    conv.lastContextTokens = usage.last.inputTokens + usage.last.outputTokens;
     return {
       kind: 'harness.context_usage',
       data: {
@@ -2466,7 +2470,8 @@ export class CodexProvider implements IAgentHarness {
               cached: total.cached - (usage.last.cachedInputTokens ?? 0),
             };
             usageLatest = total;
-            this.broadcast(conv, this.contextUsageEvent(conv, usage, model));
+            const gauge = this.contextUsageEvent(conv, usage, model);
+            if (gauge) this.broadcast(conv, gauge);
             break;
           }
 
@@ -2980,7 +2985,8 @@ export class CodexProvider implements IAgentHarness {
         const turnId = typeof p['turnId'] === 'string' ? p['turnId'] : undefined;
         if (method === 'thread/tokenUsage/updated') {
           const usage = (params as V2ThreadTokenUsageUpdatedNotification).tokenUsage;
-          if (usage) this.broadcast(conv, this.contextUsageEvent(conv, usage, conv.params.model ?? this.opts.defaultModel ?? ''));
+          const gauge = usage ? this.contextUsageEvent(conv, usage, conv.params.model ?? this.opts.defaultModel ?? '') : null;
+          if (gauge) this.broadcast(conv, gauge);
           return;
         }
         if (method === 'thread/compacted') {
