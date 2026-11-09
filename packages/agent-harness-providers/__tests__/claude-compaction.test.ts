@@ -194,9 +194,9 @@ describe('Claude compaction on a persistent session', () => {
 
   it('maps the auto-compaction setting onto the CLI settings and environment', () => {
     const base = { conversationId: 'c4', workingDirectory: '/tmp' };
-    // 40 % of an unknown model's window (200K assumed) = 80K, plus the CLI's headroom, at least its 100K minimum.
+    // 40 % of an unknown model's window (200K assumed) = 80K, plus the CLI's 33K headroom.
     const lowered = internals.buildQueryOptions({ ...base, autoCompact: { enabled: true, thresholdPct: 40 } }, undefined, { persistent: true });
-    expect((lowered['settings'] as Record<string, unknown>)['autoCompactWindow']).toBe(100_000);
+    expect((lowered['settings'] as Record<string, unknown>)['autoCompactWindow']).toBe(113_000);
     expect((lowered['env'] as Record<string, string>)['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE']).toBeUndefined();
 
     const off = internals.buildQueryOptions({ ...base, autoCompact: { enabled: false } }, undefined, { persistent: true });
@@ -211,8 +211,9 @@ describe('Claude compaction on a persistent session', () => {
 
   it('turns "compact at N % full" into the window the CLI compacts below', async () => {
     const { autoCompactWindowFor } = await import('../src/providers/claude-agent/ClaudeAgentProvider.js');
-    expect(autoCompactWindowFor({ enabled: true, thresholdPct: 50 }, 1_000_000)).toBe(513_000);
-    expect(autoCompactWindowFor({ enabled: true, thresholdPct: 90 }, 200_000)).toBe(193_000);
+    expect(autoCompactWindowFor({ enabled: true, thresholdPct: 50 }, 1_000_000)).toBe(533_000);
+    expect(autoCompactWindowFor({ enabled: true, thresholdPct: 50 }, 200_000)).toBe(133_000);
+    expect(autoCompactWindowFor({ enabled: true, thresholdPct: 90 }, 200_000)).toBe(200_000);
     expect(autoCompactWindowFor({ enabled: true, thresholdPct: 20 }, 200_000)).toBe(100_000);
     expect(autoCompactWindowFor({ enabled: true, thresholdPct: 95 }, 200_000)).toBe(200_000);
     expect(autoCompactWindowFor({ enabled: true }, 200_000)).toBeUndefined();

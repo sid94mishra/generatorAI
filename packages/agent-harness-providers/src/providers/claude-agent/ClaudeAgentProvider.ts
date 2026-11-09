@@ -301,8 +301,11 @@ function autoCompactEnv(setting: AutoCompactSetting | undefined): Record<string,
   return setting && !setting.enabled ? { DISABLE_AUTO_COMPACT: '1' } : {};
 }
 
-/** The CLI fires its auto-compaction this far below the window it is given (its output reserve and buffer). */
-const AUTO_COMPACT_HEADROOM = 13_000;
+/**
+ * The CLI fires its auto-compaction this far below the window it is given (its output reserve and buffer). Measured
+ * against CLI 2.1.316: a 200K window auto-compacts at 167K, `autoCompactWindow: 100000` at 67K.
+ */
+const AUTO_COMPACT_HEADROOM = 33_000;
 /** The smallest `autoCompactWindow` the CLI accepts. */
 const MIN_AUTO_COMPACT_WINDOW = 100_000;
 
