@@ -219,6 +219,11 @@ export type {
   IComputerAuditSink,
 } from './ComputerService.js';
 
+// Mobile devices (docs/devices)
+export { DeviceService, DeviceAccessError, DEVICE_EVENT_SCOPE } from './devices/DeviceService.js';
+export type { DeviceStep, DeviceWatcher, DeviceServiceOptions } from './devices/DeviceService.js';
+export { buildSnapshot, diffSnapshots, elementAt, ancestorsOf, findElement, formatSnapshot } from './devices/deviceSnapshot.js';
+
 // Integrated Terminal service
 export { TerminalService } from './TerminalService.js';
 export type { TerminalServiceConfig, TerminalViewer } from './TerminalService.js';

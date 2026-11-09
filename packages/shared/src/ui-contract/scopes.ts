@@ -36,6 +36,7 @@ export const SCOPE_LABELS: Readonly<Record<string, ScopeLabel>> = {
   'exec:agent': { label: 'Run agents', description: 'Run agents and answer their questions' },
   'exec:terminal': { label: 'Terminal', description: 'Run terminal commands on your machine' },
   'exec:browser': { label: 'Browser', description: 'Control the built-in browser' },
+  'exec:device': { label: 'Mobile devices', description: 'View and drive the simulators, emulators and phones on your computer' },
   'exec:computer': { label: 'Computer use', description: 'Watch and approve the agent operating apps on your desktop' },
   'admin:harnesses': { label: 'Model providers', description: 'Change which AI provider is used' },
   'admin:credentials': { label: 'Credentials', description: 'View and change stored credentials' },

@@ -16,6 +16,7 @@ import type { IMcpHub } from '../../mcp/IMcpHub.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
 import type { BrowserService } from '../BrowserService.js';
 import type { ComputerService } from '../ComputerService.js';
+import type { DeviceService } from '../devices/DeviceService.js';
 import type { WidgetService } from '../WidgetService.js';
 import type { IWidgetRegistry } from '../../domain/ports/IWidgetRegistry.js';
 import type { OrchestratorService } from '../orchestrator/OrchestratorService.js';
@@ -81,6 +82,8 @@ export interface SessionComposerDeps {
   workspaceManager?: WorkspaceManager;
   browserService?: BrowserService;
   computerService?: ComputerService;
+  /** Mobile devices (docs/devices). */
+  deviceService?: DeviceService;
   widgetService?: WidgetService;
   widgetRegistry?: IWidgetRegistry;
   /** Absolute base URL widget iframes fetch assets from ('' = same origin). */

@@ -47,6 +47,7 @@ export const AuditAction = {
   terminalOpened: 'exec.terminal_opened',
   terminalClosed: 'exec.terminal_closed',
   browserOpened: 'exec.browser_opened',
+  deviceOpened: 'exec.device_opened',
   sshHostKeyTrusted: 'ssh.host_key_trusted',
   sshHostKeyChanged: 'ssh.host_key_changed',
   relayHostConnected: 'relay.host_connected',

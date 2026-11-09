@@ -593,6 +593,12 @@ export type AgentEvent =
       };
     }
   | { kind: 'browser.error'; data: { workspaceId: string; error: string; kind?: 'crash' | 'timeout' | 'blocked' | 'capacity' | 'unknown' } }
+  // ── Mobile device events (docs/devices) ──
+  // Emitted by DeviceService on `devices:<workspaceId>`. The pane's frames and
+  // touch marks travel on its own stream socket, never here.
+  | { kind: 'devices.opened'; data: { workspaceId: string; device: string; name: string; by: 'agent' | 'user' } }
+  | { kind: 'devices.access_requested'; data: { workspaceId: string; device: string; name: string } }
+  | { kind: 'devices.closed'; data: { workspaceId: string; device: string } }
   // ── Computer Use Events ──
   // Emitted by ComputerService. Like browser events these never carry inline
   // image data — screenshots are written as `computer_screenshot` artifacts

@@ -36,6 +36,10 @@ export type {
   ComputerToolName,
 } from './computer/index.js';
 
+// Mobile devices (docs/devices) — iOS simulators, Android emulators and phones.
+export { buildDeviceToolSet, DEVICE_TOOL_NAMES, DEVICE_APP_ASKING_ACTIONS, parseDeviceStep } from './devices/index.js';
+export type { DeviceToolContext } from './devices/index.js';
+
 // v2 widget tools — render / update / close / search widgets.
 // Legacy `ui_*` names are also exported as aliases from the same module.
 export {

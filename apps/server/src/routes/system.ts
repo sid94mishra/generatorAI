@@ -20,6 +20,7 @@ import { toMcpServerEntry } from '@generatorai/core';
 import type { Container } from '../composition-root.js';
 import { serverDisplayName } from './auth.js';
 import { readComputerUsePreferences, writeComputerUsePreferences } from '../settings/computerUse.js';
+import { readDevicePreferences, writeDevicePreferences } from '../settings/devices.js';
 import {
   readAudioPreferences,
   writeAudioPreferences,
@@ -41,6 +42,11 @@ import {
   MIN_RETENTION_DAYS,
   MAX_RETENTION_DAYS,
 } from '../settings/workspaceRetention.js';
+
+const mobileDevicesSchema = z.object({
+  enabled: z.boolean().optional(),
+  androidSdkPath: z.string().max(1024).optional(),
+});
 
 const computerUseSchema = z.object({
   enabled: z.boolean(),
@@ -488,6 +494,44 @@ export function createSystemRoutes(container: Container): Router {
         // is per-workspace and lives on /workspaces/:id/computer/runtime.
         runtime: await container.computerService.runtimeStatus(),
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // GET /system/mobile-devices — Settings › Mobile devices (docs/devices DV-9): the switch, the SDK
+  // path, and the setup checklist for this host.
+  router.get('/mobile-devices', async (req, res, next) => {
+    try {
+      const prefs = await readDevicePreferences(dataDir);
+      res.json({
+        enabled: container.deviceService.isEnabled(),
+        androidSdkPath: prefs.androidSdkPath,
+        tooling: await container.deviceService.tooling(req.query['fresh'] === '1'),
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // PUT /system/mobile-devices — applies live: turning it off stops every live view and, through the
+  // binding key, removes the device tools from open chats on their next turn.
+  router.put('/mobile-devices', async (req, res, next) => {
+    const parsed = mobileDevicesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: { code: 'INVALID_BODY', message: parsed.error.message } });
+      return;
+    }
+    try {
+      const current = await readDevicePreferences(dataDir);
+      const prefs = {
+        enabled: parsed.data.enabled ?? current.enabled,
+        androidSdkPath: (parsed.data.androidSdkPath ?? current.androidSdkPath).trim(),
+      };
+      await writeDevicePreferences(dataDir, prefs);
+      container.deviceService.setEnabled(prefs.enabled);
+      container.setAndroidSdkPath(prefs.androidSdkPath);
+      res.json({ ...prefs, tooling: await container.deviceService.tooling(true) });
     } catch (err) {
       next(err);
     }

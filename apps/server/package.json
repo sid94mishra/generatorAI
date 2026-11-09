@@ -45,6 +45,7 @@
     "pino": "^10.3.1",
     "pino-opentelemetry-transport": "^3.0.0",
     "pino-pretty": "^13.0.0",
+    "serve-sim": "0.1.49",
     "ws": "^8.21.3",
     "zod": "^3.25.76"
   },

@@ -272,6 +272,11 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'browser.selection': 'item',
   'browser.error': 'item',
 
+  // mobile devices
+  'devices.opened': 'item',
+  'devices.access_requested': 'item',
+  'devices.closed': 'item',
+
   // computer
   'computer.session_started': 'item',
   'computer.session_stopped': 'item',

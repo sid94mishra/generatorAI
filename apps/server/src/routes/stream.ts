@@ -275,12 +275,13 @@ function insufficientScopeBody(
 }
 
 /** Ticket scopes redeemable by a WebSocket upgrade rather than SSE. */
-const SOCKET_TICKET_SCOPES = new Set<string>(['terminal', 'browser', 'stt', 'tts']);
+const SOCKET_TICKET_SCOPES = new Set<string>(['terminal', 'browser', 'devices', 'stt', 'tts']);
 
 /** The API scope a caller must already hold to mint each socket ticket. */
 const SOCKET_TICKET_SCOPE_REQUIREMENTS: Record<string, Scope | undefined> = {
   terminal: 'exec:terminal',
   browser: 'exec:browser',
+  devices: 'exec:device',
   computer: 'exec:computer',
   stt: 'write:chats',
   // Reading a message aloud carries the same authority as reading that

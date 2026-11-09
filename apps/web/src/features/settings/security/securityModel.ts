@@ -93,6 +93,7 @@ export const SCOPE_PRESETS: readonly ScopePreset[] = [
       'exec:agent',
       'exec:terminal',
       'exec:browser',
+      'exec:device',
     ],
   },
 ];
@@ -105,6 +106,7 @@ export const SCOPE_PRESETS: readonly ScopePreset[] = [
 export const GRANTABLE_CAPABILITIES: readonly { scope: string; label: string; hint: string }[] = [
   { scope: 'exec:terminal', label: 'Terminal', hint: 'Run shell commands in a workspace — remote code execution.' },
   { scope: 'exec:browser', label: 'Browser', hint: "View and drive the agent's browser session." },
+  { scope: 'exec:device', label: 'Mobile devices', hint: 'View and drive the simulators, emulators and phones on the computer.' },
   { scope: 'write:files', label: 'Write files', hint: 'Upload attachments and edit workspace files.' },
   { scope: 'write:workflows', label: 'Control runs', hint: 'Start, pause and cancel workflow runs, and edit definitions.' },
   { scope: 'write:projects', label: 'Edit projects', hint: 'Create projects and link codebases.' },

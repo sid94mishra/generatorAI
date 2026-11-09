@@ -26,6 +26,8 @@ import { mintLocalAdminToken } from './composition/localAdminToken.js';
 import { loadOrCreateCallbackKey } from './composition/callbackKey.js';
 import { installAgentCursorTheme, resolveCuaDriverBinary } from './computer/driverBinary.js';
 import { ScreenCast } from './computer/screenCast.js';
+import { resolveScrcpyServer, resolveServeSimCli } from './devices/deviceResources.js';
+import { readDevicePreferences } from './settings/devices.js';
 import { createPreviewProducer } from './computer/previewProducer.js';
 import { registerEphemeralProducer } from './streaming/ephemeralScopes.js';
 import { RelayHostBroker } from './relay/RelayHostBroker.js';
@@ -158,6 +160,9 @@ import {
   // Computer Use
   ComputerService,
   CuaDriverBridge,
+  DeviceService,
+  AndroidBridge,
+  IosSimulatorBridge,
   NullComputerBridge,
   PendingConsentStore,
   // G-01 — attention feed
@@ -2005,6 +2010,29 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     await computerService.stop(workspaceId, 'workspace-deleted');
   }, 'native');
 
+  // ── Mobile devices (docs/devices) ──
+  // Android through the user's adb (Tango + the bundled scrcpy-server), iOS
+  // simulators through a serve-sim helper we supervise on loopback.
+  const devicePrefsDir = dirname(resolve(config.dbPath));
+  const devicePrefs = await readDevicePreferences(devicePrefsDir);
+  let androidSdkPath = devicePrefs.androidSdkPath;
+  const deviceService = new DeviceService(
+    eventBus,
+    logger,
+    [
+      new AndroidBridge({ logger, sdkPath: () => androidSdkPath || null, scrcpyServerPath: await resolveScrcpyServer() }),
+      new IosSimulatorBridge({ logger, serveSimCli: await resolveServeSimCli() }),
+    ],
+    { enabled: devicePrefs.enabled },
+  );
+  const setAndroidSdkPath = (value: string): void => {
+    androidSdkPath = value;
+  };
+  chatExtensions.deviceService = deviceService;
+  workspaceManager.registerBeforeDelete(async (workspaceId) => {
+    deviceService.forgetWorkspace(workspaceId);
+  }, 'native');
+
   // W09 / P1-11 — the live preview is a live-only scope on the shared stream,
   // not a second SSE endpoint with a poll per connection. One producer per
   // workspace feeds every watcher; it starts on the first and stops on the last.
@@ -2515,6 +2543,8 @@ export async function createContainer(config: AppConfig, options: CreateContaine
 
     // Computer Use
     computerService,
+    deviceService,
+    setAndroidSdkPath,
     computerUseRepo,
     cuaDriverBridge,
     computerConsentStore,
@@ -2866,6 +2896,7 @@ export async function createContainer(config: AppConfig, options: CreateContaine
       // any live driver sessions.
       computerConsentStore.cancelAll();
       await computerService.dispose();
+      await deviceService.dispose().catch(() => undefined);
 
       // Stop every live Integrated Browser session through its normal path
       // (bridge stop, row → terminated, `browser.session_stopped`). Before
@@ -3020,6 +3051,10 @@ export interface Container {
 
   /** Computer Use service. Refuses everything unless a desktop is attached. */
   computerService: ComputerService;
+  /** Mobile devices (docs/devices). */
+  deviceService: DeviceService;
+  /** Settings › Mobile devices › Android SDK path, applied live. */
+  setAndroidSdkPath: (value: string) => void;
   computerUseRepo: DrizzleComputerUseRepository;
   /** Exposed so routes/internal-computer.ts can push the driver socket path. */
   cuaDriverBridge: CuaDriverBridge;

@@ -36,6 +36,11 @@
  *                              Kept external, it stays behind the engine's
  *                              guarded dynamic import.
  *
+ *   serve-sim                 The iOS simulator helper (docs/devices DV-3). Never
+ *                              imported: the server spawns its CLI as a child
+ *                              process, so it ships as files, with its native
+ *                              addon and Swift helpers.
+ *
  *   @trycua/cua-driver        Finds its native library through
  *                              `createRequire(callerUrl).resolve()` against a
  *                              sibling platform package. Inlined, `callerUrl`
@@ -70,6 +75,7 @@ export const RUNTIME_PACKAGES = [
   'node-pty',
   'playwright',
   '@trycua/cua-driver',
+  'serve-sim',
   // The Codex CLI the packaged app ships. Its `bin/codex.js` launcher picks
   // the per-platform binary package (`@openai/codex-<platform>-<arch>`) by
   // `process.platform`/`process.arch`, and `resolveCodexCommand` finds the

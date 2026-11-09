@@ -41,6 +41,7 @@ import { createEditorRoutes } from './editor.js';
 import { createWorkflowScriptRoutes } from './workflowScripts.js';
 import { createBrowserRoutes } from './browser.js';
 import { createComputerRoutes } from './computer.js';
+import { createDeviceRoutes } from './devices.js';
 import { createTerminalRoutes } from './terminals.js';
 import { createAttentionRoutes } from './attention.js';
 import { createStatsRoutes } from './stats.js';
@@ -109,6 +110,7 @@ export function createApiRouter(container: Container): Router {
 
   // Computer Use — read-only: window frames + audit for the preview panel.
   router.use('/workspaces/:id/computer', createComputerRoutes(container));
+  router.use('/workspaces/:id/devices', createDeviceRoutes(container));
 
   // Integrated Terminal — nested under workspaces, mirrors the browser
   // topology. Live IO is served via the WebSocket registered in

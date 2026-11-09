@@ -43,6 +43,7 @@ import type { WedgeDetector, LoopTurnProber } from '@generatorai/core';
 import { createApp } from './app.js';
 import { createWidgetAssetRoutes } from './routes/extensions.js';
 import { attachBrowserWebSocket } from './browser-ws.js';
+import { attachDeviceWebSocket } from './device-ws.js';
 import { attachTerminalWebSocket } from './terminal-ws.js';
 import { attachSttWebSocket } from './stt-ws.js';
 import { attachTtsWebSocket } from './tts-ws.js';
@@ -727,6 +728,7 @@ async function startServer(): Promise<void> {
   //     for high-fps live-view streaming + input dispatch. Bypasses the
   //     Vite dev proxy's multipart/x-mixed-replace buffering.
   attachBrowserWebSocket(server, container);
+  attachDeviceWebSocket(server, container);
 
   // 5c. Attach Integrated Terminal WebSocket
   //     (`/api/workspaces/:id/terminals/:sid/stream`) for live PTY IO.

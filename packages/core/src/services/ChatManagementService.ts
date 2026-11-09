@@ -1273,6 +1273,7 @@ export class ChatManagementService {
       // Computer Use is a live Settings toggle: a chat open when it flipped
       // must rebind, or it keeps (or lacks) desktop control.
       computerUseEnabled: this.extensions.computerService?.isEnabled() ?? false,
+      devicesEnabled: this.extensions.deviceService?.isEnabled() ?? false,
       harnessType: chat.harnessConfig?.harnessType ?? '',
       model: chat.harnessConfig?.model ?? chat.model ?? '',
       // Agent ref + version only. Per-turn options must NOT participate, or

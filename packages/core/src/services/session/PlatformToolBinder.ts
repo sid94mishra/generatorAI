@@ -15,6 +15,7 @@ import { COMPUTER_USE_SKILL_ID, COMPUTER_USE_SKILL_NAME } from '@generatorai/sha
 import type { AgentToolPolicy, ChatSourceControlOptions } from '@generatorai/shared';
 import { buildBrowserToolSet } from '../../tools/browser/index.js';
 import { buildComputerToolSet } from '../../tools/computer/index.js';
+import { buildDeviceToolSet, DEVICE_APP_ASKING_ACTIONS } from '../../tools/devices/index.js';
 import { buildWidgetTools } from '../../tools/widgetTools.js';
 import { buildOrchestratorToolSet } from '../../tools/orchestrator/index.js';
 import { isExtensionAuthorToolName } from '../../tools/extensionAuthorTools.js';
@@ -31,6 +32,7 @@ import type { StageOrchestratorParent } from '../orchestrator/OrchestratorServic
 import {
   BROWSER_SYSTEM_HINT,
   COMPUTER_USE_SYSTEM_HINT,
+  DEVICES_SYSTEM_HINT,
   EXTENSION_AUTHORING_HINT,
   WIDGET_SYSTEM_HINT,
   buildAutoCommitHint,
@@ -156,6 +158,30 @@ export class PlatformToolBinder {
     } catch (err) {
       console.warn(`[PlatformToolBinder] Computer tool registration failed for ${ownerTag(t.owner)}:`, err);
     }
+  }
+
+  /**
+   * Mobile devices (docs/devices DV-7, DV-8): the `device_*` tools and their
+   * hint while Settings › Mobile devices is on and the session has a
+   * workspace. Taps and reads run unasked (access is the pane's per-device
+   * switch); installing an app and opening a URL ask like other actions with
+   * effects beyond the screen, and are refused while planning.
+   */
+  devices(cfg: ConversationConfig, t: BindTarget, opts: { port: GatePort | undefined; turnOf: () => TurnContext | undefined }): void {
+    const { deviceService } = this.deps;
+    if (!deviceService?.isEnabled() || !t.workspaceId) return;
+    const built = buildDeviceToolSet({ deviceService, workspaceId: t.workspaceId, owner: ownerTag(t.owner) });
+    const tools = built.map((tool) => {
+      if (tool.name !== 'device_app') return tool;
+      const [gated] = askBeforeActing([tool], { turnOf: opts.turnOf, port: opts.port, always: new Set() });
+      return {
+        ...gated!,
+        handler: (args: Record<string, unknown>, callCtx?: ToolCallContext) =>
+          DEVICE_APP_ASKING_ACTIONS.has(String(args['action'])) ? gated!.handler(args, callCtx) : tool.handler(args, callCtx),
+      };
+    });
+    appendTools(cfg, tools);
+    appendSystemBlock(cfg, DEVICES_SYSTEM_HINT);
   }
 
   /**

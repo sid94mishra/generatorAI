@@ -32,6 +32,9 @@ export const SCOPES = [
   'exec:agent',
   'exec:terminal',
   'exec:browser',
+  // Viewing and driving the mobile devices on this computer (docs/devices):
+  // a simulator, an emulator or a phone, through the Devices tab.
+  'exec:device',
   // Answering a Computer Use consent prompt and revoking its grants. Separate
   // from `exec:browser` because it authorises control of the physical machine,
   // and separate from `exec:agent` so approving an agent's QUESTION never
@@ -171,6 +174,7 @@ export function scopesForbiddenFor(platform: string, scopes: readonly string[]):
 export const SIGNED_LINK_FORBIDDEN_SCOPES: readonly Scope[] = [
   'exec:terminal',
   'exec:browser',
+  'exec:device',
   'admin:harnesses',
   'admin:credentials',
   'admin:devices',
@@ -182,6 +186,7 @@ export const SIGNED_LINK_FORBIDDEN_SCOPES: readonly Scope[] = [
 export const HIGH_RISK_SCOPES: readonly Scope[] = [
   'exec:terminal',
   'exec:browser',
+  'exec:device',
   'admin:credentials',
   'admin:devices',
   'admin:settings',

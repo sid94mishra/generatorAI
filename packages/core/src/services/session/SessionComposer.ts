@@ -266,6 +266,12 @@ export class SessionComposer {
         asking.has(tool.name) ? askBeforeRunning([tool], { turnOf, port })[0]! : tool,
       );
     }
+    // Devices come after the D-102 wrap on purpose: every tap asking would make
+    // the tools unusable; access is the Devices tab's per-device switch (DV-8).
+    this.binder.devices(cfg, target, {
+      port: i.gates && i.attended ? withAgentToolPolicy(i.gates, projection.toolPolicy.groups) : undefined,
+      turnOf: () => this.turns.get(i.conversationId),
+    });
     this.binder.sourceControlHint(cfg, i.platform.sourceControl);
     const mcpWarnings = await resolveMcp(
       cfg,
@@ -407,6 +413,7 @@ export class SessionComposer {
       agentVersion: projection.agentVersion ?? 0,
       permissionMode: i.permission.bindingMode,
       computerUseEnabled: this.deps.computerService?.isEnabled() ?? false,
+      devicesEnabled: this.deps.deviceService?.isEnabled() ?? false,
     });
 
     return {

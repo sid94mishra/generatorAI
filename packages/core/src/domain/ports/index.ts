@@ -283,3 +283,17 @@ export type {
   PermissionRuleOwner,
   StoredPermissionRule,
 } from './IPermissionRuleRepository.js';
+
+// Mobile devices (docs/devices)
+export type {
+  BridgeDevice,
+  DeviceAppAction,
+  DeviceFrame,
+  DeviceFrameSink,
+  DeviceLogOptions,
+  DeviceStreamHandle,
+  IDeviceBridge,
+  RawDeviceElement,
+  RawDeviceSnapshot,
+} from './IDeviceBridge.js';
+export { DEVICE_BUTTONS, DEVICE_KEYS } from './IDeviceBridge.js';

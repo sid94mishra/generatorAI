@@ -352,6 +352,9 @@ export function createBuildConfig({ platform, arch, channel, signed, publish, en
         to: 'cua-driver',
         filter: ['**/*', '!.version', ...SHARED_RESOURCE_EXCLUSIONS],
       },
+      // Platform-independent: the Android live view's scrcpy-server jar, pushed
+      // to the device on first use (docs/devices DV-2).
+      { from: 'resources/scrcpy', to: 'scrcpy', filter: ['scrcpy-server-*', ...SHARED_RESOURCE_EXCLUSIONS] },
       // Platform-independent: the agent cursor theme is a Lottie bundle the
       // server installs into the driver's theme store on boot.
       { from: 'resources/cursor-themes', to: 'cursor-themes', filter: ['**/*', ...SHARED_RESOURCE_EXCLUSIONS] },

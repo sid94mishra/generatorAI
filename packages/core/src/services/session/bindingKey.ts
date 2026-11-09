@@ -18,9 +18,12 @@ export interface BindingKeyParts {
    * flipped must rebind, or it keeps (or lacks) desktop control.
    */
   computerUseEnabled: boolean;
+  /** Settings › Mobile devices: also a live toggle that adds or removes tools. */
+  devicesEnabled: boolean;
 }
 
 export function formatConversationBindingKey(parts: BindingKeyParts): string {
   const cu = parts.computerUseEnabled ? '1' : '0';
-  return `${parts.harnessType}::${parts.model}::${parts.agentRef}::${parts.agentVersion}::cu${cu}::pm${parts.permissionMode ?? '-'}`;
+  const dv = parts.devicesEnabled ? '1' : '0';
+  return `${parts.harnessType}::${parts.model}::${parts.agentRef}::${parts.agentVersion}::cu${cu}::dv${dv}::pm${parts.permissionMode ?? '-'}`;
 }
