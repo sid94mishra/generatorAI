@@ -185,8 +185,6 @@ const UI_CONCEPTS = {
   /** GitHub domain glyphs (D-146): merging a pull request, an issue. */
   merge: { lucide: 'git-merge', lucideOnly: true },
   issue: { lucide: 'circle-dot', lucideOnly: true },
-  /** Compact a conversation: its history folded into a summary (docs/compaction). */
-  compact: { lucide: 'fold-vertical', lucideOnly: true },
 } as const satisfies Record<string, IconConceptDef>;
 
 export const ICON_CONCEPTS = {

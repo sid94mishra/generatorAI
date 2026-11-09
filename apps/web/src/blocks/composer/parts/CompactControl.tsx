@@ -49,7 +49,7 @@ export function CompactControl({ onCompact, disabled = false, fill }: CompactCon
       <PopoverTrigger
         render={
           <IconButton
-            icon="compact"
+            icon="collapse-all"
             label="Compact conversation"
             size="sm"
             disabled={disabled}

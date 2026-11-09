@@ -28,7 +28,7 @@ export function CompactionDivider({ record }: CompactionDividerProps) {
       <div className="flex min-w-0 items-center gap-2">
         <Separator className="min-w-4 flex-1" />
         <span className="flex shrink-0 items-center gap-1.5 text-small text-fg-3">
-          <Icon concept="compact" size={14} />
+          <Icon concept="collapse-all" size={14} />
           <span>{describeCompaction(record)}</span>
         </span>
         {summary ? (
