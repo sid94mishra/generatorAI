@@ -277,11 +277,20 @@ function typeExpr(schemaLike: unknown, indent: string): string {
   // oneOf/anyOf are both unions here: the artifact uses oneOf for closed
   // variant sets and anyOf for `T | null`, and TypeScript expresses both the
   // same way (it has no exclusive-union form).
+  //
+  // A schema may carry its own properties beside the union — fields every
+  // variant shares, e.g. Codex's ThreadItem `{ startedAtMs, completedAtMs,
+  // oneOf: [...items] }` — which must become `{ shared } & (A | B)`: emitting
+  // the union alone dropped the shared fields, and a variant built the same
+  // way lost its tag (`{ fileId } | { result }` with no `type`).
   for (const key of ['oneOf', 'anyOf'] as const) {
     const branches = schema[key] as JsonSchema[] | undefined;
     if (Array.isArray(branches) && branches.length > 0) {
       const parts = unique(branches.map((b) => parenthesise(typeExpr(b, indent))));
-      return parts.length === 1 ? (parts[0] as string) : parts.join(' | ');
+      const union = parts.length === 1 ? (parts[0] as string) : parts.join(' | ');
+      const shared = schema['properties'] as Record<string, unknown> | undefined;
+      if (!shared || Object.keys(shared).length === 0) return union;
+      return `${objectLiteral(schema, indent)} & ${parenthesise(union)}`;
     }
   }
 

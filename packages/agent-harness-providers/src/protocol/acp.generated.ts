@@ -612,11 +612,33 @@ export type KillTerminalRequest = {
  * either via a form or by directing them to a URL.
  * Elicitations are tied to a session (optionally a tool call) or a request.
  */
-export type CreateElicitationRequest = ({
+export type CreateElicitationRequest = {
+  /** A human-readable message describing what input is needed. */
+  message: string;
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * Optional. Omitted and `null` are equivalent and mean no metadata.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+} & ({
   mode: "form";
 } & ElicitationFormMode) | ({
   mode: "url";
-} & ElicitationUrlMode) | (ElicitationSessionScope | ElicitationRequestScope);
+} & ElicitationUrlMode) | ({
+  /**
+   * Custom or future elicitation mode.
+   *
+   * Values beginning with `_` are reserved for implementation-specific
+   * extensions. Unknown values that do not begin with `_` are reserved for
+   * future ACP variants.
+   */
+  mode: string;
+} & (ElicitationSessionScope | ElicitationRequestScope));
 
 /**
  * Session-scoped elicitation, optionally tied to a specific tool call.
@@ -1031,13 +1053,21 @@ export type MultiSelectPropertySchema = {
 };
 
 /** Form-based elicitation mode where the client renders a form from the provided schema. */
-export type ElicitationFormMode = ElicitationSessionScope | ElicitationRequestScope;
+export type ElicitationFormMode = {
+  /** A JSON Schema describing the form fields to present to the user. */
+  requestedSchema: ElicitationSchema;
+} & (ElicitationSessionScope | ElicitationRequestScope);
 
 /** Unique identifier for an elicitation. */
 export type ElicitationId = string;
 
 /** URL-based elicitation mode where the client directs the user to a URL. */
-export type ElicitationUrlMode = ElicitationSessionScope | ElicitationRequestScope;
+export type ElicitationUrlMode = {
+  /** The unique identifier for this elicitation. */
+  elicitationId: ElicitationId;
+  /** The URL to direct the user to. */
+  url: string;
+} & (ElicitationSessionScope | ElicitationRequestScope);
 
 /**
  * **UNSTABLE**
@@ -2100,7 +2130,24 @@ export type SessionMode = {
 };
 
 /** A session configuration option selector and its current state. */
-export type SessionConfigOption = ({
+export type SessionConfigOption = {
+  /** Unique identifier for the configuration option. */
+  id: SessionConfigId;
+  /** Human-readable label for the option. */
+  name: string;
+  /** Optional description for the Client to display to the user. */
+  description?: string | null;
+  /** Optional semantic category for this option (UX only). */
+  category?: SessionConfigOptionCategory | null;
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+} & ({
   type: "select";
 } & SessionConfigSelect) | ({
   type: "boolean";
@@ -4062,13 +4109,26 @@ export type SetSessionModeRequest = {
 
 /** Request parameters for setting a session configuration option. */
 export type SetSessionConfigOptionRequest = {
+  /** The ID of the session to set the configuration option for. */
+  sessionId: SessionId;
+  /** The ID of the configuration option to set. */
+  configId: SessionConfigId;
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+} & ({
   /** The boolean value. */
   value: boolean;
   type: "boolean";
 } | {
   /** The value ID. */
   value: SessionConfigValueId;
-};
+});
 
 /**
  * Request parameters for sending a user prompt to the agent.
@@ -4524,7 +4584,18 @@ export type KillTerminalResponse = {
 };
 
 /** Response from the client to an elicitation request. */
-export type CreateElicitationResponse = ({
+export type CreateElicitationResponse = {
+  /**
+   * The _meta property is reserved by ACP to allow clients and agents to attach additional
+   * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+   * these keys.
+   *
+   * Optional. Omitted and `null` are equivalent and mean no metadata.
+   *
+   * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+   */
+  _meta?: Record<string, unknown> | null;
+} & ({
   action: "accept";
 } & ElicitationAcceptAction) | {
   action: "decline";
