@@ -527,17 +527,27 @@ export class AndroidBridge implements IDeviceBridge {
   }
 
   async snapshot(id: string): Promise<RawDeviceSnapshot> {
-    // The dump's root bounds are the screen in its current rotation. While the
-    // UI is animating or the device is busy, uiautomator prints an error
-    // ("could not get idle state") instead of XML: try once more.
-    let xml = await this.adb(['-s', id, 'exec-out', 'uiautomator', 'dump', '--compressed', '/dev/tty'], 30_000);
-    if (!xml.includes('<hierarchy')) {
+    // While the UI is animating or the device is busy, uiautomator prints an
+    // error ("could not get idle state") instead of XML: try again. A screen
+    // that keeps changing on its own never settles, and is reported as such.
+    const dump = () => this.adb(['-s', id, 'exec-out', 'uiautomator', 'dump', '--compressed', '/dev/tty'], 30_000);
+    let xml = await dump();
+    for (let attempt = 0; attempt < 2 && !xml.includes('<hierarchy'); attempt++) {
       await new Promise((r) => setTimeout(r, 1000));
-      xml = await this.adb(['-s', id, 'exec-out', 'uiautomator', 'dump', '--compressed', '/dev/tty'], 30_000);
+      xml = await dump();
     }
-    if (!xml.includes('<hierarchy')) throw new Error(`The screen could not be read: ${xml.trim().slice(0, 200) || 'no output'}`);
-    const parsed = parseUiautomatorDump(xml);
-    const focus = await this.shell(id, 'dumpsys window | grep -E "mCurrentFocus|mFocusedApp"', 10_000).catch(() => '');
+    if (!xml.includes('<hierarchy')) {
+      if (/idle state/i.test(xml)) {
+        throw new Error('The screen keeps changing, so its elements cannot be read here. Use device_screenshot and act on points (x, y fractions) instead.');
+      }
+      throw new Error(`The screen could not be read: ${xml.trim().slice(0, 200) || 'no output'}`);
+    }
+    // Bounds are absolute; the root node is only the top window (a dialog's is the dialog).
+    const [size, focus] = await Promise.all([
+      this.displaySize(id),
+      this.shell(id, 'dumpsys window | grep -E "mCurrentFocus|mFocusedApp"', 10_000).catch(() => ''),
+    ]);
+    const parsed = parseUiautomatorDump(xml, size);
     const pkg = focus.match(/\s([a-zA-Z][\w.]+)\/[\w.$]+/)?.[1];
     return { ...parsed, ...(pkg ? { app: pkg } : {}) };
   }

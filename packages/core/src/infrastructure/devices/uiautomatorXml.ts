@@ -78,15 +78,15 @@ export function roleForAndroidClass(cls: string, a: Map<string, string>): string
 }
 
 /**
- * Parses a dump. `screen` is the display size in pixels (`wm size`); when
- * omitted the root node's bounds are used. Elements keep their dump order
- * (document order = reading order).
+ * Parses a dump. `screen` is the display size in pixels in its current
+ * rotation: bounds are absolute, while the root node is only the top window
+ * (a dialog's root is the dialog). Elements keep their dump order (document
+ * order = reading order).
  */
-export function parseUiautomatorDump(xml: string, screen?: { width: number; height: number }): RawDeviceSnapshot {
+export function parseUiautomatorDump(xml: string, screen: { width: number; height: number }): RawDeviceSnapshot {
   const elements: RawDeviceElement[] = [];
   let depth = 0;
-  let width = screen?.width ?? 0;
-  let height = screen?.height ?? 0;
+  const { width, height } = screen;
   const packages = new Map<string, number>();
   for (const m of xml.matchAll(/<node\b([^>]*?)(\/?)>|<\/node>/g)) {
     if (m[0] === '</node>') {
@@ -96,10 +96,6 @@ export function parseUiautomatorDump(xml: string, screen?: { width: number; heig
     const a = attrs(m[1] ?? '');
     const selfClosing = m[2] === '/';
     const b = bounds(a.get('bounds'));
-    if (b && (width === 0 || height === 0) && depth === 0) {
-      width = b[2];
-      height = b[3];
-    }
     if (b && width > 0 && height > 0) {
       const [l, t, r, btm] = b;
       const w = r - l;

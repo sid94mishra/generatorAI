@@ -43,6 +43,7 @@ describe('parseUiautomatorDump', () => {
   it('treats a clickable TextView (a launcher icon) as a button', () => {
     const icon = parseUiautomatorDump(
       '<hierarchy><node class="android.widget.FrameLayout" package="l" bounds="[0,0][100,200]"><node text="Gmail" class="android.widget.TextView" package="l" clickable="true" bounds="[0,0][50,50]" /></node></hierarchy>',
+      { width: 100, height: 200 },
     );
     expect(icon.elements.find((e) => e.label === 'Gmail')).toMatchObject({ role: 'Button', interactive: true });
   });
@@ -52,8 +53,15 @@ describe('parseUiautomatorDump', () => {
     expect(snap.app).toBe('com.example.app');
   });
 
-  it('falls back to the root bounds without a screen size', () => {
-    expect(parseUiautomatorDump(DUMP).screen).toEqual({ width: 1080, height: 2400, unit: 'px' });
+  it('places a dialog by the display size, not by its own window', () => {
+    const dialog = parseUiautomatorDump(
+      '<hierarchy rotation="0"><node class="android.widget.FrameLayout" package="android" bounds="[28,907][1052,1493]"><node text="Close app" class="android.widget.Button" package="android" clickable="true" bounds="[80,1300][540,1420]" /></node></hierarchy>',
+      { width: 1080, height: 2400 },
+    );
+    expect(dialog.screen).toEqual({ width: 1080, height: 2400, unit: 'px' });
+    const close = dialog.elements.find((e) => e.label === 'Close app')!;
+    expect(close.frame.x + close.frame.w / 2).toBeCloseTo(310 / 1080);
+    expect(close.frame.y + close.frame.h / 2).toBeCloseTo(1360 / 2400);
   });
 });
 
