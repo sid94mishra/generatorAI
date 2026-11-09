@@ -210,3 +210,12 @@ describe('Claude compaction on a persistent session', () => {
     expect(provider.capabilities()).toMatchObject({ conversationCompact: true, compactInstructions: true });
   });
 });
+
+describe('compactSummaryText', () => {
+  it('keeps the summary, not the scratch analysis', async () => {
+    const { compactSummaryText } = await import('../src/providers/claude-agent/ClaudeAgentProvider.js');
+    expect(compactSummaryText('<analysis>\nthinking\n</analysis>\n\n<summary>\n1. Goal: X\n</summary>')).toBe('1. Goal: X');
+    expect(compactSummaryText('<analysis>scratch</analysis>\nPlain summary')).toBe('Plain summary');
+    expect(compactSummaryText('Just text')).toBe('Just text');
+  });
+});

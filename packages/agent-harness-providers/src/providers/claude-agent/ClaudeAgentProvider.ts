@@ -309,6 +309,16 @@ function autoCompactEnv(setting: AutoCompactSetting | undefined): Record<string,
   return { CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(Math.min(99, Math.max(1, Math.round(pct)))) };
 }
 
+/**
+ * The summary the conversation continues from. Claude Code writes `<analysis>` (its scratch work) then `<summary>`;
+ * only the summary is what the model carries on with, and what a reader or another provider needs.
+ */
+export function compactSummaryText(raw: string): string {
+  const summary = /<summary>([\s\S]*?)(?:<\/summary>|$)/i.exec(raw)?.[1]?.trim();
+  if (summary) return summary;
+  return raw.replace(/<analysis>[\s\S]*?<\/analysis>/gi, '').trim() || raw.trim();
+}
+
 /** Why a `/compact` turn's `result` came without a boundary: the CLI's own words when it gave any. */
 function compactionFailureText(message: SDKMessage): string {
   const result = message as unknown as { subtype?: string; result?: string; errors?: string[] };
@@ -2705,7 +2715,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       ...(hooks['PostCompact'] ?? []),
       ...wrapClaudeHook(async (input) => {
         const summary = input['compact_summary'];
-        if (typeof summary === 'string' && summary.trim()) this.compactSummaries.set(config.conversationId, summary);
+        if (typeof summary === 'string' && summary.trim()) this.compactSummaries.set(config.conversationId, compactSummaryText(summary));
         return {};
       }),
     ];

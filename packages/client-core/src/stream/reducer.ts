@@ -581,7 +581,8 @@ export function addSystemMessage(
 export function startPending(
   streams: StreamsRecord,
   sessionId: string,
-  userMessage?: string,
+  /** `null`: a turn with no user message (a compaction) — never the previous prompt. */
+  userMessage?: string | null,
 ): StreamsRecord {
   const existing = streams[sessionId];
   // Invariant 4 — carry widgets across the turn barrier.
@@ -592,7 +593,7 @@ export function startPending(
    * showed keeps the user's own prompt on screen; without it the turn's
    * prompt blinked out the moment the server acknowledged it.
    */
-  const text = userMessage ?? existing?.pendingUserMessage ?? undefined;
+  const text = userMessage === null ? undefined : (userMessage ?? existing?.pendingUserMessage ?? undefined);
 
   return put(streams, sessionId, {
     ...DEFAULT_STREAM,
@@ -629,7 +630,7 @@ export function startPending(
 export function startTurn(
   streams: StreamsRecord,
   sessionId: string,
-  userMessage?: string,
+  userMessage?: string | null,
 ): StreamsRecord {
   const existing = streams[sessionId];
   const inTurn =

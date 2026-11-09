@@ -358,6 +358,14 @@ describe('StreamEventRouter — session_info notices', () => {
     ]);
   });
 
+  it('starts the live turn of a compaction, with no user message', () => {
+    const effects = run([{ kind: 'harness.turn_start', data: { turnId: 't-c', kind: 'compaction' } }]);
+    expect(effects).toContainEqual(expect.objectContaining({ op: 'startPending', userMessage: null }));
+    expect(effects).toContainEqual(expect.objectContaining({ op: 'setServerTurnId', turnId: 't-c' }));
+    // An ordinary turn start only latches the id: the user message starts that turn.
+    expect(run([{ kind: 'harness.turn_start', data: { turnId: 't-1' } }]).some((e) => e.op === 'startPending')).toBe(false);
+  });
+
   it('records a compaction as its own step, whichever provider reports it', () => {
     const effects = run([
       info('compaction_start', 'x', { trigger: 'manual' }),

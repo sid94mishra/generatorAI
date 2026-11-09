@@ -102,7 +102,7 @@ export type StreamEffect =
   | { op: 'appendToken'; key: string; text: string }
   | { op: 'appendThinking'; key: string; text: string }
   | { op: 'completeThinking'; key: string }
-  | { op: 'startPending'; key: string; userMessage?: string }
+  | { op: 'startPending'; key: string; userMessage?: string | null }
   /**
    * Text that arrived only on `message_complete`, with no token stream
    * behind it. Applied ONLY when the turn produced no text block, so a
@@ -747,6 +747,13 @@ export class StreamEventRouter {
 
       case 'harness.turn_start':
       case 'copilot.turn_start': {
+        // A compaction (docs/compaction) is a turn with no user message: it starts the live turn itself, or the chat
+        // looked idle while it ran and a message sent meanwhile was refused as busy.
+        if (data['kind'] === 'compaction' && !internal) {
+          this.flushKey(key, out);
+          out.push({ op: 'cancelTranscriptCleanup', key });
+          out.push({ op: 'startPending', key, userMessage: null });
+        }
         // Latched so consumers can de-dup history by `metadata.turnId`
         // (O(1), collision-free) instead of comparing message content.
         const turnId = optStr(data['turnId']);
