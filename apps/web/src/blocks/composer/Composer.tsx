@@ -193,6 +193,7 @@ function commandIcon(c: SlashCommand): IconConcept {
 const CAPTURE_ICON: Record<CaptureSource, IconConcept> = {
   browser: 'browser',
   terminal: 'terminal',
+  device: 'device',
   file: 'attach',
   mention: 'mention',
 };

@@ -13,6 +13,7 @@ import {
   AudioSection,
   BrowserTerminalSection,
   ComputerUseSection,
+  MobileDevicesSection,
   DiagnosticsSection,
   ExtensionsSection,
   SecuritySection,
@@ -60,6 +61,11 @@ const SECTIONS: SettingsSectionDefinition[] = [
     id: 'computer-use',
     render: () => <ComputerUseSection />,
     footer: <SettingsStatusFooter icon="shield">Saved to the server</SettingsStatusFooter>,
+  },
+  {
+    id: 'mobile-devices',
+    render: () => <MobileDevicesSection />,
+    footer: <SettingsStatusFooter icon="server">Saved to the server</SettingsStatusFooter>,
   },
   {
     id: 'audio',

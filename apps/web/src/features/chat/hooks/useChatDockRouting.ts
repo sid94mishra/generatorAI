@@ -37,7 +37,7 @@ export const CHAT_DOCK_KEYS = dockStorageKeys('chat');
  * session; widgets one surface each; file tabs one viewer each.
  */
 /** D-180 adds side chats: four beside one chat (web-only, see `ChatDockTabType`). */
-export const CHAT_DOCK_TAB_CAPS = { ...DOCK_TAB_CAPS, side: 4 } as const;
+export const CHAT_DOCK_TAB_CAPS = { ...DOCK_TAB_CAPS, side: 4, devices: 4 } as const;
 
 export type { DockFocusRequest };
 

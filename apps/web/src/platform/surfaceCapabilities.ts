@@ -44,6 +44,8 @@ export function surfaceCapabilities(): TransportCapabilitySet {
 export interface DockTabOptions {
   /** Computer-use is also behind a server-side feature flag. */
   computerUseEnabled: boolean;
+  /** Settings › Mobile devices (docs/devices DV-10). */
+  devicesEnabled?: boolean;
   /** Background tasks only exist for an orchestrator chat. */
   isOrchestrator: boolean;
 }
@@ -62,7 +64,7 @@ export interface DockTabOptions {
  * D-180: the web chat dock also has side-chat tabs. Web-only (mobile's pane registry is keyed by `DockTabType`
  * and has no side chats yet), so the type lives here rather than in the shared contract.
  */
-export type ChatDockTabType = DockTabType | 'side';
+export type ChatDockTabType = DockTabType | 'side' | 'devices';
 
 export function dockTabTypes(
   options: DockTabOptions,
@@ -73,6 +75,8 @@ export function dockTabTypes(
   tabs.push('files');
   if (caps.terminalRendering.supported) tabs.push('terminal');
   if (caps.browserPanelRendering.supported) tabs.push('browser');
+  // Devices (docs/devices): web-only like side chats, and a live view, so it needs a surface that streams.
+  if (options.devicesEnabled && caps.browserPanelRendering.supported && caps.websocketStreaming.supported) tabs.push('devices');
   if (options.isOrchestrator) tabs.push('tasks');
   if (caps.computerPanelRendering.supported && options.computerUseEnabled) tabs.push('computer');
   tabs.push('plan');
@@ -87,8 +91,8 @@ export function dockTabTypes(
  * What the dock's "+" menu offers. The dock opens on its default tab alone; every other panel this chat has is
  * opened from here (or by the agent using it), and Terminal / Browser again for extra instances.
  */
-export function dockAddableTabTypes(types: readonly ChatDockTabType[]): DockTabType[] {
-  return (['files', 'terminal', 'browser', 'tasks', 'computer', 'widget'] as const).filter((t) => types.includes(t));
+export function dockAddableTabTypes(types: readonly ChatDockTabType[]): ChatDockTabType[] {
+  return (['files', 'terminal', 'browser', 'devices', 'tasks', 'computer', 'widget'] as const).filter((t) => types.includes(t));
 }
 
 /**

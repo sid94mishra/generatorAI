@@ -18,6 +18,7 @@ export { TemplatesSection } from './templates/TemplatesSection.js';
 export { SourceControlSection } from './source-control/SourceControlSection.js';
 export { BrowserTerminalSection } from './sections/BrowserTerminalSection.js';
 export { ComputerUseSection } from './sections/ComputerUseSection.js';
+export { MobileDevicesSection } from './sections/MobileDevicesSection.js';
 export { AudioSection } from './sections/AudioSection.js';
 export { ExtensionsSection } from './sections/ExtensionsSection.js';
 export { StorageSection } from './sections/StorageSection.js';

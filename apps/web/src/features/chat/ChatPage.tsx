@@ -51,6 +51,9 @@ import { TerminalDockPanel, TerminalDockProvider, terminalTabLabel, type Termina
 import { BrowserDockPanel, BrowserDockProvider, browserDockTabDetail, browserDockTabLabel, type BrowserDockContextValue } from '@/blocks/browser/browserDock.js';
 import type { BrowserTabState } from '@/blocks/browser/useBrowserTabState.js';
 import { BROWSER_COMMENTS_PROMPT } from '@/blocks/browser/browserAnnotations.js';
+import { DevicesDockPanel, DevicesDockProvider, devicesDockTabLabel, type DevicesDockContextValue, type DevicesTabState } from '@/blocks/devices/devicesDock.js';
+import { useDevicesEvents } from '@/blocks/devices/useDevices.js';
+import { useMobileDevicesSettings } from '@/hooks/deviceQueries.js';
 import type { BrowserSendHandler } from '@/blocks/browser/useBrowserAnnotations.js';
 import { ScmResultCard } from '@/blocks/scm/ScmResultCard.js';
 import { WidgetFrame } from '@/blocks/widgets/index.js';
@@ -129,6 +132,8 @@ export function ChatPage() {
   const [pendingCaptures, setPendingCaptures] = useState<ComposerAttachment[]>([]);
   // Per-instance browser tab state (keyed by dock tab id): each Browser tab's live title, favicon, spinner.
   const [browserTabs, setBrowserTabs] = useState<Record<string, BrowserTabState>>({});
+  // Per-instance Devices tab state (keyed by dock tab id): the device's name and whether the agent drives it.
+  const [devicesTabs, setDevicesTabs] = useState<Record<string, DevicesTabState>>({});
 
   const openEditSources = useEditSourcesStore((s) => s.open);
   const editSources = useCallback(() => {
@@ -256,6 +261,15 @@ export function ChatPage() {
         forgetFileTab(tab.id);
         return;
       }
+      if (tab.type === 'devices') {
+        setDevicesTabs((prev) => {
+          if (!(tab.id in prev)) return prev;
+          const next = { ...prev };
+          delete next[tab.id];
+          return next;
+        });
+        return;
+      }
       if (tab.type !== 'browser') return;
       forgetBrowserTab(tab.id);
       setBrowserTabs((prev) => {
@@ -271,7 +285,9 @@ export function ChatPage() {
   const isOrchestrator = view.isOrchestrator;
   // W29 — the panel list is a ledger decision: a surface that cannot render the
   // browser or computer live view is not offered a tab for it.
-  const surfaceTabs = useSurfaceDockTabs({ computerUseEnabled: view.computerUseEnabled, isOrchestrator });
+  // Only a chat with a workspace can have a Devices tab: no workspace, no request.
+  const devicesEnabled = useMobileDevicesSettings({ enabled: Boolean(chat?.workspaceId) }).data?.enabled === true;
+  const surfaceTabs = useSurfaceDockTabs({ computerUseEnabled: view.computerUseEnabled, isOrchestrator, devicesEnabled });
   const dockTypes = surfaceTabs.types;
   /** Workers running or waiting to start — the Tasks tab's live count. */
   const runningTaskCount = useRunningBackgroundTaskCount(sessionId);
@@ -281,7 +297,7 @@ export function ChatPage() {
   const widgetTitlesKey = stream.widgetTitlesKey;
 
   const addCapture = useCallback(
-    (source: 'browser' | 'terminal') => (file: File) =>
+    (source: 'browser' | 'terminal' | 'device') => (file: File) =>
       setPendingCaptures((prev) => [...prev, { id: `${source}:${Date.now()}:${file.name}`, file, source, label: file.name }]),
     [],
   );
@@ -338,6 +354,24 @@ export function ChatPage() {
       onTabStateChange: onBrowserTabState,
     }),
     [chat?.workspaceId, browserUrlScopeKey, addCapture, sendBrowserComments, isWorking, agentName, onBrowserTabState],
+  );
+  const onDevicesTabState = useCallback((tabId: string, s: DevicesTabState) => {
+    setDevicesTabs((prev) => {
+      const cur = prev[tabId];
+      if (cur && cur.name === s.name && cur.running === s.running && cur.agentActive === s.agentActive) return prev;
+      return { ...prev, [tabId]: s };
+    });
+  }, []);
+  const devicesDock = useMemo<DevicesDockContextValue>(
+    () => ({
+      workspaceId: chat?.workspaceId,
+      scopeKey: `chat:${chatId ?? 'unknown'}`,
+      onCapture: addCapture('device'),
+      agentBusy: isWorking,
+      ...(agentName ? { agentName } : {}),
+      onTabStateChange: onDevicesTabState,
+    }),
+    [chat?.workspaceId, chatId, addCapture, isWorking, agentName, onDevicesTabState],
   );
   // A shell opens in the working directory; with several sources its "cd" menu reaches the others.
   const workspaceMounts = useWorkspaceInfo(chat?.workspaceId).data?.mounts;
@@ -437,6 +471,23 @@ export function ChatPage() {
         ...noWorkspace,
         Component: TerminalDockPanel,
       },
+      // docs/devices — iOS simulators, Android emulators and phones; one device per tab.
+      devices: {
+        label: 'Devices',
+        description: 'Simulators, emulators and phones the agent can use',
+        icon: 'device',
+        allowMultiple: true,
+        maxInstances: CHAT_DOCK_TAB_CAPS.devices,
+        getTabLabel: ({ id, index }) => devicesDockTabLabel(devicesTabs[id], index),
+        getTabDot: ({ id }) =>
+          devicesTabs[id]?.agentActive
+            ? { tone: 'run', label: 'The agent is using this device' }
+            : devicesTabs[id]?.running
+              ? { tone: 'ok', label: 'Running' }
+              : undefined,
+        ...noWorkspace,
+        Component: DevicesDockPanel,
+      },
       computer: {
         label: 'Computer',
         description: 'Watch the desktop windows the agent reads and acts on',
@@ -486,7 +537,7 @@ export function ChatPage() {
     };
     // Only the types this chat has on this surface (Tasks for orchestrators, Computer when enabled …).
     return Object.fromEntries(dockTypes.flatMap((type) => (registry[type] ? [[type, registry[type]]] : [])));
-  }, [dockTypes, chat?.workspaceId, sessionId, fileTabs.filesTabLabel, fileTabs.fileTabLabel, browserTabs, runningTaskCount, widgetTitlesKey, sideNames]);
+  }, [dockTypes, chat?.workspaceId, sessionId, fileTabs.filesTabLabel, fileTabs.fileTabLabel, browserTabs, devicesTabs, runningTaskCount, widgetTitlesKey, sideNames]);
 
   // Transcript host slots.
   const renderTranscriptWidget = useCallback((block: WidgetBlock, sid: string) => <WidgetFrame block={block} sessionId={sid} />, []);
@@ -501,6 +552,13 @@ export function ChatPage() {
     [chat?.workspaceId, chatId],
   );
   const requestDockFocus = dock.requestFocus;
+  // The agent opening a device shows it (DV-10); a request for access shows the Allow prompt.
+  useDevicesEvents(devicesEnabled ? chat?.workspaceId : undefined, (event) => {
+    if ((event.kind === 'devices.opened' && event.by === 'agent') || event.kind === 'devices.access_requested') {
+      setDockOpen(true);
+      requestDockFocus({ type: 'devices', token: Date.now() });
+    }
+  });
   const focusDockTab = useCallback(
     (type: 'browser' | 'tasks') => {
       setDockOpen(true);
@@ -650,6 +708,7 @@ export function ChatPage() {
           <FilesDockProvider value={fileTabs.dockContext}>
             <TerminalDockProvider value={terminalDock}>
               <BrowserDockProvider value={browserDock}>
+              <DevicesDockProvider value={devicesDock}>
                 <SideChatDockContext.Provider value={sideDock}>
                 {confirmer.dialog}
                 <Workspace
@@ -760,6 +819,7 @@ export function ChatPage() {
                   )}
                 />
                 </SideChatDockContext.Provider>
+              </DevicesDockProvider>
               </BrowserDockProvider>
             </TerminalDockProvider>
           </FilesDockProvider>

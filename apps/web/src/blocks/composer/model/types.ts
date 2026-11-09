@@ -6,7 +6,7 @@
 
 import type { ChatReferenceMode } from '@generatorai/shared';
 
-export type CaptureSource = 'browser' | 'terminal' | 'file' | 'mention';
+export type CaptureSource = 'browser' | 'terminal' | 'device' | 'file' | 'mention';
 
 /**
  * An attachment shown as a removable chip above the textarea. Wraps the raw

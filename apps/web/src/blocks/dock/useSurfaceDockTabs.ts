@@ -7,19 +7,18 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useMemo } from 'react';
-import type { DockTabType } from '@generatorai/shared/ui-contract';
 import { defaultDockTab, dockAddableTabTypes, dockTabTypes, type ChatDockTabType } from '@/platform/surfaceCapabilities.js';
 
 export interface SurfaceDockTabs {
   types: ChatDockTabType[];
-  addable: DockTabType[];
+  addable: ChatDockTabType[];
   defaultTab: 'changes' | 'files';
 }
 
-export function useSurfaceDockTabs(options: { isOrchestrator: boolean; computerUseEnabled: boolean }): SurfaceDockTabs {
-  const { isOrchestrator, computerUseEnabled } = options;
+export function useSurfaceDockTabs(options: { isOrchestrator: boolean; computerUseEnabled: boolean; devicesEnabled?: boolean }): SurfaceDockTabs {
+  const { isOrchestrator, computerUseEnabled, devicesEnabled = false } = options;
   return useMemo(() => {
-    const types = dockTabTypes({ isOrchestrator, computerUseEnabled });
+    const types = dockTabTypes({ isOrchestrator, computerUseEnabled, devicesEnabled });
     return { types, addable: dockAddableTabTypes(types), defaultTab: defaultDockTab() };
-  }, [isOrchestrator, computerUseEnabled]);
+  }, [isOrchestrator, computerUseEnabled, devicesEnabled]);
 }
