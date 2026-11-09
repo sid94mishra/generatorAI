@@ -11,7 +11,7 @@
 | Node.js | ≥ 20 |
 | pnpm | 10.29.2 (auto-installed via `corepack`) |
 | Either Copilot CLI | `@github/copilot-sdk@1.0.29` with the CLI the app bundles (`@github/copilot@1.0.107`); or install `copilot` CLI globally |
-| Or Claude Code CLI | bundled by `@anthropic-ai/claude-agent-sdk@^0.3.220`; or install `claude` CLI globally |
+| Or Claude Code CLI | bundled by `@anthropic-ai/claude-agent-sdk@~0.3.319`; or install `claude` CLI globally |
 | SQLite | Bundled via `better-sqlite3` (no separate install needed) |
 | Git | `git` ≥ 2.30 (for worktrees) |
 | Docker | Optional; needed only when `SANDBOX_ENABLED=true` |

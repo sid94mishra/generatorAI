@@ -143,7 +143,7 @@ the key, so it must not rebind.
 
 ## 5. Provider mapping
 
-| Concept | Copilot SDK 1.0.8 | Claude Agent SDK 0.3.220 |
+| Concept | Copilot SDK 1.0.29 | Claude Agent SDK 0.3.319 |
 |---|---|---|
 | Team members | `SessionConfig.customAgents[]` | `Options.agents` (`AgentDefinition`) |
 | Skills | `skillDirectories` + `disabledSkills` (by NAME) | `Options.skills: string[] \| 'all'` |
