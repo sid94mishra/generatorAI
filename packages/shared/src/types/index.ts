@@ -654,3 +654,5 @@ export type {
   DevicesOverview,
 } from './Devices.js';
 export { DEVICE_FRAME_CODEC, DEVICE_FRAME_FLAG } from './Devices.js';
+export type { CompactionInfo, CompactionInfoType, CompactionRecord, CompactionTrigger } from './Compaction.js';
+export { COMPACTION_INFO, describeCompaction } from './Compaction.js';

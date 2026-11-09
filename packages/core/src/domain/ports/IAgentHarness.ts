@@ -446,6 +446,12 @@ export interface AttachmentRef {
   mimeType?: string;
 }
 
+export interface AutoCompactSetting {
+  enabled: boolean;
+  /** Compact once the context window is this full (percent, 1–99). Absent: the provider's own threshold. */
+  thresholdPct?: number;
+}
+
 export interface CreateConversationParams {
   conversationId: string;
   model?: string;
@@ -564,6 +570,12 @@ export interface CreateConversationParams {
   contextTier?: 'default' | 'long_context';
   /** Maximum number of agent turns before stopping */
   maxTurns?: number;
+  /**
+   * The app's auto-compaction setting (docs/compaction §3.6), mapped by each adapter onto its provider's own:
+   * `enabled: false` turns the provider's automatic compaction off; `thresholdPct` (1–99) compacts once the context
+   * window is that full. Absent: the provider's default. A provider that cannot honour it records a warning.
+   */
+  autoCompact?: AutoCompactSetting;
 
   // ── Permissions ──
   onPermissionRequest?: PermissionRequestHandler;
@@ -706,6 +718,11 @@ export interface ForkConversationResult {
   anchorMap?: Record<string, string>;
 }
 
+export interface CompactConversationOptions {
+  /** What the summary should keep or focus on; dropped by a provider whose capabilities say it takes none. */
+  instructions?: string;
+}
+
 export interface RewindConversationOptions {
   /** The conversation's provider handle as persisted by the caller (see `ForkConversationOptions`). */
   providerSessionId?: string;
@@ -814,6 +831,17 @@ export interface IHarnessConversationLifecycle {
    * caller's business (workspace checkpoints); this only moves the transcript.
    */
   rewindConversation?(conversationId: string, options: RewindConversationOptions): Promise<ForkConversationResult>;
+  /**
+   * Compact `conversationId` with the provider's own compaction: the history so far is replaced by a summary and
+   * the same provider session continues from it. OPTIONAL — declare `capabilities().conversationCompact` (per
+   * conversation through `capabilitiesFor` when it depends on the agent) when implemented.
+   *
+   * Contract: emits `harness.session_info` `compaction_start` then `compact_boundary` (or `compaction_failed`) with
+   * `trigger: 'manual'` on the conversation's stream, and `harness.context_usage` when the provider reports the new
+   * fill; resolves once the compaction has finished, rejects when it failed. Bills a model call. The caller makes
+   * sure no turn is running.
+   */
+  compactConversation?(conversationId: string, options?: CompactConversationOptions): Promise<void>;
   listConversations(): Promise<string[]>;
   getLastConversationId(): Promise<string | null>;
   deleteConversation(conversationId: string): Promise<void>;

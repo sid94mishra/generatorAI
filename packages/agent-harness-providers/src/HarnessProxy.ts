@@ -32,6 +32,7 @@ import type {
   ForkConversationOptions,
   ForkConversationResult,
   RewindConversationOptions,
+  CompactConversationOptions,
 } from '@generatorai/core';
 import type { AgentEvent } from '@generatorai/shared';
 import type { HarnessType } from './types.js';
@@ -139,6 +140,11 @@ export class HarnessProxy implements IAgentHarness {
   rewindConversation(conversationId: string, options: RewindConversationOptions): Promise<ForkConversationResult> {
     const fn = this._adapter.rewindConversation;
     if (!fn) return Promise.reject(new Error('This provider cannot rewind conversations'));
+    return fn.call(this._adapter, conversationId, options);
+  }
+  compactConversation(conversationId: string, options?: CompactConversationOptions): Promise<void> {
+    const fn = this._adapter.compactConversation;
+    if (!fn) return Promise.reject(new Error('This provider cannot compact conversations'));
     return fn.call(this._adapter, conversationId, options);
   }
   capabilitiesFor(conversationId: string): ProviderCapabilities {

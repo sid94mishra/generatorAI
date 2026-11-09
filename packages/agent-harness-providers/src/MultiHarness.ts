@@ -31,6 +31,7 @@ import type {
   ForkConversationOptions,
   ForkConversationResult,
   RewindConversationOptions,
+  CompactConversationOptions,
 } from '@generatorai/core';
 import { HarnessConnectionError } from '@generatorai/shared';
 import type { HarnessRegistry } from './HarnessRegistry.js';
@@ -684,6 +685,12 @@ export class MultiHarness implements IAgentHarness {
     return adapter.rewindConversation(conversationId, options);
   }
 
+  async compactConversation(conversationId: string, options?: CompactConversationOptions): Promise<void> {
+    const adapter = await this.adapterFor(conversationId);
+    if (!adapter.compactConversation) throw new Error('This provider cannot compact conversations');
+    return adapter.compactConversation(conversationId, options);
+  }
+
   hasLiveConversation(conversationId: string): boolean {
     // W34 — a thread bound to a deleted account has no live session anywhere.
     // Peeking the fallback adapter here would report another account's session
@@ -1017,6 +1024,8 @@ export class MultiHarness implements IAgentHarness {
       budgetTracking: caps.every((c) => c.budgetTracking),
       conversationFork: caps.every((c) => c.conversationFork === true),
       conversationRewind: caps.every((c) => c.conversationRewind === true),
+      conversationCompact: caps.every((c) => c.conversationCompact === true),
+      compactInstructions: caps.every((c) => c.compactInstructions === true),
     };
   }
 
@@ -1056,7 +1065,8 @@ export class MultiHarness implements IAgentHarness {
     if (!adapter || typeof (adapter as IAgentHarness).capabilities !== 'function') {
       return this.capabilities();
     }
-    return (adapter as IAgentHarness).capabilities();
+    // An adapter whose capabilities depend on the conversation (an ACP agent advertising `/compact`) answers for it.
+    return (adapter as IAgentHarness).capabilitiesFor?.(conversationId) ?? (adapter as IAgentHarness).capabilities();
   }
 }
 

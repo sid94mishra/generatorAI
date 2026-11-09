@@ -132,6 +132,15 @@ export interface ProviderCapabilities {
    */
   conversationRewind?: boolean;
   /**
+   * Whether `compactConversation` is implemented natively — the provider summarises the history and continues the
+   * same session (Claude `/compact`, Codex `thread/compact/start`, Copilot `history.compact`, OpenCode `summarize`,
+   * an ACP agent advertising `/compact`). Without it the chat service compacts synthetically: it summarises the
+   * transcript and the next prompt starts a fresh provider session from the summary.
+   */
+  conversationCompact?: boolean;
+  /** Whether `compactConversation` honours `instructions` (what the summary should focus on). */
+  compactInstructions?: boolean;
+  /**
    * Whether `startLogin` / `logout` are implemented — the provider can sign
    * the user in from the app (Codex's ChatGPT browser flow) instead of
    * requiring a terminal command.

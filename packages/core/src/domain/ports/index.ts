@@ -43,6 +43,8 @@ export type {
   ForkConversationOptions,
   ForkConversationResult,
   RewindConversationOptions,
+  CompactConversationOptions,
+  AutoCompactSetting,
 } from './IAgentHarness.js';
 export { TOOL_BINARY_KEY, takeToolBinaries } from './IAgentHarness.js';
 

@@ -10,6 +10,7 @@ import type {
   QuestionCardSummary,
 } from './AgentMode.js';
 import type { FileOpStat } from './AgentEvent.js';
+import type { CompactionRecord } from './Compaction.js';
 
 export interface ChatMessageMetadata {
   /** Thinking/reasoning text from the harness (all of the turn's, joined) */
@@ -70,6 +71,8 @@ export interface ChatMessageMetadata {
   isOutputRetry?: boolean;
   /** Whether this assistant message was partially produced before a pause/abort */
   partial?: boolean;
+  /** A `system` row recording a finished compaction of the conversation (docs/compaction). */
+  compaction?: CompactionRecord;
   /** Server-generated stable turn identifier.
    *  Stamped on both the user and assistant message that form a single
    *  chat turn. Enables collision-free dedup on the web client (WEB-02) —
