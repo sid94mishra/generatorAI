@@ -77,6 +77,10 @@ function sendCodedError(res: { status: (n: number) => { json: (b: unknown) => vo
     res.status(404).json({ error: { code, message } });
     return true;
   }
+  if (code === 'INTERACTION_PENDING' || code === 'NOTHING_TO_COMPACT') {
+    res.status(409).json({ error: { code, message, ...((err as { details?: unknown }).details ? { details: (err as { details?: unknown }).details } : {}) } });
+    return true;
+  }
   return false;
 }
 
@@ -143,6 +147,13 @@ const RewindChatSchema = z
   .object({
     turnId: z.string().min(1),
     scope: z.enum(['all', 'code', 'conversation']).optional(),
+  })
+  .strip();
+
+const CompactChatSchema = z
+  .object({
+    /** What the summary should keep or focus on (taken by providers whose compaction accepts instructions). */
+    instructions: z.string().max(2_000).optional(),
   })
   .strip();
 
@@ -1216,6 +1227,28 @@ export function createChatApiRoutes(container: Container): Router {
         requestId: req.requestId,
       });
       res.json(result);
+    } catch (err) {
+      if (sendCodedError(res, err)) return;
+      next(err);
+    }
+  });
+
+  // POST /chats/:id/compact — summarise the conversation so far and continue from the summary (docs/compaction).
+  // 202 once accepted; it streams on the chat like a turn (compaction_start → compact_boundary, idle).
+  router.post('/:id/compact', async (req, res, next) => {
+    try {
+      const chatId = String(req.params['id']);
+      const parsed = CompactChatSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: parsed.error.message } });
+        return;
+      }
+      const { turnId, done } = await chatManagementService.compactChat(chatId, parsed.data);
+      void done.catch((err: unknown) =>
+        logger.warn(`[ChatRoutes] Compaction of chat ${chatId} failed: ${err instanceof Error ? err.message : String(err)}`),
+      );
+      logger.info(`[ChatRoutes] Compacting chat ${chatId}`, { requestId: req.requestId });
+      res.status(202).json({ chatId, turnId });
     } catch (err) {
       if (sendCodedError(res, err)) return;
       next(err);

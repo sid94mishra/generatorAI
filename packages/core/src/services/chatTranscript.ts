@@ -15,7 +15,7 @@
 // keeps the gist of what was said even though its own history restarted.
 // ────────────────────────────────────────────────────────────────
 
-import type { ChatMessage, PlanCardSummary, QuestionCardSummary } from '@generatorai/shared';
+import type { ChatMessage, CompactionRecord, PlanCardSummary, QuestionCardSummary } from '@generatorai/shared';
 import type { ConversationAnchor } from '../domain/ports/IAgentHarness.js';
 
 export interface ChatTurn {
@@ -95,6 +95,15 @@ export function turnsAreAnchored(turns: readonly ChatTurn[]): boolean {
   return turns.every(
     (t) => t.assistantMessages.length === 0 || t.assistantMessages.some((m) => m.metadata?.providerAnchor),
   );
+}
+
+/** The newest compaction row (`metadata.compaction` on a `system` row) and its index, if the chat has one. */
+export function lastCompaction(messages: readonly ChatMessage[]): { index: number; record: CompactionRecord } | undefined {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const record = messages[i]?.metadata?.compaction;
+    if (record && messages[i]?.role === 'system') return { index: i, record };
+  }
+  return undefined;
 }
 
 // ── Synthetic seed ──────────────────────────────────────────────
@@ -267,8 +276,13 @@ export interface ConversationSeedOptions {
  * moved to another provider. Empty string when there is nothing to seed.
  */
 export function buildConversationSeed(messages: readonly ChatMessage[], options: ConversationSeedOptions = {}): string {
-  const turns = groupTurns(messages).filter((t) => t.userMessage || t.assistantMessages.length > 0);
-  if (turns.length === 0) return '';
+  // After a compaction that kept its summary, the chat continues from the summary: the seed is the summary and the
+  // turns since, as the provider that compacted it remembers it — not the whole history it summarised away.
+  const cut = options.since ? undefined : lastCompaction(messages);
+  const summary = cut?.record.summary?.trim();
+  const rows = summary ? messages.slice(cut!.index + 1) : messages;
+  const turns = groupTurns(rows).filter((t) => t.userMessage || t.assistantMessages.length > 0);
+  if (turns.length === 0 && !summary) return '';
   const n = turns.length;
   const full = turns.map((t, i) => (i >= n - SEED_DETAILED_TURNS ? renderTurnInDetail(t) : renderTurnForSeed(t)));
   const brief = turns.map((t, i) => (i >= n - SEED_DETAILED_TURNS ? renderTurnForSeed(t) : full[i]!));
@@ -302,8 +316,10 @@ export function buildConversationSeed(messages: readonly ChatMessage[], options:
       'This is what was said so far in this chat; treat it as your own memory and continue from here. ' +
       `Files on disk reflect the current state, not necessarily every action below. ${PROCESSES_NOTE}]`;
   const omitted = dropped > 0 ? `\n[${dropped} earlier turn${dropped === 1 ? '' : 's'} omitted]` : '';
+  const compacted = summary ? `\n\n[Summary of the conversation before this point — it was compacted]\n${summary}` : '';
   const earlier = index.length ? `\n\n[Earlier turns — the user's prompts only]\n${index.join('\n')}` : '';
-  return `${header}${omitted}${earlier}\n\n${body.join('\n\n---\n\n')}\n\n[End of restored history]`;
+  const recent = body.length ? `\n\n${body.join('\n\n---\n\n')}` : '';
+  return `${header}${compacted}${omitted}${earlier}${recent}\n\n[End of restored history]`;
 }
 
 /** Wrap a seed and the new prompt into one message for the provider. */

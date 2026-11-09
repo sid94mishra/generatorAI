@@ -161,6 +161,9 @@ export class SessionComposer {
       harnessType: i.spec.harnessType,
       streaming: i.extras?.streaming ?? true,
     };
+    // The app's auto-compaction setting: each adapter maps it onto its provider's own (docs/compaction §3.6).
+    const autoCompact = this.deps.autoCompact?.();
+    if (autoCompact) cfg['autoCompact'] = autoCompact;
     // 2. resume id — a live adapter's own record still wins.
     if (i.resumeProviderSessionId) cfg['resumeProviderSessionId'] = i.resumeProviderSessionId;
 

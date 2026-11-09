@@ -23,7 +23,7 @@ import type {
   ToolPermissionRequestPayload,
   PermissionRule,
 } from '@generatorai/shared';
-import { generateId, DEFAULT_AGENT_MODE, ValidationError, chatSourceAlias, isMountableSource, MAX_CHAT_REFERENCES } from '@generatorai/shared';
+import { COMPACTION_INFO, describeCompaction, generateId, DEFAULT_AGENT_MODE, ValidationError, chatSourceAlias, isMountableSource, MAX_CHAT_REFERENCES } from '@generatorai/shared';
 import type { ChatReferenceInput, ChatReferenceMode, ChatReferencePreview, SideChatMode } from '@generatorai/shared';
 import { ChatReferenceSummarizer, joinChatReferences, needsSummary, renderChatReference, type RenderedChatReference } from './chatReferences.js';
 import { PLAN_GATE_COPY } from '@generatorai/shared/ui-contract';
@@ -87,6 +87,7 @@ import {
   applyConversationSeed,
   interruptedReplyNotice,
 } from './chatTranscript.js';
+import { compactionFromEvent, compactionRow, lastCompaction, summariseForCompaction } from './chatCompaction.js';
 import type { ConversationAnchor } from '../domain/ports/IAgentHarness.js';
 import type { RestoreTurnResult } from './WorkspaceCheckpointService.js';
 
@@ -1752,6 +1753,7 @@ export class ChatManagementService {
       } catch {
         // May not be active
       }
+      this.unwatchCompactions(session.conversationId);
       try {
         await this.harness.destroyConversation(session.conversationId);
       } catch {
@@ -2072,18 +2074,7 @@ export class ChatManagementService {
     // first SDK query blocked, detach its listener, and mis-attribute late
     // events to the new turnId. Reject deterministically instead; the UI
     // offers "Cancel review and send".
-    if (this.extensions.agentInteractionService) {
-      const pending = await this.extensions.agentInteractionService.listPendingByChat(chatId);
-      const gate = pending[0];
-      if (gate) {
-        const err = new Error(
-          'This chat is waiting on your response. Resolve or cancel it before sending a new message.',
-        ) as Error & { code?: string; details?: unknown };
-        err.code = 'INTERACTION_PENDING';
-        err.details = { interactionId: gate.id, kind: gate.kind };
-        throw err;
-      }
-    }
+    await this.assertNoOpenGate(chatId);
 
     // Review 6.1 — refuse a second prompt while a turn is still running.
     //
@@ -2133,111 +2124,8 @@ export class ChatManagementService {
       throw new Error(`Chat ${chatId} has no conversation`);
     }
 
-    // Ensure the conversation is in-memory AND bound to the model/provider the
-    // chat currently asks for.
-    //
-    // Both harness providers freeze `model` inside the adapter's in-memory
-    // conversation config at creation time, so changing the chat's model has
-    // no effect on a live conversation — every later turn would silently keep
-    // running the original model. We therefore rebind whenever the requested
-    // model/provider differs from what we last applied, using the same resume
-    // path as recovery.
-    //
-    // CRITICAL (recovery case): when the conversation is NOT live in the
-    // harness's memory (server restart / eviction), we must resume it WITH its
-    // tool config so the built-in browser / widget / custom tool HANDLERS are
-    // re-registered. Tool handlers are in-memory functions that cannot be
-    // persisted into the SDK session store, so a bare resume restores the
-    // history WITHOUT tools — the SDK then tells the model those tools "are no
-    // longer available", and it refuses every browser/tool task for the rest of
-    // the chat. Passing the rebuilt config rebinds the handlers while the SDK
-    // keeps the persisted history. If the SDK store no longer has the session
-    // (archived → deleted), fall back to creating a fresh functional one.
-    const desiredBinding = this.conversationBindingKey(chat);
-    const bindingChanged =
-      this.conversationBindings.get(session.conversationId) !== desiredBinding ||
-      (!!chat.workspaceId && (await this.cwdMovedSinceCompose(chat.workspaceId)));
-    if (!this.harness.hasLiveConversation(session.conversationId) || bindingChanged) {
-      // E-4 — a model from another provider moves the conversation to a FRESH session there (MultiHarness): the
-      // new provider knows nothing of this chat, so a "review what you just did" landed on an agent with no
-      // memory of it. Seed it with the transcript once, exactly as a synthetic fork or rewind does.
-      const pinned = chat.harnessConfig?.harnessType;
-      const owner = this.harness.conversationHarness?.(session.conversationId);
-      // Back to a provider the chat ran on before: it resumes the session it left, and hears only what was
-      // said since — it already remembers the rest exactly.
-      let returning: { providerSessionId: string; transcript: ChatMessage[] } | undefined;
-      if (pinned && owner && pinned !== owner) {
-        const transcript = await this.messageRepo.getByChatId(chatId);
-        await this.markLeftSession(transcript, owner, session.providerSessionId);
-        // From here that id lives on the mark only: no recovery path may hand it to the provider the chat moves to.
-        if (session.providerSessionId) {
-          await this.sessionRepo.update(session.id, { providerSessionId: '' });
-          session.providerSessionId = undefined;
-        }
-        if (!chat.conversationSeed) {
-          const back = await this.sessionToReturnTo(transcript, pinned);
-          if (back) returning = { providerSessionId: back.providerSessionId, transcript };
-          const seed = back ? buildConversationSeed(transcript.slice(back.after), { since: true }) : buildConversationSeed(transcript);
-          if (seed) {
-            chat.conversationSeed = seed;
-            await this.chatRepo.update(chatId, { conversationSeed: seed });
-          }
-        }
-      }
-      const cfg = {
-        ...(await this.buildConversationConfig(chat, session.conversationId)),
-        ...(returning ? { resumeProviderSessionId: returning.providerSessionId, resumeProviderSessionHarness: pinned } : {}),
-      };
-      try {
-        await withDeadline(
-          this.harness.resumeConversation(
-            session.conversationId,
-            cfg as unknown as CreateConversationParams,
-          ),
-          CONVERSATION_BIND_TIMEOUT_MS,
-          'resume the conversation',
-        );
-        this.conversationBindings.set(session.conversationId, desiredBinding);
-        await this.seedIfRestarted(chat, session.conversationId);
-      } catch {
-        if (returning) {
-          // The session it left could not be resumed after all: a fresh one gets the whole history.
-          const seed = buildConversationSeed(returning.transcript);
-          chat.conversationSeed = seed;
-          await this.chatRepo.update(chatId, { conversationSeed: seed });
-        }
-        try {
-          await withDeadline(
-            this.ensureConversation(chat, session.conversationId),
-            CONVERSATION_BIND_TIMEOUT_MS,
-            'recreate the conversation',
-          );
-          this.conversationBindings.set(session.conversationId, desiredBinding);
-        } catch (recreateErr) {
-          console.warn(
-            `[ChatManagement] Failed to recover conversation for chat ${chatId}:`,
-            recreateErr,
-          );
-          // Without this the turn dies here: the route already answered 202,
-          // nothing is persisted, and no event is ever emitted — the chat just
-          // stops, which reads as "my message disappeared".
-          await this.eventBus.emit(chat.sessionId, {
-            kind: 'harness.error',
-            data: {
-              chatId,
-              message:
-                `Could not reach the agent provider: ${(recreateErr as Error).message}. ` +
-                'Send the message again.',
-            },
-          } as unknown as AgentEvent);
-          await this.eventBus.emit(chat.sessionId, {
-            kind: 'harness.idle',
-            data: { chatId },
-          } as unknown as AgentEvent);
-          throw recreateErr;
-        }
-      }
-    }
+    await this.bindConversation(chat, session);
+    this.watchCompactions(chat, session.conversationId);
 
     // VSCode-parity "share with agent" re-attach on new turn — if the
     // user manually detached the browser between turns, a new prompt
@@ -2716,6 +2604,377 @@ export class ChatManagementService {
    *   fresh runtime with the persisted history rather than queueing behind a
    *   turn the old one never settled.
    */
+  /**
+   * Ensure the chat's conversation is in the harness's memory AND bound to the model/provider the chat asks for
+   * now (a prompt and a compaction both start here). Moving to another provider seeds the new session; on failure
+   * the chat stream gets an error and idle, and this throws.
+   */
+  private async bindConversation(chat: Chat, session: { id: string; conversationId?: string | undefined; providerSessionId?: string | undefined }): Promise<void> {
+    const chatId = chat.id;
+    if (!session.conversationId) throw new Error(`Chat ${chatId} has no conversation`);
+    // Ensure the conversation is in-memory AND bound to the model/provider the
+    // chat currently asks for.
+    //
+    // Both harness providers freeze `model` inside the adapter's in-memory
+    // conversation config at creation time, so changing the chat's model has
+    // no effect on a live conversation — every later turn would silently keep
+    // running the original model. We therefore rebind whenever the requested
+    // model/provider differs from what we last applied, using the same resume
+    // path as recovery.
+    //
+    // CRITICAL (recovery case): when the conversation is NOT live in the
+    // harness's memory (server restart / eviction), we must resume it WITH its
+    // tool config so the built-in browser / widget / custom tool HANDLERS are
+    // re-registered. Tool handlers are in-memory functions that cannot be
+    // persisted into the SDK session store, so a bare resume restores the
+    // history WITHOUT tools — the SDK then tells the model those tools "are no
+    // longer available", and it refuses every browser/tool task for the rest of
+    // the chat. Passing the rebuilt config rebinds the handlers while the SDK
+    // keeps the persisted history. If the SDK store no longer has the session
+    // (archived → deleted), fall back to creating a fresh functional one.
+    const desiredBinding = this.conversationBindingKey(chat);
+    const bindingChanged =
+      this.conversationBindings.get(session.conversationId) !== desiredBinding ||
+      (!!chat.workspaceId && (await this.cwdMovedSinceCompose(chat.workspaceId)));
+    if (!this.harness.hasLiveConversation(session.conversationId) || bindingChanged) {
+      // E-4 — a model from another provider moves the conversation to a FRESH session there (MultiHarness): the
+      // new provider knows nothing of this chat, so a "review what you just did" landed on an agent with no
+      // memory of it. Seed it with the transcript once, exactly as a synthetic fork or rewind does.
+      const pinned = chat.harnessConfig?.harnessType;
+      const owner = this.harness.conversationHarness?.(session.conversationId);
+      // Back to a provider the chat ran on before: it resumes the session it left, and hears only what was
+      // said since — it already remembers the rest exactly.
+      let returning: { providerSessionId: string; transcript: ChatMessage[] } | undefined;
+      if (pinned && owner && pinned !== owner) {
+        const transcript = await this.messageRepo.getByChatId(chatId);
+        await this.markLeftSession(transcript, owner, session.providerSessionId);
+        // From here that id lives on the mark only: no recovery path may hand it to the provider the chat moves to.
+        if (session.providerSessionId) {
+          await this.sessionRepo.update(session.id, { providerSessionId: '' });
+          session.providerSessionId = undefined;
+        }
+        if (!chat.conversationSeed) {
+          const back = await this.sessionToReturnTo(transcript, pinned);
+          if (back) returning = { providerSessionId: back.providerSessionId, transcript };
+          const seed = back ? buildConversationSeed(transcript.slice(back.after), { since: true }) : buildConversationSeed(transcript);
+          if (seed) {
+            chat.conversationSeed = seed;
+            await this.chatRepo.update(chatId, { conversationSeed: seed });
+          }
+        }
+      }
+      const cfg = {
+        ...(await this.buildConversationConfig(chat, session.conversationId)),
+        ...(returning ? { resumeProviderSessionId: returning.providerSessionId, resumeProviderSessionHarness: pinned } : {}),
+      };
+      try {
+        await withDeadline(
+          this.harness.resumeConversation(
+            session.conversationId,
+            cfg as unknown as CreateConversationParams,
+          ),
+          CONVERSATION_BIND_TIMEOUT_MS,
+          'resume the conversation',
+        );
+        this.conversationBindings.set(session.conversationId, desiredBinding);
+        await this.seedIfRestarted(chat, session.conversationId);
+      } catch {
+        if (returning) {
+          // The session it left could not be resumed after all: a fresh one gets the whole history.
+          const seed = buildConversationSeed(returning.transcript);
+          chat.conversationSeed = seed;
+          await this.chatRepo.update(chatId, { conversationSeed: seed });
+        }
+        try {
+          await withDeadline(
+            this.ensureConversation(chat, session.conversationId),
+            CONVERSATION_BIND_TIMEOUT_MS,
+            'recreate the conversation',
+          );
+          this.conversationBindings.set(session.conversationId, desiredBinding);
+        } catch (recreateErr) {
+          console.warn(
+            `[ChatManagement] Failed to recover conversation for chat ${chatId}:`,
+            recreateErr,
+          );
+          // Without this the turn dies here: the route already answered 202,
+          // nothing is persisted, and no event is ever emitted — the chat just
+          // stops, which reads as "my message disappeared".
+          await this.eventBus.emit(chat.sessionId, {
+            kind: 'harness.error',
+            data: {
+              chatId,
+              message:
+                `Could not reach the agent provider: ${(recreateErr as Error).message}. ` +
+                'Send the message again.',
+            },
+          } as unknown as AgentEvent);
+          await this.eventBus.emit(chat.sessionId, {
+            kind: 'harness.idle',
+            data: { chatId },
+          } as unknown as AgentEvent);
+          throw recreateErr;
+        }
+      }
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // Compaction (docs/compaction/README.md)
+  // ══════════════════════════════════════════════════════════════
+
+  /** `INTERACTION_PENDING` while a plan review, question or permission gate of the chat is open (PLN-01). */
+  private async assertNoOpenGate(chatId: string): Promise<void> {
+    if (!this.extensions.agentInteractionService) return;
+    const pending = await this.extensions.agentInteractionService.listPendingByChat(chatId);
+    const gate = pending[0];
+    if (!gate) return;
+    const err = new Error(
+      'This chat is waiting on your response. Resolve or cancel it before sending a new message.',
+    ) as Error & { code?: string; details?: unknown };
+    err.code = 'INTERACTION_PENDING';
+    err.details = { interactionId: gate.id, kind: gate.kind };
+    throw err;
+  }
+
+  /** One standing compaction listener per live conversation: chat id and unsubscribe. */
+  private readonly compactionWatches = new Map<string, { chatId: string; unsub: () => void }>();
+
+  /**
+   * Record every compaction of the chat's conversation — the provider's own (its window filled up, or Claude's idle
+   * compaction between turns) and the ones the user asked for — as one `system` row, the single writer of those
+   * rows. Outside a turn nobody else is listening, so the compaction and the new context fill are also forwarded to
+   * the chat's stream; inside one the turn's own listener already forwards them.
+   *
+   * Re-registered at every bind: a provider drops a conversation's listeners when it resumes or recreates it.
+   */
+  private watchCompactions(chat: Chat, conversationId: string | undefined): void {
+    if (!conversationId) return;
+    this.compactionWatches.get(conversationId)?.unsub();
+    const chatId = chat.id;
+    const unsub = this.harness.onConversationEvent(conversationId, (event) => {
+      const inTurn = this.isTurnActive(chatId);
+      const record = compactionFromEvent(event);
+      if (record) {
+        const turnId = inTurn ? this.turns.get(conversationId)?.turnId : undefined;
+        void this.messageRepo
+          .create(compactionRow({ sessionId: chat.sessionId, chatId, ...(turnId ? { turnId } : {}) }, { ...record, ...(chat.model ? { model: chat.model } : {}) }))
+          .catch((err: unknown) => console.warn(`[ChatManagement] could not record a compaction of chat ${chatId}:`, err));
+      }
+      if (inTurn) return;
+      const info = event.kind === 'harness.session_info' ? (event.data as { infoType?: unknown }).infoType : undefined;
+      const compactionEvent = info === COMPACTION_INFO.start || info === COMPACTION_INFO.boundary || info === COMPACTION_INFO.failed;
+      if (compactionEvent || event.kind === 'harness.context_usage') {
+        void this.eventBus.emit(chat.sessionId, this.enrichWithChatId(event, chatId)).catch(() => undefined);
+      }
+    });
+    this.compactionWatches.set(conversationId, { chatId, unsub });
+  }
+
+  private unwatchCompactions(conversationId: string): void {
+    this.compactionWatches.get(conversationId)?.unsub();
+    this.compactionWatches.delete(conversationId);
+  }
+
+  /**
+   * Compact the chat's conversation now (the composer's Compact button). A turn of its own: refused while one runs
+   * or a gate is open, Stop ends it, and it streams like one. Native when the provider has a compaction of its own;
+   * otherwise — and when the chat has just moved to a provider that has not heard any of it yet — the app writes the
+   * summary and the next prompt starts a fresh provider session from it.
+   */
+  async compactChat(
+    chatId: string,
+    options: { instructions?: string } = {},
+  ): Promise<{ turnId: string; done: Promise<{ mode: 'native' | 'synthetic' }> }> {
+    const chat = await this.chatRepo.getById(chatId);
+    if (chat.status !== 'active') throw new Error(`Chat ${chatId} is archived and cannot be compacted`);
+    await this.assertNoOpenGate(chatId);
+    if (this.isTurnActive(chatId)) {
+      const err = new Error('This chat is still generating a response. Wait for it to finish, or stop it first.') as Error & { code?: string };
+      err.code = 'CHAT_BUSY';
+      throw err;
+    }
+    const transcript = await this.messageRepo.getByChatId(chatId);
+    const since = lastCompaction(transcript);
+    if (!transcript.slice(since ? since.index + 1 : 0).some((m) => m.role === 'assistant')) {
+      const err = new Error('There is nothing new to compact yet.') as Error & { code?: string };
+      err.code = 'NOTHING_TO_COMPACT';
+      throw err;
+    }
+    const instructions = options.instructions?.trim() ? options.instructions.trim().slice(0, 2_000) : undefined;
+
+    this.startingTurns.add(chatId);
+    this.cancelledTurns.delete(chatId);
+    const turnId = generateId();
+    // Accepted: the caller answers now, the compaction streams on the chat (`done` settles when it has finished).
+    return { turnId, done: this.runCompaction(chat, turnId, transcript, instructions) };
+  }
+
+  private async runCompaction(
+    chat: Chat,
+    turnId: string,
+    transcript: ChatMessage[],
+    instructions: string | undefined,
+  ): Promise<{ mode: 'native' | 'synthetic' }> {
+    const chatId = chat.id;
+    let unsub: (() => void) | undefined;
+    let finished = false;
+    try {
+      if (chat.workspaceId && this.extensions.mountService) await this.extensions.mountService.ready(chat.workspaceId);
+      const session = await this.sessionRepo.getById(chat.sessionId);
+      if (!session.conversationId) throw new Error(`Chat ${chatId} has no conversation`);
+      const conversationId = session.conversationId;
+      await this.bindConversation(chat, session);
+      this.watchCompactions(chat, conversationId);
+      const caps = this.capabilitiesForConversation(conversationId);
+      // A seed still waiting means the provider's session has not heard the chat yet: there is nothing of its own
+      // to compact, so the seed itself is what gets summarised.
+      const native = !!caps.conversationCompact && !!this.harness.compactConversation && !chat.conversationSeed;
+
+      this.chatConversations.set(chatId, conversationId);
+      this.turns.set(conversationId, {
+        owner: { kind: 'chat', chatId, sessionId: chat.sessionId, ...(chat.parentChatId ? { parentChatId: chat.parentChatId } : {}) },
+        sessionId: chat.sessionId,
+        turnId,
+        agentMode: this.resolveAgentMode(chat, undefined),
+        permissionMode: resolveTurnPermissionMode(this.resolveAgentMode(chat, undefined), chat.permissionMode),
+        planIds: [],
+        interactionIds: [],
+        nextSequence: 0,
+        cardSequence: new Map(),
+      });
+      await this.eventBus.emit(chat.sessionId, {
+        kind: 'harness.turn_start',
+        data: { turnId, chatId, kind: 'compaction' } as { turnId: string },
+      } as AgentEvent);
+      await this.updateListSummary(chat, () => this.chatRepo.touchActivity(chatId, new Date()));
+
+      let failure: string | undefined;
+      let idle!: () => void;
+      const idleSeen = new Promise<void>((resolve) => { idle = resolve; });
+      const finish = async (opts: { cancelled?: boolean; error?: string } = {}): Promise<void> => {
+        if (finished) return;
+        finished = true;
+        this.turnFinalizers.delete(chatId);
+        this.activeSubscriptions.delete(chatId);
+        unsub?.();
+        await rememberProviderSession(this.harness, this.sessionRepo, session);
+        await this.updateListSummary(chat, () =>
+          this.chatRepo.recordTurnEnd(chatId, {
+            status: opts.cancelled || this.cancelledTurns.has(chatId) ? 'cancelled' : opts.error ? 'failed' : 'succeeded',
+            endedAt: new Date(),
+            ...(opts.error ? { error: opts.error.split('\n')[0]! } : {}),
+          }),
+        );
+      };
+      this.turnFinalizers.set(chatId, (opts) => finish({ cancelled: opts?.partial === true }));
+
+      if (native) {
+        unsub = this.harness.onConversationEvent(conversationId, (event) => {
+          if (event.kind === 'harness.user_message' || event.kind === 'harness.session_start' || event.kind === 'harness.turn_start') return;
+          if (event.kind === 'harness.session_info' && (event.data as { infoType?: unknown }).infoType === COMPACTION_INFO.failed) {
+            const e = (event.data as { error?: unknown }).error;
+            failure = typeof e === 'string' && e ? e : 'The provider could not compact the conversation';
+          }
+          void this.eventBus.emit(chat.sessionId, this.enrichWithChatId(event, chatId)).catch(() => undefined);
+          if (event.kind === 'harness.idle') idle();
+        });
+        this.activeSubscriptions.set(chatId, unsub);
+        this.startingTurns.delete(chatId);
+        try {
+          await this.harness.compactConversation!(conversationId, {
+            ...(instructions && caps.compactInstructions ? { instructions } : {}),
+          });
+        } catch (err) {
+          if (!this.cancelledTurns.has(chatId)) failure ??= err instanceof Error ? err.message : String(err);
+        }
+        // The provider ends the compaction with idle like any turn; one that does not is not waited on for ever.
+        await Promise.race([idleSeen, new Promise((r) => setTimeout(r, 5_000).unref?.())]);
+        const cancelled = this.cancelledTurns.delete(chatId);
+        if (failure && !cancelled) {
+          await this.eventBus.emit(chat.sessionId, {
+            kind: 'harness.error',
+            data: { chatId, message: `Could not compact the conversation: ${failure}` },
+          } as unknown as AgentEvent);
+        }
+        await finish(cancelled ? { cancelled } : failure ? { error: failure } : {});
+        await this.eventBus.emit(chat.sessionId, this.enrichWithChatId({ kind: 'harness.idle', data: {} } as AgentEvent, chatId));
+        return { mode: 'native' };
+      }
+
+      // Synthetic: the app writes the summary; the next prompt opens a fresh provider session from it.
+      const controller = new AbortController();
+      this.activeSubscriptions.set(chatId, () => controller.abort());
+      this.turnFinalizers.set(chatId, async (opts) => {
+        controller.abort();
+        await finish({ cancelled: opts?.partial === true });
+      });
+      this.startingTurns.delete(chatId);
+      const emitInfo = (infoType: string, data: Record<string, unknown>) =>
+        this.eventBus.emit(chat.sessionId, { kind: 'harness.session_info', data: { infoType, chatId, ...data } } as unknown as AgentEvent);
+      await emitInfo(COMPACTION_INFO.start, { trigger: 'manual', message: 'Compacting conversation…' });
+      try {
+        // A seed waiting for the next prompt (a provider move) holds what this chat is to the new session.
+        const source = chat.conversationSeed
+          ? [...transcript, { id: 'seed', sessionId: chat.sessionId, chatId, role: 'user', content: chat.conversationSeed, timestamp: new Date() } as ChatMessage]
+          : transcript;
+        const summary = await summariseForCompaction(this.harness, chat.conversationSeed ? source.slice(-1) : source, {
+          ...(chat.model ? { model: chat.model } : {}),
+          ...(chat.harnessConfig?.harnessType ? { harnessType: chat.harnessConfig.harnessType } : {}),
+          ...(instructions ? { instructions } : {}),
+          signal: controller.signal,
+        });
+        if (this.cancelledTurns.has(chatId)) throw new Error('cancelled');
+        try {
+          await withDeadline(this.harness.destroyConversation(conversationId), CONVERSATION_BIND_TIMEOUT_MS, 'destroy the conversation');
+        } catch {
+          // Best effort — a fresh session is what the next prompt gets either way.
+        }
+        this.conversationBindings.delete(conversationId);
+        await this.sessionRepo.update(session.id, { providerSessionId: '' });
+        session.providerSessionId = undefined;
+        const record = { trigger: 'manual' as const, summary, synthetic: true, ...(chat.model ? { model: chat.model } : {}) };
+        await this.messageRepo.create(compactionRow({ sessionId: chat.sessionId, chatId, turnId }, record));
+        const seed = buildConversationSeed(await this.messageRepo.getByChatId(chatId));
+        chat.conversationSeed = seed;
+        await this.chatRepo.update(chatId, { conversationSeed: seed });
+        await emitInfo(COMPACTION_INFO.boundary, { trigger: 'manual', summary, message: describeCompaction(record) });
+        await finish();
+      } catch (err) {
+        const cancelled = this.cancelledTurns.delete(chatId);
+        const message = err instanceof Error ? err.message : String(err);
+        if (!cancelled) {
+          await emitInfo(COMPACTION_INFO.failed, { trigger: 'manual', error: message, message: 'Could not compact the conversation' });
+          await this.eventBus.emit(chat.sessionId, {
+            kind: 'harness.error',
+            data: { chatId, message: `Could not compact the conversation: ${message}` },
+          } as unknown as AgentEvent);
+        }
+        await finish(cancelled ? { cancelled } : { error: message });
+      }
+      await this.eventBus.emit(chat.sessionId, this.enrichWithChatId({ kind: 'harness.idle', data: {} } as AgentEvent, chatId));
+      return { mode: 'synthetic' };
+    } catch (err) {
+      // Failed before the compaction started (mount, bind): say so on the chat and end the turn the client saw begin.
+      if (!finished) {
+        const message = err instanceof Error ? err.message : String(err);
+        await this.eventBus.emit(chat.sessionId, {
+          kind: 'harness.error',
+          data: { chatId, message: `Could not compact the conversation: ${message}` },
+        } as unknown as AgentEvent);
+        await this.eventBus.emit(chat.sessionId, this.enrichWithChatId({ kind: 'harness.idle', data: {} } as AgentEvent, chatId));
+      }
+      throw err;
+    } finally {
+      this.startingTurns.delete(chatId);
+      if (!finished) {
+        this.turnFinalizers.delete(chatId);
+        this.activeSubscriptions.delete(chatId);
+        unsub?.();
+      }
+    }
+  }
+
   /** Bring a conversation back into the harness's memory (best effort). */
   private async ensureLiveConversation(conversationId: string, cfg: CreateConversationParams): Promise<void> {
     if (this.harness.hasLiveConversation(conversationId)) return;
@@ -3602,6 +3861,7 @@ export class ChatManagementService {
       } catch {
         // May not be active
       }
+      this.unwatchCompactions(session.conversationId);
       try {
         await this.harness.deleteConversation(session.conversationId);
       } catch {

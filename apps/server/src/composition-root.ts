@@ -9,6 +9,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 import { WorkflowEngineSettingsStore } from './settings/workflowEngine.js';
+import { CompactionSettingsStore, autoCompactFor } from './settings/compaction.js';
 import { ProviderVisibilityStore } from './settings/providerVisibility.js';
 import { CopilotCliService } from './settings/copilotCli.js';
 import * as path from 'node:path';
@@ -915,11 +916,15 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     scriptRunner.setAllowedCommands(s.allowedCommands);
   });
 
+  // Settings › Agents: whether the providers compact a full conversation on their own, and at how full.
+  const compactionSettings = await CompactionSettingsStore.load(dirname(resolve(config.dbPath)));
+
   // Chat extensions object — passed by reference to createCoreServices.
   // `worktreeService` is set later after project services are created.
   const chatExtensions: ChatManagementServiceExtensions = {
     customToolRegistry,
     mcpHub,
+    autoCompact: () => autoCompactFor(compactionSettings.get()),
     // BYOK provider API keys are `secretref:` pointers; the session composer
     // reads the value here, at the last moment (never the pointer string).
     resolveSecretRef: (ref) => mcpCredentialVault.resolveRef(ref),
@@ -2590,6 +2595,7 @@ export async function createContainer(config: AppConfig, options: CreateContaine
     hostSupervisor,
     admissionController,
     workflowEngineSettings,
+    compactionSettings,
     providerVisibility,
     copilotCli,
     streamBroker,
@@ -3123,6 +3129,8 @@ export interface Container {
   admissionController: AdmissionController;
   /** Flow key limits, the summary model and the trigger debounce (Settings → Workflow engine, P07). */
   workflowEngineSettings: WorkflowEngineSettingsStore;
+  /** Auto-compaction of full conversations (Settings › Agents, docs/compaction). */
+  compactionSettings: CompactionSettingsStore;
   /** D-131 — which agent providers this server serves (Settings › Model providers, admin). */
   providerVisibility: ProviderVisibilityStore;
   /** The Copilot CLI, downloaded on first use. */

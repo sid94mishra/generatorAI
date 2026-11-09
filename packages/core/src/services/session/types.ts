@@ -10,7 +10,7 @@
 import type { ProcessControl } from '../../tools/processTools.js';
 import type { AgentMode, AgentToolPolicy, PermissionCardSummary, PlanCardNote } from '@generatorai/shared';
 import type { HookBridge } from '../../domain/ports/IHookBridge.js';
-import type { HarnessPermissionMode } from '../../domain/ports/IAgentHarness.js';
+import type { AutoCompactSetting, HarnessPermissionMode } from '../../domain/ports/IAgentHarness.js';
 import type { CustomToolRegistry } from '../../tools/CustomToolRegistry.js';
 import type { IMcpHub } from '../../mcp/IMcpHub.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
@@ -104,6 +104,8 @@ export interface SessionComposerDeps {
   platformTools?: PlatformToolHost;
   /** D-187: stops what listens on a local port, outside any agent sandbox (`stop_port_listener`). */
   processControl?: ProcessControl;
+  /** The app's auto-compaction setting (docs/compaction §3.6), read at every compose; undefined = provider default. */
+  autoCompact?: () => AutoCompactSetting | undefined;
 }
 
 /**

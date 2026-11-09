@@ -29,6 +29,7 @@ import {
   MAX_ALLOWED_COMMANDS,
   MAX_TRIGGER_DEBOUNCE_MS,
 } from '../settings/workflowEngine.js';
+import { MAX_COMPACT_THRESHOLD_PCT, MIN_COMPACT_THRESHOLD_PCT } from '../settings/compaction.js';
 
 type FlowKind = 'global' | 'provider' | 'model' | 'check' | 'worktree' | 'run';
 
@@ -60,6 +61,20 @@ const WorkflowEngineSettingsBody = z
       .describe('The operator limits over the defaults (the whole set: a key left out goes back to its default)'),
     summaryModel: z.string().max(200).nullable().optional().describe('The model of llm summaries; null uses the stage model'),
     triggerDebounceMs: z.number().int().min(0).max(MAX_TRIGGER_DEBOUNCE_MS).optional().describe('Automation webhook and cron trigger debounce'),
+  })
+  .strict();
+
+const CompactionSettingsBody = z
+  .object({
+    autoCompact: z.boolean().optional().describe('The providers compact a conversation on their own when its context window fills up'),
+    thresholdPct: z
+      .number()
+      .int()
+      .min(MIN_COMPACT_THRESHOLD_PCT)
+      .max(MAX_COMPACT_THRESHOLD_PCT)
+      .nullable()
+      .optional()
+      .describe('At how full (percent); null = each provider\'s own threshold'),
   })
   .strict();
 
@@ -135,6 +150,30 @@ export function createSettingsRoutes(container: Container): Router {
       flows,
     };
   };
+
+  // Settings › Agents — auto-compaction (docs/compaction §3.6); applies to each chat from its next message.
+  router.get('/compaction', (_req, res) => {
+    res.json(container.compactionSettings.get());
+  });
+
+  router.put('/compaction', async (req, res, next) => {
+    const parsed = CompactionSettingsBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: { code: 'INVALID_BODY', message: parsed.error.message } });
+      return;
+    }
+    try {
+      const { autoCompact, thresholdPct } = parsed.data;
+      res.json(
+        await container.compactionSettings.update({
+          ...(autoCompact !== undefined ? { autoCompact } : {}),
+          ...(thresholdPct !== undefined ? { thresholdPct } : {}),
+        }),
+      );
+    } catch (err) {
+      next(err);
+    }
+  });
 
   router.get('/workflow-engine', (_req, res) => {
     res.json(engineView());
