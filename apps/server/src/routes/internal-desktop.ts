@@ -24,7 +24,7 @@
 import { Router } from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import { hostname } from 'node:os';
-import { ALL_SCOPES } from '@generatorai/auth';
+import { ALL_SCOPES, type Principal } from '@generatorai/auth';
 import { PairingOfferSchema, encodePairingOffer, pairingOfferUrl } from '@generatorai/relay-protocol';
 import { formatPairingCode } from '@generatorai/shared';
 import type { Container } from '../composition-root.js';
@@ -56,6 +56,15 @@ export interface InternalDesktopRateLimit {
 // typecheck against `typeof INTERNAL_DESKTOP_RATE_LIMIT` even though any
 // `number` is functionally valid here (see `RateLimitOptions`).
 export const INTERNAL_DESKTOP_RATE_LIMIT: InternalDesktopRateLimit = { perKeyLimit: 10, globalLimit: 20, windowMs: 60_000 };
+
+/** The principal every shell action is recorded under. */
+const DESKTOP_SHELL: Principal = {
+  type: 'internal-service',
+  id: 'desktop-shell',
+  displayName: 'Electron desktop shell',
+  scopes: [...ALL_SCOPES],
+  transport: 'loopback',
+};
 
 export function createInternalDesktopRoutes(
   container: Container,
@@ -108,13 +117,7 @@ export function createInternalDesktopRoutes(
               : 'GeneratorAI Desktop',
           platform: 'desktop',
           requestedScopes: [...ALL_SCOPES],
-          createdBy: {
-            type: 'internal-service',
-            id: 'desktop-shell',
-            displayName: 'Electron desktop shell',
-            scopes: [...ALL_SCOPES],
-            transport: 'loopback',
-          },
+          createdBy: DESKTOP_SHELL,
           ttlMs: 5 * 60_000,
           relayInvite: null,
         });
@@ -146,6 +149,39 @@ export function createInternalDesktopRoutes(
         res.status(500).json({
           error: { code: 'PAIRING_FAILED', message: 'Could not create a pairing grant.' },
         });
+      }
+    })();
+  });
+
+  /**
+   * Tops the shell's own renderer device up to every scope this server knows.
+   *
+   * The renderer pairs once, with every scope there was at the time; a scope a
+   * later release adds (`exec:device`) would otherwise never reach it, and the
+   * ordinary scope change is clamped to the caller's own scopes. Only a
+   * desktop device that already holds `admin:devices` (what the shell's grant
+   * gives) is topped up, so this never widens another machine's device.
+   */
+  router.post('/scopes', (req, res) => {
+    void (async () => {
+      try {
+        const deviceId = typeof req.body?.deviceId === 'string' ? req.body.deviceId : '';
+        const device = deviceId ? await container.security.devices.getDevice(deviceId) : null;
+        if (!device || device.revokedAt != null || device.platform !== 'desktop' || !device.scopes.includes('admin:devices')) {
+          res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No desktop device with that id.' } });
+          return;
+        }
+        const added = ALL_SCOPES.filter((s) => !device.scopes.includes(s));
+        if (added.length > 0) {
+          await container.security.devices.updateDeviceScopes(deviceId, [...device.scopes, ...added], DESKTOP_SHELL);
+          logger.info('[InternalDesktop] Desktop device gained new scopes', { added });
+        }
+        res.json({ added });
+      } catch (err) {
+        logger.warn('[InternalDesktop] Could not top up the desktop device scopes', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        res.status(500).json({ error: { code: 'SCOPES_FAILED', message: 'Could not update the desktop device.' } });
       }
     })();
   });

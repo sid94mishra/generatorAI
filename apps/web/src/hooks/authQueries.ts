@@ -76,6 +76,7 @@ export function resolveGateOutcome(input: {
 interface DesktopPairingBridge {
   isDesktop?: boolean;
   requestPairingCode?: (name?: string) => Promise<{ pairingUrl: string } | null>;
+  syncDeviceScopes?: (deviceId: string) => Promise<string[] | null>;
 }
 
 /**
@@ -197,6 +198,17 @@ export function useAuthGate(): AuthGateState {
       cancelled = true;
     };
   }, [ready, state.status, openServer]);
+
+  // The desktop paired once, with every scope there was then; a scope a later
+  // release adds reaches it only through the shell. The server reads scopes
+  // from the device record on every request, so nothing needs refreshing.
+  const deviceId = state.status === 'authenticated' ? state.deviceId : null;
+  useEffect(() => {
+    if (!deviceId) return;
+    const desktop = desktopPairingBridge();
+    if (!desktop?.isDesktop || typeof desktop.syncDeviceScopes !== 'function') return;
+    void desktop.syncDeviceScopes(deviceId).catch(() => null);
+  }, [deviceId]);
 
   const outcome = resolveGateOutcome({
     ready,

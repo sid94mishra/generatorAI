@@ -207,14 +207,46 @@ export class ServerManager extends EventEmitter {
     pairingUrl: string;
     expiresAt: number;
   } | null> {
-    if (!this.port || !this.desktopAdminToken) return null;
-    const body = JSON.stringify(deviceName ? { deviceName } : {});
+    const res = await this.internalPost('/internal/desktop/pairing', deviceName ? { deviceName } : {});
+    if (!res) return null;
+    if (res.status !== 201) {
+      // Never log the body — a success body carries pairing material.
+      log.warn('Desktop pairing request failed', { status: res.status });
+      return null;
+    }
+    try {
+      return JSON.parse(res.raw) as { pairingCode: string; pairingUrl: string; expiresAt: number };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Tops the renderer's own device up to every scope the embedded server
+   * knows (a scope added by a later release). Returns the scopes added, or
+   * null when the server refused or is not running.
+   */
+  async syncDeviceScopes(deviceId: string): Promise<string[] | null> {
+    const res = await this.internalPost('/internal/desktop/scopes', { deviceId });
+    if (!res || res.status !== 200) return null;
+    try {
+      const added = (JSON.parse(res.raw) as { added?: unknown }).added;
+      return Array.isArray(added) ? added.filter((s): s is string => typeof s === 'string') : [];
+    } catch {
+      return null;
+    }
+  }
+
+  /** POSTs to the embedded server's `/internal/desktop` routes with the handshake token. */
+  private internalPost(path: string, payload: object): Promise<{ status: number; raw: string } | null> {
+    if (!this.port || !this.desktopAdminToken) return Promise.resolve(null);
+    const body = JSON.stringify(payload);
     return new Promise((resolve) => {
       const req = http.request(
         {
           host: '127.0.0.1',
           port: this.port!,
-          path: '/internal/desktop/pairing',
+          path,
           method: 'POST',
           timeout: 5000,
           headers: {
@@ -227,18 +259,7 @@ export class ServerManager extends EventEmitter {
           let raw = '';
           res.setEncoding('utf8');
           res.on('data', (c) => (raw += c));
-          res.on('end', () => {
-            if (res.statusCode !== 201) {
-              // Never log `raw` — a success body carries pairing material.
-              log.warn('Desktop pairing request failed', { status: res.statusCode });
-              return resolve(null);
-            }
-            try {
-              resolve(JSON.parse(raw) as { pairingCode: string; pairingUrl: string; expiresAt: number });
-            } catch {
-              resolve(null);
-            }
-          });
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, raw }));
         },
       );
       req.on('timeout', () => req.destroy());

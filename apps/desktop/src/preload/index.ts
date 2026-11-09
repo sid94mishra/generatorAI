@@ -62,6 +62,8 @@ const api = {
    */
   requestPairingCode: (deviceName?: string): Promise<DesktopPairingCode | null> =>
     ipcRenderer.invoke(IPC.requestPairingCode, deviceName),
+  /** Tops this renderer's device up to every scope the embedded server knows. */
+  syncDeviceScopes: (deviceId: string): Promise<string[] | null> => ipcRenderer.invoke(IPC.syncDeviceScopes, deviceId),
 
   selectDirectory: (opts?: { defaultPath?: string }): Promise<string | null> =>
     ipcRenderer.invoke(IPC.selectDirectory, opts),

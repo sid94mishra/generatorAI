@@ -266,6 +266,15 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
     },
   );
 
+  // Same origin rule as the pairing mint. The server only tops up a desktop
+  // device that already holds `admin:devices`, i.e. this shell's own grant.
+  guardedHandle(IPC.syncDeviceScopes, async (e, deviceId?: unknown): Promise<string[] | null> => {
+    if (mode === 'dev') return null;
+    if (!isEmbeddedServerOrigin(e.senderFrame?.url, sm.url)) return null;
+    if (typeof deviceId !== 'string' || deviceId.length === 0 || deviceId.length > 64) return null;
+    return sm.syncDeviceScopes(deviceId);
+  });
+
   guardedHandle(IPC.openExternal, (_e, url: string) => {
     wm.openExternalSafely(url);
   });

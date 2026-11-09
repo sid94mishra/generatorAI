@@ -8,6 +8,7 @@ import express from 'express';
 import request from 'supertest';
 import { createInternalDesktopRoutes, INTERNAL_DESKTOP_RATE_LIMIT } from '../routes/internal-desktop.js';
 import { hostIdFromPublicKey } from '@generatorai/relay-protocol';
+import { ALL_SCOPES } from '@generatorai/auth';
 
 const TOKEN = 'desktop-admin-token';
 
@@ -37,6 +38,8 @@ function makeContainer() {
           expiresAt: Date.now() + 60_000,
           requestedScopes: ['chats:read'],
         })),
+        getDevice: vi.fn(async (_id: string): Promise<Record<string, unknown> | null> => null),
+        updateDeviceScopes: vi.fn(async () => []),
       },
     },
   };
@@ -98,6 +101,33 @@ describe('internal desktop routes', () => {
     await request(app).post('/internal/desktop/pairing').send({}).expect(401);
     await request(app).post('/internal/desktop/pairing').send({}).expect(401);
     await request(app).post('/internal/desktop/pairing').send({}).expect(429);
+  });
+
+  it('tops the shell\'s own desktop device up to every scope', async () => {
+    const container = makeContainer();
+    const held = ALL_SCOPES.filter((s) => s !== 'exec:device');
+    container.security.devices.getDevice.mockResolvedValue({ deviceId: 'd1', platform: 'desktop', revokedAt: null, scopes: held });
+    const res = await request(makeApp(container))
+      .post('/internal/desktop/scopes')
+      .set('authorization', `Bearer ${TOKEN}`)
+      .send({ deviceId: 'd1' })
+      .expect(200);
+    expect(res.body).toEqual({ added: ['exec:device'] });
+    expect(container.security.devices.updateDeviceScopes).toHaveBeenCalledWith('d1', [...held, 'exec:device'], expect.objectContaining({ id: 'desktop-shell' }));
+  });
+
+  it('never widens a device that is not the shell\'s own desktop grant', async () => {
+    for (const device of [
+      { deviceId: 'd2', platform: 'mobile', revokedAt: null, scopes: ['admin:devices'] },
+      { deviceId: 'd3', platform: 'desktop', revokedAt: null, scopes: ['read:chats'] },
+      { deviceId: 'd4', platform: 'desktop', revokedAt: 1, scopes: ['admin:devices'] },
+    ]) {
+      const container = makeContainer();
+      container.security.devices.getDevice.mockResolvedValue(device);
+      await request(makeApp(container)).post('/internal/desktop/scopes').set('authorization', `Bearer ${TOKEN}`).send({ deviceId: device.deviceId }).expect(404);
+      expect(container.security.devices.updateDeviceScopes).not.toHaveBeenCalled();
+    }
+    await request(makeApp(makeContainer())).post('/internal/desktop/scopes').send({ deviceId: 'd1' }).expect(401);
   });
 
   it('ships with a small default budget', () => {

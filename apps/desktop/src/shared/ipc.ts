@@ -129,6 +129,12 @@ export const IPC = {
    */
   requestPairingCode: 'desktop:requestPairingCode',
   /**
+   * Tops the renderer's own paired device up to every scope the embedded
+   * server knows, so a scope added by a later release reaches an existing
+   * install. Resolves to the scopes added, or null.
+   */
+  syncDeviceScopes: 'desktop:syncDeviceScopes',
+  /**
    * Renderer pushes UI state up so the native menu can mirror it. The first
    * push from a document also tells main that document's bridge listeners are
    * up, so routes can go over {@link IPC_EVENT.navigate} (06 §3.4).

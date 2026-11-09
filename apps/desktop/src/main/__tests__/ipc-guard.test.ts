@@ -140,7 +140,9 @@ describe('ipc.ts registers every channel through the guard', () => {
     // D-140/D-145: browser comments drop pickElement + annotateRegion and add
     // capture, annotateOpen, annotateSave, annotateCancel (net +2).
     // U-67: computerPermissions (macOS privacy grants for computer use).
-    expect(guarded.length).toBe(52);
+    // computerWindowStream (the computer-use live preview), and syncDeviceScopes
+    // (the renderer's own device gains scopes a later release adds).
+    expect(guarded.length).toBe(54);
   });
 });
 
