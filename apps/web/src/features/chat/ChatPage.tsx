@@ -285,8 +285,10 @@ export function ChatPage() {
   const isOrchestrator = view.isOrchestrator;
   // W29 — the panel list is a ledger decision: a surface that cannot render the
   // browser or computer live view is not offered a tab for it.
-  // Only a chat with a workspace can have a Devices tab: no workspace, no request.
-  const devicesEnabled = useMobileDevicesSettings({ enabled: Boolean(chat?.workspaceId) }).data?.enabled === true;
+  // Only a chat with a workspace can have a Devices tab: no workspace, no request. The type stays
+  // registered until the server says the feature is off — a dock restored before the answer
+  // arrives would otherwise drop (and forget) a Devices tab the chat had open.
+  const devicesEnabled = useMobileDevicesSettings({ enabled: Boolean(chat?.workspaceId) }).data?.enabled !== false;
   const surfaceTabs = useSurfaceDockTabs({ computerUseEnabled: view.computerUseEnabled, isOrchestrator, devicesEnabled });
   const dockTypes = surfaceTabs.types;
   /** Workers running or waiting to start — the Tasks tab's live count. */

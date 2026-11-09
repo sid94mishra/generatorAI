@@ -149,7 +149,7 @@ export function buildDeviceToolSet(ctx: DeviceToolContext): ToolDefinition[] {
       owner,
       skipPermission: true,
       alwaysLoad: true,
-      timeoutMs: 330_000,
+      timeoutMs: 660_000,
       parametersSchema: {
         type: 'object',
         properties: { device: { type: 'string', description: 'Device key or name from device_list.' } },

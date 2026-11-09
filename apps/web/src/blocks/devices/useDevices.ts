@@ -112,7 +112,8 @@ export function useDevices(workspaceId: string | undefined, active: boolean): De
     [workspaceId, refresh],
   );
 
-  return { listing, loading, error, busy, refresh, start, stop, setAccess, actionError, clearActionError: () => setActionError(null) };
+  const clearActionError = useCallback(() => setActionError(null), []);
+  return { listing, loading, error, busy, refresh, start, stop, setAccess, actionError, clearActionError };
 }
 
 export interface DevicesEvent {

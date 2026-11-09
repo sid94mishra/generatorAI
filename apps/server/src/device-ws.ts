@@ -182,7 +182,12 @@ export function attachDeviceWebSocket(server: HttpServer, container: Container):
           if (frame.keyframe || frame.config) skipping = false;
           ws.send(encodeDeviceFrame(frame, Math.round((performance.now() - started) * 1000)));
         },
-        message: sendText,
+        message: (message) => {
+          sendText(message);
+          // The device stream broke (a device still booting, a crashed capture): close so the
+          // client reconnects and gets a fresh stream rather than a socket with no frames.
+          if (message.type === 'stream_error' && ws.readyState === ws.OPEN) ws.close(1011, 'stream error');
+        },
       })
       .then((handle) => {
         if (closed) handle.close();

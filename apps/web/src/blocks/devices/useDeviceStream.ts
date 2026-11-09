@@ -35,10 +35,13 @@ export interface DeviceStream {
   fps: number;
   codec: string | null;
   send: (event: DeviceInputEvent) => void;
+  /** Start over after the reconnects ran out. */
+  retry: () => void;
 }
 
 export function useDeviceStream(options: { workspaceId: string | undefined; device: string | null; enabled: boolean }): DeviceStream {
   const { workspaceId, device, enabled } = options;
+  const [attempt, setAttempt] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const [state, setState] = useState<DeviceStreamState>('idle');
@@ -86,6 +89,9 @@ export function useDeviceStream(options: { workspaceId: string | undefined; devi
       }
       canvas.getContext('2d')?.drawImage(source, 0, 0, w, h);
       frames += 1;
+      // Frames flowing is what makes a connection healthy.
+      reconnects = 0;
+      setError(null);
       setHasFrame(true);
     };
 
@@ -200,27 +206,26 @@ export function useDeviceStream(options: { workspaceId: string | undefined; devi
           ws.binaryType = 'arraybuffer';
           wsRef.current = ws;
           ws.onopen = () => {
-            reconnects = 0;
             setState('live');
-            setError(null);
           };
           ws.onmessage = (e) => {
             if (cancelled) return;
             if (typeof e.data === 'string') onText(e.data);
             else onBinary(e.data as ArrayBuffer);
           };
-          ws.onclose = (e) => {
+          ws.onclose = () => {
             wsRef.current = null;
             resetDecoder();
             if (cancelled) return;
-            // 1011: the server said it cannot stream this device; the error is already shown.
-            if (e.code === 1011 || reconnects >= MAX_RECONNECTS) {
+            // Every close is retried a few times — a device that just booted often
+            // refuses its first stream — then left to the Retry button.
+            if (reconnects >= MAX_RECONNECTS) {
               setState('failed');
               return;
             }
             reconnects += 1;
             setState('reconnecting');
-            retryTimer = setTimeout(open, Math.min(2000, 300 * reconnects));
+            retryTimer = setTimeout(open, Math.min(5000, 800 * reconnects));
           };
         } catch (err) {
           if (!cancelled) {
@@ -248,7 +253,7 @@ export function useDeviceStream(options: { workspaceId: string | undefined; devi
       }
       wsRef.current = null;
     };
-  }, [workspaceId, device, enabled]);
+  }, [workspaceId, device, enabled, attempt]);
 
   // Marks fade on their own; clear them once the newest is stale.
   useEffect(() => {
@@ -262,5 +267,7 @@ export function useDeviceStream(options: { workspaceId: string | undefined; devi
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
   }, []);
 
-  return { canvasRef, state, size, hasFrame, marks, agentAccess, agentActive, error, fps, codec, send };
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+
+  return { canvasRef, state, size, hasFrame, marks, agentAccess, agentActive, error, fps, codec, send, retry };
 }

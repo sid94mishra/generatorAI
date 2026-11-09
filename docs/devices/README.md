@@ -21,7 +21,7 @@ agent can see and drive it, and the user can select an element on it and send th
 |---|---|---|
 | DV-1 | **Platforms.** v1 covers Android emulators and physical Android phones (USB or Wi-Fi debugging) on macOS, Windows and Linux, and iOS simulators on Apple-silicon Macs. Physical iPhones come later. | Android tooling runs on every OS. Apple allows simulators only on Macs, and the simulator helper is arm64-only. A physical iPhone needs a signed on-device runner. Nobody ships that today (01 §2.3) |
 | DV-2 | **Android pipe.** The Node server talks to the user's `adb` server through Tango (`@yume-chan/adb`, `adb-server-node-tcp`, `adb-scrcpy`, `scrcpy`; MIT). We bundle **scrcpy-server 3.3.3** (Apache-2.0, sha256 `7e70323b…5354be0`) and push it to the device. That gives H.264 at up to 60 fps plus touch, scroll, keys and text on scrcpy's control socket. `adb` handles lifecycle, apps, URLs, logs, screenshots and the UI tree (`uiautomator dump`) | The de-facto standard. Pure JS on all three OSes, with no Bun and no ffmpeg (01 §6 B) |
-| DV-3 | **iOS pipe.** `serve-sim` (Apache-2.0) runs its helper as a supervised child on **loopback only**, with no `--allow-exec`. The server proxies five of its routes: `stream.avcc`, `stream.mjpeg`, `ws` (HID), `ax` and `foreground`. `xcrun simctl` handles lifecycle, apps, URLs, logs and screenshots | Apple has no public tap or streaming API. serve-sim is the maintained helper and works on Xcode 27. Measured here (§9.1): 60 fps capture, touch, Home, keys and the accessibility tree |
+| DV-3 | **iOS pipe.** `serve-sim` (Apache-2.0) runs its helper as a supervised child on **loopback only**, with no `--allow-exec`. The server proxies five of its routes: `stream.avcc`, `stream.mjpeg`, `ws` (HID), `ax` and `foreground`. `xcrun simctl` handles lifecycle, apps, URLs, logs and screenshots | Apple has no public tap or streaming API. serve-sim is the maintained helper and works on Xcode 27. Measured here (§10.1): 60 fps capture, touch, Home, keys and the accessibility tree |
 | DV-4 | **No agent-device.** The owner approved it, but it brings its own background service and an XCTest runner build. serve-sim's `ax` (iOS) and `uiautomator` (Android) already give the agent an element tree | One fewer dependency and one fewer process. Revisit if Android tree reads prove too slow |
 | DV-5 | **Transport.** Frames and input go through the GeneratorAI server on one authenticated WebSocket per open device view: `/api/workspaces/:id/devices/stream?device=<key>`. It uses the Browser's 16-byte frame header with two new codec ids: `2` H.264 AVCC (iOS) and `3` H.264 Annex-B (Android). A codec-config frame carries flag bit 1. JPEG (codec 0) covers seeds and fallback | The web UI can be remote (pairing, relay). One proven framing. WebCodecs decodes H.264 in Electron and Chromium |
 | DV-6 | **Coordinates.** Every touch, tap, swipe and element frame is **normalised 0..1** of the screen, in both the pane and the agent tools | iOS points and Android pixels never mix (01 §5.2) |
@@ -116,7 +116,8 @@ The dock is about 480 px wide. The pane stacks top to bottom:
 | `device_logs` | `device?`, `app?`, `lines?` (default 200), `level?` | Recent log lines (logcat, or `log show` for the simulator) |
 
 A `devices` system hint explains the ref model and the batching rule ("use `device_act` with several steps, then read its
-diff"), and says to load the `mobile-devices` skill for longer flows.
+diff"). No separate skill: the hint and the tool descriptions carry the whole manual (a staged skill can follow if flows
+prove to need one).
 
 ## 5. Architecture
 
@@ -191,15 +192,27 @@ features/settings: Mobile devices                                            │
 |---|---|
 | Research (01) and code analysis (02) | done |
 | Decisions, design, journeys, tools, architecture (this file) | done |
-| Feasibility probes (§9.1) | done |
-| DV-P1 Core | in progress |
-| DV-P2 Pane | — |
+| Feasibility probes (§10.1) | done |
+| DV-P1 Core | done (d3514d70) |
+| DV-P2 Pane | done (e6f2efb5); walkthrough in progress |
 | DV-P3 Agent end to end | — |
 | DV-P4 Release and install | — |
 
-## 9. Evidence
+## 9. Build notes
 
-### 9.1 Feasibility probes (2026-11-09, this Mac: macOS 27, Xcode 27.0, iOS 27 runtime, Android emulator 37)
+- **Dock type is web-only.** `devices` is a `ChatDockTabType` like side chats, not a shared `DockTabType`: the mobile app
+  keys its pane registry exhaustively by `DockTabType` and is out of scope.
+- **The simulator helper detaches.** `serve-sim --no-preview` starts its helper as a separate daemon; a second request for
+  a simulator already served reuses that helper (our child prints its address and exits 0). The bridge keeps the address
+  and restarts only when it stops answering; dispose runs `serve-sim --kill`.
+- **iOS 27 on a loaded machine.** The first boot of a simulator can sit on the Apple logo or a black screen for minutes
+  after `bootstatus` reports done, and its accessibility service answers "no frontmost application" until an app is
+  launched. The pane shows the stream as soon as frames arrive; the agent's snapshot retries once on an empty tree.
+- **Android emulators boot headless with SwiftShader** and cold-boot when their snapshot was saved with another renderer.
+
+## 10. Evidence
+
+### 10.1 Feasibility probes (2026-11-09, this Mac: macOS 27, Xcode 27.0, iOS 27 runtime, Android emulator 37)
 
 - `simctl io screenshot`: 1.8–3.6 s per frame under load. Too slow for a live view.
 - `simctl io recordVideo` to stdout: "rendering to standard out is no longer supported".

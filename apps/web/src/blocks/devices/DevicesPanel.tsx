@@ -87,6 +87,8 @@ const STATE_TONE: Record<DeviceInfo['state'], DotTone> = {
   unauthorized: 'warn',
 };
 
+const STATE_ORDER: Record<DeviceInfo['state'], number> = { running: 0, starting: 1, unauthorized: 2, offline: 3, off: 4 };
+
 const KIND_LABEL: Record<DeviceInfo['kind'], string> = {
   simulator: 'Simulator',
   emulator: 'Emulator',
@@ -157,6 +159,12 @@ export function DevicesPanel({
   useEffect(() => {
     onTabStateChange?.({ name: device?.name ?? null, running, agentActive: stream.agentActive });
   }, [onTabStateChange, device?.name, running, stream.agentActive]);
+
+  // A start that timed out while the device kept booting: once it runs, the error is stale.
+  const { clearActionError } = devices;
+  useEffect(() => {
+    if (running) clearActionError();
+  }, [running, clearActionError]);
 
   // Select mode reads the element tree once when it starts.
   useEffect(() => {
@@ -233,7 +241,8 @@ export function DevicesPanel({
 
   // ── Body states ────────────────────────────────────────────
 
-  const allDevices = listing?.devices ?? [];
+  // Running devices first, then those starting, then the rest by name.
+  const allDevices = [...(listing?.devices ?? [])].sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || a.name.localeCompare(b.name));
   const groups = (['ios', 'android'] as const)
     .map((platform) => ({ platform, items: allDevices.filter((d) => d.platform === platform) }))
     .filter((g) => g.items.length > 0);
@@ -277,7 +286,7 @@ export function DevicesPanel({
         <p className="mt-1 mb-3 text-small text-fg-2">Pick one to start it and see its screen here. The agent can use it too.</p>
         {groups.map((g) => (
           <section key={g.platform} className="mb-4">
-            <h4 className="mb-1 text-micro uppercase tracking-wide text-fg-3">{g.platform === 'ios' ? 'iOS' : 'Android'}</h4>
+            <h4 className="mb-1 text-micro text-fg-3">{g.platform === 'ios' ? 'iOS' : 'Android'}</h4>
             <div className="overflow-hidden rounded-card border border-line-soft">
               {g.items.map((d) => {
                 const choose = () => {
@@ -559,6 +568,11 @@ export function DevicesPanel({
               .filter(Boolean)
               .join(' · ')}
           </span>
+          {stream.state === 'failed' && (
+            <Button size="sm" variant="ghost" icon="refresh" data-testid="device-stream-retry" onClick={stream.retry}>
+              Retry
+            </Button>
+          )}
           <span className="ml-auto truncate text-micro text-fg-3">{agentAccess ? 'Agent can use this device' : 'Agent access off'}</span>
         </div>
       )}

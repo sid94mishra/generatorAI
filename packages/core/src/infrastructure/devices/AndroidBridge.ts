@@ -10,7 +10,7 @@
 //
 // Emulators boot headless (`-no-window`) with SwiftShader: a host-GPU
 // emulator without a window composites nothing, and both `screencap` and the
-// encoder then read black frames (measured, docs/devices §9.1).
+// encoder then read black frames (measured, docs/devices §10.1).
 // ────────────────────────────────────────────────────────────────
 
 import { spawn } from 'node:child_process';
@@ -59,7 +59,8 @@ const MOTION = { down: 0, up: 1, move: 2 } as const;
 const KEY_DOWN = 0;
 const KEY_UP = 1;
 
-const BOOT_TIMEOUT_MS = 240_000;
+// A cold boot (a new device, or a snapshot saved with another renderer) can take minutes on a busy machine.
+const BOOT_TIMEOUT_MS = 600_000;
 const TOOLS_TTL_MS = 10_000;
 
 export interface AndroidBridgeOptions {
@@ -221,7 +222,11 @@ export class AndroidBridge implements IDeviceBridge {
       if (emulator && d.state === 'device') {
         avd = this.avdBySerial.get(d.serial);
         if (!avd) {
-          avd = (await this.adb(['-s', d.serial, 'emu', 'avd', 'name'], 5_000).catch(() => '')).split(/\r?\n/)[0]?.trim();
+          // The emulator console answers instantly when idle but can time out
+          // while the guest is busy booting; the boot property never does.
+          avd =
+            (await this.adb(['-s', d.serial, 'emu', 'avd', 'name'], 5_000).catch(() => '')).split(/\r?\n/)[0]?.trim() ||
+            (await this.shell(d.serial, 'getprop ro.boot.qemu.avd_name', 8_000).catch(() => '')).trim();
           if (avd) this.avdBySerial.set(d.serial, avd);
         }
         if (avd) runningAvds.add(avd);
@@ -308,7 +313,7 @@ export class AndroidBridge implements IDeviceBridge {
       }
       await new Promise((r) => setTimeout(r, 1500));
     }
-    throw new Error(`The emulator did not finish starting within ${BOOT_TIMEOUT_MS / 1000} s.\n${await tail()}`);
+    throw new Error(`The emulator is still starting after ${BOOT_TIMEOUT_MS / 60_000} minutes; it keeps booting in the background.\n${await tail()}`);
   }
 
   /** A dozing emulator streams black: wake it and lift the lock screen. */
@@ -518,8 +523,15 @@ export class AndroidBridge implements IDeviceBridge {
   }
 
   async snapshot(id: string): Promise<RawDeviceSnapshot> {
-    // The dump's root bounds are the screen in its current rotation.
-    const xml = await this.adb(['-s', id, 'exec-out', 'uiautomator', 'dump', '--compressed', '/dev/tty'], 30_000);
+    // The dump's root bounds are the screen in its current rotation. While the
+    // UI is animating or the device is busy, uiautomator prints an error
+    // ("could not get idle state") instead of XML: try once more.
+    let xml = await this.adb(['-s', id, 'exec-out', 'uiautomator', 'dump', '--compressed', '/dev/tty'], 30_000);
+    if (!xml.includes('<hierarchy')) {
+      await new Promise((r) => setTimeout(r, 1000));
+      xml = await this.adb(['-s', id, 'exec-out', 'uiautomator', 'dump', '--compressed', '/dev/tty'], 30_000);
+    }
+    if (!xml.includes('<hierarchy')) throw new Error(`The screen could not be read: ${xml.trim().slice(0, 200) || 'no output'}`);
     const parsed = parseUiautomatorDump(xml);
     const focus = await this.shell(id, 'dumpsys window | grep -E "mCurrentFocus|mFocusedApp"', 10_000).catch(() => '');
     const pkg = focus.match(/\s([a-zA-Z][\w.]+)\/[\w.$]+/)?.[1];

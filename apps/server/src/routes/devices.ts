@@ -63,7 +63,7 @@ export function createDeviceRoutes(container: Container): Router {
       if (!workspaceId) return;
       const body = z.object({ device: DeviceKeySchema }).safeParse(req.body ?? {});
       if (!body.success) return fail(res, 400, 'VALIDATION', body.error.message);
-      req.setTimeout(330_000);
+      req.setTimeout(660_000);
       res.json({ device: await deviceService.startDevice(workspaceId, body.data.device) });
     } catch (err) {
       if (!res.headersSent) fail(res, 409, 'DEVICE_START_FAILED', (err as Error).message);

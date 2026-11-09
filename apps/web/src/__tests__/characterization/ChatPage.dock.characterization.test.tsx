@@ -433,7 +433,9 @@ describe('tab caps and the addable ledger (09 §5.4 Tab caps; 1139-1297)', () =>
     H.setFakeData({ computerUseEnabled: opts.computerUseEnabled });
     mount(H.makeChat({ orchestratorMode: opts.isOrchestrator }));
     await openAddMenu();
-    expect(addable()).toEqual(dockAddableTabTypes(dockTabTypes(opts)));
+    // Devices (docs/devices) stays offered until the server says mobile devices are off.
+    expect(addable()).toEqual(dockAddableTabTypes(dockTabTypes({ ...opts, devicesEnabled: true })));
+    expect(addable().includes('devices')).toBe(true);
     expect(addable().includes('tasks')).toBe(opts.isOrchestrator);
     expect(addable().includes('computer')).toBe(opts.computerUseEnabled);
     expect(tabsOf('computer')).toHaveLength(0);

@@ -7,7 +7,7 @@
 //    process on 127.0.0.1 (never `--allow-exec`). Apple publishes no tap or
 //    streaming API; the helper drives SimulatorKit privately, and a native
 //    hang or crash in it must not take the server down (loading its addon
-//    in-process hung Node's main thread, docs/devices §9.1).
+//    in-process hung Node's main thread, docs/devices §10.1).
 //
 // The helper is reached only by this process; nothing is exposed to clients
 // except through the server's authenticated device routes.
@@ -43,6 +43,8 @@ export interface IosSimulatorBridgeOptions {
 interface Helper {
   child: ChildProcess;
   base: string;
+  /** Another serve-sim already served this simulator; ours reused it and exited. Never killed by us. */
+  reused: boolean;
   ws: WebSocket | null;
   wsReady: Promise<WebSocket> | null;
 }
@@ -245,26 +247,50 @@ export class IosSimulatorBridge implements IDeviceBridge {
       child.kill('SIGKILL');
       throw new Error('The simulator helper bound an unexpected address.');
     }
-    child.once('exit', () => this.helpers.delete(udid));
+    // A helper already serving this simulator (another app, a terminal) makes
+    // ours print that helper's address and exit 0: keep using the address. Any
+    // other exit means the helper is gone.
+    const helper: Helper = { child, base, reused: false, ws: null, wsReady: null };
+    child.once('exit', (code) => {
+      if (code === 0) helper.reused = true;
+      else this.helpers.delete(udid);
+    });
     this.options.logger.info?.(`[devices] simulator helper for ${udid} on ${base}`);
-    return { child, base, ws: null, wsReady: null };
+    return helper;
   }
 
   private async stopHelper(udid: string): Promise<void> {
     const pending = this.helpers.get(udid);
     this.helpers.delete(udid);
     const helper = await pending?.catch(() => null);
-    if (!helper) return;
-    helper.ws?.close();
-    helper.child.kill('SIGTERM');
-    setTimeout(() => {
-      if (helper.child.exitCode === null) helper.child.kill('SIGKILL');
-    }, 2000).unref();
+    helper?.ws?.close();
+    if (helper && helper.child.exitCode === null) {
+      helper.child.kill('SIGTERM');
+      setTimeout(() => {
+        if (helper.child.exitCode === null) helper.child.kill('SIGKILL');
+      }, 2000).unref();
+    }
+    // `--no-preview` hands the device to a detached helper daemon of its own;
+    // only serve-sim's `--kill` reaches it.
+    const cli = this.options.serveSimCli;
+    if (cli && helper && !helper.reused) {
+      await runText(this.options.nodePath ?? process.execPath, [cli, '--kill', udid], {
+        timeoutMs: 15_000,
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      }).catch(() => undefined);
+    }
   }
 
   private async get(udid: string, route: string, timeoutMs = 20_000): Promise<Response> {
     const helper = await this.helper(udid);
-    const res = await fetch(`${helper.base}/${route}`, { signal: AbortSignal.timeout(timeoutMs) });
+    let res: Response;
+    try {
+      res = await fetch(`${helper.base}/${route}`, { signal: AbortSignal.timeout(timeoutMs) });
+    } catch (err) {
+      // Unreachable (the helper we reused went away): start a fresh one next time.
+      if ((err as Error).name !== 'TimeoutError') this.helpers.delete(udid);
+      throw err;
+    }
     if (!res.ok) throw new Error(`${route}: ${(await res.text().catch(() => '')).slice(0, 300) || res.status}`);
     return res;
   }
@@ -280,7 +306,10 @@ export class IosSimulatorBridge implements IDeviceBridge {
         helper.ws = ws;
         resolve(ws);
       };
-      ws.onerror = () => reject(new Error('Could not connect to the simulator input channel.'));
+      ws.onerror = () => {
+        this.helpers.delete(udid);
+        reject(new Error('Could not connect to the simulator input channel.'));
+      };
       ws.onclose = () => {
         helper.ws = null;
         helper.wsReady = null;
