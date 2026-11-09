@@ -2,7 +2,7 @@
 // Types for ClaudeAgentProvider
 // ────────────────────────────────────────────────────────────────
 
-import type { PlanReviewRequestHandler, QuestionRequestHandler } from '@generatorai/core';
+import type { AutoCompactSetting, PlanReviewRequestHandler, QuestionRequestHandler } from '@generatorai/core';
 import type { AgentHostSupervisor } from '../../AgentHostSupervisor.js';
 
 export interface ClaudeAgentProviderOptions {
@@ -174,6 +174,8 @@ export interface StoredConversationConfig {
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   maxTurns?: number;
   maxBudgetUsd?: number;
+  /** The app's auto-compaction setting (docs/compaction §3.6): `settings.autoCompactEnabled` and the CLI's threshold override. */
+  autoCompact?: AutoCompactSetting;
   permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk';
   tools?: string[];
   allowedTools?: string[];

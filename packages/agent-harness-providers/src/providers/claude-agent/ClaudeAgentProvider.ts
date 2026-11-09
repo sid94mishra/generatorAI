@@ -62,10 +62,12 @@ import type {
   ForkConversationOptions,
   ForkConversationResult,
   RewindConversationOptions,
+  CompactConversationOptions,
+  AutoCompactSetting,
 } from '@generatorai/core';
 import type { HookBridge } from '@generatorai/core';
 import type { AgentEvent, AgentEventKind } from '@generatorai/shared';
-import { HarnessSessionError, withSpan, getMeter, createAgentEvent, GenAiTurnSpans } from '@generatorai/shared';
+import { HarnessSessionError, withSpan, getMeter, createAgentEvent, GenAiTurnSpans, COMPACTION_INFO } from '@generatorai/shared';
 import { lastIterationUsage, mapClaudeAgentMessageToAgentEvents } from './event-mapper.js';
 import { sessionTotalsOf, usageSince, type SessionUsageTotals } from './sessionUsage.js';
 // W41 — `./tool-factory.js` value-imports `createSdkMcpServer` from the Claude
@@ -282,6 +284,65 @@ function isHousekeepingResult(message: SDKMessage, turn: TurnState): boolean {
   return spent === 0;
 }
 
+/** A compaction `compactConversation` asked for, while it runs. */
+interface ManualCompaction {
+  /** The CLI reported the boundary: it happened. */
+  sawBoundary: boolean;
+  /** Why it did not: set once `compaction_failed` is on the stream. */
+  error?: string;
+}
+
+function sameAutoCompact(a: AutoCompactSetting | undefined, b: AutoCompactSetting | undefined): boolean {
+  return (a?.enabled ?? true) === (b?.enabled ?? true) && a?.thresholdPct === b?.thresholdPct;
+}
+
+/**
+ * The CLI's auto-compaction threshold, as a percentage of the window. `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` can only
+ * lower it, which is all the setting offers; the on/off switch is `settings.autoCompactEnabled`
+ * (`DISABLE_AUTO_COMPACT` as well, which leaves `/compact` working).
+ */
+function autoCompactEnv(setting: AutoCompactSetting | undefined): Record<string, string> {
+  if (!setting) return {};
+  if (!setting.enabled) return { DISABLE_AUTO_COMPACT: '1' };
+  const pct = setting.thresholdPct;
+  if (typeof pct !== 'number' || !Number.isFinite(pct)) return {};
+  return { CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(Math.min(99, Math.max(1, Math.round(pct)))) };
+}
+
+/** Why a `/compact` turn's `result` came without a boundary: the CLI's own words when it gave any. */
+function compactionFailureText(message: SDKMessage): string {
+  const result = message as unknown as { subtype?: string; result?: string; errors?: string[] };
+  if (result.subtype === 'success') return result.result?.trim() || 'The conversation was not compacted.';
+  return result.errors?.join('; ') || `The compaction failed (${result.subtype ?? 'error'}).`;
+}
+
+function compactionFailedEvent(error: string, trigger: 'manual' | 'auto'): AgentEvent {
+  return createAgentEvent('harness.session_info', {
+    infoType: COMPACTION_INFO.failed,
+    message: `Compaction failed: ${error}`,
+    trigger,
+    error,
+    provider: 'claude-agent',
+  });
+}
+
+/** The same `harness.session_info` event with `extra` added to its data. */
+function withInfo(event: AgentEvent, extra: Record<string, unknown>): AgentEvent {
+  return { ...event, data: { ...(event.data as Record<string, unknown>), ...extra } } as unknown as AgentEvent;
+}
+
+function isCompactionBoundary(event: AgentEvent): boolean {
+  return event.kind === 'harness.session_info' && (event.data as { infoType?: string }).infoType === COMPACTION_INFO.boundary;
+}
+
+/** A system message about a compaction: its start, its outcome, its boundary. */
+function isCompactionMessage(message: SDKMessage): boolean {
+  if (message.type !== 'system') return false;
+  const sys = message as unknown as { subtype?: string; status?: unknown; compact_result?: unknown };
+  if (sys.subtype === 'compact_boundary') return true;
+  return sys.subtype === 'status' && (sys.status === 'compacting' || sys.compact_result !== undefined);
+}
+
 interface TurnState {
   conversationId: string;
   activeQuery: ActiveQuery;
@@ -298,6 +359,11 @@ interface TurnState {
    * with a zero-turn result and no assistant message, legitimately.
    */
   localCommand: boolean;
+  /**
+   * The conversation was compacted and the model has not called the API since. The `result` then describes the
+   * summarising call, whose prompt was the whole pre-compaction context: its numbers must not reach the gauge.
+   */
+  compacted?: boolean;
   /**
    * Persistent mode: the session's totals when this turn's first message arrived (absent — the key unset — until
    * then; `undefined` for a fresh process). `harness.usage` reports what the turn added on top of them.
@@ -408,6 +474,8 @@ export function sessionFingerprint(options: ClaudeOptions): string {
     maxTurns: o['maxTurns'],
     maxBudgetUsd: o['maxBudgetUsd'],
     env: o['env'],
+    // The auto-compaction switch lives here, and the CLI reads it at start.
+    settings: o['settings'],
     settingSources: o['settingSources'],
     enableFileCheckpointing: o['enableFileCheckpointing'],
     includePartialMessages: o['includePartialMessages'],
@@ -729,6 +797,10 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * costs the model its history — only its process. Bounded FIFO.
    */
   private readonly evictedSessionIds = new Map<string, string>();
+  /** Compactions `compactConversation` asked for, by conversation, while they run. */
+  private readonly manualCompactions = new Map<string, ManualCompaction>();
+  /** The summary the `PostCompact` hook reported, until the boundary it belongs to is published. */
+  private readonly compactSummaries = new Map<string, string>();
   private readonly persistentSessions: boolean;
   /**
    * Conversations pre-warmed by `prewarmConversation` but not yet used.
@@ -1046,6 +1118,9 @@ export class ClaudeAgentProvider implements IAgentHarness {
       // same fork with the chat re-pointed at the branch.
       conversationFork: true,
       conversationRewind: true,
+      // `/compact [instructions]`, run as a turn of its own (`compactConversation`).
+      conversationCompact: true,
+      compactInstructions: true,
       maxContextTokens: 200_000,
       // MINOR-4 fix: computerUse must be explicitly declared (L9 fail-closed).
       // Claude supports the native computer_use tool via its SDK.
@@ -1487,6 +1562,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
         effort: (params.reasoningEffort as StoredConversationConfig['effort']) ?? this.options.defaultEffort,
         maxTurns: params.maxTurns ?? this.options.defaultMaxTurns,
         maxBudgetUsd: this.options.defaultMaxBudgetUsd,
+        ...(params.autoCompact ? { autoCompact: params.autoCompact } : {}),
         permissionMode: params.permissionMode ?? this.options.defaultPermissionMode ?? 'bypassPermissions',
         tools: builtinAllowList,
         allowedTools: resolvedAllowedTools.length > 0 ? resolvedAllowedTools : undefined,
@@ -1561,7 +1637,9 @@ export class ClaudeAgentProvider implements IAgentHarness {
     if (existing) {
       const requestedModel = params?.model ?? this.options.defaultModel ?? this.catalogDefaultModel();
       const rootsChanged = !!params && !sameRoots(existing, params, this.options.defaultCwd);
-      if (!params || (requestedModel === existing.model && !rootsChanged)) {
+      // A changed auto-compaction setting rebuilds too: it lives in the session's settings and environment.
+      const autoCompactChanged = !!params && !sameAutoCompact(existing.autoCompact, params.autoCompact);
+      if (!params || (requestedModel === existing.model && !rootsChanged && !autoCompactChanged)) {
         if (this.verbose) console.log(`[ClaudeAgentAdapter] Conversation ${conversationId} already in memory, skipping resume`);
         return;
       }
@@ -1954,6 +2032,80 @@ export class ClaudeAgentProvider implements IAgentHarness {
       await this.failTurn(turn, err);
     }
     return turn;
+  }
+
+  /**
+   * Compact the conversation with Claude Code's own `/compact`, as a turn of its own: the same permit, session and
+   * event lifecycle as a prompt (`harness.idle` ends it), so a stop works and the chat service needs nothing
+   * special. Resolves once the boundary arrived; rejects when the CLI did not compact (too little history, an
+   * error) — `compaction_failed` is on the stream by then.
+   */
+  async compactConversation(conversationId: string, options: CompactConversationOptions = {}): Promise<void> {
+    if (!this.conversations.has(conversationId)) throw new Error(`Conversation ${conversationId} not found`);
+    const instructions = options.instructions?.trim();
+    const inFlight = this.turns.get(conversationId);
+    if (inFlight) await inFlight.done;
+    const state: ManualCompaction = { sawBoundary: false };
+    this.manualCompactions.set(conversationId, state);
+    try {
+      // Announced here rather than from the CLI's `compacting` status, which may come late or not at all.
+      await this.emitEventToHandlers(conversationId, createAgentEvent('harness.session_info', {
+        infoType: COMPACTION_INFO.start,
+        message: 'Compacting conversation…',
+        trigger: 'manual',
+        provider: 'claude-agent',
+      }));
+      const turn = await this.startPromptTurn(conversationId, instructions ? `/compact ${instructions}` : '/compact', Date.now());
+      if (!turn) throw new Error('The compaction was stopped before it started.');
+      await turn.done;
+      if (state.sawBoundary) return;
+      if (turn.activeQuery.status === 'aborted') throw new Error('The compaction was stopped.');
+      throw new Error(state.error ?? 'The conversation was not compacted.');
+    } finally {
+      if (this.manualCompactions.get(conversationId) === state) this.manualCompactions.delete(conversationId);
+    }
+  }
+
+  /**
+   * Fit a mapped compaction event to what this provider knows: who started it (the CLI's `compacting` status does
+   * not say), the summary the `PostCompact` hook reported, and the state of a compaction it was asked for. `null`
+   * drops a duplicate start.
+   */
+  private adjustCompactionEvent(conversationId: string, event: AgentEvent): AgentEvent | null {
+    if (event.kind !== 'harness.session_info') return event;
+    const data = event.data as { infoType?: string; [key: string]: unknown };
+    const manual = this.manualCompactions.get(conversationId);
+    switch (data.infoType) {
+      case COMPACTION_INFO.start:
+        // `compactConversation` announced it already.
+        return manual ? null : event;
+      case COMPACTION_INFO.failed:
+        if (!manual) return event;
+        manual.error ??= String(data['error'] ?? 'Compaction failed');
+        return withInfo(event, { trigger: 'manual' });
+      case COMPACTION_INFO.boundary: {
+        if (manual) manual.sawBoundary = true;
+        const summary = this.compactSummaries.get(conversationId);
+        this.compactSummaries.delete(conversationId);
+        return summary ? withInfo(event, { summary }) : event;
+      }
+      default:
+        return event;
+    }
+  }
+
+  /** A compaction that happened between turns: publish it, then read the new window off the still-open session. */
+  private async publishOutOfTurnCompaction(session: PersistentSession, message: SDKMessage): Promise<void> {
+    const { conversationId } = session;
+    for (const mapped of mapClaudeAgentMessageToAgentEvents(message)) {
+      const event = this.adjustCompactionEvent(conversationId, mapped);
+      if (!event) continue;
+      await this.emitEventToHandlers(conversationId, event);
+      if (isCompactionBoundary(event)) {
+        this.resetContextUsageProbe(conversationId);
+        this.beginContextUsageProbe(conversationId, session.query);
+      }
+    }
   }
 
   /**
@@ -2547,6 +2699,16 @@ export class ClaudeAgentProvider implements IAgentHarness {
   ): ClaudeOptions['hooks'] {
     const bridge = (config.hooks as HookBridge | undefined) ?? {};
     const hooks = { ...(this.buildClaudeHooks(bridge) as unknown as Record<string, unknown[]>) };
+    // The summary a compaction produced: it rides on the boundary it belongs to (docs/compaction §3.4 — a move to
+    // another provider starts from it). Never alters the compaction.
+    hooks['PostCompact'] = [
+      ...(hooks['PostCompact'] ?? []),
+      ...wrapClaudeHook(async (input) => {
+        const summary = input['compact_summary'];
+        if (typeof summary === 'string' && summary.trim()) this.compactSummaries.set(config.conversationId, summary);
+        return {};
+      }),
+    ];
     if (!hooks['PreToolUse']) {
       // The default gate is read when the hook FIRES, not captured here: a
       // persistent session keeps these hooks for its whole life, and
@@ -2774,9 +2936,11 @@ export class ClaudeAgentProvider implements IAgentHarness {
     // The app has its own memory and instruction surfaces; this one belongs
     // to the user's CLI. It stays on only when the operator has opted into
     // user-level settings, where sharing the profile is the point.
-    if (!(this.options.settingSources ?? []).includes('user')) {
-      (options as Record<string, unknown>)['settings'] = { autoMemoryEnabled: false };
-    }
+    const settings: Record<string, unknown> = {};
+    if (!(this.options.settingSources ?? []).includes('user')) settings['autoMemoryEnabled'] = false;
+    // The app's auto-compaction switch (docs/compaction §3.6). Manual `/compact` keeps working either way.
+    if (config.autoCompact?.enabled === false) settings['autoCompactEnabled'] = false;
+    if (Object.keys(settings).length > 0) (options as Record<string, unknown>)['settings'] = settings;
 
     // RV-9 — native structured output for THIS turn (a workflow stage's final
     // prompt turn). The format is session-scoped in the SDK, so it is only
@@ -2872,6 +3036,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       extra: {
         ...this.options.env,
         ...config.env,
+        ...autoCompactEnv(config.autoCompact),
         // Per-instance managed home, so two accounts of the same provider
         // never share (or race on) one credential file.
         ...(this.options.homeDir ? { CLAUDE_CONFIG_DIR: this.options.homeDir } : {}),
@@ -3742,6 +3907,9 @@ export class ClaudeAgentProvider implements IAgentHarness {
         if (tasks) session.backgroundAgents = new Set(tasks.filter((t) => REPORTING_TASK_TYPES.has(t.task_type)).map((t) => t.task_id));
         const turn = this.turns.get(conversationId);
         if (!turn || turn.aborted) {
+          // A compaction between turns (the CLI compacts an idle session before its prompt cache expires) is
+          // still news: the conversation's history changed, so the chat records it and the gauge drops.
+          if (isCompactionMessage(message)) await this.publishOutOfTurnCompaction(session, message);
           // Nothing is waiting for this (a cancelled turn, or output that
           // arrived after settlement) — record the session id and drop it.
           if (message.type === 'result') {
@@ -3873,8 +4041,26 @@ export class ClaudeAgentProvider implements IAgentHarness {
   private async applyMessageToTurn(turn: TurnState, message: SDKMessage, queryHandle: Query, hold = false): Promise<void> {
     const { conversationId } = turn;
 
+    // A compaction this provider was asked for ends with this `result`: without a boundary it did not happen
+    // ("Not enough messages to compact.", an error), and the transcript has to say so before the turn ends.
+    const manual = this.manualCompactions.get(conversationId);
+    if (message.type === 'result' && manual && !manual.sawBoundary && manual.error === undefined) {
+      manual.error = compactionFailureText(message);
+      await this.emitEventToHandlers(conversationId, compactionFailedEvent(manual.error, 'manual'));
+    }
+    if (message.type === 'assistant') turn.compacted = false;
+
     let snapshotSent = false;
-    for (const event of mapClaudeAgentMessageToAgentEvents(message)) {
+    for (const mapped of mapClaudeAgentMessageToAgentEvents(message)) {
+      const event = this.adjustCompactionEvent(conversationId, mapped);
+      if (!event) continue;
+      if (isCompactionBoundary(event)) {
+        turn.compacted = true;
+        // Whatever the window held before is gone; read it afresh (below, once the boundary is out).
+        this.resetContextUsageProbe(conversationId);
+      }
+      // The summarising call's own usage describes the window BEFORE compaction (see `TurnState.compacted`).
+      if (message.type === 'result' && turn.compacted && event.kind === 'harness.context_usage') continue;
       if (hold && isTerminalEvent(event)) {
         // Background agents are still out (see `readSession`): the turn is not over yet.
         (turn.heldTerminal ??= []).push(event);
@@ -3888,9 +4074,10 @@ export class ClaudeAgentProvider implements IAgentHarness {
         // afterwards reaches nobody. It did exactly that — the breakdown was
         // computed every turn and the gauge never once showed it.
         this.recordObservedLimits(message);
-        await this.emitContextUsageSnapshot(conversationId, message, queryHandle);
+        await this.emitContextUsageSnapshot(conversationId, turn.compacted ? undefined : message, queryHandle);
       }
       await this.emitEventToHandlers(conversationId, event);
+      if (isCompactionBoundary(event)) this.beginContextUsageProbe(conversationId, queryHandle);
     }
 
     if (message.type === 'assistant') {

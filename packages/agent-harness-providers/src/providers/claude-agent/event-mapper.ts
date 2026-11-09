@@ -13,7 +13,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { AgentEvent, AgentEventKind, FileOpHunk, FileOpStat, McpServerStartupStatus } from '@generatorai/shared';
-import { createAgentEvent, mcpStartupWarnings } from '@generatorai/shared';
+import { COMPACTION_INFO, createAgentEvent, describeCompaction, mcpStartupWarnings } from '@generatorai/shared';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 
 // Helper type for narrowing system messages
@@ -734,17 +734,23 @@ export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEv
 
         case 'compact_boundary': {
           // The gauge must DROP after compaction. `post_tokens` is the
-          // authoritative post-compaction fill; when the SDK omits it (older
-          // builds) we still surface the boundary so the UI can invalidate.
+          // authoritative post-compaction fill; when the SDK omits it the
+          // provider re-reads the window (`getContextUsage`) after the boundary.
           const meta = (sys['compact_metadata'] ?? {}) as {
             trigger?: string;
             pre_tokens?: number;
             post_tokens?: number;
           };
-          events.push(createAgentEvent(kind, buildSessionInfoPayload(
-            'compact_boundary',
-            `Context compacted (${meta.trigger ?? 'auto'})`,
-          )));
+          const info = {
+            trigger: meta.trigger === 'manual' ? ('manual' as const) : ('auto' as const),
+            ...(typeof meta.pre_tokens === 'number' ? { preTokens: meta.pre_tokens } : {}),
+            ...(typeof meta.post_tokens === 'number' ? { postTokens: meta.post_tokens } : {}),
+          };
+          events.push(createAgentEvent(kind, {
+            ...buildSessionInfoPayload(COMPACTION_INFO.boundary, describeCompaction(info)),
+            ...info,
+            provider: 'claude-agent',
+          }));
           if (typeof meta.post_tokens === 'number') {
             events.push(createAgentEvent('harness.context_usage', {
               provider: 'claude-agent',
@@ -759,9 +765,31 @@ export function mapClaudeAgentMessageToAgentEvents(message: SDKMessage): AgentEv
           events.push(createAgentEvent(kind, buildSessionInfoPayload('notification', String(sys.text ?? ''))));
           break;
 
-        case 'status':
+        case 'status': {
+          // `compacting` while a compaction runs, then a status carrying its outcome (`compact_result`). The
+          // status does not say who started it: `auto` here, relabelled by the provider when it asked for one.
+          if (sys.status === 'compacting') {
+            events.push(createAgentEvent(kind, {
+              ...buildSessionInfoPayload(COMPACTION_INFO.start, 'Compacting conversation…'),
+              trigger: 'auto',
+              provider: 'claude-agent',
+            }));
+            break;
+          }
+          if (sys['compact_result'] === 'failed') {
+            const error = typeof sys['compact_error'] === 'string' && sys['compact_error'] ? sys['compact_error'] : 'Compaction failed';
+            events.push(createAgentEvent(kind, {
+              ...buildSessionInfoPayload(COMPACTION_INFO.failed, `Compaction failed: ${error}`),
+              trigger: 'auto',
+              error,
+              provider: 'claude-agent',
+            }));
+            break;
+          }
+          if (sys['compact_result'] === 'success') break;
           events.push(createAgentEvent(kind, buildSessionInfoPayload('status', String(sys.status ?? ''))));
           break;
+        }
 
         case 'task_notification': {
           // Forwarded as a sub-agent PROGRESS note (the transcript attaches it
