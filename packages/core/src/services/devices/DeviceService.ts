@@ -258,8 +258,10 @@ export class DeviceService {
     if (device.state === 'unauthorized') {
       throw new Error(`${device.name} has not allowed USB debugging from this computer yet: accept the prompt on the phone.`);
     }
+    // Also for a device that says it is running: a simulator reports Booted while its boot is still under way, and
+    // the bridge waits for it to be ready (instant once it is).
+    await bridge.boot(device, signal);
     if (device.state !== 'running') {
-      await bridge.boot(device, signal);
       this.workspace(workspaceId).booted.add(key);
       this.listCache = null;
     }

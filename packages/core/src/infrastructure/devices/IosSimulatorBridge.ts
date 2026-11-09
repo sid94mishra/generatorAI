@@ -206,12 +206,16 @@ export class IosSimulatorBridge implements IDeviceBridge {
   }
 
   async boot(device: BridgeDevice, signal?: AbortSignal): Promise<string> {
-    if (device.state === 'running') return device.id;
     this.booting.add(device.id);
     try {
-      await this.simctl(['boot', device.id], 120_000).catch((err: Error) => {
-        if (!/current state: Booted/i.test(err.message)) throw err;
-      });
+      // `simctl` reports Booted as soon as a boot STARTS, so a simulator booted a moment ago (from the pane, Xcode, a
+      // previous call) is not necessarily ready: apps would not launch and `spawn` failed with "getpwuid_r did not
+      // find a match". `bootstatus -b` returns at once on a simulator that has finished booting.
+      if (device.state !== 'running') {
+        await this.simctl(['boot', device.id], 120_000).catch((err: Error) => {
+          if (!/current state: Booted/i.test(err.message)) throw err;
+        });
+      }
       // `bootstatus -b` blocks until SpringBoard is up. A first boot can
       // report "Data Migration Failed" and still finish; the state is what counts.
       await this.simctl(['bootstatus', device.id, '-b'], 300_000).catch(() => undefined);
