@@ -739,3 +739,15 @@ describe('OpenCodeProvider — per-conversation project directory', () => {
     ]);
   }, 20_000);
 });
+
+describe('an OpenCode 2 server is refused with a reason, not a timeout', () => {
+  it('names OpenCode 2 when /session is 404 and /api/session answers', async () => {
+    const h = await startHarness((req, res) => {
+      if (req.url?.startsWith('/api/session')) return json(res, 200, []);
+      return json(res, 404, { error: 'not found' });
+    });
+    const p = makeProvider({ baseUrl: h.baseUrl });
+    await expect(p.initialize()).rejects.toThrow(/OpenCode 2/);
+    expect(await p.ping()).toBe(false);
+  });
+});

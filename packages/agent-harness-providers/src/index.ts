@@ -164,7 +164,7 @@ export {
 //              `@openai/codex@0.151.0`. 686 definitions, including the whole
 //              `thread/*` + `turn/*` v2 surface.
 //   OpenCode → `schemas/opencode/openapi.json`, the OpenAPI 3.1 document
-//              `opencode serve` publishes at `GET /doc` on `opencode-ai@1.18.25`.
+//              `opencode serve` publishes at `GET /doc` on `opencode-ai@1.19.5`.
 //              472 schemas plus a derived operations table.
 //
 // The two committed artifacts replace hand-invented stand-ins that described

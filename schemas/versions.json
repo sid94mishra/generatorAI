@@ -28,8 +28,8 @@
     "opencode": {
       "status": "generated",
       "artifactPath": "schemas/opencode/openapi.json",
-      "version": "1.18.25",
-      "capturedBy": "npx --yes opencode-ai@1.18.25 opencode serve --port <p> && curl -s http://127.0.0.1:<p>/doc  →  openapi.json",
+      "version": "1.19.5",
+      "capturedBy": "npx --yes opencode-ai@1.19.5 opencode serve --port <p> && curl -s http://127.0.0.1:<p>/doc  →  openapi.json (equivalently: packages/sdk/openapi.json at the opencode v1.19.5 tag with x-codeSamples removed — identical to /doc, checked at 1.18.25)",
       "defsPath": "components.schemas",
       "methodTable": "openapi",
       "tableName": "OPENCODE",

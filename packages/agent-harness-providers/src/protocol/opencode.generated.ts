@@ -1,8 +1,8 @@
 // AUTO-GENERATED — do not edit. Run `pnpm generate:schemas` to update.
 // Protocol:        opencode
-// Source artifact: schemas/opencode/openapi.json@1.18.25
-// Captured by:     npx --yes opencode-ai@1.18.25 opencode serve --port <p> && curl -s http://127.0.0.1:<p>/doc  →  openapi.json
-// Artifact sha256: dfb7d42a555389f0c662fa2b4a8af1d61633c96710cf54bce3ff2404e2e7d896
+// Source artifact: schemas/opencode/openapi.json@1.19.5
+// Captured by:     npx --yes opencode-ai@1.19.5 opencode serve --port <p> && curl -s http://127.0.0.1:<p>/doc  →  openapi.json (equivalently: packages/sdk/openapi.json at the opencode v1.19.5 tag with x-codeSamples removed — identical to /doc, checked at 1.18.25)
+// Artifact sha256: eebb56042880e07c354e0ad0a31f70aab45f536adf5b40b6b1fd5abf4663417b
 // Definitions:     472
 //
 // The sha256 above is of the upstream file itself. If the pinned dependency
@@ -1373,9 +1373,10 @@ export type ProviderConfig = {
     setCacheKey?: boolean;
     /** Timeout in milliseconds for full requests to this provider. Set to false to disable timeout. */
     timeout?: number | false;
-    /** Timeout in milliseconds to wait for response headers. Provider integrations may set defaults. Set to false to disable timeout. */
+    /** Timeout in milliseconds to wait for response headers (default: 300000). Set to false to disable timeout. */
     headerTimeout?: number | false;
-    chunkTimeout?: number;
+    /** Timeout in milliseconds between streamed SSE chunks for this provider (default: 300000). If no chunk arrives within this window, the request is aborted. Set to false to disable timeout. */
+    chunkTimeout?: number | false;
   };
   models?: Record<string, {
     id?: string;
@@ -1384,6 +1385,17 @@ export type ProviderConfig = {
     release_date?: string;
     attachment?: boolean;
     reasoning?: boolean;
+    /** Reasoning controls the model accepts, used to build its variants */
+    reasoning_options?: Array<{
+      type: "effort";
+      values: Array<string>;
+    } | {
+      type: "toggle";
+    } | {
+      type: "budget_tokens";
+      min?: number;
+      max?: number;
+    }>;
     temperature?: boolean;
     tool_call?: boolean;
     interleaved?: boolean | ("reasoning" | "reasoning_content" | "reasoning_text") | string | ({
@@ -1496,7 +1508,7 @@ export type Config = {
   plugin?: Array<string | unknown[]>;
   share?: "manual" | "auto" | "disabled";
   autoshare?: boolean;
-  /** Automatically update to the latest version. Set to true to auto-update, false to disable, or 'notify' to show update notifications */
+  /** Check for new versions and show an update notice. Updates are never installed automatically; run /update or `opencode upgrade`. Set to false to disable update checks. true and 'notify' behave the same */
   autoupdate?: boolean | "notify";
   disabled_providers?: Array<string>;
   enabled_providers?: Array<string>;

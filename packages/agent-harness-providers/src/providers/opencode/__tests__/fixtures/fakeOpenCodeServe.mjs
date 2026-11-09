@@ -220,7 +220,7 @@ const server = createServer(async (req, res) => {
       // A real server records the project the session was created against.
       directory: url.searchParams.get('directory') ?? '/tmp',
       title: body.title ?? 'untitled',
-      version: '1.18.25',
+      version: '1.19.5',
       cost: 0,
       tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
       time: { created: 0, updated: 0 },

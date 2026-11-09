@@ -171,6 +171,16 @@ const ABORT_ERRORS: ReadonlySet<string> = new Set(['MessageAbortedError']);
 
 // ── OpenCodeProvider ─────────────────────────────────────────────
 
+/** The server is OpenCode 2, whose HTTP API this adapter does not speak. */
+class OpenCode2Unsupported extends Error {
+  constructor() {
+    super(
+      'OpenCodeProvider: this opencode is OpenCode 2, which GeneratorAI does not support yet. ' +
+        'Install OpenCode 1 (the `opencode-ai` package), or set `binaryPath` to an OpenCode 1 binary.',
+    );
+  }
+}
+
 /**
  * W38 — IAgentHarness backed by `opencode serve`.
  *
@@ -368,8 +378,22 @@ export class OpenCodeProvider implements IAgentHarness {
       const resp = await this.fetch(OPENCODE_OPERATIONS['session.list'].path);
       // Drain the body so the socket returns to the pool instead of dangling.
       await resp.arrayBuffer().catch(() => undefined);
+      if (resp.status === 404) await this.refuseOpenCode2();
       return resp.ok;
-    } catch { return false; }
+    } catch (err) {
+      if (err instanceof OpenCode2Unsupported) throw err;
+      return false;
+    }
+  }
+
+  /**
+   * OpenCode 2 (`@opencode/cli`, also a binary named `opencode`) serves a different HTTP API under `/api/*`:
+   * without this its server answered every probe with 404 and the start timed out with no reason given.
+   */
+  private async refuseOpenCode2(): Promise<void> {
+    const resp = await this.fetch('/api/session').catch(() => null);
+    await resp?.arrayBuffer().catch(() => undefined);
+    if (resp?.ok) throw new OpenCode2Unsupported();
   }
 
   async stop(): Promise<void> { await this.shutdown(); }
@@ -397,7 +421,7 @@ export class OpenCodeProvider implements IAgentHarness {
   getClientState(): HarnessClientState { return this.clientState; }
 
   async ping(): Promise<boolean> {
-    return this.probe();
+    return this.probe().catch(() => false);
   }
 
   onClientEvent(handler: Listener<HarnessClientEvent>): UnsubFn {
