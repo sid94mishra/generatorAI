@@ -10,7 +10,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect } from 'vitest';
-import { mapSdkEventToAgentEvent } from '../src/providers/copilot/event-mapper.js';
+import { mapSdkEventToAgentEvent, mapSdkEventToAgentEvents } from '../src/providers/copilot/event-mapper.js';
 import { mapClaudeAgentMessageToAgentEvents } from '../src/providers/claude-agent/event-mapper.js';
 
 function ev(type: string, data?: unknown, extra?: Record<string, unknown>) {
@@ -50,14 +50,18 @@ describe('copilot → harness.context_usage', () => {
     expect((out.data as Record<string, unknown>)['agentId']).toBe('sub-1');
   });
 
-  it('keeps compaction_complete numbers instead of discarding them', () => {
-    // Previously this fell into the mapper's default branch, so the gauge
-    // stayed pinned at the pre-compaction value.
-    const out = mapSdkEventToAgentEvent(ev('session.compaction_complete', {
-      contextWindow: { currentTokens: 15_000, tokenLimit: 200_000, systemTokens: 3_000 },
+  it('drops the gauge to the post-compaction fill', () => {
+    // compaction_complete is flat and has no `currentTokens`: the fill is `postCompactionTokens`. Reading
+    // `currentTokens` (or a nested `contextWindow` the event never had) left the gauge at 0 with no limit.
+    const out = mapSdkEventToAgentEvents(ev('session.compaction_complete', {
+      success: true,
+      preCompactionTokens: 150_000,
+      postCompactionTokens: 15_000,
+      tokenLimit: 200_000,
+      systemTokens: 3_000,
     }));
-    expect(out.kind).toBe('harness.context_usage');
-    const d = out.data as Record<string, unknown>;
+    const gauge = out.find((e) => e.kind === 'harness.context_usage');
+    const d = gauge?.data as Record<string, unknown>;
     expect(d['currentTokens']).toBe(15_000);
     expect(d['promptTokenLimit']).toBe(200_000);
   });

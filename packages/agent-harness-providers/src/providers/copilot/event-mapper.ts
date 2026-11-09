@@ -9,8 +9,8 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { SessionEvent } from '@github/copilot-sdk';
-import type { AgentEvent, AgentEventKind } from '@generatorai/shared';
-import { createAgentEvent } from '@generatorai/shared';
+import type { AgentEvent, AgentEventKind, CompactionTrigger } from '@generatorai/shared';
+import { COMPACTION_INFO, createAgentEvent, describeCompaction } from '@generatorai/shared';
 
 // ── Phase 1: Kind Resolution Table ──
 // Maps Copilot SDK event type strings to domain AgentEventKind.
@@ -39,8 +39,10 @@ const SDK_EVENT_TO_KIND: Record<string, AgentEventKind> = {
   'session.info': 'harness.session_info',
   'pending_messages.modified': 'harness.session_info',
   'session.usage_info': 'harness.context_usage',
+  // Compaction: start / finish (or failure) notices; a finished one also drops the gauge (see
+  // `mapSdkEventToAgentEvents`).
   'session.compaction_start': 'harness.session_info',
-  'session.compaction_complete': 'harness.context_usage',
+  'session.compaction_complete': 'harness.session_info',
   'session.context_changed': 'harness.context_usage',
   'assistant.streaming_delta': 'harness.session_info',
   'tool.execution_partial_result': 'harness.session_info',
@@ -252,29 +254,26 @@ function num(v: unknown): number | undefined {
  * Maps the Copilot SDK's context-window reports onto the provider-neutral
  * `harness.context_usage` payload.
  *
- * Three SDK events carry the same shape:
+ * Three SDK events carry the numbers:
  *   - `session.usage_info`         — live, ephemeral, emitted throughout a turn
- *   - `session.compaction_complete`— post-compaction totals (the gauge must DROP)
  *   - `session.context_changed`    — context re-computed for another reason
+ *   - `session.compaction_complete`— post-compaction totals (the gauge must DROP);
+ *     flat like the others, but the fill is `postCompactionTokens` — it has no
+ *     `currentTokens`, so reading that left the gauge at 0 with no limit after
+ *     every Copilot compaction.
  *
  * `tokenLimit` is the model's PROMPT budget, which is what the gauge divides
- * by. Previously compaction/context_changed fell through to a default branch
- * and their numbers were discarded, so the gauge stayed pinned at the
- * pre-compaction value.
+ * by.
  */
 function populateContextUsagePayload(
   sdkEventType: string,
   eventData: Record<string, unknown>,
   sdkEvent: SessionEvent,
 ): Record<string, unknown> {
-  // `compaction_complete` nests the post-compaction window under `contextWindow`.
-  const nested =
-    eventData['contextWindow'] != null && typeof eventData['contextWindow'] === 'object'
-      ? (eventData['contextWindow'] as Record<string, unknown>)
-      : undefined;
-  const src = nested ?? eventData;
+  const src = eventData;
 
-  const currentTokens = num(src['currentTokens']) ?? 0;
+  const currentTokens =
+    (sdkEventType === 'session.compaction_complete' ? num(src['postCompactionTokens']) : num(src['currentTokens'])) ?? 0;
   const promptTokenLimit = num(src['tokenLimit']) ?? num(src['promptTokenLimit']);
   const system = num(src['systemTokens']);
   const conversation = num(src['conversationTokens']);
@@ -322,7 +321,43 @@ function populateSessionInfoPayload(
       return { infoType: 'pending_messages', message: '' };
 
     case 'session.compaction_start':
-      return { infoType: 'compaction_start', message: 'Compacting conversation context…' };
+      return {
+        infoType: COMPACTION_INFO.start,
+        message: 'Compacting conversation…',
+        trigger: compactionTrigger(eventData['trigger']),
+        ...(num(eventData['currentTokens']) != null ? { preTokens: num(eventData['currentTokens']) } : {}),
+        provider: 'copilot',
+        ...(sdkEvent && agentIdOf(sdkEvent) ? { agentId: agentIdOf(sdkEvent) } : {}),
+      };
+
+    case 'session.compaction_complete': {
+      const trigger = compactionTrigger(eventData['trigger']);
+      const agentId = sdkEvent ? agentIdOf(sdkEvent) : undefined;
+      if (eventData['success'] === false) {
+        const error = str(eventData['error']) ?? str(eventData['failureReason']) ?? 'unknown error';
+        return {
+          infoType: COMPACTION_INFO.failed,
+          message: `Compaction failed: ${error}`,
+          trigger,
+          error,
+          provider: 'copilot',
+          ...(agentId ? { agentId } : {}),
+        };
+      }
+      const preTokens = num(eventData['preCompactionTokens']);
+      const postTokens = num(eventData['postCompactionTokens']);
+      const summary = str(eventData['summaryContent']);
+      return {
+        infoType: COMPACTION_INFO.boundary,
+        message: describeCompaction({ trigger, preTokens, postTokens }),
+        trigger,
+        ...(preTokens != null ? { preTokens } : {}),
+        ...(postTokens != null ? { postTokens } : {}),
+        ...(summary ? { summary } : {}),
+        provider: 'copilot',
+        ...(agentId ? { agentId } : {}),
+      };
+    }
 
     case 'tool.execution_partial_result':
       return {
@@ -415,6 +450,31 @@ export function mapSdkEventToAgentEvent(sdkEvent: SessionEvent): AgentEvent {
   const payload = populatePayload(kind, sdkEvent.type, eventData, sdkEvent);
 
   return createAgentEvent(kind, payload);
+}
+
+/**
+ * Every domain event one SDK event stands for — what a conversation listener
+ * receives. One for most; a finished compaction is also a gauge reading (the
+ * post-compaction fill), so it yields the notice and, when the SDK reports the
+ * new fill, a `harness.context_usage`.
+ */
+export function mapSdkEventToAgentEvents(sdkEvent: SessionEvent): AgentEvent[] {
+  const primary = mapSdkEventToAgentEvent(sdkEvent);
+  if (sdkEvent.type !== 'session.compaction_complete') return [primary];
+  const data =
+    sdkEvent.data != null && typeof sdkEvent.data === 'object' ? (sdkEvent.data as unknown as Record<string, unknown>) : {};
+  if (data['success'] === false || num(data['postCompactionTokens']) == null) return [primary];
+  const gauge = populateContextUsagePayload(sdkEvent.type, data, sdkEvent);
+  return [primary, createAgentEvent<AgentEventKind>('harness.context_usage', gauge)];
+}
+
+/** The SDK's reasons collapse to who started it: `manual` (`/compact`, `history.compact`) or the provider. */
+function compactionTrigger(value: unknown): CompactionTrigger {
+  return value === 'manual' ? 'manual' : 'auto';
+}
+
+function str(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
 /**

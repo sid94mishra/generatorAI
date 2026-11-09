@@ -40,6 +40,7 @@ import type {
   ConversationWarning,
   HarnessAgentInfo,
   ProviderCapabilities,
+  CompactConversationOptions,
 } from '@generatorai/core';
 import type { AgentEvent } from '@generatorai/shared';
 import type { CopilotProviderOptions } from './CopilotProvider.js';
@@ -217,6 +218,8 @@ export class WorkspacedCopilotPool implements IAgentHarness {
       skills: 'directories',
       sessionPersistence: true,
       budgetTracking: false,
+      conversationCompact: true,
+      compactInstructions: true,
     };
   }
 
@@ -368,6 +371,12 @@ export class WorkspacedCopilotPool implements IAgentHarness {
 
   async abortConversation(conversationId: string): Promise<void> {
     return this.entryFor(conversationId)?.provider.abortConversation(conversationId);
+  }
+
+  async compactConversation(conversationId: string, options?: CompactConversationOptions): Promise<void> {
+    const entry = this.entryFor(conversationId);
+    if (!entry) throw new Error(`No active conversation: ${conversationId}`);
+    return entry.provider.compactConversation(conversationId, options);
   }
 
   // ── Events ────────────────────────────────────────────────────────

@@ -34,10 +34,12 @@ import type {
   ConversationWarning,
   HarnessAgentInfo,
   ProviderCapabilities,
+  AutoCompactSetting,
+  CompactConversationOptions,
 } from '@generatorai/core';
 import type { AgentEvent } from '@generatorai/shared';
-import { HarnessSessionError, withSpan, getMeter, GenAiTurnSpans } from '@generatorai/shared';
-import { mapSdkEventToAgentEvent } from './event-mapper.js';
+import { COMPACTION_INFO, HarnessSessionError, createAgentEvent, describeCompaction, withSpan, getMeter, GenAiTurnSpans } from '@generatorai/shared';
+import { mapSdkEventToAgentEvents } from './event-mapper.js';
 // W41 — `./tool-factory.js` value-imports `defineTool` from the Copilot SDK,
 // so a static import here would defeat the lazy load above. Imported
 // dynamically at its two call sites (createConversation / resumeConversation).
@@ -320,6 +322,8 @@ export class CopilotProvider implements IAgentHarness {
   /** Tracks active event listener cleanup functions per conversation.
    *  Used to prevent handler leaks when resumeConversation replaces the SDK session handle. */
   private conversationListenerCleanups = new Map<string, Set<() => void>>();
+  /** The domain handlers subscribed per conversation — where events the adapter makes itself (a manual compaction's) go. */
+  private conversationHandlers = new Map<string, Set<(event: AgentEvent) => void>>();
   /**
    * ORC-05 — per-conversation "have we already warned?" flag so we don't
    * spam logs once a leak has been flagged. Reset when the conversation is
@@ -1117,6 +1121,9 @@ export class CopilotProvider implements IAgentHarness {
       // Default to approveAll; overridden below if params.onPermissionRequest is provided.
       onPermissionRequest: approveAll,
     };
+    // The app's auto-compaction setting (docs/compaction §3.6) is Copilot's `infiniteSessions`.
+    const infinite = infiniteSessionsFor(params.autoCompact);
+    if (infinite) sessionConfig.infiniteSessions = infinite;
     // Copilot has no `Options.skills` equivalent: an explicit allow-list is
     // expressed by disabling everything outside it.
     if (params.skills && params.disabledSkills === undefined) {
@@ -1447,6 +1454,8 @@ export class CopilotProvider implements IAgentHarness {
       if (params.contextTier) resumeConfig.contextTier = params.contextTier;
       if (params.configDir) resumeConfig.configDirectory = params.configDir;
       if (params.streaming !== undefined) resumeConfig.streaming = params.streaming;
+      const infinite = infiniteSessionsFor(params.autoCompact);
+      if (infinite) resumeConfig.infiniteSessions = infinite;
       registeredAgents = this.applyAgentConfig(resumeConfig, params, warnings);
     }
     // PLN-01 — reinstall the plan-mode gates on resume (see installPlanGates).
@@ -1772,6 +1781,9 @@ export class CopilotProvider implements IAgentHarness {
       // MINOR-4 fix: computerUse must be explicitly declared (L9 fail-closed).
       // Copilot SDK does not expose the computer_use tool natively.
       computerUse: false,
+      // `session.rpc.history.compact({ customInstructions })` — see compactConversation.
+      conversationCompact: true,
+      compactInstructions: true,
     };
   }
 
@@ -2077,6 +2089,77 @@ export class CopilotProvider implements IAgentHarness {
     if (session) await session.abort();
   }
 
+  /**
+   * Manual compaction (docs/compaction): `history.compact`, which resolves once the summary has replaced the
+   * history. The SDK announces it itself (`session.compaction_start` / `_complete` with `trigger: 'manual'`, mapped
+   * by the event mapper); the RPC result stands in only for an announcement that did not come, so a listener sees
+   * each notice once. Ends like a turn (`harness.idle`) when it worked; a failure rejects and the caller ends it.
+   */
+  async compactConversation(conversationId: string, options: CompactConversationOptions = {}): Promise<void> {
+    const session = this.getSession(conversationId);
+    const seen = { start: false, end: false, idle: false };
+    const off = session.on((e: SessionEvent) => {
+      if ((e as { agentId?: string }).agentId) return; // a sub-agent's own compaction
+      if (e.type === 'session.compaction_start') seen.start = true;
+      else if (e.type === 'session.compaction_complete') seen.end = true;
+      else if (e.type === 'session.idle') seen.idle = true;
+    });
+    const emit = (kind: AgentEvent['kind'], data: Record<string, unknown>) =>
+      this.emitToConversation(conversationId, createAgentEvent(kind, data));
+    const instructions = options.instructions?.trim();
+    try {
+      let result: Awaited<ReturnType<CopilotSession['rpc']['history']['compact']>>;
+      try {
+        result = await session.rpc.history.compact({
+          trigger: 'manual',
+          ...(instructions ? { customInstructions: instructions } : {}),
+        });
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        if (!seen.end) emit('harness.session_info', { infoType: COMPACTION_INFO.failed, message: `Compaction failed: ${error}`, trigger: 'manual', error, provider: 'copilot' });
+        throw err;
+      }
+      if (!result.success) {
+        const error = 'the provider could not compact this conversation';
+        if (!seen.end) emit('harness.session_info', { infoType: COMPACTION_INFO.failed, message: `Compaction failed: ${error}`, trigger: 'manual', error, provider: 'copilot' });
+        throw new Error(`Compaction failed: ${error}`);
+      }
+      if (!seen.end) {
+        const window = result.contextWindow;
+        const postTokens = window?.currentTokens;
+        const preTokens = postTokens != null ? postTokens + result.tokensRemoved : undefined;
+        if (!seen.start) emit('harness.session_info', { infoType: COMPACTION_INFO.start, message: 'Compacting conversation…', trigger: 'manual', provider: 'copilot' });
+        emit('harness.session_info', {
+          infoType: COMPACTION_INFO.boundary,
+          message: describeCompaction({ trigger: 'manual', preTokens, postTokens }),
+          trigger: 'manual',
+          ...(preTokens != null ? { preTokens } : {}),
+          ...(postTokens != null ? { postTokens } : {}),
+          ...(result.summaryContent ? { summary: result.summaryContent } : {}),
+          provider: 'copilot',
+        });
+        if (window) {
+          emit('harness.context_usage', {
+            provider: 'copilot',
+            source: 'provider',
+            currentTokens: window.currentTokens,
+            promptTokenLimit: window.tokenLimit,
+            messagesLength: window.messagesLength,
+            reason: 'history.compact',
+          });
+        }
+      }
+    } finally {
+      off();
+    }
+    if (!seen.idle) emit('harness.idle', {});
+  }
+
+  /** Delivers an event the adapter made itself to everyone listening on the conversation. */
+  private emitToConversation(conversationId: string, event: AgentEvent): void {
+    for (const handler of [...(this.conversationHandlers.get(conversationId) ?? [])]) handler(event);
+  }
+
   // ── Event Subscription ──
 
   onConversationEvent(
@@ -2087,9 +2170,14 @@ export class CopilotProvider implements IAgentHarness {
     const unsub = session.on((sdkEvent: SessionEvent) => {
 
       if (this.verbose) console.debug(`[CopilotAdapter][SDK_EVENT] type=${sdkEvent.type} data=${JSON.stringify(sdkEvent.data ?? {}).slice(0, 500)}`);
-      const mapped = mapSdkEventToAgentEvent(sdkEvent);
-      handler(mapped);
+      for (const mapped of mapSdkEventToAgentEvents(sdkEvent)) handler(mapped);
     });
+    let handlers = this.conversationHandlers.get(conversationId);
+    if (!handlers) {
+      handlers = new Set();
+      this.conversationHandlers.set(conversationId, handlers);
+    }
+    handlers.add(handler);
 
     // Track for cleanup on resumeConversation
     let cleanups = this.conversationListenerCleanups.get(conversationId);
@@ -2099,6 +2187,7 @@ export class CopilotProvider implements IAgentHarness {
     }
     const wrappedUnsub = () => {
       unsub();
+      this.conversationHandlers.get(conversationId)?.delete(handler);
       cleanups!.delete(wrappedUnsub);
       // Counter was incremented on subscription; rewind it on cleanup so
       // the metric reflects currently-attached listeners, not cumulative.
@@ -2215,3 +2304,15 @@ export class CopilotProvider implements IAgentHarness {
   }
 }
 
+/**
+ * The app's auto-compaction setting as Copilot's `infiniteSessions`: off, or background compaction once the window
+ * is `thresholdPct` full (the blocking threshold kept at or above it; the SDK's default is 0.95). Undefined: the
+ * SDK's own defaults (on, 80 % / 95 %).
+ */
+export function infiniteSessionsFor(setting: AutoCompactSetting | undefined): SessionConfig['infiniteSessions'] {
+  if (!setting) return undefined;
+  if (!setting.enabled) return { enabled: false };
+  if (setting.thresholdPct == null) return { enabled: true };
+  const background = Math.min(99, Math.max(1, Math.round(setting.thresholdPct))) / 100;
+  return { enabled: true, backgroundCompactionThreshold: background, bufferExhaustionThreshold: Math.max(0.95, background) };
+}

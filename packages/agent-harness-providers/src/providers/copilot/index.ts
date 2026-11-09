@@ -5,7 +5,8 @@ export type { CopilotProviderOptions } from './CopilotProvider.js';
 // that needs to know whether `@github/copilot-sdk` is actually installed
 // (`HarnessFactory.getAvailableProviders`) has to ask for it explicitly.
 export { loadCopilotSdk, isCopilotSdkLoaded } from './CopilotProvider.js';
-export { mapSdkEventToAgentEvent, mapSdkEventsToAgentEvents } from './event-mapper.js';
+export { mapSdkEventToAgentEvent, mapSdkEventToAgentEvents, mapSdkEventsToAgentEvents } from './event-mapper.js';
+export { infiniteSessionsFor } from './CopilotProvider.js';
 // NOTE (W41): `./tool-factory.js` is deliberately NOT re-exported here. It
 // value-imports `defineTool` from the Copilot SDK, so re-exporting it would
 // make importing this module load the SDK — the exact defect W41 fixes. Import
