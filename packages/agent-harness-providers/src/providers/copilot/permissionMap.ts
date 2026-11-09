@@ -50,6 +50,9 @@ export const PERMISSION_KIND_TO_DOMAIN_TYPE = {
   // SDK 1.0 GA added extension-management permission kinds:
   'extension-management': 'other',
   'extension-permission-access': 'other',
+  // SDK 1.0.29: a workflow run, and an extension reading the environment.
+  workflow: 'other',
+  'extension-env-access': 'other',
 } as const satisfies Record<SdkPermissionKind, PermissionRequest['type']>;
 
 /**

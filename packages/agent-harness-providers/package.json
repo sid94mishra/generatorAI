@@ -55,7 +55,7 @@
   },
   "optionalDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.220",
-    "@github/copilot-sdk": "^1.0.8",
+    "@github/copilot-sdk": "1.0.29",
     "@openai/codex": "0.167.0"
   },
   "devDependencies": {

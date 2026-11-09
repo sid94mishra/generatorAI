@@ -23,7 +23,7 @@ pnpm add @generatorai/sdk
 
 Runtime requirements:
 - Node.js ≥ 20
-- Either `@github/copilot-sdk@^1.0.8` (and a logged-in `copilot` CLI on the host) **or** `@anthropic-ai/claude-agent-sdk@^0.3.220` (and a logged-in `claude` Code CLI).
+- Either `@github/copilot-sdk@1.0.29` (and a logged-in `copilot` CLI on the host) **or** `@anthropic-ai/claude-agent-sdk@^0.3.220` (and a logged-in `claude` Code CLI).
 
 The harness packages are *lazy-loaded*, so you only need to install whichever you'll actually use.
 

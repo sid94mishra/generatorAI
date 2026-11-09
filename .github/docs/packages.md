@@ -268,7 +268,7 @@ src/
 
 | | `CopilotProvider` | `ClaudeAgentProvider` |
 |---|---|---|
-| **SDK** | `@github/copilot-sdk@^1.0.8` (bundles `@github/copilot@1.0.75` CLI) | `@anthropic-ai/claude-agent-sdk@^0.3.220` |
+| **SDK** | `@github/copilot-sdk@1.0.29` (CLI `@github/copilot@1.0.107`, pinned by the desktop app) | `@anthropic-ai/claude-agent-sdk@^0.3.220` |
 | **Session model** | Long-lived `CopilotSession` per conversation | Stateless per-query subprocess |
 | **Connection** | `RuntimeConnection.forStdio({ path })` or `.forUri(url)` (sandbox) | Spawned `claude` Code CLI subprocess per query |
 | **Streaming** | SDK event listener (`session.on('event', …)`) | Async iterator over `claudeQuery(opts)` |

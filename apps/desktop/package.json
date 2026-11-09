@@ -48,7 +48,7 @@
     "yaml": "^2.8.3"
   },
   "optionalDependencies": {
-    "@github/copilot": "1.0.75",
+    "@github/copilot": "1.0.107",
     "@openai/codex": "0.167.0",
     "@trycua/cua-driver": "0.41.2"
   }
